@@ -7,6 +7,7 @@ import { BrowserAgentControlPreview } from './BrowserAgentControlPreview'
 import { useSettingDraftRecord } from './use-setting-draft'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import '../../styles/browser-agent-control-settings.css'
+import './agent-takeover-settings.css'
 
 type NumericPreference = keyof typeof BROWSER_AGENT_CONTROL_LIMITS
 export function BrowserAgentControlSettingsPane({ preferences, active, onSave }: {

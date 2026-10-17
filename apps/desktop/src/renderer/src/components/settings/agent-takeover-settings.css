@@ -1,0 +1,26 @@
+.browser-agent-control-settings { container-name: agent-control-settings; }
+.browser-agent-control-settings > .settings-group-note { max-width: 78ch; line-height: 1.65; }
+.browser-agent-control-settings .browser-agent-control__layout { gap: var(--sp-6); }
+.browser-agent-control-settings .browser-agent-control__editor { gap: var(--sp-5); }
+.browser-agent-control-settings .browser-agent-control__toggle { min-height: 36px; gap: var(--sp-4); padding-block: var(--sp-3); }
+.browser-agent-control-settings .browser-agent-control__toggle + .browser-agent-control__toggle { border-color: var(--line-soft); }
+.browser-agent-control-settings .browser-agent-control__toggle strong { font-size: var(--fs-body); }
+.browser-agent-control-settings .browser-agent-control__toggle small { max-width: 40ch; font-size: var(--fs-meta); line-height: 1.6; }
+.browser-agent-control-settings .browser-agent-control__pair { gap: var(--sp-4); padding-block: var(--sp-4); }
+.browser-agent-control-settings .browser-agent-control__advanced { border-color: var(--line-soft); }
+.browser-agent-control-settings .browser-agent-preview { border-color: var(--line-soft); border-radius: var(--radius-lg); }
+.browser-agent-control-settings .browser-agent-preview__header { flex-wrap: wrap; padding: var(--sp-4); }
+.browser-agent-control-settings .browser-agent-preview__header strong { font-size: var(--fs-body); font-weight: 550; }
+.browser-agent-control-settings .browser-agent-preview__header small { font-size: var(--fs-meta); }
+.browser-agent-control-settings .browser-agent-preview__options { padding-inline: var(--sp-4); gap: var(--sp-3) var(--sp-4); }
+.browser-agent-control-settings .browser-agent-preview__options label { font-size: var(--fs-meta); }
+.browser-agent-control-settings .browser-agent-preview__caption { min-height: 0; padding: var(--sp-4); font-size: var(--fs-meta); line-height: 1.6; }
+.browser-agent-control-settings :is(input, select, summary):focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; }
+@container agent-control-settings (max-width: 639px) {
+  .browser-agent-control-settings .browser-agent-preview { position: static; }
+  .browser-agent-control-settings .browser-agent-control__layout { gap: var(--sp-5); }
+}
+@media (max-height: 620px) {
+  .browser-agent-control-settings .browser-agent-preview { position: static; }
+  .browser-agent-control-settings .browser-agent-preview__stage { height: 180px; }
+}
