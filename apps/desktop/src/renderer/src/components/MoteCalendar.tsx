@@ -197,13 +197,13 @@ export function MoteCalendar({ scope, reference, active }: {
     </button>
   }
   return <div ref={surface} className="mote-calendar calendar-schedules mote-details__content" role="tabpanel" aria-label="Mote calendar">
-    <header className="mote-calendar__heading"><div><h3>Arrangements</h3><p>Reminders, countdowns and recurring work</p></div><button type="button" className="mote-calendar__create" onClick={() => prepare()}><Plus size={14} aria-hidden />New arrangement</button></header>
-    <div className="mote-calendar__toolbar">
+    <header className="mote-calendar__toolbar" aria-label="Calendar controls">
       <div className="mote-calendar__navigation">{mode !== 'upcoming' ? <><button type="button" aria-label={mode === 'week' ? 'Previous week' : 'Previous month'} onClick={() => chooseDate(mode === 'week' ? selectedDate.minus({ weeks: 1 }) : start.minus({ months: 1 }))}><ChevronLeft size={16} aria-hidden /></button>
         <button type="button" aria-label={mode === 'week' ? 'Next week' : 'Next month'} onClick={() => chooseDate(mode === 'week' ? selectedDate.plus({ weeks: 1 }) : start.plus({ months: 1 }))}><ChevronRight size={16} aria-hidden /></button>
         </> : null}<h4>{title}</h4>{mode !== 'upcoming' ? <button type="button" className="mote-calendar__today" onClick={() => chooseDate(DateTime.fromMillis(now, { zone: timezone }))}>Today</button> : null}</div>
       <SurfaceModeSwitch value={mode} active={active} ariaLabel="Calendar view" options={[{ value: 'month', label: 'Month' }, { value: 'week', label: 'Week' }, { value: 'upcoming', label: 'Upcoming' }]} onChange={setMode} />
-    </div>
+      <button type="button" className="mote-calendar__create" aria-label="New arrangement" title="New arrangement" onClick={() => prepare()}><Plus size={14} aria-hidden /><span>New<span className="mote-calendar__create-label"> arrangement</span></span></button>
+    </header>
     <div className="mote-calendar__meta"><span className="mote-calendar__zone">{timezone}</span><span>{source.observed ? source.records.length + ' saved arrangements' : 'Arrangements unconfirmed'}</span></div>
     {!queries.length || source.error ? <div className="calendar-schedules__notice" role="status"><p>{!queries.length ? scope.issue ?? scope.topic.readError ?? 'Mote directory scope is unconfirmed.' : source.error} Last confirmed arrangements are kept.</p>{queries.length ? <button type="button" className="small-button" onClick={source.refresh}>Retry arrangements</button> : null}</div> : null}
     {navigationIssue ? <p role="status" className="calendar-schedules__notice">{navigationIssue}</p> : null}
