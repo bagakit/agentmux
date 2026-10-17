@@ -14,4 +14,5 @@
 @media (max-width: 560px) {
   .general-settings__data dl > div { grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); }
   .general-settings .settings-diagnostics { flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
+  .general-settings .settings-diagnostics > span { flex: 0 1 auto; }
 }
