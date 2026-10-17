@@ -8,8 +8,8 @@ import type { FocusContext } from '../src/renderer/src/lib/focus-context'
 
 // The actual Toolbar and Radix focus scopes are mounted. Only the external
 // action owners are mocked; this suite does not assert Core/Run authority.
-const owners = vi.hoisted(() => ({ renameAgent: vi.fn(), renameTab: vi.fn(), setMainSurface: vi.fn(), selectWorkspace: vi.fn(async () => {}), focusRegion: vi.fn(), focusExecutionSession: vi.fn(), sessions: [], agentNames: {}, timelines: {}, workspaceFileRevisions: {}, scratchTopicSnapshots: {}, refreshScratchTopics: vi.fn(async () => {}), spaceObjectIcons: {} }))
-vi.mock('../src/renderer/src/store', () => ({ useAppStore: Object.assign((selector: (state: typeof owners) => unknown) => selector(owners), { getState: () => ({ ...owners, activeWorkspaceId: null, layouts: { 'original-workspace': { groups: [{ id: 'original-group', tabOrder: ['original-tab'] }] } }, tabs: { [tab.id]: tab } }) }) }))
+const owners = vi.hoisted(() => ({ renameAgent: vi.fn(), toggleRegion: vi.fn(), renameTab: vi.fn(), setMainSurface: vi.fn(), selectWorkspace: vi.fn(async () => {}), focusRegion: vi.fn(), focusExecutionSession: vi.fn(), sessions: [], agentNames: {}, timelines: {}, workspaceFileRevisions: {}, scratchTopicSnapshots: {}, sessionNameMetadata: {}, pendingAgentLaunches: {}, refreshScratchTopics: vi.fn(async () => {}), spaceObjectIcons: {} }))
+vi.mock('../src/renderer/src/store', () => ({ agentRegionExecution: () => undefined, currentDisplayNameRevision: () => 0, useAppStore: Object.assign((selector: (state: typeof owners) => unknown) => selector(owners), { getState: () => ({ ...owners, activeWorkspaceId: null, layouts: { 'original-workspace': { groups: [{ id: 'original-group', tabOrder: ['original-tab'] }] } }, tabs: { [tab.id]: tab } }), subscribe: () => () => {} }) }))
 import { FocusToolbar } from '../src/renderer/src/components/FocusToolbar'
 
 const selected: FocusContext = {
@@ -22,17 +22,19 @@ const tab = createWorkbenchTab('original-tab', { regionId: 'original-region', ki
 let root: Root, container: HTMLDivElement, destination: HTMLButtonElement, review: ReturnType<typeof vi.fn>
 const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 25)) })
 const identity = () => container.querySelector<HTMLButtonElement>('.focus-toolbar__identity')!
-const trigger = () => container.querySelector<HTMLButtonElement>('[aria-label="Focus context actions"]')!
+const trigger = () => container.querySelector<HTMLButtonElement>('[aria-label="Tab actions"]')!
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   container = document.createElement('div'); destination = document.createElement('button')
   destination.textContent = 'Selected action destination'; document.body.append(container, destination)
   review = vi.fn(() => destination.focus())
+  owners.renameTab.mockResolvedValue(true)
   owners.setMainSurface.mockImplementation(() => destination.focus())
   owners.focusRegion.mockImplementation(() => destination.focus())
+  owners.toggleRegion.mockImplementation(() => destination.focus())
   owners.focusExecutionSession.mockImplementation(() => destination.focus())
   root = createRoot(container)
-  await act(async () => root.render(createElement(FocusToolbar, { children: createElement('input', { 'aria-label': 'Search contexts' }), selectedId: selected.id, selected, tab, reference: { displayWorkspaceId: selected.workspaceId, groupId: 'original-group', tabId: tab.id, regionId: 'original-region' }, onReview: review, onCloseWorkspace: () => owners.focusExecutionSession(null) })))
+  await act(async () => root.render(createElement(FocusToolbar, { children: createElement('input', { 'aria-label': 'Search contexts' }), selectedId: selected.id, selected, tab, reference: { displayWorkspaceId: selected.workspaceId, groupId: 'original-group', tabId: tab.id, regionId: 'original-region' }, onReview: review, onToggleRegion: owners.toggleRegion, onCloseWorkspace: () => owners.focusExecutionSession(null) })))
 })
 afterEach(async () => {
   await act(async () => root.unmount()); await settle()
@@ -85,8 +87,11 @@ it.each(['dropdown', 'context', 'keyboard'] as const)('the %s menu retains its a
   await open(kind)
   const labels = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].map(node => node.textContent)
   expect(labels).toContain('Rename Tab')
-  expect(labels).toContain('Review request')
-  expect(labels).toContain('Stop Agent')
+  expect(labels).toContain('Show only this Region')
+  expect(labels).not.toContain('Review request')
+  expect(labels).not.toContain('Stop Agent')
+  expect(labels).not.toContain('Restart Session…')
+  expect(document.querySelector('[data-focus-tab-menu-context]')?.textContent).toBe(`Tab actions · ${tab.name}`)
   expect(labels).not.toContain('Close Focus workspace')
   expect(container.querySelectorAll('button[aria-label="Close Focus workspace"]')).toHaveLength(1)
 })
@@ -97,8 +102,11 @@ it('the permanent collapse shortcut leaves focus with its existing action owner'
   expect(owners.focusExecutionSession).toHaveBeenCalledExactlyOnceWith(null)
   expect(document.activeElement).toBe(destination)
 })
-it('Review request leaves focus with the selected action owner after menu cleanup', async () => {
-  await open('dropdown'); await pick('Review request')
+it('direct Review identifies its Agent and leaves focus with the existing request owner', async () => {
+  const button = container.querySelector<HTMLButtonElement>('.focus-toolbar__review')!
+  expect(button.getAttribute('aria-label')).toBe(`Review request for Agent ${selected.name}`)
+  expect(button.title).toContain(selected.name)
+  await act(async () => button.click())
   expect(review).toHaveBeenCalledTimes(1)
   expect(document.activeElement).toBe(destination)
 })
@@ -125,7 +133,7 @@ it('Rename blur commits through the existing owner and keeps the newly focused t
   const input = container.querySelector<HTMLInputElement>('[aria-label="Rename Tab"]')!
   expect(input).toBeTruthy(); expect(document.activeElement).toBe(input)
   await act(async () => destination.focus()); await settle()
-  expect(owners.renameTab).toHaveBeenCalledExactlyOnceWith(tab.id, tab.name); expect(owners.renameAgent).not.toHaveBeenCalled()
+  expect(owners.renameTab).toHaveBeenCalledExactlyOnceWith(tab.id, tab.name, 0); expect(owners.renameAgent).not.toHaveBeenCalled()
   expect(container.querySelector('[aria-label="Rename Tab"]')).toBeNull()
   expect(identity()).toBeTruthy()
   expect(document.activeElement).toBe(destination)
@@ -158,8 +166,8 @@ it('a mouse-only hover action keeps its selected destination without a second op
   await settle()
   expect(document.querySelectorAll('[role="menuitem"]').length).toBeGreaterThan(0)
   expect(document.activeElement).toBe(editor)
-  await pick('Review request')
-  expect(review).toHaveBeenCalledTimes(1); expect(document.activeElement).toBe(destination)
+  await pick('Show only this Region')
+  expect(owners.toggleRegion).toHaveBeenCalledTimes(1); expect(document.activeElement).toBe(destination)
 })
 
 it.each(['F10', 'ContextMenu'] as const)('natural hover close followed by identity %s opens a keyboard-operable focused menu', async key => {
@@ -189,4 +197,25 @@ it.each(['F10', 'ContextMenu'] as const)('natural hover close followed by identi
   await settle()
   expect(items).toContain(document.activeElement)
   expect(document.activeElement).not.toBe(initial)
+})
+
+it('a later deliberate input wins over the title keyboard entry after a natural hover close', async () => {
+  const editor = container.querySelector<HTMLInputElement>('[aria-label="Search contexts"]')!
+  editor.focus()
+  await act(async () => trigger().dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
+  await settle()
+  const content = document.querySelector<HTMLElement>('[role="menu"]')!
+  await act(async () => {
+    content.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', buttons: 0, relatedTarget: editor }))
+    await new Promise(resolve => setTimeout(resolve, 220))
+  })
+  await settle()
+  expect(document.querySelector('[role="menu"]')).toBeNull()
+  identity().focus()
+  await act(async () => {
+    identity().dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ContextMenu' }))
+    destination.focus()
+  })
+  await settle()
+  expect(document.activeElement).toBe(destination)
 })

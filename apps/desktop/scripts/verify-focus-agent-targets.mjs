@@ -7,7 +7,7 @@ await verifyRendererSourceMutations({
   name: 'focus-agent-targets',
   owningConfig: 'apps/desktop/test/vitest.context-hover.config.mts',
   tests: ['apps/desktop/test/focus-stop-agent.test.tsx', 'apps/desktop/test/session-restart.test.tsx'],
-  sources: [target, store, ...['FocusStopAgent', 'SessionRestart', 'FocusContextMenu', 'FocusToolbar', 'RegionContextMenu', 'WorkspaceWorkbench'].map(component),
+  sources: [target, store, ...['SessionStop', 'SessionRestart', 'FocusContextMenu', 'FocusToolbar', 'RegionContextMenu', 'WorkspaceWorkbench'].map(component),
     'apps/desktop/test/helpers/composer-dom-fixture.tsx', 'apps/desktop/test/helpers/client-ui-render.tsx',
     'apps/desktop/test/helpers/agent-information-root.tsx', 'apps/desktop/scripts/lib/fixture-values.mjs', 'test/fixture-values.mjs'],
   mutations: [
@@ -17,7 +17,7 @@ await verifyRendererSourceMutations({
     { label: 'original-presentation-and-control-must-select-target', file: target,
       before: 'session.id === target.id && session.hostId === target.hostId &&\n    session.control.hostId === control.hostId && session.control.agentSessionId === control.agentSessionId',
       after: 'session.id === target.id' },
-    { label: 'stop-must-recheck-original-run-at-confirmation', file: component('FocusStopAgent'),
+    { label: 'stop-must-recheck-original-run-at-confirmation', file: component('SessionStop'),
       before: 'if (!agentMenuRunMatches(current, control))', after: 'if (false)' },
     { label: 'restart-must-recheck-original-run-at-confirmation', file: component('SessionRestart'),
       before: 'if (!original.submitted && !agentMenuRunMatches(current, control))', after: 'if (false)' },

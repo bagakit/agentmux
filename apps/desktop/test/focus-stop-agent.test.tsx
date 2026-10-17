@@ -28,13 +28,12 @@ function Scene() {
 const card = () => container.querySelector<HTMLButtonElement>(`button[data-session-id="${target.id}"]`)!
 const confirm = () => document.querySelector<HTMLButtonElement>('[role="dialog"] [data-confirm-label="Stop Agent"]')!
 const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
-async function open(entry: 'card' | 'toolbar' | 'title' = 'card', action: 'Stop Agent' | 'Restart Session…' = 'Stop Agent') {
-  const origin = entry === 'card' ? card() : container.querySelector<HTMLButtonElement>(entry === 'title' ? '.focus-toolbar__identity' : '[aria-label="Focus context actions"]')!
+async function open(action: 'Stop Agent' | 'Restart Session…' = 'Stop Agent') {
+  const origin = card()
   expect(origin).toBeTruthy()
   await act(async () => {
     origin.focus()
-    if (entry === 'toolbar') origin.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowDown' }))
-    else origin.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 40, clientY: 40 }))
+    origin.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 40, clientY: 40 }))
   })
   await settle()
   const stop = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === action)
@@ -67,8 +66,8 @@ afterEach(async () => {
   useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
 
-it.each(['card', 'toolbar', 'title'] as const)('opens %s confirmation, cancels with exact focus return and keeps collapse separate', async entry => {
-  const before = useAppStore.getState(), origin = await open(entry)
+it('opens Agent confirmation, cancels with exact focus return and keeps collapse separate', async () => {
+  const before = useAppStore.getState(), origin = await open()
   const cancel = document.querySelector<HTMLButtonElement>('.confirmation-dialog__cancel')!
   expect(document.activeElement).toBe(cancel)
   await act(async () => cancel.click()); await settle()
@@ -76,6 +75,26 @@ it.each(['card', 'toolbar', 'title'] as const)('opens %s confirmation, cancels w
   expect(api.sessions.stop).not.toHaveBeenCalled(); retained(before)
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close Focus workspace"]')!.click())
   expect(collapse).toHaveBeenCalledOnce(); expect(api.sessions.stop).not.toHaveBeenCalled(); expect(select).not.toHaveBeenCalled()
+})
+
+it.each(['toolbar', 'title'] as const)('the %s Tab menu excludes Agent lifecycle actions and keeps its exact Tab scope', async entry => {
+  const origin = container.querySelector<HTMLButtonElement>(entry === 'title' ? '.focus-toolbar__identity' : '[aria-label="Tab actions"]')!
+  await act(async () => {
+    origin.focus()
+    origin.dispatchEvent(entry === 'toolbar'
+      ? new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowDown' })
+      : new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }))
+  })
+  await settle()
+  const labels = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].map(item => item.textContent)
+  expect(labels.length).toBeGreaterThan(0)
+  expect(labels).toContain('Rename Tab')
+  expect(labels).not.toContain('Stop Agent')
+  expect(labels).not.toContain('Restart Session…')
+  expect(labels).not.toContain('Review request')
+  expect(document.querySelector('[data-focus-tab-menu-context]')?.textContent).toContain('Tab actions')
+  expect(document.querySelector('[role="dialog"]')).toBeNull()
+  expect(api.sessions.stop).not.toHaveBeenCalled()
 })
 
 it('sends one exact host/SID/Run from the card, holds pending and never invents stopped facts', async () => {
@@ -92,8 +111,8 @@ it('sends one exact host/SID/Run from the card, holds pending and never invents 
   expect(useAppStore.getState().sessions).toBe(before.sessions); retained(before)
 })
 
-it('toolbar stops its selected semantic Agent rather than the active workspace or same-name neighbor', async () => {
-  await open('toolbar')
+it('the card stops its original semantic Agent rather than the active workspace or same-name neighbor', async () => {
+  await open()
   await act(async () => useAppStore.setState({ activeWorkspaceId: 'other', agentFocus: { execution: { sessionId: first.id, history: [] }, pmo: { sessionId: null } } }))
   await act(async () => confirm().click()); await settle()
   expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(target.control)
@@ -145,10 +164,10 @@ it('leaving a pending confirmation does not refocus or mutate a later work surfa
 })
 
 
-it.each(['card', 'toolbar', 'title'] as const)('offers explicit Restart from the original %s menu without executing before confirmation', async entry => {
+it('offers explicit Restart from the original Agent card without executing before confirmation', async () => {
   const restart = vi.spyOn(api.sessions, 'restart')
   const before = useAppStore.getState()
-  await open(entry, 'Restart Session…')
+  await open('Restart Session…')
   expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Running work will be interrupted')
   expect(restart).not.toHaveBeenCalled(); expect(api.sessions.stop).not.toHaveBeenCalled()
   await act(async () => document.querySelector<HTMLButtonElement>('.confirmation-dialog__cancel')!.click()); await settle()
@@ -167,20 +186,20 @@ async function exactTarget(session: typeof target, neighbors: typeof target[] = 
     root.render(<ExactTargetScene session={session} withControl={withControl} />)
   })
 }
-it.each(['card', 'toolbar', 'title'] as const)('the original %s target keeps a same-SID remote Host, even with a local match first', async entry => {
+it('the original Agent target keeps a same-SID remote Host, even with a local match first', async () => {
   const remote = { ...target, hostId: 'remote', control: { ...target.control, hostId: 'remote', run: { runId: 'remote-original-run' } } }
   await exactTarget(remote, [target])
   const before = useAppStore.getState()
-  await open(entry); await act(async () => confirm().click()); await settle()
+  await open(); await act(async () => confirm().click()); await settle()
   expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(remote.control)
   expect(useAppStore.getState().sessions).toBe(before.sessions); retained(before)
 })
-it.each(['card', 'toolbar', 'title'] as const)('the original %s target uses its canonical control while retaining a presentation alias', async entry => {
+it('the original Agent target uses its canonical control while retaining a presentation alias', async () => {
   const alias = { ...target, control: { ...target.control, agentSessionId: 'canonical-original-agent' } }
   const unrelated = composerSession(alias.control.agentSessionId)
   await exactTarget(alias, [unrelated])
   const before = useAppStore.getState()
-  await open(entry); await act(async () => confirm().click()); await settle()
+  await open(); await act(async () => confirm().click()); await settle()
   expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(alias.control); retained(before)
 })
 it('copies the canonical Agent link from the original alias card', async () => {
