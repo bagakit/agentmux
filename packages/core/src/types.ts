@@ -1146,6 +1146,8 @@ export type AgentNativePromptInputPlan = Readonly<{
 } & (
   /** Manual input authorizes the actor's atomic idle start or busy append. */
   { operation: 'start-or-steer'; expectedTurnId?: never } |
+  /** The original native input owner queues this frozen input and dispatches only while idle. */
+  { operation: 'queue-idle'; expectedTurnId?: never } |
   /** Original exact-turn plans remain readable and joinable; never converted. */
   { operation?: 'steer'; expectedTurnId: string }
 )>
@@ -1218,7 +1220,7 @@ export type AgentMuxAgentSession = {
   } & (
     { transport?: 'pty'; startByte: number; endByte: number; native?: never } |
     { transport: 'native'; startByte?: never; endByte?: never;
-      native: { plan: AgentNativePromptInputPlan; outcome: 'claimed' | 'admitted' | 'not-applied' | 'unknown'; turnId?: string; errorCode?: number } }
+      native: { plan: AgentNativePromptInputPlan; outcome: 'claimed' | 'admitted' | 'not-applied' | 'unknown'; turnId?: string; queuedSubmissionId?: string; errorCode?: number } }
   )
   terminalPromptSubmission?: AgentTerminalPromptSubmissionState
   terminalPromptDelivery?: AgentTerminalPromptDeliveryState
@@ -1276,6 +1278,8 @@ export type AgentMuxAgentCreationFact = {
 
 /** Original message segments and verified authors captured before Input dispatch. */
 export type AgentPromptMessageContent = {
+  /** Original Core notification input identity; the encoded text does not establish this fact. */
+  a2aNotificationId?: string
   /** Original question identity frozen with this input; independent of encoded native text. */
   questionReply?: { source: AgentSessionHistorySource; turnId: string; recordId: string; questionIds: string[] }
   userContent?: string
@@ -1930,6 +1934,8 @@ export type AgentWorkHistoryProjection = {
 
 export type AgentTimelineItem = {
   id: string
+  /** Original Core notification identity, distinct from the referenced A2A messages. */
+  a2aNotificationId?: string
   /** Original typed provenance, never reconstructed from display text or opaque item IDs. */
   conversation?: import('./conversation-timeline.js').ConversationRecordProvenance
   conversationDiagnostic?: { code: string; message: string; original?: unknown }

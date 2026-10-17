@@ -126,7 +126,8 @@ export type AgentProviderNativeInputContext = { processId: number; nativeActor: 
 export type AgentProviderPreparedNativeInput = {
   plan: AgentNativePromptInputPlan
   /** Called only after Core persists the original claim and correlation. */
-  send(prompt: string, plan: AgentNativePromptInputPlan): Promise<{ outcome: 'admitted'; turnId: string } | { outcome: 'not-applied'; errorCode: number }>
+  send(prompt: string, plan: AgentNativePromptInputPlan): Promise<{ outcome: 'admitted'; turnId: string } |
+    { outcome: 'admitted'; queuedSubmissionId: string } | { outcome: 'not-applied'; errorCode: number }>
   dispose(): void
 }
 export type AgentProviderSessionStatusObservationContext = AgentProviderSessionStatusContext & {
@@ -169,7 +170,7 @@ export type AgentProvider = {
   prepareManagedLaunch?(plan: AgentLaunchPlan, lifecycleOperationId: string, context: { kind: 'create' | 'resume' | 'fork'; prompt?: string }): Promise<AgentProviderManagedLaunch>
   /** Encode replies from an exact Provider-read record; no caller-supplied display text. */
   planQuestionReply?(record: AgentSessionHistoryItem, answers: readonly AgentSessionHistoryQuestionAnswer[]): string
-  prepareNativeInput?(context: AgentProviderNativeInputContext, target: { providerId: string; nativeSessionId: string; expectedTurnId?: string }): Promise<AgentProviderPreparedNativeInput>
+  prepareNativeInput?(context: AgentProviderNativeInputContext, target: { providerId: string; nativeSessionId: string; expectedTurnId?: string; idleOnly?: true }): Promise<AgentProviderPreparedNativeInput>
   observeTerminalFrontend?(context: AgentProviderNativeInputContext & { onFrontend(observation: AgentTerminalFrontendObservation): void; onUnavailable(message: string): void }): Promise<{ dispose(): void }>
   reconnectTerminalFrontend?(context: AgentProviderNativeInputContext, request: { operationId: string; expectedFrontendId: string; nativeSessionId: string }): Promise<AgentTerminalFrontendObservation>
   resolveLaunchArgv(selections: LaunchOptionSelection): string[]

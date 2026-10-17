@@ -1,6 +1,7 @@
 import { CODEX_ACTOR_ID_ENV, CODEX_ACTOR_LIFECYCLE_ENV } from './codex-managed-frontend.js'
 import { JSONRPCErrorException } from 'json-rpc-2.0'
 import { randomBytes, randomUUID } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import { nativeInputSourceId } from '../native-input-correlation.js'
 import { fileURLToPath } from 'node:url'
 import { AgentMuxError } from '../errors.js'
@@ -99,7 +100,7 @@ export const prepareCodexManagedLaunch: NonNullable<AgentProvider['prepareManage
 }
 
 export const prepareCodexNativeInput: NonNullable<AgentProvider['prepareNativeInput']> = async (context, target) => {
-  if (target.providerId !== 'codex' || context.nativeActor.protocolId !== PROTOCOL_ID) throw unavailable()
+  if (target.providerId !== 'codex' || context.nativeActor.protocolId !== PROTOCOL_ID || target.idleOnly && target.expectedTurnId !== undefined) throw unavailable()
   const { processId, nativeActor, signal } = context
   const birth = await nativeProcessBirth(processId, signal)
   const listeners = await nativeProcessTcpListeners(processId, signal)
@@ -111,7 +112,7 @@ export const prepareCodexNativeInput: NonNullable<AgentProvider['prepareNativeIn
     if (value?.thread?.id !== target.nativeSessionId || value.thread.canAcceptDirectInput !== true) throw unavailable()
     const plan = { kind: 'native-rpc' as const, protocolId: PROTOCOL_ID, sourceId: nativeInputSourceId(target),
       actorId: nativeActor.actorId, threadId: target.nativeSessionId,
-      ...(target.expectedTurnId === undefined ? { operation: 'start-or-steer' as const } : { operation: 'steer' as const, expectedTurnId: target.expectedTurnId }) }
+      ...(target.idleOnly ? { operation: 'queue-idle' as const } : target.expectedTurnId === undefined ? { operation: 'start-or-steer' as const } : { operation: 'steer' as const, expectedTurnId: target.expectedTurnId }) }
     return { plan, dispose,
       async send(prompt, frozen) {
         signal.throwIfAborted()
@@ -120,6 +121,17 @@ export const prepareCodexNativeInput: NonNullable<AgentProvider['prepareNativeIn
         if (await nativeProcessBirth(processId, signal) !== birth || await nativeProcessBirth(listener.processId, signal) !== listenerBirth ||
             !(await nativeProcessTcpListeners(processId, signal)).some(x => x.processId === listener.processId && x.endpoint === listener.endpoint)) throw unavailable()
         try {
+          if (frozen.operation === 'queue-idle') {
+            // The original actor's durable queue atomically dispatches only while idle,
+            // including when a manual turn wins after Core's final completion check.
+            // Never start/reorder a native queue or re-add an unknown original claim.
+            const input = [{ type: 'text', text: prompt, text_elements: [] }]
+            const receipt = await call('thread/queue/add', { threadId: frozen.threadId, input, clientUserMessageId: frozen.clientCorrelation })
+            const queued = receipt?.queuedSubmission
+            if (typeof queued?.id !== 'string' || !queued.id || queued.clientUserMessageId !== frozen.clientCorrelation ||
+                !isDeepStrictEqual(queued.input, input)) throw unavailable()
+            return { outcome: 'admitted', queuedSubmissionId: queued.id }
+          }
           const receipt = await call(frozen.operation === 'start-or-steer' ? 'turn/start' : 'turn/steer', {
             threadId: frozen.threadId, ...(frozen.operation === 'start-or-steer' ? {} : { expectedTurnId: frozen.expectedTurnId }),
             input: [{ type: 'text', text: prompt }], clientUserMessageId: frozen.clientCorrelation })

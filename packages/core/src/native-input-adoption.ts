@@ -26,15 +26,23 @@ export async function confirmNativeInputAdoption(item: AgentSessionHistoryItem, 
         plan.clientCorrelation !== native.clientCorrelation || plan.sourceId !== nativeInputSourceId(source) ||
         plan.threadId !== source.nativeSessionId ||
         plan.expectedTurnId !== undefined && plan.expectedTurnId !== native.turnId || claim.transport !== 'native' ||
-        claim.native.outcome === 'not-applied' || claim.native.outcome === 'admitted' && claim.native.turnId !== native.turnId) return unconfirmed()
+        claim.native.outcome === 'not-applied' || claim.native.outcome === 'admitted' && plan.operation !== 'queue-idle' && claim.native.turnId !== native.turnId) return unconfirmed()
     const target = intent.admissionIntent
-    const addressed = target?.kind === 'native-conversation' && isDeepStrictEqual(target.expectedRun, key.expectedRun) &&
+    const addressed = plan.operation !== 'queue-idle' && target?.kind === 'native-conversation' && isDeepStrictEqual(target.expectedRun, key.expectedRun) &&
       isDeepStrictEqual(target.source, source) && plan.expectedTurnId === target.expectedTurnId
     const questionReply = key.kind === 'prompt' && intent.message?.questionReply
     const defaultInput = (key.kind === 'message' || questionReply && isDeepStrictEqual(questionReply.source, source)) &&
       target?.kind === 'exact-condition' && isDeepStrictEqual(target.condition.expectedRun, key.expectedRun) &&
       (intent.execution ?? 'default') === 'default' && plan.operation === 'start-or-steer' && plan.expectedTurnId === undefined
-    if (!addressed && !defaultInput) return unconfirmed()
+    // Native queue entries can be edited by their original user. Correlation alone
+    // cannot turn that edited content back into the frozen platform notification.
+    const notification = key.kind === 'prompt' && intent.message?.a2aNotificationId === key.submissionId &&
+      intent.message.systemContext === intent.prompt && intent.message.userContent === undefined &&
+      intent.message.authorAgentSessionId === undefined && intent.message.authorHuman === undefined && intent.message.authorExternal === undefined &&
+      target?.kind === 'exact-condition' && isDeepStrictEqual(target.condition.expectedRun, key.expectedRun) &&
+      (intent.execution ?? 'default') === 'default' && plan.operation === 'queue-idle' && plan.expectedTurnId === undefined &&
+      item.contentParts.length === 1 && item.contentParts[0]?.kind === 'text' && item.contentParts[0].text === intent.prompt
+    if (!addressed && !defaultInput && !notification) return unconfirmed()
     return { ...original, conversation: { ...conversation, adoptedInput: { key } } }
   } catch {
     signal?.throwIfAborted()
