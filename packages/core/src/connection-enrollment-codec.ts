@@ -1,3 +1,4 @@
+import { parseConnectionRequestTrace, parseConnectionRequestTraceSelector } from './connection-request-trace.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
@@ -375,7 +376,7 @@ function action(value: unknown): ConnectionEnrollmentAction {
   }
 }
 export function parseConnectionEnrollmentView(value: unknown): ConnectionEnrollmentView {
-  const p = object(value, ['operation', 'challenge', 'account', 'actions', 'receipt'])
+  const p = object(value, ['operation', 'challenge', 'account', 'actions', 'receipt', 'requestTrace'])
   if (!Array.isArray(p.actions)) fail()
   const operation = p.operation === null ? null : parseConnectionEnrollmentOperation(p.operation),
     actions = (p.actions as unknown[]).map(action),
@@ -402,7 +403,7 @@ export function parseConnectionEnrollmentView(value: unknown): ConnectionEnrollm
     fail()
   if ((challenge || account) && !operation?.authentication) fail()
   if (account && !['account', 'confirmed'].includes(operation!.authentication!.stage)) fail()
-  return { operation, challenge, account, actions, ...(receipt ? { receipt } : {}) }
+  return { operation, challenge, account, actions, ...(receipt ? { receipt } : {}), ...(p.requestTrace === undefined ? {} : { requestTrace: parseConnectionRequestTrace(p.requestTrace, operation?.operationId ?? String((p.requestTrace as { operationId?: unknown })?.operationId), { limit: 100 }) }) }
 }
 function capability(value: unknown): ConnectionEnrollmentCapability {
   const p = object(value, ['adapterId', 'domain', 'label', 'availability', 'reason'])
@@ -428,6 +429,10 @@ export function parseConnectionEnrollmentParams<M extends ConnectionEnrollmentMe
       ...(p.cursor === undefined ? {} : { cursor: text(p.cursor) }),
       ...(p.limit === undefined ? {} : { limit: integer(p.limit, 1, 100) })
     } as ConnectionEnrollmentParamsMap[M]
+  }
+  if (method === 'connection.enrollment.inspect') {
+    const p = object(value, ['operationId', 'requestTrace'])
+    return { operationId: id(p.operationId), ...(p.requestTrace === undefined ? {} : { requestTrace: parseConnectionRequestTraceSelector(p.requestTrace) }) } as ConnectionEnrollmentParamsMap[M]
   }
   if (method === 'connection.enrollment.advance') {
     const p = object(value, ['operationId', 'ownRevision', 'decision']),
@@ -482,6 +487,12 @@ export function parseConnectionEnrollmentResult<M extends ConnectionEnrollmentMe
     (!operation && method !== 'connection.enrollment.inspect')
   )
     fail()
+  const traceSelector = method === 'connection.enrollment.inspect' ? (input as ConnectionEnrollmentParamsMap['connection.enrollment.inspect']).requestTrace : undefined
+  if ((traceSelector !== undefined) !== (view.requestTrace !== undefined)) fail()
+  if (view.requestTrace) {
+    if (view.challenge || view.account || view.actions.length || view.receipt) fail()
+    view.requestTrace = parseConnectionRequestTrace(view.requestTrace, (input as { operationId: string }).operationId, traceSelector)
+  }
   if (operation && method === 'connection.enrollment.begin') {
     const b = input as ConnectionEnrollmentBeginInput
     if (

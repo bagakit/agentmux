@@ -1,3 +1,4 @@
+import { readConnectionRequestTrace } from './connection-request-trace.js'
 import { randomUUID } from 'node:crypto'
 import { AgentMuxError } from '@agentmux/core'
 import {
@@ -21,6 +22,7 @@ import {
   type ConnectionEnrollmentListInput,
   type ConnectionEnrollmentOperation,
   type ConnectionEnrollmentOperationInput,
+  type ConnectionEnrollmentInspect,
   type ConnectionEnrollmentPort,
   type ConnectionEnrollmentReceipt,
   type ConnectionEnrollmentView,
@@ -151,12 +153,13 @@ export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
     return { ...this.store.page(input.cursor, input.limit ?? 25, context?.actor.kind === 'agent' ? context.actor : undefined), capabilities }
   }
   async inspect(
-    value: ConnectionEnrollmentOperationInput,
+    value: ConnectionEnrollmentInspect,
     context: ConnectionEnrollmentCallContext
   ): Promise<ConnectionEnrollmentView> {
     const input = parseConnectionEnrollmentParams('connection.enrollment.inspect', value),
       row = this.store.read(input.operationId)
     await this.authority(row, context)
+    if (input.requestTrace !== undefined) return { operation: row?.operation ?? null, challenge: null, account: null, actions: [], requestTrace: this.store.safe(() => readConnectionRequestTrace(this.options.connections.database, 'enrollment', input.operationId, context.actor, input.requestTrace!, row !== null)) }
     return this.view(row, context)
   }
   private async join(id: string, work: () => Promise<void>): Promise<void> {
