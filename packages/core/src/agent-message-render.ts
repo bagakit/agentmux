@@ -317,7 +317,6 @@ export type AgentMuxProtocolCatalogEntry = {
   id: AmuxProtocolId
   title: string
   description: string
-  syntax: string
   form: 'envelope' | 'marker' | 'frame' | 'link' | 'extension'
   examples: readonly { label: string; wire: string }[]
 }

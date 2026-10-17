@@ -517,7 +517,7 @@ examples using the shared message cards. The following list comes from this loca
 same Core definitions; it does not describe the connected Runtime or an older installation.
 Reading a declaration does not authenticate its author, execute hints or grant permissions.
 
-${AGENTMUX_PROTOCOL_CATALOG.map(entry => `- ${entry.title}: ${entry.syntax.replaceAll('\n', ' ')}\n  ${entry.description}`).join('\n')}`
+${AGENTMUX_PROTOCOL_CATALOG.map(entry => `- ${entry.title} (${entry.id}, ${entry.form})\n  ${entry.description}`).join('\n')}`
   },
   space: {
     summary: 'Durable spatial identities, display layout and exact navigation',

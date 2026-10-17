@@ -16,6 +16,10 @@ function ProtocolExamples({ entry }: { entry: AgentMuxProtocolCatalogEntry }) {
   return <ClientUiProvider platform={platform}>
     {entry.examples.map((example, index) => <section key={index} className="amux-protocols__example" aria-label={example.label}>
       <h4>{example.label}</h4>
+      <details className="amux-protocols__wire">
+        <summary>Original wire</summary>
+        <pre>{example.wire}</pre>
+      </details>
       <div className="amux-protocols__preview" data-protocol-example={entry.id}>
         <ConversationMessage content={example.wire} speaker={{ role: 'human', id: 'protocol-example' }} name="Example input"
           messageId={`protocol-example:${entry.id}:${index}`} compact expandedContent />
@@ -34,7 +38,6 @@ function ProtocolRow({ entry, active }: { entry: AgentMuxProtocolCatalogEntry; a
       <code>{entry.form}</code>
     </summary>
     {open && active ? <div className="amux-protocols__body">
-      <h4>Syntax</h4><pre className="amux-protocols__syntax">{entry.syntax}</pre>
       <ProtocolExamples entry={entry} />
     </div> : null}
   </details>
@@ -55,7 +58,7 @@ export const amuxProtocolsSettingsModule = {
   icon: semanticIconComponent('object.document'),
   keywords: 'amux protocol protocols reference wire declaration envelope marker sharing links format card 协议 格式 声明 卡片 参考',
   searchTargets: AGENTMUX_PROTOCOL_CATALOG.map(entry => ({ id: entry.id, title: entry.title, description: entry.description,
-    keywords: `${entry.id} ${entry.form} ${entry.syntax}`, kind: 'info' as const })),
+    keywords: `${entry.id} ${entry.form} ${entry.examples.map(example => example.wire).join(' ')}`, kind: 'info' as const })),
   savedSummary: () => `${AGENTMUX_PROTOCOL_CATALOG.length} read-only formats`,
   Pane: AmuxProtocolsPane
 } as const satisfies SettingsModule
