@@ -131,9 +131,11 @@ Focus 默认仍加载完整 Tab；用户明确选择“只看此 Region”时，
 
 功能组与成员导航各有范围：知识分类下选择具体 Topic 是 Zone 选择，中间的 Category 成员目录与右侧当前 Topic 的 Tabs/Regions 各有明确作用域。右侧只消费当前 Topic 的原组成；知识检索、Topic 知识与资料保真实来源和范围，跨分类总览和发现保留在明确的 Topics 知识库入口。对象范围、当前展示位置和资源 Workspace 分别保留，共享 Scratch 资源容器不授予所有内容当前成员身份。
 
-Folder 的内容入口为 **Files + Zones**，原 Branches 区域表达的是 Zone 工作分区导航，不是通用 Git 分支浏览器。Zone 目录从同一空间图的实体与该 Space 的全部绑定派生，包含普通目录、worktree 及保留的未知资源上下文；不能从 Git 引用列表、分支名、当前 HEAD 或 Agent cwd 重新铸造 Zone。选择已有工作分区进入该 Zone 的原 Tabs/Regions，恢复其原工作面和成员偏好，不 checkout、不新建 Session。未绑定 worktree 的分支是创建工作目录的资源候选，不伪装成已经存在的 Zone；显式创建 worktree 仍沿原资源与空间 owner，创建和导航回执各自成立。
+Folder 的内容入口为 **Files + Zones**，其中的工作目录导航展示保存在当前 Space 的 Zone 及其原工作面，不是仓库的全部 Git worktree 或通用分支清单。Zone 目录从同一空间图的实体与该 Space 的全部绑定派生，包含普通目录、worktree 及保留的未知资源上下文；不能从 Git 引用列表、分支名、当前 HEAD 或 Agent cwd 重新铸造 Zone。选择已有工作分区进入该 Zone 的原 Tabs/Regions，恢复其原工作面和成员偏好，不 checkout、不新建 Session。未绑定 worktree 的分支是创建工作目录的资源候选，不伪装成已经存在的 Zone；显式创建 worktree 仍沿原资源与空间 owner，创建和导航回执各自成立。
 
-Folder 的 Zone 导航须让人辨认其已确认的目录／worktree 类型、分支和准确位置，不能只显示内部标识或从路径长相猜类型。方向键及 Home／End 在目录内移动键盘焦点，Enter／Space 明确进入原工作分区；仅移动焦点不 checkout 或改变所选 Zone。工作目录管理入口明确说明进入 Git 的 worktree 管理，不能以未标明含义的加号暗示已经创建；创建仍由原 Git owner 完成。改动摘要与当前 Zone 的准确资源相邻并标明该范围，不以醒目的孤立数量充当导航主体；未知仍沿原说明和恢复路径。
+Folder 的 Zone 导航须让人辨认其已确认的主工作树、关联 worktree、普通目录或子目录、分支和准确位置，不能只显示内部标识或从路径长相猜类型；Home 与未知资源保留各自含义。目录可用性与 Git 关系是分别观察的事实：只有原 Host 对准确目录明确报告找不到或目标不是目录时才给出对应说明，权限、I/O、别名对应歧义或探测失败仍为未知；不在成功 Git 清单中本身不证明目录不存在。已保存目录暂缺也保留原行、Zone 与工作面，不能自动删除、隐藏或 prune；未知观察不拿走已有 Files、导航与健康 Agent 能力。方向键及 Home／End 在目录内移动键盘焦点，Enter／Space 明确进入原工作分区；仅移动焦点不 checkout 或改变所选 Zone。改动摘要与当前 Zone 的准确资源相邻并标明该范围，不以醒目的孤立数量充当导航主体；未知仍沿原说明和恢复路径。
+
+全部 worktree 的入口明确查看同一 Host、同一仓库由原 Git owner 观察的完整目录清单，包含主工作树、linked、detached 与 bare 各自真实形态，不能用有分支名的记录数代替全部目录数。该入口与已保存 Zone 的数量使用不同单位；说明尚未关联到当前 Space 的 worktree 时，以准确 Host、原目录及原 Host 唯一确认的路径别名匹配，每个原生 worktree 只计一次，多个 Zone 不能重复计数，普通子目录不充当该 worktree 根已关联。观察或对应关系不完整时明确数量未知或仅列已确认项，不用零或精确差额冒充完整结果。在 Git 管理面可核对 worktree 与当前 Space 的已有工作面对应关系；查看、刷新和定位不导入或注册目录、不创建 Zone、不重写身份，打开已有工作面与显式打开／创建 worktree 的动作及回执分别成立。创建和移除仍沿原 Git 与空间 owner，不以未标明含义的加号暗示已经创建。
 
 同一 Zone 的资源投影在保存回执、跨进程观察与普通重启后保留原已确认 Host、准确目录和资源未知状态；显式目录不能因还原丢字段而退回登记 Workspace 的根目录。默认沿 Workspace 根目录的上下文仍随该原记录的明确路径重设更新，不能为保留显式目录而冻结旧默认根。目录名称可沿原命名 owner 表达人类别名，但不能冒充另一目录的名称或当前 Git 分支；类型、分支与仓库关系沿准确 Host／目录的原 Git 观测 owner，不从登记时的名称、旧分支或路径形状推定当前事实。观测暂不可用保留原 Zone、工作面与可用能力，并如实表达未知或上次观察；不把全部 Git worktree 自动变成 Zone，也不因修正资源呈现重发 Zone／Tab／Region 或 Session 身份。
 
