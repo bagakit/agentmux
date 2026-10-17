@@ -68,9 +68,9 @@ export function canReplaceCapturedWindow(viewport: HTMLElement | null, snapshot:
     }
     const original = previous.get(key), next = retained.get(key)
     if (captured && range) {
-      try {
-        if (range.intersectsNode(node) && (!next || !original || conversationRevision(original) !== conversationRevision(next))) return false
-      } catch { return false }
+      let intersects = true
+      try { intersects = range.intersectsNode(node) } catch { /* Keep the original version guard when geometry is unavailable. */ }
+      if (intersects && (!next || !original || conversationRevision(original) !== conversationRevision(next))) return false
     }
   }
   return true
