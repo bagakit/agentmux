@@ -178,8 +178,10 @@ export function BrowserResources({ active, directory, automatic, onAutomaticChan
       <button className="small-button" disabled={!active || busy.size > 0} onClick={() => void perform(selectedRows, 'release')}>Release selected ({selected.size})</button>
       <button className="browser-resources__text-button" disabled={busy.size > 0} onClick={() => setSelected(new Map())}>Clear selection</button>
     </div> : null}
-    {directory.notice ? <p className="browser-resources__notice" role="status">{directory.notice}</p> : null}
-    {observation.error ? <p className="browser-resources__notice" role="status">Process observation unavailable: {observation.error}</p> : null}
+    {directory.notice || observation.error ? <div className="browser-resources__notices">
+      {directory.notice ? <p className="browser-resources__notice" role="status">{directory.notice}</p> : null}
+      {observation.error ? <p className="browser-resources__notice" role="status">Process observation unavailable: {observation.error}</p> : null}
+    </div> : null}
     {!embedded.length ? <p className="settings-group-note">{directory.pending ? 'Reading Browser owners…' : 'No embedded Browser pages observed. Refresh to inspect the current directory.'}</p> : !shown.length ? <p className="settings-group-note">No pages match this filter.</p> : <>
       <div className="browser-resources__columns" aria-hidden="false">
         <input type="checkbox" aria-label="Select eligible pages in this filter" checked={allSelected} disabled={!active || !selectable.length || busy.size > 0}

@@ -1,0 +1,17 @@
+.settings-browser > [data-settings-field='agent-automation'] { padding: var(--sp-5); border: 1px solid var(--line-soft); border-radius: var(--radius-lg); background: var(--surface-1); }
+.settings-browser .browser-automation-toggle { padding: var(--sp-3) 0 0; align-items: flex-start; }
+.settings-browser .browser-automation-toggle input { flex: none; margin-top: 2px; }
+.settings-browser .browser-automation-toggle small { max-width: 76ch; line-height: 1.65; }
+.settings-browser .browser-resources__overview { align-items: flex-start; gap: var(--sp-3) var(--sp-5); margin-block: var(--sp-4); }
+.settings-browser .browser-resources__overview > div { display: flex; align-items: baseline; gap: var(--sp-2); }
+.settings-browser .browser-resources__overview strong { font-size: var(--fs-title); font-weight: 550; }
+.settings-browser .browser-resources__overview > small { max-width: 48ch; line-height: 1.6; }
+.settings-browser .browser-resources__controls { margin-bottom: var(--sp-4); }
+.settings-browser .browser-resources__notices { display: grid; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); background: var(--surface-1); border-radius: var(--radius); }
+.settings-browser .browser-resources__notice { margin: 0; line-height: 1.6; }
+.settings-browser .browser-resources > .settings-group-note { margin-block: var(--sp-4); }
+.settings-browser .browser-resources__policy { margin-top: var(--sp-5); padding-top: var(--sp-4); }
+.settings-browser .external-browser-connections > .settings-group-note { max-width: 78ch; line-height: 1.65; }
+.settings-browser .external-browser-connections__actions { gap: var(--sp-3); margin-top: var(--sp-4); }
+.settings-browser summary { cursor: pointer; }
+.settings-browser summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; border-radius: var(--radius-sm); }
