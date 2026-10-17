@@ -10,7 +10,7 @@ import { runProbeProcess } from './probe-process.mjs'
 
 const root = resolve(import.meta.dirname, '../../..'), desktop = join(root, 'apps/desktop'), require = createRequire(join(desktop, 'package.json'))
 const args = process.argv.slice(2)
-assert.ok(args.length === 1 && args[0] === '--prepare' || args.length === 2 && args[0] === '--run', 'Use --prepare, then --run DIRECTORY when the private window observation lane is free')
+assert.ok(args.length === 1 && args[0] === '--prepare' || args.length === 2 && args[0] === '--run', 'Use --prepare, then --run DIRECTORY for the original pure-Renderer Settings captures')
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const directory = args[0] === '--run' ? resolve(args[1]) : join(root, '.tmp/browser-resource-presentation/native-' + randomUUID())
 assert.ok(directory.startsWith(join(root, '.tmp/browser-resource-presentation/') + 'native-'), 'Only this fixture output is eligible')
@@ -30,6 +30,13 @@ if (args[0] === '--prepare') {
   const vite = await import(pathToFileURL(require.resolve('vite')))
   await vite.build({ configFile: false, root: fixture, base: './', logLevel: 'error', worker: { format: 'es' },
     define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, resolve: { alias: aliases },
+    css: { postcss: { plugins: [{ postcssPlugin: 'actual-resource-settings-css-inputs', Once(css) {
+      css.walk(node => {
+        const file = node.source?.input.file
+        if (!file?.startsWith(root + '/') || file.includes('/node_modules/') || !file.endsWith('.css') || file.includes('?')) return
+        sources[relative(root, file)] = { file: hash(readFileSync(file)), consumed: hash(node.source.input.css) }
+      })
+    } }] } },
     plugins: [{ name: 'actual-resource-settings-sources', enforce: 'pre', transform(code, id) {
       const file = id.split('?')[0], name = relative(root, file)
       if (!file.startsWith(root + '/') || file.includes('/node_modules/') || !/\.(?:ts|tsx|css)$/u.test(file)) return
@@ -39,7 +46,8 @@ if (args[0] === '--prepare') {
   for (const file of ['apps/desktop/src/renderer/src/components/SettingsPanel.tsx',
     'apps/desktop/src/renderer/src/components/settings/BrowserResources.tsx',
     'apps/desktop/src/renderer/src/components/settings/browser-resource-view.ts',
-    'apps/desktop/src/renderer/src/styles/browser-resources.css']) {
+    'apps/desktop/src/renderer/src/styles/browser-resources.css',
+    'apps/desktop/src/renderer/src/styles/settings-materials.css']) {
     assert.equal(sources[file]?.file, hash(await readFile(join(root, file))), 'Actual candidate Renderer input: ' + file)
     assert.equal(sources[file].consumed, sources[file].file, 'Unmodified actual presentation source')
   }
@@ -49,7 +57,7 @@ if (args[0] === '--prepare') {
   await writeFile(sourceFile, JSON.stringify({ schema: 'agentmux.browser-resource-settings-visual-inputs.v1',
     candidate: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), sources,
     boundary: 'Production Settings components and CSS with controlled typed directory/process data; original Main lifecycle and machine metrics are not under test.' }, null, 2))
-  console.log(JSON.stringify({ prepared: true, directory, next: 'Run this exact directory when the private observation lane is free' }))
+  console.log(JSON.stringify({ prepared: true, directory, next: 'Run this exact directory to capture the complete actual Settings viewports' }))
 } else {
   const source = JSON.parse(await readFile(sourceFile, 'utf8'))
   const owning = ['apps/desktop/src/renderer/src/components/settings/BrowserResources.tsx',
@@ -70,7 +78,7 @@ if (args[0] === '--prepare') {
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(AGENTMUX_|CTXMUX_)/u.test(key) && key !== 'ELECTRON_RUN_AS_NODE'))
   Object.assign(env, { AGENTMUX_RESOURCE_VISUAL_ROOT: directory, AGENTMUX_RESOURCE_VISUAL_HTML: join(directory, 'compiled/index.html') })
   const executable = require('electron'), logs = []
-  const outcome = await runProbeProcess(executable, [join(fixture, 'main.cjs')], { cwd: directory, env, timeoutMs: 220000,
+  const outcome = await runProbeProcess(executable, [join(fixture, 'main.cjs')], { cwd: directory, env, timeoutMs: 45000,
     onLine: line => { logs.push(line); process.stderr.write(line + '\n') } })
   await writeFile(join(directory, 'native.log'), logs.join('\n'))
   const capture = JSON.parse(await readFile(join(directory, 'capture.json'), 'utf8'))
