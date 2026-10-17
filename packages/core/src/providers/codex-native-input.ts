@@ -10,6 +10,7 @@ import { nativeProcessBirth, nativeProcessTcpListeners } from '../agent-native-p
 import type { AgentProvider } from '../agent-provider.js'
 import { CODEX_NATIVE_TOKEN_ENV, type CodexManagedResume } from './codex-managed-run.js'
 import { connectCodexNativeActor } from './codex-native-rpc.js'
+import { prepareCodexDurableQueueInput } from './codex-native-queue.js'
 
 const PROTOCOL_ID = 'codex-app-server-v2-0.163'
 const BYPASS_PERMISSIONS = '--dangerously-bypass-approvals-and-sandbox'
@@ -100,6 +101,7 @@ export const prepareCodexManagedLaunch: NonNullable<AgentProvider['prepareManage
 }
 
 export const prepareCodexNativeInput: NonNullable<AgentProvider['prepareNativeInput']> = async (context, target) => {
+  if (!context.nativeActor) return await prepareCodexDurableQueueInput(context, target)
   if (target.providerId !== 'codex' || context.nativeActor.protocolId !== PROTOCOL_ID || target.idleOnly && target.expectedTurnId !== undefined) throw unavailable()
   const { processId, nativeActor, signal } = context
   const birth = await nativeProcessBirth(processId, signal)
@@ -113,13 +115,17 @@ export const prepareCodexNativeInput: NonNullable<AgentProvider['prepareNativeIn
     const plan = { kind: 'native-rpc' as const, protocolId: PROTOCOL_ID, sourceId: nativeInputSourceId(target),
       actorId: nativeActor.actorId, threadId: target.nativeSessionId,
       ...(target.idleOnly ? { operation: 'queue-idle' as const } : target.expectedTurnId === undefined ? { operation: 'start-or-steer' as const } : { operation: 'steer' as const, expectedTurnId: target.expectedTurnId }) }
-    return { plan, dispose,
+    const assertCurrent = async (): Promise<void> => {
+      signal.throwIfAborted()
+      if (await nativeProcessBirth(processId, signal) !== birth || await nativeProcessBirth(listener.processId, signal) !== listenerBirth ||
+          !(await nativeProcessTcpListeners(processId, signal)).some(x => x.processId === listener.processId && x.endpoint === listener.endpoint)) throw unavailable()
+    }
+    return { plan, assertCurrent, dispose,
       async send(prompt, frozen) {
         signal.throwIfAborted()
         if (frozen.protocolId !== plan.protocolId || frozen.actorId !== plan.actorId || frozen.sourceId !== plan.sourceId ||
             frozen.threadId !== plan.threadId || frozen.operation !== plan.operation || frozen.expectedTurnId !== target.expectedTurnId || !frozen.clientCorrelation) throw unavailable()
-        if (await nativeProcessBirth(processId, signal) !== birth || await nativeProcessBirth(listener.processId, signal) !== listenerBirth ||
-            !(await nativeProcessTcpListeners(processId, signal)).some(x => x.processId === listener.processId && x.endpoint === listener.endpoint)) throw unavailable()
+        await assertCurrent()
         try {
           if (frozen.operation === 'queue-idle') {
             // The original actor's durable queue atomically dispatches only while idle,
