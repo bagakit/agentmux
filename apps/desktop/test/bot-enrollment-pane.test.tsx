@@ -290,7 +290,7 @@ it('keeps a submitted original intent reachable after its real begin reply is lo
     expect(dom.container.querySelector('[data-enrollment-resume]')).not.toBeNull()
     expect(dom.container.querySelector('[aria-label="New bot name"]')).toBeNull()
     expect(dom.container.querySelector('[aria-label="Bot creation platform"]')).toBeNull()
-    expect(dom.container.querySelector('.connector-enrollment__resume')?.textContent).toContain('AgentMux bot')
+    expect(dom.container.querySelector('.connector-enrollment__resume')?.textContent).toMatch(/AMUX-[0-9A-F]{8}/)
     await select(operationId)
     expect(dom.container.querySelector('[data-enrollment-operation]')?.getAttribute('data-enrollment-operation')).toBe(operationId)
     await ready('[data-enrollment-code] svg'); await inspectOriginal()
@@ -298,4 +298,20 @@ it('keeps a submitted original intent reachable after its real begin reply is lo
     await act(async () => { release(); await gate })
     expect((await fixture.sdk.call('connection.enrollment.ls', {})).operations.map(item => item.operationId)).toEqual([operationId])
   } finally { release() }
+})
+
+
+it('keeps a generated general identity name stable across catalog reads and freezes it at sign-in', async () => {
+  await open(); await mount()
+  const input = dom.container.querySelector<HTMLInputElement>('[aria-label="New bot name"]')!
+  const name = input.value
+  expect(name).toMatch(/^AMUX-[0-9A-F]{8}$/)
+  await dom.render(<ExternalConnectionsSettings active />)
+  expect(dom.container.querySelector('[aria-label="New bot name"]')).toBe(input)
+  expect(input.value).toBe(name)
+  await click('[data-enrollment-create]')
+  await ready('[data-enrollment-operation]')
+  await vi.waitFor(() => expect(fixture.begin.mock.calls[0]?.[0]).toMatchObject({ label: name }))
+  const id = fixture.begin.mock.calls[0]![0].operationId
+  expect((await fixture.sdk.call('connection.enrollment.inspect', { operationId: id })).operation).toMatchObject({ label: name, preset: { name } })
 })
