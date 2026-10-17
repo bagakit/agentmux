@@ -20,7 +20,7 @@
 | 对话视图的目标、场景、交互与产品验收 | [对话视图 PRD](design/behavior/conversation-mode.md) · [呈现 SSOT](design/presentation/conversation-mode.md) |
 | 对话模式怎样接到 Core、Desktop、Mobile 与公共协议 | [机制与接线](architecture/conversation.md) · [公共协议](specs/conversation-protocol.md) |
 | amux 信封、业务标记、内容分享与对象链接的格式 | [amux 可读协议 SSOT](specs/amux-protocol.md) |
-| Agent 发现、A2A 广播、双向事件、spawn 与通信责任 | [A2A 协作业务 SSOT](design/behavior/a2a-collaboration.md) |
+| Agent 发现、A2A 广播、双向事件、spawn、协作图与通信责任 | [A2A 协作业务 SSOT](design/behavior/a2a-collaboration.md) |
 | Composer、邮箱、草稿、队列与持续推进 | [输入与邮箱](design/behavior/conversation-input.md) |
 | 共享对话组件、Composer 与客户端平台适配 | [Client UI](../packages/client-ui/README.md) |
 

@@ -18,6 +18,7 @@
 - [Hook 隔离提示的密度](#hook-隔离提示的密度)
 - [AgentMux 注入上下文的阅读](#agentmux-注入上下文的阅读)
 - [A2A 消息队列与身份信息密度](#a2a-消息队列与身份信息密度)
+- [Agent 协作图](#agent-协作图)
 - [A2A 的可读消息与地址](#a2a-的可读消息与地址)
 - [Message Tool 的等待与失败说明](#message-tool-的等待与失败说明)
 
@@ -111,6 +112,14 @@ Tab、树、Session、Board 与 Browser rail 的普通身份图按提醒价值�
 - Message Tools 的首层只显示发送者、接收者、当前投递状态和必要的失败/重试动作；`messageId`、receipt、generation、thread/correlation 和 workspace/session/run 关联进入详情或审计入口，不占用 Composer 主输入区。
 - 队列重启、replay、背压或 Store 降级使用现有 Agent/Session 服务窗的一行状态提示，说明事实、当前能力和恢复动作；不清空消息列表、不覆盖 Composer，也不把健康 Agent 画成终局错误。
 - 读取和审计入口支持按 thread、recipient、session 或 receipt 收窄范围；默认列表按 durable sequence 排序，不能用当前 Region 或视觉位置替代消息身份。
+
+## Agent 协作图
+
+协作图沿[工作区域与关系范围](../behavior/a2a-collaboration.md#工作区域与-agent-协作图)呈现。主视觉精致、紧凑、简约，以区域、Agent 与关系内容建立层级；说明直接表达准确对象和可用动作，减少口号、重复元信息和常驻说明占位，控件密度与命中区沿[共同视觉规则](shared-rules.md)。
+
+Agent 节点复用已有 Focus Agent 卡片及已打磨的详情 hover，沿[卡片、预览与状态](focus-context.md#卡片预览与状态)保留共同身份、内容层级与鼠标／键盘阅读语言，不为图另画一套 Agent 资料卡或详情面。
+
+对话与协作关系用克制的局部动态表达本次发送、回复或进展，准确端点、方向和所指关系可辨，不能只靠运动或颜色传达含义。动态不移动节点或打断阅读，减少动态时保留静态关系与来源；隐藏、结束或来源失效时停止旧活动反馈，不循环制造热闹。活动事实与事件归属只由上述行为合同确认。
 
 ## A2A 的可读消息与地址
 
