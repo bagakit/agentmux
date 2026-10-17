@@ -5,9 +5,9 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { parseTerminalFrontendObservation, type AgentTerminalFrontendObservation } from '../src/agent-terminal-frontend.js'
 import { runCodexManaged } from '../src/providers/codex-managed-run.js'
 
-const boundary = vi.hoisted(() => ({ spawn: vi.fn(), publish: vi.fn(), handlers: undefined as any }))
+const boundary = vi.hoisted(() => ({ spawn: vi.fn(), listeners: vi.fn(), publish: vi.fn(), handlers: undefined as any }))
 vi.mock('node:child_process', () => ({ spawn: boundary.spawn }))
-vi.mock('../src/agent-native-process.js', () => ({ nativeProcessTcpListeners: async () => [{ endpoint: 'ws://127.0.0.1:12345' }] }))
+vi.mock('../src/agent-native-process.js', () => ({ nativeProcessTcpListeners: boundary.listeners }))
 vi.mock('../src/providers/codex-managed-frontend.js', () => ({
   CODEX_ACTOR_ID_ENV: 'AGENTMUX_CODEX_ACTOR_ID', CODEX_ACTOR_LIFECYCLE_ENV: 'AGENTMUX_CODEX_ACTOR_LIFECYCLE',
   openCodexFrontendControl: async (_token: string, _identity: unknown, handlers: unknown) => {
@@ -32,6 +32,7 @@ async function start() {
 }
 beforeEach(() => {
   children = []; originalBytes = []; boundary.publish.mockClear(); boundary.handlers = undefined
+  boundary.listeners.mockReset().mockResolvedValue([{ endpoint: 'ws://127.0.0.1:12345' }])
   vi.stubEnv('AGENTMUX_CODEX_ACTOR_TOKEN', 'private-token')
   vi.stubEnv('AGENTMUX_CODEX_ACTOR_ID', 'original-actor')
   vi.stubEnv('AGENTMUX_CODEX_ACTOR_LIFECYCLE', 'original-lifecycle')
@@ -90,4 +91,20 @@ it('starts a clean generation and refuses to put late original stderr onto its r
   children[2]!.emit('exit', 0, null); children[2]!.emit('close', 0, null)
   expect(current()).toMatchObject({ frontendId: repairedId, state: 'detached', exitCode: 0 })
   expect(current().message).toBeUndefined()
+})
+
+it('publishes one stable initial generation before slow backend preparation and keeps it through first TUI spawn', async () => {
+  const endpoint = Promise.withResolvers<Array<{ endpoint: string }>>()
+  boundary.listeners.mockReturnValueOnce(endpoint.promise)
+  pending = runCodexManaged({ command: 'private-provider', args: [], serverConfig: [], frontendArgs: [] })
+  try {
+    await vi.waitFor(() => expect(boundary.handlers).toBeDefined())
+    const originalId = current().frontendId
+    expect(current()).toMatchObject({ state: 'starting', backendState: 'running' })
+    expect(children).toHaveLength(1)
+    endpoint.resolve([{ endpoint: 'ws://127.0.0.1:12345' }])
+    await vi.waitFor(() => expect(current().state).toBe('attached'))
+    expect(current().frontendId).toBe(originalId)
+    expect(boundary.publish.mock.calls.every(call => call[0].frontendId === originalId)).toBe(true)
+  } finally { endpoint.resolve([{ endpoint: 'ws://127.0.0.1:12345' }]) }
 })
