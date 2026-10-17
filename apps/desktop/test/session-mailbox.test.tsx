@@ -3,6 +3,7 @@ const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => awa
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
+import { appendFileSync } from 'node:fs'
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
@@ -253,6 +254,9 @@ it.each(['entry', 'content'] as const)('pins the hover preview through %s intera
   const list = vi.spyOn(api.continuousProgress, 'list').mockResolvedValue([])
   const observe = vi.spyOn(api.continuousProgress, 'onChanged')
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  const control = mailbox().querySelector('.continuous-progress-control')!
+  expect(control).not.toBeNull()
+  expect(control.children).toHaveLength(0)
   const methods = popoverMethods()
   vi.useFakeTimers()
   await pointer(trigger(), 'pointerover')
@@ -264,7 +268,7 @@ it.each(['entry', 'content'] as const)('pins the hover preview through %s intera
     await pointer(mailbox().querySelector('[id$="-progress-tab"]')!, 'pointerdown')
   }
   await folder('progress')
-  const form = mailbox().querySelector('.continuous-progress-control form')!
+  const form = control.querySelector('form')!
   expect(form).not.toBeNull()
   if (surface === 'content') {
     const input = form.querySelector<HTMLInputElement>('input[type="number"]')!
@@ -699,20 +703,44 @@ it('keeps unconfirmed initial input visible and copyable without calling it Sent
 it('projects loop status without adding unread or pending mail, switching pages, or treating a pending list as inactive', async () => {
   let resolveList!: (loops: ContinuousProgressLoop[]) => void
   let changed!: (loop: ContinuousProgressLoop) => void
-  vi.spyOn(api.continuousProgress, 'list').mockImplementation(() => new Promise(resolve => { resolveList = resolve }))
+  const list = vi.spyOn(api.continuousProgress, 'list').mockImplementation(() => new Promise(resolve => { resolveList = resolve }))
   const dispose = vi.fn()
-  vi.spyOn(api.continuousProgress, 'onChanged').mockImplementation(listener => { changed = listener; return dispose })
+  const observe = vi.spyOn(api.continuousProgress, 'onChanged').mockImplementation(listener => { changed = listener; return dispose })
+  let resolveSchedules!: (result: Awaited<ReturnType<typeof api.schedule.list>>) => void
+  let scheduleChanged!: (schedule: ContinuousProgressLoop) => void
+  const scheduleList = vi.spyOn(api.schedule, 'list').mockImplementation(() => new Promise(resolve => { resolveSchedules = resolve }))
+  const scheduleDispose = vi.fn()
+  const scheduleObserve = vi.spyOn(api.schedule, 'onChanged').mockImplementation(listener => { scheduleChanged = listener; return scheduleDispose })
   useAppStore.setState({ sessions: [composerSession()], agentSteerQueues: { 'agent-1': [
     { operationId: 'manual', runId: 'run-agent-1', text: 'Manual pending', status: 'queued' }
   ] } })
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  const control = mailbox().querySelector('.continuous-progress-control')!
+  expect(control).not.toBeNull()
+  expect(control.children).toHaveLength(0)
   expect(trigger().getAttribute('data-progress-state')).toBe('unconfirmed')
   expect(trigger().getAttribute('aria-label')).toContain('0 unread')
   expect(trigger().getAttribute('aria-label')).toContain('User Messages 1 pending')
   await act(async () => resolveList([]))
+  expect(trigger().getAttribute('data-progress-state')).toBe('unconfirmed')
+  await act(async () => resolveSchedules({ schedules: [], executionScope: 'connected-host' }))
   expect(trigger().getAttribute('data-progress-state')).toBe('inactive')
   expect(trigger().title).toContain('Continuous progress: inactive (not enabled)')
   expect(trigger().getAttribute('aria-label')).toBe(trigger().title)
+  const calendar: ContinuousProgressLoop = { ...progressLoop(), loopId: 'mailbox-calendar',
+    calendar: { kind: 'daily', timezone: 'UTC', time: new Date(_tailFixtureEpoch(0, 9 * 60 * 60)).toISOString().slice(11, 16),
+      policies: { gap: 'skip', fold: 'earlier', monthEnd: 'clamp', overdue: 'latest' } } }
+  for (const schedule of [calendar, { ...calendar, status: 'paused' as const },
+    { ...calendar, status: 'paused' as const, lastOutcome: 'unknown' as const }]) {
+    await act(async () => scheduleChanged(schedule))
+    expect(trigger().dataset.progressState).toBe(schedule.lastOutcome === 'unknown' ? 'unconfirmed' : schedule.status)
+    expect(mailbox().dataset.state).toBe('closed')
+    expect(control.children).toHaveLength(0)
+  }
+  await act(async () => scheduleChanged({ ...calendar, status: 'stopped' }))
+  await act(async () => changed(progressLoop()))
+  expect(trigger().dataset.progressState).toBe('active')
+  expect(control.children).toHaveLength(0)
   await toggle('open')
   expect(mailbox().querySelector('[aria-selected="true"]')?.getAttribute('aria-label')).toBe('User Messages: 1 pending')
   for (const loop of [progressLoop(), progressLoop('paused'), { ...progressLoop('paused'), lastOutcome: 'unknown' as const }]) {
@@ -722,23 +750,35 @@ it('projects loop status without adding unread or pending mail, switching pages,
     expect(unread()).toBe('false')
     expect(trigger().textContent).toBe('')
     expect(mailbox().querySelector('[id$="-user-tab"] .composer-mailbox__count')!.textContent).toBe('1')
+    expect(control.children).toHaveLength(0)
   }
   await folder('progress')
+  expect(control.querySelector('.continuous-progress-control__heading')?.textContent).toContain('Unconfirmed')
   await act(async () => changed({ ...progressLoop(), workspacePath: _hygiene_fixturePath("unrelated") }))
   expect(trigger().getAttribute('data-progress-state')).toBe('unconfirmed')
   expect(mailbox().querySelector('[aria-selected="true"]')?.textContent).toBe('Progress')
+  expect(list).toHaveBeenCalledTimes(1)
+  expect(observe).toHaveBeenCalledTimes(1)
+  expect(scheduleList).toHaveBeenCalledTimes(1)
+  expect(scheduleObserve).toHaveBeenCalledTimes(1)
   await dom.render(null)
   expect(dispose).toHaveBeenCalledTimes(1)
+  expect(scheduleDispose).toHaveBeenCalledTimes(1)
 })
 
 it('retains every progress field and unconfirmed composition through page, close and Composer mode changes with one observer', async () => {
   const list = vi.spyOn(api.continuousProgress, 'list').mockResolvedValue([])
   const observe = vi.spyOn(api.continuousProgress, 'onChanged').mockImplementation(() => vi.fn())
+  const scheduleList = vi.spyOn(api.schedule, 'list')
+  const scheduleObserve = vi.spyOn(api.schedule, 'onChanged').mockImplementation(() => vi.fn())
   const create = vi.spyOn(api.continuousProgress, 'create')
   const action = vi.spyOn(api.continuousProgress, 'action')
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   const mainDrafts = structuredClone(useAppStore.getState().agentComposerDrafts)
   const mainQueues = structuredClone(useAppStore.getState().agentSteerQueues)
+  const control = mailbox().querySelector('.continuous-progress-control')!
+  expect(control).not.toBeNull()
+  expect(control.children).toHaveLength(0)
   await toggle('open'); await folder('progress')
   const form = mailbox().querySelector<HTMLFormElement>('.continuous-progress-control form')!
   expect(form).not.toBeNull()
@@ -757,16 +797,48 @@ it('retains every progress field and unconfirmed composition through page, close
     textarea.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }))
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, '未确认续行候选')
     textarea.dispatchEvent(new CompositionEvent('compositionupdate', { bubbles: true, data: '未确认续行候选' }))
+    textarea.setSelectionRange(1, 4, 'forward')
   })
+  const selection = [textarea.selectionStart, textarea.selectionEnd, textarea.selectionDirection]
+  function recordForm(stage: string) {
+    if (process.env.AGENTMUX_RETAINED_TAB_SAMPLES) appendFileSync(process.env.AGENTMUX_RETAINED_TAB_SAMPLES,
+      JSON.stringify({ phase: 'progress-form-retained', stage,
+        formSame: control.querySelector('form') === form, textareaSame: control.querySelector('textarea') === textarea,
+        fieldValues: fields.map(field => field.value), prompt: textarea.value,
+        selection: [textarea.selectionStart, textarea.selectionEnd, textarea.selectionDirection],
+        loopLists: list.mock.calls.length, loopObservers: observe.mock.calls.length,
+        scheduleLists: scheduleList.mock.calls.length, scheduleObservers: scheduleObserve.mock.calls.length }) + '\n')
+  }
   await folder('inbox'); await toggle('closed'); await toggle('open'); await folder('progress')
+  recordForm('page-close')
+  expect(control.querySelector('form')).toBe(form)
+  const replacement = session()
+  replacement.control = { ...replacement.control, run: { runId: 'run-replacement' } }
+  await act(async () => useAppStore.setState({ sessions: [replacement] }))
+  recordForm('same-target-run')
+  expect(mailbox().querySelector('.continuous-progress-control form')).toBe(form)
+  await toggle('closed')
+  await dom.render(<AgentSessionComposer sessionId="agent-1" visible={false} />)
+  recordForm('hidden')
+  expect(mailbox().querySelector('.continuous-progress-control')).toBe(control)
+  expect(control.querySelector('form')).toBe(form)
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  await toggle('open'); await folder('progress')
   for (let index = 0; index < 3; index++) await dom.click('.composer-tool--mode')
+  recordForm('complete')
   expect(mailbox().querySelector('.continuous-progress-control form')).toBe(form)
   expect(form.querySelector('textarea')).toBe(textarea)
   expect(textarea.value).toBe('未确认续行候选')
+  expect([textarea.selectionStart, textarea.selectionEnd, textarea.selectionDirection]).toEqual(selection)
   expect(fields.map(field => field.value)).toEqual(values)
   expect(form.querySelector<HTMLInputElement>('[type="checkbox"]')!.checked).toBe(true)
   expect(list).toHaveBeenCalledTimes(1)
   expect(observe).toHaveBeenCalledTimes(1)
+  const target = { hostId: replacement.control.hostId, agentSessionId: replacement.control.agentSessionId,
+    providerId: replacement.providerId, workspacePath: replacement.workspacePath }
+  expect(list).toHaveBeenCalledWith(target)
+  expect(scheduleList).toHaveBeenCalledExactlyOnceWith({ target })
+  expect(scheduleObserve).toHaveBeenCalledTimes(1)
   expect(create).not.toHaveBeenCalled()
   expect(action).not.toHaveBeenCalled()
   expect(useAppStore.getState().agentComposerDrafts).toEqual(mainDrafts)
