@@ -9,6 +9,7 @@ import { observeRead } from './observation-read.js'
 import { parseCumulativeUsage } from './agent-usage-transcript.js'
 import { parseAgentForkSource } from './agent-fork.js'
 import { parseAgentMuxCreationOrigin } from './agent-creation-admission.js'
+import { parseAgentSpawnCreator } from './agent-spawn.js'
 import { assertCurrentAgentCapabilityBinding, type AgentCapabilityBinding } from './agent-capability.js'
 import { agentActivityTimelineItem } from './agent-activity-state.js'
 import { createHash, randomUUID } from 'node:crypto'
@@ -593,6 +594,8 @@ function normalizeHistoryMetadata(value: unknown): AgentSessionHistoryMetadata {
     executorId: string(source.executorId, 'history.executorId'),
     workspacePath: string(source.workspacePath, 'history.workspacePath', MAX_PATH_BYTES),
     createdAt: timestamp(source.createdAt, 'history.createdAt'),
+    ...(source.creation === undefined ? {} : { creation: parseAgentCreationFact(source.creation) }),
+    ...(source.forkedFrom === undefined ? {} : { forkedFrom: parseAgentForkSource(source.forkedFrom) }),
     ...(handle === undefined ? {} : { nativeHandle: handle }),
     ...(observed === undefined ? {} : { observedNativeHandle: observed }),
     ...(previous?.kind === 'provider' ? { previousNativeHandle: previous } : {})
@@ -1347,7 +1350,7 @@ function nativeConfirmation(value: unknown): AgentNativeSessionConfirmationRecei
     ...(p.previousPromptSubmissionId === undefined ? {} : { previousPromptSubmissionId: string(p.previousPromptSubmissionId, 'nativeConfirmation.previousPromptSubmissionId') }) }
 }
 
-function creationFact(value: unknown): NonNullable<AgentMuxAgentSession['creation']> {
+export function parseAgentCreationFact(value: unknown): NonNullable<AgentMuxAgentSession['creation']> {
   const creation = record(value, 'creation'), initialPrompt = creation.initialPrompt
   if (!['not-requested', 'confirmed', 'unconfirmed', 'unknown'].includes(String(initialPrompt)) ||
     creation.agentMuxContext !== undefined && !['confirmed', 'unconfirmed', 'unknown'].includes(String(creation.agentMuxContext)) ||
@@ -1361,6 +1364,9 @@ function creationFact(value: unknown): NonNullable<AgentMuxAgentSession['creatio
     failure = { step: p.step as NonNullable<typeof failure>['step'], code: string(p.code, 'creation.failure.code'), message: text(p.message, 'creation.failure.message') }
   }
   return { createOperationId: string(creation.createOperationId, 'creation.createOperationId'), initialPrompt: initialPrompt as NonNullable<AgentMuxAgentSession['creation']>['initialPrompt'],
+    ...(creation.createdBy === undefined ? {} : { createdBy: parseAgentSpawnCreator(creation.createdBy) }),
+    ...(creation.createdRun === undefined ? {} : { createdRun: runRef(creation.createdRun) }),
+    ...(creation.initialMessageId === undefined ? {} : { initialMessageId: string(creation.initialMessageId, 'creation.initialMessageId') }),
     ...(creation.initialMessageOrigin === undefined ? {} : { initialMessageOrigin: parseAgentMuxCreationOrigin(creation.initialMessageOrigin) }),
     ...(creation.executorRevision === undefined ? {} : { executorRevision: creation.executorRevision as string }),
     ...(creation.agentMuxContext === undefined ? {} : { agentMuxContext: creation.agentMuxContext as 'confirmed' | 'unconfirmed' | 'unknown' }),
@@ -1372,8 +1378,8 @@ function normalizePreparedCreation(value: unknown): AgentMuxPreparedCreation {
   const p = record(value, 'prepared creation')
   if (p.kind !== 'agent' || Object.keys(p).some(key => !['kind', 'agentSessionId', 'providerId', 'executorId', 'hostId', 'workspacePath',
     'hookBindingId', 'hookToken', 'capabilityHash', 'createdAt', 'updatedAt', 'creation', 'forkedFrom', 'nativeHandle', 'launchOptions', 'nativeActor'].includes(key))) throw new AgentMuxError('Invalid no-Run creation seed.', 'INVALID_AGENT_SESSION_STORE')
-  const creation = creationFact(p.creation), forkedFrom = p.forkedFrom === undefined ? undefined : parseAgentForkSource(p.forkedFrom)
-  if (!creation.intentDigest || creation.persistence || creation.failure || creation.agentMuxContext !== 'unknown' ||
+  const creation = parseAgentCreationFact(p.creation), forkedFrom = p.forkedFrom === undefined ? undefined : parseAgentForkSource(p.forkedFrom)
+  if (!creation.intentDigest || creation.createdRun || creation.persistence || creation.failure || creation.agentMuxContext !== 'unknown' ||
     forkedFrom && forkedFrom.expectedNativeHandle.providerId !== p.providerId) throw new AgentMuxError('Prepared creation intent is incomplete.', 'INVALID_AGENT_SESSION_STORE')
   return { kind: 'agent', agentSessionId: string(p.agentSessionId, 'agentSessionId'), providerId: string(p.providerId, 'providerId'),
     executorId: string(p.executorId, 'executorId'), hostId: string(p.hostId, 'hostId'), workspacePath: string(p.workspacePath, 'workspacePath', MAX_PATH_BYTES),
@@ -1420,7 +1426,7 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
       return { run: runRef(fact.run), source: 'user' as const, observedAt: timestamp(fact.observedAt, 'reopenedFrom.observedAt') }
     })() }),
     ...(source.forkedFrom === undefined ? {} : { forkedFrom: parseAgentForkSource(source.forkedFrom) }),
-    ...(source.creation === undefined ? {} : { creation: creationFact(source.creation) }),
+    ...(source.creation === undefined ? {} : { creation: parseAgentCreationFact(source.creation) }),
     ...(source.terminalHandshake === undefined
       ? {}
       : { terminalHandshake: terminalHandshake(source.terminalHandshake, currentRun) }),
@@ -2122,10 +2128,12 @@ function assertLifecycleCommit(
   if (reservation.kind === 'create' && reservation.preparedCreation) {
     const { run, retiredRuns, creation, terminalPromptReadiness, ...actual } = next
     const { creation: intended, ...prepared } = reservation.preparedCreation
+    const { createdRun, ...creationIntent } = creation!
     // Initial composer readiness belongs to the just-started exact Run. It cannot
     // exist in a no-Run preparation; normalizeAgentSession already checks its Run.
     if (terminalPromptReadiness && terminalPromptReadiness.source !== 'initial-composer') throw new AgentMuxError('A creation cannot import another composer readiness epoch.', 'INVALID_AGENT_SESSION_STORE')
-    if (!isDeepStrictEqual(actual, prepared) || !isDeepStrictEqual(creation, intended) || retiredRuns.length) throw new AgentMuxError('Creation commit changed its prepared identity or intent.', 'INVALID_AGENT_SESSION_STORE')
+    if (createdRun && createdRun.runId !== run.runId || !isDeepStrictEqual(actual, prepared) ||
+      !isDeepStrictEqual(creationIntent, intended) || retiredRuns.length) throw new AgentMuxError('Creation commit changed its prepared identity or intent.', 'INVALID_AGENT_SESSION_STORE')
   }
   if (reservation.kind === 'reopen') {
     const retirement = reservation.expectedRetirement, history = retirement.history

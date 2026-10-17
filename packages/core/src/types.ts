@@ -822,9 +822,9 @@ export type AgentSessionHistoryCollaboration =
       path?: string
     }
 
-/** The durable locator for reading; deliberately carries no Run or input authority. */
+/** Durable reading and provenance only; no authority to control a current Run or send input. */
 export type AgentSessionHistoryMetadata = Pick<AgentMuxStoredAgentSession,
-  'providerId' | 'executorId' | 'workspacePath' | 'nativeHandle' | 'observedNativeHandle' | 'createdAt'> & {
+  'providerId' | 'executorId' | 'workspacePath' | 'nativeHandle' | 'observedNativeHandle' | 'createdAt' | 'creation' | 'forkedFrom'> & {
   previousNativeHandle?: Extract<AgentNativeSessionHandle, { kind: 'provider' }>
 }
 
@@ -1263,7 +1263,13 @@ export type AgentPromptSubmissionRecord = {
 
 export type AgentMuxAgentCreationFact = {
   createOperationId: string
-  /** Source owner verification and target's explicit source-key trust for this initial message. */
+  /** Original authenticated creation source, distinct from initial-message author and fork ancestry. */
+  createdBy?: import('./agent-spawn.js').AgentMuxSpawnCreator
+  /** First actual Run of this creation; later resume never replaces this provenance. */
+  createdRun?: AgentMuxRunRef
+  /** Reference to the original initial message, absent when no body was requested. */
+  initialMessageId?: string
+  /** Original source admission and target trust; it does not prove an initial message exists. */
   initialMessageOrigin?: AgentMuxCreationOrigin
   executorRevision?: string
   /** Complete authenticated creation intent hash; no raw launch secrets are persisted. */
