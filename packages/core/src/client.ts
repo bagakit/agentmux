@@ -1,3 +1,6 @@
+import { AgentMuxMessageNotifications } from './agent-message-notifications.js'
+import type { AgentMuxMessageNotification } from './agent-message-notification.js'
+import { isMessageNotificationInput } from './agent-message-notification.js'
 import { parseTerminalFrontendObservation, type AgentTerminalFrontend } from './agent-terminal-frontend.js'
 import { parseAgentRestartInput, type AgentMuxAgentRestartIdentity, type AgentMuxAgentRestartInput, type AgentMuxAgentRestartInspection } from './agent-session-restart.js'
 import { AgentSessionContinuitySupervisor } from './agent-session-continuity-supervisor.js'
@@ -413,7 +416,8 @@ export type AgentMuxAgentMessageSubmission = {
   sourceChannel?: import('./types.js').AgentMessageChannel
   execution?: import('./types.js').AgentPromptExecution
   caller?: { agentSessionId: string; capability: string }
-} & ({ condition: AgentPromptCondition; admissionIntent?: never } |
+} & ({ condition?: never; admissionIntent?: never; execution?: 'default' } |
+  { condition: AgentPromptCondition; admissionIntent?: never } |
   { condition?: never; admissionIntent: Exclude<AgentPromptAdmissionIntent, { kind: 'exact-condition' }>; execution: 'immediate' })
 
 export type AgentMuxAgentMessageInput = AgentMuxAgentMessageSubmission & { agentSessionId: string }
@@ -835,6 +839,8 @@ export class AgentMuxClient {
   private readonly continuityInputsUnsubscribe: () => void
   private readonly publisher = new AgentMuxClientEventPublisher()
   private messageReadUsed = false
+  private readonly messageNotifications: AgentMuxMessageNotifications
+  private readonly messageNotificationsUnsubscribe: () => void
   private messageObservationDisposed = false
   private messageObservation: ReturnType<typeof observeMessageJournal> | undefined
   private readonly acp: AgentMuxAcpBridge
@@ -1103,7 +1109,7 @@ export class AgentMuxClient {
         if (await this.messageQueue.inspectInput({ key })) throw new AgentMuxError(
           'The original controlled input requires its original journal gate and intent.', 'AGENT_PROMPT_OPERATION_CONFLICT')
       },
-      withUncontrolledInputClaim: (key, claim) => this.messageQueue.withUncontrolledInputClaim(key, claim, async () => Boolean(await this.inspectAgentPromptSubmission(key))),
+      withUncontrolledInputClaim: (key, claim, notificationId) => this.messageQueue.withUncontrolledInputClaim(key, claim, async () => Boolean(await this.inspectAgentPromptSubmission(key)), notificationId),
       onInputAccepted: (key, at) => this.recordAcceptedInput(key, at),
       assertAgentRun: (session, run) => { this.assertAgentRun(session, run) },
       updateExactAgentSession: (agentSessionId, expectedRun, update, futureIntentId, author) =>
@@ -1132,6 +1138,25 @@ export class AgentMuxClient {
     })
     this.continuityInputsUnsubscribe = this.publisher.onStatusEvent(event => {
       if (event.type === 'agent-session') this.continuityInputs.observe(this.registry.get(event.session.agentSessionId))
+    })
+    this.messageNotifications = new AgentMuxMessageNotifications({ queue: this.messageQueue,
+      connected: () => this.connected && this.kernel.isConnected(),
+      read: async id => {
+        if (!this.registry.has(id)) return null
+        const current = await this.registry.refresh(id, this.registry.get(id).run)
+        const run = await this.requireCurrentAgentRun(current)
+        return { session: this.projectSession(current), inputByte: run.acceptedInputBytes }
+      },
+      submit: notice => this.submitMessageNotification(notice),
+      inputAbsent: async key => !await this.inspectAgentPromptSubmission(key),
+      unavailable: (agentSessionId, error) => this.publisher.publish({ type: 'agent-error',
+        ...(agentSessionId ? { agentSessionId } : {}), code: 'A2A_NOTIFICATION_UNCONFIRMED',
+        message: `Inbox notification is unconfirmed. Original messages and healthy manual input are retained; read the original MID or explicitly notify it. ${error instanceof Error ? error.message : String(error)}`,
+        evidence: { source: 'agentmux', observedAt: Date.now() } })
+    })
+    this.messageNotificationsUnsubscribe = this.publisher.onStatusEvent(event => {
+      if (event.type === 'agent-session') this.messageNotifications.changed(event.session.agentSessionId)
+      else if (event.type === 'connection-state' && event.state === 'restored') void this.messageNotifications.restore()
     })
   }
 
@@ -1347,6 +1372,7 @@ export class AgentMuxClient {
       if (!this.kernel.isConnected()) throw new AgentMuxError('Connection changed during recovery observation.', 'CTXMUX_DISCONNECTED')
       this.connectionNeedsObservation = auxiliaryObservationIncomplete
       this.connectionHealthySince = Date.now()
+      void this.messageNotifications.restore()
       this.continuityInputs.restore(this.registry.list())
       this.continuitySupervisor.restore(this.registry.list())
       for (const session of this.registry.list()) {
@@ -1886,6 +1912,8 @@ export class AgentMuxClient {
   }
 
   async dispose(): Promise<void> {
+    this.messageNotificationsUnsubscribe()
+    await this.messageNotifications.dispose()
     this.messageObservationDisposed = true; this.messageObservation?.dispose(); this.messageObservation = undefined
     await this.continuityInputs.dispose()
     this.continuityInputsUnsubscribe()
@@ -2447,9 +2475,27 @@ export class AgentMuxClient {
       await read(binding.assertCurrent())
       const record = normalizeSessionHistoryPage(source, { source, items: [item], nextCursor: null }, 1).items[0]!
       if (record.id !== recordId || invocation.turnId !== undefined && record.turnId !== invocation.turnId) throw new AgentMuxError('The original lookup returned another native record.', 'CONTROL_PROTOCOL_ERROR')
-      return await read(confirmNativeInputAdoption(record, { hostId: binding.sourceHostId, agentSessionId }, originalSource,
+      const adopted = await read(confirmNativeInputAdoption(record, { hostId: binding.sourceHostId, agentSessionId }, originalSource,
         key => this.inspectAgentPromptSubmission(key), controller.signal))
+      await this.observeNotificationAdoptions([adopted])
+      return adopted
     } finally { signal?.removeEventListener('abort', cancel); lifetime.close() }
+  }
+
+  /** A qualified original native record can settle a lost notification ACK without replaying input or consuming Inbox. */
+  private async observeNotificationAdoptions(items: readonly AgentSessionHistoryItem[]): Promise<void> {
+    for (const item of items) {
+      const adoption = item.conversation?.adoptedInput
+      if (adoption?.purpose !== 'a2a-notification' || adoption.key.kind !== 'prompt') continue
+      try {
+        const notice = await this.messageQueue.readNotification(adoption.key.submissionId)
+        if (notice && isDeepStrictEqual(notice.key, adoption.key) && (notice.state === 'pending' || notice.state === 'unconfirmed')) await this.messageQueue.recordNotificationResult(notice.notificationId, 'submitted')
+      } catch (error) {
+        this.publisher.publish({ type: 'agent-error', agentSessionId: adoption.key.agentSessionId, code: 'A2A_NOTIFICATION_OBSERVATION_UNCONFIRMED',
+          message: `The native record remains readable; the original notification observation could not be retained. ${error instanceof Error ? error.message : String(error)}`,
+          evidence: { source: 'agentmux', run: adoption.key.expectedRun, observedAt: Date.now() } })
+      }
+    }
   }
 
   /** Notifications only wake authoritative reads. Each native/captured source keeps its original scope. */
@@ -3058,6 +3104,7 @@ export class AgentMuxClient {
       await read(binding.assertCurrent())
       const normalized = normalizeSessionHistoryPage(source, page, limit)
       const items = await read(confirmNativeInputAdoptions(normalized.items, { hostId: binding.sourceHostId, agentSessionId }, source, key => this.inspectAgentPromptSubmission(key), controller.signal))
+      await this.observeNotificationAdoptions(items)
       return { agentSessionId, sourceHostId: binding.sourceHostId, ...normalizeSessionHistoryPage(source, { ...normalized, items }, limit) }
     } finally {
       options.signal?.removeEventListener('abort', cancelled)
@@ -3102,6 +3149,7 @@ export class AgentMuxClient {
       const checkpoint = { agentSessionId, source, cursor: page.cursor }, ref = { hostId: 'local', agentSessionId }
       const normalized = parseNativeConversationChangesPage({ ...ref, source: page.source, items: page.items, checkpoint, more: page.more }, { ...ref, checkpoint: options.checkpoint ?? checkpoint, limit })
       const items = await read(confirmNativeInputAdoptions(normalized.items, { hostId: binding.sourceHostId, agentSessionId }, source, key => this.inspectAgentPromptSubmission(key), controller.signal))
+      await this.observeNotificationAdoptions(items)
       return { ...normalized, items: normalizeSessionHistoryPage(source, { source, items, nextCursor: null }, limit).items }
     } finally { options.signal?.removeEventListener('abort', cancel); lifetime.close() }
   }
@@ -6740,7 +6788,7 @@ export class AgentMuxClient {
     assertSession?: (session: AgentMuxAgentSession) => void, assertInput?: () => void,
     authority?: import('./prompt-submission.js').AgentPromptInputAuthority, producer: 'prompt' | 'message' = 'prompt',
     inputControl?: { authorizeDispatch(): Promise<import('./agent-input-wait.js').AgentInputDispatchLink | null> },
-    questionReply?: AgentPromptMessageContent['questionReply']): Promise<void> {
+    questionReply?: AgentPromptMessageContent['questionReply'], platformNotification?: AgentMuxMessageNotification): Promise<void> {
     const startedAt = Date.now()
     const id = (value: unknown): string | null => typeof value === 'string' && value.length > 0 && value.length <= 512 && !/[\0\r\n]/u.test(value) ? value : null
     let sourceDevice: import('./types.js').AgentOperationDevice | undefined
@@ -6756,7 +6804,7 @@ export class AgentMuxClient {
     let stage = 'validation'
     try {
       assertInput?.()
-      await this.performPromptSubmission(input, authorAgentSessionId, assertSession, value => { stage = value }, authority, producer, inputControl, questionReply)
+      await this.performPromptSubmission(input, authorAgentSessionId, assertSession, value => { stage = value }, authority, producer, inputControl, questionReply, platformNotification)
     } catch (error) {
       // All observations below come from this invocation's failure boundary. Missing
       // projections stay missing; they do not authorize replay of the logical message.
@@ -6794,7 +6842,7 @@ export class AgentMuxClient {
     assertSession?: (session: AgentMuxAgentSession) => void, stage: (value: string) => void = () => {},
     authority?: import('./prompt-submission.js').AgentPromptInputAuthority, producer: 'prompt' | 'message' = 'prompt',
     inputControl?: { authorizeDispatch(): Promise<import('./agent-input-wait.js').AgentInputDispatchLink | null> },
-    questionReply?: AgentPromptMessageContent['questionReply']): Promise<void> {
+    questionReply?: AgentPromptMessageContent['questionReply'], platformNotification?: AgentMuxMessageNotification): Promise<void> {
     stage('connection')
     this.requireConnected()
     stage('validation')
@@ -6826,15 +6874,19 @@ export class AgentMuxClient {
     }
     if (!content.trim() && !input.agentMuxNote?.trim()) throw new AgentMuxError('Agent prompt cannot be empty.', 'INVALID_AGENT_PROMPT')
     // Producer facts come from explicit input, never by parsing the user's string.
-    const composed = composeAgentPrompt(content, input.agentMuxNote)
+    if (platformNotification && (platformNotification.key.submissionId !== input.operationId || platformNotification.key.agentSessionId !== input.agentSessionId ||
+        !isDeepStrictEqual(platformNotification.key.expectedRun, input.expectedRun) || input.authorHuman !== undefined || authorAgentSessionId !== undefined ||
+        input.agentMuxNote !== undefined || !isDeepStrictEqual(await this.messageQueue.readNotification(input.operationId), platformNotification))) throw new AgentMuxError(
+      'The original platform notification input is not confirmed.', 'INVALID_A2A_NOTIFICATION')
+    const composed = platformNotification ? { text: platformNotification.wire, systemContext: platformNotification.wire } : composeAgentPrompt(content, input.agentMuxNote)
     // A message's authored envelope was already checked against the immutable
     // journal. Resume its original Input recipe; a newer formatter or reminder
     // cannot change bytes or producer facts after a possibly applied claim.
-    const frozen = producer === 'message' || input.agentMuxNote ? (await this.inspectAgentPromptSubmission({
+    const frozen = producer === 'message' || input.agentMuxNote || platformNotification ? (await this.inspectAgentPromptSubmission({
       agentSessionId: input.agentSessionId, expectedRun: input.expectedRun,
       ...(producer === 'message' ? { kind: 'message', messageId: input.operationId } : { kind: 'prompt', submissionId: input.operationId })
     }))?.admission?.intent : undefined
-    const authored: AgentPromptMessageContent = {
+    const authored: AgentPromptMessageContent = platformNotification ? { systemContext: platformNotification.wire, a2aNotificationId: platformNotification.notificationId } : {
       ...(questionReply ? { questionReply: structuredClone(questionReply) } : {}),
       ...(content.trim() ? { userContent: content } : {}),
       ...(composed.systemContext ? { systemContext: composed.systemContext } : {}),
@@ -6923,7 +6975,8 @@ export class AgentMuxClient {
               input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal, input.expectedInputByte, admittedMessage, input.execution, input.expectedFutureIntent, assertCurrentSubmission, transportQualification,
               inputKey,
               { ...(authority ? { authority } : {}), ...(inputControl ? { authorizeDispatch: inputControl.authorizeDispatch } : {}),
-                ...(questionReply ? { requiredNativeSource: questionReply.source } : {}) })
+                ...(questionReply ? { requiredNativeSource: questionReply.source } : {}),
+                ...(platformNotification?.mode === 'idle' ? { idleOnly: platformNotification.idle! } : {}) })
           }, { kind: 'semantic', bytes: null }, renderObservation, transportQualification ? protocolInput : undefined, releasePreparationObservation, release => { releasePreparationObservation = release }, transportQualification?.deadline)
           break
         } catch (error) {
@@ -6978,11 +7031,104 @@ export class AgentMuxClient {
     }
   }
 
-  /** The one public A2A input owner: authenticated identity, durable intent, then source plus body. */
+  /** A trusted explicit user action over existing Inbox IDs, with its own original input identity. */
+  async notifyMessages(input: { operationId: string; messageIds: readonly string[] }, context?: AgentInputCallContext): Promise<{
+    notification: AgentMuxMessageNotification; input: import('./types.js').AgentPromptSubmissionRecord | null
+  }> {
+    context?.requestSignal?.throwIfAborted(); await context?.assertCurrent?.()
+    if (!Array.isArray(input.messageIds) || !input.messageIds.length || input.messageIds.length > 100 || new Set(input.messageIds).size !== input.messageIds.length) throw new AgentMuxError(
+      'Select one to one hundred distinct original Inbox message IDs.', 'INVALID_A2A_NOTIFICATION')
+    const originals = await this.messageQueue.readNotificationMessages(input.messageIds)
+    const first = originals[0]
+    if (!first?.recipientSessionId || !first.recipientRunId || originals.some(original => !original || original.deliveryMode !== 'reference' ||
+        original.recipientSessionId !== first.recipientSessionId || original.recipientRunId !== first.recipientRunId)) throw new AgentMuxError(
+      'The selected Inbox messages must belong to the same exact recipient Run.', 'MESSAGE_RECIPIENT_MISMATCH')
+    const retained = await this.messageQueue.readNotification(input.operationId)
+    let notification: AgentMuxMessageNotification | null = retained
+    if (retained && (retained.mode !== 'steer' || !isDeepStrictEqual(retained.messageIds, input.messageIds) ||
+        retained.key.agentSessionId !== first.recipientSessionId || retained.key.expectedRun.runId !== first.recipientRunId)) throw new AgentMuxError(
+      'The original notification action already names another target or reference set.', 'A2A_NOTIFICATION_CONFLICT')
+    if (!notification) {
+      const session = await this.currentStoredAgentSession(first.recipientSessionId)
+      if (session.run.runId !== first.recipientRunId) throw new AgentMuxError('The original recipient Run changed. The Inbox and original action are retained.', 'STALE_AGENT_SESSION')
+      notification = await this.messageQueue.prepareNotification({ notificationId: safeId(input.operationId, 'Notification operation ID'),
+        agentSessionId: session.agentSessionId, condition: agentPromptCondition(session), messageIds: input.messageIds,
+        originalInputAbsent: async () => !await this.inspectAgentPromptSubmission({ kind: 'prompt', agentSessionId: session.agentSessionId,
+          expectedRun: session.run, submissionId: input.operationId }) })
+    }
+    if (!notification) throw new AgentMuxError('No original Inbox references were selected.', 'MESSAGE_NOT_FOUND')
+    await this.submitMessageNotification(notification, context)
+    return { notification: (await this.messageQueue.readNotification(notification.notificationId))!, input: await this.inspectAgentPromptSubmission(notification.key) }
+  }
+
+  private async submitMessageNotification(notice: AgentMuxMessageNotification, context?: AgentInputCallContext): Promise<void> {
+    if (notice.state === 'submitted' || notice.state === 'not-applied') return
+    const inspect = () => this.inspectAgentPromptSubmission(notice.key)
+    const submitted = (record: import('./types.js').AgentPromptSubmissionRecord | null) => isMessageNotificationInput(notice, record) &&
+      (record.admission?.acknowledged === true || record.terminalPromptSubmission?.submit.acknowledged === true)
+    const original = await inspect()
+    if (original && !isMessageNotificationInput(notice, original)) throw new AgentMuxError(
+      'Another original input owns this notification identity. Its outcome cannot sign the Inbox notification.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+    if (submitted(original)) { await this.messageQueue.recordNotificationResult(notice.notificationId, 'submitted'); return }
+    const notApplied = (record: import('./types.js').AgentPromptSubmissionRecord | null) => isMessageNotificationInput(notice, record) &&
+      agentPromptNotApplied({ run: record.run, ...(record.admission ? { promptCompletionAdmission: record.admission } : {}),
+        ...(record.terminalPromptSubmission ? { terminalPromptSubmission: record.terminalPromptSubmission } : {}) }) !== undefined
+    if (notApplied(original)) { await this.messageQueue.recordNotificationResult(notice.notificationId, 'not-applied', 'The original input owner confirmed this whole notification input was not applied.'); return }
+    // Unknown claims are observation-only, including after reopening this Client.
+    if (notice.state === 'unconfirmed' || original) {
+      if (notice.state !== 'unconfirmed') await this.messageQueue.recordNotificationResult(notice.notificationId, 'unconfirmed', 'The original notification input has an unresolved admission. Keep its input key; do not send a replacement.')
+      return
+    }
+    try {
+      const base = { agentSessionId: notice.key.agentSessionId, operationId: notice.notificationId,
+        prompt: notice.wire, ...(context?.requestSignal ? { signal: context.requestSignal } : {}) }
+      const input: AgentMuxAgentPromptInput = notice.mode === 'idle'
+        ? { ...base, ...notice.condition, execution: 'default', expectedCompletionId: notice.idle!.completionId, expectedInputByte: notice.idle!.inputByte }
+        : { ...base, expectedRun: notice.key.expectedRun, admissionIntent: { kind: 'manual-actor' }, execution: 'immediate' }
+      await this.submitPromptInternal(input, undefined, undefined, undefined, this.inputCallAuthority(undefined, context), 'prompt', undefined, undefined, notice)
+      const receipt = await inspect()
+      if (submitted(receipt)) await this.messageQueue.recordNotificationResult(notice.notificationId, 'submitted')
+      else await this.messageQueue.recordNotificationResult(notice.notificationId, 'unconfirmed', 'The original input owner has not confirmed notification admission.')
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      const receipt = await inspect()
+      if (submitted(receipt)) { await this.messageQueue.recordNotificationResult(notice.notificationId, 'submitted'); return }
+      const retired = await this.messageQueue.retireNotificationBeforeInput(notice.notificationId, async () => {
+        const record = await inspect()
+        return record === null || notApplied(record)
+      }, reason)
+      if (!retired) await this.messageQueue.recordNotificationResult(notice.notificationId, 'unconfirmed', reason)
+      this.publisher.publish({ type: 'agent-error', agentSessionId: notice.key.agentSessionId, code: 'A2A_NOTIFICATION_UNCONFIRMED',
+        message: `The original Inbox is retained. Notification ${notice.notificationId}: ${reason}`,
+        evidence: { source: 'agentmux', run: notice.key.expectedRun, observedAt: Date.now() } })
+    }
+  }
+
   async submitAgentMessage(input: AgentMuxAgentMessageInput, context?: AgentInputCallContext): Promise<void | AgentInputSubmissionReceipt> {
     context?.requestSignal?.throwIfAborted()
     input = { ...input, ...(input.caller ? { caller: { ...input.caller } } : {}) }
     const envelope = validateAgentMuxMessageEnvelope(input.envelope)
+    const retained = await this.messageQueue.readByMessageId(envelope.messageId) ?? await this.messageQueue.readByOperationId(envelope.operationId)
+    if (envelope.sender.kind === 'agent-session' && (!retained || retained.deliveryMode === 'reference')) {
+      if (input.execution === 'immediate' || input.admissionIntent !== undefined) throw new AgentMuxError(
+        'A managed sender cannot authorize steer. The existing Inbox and manual user input remain available; an explicit user notification is a separate action.', 'CONTROL_PERMISSION_DENIED', undefined,
+        { disposition: 'not_applied', confirmedInputBytes: 0 })
+      if (!input.caller?.capability || envelope.recipientSessionId !== input.agentSessionId || envelope.recipient.kind !== 'agent-session' ||
+          envelope.recipient.agentSessionId !== input.agentSessionId) throw new AgentMuxError('The original managed message author or recipient is invalid.', 'MESSAGE_SENDER_MISMATCH')
+      const reauthorize = async () => {
+        context?.requestSignal?.throwIfAborted()
+        await context?.assertCurrent?.()
+        await this.messageAuthorBinding({ capability: input.caller!.capability, callerAgentSessionId: input.caller!.agentSessionId,
+          senderAgentSessionId: envelope.sender.kind === 'agent-session' ? envelope.sender.agentSessionId : null,
+          senderSessionId: envelope.senderSessionId, senderRunId: envelope.senderRunId,
+          recipientSessionId: envelope.recipientSessionId, recipientRunId: envelope.recipientRunId })
+      }
+      await reauthorize()
+      await this.messageQueue.append({ ...envelope, execution: 'default', sourceChannel: normalizeMessageChannel(input.sourceChannel ?? 'agent-message'),
+        ...(input.sourceDevice ? { sourceDevice: normalizeOperationDevice(input.sourceDevice) } : {}) }, { deliveryMode: 'reference', reauthorize })
+      this.messageNotifications.saved(input.agentSessionId)
+      return
+    }
     const admissionIntent: AgentPromptAdmissionIntent = input.admissionIntent === undefined
       ? { kind: 'exact-condition', condition: validateAgentPromptCondition(input.condition) }
       : validateAgentPromptAdmissionIntent(input.admissionIntent)
@@ -8385,7 +8531,7 @@ export class AgentMuxClient {
   ): Promise<void> {
     const now = Date.now()
     if (message.systemContext) await this.recordMessageAfterSideEffect(session, `system-context:${operationId}`,
-      'AgentMux context', message.systemContext, now, 'agentmux', { status })
+      'AgentMux context', message.systemContext, now, 'agentmux', { status, ...(message.a2aNotificationId ? { a2aNotificationId: message.a2aNotificationId, ...(inputRef ? { inputRef } : {}) } : {}) })
     if (message.userContent) await this.recordMessageAfterSideEffect(session, `prompt:${operationId}`,
       title, message.userContent, now, 'user', { status, publicContent: 'confirmed', ...(inputRef ? { inputRef } : {}),
         ...(message.authorAgentSessionId ? { authorAgentSessionId: message.authorAgentSessionId } : {}),
@@ -8411,7 +8557,7 @@ export class AgentMuxClient {
     content: string,
     observedAt: number,
     source: 'user' | 'agentmux',
-    delivery: { sourceDevice?: import('./types.js').AgentOperationDevice; sourceChannel?: import('./types.js').AgentMessageChannel; authorAgentSessionId?: string; authorHuman?: boolean; authorExternal?: import('./external-author.js').AgentExternalMessageAuthor; status?: 'complete' | 'failed'; publicContent?: 'confirmed'; inputRef?: AgentPromptInputKey } = {}
+    delivery: { a2aNotificationId?: string; sourceDevice?: import('./types.js').AgentOperationDevice; sourceChannel?: import('./types.js').AgentMessageChannel; authorAgentSessionId?: string; authorHuman?: boolean; authorExternal?: import('./external-author.js').AgentExternalMessageAuthor; status?: 'complete' | 'failed'; publicContent?: 'confirmed'; inputRef?: AgentPromptInputKey } = {}
   ): Promise<void> {
     const mutation: AgentTimelineMutation = {
       type: 'append',
@@ -8426,8 +8572,9 @@ export class AgentMuxClient {
         updatedAt: observedAt,
         title,
         content,
+        ...(source === 'agentmux' && delivery.a2aNotificationId ? { a2aNotificationId: delivery.a2aNotificationId } : {}),
         ...(source === 'user' && delivery.publicContent ? { publicContent: delivery.publicContent } : {}),
-        ...(source === 'user' && delivery.inputRef ? { inputRef: delivery.inputRef } : {}),
+        ...((source === 'user' || delivery.a2aNotificationId !== undefined) && delivery.inputRef ? { inputRef: delivery.inputRef } : {}),
         ...(delivery.sourceDevice ? { sourceDevice: delivery.sourceDevice } : {}),
         ...(delivery.sourceChannel ? { sourceChannel: delivery.sourceChannel } : {}),
         ...(source === 'user' && delivery.authorExternal ? { authorExternal: delivery.authorExternal } : {}),
