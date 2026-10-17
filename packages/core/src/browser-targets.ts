@@ -20,3 +20,19 @@ export type AgentMuxBrowserTarget = {
 
 /** Only the person-facing Desktop API supplies a pairing secret. Never a Control result. */
 export type AgentMuxExternalBrowserPairing = { link: string; expiresAt: number }
+
+/** Native owner facts only; absence is unknown, never permission to discard a page. */
+export type AgentMuxBrowserRetentionReason =
+  | 'visible' | 'presentation' | 'operation' | 'loading' | 'profile-switch' | 'selection'
+  | 'media' | 'download' | 'upload' | 'debugger' | 'document-used' | 'document-unconfirmed'
+  | 'source-changed' | 'close-unconfirmed' | 'beforeunload' | 'owner-unavailable'
+export type AgentMuxBrowserRetention = {
+  status: 'eligible' | 'retained' | 'unknown'
+  reasons: readonly AgentMuxBrowserRetentionReason[]
+}
+export type AgentMuxBrowserReleaseReceipt = {
+  browserId: string
+  navigationId: string
+  status: 'released' | 'retained' | 'unknown'
+  reasons: readonly AgentMuxBrowserRetentionReason[]
+}
