@@ -13,7 +13,8 @@ import type { DiagnosticEvidenceRead, DiagnosticEvidenceAuthority, DiagnosticEvi
  */
 export const CLIENT_INCIDENT_LIMITS = Object.freeze({ records: 128, bytes: 2 * 1024 * 1024,
   recordBytes: 40 * 1024, queue: 32, queueBytes: 512 * 1024, readers: 4,
-  indexBytes: 512 * 1024, retentionMs: 7 * 24 * 60 * 60 * 1000 })
+  indexBytes: 512 * 1024, retentionMs: 7 * 24 * 60 * 60 * 1000,
+  readingProgressRecords: 16, readingProgressBytes: 512 * 1024 })
 
 type Persistence = 'confirmed' | 'observed' | 'unconfirmed'
 type Counters = AgentMuxClientIncidentPage['coverage']
@@ -29,6 +30,12 @@ const emptyCounters = (): Manifest['counters'] => ({ dropped: 0, invalid: 0, dup
   corrupt: 0, writeFailures: 0, indexFailures: 0, cleanupFailures: 0 })
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const safeInt = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0
+function progressKey(report: AgentMuxClientIncidentReport, producer: AgentMuxClientIncidentProducer): string | null {
+  if (report.kind !== 'conversation-reading-progress') return null
+  const scope = report.reading.scope
+  return JSON.stringify([producer.appInstanceId, producer.producerInstanceId, scope.owner, scope.ownerInstanceId,
+    scope.consumerKind, scope.consumerId, scope.hostId, scope.agentSessionId, scope.runId, scope.sourceHostId, scope.producerBuildId])
+}
 
 /** Main-owned immutable records and a bounded durable index. This owner performs no business calls. */
 export class ClientIncidentArchive {
@@ -137,6 +144,10 @@ export class ClientIncidentArchive {
     try { await this.write(join(this.directory, 'index.json'), content) }
     catch (error) { this.counters.indexFailures++; throw error }
   }
+  private omitQueued(index: number): void {
+    const omitted = this.queue.splice(index, 1)[0]!
+    this.queueBytes -= omitted.bytes; this.accepted.delete(omitted.key); this.counters.dropped++
+  }
   /** Main stamps the actual receiving owner. The Renderer cannot supply any archive authority. */
   enqueue(input: AgentMuxClientIncidentReport, producer: AgentMuxClientIncidentProducer): ClientIncidentReceipt {
     let report: AgentMuxClientIncidentReport
@@ -149,11 +160,34 @@ export class ClientIncidentArchive {
       if (previous.digest !== fingerprint) { this.counters.invalid++; return { accepted: false } }
       this.counters.duplicates++; return { accepted: true, ...(this.startup === 'ready' ? { logId: previous.logId } : {}) }
     }
-    if (this.startup === 'unavailable' || this.queue.filter(item => item.producer.producerInstanceId === producer.producerInstanceId).length >= 8 || this.queue.length >= CLIENT_INCIDENT_LIMITS.queue ||
-        this.queueBytes + bytes > CLIENT_INCIDENT_LIMITS.queueBytes) { this.counters.dropped++; return { accepted: false } }
-    const logId = mintObjectId()
+    // Preserve the same reading identity before considering queue reclamation.
+    const logId = report.reading?.logId ?? mintObjectId()
     if (this.memory.has(logId) || this.queue.some(item => item.logId === logId) ||
       this.manifest?.entries.some(entry => entry.summary.recordRef.logId === logId)) { this.counters.dropped++; return { accepted: false } }
+    const progress = progressKey(report, producer)
+    let replace = -1
+    if (progress !== null) {
+      const same = this.queue.flatMap((item, index) => index >= (this.draining ? 1 : 0) &&
+        progressKey(item.report, item.producer) === progress ? [index] : [])
+      // Retain the first pending checkpoint and the latest tail. An actual writer
+      // remains immutable; each omitted original is reflected in coverage.
+      if (same.length >= 2) replace = same.at(-1)!
+    }
+    const replaced = replace < 0 ? undefined : this.queue[replace]
+    const producerFull = () => this.queue.filter(item => item.producer.producerInstanceId === producer.producerInstanceId).length - (replaced ? 1 : 0) >= 8
+    const full = () => producerFull() || this.queue.length - (replaced ? 1 : 0) >= CLIENT_INCIDENT_LIMITS.queue ||
+      this.queueBytes - (replaced?.bytes ?? 0) + bytes > CLIENT_INCIDENT_LIMITS.queueBytes
+    if (report.kind !== 'conversation-reading-progress') {
+      while (full()) {
+        const ownBudget = producerFull()
+        const victim = this.queue.findIndex((item, index) => index >= (this.draining ? 1 : 0) &&
+          item.report.kind === 'conversation-reading-progress' && (!ownBudget || item.producer.producerInstanceId === producer.producerInstanceId))
+        if (victim < 0) break
+        this.omitQueued(victim)
+      }
+    }
+    if (this.startup === 'unavailable' || full()) { this.counters.dropped++; return { accepted: false } }
+    if (replaced) this.omitQueued(replace)
     const pending = { logId, report, producer: structuredClone(producer), receivedAt: this.now(), bytes, key, digest: fingerprint }
     this.accepted.set(key, { logId: pending.logId, digest: fingerprint })
     this.queue.push(pending); this.queueBytes += bytes
@@ -220,14 +254,29 @@ export class ClientIncidentArchive {
       receivedAt: pending.receivedAt, producer: pending.producer, report: pending.report })
     const content = JSON.stringify(record) + '\n', bytes = Buffer.byteLength(content)
     const expiredBefore = this.now() - CLIENT_INCIDENT_LIMITS.retentionMs
+    const isProgress = (entry: Entry) => entry.summary.kind === 'conversation-reading-progress'
+    const progress = pending.report.kind === 'conversation-reading-progress'
+    const progressOverBudget = () => {
+      const entries = manifest.entries.filter(isProgress)
+      return progress && (entries.length >= CLIENT_INCIDENT_LIMITS.readingProgressRecords ||
+        entries.reduce((total, entry) => total + entry.bytes, 0) + bytes > CLIENT_INCIDENT_LIMITS.readingProgressBytes)
+    }
     while (manifest.entries.length && (manifest.entries.length >= CLIENT_INCIDENT_LIMITS.records ||
       manifest.entries.reduce((total, entry) => total + entry.bytes, 0) + bytes > CLIENT_INCIDENT_LIMITS.bytes ||
-      manifest.entries[0]!.summary.receivedAt < expiredBefore)) {
-      const oldest = manifest.entries[0]!, logId = oldest.summary.recordRef.logId
+      manifest.entries[0]!.summary.receivedAt < expiredBefore || progressOverBudget())) {
+      let victim = 0
+      if (manifest.entries[0]!.summary.receivedAt >= expiredBefore) {
+        const progressIndex = manifest.entries.findIndex(isProgress)
+        // Low-priority progress cannot evict an unrelated retained failure.
+        // Critical evidence reclaims progress first, then follows normal retention.
+        if (progressIndex >= 0) victim = progressIndex
+        else if (progress) { this.counters.dropped++; return }
+      }
+      const oldest = manifest.entries[victim]!, logId = oldest.summary.recordRef.logId
       // Keep the indexed identity until its file is actually removed. A failed removal stops only
       // this diagnostic publication, so repeated failures cannot grow unindexed disk garbage.
       await unlink(join(this.directory, logId + '.json')).catch(error => { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error })
-      manifest.entries.shift(); this.memory.delete(logId); this.accepted.delete(oldest.key)
+      manifest.entries.splice(victim, 1); this.memory.delete(logId); this.accepted.delete(oldest.key)
       manifest.evicted.push(logId); if (manifest.evicted.length > CLIENT_INCIDENT_LIMITS.records) manifest.evicted.shift()
       this.counters.evicted++
     }
