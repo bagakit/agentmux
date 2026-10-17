@@ -339,9 +339,16 @@ async function run() {
   }
   const traceReceipts: any[] = []
   receipt.trace = traceReceipts
+  async function settleNativeGeometry() {
+    await until(async () => {
+      const stage = await evaluate('contextualProof.facts().stage')
+      const zoom = contents.getZoomFactor(), bounds = page.getBounds()
+      return page.getVisible() && stage && ['x', 'y', 'width', 'height'].every(key => Math.abs(bounds[key as keyof typeof bounds] - Math.round(stage[key] * zoom)) <= 1)
+    }, 'the original native Browser bounds to match its current rendered stage')
+  }
   for (const shape of [{ name: 'normal', width: 1120, height: 760 }, { name: 'narrow', width: 360, height: 760 }, { name: 'short', width: 760, height: 420 }]) {
     window.setSize(shape.width, shape.height)
-    await settled(); await delay(100)
+    await settled(); await settleNativeGeometry()
     for (const viewport of ['responsive', { width: 640, height: 480, screenPosition: 'desktop' }]) {
       receipt.currentCase = { shape, viewport, mode: 'live-floating' }
       await evaluate(`window.agentmux.browser.setViewport('contextual-browser', ${JSON.stringify(viewport)})`)
@@ -349,6 +356,8 @@ async function run() {
       const finish = await startProgram('trace-floating-' + shape.name + '-' + (typeof viewport === 'string' ? 'responsive' : 'fixed'))
       const original = await pageFacts()
       await openTrace()
+      const currentStepVisible = await evaluate(`(()=>{const panel=document.querySelector('aside[aria-label="Browser activity trace"]'),step=panel?.querySelector('.browser-rsi-timeline__step--running,.browser-rsi-timeline__step--waiting');if(!panel||!step)return false;const p=panel.getBoundingClientRect(),s=step.getBoundingClientRect();return s.top>=p.top&&s.bottom<=p.bottom})()`)
+      assert.equal(currentStepVisible, true, 'Opening the live trace must show the current step before scrolling through older operations')
       const trace = await evaluate('(()=>{const e=document.querySelector("aside[aria-label=\\"Browser activity trace\\"]");return{floating:e.classList.contains("browser-trace-rail--floating"),sameDocument:e.ownerDocument===document,modal:e.getAttribute("aria-modal"),visibility:getComputedStyle(e).visibility,positioned:Boolean(e.style.left&&e.style.top),box:e.getBoundingClientRect().toJSON()}})()')
       assert.equal(trace.floating, true, 'Opening a live trace must float without taking page flow space')
       assert.equal(trace.sameDocument, true)
