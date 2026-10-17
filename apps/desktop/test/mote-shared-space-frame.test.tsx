@@ -299,12 +299,21 @@ describe('actual Mote caller uses the shared Space workbench frame', () => {
     expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
     expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
   })
-  it('does not turn an explicitly empty Mote into a new Session after restoring the full preference', async () => {
+  it('restores an empty selection preference to the original Zone without creating a Session', async () => {
     localStorage.setItem(savedMoteKey, JSON.stringify({ open: true, targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: null, reference: null }))
+    const before = useAppStore.getState()
     await app.mount()
-    expect(app.panel().dataset.moteTargetTab).toBeUndefined()
-    expect(app.panel().querySelector('[aria-label="Message Agent"]')).toBeNull()
+    expect(app.panel().dataset.moteTargetTab).toBe(defaultTab.id)
+    expect(app.panel().querySelector('[aria-label="Message Agent"]')?.textContent).toContain('Default unsent')
+    expect(app.panel().querySelectorAll('.workbench-tab--active')).toHaveLength(1)
     expect(Object.keys(useAppStore.getState().tabs)).toContain(defaultTab.id)
+    expect(useAppStore.getState().tabs).toBe(before.tabs)
+    expect(useAppStore.getState().layouts).toBe(before.layouts)
+    expect(useAppStore.getState().sessions.map(session => [session.id, session.control, session.processState]))
+      .toEqual(before.sessions.map(session => [session.id, session.control, session.processState]))
+    expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+    expect(readPmoTeamsTopicFloatingState().reference).toEqual({ displayWorkspaceId: SCRATCH_WORKSPACE_ID,
+      groupId: 'mote-group', tabId: defaultTab.id, regionId: defaultTab.layout.activeRegionId })
     expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
   })
   it('keeps current typing focus and caret when an additional location makes selection ambiguous', async () => {

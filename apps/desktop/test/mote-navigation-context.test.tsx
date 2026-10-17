@@ -66,7 +66,7 @@ it('an explicit cross-context handoff captures its exact Region once and keeps a
   expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled()
 })
 
-it('an unsaved Mote retains original discussions until an exact handoff and then ignores Work and semantic focus ordering', async () => {
+it('an unsaved Mote selects its original Zone member and keeps an exact handoff independent of Work focus', async () => {
   localStorage.removeItem(savedMoteKey)
   useAppStore.getState().activateTab(SCRATCH_WORKSPACE_ID, 'mote-group', customTab.id)
   useAppStore.setState({ recentMoteAgents: {} })
@@ -74,11 +74,15 @@ it('an unsaved Mote retains original discussions until an exact handoff and then
   await app.mount()
   await act(async () => requestPmoTeamsTopicFloatingOpen())
   await settleMoteApp()
-  expect(app.panel().dataset.moteTargetTab).toBeUndefined()
+  expect(app.panel().dataset.moteTargetTab).toBe(defaultTab.id)
+  expect(app.panel().querySelectorAll('.workbench-tab--active')).toHaveLength(1)
+  expect(app.panel().querySelector('[aria-label="Message Agent"]')).not.toBeNull()
   expect(useAppStore.getState().tabs).toBe(original.tabs)
   expect(useAppStore.getState().layouts).toBe(original.layouts)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(original.agentComposerDrafts)
   expect([defaultTab.id, neighborTab.id].every(id => Object.hasOwn(useAppStore.getState().tabs, id))).toBe(true)
-  expect(saved().targetTabId).toBeUndefined()
+  expect(saved().targetTabId).toBe(defaultTab.id)
+  expect(saved().reference).toEqual(reference)
   const selected = { ...reference, tabId: neighborTab.id, regionId: neighborTab.layout.activeRegionId }
   await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: neighborTab.id, reference: selected }))
   await settleMoteApp()
