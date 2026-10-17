@@ -3,8 +3,8 @@ import ts from 'typescript'
 import { expect } from 'vitest'
 
 /** Reverse the actual durable schema; an added ordinary field must acquire real CLI support. */
-export async function scalarSettingsSchemaKeys(): Promise<string[]> {
-  const source = ts.createSourceFile('config-store.ts', await readFile(new URL('../../src/main/config-store.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true)
+export async function scalarSettingsSchemaKeys(sourceFile: string | URL = new URL('../../src/main/config-store.ts', import.meta.url)): Promise<string[]> {
+  const source = ts.createSourceFile('config-store.ts', await readFile(sourceFile, 'utf8'), ts.ScriptTarget.Latest, true)
   const declarations = new Map<string, ts.Expression>()
   source.forEachChild((node) => {
     if (!ts.isVariableStatement(node)) return
