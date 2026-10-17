@@ -10,7 +10,8 @@ import '../styles/recall.css'
 import { ConfirmationDialog } from './ConfirmationDialog'
 import { useNotebookOperation } from './NotebookOperation'
 import { changeNotebook, refreshNotebookLibrary, recordNotebookChanges, retryNotebookRecoveries, useNotebookLibrary, type NoteNotebookContext } from '../lib/notebook-library'
-import { openNotebookPage, prepareNotebookWorkface } from '../lib/recall-notebooks'
+import { openNotebookFile, openNotebookPage, prepareNotebookWorkface } from '../lib/recall-notebooks'
+import type { CanvasFileTarget } from './NoteCanvas'
 import { spatialCatalog } from '../lib/space-agent-control'
 import { useLauncherState } from '../lib/launcher-state'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
@@ -124,6 +125,16 @@ export const GlobalRecallSurface = memo(function GlobalRecallSurface({ visible =
     intent.current += 1; useAppStore.getState().setRecallNotebook(page.notebookId, page.noteId); setError(null)
     try { await openNotebookPage(page, onSelectReference, selection?.active, blockId ? { noteId: page.noteId, blockId } : undefined) } catch (cause) { setError(presentError(cause)) }
   }
+  async function showFile(file: CanvasFileTarget, blockId: string | undefined, signal: AbortSignal) {
+    if (signal.aborted || !activeNotebook) return false
+    const request = ++intent.current, notebook = activeNotebook
+    const workface = await prepareNotebookWorkface(notebook, file.resource.workspaceId)
+    if (signal.aborted || !active.current || request !== intent.current || useAppStore.getState().recallNotebookId !== notebook.notebookId) return false
+    setError(null)
+    const opened = await openNotebookFile({ ...file, workface }, onSelectReference, selection?.active, blockId ? { noteId: file.noteId, blockId } : undefined, undefined, signal)
+    if (opened && active.current && useAppStore.getState().recallNotebookId === notebook.notebookId) setDirectoryOpen(false)
+    return opened
+  }
   async function removeNotebook() {
     if (!deleteTarget) return
     const id = deleteTarget.notebookId
@@ -209,7 +220,7 @@ export const GlobalRecallSurface = memo(function GlobalRecallSurface({ visible =
       <div className="recall-preserved-workbench" hidden={directoryOpen || !selection} inert={directoryOpen || !selection}>
       {selection ? projection ? <WorkspaceWorkbench workspaceId={projection.displayWorkspaceId} projection={projection} viewOwnership="projection" viewTargets={viewTargets} onCreateTab={() => void createPage()} leadingChrome={isMacPlatform() ? <span className="survey-window-controls-inset" aria-hidden="true" /> : undefined} visible={visible && !directoryOpen} /> : <div className="workbench-zone-state" role="status"><h2>The original page is kept</h2><p>Its work surface is still restoring. Reopen this same page from its Notebook.</p><button className="note-text-button" onClick={() => noteId && library?.pages[noteId] ? void showPage(library.pages[noteId]!) : chooseNotebook(notebookId)}>Reopen page</button></div>
         : null}</div>
-      {directoryOpen || !selection ? activeNotebook ? <NotebookHome active={visible} view={directoryView} onViewChange={setDirectoryView} query={query} onQuery={sidebarCollapsed ? setQuery : undefined} navigationVisible={!sidebarCollapsed} archived={archived} onArchivedChange={sidebarCollapsed ? value => { setArchived(value); setQuery('') } : undefined} notebook={activeNotebook} pages={notebookPages} pending={opening} onCreate={() => void createPage()} onOpen={(page, blockId) => void showPage(page, blockId)} onTalk={beginTalk} />
+      {directoryOpen || !selection ? activeNotebook ? <NotebookHome active={visible} view={directoryView} onViewChange={setDirectoryView} query={query} onQuery={sidebarCollapsed ? setQuery : undefined} navigationVisible={!sidebarCollapsed} archived={archived} onArchivedChange={sidebarCollapsed ? value => { setArchived(value); setQuery('') } : undefined} notebook={activeNotebook} pages={notebookPages} pending={opening} onCreate={() => void createPage()} onOpen={(page, blockId) => void showPage(page, blockId)} onOpenFile={showFile} onTalk={beginTalk} />
           : <div className="recall-directory-state" role="status"><NotebookIcon size={24} strokeWidth={1.4} /><h2>{notebookId ? 'Your Notebook selection is kept' : 'Loading your Notebook'}</h2><p>{notebookId ? 'This Notebook is not confirmed in the current directory. Refresh or choose another Notebook above; original pages and work remain available.' : 'Your pages will appear when the directory is confirmed.'}</p><button className="note-text-button" onClick={() => void refreshNotebookLibrary().catch(() => {})}>Refresh notebooks</button></div> : null}
     </div></div>
     <TopicKnowledgeCapture target={capture} onClose={() => setCapture(null)} onSaved={entry => {

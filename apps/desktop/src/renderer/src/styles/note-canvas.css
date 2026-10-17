@@ -180,3 +180,10 @@
 
 .note-canvas-comparison .note-canvas-inspector-actions { margin: 0 0 7px; }
 .note-canvas-comparison-to .note-canvas-comparison-content { margin-bottom: 0; }
+
+.note-canvas-card[data-kind="shared-block"] { border-color: color-mix(in srgb, var(--green) 36%, var(--line)); }
+.note-canvas-card[data-kind="shared-block"] .note-canvas-book { color: var(--green); }
+.note-canvas-body[data-reading-mode="summary"] { max-height: 280px; }
+.note-canvas-reader .note-include-link { display: flex; flex-direction: column; gap: 3px; margin-block: 10px; padding: 7px 10px; border-left: 2px solid var(--green); background: var(--wash-1); }
+.note-canvas-reader .note-include-link > span { color: var(--text-3); font-size: 9px; }
+.note-canvas-reader .note-include-link > button { padding: 0; border: 0; background: transparent; color: var(--green); font-size: 11px; line-height: 1.6; text-align: left; overflow-wrap: anywhere; }

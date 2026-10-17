@@ -11,9 +11,9 @@ import { noteSavedEditors } from './NoteParticipants'
 import type { NotebookPage, NoteResource } from '@agentmux/core/notebook-catalog'
 import { sameNoteResource, useNotebookLibrary } from '../lib/notebook-library'
 import { NoteBlockEditor, type NoteEditorHandle } from './NoteBlockEditor'
-import { NoteCanvas } from './NoteCanvas'
+import { NoteCanvas, type CanvasFileTarget } from './NoteCanvas'
 import { useWorkbenchBrowserPresentation, WorkbenchPresentationContext } from '../lib/workbench-presentation'
-import { openNotebookPage } from '../lib/recall-notebooks'
+import { openNotebookFile, openNotebookPage } from '../lib/recall-notebooks'
 import { useAppStore } from '../store'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useNoteLinkNavigation } from '../lib/use-note-link-navigation'
@@ -140,6 +140,13 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
         blockId ? { noteId: page.noteId, blockId } : undefined)
     } catch (error) { setIssue(presentError(error)); useAppStore.getState().reportError(error) }
   }
+  const openCanvasFile = async (file: CanvasFileTarget, blockId: string | undefined, signal: AbortSignal) => {
+    const reference = presentation.reference
+    const space = reference && useAppStore.getState().tabs[reference.tabId]?.space
+    if (!reference || !space) throw new Error('The original file display position is unconfirmed. Your graph and source are kept; reopen from its Notebook.')
+    return openNotebookFile(file, presentation.projection?.onSelect, reference, blockId ? { noteId: file.noteId, blockId } : undefined,
+      { reference, space, ...(presentation.projection ? { projection: presentation.projection } : {}) }, signal)
+  }
   const openLinkedPage = async (page: NotebookPage, blockId?: string) => {
     if (read.status === 'valid' && page.noteId === read.note.noteId && resource && sameNoteResource(page.resource, resource)) { await openCanvasPage(page, blockId); return }
     if (onOpenPage) await onOpenPage(page, blockId)
@@ -167,7 +174,7 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
         options={[{ value: 'note', label: 'Note', ariaLabel: 'Note view' }, { value: 'graph', label: 'Graph', ariaLabel: 'Graph view' }]} />
     </>, toolbar.element) : null}
     {canvasOpen ? <span className="note-view-snapshot" role="status">Saved relationships{dirty ? <span>Save your note to update this graph.</span> : null}</span> : null}
-    {canvasOpen ? <div className="note-association-canvas"><NoteCanvas scope={{ kind: 'note', noteId: read.note.noteId }} active={presentation.active} onOpen={openCanvasPage} /></div> : null}
+    {canvasOpen ? <div className="note-association-canvas"><NoteCanvas scope={{ kind: 'note', noteId: read.note.noteId }} active={presentation.active} onOpen={openCanvasPage} onOpenFile={openCanvasFile} /></div> : null}
     <div hidden={canvasOpen} inert={canvasOpen} className="note-original-editor">
     <WorkbenchPresentationContext.Provider value={canvasOpen ? { ...presentation, active: false } : presentation}>
     <NoteBlockEditor note={read.note} knowledge={knowledge} onChange={onChange} onSave={onSave} onOpen={onOpen} onIssue={setIssue} handleRef={attachHandle} onOpenLink={links.openLink} active={presentation.active && !canvasOpen} showBacklinks={!registered} sourceIdentity={sourceIdentity} {...(onSelectedBlock ? { onSelectedBlock } : {})} {...(onCompositionChange ? { onCompositionChange } : {})}
