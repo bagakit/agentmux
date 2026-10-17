@@ -450,6 +450,35 @@ const FULL_COMMIT_OID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u
 const MAX_HISTORY_REFS = 2_000
 const MAX_HISTORY_PAGE = 100
 
+// Reuse only immutable first-page bytes. Each read still observes this runner's
+// exact repository and current refs; decorations and checkedAt are never cached.
+// Weak ownership lets released Hosts take their cache with them. Oversized pages
+// simply use the normal Git path, so this metadata budget cannot limit history.
+const HISTORY_CACHE_BYTES = 1024 * 1024
+const HISTORY_CACHE_ENTRIES = 16
+const historyPages = new WeakMap<GitCommandRunner, { pages: Map<string, string>; bytes: number }>()
+
+function cachedHistoryPage(host: GitCommandRunner, key: string): string | undefined {
+  const cache = historyPages.get(host), output = cache?.pages.get(key)
+  if (output !== undefined) { cache!.pages.delete(key); cache!.pages.set(key, output) }
+  return output
+}
+
+function rememberHistoryPage(host: GitCommandRunner, key: string, output: string): void {
+  const bytes = Buffer.byteLength(key) + Buffer.byteLength(output)
+  if (bytes > HISTORY_CACHE_BYTES) return
+  let cache = historyPages.get(host)
+  if (!cache) { cache = { pages: new Map(), bytes: 0 }; historyPages.set(host, cache) }
+  const previous = cache.pages.get(key)
+  if (previous !== undefined) { cache.bytes -= Buffer.byteLength(key) + Buffer.byteLength(previous); cache.pages.delete(key) }
+  cache.pages.set(key, output); cache.bytes += bytes
+  while (cache.bytes > HISTORY_CACHE_BYTES || cache.pages.size > HISTORY_CACHE_ENTRIES) {
+    const oldest = cache.pages.keys().next().value!
+    cache.bytes -= Buffer.byteLength(oldest) + Buffer.byteLength(cache.pages.get(oldest)!)
+    cache.pages.delete(oldest)
+  }
+}
+
 /** Raw pretty format preserves original parents, including a shallow boundary; %P can rewrite them. */
 export function parseGitHistory(output: string): Omit<GitHistoryCommit, 'refs'>[] {
   if (output === '') return []
@@ -701,6 +730,7 @@ export class GitRepository {
     const repoPath = await this.resolveRepoPath(host, workspace.path)
     if (repoPath === null) return { kind: 'not-a-git-repository', hostId: workspace.hostId, workspacePath: workspace.path }
     let snapshot: GitHistorySnapshot
+    let cacheable = false
     const offset = input.cursor?.offset ?? 0
     if (!Number.isSafeInteger(offset) || offset < 0) throw new Error('Invalid history cursor offset')
     if (input.cursor) {
@@ -722,27 +752,43 @@ export class GitRepository {
       const expected = this.historyRoots(snapshot.refs, snapshot.selectedRef)
       if (JSON.stringify(expected) !== JSON.stringify(snapshot.roots)) throw new Error('History cursor roots changed')
     } else {
-      const refs = await this.observedRefs(host, repoPath)
+      const observation = await this.observedRefs(host, repoPath), refs = observation.refs
+      if (observation.cacheable && observation.graftPath) {
+        // Legacy grafts, like shallow boundaries, can alter traversal without
+        // changing roots. Missing cache eligibility never prevents a Git read.
+        try {
+          const grafts = await this.readWorktreeFile(observation.graftPath)
+          cacheable = !grafts.present || !grafts.oversized && grafts.bytes.length === 0
+        } catch { /* This optional metadata observation only disables reuse. */ }
+      }
       const selectedRef = input.ref ?? null
       snapshot = { hostId: workspace.hostId, repoPath, selectedRef, refs,
         roots: this.historyRoots(refs, selectedRef), checkedAt: Date.now() }
     }
     if (snapshot.roots.length === 0) return { kind: 'ready', snapshot, commits: [], nextCursor: null }
-    const result = await this.comparisonGit(host, repoPath,
+    // Cursor reads continue through Git, including its missing-object checks.
+    // Fresh first-page roots have just been read by observedRefs. Raw bytes are
+    // reparsed on every hit, so callers cannot mutate a later result's parents.
+    const pageKey = JSON.stringify([workspace.hostId, repoPath, snapshot.roots, limit])
+    const cached = cacheable ? cachedHistoryPage(host, pageKey) : undefined
+    const output = cached ?? (await this.comparisonGit(host, repoPath,
       ['log', '--no-color', '--no-decorate', '--no-show-signature', '--topo-order', '--format=raw', '--no-abbrev',
         `--max-count=${limit + 1}`, `--skip=${offset}`, '--stdin', '--'], 'Could not read the fixed history commits',
-      snapshot.roots.join('\n') + '\n')
+      snapshot.roots.join('\n') + '\n')).stdout
     // Roots are immutable complete OIDs, never revision expressions supplied through stdin.
-    const parsed = parseGitHistory(result.stdout)
+    const parsed = parseGitHistory(output)
     if (parsed.length > limit + 1 || new Set(parsed.map(commit => commit.oid)).size !== parsed.length) throw new Error('Git returned an invalid history page')
+    if (cacheable && cached === undefined) rememberHistoryPage(host, pageKey, output)
     const commits = parsed.slice(0, limit).map(commit => ({ ...commit, refs: snapshot.refs.filter(ref => ref.oid === commit.oid) }))
     return { kind: 'ready', snapshot, commits, nextCursor: parsed.length > limit ? { snapshot, offset: offset + commits.length } : null }
   }
 
-  private async observedRefs(host: GitCommandRunner, repoPath: string, commitOid?: string): Promise<GitHistoryRef[]> {
-      const enumerated = await this.comparisonGit(host, repoPath,
+  private async observedRefs(host: GitCommandRunner, repoPath: string, commitOid?: string): Promise<{ refs: GitHistoryRef[]; cacheable: boolean; graftPath: string }> {
+      const [enumerated, head] = await Promise.all([this.comparisonGit(host, repoPath,
         ['for-each-ref', `--count=${MAX_HISTORY_REFS + 1}`, ...(commitOid ? [`--points-at=${commitOid}`] : []), '--format=%(refname)%00%(objecttype)%00%(objectname)%00%(*objecttype)%00%(*objectname)',
-          'refs/heads', 'refs/remotes', 'refs/tags'], 'Could not read history references')
+          'refs/heads', 'refs/remotes', 'refs/tags'], 'Could not read history references'),
+        host.run('git', ['-C', repoPath, 'rev-parse', '--path-format=absolute', '--git-path', 'info/grafts',
+          '--is-shallow-repository', '--verify', '--quiet', 'HEAD^{commit}'], GIT_RUN_OPTIONS)])
       const records = enumerated.stdout.split('\n').filter(Boolean)
       if (records.length > MAX_HISTORY_REFS) throw new Error('History has too many references; the complete reference snapshot exceeds the 2000-ref limit')
       const refs: GitHistoryRef[] = records.flatMap(record => {
@@ -756,8 +802,8 @@ export class GitRepository {
         }
         return [{ name, kind, oid: this.commitOid(oid) }]
       })
-      const head = await host.run('git', ['-C', repoPath, 'rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], GIT_RUN_OPTIONS)
-      if (head.exitCode === 0) refs.push({ name: 'HEAD', kind: 'head', oid: this.commitOid(head.stdout) })
+      const headFields = head.stdout.replace(/\n$/u, '').split('\n'), headOid = headFields.pop(), shallow = headFields.pop()
+      if (head.exitCode === 0) refs.push({ name: 'HEAD', kind: 'head', oid: this.commitOid(headOid ?? '') })
       else {
         const symbolic = await this.comparisonGit(host, repoPath, ['symbolic-ref', '--quiet', 'HEAD'], 'Could not read history HEAD')
         const name = symbolic.stdout.trim()
@@ -765,7 +811,9 @@ export class GitRepository {
         const exists = await host.run('git', ['-C', repoPath, 'show-ref', '--verify', '--quiet', name], GIT_RUN_OPTIONS)
         if (exists.exitCode !== 1 || exists.stderr.trim()) throw gitFailureError(head, 'History HEAD is unreadable')
       }
-    return commitOid ? refs.filter(ref => ref.oid === commitOid) : refs
+    // A shallow boundary is mutable independently of root OIDs (for example
+    // after deepen). Keep such reads on Git instead of retaining their pages.
+    return { refs: commitOid ? refs.filter(ref => ref.oid === commitOid) : refs, cacheable: shallow === 'false', graftPath: headFields.join('\n') }
   }
 
   private historyRoots(refs: GitHistoryRef[], selectedRef: string | null): string[] {
@@ -857,7 +905,7 @@ export class GitRepository {
     const changes = await this.comparisonGit(host, repoPath, args, 'Could not read the commit files')
     const warnings = changes.stderr.trim() ? [scrubGitCredentials(changes.stderr.trim())] : []
     let refs: GitHistoryRef[] = []
-    try { refs = await this.observedRefs(host, repoPath, oid) }
+    try { refs = (await this.observedRefs(host, repoPath, oid)).refs }
     catch (error) {
       // Decorations are observations, not prerequisites for the fixed commit's readable content.
       // Keep their unknown state explicit rather than reporting an authoritative empty reference set.
