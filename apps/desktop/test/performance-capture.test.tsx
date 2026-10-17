@@ -2,6 +2,7 @@
 import { act } from 'react'
 import type { Root } from 'react-dom/client'
 import { createHash } from 'node:crypto'
+import { gzipSync } from 'node:zlib'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import type { AgentMuxPreloadApi } from '../src/shared/contracts'
@@ -39,11 +40,24 @@ function capture(input: RendererV8ProfileInput): RendererV8ProfileResult {
     sourceVerified: { before: true, after: true }, cleanup: { stopRequested: true, stopAcknowledged: true, disableAcknowledged: true, detached: 'confirmed' },
     profile, profileBytes: Buffer.byteLength(json), sha256: createHash('sha256').update(json).digest('hex'), issues: [] }
 }
-function unknownTrace(input: RendererV8ProfileInput): RendererTraceResult { return { ...input, schema: 'agentmux.renderer-trace.v1', scope: 'chromium-target-related-timeline', status: 'unknown',
-    transferMode: 'ReportEvents', traceTimeUnit: 'microseconds', requestedCategories: [...RENDERER_TRACE_CATEGORIES],
+function unknownTrace(input: RendererV8ProfileInput): RendererTraceResult { return { ...input, schema: 'agentmux.renderer-trace.v2', scope: 'chromium-target-related-timeline', status: 'unknown',
+    transferMode: 'ReturnAsStream', streamFormat: 'json', streamCompression: 'gzip', traceTimeUnit: 'microseconds', requestedCategories: [...RENDERER_TRACE_CATEGORIES],
     timing: { requestedAt: _historyFixtureEpoch(0, 0, 1), startedAt: _historyFixtureEpoch(0, 0, 2), endAcknowledgedAt: null, completedAt: null, finishedAt: _historyFixtureEpoch(0, 0, 3), startMonotonicMs: 1, endMonotonicMs: null, completeMonotonicMs: null },
     sourceVerified: { before: true, after: false }, lifecycle: { startRequested: true, startAcknowledged: true, endRequested: true, endAcknowledged: false, tracingComplete: false, dataLossOccurred: null, detached: 'unconfirmed' },
-    bufferUsage: { observations: 0, maxFraction: null, fullObserved: false }, receivedEvents: 0, receivedTraceBytes: 18, trace: null, traceBytes: null, sha256: null, issues: [] } }
+    stream: { handleReceived: false, eof: false, closeRequested: false, closeAcknowledged: false },
+    bufferUsage: { observations: 0, maxFraction: null, fullObserved: false }, receivedEvents: 0, receivedTraceBytes: 0, receivedGzipBytes: 0, trace: null, traceBytes: null, sha256: null, issues: [] } }
+
+function completedTrace(input: RendererV8ProfileInput): RendererTraceResult {
+  const raw = '{ "metadata": {"original":"λ"}, "traceEvents":[{"pid":4,"name":"Layout","args":{"future":[1,true,null]}}], "futureRoot": true }'
+  const gzip = gzipSync(raw), hash = (bytes: string | Uint8Array) => createHash('sha256').update(bytes).digest('hex')
+  const original = unknownTrace(input)
+  return { ...original, status: 'completed', sourceVerified: { before: true, after: true },
+    timing: { ...original.timing, endAcknowledgedAt: original.timing.finishedAt, completedAt: original.timing.finishedAt, endMonotonicMs: 2001, completeMonotonicMs: 2002 },
+    lifecycle: { ...original.lifecycle, endAcknowledged: true, tracingComplete: true, dataLossOccurred: false, detached: 'confirmed' },
+    stream: { handleReceived: true, eof: true, closeRequested: true, closeAcknowledged: true },
+    receivedEvents: 1, receivedTraceBytes: Buffer.byteLength(raw), receivedGzipBytes: gzip.length,
+    trace: { encoding: 'base64', data: gzip.toString('base64'), bytes: gzip.length, sha256: hash(gzip) }, traceBytes: Buffer.byteLength(raw), sha256: hash(raw) }
+}
 
 let root: Root, container: HTMLDivElement, initial: ReturnType<typeof useAppStore.getState>
 let profilePort: ReturnType<typeof vi.fn>, tracePort: ReturnType<typeof vi.fn>
@@ -137,14 +151,14 @@ it('the timeline GUI consumes the same exact-source Main delegate and original u
   expect(document.querySelector('[aria-label="Sampled call stacks"]')).toBeNull()
 })
 
-it('export preserves original profile and original receipt byte semantics without another capture', async () => {
+it('export preserves original profile and omits profile payload from its receipt without another capture', async () => {
   const create = vi.fn((_blob: Blob) => 'blob:private-capture'), revoke = vi.fn(), downloads: { name: string; blob: Blob }[] = []
   vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: create, revokeObjectURL: revoke }))
   vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) { downloads.push({ name: this.download, blob: create.mock.calls.at(-1)![0] as Blob }) })
   await render(); await click(sampleButton); await click('.performance-capture-result .performance-capture-actions > button:first-child'); await click('.performance-capture-result .performance-capture-actions > button:last-child')
   expect(downloads.map(item => item.name)).toEqual(['renderer.cpuprofile', 'renderer-capture-receipt.json'])
   expect(JSON.parse(await downloads[0]!.blob.text())).toEqual(originalProfile())
-  expect(JSON.parse(await downloads[1]!.blob.text())).toEqual(capture(profilePort.mock.calls[0]![0]))
+  expect(JSON.parse(await downloads[1]!.blob.text())).toEqual({ ...capture(profilePort.mock.calls[0]![0]), profile: '(export original profile)' })
   expect(profilePort).toHaveBeenCalledOnce()
 })
 
@@ -184,7 +198,7 @@ it('an unknown trace retains the completed profile and selected frame, with inde
   expect(downloads.map(item => item.name)).toEqual(['renderer-capture-receipt.json', 'renderer.cpuprofile', 'renderer-capture-receipt.json'])
   expect(JSON.parse(await downloads[0]!.blob.text())).toEqual(unknownTrace(tracePort.mock.calls[0]![0]))
   expect(JSON.parse(await downloads[1]!.blob.text())).toEqual(originalProfile())
-  expect(JSON.parse(await downloads[2]!.blob.text())).toEqual(profileResult)
+  expect(JSON.parse(await downloads[2]!.blob.text())).toEqual({ ...profileResult, profile: '(export original profile)' })
   expect(profilePort).toHaveBeenCalledOnce(); expect(tracePort).toHaveBeenCalledOnce()
 })
 
@@ -209,4 +223,28 @@ it('self time and inclusive tree weights stay separate; malformed trees and empt
   const cyclic = originalProfile(); cyclic.nodes[2]!.children = [1]
   expect(analyseRendererProfile(cyclic).data).toBeNull()
   expect(analyseRendererProfile({ ...originalProfile(), timeDeltas: [0, 0, 0] }).reason).toContain('zero')
+})
+
+
+it('exports original native gzip bytes through the actual trace button and keeps payload out of receipts', async () => {
+  const downloads: { name: string; blob: Blob }[] = [], create = vi.fn((_blob: Blob) => 'blob:original-gzip')
+  vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: create, revokeObjectURL: vi.fn() }))
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+    downloads.push({ name: this.download, blob: create.mock.calls.at(-1)![0] as Blob })
+  })
+  const decode = vi.spyOn(globalThis, 'atob')
+  tracePort.mockImplementation(async input => completedTrace(input))
+  await render()
+  expect(tracePort).not.toHaveBeenCalled(); expect(decode).not.toHaveBeenCalled()
+  await click('[data-performance-capture] .performance-capture-actions > button:last-child')
+  const original = completedTrace(tracePort.mock.calls[0]![0]), trace = original.trace!
+  expect(decode).not.toHaveBeenCalled()
+  expect(node('.performance-capture-receipt').textContent).not.toContain(trace.data)
+  await click('.performance-capture-result .performance-capture-actions > button:first-child')
+  await click('.performance-capture-result .performance-capture-actions > button:last-child')
+  expect(downloads.map(item => item.name)).toEqual(['renderer-trace.json.gz', 'renderer-capture-receipt.json'])
+  expect(downloads[0]!.blob.type).toBe('application/gzip')
+  expect(Buffer.from(await downloads[0]!.blob.arrayBuffer())).toEqual(Buffer.from(trace.data, 'base64'))
+  expect(JSON.parse(await downloads[1]!.blob.text())).toEqual({ ...original, trace: { ...trace, data: '(export original native gzip)' } })
+  expect(decode).toHaveBeenCalledOnce(); expect(tracePort).toHaveBeenCalledOnce(); expect(profilePort).not.toHaveBeenCalled()
 })

@@ -1,7 +1,10 @@
+import { tmpdir } from 'node:os'
 import { EventEmitter } from 'node:events'
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
+import { gzipSync } from 'node:zlib'
+import { readPerformanceSceneEvidence, parsePerformanceSceneEvidence } from '../../../packages/core/src/performance-scene-evidence'
 import type { WebContents } from 'electron'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxError, durableWriteFile, DurableWriteError } from '@agentmux/core'
@@ -113,10 +116,12 @@ const memory = (): RendererMemoryResult => ({
 const trace = (): RendererTraceResult => ({
   target,
   durationMs: 2000,
-  schema: 'agentmux.renderer-trace.v1',
+  schema: 'agentmux.renderer-trace.v2',
   scope: 'chromium-target-related-timeline',
   status: 'failed',
-  transferMode: 'ReportEvents',
+  transferMode: 'ReturnAsStream',
+  streamFormat: 'json',
+  streamCompression: 'gzip',
   traceTimeUnit: 'microseconds',
   requestedCategories: [...RENDERER_TRACE_CATEGORIES],
   timing: {
@@ -139,9 +144,11 @@ const trace = (): RendererTraceResult => ({
     dataLossOccurred: null,
     detached: 'not-attached'
   },
+  stream: { handleReceived: false, eof: false, closeRequested: false, closeAcknowledged: false },
   bufferUsage: { observations: 0, maxFraction: null, fullObserved: false },
   receivedEvents: 0,
-  receivedTraceBytes: 18,
+  receivedTraceBytes: 0,
+  receivedGzipBytes: 0,
   trace: null,
   traceBytes: null,
   sha256: null,
@@ -156,7 +163,7 @@ afterEach(async () => {
   for (const close of cleanups.splice(0)) await close()
 })
 async function context(write?: typeof durableWriteFile) {
-  const directory = await mkdtemp(join(process.env.TMPDIR ?? '/private/tmp', 'amx-scene-unit-'))
+  const directory = await mkdtemp(join(process.env.TMPDIR ?? tmpdir(), 'amx-scene-unit-'))
   cleanups.push(() => rm(directory, { recursive: true, force: true }))
   const path = join(directory, 'latest.json'),
     owner = new PerformanceSceneOwner(path, write)
@@ -508,4 +515,39 @@ it('does not detach a replacement debugger after the original native owner is lo
   expect(
     f.debuggerClient.sendCommand.mock.calls.filter(([method]) => method === 'HeapProfiler.stopSampling')
   ).toHaveLength(0)
+})
+
+
+it('retains native gzip in the actual saved scene and projects separate raw and compressed byte facts', async () => {
+  const { owner, deps, path } = await context()
+  const raw = '{ "metadata":{"original":"λ"}, "traceEvents":[{"name":"Layout","pid":4}], "future":true }'
+  const gzip = gzipSync(raw), digest = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex')
+  const original: RendererTraceResult = { ...trace(), status: 'completed', sourceVerified: { before: true, after: true },
+    timing: { requestedAt: Date.now(), startedAt: Date.now(), endAcknowledgedAt: Date.now(), completedAt: Date.now(), finishedAt: Date.now(), startMonotonicMs: 1, endMonotonicMs: 2001, completeMonotonicMs: 2002 },
+    lifecycle: { startRequested: true, startAcknowledged: true, endRequested: true, endAcknowledged: true, tracingComplete: true, dataLossOccurred: false, detached: 'confirmed' },
+    stream: { handleReceived: true, eof: true, closeRequested: true, closeAcknowledged: true },
+    receivedEvents: 1, receivedTraceBytes: Buffer.byteLength(raw), receivedGzipBytes: gzip.length,
+    trace: { encoding: 'base64', data: gzip.toString('base64'), bytes: gzip.length, sha256: digest(gzip) }, traceBytes: Buffer.byteLength(raw), sha256: digest(raw), issues: [] }
+  deps.captureTrace = vi.fn(async () => original)
+  const captured = await owner.capture({ target }, deps)
+  expect(captured.scene.status).toBe('completed'); expect(captured.persistence.status).toBe('confirmed')
+  expect(JSON.parse(await readFile(path, 'utf8')).timeline.result).toEqual(original)
+  const inspected = await owner.inspect({ captureId: captured.scene.captureId })
+  expect(inspected.status).toBe('available'); expect(inspected.scene!.timeline.result).toEqual(original)
+  const evidence = await readPerformanceSceneEvidence({ domain: 'performance.scene', hostId: 'local', captureId: captured.scene.captureId },
+    (input, signal) => owner.inspect(input, signal), { signal: new AbortController().signal, maxBytes: 16 * 1024 })
+  expect(evidence.availability).toBe('found')
+  expect(parsePerformanceSceneEvidence(evidence.data, captured.scene.captureId).phases[4]).toMatchObject({ profileBytes: Buffer.byteLength(raw), gzipBytes: gzip.length })
+  expect(JSON.stringify(evidence)).not.toContain(original.trace!.data)
+  expect(deps.captureTrace).toHaveBeenCalledOnce()
+})
+
+it('reports unsupported stored trace versions without changing their bytes or recapturing', async () => {
+  const { owner, deps, path } = await context(), captured = await owner.capture({ target }, deps)
+  const unsupported = structuredClone(captured.scene) as unknown as { timeline: { result: { schema: string } } }
+  unsupported.timeline.result.schema = 'agentmux.renderer-trace.unsupported'
+  const bytes = JSON.stringify(unsupported); await writeFile(path, bytes)
+  const inspected = await owner.inspect({ captureId: captured.scene.captureId })
+  expect(inspected.status).toBe('unavailable'); expect(inspected.issue?.message).toMatch(/unsupported.*(schema|version)|(schema|version).*unsupported/i)
+  expect(await readFile(path, 'utf8')).toBe(bytes); expect(deps.captureTrace).toHaveBeenCalledOnce()
 })
