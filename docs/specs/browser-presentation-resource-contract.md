@@ -1,6 +1,6 @@
 # Browser 展示媒体资源合同
 
-本文说明现有 Browser 呈现接口如何绑定原页面、呈现 lease、媒体 capture 与输入位置。产品约束只由交互 SSOT[《Zone→Tabs→Regions 的实体与展示绑定》](../design/behavior/spaces-and-layout.md#zonetabsregions-的实体与展示绑定)定义；视觉只引用[Browser 呈现约束](../design/presentation/browser-workface.md)。精确接口与运行期校验来源见 [Browser 展示媒体 ABI](browser-presentation-abi.md)，本文不保存另一份类型或任务流程。
+本文说明现有 Browser 呈现接口如何绑定原页面、呈现 lease、媒体 capture 与输入位置。产品约束只由交互 SSOT[《多位置呈现、局部遮挡与输入交接》](../design/behavior/browser-workface.md#多位置呈现局部遮挡与输入交接)定义；视觉只引用[Browser 呈现约束](../design/presentation/browser-workface.md)。精确接口与运行期校验来源见 [Browser 展示媒体 ABI](browser-presentation-abi.md)，本文不保存另一份类型或任务流程。
 
 ## 页面、呈现与媒体分别由谁持有
 
@@ -8,7 +8,7 @@
 | --- | --- |
 | 原 Browser 页面 | [BrowserViewManager](../../apps/desktop/src/main/browser-view-manager.ts) 的原 BrowserEntry／WebContents／view／Profile／navigation／viewport；foreign 展示不改资源 Workspace |
 | 呈现身份 | 原公共 occurrence 的 `presentationId` 与 exact location；BVM 只持实际注册的瞬态 lease，不建立第二持久位置目录 |
-| requester | 真实受信 IPC 的 App WebContents／Session／main frame／完整已加载文档；Renderer payload 不提供这些 Electron identity 或权限 |
+| requester | 真实受信 IPC 的 App WebContents／Session／当前主文档及其不可变的原生 `processId`／`frameToken` 身份快照；Renderer payload 不提供这些 Electron identity 或权限 |
 | 媒体流与 tracks | [BrowserPresentationStage](../../apps/desktop/src/renderer/src/components/BrowserPresentationStage.tsx) 中原媒体 holder；一个 Browser 的 capture 可共享给多个 video，Main 持许可及失效事实 |
 | 输入位置 | 原 Native view 的当前有效 lease；不因多个画面副本生出第二 viewport、导航或输入 owner |
 
@@ -18,9 +18,9 @@
 
 原 `AgentMuxDesktopApi.browser` 经 preload、`registerIpc.handleWithEvent` 到 BVM。display handler 对准确 pending scope 提供 video-only 原页面，关闭 system picker，不改原 Source Profile 权限；每 requester 仅一项未 settled arm，避免没有业务 request ID 的 callback 串源。
 
-`armPresentationCapture` 对尚未显示的原生来源先沿当前可见 lease 初始化缺失的正面积 bounds，将同一 view 放到 App Renderer 下方完成采集启动所需绘制；已有来源尺寸不随被动镜像改变。这一步不取得输入 lease、不聚焦、不将原生页放到工作面上方。`finishPresentationCapturePreparation` 在 ready／failed／stopped／revoked 后结束准备，保留期间发生的真实选择，也不重新挂回已被 Profile 切换或释放移除的旧来源；被动来源隐藏失败时保留在 Renderer 下方，清理异常不截断撤销通知或留下不可重试的 pending capture。原媒体 API 与权限检查保持同一来源。
+`armPresentationCapture` 对尚未显示的原生来源先沿当前可见 lease 初始化缺失的正面积 bounds，将同一 view 暂放在隐藏且不取焦点的 `BaseWindow` 中完成采集启动所需绘制；不创建另一页面，已有来源尺寸不随被动镜像改变。这一步不取得输入 lease、不聚焦、不将原生页放到工作面上方。`finishPresentationCapturePreparation` 在 ready／failed／stopped／revoked 后结束准备并清理临时原生窗口，保留期间发生的真实选择，也不重新挂回已被 Profile 切换或释放移除的旧来源；被动来源隐藏失败时脱离原生宿主，保留原页面及显式选择的恢复路径，清理异常不截断撤销通知或留下不可重试的 pending capture。原媒体 API 与权限检查保持同一来源。
 
-错误主 frame／文档／Session、foreign opaque handle、已释放 source 或没有合法可见正面积 geometry，拒绝该次 capture。已有 capture 不因最初 issuer lease 隐藏或取消而收掉另一个可见 consumer 的流；最后可见 consumer 撤去才收媒体。媒体失败不作为原页面加载、导航或人工输入的前置条件，失败及显式重试规则见[《Browser 工作面》](../design/behavior/browser-workface.md#browser-工作面-1)中的多位置呈现边界引用。
+错误主 frame／文档／Session、foreign opaque handle、已释放 source 或没有合法可见正面积 geometry，拒绝该次 capture。已有 capture 不因最初 issuer lease 隐藏或取消而收掉另一个可见 consumer 的流；最后可见 consumer 撤去才收媒体。媒体失败不作为原页面加载、导航或人工输入的前置条件，失败及显式重试规则只见[多位置呈现、局部遮挡与输入交接](../design/behavior/browser-workface.md#多位置呈现局部遮挡与输入交接)。
 
 ACK 是可信 App holder 的媒体报告：ready／stopped 带实际非空 track IDs，failed 独立，stopped 不重启已撤 scope；已 ready 后核同一集合。迟到流可直接报告真实 stopped，不能先假报 ready。物理 ended 需要实际观察，Main 发 revoke、ACK 无异常或移除 DOM 都不等同于已观测停轨；requester 结束后无法读旧 track 时保持 unknown。
 
