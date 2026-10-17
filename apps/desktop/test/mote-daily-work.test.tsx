@@ -93,7 +93,8 @@ describe('original Mote Goal composition and current-work caller', () => {
     expect([...panel.querySelectorAll('[data-mote-goal]')].map(item => item.getAttribute('data-mote-goal')).sort()).toEqual(['neighbor', 'ours'])
     await moteClick(panel.querySelector('[data-mote-goal="ours"] .mote-current-work__copy')!)
     expect(panel.querySelector('[aria-label="Goal continuous progress"]')).not.toBeNull()
-    expect((panel.querySelector('[aria-label="Goal continuation Agent"]') as HTMLElement).dataset.value).toBe(defaultAgent.id)
+    expect(panel.querySelector('.goals-supervisor-guide')?.textContent).toContain('Choose Supervisor')
+    expect(panel.querySelector('.goals-continuation__start')).toBeNull()
     expect(useAppStore.getState().agentComposerDrafts).toBe(before); expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled()
   })
   it('opens original Goal/results navigation without selecting a foreign Topic or starting an Agent', async () => {

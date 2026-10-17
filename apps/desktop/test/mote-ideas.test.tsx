@@ -87,7 +87,7 @@ describe('original Ideas request and feedback owners', () => {
   it('latches same-Mote Region A to B to A navigation and retains a separate Mote direction across a late read', async () => {
     let finish!: (value: FileReadResult) => void, captured!: FileReadParams
     const read = vi.fn<(params: FileReadParams) => Promise<FileReadResult>>(params => { captured = params; return new Promise(resolve => { finish = resolve }) })
-    vi.spyOn(api.files, 'readPublic').mockImplementation(params => panel()?.querySelector('[aria-label="Idea direction"]') ? read(params) : Promise.resolve(publicRead(params)))
+    vi.spyOn(api.files, 'readPublic').mockImplementation(params => panel()?.querySelector('[aria-label="Mote ideas"] [aria-label="Idea direction"]') ? read(params) : Promise.resolve(publicRead(params)))
     await app.mount(); await ideas(); await type('[aria-label="Idea direction"]', 'Retained original Mote direction'); const before = useAppStore.getState()
     await moteClick(button('Prepare idea request'))
     await act(async () => { useAppStore.getState().activateTab(SCRATCH_WORKSPACE_ID, 'mote-group', neighborTab.id); useAppStore.getState().activateTab(SCRATCH_WORKSPACE_ID, 'mote-group', defaultTab.id) }); await settleMoteApp()
