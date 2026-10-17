@@ -302,10 +302,10 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
           fact.type === 'connection-state' && fact.state === 'restored') void inputMailbox.refresh()
     })
   }, [open, visible, inputMailboxHost, mailboxSessionId, inputMailbox.refresh])
-  // The shared input inventory also owns Agent inputs; this face retains only human and unconfirmed authors.
+  // The shared inventory retains every input; this face excludes known Agent and platform producers.
   const userInputMailbox = useMemo(() => ({ ...inputMailbox,
-    items: inputMailbox.items.filter(item => inputMailboxPresentation(item).speaker.role !== 'agent'),
-    failures: inputMailbox.failures.filter(item => inputMailboxPresentation(item).speaker.role !== 'agent')
+    items: inputMailbox.items.filter(item => { const { role } = inputMailboxPresentation(item).speaker; return role !== 'agent' && role !== 'system' }),
+    failures: inputMailbox.failures.filter(item => { const { role } = inputMailboxPresentation(item).speaker; return role !== 'agent' && role !== 'system' })
   }), [inputMailbox])
   const displayedMessages = useMemo(() => mailboxMessages(mailboxSessionId,timeline,effectiveUserMessages,effectiveControl?.hostId), [mailboxSessionId,timeline,effectiveUserMessages,effectiveControl?.hostId])
   const sent = useMemo(() => displayedMessages.filter(item => item.message.author.kind !== 'agent'), [displayedMessages])

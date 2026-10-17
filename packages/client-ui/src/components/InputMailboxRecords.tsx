@@ -5,9 +5,9 @@ import { MessageDeliveryFailure } from './MessageDeliveryFailure.js'
 import { presentMessageDeliveryFailure } from '../lib/message-delivery-presentation.js'
 import { useClientUiPlatform } from '../platform.js'
 import { inputMailboxItemKey, type useAgentInputMailbox } from '../lib/use-agent-input-mailbox.js'
-import { HUMAN_SPEAKER_ID, UNKNOWN_SPEAKER_ID, speakerOfExternalAuthor, externalSpeakerLabel, type ConversationSpeaker } from '../lib/conversation-speaker.js'
+import { AGENTMUX_SYSTEM_SPEAKER_ID, HUMAN_SPEAKER_ID, UNKNOWN_SPEAKER_ID, speakerOfExternalAuthor, externalSpeakerLabel, type ConversationSpeaker } from '../lib/conversation-speaker.js'
 
-export function inputMailboxPresentation(item: AgentInputMailboxItem): { text: string | null; contentBoundary: ConversationContentBoundary; speaker: ConversationSpeaker; source: string; state: string } {
+export function inputMailboxPresentation(item: AgentInputMailboxItem): { text: string | null; contentBoundary: ConversationContentBoundary; speaker: ConversationSpeaker; source: string; state: string; a2aNotificationId?: string } {
   const unknown = { role: 'unknown' as const, id: UNKNOWN_SPEAKER_ID }
   if (item.kind === 'controlled') {
     const original = item.intent.source, sender = item.message?.sender
@@ -18,14 +18,23 @@ export function inputMailboxPresentation(item: AgentInputMailboxItem): { text: s
       source: sender?.kind === 'external' ? sender.actor.application.domain : original.kind === 'prompt' ? original.sourceChannel ?? '原提交' : item.sourceChannel ?? '原消息',
       state: item.receipt ? presentMessageDeliveryFailure({ error: null, inputReceipt: item.receipt }).title : '原输入观察未确认' }
   }
-  const message = item.record?.admission?.intent?.message ?? item.record?.launch?.message
-  const speaker = message?.authorExternal ? speakerOfExternalAuthor(message.authorExternal)
+  const { key, record } = item, admission = record?.admission, inputKey = admission?.inputKey
+  const message = admission?.intent?.message ?? record?.launch?.message
+  // Only the original typed producer identifies a platform notice; authored wire remains an ordinary input.
+  const isNotification = key.kind === 'prompt' && inputKey?.kind === 'prompt' &&
+    inputKey.agentSessionId === key.agentSessionId && inputKey.expectedRun.runId === key.expectedRun.runId && inputKey.submissionId === key.submissionId &&
+    record?.agentSessionId === key.agentSessionId && record.run.runId === key.expectedRun.runId && admission?.intent?.run.runId === key.expectedRun.runId &&
+    message?.a2aNotificationId === key.submissionId && message.systemContext === admission.intent.prompt &&
+    message.userContent === undefined && message.authorHuman === undefined && message.authorAgentSessionId === undefined && message.authorExternal === undefined
+  const speaker = isNotification ? { role: 'system' as const, id: AGENTMUX_SYSTEM_SPEAKER_ID }
+    : message?.authorExternal ? speakerOfExternalAuthor(message.authorExternal)
     : message?.authorAgentSessionId ? { role: 'agent' as const, id: message.authorAgentSessionId }
     : message?.authorHuman === true ? { role: 'human' as const, id: HUMAN_SPEAKER_ID } : unknown
   // Core performPromptSubmission records the original prompt body here, but a message-key producer records its rendered wire.
   return { text: message?.userContent ?? item.record?.admission?.intent?.prompt ?? item.record?.launch?.prompt ?? null,
     contentBoundary: item.key.kind === 'prompt' && message?.userContent !== undefined ? 'body' : 'wire',
-    speaker, source: message?.sourceChannel ?? '原提交', state: item.record ? '原提交已登记' : '原提交观察未确认' }
+    speaker, source: message?.sourceChannel ?? '原提交', state: item.record ? '原提交已登记' : '原提交观察未确认',
+    ...(isNotification ? { a2aNotificationId: message.a2aNotificationId } : {}) }
 }
 
 export type InputMailboxDisplayRow = { key: string; time: number; node: ReactNode }
@@ -50,12 +59,12 @@ export function InputMailboxRecords({ mailbox, hostId, reading, onCopy, renderLo
       const key = inputMailboxItemKey(hostId,item), view = inputMailboxPresentation(item), local = selected === key ? renderLocal?.(item) : null
       const failed = failures.get(key)
       return { key, time: item.recordedAt, node: <li key={key} data-input-mailbox-key={key} data-input-mailbox-kind={item.kind}>
-        <div className="input-history__meta"><span data-mailbox-author>{view.speaker.role === 'external' ? externalSpeakerLabel(view.speaker) : view.speaker.role === 'agent' ? view.speaker.id : view.speaker.role === 'human' ? 'Human' : 'Author unknown'}</span>{view.speaker.role === 'external' && view.source === view.speaker.external?.actor.application.domain ? null : <span>{view.source}</span>}<span>{failed && failed !== item ? '此前已读 · ' : ''}{view.state}</span><time>{new Date(item.recordedAt).toLocaleString()}</time></div>
+        <div className="input-history__meta"><span data-mailbox-author>{view.speaker.role === 'external' ? externalSpeakerLabel(view.speaker) : view.speaker.role === 'agent' ? view.speaker.id : view.speaker.role === 'system' ? 'AgentMux' : view.speaker.role === 'human' ? 'Human' : 'Author unknown'}</span>{view.speaker.role === 'external' && view.source === view.speaker.external?.actor.application.domain ? null : <span>{view.source}</span>}<span>{failed && failed !== item ? '此前已读 · ' : ''}{view.state}</span><time>{new Date(item.recordedAt).toLocaleString()}</time></div>
         <p className="input-history__excerpt">{view.text?.slice(0,320) ?? '原正文未随本条观察返回'}</p>
         <details open={selected === key} onToggle={event => { if (event.currentTarget.open) setSelected(key); else if (selected === key) setSelected(null) }}><summary>查看原输入</summary>
           {selected === key ? <>
           {view.text !== null ? <ConversationMessage {...reading} compact recordedIdentity detailsOnlyMetadata
-            messageId={key} speaker={view.speaker} content={view.text} contentBoundary={view.contentBoundary} createdAt={item.recordedAt} {...(onCopy ? { onCopy } : {})} /> : null}
+            messageId={key} speaker={view.speaker} content={view.text} contentBoundary={view.contentBoundary} a2aNotificationId={view.a2aNotificationId} createdAt={item.recordedAt} {...(onCopy ? { onCopy } : {})} /> : null}
           {item.kind === 'controlled' ? <MessageDeliveryFailure compact error={item.failure ?? null}
             {...(item.receipt ? { inputReceipt: item.receipt } : {})} copyText={onCopy ?? (text => platform.copyText(text, () => {}))} /> : null}
           {item.kind === 'submission' && item.failure ? <p role="status">{item.failure.message}</p> : null}
