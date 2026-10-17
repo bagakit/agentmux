@@ -9,7 +9,8 @@ import type {
   ConnectionEnrollmentActionKind,
   ConnectionEnrollmentAdvanceInput,
   ConnectionEnrollmentBeginInput,
-  ConnectionEnrollmentView
+  ConnectionEnrollmentView,
+  ConnectionSetupView
 } from '@agentmux/core/connections'
 import { createDesktopConnections } from '../src/main/connector-host.js'
 import type { CredentialEncryption } from '../src/main/connector-secrets.js'
@@ -43,7 +44,7 @@ let services: Awaited<ReturnType<typeof createDesktopConnections>>
 let server: AgentMuxControlServer
 let client: Awaited<ReturnType<typeof connectAgentMuxRpc>>
 let sdk: ReturnType<typeof defaultFeishuSdkTransport>
-let calls: Array<{ url: string; path: string; preclaimed: boolean; cookie: string; referer: string | null }>
+let calls: Array<{ url: string; path: string; preclaimed: boolean; cookie: string; referer: string | null; origin: string | null; csrf: string | null; method?: string; attemptId: string | null; stepKind: string | null }>
 let pollReply: (() => Response) | undefined
 let authorize: boolean
 let clock: number
@@ -106,13 +107,19 @@ beforeEach(async () => {
             )
             .get(originalAttempt)
         : null
-      sentCookies.push({ path: target.pathname, cookie: new Headers(options?.headers).get('cookie') ?? '' })
+      const headers = new Headers(options?.headers)
+      sentCookies.push({ path: target.pathname, cookie: headers.get('cookie') ?? '' })
       calls.push({
         url: target.href,
         path: target.pathname,
         preclaimed: claim?.state === 'claimed' && claim.operation_id === input.operationId,
-        cookie: new Headers(options?.headers).get('cookie') ?? '',
-        referer: new Headers(options?.headers).get('referer')
+        cookie: headers.get('cookie') ?? '',
+        referer: headers.get('referer'),
+        origin: headers.get('origin'),
+        csrf: headers.get('x-csrf-token'),
+        method: options?.method,
+        attemptId: originalAttempt,
+        stepKind: claim ? String(claim.kind) : null
       })
       const consoleResponse = consoleResponses.get(target.href)
       if (consoleResponse) return consoleResponse()
@@ -590,6 +597,95 @@ it.each([
   expect(calls).toHaveLength(before + 1)
   const wire = JSON.stringify({ unknown, observed })
   for (const value of ['unqualified.invalid', 'private-account', 'private-redirect-token', 'private-fragment', 'private-redirect-body']) expect(wire).not.toContain(value)
+})
+
+it('creates and configures the original bot from its final alternate Console through public SDK and compiled CLI', async () => {
+  const origin = 'https://open.larkoffice.com', finalDocument = origin + '/console/profile?ticket=private-alternate-login'
+  const appId = feishuConfig.application.appId, readPath = '/developers/v1/robot/' + appId
+  let enabled = false
+  consoleResponses.set('https://open.feishu.cn/app', () => new Response('', { status: 302, headers: { location: finalDocument } }))
+  consoleResponses.set(finalDocument, () => new Response(consoleDocument, { headers: { 'content-type': 'text/html', 'set-cookie': 'alternate-session=private-alternate-cookie; Path=/; Secure; HttpOnly' } }))
+  consoleResponses.set(origin + '/developers/v1/app/upload/image', () => Response.json({ code: 0, data: { url: 'https://images.example.test/alternate.png' } }, { headers: { 'set-cookie': 'alternate-continuation=private-continued-cookie; Path=/; Secure; HttpOnly' } }))
+  consoleResponses.set(origin + '/developers/v1/manifest/upsert_by_template', () => Response.json({ code: 0, data: { ClientID: appId } }))
+  consoleResponses.set(origin + '/developers/v1/secret/' + appId, () => Response.json({ code: 0, data: { secret: applicationSecret } }))
+  consoleResponses.set(origin + readPath, () => Response.json({ code: 0, data: { enable: enabled } }))
+  consoleResponses.set(origin + '/developers/v1/robot/switch/' + appId, () => { enabled = true; return Response.json({ code: 0, data: {} }) })
+  const pending = await client.call('connection.enrollment.begin', input), signedIn = await account(pending, true)
+  expect(signedIn.operation!.authentication!.attemptId).toBe(pending.operation!.authentication!.attemptId)
+  expect(signedIn.account).toMatchObject({ userId: 'original-user', tenantId: 'original-tenant' })
+  expect(signedIn.actions.map(action => action.kind)).not.toContain('create')
+  const beforeConfirm = calls.length
+  const confirmed = await client.call('connection.enrollment.advance', decision(signedIn, 'confirm-account'))
+  expect(calls).toHaveLength(beforeConfirm)
+  const create = decision(confirmed, 'create'), saved = await cli(['advance', '--input', '-'], create)
+  expect(saved.operation).toMatchObject({ operationId: input.operationId, connectionId: input.connectionId, application: feishuConfig.application, authorization: 'authorized', credential: 'stored', configuration: 'configured', creation: { upload: 'confirmed', create: 'confirmed' } })
+  const creation = calls.slice(beforeConfirm)
+  expect(creation.map(call => call.path)).toEqual(['/developers/v1/app/upload/image', '/developers/v1/manifest/upsert_by_template', '/developers/v1/secret/' + appId])
+  expect(creation.map(call => call.stepKind)).toEqual(['upload', 'create', 'credential'])
+  expect(new Set(creation.map(call => call.attemptId)).size).toBe(3)
+  expect(creation.every(call => call.preclaimed && call.referer === finalDocument)).toBe(true)
+  const record = (await client.call('connection.inspect', { connectionId: input.connectionId })).connection!
+  expect(record.config.application).toEqual(feishuConfig.application)
+  const credential = services.database!.prepare('SELECT ciphertext FROM connection_credential WHERE credential_ref=?').get(record.config.credentialRef)
+  expect(credential?.ciphertext).toBeInstanceOf(Uint8Array)
+  expect(Buffer.from(credential!.ciphertext as Uint8Array).includes(Buffer.from(applicationSecret))).toBe(false)
+  const beforeAdoption = calls.length
+  expect((await client.call('connection.enrollment.advance', create)).operation).toEqual(saved.operation)
+  expect((await cli(['inspect', '--operation-id', input.operationId])).operation).toEqual(saved.operation)
+  expect(calls).toHaveLength(beforeAdoption)
+  const setupInput = { operationId: 'alternate-origin-management', connectionId: input.connectionId, expectedConnectionRevision: record.revision, goal: { kind: 'agent-conversation', interaction: 'messages' }, source: { kind: 'enrollment', operationId: input.operationId, expectedRevision: saved.operation!.revision } } as const
+  const setupCli = async (args: string[], body?: unknown): Promise<ConnectionSetupView> => {
+    const result = await runCompiledObjectCli(['--endpoint', 'unix:' + server.path, 'connection', 'setup', ...args], objectCliEnvironment(original.root), body === undefined ? '' : JSON.stringify(body))
+    expect(result.code, result.stdout + result.stderr).toBe(0)
+    return JSON.parse(result.stdout).result
+  }
+  const adopted = await client.call('connection.setup.begin', setupInput)
+  expect(adopted.operation).toMatchObject({ ...setupInput, application: feishuConfig.application, request: { kind: 'enrollment-handoff', state: 'confirmed' }, secureStorage: 'stored' })
+  expect(adopted.continuation).toMatchObject({ stage: 'account', account: signedIn.account })
+  expect(adopted.challenge).toBeNull()
+  expect((await setupCli(['begin', '--input', '-'], setupInput)).operation).toEqual(adopted.operation)
+  const confirmAccount = adopted.continuation!.actions.find(action => action.kind === 'confirm-account')!
+  expect(confirmAccount).toBeDefined()
+  const setupConfirmed = await setupCli(['advance', '--input', '-'], { operationId: setupInput.operationId, expectedRevision: confirmAccount.expectedRevision, decision: { actionId: confirmAccount.actionId, value: 'confirm' } })
+  expect(setupConfirmed.continuation!.stage).toBe('confirmed')
+  expect(calls).toHaveLength(beforeAdoption)
+  const inspection = await client.call('connection.setup.inspect', { operationId: setupInput.operationId, applicationInspection: {} })
+  const read = inspection.applicationInspection!.actions.find(action => action.kind === 'read-bot-settings')!
+  expect(read).toBeDefined()
+  const observed = await setupCli(['advance', '--input', '-'], { operationId: setupInput.operationId, expectedRevision: read.expectedRevision, decision: { actionId: read.actionId, value: 'continue' } })
+  expect(calls).toHaveLength(beforeAdoption + 1)
+  expect(observed.applicationInspection!.selected).toMatchObject({ subject: 'bot-settings', request: 'confirmed', secureStorage: 'stored' })
+  const offered = await client.call('connection.setup.inspect', { operationId: setupInput.operationId, applicationConfiguration: { effect: 'enable-messaging' } })
+  expect(offered.applicationConfiguration!.capability).toBe('disabled')
+  const enable = offered.applicationConfiguration!.actions.find(action => action.kind === 'enable-messaging')!
+  expect(enable).toBeDefined()
+  const enableInput = { operationId: setupInput.operationId, expectedRevision: enable.expectedRevision, decision: { actionId: enable.actionId, value: 'confirm' } } as const
+  const accepted = await client.call('connection.setup.advance', enableInput)
+  expect(calls).toHaveLength(beforeAdoption + 2)
+  expect(accepted.applicationConfiguration!.selected).toMatchObject({ effect: 'enable-messaging', request: 'confirmed', secureStorage: 'stored' })
+  expect(accepted.applicationConfiguration!.capability).not.toBe('enabled')
+  expect((await setupCli(['advance', '--input', '-'], enableInput)).receipt).toEqual(accepted.receipt)
+  expect(calls).toHaveLength(beforeAdoption + 2)
+  const latest = await client.call('connection.setup.inspect', { operationId: setupInput.operationId, applicationInspection: {} })
+  const readBack = latest.applicationInspection!.actions.find(action => action.kind === 'read-bot-settings')!
+  const readAgain = await client.call('connection.setup.advance', { operationId: setupInput.operationId, expectedRevision: readBack.expectedRevision, decision: { actionId: readBack.actionId, value: 'continue' } })
+  expect(readAgain.applicationInspection!.selected).toMatchObject({ request: 'confirmed', secureStorage: 'stored' })
+  expect(calls).toHaveLength(beforeAdoption + 3)
+  const configured = await setupCli(['inspect', '--operation-id', setupInput.operationId, '--application-configuration', 'enable-messaging'])
+  expect(configured.applicationConfiguration!.capability).toBe('enabled')
+  const business = calls.slice(beforeConfirm)
+  expect(business.map(call => call.path)).toEqual([...creation.map(call => call.path), readPath, '/developers/v1/robot/switch/' + appId, readPath])
+  expect(business.every(call => call.method === 'POST' && new URL(call.url).origin === origin && call.origin === origin && call.csrf === 'original-private-csrf')).toBe(true)
+  expect(business.every(call => call.cookie.includes('alternate-session=private-alternate-cookie') && !call.cookie.includes('session=original-private-cookie'))).toBe(true)
+  expect(business.slice(1).every(call => call.cookie.includes('alternate-continuation=private-continued-cookie'))).toBe(true)
+  expect(calls.slice(beforeAdoption).every(call => call.referer === origin + '/app/' + appId)).toBe(true)
+  expect((await client.call('connection.enrollment.inspect', { operationId: input.operationId })).operation).toEqual(saved.operation)
+  expect(calls).toHaveLength(beforeAdoption + 3)
+  const wire = JSON.stringify({ saved, record, adopted, accepted, configured })
+  for (const value of [applicationSecret, 'private-alternate-login', 'private-alternate-cookie', 'private-continued-cookie', 'original-private-csrf']) expect(wire).not.toContain(value)
+  services.database!.exec('PRAGMA wal_checkpoint(FULL)')
+  const bytes = await readFile(join(original.root, 'enrollment-host', 'connections.sqlite'))
+  for (const value of [applicationSecret, 'private-alternate-cookie', 'private-continued-cookie', 'original-private-csrf']) expect(bytes.includes(Buffer.from(value))).toBe(false)
 })
 
 it('continues native zero waiting through Host, SDK and compiled CLI to the original account', async () => {
