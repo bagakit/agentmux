@@ -59,7 +59,7 @@ it('promotes direct native buttons and views the exact second occurrence instead
   expect(current.layouts.project!.activeGroupId).toBe(reference.groupId)
   expect(current.agentFocus.execution.reference).toEqual(reference)
   expect(current.sessions).toBe(before.sessions); expect(current.agentComposerDrafts).toBe(before.agentComposerDrafts)
-  await act(async () => button('Focus context actions').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, pointerType: 'mouse' })))
+  await act(async () => button('Tab actions').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, pointerType: 'mouse' })))
   expect([...document.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).not.toContain('Continue in Space')
 })
 it('creates one exact complete-Tab discussion through the original primary Mote owner and retains both old drafts', async () => {

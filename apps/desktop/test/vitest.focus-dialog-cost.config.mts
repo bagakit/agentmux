@@ -5,7 +5,7 @@ import { relative, resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
 import source from './vitest.mote-context.config.mts'
 
-const owners = ['apps/desktop/src/renderer/src/components/FocusStopAgent.tsx', 'apps/desktop/src/renderer/src/components/SessionRestart.tsx']
+const owners = ['apps/desktop/src/renderer/src/components/SessionStop.tsx', 'apps/desktop/src/renderer/src/components/SessionRestart.tsx']
 const hash = (value: string) => createHash('sha256').update(value).digest('hex')
 const snapshots: Record<string, string> = process.env.AGENTMUX_FOCUS_DIALOG_SOURCES ? JSON.parse(readFileSync(process.env.AGENTMUX_FOCUS_DIALOG_SOURCES, 'utf8')) : {}
 export default defineConfig({
@@ -14,7 +14,7 @@ export default defineConfig({
     const path = relative(source.root!, id.split('?')[0]!)
     let code = snapshots[path] ?? original
     const effective = code, mutant = process.env.AGENTMUX_FOCUS_DIALOG_MUTANT
-    if (owners.includes(path) && mutant === (path.endsWith('/FocusStopAgent.tsx') ? 'stop-eager' : 'restart-eager')) {
+    if (owners.includes(path) && mutant === (path.endsWith('/SessionStop.tsx') ? 'stop-eager' : 'restart-eager')) {
       const anchor = 'dialog: request !== null ? <ConfirmationDialog'
       assert.equal(code.split(anchor).length - 1, 1, 'Unique loaded request presentation gate')
       assert.equal(code.split(' /> : null').length - 1, 1, 'Unique loaded request dialog end')

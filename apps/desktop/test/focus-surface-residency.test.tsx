@@ -173,12 +173,10 @@ async function expandNativeHit() {
   await act(async () => { hit.open = true; hit.dispatchEvent(new Event('toggle')) })
   return hit
 }
-async function openStop(entry: 'card' | 'toolbar') {
-  const origin = container.querySelector<HTMLElement>(entry === 'card' ? `button[data-session-id="${source.id}"]` : '[aria-label="Focus context actions"]')!
+async function openStop() {
+  const origin = container.querySelector<HTMLElement>(`button[data-session-id="${source.id}"]`)!
   expect(origin).not.toBeNull()
-  await act(async () => { origin.focus(); origin.dispatchEvent(entry === 'toolbar'
-    ? new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })
-    : new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 40, clientY: 40 })) })
+  await act(async () => { origin.focus(); origin.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 40, clientY: 40 })) })
   await settle()
   const stop = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Stop Agent')!
   expect(stop).toBeDefined(); await act(async () => stop.click()); await settle()
@@ -209,9 +207,9 @@ describe('actual App Focus residency', () => {
     await control({ kind: 'surface', surface: 'focus' })
     expect(document.querySelector('.recent-focus__observation')).toBeNull(); expect(document.activeElement).toBe(outside)
   })
-  it.each(['card', 'toolbar'] as const)('drops the unconfirmed %s Stop dialog without issuing a command or replaying focus', async entry => {
+  it('drops the unconfirmed Agent card Stop dialog without issuing a command or replaying focus', async () => {
     await focus(); const stop = vi.spyOn(api.sessions, 'stop').mockResolvedValue(undefined)
-    await openStop(entry)
+    await openStop()
     await control({ kind: 'goal', goalId: 'exact' })
     expect(document.querySelector('.confirmation-dialog')).toBeNull()
     outside.focus(); await control({ kind: 'surface', surface: 'focus' })
@@ -221,7 +219,7 @@ describe('actual App Focus residency', () => {
   it('keeps an already-issued exact Stop running across Goal viewing without reopening its old confirmation', async () => {
     await focus(); let finish!: () => void
     const stop = vi.spyOn(api.sessions, 'stop').mockImplementation(() => new Promise(resolve => { finish = resolve }))
-    await openStop('card')
+    await openStop()
     await act(async () => document.querySelector<HTMLButtonElement>('[data-confirm-label="Stop Agent"]')!.click())
     expect(stop).toHaveBeenCalledExactlyOnceWith(source.control)
     const before = useAppStore.getState()

@@ -126,7 +126,7 @@ it('uses the actual Focus menu to move only the original exact Region and return
     const control = { stop: vi.spyOn(api.sessions, 'stop'), resume: vi.spyOn(api.sessions, 'resume'),
       launch: vi.spyOn(api.sessions, 'launchAgent'), write: vi.spyOn(api.sessions, 'write'), interrupt: vi.spyOn(api.sessions, 'interrupt') }
     async function selectLevel(label: string) {
-      const button = fixture.container.querySelector<HTMLButtonElement>('button[aria-label="Focus context actions"]')!
+      const button = fixture.container.querySelector<HTMLButtonElement>('button[aria-label="Tab actions"]')!
       expect(button).not.toBeNull()
       await act(async () => button.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
       const action = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === label)!
@@ -180,7 +180,7 @@ it('the borrowed Region uses its original dirty-file close confirmation and exac
     const original=fixture.container.querySelector('[data-fixture-file="exact-r2"]')!
     expect(original).not.toBeNull()
     const close=vi.spyOn(before,'closeRegion')
-    const menu=fixture.container.querySelector<HTMLButtonElement>('button[aria-label="Focus context actions"]')!
+    const menu=fixture.container.querySelector<HTMLButtonElement>('button[aria-label="Tab actions"]')!
     await act(async()=>menu.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})))
     const action=[...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item=>item.textContent==='Show only this Region')!
     expect(action).not.toBeUndefined();await act(async()=>action.click())

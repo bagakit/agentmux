@@ -22,7 +22,7 @@ const mutations = {
   embeddedImage: ['packages/client-ui/src/components/AgentMarkdown.tsx', '<ConversationImage active={context.visible}', '<ConversationImage active={true}'],
   legend: ['apps/desktop/src/renderer/src/components/RecentFocusTimeline.tsx', '<FocusTimelineLegend active={documentVisible}', '<FocusTimelineLegend active={true}'],
   heightDrag: ['apps/desktop/src/renderer/src/components/RecentFocusTimeline.tsx', 'return () => { cancel(); window.removeEventListener', 'return () => { window.removeEventListener'],
-  stopIntent: ['apps/desktop/src/renderer/src/components/FocusStopAgent.tsx', 'if (!active) setRequest(null)', 'if (false) setRequest(null)'],
+  stopIntent: ['apps/desktop/src/renderer/src/components/SessionStop.tsx', 'if (!active) setRequest(null)', 'if (false) setRequest(null)'],
   observation: ['apps/desktop/src/renderer/src/components/RecentFocusTimeline.tsx', 'if (!documentVisible) { setObservation(null); setWorkObservation(null);', 'if (!documentVisible) {'],
   selection: ['apps/desktop/src/renderer/src/store.ts', '  setSelectedDemand(id) {\n    set({ selectedDemandId: id })', `  setSelectedDemand(id) {
     const state = get(), demand = id ? state.demands[id] : undefined

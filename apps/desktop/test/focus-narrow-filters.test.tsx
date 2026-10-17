@@ -101,7 +101,7 @@ it('keyboard menu and Escape return to this same trigger while a later deliberat
     expect(f.trigger()).not.toBeNull();f.trigger().focus();await f.open();expect(f.menu().contains(document.activeElement)).toBe(true)
     await f.escape();await vi.waitFor(()=>expect(document.activeElement).toBe(f.trigger()))
     await f.open();await act(async()=>{f.menu().dispatchEvent(new KeyboardEvent('keydown',{bubbles:true,key:'Escape'}));f.search().focus()});await act(async()=>{});expect(document.activeElement).toBe(f.search())
-    expect(f.container.querySelector('[aria-label="Focus context actions"]')).not.toBeNull();expect(f.container.querySelector('[aria-label="Close Focus workspace"]')).not.toBeNull()
+    expect(f.container.querySelector('[aria-label="Tab actions"]')).not.toBeNull();expect(f.container.querySelector('[aria-label="Close Focus workspace"]')).not.toBeNull()
   } finally {await f.close()}
 })
 it('filtering and width changes preserve original work, query DOM, Range, draft, exact Run and layout', async () => {
