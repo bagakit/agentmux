@@ -1,6 +1,6 @@
 import { useState, type CSSProperties } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import type { AppUsage, MetricsObservation, RendererPerformanceSnapshot } from '@agentmux/core/control'
+import type { AppUsage, MetricsObservation, RendererPerformanceSnapshot, RendererTimingKind } from '@agentmux/core/control'
 
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 
@@ -30,8 +30,9 @@ const timingLabels = {
   'terminal-write': ['Terminal writes', 'Parser callback wait'],
   'long-task': ['Long tasks', 'Main-thread duration'],
   'input-delay': ['Input queue', 'Event Timing · ≥16 ms events'],
-  'terminal-interaction': ['Terminal input', 'Dispatch / request wait']
-} as const
+  'terminal-interaction': ['Terminal input', 'Dispatch / request wait'],
+  'terminal-cleanup': ['Terminal cleanup', 'Synchronous dispose calls']
+} as const satisfies Record<RendererTimingKind, readonly [string, string]>
 function WorkAndWait({ performance: p, available }: { performance: RendererPerformanceSnapshot; available: boolean }) {
   const epochs = p.timingEpochs
   const [period, setPeriod] = useState<'current' | 'previous'>('current')
@@ -53,16 +54,18 @@ function WorkAndWait({ performance: p, available }: { performance: RendererPerfo
         const state = kind === 'long-task' ? p.longTasks.state : kind === 'input-delay' ? p.inputDelay.state : null
         const supported = state === null || state === 'observing'
         const peak = p.slowEvents.find(event => event.kind === kind && event.retainedAs.includes(selected === 'current' ? 'current-peak' : 'previous-peak'))
+        const owner = peak?.terminal ?? peak?.cleanup
         return <section key={kind} className="performance-work-cell" data-timing-kind={kind} style={heat(timing.count && supported ? timing.maxMs : null, 50, available, '--amber-text')}>
           <strong>{label}</strong><small>{description}</small>
           <span>{timing.count ? `${Math.round(timing.totalMs)} ms` : 'No samples'}<small>{timing.count} samples · max {timing.maxMs.toFixed(1)} ms</small></span>
           <small className="performance-peak" data-performance-peak={kind}>
             {peak ? <>
               <span>Peak #{peak.id} · {peak.durationMs.toFixed(1)} ms · {peak.detail}</span>
-              {peak.terminal ? <>
-                <span>{peak.terminal.cause} · {peak.terminal.payload.length} {peak.terminal.payload.unit}</span>
-                <span>Host {peak.terminal.hostId} · Session {peak.terminal.sessionId}</span>
-                <span>Run {peak.terminal.runId} · Region {peak.terminal.regionId ?? 'unknown'} · instance {peak.terminal.instanceId}</span>
+              {owner ? <>
+                {peak.terminal ? <span>{peak.terminal.cause} · {peak.terminal.payload.length} {peak.terminal.payload.unit}</span> : null}
+                {peak.cleanup ? <span>{peak.cleanup.outcome === 'returned' ? 'Returned synchronously' : 'Threw'} · not a resource release ACK</span> : null}
+                <span>Host {owner.hostId} · Session {owner.sessionId}</span>
+                <span>Run {owner.runId} · Region {owner.regionId ?? 'unknown'} · instance {owner.instanceId}</span>
               </> : <span>Renderer-wide · terminal owner unknown</span>}
             </> : 'No retained slow event (≥50 ms)'}
           </small>

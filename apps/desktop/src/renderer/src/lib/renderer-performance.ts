@@ -1,5 +1,5 @@
-import { createInputPerformanceRecorder, readInputObservation } from '@agentmux/core/control'
-import type { RendererConsumerCost, RendererOverlayObservation, RendererPerformanceSnapshot, RendererSlowEvent, RendererTerminalCost, RendererTerminalWriteContext, RendererWorkTiming } from '@agentmux/core/control'
+import { createInputPerformanceRecorder, readInputObservation, RENDERER_TIMING_KINDS } from '@agentmux/core/control'
+import type { RendererConsumerCost, RendererOverlayObservation, RendererPerformanceSnapshot, RendererSlowEvent, RendererTerminalCleanupContext, RendererTerminalCost, RendererTerminalWriteContext, RendererWorkTiming } from '@agentmux/core/control'
 import { tabSwitchObservation } from './tab-switch-observation'
 
 const timing = (): RendererWorkTiming => ({ count: 0, totalMs: 0, maxMs: 0 })
@@ -8,12 +8,12 @@ function add(target: RendererWorkTiming, duration: number) {
   const ms = Math.max(0, duration)
   target.count++; target.totalMs += ms; target.maxMs = Math.max(target.maxMs, ms)
 }
-const timingKinds = ['session-event', 'terminal-write', 'long-task', 'input-delay', 'terminal-interaction'] as const
+const timingKinds = RENDERER_TIMING_KINDS
 type TimingKind = typeof timingKinds[number]
-const kindCounts = (): Record<TimingKind, number> => ({ 'session-event': 0, 'terminal-write': 0, 'long-task': 0, 'input-delay': 0, 'terminal-interaction': 0 })
+const kindCounts = (): Record<TimingKind, number> => Object.fromEntries(timingKinds.map(kind => [kind, 0])) as Record<TimingKind, number>
 const epoch = (startMonoMs: number): RendererPerformanceSnapshot['timingEpochs']['current'] => ({
   startMonoMs, endMonoMs: startMonoMs + 10_000,
-  timings: { 'session-event': timing(), 'terminal-write': timing(), 'long-task': timing(), 'input-delay': timing(), 'terminal-interaction': timing() }
+  timings: Object.fromEntries(timingKinds.map(kind => [kind, timing()])) as Record<TimingKind, RendererWorkTiming>
 })
 const copyEpoch = (value: ReturnType<typeof epoch>): ReturnType<typeof epoch> => ({
   ...value, timings: Object.fromEntries(timingKinds.map(kind => [kind, { ...value.timings[kind] }])) as ReturnType<typeof epoch>['timings']
@@ -27,11 +27,9 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
   let currentEpoch = epoch(Math.floor(recordingSinceMonoMs / 10_000) * 10_000)
   let previousEpoch: ReturnType<typeof epoch> | null = null
   const late = kindCounts(), unknown = kindCounts(), slowEventCounts = kindCounts()
-  const peaks = (): Record<TimingKind, RendererSlowEvent | null> => ({ 'session-event': null, 'terminal-write': null, 'long-task': null, 'input-delay': null, 'terminal-interaction': null })
+  const peaks = (): Record<TimingKind, RendererSlowEvent | null> => Object.fromEntries(timingKinds.map(kind => [kind, null])) as Record<TimingKind, RendererSlowEvent | null>
   let currentPeaks = peaks(), previousPeaks = peaks()
-  const slowByKind: Record<TimingKind, RendererPerformanceSnapshot['slowEvents']> = {
-    'session-event': [], 'terminal-write': [], 'long-task': [], 'input-delay': [], 'terminal-interaction': []
-  }
+  const slowByKind = Object.fromEntries(timingKinds.map(kind => [kind, [] as RendererPerformanceSnapshot['slowEvents']])) as Record<TimingKind, RendererPerformanceSnapshot['slowEvents']>
   let eventSerial = 0, terminalSerial = 0
   const consumers = { composer: { visible: consumer(), hidden: consumer() }, sessionPane: { visible: consumer(), hidden: consumer() } }
   const overlay: RendererPerformanceSnapshot['overlay'] = {
@@ -57,7 +55,7 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
     previousEpoch = startMonoMs === currentEpoch.endMonoMs ? currentEpoch : epoch(startMonoMs - 10_000)
     currentEpoch = epoch(startMonoMs)
   }
-  function record(kind: TimingKind, detail: string, durationMs: number, occurrence: number | null, deliveredAtMonoMs: number, terminal: RendererSlowEvent['terminal'] = null): void {
+  function record(kind: TimingKind, detail: string, durationMs: number, occurrence: number | null, deliveredAtMonoMs: number, terminal: RendererSlowEvent['terminal'] = null, cleanup: RendererSlowEvent['cleanup'] = null): void {
     rotate(deliveredAtMonoMs)
     const occurredAtMonoMs = occurrence !== null && Number.isFinite(occurrence) && occurrence >= recordingSinceMonoMs && occurrence <= deliveredAtMonoMs ? occurrence : null
     if (occurredAtMonoMs === null) unknown[kind]++
@@ -66,7 +64,7 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
     else late[kind]++
     if (durationMs < 50) return
     const records = slowByKind[kind]
-    const event: RendererSlowEvent = { id: ++eventSerial, kind, detail, observedAt: wall(), durationMs, occurredAtMonoMs, deliveredAtMonoMs, retainedAs: [], terminal }
+    const event: RendererSlowEvent = { id: ++eventSerial, kind, detail, observedAt: wall(), durationMs, occurredAtMonoMs, deliveredAtMonoMs, retainedAs: [], terminal, cleanup }
     slowEventCounts[kind]++
     if (records.length === 4) records.shift()
     records.push(event)
@@ -130,6 +128,10 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
       else terminalWrites.bytes += data.byteLength
       record('terminal-write', visible ? 'visible' : 'hidden', elapsed, start, delivered, { ...context,
         payload: { unit: typeof data === 'string' ? 'string-code-units' : 'bytes', length: typeof data === 'string' ? data.length : data.byteLength } })
+    },
+    terminalCleanup(start: number, context: RendererTerminalCleanupContext) {
+      const delivered = now()
+      record('terminal-cleanup', context.operation, Math.max(0, delivered - start), start, delivered, null, { ...context })
     },
     registerTerminal(read: () => RendererTerminalCost) {
       terminals.add(read)
@@ -210,7 +212,8 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
         for (const peak of [currentPeaks[kind], previousPeaks[kind]]) if (peak && !retained.includes(peak)) retained.push(peak)
         return retained.map(event => ({ ...event,
           retainedAs: [...(latest.includes(event) ? ['latest' as const] : []), ...(currentPeaks[kind] === event ? ['current-peak' as const] : []), ...(previousPeaks[kind] === event ? ['previous-peak' as const] : [])],
-          terminal: event.terminal && { ...event.terminal, payload: { ...event.terminal.payload } }
+          terminal: event.terminal && { ...event.terminal, payload: { ...event.terminal.payload } },
+          cleanup: event.cleanup && { ...event.cleanup }
         }))
       }).sort((a, b) => a.id - b.id)
       const value: RendererPerformanceSnapshot = {
