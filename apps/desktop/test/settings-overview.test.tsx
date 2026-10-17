@@ -101,7 +101,7 @@ it('Overview, sidebar and actual navigation share every configuration module wit
   const catalog = visibleSettingsSections('')
   expect(catalog.map(entry => entry.id)).toEqual([
     'profile', 'appearance', 'notifications', 'browser', 'general', 'keyboard-shortcuts',
-    'hosts', 'devices', 'toolkit', 'agents', 'prompts', 'space', 'focus', 'goals', 'survey', 'notes', 'mote'
+    'hosts', 'amux-conversation', 'toolkit', 'agents', 'prompts', 'space', 'focus', 'goals', 'survey', 'notes', 'mote'
   ])
   const links = [...overview().querySelectorAll<HTMLButtonElement>('[data-settings-section]')]
   expect(links.map(link => link.dataset.settingsSection)).toEqual(catalog.map(entry => entry.id))

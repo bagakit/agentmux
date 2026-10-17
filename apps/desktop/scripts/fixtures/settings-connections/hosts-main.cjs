@@ -139,7 +139,7 @@ app.whenReady().then(async () => {
       assert.equal(check.id,target);assert.equal(check.hostname,'development-alias');assert.equal(check.user,'authored-user')
       if (width===320&&theme==='light') {
         await read(`window.__retainedName=document.querySelector(${JSON.stringify(nameSelector)})`)
-        await route('devices');await until('window.connectionsProof.calls.some(call=>call.kind==="device.ls")')
+        await route('amux-conversation');await until('window.connectionsProof.calls.some(call=>call.kind==="device.ls")')
         await route('hosts')
         assert.equal(await read(`document.querySelector(${JSON.stringify(nameSelector)})===window.__retainedName`),true)
         assert.equal(await read('window.__retainedName.value'),original.name)

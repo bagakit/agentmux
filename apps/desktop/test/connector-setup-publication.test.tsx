@@ -75,7 +75,7 @@ async function click(selector: string) {
 const writes = () => native.filter(call => call.path.includes('/app_version/create/') || call.path.includes('/publish/commit/'))
 function current() { return calls.filter(call => (call.result as ConnectionSetupView)?.applicationConfiguration).at(-1)?.result as ConnectionSetupView }
 async function open() {
-  await dom.render(<SettingsPanel visible initialSection="chat-connections" onClose={() => {}} />)
+  await dom.render(<SettingsPanel visible initialSection="lark" onClose={() => {}} />)
   await click('[data-connection="settings-publication-bot"] button'); await click('[data-management-open]'); await click('[data-management-start]')
   await ready(() => expect(dom.container.querySelector('[data-management-confirm]')).not.toBeNull())
   await click('[data-management-confirm]')

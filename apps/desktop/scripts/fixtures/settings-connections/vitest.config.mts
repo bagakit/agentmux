@@ -18,7 +18,7 @@ const edits: Record<string, { file: string; before: string; after: string }> = {
   access: { file: base + 'HostSettingsPane.tsx', before: "data-host-access={id} hidden={selectedId !== id || panel !== 'agents'}", after: "data-host-access={id} hidden={selectedId !== id || panel !== 'connection'}" },
   route: { file: base + 'HostTopology.tsx', before: "host.user || 'SSH config'", after: "'borrowed-user'" },
   graph: { file: base + 'HostSettingsPane.tsx', before: 'onSelect={selectTopologyHost}', after: 'onSelect={() => {}}' },
-  catalog: { file: base + 'modules/devices.tsx', before: "group: 'connections'", after: "group: 'resources'" },
+  catalog: { file: base + 'modules/amux-conversation.tsx', before: "group: 'conversation-channels'", after: "group: 'resources'" },
   single: { file: base + 'HostSettingsPane.tsx', before: 'hosts.filter((host) => host.id === selectedId).map', after: 'hosts.filter(() => true).map' },
   drafts: { file: base + 'HostSettingsPane.tsx', before: 'function selectHostPanel(id: string, panel: HostConnectionPanel): void {',
     after: 'function selectHostPanel(id: string, panel: HostConnectionPanel): void {\n    resource.setValue(() => Object.fromEntries(config.hosts.map((host) => [host.id, host])))' }

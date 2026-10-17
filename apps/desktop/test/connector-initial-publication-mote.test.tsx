@@ -53,8 +53,8 @@ it('the original mounted Mote creation continues into explicit first bot version
   const parentInput = f.parentCalls.mock.calls.find(([method]) => method === 'space.mote.connection.create')![1] as any
   const parent = (await f.client.call('space.mote.connection.inspect', { operationId: parentInput.operationId })).operation!
   await f.click('Continue bot setup')
-  const origin = f.navigation.openMoteConnector.mock.calls[0]![0]
-  await f.render(0, true, { section: 'chat-connections', moteConnectorOrigin: origin })
+  const origin = f.navigation.openMoteLark.mock.calls[0]![0]
+  await f.render(0, true, { section: 'lark', moteLarkOrigin: origin })
   await click('[data-management-confirm]')
   await click('[data-guided-primary]')
   await ready(() => expect(document.querySelector('[data-management-publication]')).not.toBeNull())

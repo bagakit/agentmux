@@ -105,7 +105,7 @@ afterEach(async () => {
 function MountedSettings() {
   const [visible, setVisible] = useState(true)
   closeSettings = () => setVisible(false); reopenSettings = () => setVisible(true)
-  return <SettingsPanel visible={visible} initialSection="chat-connections" onClose={closeSettings} />
+  return <SettingsPanel visible={visible} initialSection="lark" onClose={closeSettings} />
 }
 async function click(selector: string) {
   if (selector === '[data-enrollment-create]') {
