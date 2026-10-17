@@ -16,6 +16,7 @@ import { MoteDetailsPanel } from '../../src/renderer/src/components/MoteDetailsP
 import { MoteConnectionIdentity, MoteConnectionPanel } from '../../src/renderer/src/components/MoteConnectionIdentity'
 import { ExternalConnectionsSettings } from '../../src/renderer/src/components/settings/ExternalConnectionsSettings'
 import { SettingsNavigation, type SettingsNavigationRequest } from '../../src/renderer/src/components/SettingsNavigation'
+import { SettingsPanel } from '../../src/renderer/src/components/SettingsPanel'
 import type { MoteWorkfaceScope } from '../../src/renderer/src/lib/mote-workface'
 import { installNativePopover, moteConfig } from './mote-workface'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../../packages/core/test/helpers/object-cli-rpc'
@@ -49,7 +50,7 @@ export async function moteBotUi(options: NonNullable<Parameters<typeof moteConne
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [] })
   window.localStorage.clear(); await useAppStore.persist.rehydrate()
   const stop = await useAppStore.getState().initialize(); stop()
-  useAppStore.setState({ config, loading: false, spaceZoneBindings: {}, moteBotRequests: {}, moteConnectionSaveIntents: {} })
+  useAppStore.setState({ config, loading: false, spaceZoneBindings: {}, moteBotRequests: {}, botTaskSelections: {}, moteConnectionSaveIntents: {} })
   const handlers = new Map<string, (...args: any[]) => Promise<any>>(), sender = {}
   const handleWithEvent = (name: string, handler: (...args: any[]) => Promise<any>) => { handlers.set(name, handler) }
   const assertTrusted = (_channel: string, event: { sender: object }) => { if (event.sender !== sender) throw new Error('Untrusted renderer') }
@@ -87,8 +88,9 @@ export async function moteBotUi(options: NonNullable<Parameters<typeof moteConne
   }
   async function settle() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) }) }
   async function open(index = 0) { await render(index); await vi.waitFor(() => expect(document.querySelector('.mote-connection__row')).not.toBeNull()); await act(async () => (document.querySelector('.mote-connection__row') as HTMLElement).click()); await settle() }
+  async function renderSettings(navigationRequest?: SettingsNavigationRequest, visible = true) { await act(async () => view.render(<SettingsNavigation.Provider value={navigation}><SettingsPanel initialSection="lark" navigationRequest={navigationRequest} visible={visible} onClose={() => {}} /></SettingsNavigation.Provider>)); mounted = true; await settle() }
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', process.env.AGENTMUX_TEST_OBJECT_CLI ?? resolve('packages/core/bin/amux'))
-  return { ...owner, container, scopes, calls, registration, parentCalls, connectionCalls, saves, forward, handlers, sender, navigation, open, click, render, settle,
+  return { ...owner, container, scopes, calls, registration, parentCalls, connectionCalls, saves, forward, handlers, sender, navigation, open, click, render, renderSettings, settle,
     async renderCreateShortcut(index = 0) { await act(async () => view.render(<MoteConnectionPanel key={'create-' + index} target={owner.target(index)} topicId={owner.motes[index]!.id} moteName={scopes[index]!.topic.title} onRead={() => {}} createOnOpen />)); mounted = true; await settle() },
     async renderMotePanel(index = 0) { await act(async () => view.render(<SettingsNavigation.Provider value={navigation}><MoteDetailsPanel scope={scopes[index]!} active onOpenPath={async () => {}} /></SettingsNavigation.Provider>)); mounted = true; await settle() },
     get beginCount() { return options.generic ? owner.counts.begin : native.begins }, get authenticationCount() { return options.generic ? owner.counts.authentication : native.authentications },
@@ -96,6 +98,7 @@ export async function moteBotUi(options: NonNullable<Parameters<typeof moteConne
     async preferenceCli() { const r = await runCompiledObjectCli(['--endpoint', 'unix:' + owner.server.path, 'space', 'mote', 'preferences', 'read', '--input', '-'], objectCliEnvironment(root), JSON.stringify({kind: 'connection', target: owner.target()})); expect(r.code, r.stdout + r.stderr).toBe(0); return JSON.parse(r.stdout).result },
     async cli(action: string, input: unknown) { const r = await runCompiledObjectCli(['--endpoint', 'unix:' + owner.server.path, 'space', 'mote', 'connection', action, ...(action === 'inspect' ? ['--operation-id', (input as { operationId: string }).operationId] : ['--input', '-'])], objectCliEnvironment(root), JSON.stringify(input)); expect(r.code, r.stdout + r.stderr).toBe(0); return JSON.parse(r.stdout).result },
     async remount(index = 0) { if (mounted) await act(async () => view.unmount()); view = createClientUiRoot(container); await useAppStore.persist.rehydrate(); await open(index) },
+    async remountSettings(navigationRequest?: SettingsNavigationRequest) { if (mounted) await act(async () => view.unmount()); view = createClientUiRoot(container); await useAppStore.persist.rehydrate(); await renderSettings(navigationRequest) },
     async close() {
       const errors: unknown[] = []
       const actions = [async () => { if (mounted) await act(async () => view.unmount()) }, () => container.remove(), () => owner.close(), settle, restore, () => window.localStorage.clear(), () => useAppStore.setState(original, true), () => rm(root, { recursive: true, force: true }), () => vi.restoreAllMocks(), () => vi.unstubAllGlobals(), () => vi.unstubAllEnvs()]
