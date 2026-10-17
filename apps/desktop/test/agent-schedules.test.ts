@@ -2,7 +2,7 @@ import { fixtureCivil as _hygiene_fixtureCivil, fixtureClock as _hygiene_fixture
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { nextCalendarOccurrence, latestCalendarOccurrence } from '../src/main/agent-schedule-calendar.js'
+import { nextCalendarOccurrence, latestCalendarOccurrence } from '@agentmux/core/schedule-calendar'
 import { ContinuousProgressLoopManager, type LoopTickHandler } from '../src/main/continuous-progress-loop-manager.js'
 import { ContinuousProgressLoopStore } from '../src/main/continuous-progress-loop-store.js'
 import { observeAgent, type ContinuousProgressLoop, type AgentMuxRpcCallContext, type AgentMuxPendingInteraction } from '@agentmux/core'

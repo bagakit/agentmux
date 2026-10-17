@@ -17,7 +17,7 @@ const commands = AGENTMUX_CLI_COMMANDS.filter(command => command.method.startsWi
 describe('compiled schedule discovery and invocation', () => {
   it('prints one usable syntax with parser-accurate inputs in every discovery surface', async () => {
     expect(commands).toHaveLength(6)
-    const [catalog, surface] = await Promise.all([['--help'], ['schedule', '--help']].map(args => run(args)))
+    const [catalog, surface] = await Promise.all([run(['--help']), run(['schedule', '--help'])])
     expect(catalog.code, catalog.stderr).toBe(0)
     expect(catalog.stdout.split('\n').map(line => line.trim())).toContain('amux schedule')
     expect(surface.code, surface.stderr).toBe(0)
