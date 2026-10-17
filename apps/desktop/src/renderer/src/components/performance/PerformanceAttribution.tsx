@@ -76,6 +76,34 @@ function WorkAndWait({ performance: p, available }: { performance: RendererPerfo
     <p className="performance-note">Outside retained periods: {Object.values(epochs.late).reduce((a, b) => a + b, 0)} late · {Object.values(epochs.unknown).reduce((a, b) => a + b, 0)} unknown occurrence. No samples does not prove no delay.</p>
   </details>
 }
+function TerminalWork({ performance: p }: { performance: RendererPerformanceSnapshot }) {
+  const [expanded, setExpanded] = useState(false)
+  const causes = { live: 'Live output', history: 'History replay', checkpoint: 'Checkpoint restore' } as const
+  return <details className="performance-work" data-performance-terminals onToggle={event => setExpanded(event.currentTarget.open)}>
+    <summary>Terminal work <span>{p.terminals.length} current instances</span><ThemeNavigationDownIcon size={12} /></summary>
+    {expanded ? <>
+      <p className="performance-note">Lifetime counts for each retained instance. Visibility is current; writes include visible and hidden time. Callback wait overlaps other work and is not CPU or a painted-frame measurement.</p>
+      <div className="performance-work-grid">
+        {p.terminals.map(terminal => <section className="performance-work-cell" key={`${terminal.hostId}:${terminal.instanceId}`} data-terminal-instance={terminal.instanceId}>
+          <strong>{terminal.visible ? 'Visible' : 'Hidden'} · instance {terminal.instanceId}</strong>
+          <small className="performance-peak"><span>Host {terminal.hostId}</span><span>Session {terminal.sessionId}</span><span>Run {terminal.runId}</span><span>Region {terminal.regionId ?? 'unknown'}</span></small>
+          <span>{terminal.renderCallbacks} render callbacks</span>
+          {(['live', 'history', 'checkpoint'] as const).map(cause => {
+            const cost = terminal.writes[cause]
+            return <div key={cause} data-terminal-write-cause={cause}>
+              <strong>{causes[cause]}</strong>
+              <small>{cost.started} started · {cost.completed} completed</small>
+              <small>{cost.bytes} bytes{cost.stringCodeUnits > 0 ? ` · ${cost.stringCodeUnits} string code units` : ''}</small>
+              <small>Callback wait {cost.callbackWall.totalMs.toFixed(1)} ms · max {cost.callbackWall.maxMs.toFixed(1)} ms</small>
+            </div>
+          })}
+        </section>)}
+      </div>
+      {p.terminals.length === 0 ? <p className="performance-note">No current terminal instances in this reading.</p> : null}
+      {p.omittedTerminals > 0 || p.unavailableTerminals > 0 ? <p className="performance-note">{p.omittedTerminals} instances omitted · {p.unavailableTerminals} unavailable. Their work is unknown.</p> : null}
+    </> : null}
+  </details>
+}
 function CurrentWindow({ observation, paused }: { observation: MetricsObservation; paused: boolean }) {
   const source = observation.renderer, renderer = source.data
   if (!renderer) return <p className="performance-note">Current window diagnostics · {source.reason ?? source.state}</p>
@@ -89,6 +117,7 @@ function CurrentWindow({ observation, paused }: { observation: MetricsObservatio
     {source.state !== 'available' ? <p className="performance-state">Previous window reading · {source.reason ?? source.state}</p> : null}
     <p className="performance-note">Terminal, editor, DOM and native RSS attribution is unknown.</p>
     <WorkAndWait performance={renderer.performance} available={!paused && source.state === 'available'} />
+    <TerminalWork performance={renderer.performance} />
   </section>
 }
 

@@ -136,6 +136,8 @@ const countsParser = record({ monacoEditors: nullable(count), monacoModels: null
   runtimeSubscriptions: count, terminalViews: count, terminalAddons: count, terminalListeners: count })
 const boolean: Parser = v => { if (typeof v !== 'boolean') invalid() }
 const timingParser = record({ count, totalMs: number, maxMs: number })
+const terminalWriteCostParser = record({ started: count, completed: count, bytes: count,
+  stringCodeUnits: count, callbackWall: timingParser })
 const terminalInteractionParser = record({ observedSinceAt: number,
   keydown: record({ count, unknownDelayCount: count, delay: timingParser }),
   wheel: record({ count, unknownDelayCount: count, delay: timingParser }),
@@ -233,7 +235,8 @@ const performanceParser = record({ startedAt: number, observedAt: number, record
   inputDelay: record({ state: v => { if (!['observing','unsupported','stopped','unavailable'].includes(v as string)) invalid() },
     reason: nullable(text), durationThresholdMs: literal(16), timing: timingParser }),
   longTasks: record({ state: v => { if (!['observing','unsupported','stopped','unavailable'].includes(v as string)) invalid() }, reason: nullable(text), timing: timingParser }),
-  terminals: boundedArray(64, record({ sessionId: identity, runId: identity, regionId: nullable(identity),
+  terminals: boundedArray(64, record({ hostId: identity, sessionId: identity, runId: identity, regionId: nullable(identity), instanceId: count,
+    writes: record({ live: terminalWriteCostParser, history: terminalWriteCostParser, checkpoint: terminalWriteCostParser }), renderCallbacks: count,
     visible: boolean, visibleSinceAt: nullable(number), readySinceAt: nullable(number), revealed: boolean, liveReady: boolean, acceptsInput: boolean,
     replaying: boolean, inFlightWrites: count, queuedItems: count, queuedBytes: count, pendingItems: count, pendingBytes: count,
     cols: count, rows: count, normalLines: count, alternateLines: count, interaction: terminalInteractionParser })), omittedTerminals: count, unavailableTerminals: count,
