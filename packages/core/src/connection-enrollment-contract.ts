@@ -1,3 +1,4 @@
+import type { ConnectionSetupInitialProgress, ConnectionSetupInitialPublication } from './connection-setup-contract.js'
 import type { ConnectionRequestTrace, ConnectionRequestTraceSelector } from './connection-request-trace.js'
 import type { ConnectionApplication, ConnectionOperation } from './connections-contract.js'
 export type ConnectionEnrollmentReason =
@@ -98,9 +99,12 @@ export type ConnectionEnrollmentBeginInput = {
   domain: string
   label: string
   preset: ConnectionEnrollmentPreset
+  initialPublication?: ConnectionSetupInitialPublication
 }
 export type ConnectionEnrollmentOperation = Omit<ConnectionEnrollmentBeginInput, 'preset'> & {
   preset?: ConnectionEnrollmentPresetSummary
+  /** Original Setup identity and local saved progress; never active confirmation material. */
+  initialSetup?: { operationId: string; progress: ConnectionSetupInitialProgress | null }
   revision: number
   /** Original application facts. Account confirmation alone never authorizes an application. */
   authorization: 'not-started' | 'pending' | 'authorized' | 'denied' | 'expired' | 'unknown'
@@ -136,6 +140,7 @@ export type ConnectionEnrollmentActionKind =
   | 'create'
   | 'read-credential'
   | 'recover-local'
+  | 'continue-setup'
 export type ConnectionEnrollmentAction = {
   actionId: string
   ownRevision: number

@@ -1,3 +1,4 @@
+import { parseConnectionSetupInitialPublication, parseConnectionSetupInitialProgress } from './connection-setup-codec.js'
 import { parseConnectionRequestTrace, parseConnectionRequestTraceSelector } from './connection-request-trace.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { AgentMuxError } from './errors.js'
@@ -82,7 +83,8 @@ const kinds: readonly ConnectionEnrollmentActionKind[] = [
   'renew-authentication',
   'create',
   'read-credential',
-  'recover-local'
+  'recover-local',
+  'continue-setup'
 ]
 export function parseConnectionEnrollmentPreset(value: unknown): ConnectionEnrollmentPreset {
   const p = object(value, ['name', 'description', 'avatar']),
@@ -130,14 +132,15 @@ export function summarizeConnectionEnrollmentPreset(
   }
 }
 export function parseConnectionEnrollmentBegin(value: unknown): ConnectionEnrollmentBeginInput {
-  const p = object(value, ['operationId', 'connectionId', 'adapterId', 'domain', 'label', 'preset'])
+  const p = object(value, ['operationId', 'connectionId', 'adapterId', 'domain', 'label', 'preset', 'initialPublication'])
   return {
     operationId: id(p.operationId),
     connectionId: id(p.connectionId),
     adapterId: id(p.adapterId),
     domain: domain(p.domain),
     label: text(p.label),
-    preset: parseConnectionEnrollmentPreset(p.preset)
+    preset: parseConnectionEnrollmentPreset(p.preset),
+    ...(p.initialPublication === undefined ? {} : { initialPublication: parseConnectionSetupInitialPublication(p.initialPublication) })
   }
 }
 export function parseConnectionEnrollmentChallenge(value: unknown): ConnectionEnrollmentChallenge {
@@ -223,6 +226,8 @@ export function parseConnectionEnrollmentOperation(value: unknown): ConnectionEn
     'domain',
     'label',
     'preset',
+    'initialPublication',
+    'initialSetup',
     'revision',
     'authorization',
     'credential',
@@ -316,6 +321,11 @@ export function parseConnectionEnrollmentOperation(value: unknown): ConnectionEn
     domain: domain(p.domain),
     label: text(p.label),
     ...(preset ? { preset } : {}),
+    ...(p.initialPublication === undefined ? {} : { initialPublication: parseConnectionSetupInitialPublication(p.initialPublication) }),
+    ...(p.initialSetup === undefined ? {} : { initialSetup: (() => {
+      const initial = object(p.initialSetup, ['operationId', 'progress'])
+      return { operationId: id(initial.operationId), progress: initial.progress === null ? null : parseConnectionSetupInitialProgress(initial.progress) }
+    })() }),
     revision: integer(p.revision, 1),
     authorization: choice(p.authorization, [
       'not-started',
@@ -342,6 +352,7 @@ export function parseConnectionEnrollmentOperation(value: unknown): ConnectionEn
       ? {}
       : { diagnostic: parseConnectionEnrollmentDiagnostic(p.diagnostic) })
   }
+  if (!!result.initialPublication !== !!result.initialSetup || result.initialSetup?.progress && result.configuration !== 'configured') fail()
   if (application && application.domain !== result.domain) fail()
   if (configured) {
     const c = configured.connection
@@ -401,6 +412,7 @@ export function parseConnectionEnrollmentView(value: unknown): ConnectionEnrollm
     (receipt && operation && receipt.ownRevision > operation.revision)
   )
     fail()
+  if (actions.some(a => a.kind === 'continue-setup') && (!operation?.initialSetup || operation.configuration !== 'configured' || operation.initialSetup.progress?.state === 'complete')) fail()
   if ((challenge || account) && !operation?.authentication) fail()
   if (account && !['account', 'confirmed'].includes(operation!.authentication!.stage)) fail()
   return { operation, challenge, account, actions, ...(receipt ? { receipt } : {}), ...(p.requestTrace === undefined ? {} : { requestTrace: parseConnectionRequestTrace(p.requestTrace, operation?.operationId ?? String((p.requestTrace as { operationId?: unknown })?.operationId), { limit: 100 }) }) }
@@ -500,6 +512,7 @@ export function parseConnectionEnrollmentResult<M extends ConnectionEnrollmentMe
       operation.adapterId !== b.adapterId ||
       operation.domain !== b.domain ||
       operation.label !== b.label ||
+      JSON.stringify(operation.initialPublication) !== JSON.stringify(b.initialPublication) ||
       JSON.stringify(operation.preset) !==
         JSON.stringify(summarizeConnectionEnrollmentPreset(b.preset))
     )

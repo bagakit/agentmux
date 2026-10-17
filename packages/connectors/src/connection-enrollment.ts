@@ -28,7 +28,8 @@ import {
   type ConnectionEnrollmentView,
   type ConnectionSetupEnrollmentSource,
   type ConnectionApplication,
-  type ConnectionSetupAccount
+  type ConnectionSetupAccount,
+  type ConnectionSetupBegin
 } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import type {
@@ -150,7 +151,12 @@ export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
           ...(available ? {} : { reason: 'secure-storage-unavailable' as const })
         }))
       )
-    return { ...this.store.page(input.cursor, input.limit ?? 25, context?.actor.kind === 'agent' ? context.actor : undefined), capabilities }
+    const page = this.store.page(input.cursor, input.limit ?? 25, context?.actor.kind === 'agent' ? context.actor : undefined)
+    const operations = await Promise.all(page.operations.map(async operation => {
+      const row = this.store.read(operation.operationId)!
+      return this.summary(row, context)
+    }))
+    return { ...page, operations, capabilities }
   }
   async inspect(
     value: ConnectionEnrollmentInspect,
@@ -181,14 +187,35 @@ export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
       kind
     }
   }
+  private setupInput(row: EnrollmentRow): ConnectionSetupBegin | null {
+    const operation = row.operation
+    if (!operation.initialPublication || !operation.initialSetup || !operation.configured) return null
+    return { operationId: operation.initialSetup.operationId, connectionId: operation.connectionId,
+      expectedConnectionRevision: operation.configured.connection.revision,
+      source: { kind: 'enrollment', operationId: operation.operationId, expectedRevision: operation.revision },
+      goal: { kind: 'agent-conversation', interaction: 'cards' }, initialPublication: operation.initialPublication }
+  }
+  private async summary(row: EnrollmentRow, context?: ConnectionEnrollmentCallContext): Promise<ConnectionEnrollmentOperation> {
+    const input = this.setupInput(row)
+    if (!input || !context || !sameEnrollmentActor(row.actor, context.actor)) return row.operation
+    const setup = await this.options.connections.setup!.inspect({ operationId: input.operationId }, context)
+    if (setup.operation && (!same(setup.operation.source, input.source) || !same(setup.operation.initialPublication, input.initialPublication) || setup.operation.connectionId !== input.connectionId)) throw issue('CONNECTION_OPERATION_CONFLICT')
+    return { ...row.operation, initialSetup: { operationId: input.operationId, progress: setup.initialSetup ?? null } }
+  }
+  private async continueSetup(row: EnrollmentRow, context: ConnectionEnrollmentCallContext): Promise<void> {
+    const input = this.setupInput(row)
+    if (!input) return
+    await this.authority(row, context)
+    await this.options.connections.setup!.begin(input, context)
+  }
   private async view(
     row: EnrollmentRow | null,
     context: ConnectionEnrollmentCallContext,
-    receipt?: ConnectionEnrollmentReceipt
+    receipt?: ConnectionEnrollmentReceipt | null
   ): Promise<ConnectionEnrollmentView> {
     if (!row) return { operation: null, challenge: null, account: null, actions: [] }
     let snapshot: Snapshot | null = null,
-      operation = row.operation
+      operation = await this.summary(row, context)
     if (row.version === 2 && row.privateRef) {
       try {
         snapshot = await this.privateSnapshot(row)
@@ -218,11 +245,12 @@ export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
         ...(receipt ? { receipt } : {})
       })
     }
-    receipt ??= row.activeActionId
+    if (receipt === undefined) receipt = row.activeActionId
       ? this.store.readAction(row.operation.operationId, row.activeActionId)?.receipt
       : undefined
     const actions: ConnectionEnrollmentAction[] = [],
       auth = operation.authentication
+    if (operation.configuration === 'configured' && operation.initialSetup && operation.initialSetup.progress?.state !== 'complete') actions.push(this.action(row, 'continue-setup'))
     if (operation.configuration !== 'configured') {
       actions.push(this.action(row, 'recover-local'))
       if (row.version === 2 && (!this.store.claimed(row) || !!operation.application)) {
@@ -342,6 +370,7 @@ export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
       row = this.store.read(input.operationId)!
       await this.runStep(row, 'begin', context)
     })
+    await this.continueSetup(this.store.read(admitted.operation.operationId)!, context)
     return this.view(this.store.read(admitted.operation.operationId), context)
   }
   async advance(
@@ -373,6 +402,11 @@ export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
           a.ownRevision === input.ownRevision
       )
     if (!offered) throw issue('CONNECTION_REVISION_CONFLICT')
+    // Setup owns its effects and receipts. Composition never changes the source revision.
+    if (input.decision.kind === 'continue-setup') {
+      await this.continueSetup(original, context)
+      return this.view(this.store.read(input.operationId), context, null)
+    }
     if (original.version !== 2) {
       if (input.decision.kind !== 'recover-local') throw issue('CONNECTION_REVISION_CONFLICT')
       const row = await this.recover(original, context)
@@ -470,6 +504,7 @@ export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
     const recorded = this.store.readAction(input.operationId, input.decision.actionId)
     // Joining another original action does not admit this distinct decision or borrow its receipt.
     if (!recorded) throw issue('CONNECTION_REVISION_CONFLICT')
+    if (input.decision.kind === 'create' || input.decision.kind === 'read-credential') await this.continueSetup(row, context)
     return this.view(row, context, recorded.receipt)
   }
   private finishAction(
