@@ -56,10 +56,10 @@ export function ConversationResourceText({ sources, active = true, part, partInd
   const copyableText = content?.kind === 'text' ? content.text : content?.kind === 'resource' ? content.resourceType === 'image' || content.resourceType === 'file' ? part.reference : content.reference : null
   const text = content?.kind === 'text' ? sessionHistoryTextForReading(content) : ''
   const prefix = useMemo(() => {
-    if (contentBoundary !== 'wire' || !(inputMode || a2aNotificationId) || partIndex !== 0 || content?.kind !== 'text') return null
+    if (contentBoundary !== 'wire' || partIndex !== 0 || content?.kind !== 'text') return null
     const parsed = parseAgentMuxMessagePrefix(text)
     return a2aNotificationId && parsed?.kind !== 'references' ? null : parsed
-  }, [contentBoundary, inputMode, a2aNotificationId, partIndex, content, text])
+  }, [contentBoundary, a2aNotificationId, partIndex, content, text])
   return <div className="conversation-resource-text">
     <div className="conversation-resource-text__controls">
       {!content ? <button type="button" onClick={() => { void load() }} disabled={loading}>

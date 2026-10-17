@@ -318,7 +318,7 @@ export type AgentMuxProtocolCatalogEntry = {
   title: string
   description: string
   syntax: string
-  form: 'envelope' | 'marker' | 'frame' | 'link'
+  form: 'envelope' | 'marker' | 'frame' | 'link' | 'extension'
   examples: readonly { label: string; wire: string }[]
 }
 
@@ -343,7 +343,11 @@ const protocolExamples = {
     { label: 'File context', wire: formatAmuxSharing('File', 'docs/example.md\nOriginal file context.') },
     { label: 'Browser context', wire: formatAmuxSharing('Browser', 'https://example.org/\nOriginal page context.') }
   ],
-  link: () => [{ label: 'Exact object identity', wire: formatAmuxObjectLink({ kind: 'agent', agentSessionId: 'SID' }) }]
+  link: () => [{ label: 'Exact object identity', wire: formatAmuxObjectLink({ kind: 'agent', agentSessionId: 'SID' }) }],
+  generic: () => {
+    const tag = AMUX_PROTOCOL_DEFINITIONS.generic.tag.replace('NAME', 'example')
+    return [{ label: 'Illustrative unregistered declaration', wire: `<${tag} topic="Example">Original opaque content.</${tag}>` }]
+  }
 } satisfies Record<AmuxProtocolId, () => readonly { label: string; wire: string }[]>
 
 /** Local compiled reading capabilities, not the connected Runtime's version or permissions. */

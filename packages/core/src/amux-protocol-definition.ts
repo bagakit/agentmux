@@ -39,6 +39,11 @@ export const AMUX_PROTOCOL_DEFINITIONS = {
     tag: 'amux://', form: 'link', title: 'Object link',
     description: 'One exact Agent or spatial identity. A valid link does not prove the object exists or authorize navigation.',
     syntax: 'amux://KIND/ID'
+  },
+  generic: {
+    tag: 'amux:NAME', form: 'extension', title: 'Other amux declarations',
+    description: 'A complete unregistered type uses a generic reading card. Its body remains opaque; no business support or authority is implied.',
+    syntax: '<amux:NAME key="value">…</amux:NAME>'
   }
 } as const
 
