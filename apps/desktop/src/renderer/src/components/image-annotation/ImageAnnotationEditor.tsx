@@ -2,6 +2,7 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { useWorkbenchDocument } from '../../lib/workbench-document'
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { AnnotationToolbar, ANNOTATION_TOOLS, type AnnotationTool } from './AnnotationToolbar'
 import { AnnotationOriginalMenu } from './AnnotationOriginalMenu'
@@ -26,6 +27,7 @@ type TextDraft = { shape: TextShape; existing: boolean; edited: boolean }
 type TransformGesture = { original: ScreenshotShape; start: ScreenshotPoint; handle?: SelectionHandleId }
 
 export function ImageAnnotationEditor({ image, busy, copied, active = true, initialState, documentStatus,
+  ownerDocument, title = 'Screenshot', completeLabel = 'Copy PNG', busyLabel = 'Copying…',
   onCancel, onComplete, onCopyContext, onSaveOriginal, onOpenOriginal, onEdited, onError }: {
   image: AnnotationImage
   busy: boolean
@@ -33,6 +35,10 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   active?: boolean
   initialState?: Pick<ScreenshotDocument, 'shapes' | 'crop'>
   documentStatus?: string | null
+  ownerDocument?: Document
+  title?: string
+  completeLabel?: string
+  busyLabel?: string
   onCancel(): void
   onComplete(input: ImageAnnotationInput): void
   onCopyContext?(input: ImageAnnotationInput): void
@@ -41,6 +47,9 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   onEdited?(): void
   onError?(error: unknown): void
 }) {
+  const workbenchDocument = useWorkbenchDocument()
+  const document = ownerDocument ?? workbenchDocument
+  const ownerWindow = document.defaultView!
   const editorRef = useRef<HTMLDivElement>(null), containerRef = useRef<HTMLDivElement>(null)
   const imageRef = useRef<HTMLImageElement>(null), canvasRef = useRef<HTMLCanvasElement>(null), textInputRef = useRef<HTMLInputElement>(null)
   const currentGestureRef = useRef<ScreenshotShape | null>(null), transformRef = useRef<TransformGesture | null>(null)
@@ -78,7 +87,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   }
   const schedulePaint = useCallback(() => {
     if (paintFrame.current) return
-    paintFrame.current = requestAnimationFrame(() => {
+    paintFrame.current = ownerWindow.requestAnimationFrame(() => {
       paintFrame.current = 0
       const canvas = canvasRef.current, committed = committedLayerRef.current, state = live.current, currentView = viewRef.current
       if (!state.active || !canvas || !committed || !state.size.width || !state.size.height) return
@@ -120,7 +129,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
         setView(current => current === currentView ? current : currentView)
       } catch (error) { onError?.(error) }
     })
-  }, [image.width, image.height, onError])
+  }, [image.width, image.height, onError, ownerWindow])
   const requestView = useCallback((next: AnnotationView) => { viewRef.current = next; schedulePaint() }, [schedulePaint])
   const resetGesture = useCallback(() => {
     currentGestureRef.current = null; transformRef.current = null; cropRef.current = null; eraseRef.current = null
@@ -133,27 +142,27 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   useEffect(() => {
     if (!active) return
     const focusCanvas = () => { if (document.activeElement === document.body) canvasRef.current?.focus({ preventScroll: true }) }
-    focusCanvas(); const frame = requestAnimationFrame(focusCanvas)
-    return () => cancelAnimationFrame(frame)
+    focusCanvas(); const frame = ownerWindow.requestAnimationFrame(focusCanvas)
+    return () => ownerWindow.cancelAnimationFrame(frame)
   }, [active, pendingText])
   useEffect(() => {
     if (!active) return
     const container = containerRef.current
     if (!container) return
     const measure = () => { const rect = container.getBoundingClientRect()
-      const next = { width: Math.max(1, rect.width), height: Math.max(1, rect.height), dpr: window.devicePixelRatio || 1 }
+      const next = { width: Math.max(1, rect.width), height: Math.max(1, rect.height), dpr: ownerWindow.devicePixelRatio || 1 }
       setSize(current => current.width === next.width && current.height === next.height && current.dpr === next.dpr ? current : next)
     }
     measure(); const observer = new ResizeObserver(measure); observer.observe(container)
-    window.addEventListener('resize', measure)
-    return () => { observer.disconnect(); window.removeEventListener('resize', measure) }
+    ownerWindow.addEventListener('resize', measure)
+    return () => { observer.disconnect(); ownerWindow.removeEventListener('resize', measure) }
   }, [active])
   useEffect(() => { if (active && fitted && size.width && size.height) requestView(fitImageView(size.width, size.height, image.width, image.height)) },
     [active, fitted, size, image.width, image.height, requestView])
   useEffect(() => { if (active) schedulePaint() }, [active, documentState, selectedId, loaded, size, tool, pendingText, schedulePaint])
-  useEffect(() => { if (!active) { cancelAnimationFrame(paintFrame.current); paintFrame.current = 0; resetGesture(); spaceHeld.current = false; setPanHeld(false) } }, [active, resetGesture])
-  useEffect(() => () => { cancelAnimationFrame(paintFrame.current); resetGesture() }, [resetGesture])
-  useEffect(() => { if (active && pendingText) { const frame = requestAnimationFrame(() => textInputRef.current?.focus({ preventScroll: true })); return () => cancelAnimationFrame(frame) } }, [active, pendingText])
+  useEffect(() => { if (!active) { ownerWindow.cancelAnimationFrame(paintFrame.current); paintFrame.current = 0; resetGesture(); spaceHeld.current = false; setPanHeld(false) } }, [active, resetGesture, ownerWindow])
+  useEffect(() => () => { ownerWindow.cancelAnimationFrame(paintFrame.current); resetGesture() }, [resetGesture, ownerWindow])
+  useEffect(() => { if (active && pendingText) { const frame = ownerWindow.requestAnimationFrame(() => textInputRef.current?.focus({ preventScroll: true })); return () => ownerWindow.cancelAnimationFrame(frame) } }, [active, pendingText, ownerWindow])
   useEffect(() => { setNoteDraft(selectedNote?.note ?? '') }, [selectedNote?.id, selectedNote?.note])
 
   function fitImage() { resetGesture(); setFitted(true); requestView(fitImageView(size.width, size.height, image.width, image.height)) }
@@ -184,7 +193,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   useEffect(() => {
     if (!active) return
     const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target instanceof Node && event.target !== document.body ? event.target : document.activeElement
+      const target = event.target && 'nodeType' in event.target && event.target !== document.body ? event.target as Node : document.activeElement
       if (!target || !editorRef.current?.contains(target) || isImeOwnedKeyboardEvent(event)) return
       if (event.key === 'Escape') {
         event.preventDefault()
@@ -193,7 +202,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
         else onCancel()
         return
       }
-      if (event.target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName)) return
+      if (event.target && 'tagName' in event.target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(String(event.target.tagName))) return
       if (event.key === ' ' && target === canvasRef.current) { event.preventDefault(); spaceHeld.current = true; setPanHeld(true); return }
       if (event.key === '0') { event.preventDefault(); fitImage(); return }
       if (event.key === '1') { event.preventDefault(); zoomTo(1); return }
@@ -214,8 +223,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     }
     const releaseSpace = () => { spaceHeld.current = false; setPanHeld(false) }
     const onKeyUp = (event: KeyboardEvent) => { if (event.key === ' ') releaseSpace() }
-    window.addEventListener('keydown', onKeyDown); window.addEventListener('keyup', onKeyUp); window.addEventListener('blur', releaseSpace)
-    return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); window.removeEventListener('blur', releaseSpace) }
+    ownerWindow.addEventListener('keydown', onKeyDown); ownerWindow.addEventListener('keyup', onKeyUp); ownerWindow.addEventListener('blur', releaseSpace)
+    return () => { ownerWindow.removeEventListener('keydown', onKeyDown); ownerWindow.removeEventListener('keyup', onKeyUp); ownerWindow.removeEventListener('blur', releaseSpace) }
   }, [active, busy, selected, pendingText, onCancel, redo, undo, edit, resetGesture, requestView, size, fitted])
 
   function localPoint(event: { clientX: number; clientY: number }): ScreenshotPoint {
@@ -362,16 +371,16 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   // This is an editing control, independent of the annotation's original geometry and type size.
   const textEditorFont = Math.max(12, Math.min(32, (pendingText?.shape.fontSize ?? fontSize) * scale))
   const textEditorWidth = Math.min(280, Math.max(1, size.width)), textEditorHeight = Math.min(textEditorFont * 1.4 + 10, Math.max(1, size.height))
-  return <div ref={editorRef} className="image-annotation-editor" role="dialog" aria-label="Screenshot editor" style={active ? undefined : { display: 'none' }}>
+  return <div ref={editorRef} className="image-annotation-editor" role="dialog" aria-label={title === 'Screenshot' ? 'Screenshot editor' : title} style={active ? undefined : { display: 'none' }}>
     <header className="image-annotation-editor__header">
-      <span className="image-annotation-editor__title"><strong>Screenshot</strong><small>{image.width} × {image.height}</small>
+      <span className="image-annotation-editor__title"><strong>{title}</strong><small>{image.width} × {image.height}</small>
         <span className={'image-annotation-editor__status' + (copied ? ' image-annotation-editor__status--success' : '')} role="status">{copied ? <><CheckIcon size={13} />{copied}</> : documentStatus}</span>
       </span>
       <div className="image-annotation-toolbar__actions">
         <AnnotationOriginalMenu active={active} busy={busy} loaded={loaded} onOpen={onOpenOriginal} onSave={onSaveOriginal ? () => complete('save') : undefined} />
         <button type="button" onClick={onCancel}><CancelIcon size={13} /> Cancel</button>
         {onCopyContext ? <button type="button" disabled={busy || !loaded} onClick={() => complete('context')}>Copy context</button> : null}
-        <button className="primary-button" type="button" disabled={busy || !loaded} onClick={() => complete()}><ClipboardIcon size={13} />{busy ? 'Copying…' : 'Copy PNG'}</button>
+        <button className="primary-button" type="button" disabled={busy || !loaded} onClick={() => complete()}><ClipboardIcon size={13} />{busy ? busyLabel : completeLabel}</button>
       </div>
     </header>
     <AnnotationToolbar tool={tool} busy={busy} undoable={canUndo(documentState)} redoable={canRedo(documentState)} selected={!!selected}
