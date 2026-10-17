@@ -7,6 +7,11 @@ export const referenceProofSha = bytes => createHash('sha256').update(bytes).dig
 const json = async path => JSON.parse(await readFile(path, 'utf8'))
 const indexPath = root => join(root, '.tmp/a2a-reference-delivery/current.json')
 const edits = ['default-managed-inbox-producer', 'notice-does-not-become-user-request', 'original-notice-run-boundary', 'submitted-reference-leaves-pending-index']
+const nativeEdits = ['native-queue-becomes-steer', 'native-idle-target-is-omitted', 'completion-fence-is-omitted',
+  'final-input-fence-is-omitted', 'notification-identity-is-omitted', 'edited-notification-is-adopted',
+  'native-queue-receipt-is-unchecked', 'notification-identity-is-not-restored',
+  'independent-idle-notification-is-blocked', 'independent-idle-completion-is-consumed',
+  'controlled-notice-reservation-spills-to-other-key', 'uncontrolled-notice-reservation-spills-to-other-key']
 function local(root, path) {
   const target = resolve(root, path), name = relative(root, target)
   assert.ok(!isAbsolute(name) && name.startsWith('.tmp/') && !name.split('/').includes('..'), 'Proof artifacts stay in their owning evidence area')
@@ -63,9 +68,9 @@ async function deliveryFacts({ root, receipt }) {
   for (const item of compiled.cases) assert.deepEqual(await testRun(root, directory, item.red, true, artifacts), await testRun(root, directory, item.restored, false, artifacts))
   assert.equal(native.passed, true); assert.equal(native.sourceOnly, true); assert.equal(native.sharedTreeMutations, 0)
   assert.deepEqual(native.sourceBefore, native.sourceAfter); await inputs(root, native.sourceBefore)
-  assert.equal(native.cases.length, 10); assert.equal(new Set(native.cases.map(item => item.mutation)).size, 10)
+  assert.deepEqual(native.cases.map(item => item.mutation), nativeEdits)
   const nativeDirectory = dirname(nativePath), nativeBaseline = await testRun(root, nativeDirectory, native.baseline, false, artifacts, true)
-  assert.equal(nativeBaseline.length, 19); assert.equal((await testRun(root, nativeDirectory, native.regression, false, artifacts, true)).length, 30)
+  assert.equal(nativeBaseline.length, 23); assert.equal((await testRun(root, nativeDirectory, native.regression, false, artifacts, true)).length, 30)
   for (const item of native.cases) {
     assert.deepEqual(await testRun(root, nativeDirectory, item.red, true, artifacts, true), nativeBaseline)
     assert.deepEqual(await testRun(root, nativeDirectory, item.restored, false, artifacts, true), nativeBaseline)
@@ -104,5 +109,5 @@ export async function verifyReferenceDeliveryProof({ root, index }) {
   assert.deepEqual([...facts.artifacts].map(path => relative(root, path)).sort(), Object.keys(sealed.artifacts).sort())
   return { passed: true, receipt: sealed.receipt, artifactIndex: index.path, sha256: index.sha256,
     sources: facts.compiled.sourceBefore, compiled: facts.compiled.compiledInputs,
-    cases: 14, compiledMutants: 4, nativeSourceMutants: 10, reopen: facts.reopened, sameIdleUnknown: facts.facts }
+    cases: 14, compiledMutants: 4, nativeSourceMutants: nativeEdits.length, reopen: facts.reopened, sameIdleUnknown: facts.facts }
 }
