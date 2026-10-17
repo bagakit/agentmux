@@ -98,7 +98,7 @@ it('SDK and compiled CLI review exact App rows then request only missing origina
   expect(f.native).toEqual(before)
   const input = action(offered, effect), accepted = await f.cli(['advance', '--input', '-'], input)
   expect(accepted.applicationConfiguration!.selected).toMatchObject({ effect, purpose: 'agent-conversation', sourceStepIds: { catalog: catalog.stepId, applied: applied.stepId }, scopeNames: NAMES.slice(1, 7), input, request: 'confirmed', secureStorage: 'stored', requiresDataRangeConfiguration: true })
-  expect(f.native.slice(before.length)).toEqual([{ path: '/developers/v1/scope/update/' + APP, body: { appScopeIDs: IDS.slice(1, 7), userScopeIDs: [], scopeIds: [], operation: 'add', isDeveloperPanel: true } }])
+  expect(f.native.slice(before.length)).toEqual([{ path: '/developers/v1/scope/update/' + APP, body: { clientId: APP, appScopeIDs: IDS.slice(1, 7), userScopeIDs: [], scopeIds: [], operation: 'add', isDeveloperPanel: true } }])
   expect(accepted.applicationConfiguration!.capability).toBe('unknown')
   expect(await f.sdk.call('connection.setup.advance', input)).toEqual(accepted)
   expect(f.native.slice(before.length)).toHaveLength(1)
@@ -120,7 +120,7 @@ it('the same exact review selects seven by default and nine only with explicit M
   expect(f.native).toEqual(before)
   const added = await f.sdk.call('connection.setup.advance', action(extended, effect))
   expect(added.applicationConfiguration!.selected).toMatchObject({ purpose: 'mote-profile-sync', scopeNames: NAMES })
-  expect(f.native.at(-1)).toEqual({ path: '/developers/v1/scope/update/' + APP, body: { appScopeIDs: IDS, userScopeIDs: [], scopeIds: [], operation: 'add', isDeveloperPanel: true } })
+  expect(f.native.at(-1)).toEqual({ path: '/developers/v1/scope/update/' + APP, body: { clientId: APP, appScopeIDs: IDS, userScopeIDs: [], scopeIds: [], operation: 'add', isDeveloperPanel: true } })
   await f.close()
   const empty = await fixture(); empty.applied({ scopes: IDS.map(id => ({ id, scopeIdentityType: 2 })) })
   await empty.read('permission-catalog'); await empty.read('application-permissions')
@@ -228,8 +228,8 @@ it('a confirmed seven-item request permits an explicit same-Setup Mote addition 
   expect(extended.applicationConfiguration!.selected).toMatchObject({ purpose: 'mote-profile-sync', scopeNames: NAMES.slice(7) })
   expect(extended.applicationConfiguration!.effects).toHaveLength(2)
   expect(f.native.filter(call => call.path.includes('/scope/update/'))).toEqual([
-    { path: '/developers/v1/scope/update/' + APP, body: { appScopeIDs: IDS.slice(0, 7), userScopeIDs: [], scopeIds: [], operation: 'add', isDeveloperPanel: true } },
-    { path: '/developers/v1/scope/update/' + APP, body: { appScopeIDs: IDS.slice(7), userScopeIDs: [], scopeIds: [], operation: 'add', isDeveloperPanel: true } }
+    { path: '/developers/v1/scope/update/' + APP, body: { clientId: APP, appScopeIDs: IDS.slice(0, 7), userScopeIDs: [], scopeIds: [], operation: 'add', isDeveloperPanel: true } },
+    { path: '/developers/v1/scope/update/' + APP, body: { clientId: APP, appScopeIDs: IDS.slice(7), userScopeIDs: [], scopeIds: [], operation: 'add', isDeveloperPanel: true } }
   ])
 }, 30_000)
 
@@ -270,7 +270,7 @@ it.each(['native-inflight', 'stored-ack'] as const)('a true %s writer exit prese
   expect(resumed.applicationConfiguration!.selected).toEqual({ ...original, request: mode === 'stored-ack' ? 'confirmed' : 'unknown', secureStorage: mode === 'stored-ack' ? 'stored' : 'not-started' })
   expect((await cli(['advance', '--input', '-'], input)).applicationConfiguration!.selected).toEqual(resumed.applicationConfiguration!.selected)
   expect(await readFile(join(f.directory, 'permission-writes.ndjson'), 'utf8')).toBe(native)
-  expect(native.trim().split('\n').map(line => JSON.parse(line))).toEqual([{ path: '/developers/v1/scope/update/' + APP, body: { appScopeIDs: IDS.slice(0, 7), userScopeIDs: [], scopeIds: [], operation: 'add', isDeveloperPanel: true } }])
+  expect(native.trim().split('\n').map(line => JSON.parse(line))).toEqual([{ path: '/developers/v1/scope/update/' + APP, body: { clientId: APP, appScopeIDs: IDS.slice(0, 7), userScopeIDs: [], scopeIds: [], operation: 'add', isDeveloperPanel: true } }])
 }, 30_000)
 
 

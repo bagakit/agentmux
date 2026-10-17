@@ -57,14 +57,14 @@ async function fixture(interaction: 'messages' | 'cards' = 'cards', unknownEffec
     if (path.endsWith('/app_version/list/' + APP)) return reply({ versions: versionCreated ? [{ versionId: VERSION, appVersion: '1.0.0', versionStatus: submitted ? versionStatus : 0 }] : [] })
     if (path.endsWith('/app_version/detail/' + APP + '/' + VERSION)) return reply({ versionId: VERSION, appVersion: '1.0.0', versionStatus: submitted ? versionStatus : 0 })
     if (blocked && path.includes(blocked)) return new Response(null, { status: 502 })
-    if (path.endsWith('/robot/switch/' + APP)) { messaging = true; return reply({}) }
-    if (path.endsWith('/event/switch/' + APP)) { eventMode = 4; return reply({}) }
-    if (path.endsWith('/scope/update/' + APP)) { scopes = body.appScopeIDs.map((id: number) => ({ id, scopeIdentityType: 2 })); return reply({ needConfigurePrivilege: false }) }
-    if (path.endsWith('/event/update/' + APP)) { received = true; return reply({}) }
+    if (path.endsWith('/robot/switch/' + APP)) { expect(body).toEqual({ clientId: APP, enable: true }); messaging = true; return reply({}) }
+    if (path.endsWith('/event/switch/' + APP)) { expect(body).toEqual({ clientId: APP, eventMode: 4 }); eventMode = 4; return reply({}) }
+    if (path.endsWith('/scope/update/' + APP)) { expect(body.clientId).toBe(APP); scopes = body.appScopeIDs.map((id: number) => ({ id, scopeIdentityType: 2 })); return reply({ needConfigurePrivilege: false }) }
+    if (path.endsWith('/event/update/' + APP)) { expect(body).toEqual({ clientId: APP, events: [], appEvents: [EVENT], userEvents: [], operation: 'add', eventMode: 4 }); received = true; return reply({}) }
     if (path.endsWith('/callback/switch/' + APP)) { callbackMode = 4; return reply({}) }
     if (path.endsWith('/callback/update/' + APP)) { cardActions = true; return reply({}) }
-    if (path.endsWith('/app_version/create/' + APP)) { versionCreated = true; return reply({ versionId: VERSION }) }
-    if (path.endsWith('/publish/commit/' + APP + '/' + VERSION)) { submitted = true; return reply({}) }
+    if (path.endsWith('/app_version/create/' + APP)) { expect(body).not.toHaveProperty('autoPublish'); versionCreated = true; return reply({ versionId: VERSION }) }
+    if (path.endsWith('/publish/commit/' + APP + '/' + VERSION)) { expect(body).toEqual({ clientId: APP }); submitted = true; return reply({}) }
     throw Error('Unexpected initial setup native request: ' + path)
   }))
   let enrollment = await sdk.call('connection.enrollment.begin', { operationId: 'initial-creation', connectionId: 'initial-bot', adapterId: 'feishu', domain: 'open.feishu.cn', label: 'AMUX identity', preset: { name: 'AMUX identity', description: 'Saved Mote description', avatar: { pngDataUrl: PNG } } })
@@ -108,8 +108,8 @@ it.each(['messages', 'cards'] as const)('public SDK and actual CLI complete orig
     '/developers/v1/publish/commit/' + APP + '/' + VERSION
   ])
   const create = writes.find(request => request.path.includes('/app_version/create/'))!
-  expect(create.body).toMatchObject({ appVersion: '1.0.0', changeLog: 'Enable AMUX conversations.', autoPublish: false, pcDefaultAbility: 'bot', mobileDefaultAbility: 'bot', visibleSuggest: { members: [USER], departments: [], groups: [], isAll: 0 } })
-  expect(writes.find(request => request.path.includes('/publish/commit/'))!.body).toEqual({ is_full_release: false })
+  expect(create.body).toEqual({ appVersion: '1.0.0', changeLog: 'Enable AMUX conversations.', pcDefaultAbility: 'bot', mobileDefaultAbility: 'bot', visibleSuggest: { members: [USER], departments: [], groups: [], isAll: 0 }, blackVisibleSuggest: { departments: [], members: [], groups: [], isAll: 0 } })
+  expect(writes.find(request => request.path.includes('/publish/commit/'))!.body).toEqual({ clientId: APP })
   const count = f.requests.length
   expect((await f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId })).initialSetup).toEqual(result.initialSetup)
   expect(f.requests).toHaveLength(count)
