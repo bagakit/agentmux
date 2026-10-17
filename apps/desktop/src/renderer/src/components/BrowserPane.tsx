@@ -1147,7 +1147,7 @@ function BrowserPaneContent({
           onOpenChange={setMenuOpen}
         />
         <button type="button" ref={visible ? discussion.buttonRef : undefined} aria-label="Message Browser operator"
-          title="Send an opinion to the original Agent" onClick={event => discussion.open(event.currentTarget)}>{discussion.button}</button>
+          title="Send an opinion to the original Agent" onClick={event => discussion.open(event.currentTarget, undefined, traceAnchors.current.get(key))}>{discussion.button}</button>
         {toolbar?.selectElement ? (
           <button
             type="button"
@@ -1458,7 +1458,7 @@ function BrowserPaneContent({
               }).catch(reportError)
             }}
           /> : null}
-          {timelineOperation && timelineSelectedStep ? <button type="button" className="small-button" onClick={event => discussion.open(event.currentTarget as HTMLButtonElement, { operationId: timelineOperation.id, sequence: timelineSelectedStep.sequence })}>Comment on step {timelineSelectedStep.sequence}</button> : null}
+          {timelineOperation && timelineSelectedStep ? <button type="button" className="small-button" onClick={event => discussion.open(event.currentTarget as HTMLButtonElement, { operationId: timelineOperation.id, sequence: timelineSelectedStep.sequence }, traceAnchors.current.get(key))}>Comment on step {timelineSelectedStep.sequence}</button> : null}
           {timelineOperation && timelineSelectedStep
             ? <BrowserStepEvidence operation={timelineOperation} step={timelineSelectedStep} /> : null}
           {replayPlan ? (
