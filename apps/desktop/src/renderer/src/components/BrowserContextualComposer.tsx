@@ -179,7 +179,7 @@ export function useBrowserContextualComposer(browserId: string, operation: Brows
       {submitted ? <p className="browser-contextual-composer__notice" role="status">Queued for the original Agent. Delivery and adoption are separate; check Pending in its message box.</p> : null}
       <footer><small>Ctrl / ⌘ Enter</small>{!text.trim() && !busy && !pending.current && original ? <button type="button" className="small-button" onClick={() => {
         ++request.current; currentOriginal.current = null; setOriginal(null); setSubmitted(null); setIncludeContext(true);
-        if (anchor.current) void show(anchor.current)
+        if (anchor.current) void show(anchor.current, undefined, true, anchorPane.current ?? undefined)
       }}>New opinion</button> : null}<button type="button" className="primary-button" disabled={busy || !original || !text.trim()} onClick={() => void send()}><SendIcon size={12} />{busy ? 'Queueing…' : includeContext && source ? 'Queue opinion' : 'Queue text only'}</button></footer>
     </section>
   </WindowOverlayPortal> : null
