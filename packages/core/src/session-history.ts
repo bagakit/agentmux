@@ -77,6 +77,31 @@ function collaboration(value: unknown): AgentSessionHistoryCollaboration {
     }) }
 }
 
+/** Native message attribution is optional reading metadata, never input authority. */
+function collaborationFields(value: unknown, source: AgentSessionHistorySource): Pick<AgentSessionHistoryItem, 'collaboration' | 'conversationDiagnostic'> {
+  const record = object(value)
+  if (record.kind !== 'message') return { collaboration: collaboration(value) }
+  const invalidFields: string[] = []
+  const reportedSource = record.source && typeof record.source === 'object' && !Array.isArray(record.source)
+    ? record.source as Record<string, unknown> : undefined
+  const sourceConfirmed = reportedSource !== undefined && reportedSource.providerId === source.providerId && reportedSource.nativeSessionId === source.nativeSessionId &&
+    Object.keys(reportedSource).every(key => key === 'providerId' || key === 'nativeSessionId')
+  if (!sourceConfirmed) invalidFields.push('source')
+  if (Object.keys(record).some(key => !['kind', 'source', 'sender', 'recipient'].includes(key))) invalidFields.push('fields')
+  const actor = (key: 'sender' | 'recipient'): string | undefined => {
+    const value = record[key]
+    if (value === undefined) return undefined
+    if (typeof value === 'string' && value.length > 0 && value.length <= 16_384 && !/[\u0000-\u001f\u007f]/u.test(value)) return value
+    invalidFields.push(key)
+    return undefined
+  }
+  const sender = actor('sender'), recipient = actor('recipient')
+  return { collaboration: { kind: 'message', source: { providerId: source.providerId, nativeSessionId: source.nativeSessionId },
+    ...(sender === undefined || !sourceConfirmed ? {} : { sender }), ...(recipient === undefined || !sourceConfirmed ? {} : { recipient }) },
+    ...(invalidFields.length ? { conversationDiagnostic: { code: 'NATIVE_COLLABORATION_ATTRIBUTION_UNCONFIRMED',
+      message: `Optional native collaboration attribution is unknown (${invalidFields.join(', ')}). The original message remains readable.`, original: value } } : {}) }
+}
+
 function questionRequest(value: unknown): AgentSessionHistoryQuestionRequest {
   const request = object(value)
   if (request.delivery !== 'async' || !Array.isArray(request.questions) || !request.questions.length) return invalid()
@@ -256,8 +281,10 @@ export function normalizeSessionHistoryPage(
     if (item.questionAnswers !== undefined && item.kind !== 'user-message') return invalid()
     const questionDiagnostic = item.questionDiagnostic === undefined ? undefined : object(item.questionDiagnostic)
     if (questionDiagnostic && item.kind !== 'assistant-message' && item.kind !== 'user-message') return invalid()
+    const collaborationMetadata = item.collaboration === undefined ? {} : collaborationFields(item.collaboration, source)
     return { id, kind: item.kind, contentParts,
       ...conversationProvenanceFields(item),
+      ...collaborationMetadata,
       ...normalizeSessionHistoryMetrics(item),
       ...(item.messagePhase === undefined ? {} : { messagePhase: choice(item.messagePhase, ['progress', 'final']) }),
       ...(item.questionRequest === undefined ? {} : { questionRequest: questionRequest(item.questionRequest) }),
@@ -265,7 +292,6 @@ export function normalizeSessionHistoryPage(
       ...(questionDiagnostic === undefined ? {} : { questionDiagnostic: {
         code: nonempty(questionDiagnostic.code), message: nonempty(questionDiagnostic.message)
       } }),
-      ...(item.collaboration === undefined ? {} : { collaboration: collaboration(item.collaboration) }),
       ...(item.turnId === undefined ? {} : { turnId: nonempty(item.turnId) }),
       ...(item.title === undefined ? {} : { title: item.title }),
       ...(startedAt === undefined ? {} : { startedAt }),

@@ -136,6 +136,7 @@ const capturedRoles: Record<AgentTimelineItemKind, ConversationEvent['role']> = 
 export function conversationRecordRole(record: ConversationSourceRecord): ConversationEvent['role'] {
   const { original } = record
   if (original.kind === 'native') return original.item.conversation?.adoptedInput?.purpose === 'a2a-notification' ? 'notice' : original.item.questionRequest ? 'interaction'
+    : original.item.collaboration?.kind === 'message' ? 'message'
     : original.item.kind === 'activity' ? 'process' : original.item.kind === 'system-message' ? 'notice' : 'message'
   const item = original.item
   if (item.kind === 'assistant_message' && item.source === 'native-hook' && recordedConversationAuthor(item).kind === 'unknown') return 'observation'
