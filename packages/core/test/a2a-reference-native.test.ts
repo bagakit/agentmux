@@ -240,6 +240,16 @@ describe('A2A references through actual private Runtime and public CLI', () => {
     expect(await h.queue.readNotification(notificationId)).toEqual(notice)
     expect(await h.client.inspectAgentPromptSubmission(notice!.key)).toBeNull()
     expect((await h.client.statusAgent('recipient')).run.acceptedInputBytes).toBe(before.run.acceptedInputBytes)
+    const unrelatedPrompt = 'The other Session keeps its own same-ID input capability'
+    const senderRun = h.client.agentSession('sender').run
+    await h.client.submitAgentPrompt({ agentSessionId: 'sender', operationId: notificationId, expectedRun: senderRun,
+      admissionIntent: { kind: 'manual-actor' }, execution: 'immediate', prompt: unrelatedPrompt, authorHuman: true })
+    expect(await eventually(() => readFile(join(h.root, 'sender-terminal.bytes'), 'utf8').catch(() => ''), value => value.includes(unrelatedPrompt))).toContain(unrelatedPrompt)
+    const senderKey = { kind: 'prompt' as const, agentSessionId: 'sender', expectedRun: senderRun, submissionId: notificationId }
+    const unrelated = await h.client.inspectAgentPromptSubmission(senderKey)
+    expect(unrelated?.admission?.inputKey).toEqual(senderKey)
+    expect(unrelated?.admission?.acknowledged || unrelated?.terminalPromptSubmission?.submit.acknowledged).toBe(true)
+    expect(await h.queue.readNotification(notificationId)).toEqual(notice)
     const prompt = 'A distinct user input remains available'
     await h.client.submitAgentPrompt({ agentSessionId: 'recipient', operationId: 'independent-user-input', expectedRun: h.session.run,
       admissionIntent: { kind: 'manual-actor' }, execution: 'immediate', prompt, authorHuman: true })
