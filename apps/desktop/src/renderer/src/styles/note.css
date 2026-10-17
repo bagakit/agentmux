@@ -243,21 +243,27 @@
 .note-editor__body:hover > .note-block-action, .note-editor__body:focus-within > .note-block-action { opacity: 1; }
 .note-block-action:hover { color: var(--text); background: var(--wash-1); }
 .note-block-action:focus-visible { opacity: 1; outline: 2px solid var(--green); outline-offset: 1px; }
-/* Permanent start/end boundaries distinguish the original shared file from its host prose. */
-.note-shared-block { position: relative; margin: var(--sp-5) 0; padding: var(--sp-2) 0 var(--sp-2) var(--sp-4); border-inline-start: 2px solid var(--line); }
-.note-shared-block::before, .note-shared-block::after { content: ''; position: absolute; inset-inline-start: -2px; width: 12px; height: 1px; background: var(--line); }
+/* Shared prose keeps its boundary while normal chrome appears without moving text. */
+.note-shared-block { position: relative; margin: var(--sp-4) 0; padding: var(--sp-1) 0 var(--sp-1) var(--sp-4); border-inline-start: 1px solid var(--line); }
+.note-shared-block::before, .note-shared-block::after { content: ''; position: absolute; inset-inline-start: -1px; width: 8px; height: 1px; background: var(--line); }
 .note-shared-block::before { top: 0; }
 .note-shared-block::after { bottom: 0; }
 .note-shared-block:focus-within { border-color: var(--green); }
-.note-shared-block__header { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-2); color: var(--text-3); font: var(--fs-meta)/1.5 var(--font-sans); }
-.note-shared-block__header > :nth-child(2) { margin-inline-start: auto; font-size: var(--fs-micro); }
-.note-shared-block__header .note-text-button { min-height: 24px; padding-inline: var(--sp-2); font: inherit; }
+.note-shared-content { position: relative; }
+.note-shared-block__marker { position: absolute; inset-inline-start: -25px; top: 0; width: 20px; height: 20px; display: grid; place-items: center; border: 0; border-radius: 4px; padding: 0; color: var(--text-3); background: var(--bg); cursor: help; }
+.note-shared-content[data-shared-role="source"] > .note-shared-block__marker { color: var(--text-2); }
+.note-shared-block__marker:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
+.note-shared-block__header { position: absolute; z-index: 2; inset-inline: 0; bottom: 100%; display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); min-height: 20px; color: var(--text-3); background: var(--bg); font: var(--fs-micro)/1.5 var(--font-sans); opacity: 0; visibility: hidden; pointer-events: none; }
+.note-shared-block__header > :nth-child(2) { margin-inline-start: auto; }
+.note-shared-block__header .note-text-button { min-height: 20px; padding-inline: var(--sp-2); font: inherit; }
 .note-shared-block__header .note-text-button:disabled { opacity: .4; cursor: default; }
-.note-shared-block > .note-embedded-content { margin-top: 0; }
+.note-shared-block:hover > .note-shared-content > .note-shared-block__header, .note-shared-block:focus-within > .note-shared-content > .note-shared-block__header, .note-shared-block__header[data-attention] { opacity: 1; visibility: visible; pointer-events: auto; }
 .note-shared-block .note-editor { padding: 0; max-width: none; }
 .note-shared-block .note-editor__tools { display: none; }
 .note-shared-block .note-block-content { min-height: 0; padding-bottom: 0; }
+.note-shared-block .note-block-content > :first-child { margin-top: 0; }
 .note-shared-block .note-block-content > :last-child { margin-bottom: 0; }
-.note-shared-block__end { margin-top: var(--sp-2); color: var(--text-3); font: var(--fs-micro)/1.5 var(--font-sans); }
+.note-shared-block__end { position: absolute; top: calc(100% + 2px); color: var(--text-3); background: var(--bg); font: var(--fs-micro)/1.5 var(--font-sans); opacity: 0; visibility: hidden; pointer-events: none; }
+.note-shared-block:hover > .note-shared-content > .note-shared-block__end, .note-shared-block:focus-within > .note-shared-content > .note-shared-block__end { opacity: 1; visibility: visible; }
 @media (pointer: coarse) { .note-editor__body > .note-block-action { opacity: 1; } }
 .note-editor__body:has(.note-shared-block:hover) > .note-block-action, .note-editor__body:has(.note-shared-block:focus-within) > .note-block-action { opacity: 0; pointer-events: none; }
