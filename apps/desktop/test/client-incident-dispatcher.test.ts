@@ -26,7 +26,7 @@ function reading(serial: number, consumerId = 'original-consumer', trigger: Read
       : trigger === 'recovered' ? 'conversation-reading-recovered' : 'conversation-reading-progress',
     stage: 'reading-observed', code: null, elapsedMs: 0, reading: record }
 }
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
 it('owns one actual Realm queue regardless of document positions', async () => {
   const report = vi.fn(async () => done), open = vi.fn(async () => ({ token: 'realm-token' }))
@@ -60,6 +60,7 @@ it('detaches metadata before queueing and preserves actual in-flight admission u
 })
 
 it('shares count and UTF-8 budgets across reading and Terminal while retaining the first pending start', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
   const opening = deferred<unknown>(), sent: AgentMuxClientIncidentReport[] = []
   const transport = { open: vi.fn(() => opening.promise), report: vi.fn(async (_token: string, input: AgentMuxClientIncidentReport) => { sent.push(input); return done }) }
   const sender = createClientIncidentDispatcher(() => transport)
@@ -71,10 +72,11 @@ it('shares count and UTF-8 budgets across reading and Terminal while retaining t
   sender.send(reading(32, 'original-consumer', 'recovered'))
   expect(sender.inspect().pending).toBe(6)
   opening.resolve({ token: 'realm-token' })
-  await vi.waitFor(() => expect(sent).toHaveLength(6))
+  await vi.advanceTimersByTimeAsync(2000)
+  expect(sent).toHaveLength(6)
   expect(sent.filter(item => item.kind === 'conversation-reading-progress').map(item => item.occurrenceId)).toEqual([freshId(0), freshId(29)])
-  expect(sent.map(item => item.kind)).toEqual(['conversation-reading-progress', 'conversation-reading-progress',
-    'terminal-attach-failed', 'conversation-reading-failure', 'conversation-reading-held', 'conversation-reading-recovered'])
+  expect(sent.map(item => item.kind)).toEqual(['terminal-attach-failed', 'conversation-reading-failure',
+    'conversation-reading-held', 'conversation-reading-recovered', 'conversation-reading-progress', 'conversation-reading-progress'])
   expect(sender.dropped()).toBe(28)
   expect(sender.inspect().pendingBytes).toBe(0)
 })
@@ -117,6 +119,7 @@ it('accounts actual encoded report bytes rather than character length', async ()
 })
 
 it('reclaims queued healthy progress to preserve a newly arriving critical observation', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
   const opening = deferred<unknown>(), seen: AgentMuxClientIncidentReport[] = []
   const sender = createClientIncidentDispatcher(() => ({ open: () => opening.promise,
     report: async (_token, report) => { seen.push(report); return report.reading ? { accepted: true, logId: report.reading.logId } : done } }))
@@ -126,7 +129,8 @@ it('reclaims queued healthy progress to preserve a newly arriving critical obser
   sender.send(terminal(99))
   expect(sender.inspect()).toMatchObject({ pending: 32, inFlight: true, dropped: 1 })
   opening.resolve({ token: 'realm-token' })
-  await vi.waitFor(() => expect(seen).toHaveLength(32))
+  await vi.advanceTimersByTimeAsync(16000)
+  expect(seen).toHaveLength(32)
   expect(seen.filter(report => report.kind === 'conversation-reading-progress')).toHaveLength(15)
   expect(seen.some(report => report.occurrenceId === 'terminal-99')).toBe(true)
 })
