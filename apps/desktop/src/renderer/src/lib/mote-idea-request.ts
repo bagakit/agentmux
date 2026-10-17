@@ -21,6 +21,7 @@ export type MoteIdeaSources = {
 }
 const excerpt = (text: string, limit = 6000) => text.length <= limit ? text : text.slice(0, limit) + '\n[Excerpt; the rest remains in the original source.]'
 const sourceDocument = (document: FileDocument) => JSON.stringify({ path: document.path, revision: document.revision, excerpt: excerpt(document.content) })
+const ideaKnowledgeGuidance = 'Carry forward earlier authorization to maintain this Mote’s original knowledge; do not require another request for each useful update within that scope. Keep an idea a proposal until the user decides, not a confirmed preference, accepted Goal or completed result. Maintain relevant original notes and short index links with source, date and scope through current Files revision-checked save and readback. Preserve unrelated notes, user edits and explicit feedback. Do not rewrite SOUL or BEHAVIOR from a suggestion, or start an extra Agent, model round or background reflection for this request. This guidance grants no new authorization for arrangements or external actions.'
 
 /** A request to a real Agent, never an authored suggestion or completed result. */
 export function moteIdeaRequestText(sources: MoteIdeaSources): string {
@@ -38,7 +39,8 @@ export function moteIdeaRequestText(sources: MoteIdeaSources): string {
       'Original linked Goals (Renderer Session association, up to 3): ' + JSON.stringify(discussion.goals.map(goal => ({ id: goal.id, title: goal.title, description: excerpt(goal.description, 1000), status: goal.status, updatedAt: goal.updatedAt })))
     ] : ['Discussion history and linked Goals: not included.']),
     'Unknown or omitted context: ' + (sources.unknown.length ? sources.unknown.join(' ') : 'No additional observation failure in these reads. Source statements still require judgment.'),
-    'If I choose an idea, help continue it in the original discussion and save its reason, source and next step in an original note when I ask. Preserve unrelated notes and conversation.'
+    'If I choose an idea, help continue it in the original discussion. Preserve the original conversation.',
+    ideaKnowledgeGuidance
   ].join('\n\n')
 }
 
@@ -138,7 +140,8 @@ export async function prepareMoteIdeaSchedule(scope: MoteWorkfaceScope, referenc
     ] : ['Discussion history and linked Goals are not included.']),
     'For each delivered request, read the current relevant original files using the original file.read / file.ls capability. These revisions and conversation/Goal observations are last-confirmed preparation facts, not current truth or a required future revision. Report failed or unknown reads; do not substitute a neighboring Mote, unseen conversation or invented source.',
     ...(prepared.sources.unknown.length ? ['Unconfirmed observations: ' + prepared.sources.unknown.join(' ')] : []),
-    'Current human instructions take priority. Saved SOUL changes apply to a new Session; do not claim an existing Session was hot-updated. Continue a chosen idea through the original discussion/Goal and save an original note only when asked; preserve unrelated work and explicit feedback.'
+    'Current human instructions take priority. Saved SOUL changes apply to a new Session; do not claim an existing Session was hot-updated. Continue a chosen idea through the original discussion/Goal.',
+    ideaKnowledgeGuidance
   ].join('\n\n')
   return { target: prepared.target, message: input.direction, frozenContext: context, sources: prepared.observations }
 }

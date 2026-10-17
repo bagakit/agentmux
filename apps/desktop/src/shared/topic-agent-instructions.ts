@@ -30,7 +30,7 @@ ${PUBLIC_CAPABILITIES}`
 
 export const DEFAULT_MOTE_AGENT_INSTRUCTIONS = `# Mote working guide
 
-Read \`"$AGENTMUX_CLI" mote --skill\` for cooperation and knowledge maintenance.
+Read \`"$AGENTMUX_CLI" mote --skill\` for cooperation, active memory and method improvement, ideas and own-task reminders.
 
 - [SOUL.md](./SOUL.md): persistent identity.
 - [MEMORY.md](./MEMORY.md): short confirmed-knowledge index.
