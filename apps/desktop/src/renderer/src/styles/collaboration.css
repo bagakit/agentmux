@@ -15,7 +15,7 @@
 .collaboration-toolbar__kinds button[data-kind=creation] span { border-top-style: dashed; border-color: var(--text-2); }
 .collaboration-toolbar__kinds button[data-kind=supervision] span { border-color: var(--amber); }
 .collaboration-dialog__body { display: flex; flex: 1; min-height: 0; }
-.collaboration-canvas { position: relative; flex: 1; min-width: 0; min-height: 0; background: var(--surface-1, var(--surface-1)); }
+.collaboration-canvas { position: relative; flex: 1; min-width: 0; min-height: 0; background: var(--surface-1); }
 .collaboration-canvas .react-flow__background { opacity: .15; }
 .collaboration-canvas .react-flow__handle { width: 4px; height: 4px; min-width: 4px; min-height: 4px; border: none; background: var(--line); opacity: .5; }
 .collaboration-canvas .react-flow__node-area { z-index: -1 !important; }
@@ -77,3 +77,8 @@
 .collaboration-canvas__issue button { color: var(--green); background: transparent; border: 0; cursor: pointer; }
 .collaboration-navigation { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px; margin-bottom: 14px; }
 .collaboration-navigation button { margin: 3px; }
+
+.collaboration-area__internal { pointer-events: auto; position: absolute; right: 12px; top: 12px; padding: 3px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-2); font-size: var(--fs-micro); cursor: pointer; }
+.collaboration-area[data-folded=true]:has(.collaboration-area__internal) .collaboration-area__heading { padding-right: 112px; }
+.collaboration-area__internal:hover { color: var(--green); }
+.collaboration-area-issues { border-bottom: 1px solid var(--line); padding-bottom: 10px; }
