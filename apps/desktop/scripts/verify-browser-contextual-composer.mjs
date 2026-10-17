@@ -84,6 +84,15 @@ async function workspaceSource(name) {
   }
   return null
 }
+// PostCSS resolves @import through Vite aliases rather than every module plugin.
+const browserSourceAliases = [...workspacePackages].flatMap(([name, pkg]) => Object.entries(pkg.exports)
+  .sort(([left], [right]) => Number(left.includes('*')) - Number(right.includes('*')) || right.length - left.length).flatMap(([key, spec]) => {
+  const target = typeof spec === 'string' ? spec : spec.browser
+  if (!target?.startsWith('./src/')) return []
+  const namePattern = name + (key === '.' ? '' : key.slice(1))
+  return [{ find: new RegExp('^' + namePattern.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&').replace('\\*', '(.+)') + '$'),
+    replacement: resolve(pkg.directory, target).replace('*', '$1') }]
+}))
 async function execute(executable, args, env) {
   return await new Promise((resolve, reject) => {
     const child = spawn(executable, args, { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] }); let log = '', timedOut = false
@@ -138,7 +147,11 @@ async function native(label, mutation) {
     await viteBuild({ configFile: false, logLevel: 'error', root: join(root, 'apps/desktop/scripts/fixtures/browser-contextual-composer'), base: './',
       define: { __AGENTMUX_WEB_PREVIEW__: 'false' },
       worker: { format: 'es' },
-      resolve: { dedupe: ['react', 'react-dom'], alias: Object.entries(aliases).map(([name, path]) => ({ find: new RegExp('^' + name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&') + '$'), replacement: path })) },
+      css: { postcss: { plugins: [{ postcssPlugin: 'actual-contextual-css-inputs', async OnceExit(_stylesheet, { result }) {
+        for (const message of result.messages) if (message.type === 'dependency' && typeof message.file === 'string' &&
+          message.file.startsWith(root + '/') && !message.file.includes('/node_modules/')) await bind(message.file)
+      } }] } },
+      resolve: { dedupe: ['react', 'react-dom'], alias: [...Object.entries(aliases).map(([name, path]) => ({ find: new RegExp('^' + name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&') + '$'), replacement: path })), ...browserSourceAliases] },
       plugins: [{ name: 'actual-renderer-inputs', enforce: 'pre', async resolveId(id) { return await workspaceSource(id) },
         async load(id) {
           if (id.includes('?') || !id.startsWith(root + '/') || id.includes('/node_modules/') || !/\.(?:[cm]?[jt]sx?|css)$/u.test(id)) return
@@ -151,6 +164,8 @@ async function native(label, mutation) {
         }, moduleParsed(info) { if (info.id.startsWith(root + '/') && !info.id.includes('/node_modules/')) rendererInputs.add(info.id.split('?')[0]) } }],
       build: { outDir: join(directory, 'renderer'), emptyOutDir: false, minify: false, sourcemap: false, target: 'esnext' } })
     for (const file of rendererInputs) await bind(file)
+    for (const file of ['apps/desktop/src/renderer/src/styles/browser.css', 'apps/desktop/src/renderer/src/styles/browser-contextual-composer.css', 'packages/client-ui/src/styles/conversation-browser-context.css'])
+      assert.ok(sources.has(file), 'The actual postcss import must bind its candidate stylesheet: ' + file)
     assert.equal(applied, Boolean(mutation), 'The exact owning production module must consume its private mutation')
     for (const file of ['apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/components/BrowserPane.tsx', 'apps/desktop/src/renderer/src/components/BrowserContextualComposer.tsx']) assert.ok(rendererInputs.has(join(root, file)), 'Renderer consumes actual production: ' + file)
     await writeFile(join(directory, 'bootstrap.cjs'), `const {app}=require('electron'),fs=require('node:fs'),path=require('node:path');const root=${JSON.stringify(directory)};for(const key of ['home','appData','userData','sessionData']){const p=path.join(root,key);fs.mkdirSync(p,{recursive:true});app.setPath(key,p)}const fail=error=>{console.error(error);fs.writeFileSync(path.join(root,'native-receipt.json'),JSON.stringify({passed:false,failure:{message:error.message,stack:error.stack}}));app.exit(1)};process.on('uncaughtException',fail);app.whenReady().then(()=>import(${JSON.stringify(join(dist, 'main.mjs'))})).catch(fail);`)
