@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { MetricsObservation, RendererAllocationsResult, RendererPerformanceScene } from '@agentmux/core/control'
 import type { PerformanceSceneState } from '../../lib/use-performance-scene'
-import { CaptureResult, currentPerformanceCaptureTarget, downloadPerformanceJSON } from './PerformanceCapture'
+import { CaptureResult, currentPerformanceCaptureTarget, downloadPerformanceJSON, downloadPerformanceTrace } from './PerformanceCapture'
 
 const bytes = (value: number) => value >= 1048576 ? `${(value / 1048576).toFixed(1)} MiB` : value >= 1024 ? `${(value / 1024).toFixed(1)} KiB` : `${value} B`
 const time = (value: number) => new Date(value).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -80,7 +80,7 @@ export function PerformanceScene({ state, observation, externalBusy = false }: {
         <button type="button" onClick={() => exportJSON({ scene, persistence }, 'performance-scene.json')}>Export scene</button>
         {scene.cpu.result?.profile ? <button type="button" onClick={() => exportJSON(scene.cpu.result!.profile, 'renderer.cpuprofile')}>CPU profile</button> : null}
         {allocationResult?.profile ? <button type="button" onClick={() => exportJSON(allocationResult.profile, 'renderer.heapprofile')}>Allocation profile</button> : null}
-        {scene.timeline.result?.trace ? <button type="button" onClick={() => exportJSON(scene.timeline.result!.trace, 'renderer-trace.json')}>Timeline</button> : null}
+        {scene.timeline.result?.trace ? <button type="button" onClick={() => { downloadPerformanceTrace(scene.timeline.result!.trace!); setExported(true) }}>Timeline</button> : null}
       </div>
       {exported ? <p className="performance-note" role="status">Download requested. Check your selected destination for the saved file.</p> : null}
       <details className="performance-disclosure"><summary>Sources and capture stages</summary>

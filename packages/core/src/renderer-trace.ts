@@ -3,16 +3,17 @@ import { rpcRecord } from './rpc-data.js'
 import { parseRendererV8ProfileInput, sameRendererV8ProfileTarget, type RendererV8ProfileInput } from './renderer-v8-profile.js'
 
 export type RendererTraceInput = RendererV8ProfileInput
-export type RendererTraceEvent = Record<string, unknown>
-export type RendererTrace = { traceEvents: RendererTraceEvent[] }
+/** Original native gzip bytes, never a reconstructed event array. */
+export type RendererTrace = { encoding: 'base64'; data: string; bytes: number; sha256: string }
 export const RENDERER_TRACE_MAX_BYTES = 8 * 1024 * 1024
 export const RENDERER_TRACE_METADATA_BYTES = 64 * 1024
+export const RENDERER_TRACE_MAX_GZIP_BYTES = 3 * Math.floor((RENDERER_TRACE_MAX_BYTES - RENDERER_TRACE_METADATA_BYTES) / 4)
 export const RENDERER_TRACE_CATEGORIES = ['toplevel', 'devtools.timeline', 'disabled-by-default-devtools.timeline',
   'blink', 'blink.user_timing', 'cc', 'gpu', 'viz', 'input', 'latencyInfo'] as const
 export type RendererTraceResult = RendererTraceInput & {
-  schema: 'agentmux.renderer-trace.v1'; scope: 'chromium-target-related-timeline'; status: 'completed' | 'failed' | 'unknown'
+  schema: 'agentmux.renderer-trace.v2'; scope: 'chromium-target-related-timeline'; status: 'completed' | 'failed' | 'unknown'
   /** Requested filters, not proof of native support. Observed PID/category facts remain in the original events. */
-  transferMode: 'ReportEvents'; traceTimeUnit: 'microseconds'; requestedCategories: string[]
+  transferMode: 'ReturnAsStream'; streamFormat: 'json'; streamCompression: 'gzip'; traceTimeUnit: 'microseconds'; requestedCategories: string[]
   /** Main receive times: startedAt/startMonotonicMs mark start ACK, not the native trace's earliest event. */
   timing: { requestedAt: number; startedAt: number | null; endAcknowledgedAt: number | null; completedAt: number | null
     finishedAt: number; startMonotonicMs: number | null; endMonotonicMs: number | null; completeMonotonicMs: number | null }
@@ -20,8 +21,9 @@ export type RendererTraceResult = RendererTraceInput & {
   lifecycle: { startRequested: boolean; startAcknowledged: boolean; endRequested: boolean; endAcknowledged: boolean
     tracingComplete: boolean; dataLossOccurred: boolean | null; detached: 'not-attached' | 'confirmed' | 'unconfirmed' | 'owner-lost' }
   bufferUsage: { observations: number; maxFraction: number | null; fullObserved: boolean }
-  /** Compact JSON document bytes from chunks observed so far, including the empty document envelope. */
-  receivedEvents: number; receivedTraceBytes: number
+  /** Observed decoded bytes/events and original gzip bytes; failure counters may include a violating chunk. */
+  receivedEvents: number; receivedTraceBytes: number; receivedGzipBytes: number
+  stream: { handleReceived: boolean; eof: boolean; closeRequested: boolean; closeAcknowledged: boolean }
   trace: RendererTrace | null; traceBytes: number | null; sha256: string | null
   issues: Array<{ stage: string; code: string; message: string; messageTruncated: boolean }>
 }
@@ -44,42 +46,31 @@ function array(value: unknown): unknown[] {
 export function parseRendererTraceInput(value: unknown, code = 'INVALID_CONTROL_REQUEST'): RendererTraceInput {
   try { return parseRendererV8ProfileInput(value, code) } catch { return invalid(code) }
 }
-/** Keep every JSON field and event in its original order; no event-name projection. */
-export function parseRendererTraceEvents(value: unknown): RendererTraceEvent[] {
-  for (const event of array(value)) rpcRecord(event, undefined, 'CONTROL_PROTOCOL_ERROR')
-  const pending: unknown[] = [value], seen = new WeakSet<object>()
-  while (pending.length) {
-    const item = pending.pop()
-    if (item === null || typeof item === 'string' || typeof item === 'boolean' || typeof item === 'number' && Number.isFinite(item)) continue
-    if (!item || typeof item !== 'object') invalid()
-    if (seen.has(item)) continue
-    seen.add(item)
-    if (Array.isArray(item)) {
-      for (const value of array(item)) pending.push(value)
-    } else {
-      const object = rpcRecord(item, undefined, 'CONTROL_PROTOCOL_ERROR')
-      for (const key of Object.keys(object)) pending.push(Object.getOwnPropertyDescriptor(object, key)!.value)
-    }
-  }
-  try { JSON.stringify(value) } catch { invalid() }
-  return value as RendererTraceEvent[]
-}
-export function rendererTraceJSON(trace: RendererTrace): string {
-  const data = fields(trace, ['traceEvents'])
-  parseRendererTraceEvents(data.traceEvents)
-  const text = JSON.stringify(trace)
-  if (new TextEncoder().encode(text).byteLength > RENDERER_TRACE_MAX_BYTES) {
-    throw new AgentMuxError('Original Renderer trace exceeds the 8 MiB result transport budget; it was not truncated.', 'CONTROL_PROTOCOL_ERROR')
-  }
-  return text
+/** Canonical base64 shape/length only. Byte inflation belongs to explicit Node consumers. */
+function parseMaterial(value: unknown): RendererTrace {
+  const r = fields(value, ['encoding', 'data', 'bytes', 'sha256'])
+  if (r.encoding !== 'base64' || typeof r.data !== 'string' || !count(r.bytes) || r.bytes < 1 ||
+    r.bytes > RENDERER_TRACE_MAX_GZIP_BYTES || r.data.length !== 4 * Math.ceil(r.bytes / 3) ||
+    typeof r.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(r.sha256)) invalid()
+  const sextet = (code: number) => code >= 65 && code <= 90 ? code - 65 : code >= 97 && code <= 122 ? code - 71 :
+    code >= 48 && code <= 57 ? code + 4 : code === 43 ? 62 : code === 47 ? 63 : -1
+  const padding = r.bytes % 3 === 0 ? 0 : 3 - r.bytes % 3, end = r.data.length - padding
+  for (let i = 0; i < end; i++) if (sextet(r.data.charCodeAt(i)) < 0) invalid()
+  for (let i = end; i < r.data.length; i++) if (r.data.charCodeAt(i) !== 61) invalid()
+  if (padding && (sextet(r.data.charCodeAt(end - 1)) & (padding === 2 ? 15 : 3)) !== 0) invalid()
+  return r as unknown as RendererTrace
 }
 export function parseRendererTraceResult(value: unknown, input?: RendererTraceInput): RendererTraceResult {
-  const r = fields(value, ['target', 'durationMs', 'schema', 'scope', 'status', 'transferMode', 'traceTimeUnit', 'requestedCategories',
-    'timing', 'sourceVerified', 'lifecycle', 'bufferUsage', 'receivedEvents', 'receivedTraceBytes', 'trace', 'traceBytes', 'sha256', 'issues'])
+  const envelope = rpcRecord(value, undefined, 'CONTROL_PROTOCOL_ERROR')
+  if (envelope.schema !== 'agentmux.renderer-trace.v2') {
+    throw new AgentMuxError('Renderer trace version is unsupported; the original stored material was not modified.', 'CONTROL_PROTOCOL_ERROR')
+  }
+  const r = fields(envelope, ['target', 'durationMs', 'schema', 'scope', 'status', 'transferMode', 'streamFormat', 'streamCompression', 'traceTimeUnit', 'requestedCategories',
+    'timing', 'sourceVerified', 'lifecycle', 'bufferUsage', 'receivedEvents', 'receivedTraceBytes', 'receivedGzipBytes', 'stream', 'trace', 'traceBytes', 'sha256', 'issues'])
   const actual = parseRendererTraceInput({ target: r.target, durationMs: r.durationMs }, 'CONTROL_PROTOCOL_ERROR')
   if (input && (!sameRendererV8ProfileTarget(actual.target, input.target) || actual.durationMs !== input.durationMs)) invalid()
-  if (r.schema !== 'agentmux.renderer-trace.v1' || r.scope !== 'chromium-target-related-timeline' ||
-    !['completed', 'failed', 'unknown'].includes(String(r.status)) || r.transferMode !== 'ReportEvents' || r.traceTimeUnit !== 'microseconds' ||
+  if (r.schema !== 'agentmux.renderer-trace.v2' || r.scope !== 'chromium-target-related-timeline' ||
+    !['completed', 'failed', 'unknown'].includes(String(r.status)) || r.transferMode !== 'ReturnAsStream' || r.streamFormat !== 'json' || r.streamCompression !== 'gzip' || r.traceTimeUnit !== 'microseconds' ||
     array(r.requestedCategories).length !== RENDERER_TRACE_CATEGORIES.length || (r.requestedCategories as unknown[]).some((category, index) => category !== RENDERER_TRACE_CATEGORIES[index])) invalid()
   const timing = fields(r.timing, ['requestedAt', 'startedAt', 'endAcknowledgedAt', 'completedAt', 'finishedAt', 'startMonotonicMs', 'endMonotonicMs', 'completeMonotonicMs'])
   for (const key of ['requestedAt', 'finishedAt']) if (!numeric(timing[key])) invalid()
@@ -95,12 +86,16 @@ export function parseRendererTraceResult(value: unknown, input?: RendererTraceIn
   const usage = fields(r.bufferUsage, ['observations', 'maxFraction', 'fullObserved'])
   if (!count(usage.observations) || usage.maxFraction !== null && (!numeric(usage.maxFraction) || usage.maxFraction > 1) ||
     typeof usage.fullObserved !== 'boolean' || usage.fullObserved !== (usage.maxFraction === 1)) invalid()
-  if (!count(r.receivedEvents) || !count(r.receivedTraceBytes) || r.traceBytes !== null && !count(r.traceBytes)) invalid()
+  const stream = fields(r.stream, ['handleReceived', 'eof', 'closeRequested', 'closeAcknowledged'])
+  for (const key of ['handleReceived', 'eof', 'closeRequested', 'closeAcknowledged']) if (typeof stream[key] !== 'boolean') invalid()
+  if ((stream.eof || stream.closeRequested) && !stream.handleReceived ||
+    stream.closeAcknowledged && !stream.closeRequested) invalid()
+  if (!count(r.receivedEvents) || !count(r.receivedTraceBytes) || !count(r.receivedGzipBytes) || r.traceBytes !== null && !count(r.traceBytes)) invalid()
   if (r.trace === null) { if (r.sha256 !== null || r.traceBytes !== null) invalid() }
   else {
-    const text = rendererTraceJSON(r.trace as RendererTrace)
-    if (r.traceBytes !== new TextEncoder().encode(text).byteLength || r.receivedTraceBytes !== r.traceBytes ||
-      (r.trace as RendererTrace).traceEvents.length !== r.receivedEvents || typeof r.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(r.sha256)) invalid()
+    const trace = parseMaterial(r.trace)
+    if (!count(r.traceBytes) || r.receivedTraceBytes !== r.traceBytes || trace.bytes !== r.receivedGzipBytes ||
+      typeof r.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(r.sha256) || !stream.eof) invalid()
   }
   const issues = array(r.issues)
   if (issues.length > 8) invalid()
@@ -110,8 +105,10 @@ export function parseRendererTraceResult(value: unknown, input?: RendererTraceIn
       typeof i.message !== 'string' || i.message.length > 2048 || typeof i.messageTruncated !== 'boolean') invalid()
   }
   if (r.status === 'completed' && (r.trace === null || !source.before || !source.after || !life.startAcknowledged || !life.endAcknowledged ||
-    !life.tracingComplete || life.dataLossOccurred !== false || life.detached !== 'confirmed' || usage.fullObserved || issues.length ||
+    !life.tracingComplete || !stream.handleReceived || !stream.eof || !stream.closeRequested || !stream.closeAcknowledged || life.dataLossOccurred !== false || life.detached !== 'confirmed' || usage.fullObserved || issues.length ||
     ['startedAt', 'endAcknowledgedAt', 'completedAt', 'startMonotonicMs', 'endMonotonicMs', 'completeMonotonicMs'].some(key => timing[key] === null))) invalid()
-  if (new TextEncoder().encode(JSON.stringify({ ...r, trace: null })).byteLength > RENDERER_TRACE_METADATA_BYTES) invalid()
+  const metadata = { ...r, trace: r.trace === null ? null : { ...r.trace as RendererTrace, data: '' } }
+  const metadataBytes = new TextEncoder().encode(JSON.stringify(metadata)).byteLength
+  if (metadataBytes > RENDERER_TRACE_METADATA_BYTES || metadataBytes + (r.trace === null ? 0 : (r.trace as RendererTrace).data.length) > RENDERER_TRACE_MAX_BYTES) invalid()
   return r as unknown as RendererTraceResult
 }

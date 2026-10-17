@@ -23,6 +23,7 @@ export type PerformanceSceneEvidence = {
     status: 'completed' | 'failed' | 'unknown' | 'skipped'
     hasOriginal: boolean
     profileBytes: number | null
+    gzipBytes: number | null
     issueCodes: Array<string | null>
   }>
 }
@@ -58,12 +59,14 @@ export async function readPerformanceSceneEvidence(
         const r = p.result as {
           profileBytes?: number | null
           traceBytes?: number | null
+          trace?: { bytes: number } | null
           issues?: Array<{ code: string }>
         } | null
         return {
           status: p.status,
           hasOriginal: p.result !== null,
           profileBytes: r?.profileBytes ?? r?.traceBytes ?? null,
+          gzipBytes: r?.trace?.bytes ?? null,
           issueCodes: [
             ...(p.issue ? [diagnosticCauseCode(p.issue.code)] : []),
             ...(r?.issues ?? []).map((i) => diagnosticCauseCode(i.code))
@@ -130,11 +133,12 @@ export function parsePerformanceSceneEvidence(value: unknown, captureId: string)
   )
     bad()
   for (const item of r.phases as unknown[]) {
-    const p = fields(item, ['status', 'hasOriginal', 'profileBytes', 'issueCodes'])
+    const p = fields(item, ['status', 'hasOriginal', 'profileBytes', 'gzipBytes', 'issueCodes'])
     if (
       !['completed', 'failed', 'unknown', 'skipped'].includes(String(p.status)) ||
       typeof p.hasOriginal !== 'boolean' ||
       (p.profileBytes !== null && (!Number.isSafeInteger(p.profileBytes) || Number(p.profileBytes) < 0)) ||
+      (p.gzipBytes !== null && (!Number.isSafeInteger(p.gzipBytes) || Number(p.gzipBytes) < 0)) ||
       !Array.isArray(p.issueCodes) ||
       p.issueCodes.length > 9 ||
       (p.issueCodes as unknown[]).some((c) => c !== null && diagnosticCauseCode(c) !== c)

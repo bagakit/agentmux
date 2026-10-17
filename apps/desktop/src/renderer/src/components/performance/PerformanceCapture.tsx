@@ -18,10 +18,18 @@ export function currentPerformanceCaptureTarget(observation: MetricsObservation 
   return { ...window, pid: renderer.process.pid, creationTime: renderer.process.creationTime }
 }
 
-export function downloadPerformanceJSON(value: unknown, name: string) {
-  const url = URL.createObjectURL(new Blob([JSON.stringify(value)], { type: 'application/json' }))
+function downloadPerformanceBlob(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob)
   const link = document.createElement('a'); link.href = url; link.download = name; link.click()
   setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+export function downloadPerformanceJSON(value: unknown, name: string) {
+  downloadPerformanceBlob(new Blob([JSON.stringify(value)], { type: 'application/json' }), name)
+}
+/** Decode only on explicit export. The Renderer never inflates or parses the native timeline. */
+export function downloadPerformanceTrace(trace: NonNullable<RendererTraceResult['trace']>) {
+  const bytes = Uint8Array.from(atob(trace.data), character => character.charCodeAt(0))
+  downloadPerformanceBlob(new Blob([bytes], { type: 'application/gzip' }), 'renderer-trace.json.gz')
 }
 
 function ProfileView({ analysis }: { analysis: ProfileAnalysis }) {
@@ -57,6 +65,8 @@ export function CaptureResult({ capture, sourceChanged, retained = false }: { ca
   const result = capture.result
   const analysis = useMemo(() => capture.kind === 'profile' && capture.result.status === 'completed' && capture.result.profile ? analyseRendererProfile(capture.result.profile) : null, [capture.kind, capture.result])
   const material = capture.kind === 'profile' ? capture.result.profile : capture.result.trace
+  const receipt = capture.kind === 'profile' ? { ...capture.result, profile: material ? '(export original profile)' : null }
+    : { ...capture.result, trace: capture.result.trace ? { ...capture.result.trace, data: '(export original native gzip)' } : null }
   return <section className="performance-capture-result" aria-label={retained ? "Retained completed JavaScript profile" : "Capture result"}>
     {retained ? <p className="performance-note">Last completed JavaScript profile. The latest capture has its own receipt above.</p> : null}
     {sourceChanged ? <p className="performance-state">Showing the original captured process. Current window readings changed; this result was not reassigned.</p> : null}
@@ -64,12 +74,12 @@ export function CaptureResult({ capture, sourceChanged, retained = false }: { ca
     <p className="performance-note">PID {result.target.pid} · generation {result.target.generation} · source verified {String(result.sourceVerified.before)} / {String(result.sourceVerified.after)}</p>
     {result.status !== 'completed' ? <p className="performance-state" data-tone="warning">{result.status === 'unknown' ? 'Capture or cleanup is unconfirmed. Inspect the original receipt before another request.' : 'Capture did not complete.'} {result.issues.map(issue => `${issue.stage}: ${issue.message}`).join(' · ')}</p> : null}
     {analysis?.data ? <ProfileView analysis={analysis.data} /> : analysis?.reason ? <p className="performance-state">{analysis.reason}</p> : null}
-    {capture.kind === 'trace' ? <p className="performance-note">{capture.result.receivedEvents} timeline events. Export the original trace to inspect Style, Layout, Paint and compositor work in a trace viewer; categories are requested filters, not proof of coverage.</p> : null}
+    {capture.kind === 'trace' ? <p className="performance-note">{capture.result.receivedEvents} timeline events · {capture.result.receivedTraceBytes} original bytes{capture.result.trace ? ` · ${capture.result.trace.bytes} compressed bytes` : ''}. Export the original gzip trace to inspect Style, Layout, Paint and compositor work in a trace viewer; categories are requested filters, not proof of coverage.</p> : null}
     <div className="performance-capture-actions">
-      {material ? <button type="button" onClick={() => downloadPerformanceJSON(material, capture.kind === 'profile' ? 'renderer.cpuprofile' : 'renderer-trace.json')}>Export {capture.kind === 'profile' ? 'profile' : 'trace'}</button> : null}
-      <button type="button" onClick={() => downloadPerformanceJSON(result, 'renderer-capture-receipt.json')}>Export receipt</button>
+      {capture.kind === 'profile' && capture.result.profile ? <button type="button" onClick={() => downloadPerformanceJSON(capture.result.profile, 'renderer.cpuprofile')}>Export profile</button> : capture.kind === 'trace' && capture.result.trace ? <button type="button" onClick={() => downloadPerformanceTrace(capture.result.trace!)}>Export trace</button> : null}
+      <button type="button" onClick={() => downloadPerformanceJSON(receipt, 'renderer-capture-receipt.json')}>Export receipt</button>
     </div>
-    <details className="performance-disclosure"><summary>Capture receipt</summary><pre className="performance-capture-receipt">{JSON.stringify({ ...result, ...(capture.kind === 'profile' ? { profile: material ? '(export original profile)' : null } : { trace: material ? '(export original trace)' : null }) }, null, 2)}</pre></details>
+    <details className="performance-disclosure"><summary>Capture receipt</summary><pre className="performance-capture-receipt">{JSON.stringify(receipt, null, 2)}</pre></details>
   </section>
 }
 
