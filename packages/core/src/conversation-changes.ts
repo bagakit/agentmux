@@ -23,7 +23,9 @@ export type ConversationFrontier = ConversationRef & { scope: ConversationScope;
 )[] }
 export type ConversationCheckpoint = ConversationRef & { sourceHostId: string; frontier: ConversationFrontier }
 export type ConversationVersionedAnchor = { record: ConversationItemRef; revision: string; frontier: ConversationCheckpoint }
-export type ConversationTimelineReadInput = ConversationRef & { limit?: number; cursor?: string; maxBytes?: number; record?: ConversationItemRef; anchor?: ConversationVersionedAnchor; view?: string; nativeSource?: { providerId: string; nativeSessionId: string } }
+export type ConversationTimelineReadInput = ConversationRef & { limit?: number; cursor?: string; maxBytes?: number; record?: ConversationItemRef; anchor?: ConversationVersionedAnchor; view?: string; nativeSource?: { providerId: string; nativeSessionId: string };
+  /** Older expansion must retain every accepted contribution or leave the original view unchanged. */
+  preserveCurrent?: boolean }
 export type ConversationUnit = { event: ConversationEvent; records: readonly ConversationSourceRecord[] }
 export type ConversationUnitEntry = JsonReadEntry<ConversationUnit>
 export type ConversationWindowBoundary = { record: ConversationItemRef; revision: string }
@@ -209,12 +211,14 @@ function options(value: Record<string, unknown>): { limit?: number; maxBytes?: n
     ...(value.view === undefined ? {} : { view: text(value.view, 131_072) }) }
 }
 export function parseConversationTimelineReadInput(value: unknown): ConversationTimelineReadInput {
-  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'limit', 'cursor', 'maxBytes', 'record', 'anchor', 'view', 'nativeSource'])
+  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'limit', 'cursor', 'maxBytes', 'record', 'anchor', 'view', 'nativeSource', 'preserveCurrent'])
   const ref = parseConversationRef({ hostId: p.hostId, agentSessionId: p.agentSessionId })
   if (p.record !== undefined && (p.anchor !== undefined || p.view !== undefined || p.nativeSource !== undefined)) return bad('An exact current record cannot be combined with another read mode.')
+  if (p.preserveCurrent !== undefined && typeof p.preserveCurrent !== 'boolean') return bad('Window preservation must be a boolean.')
+  if (p.preserveCurrent && (p.cursor === undefined || p.record !== undefined || p.anchor !== undefined || p.view !== undefined || p.nativeSource !== undefined)) return bad('Window preservation requires the original older cursor and its wire continuations.')
   const record = p.record === undefined ? undefined : itemRef(p.record, { hostId: text(rpcRecord(p.record).hostId), agentSessionId: ref.agentSessionId })
   const native = p.nativeSource === undefined ? undefined : rpcRecord(p.nativeSource, ['providerId', 'nativeSessionId'])
-  return { ...ref, ...options(p), ...(record ? { record } : {}), ...(native ? { nativeSource: { providerId: text(native.providerId), nativeSessionId: text(native.nativeSessionId) } } : {}),
+  return { ...ref, ...options(p), ...(p.preserveCurrent === undefined ? {} : { preserveCurrent: p.preserveCurrent as boolean }), ...(record ? { record } : {}), ...(native ? { nativeSource: { providerId: text(native.providerId), nativeSessionId: text(native.nativeSessionId) } } : {}),
     ...(p.anchor === undefined ? {} : { anchor: parseConversationVersionedAnchor(p.anchor, ref) }) }
 }
 export function parseConversationChangesInput(value: unknown): ConversationChangesInput {
