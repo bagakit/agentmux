@@ -156,3 +156,4 @@ export type { BrowserInputContext, BrowserInputContextSource, BrowserInputSelect
 export { parseAgentInputSubmit } from './agent-input-submit.js'
 export type { AgentInputSubmit, AgentInputSubmitResult } from './agent-input-submit.js'
 export * from './agent-input-context-capture.js'
+export * from './client-incident.js'

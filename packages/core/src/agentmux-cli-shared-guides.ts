@@ -45,6 +45,10 @@ to discover original references; --logid reads one exact record. Keep the origin
 Core source metadata is bounded current-instance memory, not durable history or proof that no issue occurred.
 Client presentation metadata belongs to client.incident and its actual archive coverage. A received invalidation is not a source write time.
 No query starts a Reader, Runtime recovery, sampling, refresh or input.
+For client.incident, use --domain client.incident --host-id HOST --recent to discover retained
+incident references without a Session ID. Follow an original reference with --logid ID; its optional
+authority constrains the exact archive namespace. Recent cursors retain the same Host and filters.
+Incident reads expose finite metadata and explicit coverage only; include-raw adds no terminal text.
 For mote.context.client, use --input FILE|- containing the complete typed query.
 Freeze scope.hostId/directoryPath from the resource Workspace row in app snapshot --include workspaces,
 topicId from Mote discovery, and Tab/reference from app inspect or space ls. A Mote's physical

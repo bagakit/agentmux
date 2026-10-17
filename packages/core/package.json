@@ -270,6 +270,10 @@
       "types": "./dist/diagnostic-evidence.d.ts",
       "import": "./dist/diagnostic-evidence.js"
     },
+    "./client-incident": {
+      "types": "./dist/client-incident.d.ts",
+      "import": "./dist/client-incident.js"
+    },
     "./mote-face": {
       "types": "./dist/mote-face.d.ts",
       "import": "./dist/mote-face.js"

@@ -125,6 +125,7 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   connections?: ConnectionPort
   goalDelegations?: GoalDelegationsOwner
   moteContext?: import('./diagnostic-evidence.js').AgentMuxMoteContextEvidencePort
+  clientIncidents?: import('./client-incident.js').AgentMuxClientIncidentPort
   deliveryAttempts?: { hostId: string; store: DeliveryAttemptStore }
   /** Original semantic owner identity; never ctxmux identity or a route alias. */
   diagnosticCoreAuthority?(scope: AgentMuxRpcCoreClient): import('./diagnostic-evidence.js').AgentMuxDiagnosticAuthorityObservation | Promise<import('./diagnostic-evidence.js').AgentMuxDiagnosticAuthorityObservation>
@@ -1402,12 +1403,17 @@ export class AgentMuxRpcService {
         // Discovery reads registered contracts only. An attached client cannot replace
         // an original local journal, authority or reader for an already-owned domain.
         const local = await inspectDiagnosticEvidence(this.diagnosticQuery, {}, this.ports, caller, context.signal)
-        if ((!input.target || !local.capabilities.some(capability => capability.domain === input.target?.domain)) && this.ports.forwardControl) {
+        const ownsTarget = local.capabilities.some(capability => capability.domain === input.target?.domain &&
+          (input.target?.domain !== 'client.incident' || capability.target === ('recent' in input.target ? 'recent' : 'log-id')))
+        if ((!input.target || !ownsTarget) && this.ports.forwardControl) {
           try {
             const forwarded = parseDiagnosticEvidenceResult(await this.ports.forwardControl('system.diagnostics.inspect', structuredClone(input), context), input)
             if (input.target) { result = forwarded; break }
-            const capabilities = new Map(local.capabilities.map(capability => [capability.domain, capability]))
-            for (const capability of forwarded.capabilities) if (!capabilities.has(capability.domain)) capabilities.set(capability.domain, capability)
+            const capabilities = new Map(local.capabilities.map(capability => [`${capability.domain}:${capability.target}`, capability]))
+            for (const capability of forwarded.capabilities) {
+              const key = `${capability.domain}:${capability.target}`
+              if (!capabilities.has(key)) capabilities.set(key, capability)
+            }
             const discovery = { ...local, capabilities: [...capabilities.values()], issues: [...local.issues, ...forwarded.issues],
               completeness: local.completeness === 'complete' && forwarded.completeness === 'complete' ? 'complete' as const : 'partial' as const,
               budget: { ...local.budget } }

@@ -1,6 +1,7 @@
 import { parseReadingDiagnosticRecord } from './reading-diagnostic.js'
 import { parseReadingDiagnosticTarget, parseReadingDiagnosticFindResult, parseReadingDiagnosticSourceRead } from './reading-diagnostic-query.js'
 import { parsePerformanceSceneEvidence } from './performance-scene-evidence.js'
+import { parseClientIncidentTarget, parseClientIncidentRecord, parseClientIncidentPage } from './client-incident.js'
 import { isDeepStrictEqual } from 'node:util'
 import { parseMoteContextEvidenceTarget, parseMoteContextEvidence } from './mote-context-observation.js'
 import { parseToolkitPerformanceFailure } from './toolkit-performance-failure.js'
@@ -71,6 +72,8 @@ function parseTarget(v: unknown): AgentMuxDiagnosticEvidenceTarget {
     object(p, ['domain', 'hostId', 'executionId']); text(p.hostId); text(p.executionId)
   } else if (p.domain === 'mote.context.client') {
     parseMoteContextEvidenceTarget(p)
+  } else if (p.domain === 'client.incident') {
+    parseClientIncidentTarget(p)
   } else if (p.domain === 'native-recorder-failure') {
     object(p, ['domain', 'hostId', 'agentSessionId', 'runId']); text(p.hostId); text(p.agentSessionId); text(p.runId)
   } else bad()
@@ -156,6 +159,19 @@ export function parseDiagnosticEvidenceResult(value: unknown, request: unknown):
             if (page.availability !== 'found') bad()
             if (!isDeepStrictEqual(r.readAuthority, page.authority) || r.completeness !== (page.coverage.complete && !page.issue ? 'complete' : 'partial')) bad()
           }
+        } else if (target.domain === 'client.incident') {
+          if (raw.returned !== 'withheld' || raw.truncated !== false) bad()
+          if ('recent' in target) {
+            if (r.recordRef !== null || r.scope !== 'interval-observation') bad()
+            const page = parseClientIncidentPage(r.data, target)
+            if (page.items.some(item => r.authorityStatus !== 'verified' || !isDeepStrictEqual(item.recordRef.authority, r.readAuthority))) bad()
+          } else {
+            if (r.recordRef === null || r.scope !== 'record' || raw.retention !== 'retained') bad()
+            const data = parseClientIncidentRecord(r.data), recordRef = rpcRecord(r.recordRef)
+            if (data.logId !== target.logId || !isDeepStrictEqual(data.authority, recordRef.authority)) bad()
+            if (target.authority && (target.authority.kind !== data.authority.kind || target.authority.id !== data.authority.id)) bad()
+            if (r.readAuthority !== null && !isDeepStrictEqual(r.readAuthority, data.authority)) bad()
+          }
         } else if (target.domain === 'mote.context.client') {
           if (r.recordRef !== null || r.readAuthority !== null || r.authorityStatus !== 'unavailable' ||
             r.persistence !== null || r.scope !== 'point-observation' || r.observedAt !== null) bad()
@@ -186,8 +202,9 @@ export function parseDiagnosticEvidenceResult(value: unknown, request: unknown):
     for (const key of Object.keys(limits)) if (b[key] !== limits[key as keyof typeof limits]) bad()
     for (const key of ['usedReads', 'usedBytes', 'elapsedMs']) number(b[key])
     if (b.usedReads !== reads.length || b.usedBytes !== Buffer.byteLength(JSON.stringify(p))) bad()
-    array(p.capabilities, 8, item => { const c = object(item, ['domain', 'target', 'raw', 'read']); member(c.domain, ['delivery.client', 'delivery.core', 'native-recorder-failure', 'toolkit.performance-failure', 'mote.context.client', 'performance.scene', 'reading.lifecycle']); member(c.target, ['log-id', 'session-run', 'execution-id', 'mote-context', 'capture-id', 'reading-lifecycle']); member(c.raw, [true, false]); member(c.read, ['supported', 'not-exposed'])
+    array(p.capabilities, 10, item => { const c = object(item, ['domain', 'target', 'raw', 'read']); member(c.domain, ['delivery.client', 'delivery.core', 'native-recorder-failure', 'toolkit.performance-failure', 'mote.context.client', 'performance.scene', 'reading.lifecycle', 'client.incident']); member(c.target, ['log-id', 'recent', 'session-run', 'execution-id', 'mote-context', 'capture-id', 'reading-lifecycle']); member(c.raw, [true, false]); member(c.read, ['supported', 'not-exposed'])
       if ((c.domain === 'reading.lifecycle') !== (c.target === 'reading-lifecycle') || c.domain === 'reading.lifecycle' && c.raw !== false || (c.domain === 'mote.context.client') !== (c.target === 'mote-context') || (c.domain === 'performance.scene') !== (c.target === 'capture-id') || c.domain === 'performance.scene' && c.raw !== false) bad()
+      if (c.target === 'recent' && c.domain !== 'client.incident' || c.domain === 'client.incident' && (c.raw !== false || !['log-id', 'recent'].includes(c.target as string))) bad()
     })
     return p as AgentMuxDiagnosticEvidenceResult
   } catch { return bad() }
