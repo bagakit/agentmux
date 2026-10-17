@@ -293,7 +293,7 @@ it('an open Activity reads only its own timeline and name revisions', async () =
 
 it('keyboard reaches no-position Agents directly and selects the exact original Agent', async () => {
   const sessions = useAppStore.getState().sessions.filter(session => ['project-0-one', 'project-0-two'].includes(session.id))
-  const selectSession = vi.fn()
+  const selectSession = vi.fn().mockReturnValue(true)
   useAppStore.setState({ selectSession, tabs: {}, layouts: {} })
   const held = useAppStore.getState()
   await act(async () => root.render(<ProjectActivity sessions={sessions} />))

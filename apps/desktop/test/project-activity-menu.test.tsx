@@ -2,8 +2,11 @@
 import { act } from 'react'
 import { expect, it, vi } from 'vitest'
 import { ProjectActivity } from '../src/renderer/src/components/ProjectActivity'
+import { api } from '../src/renderer/src/lib/api'
+import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
 import { useAppStore } from '../src/renderer/src/store'
-import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
+import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
+import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
 
 const dom = composerDOM()
 async function openAgents() {
@@ -55,4 +58,35 @@ it('does not let a retained no-position card select a different Host after its o
   expect(reportError).toHaveBeenCalledTimes(1)
   expect(document.querySelector('.project-activity-menu .focus-context')).toBe(card)
   expect(useAppStore.getState().sessions).toEqual([replacement])
+})
+
+it('retains Activity after the original navigation fails and closes only after a successful retry', async () => {
+  const original = composerSession('unplaced-original')
+  useAppStore.setState({ config: composerConfig, sessions: [original], tabs: {}, layouts: {}, timelines: {},
+    agentNames: {}, workbenchSpaceSelection: null, agentComposerDrafts: { [original.id]: 'Keep the original draft' } })
+  const graph = desktopSpatialGraph(useAppStore.getState(), [])
+  vi.spyOn(api.spatial, 'read').mockResolvedValue({ schemaVersion: 1, revision: 1, graph })
+  await initializeSpatialControlFixture()
+  const select = vi.spyOn(useAppStore.getState(), 'selectSession')
+  useAppStore.setState({ config: { ...composerConfig, workspaces: [] } })
+  const held = useAppStore.getState()
+  await dom.render(<ProjectActivity sessions={[original]} />)
+  const [card] = await openAgents()
+  const menu = document.querySelector('.project-activity-menu')
+  await act(async () => card!.click())
+  expect(select).toHaveReturnedWith(false)
+  expect(document.querySelector('.project-activity-menu')).toBe(menu)
+  expect(document.querySelector('.project-activity-agent')).toBe(card)
+  expect(useAppStore.getState().sessions).toBe(held.sessions)
+  expect(useAppStore.getState().tabs).toBe(held.tabs)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(held.agentComposerDrafts)
+  expect(useAppStore.getState().workbenchSpaceSelection).toBeNull()
+
+  await act(async () => useAppStore.setState({ config: composerConfig }))
+  await act(async () => card!.click())
+  expect(select).toHaveReturnedWith(true)
+  expect(select).toHaveBeenCalledTimes(2)
+  expect(document.querySelector('.project-activity-menu')).toBeNull()
+  expect(useAppStore.getState().agentFocus.execution.sessionId).toBe(original.id)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(held.agentComposerDrafts)
 })
