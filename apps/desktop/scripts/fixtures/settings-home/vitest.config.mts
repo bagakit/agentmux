@@ -10,6 +10,7 @@ assert.ok(evidence, 'The isolated test has an explicit evidence directory')
 mkdirSync(evidence, { recursive: true })
 const mutant = process.env.AGENTMUX_SETTINGS_HOME_MUTANT
 const edits: Record<string, [string, string, string]> = {
+  disclosure: ['components/SettingsPanel.tsx', 'if (parent instanceof HTMLDetailsElement) parent.open = true', 'if (parent instanceof HTMLDetailsElement) void parent.open'],
   expanded: ['components/settings/SettingsSidebarNavigation.tsx', 'new Set(groups.map(group => group.id))', "new Set(['preferences'])"],
   entry: ['components/TopRowChrome.tsx', "settings.open('overview')", "settings.open('appearance')"],
   drafts: ['components/SettingsPanel.tsx', 'visited.map((pane)', "(active === 'overview' ? [] : [active]).map((pane)"],
