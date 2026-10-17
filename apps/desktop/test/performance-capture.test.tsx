@@ -60,22 +60,23 @@ function completedTrace(input: RendererV8ProfileInput): RendererTraceResult {
 }
 
 let root: Root, container: HTMLDivElement, initial: ReturnType<typeof useAppStore.getState>
-let profilePort: ReturnType<typeof vi.fn>, tracePort: ReturnType<typeof vi.fn>
+let profilePort: ReturnType<typeof vi.fn>, tracePort: ReturnType<typeof vi.fn>, animationsPort: ReturnType<typeof vi.fn>
 const handlers = new Map<string, (event: never, input: unknown) => unknown>()
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   container = document.createElement('div'); document.body.append(container); root = createRoot(container); initial = useAppStore.getState()
-  profilePort = vi.fn(async (input: RendererV8ProfileInput) => capture(input)); tracePort = vi.fn()
-  handlers.clear(); registerPerformanceCaptureIpc({ captureProfile: profilePort, captureTrace: tracePort, subscribe: vi.fn() }, (channel, handler) => handlers.set(channel, handler))
+  profilePort = vi.fn(async (input: RendererV8ProfileInput) => capture(input)); tracePort = vi.fn(); animationsPort = vi.fn()
+  handlers.clear(); registerPerformanceCaptureIpc({ captureProfile: profilePort, captureTrace: tracePort, inspectAnimations: animationsPort, subscribe: vi.fn() }, (channel, handler) => handlers.set(channel, handler))
   bridge.invoke.mockImplementation((channel, input) => handlers.get(channel)!(undefined as never, input))
   vi.spyOn(api.performance, 'captureProfile').mockImplementation(input => bridge.api!.performance.captureProfile(input))
   vi.spyOn(api.performance, 'captureTrace').mockImplementation(input => bridge.api!.performance.captureTrace(input))
+  vi.spyOn(api.performance, 'inspectAnimations').mockImplementation(input => bridge.api!.performance.inspectAnimations(input))
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals(); bridge.invoke.mockReset() })
 function node<T extends HTMLElement = HTMLElement>(selector: string): T { const n = document.querySelector<T>(selector); expect(n).not.toBeNull(); expect(n!.isConnected).toBe(true); return n! }
 const click = async (selector: string) => act(async () => node<HTMLButtonElement>(selector).click())
 const render = async (snapshot = samples.fresh) => act(async () => root.render(<PerformanceOverview snapshot={snapshot} close={() => {}} onConfigure={() => {}} onViewScript={() => {}} />))
-const sampleButton = '[data-performance-capture] .performance-capture-actions > button:first-child'
+const sampleButton = '[data-performance-capture] [data-performance-action="profile"]'
 
 it('actual App popover sends its exact target through product preload and registered metrics delegate, then drills real weighted samples', async () => {
   vi.spyOn(api.toolkit, 'observe').mockImplementation((_id, callback) => { callback(samples.fresh); return { dispose() {} } })
@@ -92,6 +93,19 @@ it('actual App popover sends its exact target through product preload and regist
   expect(node('.performance-frame-detail').textContent).toContain('app://renderer/')
   await click('.performance-capture-result .performance-inline-action'); expect(node('.performance-frame-detail').textContent).toContain('(root)')
   expect(node('[aria-label="Capture result"]').textContent).toContain('completed')
+})
+
+it('an unknown animation read retains the completed profile and its selected flame frame', async () => {
+  animationsPort.mockImplementation(async ({ target }) => ({ target, schema: 'agentmux.renderer-animations.v1', scope: 'renderer-document', status: 'unknown',
+    timing: { requestedAt: _historyFixtureEpoch(0, 0, 1), sampledAt: null, finishedAt: _historyFixtureEpoch(0, 0, 2) },
+    sourceVerified: { before: true, after: false }, evaluation: { requested: true, settled: false }, snapshot: null,
+    issues: [{ stage: 'evaluate', code: 'CONTROL_TIMEOUT', message: 'Fixture evaluation completion unknown', messageTruncated: false }] }))
+  await render(); await click(sampleButton); await click('.performance-module-row')
+  const originalFrame = node('.performance-frame-detail')
+  await click('[data-performance-action="animations"]')
+  expect(node('[aria-label="Animation inspection result"]').textContent).toContain('unknown')
+  expect(node('.performance-frame-detail')).toBe(originalFrame); expect(originalFrame.isConnected).toBe(true)
+  expect(profilePort).toHaveBeenCalledOnce(); expect(animationsPort).toHaveBeenCalledOnce(); expect(tracePort).not.toHaveBeenCalled()
 })
 
 it('missing/stale or reused process identity cannot authorise a GUI capture; opening does no sampling', async () => {
@@ -143,7 +157,7 @@ it('a refused capture keeps ordinary readings and the last original material; ma
 
 it('the timeline GUI consumes the same exact-source Main delegate and original unknown lifecycle instead of inventing rendering analysis', async () => {
   tracePort.mockImplementation(async input => unknownTrace(input))
-  await render(); await click('[data-performance-capture] .performance-capture-actions > button:last-child')
+  await render(); await click('[data-performance-capture] [data-performance-action="trace"]')
   expect(bridge.invoke).toHaveBeenCalledWith('metrics:captureTrace', { target: currentPerformanceCaptureTarget(samples.fresh.observation), durationMs: 2000 })
   expect(tracePort).toHaveBeenCalledOnce(); expect(profilePort).not.toHaveBeenCalled()
   expect(node('[aria-label="Capture result"]').textContent).toContain('unconfirmed')
@@ -184,7 +198,7 @@ it('an unknown trace retains the completed profile and selected frame, with inde
   observation.app.data!.processes = observation.app.data!.processes.map(process => process.pid === previous.pid && process.creationTime === previous.creationTime ? { ...process, ...replacement } : process)
   await render(changed)
   tracePort.mockImplementation(async input => unknownTrace(input))
-  await click('[data-performance-capture] > .performance-capture-actions > button:last-child')
+  await click('[data-performance-capture] [data-performance-action="trace"]')
   const latest = node('[aria-label="Capture result"]'), retained = node('[aria-label="Retained completed JavaScript profile"]')
   expect(latest.textContent).toContain('unknown'); expect(latest.textContent).toContain('PID 2346')
   expect(latest.querySelector('[aria-label="Sampled call stacks"]')).toBeNull()
@@ -236,7 +250,7 @@ it('exports original native gzip bytes through the actual trace button and keeps
   tracePort.mockImplementation(async input => completedTrace(input))
   await render()
   expect(tracePort).not.toHaveBeenCalled(); expect(decode).not.toHaveBeenCalled()
-  await click('[data-performance-capture] .performance-capture-actions > button:last-child')
+  await click('[data-performance-capture] [data-performance-action="trace"]')
   const original = completedTrace(tracePort.mock.calls[0]![0]), trace = original.trace!
   expect(decode).not.toHaveBeenCalled()
   expect(node('.performance-capture-receipt').textContent).not.toContain(trace.data)
