@@ -892,6 +892,7 @@ export function TerminalView({
     let observedOutput = false
     let attachmentId: string | null = null
     let revealed = false
+    let attachDeadlineOccurrence: string | null = null
     let readyForLiveOutput = false
     let readySinceAt: number | null = null
     let replayingContinuation = true
@@ -970,6 +971,10 @@ export function TerminalView({
     let cursor = 0
     let resizeRevision = 0
     let liveGapRedrawPending = false
+    let gapIncidentActive = false
+    let historyReadIncidentActive = false
+    let continuationObservation: { type: AgentMuxRunAttachment['terminal']['type']; reason?: TerminalContinuationAbsence['reason'] } | null = null
+    let recordedContinuationAbsence: TerminalContinuationAbsence | null = null
     let outputTail = Promise.resolve()
     const liveOutputQueue = new TerminalLiveOutputQueue()
     let liveDrain: Promise<void> | null = null
@@ -994,6 +999,8 @@ export function TerminalView({
           attachmentState: attachmentId ? 'attached' : 'attaching',
           processState: processStateRef.current === 'running' || processStateRef.current === 'exited' ? processStateRef.current : 'unknown',
           renderer: webgl ? 'webgl' : 'dom',
+          ...(continuationObservation ? { continuationType: continuationObservation.type,
+            ...('reason' in continuationObservation ? { continuationReason: continuationObservation.reason } : {}) } : {}),
           ...(includeGeometry ? { clientWidth: root.clientWidth, clientHeight: root.clientHeight } : {})
         }
       }
@@ -1246,7 +1253,10 @@ export function TerminalView({
         if (disposed) return
         cursor = recovered.cursor
         if (recovered.incomplete) setHistoryReadFailure(true)
+        else historyReadIncidentActive = false
         if (recovered.gap) {
+          if (!gapIncidentActive) incidents?.capture('terminal-output-gap', 'output-gap')
+          gapIncidentActive = true
           setRuntimeHistoryGap(true)
           setReplayGap(true)
           liveGapRedrawPending = true
@@ -1254,7 +1264,11 @@ export function TerminalView({
       } catch (error) {
         // Keep live/input available. A failed read says nothing about Runtime eviction, and a
         // later cursor cannot prove that this earlier missing range was ever reconstructed.
-        if (!disposed) setHistoryReadFailure(true)
+        if (!disposed) {
+          if (!historyReadIncidentActive) incidents?.capture('terminal-replay-failed', 'replay-failed', error)
+          historyReadIncidentActive = true
+          setHistoryReadFailure(true)
+        }
         console.warn('[terminal] retained history recovery failed', error)
       }
     }
@@ -1263,6 +1277,8 @@ export function TerminalView({
     // bypass original-output inspectors, while input readiness keeps its existing live owner.
     const applyContinuation = async (snapshot: Pick<AgentMuxRunAttachment, 'terminal' | 'replay' | 'resizeRevision'> & { run: Pick<AgentMuxRunAttachment['run'], 'runId' | 'latestOutputBytes'> }, preserve = false): Promise<void> => {
       latestObservedOutputBytes = snapshot.run.latestOutputBytes
+      continuationObservation = { type: snapshot.terminal.type,
+        ...('reason' in snapshot.terminal ? { reason: snapshot.terminal.reason } : {}) }
       incidents?.mark('replay-started')
       // Exhaust the same ordering iterator before changing the canvas. Steps hold byte views,
       // not copied payload; an invalid tail or revision cannot leave a partially restored seed.
@@ -1354,7 +1370,16 @@ export function TerminalView({
       }
       liveGapRedrawPending = false
       continuationKnown = false
+      recordContinuationAbsence(absence)
       setContinuationAbsence({ ...absence, duringReconnect: true })
+    }
+
+    const recordContinuationAbsence = (absence: TerminalContinuationAbsence): void => {
+      continuationObservation = absence
+      if (recordedContinuationAbsence?.type !== absence.type || recordedContinuationAbsence?.reason !== absence.reason) {
+        incidents?.capture('terminal-continuation-unavailable', 'observation-unavailable')
+        recordedContinuationAbsence = absence
+      }
     }
 
     const drainLiveOutput = async (): Promise<void> => {
@@ -1366,12 +1391,16 @@ export function TerminalView({
         const taken = liveOutputQueue.take()
         if (taken.snapshot) {
           const { snapshot } = taken.snapshot
+          incidents?.begin('attach-received')
           if (snapshot.terminal.type === 'basic-vt') {
             const previousCursor = cursor
             viewport.beginReplay()
             try {
               await applyContinuation(snapshot)
               if (disposed) return
+              gapIncidentActive = false
+              historyReadIncidentActive = false
+              recordedContinuationAbsence = null
               incidents?.capture('terminal-recovered', 'observation-restored')
               setContinuationAbsence(null)
               setReplaySizeUnknown(false)
@@ -1380,6 +1409,7 @@ export function TerminalView({
               liveGapRedrawPending = false
               setHistoryBoundary(terminalHistoryBoundary(terminal.buffer.active, terminal.rows, terminal.options.scrollback!))
             } catch (error) {
+              if (!disposed) incidents?.capture('terminal-replay-failed', 'replay-failed', error)
               cursor = previousCursor
               acceptUncontinuedSnapshot(snapshot, { type: 'unavailable', reason: 'invalid_checkpoint' })
               console.warn('[terminal] reconnect state could not be continued', error)
@@ -1402,6 +1432,7 @@ export function TerminalView({
             // Original byte backfill cannot reconstruct a lost resize. Keep the current grid
             // usable while stating that the earlier terminal state is no longer proven.
             setContinuationAbsence({ type: 'unavailable', reason: 'source_gap' })
+            recordContinuationAbsence({ type: 'unavailable', reason: 'source_gap' })
           }
           viewport.acceptOwnerSize(resize.size)
           resizeRevision = resize.resizeRevision
@@ -1423,6 +1454,8 @@ export function TerminalView({
           if (cursor !== beforeRecovery) composed = composeTerminalLiveOutputWrite(taken.batch, cursor)
         }
         if (composed.gap) {
+          if (!gapIncidentActive) incidents?.capture('terminal-output-gap', 'output-gap')
+          gapIncidentActive = true
           // Recovery either confirmed a Runtime gap or could not read history. Keep that fact
           // outside the PTY screen; a repaint can repair only the current screen.
           // The service window owns the notice; a healthy Run gets one current-screen repaint below.
@@ -1688,7 +1721,7 @@ export function TerminalView({
         deadlineMs: TERMINAL_REVEAL_DEADLINE_MS
       })
       if (!decision.reveal) return
-      incidents?.capture('terminal-reveal-deadline', 'reveal-deadline')
+      attachDeadlineOccurrence = incidents?.capture('terminal-reveal-deadline', 'reveal-deadline') ?? null
       // 强制揭示绝不静默：先记账，再揭示。
       reveal(decision.overdue)
     }, TERMINAL_REVEAL_DEADLINE_MS)
@@ -1698,6 +1731,7 @@ export function TerminalView({
       // Freeze the old state before refreshSession or any output connection replacement runs.
       const refreshOccurrence = refresh ? incidents?.capture('terminal-refresh', 'refresh-requested') : undefined
       const preserve = refresh && readyForLiveOutput
+      let applyingReplay = false
       let readingMarker: ReturnType<Terminal['registerMarker']> | undefined
       try {
         if (refresh) {
@@ -1733,15 +1767,19 @@ export function TerminalView({
         setReplaySizeUnknown(hasReplay && !restored && result.currentSize === null)
         if (result.terminal.type === 'unknown' || result.terminal.type === 'unavailable') setContinuationAbsence(result.terminal)
         if (result.gap && !restored) {
+          if (!gapIncidentActive) incidents?.capture('terminal-output-gap', 'output-gap')
+          gapIncidentActive = true
           setReplayGap(true)
           setRuntimeHistoryGap(true)
           cursor = result.gap.firstAvailableByte
         }
         if (hasReplay) observeOutput()
+        applyingReplay = true
         await applyContinuation({
           run: { ...session.control.run, latestOutputBytes: result.session.latestOutputBytes },
           terminal: result.terminal, replay: result.replay, resizeRevision: result.resizeRevision
         }, preserve)
+        applyingReplay = false
         if (disposed) return
         setAttachFailed(false)
         setAttachmentFailure(null)
@@ -1788,17 +1826,21 @@ export function TerminalView({
           },
           onRedrawError: (error) => console.warn('[terminal] failed to redraw after replay gap', error),
           onRecoveryError: (error) => {
-            incidents?.capture('terminal-replay-failed', 'attach-failed', error)
+            incidents?.capture('terminal-replay-failed', 'replay-failed', error)
             console.warn('[terminal] live viewport recovery degraded', error)
           }
         })
         if (!disposed && refresh) incidents?.capture('terminal-refresh', 'refresh-completed', undefined, refreshOccurrence ?? null)
+        if (!disposed && !refresh && attachDeadlineOccurrence) {
+          incidents?.capture('terminal-recovered', 'observation-restored', undefined, attachDeadlineOccurrence)
+        }
       } catch (error) {
         if (!disposed) {
           const detail = (error instanceof Error ? error.message : String(error))
             .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
-          incidents?.capture('terminal-attach-failed', refresh ? 'refresh-failed' : 'attach-failed', error,
-            refreshOccurrence ?? null)
+          incidents?.capture(applyingReplay ? 'terminal-replay-failed' : 'terminal-attach-failed',
+            refresh ? 'refresh-failed' : applyingReplay ? 'replay-failed' : 'attach-failed', error,
+            refreshOccurrence ?? attachDeadlineOccurrence)
           const vanishedAgentRun = session.kind === 'agent' && isVanishedAgentRunError(error)
           if (!refresh && vanishedAgentRun && recoverVanishedRunRef.current !== session.control.run.runId) {
             // The durable Agent Session is still the owner. Ask the store to perform the
