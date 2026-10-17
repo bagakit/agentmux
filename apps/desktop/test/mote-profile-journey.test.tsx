@@ -40,6 +40,60 @@ async function trace() {
   await vi.waitFor(() => expect(document.querySelector('.connector-request-trace table')).not.toBeNull())
 }
 
+it('updates the original profile before an incomplete publication audience stops publishing with its exact issue', async () => {
+  await ready()
+  const transport = f.registration.getMockImplementation()!
+  f.registration.mockImplementation(async (url, input) => {
+    const response = await transport(url, input)
+    return new URL(url instanceof Request ? url.url : String(url)).pathname.includes('/visible/online/')
+      ? Response.json({ code: 0, data: { whiteList: native.audience } })
+      : response
+  })
+  await signIn()
+  await vi.waitFor(() => expect(native.written, 'Future publication metadata cannot prevent the authorized profile write').toBe(true), { timeout: 15_000 })
+  await vi.waitFor(() => {
+    expect(currentStep()).toBe('4')
+    expect(progress().textContent).toContain('Needs attention')
+    expect(document.querySelector('[data-step="3"]')?.textContent).toContain('Confirmed')
+    expect(document.querySelector('[data-console-profile-task]')?.textContent).toContain('Both complete current visibility ranges are required')
+  })
+  expect(native.requests.filter(request => request.path.includes('/base_info/'))).toHaveLength(1)
+  expect(native.requests.some(request => request.path.includes('/app_version/create/') || request.path.includes('/publish/commit/'))).toBe(false)
+  expect(native.current.name).toBe('Saved public name')
+  expect(f.creationCount).toBe(1)
+}, 30_000)
+
+it('publishes the saved profile with native version labels and current entries without unrelated manual form metadata', async () => {
+  await ready()
+  const transport = f.registration.getMockImplementation()!
+  f.registration.mockImplementation(async (url, input) => {
+    const response = await transport(url, input)
+    const path = new URL(url instanceof Request ? url.url : String(url)).pathname
+    if (!path.includes('/app_version/list/') && !path.includes('/app_version/change/')) return response
+    const payload = await response.json()
+    if (path.includes('/app_version/list/')) payload.data.versions = payload.data.versions.map((version: any) => {
+      if (version.versionId !== 'original-online') return version
+      const { versionId, ...original } = version
+      return original
+    })
+    else {
+      delete payload.data.pcDefaultAbilityList
+      delete payload.data.mobileDefaultAbilityList
+      delete payload.data.applyReasonConfig
+    }
+    return Response.json(payload)
+  })
+  await signIn()
+  await vi.waitFor(() => expect(progress().textContent).toContain('original profile version is approved'), { timeout: 15_000 })
+  const create = native.requests.filter(request => request.path.includes('/app_version/create/'))
+  expect(create).toHaveLength(1)
+  expect(create[0]!.body).toMatchObject({ appVersion: '1.0.1', pcDefaultAbility: 'bot', mobileDefaultAbility: 'bot' })
+  expect(create[0]!.body.applyReasonConfig).toBeUndefined()
+  expect(native.requests.filter(request => request.path.includes('/base_info/'))).toHaveLength(1)
+  expect(native.submitted).toBe(true)
+  expect(f.creationCount).toBe(1)
+}, 30_000)
+
 it.each([1, 2])('keeps the original QR mounted while a status %s poll is pending across local progress inspections', async status => {
   await ready()
   const transport = f.registration.getMockImplementation()!
