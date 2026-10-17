@@ -7,7 +7,7 @@ import { runProbeProcess } from '../../probe-process.mjs'
 import { radixOverlayAliases } from '../../radix-overlay-aliases.ts'
 
 const fixture = import.meta.dirname, root = path.resolve(fixture, '../../../../..')
-const directory = path.join(root, ".local/state/mote-calendar/capture-" + randomUUID()), compiled = path.join(directory, 'compiled')
+const directory = path.join(root, '.local/state/mote-workspace/capture-' + randomUUID()), compiled = path.join(directory, 'compiled')
 // Clear before loading esbuild: its service is a child process too.
 for (const key of Object.keys(process.env)) if (key.startsWith('AGENTMUX_') || key.startsWith('CTXMUX_') || key === 'ELECTRON_RUN_AS_NODE') delete process.env[key]
 Object.assign(process.env, { AGENTMUX_RUNTIME_DIRECTORY: path.join(directory, 'runtime'), AGENTMUX_STATE_DIRECTORY: path.join(directory, 'state'),
