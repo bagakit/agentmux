@@ -28,7 +28,7 @@ import {
   type ProjectRailNode
 } from '../lib/workspace-projects'
 import { rowAttention, rowAttentionLabel } from '../lib/row-attention'
-import { idleAgentCount, producingAgentCount, workingAgentCount } from '../lib/project-board'
+import { agentActivityCounts } from '../lib/project-board'
 import { useAppStore } from '../store'
 import { SpaceTopicsTree } from './SpaceTopicsTree'
 import { SpaceCreateMenu } from './SpaceCreateMenu'
@@ -249,14 +249,17 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
       // Rolled up from the same Session projection the window bar and the tab dots read, so a
       // collapsed project can no longer hide an Agent that is waiting on you.
       const attention = rowAttention(projectSessions)
-      const attentionLabel = rowAttentionLabel(attention)
-      const producingCount = producingAgentCount(projectSessions)
+      const activity = agentActivityCounts(projectSessions)
+      const attentionLabel = rowAttentionLabel(attention.category === 'needs-you' ? { ...attention, count: activity.needsYou } : attention)
+      const producingCount = activity.working
       const workingLabel = producingCount > 0
         ? `${producingCount} ${producingCount === 1 ? 'Agent is' : 'Agents are'} working`
         : null
-      const idleCount = idleAgentCount(projectSessions)
+      const idleCount = activity.idle
       const idleLabel = idleCount > 0 ? `${idleCount} idle` : null
-      const rowStateLabel = [workingLabel, idleLabel, attentionLabel].filter(Boolean).join(' · ')
+      const unknownLabel = activity.unknown > 0 ? `${activity.unknown} activity unknown` : null
+      const requestLabel = activity.needsYou > 0 && attention.category !== 'needs-you' ? rowAttentionLabel({ ...attention, category: 'needs-you', count: activity.needsYou }) : null
+      const rowStateLabel = [workingLabel, idleLabel, unknownLabel, requestLabel, attentionLabel].filter(Boolean).join(' · ')
       const countTitle = [
         `${project.workspaces.length} ${project.workspaces.length === 1 ? 'worktree' : 'worktrees'}`,
         `${sessionCount} ${sessionCount === 1 ? 'session' : 'sessions'}`,
@@ -292,7 +295,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
           {...(active ? { 'data-active-workspace-id': activeWorkspaceId } : {})}
           // 分类成员、路径聚合与真实目录层级相加；这里只报层数，像素归密度合同和样式表。
           {...(depth > 0 ? { style: { '--rail-depth': depth } as CSSProperties } : {})}
-          {...(workingAgentCount(projectSessions) > 0 ? { 'data-running': 'true' } : {})}
+          {...(activity.working > 0 ? { 'data-running': 'true' } : {})}
           onClick={() => {
             if (!preferred) return
             const keepBoardOpen = mainSurface === 'board'
@@ -479,28 +482,30 @@ function GroupHeader({
   const workspaces = useMemo(() => group.nodes.flatMap(node => node.project.workspaces), [group.nodes])
   const groupSessions = useDirectorySessions(workspaces, visible)
   const attention = rowAttention(groupSessions)
-  const attentionLabel = rowAttentionLabel(attention)
-  const producing = producingAgentCount(groupSessions)
+  const activity = agentActivityCounts(groupSessions)
+  const attentionLabel = rowAttentionLabel(attention.category === 'needs-you' ? { ...attention, count: activity.needsYou } : attention)
+  const producing = activity.working
   const workingLabel = producing > 0
     ? `${producing} ${producing === 1 ? 'Agent is' : 'Agents are'} working`
     : null
-  const idle = idleAgentCount(groupSessions)
+  const idle = activity.idle
   const idleLabel = idle > 0 ? `${idle} idle` : null
+  const unknownLabel = activity.unknown > 0 ? `${activity.unknown} activity unknown` : null
+  const requestLabel = activity.needsYou > 0 && attention.category !== 'needs-you' ? rowAttentionLabel({ ...attention, category: 'needs-you', count: activity.needsYou }) : null
   const topLevel = group.nodes.filter((node) => node.depth === 0).length
   const memberLabel = `${topLevel} ${topLevel === 1 ? 'project' : 'projects'}`
-  // 与项目行同一条规则：attention 压过 running，因为 CSS 给同一个角标上色并挂 `?`/`!`。
   return (
     <div className="project-rail-entry" data-space-entry>
       <button
         type="button"
         className="project-rail-group__header"
-        aria-label={[group.label, memberLabel, ...(attentionLabel ? [attentionLabel] : [])].join(' · ')}
+        aria-label={[group.label, memberLabel, workingLabel, idleLabel, unknownLabel, requestLabel, attentionLabel].filter(Boolean).join(' · ')}
         aria-expanded={!collapsed}
         data-space-nav={projectGroupKey(group) ?? undefined}
         data-space-parent={parentKey}
         data-space-expanded={!filtering ? !collapsed : undefined}
         data-space-disclosure
-        title={[group.groupPath ? displayPath(group.groupPath, group.hostId) : null, memberLabel, ...(workingLabel ? [workingLabel] : []), ...(idleLabel ? [idleLabel] : [])]
+        title={[group.groupPath ? displayPath(group.groupPath, group.hostId) : null, memberLabel, workingLabel, idleLabel, unknownLabel]
           .filter(Boolean)
           .join(' · ')}
         onClick={onToggle}

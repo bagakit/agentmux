@@ -1,3 +1,5 @@
+import { observeAgentSession } from './agent-observation'
+import { isNeedsYouState } from './attention-vocabulary'
 import type {
   SessionSnapshot,
   WorkspaceBranchRecord,
@@ -130,52 +132,27 @@ export const BOARD_COLUMN_DESCRIPTIONS: Record<ProjectBoardColumn, string> = {
   done: 'Completed runs'
 }
 
-/**
- * Count the live Agent Sessions that belong to the Board's working column.
- *
- * Project Rail uses this as a presence signal, rather than re-interpreting individual status
- * strings. Keeping the predicate on the Board projection means `starting`, `running`, and `working`
- * stay in lockstep everywhere a surface says that an Agent is running.
- */
-export function workingAgentCount(sessions: readonly SessionSnapshot[]): number {
-  return sessions.reduce(
-    (count, session) => (
-      session.kind === 'agent' && sessionBoardColumn(session) === 'working' ? count + 1 : count
-    ),
-    0
-  )
-}
-
-/**
- * Count Agents with a semantic turn in progress, excluding a live but quiet Session.
- *
- * The Board working column is the shared activity projection. `running` is the one member
- * whose process is alive while its semantic turn is quiet, so this label count removes only
- * that state instead of inventing a second map of all working states.
- */
-export function producingAgentCount(sessions: readonly SessionSnapshot[]): number {
-  return sessions.reduce(
-    (count, session) => count + (
-      session.kind === 'agent' &&
-      sessionBoardColumn(session) === 'working' &&
-      session.status.state !== 'running'
-        ? 1
-        : 0
-    ),
-    0
-  )
-}
-
-/**
- * `running` is the quiet, process-available state after the semantic activity projection has gone
- * idle.  Keep this count beside workingAgentCount so the Project Rail and Board never invent their
- * own status predicate.
- */
-export function idleAgentCount(sessions: readonly SessionSnapshot[]): number {
-  return sessions.reduce(
-    (count, session) => count + (session.kind === 'agent' && session.status.state === 'running' ? 1 : 0),
-    0
-  )
+/** Activity is a Core observation, independently of the Board's coarse placement. */
+export function agentActivityCounts(sessions: readonly SessionSnapshot[], now = Date.now()) {
+  const counts = { working: 0, idle: 0, unknown: 0, completed: 0, needsYou: 0, error: 0 }
+  for (const session of sessions) {
+    if (session.kind !== 'agent') continue
+    const needsYou = session.pendingInteraction !== undefined || isNeedsYouState(session.status.state)
+    const failed = session.status.state === 'error'
+    if (needsYou) counts.needsYou++
+    if (failed) counts.error++
+    // Requests and errors remain actionable facts even when activity is unconfirmed.
+    if (needsYou || failed) continue
+    if (session.runUnobserved || session.processState !== 'running') { counts.unknown++; continue }
+    const observation = observeAgentSession(session, now)
+    if (observation.semantic === 'active') counts.working++
+    else if (observation.semantic === 'idle') {
+      // A newer native activity observation is separate from an old main-turn result.
+      if (session.status.state === 'done' && !session.currentActivity) counts.completed++
+      else counts.idle++
+    } else counts.unknown++
+  }
+  return counts
 }
 
 function groupRuns(
