@@ -493,6 +493,32 @@ describe('safe native Browser release', () => {
     await vi.waitFor(()=>expect(f.entry().resourceDocumentConfirmed).toBe(true))
     return {...f, contents:f.views[0]!.webContents, nav:()=>f.entry().navigationId}
   }
+  it('retains the promoted Profile document when candidate media preceded its ownership',async()=>{
+    const f=await quiet(),entry=f.entry(),originalNavigation=f.nav()
+    expect(entry.resourceRisk.size).toBe(0)
+    let candidate:InstanceType<typeof native.Contents>|undefined
+    native.Contents.beforeLoad=async contents=>{
+      candidate=contents
+      expect(contents).not.toBe(f.contents)
+      expect(entry.view.webContents).toBe(f.contents)
+      expect(entry.pendingSwitch.view.webContents).toBe(contents)
+      expect(contents.listeners.get('media-started-playing')?.size).toBe(1)
+      contents.emit('media-started-playing')
+      expect(entry.resourceRisk.has('media')).toBe(false)
+    }
+    const switched=await f.manager.switchProfile('original-browser','replacement-profile')
+    const promoted=f.views[0]!.webContents
+    expect(promoted).toBe(candidate);expect(entry.view.webContents).toBe(promoted)
+    expect(switched).toMatchObject({id:'original-browser',profileId:'replacement-profile',url})
+    expect(switched.navigationId).not.toBe(originalNavigation)
+    expect(f.contents.close).toHaveBeenCalledOnce()
+    const receipt=await f.manager.release('original-browser',switched.navigationId)
+    expect.soft(receipt).toMatchObject({browserId:'original-browser',navigationId:switched.navigationId,
+      status:'unknown',reasons:['document-unconfirmed']})
+    expect.soft(f.entry()).toBe(entry)
+    expect.soft(promoted.close).not.toHaveBeenCalled();expect.soft(promoted.dead).toBe(false)
+    expect.soft(Reflect.get(f.manager,'releasedEntries').size).toBe(0)
+  })
   it('commits only native destruction, then restores original identity and viewport',async()=>{
     const f=await quiet(); const nav=f.nav(), entry=f.entry()
     await f.manager.setViewport('original-browser','tablet')
