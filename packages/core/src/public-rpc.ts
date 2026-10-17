@@ -45,7 +45,7 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'space.arrange': 'arrange', 'file.open': 'open.file', 'file.view': 'space.view', 'file.format': 'file.format', 'file.build': 'file.build', 'file.build.inspect': 'file.build.inspect', 'file.build.cancel': 'file.build.cancel',
   'terminal.open': 'open.terminal', 'browser.open': 'open.browser',
   'git.open': 'open.git',
-  'browser.restore': 'browser.restore', 'browser.targets': 'browser.targets', 'browser.run': 'browser.run', 'browser.history': 'browser.history',
+  'browser.release': 'browser.release', 'browser.restore': 'browser.restore', 'browser.targets': 'browser.targets', 'browser.run': 'browser.run', 'browser.history': 'browser.history',
   'browser.inspect': 'browser.operation',
   // Stopping an active external-tab operation also ends only its original sharing
   // grant. Finished operations return their retained state without revoking sharing.

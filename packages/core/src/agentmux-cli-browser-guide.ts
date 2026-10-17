@@ -13,6 +13,9 @@ discovery alone does not create a page.
 Use \`amux browser restore --browser ID [--operation-id ID]\` to acquire that exact native page without selecting or focusing it.
 Its one current ready target confirms neither page-load completion nor a historical restore operation. Keep the original business ID and unknown reply; do not automatically repeat.
 This action has no restore-history inspect; \`browser inspect\` still reads the original program journal.
+Use \`amux browser release --browser ID --navigation NAV [--operation-id ID]\` for one exact currently observed embedded page.
+The same owner policy retains visible, active or uncertain pages. Read its released/retained/unknown result and reasons; Browser, Regions and website data remain.
+An unknown result keeps the original request identity without automatic resubmission. Current discovery cannot confirm historical release completion.
 Use \`amux browser open --url URL --private\` with an exact placement to create
 one separate temporary website session. Check its returned mode and target identity.
 Closing ends that session; app restart preserves its Region as an empty private page.

@@ -549,6 +549,8 @@ export async function registerIpc(args: {
   const executeControlOwner = async (
     request: AgentMuxControlRequest, signal?: AbortSignal
   ): Promise<AgentMuxControlResult> => {
+    if (request.operation === 'browser.release') return { operation: request.operation,
+      receipt: await browsers.release(request.browserId, request.navigationId) }
     if (request.operation === 'space.mote.preferences.read' || request.operation === 'space.mote.preferences.save') return moteConnectionPreferences.execute(request, signal)
     if(request.operation==='space.ls' || request.operation==='space.inspect') {
       if(!request.presentation && !('requestId' in request.target)) {
