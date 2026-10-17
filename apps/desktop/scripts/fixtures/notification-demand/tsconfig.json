@@ -1,0 +1,52 @@
+{
+  "extends": "../../../tsconfig.test.json",
+  "compilerOptions": {
+    "paths": {
+      "@agentmux/core": [
+        "../../../../../packages/core/src/index.ts"
+      ],
+      "@agentmux/core/*": [
+        "../../../../../packages/core/src/*"
+      ],
+      "@agentmux/core/agent-input-mailbox": [
+        "../../../../../packages/core/src/agent-input-mailbox-codec.ts"
+      ],
+      "@agentmux/core/files": [
+        "../../../../../packages/core/src/public-rpc-files.ts"
+      ],
+      "@agentmux/core/schedule": [
+        "../../../../../packages/core/src/agent-schedule.ts"
+      ],
+      "@agentmux/core/timeline": [
+        "../../../../../packages/core/src/session-timeline.ts"
+      ],
+      "@agentmux/core/launch-option": [
+        "../../../../../packages/core/src/agent-launch-option.ts"
+      ],
+      "@agentmux/core/agent-status": [
+        "../../../../../packages/core/src/agent-status-freshness.ts"
+      ],
+      "@agentmux/core/provider-id": [
+        "../../../../../packages/core/src/agent-provider-id.ts"
+      ],
+      "@agentmux/core/run-status": [
+        "../../../../../packages/core/src/agent-run-status.ts"
+      ],
+      "@agentmux/core/prompt-condition": [
+        "../../../../../packages/core/src/agent-prompt-condition.ts"
+      ],
+      "@agentmux/core/relay-identity": [
+        "../../../../../packages/core/src/rpc-relay-keypair.ts"
+      ],
+      "@agentmux/core/schedule-rpc": [
+        "../../../../../packages/core/src/public-rpc-schedules.ts"
+      ]
+    }
+  },
+  "include": [
+    "../../../test/notification-demand.test.tsx",
+    "../../../test/notification-preview.test.ts",
+    "../../../test/notification-item.test.tsx",
+    "../../../src/renderer/src/global.d.ts"
+  ]
+}

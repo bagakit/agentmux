@@ -1,4 +1,4 @@
-import { currentNotificationRows, notificationEventRows, notificationTrigger, toggleNotificationCenter } from './helpers/notification-center'
+import { currentNotificationRows, notificationEventRows, notificationTrigger, toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
@@ -180,7 +180,9 @@ function lifecycleNotice(owner: { regionId: string } | { subject: import('../src
 }
 function expectCurrent(record: NotificationEvent) {
   expect(useAppStore.getState().notificationEvents).toContain(record)
-  expect(currentNotificationRows(container).some(row => row.dataset.noticeId === record.id)).toBe(true)
+  if (notificationTrigger(container).getAttribute('aria-expanded') === 'true')
+    expect(currentNotificationRows(container).some(row => row.dataset.noticeId === record.id)).toBe(true)
+  else expect(currentNotificationRows(container)).toHaveLength(0)
 }
 
 async function launch() {
@@ -272,6 +274,8 @@ it.each([
   expect(container.querySelector('.launch-surface .service-disclosure__summary')).toBeNull()
   const reported = lifecycleNotice({ regionId })!
   expectCurrent(reported)
+  await toggleNotificationCenter(container, 'open')
+  await toggleNotificationDetails(currentNotificationRows(container).find(row => row.dataset.noticeId === reported.id)!)
   expect(currentNotificationRows(container).find(row => row.dataset.noticeId === reported.id)?.textContent).toContain(message)
   const receipts = useAppStore.getState().noticeReadReceipts
   await act(async () => useAppStore.getState().reportError(new Error(message), lifecycleNotice({ regionId })!.context!))
@@ -329,6 +333,8 @@ it('actual Resume failure reaches this same Session service window and inbox wit
   expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
   expect(core.agentSession(id).nativeHandle).toMatchObject({ sessionId: 'private-native-handle' })
   expect(useAppStore.getState().agentComposerDrafts[id]).toBe('Session draft')
+  await toggleNotificationCenter(container, 'open')
+  await toggleNotificationDetails(currentNotificationRows(container).find(row => row.dataset.noticeId === lifecycleNotice({ subject: session.control })!.id)!)
   expect(currentNotificationRows(container).some(row => row.textContent?.includes('private resume write failure'))).toBe(true)
   await collapseFailure(container.querySelector('.agent-launch-notice')!)
   expect(container.querySelector('.agent-launch-notice .service-disclosure__summary')).toBeNull()
@@ -367,6 +373,9 @@ it('the actual App offers the same failure through System without a second windo
   useAppStore.setState({ loading: false, mainSurface: 'agents' })
   await act(async () => root.render(<App />))
   expect(container.querySelector('main.main-shell')).not.toBeNull()
+  expect(container.querySelectorAll('.notification-item[data-notice-id]')).toHaveLength(0)
+  await toggleNotificationCenter(container, 'open')
+  await toggleNotificationDetails(currentNotificationRows(container)[0]!)
   expect(container.querySelectorAll('.notification-item[data-notice-id]')).toHaveLength(1)
   expect(container.querySelector('.notification-item[data-notice-id]')?.textContent).toContain('one lifecycle cause')
   expect(container.querySelector('.notification-item[data-event-id]')).toBeNull()
@@ -416,8 +425,11 @@ it('keeps two actual Launcher failures and their Retry Start entries when ordina
   await vi.waitFor(() => expect(lifecycleNotice({ regionId: secondary.regionId })).toBeDefined())
   const second = lifecycleNotice({ regionId: secondary.regionId })!
   expectCurrent(first); expectCurrent(second)
+  await toggleNotificationCenter(container, 'open')
   const firstRow = currentNotificationRows(container).find(row => row.dataset.noticeId === first.id)!
   const secondRow = currentNotificationRows(container).find(row => row.dataset.noticeId === second.id)!
+  await toggleNotificationDetails(firstRow)
+  await toggleNotificationDetails(secondRow)
   expect(firstRow.querySelector('.notification-item__title')?.textContent).toContain(regionId)
   expect(secondRow.querySelector('.notification-item__title')?.textContent).toContain(secondary.regionId)
   expect(firstRow.textContent).toContain(`Tab ${launcherId}`)
