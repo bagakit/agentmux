@@ -941,9 +941,28 @@ it('explicit related bootstrap mutations remain unknown through the original pub
   }
 }, 45_000)
 
-it('continues the original Console transport through Setup SDK and compiled CLI before exact account consent', async () => {
+it('continues the dual-domain Console issuer chain through Setup SDK and compiled CLI before exact account consent', async () => {
   const f = await fixture(), before = await f.sdk.call('connection.inspect', { connectionId: f.input.connectionId }), route = nativeRoute()
-  const endpoints = ['https://open.feishu.cn/app', 'https://open.feishu.cn/console/callback?state=fixture', 'https://accounts.feishu.cn/accounts/console?state=fixture', 'https://ask.feishu.cn/console-handoff', 'https://open.feishu.cn/region/app?lang=zh']
+  const endpoints = [
+    'https://open.feishu.cn/app', 'https://open.larkoffice.com/app?dual_id=fixture&from_domain=fixture',
+    'https://accounts.larkoffice.com/accounts/handoff?step=enter', 'https://accounts.feishu.cn/accounts/handoff?step=transfer',
+    'https://login.feishu.cn/accounts/handoff?step=login', 'https://accounts.feishu.cn/accounts/handoff?step=return',
+    'https://accounts.feishu.cn/accounts/handoff?step=sync', 'https://accounts.larkoffice.com/accounts/handoff?step=finish',
+    'https://open.larkoffice.com/app'
+  ]
+  const scopedCookies = [
+    [`session=${SESSION}`, 'web_session=fixture-console-session'], [], [],
+    [`session=${SESSION}`, 'web_session=fixture-console-session'],
+    [`session=${SESSION}`, 'web_session=fixture-console-session'],
+    ['cnIssuer=fixture-cn-issuer', `session=${SESSION}`, 'web_session=fixture-console-session'],
+    ['cnIssuer=fixture-cn-issuer', `session=${SESSION}`, 'web_session=fixture-console-session'],
+    ['intlIssuer=fixture-intl-issuer'], ['intlConsole=fixture-intl-console']
+  ]
+  const responseCookies = [
+    'cnConsole=fixture-cn-console; Path=/; Secure', 'intlConsole=fixture-intl-console; Path=/; Secure',
+    'intlIssuer=fixture-intl-issuer; Path=/accounts; Secure', 'cnIssuer=fixture-cn-issuer; Path=/accounts; Secure',
+    'loginOnly=fixture-login-cookie; Path=/; Secure'
+  ]
   const requests = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const target = String(url), index = endpoints.indexOf(target)
     if (index < 0) return route(url, init)
@@ -951,25 +970,25 @@ it('continues the original Console transport through Setup SDK and compiled CLI 
     const headers = new Headers(init?.headers)
     expect(headers.get('referer')).toBe(index === 0 ? 'https://ask.feishu.cn/' : endpoints[index - 1])
     expect(headers.get('x-flow-key')).toBeNull(); expect(headers.get('x-csrf-token')).toBeNull()
-    const cookies = headers.get('cookie')?.split('; ').sort()
-    expect(cookies).toEqual(index === 1 || index === 4 ? ['consoleOnly=fixture-console-cookie', `session=${SESSION}`, 'web_session=fixture-console-session'] : index === 3 ? ['askOnly=fixture-ask-cookie', `session=${SESSION}`, 'web_session=fixture-console-session'] : [`session=${SESSION}`, 'web_session=fixture-console-session'])
-    if (index === 4) return new Response(bootstrap(), { headers: { 'content-type': 'text/html' } })
-    return new Response(null, { status: [302, 303, 307, 308][index], headers: {
-      location: endpoints[index + 1]! + (index === 0 || index === 3 ? '#local-view' : ''),
-      ...(index === 0 ? { 'set-cookie': 'consoleOnly=fixture-console-cookie; Path=/; Secure' } : {})
+    expect(headers.get('cookie')?.split('; ').sort() ?? []).toEqual(scopedCookies[index])
+    if (index === endpoints.length - 1) return new Response(bootstrap(), { headers: { 'content-type': 'text/html' } })
+    return new Response(null, { status: 302, headers: {
+      location: endpoints[index + 1]!, ...(responseCookies[index] ? { 'set-cookie': responseCookies[index]! } : {})
     } })
   }); vi.stubGlobal('fetch', requests)
   let view = result(await f.cli(['begin', '--input', '-'], f.input))
-  const attemptId = view.operation!.request.attemptId
-  for (let index = 0; index < 9; index++) {
+  const attemptId = view.operation!.request.attemptId, advances = endpoints.length + 4
+  for (let index = 0; index < advances; index++) {
     const original = advanceInput(view), count = requests.mock.calls.length
     view = index % 2 ? result(await f.cli(['advance', '--input', '-'], original)) : await f.sdk.call('connection.setup.advance', original)
     expect(requests).toHaveBeenCalledTimes(count + 1)
     expect(view.operation?.request.attemptId).toBe(attemptId)
-    expect(view.continuation?.stage).toBe(index === 8 ? 'account' : 'handoff')
-    if (index < 8) { expect(view.continuation?.account).toBeNull(); expect(view.continuation?.actions.map(action => action.kind)).not.toContain('confirm-account') }
+    expect(view.continuation?.stage).toBe(index === advances - 1 ? 'account' : 'handoff')
+    if (index < advances - 1) { expect(view.continuation?.account).toBeNull(); expect(view.continuation?.actions.map(action => action.kind)).not.toContain('confirm-account') }
     expect((await f.sdk.call('connection.setup.advance', original)).receipt).toEqual(view.receipt)
     expect(requests).toHaveBeenCalledTimes(count + 1)
+    // Resume the same encrypted Console snapshot after its first international issuer response.
+    if (index === 6) { await f.close(); await f.reopen(); view = await inspect(f) }
   }
   expect(requests.mock.calls.map(([url]) => { const target = new URL(String(url)); return target.origin + target.pathname + target.search })).toEqual([
     expect.stringMatching(/^https:\/\/accounts\.feishu\.cn\/accounts\/qrlogin\/init\?/),
@@ -984,11 +1003,11 @@ it('continues the original Console transport through Setup SDK and compiled CLI 
   expect(await f.sdk.call('connection.inspect', { connectionId: f.input.connectionId })).toEqual(before)
 }, 30_000)
 
-it('keeps valid identity HTML from a Console issuer intermediate unknown through the original Setup owner', async () => {
+it.each(['accounts.feishu.cn', 'accounts.larkoffice.com', 'login.feishu.cn'])('keeps valid identity HTML from Console issuer %s unknown through the original Setup owner', async host => {
   const f = await fixture(), route = nativeRoute(), before = await f.sdk.call('connection.inspect', { connectionId: f.input.connectionId })
   const requests = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-    if (String(url) === 'https://open.feishu.cn/app') return new Response(null, { status: 302, headers: { location: 'https://accounts.feishu.cn/accounts/console' } })
-    if (String(url) === 'https://accounts.feishu.cn/accounts/console') return new Response(bootstrap(), { headers: { 'content-type': 'text/html' } })
+    if (String(url) === 'https://open.feishu.cn/app') return new Response(null, { status: 302, headers: { location: `https://${host}/accounts/console` } })
+    if (String(url) === `https://${host}/accounts/console`) return new Response(bootstrap(), { headers: { 'content-type': 'text/html' } })
     return route(url, init)
   }); vi.stubGlobal('fetch', requests)
   let view = await f.sdk.call('connection.setup.begin', f.input), original: ConnectionSetupAdvance | undefined

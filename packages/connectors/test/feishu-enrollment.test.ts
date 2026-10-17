@@ -91,7 +91,8 @@ it.each([{}, { status: null }, { status: 0 }, { status: 2 }])('uses enter_app ha
 })
 it.each([
   [7, undefined], [' ', 'invalid-url'], ['http://accounts.feishu.cn/cross', 'unsupported-scheme'],
-  ['https://foreign.example/cross', 'unexpected-host'], ['https://user@accounts.feishu.cn/cross', 'url-credentials'],
+  ['https://foreign.example/cross', 'unexpected-host'], ['https://accounts.larkoffice.com/cross', 'unexpected-host'],
+  ['https://login.feishu.cn/cross', 'unexpected-host'], ['https://user@accounts.feishu.cn/cross', 'url-credentials'],
   ['https://accounts.feishu.cn:8443/cross', 'unexpected-port'], ['https://accounts.feishu.cn/cross#fragment', 'unexpected-fragment']
 ])('keeps an unqualified handoff unknown without following its URL: %s', async (crossLoginUri, redirectReason) => {
   const network = remote(
@@ -567,10 +568,37 @@ it('keeps the original scoped cookies and referer through Console issuer interme
   expect(headers.every(value => !value.has('x-flow-key') && !value.has('x-csrf-token'))).toBe(true)
 })
 
+it.each(['accounts.larkoffice.com', 'login.feishu.cn'])('reuses the final Console snapshot after %s for the original Enrollment upload', async host => {
+  const document = 'https://open.larkoffice.com/app', issuer = `https://${host}/accounts/handoff`
+  const f = await consoleReady(
+    new Response(null, { status: 302, headers: { location: issuer } }),
+    new Response(null, { status: 302, headers: { location: document } }),
+    new Response(html(), { headers: { 'content-type': 'text/html', 'set-cookie': 'consoleOnly=private-console; Path=/; Secure' } }),
+    Response.json({ code: 0, data: { url: icon } })
+  )
+  let view = f.view
+  for (let index = 0; index < 3; index++) {
+    const count = f.network.calls.length
+    view = authentication(await f.adapter.advance({ ...f.original, privateState: view.privateState }))
+    expect(f.network.calls).toHaveLength(count + 1)
+    expect(view.stage).toBe(index === 2 ? 'account' : 'handoff')
+  }
+  const uploaded = await f.adapter.upload({ ...f.original, privateState: view.privateState, pngDataUrl })
+  expect(uploaded.kind).toBe('uploaded')
+  expect(f.network.calls.map(call => call.url).slice(3)).toEqual(['https://open.feishu.cn/app', issuer, document, 'https://open.larkoffice.com/developers/v1/app/upload/image'])
+  const headers = new Headers(f.network.calls.at(-1)!.options.headers)
+  expect(headers.get('referer')).toBe(document)
+  expect(headers.get('cookie')).toBe('consoleOnly=private-console')
+  expect(headers.get('x-csrf-token')).toBe('private-csrf')
+  expect(headers.get('x-flow-key')).toBeNull()
+})
+
 it.each([
   [undefined, 'missing-location'], ['https://[', 'invalid-url'], ['http://open.feishu.cn/app', 'unsupported-scheme'],
   ['https://user:secret@open.feishu.cn/app', 'url-credentials'], ['https://open.feishu.cn:8443/app', 'unexpected-port'],
-  ['https://foreign.example/console?private=reference', 'unexpected-host']
+  ['https://foreign.example/console?private=reference', 'unexpected-host'],
+  ['https://accounts.larkoffice.com.foreign.example/console', 'unexpected-host'], ['https://login.feishu.cn.foreign.example/console', 'unexpected-host'],
+  ['http://accounts.larkoffice.com/console', 'unsupported-scheme'], ['https://login.feishu.cn:8443/console', 'unexpected-port']
 ] as const)('keeps an unqualified Console redirect unknown with its exact %s boundary', async (location, redirectReason) => {
   const f = await consoleReady(new Response(null, { status: 302, headers: location ? { location } : {} }))
   const view = await f.adapter.advance({ ...f.original, privateState: f.view.privateState })
@@ -579,7 +607,7 @@ it.each([
   expect(JSON.stringify(view)).not.toContain('private=reference')
 })
 
-it.each(['https://accounts.feishu.cn/accounts/console', 'https://ask.feishu.cn/console'])('does not grant an account from trusted non-Console HTML at %s', async location => {
+it.each(['https://accounts.feishu.cn/accounts/console', 'https://ask.feishu.cn/console', 'https://accounts.larkoffice.com/accounts/console', 'https://login.feishu.cn/accounts/console'])('does not grant an account from trusted non-Console HTML at %s', async location => {
   const f = await consoleReady(new Response(null, { status: 302, headers: { location } }), new Response(html(), { headers: { 'content-type': 'text/html' } }))
   const next = authentication(await f.adapter.advance({ ...f.original, privateState: f.view.privateState }))
   expect(next.stage).toBe('handoff'); expect(next.account).toBeNull()
