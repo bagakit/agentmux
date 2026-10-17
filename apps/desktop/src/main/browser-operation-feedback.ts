@@ -281,7 +281,15 @@ function applyFeedback(payload: FeedbackPayload, target?: Element): boolean {
     if (label && preferences.showCursorLabel) {
       labelAnimation = label.animate([{ transform: labelPosition(history.point) }, { transform: labelPosition(point) }],
         { duration: payload.moveMs, easing: 'cubic-bezier(0.2,0.8,0.2,1)' })
-      labelAnimation.startTime = animation.startTime
+      const arrowMove = animation, labelMove = labelAnimation
+      const synchronizeClock = () => {
+        if (globals[key] !== state || animation !== arrowMove || labelAnimation !== labelMove || arrowMove.startTime === null) return
+        labelMove.startTime = arrowMove.startTime
+      }
+      // A fresh Chromium animation may still be pending. Assigning null would
+      // pause the label; observe the original ready promise without delaying input.
+      if (arrowMove.startTime !== null) synchronizeClock()
+      else void arrowMove.ready.then(synchronizeClock, () => {})
     }
   }
   if (payload.kind === 'target') window.top?.postMessage({ channel: 'agentmux-feedback', type: 'register',
