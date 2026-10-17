@@ -7,7 +7,6 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { GitHistoryRef } from '../../../../../shared/git-contracts'
 import { WindowOverlayPortal } from '../../../components/WindowOverlayHost'
 import { useWorkbenchDocument } from '../../../lib/workbench-document'
-import '../../../styles/git-history-ref-picker.css'
 
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
