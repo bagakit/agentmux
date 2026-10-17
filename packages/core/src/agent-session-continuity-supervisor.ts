@@ -6,11 +6,13 @@ import type { AgentMuxAgentContinuityInput, AgentMuxAgentContinuityResult, Agent
 import type { AgentMuxLifecycleReservation } from './agent-session-store.js'
 import type { AgentMuxRunRef, AgentMuxStoredAgentSession } from './types.js'
 import type { CtxmuxAdapterRun } from './ctxmux-run-adapter.js'
+import type { AgentTerminalFrontend } from './agent-terminal-frontend.js'
 
 type Dependencies = {
   read(id: string): Promise<AgentMuxStoredAgentSession | null>
   lifecycle(id: string): Promise<AgentMuxLifecycleReservation | null>
   status(session: AgentMuxStoredAgentSession): Promise<CtxmuxAdapterRun>
+  frontend?(session: AgentMuxStoredAgentSession): Promise<AgentTerminalFrontend | undefined>
   watch(run: CtxmuxAdapterRun, changed: (error?: AgentMuxError) => void): Promise<() => Promise<void>>
   update(session: AgentMuxStoredAgentSession, change: (current: AgentMuxStoredAgentSession) => AgentMuxStoredAgentSession): Promise<AgentMuxStoredAgentSession>
   perform(input: AgentMuxAgentContinuityInput, intentOperationId?: string): Promise<AgentMuxAgentContinuityResult>
@@ -78,6 +80,10 @@ export class AgentSessionContinuitySupervisor {
       supervision.phase === 'settled' || root.intentOperationId || !active || active.agentSessionId !== session.agentSessionId ||
       active.operationId !== rootId && active.intentOperationId !== rootId ||
       (active.newRun ? !sameRun(active.newRun, session.run) : !sameRun(active.previousRun, session.run))) return
+    // A new application startup may retry a fully reconciled failed frontend.
+    // It never resets this intent's durable counter or abandons an unknown action.
+    if (input.trigger === 'startup' && supervision.phase === 'paused' && supervision.reason === 'frontend-retry-budget-exhausted' &&
+      (active.kind === 'reattachable' && active.frontendReconnect?.frontendId || active.kind === 'resumed' && active.newRun)) return
     return active
   }
 
@@ -220,12 +226,13 @@ export class AgentSessionContinuitySupervisor {
       !matchesProviderNativeSessionTarget(root.nativeTarget, active.nativeTarget) || !matchesProviderNativeSessionTarget(active.nativeTarget, session.nativeHandle)) return await settle('paused', 'original-target-changed')
     // A failed lifecycle read is not evidence that Stop is absent.
     const lifecycle = await this.deps.lifecycle(id)
-    if (lifecycle?.kind === 'stop' && sameRun(lifecycle.expectedRun, session.run) && active.newRun &&
-      sameRun(active.newRun, session.run)) return await settle('cancelled', 'user-stop')
+    const activeRun = active.newRun ?? (active.frontendReconnect ? active.previousRun : undefined)
+    if (lifecycle?.kind === 'stop' && sameRun(lifecycle.expectedRun, session.run) && activeRun &&
+      sameRun(activeRun, session.run)) return await settle('cancelled', 'user-stop')
     const cancellation = supervision.cancellation
-    if (cancellation && active.newRun && sameRun(cancellation.run, active.newRun) &&
+    if (cancellation && activeRun && sameRun(cancellation.run, activeRun) &&
       sameRun(cancellation.run, session.run) && matchesProviderNativeSessionTarget(root.nativeTarget, cancellation.nativeTarget) && matchesProviderNativeSessionTarget(cancellation.nativeTarget, session.nativeHandle)) return await settle('cancelled', 'explicit-cancellation')
-    if (!active.newRun || !sameRun(active.newRun, session.run)) {
+    if (!activeRun || !sameRun(activeRun, session.run) || active.frontendReconnect && active.kind === 'pending') {
       if (!sameRun(active.previousRun, session.run)) return await settle('paused', 'current-run-changed')
       // Prepared/unknown Start is the same original action. Its own re-entry never starts again.
       if (active.kind === 'starting' || active.reason === 'operation-unconfirmed' || active.kind === 'pending') {
@@ -263,6 +270,44 @@ export class AgentSessionContinuitySupervisor {
     const process = { run: { ...session.run }, state: run.state.type, observedAt: Date.now(),
       ...(run.state.type === 'exited' ? { exitCode: run.state.code, exitSignal: run.state.signal } : {}) }
     if (run.state.type === 'running') {
+      const frontend = await this.deps.frontend?.(session)
+      const exactFrontend = frontend && sameRun(frontend.run, session.run) ? frontend : undefined
+      const failedFrontend = exactFrontend?.state === 'detached' && exactFrontend.backendState === 'running' &&
+        typeof exactFrontend.exitCode === 'number' && exactFrontend.exitCode !== 0
+      if (failedFrontend) {
+        if (supervision.attemptCount >= supervision.attemptLimit) return await settle('paused', 'frontend-retry-budget-exhausted', process)
+        if (supervision.phase !== 'retry-wait' || supervision.nextAttemptAt === undefined) {
+          const base = Math.min(root.policy.retryMaxDelayMs, root.policy.retryInitialDelayMs * 2 ** Math.min(supervision.attemptCount - 1, 52))
+          const nextAttemptAt = Math.min(Number.MAX_SAFE_INTEGER, Date.now() + base)
+          await this.save(session, root, { ...supervision, phase: 'retry-wait', reason: 'frontend-nonzero-exit', process, nextAttemptAt, observedAt: Date.now() })
+          this.at(id, rootId, nextAttemptAt, () => this.wake(id)); return
+        }
+        if (supervision.nextAttemptAt > Date.now()) { this.at(id, rootId, supervision.nextAttemptAt, () => this.wake(id)); return }
+        const attemptCount = supervision.attemptCount + 1
+        const operationId = 'frontend-' + createHash('sha256').update(JSON.stringify([id, rootId, attemptCount])).digest('base64url')
+        const attempt: AgentMuxContinuityOperation = { operationId, agentSessionId: id, intentOperationId: rootId, trigger: root.trigger, policy: root.policy,
+          previousRun: { ...session.run }, nativeTarget: structuredClone(root.nativeTarget), admittedAt: Date.now(), observedAt: Date.now(), rechecks: 0,
+          kind: 'pending', reason: 'runtime-unverified', evidence: { kind: 'run-running', observedAt: Date.now() },
+          interruptedWorking: false, recoveryInputs: { reminder: '', continuation: '' } }
+        const next = { ...supervision, phase: 'observing' as const, reason: 'frontend-attempt-admitted', activeAttemptOperationId: operationId, attemptCount, observedAt: Date.now() }
+        delete next.nextAttemptAt
+        await this.save(session, root, next, attempt, { rechecks: 0 })
+        if (!this.disposed) await this.deps.perform(operationInput(attempt), rootId)
+        return
+      }
+      if (session.nativeActor?.frontendControl) {
+        if (exactFrontend?.state === 'detached' && exactFrontend.exitCode === 0) return await settle('settled', 'frontend-normal-exit', process)
+        // A capability ACK proves that connection only, not completed bootstrap.
+        // Keep this admitted intent quiet but live for a later exact frontend exit;
+        // every further attempt still consumes its original, durable finite budget.
+        if (exactFrontend?.state === 'attached' && (!active.frontendReconnect || exactFrontend.frontendId === active.frontendReconnect.frontendId) &&
+          session.terminalHandshake?.frontendId === exactFrontend.frontendId && session.terminalHandshake.acknowledged) {
+          if (supervision.phase !== 'observing' || supervision.reason !== 'frontend-attached') await this.save(session, root,
+            { ...supervision, phase: 'observing', reason: 'frontend-attached', process, observedAt: Date.now() })
+          return
+        }
+        return await settle('paused', 'provider-unverified', process)
+      }
       const context = supervision.contextEvidence
       if (context && sameRun(context.run, session.run) && matchesProviderNativeSessionTarget(root.nativeTarget, context.nativeTarget) && matchesProviderNativeSessionTarget(context.nativeTarget, session.nativeHandle)) return await settle('settled', 'context-observed', process)
       if (supervision.phase !== 'observing' || supervision.process?.state !== 'running' || !sameRun(supervision.process.run, session.run)) {
