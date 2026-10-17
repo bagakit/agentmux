@@ -4,12 +4,40 @@ import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, readdir, realpath, symlink, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
-import { promisify } from 'node:util'
+import { isDeepStrictEqual, promisify } from 'node:util'
 import { pathToFileURL } from 'node:url'
 import { listProbeProcesses, stopProbeProcesses, runProbeProcess } from '../probe-process.mjs'
 
 const exec = promisify(execFile), require = createRequire(import.meta.url)
 export const a2aProofSha = bytes => createHash('sha256').update(bytes).digest('hex')
+
+/** This one negative UI assertion requires successful original reads, never an unopened or failed empty face. */
+export function assertA2aReferenceUserReading(reading, recipient, nativeSource, notification) {
+  assert.deepEqual(reading.reference, { hostId: 'local', agentSessionId: recipient.agentSessionId })
+  assert.equal(reading.mailbox.agentSessionId, recipient.agentSessionId)
+  assert.ok(reading.mailbox.queueId)
+  assert.equal(reading.mailbox.coverage.kind, 'recorded-inputs')
+  assert.ok(reading.mailbox.items.every(entry => entry.kind === 'item' && !entry.item.failure))
+  const original = reading.mailbox.items.find(entry => entry.item.kind === 'submission' &&
+    isDeepStrictEqual(entry.item.key, notification.key))?.item
+  assert.ok(original, 'The actual input inventory must retain this exact original platform input')
+  assert.deepEqual(original.record.admission.inputKey, notification.key)
+  assert.equal(original.record.admission.intent.prompt, notification.wire)
+  assert.equal(original.record.admission.intent.message.a2aNotificationId, notification.key.submissionId)
+  assert.equal(original.record.admission.intent.message.systemContext, notification.wire)
+  assert.deepEqual(reading.history.map(page => page.source), ['captured', 'native'])
+  for (const page of reading.history) {
+    assert.equal(page.hostId, 'local'); assert.equal(page.agentSessionId, recipient.agentSessionId)
+    assert.equal(page.kind, 'user-message'); assert.ok(Array.isArray(page.userMessages))
+    assert.ok(['available', 'empty'].includes(page.availability)); assert.equal(page.scan.complete, true)
+  }
+  assert.deepEqual(reading.history[1].nativeSource, nativeSource)
+  assert.equal(reading.view.busy, 'false'); assert.ok(reading.view.busyTransitions.includes('true'))
+  assert.equal(reading.view.inputScope, JSON.stringify(['local', recipient.agentSessionId]))
+  assert.equal(reading.view.sourceCount, 2)
+  assert.ok(reading.view.coverage.some(text => text.includes('已查完可用记录（本次读取）')))
+  assert.deepEqual(reading.view.errors, [])
+}
 const packages = ['core', 'demand', 'client-ui', 'layout', 'relay', 'identity', 'git', 'diagnostic-evidence', 'connectors']
 const assets = ['packages/core/vendor', 'apps/desktop/vendor', 'apps/desktop/native', 'apps/desktop/brand', 'apps/desktop/browser-extension']
 const owns = ['apps/desktop/src', 'apps/desktop/electron.vite.config.ts', 'apps/desktop/package.json',
@@ -262,6 +290,9 @@ export async function verifyA2aReferenceReadingProductProof(product, { root }) {
   assert.equal(r.wireCopyFeedback, true); assert.equal(r.bodyCopyFeedback, true)
   assert.equal(r.inbox.decodedReferenceLists, 0); assert.ok(r.inbox.text.includes('Notification submitted')); assert.ok(r.outbox.includes('Notification submitted'))
   for (const text of [r.messageId, r.key.submissionId, envelope.body]) assert.ok(!r.userPage.includes(text))
+  const nativeSource = noticeUnits[0].item.records.find(record => record.original.kind === 'native').reference.source
+  assertA2aReferenceUserReading(r.userReading, r.recipient, { providerId: nativeSource.providerId, nativeSessionId: nativeSource.nativeSessionId }, { key: r.key, wire: r.wire })
+  assert.equal(r.userPage, r.userReading.view.text)
   assert.equal(r.batch.messages.length, 1); assert.equal(r.batch.messages[0].envelope.messageId, r.messageId)
   assert.deepEqual(r.afterBatch, r.batch)
   const expectedSessions = [r.author.agentSessionId, r.recipient.agentSessionId].sort()
