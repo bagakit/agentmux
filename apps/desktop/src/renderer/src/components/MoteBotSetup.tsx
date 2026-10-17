@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import type { ConnectionRecord, ConnectionEnrollmentActionKind } from '@agentmux/core/connections'
 import type { MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import { useMoteBotSetup } from '../lib/use-mote-bot-setup'
+import { TextInput } from '@agentmux/client-ui/input'
+import { generatedBotName } from '../lib/bot-creation-preset'
 import { SelectionField } from './SelectionField'
 import { BotConfirmationCode } from './BotConfirmationCode'
 import { ConnectionProfileResult } from './ConnectionProfileResult'
@@ -41,6 +43,8 @@ export function MoteBotSetup({
   const setup = useMoteBotSetup(target, topicId),
     [avatar, setAvatar] = useState(true),
     [issuer, setIssuer] = useState('')
+  const [nameSource, setNameSource] = useState('mote'), [manualName, setManualName] = useState<string | null>(null)
+  const newDraft = () => { setNameSource('mote'); setManualName(null); setup.newIntent() }
   const [separate, setSeparate] = useState(false), [replacing, setReplacing] = useState(false)
   const shortcut = useRef(createOnOpen)
   const available = setup.capabilities.filter((item) => item.availability === 'available')
@@ -80,7 +84,6 @@ export function MoteBotSetup({
     shortcut.current = false
     onCreateIntentConsumed?.()
     if (resumeId) void setup.check(resumeId)
-    else if (setup.profile.image) void setup.begin(capability, true)
   }, [setup.historyReady, setup.loading, setup.profile, capability, resumeId])
   const enrollment = operation?.enrollment
   const challenge = setup.enrollmentView?.challenge,
@@ -249,11 +252,19 @@ export function MoteBotSetup({
                   Change bot
                 </button>
               </div>
-              <details className="mote-bot-replacement"><summary>Create a replacement identity</summary><p className="mote-details__hint">Create another bot using this Mote’s name and avatar. The current identity stays until the new one is saved; existing groups keep their bot.</p><button type="button" className="small-button" data-mote-identity-replace onClick={() => { setReplacing(true); setSeparate(true); setAvatar(true); setup.newIntent() }}>Prepare replacement</button></details>
+              <details className="mote-bot-replacement"><summary>Create a replacement identity</summary><p className="mote-details__hint">Create another bot using this Mote’s name and avatar. The current identity stays until the new one is saved; existing groups keep their bot.</p><button type="button" className="small-button" data-mote-identity-replace onClick={() => { setReplacing(true); setSeparate(true); setAvatar(true); newDraft() }}>Prepare replacement</button></details>
             </>
           ) : (
             <>
               {replacing ? <p className="mote-details__hint">A new identity for this Mote. Its current bot stays in place while you finish.</p> : null}
+              {setup.profile ? <div className="mote-bot-name">
+                <div className="mote-bot-name__heading"><span>Bot name</span><SelectionField label="Bot name source" value={nameSource}
+                  options={[{ value: 'mote', label: 'Use Mote name' }, { value: 'manual', label: 'Enter manually' }]}
+                  onValueChange={value => { if (value === 'manual' && manualName === null) setManualName(generatedBotName()); setNameSource(value) }} /></div>
+                <TextInput aria-label="Bot name" readOnly={nameSource === 'mote'} value={nameSource === 'mote' ? setup.profile.name : manualName ?? ''}
+                  onChange={event => setManualName(event.target.value)} autoComplete="off" spellCheck={false} />
+                <small>{nameSource === 'mote' ? 'Uses this Mote’s saved name. Its profile stays unchanged.' : 'Only names the new bot. This Mote and existing bots stay unchanged.'}</small>
+              </div> : null}
               {available.length > 1 ? (
                 <SelectionField
                   label="Mote bot platform"
@@ -281,10 +292,10 @@ export function MoteBotSetup({
                     type="button"
                     className="primary-button"
                     data-mote-bot-create
-                    disabled={!setup.profile?.image || !capability}
+                    disabled={!setup.profile?.image || !capability || nameSource === 'manual' && !manualName?.trim()}
                     onClick={() => {
                       setSeparate(false)
-                      capability && void setup.begin(capability, true)
+                      capability && void setup.begin(capability, true, nameSource === 'manual' ? manualName! : undefined)
                     }}
                   >
                     {hasSavedBot
@@ -316,7 +327,7 @@ export function MoteBotSetup({
             onClick={() => {
               setSeparate(false)
               setReplacing(false)
-              setup.newIntent()
+              newDraft()
               onCurrent()
             }}
           >
@@ -480,7 +491,7 @@ export function MoteBotSetup({
             type="button"
             className="small-button"
             onClick={() => {
-              setup.newIntent()
+              newDraft()
               setSeparate(true)
               onCurrent()
             }}

@@ -94,3 +94,11 @@
 }
 @media (prefers-reduced-motion: reduce) { .connector-mote-card { transition: none; } }
 @media (pointer: coarse) { .mote-bot-task__content button { min-height: 44px; } }
+
+.mote-bot-name { display: grid; gap: var(--sp-3); min-width: 0; }
+.mote-bot-name__heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+.mote-bot-name__heading > span { color: var(--text-2); font-size: var(--fs-body); }
+.mote-bot-name__heading .selection-field { width: auto; max-width: 100%; font-size: var(--fs-meta); }
+.mote-bot-name input { width: 100%; min-width: 0; }
+.mote-bot-name input[readonly] { color: var(--text-2); }
+.mote-bot-name small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
