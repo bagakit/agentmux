@@ -10,6 +10,7 @@ import { isConnectionSetupMethod, parseConnectionSetupParams } from './connectio
 import { parseAgentContinuityControlInput, parseAgentContinuityControlResult } from './agent-session-continuity-control.js'
 import { parseRendererV8ProfileResult } from './renderer-v8-profile.js'
 import { parseRendererMemoryResult } from './renderer-memory.js'
+import { parseRendererAnimationsResult } from './renderer-animations.js'
 import { parseRendererTraceResult } from './renderer-trace.js'
 import { ConversationLandmarkStore } from './conversation-landmark-store.js'
 import { parseConversationLandmarkQuery, parseConversationLandmarkWrite } from './conversation-landmarks.js'
@@ -1276,6 +1277,7 @@ export class AgentMuxRpcService {
         : request.operation === 'metrics.allocations.capture' ? { operation: 'metrics.allocations.capture', capture: await this.captureAllocations({ target: request.target, durationMs: request.durationMs }, context.signal) }
         : request.operation === 'metrics.scene.capture' ? { operation: 'metrics.scene.capture', capture: await this.captureScene({ target: request.target }, context.signal) }
         : request.operation === 'metrics.scene.inspect' ? { operation: 'metrics.scene.inspect', inspection: await this.inspectScene(request.captureId === undefined ? {} : { captureId: request.captureId }, context.signal) }
+        : request.operation === 'metrics.animations.inspect' ? { operation: 'metrics.animations.inspect', observation: await this.inspectAnimations({ target: request.target }, context.signal) }
         : request.operation === 'metrics.memory.inspect' ? { operation: 'metrics.memory.inspect', observation: await this.inspectMemory({ target: request.target }, context.signal) }
         : request.operation === 'metrics.trace.capture' ? { operation: 'metrics.trace.capture', capture: await this.captureTrace({ target: request.target, durationMs: request.durationMs }, context.signal) }
         : request.operation === 'metrics.profile.capture' ? { operation: 'metrics.profile.capture', capture: await this.captureProfile({ target: request.target, durationMs: request.durationMs }, context.signal) }
@@ -1958,6 +1960,10 @@ export class AgentMuxRpcService {
   private async inspectScene(input: import('./renderer-performance-scene.js').RendererSceneInspectInput, signal?: AbortSignal) {
     if (!this.ports.metrics?.inspectScene) throw new AgentMuxError('Scene inspection is unavailable on the original metrics owner.', 'METRICS_UNSUPPORTED')
     return parseRendererSceneInspection(await this.ports.metrics.inspectScene(input, signal), input)
+  }
+  private async inspectAnimations(input: import('./renderer-animations.js').RendererAnimationsInput, signal?: AbortSignal) {
+    if (!this.ports.metrics?.inspectAnimations) throw new AgentMuxError('Renderer animation observations are unavailable on the original metrics owner.', 'METRICS_UNSUPPORTED')
+    return parseRendererAnimationsResult(await this.ports.metrics.inspectAnimations(input, signal), input)
   }
   private async inspectMemory(input: import('./renderer-memory.js').RendererMemoryInput, signal?: AbortSignal) {
     if (!this.ports.metrics?.inspectMemory) throw new AgentMuxError('Renderer memory details are unavailable on the original metrics owner.', 'METRICS_UNSUPPORTED')

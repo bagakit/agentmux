@@ -5,6 +5,7 @@ import { parseRendererSceneCaptureInput, parseRendererSceneInspectInput } from '
 import { parseAgentContinuityControlInput } from './agent-session-continuity-control.js'
 import { parseRendererV8ProfileInput } from './renderer-v8-profile.js'
 import { parseRendererMemoryInput } from './renderer-memory.js'
+import { parseRendererAnimationsInput } from './renderer-animations.js'
 import { parseRendererTraceInput } from './renderer-trace.js'
 import { parseConversationLandmarkWrite } from './conversation-landmarks.js'
 import { parseMoteConnectionParams } from './mote-connection-codec.js'
@@ -832,6 +833,10 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('system.metrics.scene.inspect', '[--capture-id ID] [--output FILE]', 'Read the single latest retained original scene without starting any sampling.',
     { '--capture-id': 'data', '--output': 'data' }, f => parseRendererSceneInspectInput(fields(f, { '--capture-id': 'captureId' })) as unknown as Record<string, unknown>,
     'Omit capture-id to read latest; supply original captureId for an exact read. Replaced or missing originals are not regenerated. Available means current bytes are readable, not a reconstructed directory-fsync ACK. Large raw profiles remain in this domain, not the small diagnostic envelope. --output creates a new local scene JSON, never overwrites a file/symlink. Inspect never captures, retries, uploads, changes target, focuses or alters Agent health.'),
+  command('system.metrics.animations.inspect', '--window-id W --web-contents-id WC --generation G --pid PID --creation-time MS', 'Explicitly inspect bounded Web Animation instances in one exact Renderer document.',
+    { '--window-id': 'value', '--web-contents-id': 'value', '--generation': 'value', '--pid': 'value', '--creation-time': 'value' }, f =>
+      parseRendererAnimationsInput({ target: numbers(f, { '--window-id': 'windowId', '--web-contents-id': 'webContentsId', '--generation': 'generation', '--pid': 'pid', '--creation-time': 'creationTime' }) }) as unknown as Record<string, unknown>,
+    'Use the exact original metrics window/WebContents/generation/PID/creationTime. One static document.getAnimations() read returns at most 128 instances, native timing/state and bounded tag/class ancestry; omitted entries and truncation stay explicit. This document excludes iframe/worker coverage. Labels and running state do not prove CPU cost or Runtime identity. No DOM text/IDs, layout, animation mutation, debugger attachment, automatic collection, retry or history. Existing DevTools stays available. Evaluation-requested/settled and source checks remain in completed/failed/unknown receipts; a late result cannot change the original reply.'),
   command('system.metrics.memory.inspect', '--window-id W --web-contents-id WC --generation G --pid PID --creation-time MS', 'Explicitly read one exact Renderer V8 isolate heap/backing counter snapshot in bytes.',
     { '--window-id': 'value', '--web-contents-id': 'value', '--generation': 'value', '--pid': 'value', '--creation-time': 'value' }, f =>
       parseRendererMemoryInput({ target: numbers(f, { '--window-id': 'windowId', '--web-contents-id': 'webContentsId', '--generation': 'generation', '--pid': 'pid', '--creation-time': 'creationTime' }) }) as unknown as Record<string, unknown>,

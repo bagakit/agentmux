@@ -2,6 +2,7 @@ import { parseRendererAllocationsInput, parseRendererAllocationsResult } from '.
 import { parseRendererSceneCaptureInput, parseRendererSceneCaptureResult, parseRendererSceneInspectInput, parseRendererSceneInspection } from './renderer-performance-scene.js'
 import { parseRendererV8ProfileInput, parseRendererV8ProfileResult } from './renderer-v8-profile.js'
 import { parseRendererMemoryInput, parseRendererMemoryResult } from './renderer-memory.js'
+import { parseRendererAnimationsInput, parseRendererAnimationsResult } from './renderer-animations.js'
 import { parseRendererTraceInput, parseRendererTraceResult } from './renderer-trace.js'
 import { parseConversationConsumerQuery } from './conversation-consumer-query.js'
 import { parseBrowserDefaultInspection, parseBrowserDefaultSettingsRequest } from './browser-default.js'
@@ -305,6 +306,11 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'target', 'durationMs'], 'INVALID_CONTROL_REQUEST')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation,
       ...parseRendererTraceInput({ target: source.target, durationMs: source.durationMs }) }
+  }
+  if (source.operation === 'metrics.animations.inspect') {
+    settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'target'], 'INVALID_CONTROL_REQUEST')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation,
+      ...parseRendererAnimationsInput({ target: source.target }) }
   }
   if (source.operation === 'metrics.memory.inspect') {
     settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'target'], 'INVALID_CONTROL_REQUEST')
@@ -1167,6 +1173,11 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     settingsFields(result, ['capture'], 'CONTROL_PROTOCOL_ERROR')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
       result: { capture: parseRendererTraceResult(result.capture) } }
+  }
+  if (operation === 'metrics.animations.inspect') {
+    settingsFields(result, ['observation'], 'CONTROL_PROTOCOL_ERROR')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
+      result: { observation: parseRendererAnimationsResult(result.observation) } }
   }
   if (operation === 'metrics.memory.inspect') {
     settingsFields(result, ['observation'], 'CONTROL_PROTOCOL_ERROR')
