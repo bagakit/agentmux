@@ -6470,7 +6470,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         runPlan = { ...plan, steps: [step] }
       }
       const report = await api.browser.runReplay(request.browserId, runPlan, request.caller
-        ? { id: request.caller.agentSessionId, name: `Agent ${request.caller.agentSessionId}` }
+        ? browserOperatorForSession(request.caller.agentSessionId, get().sessions)
         : undefined)
       requireActive()
       return {
