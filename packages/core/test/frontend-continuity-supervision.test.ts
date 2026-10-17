@@ -17,6 +17,7 @@ function fixture(overrides: Partial<AgentTerminalFrontend> = {}) {
     nativeActor: { frontendControl: true }, continuity: root, continuityOperations: { [root.operationId]: root } }
   let frontend: AgentTerminalFrontend = { run, frontendId: 'first-tui', state: 'detached', backendState: 'running', source: 'managed-process', observedAt: _tailFixtureEpoch(0, 0, 2), exitCode: 23, ...overrides }
   const perform = vi.fn(async (input: any) => {
+    processState = { type: 'running' }
     const attempt = current.continuityOperations[input.operationId]
     attempt.kind = 'reattachable'; attempt.reason = 'frontend-reconnected'
     attempt.frontendReconnect = { previousFrontendId: frontend.frontendId, frontendId: 'second-tui', outputAfterByte: 100 }
@@ -27,12 +28,17 @@ function fixture(overrides: Partial<AgentTerminalFrontend> = {}) {
     return { kind: 'reattachable', session: current, previousRun: run, run, evidence: { kind: 'run-running', observedAt: _tailFixtureEpoch(0, 0, 3) } } as any
   })
   let lifecycle:any=null
-  const status = vi.fn(async () => ({ runId: run.runId, workspacePath: current.workspacePath, state: { type: 'running' } }) as any)
+  let processState: any = { type: 'running' }
+  const readers: Array<{ changed: () => void; close: ReturnType<typeof vi.fn> }> = []
+  const update = vi.fn(async (_session: any, change: any) => { current = change(current); return current })
+  const status = vi.fn(async () => ({ runId: current.run.runId, workspacePath: current.workspacePath, state: processState }) as any)
   const supervisor = new AgentSessionContinuitySupervisor({ read: async () => current, lifecycle: async () => lifecycle, status,
-    frontend: async () => frontend, watch: async () => async () => {},
-    update: async (_session, change) => { current = change(current); return current }, perform, failed: (_id, error) => { throw error } })
+    frontend: async () => frontend, watch: async (_run, changed) => {
+      const close = vi.fn(async () => {}); readers.push({ changed, close }); return close
+    }, update, perform, failed: (_id, error) => { throw error } })
   cleanup.push(() => supervisor.dispose())
-  return { supervisor, perform, status, root: () => current.continuityOperations[root.operationId], current: () => current,
+  return { supervisor, perform, status, update, readers, root: () => current.continuityOperations[root.operationId], current: () => current,
+    exit: (code: number | null, signal: string | null = null) => { processState = { type: 'exited', code, signal }; readers.at(-1)?.changed() },
     setFrontend: (value: Partial<AgentTerminalFrontend>) => { frontend = { ...frontend, ...value }; supervisor.observe(current, true) },
     stop: () => { lifecycle={kind:'stop',expectedRun:run} }, setLimit: (value: number) => { root.supervision.attemptLimit = value }, start: () => supervisor.observe(current) }
 }
@@ -90,6 +96,46 @@ it('quiet observation does no extra status work for unrelated Session events',as
  await new Promise(resolve=>setTimeout(resolve,10));const calls=f.status.mock.calls.length;expect(calls).toBeGreaterThan(0)
  for(let i=0;i<100;i++){f.supervisor.wake('unrelated-session');f.supervisor.observe({...f.current(),agentSessionId:'unrelated-session',continuity:undefined,continuityOperations:{}})}
  await new Promise(resolve=>setTimeout(resolve,10));expect(f.status).toHaveBeenCalledTimes(calls)
+})
+
+it.each(['starting', 'unknown'] as const)('keeps an unconfirmed %s frontend quiet while retaining the exact Run lifecycle reader', async state => {
+  const f = fixture({ state }); f.start()
+  await vi.waitFor(() => expect(f.root().supervision.reason).toBe('provider-unverified'))
+  expect(f.root().supervision).toMatchObject({ phase: 'observing', attemptCount: 1, process: { run: f.current().run, state: 'running' } })
+  expect(f.readers).toHaveLength(1); expect(f.readers[0]!.close).not.toHaveBeenCalled()
+  const writes = f.update.mock.calls.length, reads = f.status.mock.calls.length
+  for (let i = 0; i < 5; i++) {
+    f.supervisor.wake(f.current().agentSessionId)
+    await vi.waitFor(() => expect(f.status.mock.calls.length).toBe(reads + i + 1))
+  }
+  expect(f.update).toHaveBeenCalledTimes(writes); expect(f.readers).toHaveLength(1)
+  expect(f.perform).not.toHaveBeenCalled()
+  f.exit(1)
+  await vi.waitFor(() => expect(f.perform).toHaveBeenCalledOnce())
+  expect(f.root().supervision.attemptCount).toBe(2)
+  expect(f.perform.mock.calls[0]![0].input).toBeUndefined()
+})
+
+it.each([
+  { code: 0, signal: null, phase: 'settled', reason: 'normal-exit' },
+  { code: null, signal: 'SIGTERM', phase: 'paused', reason: 'exit-outcome-unverified' }
+])('retains an unknown frontend reader without authorizing retry for $reason', async ({ code, signal, phase, reason }) => {
+  const f = fixture({ state: 'unknown' }); f.start()
+  await vi.waitFor(() => expect(f.root().supervision.reason).toBe('provider-unverified'))
+  f.exit(code, signal)
+  await vi.waitFor(() => expect(f.root().supervision).toMatchObject({ phase, reason }))
+  expect(f.perform).not.toHaveBeenCalled()
+})
+
+it('honors an exact Stop and the original budget after an unconfirmed frontend later exits', async () => {
+  for (const stopped of [true, false]) {
+    const f = fixture({ state: 'starting' }); f.setLimit(1); f.start()
+    await vi.waitFor(() => expect(f.root().supervision.reason).toBe('provider-unverified'))
+    if (stopped) f.stop()
+    f.exit(1)
+    await vi.waitFor(() => expect(f.root().supervision.reason).toBe(stopped ? 'user-stop' : 'retry-budget-exhausted'))
+    expect(f.perform).not.toHaveBeenCalled()
+  }
 })
 
 it.each([undefined, { acknowledged: true, run: { runId: 'original-running-backend' } }])('does not pause an attached generation or invent bootstrap evidence from an old unscoped ACK (%j)', async acknowledgement => {

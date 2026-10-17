@@ -42,7 +42,7 @@ it('validates exact supervision subjects and signal facts without narrowing real
   expect(() => core.normalizeAgentContinuityOperation({ ...operation, supervision: { ...operation.supervision,
     process: { ...operation.supervision.process, run: { runId: '' } } } })).toThrow(TypeError)
 })
-async function fixture(exitMode: 'immediate' | 'deferred' = 'immediate', options: { code?: number; signal?: boolean; alwaysFail?: boolean; delayMs?: number; handshake?: boolean } = {}) {
+async function fixture(exitMode: 'immediate' | 'deferred' = 'immediate', options: { code?: number; signal?: boolean; alwaysFail?: boolean; delayMs?: number; handshake?: boolean; unconfirmedFrontend?: boolean } = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'adr-')))
   for (const key of Object.keys(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key) && !key.startsWith('AGENTMUX_TEST_')) vi.stubEnv(key, undefined)
   const runtime = join(root, 'r'), state = join(root, 's')
@@ -68,6 +68,16 @@ async function fixture(exitMode: 'immediate' | 'deferred' = 'immediate', options
     hookStrategy: { kind: 'none' }, resumeStrategy: { kind: 'provider-native', locator: 'session-id' }, acpStrategy: { kind: 'none' },
     capabilities: { terminal: true, timeline: 'unavailable', permission: 'none', providerResume: true, replyCorrelation: 'none' } },
     ...(options.handshake ? { terminalHandshake: { query: '\x1b[?u', response: '\x1b[?0u' } } : {}),
+    ...(options.unconfirmedFrontend ? {
+      prepareManagedLaunch: async (plan: any, lifecycleOperationId: string) => ({ plan, nativeActor: {
+        protocolId: 'controlled-native', actorId: lifecycleOperationId, lifecycleOperationId, token: 'a'.repeat(64), frontendControl: true as const,
+        launch: { command: plan.command, args: plan.args }
+      } }),
+      observeTerminalFrontend: async ({ onFrontend }: any) => {
+        onFrontend({ frontendId: 'unconfirmed-native', state: 'starting', backendState: 'running', source: 'managed-process', observedAt: Date.now() })
+        return { dispose() {} }
+      }
+    } : {}),
     buildArgs: (_prompt, args) => [...args], buildResumeArgs: (id, _path, prompt, _args) => ['-e', program, id, ...(prompt ? [prompt] : [])], hook: { rules: [] } })
   const storePath = join(root, 'sessions.sqlite'), clients: Array<any> = []
   async function reader() {
@@ -158,6 +168,22 @@ it('observes a later exact Native exit even when no terminal consumer is attache
   const f = await fixture('immediate', { delayMs: 150 }); await f.recover()
   await vi.waitFor(() => expect(f.start).toHaveBeenCalledTimes(2))
   expect(rootOf((await f.store.readMetadata(f.previous.agentSessionId))!).supervision!.attemptCount).toBe(2)
+  expect(f.input).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
+})
+it('automatically retries a late recovery exit after its frontend remains unconfirmed on the real Runtime', async () => {
+  const f = await fixture('immediate', { delayMs: 800, unconfirmedFrontend: true }), first = await f.recover()
+  expect(first.kind, JSON.stringify(first)).toBe('resumed')
+  await vi.waitFor(async () => expect(rootOf((await f.store.readMetadata(f.previous.agentSessionId))!).supervision)
+    .toMatchObject({ phase: 'observing', reason: 'provider-unverified', attemptCount: 1, process: { state: 'running' } }))
+  await vi.waitFor(() => expect(f.start).toHaveBeenCalledTimes(2), { timeout: 5000 })
+  await vi.waitFor(async () => expect((await f.store.readMetadata(f.previous.agentSessionId))!.run).not.toEqual(first.session!.run))
+  const current = (await f.store.readMetadata(f.previous.agentSessionId))!
+  expect(current.agentSessionId).toBe(f.previous.agentSessionId)
+  expect(current.nativeHandle).toEqual(f.previous.nativeHandle)
+  expect(rootOf(current).supervision!.attemptCount).toBe(2)
+  expect(current.continuity!.intentOperationId).toBe('automatic-root')
+  expect(current.run).not.toEqual(first.session!.run)
+  expect(current.continuity!.recoveryInputs).toEqual({ reminder: '', continuation: '' })
   expect(f.input).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
 })
 it.each(['unavailable Runtime', 'foreign Run'] as const)('explicit refresh reobserves %s without changing its frozen budget', async cause => {
