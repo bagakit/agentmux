@@ -37,7 +37,7 @@ async function open() {
   const panel = dom.container.querySelector<HTMLElement>('.composer-mailbox')!
   const event = new Event('toggle'); Object.defineProperty(event,'newState',{value:'open'})
   await act(async () => panel.dispatchEvent(event))
-  await dom.click('[role="tab"][id$="-outbox-tab"]')
+  await dom.click('[role="tab"][id$="-user-tab"]')
 }
 it('reads actual local and connector inputs through the original Desktop API into the same mailbox without dispatch', async () => {
   const f = await inputs(), session = composerSession(f.input.agentSessionId,'claude')
@@ -55,9 +55,9 @@ it('reads actual local and connector inputs through the original Desktop API int
   await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) }); expect(dom.container.querySelectorAll('[data-input-mailbox-key]'), dom.container.querySelector('.input-mailbox')?.textContent).toHaveLength(2) })
   expect(dom.container.querySelector('.input-mailbox')?.textContent).toContain(f.event().body.slice(0,20))
   expect(dom.container.querySelector('.input-mailbox')?.textContent).toContain('Exact local original input')
-  expect(dom.container.querySelector('.input-mailbox')?.textContent).toContain(f.actor.application.domain)
+  expect(dom.container.querySelector('.input-mailbox')?.textContent).toContain(f.actor.userId)
   expect(dom.container.querySelector('.input-mailbox')?.textContent).toContain('已登记输入 · 更早历史未确认')
-  const externalRow=[...dom.container.querySelectorAll('[data-input-mailbox-key]')].find(row=>row.querySelector('[data-mailbox-author]')?.textContent?.includes(f.actor.userId))!
+  const externalRow=[...dom.container.querySelectorAll('[data-input-mailbox-key]')].find(row=>row.querySelector('.composer-mailbox__row strong')?.textContent?.includes(f.actor.userId))!
   expect(externalRow.textContent!.split(f.actor.application.domain)).toHaveLength(2)
   expect([...dom.container.querySelectorAll('.input-mailbox button')].filter(button=>button.textContent==='刷新发送记录')).toHaveLength(1)
   expect(read).toHaveBeenCalled(); expect(submit).not.toHaveBeenCalled(); expect(rejoin).not.toHaveBeenCalled()
@@ -284,6 +284,7 @@ it.each(['desktop','mobile'] as const)('interleaves the original journal and sou
   }
   await flushUntil(()=>expect(document.querySelectorAll('[data-input-mailbox-key]')).toHaveLength(2))
   const rows=[...document.querySelectorAll<HTMLElement>('[data-input-mailbox-key], [data-input-history-id], .composer-mailbox__row[data-record-key]')]
+    .filter(node=>node.dataset.inputMailboxKey || !node.closest('[data-input-mailbox-key]'))
     .map(node=>node.dataset.inputMailboxKey?'journal':node.dataset.inputHistoryId??node.dataset.recordKey?.replace('native:',''))
   expect(rows).toEqual(['native-new','journal','journal','native-old','native-unknown'])
   expect(f.inner.kernel.input).not.toHaveBeenCalled()

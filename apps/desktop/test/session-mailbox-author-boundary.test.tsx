@@ -77,7 +77,7 @@ it('excludes typed Agent and platform inputs from User Messages while retaining 
     expect(dom.container.textContent).toContain('ORIGINAL-human-input')
   })
   const rows = [...dom.container.querySelectorAll('[data-input-mailbox-key]')]
-  expect(rows.map(row => row.querySelector('[data-mailbox-author]')?.textContent)).toEqual(['Author unknown', 'Human', 'Author unknown'])
+  expect(rows.map(row => row.querySelector('.composer-mailbox__row strong')?.textContent)).toEqual(['Author unknown', 'Human', 'Author unknown'])
   expect(rows.some(row => row.getAttribute('data-input-mailbox-key')?.includes('platform-notice'))).toBe(false)
   expect(rows.some(row => row.getAttribute('data-input-mailbox-key')?.includes('authored-lookalike'))).toBe(true)
   expect(sourceItems).toHaveLength(6)
