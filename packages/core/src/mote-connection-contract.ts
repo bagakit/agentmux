@@ -6,7 +6,7 @@ import type {
 } from './mote-preferences.js'
 import type { ConnectionEnrollmentOperation, ConnectionEnrollmentCallContext, ConnectionEnrollmentAdvanceInput } from './connection-enrollment-contract.js'
 import type { ConnectionProfileOperation } from './connection-profile-contract.js'
-import type { ConnectionSetupInitialPublication } from './connection-setup-contract.js'
+import type { ConnectionSetupInitialPublication, ConnectionSetupOperation, ConnectionSetupAdvance } from './connection-setup-contract.js'
 
 /** Exact saved sources. An appearance revision is required only for include-saved. */
 export type MoteConnectionSource = { target: MotePreferencesTarget; expectedTopicRevision: string; expectedAvatarRevision: string | null }
@@ -36,6 +36,9 @@ export type MoteConnectionOperation = {
   connection: MoteConnectionRef | null
   enrollmentOperationId: string | null
   profileOperationId: string | null
+  /** New profile management belongs to the original Console Setup owner. */
+  setupOperationId?: string | null
+  setup?: ConnectionSetupOperation | null
   defaultSave: { params: MoteConnectionPreferencesSaveParams; observedReceipt: MoteConnectionPreferencesSaveResult | null } | null
   enrollment: ConnectionEnrollmentOperation | null
   profile: ConnectionProfileOperation | null
@@ -53,7 +56,7 @@ export type MoteConnectionOperation = {
     | null
 }
 export type MoteConnectionOperationInput = { operationId: string }
-export type MoteConnectionAdvanceInput = MoteConnectionOperationInput & { enrollment?: ConnectionEnrollmentAdvanceInput }
+export type MoteConnectionAdvanceInput = MoteConnectionOperationInput & { enrollment?: ConnectionEnrollmentAdvanceInput; setup?: ConnectionSetupAdvance }
 export type MoteConnectionListInput = { target: MotePreferencesTarget; cursor?: string; limit?: number }
 export type MoteConnectionParamsMap = {
   'space.mote.connection.create': MoteConnectionCreate
