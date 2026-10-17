@@ -2828,16 +2828,11 @@ export class AgentMuxClient {
     session: Pick<AgentMuxStoredAgentSession, 'executorId' | 'providerId' | 'creation'>, input: T, historyAgentSessionId?: string
   ): Promise<T> {
     const explicit = input.commandOverride !== undefined || input.args !== undefined || input.env !== undefined
-    let targetOwned = session.creation?.executorRevision !== undefined
-    // History locators intentionally carry no creation authority. Only explicit SDK
-    // overrides need this exact active-Session read; ordinary remote reads add no I/O.
-    // A retired locator retains the original explicit SDK read configuration contract.
-    if (historyAgentSessionId !== undefined && explicit) {
-      const retained = await this.store.readMetadata(historyAgentSessionId)
-      targetOwned ||= retained?.executorId === session.executorId && retained.providerId === session.providerId &&
-        retained.creation?.executorRevision !== undefined
-    }
-    if (!targetOwned && explicit) return input
+    const targetOwned = session.creation?.executorRevision !== undefined
+    // Native reading retains its Provider source independently of an unrelated
+    // Executor registry. Host-owned creation authority survives retirement in
+    // history metadata and still resolves its original private configuration.
+    if (!targetOwned && (explicit || historyAgentSessionId !== undefined)) return input
     if (!this.hostExecutorOwner) {
       if (targetOwned) throw new AgentMuxError('The target Executor owner is unavailable. The original Session and Run are retained; restore its Host configuration.', 'CONTROL_UNAVAILABLE')
       return input
