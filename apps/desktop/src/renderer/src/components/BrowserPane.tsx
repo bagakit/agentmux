@@ -40,6 +40,8 @@ import { BrowserTaskAssetEditor } from './BrowserTaskAssetEditor'
 import { BrowserTaskReliability, useBrowserTaskReliabilityRefresh, type BrowserTaskReliabilityRequest } from './BrowserTaskReliability'
 import type { BrowserTaskContent } from '../../../shared/browser-task-assets'
 import { BrowserStepEvidence } from './BrowserStepEvidence'
+import { useBrowserContextualComposer } from './BrowserContextualComposer'
+import { BrowserTraceReadingHost } from './BrowserTraceReadingHost'
 import {
   ScreenshotEditor,
   type ScreenshotCompleteInput,
@@ -271,6 +273,7 @@ function BrowserPaneContent({
   const windowPresentation = presentations.find(presentation => presentation.target === windowTarget && presentation.visible && presentation.active)
   const sourcePresentations = useRef({ primary: primaryPresentation, targets: presentations })
   sourcePresentations.current = { primary: primaryPresentation, targets: presentations }
+  const discussion = useBrowserContextualComposer(tab.browserId, tab.activity?.operation ?? null, visible, tab.navigationId)
   const toolbar = useAppStore((state) => state.config?.browser.toolbar)
   const toolsOpen = useAppStore((state) => state.toolsOpen)
   // Selection comes from the owning surface, never the first rendered occurrence.
@@ -398,7 +401,15 @@ function BrowserPaneContent({
   const [replayPlan, setReplayPlan] = useState<BrowserReplayPlan | null>(null)
   const [replayBusy, setReplayBusy] = useState(false)
   const [replayOutcome, setReplayOutcome] = useState<BrowserScriptRunReport['outcome'] | undefined>()
-  const [timelineOpen, setTimelineOpen] = useState(false)
+  const [traceViews, setTraceViews] = useState<Record<string, { open: boolean; mode: 'docked' | 'floating' }>>({})
+  const traceAnchors = useRef(new Map<string, HTMLElement>())
+  // Retention's operation reason includes the original in-flight dispatch after stop.
+  // Missing owner observations cannot shrink an already reserved execution viewport.
+  const traceCanDock = !tab.driving && Boolean(tab.retention && !tab.retention.reasons.includes('operation') &&
+    !tab.retention.reasons.includes('owner-unavailable') && !tab.nativeOwnerUnavailable && !restoring)
+  if (traceCanDock && Object.values(traceViews).some(view => !view.open && view.mode === 'docked')) {
+    setTraceViews(Object.fromEntries(Object.entries(traceViews).filter(([, view]) => view.open || view.mode !== 'docked')))
+  }
   const [operationHistory, setOperationHistory] = useState<BrowserOperation[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState<string | null>(null)
@@ -426,7 +437,7 @@ function BrowserPaneContent({
   // History and replay belong to the Browser identity. A Region can reuse this pane while switching
   // tabs, so never leave a previous Browser's selected operation or replay plan attached to the new page.
   useEffect(() => {
-    setTimelineOpen(false)
+    setTraceViews({})
     setOperationHistory([])
     setSelectedOperationId(null)
     setSelectedStep(null)
@@ -748,8 +759,9 @@ function BrowserPaneContent({
     }
   }
 
-  function openOperationTimeline(): void {
-    setTimelineOpen(true)
+  function openOperationTimeline(presentationId: string): void {
+    setTraceViews(current => ({ ...current, [presentationId]: { open: true,
+      mode: current[presentationId]?.mode === 'docked' && !traceCanDock ? 'docked' : traceCanDock ? 'docked' : 'floating' } }))
     void loadOperationHistory()
     void api.browser.getDemonstration(tab.browserId).catch(reportError)
     void api.browser.getTaskAssets(tab.browserId).catch(reportError)
@@ -1085,7 +1097,7 @@ function BrowserPaneContent({
         ) : null}
     </>
     return (
-    <section className={`browser-surface${inSurvey ? ' browser-surface--survey' : ''}`}>
+    <section className={`browser-surface${inSurvey ? ' browser-surface--survey' : ''}`} ref={node => { if (node) traceAnchors.current.set(key, node); else traceAnchors.current.delete(key) }}>
       <form
         className="browser-toolbar"
         onSubmit={(event) => {
@@ -1125,13 +1137,15 @@ function BrowserPaneContent({
           activity={browserActivity}
           browserId={tab.browserId}
           {...(tab.taskAssets ? { taskAssets: tab.taskAssets } : {})}
-          onOpenTaskRun={(assetId, version) => { setSelectedTaskAssetId(assetId); setTaskAssetReview({ assetId, version }); openOperationTimeline() }}
+          onOpenTaskRun={(assetId, version) => { setSelectedTaskAssetId(assetId); setTaskAssetReview({ assetId, version }); openOperationTimeline(key) }}
           onTakeControl={() => void stopBrowserOperation()}
           onStop={() => void stopBrowserOperation()}
           onReturnControl={() => void run(() => api.browser.returnControl(tab.browserId))}
-          onOpenTimeline={openOperationTimeline}
+          onOpenTimeline={() => openOperationTimeline(key)}
           onOpenChange={setMenuOpen}
         />
+        <button type="button" className="browser-toolbar__secondary" ref={visible ? discussion.buttonRef : undefined} aria-label="Message Browser operator"
+          title="Send an opinion to the original Agent" onClick={event => discussion.open(event.currentTarget)}>{discussion.button}</button>
         {toolbar?.selectElement ? (
           <button
             type="button"
@@ -1231,7 +1245,7 @@ function BrowserPaneContent({
                 <DropdownMenu.Item className="browser-menu__item" disabled={busy} onSelect={() => void run(() => api.browser.reload(tab.browserId))}>
                   <ThemeActionRefreshIcon size={12} /><span>Reload page</span>
                 </DropdownMenu.Item>
-                <DropdownMenu.Item className="browser-menu__item" aria-label="Open human demonstration draft" onSelect={openOperationTimeline}>
+                <DropdownMenu.Item className="browser-menu__item" aria-label="Open human demonstration draft" onSelect={() => openOperationTimeline(key)}>
                   <ThemeObjectHistoryIcon size={12} /><span>Demonstration</span>
                 </DropdownMenu.Item>
                 {toolbar?.selectElement ? <DropdownMenu.Item className="browser-menu__item" aria-label={selectionBusy ? 'Cancel element selection' : 'Select element'} disabled={selectElementDisabled} onSelect={selectElement}>
@@ -1321,8 +1335,10 @@ function BrowserPaneContent({
         <header><strong>Browser tools</strong><button type="button" className="icon-button" aria-label="Close browser tools" onClick={() => setManagementOpen(false)}><ThemeActionCloseIcon size={14} /></button></header>
         {resourceWorkspace ? <BrowserToolsPanel workspace={resourceWorkspace} visible={visible && managementOpen} /> : <p role="status">The browser resource is still restoring. Your page remains available.</p>}
       </aside> : null}
-      {timelineOpen ? (
-        <aside className="browser-trace-rail" aria-label="Browser activity trace">
+      {traceViews[key] ? (
+        <BrowserTraceReadingHost mode={traceViews[key].mode} open={traceViews[key].open} held={!traceCanDock} visible={visible}
+          anchor={() => traceAnchors.current.get(key) ?? null}
+          onReopen={() => setTraceViews(current => ({ ...current, [key]: { ...current[key]!, open: true } }))}>
           <BrowserDemonstrationSurface
             suggestions={tab.demonstration?.suggestions}
             draft={tab.demonstration?.draft ?? null}
@@ -1409,7 +1425,7 @@ function BrowserPaneContent({
             loading={historyLoading}
             error={historyError}
             onRetry={() => void loadOperationHistory()}
-            onClose={() => setTimelineOpen(false)}
+            onClose={() => setTraceViews(current => ({ ...current, [key]: { ...current[key]!, open: false } }))}
             onSelect={(operation) => {
               setSelectedOperationId(operation.id)
               setSelectedStep(null)
@@ -1440,6 +1456,7 @@ function BrowserPaneContent({
               }).catch(reportError)
             }}
           /> : null}
+          {timelineOperation && timelineSelectedStep ? <button type="button" className="small-button" onClick={event => discussion.open(event.currentTarget as HTMLButtonElement, { operationId: timelineOperation.id, sequence: timelineSelectedStep.sequence })}>Comment on step {timelineSelectedStep.sequence}</button> : null}
           {timelineOperation && timelineSelectedStep
             ? <BrowserStepEvidence operation={timelineOperation} step={timelineSelectedStep} /> : null}
           {replayPlan ? (
@@ -1452,7 +1469,7 @@ function BrowserPaneContent({
               onRun={() => void runReplay()}
             />
           ) : null}
-        </aside>
+        </BrowserTraceReadingHost>
       ) : null}
       </div>
       {customViewport === key ? <BrowserViewportSizeDialog value={tab.viewport} visible={visible}
@@ -1464,6 +1481,7 @@ function BrowserPaneContent({
   const primary = presentations.find(presentation => presentation.target.hostId === presentationTargetId) ?? presentations[0]
   return <>
     {renderPane(primary)}
+    {discussion.dialog}
     {renderPresentationFrame ? presentations.filter(presentation => presentation !== primary).map(presentation =>
       <StableWorkbenchView key={presentation.occurrence.presentationId} kind="region"
         homeId={`${presentation.stageHostId}:parked`} targetId={presentation.stageHostId}
