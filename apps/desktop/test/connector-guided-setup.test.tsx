@@ -91,7 +91,7 @@ async function ready(check: () => void) {
 }
 async function click(selector: string) {
   let button: HTMLButtonElement | null = null
-  await ready(() => { button = dom.container.querySelector(selector); expect(button, selector).not.toBeNull(); expect(button!.disabled, selector).toBe(false) })
+  await ready(() => { button = dom.container.querySelector(selector); expect(button, selector).not.toBeNull(); expect(button!.hasAttribute('disabled'), selector).toBe(false) })
   const details = button!.closest<HTMLDetailsElement>('details:not([open])')
   if (details) await act(async () => details.querySelector<HTMLElement>('summary')!.click())
   expect(button!.closest('[hidden], [inert]')).toBeNull()
@@ -110,7 +110,7 @@ async function open() {
   await click('[data-management-confirm]')
   await ready(() => expect(dom.container.querySelector('[data-guided-primary]')).not.toBeNull())
   expect(dom.container.querySelectorAll('[data-bot-setup-guide]')).toHaveLength(1)
-  expect(dom.container.querySelector('[data-guided-task] [data-bot-setup-guide]')?.getAttribute('data-bot-setup-guide')).toBe('connect')
+  expect(dom.container.querySelector('[data-management-setup] > [data-bot-setup-guide]')?.getAttribute('data-bot-setup-guide')).toBe('connect')
 }
 
 async function fill(label: string, value: string) {
@@ -204,7 +204,9 @@ it('a failed settings check stops its finite reads, removes prior authority and 
   await click('[data-guided-primary]'); await idle()
   expect(document.querySelector('.connector-management .connector-editor-title')?.textContent).toBe('Setup check interrupted')
   expect(document.querySelector('[data-guided-primary]')).toBeNull()
-  expect(document.querySelector('.connector-management__account')).toBeNull()
+  expect(document.querySelector('.connector-management__account')).not.toBeNull()
+  expect(document.querySelector('.connector-management__account')?.textContent).toContain('Last confirmed account')
+  expect(document.querySelector('[data-bot-setup-guide] [aria-current="step"]')?.textContent).toContain('Configure & publish')
   expect(document.querySelector('[data-management-inspect]')?.textContent).toBe('Retry setup check')
   expect(native.filter(call => call.path.startsWith('/developers/')).map(call => call.path)).toEqual(['/developers/v1/robot/' + APP])
   expect(writes()).toEqual([])
@@ -569,4 +571,42 @@ it('the primary check reads the frozen version after an unknown submit without c
     expect(document.querySelector('[data-guided-task]')?.textContent).toContain('original submission result is not confirmed')
     expect(writes()).toHaveLength(count)
   }
+}, 30_000)
+
+
+it('keeps all milestones and reads the exact original request trace without platform effects or private data', async () => {
+  await open()
+  const progress = document.querySelector('[aria-label="Bot setup progress"]')!
+  expect(progress.querySelectorAll('li')).toHaveLength(4)
+  expect(progress.querySelector('[data-step="3"]')?.textContent).toContain('Already saved')
+  expect(progress.querySelector('[data-step="4"]')?.getAttribute('aria-current')).toBe('step')
+  bot = true; mode = 4
+  const originalFetch = vi.mocked(globalThis.fetch).getMockImplementation()!
+  vi.mocked(globalThis.fetch).mockImplementation(async (...args) => {
+    const result = await originalFetch(...args)
+    return new URL(String(args[0])).pathname === '/developers/v1/scope/applied/' + APP ? new Response('Not confirmed', { status: 502 }) : result
+  })
+  await click('[data-guided-primary]'); await idle()
+  expect(document.querySelector('[data-guided-task]')?.textContent).toContain('Permission check not confirmed')
+  const permission = [...document.querySelectorAll('[aria-label="Configuration progress"] li')].find(node => node.textContent?.includes('Permissions'))!
+  expect(permission.textContent).toContain('Result unconfirmed')
+  expect(document.querySelector('[aria-label="Bot setup progress"] [data-step="2"]')?.textContent).toContain('Confirmed')
+  const before = native.length
+  await act(async () => document.querySelector<HTMLElement>('[data-request-trace] > summary')!.click())
+  await ready(() => expect(document.querySelector('[aria-label="Original request steps"] tbody tr')).not.toBeNull())
+  expect(native.length).toBe(before)
+  const traceCalls = calls.filter(call => call.method === 'connection.setup.inspect' && 'requestTrace' in (call.input as any))
+  expect(traceCalls.length).toBeGreaterThan(0)
+  const id = (calls.find(call => call.method === 'connection.setup.begin')!.input as any).operationId
+  expect(traceCalls.at(-1)?.input).toMatchObject({ operationId: id, requestTrace: { limit: 25 } })
+  expect((traceCalls.at(-1)?.result as any).requestTrace.entries.length).toBeGreaterThan(0)
+  const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  const button = [...document.querySelectorAll<HTMLButtonElement>('[data-request-trace] button')].find(node => node.textContent === 'Copy diagnosis')!
+  await act(async () => button.click())
+  await ready(() => expect(clipboard).toHaveBeenCalledOnce())
+  const copied = clipboard.mock.calls[0]![0]
+  expect(JSON.parse(copied).operationId).toBe(id)
+  for (const value of ['settings-publication-private-token', 'settings-publication-private-flow', 'settings-publication-private-cookie', 'settings-publication-private-csrf', 'settings-publication-user', 'settings-publication-enterprise']) expect(copied).not.toContain(value)
+  expect(document.querySelector('[data-request-trace]')?.textContent).toContain('HTTP request details were not recorded')
+  expect(native.length).toBe(before)
 }, 30_000)
