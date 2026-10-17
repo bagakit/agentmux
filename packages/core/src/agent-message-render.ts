@@ -2,6 +2,7 @@ import { DOMParser, onWarningStopParsing, type Element } from '@xmldom/xmldom'
 import type { AgentMuxMessageEnvelope } from './agent-message-envelope.js'
 import { composeOutboundMessage } from './agent-outbound-message.js'
 import { AGENTMUX_A2A_REMINDER } from './agent-messaging-guidance.js'
+import { browserInputContextJson, parseBrowserInputContext, type BrowserInputContext } from './browser-input-context.js'
 
 /**
  * Source plus unchanged authored body. Core authorizes identity before delivery;
@@ -42,7 +43,7 @@ export function renderAgentMuxMessageEnvelope(envelope: Pick<AgentMuxMessageEnve
 type AgentMuxMessageReading = {
   reminder?: { raw: string; text: string }
   /** Complete input-leading declarations, preserved as original source spans. */
-  declaredContexts?: readonly { raw: string }[]
+  declaredContexts?: readonly { raw: string; inputContext?: BrowserInputContext }[]
 }
 
 export type AgentMuxMessagePrefix = AgentMuxMessageReading & ({
@@ -135,7 +136,7 @@ function parsePacket(text: string): AgentMuxMessagePacket | null {
 function parseDeclaredContexts(text: string): AgentMuxMessagePrefix | null {
   const opening = '<amux>'
   if (!text.startsWith(opening)) return null
-  const declaredContexts: { raw: string }[] = []
+  const declaredContexts: { raw: string; inputContext?: BrowserInputContext }[] = []
   let start = 0
   while (text.startsWith(opening, start)) {
     // An A2A body may itself contain closing amux tags. Recognize its exact
@@ -147,16 +148,25 @@ function parseDeclaredContexts(text: string): AgentMuxMessagePrefix | null {
     const end = closing + '</amux>'.length
     const raw = text.slice(start, end)
     if (/<!|<\?/u.test(raw)) return null
+    let inputContext: BrowserInputContext | undefined
     try {
       const document = new DOMParser({ onError: onWarningStopParsing }).parseFromString(raw, 'text/xml')
       const root = document.documentElement
-      if (!root || root.tagName !== 'amux' || root.attributes.length !== 0 ||
-        Array.from(document.childNodes).some(node => node !== root) ||
-        Array.from(root.childNodes).some(node => node.nodeType !== 3)) return null
+      if (!root || root.tagName !== 'amux' || root.attributes.length !== 0 || Array.from(document.childNodes).some(node => node !== root)) return null
+      const children = Array.from(root.childNodes)
+      if (children.some(node => node.nodeType !== 3)) {
+        const match = /^<amux>\n<context kind="browser" version="1">\n([^\r\n]+)\n<\/context>\n<\/amux>$/u.exec(raw)
+        if (!match) return null
+        inputContext = parseBrowserInputContext(JSON.parse(match[1]!))
+        if (browserInputContextJson(inputContext) !== match[1]) return null
+      }
     } catch {
       return null
     }
-    declaredContexts.push({ raw })
+    declaredContexts.push({ raw, ...(inputContext ? { inputContext } : {}) })
+    // A context container ends its producer boundary. The following user body
+    // is opaque, even when it starts with another complete envelope example.
+    if (inputContext) return { kind: 'content', sourceLabel: '', declaredAgentSessionId: null, declaredContexts, body: text.slice(end) }
     // Newline separators join declarations; the next line's indentation is authored tail.
     const next = end + (/^(?:\r?\n)*/u.exec(text.slice(end))?.[0].length ?? 0)
     // A partly authored or unknown second declaration keeps the entire input readable.
@@ -176,6 +186,7 @@ export function parseAgentMuxMessagePrefix(text: string): AgentMuxMessagePrefix 
   const contexts = parseDeclaredContexts(text)
   if (!contexts) return null
   if (contexts.kind === 'references' || contexts.declaredMessageId !== undefined) return contexts
+  if (contexts.declaredContexts?.some(context => context.inputContext)) return contexts
   // Only newline separators join a following declaration; indentation remains authored text.
   const sender = parseSenderPrefix(contexts.body.replace(/^(?:\r?\n)*/u, ''))
   return sender ? { ...sender, ...(contexts.declaredContexts ? { declaredContexts: contexts.declaredContexts } : {}) } : contexts

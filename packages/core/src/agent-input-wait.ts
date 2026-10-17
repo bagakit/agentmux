@@ -4,6 +4,8 @@ import type { AgentNativeBinding, AgentNativeSessionHandle, AgentOperationDevice
 
 /** In-process Host context, never a wire argument or a persisted grant. */
 export type AgentInputCallContext = Readonly<{
+  /** Trusted Host capture attribution, never accepted from public business arguments. */
+  inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource
   /** Ends only intake observation until the original Core accepts its waiting owner. */
   requestSignal?: AbortSignal
   /** Trusted Host author owner; identity is attribution, while this callback checks current authority. */
@@ -38,7 +40,10 @@ export type AgentInputJournalIntent = {
   execution: 'immediate'
   environment: AgentInputSavedEnvironment
   source:
-    | { kind: 'prompt'; prompt: string; agentMuxNote?: string; authorHuman?: boolean; sourceChannel?: AgentMessageChannel; sourceDevice?: AgentOperationDevice }
+    | { kind: 'prompt'; prompt: string; agentMuxNote?: string; authorHuman?: boolean; sourceChannel?: AgentMessageChannel; sourceDevice?: AgentOperationDevice;
+        inputContext?: import('./browser-input-context.js').BrowserInputContext; inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource;
+        /** Wire frozen at first intake, before waiting or Provider preparation. */
+        promptWire?: string }
     | { kind: 'message'; messageId: string; originalControlOperationId: string }
 }
 export type AgentInputDispatchLink = { ref: AgentInputWaitRef; gateId: string }

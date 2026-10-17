@@ -14,6 +14,7 @@ import type { AgentMuxContinuityControlReceipt } from './agent-session-continuit
 import { validateAgentPromptInputKey, type AgentPromptInputKey } from './agent-prompt-condition.js'
 import { isAgentActivityStatusSource } from './agent-status-freshness.js'
 import { unconfirmedExecutableObservation } from './executable-observation.js'
+import { browserInputContextFields, parseBrowserInputContext } from './browser-input-context.js'
 
 /** Host-independent policy. Callers persist only authored fields; each admitted operation freezes this complete value. */
 export type AgentMuxContinuityPolicy = {
@@ -124,6 +125,7 @@ export type AgentMuxContinuityInputDelivery = {
 }
 /** New authored input which has not yet acquired its resumed Run binding. */
 export type AgentMuxContinuityInputRequest = {
+  inputContext?: import('./browser-input-context.js').BrowserInputContext
   submissionId: string
   prompt: string
   agentMuxNote?: string
@@ -237,7 +239,8 @@ export function normalizeAgentContinuityLaunchInput(value: unknown): AgentMuxCon
     const key = validateAgentPromptInputKey(input.key)
     if (key.kind !== 'prompt' || key.submissionId !== input.input.submissionId) throw new TypeError('Conflicting continuity launch input key.')
   }
-  return structuredClone(input)
+  return { ...structuredClone(input), input: { ...structuredClone(input.input), ...(input.input.inputContext === undefined ? {} : { inputContext: parseBrowserInputContext(input.input.inputContext) }) },
+    message: { ...structuredClone(input.message), ...browserInputContextFields(input.message) } }
 }
 
 export function normalizeAgentContinuityOperation(value: unknown): AgentMuxContinuityOperation {

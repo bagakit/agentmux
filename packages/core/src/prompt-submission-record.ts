@@ -1,6 +1,7 @@
 import { normalizeAgentContinuityLaunchInput } from './agent-session-continuity.js'
 import { parseAgentExternalMessageAuthor } from './external-author.js'
 import { AgentMuxError } from './errors.js'
+import { browserInputContextFields } from './browser-input-context.js'
 import { validateAgentInputControlId, validateAgentInputWaitRef } from './agent-input-wait.js'
 import { validateAgentPromptAdmissionIntent, validateAgentPromptInputKey } from './agent-prompt-condition.js'
 import { normalizeMessageChannel } from './message-origin.js'
@@ -263,6 +264,7 @@ function promptInputIntent(value: unknown): NonNullable<NonNullable<AgentMuxStor
       const message = record(source.message, 'promptCompletionAdmission.intent.message')
       return {
         ...(message.a2aNotificationId === undefined ? {} : { a2aNotificationId: string(message.a2aNotificationId, 'original A2A notification identity') }),
+        ...browserInputContextFields(message),
         ...(message.userContent === undefined ? {} : { userContent: bytes(message.userContent) }),
         ...(message.systemContext === undefined ? {} : { systemContext: bytes(message.systemContext) }),
         ...(message.authorAgentSessionId === undefined ? {} : { authorAgentSessionId: string(message.authorAgentSessionId, 'prompt message author') }),

@@ -2,6 +2,7 @@ import { AGENTMUX_GOAL_SKILL_ENTRY } from './goal-role-guidance.js'
 import { DOMImplementation, XMLSerializer } from '@xmldom/xmldom'
 import { AGENTMUX_SELF_CONTEXT_VERB } from './agent-self-context.js'
 import { AGENTMUX_AGENT_MESSAGING_ENTRY } from './agent-messaging-guidance.js'
+import { browserInputContextJson, type BrowserInputContext } from './browser-input-context.js'
 
 /**
  * AgentMux 对 Agent 说的话，收敛到这一个模块。
@@ -60,9 +61,10 @@ function amuxEnvelope(text: string): string {
  * `amux` 是 AgentMux 自己的话，进信封署名；`user` 是用户/发起 Agent 的原文，**逐字节透传**——
  * 不进属性、不转义、不改写。两者都缺则产出空串。
  */
-export function composeOutboundMessage(input: { amux?: string; user?: string }): string {
+export function composeOutboundMessage(input: { amux?: string; user?: string; inputContext?: BrowserInputContext }): string {
   const segments: string[] = []
   if (input.amux) segments.push(amuxEnvelope(input.amux))
+  if (input.inputContext) segments.push(`<amux>\n<context kind="browser" version="1">\n${browserInputContextJson(input.inputContext)}\n</context>\n</amux>`)
   if (input.user) segments.push(input.user)
   return segments.join('\n\n')
 }
@@ -70,12 +72,13 @@ export function composeOutboundMessage(input: { amux?: string; user?: string }):
 /** Compose explicit producer content and the original request for any existing Session. */
 export function composeAgentPrompt(
   prompt: string | undefined,
-  agentMuxNote?: string
+  agentMuxNote?: string,
+  inputContext?: BrowserInputContext
 ): { text: string; systemContext?: string } {
   const request = prompt?.trim() ? prompt : undefined
   const context = agentMuxNote?.trim() ? agentMuxNote : undefined
   return {
-    text: composeOutboundMessage({ ...(context ? { amux: context } : {}), ...(request === undefined ? {} : { user: request }) }),
+    text: composeOutboundMessage({ ...(context ? { amux: context } : {}), ...(request === undefined ? {} : { user: request }), ...(inputContext ? { inputContext } : {}) }),
     ...(context ? { systemContext: context } : {})
   }
 }
@@ -83,9 +86,9 @@ export function composeAgentPrompt(
 /** Only an already requested resume input carries fresh platform guidance.
  * No-input restoration must not become a new turn. Existing frozen packets are
  * restored by their original lifecycle owner, never recomposed here on retry. */
-export function composeAgentResumePrompt(prompt: string | undefined, agentMuxNote?: string): { text: string; systemContext?: string } {
-  if (!prompt?.trim() && !agentMuxNote?.trim()) return composeAgentPrompt(prompt, agentMuxNote)
-  return composeAgentPrompt(prompt, [AGENTMUX_AGENT_MESSAGING_ENTRY, agentMuxNote?.trim() ? agentMuxNote : undefined].filter(Boolean).join('\n\n'))
+export function composeAgentResumePrompt(prompt: string | undefined, agentMuxNote?: string, inputContext?: BrowserInputContext): { text: string; systemContext?: string } {
+  if (!prompt?.trim() && !agentMuxNote?.trim()) return composeAgentPrompt(prompt, agentMuxNote, inputContext)
+  return composeAgentPrompt(prompt, [AGENTMUX_AGENT_MESSAGING_ENTRY, agentMuxNote?.trim() ? agentMuxNote : undefined].filter(Boolean).join('\n\n'), inputContext)
 }
 
 /**

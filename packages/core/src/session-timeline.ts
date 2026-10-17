@@ -5,6 +5,7 @@ import { conversationProvenanceFields } from './conversation-provenance.js'
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { AgentMuxError } from './errors.js'
+import { browserInputContextFields } from './browser-input-context.js'
 import { isAgentActivityStatusSource, semanticStatusStale } from './agent-status-freshness.js'
 import { applyNormalizedTimelineMutation, MAX_TIMELINE_ITEMS_PER_WINDOW } from './session-timeline-reducer.js'
 import type {
@@ -214,6 +215,7 @@ export function normalizeAgentTimelineItem(value: unknown): AgentTimelineItem {
     createdAt,
     updatedAt,
     title: text(source.title, 'Timeline item title'),
+    ...browserInputContextFields(source),
     ...optionalField(source, 'content'),
     ...(contentEligibility === undefined ? {} : { contentEligibility }),
     ...(source.publicContent === undefined ? {} : { publicContent: 'confirmed' as const }),

@@ -19,6 +19,7 @@ import { defaultAgentMuxMessageQueuePath } from './runtime-paths.js'
 import type { AgentMuxRunRef, AgentPromptExecution, AgentMessageChannel, AgentOperationDevice } from './types.js'
 import { normalizeMessageChannel } from './message-origin.js'
 import { composeAgentPrompt } from './agent-outbound-message.js'
+import { browserInputContextFields } from './browser-input-context.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { configureMessageJournal, inputControlJournalSchema, messageRouteJournalSchema, messageObservationJournalSchema, messageObservationQuery, dispatchDiscoveryJournalSchema, dispatchReplyJournalSchema, openMessageJournal, openMessageJournalSnapshot, syncMessageJournal } from './agent-message-journal.js'
 import { assertAgentMessageRouteIntent, validateAgentMessageRoute, type AgentMessageRoute } from './agent-message-route.js'
@@ -530,7 +531,9 @@ export class DurableAgentMuxMessageQueue {
             intent.source.authorHuman !== undefined && typeof intent.source.authorHuman !== 'boolean') {
           throw new AgentMuxError('Original prompt intent is invalid.', 'INVALID_AGENT_INPUT_CONTROL')
         }
-        if (!composeAgentPrompt(intent.source.prompt, intent.source.agentMuxNote).text.trim()) throw new AgentMuxError('Original prompt intent is empty.', 'INVALID_AGENT_INPUT_CONTROL')
+        browserInputContextFields(intent.source)
+        if (intent.source.promptWire !== undefined && (typeof intent.source.promptWire !== 'string' || !intent.source.promptWire.trim())) throw new AgentMuxError('Frozen original prompt wire is invalid.', 'INVALID_AGENT_INPUT_CONTROL')
+        if (!composeAgentPrompt(intent.source.prompt, intent.source.agentMuxNote, intent.source.inputContext).text.trim()) throw new AgentMuxError('Original prompt intent is empty.', 'INVALID_AGENT_INPUT_CONTROL')
         if (intent.source.sourceChannel !== undefined) normalizeMessageChannel(intent.source.sourceChannel)
         if (intent.source.sourceDevice !== undefined) normalizeOperationDevice(intent.source.sourceDevice)
       } else if (intent.source.kind === 'message') {
