@@ -49,6 +49,27 @@ it('a stored old init cannot qualify any current unknown, unstored or dispatchin
   }
 })
 
+it.each(['waiting', 'scanned'] as const)('source and public decoder keep an exact live %s display source separate from its pending request and ACK', stage => {
+  const native: ConnectionSetupView = { ...reply({ ...authentication, stage: 'handoff', request: 'dispatching', secureStorage: 'not-started' }), challengeSource: { attemptId: authentication.attemptId, stepId: 'original-display-source' }, continuation: { stage, account: null, actions: [] } }
+  const storing: ConnectionSetupView = { ...reply({ ...authentication, stage, secureStorage: 'storing' }), challengeSource: { attemptId: authentication.attemptId, stepId: authentication.stepId }, continuation: { stage, account: null, actions: [] } }
+  for (const decode of decoders) {
+    expect(decode('connection.setup.inspect', native, input)).toEqual(native)
+    expect(decode('connection.setup.inspect', storing, input)).toEqual(storing)
+    for (const value of [
+      { ...native, challengeSource: { ...native.challengeSource!, attemptId: 'another-attempt' } },
+      { ...native, challengeSource: { ...native.challengeSource!, stepId: authentication.stepId } },
+      { ...storing, challengeSource: native.challengeSource },
+      { ...native, continuation: { ...native.continuation!, stage: 'expired' } },
+      { ...native, continuation: { ...native.continuation!, stage: 'handoff' } },
+      { ...native, continuation: { ...native.continuation!, actions: [{ kind: 'continue', expectedRevision: 11, actionId: 'unearned-next-action' }] } },
+      { ...native, operation: { ...native.operation!, authentication: { ...native.operation!.authentication!, request: 'unknown' } } },
+      { ...storing, operation: { ...storing.operation!, authentication: { ...storing.operation!.authentication!, secureStorage: 'unknown' } } },
+      { ...native, challenge: null },
+      { ...native, challengeSource: undefined }
+    ]) expect(() => decode('connection.setup.inspect', value, input)).toThrow(expect.objectContaining({ code: 'INVALID_CONNECTION_SETUP_DATA' }))
+  }
+})
+
 it('private child evidence may be saved or locally recovered while business confirmation stays unknown', () => {
   const readInput = { operationId: input.operationId, expectedRevision: 11, decision: { actionId: 'setup-inspect:original', value: 'continue' as const } }
   const read = { stepId: 'original-read-child', input: readInput, request: 'unknown' as const, secureStorage: 'stored' as const }
