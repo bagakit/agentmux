@@ -1,0 +1,14 @@
+.settings-appearance .settings-theme-choice { gap: var(--sp-4); padding: var(--sp-4); }
+.settings-appearance__theme-name { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--sp-2) var(--sp-4); }
+.settings-appearance__theme-name small { font-size: var(--fs-micro); color: var(--text-3); }
+.settings-appearance__selection { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2) var(--sp-5); padding-block: var(--sp-4); }
+.settings-appearance__selection p { flex: 1; min-width: min(260px, 100%); margin: 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; }
+.settings-appearance__selection code { color: var(--text-3); font: var(--fs-micro)/1.5 var(--font-mono); overflow-wrap: anywhere; }
+.settings-appearance .theme-library-actions { margin-top: 0; gap: var(--sp-3); }
+.settings-appearance__help { margin-top: var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); }
+.settings-appearance__help summary { width: fit-content; cursor: pointer; padding-block: var(--sp-2); }
+.settings-appearance__help summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.settings-appearance__help .settings-hint { padding-inline: 0; max-width: 68ch; }
+.settings-appearance .settings-theme-choice__sample { min-height: 52px; }
+.settings-appearance .terminal-theme-choice__copy small { font-size: var(--fs-meta); }
+@media (max-width: 700px) { .settings-appearance .settings-theme-grid { grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); } }
