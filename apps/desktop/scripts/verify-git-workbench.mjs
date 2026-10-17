@@ -1,12 +1,14 @@
 import { fixturePath as _hygiene_fixturePath } from "./lib/fixture-values.mjs"
 import assert from 'node:assert/strict'
 import { spawn, execFile } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, rmdir, symlink, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { pathToFileURL, fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
+import { createGitWorkbenchFixture } from './fixtures/git-workbench/repository.mjs'
+import { consumeGitWorkbenchReceipt } from './fixtures/git-workbench/receipt.mjs'
 
 // A private built Desktop, real Git, public CLI/RPC and actual UI; no Store/bridge/storage seed.
 const repositoryRoot = resolve(import.meta.dirname, '../../..')
@@ -59,6 +61,19 @@ const expectedSourceDigest = process.argv[5]
 assert.ok(/^[0-9a-f]{40}$/.test(expectedRevision ?? '') && process.argv.length === 6 &&
   process.argv[4] === '--source-digest' && /^[0-9a-f]{64}$/.test(expectedSourceDigest ?? ''),
   'An exact candidate HEAD and explicit frozen source digest are required')
+if (Object.hasOwn(process.env, 'AGENTMUX_GIT_WORKBENCH_RECEIPT')) {
+  try {
+    assert.ok(process.env.AGENTMUX_GIT_WORKBENCH_RECEIPT, 'Explicit receipt consumption requires a nonempty receipt path')
+    const reused = await consumeGitWorkbenchReceipt({ receiptPath: process.env.AGENTMUX_GIT_WORKBENCH_RECEIPT,
+      repositoryRoot, expectedRevision, expectedSourceDigest, sourceManifest })
+    process.stdout.write(JSON.stringify(reused) + '\n')
+  } catch (error) {
+    process.stdout.write(JSON.stringify({ passed: false, exactEvidenceReused: false, newNativeProofRuns: 0,
+      receipt: process.env.AGENTMUX_GIT_WORKBENCH_RECEIPT, failure: error.message, fallback: 'disabled' }) + '\n')
+    process.exit(1)
+  }
+  process.exit(0)
+}
 const desktopRoot = join(repositoryRoot, 'apps/desktop')
 const require = createRequire(join(desktopRoot, 'package.json'))
 const { listProbeProcesses, stopProbeProcesses } = await import(pathToFileURL(join(desktopRoot, 'scripts/probe-process.mjs')))
@@ -66,7 +81,7 @@ let connectAgentMuxRpc
 const exec = promisify(execFile)
 const delay = ms => new Promise(done => setTimeout(done, ms))
 const commonDirectory = (await exec('git', ['-C', repositoryRoot, 'rev-parse', '--path-format=absolute', '--git-common-dir'])).stdout.trim()
-const evidenceRoot = resolve(commonDirectory, '..', '.bagakit/feature-tracker/space-zone-git-tools')
+const evidenceRoot = resolve(commonDirectory, '..', '.bagakit/feature-tracker/git-history-navigation')
 await mkdir(evidenceRoot, { recursive: true })
 const artifacts = await mkdtemp(join(evidenceRoot, 'native-'))
 const root = join(artifacts, 'private')
@@ -80,18 +95,27 @@ const reviewDraft = 'Unsent review worktree message stays separate across tools 
 const workspaceId = 'private-git-workbench', workspaceName = 'Repository'
 const children = new Set(), connections = new Set()
 let deadline = 0
-const receipt = { schema: 'agentmux.git-reading-surfaces.v1', expectedRevision, expectedSourceDigest, sourceRoot: repositoryRoot,
-  passed: false, builds: [], screenshots: [], cleanup: {}, aestheticReview: 'not-performed' }
+const receipt = { schema: 'agentmux.git-reading-surfaces.v2', expectedRevision, expectedSourceDigest, sourceRoot: repositoryRoot,
+  passed: false, captureOnly: true, builds: [], screenshots: [], cleanup: {}, aestheticReview: 'not-performed',
+  boundary: 'Actual private built Desktop/Main/preload/Renderer, original Store, public CLI/RPC and real Git. Same private profile across two ordinary process exits. No user App/profile, user Run or Provider conversation recovery is exercised.' }
 let phase = 'prepare', failure, first, second, frozenSource, frozenTrackedChanges
 // This probe is a separate local user client, never the surrounding managed Agent.
 const privateEnvironment = Object.fromEntries(Object.entries(process.env).filter(([name]) =>
-  !name.startsWith('AGENTMUX_') && name !== 'ELECTRON_RENDERER_URL' && name !== 'ELECTRON_RUN_AS_NODE'))
+  !/^(?:AGENTMUX_|CTXMUX_)/u.test(name) && name !== 'ELECTRON_RENDERER_URL' && name !== 'ELECTRON_RUN_AS_NODE'))
 const fixtureEnvironment = { AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory,
   AGENTMUX_STATE_DIRECTORY: join(physicalRuntimeDirectory, 'state'), AGENTMUX_MESSAGE_QUEUE_PATH: join(userData, 'messages.ndjson'),
   AGENTMUX_SPATIAL_STATE_STORE: join(physicalRuntimeDirectory, 'state/spatial-state.json'),
   AGENTMUX_AGENT_SESSION_STORE: join(userData, 'agent-sessions.json'), CODEX_HOME: codexHome }
 const gitEnv = { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' }
-async function git(...args) { return (await exec('git', ['-C', workspacePath, ...args], { env: gitEnv, timeout: 20_000, maxBuffer: 2 * 1024 * 1024 })).stdout }
+async function git(...args) {
+  const options = typeof args.at(-1) === 'object' ? args.pop() : {}
+  if (!options.input) return (await exec('git', ['-C', workspacePath, ...args], { env: gitEnv, timeout: 20_000, maxBuffer: 2 * 1024 * 1024 })).stdout
+  return await new Promise((done, fail) => {
+    const child = execFile('git', ['-C', workspacePath, ...args], { env: gitEnv, timeout: 20_000, maxBuffer: 2 * 1024 * 1024 },
+      (error, stdout) => error ? fail(error) : done(stdout))
+    child.stdin.end(options.input)
+  })
+}
 async function reviewGit(...args) { return (await exec('git', ['-C', reviewWorktreePath, ...args], { env: gitEnv, timeout: 20_000, maxBuffer: 2 * 1024 * 1024 })).stdout }
 async function trackedChanges() {
   const options = { env: gitEnv, maxBuffer: 32 * 1024 * 1024 }
@@ -205,7 +229,9 @@ async function launch(label) {
   await activate(cdp)
   const nativeHome = await cdp.evaluate('(async () => (await window.agentmux.sessions.snapshot()).localHome)()')
   assert.equal(nativeHome, privateHome)
-  receipt[label] = { pid: child.pid, home, nativeHome, ready, origin: await cdp.evaluate('({href:location.href,origin:location.origin})') }
+  const nativeUserData = await main.evaluate(`process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot, 'package.json'))})('electron').app.getPath('userData')`)
+  assert.equal(nativeUserData, userData, 'Both real processes must use this round\'s private profile')
+  receipt[label] = { pid: child.pid, home, nativeHome, nativeUserData, ready, origin: await cdp.evaluate('({href:location.href,origin:location.origin})') }
   await loadedBundles(cdp, label)
   return { child, main, cdp }
 }
@@ -327,22 +353,45 @@ async function monaco(cdp, original, modified, regionId, inline = false) {
   return waitFor('visible readonly Monaco canvas and content', () => visibleRead(cdp, `(() => { const pane = ${visibleNode(paneSelector)}; const canvas=${visibleNode('.monaco-diff-editor', 'pane')};if(!canvas)return null; const rect=canvas.getBoundingClientRect();if(rect.width<80||rect.height<80)return null; const lines=${selectors('.view-lines', 'canvas')};const read = side => lines.find(element=>element.closest('.editor')?.classList.contains(side))?.innerText.replace(/\u00a0/g,' ').trim(); const left=read('original'),right=read('modified');const presentation=canvas.classList.contains('side-by-side')?'side-by-side':'inline';const displayedLines=lines.flatMap(element=>element.innerText.replace(/\u00a0/g,' ').split('\\n').map(line=>line.trim()).filter(Boolean));const valid=presentation==='side-by-side'?left===${JSON.stringify(original)}&&right===${JSON.stringify(modified)}:(${JSON.stringify(original)} === "" || displayedLines.includes(${JSON.stringify(original)})) && (${JSON.stringify(modified)} === "" || displayedLines.includes(${JSON.stringify(modified)}));return valid?{presentation,original:left,modified:right,displayedLines,viewportWidth:rect.width,viewportHeight:rect.height,canvases:${selectors('.monaco-diff-editor', 'pane')}.length}:null })()`))
 }
 async function control(method, params) {
+  const attempt = method === 'git.open' ? { method, params, startedAtMs: Date.now() } : null
+  if (attempt) (receipt.publicRpcNavigation ??= []).push(attempt)
   /** @type {import('../../../packages/core/dist/public-rpc-client.js').AgentMuxRpcClient} */
-  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(runtimeDirectory, 'control.sock') } })
-  try { return await rpc.call(method, params) }
-  finally { await rpc.dispose() }
+  let rpc
+  try {
+    rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(runtimeDirectory, 'control.sock') } })
+    const result = await rpc.call(method, params)
+    if (attempt) attempt.result = result
+    return result
+  } catch (error) {
+    if (attempt) attempt.failure = { name: error.name, code: error.code, message: error.message, data: error.data, details: error.details }
+    throw error
+  } finally {
+    if (attempt) attempt.endedAtMs = Date.now()
+    await rpc?.dispose()
+  }
 }
-async function cliOpen(oid) {
+async function cliGit(action, options = []) {
   await activate(first.cdp)
+  const operationId = action === 'open' ? randomUUID() : null
   const args = [join(repositoryRoot, 'packages/core/bin/amux'), '--endpoint', 'unix:' + join(runtimeDirectory, 'control.sock'),
-    'git', 'open', '--workspace', workspaceId, '--host', 'local', '--workspace-path', workspacePath,
-    ...(oid ? ['--oid', oid] : [])]
-  const result = await exec(process.execPath, args, { cwd: repositoryRoot, env: { ...privateEnvironment, ...fixtureEnvironment }, timeout: 20_000 })
+    'git', action, '--workspace', workspaceId, '--host', 'local', '--workspace-path', workspacePath, ...options,
+    ...(operationId ? ['--operation-id', operationId] : [])]
+  const attempt = { action, args, operationId, startedAtMs: Date.now() }
+  ;(receipt.publicCliCalls ??= []).push(attempt)
+  let result
+  try {
+    result = await exec(process.execPath, args, { cwd: repositoryRoot, env: { ...privateEnvironment, ...fixtureEnvironment }, timeout: 20_000 })
+    attempt.stdout = result.stdout; attempt.stderr = result.stderr; attempt.exitCode = 0
+  } catch (error) {
+    Object.assign(attempt, { exitCode: error.code, signal: error.signal, stdout: error.stdout, stderr: error.stderr, failure: error.message })
+    throw error
+  } finally { attempt.endedAtMs = Date.now() }
   const envelope = JSON.parse(result.stdout)
-  assert.equal(envelope.ok, true); assert.equal(envelope.operation, 'git.open')
+  assert.equal(envelope.ok, true); assert.equal(envelope.operation, 'git.' + action)
   await activate(first.cdp)
-  return { args, result: envelope.result }
+  return { args, operationId, result: envelope.result }
 }
+async function cliOpen(oid) { return await cliGit('open', oid ? ['--oid', oid] : []) }
 async function normalQuit(probe) {
   phase = 'normal-quit'
   const startedAtMs = Date.now(), budgetMs = 90_000
@@ -405,8 +454,10 @@ async function capture(cdp, name, width = 1280, theme = 'dark') {
   const tools = await toolSelection(cdp)
   receipt.visibility ??= []; receipt.visibility.push({ name, ...focus, tools, surfaces, appearanceOwner: appearance, renderedTheme: themeState })
   const { data } = await cdp.call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })
-  const path = join(artifacts, name + '.png'); await writeFile(path, Buffer.from(data, 'base64'))
-  receipt.screenshots.push({ path, width, theme, tools, targets, sha256: digest(Buffer.from(data, 'base64')) })
+  const png = Buffer.from(data, 'base64'), dimensions = { width: png.readUInt32BE(16), height: png.readUInt32BE(20) }
+  assert.deepEqual(dimensions, { width, height: 900 }, 'Capture the entire requested viewport, not a cropped component')
+  const path = join(artifacts, name + '.png'); await writeFile(path, png)
+  receipt.screenshots.push({ path, width, theme, dimensions, tools, targets, sha256: digest(png) })
 }
 async function state() { return (await control('space.state', {})).state }
 async function identity() {
@@ -441,6 +492,8 @@ async function identity() {
     }
   }
   await bundles('apps/desktop/out/renderer', /./u)
+  await bundles('apps/desktop/out/main')
+  await bundles('apps/desktop/out/preload')
   await bundles('apps/desktop/src/renderer/src/features/git', /\.(?:ts|tsx)$/)
   return Object.fromEntries(await Promise.all(paths.map(async path => [path, digest(await readFile(join(repositoryRoot, path)))])))
 }
@@ -457,75 +510,103 @@ async function focused(cdp, regionId) {
 }
 const pane = regionId => `[data-git-workbench-region="${regionId}"]`
 async function press(cdp, key) {
-  const virtualKeyCode = { ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Enter: 13 }[key]
+  const virtualKeyCode = { ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Enter: 13, Escape: 27, Home: 36, End: 35, Backspace: 8, Tab: 9 }[key]
   const input = { key, code: key, ...(virtualKeyCode ? { windowsVirtualKeyCode: virtualKeyCode } : {}) }
   await cdp.call('Input.dispatchKeyEvent', { type: 'keyDown', ...input })
   await cdp.call('Input.dispatchKeyEvent', { type: 'keyUp', ...input })
 }
-async function reference(cdp, regionId, value, scope = pane(regionId)) {
+async function typeSearch(cdp, selector, text) {
+  await click(cdp, selectors(selector))
+  const modifiers = process.platform === 'darwin' ? 4 : 2
+  await cdp.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'a', code: 'KeyA', modifiers, windowsVirtualKeyCode: 65 })
+  await cdp.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'a', code: 'KeyA', modifiers, windowsVirtualKeyCode: 65 })
+  await press(cdp, 'Backspace')
+  if (text) await cdp.call('Input.insertText', { text })
+  await waitFor('actual reference query input', () => cdp.evaluate(`${visibleNode(selector)}?.value===${JSON.stringify(text)}`))
+}
+async function nativeSelectPrefix(cdp, selector, key) {
+  await activate(cdp)
+  await cdp.evaluate(visibleNode(selector) + '.focus()')
+  const code = 'Key' + key.toUpperCase(), windowsVirtualKeyCode = key.toUpperCase().charCodeAt(0)
+  await cdp.call('Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode, text: key, unmodifiedText: key })
+  await cdp.call('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode })
+}
+async function startGitObservation(probe) {
+  const sources = []
+  const visit = async directory => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name)
+      if (entry.isDirectory()) await visit(path)
+      else if (entry.name.endsWith('.js')) sources.push({ path, url: pathToFileURL(path).href, source: await readFile(path, 'utf8') })
+    }
+  }
+  await visit(join(desktopRoot, 'out/main'))
+  assert.ok(sources.length > 0)
+  const methods = ['history', 'commitDetails', 'commitDiff', 'branchDiff', 'stage', 'commit', 'unstage', 'discard', 'push', 'pull', 'fetch']
+  const markers = Object.fromEntries(methods.map(method => {
+    const expression = new RegExp('return this\\.repository\\(workspaceId, config\\)\\.' + method + '\\(', 'g')
+    const matches = sources.flatMap(({ path, url, source }) => [...source.matchAll(expression)].map(match => ({ path, url, offset: match.index })))
+    assert.ok(matches.length > 0, 'The original GitService method must actually compile: ' + method)
+    return [method, matches]
+  }))
+  await probe.main.call('Profiler.enable')
+  await probe.main.call('Profiler.startPreciseCoverage', { callCount: true, detailed: false })
+  probe.gitObservation = { markers, sources: Object.fromEntries(sources.map(({ path, source }) => [path.slice(repositoryRoot.length + 1), digest(source)])) }
+  await gitObservation(probe, 'start')
+}
+async function gitObservation(probe, label) {
+  const covered = await probe.main.call('Profiler.takePreciseCoverage')
+  const counts = Object.fromEntries(Object.entries(probe.gitObservation.markers).map(([method, markers]) => {
+    const count = markers.reduce((total, marker) => {
+      const functions = covered.result.filter(script => script.url === marker.path || script.url === marker.url)
+        .flatMap(script => script.functions).filter(item => item.functionName === method &&
+          item.ranges.some(range => range.startOffset <= marker.offset && range.endOffset > marker.offset))
+      assert.ok(functions.length <= 1, 'Only the original GitService function may satisfy a read count')
+      return total + (functions[0]?.ranges[0]?.count ?? 0)
+    }, 0)
+    return [method, count]
+  }))
+  const result = { label, pid: probe.child.pid, counts, sources: probe.gitObservation.sources,
+    conditions: 'Main V8 precise call coverage, original GitService bodies; counts reset at each checkpoint. Observation overhead is present; elapsed search timings are diagnostic only.' }
+  ;(receipt.gitOwnerObservations ??= []).push(result)
+  return result
+}
+const referenceSearch = '[aria-label="Search history references"]'
+async function pickerView(cdp) {
+  return await cdp.evaluate(`(() => {const dialog=${visibleNode('[role="dialog"][aria-label="History references"]')};if(!dialog)return null;const input=${visibleNode(referenceSearch, 'dialog')};return {query:input?.value,focused:document.activeElement===input,count:${visibleNode('.git-history-ref-picker__count', 'dialog')}?.textContent,empty:dialog.textContent.includes('No matching references.'),options:${selectors('[role="option"]', 'dialog')}.map(option=>({value:option.getAttribute('data-value'),kind:${visibleNode('.git-history-ref-picker__kind', 'option')}?.textContent,active:option.getAttribute('data-active')==='true',position:Number(option.getAttribute('aria-posinset')),size:Number(option.getAttribute('aria-setsize'))}))}})()`)
+}
+async function reference(cdp, regionId, value, scope = '.source-control-history') {
   const selector = scope + ' [aria-label="History reference"]'
-  const observe = () => cdp.evaluate(`(() => {const matches=${selectors(selector)},select=matches[0];return {matches:matches.length,value:select?.value,index:select?.selectedIndex,focused:document.activeElement===select,regionId:select?.closest('[data-git-workbench-region]')?.getAttribute('data-git-workbench-region')??null,workspaceId:select?.closest('[data-git-workspace]')?.getAttribute('data-git-workspace')??null,options:select?Array.from(select.options).map(option=>({value:option.value,label:option.textContent.trim(),disabled:option.disabled})):[]}})()`)
-  const before = await observe()
-  assert.equal(before.matches, 1, 'Select one exact visible History control, never a retained hidden owner')
-  assert.equal(before.regionId, regionId)
-  const target = before.options.find(option => option.value === value)
-  assert.ok(target && !target.disabled, 'The exact requested reference must exist in this original select')
-  const key = target.label[0]
-  assert.match(key, /^[a-z0-9]$/iu, 'Fixture references must expose a native single-character navigation prefix')
-  const code = /[a-z]/iu.test(key) ? 'Key' + key.toUpperCase() : 'Digit' + key
-  const windowsVirtualKeyCode = key.toUpperCase().charCodeAt(0)
-  const candidates = before.options.filter(option => !option.disabled && option.label[0]?.toLowerCase() === key.toLowerCase())
-  assert.ok(candidates.length > 0)
-  const originalScope = regionId ? (await state()).graph.resources['region:' + regionId].scope : null
-  receipt.referenceInteractions ??= []
-  const interaction = { regionId, scope, requested: value, before, originalScope, key, attempts: [], observed: before.value }
-  receipt.referenceInteractions.push(interaction)
-  if (before.value !== value) {
-    await activate(cdp)
-    assert.equal(await cdp.evaluate(`(() => { const select=${visibleNode(selector)};select.focus();return document.activeElement===select })()`), true)
-    await delay(1_200)
-  }
-  for (let attempt = 0; interaction.observed !== value && attempt < candidates.length; attempt++) {
-    const previous = await observe()
-    assert.equal(previous.matches, 1); assert.equal(previous.regionId, regionId)
-    assert.equal(previous.workspaceId, before.workspaceId)
-    interaction.observed = previous.value
-    if (previous.value === value) break
-    assert.equal(previous.focused, true)
-    await cdp.call('Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode, text: key, unmodifiedText: key })
-    await cdp.call('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode })
-    const after = await observe()
-    interaction.attempts.push({ previous, after })
-    interaction.observed = after.value
-    assert.equal(after.matches, 1); assert.equal(after.regionId, regionId)
-    assert.equal(after.workspaceId, before.workspaceId)
-    assert.ok(candidates.some(option => option.value === after.value), 'Native key input must select a member of the actual prefix group')
-  }
-  await waitFor('actual chosen History reference in the original scope', async () => {
-    const selected = await observe()
-    interaction.final = selected
-    if (selected.matches !== 1 || selected.regionId !== regionId || selected.workspaceId !== before.workspaceId || selected.value !== value) return false
-    if (!regionId) return true
-    const resource = (await state()).graph.resources['region:' + regionId]
-    interaction.durable = resource
-    assert.deepEqual(resource.scope, originalScope, 'Reference navigation must keep its exact original repository resource')
-    return resource.history?.reference === value
+  const before = await cdp.evaluate(`(() => {const elements=${selectors(selector)},trigger=elements[0];return {matches:elements.length,value:trigger?.getAttribute('data-value'),workspaceId:trigger?.closest('[data-git-workspace]')?.getAttribute('data-git-workspace')}})()`)
+  assert.equal(before.matches, 1, 'Choose one exact visible History owner, never a retained hidden tool')
+  const resource = regionId ? (await state()).graph.resources['region:' + regionId] : null
+  if (resource) assert.equal(before.workspaceId, resource.workspaceId)
+  await click(cdp, selectors(selector))
+  await waitFor('reference dialog receives actual keyboard focus', async () => (await pickerView(cdp))?.focused)
+  await typeSearch(cdp, referenceSearch, value)
+  const filtered = await waitFor('exact full reference appears in the observed choices', async () => {
+    const view = await pickerView(cdp)
+    return view?.query === value && view.options.some(option => option.value === value) ? view : null
   })
-  interaction.history = await settledHistory(cdp, scope)
-  assert.equal(interaction.history.range, value, 'The completed real History read must retain the exact requested reference')
-  interaction.final = await observe()
-  assert.equal(interaction.final.value, value)
-  assert.equal(interaction.final.matches, 1); assert.equal(interaction.final.regionId, regionId)
-  assert.equal(interaction.final.workspaceId, before.workspaceId)
-  if (regionId) {
+  await press(cdp, 'ArrowDown')
+  const active = await pickerView(cdp)
+  assert.equal(active.options.find(option => option.active)?.value, value, 'Keyboard selection uses the complete ref name')
+  await press(cdp, 'Enter')
+  await waitFor('chosen reference and focus return to the original trigger', () => cdp.evaluate(`(() => {const trigger=${visibleNode(selector)};return trigger?.getAttribute('data-value')===${JSON.stringify(value)}&&trigger===document.activeElement&&!document.querySelector('[aria-label="Search history references"]')})()`))
+  const completed = await settledHistory(cdp, scope)
+  assert.equal(completed.range, value)
+  const interaction = { regionId, requested: value, before, filtered, active, history: completed }
+  if (resource) {
     interaction.durable = (await state()).graph.resources['region:' + regionId]
-    assert.deepEqual(interaction.durable.scope, originalScope)
-    assert.equal(interaction.durable.history?.reference, value)
+    assert.deepEqual(interaction.durable.scope, resource.scope)
+    assert.equal(interaction.durable.history?.reference ?? '', value)
   }
+  ;(receipt.referenceInteractions ??= []).push(interaction)
+  return interaction
 }
 async function historyView(cdp, scope) {
   await activate(cdp)
-  return await cdp.evaluate(`(() => { const root=${visibleNode(scope)},scroll=${visibleNode('.git-history-scroll', 'root')};if(!scroll)return null;const rows=${selectors('[data-history-oid]', 'scroll')};return {range:${visibleNode('[aria-label="History reference"]', 'root')}?.value,loaded:Number(/^(\\d+) commits/.exec(${visibleNode('.git-history-footer', 'scroll')}?.textContent??'')?.[1]),scrollTop:scroll.scrollTop,scrollHeight:scroll.scrollHeight,viewport:scroll.clientHeight,drawn:rows.length,graphNodes:${selectors('.git-history-node', 'scroll')}.length,rows:rows.map(row=>({oid:row.dataset.historyOid,index:Number(row.dataset.historyIndex),selected:row.getAttribute('aria-current')})),edges:${selectors('[data-child-oid]', 'scroll')}.map(edge=>({child:edge.dataset.childOid,parent:edge.dataset.parentOid}))} })()`)
+  return await cdp.evaluate(`(() => { const root=${visibleNode(scope)},scroll=${visibleNode('.git-history-scroll', 'root')};if(!scroll)return null;const rows=${selectors('[data-history-oid]', 'scroll')};return {range:${visibleNode('[aria-label="History reference"]', 'root')}?.getAttribute('data-value'),loaded:Number(/^(\\d+) commits/.exec(${visibleNode('.git-history-footer', 'scroll')}?.textContent??'')?.[1]),scrollTop:scroll.scrollTop,scrollHeight:scroll.scrollHeight,viewport:scroll.clientHeight,drawn:rows.length,graphNodes:${selectors('.git-history-node', 'scroll')}.length,rows:rows.map(row=>({oid:row.dataset.historyOid,index:Number(row.dataset.historyIndex),selected:row.getAttribute('aria-current')})),edges:${selectors('[data-child-oid]', 'scroll')}.map(edge=>({child:edge.dataset.childOid,parent:edge.dataset.parentOid}))} })()`)
 }
 async function settledHistory(cdp, scope) {
   let last, stableSince = 0
@@ -542,6 +623,18 @@ async function narrowWidth(cdp, regionId) {
   const value = await cdp.evaluate(`(() => { const rect=${visibleNode(pane(regionId))}.getBoundingClientRect();return Math.ceil(innerWidth-rect.width+320) })()`)
   return Math.max(500, value)
 }
+async function commitView(cdp, regionId, oid) {
+  return await waitFor('completed immutable commit details', () => visibleRead(cdp, `(() => {const detail=${visibleNode(pane(regionId) + ' .git-workbench__details')};if(!detail||detail.getAttribute('aria-busy')!=='false')return null;const oids=${selectors('.git-workbench__metadata code', 'detail')}.map(element=>element.textContent);if(!oids.includes(${JSON.stringify(oid)}))return null;return {oids,heading:${visibleNode('.git-workbench__message-heading', 'detail')}?.textContent,body:${visibleNode('.git-workbench__message-body', 'detail')}?.textContent,raw:detail.querySelector('.git-workbench__message')?.textContent,format:${visibleNode('[aria-label="Commit message format"]', 'detail')}?.textContent??null,parent:${visibleNode('[aria-label="Comparison parent"]', 'detail')}?.value??null,author:${visibleNode('.git-workbench__author-initials', 'detail')}?.getAttribute('aria-label'),changes:${selectors('[aria-label="File change summary"] li', 'detail')}.map(element=>element.textContent),files:${selectors('.git-workbench__files button', 'detail')}.map(element=>element.getAttribute('aria-label'))}})()`))
+}
+async function onlyHistory(cdp, regionId) {
+  const result = await visibleRead(cdp, `({panels:${selectors('.git-history-panel')}.length,sidebar:${selectors('.source-control-history .git-history-panel')}.length,main:${selectors(pane(regionId) + ' .git-history-panel')}.length,references:${selectors('[aria-label="History reference"]')}.length,replaced:${selectors('.git-history-expanded')}.length})`)
+  assert.deepEqual(result, { panels: 1, sidebar: 1, main: 0, references: 1, replaced: 0 })
+  return result
+}
+function readOnlyObservation(observation) {
+  for (const method of ['stage', 'commit', 'unstage', 'discard', 'push', 'pull', 'fetch']) assert.equal(observation.counts[method], 0, method + ' must not run during Git reading')
+  return observation
+}
 try {
   receipt.sourceRevision = (await exec('git', ['-C', repositoryRoot, 'rev-parse', 'HEAD'])).stdout.trim()
   assert.equal(receipt.sourceRevision, expectedRevision)
@@ -554,11 +647,12 @@ try {
   await writeFile(join(artifacts, 'source-manifest.json'), JSON.stringify({ ...frozenSource.manifest,
     head: expectedRevision, sourceDigest: frozenSource.digest, trackedDiffSha256: frozenTrackedChanges.sha256,
     addedSources: frozenTrackedChanges.added }, null, 2) + '\n')
+  receipt.source.manifestSha256 = digest(await readFile(join(artifacts, 'source-manifest.json')))
   await writeFile(join(artifacts, 'source-tracked.diff'), frozenTrackedChanges.patch)
   await buildCandidate('client-ui', ['--filter', '@agentmux/client-ui...', 'build'])
   await buildCandidate('desktop', ['--filter', '@agentmux/desktop', 'build'])
   ;({ connectAgentMuxRpc } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/public-rpc-client.js'))))
-  deadline = Date.now() + 360_000
+  deadline = Date.now() + 480_000
   await Promise.all([mkdir(userData, { recursive: true }), mkdir(workspacePath, { recursive: true }), mkdir(codexHome, { recursive: true }), mkdir(physicalRuntimeDirectory, { recursive: true }), mkdir(artifacts, { recursive: true })])
   // macOS AF_UNIX addresses cannot hold the long evidence path. Only the addressing
   // alias lives in fixtureRoot/tmp; all Runtime files still belong to this round's private root.
@@ -583,28 +677,10 @@ try {
   receipt.rendererRelease = { id: release.id, identity: release.identity, files: release.files }
   await writeFile(join(artifacts, 'build-identity.json'), JSON.stringify({ sourceDigest: expectedSourceDigest,
     builds: receipt.builds, files: receipt.identityBefore, release }, null, 2) + '\n')
+  receipt.buildIdentity = { path: 'build-identity.json', sha256: digest(await readFile(join(artifacts, 'build-identity.json'))) }
   await assertFrozenSource('before-fixture')
-  await git('init', '--initial-branch=main'); await git('config', 'user.name', 'Private Author'); await git('config', 'user.email', 'private@example.invalid')
-  await writeFile(join(workspacePath, 'old.ts'), 'retained original body\n'); await writeFile(join(workspacePath, 'binary.bin'), Buffer.from([0, 1, 2]))
-  await git('add', '.'); await git('commit', '-m', 'Initial repository'); const rootOid = (await git('rev-parse', 'HEAD')).trim()
-  for (let i = 0; i < 162; i++) await git('commit', '--allow-empty', '-m', `History ${String(i).padStart(2, '0')} · keep chronological context`)
-  await git('checkout', '-b', 'feature/readable-history')
-  await git('mv', 'old.ts', 'renamed.ts'); await writeFile(join(workspacePath, 'changed.ts'), 'fixed commit body\n'); await writeFile(join(workspacePath, 'binary.bin'), Buffer.from([0, 3, 4]))
-  const longPath = 'nested/long-directory-for-fixed-commit-review/精确版本与只读审阅-long-file-name.ts'
-  await mkdir(join(workspacePath, 'nested/long-directory-for-fixed-commit-review'), { recursive: true })
-  await writeFile(join(workspacePath, longPath), 'long path fixed body\n')
-  await git('add', '.'); await git('commit', '-m', 'Read complete commit files'); const featureOid = (await git('rev-parse', 'HEAD')).trim()
-  await git('checkout', 'main'); await writeFile(join(workspacePath, 'main.ts'), 'main parent\n'); await git('add', '.'); await git('commit', '-m', 'Main parent')
-  await git('merge', '--no-ff', 'feature/readable-history', '-m', 'Read commit context · 长标题保留准确对象与阅读位置 without opening a second History or another editor for every file\n\nFull message with a clear subject.\nThe original branch and history stay available while files open as fixed version diffs.')
-  const mergeOid = (await git('rev-parse', 'HEAD')).trim(), parents = (await git('show', '-s', '--format=%P', 'HEAD')).trim().split(' ')
-  await git('branch', 'topic/pure-branch'); await git('worktree', 'add', reviewWorktreePath, reviewBranch)
-  await git('branch', 'topic/root-only', rootOid)
-  await writeFile(join(workspacePath, 'changed.ts'), 'dirty worktree body must remain untouched\n')
-  await writeFile(join(workspacePath, mainStagedPath), 'Main staged body must never be committed by this probe\n')
-  await git('add', '--', mainStagedPath)
-  await writeFile(join(reviewWorktreePath, reviewStagedPath), 'Review staged body must never be committed by this probe\n')
-  await reviewGit('add', '--', reviewStagedPath)
-  receipt.fixture = { rootOid, featureOid, mergeOid, parents, longPath, reviewWorktreePath, mainStagedPath, reviewStagedPath }
+  receipt.fixture = await createGitWorkbenchFixture({ workspacePath, reviewWorktreePath, reviewBranch, mainStagedPath, reviewStagedPath, git, reviewGit })
+  const { rootOid, featureOid, mergeOid, parents, longPath, oldTipRef, errorRef } = receipt.fixture
   const fixedFiles = ['changed.ts', 'renamed.ts', 'binary.bin', 'main.ts', longPath, mainStagedPath]
   const gitState = async () => ({ head: (await git('rev-parse', 'HEAD')).trim(), status: await git('status', '--porcelain=v1'),
     index: digest(await readFile(join(workspacePath, '.git/index'))),
@@ -621,6 +697,7 @@ try {
     workspaces: [{ id: workspaceId, name: workspaceName, hostId: 'local', path: workspacePath, kind: 'folder' }], appearance: { terminalTheme: 'graphite' },
     browser: { agentAutomation: false, toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }, notifications: { mode: 'off' } }))
   first = await launch('first'); phase = 'real-ui'
+  await startGitObservation(first)
   await click(first.cdp, selectors(`.project-rail-row[data-workspace-id="${workspaceId}"]`))
   receipt.initialTools = await toolSelection(first.cdp)
   assert.equal(receipt.initialTools.contentLabel, 'Files + Zones')
@@ -726,147 +803,309 @@ try {
   await selectGitView(first.cdp, 'History')
   const sidebar = '.source-control-history'
   const sidebarStart = await settledHistory(first.cdp, sidebar)
-  await click(first.cdp, selectors(`${sidebar} [data-history-oid="${mergeOid}"] > strong`))
-  const gitRegion = await waitFor('durable clicked fixed commit', async () => {
-    const current = await state()
-    return current.graph.regions.find(r => r.kind === 'git' && !current.graph.resources['region:' + r.regionId]?.history &&
-      current.graph.resources['region:' + r.regionId]?.selection?.commitOid === mergeOid)
-  })
-  const commitPane = pane(gitRegion.regionId)
-  // Assert the clicked action itself reveals the Region. space.focus here would mask a navigation bug.
-  await waitFor('clicked commit is actually visible', () => visibleRead(first.cdp, `${visibleNode(commitPane)}?.getAttribute('aria-label')==='Git commit details'`))
-  assert.equal(await first.cdp.evaluate(`${selectors(commitPane + ' .git-history-panel')}.length`), 0)
-  receipt.commitOnly = { regionId: gitRegion.regionId, embeddedHistoryPanels: 0, sidebarWindow: sidebarStart,
-    boundary: 'DOM/navigation proof. Zero History I/O and render cost require the actual-owner qualification.' }
-  receipt.loadedRenderer = await first.cdp.evaluate('Array.from(document.scripts).map(s=>s.src).filter(s=>s.startsWith("file:"))')
-  assert.ok(receipt.loadedRenderer.length > 0)
-  for (const url of receipt.loadedRenderer) assert.equal(digest(await readFile(fileURLToPath(url))), receipt.identityBefore[fileURLToPath(url).slice(repositoryRoot.length + 1)])
-  await waitFor('complete fixed message and all real parents', () => visibleRead(first.cdp, `${visibleNode(commitPane + ' .git-workbench__message')}?.textContent.includes('original branch and history')&&${visibleNode(commitPane + ' .git-workbench__metadata')}?.textContent.includes(${JSON.stringify(parents[1])})`))
-  await capture(first.cdp, 'commit-only-dark-wide')
-  await capture(first.cdp, 'commit-only-light-narrow', await narrowWidth(first.cdp, gitRegion.regionId), 'light')
+  receipt.cliRepositoryOpen = await cliOpen()
+  const repositoryRegion = (await state()).graph.regions.find(region => region.regionId === receipt.cliRepositoryOpen.result.presentation.regionId)
+  assert.ok(repositoryRegion)
+  const repositoryPane = pane(repositoryRegion.regionId)
+  await waitFor('public repository navigation reveals its exact existing review Region', () => visibleRead(first.cdp,
+    visibleNode(repositoryPane) + "?.getAttribute('aria-label')==='Git repository review'"))
+  assert.equal((await state()).graph.resources['region:' + repositoryRegion.regionId].selection, null)
+  assert.deepEqual(Object.keys(receipt.cliRepositoryOpen.result.read.snapshot).sort(), ['hostId', 'repoPath'])
+  const repositoryTools = await toolSelection(first.cdp)
+  assert.equal(repositoryTools.tool, 'git'); assert.equal(repositoryTools.view, 'History')
+  assert.equal(repositoryTools.workface.zoneId, mainZone.zoneId)
+  receipt.uniqueHistory = await onlyHistory(first.cdp, repositoryRegion.regionId)
+  await capture(first.cdp, 'repository-no-implicit-selection-dark-wide')
+
+  await click(first.cdp, selectors(sidebar + ' [data-history-oid="' + mergeOid + '"] > strong'))
+  await waitFor('sidebar click itself reveals the original repository review', () => visibleRead(first.cdp,
+    'Boolean(' + visibleNode(repositoryPane + ' .git-workbench__details') + ')'))
+  const selectedMerge = await commitView(first.cdp, repositoryRegion.regionId, mergeOid)
+  assert.ok(selectedMerge.body.includes(receipt.fixture.mergeBody))
+  assert.ok(selectedMerge.oids.includes(parents[1]))
+  assert.match(selectedMerge.author, /not a verified photo or identity/u)
+  assert.equal((await state()).graph.resources['region:' + repositoryRegion.regionId].selection.commitOid, mergeOid)
+  const afterSelection = await settledHistory(first.cdp, sidebar)
+  assert.equal(afterSelection.range, sidebarStart.range); assert.equal(afterSelection.loaded, sidebarStart.loaded)
+  assert.ok(Math.abs(afterSelection.scrollTop - sidebarStart.scrollTop) <= 1)
+  receipt.commitOnly = { regionId: repositoryRegion.regionId, originalWindow: sidebarStart, afterSelection,
+    uniqueHistory: await onlyHistory(first.cdp, repositoryRegion.regionId) }
+  await capture(first.cdp, 'merge-commit-dark-wide')
+  await capture(first.cdp, 'merge-commit-light-narrow', await narrowWidth(first.cdp, repositoryRegion.regionId), 'light')
 
   const publicTarget = { workspaceId, expectedResource: { hostId: 'local', workspacePath } }
   receipt.publicCommit = await control('git.commit', { ...publicTarget, oid: mergeOid, parentOid: parents[0] })
   assert.equal(receipt.publicCommit.snapshot.commitOid, mergeOid)
-  assert.ok(receipt.publicCommit.commit.message.includes('original branch and history'))
+  assert.equal(selectedMerge.raw, receipt.publicCommit.commit.message)
   receipt.publicDiff = await control('git.diff', { ...publicTarget, input: { kind: 'commit', snapshot: receipt.publicCommit.snapshot, file: { path: 'changed.ts', origPath: null } } })
   assert.equal(receipt.publicDiff.new.text, 'fixed commit body\n')
+  receipt.cliCommitRead = await cliGit('commit', ['--oid', mergeOid, '--parent', parents[0]])
+  assert.deepEqual(receipt.cliCommitRead.result.snapshot, receipt.publicCommit.snapshot)
+  const diffInput = join(root, 'public-fixed-diff.json')
+  await writeFile(diffInput, JSON.stringify({ kind: 'commit', snapshot: receipt.publicCommit.snapshot, file: { path: 'changed.ts', origPath: null } }))
+  receipt.cliDiffRead = await cliGit('diff', ['--input', diffInput])
+  assert.equal(receipt.cliDiffRead.result.new.text, 'fixed commit body\n')
   receipt.cliCommitOpen = await cliOpen(mergeOid)
-  assert.equal(receipt.cliCommitOpen.result.presentation.regionId, gitRegion.regionId)
+  const independentRegionId = receipt.cliCommitOpen.result.presentation.regionId
+  assert.notEqual(independentRegionId, repositoryRegion.regionId, 'A fixed public commit is not the reusable repository review')
   assert.equal(receipt.cliCommitOpen.result.read.snapshot.commitOid, mergeOid)
-  const full = await open(mergeOid); assert.equal(full.presentation.regionId, gitRegion.regionId)
-  const otherParent = await open(mergeOid, parents[1]); assert.notEqual(otherParent.presentation.regionId, gitRegion.regionId)
-  receipt.parentOpens = { first: full, second: otherParent }
-  await waitFor('chosen second-parent details', () => visibleRead(first.cdp, `${visibleNode(pane(otherParent.presentation.regionId) + ' [aria-label="Comparison parent"]')}?.value===${JSON.stringify(parents[1])}&&Boolean(${visibleNode(pane(otherParent.presentation.regionId) + ' [aria-label="Open diff for main.ts"]')})`))
-  await open(mergeOid, parents[0])
-  const beforeInline = await state()
-  await click(first.cdp, selectors(commitPane + ' [aria-label="Open diff for changed.ts"]'))
-  receipt.canvas = await monaco(first.cdp, '', 'fixed commit body', gitRegion.regionId, true)
-  const afterInline = await state()
-  assert.deepEqual(afterInline.graph.regions.map(r => r.regionId), beforeInline.graph.regions.map(r => r.regionId))
-  assert.equal(afterInline.graph.resources['region:' + gitRegion.regionId].file.path, 'changed.ts')
-  receipt.inlineRegion = { regionId: gitRegion.regionId, regionsBefore: beforeInline.graph.regions.length,
-    regionsAfter: afterInline.graph.regions.length, file: afterInline.graph.resources['region:' + gitRegion.regionId].file }
-  const editor = await first.cdp.evaluate(`(() => { const input=${visibleNode(commitPane + ' .editor.modified textarea')};if(!input)return false;input.focus();return true })()`)
-  assert.ok(editor, 'Actual inline Monaco modified input exists')
-  await first.cdp.call('Input.insertText', { text: 'UNAUTHORIZED EDIT MUST NOT APPEAR' })
-  receipt.readonlyCanvas = await monaco(first.cdp, '', 'fixed commit body', gitRegion.regionId, true)
-  await capture(first.cdp, 'inline-diff-dark-wide')
-  await click(first.cdp, selectors(commitPane + ` [aria-label="Open diff for ${longPath}"]`))
-  await monaco(first.cdp, '', 'long path fixed body', gitRegion.regionId, true)
-  assert.equal((await state()).graph.regions.length, beforeInline.graph.regions.length)
-  await capture(first.cdp, 'inline-diff-light-narrow', await narrowWidth(first.cdp, gitRegion.regionId), 'light')
-  await click(first.cdp, selectors(commitPane + ' [aria-label="Open diff for changed.ts"]'))
-  await monaco(first.cdp, '', 'fixed commit body', gitRegion.regionId, true)
+  const full = await open(mergeOid)
+  assert.equal(full.presentation.regionId, independentRegionId)
+  const otherParent = await open(mergeOid, parents[1])
+  assert.notEqual(otherParent.presentation.regionId, independentRegionId)
+  assert.notEqual(otherParent.presentation.regionId, repositoryRegion.regionId)
+  const secondParent = await commitView(first.cdp, otherParent.presentation.regionId, mergeOid)
+  assert.equal(secondParent.parent, parents[1])
+  assert.ok(secondParent.files.includes('Open diff for main.ts'))
+  receipt.parentOpens = { first: full, second: otherParent, secondParent }
+  const independentBefore = (await state()).graph.resources['region:' + independentRegionId]
 
-  // Only the explicit repository action opens History; it does not select the first row.
-  await click(first.cdp, selectors(commitPane + ' [aria-label="View repository history"]'))
-  const repositoryRegion = await waitFor('explicit repository Region', async () => {
-    const current = await state()
-    return current.graph.regions.find(r => r.kind === 'git' && current.graph.resources['region:' + r.regionId]?.history)
+  await click(first.cdp, selectors(sidebar + ' [data-history-oid="' + featureOid + '"] > strong'))
+  const standard = await commitView(first.cdp, repositoryRegion.regionId, featureOid)
+  assert.equal(standard.heading, 'Keep fixed commit messages and file changes readable')
+  assert.ok(standard.format.includes('feat') && standard.format.includes('review') && standard.format.includes('Breaking change'))
+  assert.ok(standard.body.includes(receipt.fixture.standardBody))
+  const standardRead = await control('git.commit', { ...publicTarget, oid: featureOid })
+  assert.equal(standard.raw, standardRead.commit.message)
+  const expectedChanges = new Map()
+  for (const entry of standardRead.entries) expectedChanges.set(entry.change, (expectedChanges.get(entry.change) ?? 0) + 1)
+  assert.deepEqual(standard.changes.sort(), [...expectedChanges].map(([change, count]) => count + ' ' + change.replace('-', ' ')).sort())
+  assert.deepEqual((await state()).graph.resources['region:' + independentRegionId], independentBefore,
+    'Continuous sidebar choices cannot replace an independently fixed commit')
+  await click(first.cdp, selectors(repositoryPane + ' .git-workbench__raw-message summary'))
+  await waitFor('complete original standard message is visibly readable', () => visibleRead(first.cdp,
+    'Boolean(' + visibleNode(repositoryPane + ' .git-workbench__raw-message[open] .git-workbench__message') + ')'))
+  receipt.standardCommit = { dom: standard, read: standardRead }
+  await capture(first.cdp, 'standard-message-dark-wide')
+  await capture(first.cdp, 'standard-message-light-narrow', await narrowWidth(first.cdp, repositoryRegion.regionId), 'light')
+  await click(first.cdp, selectors(repositoryPane + ' .git-workbench__raw-message summary'))
+
+  await click(first.cdp, selectors(sidebar + ' [data-history-oid="' + mergeOid + '"] > strong'))
+  await commitView(first.cdp, repositoryRegion.regionId, mergeOid)
+  const parentSelector = repositoryPane + ' [aria-label="Comparison parent"]'
+  await nativeSelectPrefix(first.cdp, parentSelector, 'p')
+  await waitFor('actual comparison parent input updates the same immutable Region', async () =>
+    (await commitView(first.cdp, repositoryRegion.regionId, mergeOid)).parent === parents[1])
+  const alternate = await commitView(first.cdp, repositoryRegion.regionId, mergeOid)
+  assert.ok(alternate.files.includes('Open diff for main.ts'))
+  receipt.parentInput = { before: parents[0], after: alternate }
+  await capture(first.cdp, 'merge-second-parent-dark-wide')
+  await nativeSelectPrefix(first.cdp, parentSelector, 'f')
+  await waitFor('first parent restored through actual input', async () =>
+    (await commitView(first.cdp, repositoryRegion.regionId, mergeOid)).parent === parents[0])
+
+  const beforeInline = await state()
+  await click(first.cdp, selectors(repositoryPane + ' [aria-label="Open diff for changed.ts"]'))
+  receipt.canvas = await monaco(first.cdp, '', 'fixed commit body', repositoryRegion.regionId, true)
+  const afterInline = await state()
+  assert.deepEqual(afterInline.graph.regions.map(region => region.regionId), beforeInline.graph.regions.map(region => region.regionId))
+  assert.equal(afterInline.graph.resources['region:' + repositoryRegion.regionId].file.path, 'changed.ts')
+  receipt.inlineRegion = { regionId: repositoryRegion.regionId, regionsBefore: beforeInline.graph.regions.length,
+    regionsAfter: afterInline.graph.regions.length, file: afterInline.graph.resources['region:' + repositoryRegion.regionId].file }
+  const editor = await first.cdp.evaluate('(() => {const input=' + visibleNode(repositoryPane + ' .editor.modified textarea') + ';if(!input)return false;input.focus();return true})()')
+  assert.ok(editor)
+  await first.cdp.call('Input.insertText', { text: 'UNAUTHORIZED EDIT MUST NOT APPEAR' })
+  receipt.readonlyCanvas = await monaco(first.cdp, '', 'fixed commit body', repositoryRegion.regionId, true)
+  await capture(first.cdp, 'inline-diff-dark-wide')
+  await capture(first.cdp, 'inline-diff-light-wide', 1280, 'light')
+  await capture(first.cdp, 'inline-diff-dark-narrow', await narrowWidth(first.cdp, repositoryRegion.regionId))
+  await click(first.cdp, selectors(repositoryPane + ' [aria-label="Open diff for ' + longPath + '"]'))
+  await monaco(first.cdp, '', 'long path fixed body', repositoryRegion.regionId, true)
+  await capture(first.cdp, 'inline-diff-light-narrow', await narrowWidth(first.cdp, repositoryRegion.regionId), 'light')
+  await click(first.cdp, selectors(repositoryPane + ' [aria-label="Open diff for changed.ts"]'))
+  await monaco(first.cdp, '', 'fixed commit body', repositoryRegion.regionId, true)
+
+  await reference(first.cdp, repositoryRegion.regionId, '')
+  const allRead = await control('git.history', { ...publicTarget, limit: 50 })
+  assert.equal(allRead.kind, 'ready'); assert.ok(allRead.nextCursor)
+  assert.ok(!allRead.commits.some(commit => commit.oid === rootOid))
+  assert.ok(allRead.snapshot.refs.some(ref => ref.name === oldTipRef && ref.oid === rootOid))
+  assert.ok(allRead.snapshot.refs.length > 640)
+  readOnlyObservation(await gitObservation(first, 'before-manyrefs-input'))
+  await click(first.cdp, selectors(sidebar + ' [aria-label="History reference"]'))
+  const manyRefs = await waitFor('nonempty windowed choices for the complete observed reference set', async () => {
+    const view = await pickerView(first.cdp)
+    return view?.focused && view.options.length > 0 ? view : null
   })
-  const repositoryPane = pane(repositoryRegion.regionId)
-  await waitFor('repository action reveals one main History and a sidebar summary', () => visibleRead(first.cdp, `${visibleNode(repositoryPane)}?.getAttribute('aria-label')==='Git repository history'&&Boolean(${visibleNode('.git-history-expanded')})&&${selectors('.source-control-history [data-history-oid]')}.length===0`))
-  assert.equal((await state()).graph.resources['region:' + repositoryRegion.regionId].selection, null)
-  const transferred = await settledHistory(first.cdp, repositoryPane)
-  // A taller receiving viewport may legitimately prefetch one more page of the SAME window.
-  assert.ok(transferred.loaded >= sidebarStart.loaded); assert.equal(transferred.range, sidebarStart.range)
-  receipt.cliRepositoryOpen = await cliOpen()
-  assert.equal(receipt.cliRepositoryOpen.result.presentation.regionId, repositoryRegion.regionId)
-  assert.deepEqual(Object.keys(receipt.cliRepositoryOpen.result.read.snapshot).sort(), ['hostId', 'repoPath'])
-  await capture(first.cdp, 'repository-history-dark-wide')
+  const pickerGeometry = await first.cdp.evaluate('(() => {const list=' + visibleNode('[aria-label="History reference choices"]') +
+    ',row=list.querySelector("[role=option]");return {viewport:list.clientHeight,scrollHeight:list.scrollHeight,rowHeight:row.getBoundingClientRect().height}})()')
+  assert.ok(manyRefs.options[0].size >= allRead.snapshot.refs.length)
+  assert.ok(manyRefs.options.length <= Math.ceil(pickerGeometry.viewport / pickerGeometry.rowHeight) + 10,
+    'Rendered choices follow the viewport plus current virtualizer overscan, not hundreds of references')
+  assert.ok(pickerGeometry.scrollHeight > pickerGeometry.viewport)
+  await press(first.cdp, 'ArrowUp')
+  const lastChoices = await waitFor('keyboard reaches the far end of the virtualized reference list', async () => {
+    const view = await pickerView(first.cdp)
+    return view?.options.some(option => option.active && option.position === option.size) ? view : null
+  })
+  assert.ok(lastChoices.options.length <= Math.ceil(pickerGeometry.viewport / pickerGeometry.rowHeight) + 10)
+  await press(first.cdp, 'Home')
+  await waitFor('keyboard Home returns to the actual All choice without selecting it', async () =>
+    (await pickerView(first.cdp))?.options.some(option => option.active && option.value === ''))
+  await capture(first.cdp, 'manyrefs-dark-wide')
+  await capture(first.cdp, 'manyrefs-light-narrow', await narrowWidth(first.cdp, repositoryRegion.regionId), 'light')
+  const queryStarted = Date.now()
+  await typeSearch(first.cdp, referenceSearch, 'no-such-observed-reference')
+  const empty = await waitFor('zero matches stay distinct from an empty repository', async () => {
+    const view = await pickerView(first.cdp)
+    return view?.empty && view.options.length === 0 ? view : null
+  })
+  const queryElapsedMs = Date.now() - queryStarted
+  assert.ok((await historyView(first.cdp, sidebar)).loaded > 0)
+  await capture(first.cdp, 'empty-reference-search-light-narrow', await narrowWidth(first.cdp, repositoryRegion.regionId), 'light')
+  await click(first.cdp, selectors('[aria-label="Clear reference search"]'))
+  const cleared = await waitFor('clear returns the original complete observed choices', async () => {
+    const view = await pickerView(first.cdp)
+    return view?.query === '' && view.focused && view.options.length > 0 ? view : null
+  })
+  await press(first.cdp, 'Escape')
+  assert.equal(await first.cdp.evaluate('document.activeElement===' + visibleNode(sidebar + ' [aria-label="History reference"]')), true)
+  const searchOwner = readOnlyObservation(await gitObservation(first, 'manyrefs-search-clear-escape'))
+  assert.equal(searchOwner.counts.history, 0); assert.equal(searchOwner.counts.commitDetails, 0)
+  receipt.manyRefs = { observed: allRead.snapshot.refs.length, options: manyRefs, lastChoices, pickerGeometry, empty, cleared, queryElapsedMs,
+    owner: searchOwner, conditions: { width: receipt.screenshots.at(-1).width, height: 900, input: 'trusted Chromium text and keyboard input', timing: 'Includes input transport, UI observation and precise Main coverage overhead; diagnostic, not a permanent latency limit.' } }
+  const oldTip = await reference(first.cdp, repositoryRegion.regionId, oldTipRef)
+  const directOwner = readOnlyObservation(await gitObservation(first, 'old-tip-direct-reference'))
+  assert.equal(directOwner.counts.history, 1, 'Old tip confirmation reads one bounded page, not the preceding All pages')
+  assert.equal(oldTip.history.loaded, 1)
+  assert.equal(oldTip.history.rows[0].oid, rootOid)
+  const oldTipRead = await control('git.history', { ...publicTarget, ref: oldTipRef, limit: 50 })
+  const oldTipCli = await cliGit('history', ['--ref', oldTipRef, '--limit', '50'])
+  assert.equal(oldTipRead.commits[0].oid, rootOid); assert.equal(oldTipRead.nextCursor, null)
+  assert.equal(oldTipCli.result.commits[0].oid, rootOid); assert.equal(oldTipCli.result.nextCursor, null)
+  receipt.oldTipDirect = { interaction: oldTip, owner: directOwner, rpc: oldTipRead, cli: oldTipCli }
+  await click(first.cdp, selectors(sidebar + ' [data-history-oid="' + rootOid + '"] > strong'))
+  const plain = await commitView(first.cdp, repositoryRegion.regionId, rootOid)
+  assert.equal(plain.heading, 'Initial repository'); assert.equal(plain.format, null); assert.equal(plain.parent, null)
+  assert.ok(plain.body.includes('Literal <b>markup</b> remains text.'))
+  assert.equal(await first.cdp.evaluate(selectors(repositoryPane + ' .git-workbench__message-body b').concat('.length')), 0)
+  await click(first.cdp, selectors(repositoryPane + ' .git-workbench__raw-message summary'))
+  await waitFor('original nonstandard message can actually be opened', () => visibleRead(first.cdp,
+    'Boolean(' + visibleNode(repositoryPane + ' .git-workbench__raw-message[open] .git-workbench__message') + ')'))
+  receipt.nonstandardCommit = plain
+  await capture(first.cdp, 'old-tip-nonstandard-message-dark-wide')
+  await capture(first.cdp, 'old-tip-nonstandard-message-light-narrow', await narrowWidth(first.cdp, repositoryRegion.regionId), 'light')
+  await click(first.cdp, selectors(repositoryPane + ' .git-workbench__raw-message summary'))
+
+  const remoteMain = await reference(first.cdp, repositoryRegion.regionId, 'refs/remotes/origin/main')
+  assert.equal(remoteMain.history.rows[0].oid, featureOid)
+  assert.equal(remoteMain.filtered.options[0].kind, 'Remote')
+  const localMain = await reference(first.cdp, repositoryRegion.regionId, 'refs/heads/main')
+  assert.equal(localMain.history.rows[0].oid, mergeOid)
+  assert.equal(localMain.filtered.options[0].kind, 'Local')
+  receipt.sameNamedReferences = { local: localMain, remote: remoteMain }
+  await click(first.cdp, selectors(sidebar + ' [data-history-oid="' + mergeOid + '"] > strong'))
+  await commitView(first.cdp, repositoryRegion.regionId, mergeOid)
+  await click(first.cdp, selectors(repositoryPane + ' [aria-label="Open diff for changed.ts"]'))
+  await monaco(first.cdp, '', 'fixed commit body', repositoryRegion.regionId, true)
+  await reference(first.cdp, repositoryRegion.regionId, errorRef)
+  const beforeFailure = (await state()).graph.resources['region:' + repositoryRegion.regionId]
+  try {
+    await git('update-ref', '-d', errorRef, mergeOid)
+    await click(first.cdp, selectors(sidebar + ' [aria-label="Refresh history"]'))
+    await waitFor('real missing reference produces an explicit history error', () => visibleRead(first.cdp,
+      'Boolean(' + visibleNode(sidebar + ' .git-history-error[role="alert"]') + ')'))
+    const failed = (await state()).graph.resources['region:' + repositoryRegion.regionId]
+    assert.deepEqual(failed, beforeFailure, 'An unavailable reference cannot remove the original fixed commit or file')
+    await click(first.cdp, selectors(repositoryPane + ' [aria-label="Reload commit details"]'))
+    await commitView(first.cdp, repositoryRegion.regionId, mergeOid)
+    await monaco(first.cdp, '', 'fixed commit body', repositoryRegion.regionId, true)
+    receipt.historyFailure = { cause: 'Deleted only the selected private fixture reference, preserving its original OID and all objects.', before: beforeFailure, after: failed,
+      message: await first.cdp.evaluate(visibleNode(sidebar + ' .git-history-error') + '.textContent'),
+      independentRegion: (await state()).graph.resources['region:' + independentRegionId] }
+    assert.deepEqual(receipt.historyFailure.independentRegion, independentBefore)
+    await capture(first.cdp, 'history-unavailable-fixed-review-dark-wide')
+    await capture(first.cdp, 'history-unavailable-fixed-review-light-narrow', await narrowWidth(first.cdp, repositoryRegion.regionId), 'light')
+  } finally {
+    await git('update-ref', errorRef, mergeOid)
+  }
+  await click(first.cdp, selectors(sidebar + ' [aria-label="Refresh history"]'))
+  await settledHistory(first.cdp, sidebar)
+  await waitFor('restored reference clears its original error', () => visibleRead(first.cdp,
+    selectors(sidebar + ' .git-history-error').concat('.length===0')))
   await reference(first.cdp, repositoryRegion.regionId, 'refs/heads/main')
-  const initial = await settledHistory(first.cdp, repositoryPane)
-  const point = await first.cdp.evaluate(`(() => {const scroll=${visibleNode(repositoryPane + ' .git-history-scroll')},rect=scroll.getBoundingClientRect();return {x:rect.x+rect.width/2,y:rect.y+rect.height/2,delta:scroll.scrollHeight-scroll.clientHeight-Math.max(scroll.clientHeight,192)+24-scroll.scrollTop}})()`)
-  assert.ok(point.delta > 0, 'Stable initial window permits a real forward wheel before the original edge')
+  const initial = await settledHistory(first.cdp, sidebar)
+  const point = await first.cdp.evaluate('(() => {const scroll=' + visibleNode(sidebar + ' .git-history-scroll') +
+    ',rect=scroll.getBoundingClientRect();return {x:rect.x+rect.width/2,y:rect.y+rect.height/2,delta:scroll.scrollHeight-scroll.clientHeight-Math.max(scroll.clientHeight,192)+24-scroll.scrollTop}})()')
+  assert.ok(point.delta > 0)
   await first.cdp.call('Input.dispatchMouseEvent', { type: 'mouseWheel', x: point.x, y: point.y, deltaX: 0, deltaY: point.delta })
-  await waitFor('automatic prefetch before end', async () => { const v = await historyView(first.cdp, repositoryPane); return v?.loaded > initial.loaded ? v : null })
-  const appended = await settledHistory(first.cdp, repositoryPane)
+  await waitFor('the sole sidebar tree prefetches before its original edge', async () => (await historyView(first.cdp, sidebar))?.loaded > initial.loaded)
+  const appended = await settledHistory(first.cdp, sidebar)
   receipt.autoload = { before: initial.loaded, after: appended.loaded, scrollTop: appended.scrollTop, viewport: appended.viewport,
     originalScrollHeight: initial.scrollHeight, originalPageRemaining: initial.scrollHeight - appended.scrollTop - appended.viewport,
     drawn: appended.drawn, graphNodes: appended.graphNodes }
-  assert.ok(receipt.autoload.originalPageRemaining > 0, 'Prefetch occurs before the ORIGINAL page edge')
-  assert.equal(appended.drawn, appended.graphNodes); assert.ok(appended.drawn < appended.loaded, 'Actual rows and SVG nodes are windowed')
-  const parentMap = new Map((await git('log', '--all', '--format=%H %P')).trim().split('\n').map(line => { const [oid, ...parents] = line.split(' '); return [oid, parents] }))
-  for (const edge of appended.edges) assert.ok(parentMap.get(edge.child)?.includes(edge.parent), 'Drawn edge names a real parent')
+  assert.ok(receipt.autoload.originalPageRemaining > 0)
+  assert.equal(appended.drawn, appended.graphNodes); assert.ok(appended.drawn < appended.loaded)
+  const parentMap = new Map((await git('log', '--all', '--format=%H %P')).trim().split('\n').map(line => {
+    const [oid, ...commitParents] = line.split(' '); return [oid, commitParents]
+  }))
+  assert.ok(appended.edges.length > 0)
+  for (const edge of appended.edges) assert.ok(parentMap.get(edge.child)?.includes(edge.parent))
   await capture(first.cdp, 'history-window-dark-scrolled')
-  await click(first.cdp, selectors(repositoryPane + ' [aria-label="Move history to sidebar"]'))
+  readOnlyObservation(await gitObservation(first, 'before-sidebar-hide'))
+  await selectGitView(first.cdp, 'Changes')
+  await delay(250)
+  const hiddenOwner = readOnlyObservation(await gitObservation(first, 'history-hidden-with-fixed-review'))
+  assert.equal(hiddenOwner.counts.history, 0, 'The right review cannot read local History while the only tree is hidden')
+  await click(first.cdp, selectors(repositoryPane + ' [aria-label="View repository history"]'))
   const returned = await settledHistory(first.cdp, sidebar)
-  receipt.handoff = { initial: transferred, expanded: appended, sidebar: returned }
-  assert.ok(returned.loaded >= appended.loaded); assert.equal(returned.range, appended.range); assert.ok(Math.abs(returned.scrollTop - appended.scrollTop) <= 1)
-  await click(first.cdp, selectors(sidebar + ' [aria-label="Open repository history"]'))
-  const reexpanded = await settledHistory(first.cdp, repositoryPane)
-  receipt.handoff.reexpanded = reexpanded
-  assert.ok(reexpanded.loaded >= returned.loaded); assert.equal(reexpanded.range, returned.range); assert.ok(Math.abs(reexpanded.scrollTop - returned.scrollTop) <= 1)
+  assert.equal((await toolSelection(first.cdp)).view, 'History')
+  assert.equal(returned.loaded, appended.loaded); assert.equal(returned.range, appended.range)
+  assert.ok(Math.abs(returned.scrollTop - appended.scrollTop) <= 1)
+  receipt.navigationPreservation = { before: appended, after: returned, hiddenOwner,
+    uniqueHistory: await onlyHistory(first.cdp, repositoryRegion.regionId) }
 
-  // Leave the ordinary prefetch threshold before checking Locate's explicit-page behavior.
-  await first.cdp.call('Input.dispatchMouseEvent', { type: 'mouseWheel', x: point.x, y: point.y, deltaX: 0, deltaY: -reexpanded.scrollTop })
-  await waitFor('History returned to top', async () => (await historyView(first.cdp, repositoryPane))?.scrollTop === 0)
-  const unloaded = await settledHistory(first.cdp, repositoryPane)
-  assert.ok(unloaded.loaded < 166, 'The fixture still contains an unread older target')
+  await first.cdp.call('Input.dispatchMouseEvent', { type: 'mouseWheel', x: point.x, y: point.y, deltaX: 0, deltaY: -returned.scrollTop })
+  await waitFor('sole History returned to top', async () => (await historyView(first.cdp, sidebar))?.scrollTop === 0)
+  const unloaded = await settledHistory(first.cdp, sidebar)
+  assert.ok(unloaded.loaded < 166)
   const oldTarget = await open(rootOid)
-  await waitFor('root commit has no invented parent', () => visibleRead(first.cdp, `${visibleNode(pane(oldTarget.presentation.regionId) + ' .git-workbench__comparison')}?.textContent.includes('Empty tree')`))
+  await commitView(first.cdp, oldTarget.presentation.regionId, rootOid)
   await click(first.cdp, selectors(pane(oldTarget.presentation.regionId) + ' [aria-label="Locate commit in history"]'))
-  await waitFor('unloaded target stated without unbounded reads', () => visibleRead(first.cdp, `${visibleNode(repositoryPane + ' .git-workbench__locating')}?.textContent.includes('not been loaded')`))
+  await waitFor('unread target remains explicit in the sidebar without unbounded reads', () => visibleRead(first.cdp,
+    visibleNode(sidebar + ' .git-workbench__locating') + "?.textContent.includes('not been loaded')"))
   await delay(350)
-  assert.equal((await settledHistory(first.cdp, repositoryPane)).loaded, unloaded.loaded, 'Locate alone must not exhaust unread history')
+  assert.equal((await settledHistory(first.cdp, sidebar)).loaded, unloaded.loaded)
   for (let page = 0; page < 4; page++) {
-    if (await first.cdp.evaluate(`Boolean(${visibleNode(repositoryPane + ' [data-history-oid="' + rootOid + '"]')})`)) break
-    const prior = await settledHistory(first.cdp, repositoryPane)
-    await click(first.cdp, `${selectors(repositoryPane + ' .git-workbench__locating button')}.filter(e=>e.textContent==='Read next history page')`)
-    const next = await waitFor('one explicitly requested locating page', async () => { const v = await historyView(first.cdp, repositoryPane); return v?.loaded > prior.loaded ? v : null })
-    assert.ok(next.loaded - prior.loaded <= 100, 'One explicit locate action reads a bounded page')
+    if (await first.cdp.evaluate('Boolean(' + visibleNode(sidebar + ' [data-history-oid="' + rootOid + '"]') + ')')) break
+    const prior = await settledHistory(first.cdp, sidebar)
+    await click(first.cdp, selectors(sidebar + ' .git-workbench__locating button') + ".filter(element=>element.textContent==='Read next history page')")
+    const next = await waitFor('one explicitly requested bounded locating page', async () => {
+      const view = await historyView(first.cdp, sidebar); return view?.loaded > prior.loaded ? view : null
+    })
+    assert.ok(next.loaded - prior.loaded <= 100)
   }
-  await waitFor('older fixed OID revealed in the virtual viewport', () => visibleRead(first.cdp, `(() => {const row=${visibleNode(repositoryPane + ' [data-history-oid="' + rootOid + '"]')},scroll=${visibleNode(repositoryPane + ' .git-history-scroll')};if(!row||!scroll)return false;const rowRect=row.getBoundingClientRect(),scrollRect=scroll.getBoundingClientRect();return rowRect.top>=scrollRect.top&&rowRect.bottom<=scrollRect.bottom})()`))
-  receipt.olderLocation = await settledHistory(first.cdp, repositoryPane)
+  await waitFor('original old OID is actually inside the virtual viewport', () => visibleRead(first.cdp,
+    '(() => {const row=' + visibleNode(sidebar + ' [data-history-oid="' + rootOid + '"]') + ',scroll=' +
+    visibleNode(sidebar + ' .git-history-scroll') + ';if(!row||!scroll)return false;const bounds=row.getBoundingClientRect(),view=scroll.getBoundingClientRect();return bounds.top>=view.top&&bounds.bottom<=view.bottom})()'))
+  receipt.olderLocation = await settledHistory(first.cdp, sidebar)
   await capture(first.cdp, 'older-commit-located-dark')
   await reference(first.cdp, repositoryRegion.regionId, 'refs/heads/topic/root-only')
-  await settledHistory(first.cdp, repositoryPane)
   const outside = await open(parents[0])
   await click(first.cdp, selectors(pane(outside.presentation.regionId) + ' [aria-label="Locate commit in history"]'))
-  await waitFor('outside range is distinct from unloaded', () => visibleRead(first.cdp, `${visibleNode(repositoryPane + ' .git-workbench__locating')}?.textContent.includes('outside the current history range')`))
-  receipt.outsideLocation = await waitFor('outside target details and actual durable selection agree', async () => {
-    const durable = (await state()).graph.resources['region:' + repositoryRegion.regionId]
-    const details = await visibleRead(first.cdp, `(() => {const detail=${visibleNode(repositoryPane + ' .git-workbench__details')};return detail&&detail.getAttribute('aria-busy')==='false'?{oids:${selectors('.git-workbench__metadata code', 'detail')}.map(code=>code.textContent),parentOid:${visibleNode('[aria-label="Comparison parent"]', 'detail')}?.value}:null})()`)
-    return durable?.selection?.commitOid === parents[0] && durable.selection.parentOid === outside.read.snapshot.parentOid &&
-      durable.history?.reference === 'refs/heads/topic/root-only' && durable.history.focusOid === parents[0] &&
-      details?.oids.includes(parents[0]) && details.parentOid === outside.read.snapshot.parentOid ? { durable, details } : null
-  })
-  assert.equal((await historyView(first.cdp, repositoryPane)).range, 'refs/heads/topic/root-only')
-  assert.equal((await state()).graph.resources['region:' + repositoryRegion.regionId].selection.commitOid, parents[0])
+  await waitFor('outside range remains distinct from an unread page', () => visibleRead(first.cdp,
+    visibleNode(sidebar + ' .git-workbench__locating') + "?.textContent.includes('outside the current history range')"))
+  const outsideDetails = await commitView(first.cdp, repositoryRegion.regionId, parents[0])
+  const outsideDurable = (await state()).graph.resources['region:' + repositoryRegion.regionId]
+  assert.equal(outsideDurable.selection.commitOid, parents[0]); assert.equal(outsideDurable.selection.parentOid, outside.read.snapshot.parentOid)
+  assert.equal(outsideDurable.history.reference, 'refs/heads/topic/root-only'); assert.equal(outsideDurable.history.focusOid, parents[0])
+  receipt.outsideLocation = { durable: outsideDurable, details: outsideDetails }
   await capture(first.cdp, 'locate-outside-retained-light', 1280, 'light')
   await reference(first.cdp, repositoryRegion.regionId, 'refs/heads/main')
-  await settledHistory(first.cdp, repositoryPane)
-  await click(first.cdp, selectors(repositoryPane + ` [data-history-oid="${mergeOid}"] > strong`))
+  await click(first.cdp, selectors(sidebar + ' [data-history-oid="' + mergeOid + '"] > strong'))
+  await commitView(first.cdp, repositoryRegion.regionId, mergeOid)
   await click(first.cdp, selectors(repositoryPane + ' [aria-label="Open diff for changed.ts"]'))
   await monaco(first.cdp, '', 'fixed commit body', repositoryRegion.regionId, true)
   await selectGitView(first.cdp, 'Branches')
+  await waitFor('pure branch remains an actual Git resource candidate', () => visibleRead(first.cdp,
+    selectors('.branch-row') + ".some(element=>element.textContent.includes('topic/pure-branch'))"))
+  await capture(first.cdp, 'git-branches-dark-wide')
   receipt.publicRepositoryOpen = await open()
   assert.equal(receipt.publicRepositoryOpen.presentation.regionId, repositoryRegion.regionId)
-  assert.equal((await toolSelection(first.cdp)).view, 'Branches', 'Repository navigation preserves the prior Git sidebar choice')
-  await waitFor('pure branch remains a Git resource candidate', () => visibleRead(first.cdp,
-    `${selectors('.branch-row')}.some(element=>element.textContent.includes('topic/pure-branch'))`))
-  await capture(first.cdp, 'git-branches-dark-wide')
+  const projected = await toolSelection(first.cdp)
+  assert.equal(projected.tool, 'git'); assert.equal(projected.view, 'History'); assert.equal(projected.workface.zoneId, mainZone.zoneId)
+  receipt.publicRepositoryProjection = projected
+  await onlyHistory(first.cdp, repositoryRegion.regionId)
 
   // A new Diff Region requires this explicit separate-open action, after the inline assertion.
   await click(first.cdp, selectors(repositoryPane + ' [aria-label="Open diff in separate tab"]'))
@@ -895,12 +1134,16 @@ try {
   assert.deepEqual(await gitState(), unchanged, 'Every UI/public read retained HEAD, index and exact dirty file bytes')
   assert.deepEqual(await reviewGitState(), reviewUnchanged, 'The second staged worktree remains unchanged before the first quit')
   receipt.gitPreservation = { before: unchanged, after: await gitState() }
+  receipt.finalReadOwner = readOnlyObservation(await gitObservation(first, 'before-original-normal-quit'))
+  await first.main.call('Profiler.stopPreciseCoverage')
   receipt.firstExit = await normalQuit(first)
   await git('branch', '-f', 'topic/pure-branch', rootOid)
   await git('update-ref', 'refs/heads/main', rootOid, mergeOid)
   const moved = await gitState(); assert.equal(moved.head, rootOid)
   receipt.intentionalRefMove = { from: mergeOid, to: rootOid, baseline: moved }
   second = await launch('second'); phase = 'real-restart'
+  assert.notEqual(second.child.pid, first.child.pid, 'Recovery must launch a second real process after the original normal exit')
+  assert.equal(receipt.second.nativeUserData, receipt.first.nativeUserData)
   receipt.toolsAfterRestart = await waitFor('original Git tool and view restored before any navigation', async () => {
     const selected = await toolSelection(second.cdp)
     return selected.tool === 'git' && selected.view === 'History' && selected.storedTool === 'git' &&
@@ -954,9 +1197,19 @@ try {
     } catch (error) { errors.push(error.message) }
   }
   if (!errors.length) await rm(root, { recursive: true, force: true })
-  receipt.cleanup = { errors, temporaryRootRemoved: errors.length === 0 }
+  receipt.cleanup = { errors, temporaryRootRemoved: errors.length === 0,
+    buildOutputs: 'Generated outputs remain with the candidate tree; the harness does not remove unowned out/dist. The coordinator removes an isolated verification tree after consuming its receipts.' }
   receipt.passed &&= errors.length === 0
 }
 await mkdir(artifacts, { recursive: true }); await writeFile(join(artifacts, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
-process.stdout.write(JSON.stringify({ passed: receipt.passed, failure: receipt.failure ?? null, screenshots: receipt.screenshots.length, artifacts, cleanup: receipt.cleanup }) + '\n')
+const reviewPath = join(artifacts, 'review.md')
+await writeFile(reviewPath, '# Git history navigation — independent full-frame review\n\n' +
+  'Behavior result: ' + (receipt.passed ? 'passed' : 'not-qualified') + '\n\n' +
+  'Candidate: `' + expectedRevision + '`\n\nSource digest: `' + expectedSourceDigest + '`\n\n' +
+  'Aesthetic review: **not performed**. Kierkegaard must open the full PNGs and assess the actual scenes; capture success is not deliverability.\n\n' +
+  'Scope: ' + receipt.boundary + '\n\n' +
+  receipt.screenshots.map(frame => '- [' + frame.path.slice(artifacts.length + 1) + '](./' + frame.path.slice(artifacts.length + 1) + ') · ' +
+    frame.width + ' × ' + frame.dimensions.height + ' · ' + frame.theme + ' · `' + frame.sha256 + '`').join('\n') + '\n')
+process.stdout.write(JSON.stringify({ passed: receipt.passed, failure: receipt.failure ?? null, screenshots: receipt.screenshots.length,
+  artifacts, review: reviewPath, aestheticReview: receipt.aestheticReview, cleanup: receipt.cleanup }) + '\n')
 process.exitCode = receipt.passed ? 0 : 1
