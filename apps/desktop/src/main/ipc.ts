@@ -696,7 +696,7 @@ export async function registerIpc(args: {
   handle('config:get', () => config)
   handle('config:save', async (next: AppConfig, expected: AppConfig) => await configOwner.edit(expected, next))
   const hostRuntimeReads = registerHostRuntimeObservationIpc({ handle: handleWithEvent, trust: requireTrustedSender,
-    inspect: (host, signal) => callUserRpc('settings.hosts.inspect', { hostId: host.id, expected: host }, { signal }) })
+    call: callUserRpc })
   handle('hosts:check', async (input: HostConfig) => await checkSettingsHost(input, args.runtime))
   const creationTrustPorts = { savedHost: (id: string) => config.hosts.find(host => host.id === id), call: callUserRpc }
   handleWithEvent('hosts:creationTrust', async (event, input: HostConfig) => {
