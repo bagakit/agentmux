@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { runPrivateA2aProductScenario } from '../a2a-inbox-product/runtime.mjs'
+import { assertA2aReferenceUserReading } from '../../lib/a2a-inbox-product-proof.mjs'
 
 await runPrivateA2aProductScenario(async ({ client, first, sessions, facts, executable, workspace, nativeHome, controls,
   cli, credential, waitFor, activate, region, openMailbox, screenshot, nativeRequests, inputEffects }) => {
@@ -102,8 +103,23 @@ await runPrivateA2aProductScenario(async ({ client, first, sessions, facts, exec
     const restored = await first.cdp.evaluate(`(async()=>{const expected=await window.agentmux.config.get();return(await window.agentmux.config.save({...expected,appearance:${JSON.stringify(appearance)}},expected)).appearance})()`)
     assert.deepEqual(restored, appearance); facts.reading.appearance = { original: appearance, restored, transitions }
   }
+  await first.cdp.call('Emulation.setDeviceMetricsOverride', { width: 750, height: 980, deviceScaleFactor: 1, mobile: false })
   await openMailbox(first.cdp, recipientPlace.to.regionId, 'user')
-  const userPage = await first.cdp.evaluate(`${base}.querySelector('[role="tabpanel"][id$="-user"]').textContent`)
+  const userPanel = `${base}.querySelector('[role="tabpanel"][id$="-user"]')`
+  await waitFor('the original User Messages source reader', () => first.cdp.evaluate(`(()=>{const b=${userPanel}.querySelector('.input-mailbox > .input-history__actions button');return Boolean(b&&!b.disabled)})()`))
+  // Observe a read cycle from the existing refresh action; initial false and failed empty pages cannot sign absence.
+  await first.cdp.evaluate(`(()=>{const p=${userPanel};globalThis.__a2aUserReadBusy=[p.getAttribute('aria-busy')];globalThis.__a2aUserReadObserver=new MutationObserver(records=>{for(const record of records)globalThis.__a2aUserReadBusy.push(record.oldValue);globalThis.__a2aUserReadBusy.push(p.getAttribute('aria-busy'))});globalThis.__a2aUserReadObserver.observe(p,{attributes:true,attributeFilter:['aria-busy'],attributeOldValue:true})})()`)
+  await activate(first.cdp, `${userPanel}.querySelector('.input-mailbox > .input-history__actions button')`)
+  await waitFor('the original User Messages read cycle', () => first.cdp.evaluate(`${userPanel}.getAttribute('aria-busy')==='false'&&globalThis.__a2aUserReadBusy.includes('true')`))
+  const userReading = await first.cdp.evaluate(`(async()=>{const reference={hostId:'local',agentSessionId:${JSON.stringify(recipient.agentSessionId)}};
+    const mailbox=await window.agentmux.sessions.inputMailbox(reference,{limit:100,maxBytes:4*1024*1024});
+    const history=await Promise.all(['captured','native'].map(source=>window.agentmux.sessions.readHistory(reference,{source,kind:'user-message',query:'',limit:100,scanLimit:1000,maxBytes:4*1024*1024})));
+    const p=${userPanel};globalThis.__a2aUserReadObserver.disconnect();return{reference,mailbox,history,view:{text:p.textContent,busy:p.getAttribute('aria-busy'),busyTransitions:globalThis.__a2aUserReadBusy,
+      inputScope:p.querySelector('[data-input-mailbox-scope]')?.dataset.inputMailboxScope,sourceCount:p.querySelectorAll('.input-history__sources > div').length,
+      coverage:[...p.querySelectorAll('.input-history__coverage')].map(n=>n.textContent),errors:[...p.querySelectorAll('.input-mailbox > .input-history__notice,.input-history__sources [role="status"],.composer-mailbox__source-notice')].map(n=>n.textContent)}}})()`)
+  const nativeSource = contributions.find(record => record.original.kind === 'native').reference.source
+  assertA2aReferenceUserReading(userReading, recipient, { providerId: nativeSource.providerId, nativeSessionId: nativeSource.nativeSessionId }, { key, wire })
+  const userPage = userReading.view.text
   assert.ok(!userPage.includes(messageId)); assert.ok(!userPage.includes(body)); assert.ok(!userPage.includes(key.submissionId))
   await screenshot(first, 'reference-user-messages', 750, 980)
   await openMailbox(first.cdp, recipientPlace.to.regionId, 'inbox')
@@ -127,5 +143,5 @@ await runPrivateA2aProductScenario(async ({ client, first, sessions, facts, exec
   assert.deepEqual(afterBatch, batch, 'Human rendering and Copy must not acknowledge the Agent inbox')
   const afterEffects = await inputEffects(); assert.deepEqual(afterEffects, effects, 'Reading, themes, Copy and public check must not enqueue or steer input')
   facts.reading = { ...facts.reading, author, recipient, messageId, operationId, sent, original, key, input, wire, conversation, captured, rendered,
-    publicRead, copiedWire, copiedBody, wireCopyFeedback, bodyCopyFeedback, userPage, inbox, outbox, batch, afterBatch, effects: { before: effects, after: afterEffects } }
+    publicRead, copiedWire, copiedBody, wireCopyFeedback, bodyCopyFeedback, userPage, userReading, inbox, outbox, batch, afterBatch, effects: { before: effects, after: afterEffects } }
 })
