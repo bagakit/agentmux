@@ -4,6 +4,10 @@ import { DOMImplementation, XMLSerializer } from '@xmldom/xmldom'
 import { AGENTMUX_SELF_CONTEXT_VERB } from './agent-self-context.js'
 import { AGENTMUX_AGENT_MESSAGING_ENTRY } from './agent-messaging-guidance.js'
 import { browserInputContextJson, type BrowserInputContext } from './browser-input-context.js'
+import { agentPromptExceedsBudget } from './agent-prompt-budget.js'
+
+/** Ordered optional platform context. Omission must retain its source/recovery instructions. */
+export type AgentMuxOptionalContext = { text: string; omittedText: string }
 
 /**
  * AgentMux 对 Agent 说的话，收敛到这一个模块。
@@ -107,7 +111,8 @@ export function composeAgentResumePrompt(prompt: string | undefined, agentMuxNot
 export function composeAgentLaunchPrompt(
   prompt: string | undefined,
   injectAgentMuxGuide: boolean,
-  agentMuxNote?: string
+  agentMuxNote?: string,
+  optionalContext: readonly AgentMuxOptionalContext[] = []
 ): { text: string; systemContext?: string } {
   // trim 只用来判断 "有没有内容"；一旦有，透传/署名的是**未修剪的原文**，保住每一个字节。
   const userRequest = prompt?.trim() ? prompt : undefined
@@ -115,10 +120,20 @@ export function composeAgentLaunchPrompt(
   const amuxParts: string[] = []
   if (injectAgentMuxGuide) amuxParts.push(AGENTMUX_RUNTIME_GUIDE)
   if (note) amuxParts.push(note)
+  // All omission notes participate from the start. Prefer complete earlier sources,
+  // without estimating XML/UTF-8 overhead outside the actual outbound composer.
+  const selected = optionalContext.map(part => part.omittedText)
   // 只有当 AgentMux 确实要说话时，才引出用户段——否则一个空信封只会徒增噪音。
-  if (amuxParts.length > 0) amuxParts.push(userRequest ? USER_REQUEST_FOLLOWS : AWAIT_USER_REQUEST)
-  const amux = amuxParts.join('\n\n')
+  const compose = () => {
+    const parts = [...amuxParts, ...selected].filter(part => part.trim())
+    if (parts.length > 0) parts.push(userRequest ? USER_REQUEST_FOLLOWS : AWAIT_USER_REQUEST)
+    return composeAgentPrompt(userRequest, parts.join('\n\n'))
+  }
+  for (const [index, part] of optionalContext.entries()) {
+    selected[index] = part.text
+    if (agentPromptExceedsBudget(compose().text)) selected[index] = part.omittedText
+  }
   // Retain the generated system segment before wire formatting. Clients consume this fact;
   // an amux-looking string in the user's text never becomes a system message.
-  return composeAgentPrompt(userRequest, amux)
+  return compose()
 }
