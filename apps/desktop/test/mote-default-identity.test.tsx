@@ -35,10 +35,11 @@ const symbol = (id: 'object.mote' | 'avatar.badge-spark') => document.getElement
 it('new Mote default and tiny badge are independent, while the old public glyph keeps its exact drawing', async () => {
   const catalog = getSemanticIconCatalog()
   expect(catalog.icons.length).toBeGreaterThan(0)
-  expect(catalog.icons.find(item => item.id === 'object.mote')?.defaultGlyph).toBe('mote-identity')
+  expect(catalog.icons.find(item => item.id === 'object.mote')?.defaultGlyph).toBe('mote-companion')
   expect(catalog.icons.find(item => item.id === 'avatar.badge-spark')?.defaultGlyph).toBe('badge-token')
-  expect(catalog.glyphs).toEqual(expect.arrayContaining(['mote-mark', 'mote-identity', 'badge-token']))
+  expect(catalog.glyphs).toEqual(expect.arrayContaining(['mote-mark', 'mote-identity', 'mote-companion', 'badge-token']))
   expect(createHash('sha256').update(JSON.stringify(AUTHORED_ICON_GLYPHS['mote-mark'])).digest('hex')).toBe('e0c6180983b82f53856fab475a7c9a1488a4cafe40a0d9abb4a919a865f98eba')
+  expect(createHash('sha256').update(JSON.stringify(AUTHORED_ICON_GLYPHS['mote-identity'])).digest('hex')).toBe('1ce6b5465d87df359aae97217fb2277bd228cb471a6e9507cbfed72c18ad460b')
   await dom.render(<><MoteIcon size={12} /><AgentAvatarBadgeIcon badge="spark" size={6} /></>)
   expect(href(dom.container.querySelector('svg[data-semantic-icon="object.mote"]'))).toBe(semanticIconHref('object.mote'))
   expect(href(dom.container.querySelector('svg[data-semantic-icon="avatar.badge-spark"]'))).toBe(semanticIconHref('avatar.badge-spark'))
@@ -59,6 +60,7 @@ it('real Desktop and Mobile automatic primary and ordinary identities share one 
     expect(node?.getAttribute('data-mote-icon-source')).toBe('automatic')
   }
   expect(dom.container.querySelector('img')).toBeNull()
+  expect(symbol('object.mote').querySelector('path')?.getAttribute('d')).toBe(AUTHORED_ICON_GLYPHS['mote-companion'][0]![1].d)
   const custom = structuredClone(GRAPHITE_THEME)
   custom.id = 'custom.mote-default'; custom.name = 'Mote only'
   custom.icons = { 'object.mote': { kind: 'paths', paths: [{ d: path }] } }
@@ -82,9 +84,11 @@ it('spark decoration keeps original Provider and node identity under bidirection
   await act(async () => { expect(previewTheme(custom).applied).toBe(true) })
   expect(symbol('object.mote').innerHTML).toBe(originalMote)
   expect(symbol('avatar.badge-spark').querySelector('path')?.getAttribute('d')).toBe(path)
-  custom.icons = { 'object.mote': { kind: 'glyph', glyph: 'mote-mark' } }
-  await act(async () => { expect(previewTheme(custom).applied).toBe(true) })
-  expect(symbol('object.mote').querySelector('path')?.getAttribute('d')).toBe(AUTHORED_ICON_GLYPHS['mote-mark'][0]![1].d)
+  for (const glyph of ['mote-mark', 'mote-identity'] as const) {
+    custom.icons = { 'object.mote': { kind: 'glyph', glyph } }
+    await act(async () => { expect(previewTheme(custom).applied).toBe(true) })
+    expect(symbol('object.mote').querySelector('path')?.getAttribute('d')).toBe(AUTHORED_ICON_GLYPHS[glyph][0]![1].d)
+  }
   expect(symbol('avatar.badge-spark').querySelector('path')?.getAttribute('d')).not.toBe(path)
   expect(dom.container.querySelector('[data-avatar-badge="spark"]')).toBe(badge)
   expect(dom.container.querySelector('[data-agent-provider="codex"]')).toBe(provider)
