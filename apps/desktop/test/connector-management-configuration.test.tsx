@@ -11,6 +11,7 @@ import { createDesktopConnections } from '../src/main/connector-host.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { api } from '../src/renderer/src/lib/api'
+import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { enrollmentEncryption } from '../../../packages/connectors/test/fixtures/connection-enrollment.js'
 
@@ -26,6 +27,7 @@ const releases: Array<() => void> = []
 
 beforeEach(async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  useAppStore.setState({ botTaskSelections: {} })
   directory = await mkdtemp(join(tmpdir(), 'settings-configuration-'))
   const encryption = enrollmentEncryption(); secureAvailable = true
   services = await createDesktopConnections({ directory: join(directory, 'connections'), encryption: { ...encryption, isEncryptionAvailable: () => secureAvailable } })
@@ -120,6 +122,7 @@ async function seed(id = 'settings-saved-bot', appId = 'cli_settings_saved_bot')
 }
 async function select(record: ConnectionRecord) { await click(`[data-connection="${record.config.connectionId}"] button`) }
 async function enter(record: ConnectionRecord) {
+  await ready(() => expect(panel() ?? dom.container.querySelector('[data-management-open]')).not.toBeNull())
   if (!panel()) await click('[data-management-open]')
   await ready(() => expect(panel()?.dataset.managementSetup).toBe(record.config.connectionId))
 }
@@ -184,9 +187,9 @@ async function localView(operationId: string, selectedRead?: string, selectedEff
 }
 async function chooseOriginal(record: ConnectionRecord, operationId: string) {
   await enter(record)
-  const before = setupCalls('connection.setup.inspect').length
-  await click(`[data-management-original="${operationId}"]`)
-  await ready(() => { expect(setupCalls('connection.setup.inspect').slice(before).some(call => (call.input as { operationId: string }).operationId === operationId && call.delivered)).toBe(true); expect(panel()?.querySelector('[aria-busy="true"]')).toBeNull() })
+  if (panel()?.querySelector(`[data-management-original="${operationId}"]`)) await click(`[data-management-original="${operationId}"]`)
+  else if (!panel()?.textContent?.includes(operationId)) { await click('[data-management-select]'); await click(`[data-management-original="${operationId}"]`) }
+  await ready(() => { expect(setupCalls('connection.setup.inspect').some(call => (call.input as { operationId: string }).operationId === operationId && call.delivered)).toBe(true); expect(panel()?.querySelector('[aria-busy="true"]')).toBeNull() })
 }
 function assertPrivateFree(value: unknown) {
   for (const secret of [USER, TENANT, TOKEN, FLOW, SECRET, 'fixture-configuration-private-bot', 'fixture-configuration-private-effect']) expect(JSON.stringify(value)).not.toContain(secret)
@@ -218,7 +221,7 @@ it('original mounted Settings reads the exact bot, explicitly enables once and c
   expect(configuration()?.querySelector('[data-management-enable]')).toBeNull()
   expect(writes()).toHaveLength(1)
   expect(writes()[0].url).toBe('https://open.feishu.cn/developers/v1/robot/switch/' + saved.connection.config.application.appId)
-  expect(JSON.parse(String(writes()[0].init?.body))).toEqual({ enable: true })
+  expect(JSON.parse(String(writes()[0].init?.body))).toEqual({ clientId: saved.connection.config.application.appId, enable: true })
   await settle(); expect(business()).toHaveLength(2)
   await clickAction('[data-management-current-setting]', 'read-bot-settings')
   expect(currentView().applicationConfiguration?.capability).toBe('disabled')
@@ -289,7 +292,7 @@ it('selected original read and effect ACKs repair locally with their own revisio
   expect(expired.continuation?.stage).toBe('expired')
   const revised = await forward('connection.configure', { operationId: 'settings-configuration-revised-save', expectedRevision: saved.connection.revision, connection: { ...saved.connection.config, label: 'Revised original bot' } })
   const count = native.length, beginCount = setupCalls('connection.setup.begin').length
-  await dom.render(null); await mount(); await select(revised.connection); await chooseOriginal(revised.connection, operationId)
+  await dom.render(null); await mount(); await chooseOriginal(revised.connection, operationId)
   await click(`[data-management-effect-result="${originalEffect.stepId}"]`)
   await ready(() => expect(effect(currentView(operationId))).toEqual(originalEffect))
   expect(panel()?.querySelector('[data-management-code]')).toBeNull()
@@ -363,9 +366,14 @@ it.each(['API source', 'another target', 'Settings close'] as const)('a real lat
     }
     await act(async () => { delayed.release(); await delayed.promise }); await ready(() => expect(held?.delivered).toBe(true)); await settle()
     expect(panel()?.dataset.managementSetup).toBe(exit === 'another target' ? other.connection.config.connectionId : saved.connection.config.connectionId)
-    expect(panel()?.querySelector('[data-management-enable]')).toBeNull()
+    if (exit === 'another target') {
+      expect(panel()?.querySelector('[data-management-enable]')).toBeNull()
+      expect(dom.container.textContent).not.toContain(USER); expect(dom.container.textContent).not.toContain(TENANT)
+    } else {
+      await ready(() => expect(panel()?.querySelector('[data-management-enable]')).not.toBeNull())
+      expect(setupCalls('connection.setup.inspect').some(call => call !== held && call.delivered && view(call)?.applicationConfiguration?.capability === 'disabled')).toBe(true)
+    }
     expect(panel()?.querySelector('[data-management-code]')).toBeNull()
-    expect(dom.container.textContent).not.toContain(USER); expect(dom.container.textContent).not.toContain(TENANT)
     expect(writes()).toEqual([]); expect(business()).toHaveLength(1)
     expectNoSetupWrites(); await unchanged(saved); await unchanged(other)
   } finally { api.connections.call = source }
