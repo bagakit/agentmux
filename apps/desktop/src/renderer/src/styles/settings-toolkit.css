@@ -93,7 +93,9 @@
 .toolkit-editor__fields small, .toolkit-editor__arguments p, .toolkit-editor__scope p { color: var(--text-3); line-height: 1.55; overflow-wrap: anywhere; }
 .toolkit-editor__fields .toolkit-editor__toggle { display: flex; justify-content: space-between; gap: var(--sp-4); align-items: center; }
 .toolkit-editor__toggle > span { display: grid; gap: var(--sp-2); }
-.toolkit-editor__toggle strong { color: var(--text); }
+.toolkit-editor__toggle { color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; }
+.toolkit-editor__toggle strong { color: var(--text); font-size: var(--fs-body); font-weight: 550; }
+.toolkit-editor__toggle small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.55; }
 .toolkit-editor__toggle input { flex: none; accent-color: var(--green); }
 .toolkit-editor__fields .toolkit-settings__layout { padding: 0; }
 .toolkit-editor__arguments, .toolkit-editor__scope { padding-top: var(--sp-3); border-top: 1px solid var(--line-soft); color: var(--text-2); font-size: var(--fs-meta); }
