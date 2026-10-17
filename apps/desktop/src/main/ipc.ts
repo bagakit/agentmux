@@ -13,6 +13,7 @@ import { BrowserInputContextCaptureFiles, BrowserInputContextCaptures } from './
 import { registerBrowserInputContextIpc } from './browser-input-context-ipc.js'
 import { RendererV8Profiler } from './renderer-v8-profile.js'
 import { RendererMemoryInspector } from './renderer-memory.js'
+import { RendererAnimationInspector } from './renderer-animations.js'
 import { registerPerformanceCaptureIpc } from './performance-capture-ipc.js'
 import { RendererTimelineTracer } from './renderer-trace.js'
 import { ConversationLandmarkStore } from '@agentmux/core'
@@ -518,8 +519,9 @@ export async function registerIpc(args: {
   const allocations = new RendererAllocationSampler(contents, currentRendererCaptureTarget)
   const profiler = new RendererV8Profiler(contents, currentRendererCaptureTarget)
   const memory = new RendererMemoryInspector(contents, currentRendererCaptureTarget)
+  const animations = new RendererAnimationInspector(contents, currentRendererCaptureTarget)
   const tracer = new RendererTimelineTracer(contents, currentRendererCaptureTarget)
-  const metrics = createResourceMetricsPort({ sampler: args.runtime.resourceSampler, currentWindow: currentMetricsWindow, profiler, tracer, memory, allocations,
+  const metrics = createResourceMetricsPort({ sampler: args.runtime.resourceSampler, currentWindow: currentMetricsWindow, profiler, tracer, memory, animations, allocations,
     ...(args.performanceScene ? { scene: { owner: args.performanceScene, currentTarget: currentRendererCaptureTarget, loaded: () => ({ mainPid: process.pid,
       package: args.loadedPackage ?? null, renderer: contents.isLoadingMainFrame() ? null : args.loadedRenderer?.() ?? null }) } } : {}) })
   const closeMetrics = () => metrics.dispose()

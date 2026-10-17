@@ -1,5 +1,6 @@
 import { parseRendererAllocationsInput, parseRendererAllocationsResult, parseRendererSceneCaptureInput, parseRendererSceneCaptureResult, parseRendererSceneInspectInput, parseRendererSceneInspection } from '@agentmux/core/control'
 import type { IpcMainInvokeEvent } from 'electron'
+import { parseRendererAnimationsInput, parseRendererAnimationsResult } from '@agentmux/core/control'
 import { AgentMuxError } from '@agentmux/core'
 import { parseRendererV8ProfileInput, parseRendererV8ProfileResult, parseRendererTraceInput, parseRendererTraceResult,
   type AgentMuxMetricsPort } from '@agentmux/core/control'
@@ -7,6 +8,11 @@ import { parseRendererV8ProfileInput, parseRendererV8ProfileResult, parseRendere
 /** Desktop is another consumer of the original public metrics capture owner. */
 export function registerPerformanceCaptureIpc(metrics: AgentMuxMetricsPort,
   handle: (channel: string, listener: (event: IpcMainInvokeEvent, input: unknown) => unknown) => void): void {
+  handle('metrics:inspectAnimations', async (_event, raw) => {
+    const input = parseRendererAnimationsInput(raw)
+    if (!metrics.inspectAnimations) throw new AgentMuxError('Renderer animation observation is unavailable.', 'METRICS_UNSUPPORTED')
+    return parseRendererAnimationsResult(await metrics.inspectAnimations(input), input)
+  })
   handle('metrics:captureAllocations', async (_event, raw) => {
     const input = parseRendererAllocationsInput(raw)
     if (!metrics.captureAllocations) throw new AgentMuxError('Allocation sampling is unavailable.', 'METRICS_UNSUPPORTED')
