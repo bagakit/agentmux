@@ -3,10 +3,12 @@ import { once } from 'node:events'
 import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, expect, it, vi } from 'vitest'
 import * as Source from '../src/index.js'
 import { agentLifecycleOperationIdentity } from '../src/agent-session-store.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
+import { runSourceObjectCli } from './helpers/source-object-cli.js'
 import type { AgentMuxAgentResumeInput } from '../src/client.js'
 import type { AgentMuxAgentSession, AgentMuxStoredAgentSession } from '../src/types.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
@@ -15,6 +17,12 @@ const core: typeof Source & Record<string, any> = process.env.AGENTMUX_TEST_DURA
   ? await import(/* @vite-ignore */ process.env.AGENTMUX_TEST_DURABLE_RESUME_ENTRY)
   : { ...Source, ...await import('../src/public-rpc-server.js'), ...await import('../src/hosted-runtime-service.js') }
 if (process.env.AGENTMUX_TEST_DURABLE_RESUME_MUTANT) expect(Reflect.get(core, 'AGENTMUX_DURABLE_RESUME_MUTANT')).toBe(process.env.AGENTMUX_TEST_DURABLE_RESUME_MUTANT)
+vi.mock('node:child_process', async original => {
+  const actual = await original<typeof import('node:child_process')>()
+  return { ...actual, fork: ((path: string | URL, args: readonly string[], options: import('node:child_process').ForkOptions) =>
+    actual.fork(String(path).endsWith('/control-endpoint-listener-worker.js')
+      ? fileURLToPath(new URL('../src/control-endpoint-listener-worker.ts', import.meta.url)) : path, args, options)) as typeof actual.fork }
+})
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 async function fixture(delivery: 'positional-argv' | 'post-launch-only' = 'positional-argv', fatal = false) {
@@ -303,4 +311,67 @@ it('keeps the prepared operation after a real fatal exit and unconfirmed origina
   expect(await f.correlation()).toBeDefined(); expect((await f.store.readMetadata(f.previous.agentSessionId))?.run).toEqual(f.previous.run)
   await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_TERMINAL_HANDSHAKE_FAILED' })
   f.noReplacement()
+})
+
+it('keeps a real failed recovery terminal through source CLI reads and permits a separate explicit recovery', async () => {
+  const f = await fixture('positional-argv', true)
+  const request = { agentSessionId: f.previous.agentSessionId, expectedRun: f.previous.run, operationId: 'failed-manual-recovery',
+    trigger: 'manual' as const, args: f.request.args!, env: f.request.env! }
+  const failure = { code: 'AGENT_TERMINAL_HANDSHAKE_FAILED', message: expect.stringContaining('controlled startup exit') }
+  await expect(f.client.ensureAgentContinuity(request)).rejects.toMatchObject(failure)
+  const failed = (await f.store.readMetadata(f.previous.agentSessionId))!, operation = failed.continuityOperations![request.operationId]!
+  expect(failed).toMatchObject({ run: f.previous.run, nativeHandle: f.previous.nativeHandle,
+    retiredRuns: [operation.newRun], continuity: { kind: 'unavailable', reason: 'process-exited', errorCode: failure.code, error: failure.message } })
+  expect((await f.inner.kernel.status(operation.newRun!.runId)).state).toMatchObject({ type: 'exited', code: 1 })
+  const server = new core.AgentMuxControlServer({ socketPath: join(f.root, 'control.sock'), coreClients: () => [{ hostId: 'local', client: f.client }] })
+  await server.start(); cleanups.push(() => server.stop())
+  const env = objectCliEnvironment(f.root, { NODE_NO_WARNINGS: '1' })
+  for (let i = 0; i < 2; i++) {
+    const checked = await runSourceObjectCli(['agent', 'resume', '--session', f.previous.agentSessionId, '--operation-id', request.operationId], env)
+    expect(checked.code, checked.stderr).toBe(1)
+    expect(JSON.parse(checked.stderr)).toMatchObject({ ok: false, error: { code: failure.code, message: failure.message } })
+  }
+  const inspected = await runSourceObjectCli(['agent', 'inspect', '--session', f.previous.agentSessionId], env)
+  expect(inspected.code, inspected.stderr).toBe(0)
+  expect(JSON.parse(inspected.stdout)).toMatchObject({ ok: true, result: { session: { run: f.previous.run, nativeHandle: f.previous.nativeHandle,
+    continuity: operation, continuityOperations: { [request.operationId]: operation } } } })
+  expect(f.start).toHaveBeenCalledOnce(); expect(f.input).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
+  const healthy = "process.stdin.setRawMode(true);process.stdin.on('data',d=>process.stdout.write('INPUT:'+d));process.stdout.write('\\x1b[?u');setInterval(()=>{},1000)"
+  const recovered = await f.client.ensureAgentContinuity({ ...request, operationId: 'new-explicit-recovery', args: ['-e', healthy] })
+  expect(recovered.kind).toBe('resumed')
+  if (recovered.kind !== 'resumed') throw new Error('Explicit recovery did not return its actual Run')
+  expect(recovered.run).not.toEqual(f.previous.run); expect(recovered.run).not.toEqual(operation.newRun)
+  expect(recovered.session.nativeHandle).toEqual(f.previous.nativeHandle)
+  const saved = (await f.store.readMetadata(f.previous.agentSessionId))!
+  expect(saved.continuityOperations![request.operationId]).toEqual(operation)
+  expect(saved.retiredRuns).toEqual([operation.newRun, f.previous.run])
+  await expect(f.client.ensureAgentContinuity(request)).rejects.toMatchObject(failure)
+  const oldResult = await runSourceObjectCli(['agent', 'resume', '--session', f.previous.agentSessionId, '--operation-id', request.operationId], env)
+  expect(oldResult.code, oldResult.stderr).toBe(1)
+  expect(JSON.parse(oldResult.stderr)).toMatchObject({ ok: false, error: { code: failure.code, message: failure.message } })
+  expect(await f.store.readMetadata(f.previous.agentSessionId)).toEqual(saved)
+  expect((await f.inner.kernel.status(recovered.run.runId)).state.type).toBe('running')
+  await expect(f.client.ensureAgentContinuity({ ...request, operationId: 'new-explicit-recovery', args: ['-e', healthy] }))
+    .resolves.toMatchObject({ kind: 'resumed', run: recovered.run })
+  const before = f.input.mock.calls.length
+  await f.client.writeAgent({ agentSessionId: f.previous.agentSessionId, expectedRun: recovered.run, source: 'user', data: 'still-usable' })
+  await vi.waitFor(async () => expect(await f.replay(recovered)).toContain('INPUT:still-usable'))
+  expect(f.input).toHaveBeenCalledTimes(before + 1); expect(f.start).toHaveBeenCalledTimes(2); expect(f.stop).not.toHaveBeenCalled()
+})
+
+it('keeps an unknown recovery Start reconcilable after a new Core owner without classifying it as a rolled-back failure', async () => {
+  const f = await fixture()
+  const request = { agentSessionId: f.previous.agentSessionId, expectedRun: f.previous.run, operationId: f.request.operationId,
+    trigger: 'manual' as const, args: f.request.args!, env: f.request.env! }
+  f.start.mockImplementationOnce(async (input: any) => { await f.nativeStart(input); throw new core.AgentMuxError('Original Start ACK lost', 'CONTROL_UNAVAILABLE') })
+  await expect(f.client.ensureAgentContinuity(request)).resolves.toMatchObject({ kind: 'pending', reason: 'operation-unconfirmed' })
+  expect((await f.store.readMetadata(f.previous.agentSessionId))!.run).toEqual(f.previous.run)
+  expect(await f.correlation()).toBeDefined()
+  await f.client.dispose(); const second = await f.reader()
+  const restored = await second.client.ensureAgentContinuity(request)
+  expect(restored.kind).toBe('resumed')
+  if (restored.kind !== 'resumed') throw new Error('Original Start was not reconciled')
+  await f.write(restored.session, second)
+  await expect(second.client.ensureAgentContinuity(request)).resolves.toMatchObject({ kind: 'resumed', run: restored.run })
+  f.noReplacement(1)
 })
