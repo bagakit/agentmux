@@ -6,6 +6,7 @@ import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystem
 import { NotificationItem } from '../src/renderer/src/components/NotificationItem'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
+import * as notificationStore from '../src/renderer/src/store'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { notificationEventRows, notificationTrigger, toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
 
@@ -28,6 +29,59 @@ function measurePreviewReads() {
   })
   return { calls, restore: () => spy.mockRestore() }
 }
+
+it.each([2, 32])('derives one original workflow identity across %i records and unrelated Session updates', async count => {
+  const session = { ...composerSession('notification-owner-control'), status: {
+    state: 'working' as const, source: 'native-hook' as const, observedAt: Date.now()
+  } }
+  useAppStore.setState({ sessions: [session], agentComposerDrafts: { [session.id]: 'Keep the draft' } })
+  for (let index = 0; index < count; index++) useAppStore.getState().reportError(`Original failure ${index}: ${'x'.repeat(32768)}`)
+  const records = useAppStore.getState().notificationEvents
+  const identity = vi.spyOn(notificationStore, 'notificationEventIdentity')
+  await dom.render(<GlobalSystemNotices />)
+  expect(identity).toHaveBeenCalledExactlyOnceWith(useAppStore.getState().error, useAppStore.getState().errorNoticeContext)
+  identity.mockClear()
+  for (let index = 0; index < 10; index++) await act(async () => useAppStore.getState().applyEvent({ type: 'core', hostId: 'local', event: {
+    type: 'agent-status', agentSessionId: session.id, state: 'working', evidence: { source: 'native-hook', observedAt: Date.now() }
+  } }))
+  await dom.render(<GlobalSystemNotices />)
+  expect(identity).not.toHaveBeenCalled()
+  expect(useAppStore.getState().notificationEvents).toBe(records)
+  expect(useAppStore.getState().agentComposerDrafts[session.id]).toBe('Keep the draft')
+  expect(notificationTrigger(dom.container).getAttribute('aria-label')).toBe(`System notifications: ${count} unread, 0 current, ${count} recent events`)
+  await toggleNotificationCenter(dom.container, 'open')
+  expect(notificationEventRows(dom.container)).toHaveLength(count)
+  await toggleNotificationCenter(dom.container, 'closed')
+  expect(identity).not.toHaveBeenCalled()
+})
+
+it('refreshes the original workflow identity when its full error or eligible context changes', async () => {
+  const original = `${prefix}${'x'.repeat(160)}`
+  useAppStore.getState().reportError(`${original} first`)
+  const firstRecord = useAppStore.getState().notificationEvents[0]!
+  const identity = vi.spyOn(notificationStore, 'notificationEventIdentity')
+  await dom.render(<GlobalSystemNotices />)
+  identity.mockClear()
+  await act(async () => useAppStore.getState().reportError(`${original} second`))
+  expect(identity).toHaveBeenCalledExactlyOnceWith(`${original} second`, useAppStore.getState().errorNoticeContext)
+  const records = useAppStore.getState().notificationEvents
+  expect(records).toHaveLength(2)
+  expect(records[0]).toBe(firstRecord)
+  expect(records[0]!.id).not.toBe(records[1]!.id)
+  identity.mockClear()
+  const context = { kind: 'process-degraded' as const, summary: 'Original pending operation' }
+  await act(async () => useAppStore.setState({ errorNoticeContext: context }))
+  expect(identity).toHaveBeenCalledExactlyOnceWith(`${original} second`, context)
+  expect(notificationTrigger(dom.container).getAttribute('aria-label')).toContain('1 current')
+  identity.mockClear()
+  await act(async () => useAppStore.setState({ errorDismissed: true }))
+  expect(identity).not.toHaveBeenCalled()
+  expect(notificationTrigger(dom.container).getAttribute('aria-label')).toContain('0 current')
+  await act(async () => useAppStore.setState({ errorDismissed: false }))
+  expect(identity).toHaveBeenCalledExactlyOnceWith(`${original} second`, context)
+  expect(notificationTrigger(dom.container).getAttribute('aria-label')).toContain('1 current')
+  expect(useAppStore.getState().notificationEvents).toBe(records)
+})
 
 it.each([[1, 262144], [32, 1024]])('keeps closed history out of presentation and reads only short previews: %i events, %i characters', async (count, size) => {
   const session = { ...composerSession('unrelated'), status: { state: 'working' as const,
