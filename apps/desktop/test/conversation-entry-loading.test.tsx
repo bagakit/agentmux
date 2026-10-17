@@ -46,8 +46,9 @@ async function fixture(records: unknown[] = originalRecords) {
   const f = await nativeHistoryFixture('claude', jsonl(records)); closes.push(f.close)
   await desktopConversationReadBridge(f, closes)
   const initial = useAppStore.getState(); closes.push(() => useAppStore.setState(initial, true))
+  expect(f.session.nativeHandle).toBeDefined()
   const session = { ...composerSession(f.session.agentSessionId, 'claude'), executorId: 'codex', workspacePath: f.root,
-    nativeHandle: f.session.nativeHandle, control: { kind: 'agent' as const, hostId: 'local', agentSessionId: f.session.agentSessionId, run: f.session.run } }
+    nativeHandle: f.session.nativeHandle!, control: { kind: 'agent' as const, hostId: 'local', agentSessionId: f.session.agentSessionId, run: f.session.run } }
   useAppStore.setState({ ...initial, config: { ...composerConfig, workspaces: [{ ...composerConfig.workspaces[0]!, path: f.root }] },
     sessions: [session], viewModes: { [session.id]: 'terminal' }, agentNames: {}, timelines: {}, pendingAgentLaunches: {},
     recoveryCandidates: [], runtimeOwnershipWarnings: [], agentComposerDrafts: { [session.id]: 'Original draft' } }, true)
