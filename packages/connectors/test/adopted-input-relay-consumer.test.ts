@@ -54,7 +54,7 @@ async function fixture() {
   provider.prepareNativeInput = vi.fn<NonNullable<AgentProvider['prepareNativeInput']>>(async (input, selected) => {
     expect(input.nativeActor).toEqual(actor); expect(selected).toEqual(source)
     return { plan: { kind: 'native-rpc', protocolId: actor.protocolId, actorId: actor.actorId,
-      sourceId: JSON.stringify([source.providerId, source.nativeSessionId]), threadId: source.nativeSessionId, operation: 'start-or-steer' }, send, dispose: vi.fn() }
+      sourceId: JSON.stringify([source.providerId, source.nativeSessionId]), threadId: source.nativeSessionId, operation: 'start-or-steer' }, assertCurrent: vi.fn(async () => {}), send, dispose: vi.fn() }
   })
   const spatial = new core.AgentMuxSpatialStateStore(join(h.root, 'spatial.json'))
   await spatial.commit({ expectedRevision: 0, graph: {

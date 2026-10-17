@@ -28,7 +28,7 @@ async function prepareNativeActor(f: Awaited<ReturnType<typeof fixture>>) {
   const provider = (f.client as unknown as { providers: { get(id: string): AgentProvider } }).providers.get('claude')
   provider.prepareNativeInput = vi.fn<NonNullable<AgentProvider['prepareNativeInput']>>(async (ctx, target) => {
     expect(target).toEqual(inputTarget.source)
-    return { plan: { kind: 'native-rpc', protocolId: ctx.nativeActor.protocolId, actorId: ctx.nativeActor.actorId, sourceId: JSON.stringify(['claude', 'ingress-native']), threadId: target.nativeSessionId, operation: 'start-or-steer' }, send: sends, dispose: vi.fn() }
+    return { plan: { kind: 'native-rpc', protocolId: ctx.nativeActor!.protocolId, actorId: ctx.nativeActor!.actorId, sourceId: JSON.stringify(['claude', 'ingress-native']), threadId: target.nativeSessionId, operation: 'start-or-steer' }, assertCurrent: vi.fn(async () => {}), send: sends, dispose: vi.fn() }
   })
   return { sends }
 }
