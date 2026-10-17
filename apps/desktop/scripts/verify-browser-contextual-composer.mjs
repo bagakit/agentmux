@@ -12,6 +12,7 @@ const { build, transform } = createRequire(join(root, 'packages/core/package.jso
 const captureOnly = process.argv.includes('--capture-only')
 const mutationId = process.argv.find(arg => arg.startsWith('--mutation='))?.slice('--mutation='.length)
 const presenceOnly = process.argv.includes('--presence-only')
+const captureCase = process.argv.find(arg => arg.startsWith('--capture-case='))?.slice('--capture-case='.length)
 const baselineOnly = Boolean(mutationId) || captureOnly || presenceOnly || process.argv.includes('--baseline')
 const foreground = process.argv.includes('--foreground')
 const captureHandoff = process.argv.includes('--capture-handoff')
@@ -22,9 +23,12 @@ for (let index = 2; index < process.argv.length; index++) {
   if (arg === '--output') {
     assert.equal(index, outputIndex, 'Only one evidence output is accepted')
     assert.ok(process.argv[++index] && !process.argv[index].startsWith('--'), 'The output flag requires a path')
-  } else assert.ok(arg.startsWith('--mutation=') || ['--baseline', '--foreground', '--capture-handoff', '--native-opinion', '--capture-only', '--presence-only'].includes(arg), 'Unsupported contextual proof argument')
+  } else assert.ok(arg.startsWith('--mutation=') || arg.startsWith('--capture-case=') ||
+    ['--baseline', '--foreground', '--capture-handoff', '--native-opinion', '--capture-only', '--presence-only'].includes(arg), 'Unsupported contextual proof argument')
 }
 const output = outputIndex < 0 ? join(root, '.tmp/browser-agent-collaboration', mutationId ? 'contextual-composer-mutant-proof' : presenceOnly ? 'operator-presence-renderer-proof' : captureOnly ? 'contextual-composer-capture-proof' : foreground ? 'contextual-composer-foreground-proof' : captureHandoff ? 'contextual-composer-capture-proof' : 'contextual-composer-proof') : resolve(process.argv[outputIndex + 1])
+assert.ok(process.argv.filter(arg => arg.startsWith('--capture-case=')).length <= 1 &&
+  (captureCase === undefined || captureCase === 'narrow' && captureOnly && !mutationId && !presenceOnly), 'A scoped capture retains only the requested narrow visual evidence')
 assert.ok(!mutationId || !foreground && !captureHandoff && !captureOnly && !nativeOpinion && !presenceOnly, 'A scoped mutation is a background diagnostic only')
 assert.ok(!presenceOnly || !captureOnly && !foreground && !captureHandoff && !nativeOpinion, 'The presence diagnostic is background-only and cannot send an opinion')
 assert.ok(!captureOnly || captureHandoff && !nativeOpinion, 'Capture-only requires a capture handoff and cannot send an opinion')
@@ -42,6 +46,7 @@ const receipt = { schema: 'agentmux.browser-contextual-composer.proof.v1', passe
   candidate: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), runs: [],
   sharedTreeMutations: 0, independentVisualReview: 'not-performed', physicalInputQualified: false,
   captureQualified: false,
+  captureScope: captureCase ?? 'all',
   boundary: 'Actual mounted BrowserPane/Store/NativeOverlay and sandbox preload/full Main registerIpc/RuntimeController, original Hosted/Core capture reader and shipped CodexProvider over real ctxmux PTY to a repository-controlled CLI. CDP Renderer interaction and Renderer captures do not qualify OS foreground input or a composed whole-window visual review.' }
 const save = () => writeFile(join(output, 'receipt.json'), JSON.stringify({ ...receipt, sources: Object.fromEntries(sources) }, null, 2))
 async function bind(file) {
@@ -76,6 +81,9 @@ const mutations = [
   { id: 'live-anchor-commit', file: 'apps/desktop/src/renderer/src/components/BrowserTraceReadingHost.tsx',
     from: 'queueMicrotask(() => {', to: '((work: () => void) => work())(() => {',
     expected: 'The live trace must actually be painted after its original parent ref commits' },
+  { id: 'narrow-page-reading-space', file: 'apps/desktop/src/renderer/src/lib/browser-reader-position.ts',
+    from: 'const compact = pane !== null && bounds.width > 0 && bounds.width <= 380', to: 'const compact = false',
+    expected: 'The narrow reader must leave the original page heading and action visible' },
   { id: 'current-step-before-history', file: 'apps/desktop/src/renderer/src/styles/browser-contextual-composer.css',
     from: '.browser-trace-rail .browser-rsi-history__list { max-height: min(160px, 24vh); overflow-y: auto; }',
     to: '.browser-trace-rail .browser-rsi-history__list { max-height: none; overflow-y: auto; }',
@@ -236,6 +244,7 @@ async function native(label, mutation) {
       if (captureHandoff) env.AGENTMUX_CONTEXTUAL_CAPTURE_HANDOFF = '1'
       if (nativeOpinion) env.AGENTMUX_CONTEXTUAL_NATIVE_OPINION = '1'
       if (captureOnly) env.AGENTMUX_CONTEXTUAL_CAPTURE_ONLY = '1'
+      if (captureCase) env.AGENTMUX_CONTEXTUAL_CAPTURE_CASE = captureCase
     }
     console.log(label + ': private native fixture ' + directory)
     const result = await execute(require('electron'), [join(directory, 'bootstrap.cjs')], env)
@@ -257,7 +266,7 @@ async function native(label, mutation) {
         assert.equal(actual.mode, 'operator-presence'); assert.equal(actual.presence.passed, true)
         assert.equal(actual.cases.length, 1)
         assert.equal(actual.ipc.some(call => call.channel === 'sessions:submitPrompt'), false, 'Presence inspection cannot submit an opinion')
-      } else { assert.equal(actual.cases.length, captureOnly ? 1 : 2); assert.equal(actual.trace.length, 9) }
+      } else { assert.equal(actual.cases.length, captureOnly ? 1 : 2); assert.equal(actual.trace.length, captureCase ? 3 : 9) }
       if (captureOnly) {
         assert.equal(actual.mode, 'capture-only'); assert.equal(actual.nativeOpinion, undefined)
         assert.equal(actual.ipc.some(call => call.channel === 'sessions:submitPrompt'), false, 'Capture-only cannot submit another opinion')
@@ -300,6 +309,7 @@ try {
   for (const file of sources.keys()) await bind(join(root, file))
   const endingCandidate = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
   if (presenceOnly) { receipt.endingCandidate = endingCandidate; receipt.presenceDiagnosticComplete = true }
+  else if (captureCase) receipt.endingCandidate = endingCandidate // Every consumed source was rechecked above; unrelated test commits do not repaint this scope.
   else assert.equal(endingCandidate, receipt.candidate, 'The qualified candidate must stay exact')
   receipt.passed = !baselineOnly
   await save()

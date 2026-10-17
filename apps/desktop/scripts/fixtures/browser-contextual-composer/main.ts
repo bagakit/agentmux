@@ -23,6 +23,7 @@ import { BrowserNativeInputShield } from '../../../src/main/browser-native-input
 const directory = process.env.AGENTMUX_CONTEXTUAL_ROOT!, source = process.env.AGENTMUX_CONTEXTUAL_SOURCE!
 const captureOnly = process.env.AGENTMUX_CONTEXTUAL_CAPTURE_ONLY === '1'
 const presenceOnly = process.env.AGENTMUX_CONTEXTUAL_PRESENCE_ONLY === '1'
+const narrowCapture = process.env.AGENTMUX_CONTEXTUAL_CAPTURE_CASE === 'narrow'
 app.on('window-all-closed', () => {})
 const receipt: any = { schema: 'agentmux.browser-contextual-composer.native.v1', passed: false, cases: [], ipc: [],
   mode: presenceOnly ? 'operator-presence' : captureOnly ? 'capture-only' : 'opinion-and-trace',
@@ -449,7 +450,7 @@ async function run() {
     await click('.browser-operation-status__trigger')
     await until(() => evaluate('Boolean(document.querySelector("[aria-label=\\"Open browser activity timeline\\"]"))'), 'real activity disclosure')
     observations.push({ phase: 'open-menu', facts: await evaluate('contextualProof.facts()') })
-    if (captureOnly && !receipt.menuCaptured) {
+    if (captureOnly && !narrowCapture && !receipt.menuCaptured) {
       await evaluate('contextualProof.appearance("dark")'); await settled()
       await capture('menu-normal-responsive-dark')
       receipt.menuCaptured = true
@@ -468,7 +469,17 @@ async function run() {
       return page.getVisible() && stage && ['x', 'y', 'width', 'height'].every(key => Math.abs(bounds[key as keyof typeof bounds] - Math.round(stage[key] * zoom)) <= 1)
     }, 'the original native Browser bounds to match its current rendered stage')
   }
+  async function requireReadablePage(selector: string, shape: { name: string }, viewport: unknown) {
+    if (shape.name !== 'narrow' || viewport !== 'responsive') return
+    const panel = await evaluate(`document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect().toJSON()`)
+    const pageContent = await page.webContents.executeJavaScript('({height:innerHeight,heading:document.querySelector("h1").getBoundingClientRect().toJSON(),action:document.querySelector("#action").getBoundingClientRect().toJSON()})')
+    const nativeBounds = page.getBounds()
+    const contentBottom = nativeBounds.y + Math.max(pageContent.heading.bottom, pageContent.action.bottom) * nativeBounds.height / pageContent.height
+    assert.ok(panel.top >= contentBottom, 'The narrow reader must leave the original page heading and action visible')
+    ;(receipt.narrowReadability ??= []).push({ selector, panel, pageContent, nativeBounds, contentBottom })
+  }
   for (const shape of [{ name: 'normal', width: 1120, height: 760 }, { name: 'narrow', width: 360, height: 760 }, { name: 'short', width: 760, height: 420 }]) {
+    if (narrowCapture && shape.name !== 'narrow') continue
     window.setSize(shape.width, shape.height)
     await settled(); await settleNativeGeometry()
     for (const viewport of ['responsive', { width: 640, height: 480, screenPosition: 'desktop' }]) {
@@ -486,6 +497,7 @@ async function run() {
       assert.equal(trace.positioned, true)
       const currentStepVisible = await evaluate(`(()=>{const panel=document.querySelector('aside[aria-label="Browser activity trace"]'),step=panel?.querySelector('.browser-rsi-timeline__step--running,.browser-rsi-timeline__step--waiting');if(!panel||!step)return false;const p=panel.getBoundingClientRect(),s=step.getBoundingClientRect();return s.top>=p.top&&s.bottom<=p.bottom})()`)
       assert.equal(currentStepVisible, true, 'Opening the live trace must show the current step before scrolling through older operations')
+      await requireReadablePage('aside[aria-label="Browser activity trace"]', shape, viewport)
       assert.deepEqual(await pageFacts(), original, 'Opening live trace must preserve original page viewport, geometry, scroll and input')
       for (const appearance of ['dark', 'light']) {
         await evaluate(`contextualProof.appearance(${JSON.stringify(appearance)})`); await settled()
@@ -495,6 +507,7 @@ async function run() {
       assert.deepEqual(await pageFacts(), original, 'Closing live trace must preserve original page viewport, geometry, scroll and input')
       await click('button[aria-label="Message Browser operator"]'); await settled()
       assert.equal(await evaluate('getComputedStyle(document.querySelector(".browser-contextual-composer")).visibility'), 'visible', 'The opinion entry and actual discussion remain usable at this window size')
+      await requireReadablePage('.browser-contextual-composer', shape, viewport)
       assert.deepEqual(await pageFacts(), original, 'Reading the original opinion must preserve the running Browser viewport')
       for (const appearance of ['dark', 'light']) {
         await evaluate(`contextualProof.appearance(${JSON.stringify(appearance)})`); await settled()
@@ -502,6 +515,21 @@ async function run() {
       }
       await click('button[aria-label="Close discussion"]'); await settled()
       assert.deepEqual(await pageFacts(), original, 'Closing the original opinion must preserve the running Browser viewport')
+      if (shape.name === 'narrow' && viewport === 'responsive') {
+        await openTrace()
+        await click('.browser-rsi-timeline__step--running > button,.browser-rsi-timeline__step--waiting > button')
+        const commentSelector = '[data-original-step-comment]'
+        await until(() => evaluate(`(()=>{const button=[...document.querySelectorAll('aside[aria-label="Browser activity trace"] button')].find(item=>item.textContent.startsWith('Comment on step'));if(!button)return false;button.setAttribute('data-original-step-comment','');button.scrollIntoView({block:'nearest'});return true})()`), 'the actual Portal historical-step opinion entry')
+        await settled(); await click(commentSelector); await settled()
+        const historical = await evaluate(`(()=>{const panel=document.querySelector('.browser-contextual-composer');return{compact:panel.dataset.compactReader,height:panel.getBoundingClientRect().height,editor:panel.querySelector('textarea')?.getBoundingClientRect().height}})()`)
+        assert.equal(historical.compact, 'true')
+        assert.ok(historical.height > 120 && historical.editor >= 56, 'A Portal historical-step opinion must use the exact original Pane, not its small button')
+        await requireReadablePage('.browser-contextual-composer', shape, viewport)
+        await click('button[aria-label="Close discussion"]'); await settled()
+        await click('button[aria-label="Close browser activity timeline"]'); await settled()
+        assert.deepEqual(await pageFacts(), original, 'A historical opinion must preserve the original live page')
+        receipt.historicalOpinionLayout = historical
+      }
       traceReceipts.push({ shape, viewport, original, trace })
       await finish()
       console.log('Actual live trace viewport: ' + shape.name + ' ' + (typeof viewport === 'string' ? 'responsive' : 'fixed') + ' GREEN')
@@ -528,7 +556,7 @@ async function run() {
     assert.equal(receipt.ipc.some((call: any) => call.channel === 'sessions:submitPrompt'), false, 'Capture-only cannot submit or replay an opinion')
     receipt.captureOnly = { submittedOpinions: 0, nativeOpinionQualified: false,
       transportBytes: { before: initialAcceptedInputBytes, after: (await core.statusAgent(session.agentSessionId)).run.acceptedInputBytes } }
-    assert.equal(receipt.frames.filter((frame: any) => frame.surface === 'os-native-window').length, 13,
+    assert.equal(receipt.frames.filter((frame: any) => frame.surface === 'os-native-window').length, narrowCapture ? 4 : 13,
       'Capture-only must retain every actual native window, including the original menu')
     receipt.captureQualified = true
   }
