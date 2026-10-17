@@ -1,12 +1,12 @@
 // @vitest-environment happy-dom
-import { act } from 'react'
+import { act, useMemo } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentMuxMessageEvent, AgentMuxRpcParams, AgentMuxRpcResult, AgentMuxSpawnRecord } from '@agentmux/core'
 import type { RuntimeEvent, SessionHistoryReference } from '../src/shared/contracts'
 import { api } from '../src/renderer/src/lib/api'
 import { useCollaborationReading } from '../src/renderer/src/lib/use-collaboration-reading'
-import { collaborationSubjectKey, projectCollaboration, visibleCollaboration, type CollaborationReading } from '../src/renderer/src/lib/agent-collaboration'
+import { collaborationSubjectKey, createCollaborationProjector, projectCollaboration, visibleCollaboration, type CollaborationReading } from '../src/renderer/src/lib/agent-collaboration'
 
 type EventOptions = Omit<AgentMuxRpcParams<'message.events'>, 'hostId' | 'participantSessionId'>
 type EventPage = AgentMuxRpcResult<'message.events'>
@@ -286,4 +286,133 @@ it('keeps original supervision events separate from communication and never prom
   expect(evidence.events.map(item => [item.kind, item.sequence])).toEqual([['dispatch-open', 2], ['dispatch-event', 4]])
   expect(evidence).not.toHaveProperty('dispatch'); expect(evidence).not.toHaveProperty('originAwaits')
   expect(projected.relations.find(relation => relation.kind === 'communication')!.evidence).toHaveLength(1)
+})
+
+
+it('retains the exact facts through status-only loading failure observation and pulse expiration', async () => {
+  vi.useFakeTimers()
+  vi.mocked(api.sessions.messageEvents).mockResolvedValueOnce(page(reader, { latest: true }, [event(100)]))
+  await render()
+  const facts = reading.facts, original = facts[0]!, pending = deferred<EventPage>()
+  expect(facts).toHaveLength(1); expect(original.events).toHaveLength(1)
+  vi.mocked(api.sessions.messageEvents).mockImplementation(() => pending.promise)
+  await act(async () => { reading.act(reader, 'refresh') })
+  expect(reading.sources[0]!.loading).toContain('events'); expect(reading.facts).toBe(facts)
+  await emit({ type: 'agent-message-observation', state: 'unavailable', message: 'Source temporarily unavailable' })
+  expect(reading.facts).toBe(facts); expect(reading.facts[0]).toBe(original)
+  await emit(change(101)); expect(reading.pulses).toHaveLength(1)
+  await act(async () => pending.reject(Error('Original page unavailable')))
+  expect(reading.sources[0]!.issues.events).toBe('Original page unavailable'); expect(reading.facts).toBe(facts)
+  await act(async () => { await vi.advanceTimersByTimeAsync(1801) })
+  expect(reading.pulses).toEqual([]); expect(reading.facts).toBe(facts)
+})
+
+it('retains loaded A history while B is demanded and resumes A without an initial query', async () => {
+  const b = reference('other-owner')
+  vi.mocked(api.sessions.messageEvents).mockImplementation(async (subject, options = {}) => subject.hostId === b.hostId ? page(subject, options)
+    : options.latest ? page(subject, options, [event(90), event(100)], 100, { older: 90 })
+      : options.beforeSequence === 90 ? page(subject, options, [event(80)], 100, { older: 80 })
+        : options.beforeSequence === 80 ? page(subject, options, [event(70)], 100)
+          : page(subject, options, [event(101)], 101))
+  await render(); await act(async () => reading.act(reader, 'earlier'))
+  const a = reading.facts.find(fact => fact.subject.hostId === reader.hostId)!
+  expect(a.events.map(item => item.sequence)).toEqual([80, 90, 100])
+  const aCalls = () => vi.mocked(api.sessions.messageEvents).mock.calls.filter(([subject]) => subject.hostId === reader.hostId)
+  expect(aCalls()).toHaveLength(2)
+  await render([b]); await emit(change(101))
+  expect(reading.facts.find(fact => fact.subject.hostId === reader.hostId)).toBe(a); expect(aCalls()).toHaveLength(2)
+  await render()
+  expect(aCalls().map(([, options]) => options)).toEqual([
+    { latest: true, limit: 50 }, { beforeSequence: 90, throughSequence: 100, incarnation: 'original-journal', limit: 50 },
+    { afterSequence: 100, incarnation: 'original-journal', limit: 50 }
+  ])
+  expect(reading.sources[0]!.history).toEqual({ before: 80, through: 100, incarnation: 'original-journal' })
+  await act(async () => reading.act(reader, 'earlier'))
+  expect(aCalls().at(-1)![1]).toEqual({ beforeSequence: 80, throughSequence: 100, incarnation: 'original-journal', limit: 50 })
+  expect(reading.sources[0]!.events.map(item => item.sequence)).toEqual([70, 80, 90, 100, 101])
+})
+
+it('decodes only a new original page after ten thousand real accumulated rows and leaves other sources stable', async () => {
+  let decoded = 0
+  const instrumented = (sequence: number) => {
+    const row = event(sequence), refs = row.messages
+    Object.defineProperty(row, 'messages', { get() { decoded++; return refs } })
+    return row
+  }
+  const rows = Array.from({ length: 10001 }, (_, index) => instrumented(index + 1))
+  vi.mocked(api.sessions.messageEvents).mockImplementation(async (subject, options = {}) => {
+    if (options.latest) return page(subject, options, rows.slice(9950, 10000), 10000, { older: 9951 })
+    if (options.beforeSequence !== undefined) { const before = options.beforeSequence!, start = Math.max(1, before - 50)
+      return page(subject, options, rows.slice(start - 1, before - 1), 10000, { older: start === 1 ? null : start }) }
+    return page(subject, options, [rows[10000]!], 10001)
+  })
+  let projection!: ReturnType<ReturnType<typeof createCollaborationProjector>>
+  function ProjectionProbe() {
+    reading = useCollaborationReading([reader], true)
+    const project = useMemo(createCollaborationProjector, [])
+    projection = useMemo(() => project(reading.facts), [project, reading.facts])
+    return <output>{reading.sources[0]?.events.length}</output>
+  }
+  await act(async () => root!.render(<ProjectionProbe />))
+  for (let index = 0; index < 199; index++) await act(async () => reading.act(reader, 'earlier'))
+  expect(reading.sources[0]!.events).toHaveLength(10000); expect(projection.relations).toHaveLength(1)
+  expect(projection.relations[0]!.evidence).toHaveLength(10000); expect(decoded).toBe(10000)
+  const agents = projection.agents, originalEvidence = projection.relations[0]!.evidence[0]!
+  await emit(change(10001))
+  expect(decoded).toBe(10001); expect(reading.sources[0]!.events).toHaveLength(10001)
+  expect(projection.agents).toBe(agents); expect(projection.relations[0]!.evidence[0]).toBe(originalEvidence)
+  expect(projection.relations[0]!.evidence).toHaveLength(10001)
+})
+
+it('reuses unrelated projections and folds newly observed sources without replacing unchanged evidence', () => {
+  let decodedA = 0, decodedB = 0
+  const aRow = event(1), bRow = event(2, 'unrelated', 'another', 'third')
+  const aRefs = aRow.messages, bRefs = bRow.messages
+  Object.defineProperty(aRow, 'messages', { get() { decodedA++; return aRefs } })
+  Object.defineProperty(bRow, 'messages', { get() { decodedB++; return bRefs } })
+  const a = source(reader, [aRow]), b = source(reference('other-owner'), [bRow]), project = createCollaborationProjector()
+  const first = project([a, b]), unrelated = first.relations.find(relation => relation.source === collaborationSubjectKey(reference('other-owner', 'another')))!
+  expect(first.relations).toHaveLength(2); expect(decodedA).toBe(1); expect(decodedB).toBe(1)
+  expect(project([a, b])).toBe(first)
+  const row = event(3, 'another-message'), next = { ...a, events: [...a.events, row], changes: { previous: undefined, events: [row], spawns: [] } }
+  const updated = project([next, b])
+  expect(updated.agents).toBe(first.agents); expect(updated.relations.find(relation => relation.id === unrelated.id)).toBe(unrelated)
+  expect(decodedA).toBe(1); expect(decodedB).toBe(1)
+  expect(updated.relations.find(relation => relation.source === collaborationSubjectKey(reader))!.evidence).toHaveLength(2)
+  const folded = project([next, b, source(peer, [aRow, row])])
+  expect(folded).toBe(updated); expect(decodedA).toBe(2); expect(decodedB).toBe(1)
+  expect(folded.relations.flatMap(relation => relation.evidence)).toHaveLength(3)
+})
+
+
+it('replaces only the exact source incarnation and transfers shared evidence to the surviving original observer', () => {
+  const project = createCollaborationProjector(), shared = event(1, 'same-mid')
+  const a = source(reader, [shared]), b = source(peer, [shared]), first = project([a, b])
+  expect(first.relations).toHaveLength(1); expect(first.relations[0]!.evidence).toHaveLength(1)
+  expect(first.relations[0]!.evidence[0]!.subject).toEqual(reader)
+  const surviving = project([b])
+  expect(surviving.relations).toHaveLength(1); expect(surviving.relations[0]!.evidence[0]!.subject).toEqual(peer)
+  const replaced = project([source(reader, [event(1, 'same-mid', 'reader', 'new-peer')], 'new-incarnation'), b])
+  expect(replaced.relations).toHaveLength(2); expect(replaced.agents.size).toBe(3)
+  expect(replaced.relations.flatMap(relation => relation.evidence).map(item => item.kind === 'creation' ? null : item.incarnation).sort()).toEqual(['new-incarnation', 'original-journal'])
+  expect(project([]).agents.size).toBe(0); expect(project([]).relations).toEqual([])
+})
+
+
+it('keeps a live pulse phase and original observer watermark while active viewport demand changes', async () => {
+  vi.useFakeTimers()
+  vi.mocked(api.sessions.messageEvents).mockImplementation(async (subject, options = {}) => {
+    const sequence = options.afterSequence === undefined ? 100 : options.afterSequence + 1
+    return page(subject, options, [event(sequence)], sequence)
+  })
+  await render(); await emit(change(101))
+  expect(reading.pulses).toHaveLength(1)
+  const pulse = reading.pulses[0]!, b = reference(reader.hostId, 'another-source')
+  await act(async () => { await vi.advanceTimersByTimeAsync(900) })
+  await render([b]); expect(reading.pulses).toEqual([pulse])
+  await render([reader, b]); await emit(change(101))
+  expect(reading.pulses).toEqual([pulse]); expect(reading.pulses[0]).toBe(pulse)
+  await act(async () => { await vi.advanceTimersByTimeAsync(901) })
+  expect(reading.pulses).toEqual([])
+  await emit(change(101)); expect(reading.pulses).toEqual([])
 })

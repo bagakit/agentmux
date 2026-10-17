@@ -5,10 +5,13 @@ import type { AgentMuxMessageEvent, AgentMuxRpcResult, DurableAgentMuxMessage } 
 import type { RuntimeEvent, SessionHistoryReference } from '../src/shared/contracts'
 import { fixtureEpoch } from '../../../test/fixture-values.mjs'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
+import { installCollaborationCanvasGeometry } from './helpers/collaboration-canvas-dom'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
+import * as focusContext from '../src/renderer/src/lib/focus-context'
 import { AgentCollaborationDialog, type CollaborationRequest } from '../src/renderer/src/components/AgentCollaborationDialog'
 import { useCollaborationReading } from '../src/renderer/src/lib/use-collaboration-reading'
+import * as collaborationReading from '../src/renderer/src/lib/use-collaboration-reading'
 
 const dom = composerDOM({ agentInformation: true }), workspace = composerConfig.workspaces[0]!
 const sessions = ['agent-a', 'agent-b', 'agent-c', 'agent-d'].map(id => composerSession(id))
@@ -52,6 +55,7 @@ function changed(sequence: number, sender = 'agent-a', recipient = 'agent-b'): R
     senderSessionId: sender, recipientSessionId: recipient, live: true }
 }
 beforeEach(() => {
+  installCollaborationCanvasGeometry()
   verificationReads = 0; listeners = new Set(); records = [event(7, 'message-a'), event(8, 'message-c', 'agent-c', 'agent-d')]
   useAppStore.setState({ config: composerConfig, sessions, tabs: {}, layouts: {}, scratchTopicSnapshots: {}, timelines: {},
     agentNames: { 'agent-a': 'Task A', 'agent-b': 'Task B', 'agent-c': 'Task C', 'agent-d': 'Task D' },
@@ -193,4 +197,67 @@ it('expires each real live pulse independently while later traffic continues on 
     await act(async () => { vi.advanceTimersByTime(1000) })
     expect(reading.pulses).toEqual([])
   } finally { vi.useRealTimers() }
+})
+
+
+it('consumes retained incremental facts in the real Dialog without redecoding status or rebuilding unchanged cards', async () => {
+  useAppStore.setState({ sessions: [...sessions, { ...sessions[0]!, id: 'alias-a' }] })
+  let decoded = 0
+  const row = event(7, 'message-a'), refs = row.messages
+  Object.defineProperty(row, 'messages', { get() { decoded++; return refs } })
+  let currentRows = [row]
+  vi.mocked(api.sessions.messageEvents).mockImplementation(async (reference, options = {}) => ({
+    hostId: reference.hostId, participantSessionId: reference.agentSessionId, afterSequence: options.afterSequence ?? 0,
+    latest: options.latest ?? false, beforeSequence: options.beforeSequence ?? null, throughSequence: currentRows.at(-1)!.sequence,
+    incarnation: 'original-journal', messageId: null, broadcastOperationId: null,
+    events: currentRows.filter(item => item.sequence > (options.afterSequence ?? 0)), nextAfterSequence: null, nextBeforeSequence: null
+  }))
+  const context = vi.spyOn(focusContext, 'agentContextForSession')
+  await render()
+  expect(decoded).toBe(1); expect(graph().querySelectorAll('.collaboration-agent')).not.toHaveLength(0)
+  const contextCalls = context.mock.calls.length
+  expect(contextCalls).toBeGreaterThan(0)
+  await selectRelation()
+  await emit({ type: 'agent-message-observation', state: 'unavailable', message: 'Original observer is unavailable' })
+  expect(decoded).toBe(1); expect(context).toHaveBeenCalledTimes(contextCalls)
+  const next = event(8, 'second-a'), nextRefs = next.messages
+  Object.defineProperty(next, 'messages', { get() { decoded++; return nextRefs } })
+  currentRows = [row, next]
+  await emit(changed(8))
+  expect(decoded).toBe(2); expect(context).toHaveBeenCalledTimes(contextCalls)
+  expect(graph().querySelector('.collaboration-evidence')?.textContent).toContain('second-a')
+  context.mockClear()
+  await act(async () => useAppStore.setState({ agentNames: { ...useAppStore.getState().agentNames, 'agent-b': 'Updated task B' } }))
+  expect(context).toHaveBeenCalled()
+  expect([...new Set(context.mock.calls.map(([session]) => session.id))]).toEqual(['agent-b'])
+  expect(graph().textContent).toContain('Updated task B')
+  context.mockClear()
+  currentRows = [row, next, event(9, 'new-endpoint', 'agent-a', 'agent-c')]
+  await emit(changed(9))
+  expect(context).toHaveBeenCalled()
+  expect([...new Set(context.mock.calls.map(([session]) => session.id))]).toEqual(['agent-c'])
+  expect(api.sessions.readMessage).not.toHaveBeenCalled()
+  expect(useAppStore.getState().agentComposerDrafts['agent-a']).toBe('Original A draft')
+})
+
+
+it('keeps the original Dialog body mounted while real reading demand leaves and returns to its source', async () => {
+  // Inject demand at the original hook argument boundary; the hook, store, projection, Card and Reader remain real.
+  const originalHook = collaborationReading.useCollaborationReading
+  let demand = [subject('agent-a')]
+  vi.spyOn(collaborationReading, 'useCollaborationReading').mockImplementation((_subjects, enabled) => originalHook(demand, enabled))
+  await render(); await selectRelation(); await clickText('Read original message')
+  const body = bodyNode()!, detail = graph().querySelector('[data-message-id="message-a"]')!
+  expect(body.textContent).toContain('Original body with a stable reading selection.')
+  const metadataA = () => vi.mocked(api.sessions.messageEvents).mock.calls.filter(([reference, options]) => reference.agentSessionId === 'agent-a' && !options?.messageId)
+  const before = metadataA().length
+  expect(before).toBe(1); expect(api.sessions.readMessage).toHaveBeenCalledTimes(1)
+  demand = [subject('agent-c')]; await render()
+  expect(metadataA()).toHaveLength(before); expect(bodyNode()).toBe(body)
+  expect(graph().querySelector('[data-message-id="message-a"]')).toBe(detail)
+  demand = [subject('agent-a')]; await render()
+  expect(metadataA().at(-1)![1]).toEqual({ afterSequence: 8, incarnation: 'original-journal', limit: 50 })
+  expect(metadataA().filter(([, options]) => options?.latest)).toHaveLength(1)
+  expect(bodyNode()).toBe(body); expect(api.sessions.readMessage).toHaveBeenCalledTimes(1)
+  expect(useAppStore.getState().agentComposerDrafts['agent-a']).toBe('Original A draft')
 })
