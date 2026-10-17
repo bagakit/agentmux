@@ -1,6 +1,8 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { installGitHistoryViewport } from './helpers/git-history-viewport'
+import { selectHistoryReference } from './helpers/git-history-reference'
 import { act } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
@@ -35,18 +37,20 @@ const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', la
   appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
 function details(oid = 'a'.repeat(40), parentOid = 'b'.repeat(40)): Extract<GitCommitDetailsResult, { kind: 'ready' }> {
   return { kind: 'ready', snapshot: { hostId: 'local', repoPath: _hygiene_fixturePath("repo"), commitOid: oid, parentOid },
-    commit: { oid, parents: ['b'.repeat(40), 'c'.repeat(40)], subject: 'Complete merge', message: 'Complete merge\n\nThe full message body remains readable.\nSecond paragraph.', author: 'Original Author', committer: 'Original Committer', authoredAt: 10, committedAt: 20, refs: [] },
+    commit: { oid, parents: ['b'.repeat(40), 'c'.repeat(40)], subject: 'Complete merge', message: 'Complete merge\n\nThe full message body remains readable.\nSecond paragraph.', author: 'Original Author', committer: 'Original Committer', authoredAt: _tailFixtureEpoch(0, 0, 10), committedAt: _tailFixtureEpoch(0, 0, 20), refs: [] },
     entries: [{ path: 'new.ts', origPath: 'old.ts', change: 'renamed' }, { path: 'removed.ts', origPath: null, change: 'deleted' }], warnings: [] }
 }
 const commitDetails = vi.fn<(id: string, input: any) => Promise<GitCommitDetailsResult>>()
 const commitDiff = vi.fn(async () => ({ path: 'new.ts', old: { present: true, binary: false, text: 'fixed old' }, new: { present: true, binary: false, text: 'fixed new' }, binary: false, change: 'modified' }))
-const initialHistory = async (): Promise<GitHistoryResult> => ({ kind: 'ready', snapshot: { hostId: 'local', repoPath: _hygiene_fixturePath("repo"), selectedRef: null, roots: ['a'.repeat(40)], refs: [], checkedAt: 1 }, commits: [details().commit], nextCursor: null, warnings: [] })
+const initialHistory = async (): Promise<GitHistoryResult> => ({ kind: 'ready', snapshot: { hostId: 'local', repoPath: _hygiene_fixturePath("repo"), selectedRef: null, roots: ['a'.repeat(40)], refs: [], checkedAt: _tailFixtureEpoch(0, 0, 1) }, commits: [details().commit], nextCursor: null, warnings: [] })
 const history = vi.fn(initialHistory)
 let root: ReturnType<typeof createRoot> | undefined, element: HTMLDivElement
 const initial = useAppStore.getState()
-async function mount() {
+async function mount(withSidebar = false) {
   element = document.createElement('div'); document.body.append(element); root = createRoot(element)
-  await act(async () => root!.render(<WorkspaceWorkbench workspaceId="repo" />))
+  await act(async () => root!.render(withSidebar
+    ? <GitHistoryProvider workspace={workspace}><aside data-sidebar><WorkspaceGitTool workspace={workspace} visible /></aside><WorkspaceWorkbench workspaceId="repo" /></GitHistoryProvider>
+    : <WorkspaceWorkbench workspaceId="repo" />))
   await vi.waitFor(() => expect(element.querySelector('[data-git-workbench-region]')).not.toBeNull())
   return element
 }
@@ -124,16 +128,18 @@ it('retains the fixed selection on an owner mismatch and retries the same target
   expect(commitDetails.mock.calls).toEqual([['repo', { oid: 'a'.repeat(40), parentOid: 'b'.repeat(40) }], ['repo', { oid: 'a'.repeat(40), parentOid: 'b'.repeat(40) }]])
 })
 
-it('keeps a foreign repository history out of the original Git region and retries its scope', async () => {
+it('keeps observed repository history separate from the original fixed review and refreshes only the tree', async () => {
   useAppStore.getState().openGitHistory('repo', details().snapshot)
-  history.mockResolvedValueOnce({ kind: 'ready', snapshot: { hostId: 'local', repoPath: _hygiene_fixturePath("different-root"), selectedRef: null, roots: ['e'.repeat(40)], refs: [], checkedAt: 1 },
-    commits: [{ ...details('e'.repeat(40)).commit, subject: 'Foreign repository must stay hidden' }], nextCursor: null, warnings: [] })
-  await mount()
-  await vi.waitFor(() => expect(element.querySelector('.git-workbench__history [role="alert"]')?.textContent).toContain('repository changed'))
-  expect(element.querySelector('.git-workbench__history')?.textContent).not.toContain('Foreign repository must stay hidden')
-  expect(element.querySelectorAll('.git-workbench__history [data-history-oid]')).toHaveLength(0)
-  await click('.git-workbench__history [role="alert"] button')
-  await vi.waitFor(() => expect(element.querySelectorAll('.git-workbench__history [data-history-oid]')).toHaveLength(1))
+  history.mockResolvedValueOnce({ kind: 'ready', snapshot: { hostId: 'local', repoPath: _hygiene_fixturePath("different-root"), selectedRef: null, roots: ['e'.repeat(40)], refs: [], checkedAt: _tailFixtureEpoch(0, 0, 1) },
+    commits: [{ ...details('e'.repeat(40)).commit, subject: 'New repository history' }], nextCursor: null, warnings: [] })
+  await mount(true)
+  await vi.waitFor(() => expect(element.querySelector('[data-sidebar]')?.textContent).toContain('New repository history'))
+  expect(element.querySelector('[aria-label="Git repository review"]')?.textContent).not.toContain('New repository history')
+  const original = Object.values(useAppStore.getState().tabs).flatMap(tab => Object.values(tab.regions)).find(region => region.kind === 'git' && region.history)
+  expect(original?.kind === 'git' && original.scope.repoPath).toBe(_hygiene_fixturePath("repo"))
+  await click('[data-sidebar] [aria-label="Refresh history"]')
+  await vi.waitFor(() => expect(element.querySelectorAll('[data-sidebar] [data-history-oid]')).toHaveLength(1))
+  expect(element.querySelector('[data-sidebar]')?.textContent).not.toContain('New repository history')
 })
 
 it.each([{ path: _hygiene_fixturePath("other") }, { hostId: 'another-host' }])('retains the original surface instead of reading a rebound workspace %j', async change => {
@@ -148,7 +154,7 @@ it.each([{ path: _hygiene_fixturePath("other") }, { hostId: 'another-host' }])('
   await vi.waitFor(() => expect(element.querySelector('.git-workbench__message')?.textContent).toBe(details().commit.message))
 })
 
-it('shares the actual sidebar reading window with explicit repository history and returns it without rereading', async () => {
+it('keeps the actual Space history window beside repository review without an expanded-tree handoff', async () => {
   element = document.createElement('div'); document.body.append(element); root = createRoot(element)
   const frame = <GitHistoryProvider workspace={workspace}><aside data-sidebar><WorkspaceGitTool workspace={workspace} visible /></aside><WorkspaceWorkbench workspaceId="repo" /></GitHistoryProvider>
   await act(async () => root!.render(frame))
@@ -157,14 +163,14 @@ it('shares the actual sidebar reading window with explicit repository history an
   expect(history).toHaveBeenCalledTimes(1)
   await click('[data-sidebar] [data-history-oid]')
   expect(element.querySelector('[aria-label="Git commit details"]')).not.toBeNull()
-  expect(element.querySelector('[aria-label="Git repository history"]')).toBeNull()
-  expect(history).toHaveBeenCalledTimes(1)
-  await click('[data-sidebar] [aria-label="Open repository history"]')
-  await vi.waitFor(() => expect(element.querySelector('[aria-label="Git repository history"]')).not.toBeNull())
+  expect(element.querySelector('[aria-label="Git repository review"]')).not.toBeNull()
   expect(element.querySelectorAll('.git-history-panel')).toHaveLength(1)
-  expect(element.querySelector('[data-sidebar] .git-history-expanded')).not.toBeNull()
+  expect(element.querySelector('[data-sidebar] .git-history-panel')).not.toBeNull()
+  expect(element.querySelector('[data-sidebar] [aria-label="Open repository history"]')).toBeNull()
+  expect(element.querySelector('.git-workbench__history')).toBeNull()
   expect(history).toHaveBeenCalledTimes(1)
-  await click('[data-sidebar] .git-history-expanded button:last-child')
+  await act(async () => useAppStore.getState().setWorkspaceGitView('changes'))
+  await act(async () => useAppStore.getState().setWorkspaceGitView('history'))
   await vi.waitFor(() => expect(element.querySelector('[data-sidebar] [data-history-oid]')).not.toBeNull())
   expect(element.querySelectorAll('.git-history-panel')).toHaveLength(1)
   expect(history).toHaveBeenCalledTimes(1)
@@ -178,20 +184,19 @@ it('keeps the selected sidebar range when a commit detail explicitly opens repos
   await act(async () => root!.render(<GitHistoryProvider workspace={workspace}><aside data-sidebar><WorkspaceGitTool workspace={workspace} visible /></aside><WorkspaceWorkbench workspaceId="repo" /></GitHistoryProvider>))
   await click('[role="tab"][data-surface-mode="history"]')
   await vi.waitFor(() => expect(element.querySelector('[data-sidebar] [data-history-oid]')).not.toBeNull())
-  const referenceSelect = element.querySelector<HTMLSelectElement>('[aria-label="History reference"]')!
-  await act(async () => { referenceSelect.value = reference; referenceSelect.dispatchEvent(new Event('change', { bubbles: true })) })
+  await selectHistoryReference(element, reference)
   await vi.waitFor(() => expect(history).toHaveBeenLastCalledWith('repo', { ref: reference }))
   const count = history.mock.calls.length
   await click('[aria-label="View repository history"]')
-  await vi.waitFor(() => expect(element.querySelector('[aria-label="Git repository history"]')).not.toBeNull())
-  expect(element.querySelector<HTMLSelectElement>('[aria-label="History reference"]')?.value).toBe(reference)
+  await vi.waitFor(() => expect(element.querySelector('[aria-label="Git repository review"]')).not.toBeNull())
+  expect(element.querySelector('[aria-label="History reference"]')?.getAttribute('data-value')).toBe(reference)
   expect(history).toHaveBeenCalledTimes(count)
 })
 function longPage(reference: string | null = null): Extract<GitHistoryResult, { kind: 'ready' }> {
   const commits = Array.from({ length: 100 }, (_, index) => ({ ...details((index + 1).toString(16).padStart(40, '0')).commit,
     parents: [(index + 2).toString(16).padStart(40, '0')], subject: `Commit ${index}` }))
   const snapshot = { hostId: 'local', repoPath: _hygiene_fixturePath("repo"), selectedRef: reference, roots: [commits[0]!.oid],
-    refs: [{ kind: 'local' as const, name: 'refs/heads/topic', oid: commits[0]!.oid }], checkedAt: 1 }
+    refs: [{ kind: 'local' as const, name: 'refs/heads/topic', oid: commits[0]!.oid }], checkedAt: _tailFixtureEpoch(0, 0, 1) }
   return { kind: 'ready', snapshot, commits, nextCursor: { snapshot, offset: 100 }, warnings: [] }
 }
 it('retains unloaded locate targets without automatically exhausting history', async () => {
@@ -200,7 +205,7 @@ it('retains unloaded locate targets without automatically exhausting history', a
   commitDetails.mockResolvedValue(commit)
   history.mockResolvedValue(page)
   useAppStore.getState().openGitHistory('repo', commit.snapshot, null, commit.snapshot)
-  await mount()
+  await mount(true)
   await vi.waitFor(() => expect(element.querySelector('.git-workbench__locating')?.textContent).toContain('has not been loaded'))
   await vi.waitFor(() => expect(element.querySelector('.git-workbench__message')?.textContent).toBe(commit.commit.message))
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 40)) })
@@ -211,30 +216,30 @@ it('retains unloaded locate targets without automatically exhausting history', a
   await vi.waitFor(() => expect(element.querySelector('.git-workbench__locating')).toBeNull())
   expect(history).toHaveBeenCalledTimes(2)
 })
-it('keeps a visible repository window when the active sidebar workspace changes and returns', async () => {
+it('keeps fixed repository review and the saved range when its Space tree leaves and returns', async () => {
   const other = { ...workspace, id: 'other', path: _hygiene_fixturePath("other"), name: 'Other repository' }, reference = 'refs/heads/topic'
   useAppStore.setState({ config: { ...config, workspaces: [workspace, other] } })
   history.mockImplementation(async (_id?: string, input?: any) => longPage(input?.ref ?? null))
   useAppStore.getState().openGitHistory('repo', details().snapshot)
   element = document.createElement('div'); document.body.append(element); root = createRoot(element)
-  const frame = (active: typeof workspace) => <GitHistoryProvider workspace={active}><WorkspaceWorkbench workspaceId="repo" /></GitHistoryProvider>
+  const frame = (active: typeof workspace) => <GitHistoryProvider workspace={active}><aside data-sidebar><WorkspaceGitTool workspace={workspace} visible={active.id === workspace.id} /></aside><WorkspaceWorkbench workspaceId="repo" /></GitHistoryProvider>
   await act(async () => root!.render(frame(workspace)))
   await vi.waitFor(() => expect(element.querySelector('[data-history-oid]')).not.toBeNull())
-  const select = element.querySelector<HTMLSelectElement>('[aria-label="History reference"]')!
-  await act(async () => { select.value = reference; select.dispatchEvent(new Event('change', { bubbles: true })) })
+  await selectHistoryReference(element, reference)
   await vi.waitFor(() => expect(history).toHaveBeenLastCalledWith('repo', { ref: reference }))
   const scroll = element.querySelector<HTMLElement>('.git-history-scroll')!
   await act(async () => { scroll.scrollTop = 1200; scroll.dispatchEvent(new Event('scroll')) })
   const count = history.mock.calls.length
-  for (const active of [other, workspace]) {
-    await act(async () => root!.render(frame(active)))
-    await vi.waitFor(() => expect(element.querySelector<HTMLSelectElement>('[aria-label="History reference"]')?.value).toBe(reference))
-    expect(element.querySelector<HTMLElement>('.git-history-scroll')?.scrollTop).toBe(1200)
-    expect(element.querySelectorAll('[data-history-oid]').length).toBeLessThan(40)
-    expect(history).toHaveBeenCalledTimes(count)
-    const surface = Object.values(useAppStore.getState().tabs).flatMap(tab => Object.values(tab.regions)).find(region => region.kind === 'git' && region.history)
-    expect(surface?.kind === 'git' && surface.history?.reference).toBe(reference)
-  }
+  const before = Object.values(useAppStore.getState().tabs).flatMap(tab => Object.values(tab.regions)).find(region => region.kind === 'git' && region.history)
+  await act(async () => root!.render(frame(other)))
+  expect(element.querySelector('.git-workbench__history')).toBeNull()
+  expect(history).toHaveBeenCalledTimes(count)
+  await act(async () => root!.render(frame(workspace)))
+  await vi.waitFor(() => expect(element.querySelector('[aria-label="History reference"]')?.getAttribute('data-value')).toBe(reference))
+  expect(element.querySelectorAll('[data-history-oid]').length).toBeLessThan(40)
+  const after = Object.values(useAppStore.getState().tabs).flatMap(tab => Object.values(tab.regions)).find(region => region.kind === 'git' && region.history)
+  expect(after?.regionId).toBe(before?.regionId)
+  expect(after?.kind === 'git' && after.history?.reference).toBe(reference)
 })
 
 it.each(['View repository history', 'Locate commit in history'])('keeps an in-flight range choice through %s', async action => {
@@ -245,11 +250,10 @@ it.each(['View repository history', 'Locate commit in history'])('keeps an in-fl
   await act(async () => root!.render(<GitHistoryProvider workspace={workspace}><aside data-sidebar><WorkspaceGitTool workspace={workspace} visible /></aside><WorkspaceWorkbench workspaceId="repo" /></GitHistoryProvider>))
   await click('[role="tab"][data-surface-mode="history"]')
   await vi.waitFor(() => expect(element.querySelector('[data-history-oid]')).not.toBeNull())
-  const select = element.querySelector<HTMLSelectElement>('[aria-label="History reference"]')!
-  await act(async () => { select.value = reference; select.dispatchEvent(new Event('change', { bubbles: true })) })
+  await selectHistoryReference(element, reference)
   await vi.waitFor(() => expect(history).toHaveBeenCalledTimes(2))
   await click(`[aria-label="${action}"]`)
   await act(async () => finish(page))
-  await vi.waitFor(() => expect(element.querySelector<HTMLSelectElement>('[aria-label="History reference"]')?.value).toBe(reference))
+  await vi.waitFor(() => expect(element.querySelector('[aria-label="History reference"]')?.getAttribute('data-value')).toBe(reference))
   expect(history).toHaveBeenCalledTimes(2)
 })
