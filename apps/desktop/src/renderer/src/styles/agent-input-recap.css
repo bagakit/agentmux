@@ -19,7 +19,7 @@
 .agent-input-recall__inspection { position: absolute; inset: 0; z-index: 2; min-height: 0; display: flex; background: var(--surface-2); }
 .agent-input-recall__original { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
 .agent-input-recall__original > header { display: flex; flex: none; align-items: center; gap: 8px; padding: 7px 16px 9px; border-bottom: 1px solid var(--line); }
-.agent-input-recall__original > header > button { flex: none; width: 26px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); background: transparent; color: var(--text-2); cursor: pointer; }
+.agent-input-recall__original > header > button { display: grid; place-items: center; flex: none; width: 26px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); background: transparent; color: var(--text-2); cursor: pointer; }
 .agent-input-recall__original > header > button:focus-visible { outline: 1px solid var(--green); outline-offset: 2px; }
 .agent-input-recall__original > header > div { display: flex; flex: 1; flex-direction: column; min-width: 0; gap: 2px; }
 .agent-input-recall__original > header strong { color: var(--text); font-size: 11px; font-weight: 600; overflow-wrap: anywhere; }
