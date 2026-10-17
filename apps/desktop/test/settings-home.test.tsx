@@ -51,8 +51,8 @@ it('priority entries reach the same original editor and never write configuratio
 it('search temporarily reveals matching groups without replacing the chosen expansion state', async () => {
   await dom.render(<SettingsPanel onClose={() => {}} />)
   expect(group('preferences').getAttribute('aria-expanded')).toBe('true')
-  expect(group('resources').getAttribute('aria-expanded')).toBe('true')
-  expect(group('message-tool').getAttribute('aria-expanded')).toBe('false')
+  expect(group('message-tool').getAttribute('aria-expanded')).toBe('true')
+  await act(async () => group('message-tool').click())
   await act(async () => group('preferences').click())
   expect(group('preferences').getAttribute('aria-expanded')).toBe('false')
   await query('font')
@@ -69,6 +69,7 @@ it('explicit navigation reveals a collapsed destination while keeping the existi
   const toggle = node<HTMLInputElement>('[data-settings-pane="general"] input[type="checkbox"]')
   await act(async () => toggle.click())
   const draft = toggle.checked
+  await act(async () => group('remote').click())
   expect(group('remote').getAttribute('aria-expanded')).toBe('false')
   await dom.render(<SettingsPanel onClose={onClose} initialSection="hosts" />)
   expect(group('remote').getAttribute('aria-expanded')).toBe('true')
@@ -84,6 +85,7 @@ it('visiting a search result and returning preserves both destination and origin
   const original = node('[data-settings-pane="general"]')
   await act(async () => group('preferences').click())
   expect(group('preferences').getAttribute('aria-expanded')).toBe('false')
+  await act(async () => group('message-tool').click())
   expect(group('message-tool').getAttribute('aria-expanded')).toBe('false')
   await query('prompt')
   await dom.click('[data-settings-search-section="prompts"]')
@@ -106,4 +108,18 @@ it('an external exact route during a search visit reveals the new destination gr
   expect(node('[data-settings-pane="hosts"]').hidden).toBe(false)
   expect(group('remote').getAttribute('aria-expanded')).toBe('true')
   expect(node('nav [data-settings-target="hosts"]').getAttribute('aria-current')).toBe('page')
+})
+
+it('every sidebar group starts expanded and specific entries have no generic wrapper', async () => {
+  await dom.render(<SettingsPanel onClose={() => {}} />)
+  const toggles = [...dom.container.querySelectorAll('[data-settings-group-toggle]')]
+  expect(toggles.length).toBeGreaterThan(0)
+  expect(toggles.every(toggle => toggle.getAttribute('aria-expanded') === 'true')).toBe(true)
+  const entries = [...dom.container.querySelectorAll<HTMLElement>('nav [data-settings-target]')]
+  expect(entries.map(entry => entry.dataset.settingsTarget)).toEqual(['overview', ...visibleSettingsSections('').map(item => item.id)])
+  expect(entries.every(entry => !entry.closest('[hidden]'))).toBe(true)
+  expect(dom.container.querySelector('[data-settings-group-toggle="agents"]')).toBeNull()
+  expect(node('nav [data-settings-target="hosts"]').textContent).toBe('Hosts')
+  expect(node('nav [data-settings-target="agents"]').closest('[data-standalone]')).not.toBeNull()
+  expect(dom.container.querySelector('nav')!.textContent).not.toMatch(/Resources|Environments/)
 })
