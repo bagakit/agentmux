@@ -7,6 +7,7 @@ const layout = 'places every original mixed member and isolated area without ove
 const ports = 'routes real curves around same-row cards, mixed obstacles and headings with distinct role and reciprocal ports'
 const generation = 'runs the real Worker receiver and suppresses every superseded generation receipt'
 export const collaborationLayoutMutations = [
+  { name: 'empty-area-footprint', file: 'collaboration-layout-engine.ts', before: 'height: members.length ? 54 : COLLABORATION_AREA_HEADER', after: 'height: members.length ? 54 : 112', assertion: 'keeps empty areas as heading-sized original places while retaining isolated closed members' },
   { name: 'isolated-members', file: 'collaboration-layout-engine.ts', before: 'for (const box of local.get(group.id)!)', after: 'for (const box of local.get(group.id)!.filter(box => input.connections.some(edge => edge.source === box.id || edge.target === box.id)))', assertion: layout },
   { name: 'mixed-node-dimensions', file: 'collaboration-layout-engine.ts', before: 'width: node.width, height: node.height }))', after: 'width: node.width, height: 94 }))', assertion: layout },
   { name: 'heading-space', file: 'collaboration-layout-engine.ts', before: 'box.y += padding + COLLABORATION_AREA_HEADER - extent.y', after: 'box.y += padding - extent.y', assertion: layout },

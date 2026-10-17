@@ -35,6 +35,18 @@ function intersects(a: CollaborationLayoutBox, b: CollaborationLayoutBox) {
   return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
 }
 describe('finite collaboration Worker engine', () => {
+  it('keeps empty areas as heading-sized original places while retaining isolated closed members', async () => {
+    const input: CollaborationLayoutInput = { areas: [
+      { id: 'empty', name: 'Empty original area', members: [], folded: false },
+      { id: 'closed', name: 'Closed members', members: ['point'], folded: false }
+    ], nodes: [{ id: 'point', areaId: 'closed', width: 14, height: 14 }], connections: [] }
+    const boxes = await arrangeCollaboration(input), empty = boxes.find(box => box.id === 'empty')!, closed = boxes.find(box => box.id === 'closed')!, point = boxes.find(box => box.id === 'point')!
+    expect(empty).toEqual(expect.objectContaining({ kind: 'area', folded: false, height: 40 }))
+    expect(contains(closed, point)).toBe(true); expect(intersects(empty, closed)).toBe(false)
+    const expanded = await arrangeCollaboration({ ...input, areas: input.areas.map(area => area.id === 'empty' ? { ...area, members: ['new'] } : area), nodes: [...input.nodes, { id: 'new', areaId: 'empty', width: 250, height: 94 }] })
+    expect(contains(expanded.find(box => box.id === 'empty')!, expanded.find(box => box.id === 'new')!)).toBe(true)
+  })
+
   it('places every original mixed member and isolated area without overlap, with room for real headings', async () => {
     const nodes = [...Array.from({ length: 96 }, (_, index) => ({ id: `node-${index}`, areaId: `area-${index % 4}`, width: index % 3 ? 160 : 250, height: index % 3 ? 44 : 94 })), { id: 'isolated-member', areaId: 'isolated-area', width: 14, height: 14 }]
     const input: CollaborationLayoutInput = { areas: [...Array.from({ length: 4 }, (_, index) => ({ id: `area-${index}`, name: 'Original area', members: nodes.filter(node => node.areaId === `area-${index}`).map(node => node.id), folded: false })), { id: 'isolated-area', name: 'Original isolated area', members: ['isolated-member'], folded: false }], nodes, connections: nodes.slice(1, 40).map((node, index) => edge(`edge-${index}`, nodes[index]!.id, node.id)) }
