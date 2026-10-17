@@ -50,7 +50,8 @@ export function activityObservationPresentation(observation: AgentObservation, o
     : 'Last confirmed activity unavailable'
   return {
     label: observation.reason === 'activity-stale' ? 'Activity signal expired' : 'Activity not confirmed',
-    detail: `${confirmed} · ${observationAvailable
+    detail: `${observation.reason === 'activity-stale' ? 'The last work signal is out of date; current work is unknown'
+        : 'No current work signal has been received'} · ${confirmed} · ${observationAvailable
       ? `Run ${observation.process} · Prompt readiness ${observation.readiness}`
       : `Last observed Run ${observation.process} · Current input availability unconfirmed`}`
   }
