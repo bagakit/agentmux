@@ -103,6 +103,8 @@ Codex 代表纵切现在也走同一个 Adapter。`AgentProvider` 仍在 Core �
 
 Hook 的 stable binding identity 与随机 bearer 只存在于权限为 `0600` 的 Stored Session；`createAgent`、`agentSessions`、Resolver、Status、事件和 View 投影都会删除这两个控制字段。`client.onEvent` 只接受同步观察 callback；异步 Consumer 必须先复制到自己的有界队列，类型会拒绝返回 Promise 的 callback。绕过类型的调用若返回 Promise，仅该 Consumer 会退订；可用 `onEvent(callback, { onError })` 接收诊断，未提供时写入 console，其他观察者收到 `agent-error`。修正 callback 后显式重新订阅，原 Agent 与 Runtime 能力保留。监听数量随实际订阅增长，释放函数与 `dispose` 回收订阅，不以固定对象数阻断。完整终端字节使用 Attachment/Replay。
 
+尚未读取 Mailbox 的原生 Client 可用 `onEvent(callback, { observeMessages: true })` 选择未来 A2A 日志观察。每个选中注册取得独立的当前 cut；局部 cut 失败只通知该读者，原来源恢复后重取该读者当前 cut，不补弹未知期间的旧信。未指定此选项保留 `listMessages` 后启用的原懒观察；显式 `false` 不接收 A2A 事件，也不持有消息观察。同路径共享原日志 watcher，最后选中读者释放时不会被无消息兴趣的普通事件订阅留住。Hosted Client 的原 `runtime.events` 租约包含这份观察，关闭租约释放自己的注册；不另建消息流。`agent-message-changed` 的 `recordKind` 区分原信创建、投递与引用通知更新，`messageSequence` 指原信位置，`sequence` 指这次变更位置；`live: false` 是初始化或观察恢复的补读。它们不带正文，不确认已读、Agent 采用或任务完成。用户提醒只消费实时的原信创建，重连不补弹历史。
+
 Provider/ACP semantic status 与 pending Permission/Question 也是 Core-owned Session 事实。Client
 通过 `interaction` 事件和 `session.pendingInteraction` 公开 typed request；Consumer 用
 `respondAgentInteraction({ agentSessionId, expectedRun, operationId, expectedRequest, response })` 回答并取得
