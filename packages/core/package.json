@@ -309,6 +309,14 @@
     "./note-merge-node": {
       "types": "./dist/note-merge-node.d.ts",
       "import": "./dist/note-merge-node.js"
+    },
+    "./schedule-calendar": {
+      "types": "./dist/schedule-calendar.d.ts",
+      "import": "./dist/schedule-calendar.js"
+    },
+    "./schedule-rpc": {
+      "types": "./dist/public-rpc-schedules.d.ts",
+      "import": "./dist/public-rpc-schedules.js"
     }
   },
   "bin": {
@@ -344,7 +352,8 @@
     "stream-json": "3.7.0",
     "wa-sqlite": "1.0.0",
     "yaml": "2.9.0",
-    "ws": "8.21.3"
+    "ws": "8.21.3",
+    "luxon": "3.7.2"
   },
   "scripts": {
     "build": "node scripts/build.mjs",
@@ -367,6 +376,7 @@
     "esbuild": "^0.25.0",
     "typescript": "^5.9.0",
     "vitest": "^3.2.0",
-    "@types/ws": "8.18.1"
+    "@types/ws": "8.18.1",
+    "@types/luxon": "3.7.6"
   }
 }

@@ -565,7 +565,13 @@ matching leaf help before changing the original catalog or content.`
     when: 'Inspect, create, pause, resume or cancel a scheduled task',
     guide: `The scheduler owns schedule identity, timing, lifecycle and original run references.
 Reading this module creates no schedule or periodic Loop. Begin with schedule list/inspect
-and retain the exact schedule ID, current revision and requested trigger. Create within the
+and retain the exact schedule ID, current revision and requested trigger.
+Use schedule list --data <FILE|-> with {"scope":{"hostId":"EXACT_HOST","workspacePath":"EXACT_WORKSPACE"}}
+to read saved calendar arrangements and one-shot countdowns across discussions at that exact Host and
+execution directory. scope and the complete target selector are mutually exclusive. A scope is a read
+filter; it does not change any arrangement target or grant control authority. Keep each original Session.
+The SDK schedule-calendar projection can show rule estimates in a finite visible window; those estimates
+are not saved inputs, delivery receipts or authority to send. Create within the
 user's authorization and original target. A finite own-task check may support already-authorized
 work; it does not authorize recurring greetings, external actions or a background reflection loop.
 

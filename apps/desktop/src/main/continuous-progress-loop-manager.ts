@@ -1,7 +1,7 @@
 import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { AgentMuxError, AGENTMUX_AGENT_MESSAGING_ENTRY, ContinuousProgressScheduler, isAgentSchedule, agentPromptCondition, decideContinuousProgress, decideFutureProgress, type ContinuousProgressLoop, type ContinuousProgressTarget, type ContinuousProgressObservation, type ContinuousProgressTaskSource, type AgentPromptCondition } from '@agentmux/core'
 import { parseScheduleRpcParams, type ScheduleMethod, type ScheduleParamsMap, type ScheduleResultMap, type AgentMuxRpcCallContext } from '@agentmux/core'
-import { nextCalendarOccurrence, latestCalendarOccurrence } from './agent-schedule-calendar.js'
+import { nextCalendarOccurrence, latestCalendarOccurrence } from '@agentmux/core/schedule-calendar'
 import { readContinuousProgressTaskSource, validateContinuousProgressTaskSource, decideGoalProgressSource, type GoalProgressReader, type GoalProgressRecord } from './continuous-progress-task-source.js'
 import type { ContinuousProgressLoopStore } from './continuous-progress-loop-store.js'
 import { AGENT_SCHEDULE_CHECK_IN_GUIDANCE } from '@agentmux/core/schedule'
@@ -244,8 +244,8 @@ export class ContinuousProgressLoopManager {
     await this.start()
     const scope = { executionScope: 'connected-host' as const }
     if (method === 'schedule.list') {
-      const { target } = params as ScheduleParamsMap['schedule.list']
-      return { ...scope, schedules: this.list().filter(loop => isAgentSchedule(loop) && (!target || ['hostId','agentSessionId','providerId','workspacePath'].every(key => loop[key as keyof ContinuousProgressTarget] === target[key as keyof ContinuousProgressTarget]))) } as ScheduleResultMap[M]
+      const { target, scope: directory } = params as ScheduleParamsMap['schedule.list']
+      return { ...scope, schedules: this.scheduler.list(target ?? directory).filter(isAgentSchedule) } as ScheduleResultMap[M]
     }
     if (method === 'schedule.inspect') {
       const p = params as ScheduleParamsMap['schedule.inspect']

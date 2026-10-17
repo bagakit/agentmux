@@ -530,6 +530,9 @@ importers:
       json-rpc-2.0:
         specifier: 1.8.1
         version: 1.8.1
+      luxon:
+        specifier: 3.7.2
+        version: 3.7.2
       node-diff3:
         specifier: 3.2.1
         version: 3.2.1(patch_hash=921b08abe21722b700dcb6036f7a33eebf583f414dbb286e8a02541ff17a0d48)
@@ -549,6 +552,9 @@ importers:
       '@ctxmux/sdk':
         specifier: file:vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz
         version: file:packages/core/vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz
+      '@types/luxon':
+        specifier: 3.7.6
+        version: 3.7.6
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
