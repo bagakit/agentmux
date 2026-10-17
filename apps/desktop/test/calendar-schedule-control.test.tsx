@@ -1,3 +1,4 @@
+import { fixtureEpoch as _batchFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixtureCivil as _hygiene_fixtureCivil, fixtureClock as _hygiene_fixtureClock, fixtureIso as _hygiene_fixtureIso, fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -8,6 +9,7 @@ import { ContinuousProgressControl } from '../src/renderer/src/components/Contin
 import { api } from '../src/renderer/src/lib/api'
 import { DEFAULT_AGENT_SCHEDULE_CHECK_IN } from '@agentmux/core/schedule'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
+import { useAppStore } from '../src/renderer/src/store'
 
 const dom = composerDOM()
 const target = { hostId: 'local', agentSessionId: 'native-agent', providerId: 'codex', workspacePath: _hygiene_fixturePath("repo") }
@@ -39,6 +41,53 @@ async function clickText(text: string) {
 }
 
 describe('original calendar control', () => {
+  it('folding preserves a draft while a confirmed creation gives the next form current defaults', async () => {
+    useAppStore.setState({ config: { ...useAppStore.getState().config!, automation: { calendarTimezone: 'Europe/Berlin', checkInDailyBudget: 2 } } })
+    await mount(); await openForm(); await edit('textarea', 'Keep this draft'); await edit('[aria-label="Arrangement time zone"]', 'America/New_York')
+    await act(async () => { const details = dom.container.querySelector<HTMLDetailsElement>('.calendar-schedules > details')!; details.open = false; details.dispatchEvent(new Event('toggle')) })
+    await act(async () => useAppStore.setState({ config: { ...useAppStore.getState().config!, automation: { calendarTimezone: 'Asia/Tokyo', checkInDailyBudget: 3 } } }))
+    await openForm()
+    expect(dom.container.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('Keep this draft')
+    expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Arrangement time zone"]')!.value).toBe('America/New_York')
+    vi.spyOn(api.schedule, 'create').mockImplementation(async params => receipt(saved({ calendar: params.calendar, prompt: params.prompt, creationOperationId: params.operationId })))
+    await clickText('Save arrangement'); expect(dom.container.querySelector('form')).toBeNull()
+    await openForm()
+    expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Arrangement time zone"]')!.value).toBe('Asia/Tokyo')
+    expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Enable quiet follow-up"]')!.checked).toBe(false)
+    await dom.click('[aria-label="Enable quiet follow-up"]'); expect(dom.container.textContent).toContain('3 attempts per local day')
+    expect(dom.container.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('')
+  })
+  it('freezes saved timezone and quiet defaults for a new original creation while preserving explicit message and pending operation', async () => {
+    useAppStore.setState({ config: { ...useAppStore.getState().config!, automation: { calendarTimezone: 'Europe/Berlin', progressPrompt: 'Must not replace a sourced message',
+      checkInQuietStart: new Date(_batchFixtureEpoch(0, 23 * 60 * 60 + 15 * 60)).toISOString().slice(11, 16), checkInQuietEnd: new Date(_batchFixtureEpoch(0, 7 * 60 * 60 + 45 * 60)).toISOString().slice(11, 16), checkInSilenceMs: 7200000, checkInMinIntervalMs: 10800000, checkInDailyBudget: 2 } } })
+    await dom.render(<CalendarScheduleControl target={target} initialMessage="Original sourced topic" initialMessageContext="Original frozen context" />)
+    await vi.waitFor(() => expect(dom.container.querySelector('form')).not.toBeNull())
+    expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Arrangement time zone"]')!.value).toBe('Europe/Berlin')
+    expect(dom.container.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('Original sourced topic')
+    expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Enable quiet follow-up"]')!.checked).toBe(false)
+    const create = vi.spyOn(api.schedule, 'create').mockRejectedValue(new Error('Original result is unknown'))
+    await dom.click('[aria-label="Enable quiet follow-up"]')
+    await act(async () => useAppStore.setState({ config: { ...useAppStore.getState().config!, automation: { calendarTimezone: 'Asia/Tokyo', checkInDailyBudget: 3 } } }))
+    await dom.render(<CalendarScheduleControl target={{ ...target }} initialMessage="Later seed" initialMessageContext="Later context" />)
+    await clickText('Save arrangement')
+    const original = create.mock.calls[0]![0]
+    expect(original).toMatchObject({ target, calendar: { timezone: 'Europe/Berlin' }, prompt: 'Original sourced topic\n\nOriginal frozen context',
+      checkIn: { silenceMs: 7200000, minIntervalMs: 10800000, dailyBudget: 2, quiet: { start: new Date(_batchFixtureEpoch(0, 23 * 60 * 60 + 15 * 60)).toISOString().slice(11, 16), end: new Date(_batchFixtureEpoch(0, 7 * 60 * 60 + 45 * 60)).toISOString().slice(11, 16) } } })
+    await clickText('Retry original operation')
+    expect(create.mock.calls[1]![0]).toEqual(original)
+    expect(dom.draft()).toBe('Keep my draft')
+  })
+  it('new exact targets initialize current defaults while same-target edited forms keep their own values', async () => {
+    useAppStore.setState({ config: { ...useAppStore.getState().config!, automation: { calendarTimezone: 'Europe/Berlin' } } })
+    await mount(); await openForm(); await edit('[aria-label="Arrangement time zone"]', 'America/New_York'); await edit('textarea', 'An edited original draft')
+    await act(async () => useAppStore.setState({ config: { ...useAppStore.getState().config!, automation: { calendarTimezone: 'Asia/Tokyo' } } }))
+    await dom.render(<CalendarScheduleControl target={{ ...target }} />)
+    expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Arrangement time zone"]')!.value).toBe('America/New_York')
+    expect(dom.container.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('An edited original draft')
+    await dom.render(<CalendarScheduleControl target={{ ...target, agentSessionId: 'another-exact-agent' }} />); await openForm()
+    expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Arrangement time zone"]')!.value).toBe('Asia/Tokyo')
+    expect(dom.container.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('')
+  })
   it('starts a one-time date on the local civil day across a UTC day boundary', async () => {
     vi.stubEnv('TZ', 'Asia/Shanghai'); vi.useFakeTimers(); vi.setSystemTime(new Date(_hygiene_fixtureIso(24165000000, "minute")))
     try {
@@ -136,7 +185,7 @@ describe('original calendar control', () => {
     expect(dom.draft()).toBe('Keep my draft')
   })
   it('quiet follow-up controls distinguish accepted, unconfirmed and skipped attempts using the saved policy', async () => {
-    const checkInState = { budgetDate: _hygiene_fixtureCivil(10, 7), budgetUsed: 1, unanswered: { humanId: 'real-human', humanCreatedAt: 1, claimAt: 2 } }
+    const checkInState = { budgetDate: _hygiene_fixtureCivil(10, 7), budgetUsed: 1, unanswered: { humanId: 'real-human', humanCreatedAt: _batchFixtureEpoch(0, 0, 1), claimAt: _batchFixtureEpoch(0, 0, 2) } }
     let changed!: (schedule: ContinuousProgressLoop) => void
     vi.mocked(api.schedule.onChanged).mockImplementation(listener => { changed = listener; return vi.fn() })
     await mount(saved({ checkIn: DEFAULT_AGENT_SCHEDULE_CHECK_IN, checkInState, lastOutcome: 'unknown', status: 'paused' }))

@@ -209,7 +209,7 @@ describe('Conversation Channels settings', () => {
       expect(useAppStore.getState().viewModes).toBe(viewModes)
       return target
     }
-    const input = await navigate('Open Input & Mailbox', 'message-tool')
+    const input = await navigate('Open User Input', 'message-tool')
     expect(input.querySelector('[data-message-tool-settings]')).not.toBeNull()
     const command = input.querySelector<HTMLInputElement>('[aria-label="Commands prefix"]')!
     const layout = input.querySelector<HTMLInputElement>('input[value="two-line"]')!
@@ -227,7 +227,7 @@ describe('Conversation Channels settings', () => {
     expect(protocols.querySelector('[aria-label="amux protocol reference"]')).not.toBeNull()
     expect(protocols.querySelector('[data-settings-save-bar]')).toBeNull()
     await dom.click('[data-settings-target="inapp-conversation"]')
-    expect(await navigate('Open Input & Mailbox', 'message-tool')).toBe(input)
+    expect(await navigate('Open User Input', 'message-tool')).toBe(input)
     expect(input.querySelector('[aria-label="Commands prefix"]')).toBe(command)
     expect(command.value).toBe('!'); expect(layout.checked).toBe(true); expect(input.scrollTop).toBe(137)
     expect(dom.container.querySelectorAll('[data-message-tool-settings]')).toHaveLength(1)
