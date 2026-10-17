@@ -106,9 +106,10 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote, a
         </div>
   </>
   return <section className="mote-details" data-mote-details={scope.topic.id}>
-    <header className="mote-details__profile">{identity}</header>
+    <header className="mote-details__profile">{identity}
     <SurfaceModeSwitch value={section} active={active} ariaLabel="Mote details"
       options={[{ value: 'profile', label: 'Profile' }, { value: 'ideas', label: 'Ideas' }, { value: 'calendar', label: 'Calendar' }]} onChange={setSection} />
+    </header>
     <div className="mote-details__mode" hidden={section === 'calendar'}>
     <MoteContent key={JSON.stringify([scope.workspace.id, scope.workspace.hostId, scope.workspace.path, scope.topic.id, scope.topic.directoryPath, scope.rootPath])}
       scope={scope} reference={reference} active={active && section !== 'calendar'} section={contentSection.current}
@@ -232,7 +233,7 @@ function MoteContent({ scope, reference, section, onShowIdeas, onShowCalendar, o
         onClose={() => setBehaviorOpen(false)} returnFocus={() => behaviorInvoker.current?.isConnected ? behaviorInvoker.current : null} /> : null}
     </div>
     <div className="mote-details__ideas" hidden={section !== 'ideas'} data-reading={reading}>
-      <header className="mote-ideas__heading"><div><h3>Ideas</h3><p>Thoughts worth keeping, and places to go next.</p></div>{onCreateNote ? <button type="button" className="small-button" onClick={onCreateNote}><ThemeActionCreateNoteIcon size={14} /> New note</button> : null}</header>
+      <header className="mote-ideas__heading"><h3>Saved ideas</h3>{onCreateNote ? <button type="button" className="small-button" onClick={onCreateNote}><ThemeActionCreateNoteIcon size={14} /> New note</button> : null}</header>
       <MoteIdeaControls scope={scope} reference={reference} material={note?.path === selected && !issue && !loading ? note : null} onOpenPath={onOpenPath} active={ideasActive} />
       <div className="mote-ideas__browser">
       <aside className="mote-ideas__library" aria-label="Saved notes">
