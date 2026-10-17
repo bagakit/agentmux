@@ -65,7 +65,7 @@ function eligible(
   if (policy.parkingEnabled === false || policy.measurementActive === true) return false
   if (
     candidate.visible ||
-    !candidate.navigationContextActive ||
+    (candidate.kind !== 'browser' && !candidate.navigationContextActive) ||
     candidate.hiddenSinceMs === null ||
     !candidate.ownerPresent ||
     !candidate.canRebuild ||
@@ -155,7 +155,7 @@ function nextForKind(
     if (
       candidate.kind !== kind ||
       candidate.visible ||
-      !candidate.navigationContextActive ||
+      (candidate.kind !== 'browser' && !candidate.navigationContextActive) ||
       candidate.hiddenSinceMs === null ||
       !candidate.ownerPresent ||
       !candidate.canRebuild ||

@@ -82,7 +82,7 @@ function candidateForSurface(
         // would be a visible identity change even though the native owner could technically be rebuilt.
         canRebuild: Boolean(surface.browserId && surface.url && surface.profileId && surface.viewport),
         // Navigation and a live Agent drive both require this exact Main owner to keep working.
-        protected: surface.loading || (surface.driving && !surface.nativeOwnerUnavailable)
+        protected: !surface.nativeOwnerReleased && (surface.loading || surface.driving || surface.retention?.status !== 'eligible')
       }
     }
     default:
