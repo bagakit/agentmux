@@ -1,5 +1,6 @@
 import type { AgentDisplayState } from '@agentmux/core'
 import type { SessionSnapshot } from '../../../shared/contracts'
+import { currentRunRecoveryOperation } from './continuity-presentation'
 
 /** A live Run and its terminal frontend have distinct, source-owned lifetimes. */
 export function sessionFrontendPresentation(session: SessionSnapshot | undefined): { kind: 'detached' | 'unknown'; phase?: 'failed'; title: string; detail: string; diagnostic?: string } | null {
@@ -35,14 +36,15 @@ export function sessionFrontendPresentation(session: SessionSnapshot | undefined
 }
 
 /** A later restore refusal cannot replace the exact Run's confirmed exit facts. */
-export function sessionExitPresentation(session: Pick<SessionSnapshot, 'kind' | 'processState' | 'status'>): { title: string; detail: string } | null {
+export function sessionExitPresentation(session: Pick<SessionSnapshot, 'kind' | 'processState' | 'status'> & Parameters<typeof currentRunRecoveryOperation>[0]): { title: string; detail: string } | null {
   if (session.processState !== 'exited') return null
   const reason = session.status.exitReason
   const detail = reason === 'user-stopped' ? 'You stopped this session.'
     : reason === 'crashed' ? 'The process exited on its own.'
       : 'The process is no longer running; the reason could not be determined.'
   return {
-    title: `${session.kind === 'agent' ? 'Agent' : 'Terminal'} process exited`,
+    title: session.kind === 'agent' && currentRunRecoveryOperation(session) ? 'Recovery process exited'
+      : `${session.kind === 'agent' ? 'Agent' : 'Terminal'} process exited`,
     detail: detail + (session.status.exitCode === undefined ? '' : ` Exit code ${session.status.exitCode}.`)
   }
 }

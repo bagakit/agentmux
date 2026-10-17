@@ -9,6 +9,8 @@ import type { SessionSnapshot } from '../../../shared/contracts'
 import type { AgentTimelineItem } from '../../../shared/contracts'
 import type { AgentDisplayState } from '@agentmux/core'
 import { clampStep, stepTitle } from '@agentmux/client-ui/activity-step-summary'
+import { sessionExitPresentation } from './session-recovery-banner'
+import { currentRunRecoveryOperation } from './continuity-presentation'
 
 /**
  * Agent「此刻正在推进工作」的状态。只有在这些状态下，一条**已完成**的 tool_call 才还算「最近」——
@@ -66,7 +68,9 @@ export function sessionRecentActivity(
 
   // A connection/failure fact must not be hidden behind an old streaming tool item.
   if (session.status.state === 'error' || session.status.state === 'disconnected') {
-    return session.status.detail?.trim() || (session.status.state === 'disconnected'
+    const exit = typeof session.status.exitCode === 'number' ? sessionExitPresentation(session) : null
+    return session.status.detail?.trim() || (exit ? `${exit.title} · Exit code ${session.status.exitCode}`
+      : currentRunRecoveryOperation(session)?.error?.trim() || session.status.failure?.message?.trim()) || (session.status.state === 'disconnected'
       ? 'Connection lost; session retained'
       : 'Failure reported; no details available')
   }

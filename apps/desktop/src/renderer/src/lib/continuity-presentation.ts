@@ -1,6 +1,17 @@
 import type { AgentMuxContinuityOperation } from '@agentmux/core'
 import type { SessionSnapshot } from '../../../shared/contracts'
 
+/** A display-only join; an older attempt cannot explain the current Run. */
+export function currentRunRecoveryOperation(session: {
+  id?: string
+  control?: { run: { runId: string } }
+  continuity?: AgentMuxContinuityOperation | undefined
+}): AgentMuxContinuityOperation | undefined {
+  const operation = session.continuity
+  return operation?.agentSessionId === session.id && operation?.newRun && operation.newRun.runId === session.control?.run.runId
+    ? operation : undefined
+}
+
 /** A current Core operation supplies copy only; it never changes recovery eligibility. */
 export function agentContinuityPresentation(session: Extract<SessionSnapshot, { kind: 'agent' }>): {
   kind: 'restoring' | 'unconfirmed' | 'pending'
