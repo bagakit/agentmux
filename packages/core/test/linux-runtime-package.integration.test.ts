@@ -84,8 +84,8 @@ describe('qualified Darwin and Linux Core package', () => {
     installationRoots.push(root)
     await cp(join(packageRoot, 'vendor'), join(root, 'vendor'), { recursive: true })
     await cp(join(packageRoot, 'bin'), join(root, 'bin'), { recursive: true })
-    await mkdir(join(root, 'dist'))
-    await cp(join(packageRoot, 'src/ctxmux-artifact-contract.json'), join(root, 'dist/ctxmux-artifact-contract.json'))
+    await mkdir(join(root, 'src'))
+    await cp(join(packageRoot, 'src/ctxmux-artifact-contract.json'), join(root, 'src/ctxmux-artifact-contract.json'))
     const binaries = Object.keys(contract.manifests).flatMap(platform =>
       ['ctxmux', 'ctxmuxd'].map(name => join(root, 'vendor/ctxmux', platform, 'bin', name)))
     expect(binaries).toHaveLength(4)

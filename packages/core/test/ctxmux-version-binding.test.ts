@@ -303,7 +303,7 @@ describe('CtxMux 运行时版本/commit 绑定到 SHA 校验过的原件（F2）
       ['packages/core/src/ctxmux-run-adapter.ts', './ctxmux-artifact-contract.json'],
       ['packages/core/src/runtime-paths.ts', './ctxmux-artifact-contract.json'],
       ['packages/core/scripts/build.mjs', '../src/ctxmux-artifact-contract.json'],
-      ['packages/core/bin/install-ctxmux.mjs', '../dist/ctxmux-artifact-contract.json']
+      ['packages/core/bin/install-ctxmux.mjs', '../src/ctxmux-artifact-contract.json']
     ] as const
     for (const [path, module] of consumers) {
       const source = parse(path, readFileSync(join(repoRoot, path), 'utf8'))

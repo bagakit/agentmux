@@ -26,9 +26,12 @@ async function coreFixture(root: string, dependencies?: Record<string, string>) 
   const bytes = JSON.stringify(manifest)
   await put(join(packageRoot, 'vendor', 'ctxmux', 'linux-x64', 'manifest.json'), bytes)
   await put(join(packageRoot, 'vendor', 'ctxmux', 'linux-x64', 'bin', 'ctxmuxd'), native)
-  await put(join(packageRoot, 'dist', 'ctxmux-artifact-contract.json'), JSON.stringify({
+  const contract = JSON.stringify({
     protocol: 1, manifests: { 'linux-x64': sha(bytes) }, sources: { 'linux-x64': manifest.source }
-  }))
+  })
+  await put(join(packageRoot, 'dist', 'ctxmux-artifact-contract.json'), contract)
+  await put(join(packageRoot, 'src', 'ctxmux-artifact-contract.json'), contract)
+  await put(join(packageRoot, 'src', 'private-development-sentinel.ts'), 'Source implementation must not ship\n')
   return packageRoot
 }
 
@@ -45,11 +48,16 @@ it.each([undefined, {}])('omits non-Core development node_modules when runtime d
     const artifact = await createPortableCoreArtifact(join(root, 'artifact'), packageRoot)
     const files = artifact.files.map(file => file.path)
     expect(files).toContain('node_modules/portable-leaf/runtime.js')
+    expect(files.filter(file => file.startsWith('src/'))).toEqual(['src/ctxmux-artifact-contract.json'])
+    expect(await readFile(join(root, 'artifact', 'core', 'src', 'ctxmux-artifact-contract.json'), 'utf8'))
+      .toBe(await readFile(join(packageRoot, 'src', 'ctxmux-artifact-contract.json'), 'utf8'))
     expect(files).not.toContain(developmentPath)
     expect(files.some(file => file.startsWith('node_modules/portable-leaf/node_modules/'))).toBe(false)
     expect(await readFile(join(root, 'artifact', 'core', 'node_modules', 'portable-leaf', 'runtime.js'), 'utf8')).toBe('export const runtime = "retained"\n')
     const packed = (await exec('tar', ['-tzf', artifact.archivePath])).stdout
     expect(packed).toContain('./node_modules/portable-leaf/runtime.js')
+    expect(packed).toContain('./src/ctxmux-artifact-contract.json')
+    expect(packed).not.toContain('private-development-sentinel')
     expect(packed).not.toContain('dev-only-sentinel')
   } finally { await rm(root, { recursive: true, force: true }) }
 })
