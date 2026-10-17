@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
 import { parseAgentScheduleCalendar, parseAgentScheduleAfterMs } from '@agentmux/core/schedule'
 import type { ContinuousProgressLoop, ContinuousProgressTarget } from '@agentmux/core/continuous-progress-scheduler'
@@ -11,12 +11,16 @@ import { resolveAutomationPreferences, automationCalendarTimezone, automationChe
 import { ScheduleOperationNotice } from './ScheduleOperationNotice'
 
 const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+const inputFields = ['timing', 'kind', 'timezone', 'time', 'date', 'weekday', 'day', 'month', 'fold', 'delay', 'delayUnit', 'prompt', 'checkIn', 'context'] as const
+const targetFields = ['hostId', 'agentSessionId', 'providerId', 'workspacePath'] as const
 export function ScheduleCreateForm({ draftKey, target, onReceipt, initialMessage, initialMessageContext, onMessageChange, initialDate, records = [],
-  defaultKind = 'daily' }: {
+  defaultKind = 'daily', openRequest, onShowSaved }: {
   draftKey: string; target?: ContinuousProgressTarget | undefined; onReceipt(record: ContinuousProgressLoop): void
   initialMessage?: string | undefined; initialMessageContext?: string | undefined; onMessageChange?: ((value: string) => void) | undefined
   initialDate?: string; defaultKind?: ScheduleFormDraft['kind']
   records?: readonly ContinuousProgressLoop[]
+  openRequest?: { sequence: number; date: string; time?: string } | undefined
+  onShowSaved?: ((record: ContinuousProgressLoop) => void) | undefined
 }) {
   const [defaults] = useState(() => resolveAutomationPreferences(useAppStore.getState().config?.automation))
   const timezone = automationCalendarTimezone(defaults)
@@ -26,19 +30,43 @@ export function ScheduleCreateForm({ draftKey, target, onReceipt, initialMessage
     ...(target ? { target } : {}), ...(initialMessageContext ? { context: initialMessageContext } : {}) }))
   const saved = useLauncherState(state => state.drafts[draftKey]?.schedule?.form)
   const form = saved ?? fallback
+  const untouched = useRef(fallback)
+  const isUntouched = (value: ScheduleFormDraft) => inputFields.every(key => value[key] === untouched.current[key]) && targetFields.every(key => value.target?.[key] === untouched.current.target?.[key])
   const [notice, setNotice] = useState<string>()
+  const [savedArrangement, setSavedArrangement] = useState<{ key: string; record: ContinuousProgressLoop }>()
   const update = (patch: Partial<ScheduleFormDraft>) => {
     const held = useLauncherState.getState().drafts[draftKey]?.schedule?.form ?? fallback
     useLauncherState.getState().setScheduleDraft(draftKey, { form: { ...held, ...patch } })
     if (patch.prompt !== undefined) onMessageChange?.(patch.prompt)
   }
-  const confirmed = (_record: ContinuousProgressLoop, request: ScheduleRequest) => {
+  const confirmed = (record: ContinuousProgressLoop, request: ScheduleRequest) => {
     const held = useLauncherState.getState().drafts[draftKey]?.schedule?.form
-    if (request.action === 'create' && held && (held.context ? held.prompt + '\n\n' + held.context : held.prompt) === request.params.prompt)
-      useLauncherState.getState().setScheduleDraft(draftKey, { form: { ...held, prompt: '', open: false } })
+    if (request.action === 'create' && held && (held.context ? held.prompt + '\n\n' + held.context : held.prompt) === request.params.prompt) {
+      const next = { ...held, prompt: '', open: false }
+      untouched.current = next
+      useLauncherState.getState().setScheduleDraft(draftKey, { form: next })
+    }
+    if (request.action === 'create') setSavedArrangement({ key: draftKey, record })
   }
   const operation = useScheduleOperation(draftKey, onReceipt, confirmed)
   const locked = operation.busy || !!operation.pending
+  const element = useRef<HTMLDetailsElement>(null), handled = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    if (!openRequest || handled.current === openRequest.sequence) return
+    handled.current = openRequest.sequence
+    const draft = useLauncherState.getState().drafts[draftKey]?.schedule
+    const held = draft?.form ?? fallback
+    // Date shortcuts can change automatic defaults, never edited timing or an
+    // unresolved request. Persisted input remains owned by the original draft.
+    const pristine = !draft?.pending && !operation.busy && isUntouched(held)
+    const next: ScheduleFormDraft = { ...held, open: true,
+      ...(pristine ? { timing: 'calendar', kind: 'once', date: openRequest.date, ...(openRequest.time ? { time: openRequest.time } : {}), target } : {}) }
+    if (pristine) untouched.current = next
+    useLauncherState.getState().setScheduleDraft(draftKey, { form: next })
+    setNotice(pristine ? undefined : 'Your existing arrangement draft is kept. Review its date and time before saving.')
+    const frame = requestAnimationFrame(() => { element.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus({ preventScroll: true }); element.current?.scrollIntoView?.({ block: 'nearest' }) })
+    return () => cancelAnimationFrame(frame)
+  }, [openRequest, draftKey])
   function create() {
     if (locked || !form.prompt.trim()) return
     const exact = form.target ?? target
@@ -57,19 +85,23 @@ export function ScheduleCreateForm({ draftKey, target, onReceipt, initialMessage
           policies: { gap: 'skip', fold: form.fold, monthEnd: 'clamp', overdue: 'latest' } }),
           ...(form.checkIn ? { checkIn: form.checkInPolicy } : {}) }
       setNotice(undefined)
+      setSavedArrangement(undefined)
       update({ target: exact })
       void operation.perform({ action: 'create', params: { target: exact, ...timing,
         prompt: form.context ? form.prompt + '\n\n' + form.context : form.prompt, operationId: 'schedule-' + crypto.randomUUID() } })
     } catch (error) { setNotice(error instanceof Error ? error.message : String(error)) }
   }
-  return <details className="continuous-progress-control__details schedule-create" open={form.open} onToggle={event => {
+  return <><details ref={element} className="continuous-progress-control__details schedule-create" open={form.open} onToggle={event => {
     event.stopPropagation()
     if (event.currentTarget.open !== form.open) {
       const fresh = resolveAutomationPreferences(useAppStore.getState().config?.automation)
-      update({ open: event.currentTarget.open,
-        ...(event.currentTarget.open && !form.prompt.trim() && !operation.pending ? { target,
+      const pristine = !form.prompt.trim() && !operation.pending && isUntouched(form)
+      const patch = { open: event.currentTarget.open,
+        ...(event.currentTarget.open && pristine ? { target,
           timezone: automationCalendarTimezone(fresh), checkIn: false, checkInPolicy: automationCheckInPolicy(fresh),
-          ...(initialDate ? { date: initialDate } : {}) } : {}) })
+          ...(initialDate ? { date: initialDate } : {}) } : {}) }
+      if (pristine) untouched.current = { ...form, ...patch }
+      update(patch)
     }
   }}>
     <summary>New arrangement</summary>
@@ -110,5 +142,5 @@ export function ScheduleCreateForm({ draftKey, target, onReceipt, initialMessage
       <button type="submit" className="small-button" disabled={locked || !form.prompt.trim()}>Save arrangement</button>
     </form>
     <ScheduleOperationNotice operation={operation} />
-  </details>
+  </details>{savedArrangement?.key === draftKey ? <div className="schedule-create__confirmation" role="status"><span>Arrangement saved.</span>{onShowSaved ? <button type="button" onClick={() => onShowSaved(savedArrangement.record)}>View arrangement</button> : null}</div> : null}</>
 }
