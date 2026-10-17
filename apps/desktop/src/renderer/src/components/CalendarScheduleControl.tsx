@@ -20,16 +20,19 @@ export function CalendarScheduleControl({ target, onStatusChange, initialMessage
   const source = useScheduleRecords([{ target }], presented || !!onStatusChange)
   const now = useScheduleClock(presented)
   const draftKey = useMemo(() => 'schedule-create:' + (initialMessageContext ? 'source:' : '') + JSON.stringify(target), [target, !!initialMessageContext])
-  const timezone = automationCalendarTimezone(resolveAutomationPreferences(useAppStore.getState().config?.automation))
   const status: CalendarScheduleStatus = source.error || !source.observed || source.records.some(record => record.lastOutcome === 'unknown')
     ? 'unconfirmed' : source.records.some(record => record.status === 'active') ? 'active' : source.records.some(record => record.status === 'paused') ? 'paused' : 'inactive'
   useEffect(() => { onStatusChange?.(status) }, [status, onStatusChange])
+  function renderArrangements() {
+    const timezone = automationCalendarTimezone(resolveAutomationPreferences(useAppStore.getState().config?.automation))
+    return <ol className="calendar-schedules__list">{source.records.map(record =>
+      <ScheduleArrangementRow key={record.loopId} schedule={record} timezone={timezone} now={now} onReceipt={source.accept} />)}</ol>
+  }
   return <section className="calendar-schedules" aria-label="Calendar arrangements" data-schedule-state={status} hidden={!presented}>
     {presented ? <>
       <header className="calendar-schedules__heading"><h3>Arrangements</h3><span>{source.observed ? source.records.length + ' saved' : 'Unconfirmed'}</span></header>
       {source.error ? <div className="calendar-schedules__notice" role="status"><p>{source.error} Last confirmed arrangements and manual input remain available.</p><button type="button" className="small-button" onClick={source.refresh}>Retry arrangements</button></div> : null}
-      {source.records.length ? <ol className="calendar-schedules__list">{source.records.map(record =>
-        <ScheduleArrangementRow key={record.loopId} schedule={record} timezone={timezone} now={now} onReceipt={source.accept} />)}</ol>
+      {source.records.length ? renderArrangements()
         : source.observed ? <p className="continuous-progress-control__help">No saved arrangements for this Agent.</p> : !source.error ? <p className="continuous-progress-control__help">Reading arrangements…</p> : null}
     </> : null}
     <ScheduleCreateForm key={draftKey} draftKey={draftKey} target={target} onReceipt={source.accept} records={source.records}

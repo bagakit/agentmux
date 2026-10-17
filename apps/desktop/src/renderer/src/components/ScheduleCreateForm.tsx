@@ -22,12 +22,14 @@ export function ScheduleCreateForm({ draftKey, target, onReceipt, initialMessage
   openRequest?: { sequence: number; date: string; time?: string } | undefined
   onShowSaved?: ((record: ContinuousProgressLoop) => void) | undefined
 }) {
-  const [defaults] = useState(() => resolveAutomationPreferences(useAppStore.getState().config?.automation))
-  const timezone = automationCalendarTimezone(defaults)
-  const [fallback] = useState<ScheduleFormDraft>(() => ({ open: !!initialMessage, timing: 'calendar', kind: defaultKind,
-    timezone, time: [9, 0].map(value => String(value).padStart(2, '0')).join(':'), date: initialDate ?? DateTime.now().setZone(timezone).toISODate()!, weekday: '1', day: '1', month: '1',
-    fold: 'earlier', delay: '5', delayUnit: 'minutes', prompt: initialMessage ?? '', checkIn: false, checkInPolicy: automationCheckInPolicy(defaults),
-    ...(target ? { target } : {}), ...(initialMessageContext ? { context: initialMessageContext } : {}) }))
+  const [fallback] = useState<ScheduleFormDraft>(() => {
+    const defaults = resolveAutomationPreferences(useAppStore.getState().config?.automation)
+    const timezone = automationCalendarTimezone(defaults)
+    return { open: !!initialMessage, timing: 'calendar', kind: defaultKind,
+      timezone, time: [9, 0].map(value => String(value).padStart(2, '0')).join(':'), date: initialDate ?? DateTime.now().setZone(timezone).toISODate()!, weekday: '1', day: '1', month: '1',
+      fold: 'earlier', delay: '5', delayUnit: 'minutes', prompt: initialMessage ?? '', checkIn: false, checkInPolicy: automationCheckInPolicy(defaults),
+      ...(target ? { target } : {}), ...(initialMessageContext ? { context: initialMessageContext } : {}) }
+  })
   const saved = useLauncherState(state => state.drafts[draftKey]?.schedule?.form)
   const form = saved ?? fallback
   const untouched = useRef<ScheduleFormDraft | undefined>(saved ? undefined : fallback)
