@@ -239,8 +239,8 @@
 
 /* Ordinary prose stays continuous; its nearby operation appears on pointer or keyboard intent. */
 .note-editor__body { position: relative; }
-.note-block-action { position: absolute; z-index: 2; inset-inline-start: -27px; width: 25px; height: 28px; display: grid; place-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); opacity: 0; cursor: pointer; }
-.note-editor__body:hover > .note-block-action, .note-editor__body:focus-within > .note-block-action { opacity: 1; }
+.note-block-action { position: absolute; z-index: 2; inset-inline-start: -27px; width: 25px; height: 28px; display: grid; place-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); opacity: 0; pointer-events: none; cursor: pointer; }
+.note-editor__body:hover > .note-block-action, .note-editor__body:focus-within > .note-block-action { opacity: 1; pointer-events: auto; }
 .note-block-action:hover { color: var(--text); background: var(--wash-1); }
 .note-block-action:focus-visible { opacity: 1; outline: 2px solid var(--green); outline-offset: 1px; }
 /* Shared prose keeps its boundary while normal chrome appears without moving text. */
@@ -250,20 +250,37 @@
 .note-shared-block::after { bottom: 0; }
 .note-shared-block:focus-within { border-color: var(--green); }
 .note-shared-content { position: relative; }
-.note-shared-block__marker { position: absolute; inset-inline-start: -25px; top: 0; width: 20px; height: 20px; display: grid; place-items: center; border: 0; border-radius: 4px; padding: 0; color: var(--text-3); background: var(--bg); cursor: help; }
+.note-shared-block__marker { position: absolute; z-index: 3; inset-inline-start: -23px; top: -6px; width: 16px; height: 16px; display: grid; place-items: center; border: 0; border-radius: 4px; padding: 0; color: var(--text-3); background: var(--bg); cursor: help; }
 .note-shared-content[data-shared-role="source"] > .note-shared-block__marker { color: var(--text-2); }
 .note-shared-block__marker:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
-.note-shared-block__header { position: absolute; z-index: 2; inset-inline: 0; bottom: 100%; display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); min-height: 20px; color: var(--text-3); background: var(--bg); font: var(--fs-micro)/1.5 var(--font-sans); opacity: 0; visibility: hidden; pointer-events: none; }
+.note-shared-block__header { position: absolute; z-index: 2; inset-inline: 0; bottom: 100%; display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); min-height: 20px; color: var(--text-3); background: transparent; font: var(--fs-micro)/1.5 var(--font-sans); opacity: 0; visibility: hidden; pointer-events: none; }
 .note-shared-block__header > :nth-child(2) { margin-inline-start: auto; }
 .note-shared-block__header .note-text-button { min-height: 20px; padding-inline: var(--sp-2); font: inherit; }
 .note-shared-block__header .note-text-button:disabled { opacity: .4; cursor: default; }
-.note-shared-block:hover > .note-shared-content > .note-shared-block__header, .note-shared-block:focus-within > .note-shared-content > .note-shared-block__header, .note-shared-block__header[data-attention] { opacity: 1; visibility: visible; pointer-events: auto; }
+.note-shared-content:hover > .note-shared-block__header, .note-shared-content:has(> .note-shared-block__marker:focus-visible) > .note-shared-block__header, .note-shared-block__header[data-attention] { opacity: 1; visibility: visible; pointer-events: auto; }
+.note-shared-block__header[data-attention] > .note-shared-block__label { opacity: 0; visibility: hidden; }
+.note-shared-content:hover > .note-shared-block__header > .note-shared-block__label, .note-shared-content:has(> .note-shared-block__marker:focus-visible) > .note-shared-block__header > .note-shared-block__label { opacity: 1; visibility: visible; }
+.note-shared-content:has(.note-shared-content:hover) > .note-shared-block__header:not([data-attention]) { opacity: 0; visibility: hidden; pointer-events: none; }
+.note-shared-content:has(.note-shared-content:hover) > .note-shared-block__header > .note-shared-block__label { opacity: 0; visibility: hidden; }
+.note-shared-block .note-shared-block { margin-block: var(--sp-2); padding-inline-start: var(--sp-3); }
+.note-shared-notice { margin: 0; color: var(--text-3); font: var(--fs-caption)/1.5 var(--font-sans); }
+.note-shared-notice .note-text-button { min-height: 20px; padding-inline: var(--sp-1); font: inherit; }
 .note-shared-block .note-editor { padding: 0; max-width: none; }
 .note-shared-block .note-editor__tools { display: none; }
 .note-shared-block .note-block-content { min-height: 0; padding-bottom: 0; }
 .note-shared-block .note-block-content > :first-child { margin-top: 0; }
 .note-shared-block .note-block-content > :last-child { margin-bottom: 0; }
-.note-shared-block__end { position: absolute; top: calc(100% + 2px); color: var(--text-3); background: var(--bg); font: var(--fs-micro)/1.5 var(--font-sans); opacity: 0; visibility: hidden; pointer-events: none; }
-.note-shared-block:hover > .note-shared-content > .note-shared-block__end, .note-shared-block:focus-within > .note-shared-content > .note-shared-block__end { opacity: 1; visibility: visible; }
-@media (pointer: coarse) { .note-editor__body > .note-block-action { opacity: 1; } }
+.note-shared-block__end { position: absolute; top: calc(100% + 2px); color: var(--text-3); background: transparent; font: var(--fs-micro)/1.5 var(--font-sans); opacity: 0; visibility: hidden; pointer-events: none; }
+.note-shared-content:hover > .note-shared-block__end, .note-shared-content:has(> .note-shared-block__marker:focus-visible) > .note-shared-block__end { opacity: 1; visibility: visible; }
+.note-shared-content:has(.note-shared-content:hover) > .note-shared-block__end { opacity: 0; visibility: hidden; }
+@media (pointer: coarse) { .note-editor__body > .note-block-action { opacity: 1; pointer-events: auto; } }
 .note-editor__body:has(.note-shared-block:hover) > .note-block-action, .note-editor__body:has(.note-shared-block:focus-within) > .note-block-action { opacity: 0; pointer-events: none; }
+
+.note-block-action[data-copy-feedback] { opacity: 1; }
+.note-block-action[data-copy-feedback="copied"] { color: var(--green); }
+.note-block-copy-feedback { position: absolute; z-index: 3; inset-inline-start: var(--sp-4); padding: 2px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--text-2); font: var(--fs-micro)/1.5 var(--font-sans); pointer-events: none; transform: translateY(-100%); }
+.note-block-copy-feedback[data-failed] { color: var(--red); }
+.note-block-content .note-pending-shared-source { position: relative; border-inline-start: 1px dashed var(--line); padding-inline-start: var(--sp-3); margin-block: 0; padding-block: var(--sp-1); }
+.note-pending-shared-source[data-note-shared-edge="first"], .note-pending-shared-source[data-note-shared-edge="single"] { margin-top: var(--sp-2); }
+.note-pending-shared-source[data-note-shared-edge="last"], .note-pending-shared-source[data-note-shared-edge="single"] { margin-bottom: var(--sp-2); }
+.note-pending-shared-source[data-note-shared-edge="first"]::before, .note-pending-shared-source[data-note-shared-edge="single"]::before { content: '⊡'; position: absolute; inset-inline-start: -9px; top: 0; color: var(--text-3); background: var(--bg); font: var(--fs-caption)/1.4 var(--font-sans); }

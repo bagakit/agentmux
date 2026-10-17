@@ -1,4 +1,4 @@
-import { retainNoteDraftEditor, retainNoteDraftNavigation, observeNoteDraftNavigation } from '../lib/note-share-staging'
+import { retainNoteDraftEditor, retainNoteDraftNavigation, observeNoteDraftNavigation, notePendingSourceDecorations, observeNotePendingSource } from '../lib/note-share-staging'
 import { NoteSharedContext } from '../lib/note-shared-context'
 import { RovingToolbar, RovingToolbarButton } from './RovingToolbar'
 import { createContext, lazy, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react'
@@ -23,6 +23,7 @@ import { MONACO_THEME_ID } from '../lib/monaco-theme'
 
 const ReadonlyDiffEditor = lazy(() => import('./ReadonlyDiffEditor').then(module => ({ default: module.ReadonlyDiffEditor })))
 
+const ThemeStatusCopiedIcon = semanticIconComponent('status.copied')
 const ThemeObjectLinkIcon = semanticIconComponent('object.link')
 const ThemeObjectHeadingIcon = semanticIconComponent('object.heading')
 const ThemeObjectListIcon = semanticIconComponent('object.list')
@@ -125,6 +126,8 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
   const ownerDocument = useWorkbenchDocument()
   const shared = useContext(NoteSharedContext), sharedRef = useRef(shared); sharedRef.current = shared
   const [beside, setBeside] = useState<{ position: number; top: number } | null>(null)
+  const [copyFeedback, setCopyFeedback] = useState<{ position: number; message: string; accepted: boolean } | null>(null)
+  useEffect(() => { if (!copyFeedback) return; const timeout = setTimeout(() => setCopyFeedback(null), 2500); return () => clearTimeout(timeout) }, [copyFeedback])
   const sourceName = useNoteSourceTitle()
   const props = useRef({ note, onChange, onSave, onIssue, onSelectedBlock, onCompositionChange, onSnapshotIssue, onKeepDisplayedDraft })
   props.current = { note, onChange, onSave, onIssue, onSelectedBlock, onCompositionChange, onSnapshotIssue, onKeepDisplayedDraft }
@@ -158,7 +161,9 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
     }
   }
   const editorRef = useRef<Editor | null>(null)
-  const editor = useEditor({ extensions, content: note.content, editorProps: {
+  const pendingSourceKey = useRef({ fileKey: shared?.fileKey, noteId: note.noteId }); pendingSourceKey.current = { fileKey: shared?.fileKey, noteId: note.noteId }
+  const pendingSource = useMemo(() => Extension.create({ name: 'notePendingSource', addDecorations() { return { shouldUpdate: ({ tr }) => tr.docChanged || Boolean(tr.getMeta('notePendingSource')), create: ({ state }) => { const source = pendingSourceKey.current; return source.fileKey ? notePendingSourceDecorations(source.fileKey, source.noteId, state.doc) : [] } } } }), [])
+  const editor = useEditor({ extensions: [...extensions, pendingSource], content: note.content, editorProps: {
     attributes: { class: 'note-block-content', role: 'textbox', 'aria-label': 'Note blocks', 'aria-multiline': 'true' },
     handlePaste(_view, event) { return editorRef.current ? sharedRef.current?.paste(editorRef.current, event) ?? false : false },
     handleDOMEvents: { compositionstart(view) { if (!composing.current) { compositionBefore.current = view.state.doc.toJSON(); composing.current = true; snapshot.current?.pause(); props.current.onCompositionChange?.(true) }; return false } },
@@ -189,6 +194,7 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
   } }, [note.noteId])
   editorRef.current = editor
   useEffect(() => editor && shared?.fileKey ? retainNoteDraftEditor(shared.fileKey, editor) : undefined, [editor, shared?.fileKey])
+  useEffect(() => editor && shared?.fileKey ? observeNotePendingSource(shared.fileKey, note.noteId, editor, () => { if (!editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta('notePendingSource', true)) }) : undefined, [editor, shared?.fileKey, note.noteId])
   useLayoutEffect(() => {
     if (!editor || editor.isDestroyed) return
     const updateRoot = () => { if (!editor.isDestroyed) editor.view.updateRoot() }
@@ -335,6 +341,7 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
     const element = editor.view.nodeDOM(position)
     if (!(element instanceof ownerDocument.defaultView!.HTMLElement)) return
     const top = element.getBoundingClientRect().top - editor.view.dom.parentElement!.getBoundingClientRect().top
+    setCopyFeedback(value => value?.position === position ? value : null)
     setBeside(value => value?.position === position && value.top === top ? value : { position, top })
   }
   const showSelectedAction = () => {
@@ -382,11 +389,12 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
       const at = editor.state.doc.resolve(editor.view.posAtDOM(element, 0))
       showBlockAction(at.depth ? at.before(at.depth) : Math.max(0, editor.view.posAtDOM(element, 0)))
     }}>
-      {shared && <button type="button" className="note-block-action" aria-label="Copy shared block reference" title="Copy shared block reference" style={{ top: beside?.top ?? 0 }} onMouseDown={event => event.preventDefault()} onFocus={() => { if (!beside) showSelectedAction() }} onClick={() => {
+      {shared && <button type="button" className="note-block-action" aria-label={copyFeedback?.accepted ? 'Reference copied' : 'Copy shared block reference'} title={copyFeedback?.message ?? 'Copy shared block reference'} data-copy-feedback={copyFeedback ? copyFeedback.accepted ? 'copied' : 'failed' : undefined} style={{ top: beside?.top ?? 0 }} onMouseDown={event => event.preventDefault()} onFocus={() => { if (!beside) showSelectedAction() }} onClick={() => {
         if (!editor || editor.isDestroyed) return
         const at = editor.state.selection.$from, position = beside?.position ?? (at.depth ? at.before(at.depth) : editor.state.selection.from)
-        void shared.copyBlock(editor, position).then(() => props.current.onIssue('Reference copied. Paste it into a Note to share this content.')).catch(error => props.current.onIssue(error instanceof Error ? error.message : String(error)))
-      }}><ThemeObjectLinkIcon size={13} /></button>}
+        void shared.copyBlock(editor, position).then(() => setCopyFeedback({ position, accepted: true, message: 'Copied · paste to share' })).catch(error => { const message = error instanceof Error ? error.message : String(error); setCopyFeedback({ position, accepted: false, message }); props.current.onIssue(message) })
+      }}>{copyFeedback?.accepted ? <ThemeStatusCopiedIcon size={13} /> : <ThemeObjectLinkIcon size={13} />}</button>}
+      {copyFeedback && <span className="note-block-copy-feedback" role="status" data-failed={!copyFeedback.accepted || undefined} style={{ top: beside?.top ?? 0 }}>{copyFeedback.message}</span>}
       <EditorContent editor={editor} />
     </div>
     {wiki.popup}
