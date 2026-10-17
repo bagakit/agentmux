@@ -65,16 +65,10 @@
   overscroll-behavior-inline: contain;
   scrollbar-width: none;
 }
-.workbench-empty-state { flex: 1; min-width: 0; min-height: 0; height: 100%; display: grid; place-items: center; padding: clamp(20px, 5%, 48px); overflow: auto; }
-.workbench-empty-state__content { width: min(100%, 360px); display: flex; align-items: center; flex-direction: column; text-align: center; padding-block: var(--sp-5); }
-.workbench-empty-state__identity { width: 56px; height: 56px; display: grid; place-items: center; margin-bottom: var(--sp-4); }
-.workbench-empty-state__identity .project-rail-row__icon { width: 56px; height: 56px; flex: none; }
-.workbench-empty-state__identity .space-object-icon :is(svg, img) { width: 100%; height: 100%; }
-.workbench-empty-state__name { max-width: 100%; margin-bottom: var(--sp-3); color: var(--text-3); font-size: var(--fs-body); overflow-wrap: anywhere; }
-.workbench-empty-state strong { color: var(--text); font-size: clamp(20px, 2.4vw, 26px); font-weight: 550; letter-spacing: -.035em; line-height: 1.25; }
-.workbench-empty-state p { margin: var(--sp-3) 0 0; color: var(--text-3); font-size: var(--fs-body); line-height: 1.5; }
-.workbench-empty-state__action { display: flex; justify-content: center; margin-top: var(--sp-6); }
-.workbench-empty-state__action .primary-button { display: inline-flex; align-items: center; gap: var(--sp-3); min-height: 34px; padding-inline: var(--sp-5); border-radius: 9px; box-shadow: none; }
+.workbench-empty-state { --surface-state-width: 480px; }
+.workbench-empty-state .surface-state__identity { width: 40px; height: 40px; }
+.workbench-empty-state .project-rail-row__icon { width: 40px; height: 40px; flex: none; }
+.workbench-empty-state .space-object-icon :is(svg, img) { width: 100%; height: 100%; }
 .pane-tabbar__tabs::-webkit-scrollbar { display: none; }
 .workbench-tab-strip--overflow .pane-tabbar__tabs { padding-inline:var(--sp-7); scroll-padding-inline:var(--sp-7); }
 .workbench-tab-strip__nav {
@@ -234,7 +228,7 @@
 /* 一个 pane 里所有 Tab 的内容都在这儿，彼此叠放，只有活动的那层可见。
    这是"切回终端不再重放"的结构前提：隐藏的 Tab 仍在 DOM 里，xterm 实例因此活着。 */
 .pane-content { display: flex; flex: 1; min-width: 0; min-height: 0; position: relative; overflow: hidden; }
-.pane-content > .pane-body, .workspace-workbench > .pane-body { flex: 1; min-width: 0; min-height: 0; }
+.pane-content > .pane-body, .workspace-workbench > .pane-body, .workbench-layout-body > .pane-body { flex: 1; min-width: 0; min-height: 0; }
 .pane-body { display: flex; flex-direction: column; position: relative; min-width: 0; min-height: 0; overflow: hidden; }
 /* A local recovery notice takes space before the unchanged Tab layers. */
 .pane-body__content { flex: 1; position: relative; min-width: 0; min-height: 0; }

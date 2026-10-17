@@ -1,6 +1,6 @@
 /* A compact work origin; all Runtime and draft facts keep their existing owners. */
-.launch-surface { height: 100%; min-width: 0; overflow: auto; overscroll-behavior: contain; display: flex; flex-direction: column; justify-content: safe center; padding: clamp(var(--sp-6), 4vw, var(--sp-8)); background: radial-gradient(ellipse at 50% 0, color-mix(in srgb, var(--green) 3%, transparent), transparent 58%), var(--surface-0); container-name: launcher; container-type: inline-size; }
-.launch-surface > * { flex: 0 0 auto; width: min(720px, 100%); margin-inline: auto; }
+.launch-surface { --surface-state-width: 720px; padding: clamp(var(--sp-6), 4%, var(--sp-8)); background: radial-gradient(ellipse at 50% 0, color-mix(in srgb, var(--green) 3%, transparent), transparent 58%), var(--surface-0); container-name: launcher; container-type: inline-size; }
+.launch-surface > .surface-state__content > .surface-state__body { display: flex; flex-direction: column; }
 .launcher-environment { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-6); padding-bottom: var(--sp-6); margin-bottom: var(--sp-7); border-bottom: 1px solid var(--line-soft); }
 .launcher-environment__project { min-width: 0; display: flex; align-items: center; gap: var(--sp-5); }
 .launcher-environment__project > svg { flex: none; color: var(--text-3); }
@@ -68,7 +68,7 @@
 .launcher-unavailable-agents > span { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
 .launcher-unavailable-agents strong { font-weight: 500; }
 .agent-catalog__empty { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); padding: var(--sp-3) 0; color: var(--text-3); font-size: var(--fs-meta); }
-.launch-surface .launcher-composer { margin-top: 0; margin-bottom: 0; border-radius: var(--radius); background: var(--surface-1); box-shadow: var(--hl); }
+.launch-surface .launcher-composer { width: 100%; margin-top: 0; margin-bottom: 0; border-radius: var(--radius); background: var(--surface-1); box-shadow: var(--hl); }
 .launch-surface .launcher-composer:focus-within { border-color: var(--focus-line); background: var(--surface-1); }
 .launcher-tools { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-4); padding: var(--sp-3) 0 0; }
 .launcher-tools > div { min-width: 0; display: inline-flex; align-items: center; gap: var(--sp-2); }
@@ -160,9 +160,9 @@ button.launcher-mote__target:hover { color: var(--text); background: var(--surfa
 .launcher-mote__archive > span { flex: 1 1 160px; min-width: 0; overflow-wrap: anywhere; }
 .launcher-mote__archive > button { flex: none; white-space: nowrap; }
 .launcher-mote > .service-window { margin-top: var(--sp-3); }
-.launcher-mote > .service-window > button { grid-column: 2; justify-self: start; }
 /* The measured Region height changes density, never the user's section preferences. */
-.launch-surface[data-density='compact'] { justify-content: flex-start; padding: var(--sp-5); }
+.launch-surface[data-density='compact'] { padding: var(--sp-5); }
+.launch-surface[data-density='compact'] > .surface-state__content { margin-block: 0; }
 .launch-surface[data-density='compact'] .launcher-environment { flex-wrap: nowrap; padding-bottom: var(--sp-3); margin-bottom: var(--sp-3); gap: var(--sp-3); }
 .launch-surface[data-density='compact'] .launcher-environment__project { flex-basis: auto; gap: var(--sp-3); }
 .launch-surface[data-density='compact'] .launcher-environment__host { max-width: 40%; padding-inline: var(--sp-3); }

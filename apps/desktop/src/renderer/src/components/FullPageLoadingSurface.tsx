@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type PointerEvent, type ReactNode, type RefObject } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { SurfaceState } from './SurfaceState'
 import bannerUrl from '../../../../resources/startup-background.png'
 
 const ThemeStatusWaitingIcon = semanticIconComponent('status.waiting')
-const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
-const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
+const ThemeStatusInfoIcon = semanticIconComponent('status.info')
 
 
 export type FullPageLoadingPhase = 'loading' | 'recovering' | 'failed' | 'parked'
@@ -138,17 +138,13 @@ export function FullPageLoadingSurface({
         <img className="full-page-loading__art" src={bannerUrl} alt="" onError={(event) => { event.currentTarget.hidden = true }} />
         <div className="full-page-loading__light" />
       </div> : null}
-      <div className="full-page-loading__stage">
-        {children ?? <div className="full-page-loading__heading">
-            {busy ? <WaitingActivity key={phase} surface={surfaceRef} visible={visible} /> : null}
-            <h1>{title}</h1>
-            {!busy && scope === 'region' ? <span className="full-page-loading__mark" aria-hidden="true"><ThemeObjectTerminalIcon size={18} /></span> : null}
-        </div>}
-        {actions ? <div className="full-page-loading__actions">{actions}</div> : null}
-        {children == null && detail ? <p className="full-page-loading__detail">{detail}</p> : null}
-        {supplement}
-        {details ? <details className="full-page-loading__details"><summary><ThemeNavigationDisclosureIcon size={12} aria-hidden="true" />{details.summary}</summary>{details.content}</details> : null}
-      </div>
+      <SurfaceState className="full-page-loading__stage"
+        activity={busy && children == null ? <WaitingActivity key={phase} surface={surfaceRef} visible={visible} /> : undefined}
+        identity={!busy && scope === 'region' && children == null ? <ThemeStatusInfoIcon size={22} aria-hidden="true" /> : undefined}
+        title={children == null ? title : undefined}
+        actions={actions}
+        body={<>{children}{detail ? <p className="full-page-loading__detail">{detail}</p> : null}{supplement}</>}
+        details={details} />
     </section>
   )
 }
