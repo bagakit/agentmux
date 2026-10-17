@@ -194,7 +194,9 @@ async function inspectBatch(ref: ConversationRef, port: ConversationReaderPort, 
       const pageWitness = hash(JSON.stringify([state.position.native ?? null, page.nextCursor]))
       rows.push(...page.items.map((item, indexInPage) => row(ref, { kind: 'native', item }, { kind: 'native-page', source: page.source, pageWitness, indexInPage })))
       after.native = page.nextCursor
-      const current = coverage.find(value => value.source.kind === 'native')!
+      const current = initialCoverage(native)
+      coverage[coverage.findIndex(value => value.source.kind === 'native')] = current
+      if (after.unavailable) after.unavailable = after.unavailable.filter(value => value.source.kind !== 'native')
       current.earlier = page.nextCursor ? 'more' : 'unknown-before'
       current.readExtent = { ...(state.position.native ? { from: state.position.native } : {}), through: page.nextCursor ?? 'source-page-end' }
       const cut = checkpoint.cuts.find(cut => cut.kind === 'native')
@@ -209,12 +211,14 @@ async function inspectBatch(ref: ConversationRef, port: ConversationReaderPort, 
     } catch (error) {
       port.signal?.throwIfAborted()
       rows.length = 0
+      nativePage = undefined; checkpoint = state.checkpoint!
+      if (state.position.native === undefined) delete after.native; else after.native = state.position.native
       const failure = unavailable(native, error, state.position.native ?? undefined)
       failure.gaps = failure.gaps.map(gap => ({ ...gap, continuation: encode({ ...ref, version: 1, mode: 'inspect', scope: { sources: [native] },
         checkpoint: { ...ref, scope: { sources: [native] }, cuts: state.checkpoint?.cuts.filter(cut => cut.kind === 'native') ?? [] },
         position: { ...(state.position.native === undefined ? {} : { native: state.position.native }), capturedBefore: null } }) }))
       coverage[coverage.findIndex(c => c.source.kind === 'native')] = failure;
-      after.unavailable = [...(after.unavailable ?? []).filter(value => value.source.kind !== 'native'), failure]; after.native = null
+      after.unavailable = [...(after.unavailable ?? []).filter(value => value.source.kind !== 'native'), failure]
     }
   }
   const captured = state.scope.sources.find(source => source.kind === 'captured')
@@ -224,7 +228,9 @@ async function inspectBatch(ref: ConversationRef, port: ConversationReaderPort, 
         ...(state.position.capturedBefore === undefined ? {} : { beforeFirstSequence: state.position.capturedBefore }), limit })
       rows.push(...page.records.map(record => row(ref, { kind: 'captured', item: record.item }, { kind: 'captured-stream', epoch: page.stream.epoch, firstSequence: record.firstSequence }, record.revision)))
       after.capturedBefore = page.nextBeforeFirstSequence
-      const current = coverage.find(value => value.source.kind === 'captured')!
+      const current = initialCoverage(captured)
+      coverage[coverage.findIndex(value => value.source.kind === 'captured')] = current
+      if (after.unavailable) after.unavailable = after.unavailable.filter(value => value.source.kind !== 'captured')
       current.origin = page.stream.origin; current.gaps = page.stream.gaps
       current.earlier = page.more ? 'more' : page.stream.origin === 'beginning' ? 'complete' : 'unknown-before'
       current.readExtent = { through: String(page.stream.sequence) }
@@ -235,7 +241,7 @@ async function inspectBatch(ref: ConversationRef, port: ConversationReaderPort, 
         checkpoint: { ...ref, scope: { sources: [captured] }, cuts: state.checkpoint?.cuts.filter(cut => cut.kind === 'captured') ?? [] },
         position: { native: null, ...(state.position.capturedCut ? { capturedCut: state.position.capturedCut } : {}), ...(state.position.capturedBefore === undefined ? {} : { capturedBefore: state.position.capturedBefore }) } }) }))
       coverage[coverage.findIndex(value => value.source.kind === 'captured')] = failure
-      after.unavailable = [...(after.unavailable ?? []).filter(value => value.source.kind !== 'captured'), failure]; after.capturedBefore = null
+      after.unavailable = [...(after.unavailable ?? []).filter(value => value.source.kind !== 'captured'), failure]
     }
   }
   for (let index = 0; index < coverage.length; index++) if (coverage[index]!.source.kind === 'native-unavailable' || coverage[index]!.source.kind === 'captured' && !state.position.capturedCut)
