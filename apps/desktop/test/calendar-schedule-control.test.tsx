@@ -43,6 +43,37 @@ async function clickText(text: string) {
 }
 
 describe('original calendar control', () => {
+  it.each([false, true])('replaces loading with a retryable read failure and preserves input and original arrangements (retained: %s)', async retained => {
+    let reject!: (error: Error) => void, changed!: (record: ContinuousProgressLoop) => void
+    vi.mocked(api.schedule.list).mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail }))
+    vi.mocked(api.schedule.onChanged).mockImplementation(listener => { changed = listener; return vi.fn() })
+    const create = vi.spyOn(api.schedule, 'create')
+    await dom.render(<CalendarScheduleControl target={target} />)
+    expect(dom.container.textContent).toContain('Reading arrangements…')
+    await openForm(); await edit('textarea', 'Keep this unsaved arrangement')
+    const input = dom.container.querySelector<HTMLTextAreaElement>('textarea')!
+    if (retained) await act(async () => changed(saved()))
+    await act(async () => reject(new Error('Calendar source unavailable')))
+    expect(dom.container.querySelector('[role="status"]')!.textContent).toContain('Calendar source unavailable')
+    expect([...dom.container.querySelectorAll('button')].some(button => button.textContent === 'Retry arrangements')).toBe(true)
+    expect(dom.container.textContent).not.toContain('Reading arrangements…')
+    expect(dom.container.textContent).not.toContain('No saved arrangements for this Agent.')
+    expect(dom.container.querySelectorAll('[data-schedule-id]')).toHaveLength(retained ? 1 : 0)
+    if (retained) expect(dom.container.querySelector('[data-schedule-id] .calendar-schedules__context')!.textContent).toBe(saved().prompt)
+    expect(input.disabled).toBe(false); expect(input.value).toBe('Keep this unsaved arrangement')
+    expect(dom.draft()).toBe('Keep my draft')
+    vi.mocked(api.schedule.list).mockResolvedValue({ schedules: [saved({ revision: 2, status: 'paused' })], executionScope: 'connected-host' })
+    await clickText('Retry arrangements')
+    expect(api.schedule.list).toHaveBeenCalledTimes(2)
+    expect(dom.container.querySelector('[data-schedule-state]')!.getAttribute('data-schedule-state')).toBe('paused')
+    expect(dom.container.querySelector('.calendar-schedules__heading')!.textContent).toContain('1 saved')
+    expect(dom.container.textContent).not.toContain('Calendar source unavailable')
+    expect(dom.container.textContent).not.toContain('Reading arrangements…')
+    expect(dom.container.querySelector('textarea')).toBe(input)
+    expect(input.disabled).toBe(false); expect(input.value).toBe('Keep this unsaved arrangement')
+    expect(dom.container.querySelector('[data-schedule-id] .calendar-schedules__context')!.textContent).toBe(saved().prompt)
+    expect(create).not.toHaveBeenCalled(); expect(dom.draft()).toBe('Keep my draft')
+  })
   it('folding preserves a draft while a confirmed creation gives the next form current defaults', async () => {
     useAppStore.setState({ config: { ...useAppStore.getState().config!, automation: { calendarTimezone: 'Europe/Berlin', checkInDailyBudget: 2 } } })
     await mount(); await openForm(); await edit('textarea', 'Keep this draft'); await edit('[aria-label="Arrangement time zone"]', 'America/New_York')

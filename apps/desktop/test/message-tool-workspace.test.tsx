@@ -197,6 +197,7 @@ it('keeps journal detail selected while editing its original local pending item'
 it('keeps the three message paths distinct from Automation and retains its unsaved form on return', async () => {
   const observer = vi.spyOn(api.continuousProgress, 'onChanged').mockReturnValue(() => {})
   const create = vi.spyOn(api.continuousProgress, 'create'), action = vi.spyOn(api.continuousProgress, 'action')
+  vi.spyOn(api.schedule, 'list').mockRejectedValue(new Error('Calendar source unavailable'))
   await open()
   const labels = () => [...panel().querySelectorAll('.composer-mailbox__folder-label')].map(node => node.textContent)
   expect(labels()).toEqual(['Inputs', 'Agent messages', 'Notices'])
@@ -205,6 +206,9 @@ it('keeps the three message paths distinct from Automation and retains its unsav
   await click(panel().querySelector('[id$="-outbox-tab"]'))
   await click(panel().querySelector('[aria-label="Automation"]'))
   expect(panel().querySelector('[role="tablist"]')).toBeNull()
+  expect(panel().textContent).toContain('Calendar source unavailable')
+  expect(panel().textContent).toContain('Retry arrangements')
+  expect(panel().textContent).not.toContain('Reading arrangements…')
   const settings = panel().querySelector<HTMLDetailsElement>('[data-progress-details="interval"]')!
   await act(async () => { settings.open = true; settings.dispatchEvent(new Event('toggle')) })
   const interval = settings.querySelector<HTMLInputElement>('input[type="number"]')!

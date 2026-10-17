@@ -17,6 +17,9 @@ export const mutations = [
     before: 'setSelection(origin?.selection ?? null)', after: 'setSelection(null)' },
   { name: 'automation-visibility-disconnected', file: 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
     before: 'presented={progressVisible || progressPresented} visible={progressVisible}', after: 'presented={progressVisible || progressPresented}' },
+  { name: 'calendar-error-keeps-loading', file: 'apps/desktop/src/renderer/src/components/CalendarScheduleControl.tsx',
+    before: ': !source.error ? <p className="continuous-progress-control__help">Reading arrangements…</p> : null}',
+    after: ': <p className="continuous-progress-control__help">Reading arrangements…</p>}' },
   { name: 'filtered-queue-neighbors-lost', file: 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
     before: 'queued={pending} query={query}', after: 'queued={pending.filter(entry => !query || entry.text.includes(query))} query={query}' }
 ]
