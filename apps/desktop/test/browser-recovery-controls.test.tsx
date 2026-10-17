@@ -58,7 +58,7 @@ it('retains the exact failure and explicitly retries the same owner without relo
   expect(restore).toHaveBeenCalledTimes(2); expect(restore.mock.calls[1]).toEqual(restore.mock.calls[0]); expect(reload).not.toHaveBeenCalled()
   await act(async () => retried.resolve({ ...page, navigationId: 'confirmed-original' }))
   expect(container.textContent).not.toContain('Browser connection needs attention'); expect(container.textContent).not.toContain('Restoring browser')
-  expect(apply).toHaveBeenCalledWith({ type: 'updated', browser: { ...page, navigationId: 'confirmed-original' } }); expect(address().value).toBe('my next search')
+  expect(apply).toHaveBeenCalledWith({ type: 'updated', browser: { ...page, navigationId: 'confirmed-original' } }, page.navigationId); expect(address().value).toBe('my next search')
 })
 it('ignores a late rejected restore after the original projection unmounts', async () => {
   const waiting = deferred<BrowserSnapshot>(), report = vi.spyOn(useAppStore.getState(), 'reportError')
