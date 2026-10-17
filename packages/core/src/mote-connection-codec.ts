@@ -10,7 +10,7 @@ import {
 } from './mote-preferences.js'
 import { parseConnectionEnrollmentOperation, parseConnectionEnrollmentParams } from './connection-enrollment-codec.js'
 import { parseConnectionProfileOperation } from './connection-profile-codec.js'
-import { parseConnectionSetupInitialPublication } from './connection-setup-codec.js'
+import { parseConnectionSetupInitialPublication, parseConnectionSetupOperation, parseConnectionSetupParams } from './connection-setup-codec.js'
 import type {
   MoteConnectionMethod,
   MoteConnectionSource,
@@ -85,8 +85,9 @@ export function parseMoteConnectionParams<M extends MoteConnectionMethod>(m: M, 
     } as MoteConnectionParamsMap[M]
   }
   if (m === 'space.mote.connection.advance' || m === 'space.mote.connection.inspect') {
-    const p = obj(v, m === 'space.mote.connection.advance' ? ['operationId', 'enrollment'] : ['operationId'])
-    return { operationId: id(p.operationId), ...(m === 'space.mote.connection.advance' && p.enrollment !== undefined ? { enrollment: parseConnectionEnrollmentParams('connection.enrollment.advance', p.enrollment) } : {}) } as MoteConnectionParamsMap[M]
+    const p = obj(v, m === 'space.mote.connection.advance' ? ['operationId', 'enrollment', 'setup'] : ['operationId'])
+    if (p.enrollment !== undefined && p.setup !== undefined) fail()
+    return { operationId: id(p.operationId), ...(m === 'space.mote.connection.advance' && p.enrollment !== undefined ? { enrollment: parseConnectionEnrollmentParams('connection.enrollment.advance', p.enrollment) } : {}), ...(m === 'space.mote.connection.advance' && p.setup !== undefined ? { setup: parseConnectionSetupParams('connection.setup.advance', p.setup) } : {}) } as MoteConnectionParamsMap[M]
   }
   const p = obj(
     v,
@@ -117,6 +118,8 @@ export function parseMoteConnectionOperation(v: unknown): MoteConnectionOperatio
       'connection',
       'enrollmentOperationId',
       'profileOperationId',
+      'setupOperationId',
+      'setup',
       'defaultSave',
       'enrollment',
       'profile',
@@ -165,6 +168,8 @@ export function parseMoteConnectionOperation(v: unknown): MoteConnectionOperatio
     connection,
     enrollmentOperationId: p.enrollmentOperationId === null ? null : id(p.enrollmentOperationId),
     profileOperationId: p.profileOperationId === null ? null : id(p.profileOperationId),
+    ...(p.setupOperationId === undefined ? {} : { setupOperationId: p.setupOperationId === null ? null : id(p.setupOperationId) }),
+    ...(p.setup === undefined ? {} : { setup: p.setup === null ? null : parseConnectionSetupOperation(p.setup) }),
     defaultSave,
     enrollment: p.enrollment === null ? null : parseConnectionEnrollmentOperation(p.enrollment),
     profile: p.profile === null ? null : parseConnectionProfileOperation(p.profile),
@@ -191,7 +196,8 @@ export function parseMoteConnectionOperation(v: unknown): MoteConnectionOperatio
   }
   if (
     (result.action === 'create') !== (result.enrollmentOperationId !== null) ||
-    (result.action === 'sync' && (!result.profileOperationId || defaultSave !== null || result.defaultLink.state !== 'not-requested' || !connection))
+    (result.action === 'sync' && (!(result.profileOperationId || result.setupOperationId) || !!result.profileOperationId && !!result.setupOperationId || defaultSave !== null || result.defaultLink.state !== 'not-requested' || !connection)) ||
+    (result.action === 'create' && !!result.setupOperationId)
   )
     fail()
   if (
@@ -219,6 +225,13 @@ export function parseMoteConnectionOperation(v: unknown): MoteConnectionOperatio
       pr.desired.avatarSha256 !== (snapshot.avatarSha256 ?? undefined)
     )
       fail()
+  }
+  if (result.setup) {
+    const setup = result.setup
+    if (setup.operationId !== result.setupOperationId || !connection || setup.connectionId !== connection.connectionId ||
+      setup.application.domain !== connection.application.domain || setup.application.appId !== connection.application.appId ||
+      setup.goal.kind !== 'profile-update' || setup.goal.desired.name !== snapshot.name ||
+      setup.goal.desired.description !== (snapshot.description ?? '') || setup.goal.desired.avatarSha256 !== (snapshot.avatarSha256 ?? undefined)) fail()
   }
   if (
     result.defaultLink.state === 'saved' &&
@@ -271,7 +284,8 @@ export function parseMoteConnectionResult<M extends MoteConnectionMethod>(
     if (
       'connection' in request &&
       (!sameMoteConnectionValues({ connection: request.connection }, { connection: operation.connection }) ||
-        (operation.profile && operation.profile.connectionRevision !== request.expectedConnectionRevision))
+        (operation.profile && operation.profile.connectionRevision !== request.expectedConnectionRevision) ||
+        (operation.setup && operation.setup.expectedConnectionRevision !== request.expectedConnectionRevision))
     )
       fail()
   }

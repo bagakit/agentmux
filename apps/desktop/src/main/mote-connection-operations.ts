@@ -26,7 +26,9 @@ import {
   parseConnectionProfileResult,
   type ConnectionEnrollmentCallContext,
   type ConnectionEnrollmentBeginInput,
-  type ConnectionProfileSync
+  parseConnectionSetupResult,
+  type ConnectionSetupBegin,
+  type ConnectionSetupAdvance
 } from '@agentmux/core/connections'
 import type { DesktopConnectionServices } from './connector-host.js'
 import type { MoteConnectionPreferences } from './mote-connection-preferences.js'
@@ -40,7 +42,7 @@ type Row = {
   baseline: MoteConnectionBaseline | null
   pngDataUrl: string | null
   enrollmentInput: ConnectionEnrollmentBeginInput | null
-  profileInput: ConnectionProfileSync | null
+  setupInput?: ConnectionSetupBegin | null
   defaultOperationId: string
   defaultPhase: 'pending' | 'dispatching' | 'settled'
 }
@@ -250,7 +252,7 @@ export class MoteConnectionOperations implements MoteConnectionPort {
       }
       const name = action === 'create' ? (input as MoteConnectionCreate).name ?? source.name : source.name,
         enrollmentOperationId = action === 'create' ? randomUUID() : null,
-        profileOperationId = action === 'sync' ? randomUUID() : null,
+        setupOperationId = action === 'sync' ? randomUUID() : null,
         connectionId =
           action === 'create' ? randomUUID() : (input as MoteConnectionSync).connection.connectionId
       const operation: MoteConnectionOperation = {
@@ -260,7 +262,8 @@ export class MoteConnectionOperations implements MoteConnectionPort {
         snapshot: { name, description: source.description, avatarSha256: source.avatarSha256 },
         connection: action === 'sync' ? (input as MoteConnectionSync).connection : null,
         enrollmentOperationId,
-        profileOperationId,
+        profileOperationId: null,
+        ...(setupOperationId ? { setupOperationId, setup: null } : {}),
         defaultSave: null,
         enrollment: null,
         profile: null,
@@ -290,7 +293,14 @@ export class MoteConnectionOperations implements MoteConnectionPort {
         baseline,
         pngDataUrl: source.pngDataUrl,
         enrollmentInput,
-        profileInput: null,
+        setupInput: action === 'sync' ? {
+          operationId: setupOperationId!, connectionId,
+          expectedConnectionRevision: (input as MoteConnectionSync).expectedConnectionRevision,
+          goal: { kind: 'profile-update', desired: {
+            name, description: source.description ?? '',
+            ...(source.pngDataUrl ? { avatar: { pngDataUrl: source.pngDataUrl } } : {})
+          }, publication: { notes: 'Update bot identity from the saved Mote profile.' } }
+        } : null,
         defaultOperationId: randomUUID(),
         defaultPhase: 'pending'
       }
@@ -308,17 +318,20 @@ export class MoteConnectionOperations implements MoteConnectionPort {
     const row = this.read(input.operationId)
     if (!row) throw failure('UNKNOWN_MOTE_CONNECTION_OPERATION')
     await this.authority(context, row)
-    return this.runJoined(input.operationId, context, true, input.enrollment)
+    if (input.enrollment && input.enrollment.operationId !== row.enrollmentInput?.operationId ||
+      input.setup && input.setup.operationId !== row.setupInput?.operationId) throw failure('CONNECTION_OPERATION_CONFLICT')
+    return this.runJoined(input.operationId, context, true, input.enrollment, input.setup)
   }
   private async runJoined(
     id: string,
     context: ConnectionEnrollmentCallContext,
     advance: boolean,
-    enrollment?: ConnectionEnrollmentAdvanceInput
+    enrollment?: ConnectionEnrollmentAdvanceInput,
+    setup?: ConnectionSetupAdvance
   ): Promise<MoteConnectionOperation> {
     const active = this.active.get(id)
     if (active) return this.project(this.read(id)!)
-    const work = this.run(id, context, advance, enrollment)
+    const work = this.run(id, context, advance, enrollment, setup)
     this.active.set(id, work)
     try {
       return await work
@@ -330,7 +343,8 @@ export class MoteConnectionOperations implements MoteConnectionPort {
     id: string,
     context: ConnectionEnrollmentCallContext,
     advance: boolean,
-    enrollment?: ConnectionEnrollmentAdvanceInput
+    enrollment?: ConnectionEnrollmentAdvanceInput,
+    setup?: ConnectionSetupAdvance
   ): Promise<MoteConnectionOperation> {
     let row = this.read(id)!,
       childContext = this.context(context)
@@ -339,7 +353,6 @@ export class MoteConnectionOperations implements MoteConnectionPort {
       const port = this.ports.connections.connections.enrollment!
       try {
         const childId = row.enrollmentInput.operationId
-        if (enrollment && enrollment.operationId !== childId) throw failure('CONNECTION_OPERATION_CONFLICT')
         const original = await port.inspect({ operationId: childId }, childContext)
         let receipt = original.operation
         if (!receipt) {
@@ -378,25 +391,6 @@ export class MoteConnectionOperations implements MoteConnectionPort {
         )
       }
       if (!row.operation.connection) return this.project(row)
-    }
-    if (row.operation.action === 'sync' && !row.profileInput) {
-      const connection = row.operation.connection!
-      const expected = (row.input as MoteConnectionSync).expectedConnectionRevision
-      row = this.update(id, (r) => {
-        if (r.profileInput) return
-        r.profileInput = {
-          operationId: r.operation.profileOperationId!,
-          connectionId: connection.connectionId,
-          expectedConnectionRevision: expected,
-          desired: {
-            name: r.operation.snapshot.name,
-            ...(r.operation.snapshot.description === null
-              ? {}
-              : { description: r.operation.snapshot.description }),
-            ...(r.pngDataUrl ? { avatar: { pngDataUrl: r.pngDataUrl } } : {})
-          }
-        }
-      })
     }
     if (row.baseline && !row.operation.defaultSave) {
       row = this.update(id, (r) => {
@@ -470,15 +464,27 @@ export class MoteConnectionOperations implements MoteConnectionPort {
     }
     if (row.operation.action === 'create') return this.project(row)
     try {
-      const port = this.ports.connections.connections.profile!,
-        input = row.profileInput!
-      const original = await port.inspect({ operationId: input.operationId }, childContext)
-      const value = !original.operation
-        ? await port.sync(input, childContext)
-        : advance
-          ? await port.advance({ operationId: input.operationId }, childContext)
-          : original.operation
-      const receipt = parseConnectionProfileResult('connection.profile.sync', value, input)
+      const input = row.setupInput
+      if (input) {
+        const port = this.ports.connections.connections.setup!
+        const original = await port.inspect({ operationId: input.operationId }, childContext)
+        const result = !original.operation
+          ? parseConnectionSetupResult('connection.setup.begin', await port.begin(input, childContext), input)
+          : setup
+            ? parseConnectionSetupResult('connection.setup.advance', await port.advance(setup, childContext), setup)
+            : original
+        if (!result.operation) throw failure('UNKNOWN_CONNECTION_OPERATION')
+        row = this.update(id, current => {
+          if (current.operation.setup && current.operation.setup.revision > result.operation!.revision) return
+          current.operation.setup = result.operation
+          if (current.operation.issue === 'child-unconfirmed') current.operation.issue = null
+        })
+        return this.project(row)
+      }
+      // Historical writes remain readable. New management never executes an old profile child.
+      const inputId = row.operation.profileOperationId
+      if (!inputId) throw failure('UNKNOWN_CONNECTION_OPERATION')
+      const receipt = parseConnectionProfileResult('connection.profile.inspect', await this.ports.connections.connections.profile!.inspect({ operationId: inputId }, childContext), { operationId: inputId }).operation
       row = this.update(id, (r) => {
         r.operation.profile = receipt
         if (r.operation.issue === 'child-unconfirmed') r.operation.issue = null
