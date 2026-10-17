@@ -6,6 +6,7 @@ import { CONVERSATION_MAX_WINDOW_RECORDS } from '@agentmux/core/conversation'
 import { api } from './api'
 import type { SessionHistoryReference } from '../../../shared/contracts'
 import { nativeBindingKey, type AgentNativeSourceFacts } from '../../../shared/agent-native-source'
+import { useWorkbenchDocument } from './workbench-document'
 
 export type ConversationReading = {
   reference: SessionHistoryReference
@@ -34,6 +35,7 @@ const matchesSource = (a: AgentSessionHistorySource, b?: AgentSessionHistorySour
 export function useSessionConversationWindow(reading: ConversationReading | undefined,
   beforeCommit: (page: AgentSessionHistoryPage, intent: ConversationReadingIntent, currentOriginal?: AgentSessionHistoryPage, projection?: ConversationWindowProjection) => boolean,
   coverageDuration = 24 * 3_600_000, beforeCapturedCommit?: (snapshot: AgentTimelineSnapshot, displayed?: AgentTimelineSnapshot) => boolean) {
+  const document = useWorkbenchDocument()
   const displayed = useRef<AgentSessionHistoryPage | null>(null)
   const boundary = useRef<string | null>(null)
   const intent = useRef<ConversationReadingIntent>('seed')
@@ -76,7 +78,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
     const changed = () => view.acceptHeld()
     document.addEventListener('selectionchange', changed)
     return () => document.removeEventListener('selectionchange', changed)
-  }, [view.held, view.acceptHeld, reading?.enabled])
+  }, [document, view.held, view.acceptHeld, reading?.enabled])
   // A time-range selection admits bounded complete Core pages. No raw records or
   // Provider positions are accumulated by this presentation.
   useEffect(() => {
