@@ -301,3 +301,4 @@
 @media (max-width: 900px) {
   .terminal-theme-grid { grid-template-columns: 1fr; }
 }
+.terminal-context-source { display: contents; }

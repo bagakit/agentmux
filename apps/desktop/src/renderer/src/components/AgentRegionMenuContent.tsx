@@ -12,12 +12,13 @@ const InformationIcon = semanticIconComponent('status.info')
 
 /** One live SessionPane menu body for Header More and the same Region's context menu. */
 export function AgentRegionMenuContent({ name, executorLabel, sessionId, sessionKind, executionHost, readOnly,
-  onTakeOver, onHistory, onRefreshObservation, refreshing, nativeSourceActions, currentConversationActions, entries }: {
+  onTakeOver, onHistory, onRefreshObservation, refreshing, nativeSourceActions, currentConversationActions, entries, contextualActions }: {
   name: string; executorLabel: string; sessionId: string; sessionKind: 'agent' | 'terminal'
   executionHost: RegionExecutionHost; readOnly: boolean
   onTakeOver: (() => void) | undefined; onHistory: (() => void) | undefined
   onRefreshObservation: (() => void) | undefined; refreshing: boolean
   nativeSourceActions: ReactNode; currentConversationActions: ReactNode; entries: readonly RegionMenuEntry[]
+  contextualActions?: ReactNode
 }) {
   const Menu = useContext(WorkbenchMenuScope)
   return <>
@@ -25,6 +26,8 @@ export function AgentRegionMenuContent({ name, executorLabel, sessionId, session
       <strong title={name}>{name}</strong>
       <span>{executorLabel} · {executionHost.label}{executionHost.configured ? '' : executionHost.id ? ' · Not configured' : ''}{readOnly ? ' · Read-only' : ''}</span>
     </Menu.Label>
+    {contextualActions}
+    {contextualActions ? <Menu.Separator className="tab-context-menu__separator" /> : null}
     <Menu.Group aria-label="Conversation">
       {onTakeOver && !readOnly && sessionKind === 'agent' ? <Menu.Item className="tab-context-menu__item" onSelect={onTakeOver}>
         <ForwardIcon size={14} /><span>Take over</span>

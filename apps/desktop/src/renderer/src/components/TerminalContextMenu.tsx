@@ -1,7 +1,11 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ReactNode } from 'react'
-import { Fragment } from 'react'
+import { Fragment, useLayoutEffect, useMemo, useRef } from 'react'
+import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
+import { opensContextMenuFromKeyboard } from '../lib/context-menu-key'
+import { useRegionMenuObservation, type RegionContextSource } from './RegionContextMenu'
+import { TerminalMenuTools, type TerminalMenuToolProps } from './TerminalMenuTools'
 import { terminalMenuChords } from '../lib/terminal-menu-chords'
 import { isMacPlatform } from '../lib/host-platform'
 import type { TerminalFileMenuAction } from '../lib/terminal-file-action'
@@ -20,6 +24,19 @@ const ThemeActionSearchIcon = semanticIconComponent('action.search')
 const ThemeActionCurrentIcon = semanticIconComponent('action.current')
 const ThemeActionEraseIcon = semanticIconComponent('action.erase')
 
+type Point = { clientX: number; clientY: number }
+export type TerminalMenuContextSource = {
+  /** Exact Session/Host/Run facts; this is not a presentation label. */
+  identity: string
+  instance(): object | null
+  captureSelection(): boolean
+  read(point: Point | null): Pick<TerminalMenuToolProps, 'hasSelection' | 'mouseTrackingMode' | 'pathActions'>
+}
+type Gesture = {
+  point: Point | null; selected: boolean; pendingPointer: boolean
+  identity: string; instance: object | null; sample: ReturnType<TerminalMenuContextSource['read']> | null
+  origin: HTMLElement | null
+}
 
 export function TerminalContextMenu({
   children,
@@ -28,6 +45,7 @@ export function TerminalContextMenu({
   historyBoundary,
   mouseTrackingMode,
   pathActions,
+  contextSource,
   onClear,
   onCopy,
   onCopyScrollback,
@@ -54,6 +72,7 @@ export function TerminalContextMenu({
   identityActions: TerminalIdentityMenuAction[]
   /** Actions for the file path under the context-menu pointer, if one was hit. */
   pathActions: TerminalFileMenuAction[]
+  contextSource: TerminalMenuContextSource
   // xterm 此刻的鼠标上报模式（`terminal.modes.mouseTrackingMode`）。**这是复制三合一失效的根因入口**：
   // TUI 一开鼠标上报，xterm 就停用选区服务，平白左拖不再建选区，于是 getSelection() 恒空、右键
   // Copy 变灰、Ctrl/Cmd+C 全部落空（机制见 lib/terminal-selection-mode.ts）。菜单把这个模式喂给那个
@@ -79,6 +98,59 @@ export function TerminalContextMenu({
   onSelectAll: () => void
   onScrollToBottom: () => void
 }) {
+  const { setContextSource, refreshContextSource, clearContextSource, contextSource: openSource } = useRegionMenuObservation()
+  const element = useRef<HTMLDivElement>(null), keyboardRequest = useRef(false)
+  const gesture = useRef<Gesture | null>(null)
+  const currentProps = useMemo(() => ({ hasSelection, historyBoundary, mouseTrackingMode, pathActions,
+    onClear, onCopy, onCopyScrollback, onCopyViewport, onPaste, onSearch, onSelectAll, onScrollToBottom }),
+  [hasSelection, historyBoundary, mouseTrackingMode, pathActions, onClear, onCopy, onCopyScrollback,
+    onCopyViewport, onPaste, onSearch, onSelectAll, onScrollToBottom])
+  const latest = useRef({ contextSource, currentProps, identityActions })
+  latest.current = { contextSource, currentProps, identityActions }
+  const source = useMemo<RegionContextSource>(() => ({ read() {
+    const current = latest.current, invocation = gesture.current!
+    if (!invocation.sample) {
+      invocation.sample = current.contextSource.read(invocation.point)
+      invocation.pendingPointer = false
+      const active = element.current?.ownerDocument.activeElement
+      invocation.origin = active && element.current?.contains(active) ? active as HTMLElement : null
+    }
+    return {
+      tools: <TerminalMenuTools {...current.currentProps} {...invocation.sample}
+        hasSelection={invocation.selected || invocation.sample.hasSelection} />,
+      agentLink: current.identityActions.find(action => action.key === 'copy-session') ?? null,
+      onCloseAutoFocus(event) {
+        // Refusing our own return must also suppress FocusScope's unconditional default.
+        event.preventDefault()
+        const target = invocation.origin, document = target?.ownerDocument, active = document?.activeElement
+        const closing = event.target as HTMLElement | null
+        if (latest.current.contextSource.identity !== invocation.identity || latest.current.contextSource.instance() !== invocation.instance) return
+        if (!target?.isConnected || target.closest('[hidden], [inert], [aria-hidden="true"]') || target.matches(':disabled, [aria-disabled="true"]')) return
+        if (active !== document?.body && active !== target && !closing?.contains(active ?? null)) return
+        target.focus({ preventScroll: true })
+      }
+    }
+  } }), [])
+  useLayoutEffect(() => () => clearContextSource?.(source), [clearContextSource, source])
+  useLayoutEffect(() => {
+    if (openSource !== source) return
+    const invocation = gesture.current
+    if (!invocation || invocation.identity !== contextSource.identity || invocation.instance !== contextSource.instance()
+      || element.current?.closest('[hidden], [inert], [aria-hidden="true"]')) {
+      clearContextSource?.(source)
+      return
+    }
+    refreshContextSource?.(source)
+  }, [openSource, source, currentProps, identityActions, contextSource, clearContextSource, refreshContextSource])
+  function register(point: Point | null, pointer: boolean, preserveSelection = false) {
+    point = point ? { clientX: point.clientX, clientY: point.clientY } : null
+    const previous = gesture.current
+    const samePointer = preserveSelection && previous?.pendingPointer && point !== null
+      && previous.point?.clientX === point.clientX && previous.point.clientY === point.clientY
+    gesture.current = { point, selected: contextSource.captureSelection() || Boolean(samePointer && previous?.selected),
+      pendingPointer: pointer, identity: contextSource.identity, instance: contextSource.instance(), sample: null, origin: null }
+    setContextSource?.(source)
+  }
   const isMac = isMacPlatform()
   // 键位不在这里算：三个走注册表、paste 走原生 Edit→Paste 的和弦，理由与来源都在 lib 那一层。
   const chords = terminalMenuChords(isMac)
@@ -86,6 +158,26 @@ export function TerminalContextMenu({
   // **不给 `?? 'none'` 兜底**：prop 必填之后那个兜底是死代码，而它一旦留着，将来若有人把接线改成
   // 传 undefined，提示会静默消失且这里看起来一切正常。整个判定在 lib，这里不重写位掩码或平台判断。
   const selectionHint = terminalSelectionSuppressionHint(mouseTrackingMode)
+  // A Region supplies one stable Root/Anchor, even while its Header registers or moves.
+  if (setContextSource) return <div ref={element} className="terminal-context-source"
+    onPointerDownCapture={event => {
+      if (event.button === 2 || event.ctrlKey || event.pointerType !== 'mouse') register(event, true)
+    }} onPointerCancel={() => { if (openSource !== source) clearContextSource?.(source) }}
+    onPointerUp={() => { if (openSource !== source) clearContextSource?.(source) }}
+    onPointerMove={event => {
+      if (event.pointerType !== 'mouse' && openSource !== source) clearContextSource?.(source)
+    }} onContextMenuCapture={event => { register(keyboardRequest.current ? null : event, false, !keyboardRequest.current) }}
+    onKeyDownCapture={event => {
+      if (!event.currentTarget.contains(event.target as Node) || isImeOwnedKeyboardEvent(event.nativeEvent)
+        || !opensContextMenuFromKeyboard(event)) return
+      event.preventDefault()
+      event.stopPropagation()
+      keyboardRequest.current = true
+      const bounds = event.currentTarget.firstElementChild?.getBoundingClientRect()
+      try { (event.target as HTMLElement).dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true, cancelable: true, clientX: bounds?.left ?? 0, clientY: bounds?.top ?? 0
+      })) } finally { keyboardRequest.current = false }
+    }}>{children}</div>
   return (
     <ContextMenu.Root>
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>

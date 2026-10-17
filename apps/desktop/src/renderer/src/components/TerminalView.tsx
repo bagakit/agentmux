@@ -2058,6 +2058,18 @@ export function TerminalView({
     })
   }
 
+  function pathMenuActions(link: TerminalPathLink | null) {
+    return terminalFileMenuActions({ link, local: workspaceIsLocal,
+      onReveal: path => { void api.files.reveal(linkOriginRef.current.workspaceId, path).catch(reportError) },
+      onOpenSystem: path => { void api.files.openSystem(linkOriginRef.current.workspaceId, path).catch(reportError) } })
+  }
+
+  function captureMenuSelection(): boolean {
+    const text = terminalRef.current?.getSelection() ?? ''
+    if (text) rememberedSelectionRef.current = text
+    return text.length > 0
+  }
+
   function closeSearch(): void {
     searchAddonRef.current?.clearDecorations()
     setSearchOpen(false)
@@ -2151,20 +2163,24 @@ export function TerminalView({
       <TerminalContextMenu
         hasSelection={hasSelection}
         historyBoundary={!hydrating && !historyReadFailure && !replayGap && !runtimeHistoryGap ? historyBoundary : null}
-        pathActions={terminalFileMenuActions({
-          link: pathActions,
-          local: workspaceIsLocal,
-          onReveal: (path) => {
-            void api.files.reveal(linkOriginRef.current.workspaceId, path).catch(reportError)
-          },
-          onOpenSystem: (path) => {
-            void api.files.openSystem(linkOriginRef.current.workspaceId, path).catch(reportError)
-          }
-        })}
+        pathActions={pathMenuActions(pathActions)}
+        contextSource={{
+          identity: JSON.stringify([session.id, session.control]),
+          instance: () => terminalRef.current,
+          captureSelection: captureMenuSelection,
+          read: point => ({
+            hasSelection: captureMenuSelection(),
+            mouseTrackingMode: terminalRef.current?.modes.mouseTrackingMode ?? mouseTrackingMode,
+            pathActions: pathMenuActions(point && rootRef.current ? terminalPathAtPointer(
+              terminalRef.current, rootRef.current, point.clientX, point.clientY, activeWorkspaceRootRef.current
+            ) : null)
+          })
+        }}
         identityActions={terminalIdentityMenuActions({
           // 身份取**这一格自己的** session，不从 store 读当前活跃会话：用户右键的那一格往往
           // 恰恰不是聚焦的那一格（分屏下尤其），从 store 取会复制出邻座的身份。
-          sessionId: session.id,
+          // Agent 链接沿 control 的语义身份；presentation.id 可以与它不同。
+          sessionId: session.kind === 'agent' ? session.control.agentSessionId : session.id,
           sessionKind: session.kind,
           // 复用全 renderer 唯一那个写剪贴板的出口（clipboard-copy.ts），与上面三条 Copy 同一条路。
           writeClipboardText: async (text) => { await copyTextToClipboard(text, reportError) }
