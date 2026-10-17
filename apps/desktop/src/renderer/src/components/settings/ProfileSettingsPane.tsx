@@ -67,10 +67,10 @@ export function ProfileSettingsPane({ profile, onSave }: {
         {value.avatar ? <img src={value.avatar} alt="" /> : <ThemeObjectUserIcon size={34} strokeWidth={1.5} aria-hidden="true" />}
       </div>
       <div className="settings-profile__identity-text">
-        <span className="settings-profile__eyebrow">Your place in AgentMux</span>
-        <label htmlFor="profile-display-name" data-settings-field="display-name">What should we call you?</label>
+        <label htmlFor="profile-display-name" data-settings-field="display-name">Display name</label>
         <TextInput id="profile-display-name" aria-label="Display name" value={value.displayName} maxLength={USER_PROFILE_NAME_LIMIT}
           placeholder="Your name" autoComplete="nickname" onChange={event => draft.setField('displayName', event.currentTarget.value)} />
+        <p className="settings-profile__identity-hint">Shown with your messages and shared context.</p>
         <div className="settings-profile__image-actions" data-settings-field="profile-photo">
           <button ref={photoButton} type="button" className="small-button" onClick={() => upload.current?.click()}><ThemeActionCaptureIcon size={13} aria-hidden="true" /> Change photo</button>
           {value.avatar && <button type="button" className="settings-profile__remove" onClick={() => draft.setField('avatar', '')}>Remove</button>}
@@ -86,18 +86,19 @@ export function ProfileSettingsPane({ profile, onSave }: {
     </section>}
     {imageError && <p className="settings-inline-error" role="alert">{imageError}</p>}
     <section className="settings-profile__context" data-settings-field="profile-about">
-      <header><h3>Working with you</h3><p>A little context makes a better collaborator.</p></header>
-      <label htmlFor="profile-about">About you &amp; how you work</label>
+      <header><h3><label htmlFor="profile-about">About you &amp; how you work</label></h3><p>Your work, experience and communication preferences.</p></header>
       <ComposerTextarea id="profile-about" aria-label="About you and how you work" value={value.about} maxLength={USER_PROFILE_ABOUT_LIMIT}
         rows={6} placeholder="Your work, experience, and how you prefer agents to communicate."
         onValueChange={value => draft.setField('about', value)} />
       <div className="settings-profile__context-footer"><span>This is your context. Each Mote keeps its own role and instructions.</span><small>{value.about.length} / {USER_PROFILE_ABOUT_LIMIT}</small></div>
+    </section>
+    <section className="settings-profile__distribution">
       <label className="settings-profile__sharing" data-settings-field="profile-sharing">
         <input type="checkbox" checked={value.shareWithAgents} onChange={event => draft.setField('shareWithAgents', event.currentTarget.checked)} />
         <span><strong>Share with new agents</strong><small>Your saved name and About are included when a new agent starts on this Mac. Existing conversations keep their context.</small></span>
       </label>
+      <p className="settings-profile__note">Saved on this Mac. Your photo stays in conversations; only text is shared. Authorized agents can also read your saved profile through the settings CLI.</p>
     </section>
-    <p className="settings-profile__note">Saved locally. Your photo appears in conversations; only text is shared with new agents. Authorized agents can also read your saved profile through the settings CLI.</p>
     <SettingsSaveBar save={saveState} dirty={draft.dirty} onSave={() => void save()} />
   </div>
 }
