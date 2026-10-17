@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, AgentMuxError, AgentMuxRpcService, connectAgentMuxRpc } from '@agentmux/core'
-import { parseConnectionEnrollmentOperation, parseConnectionEnrollmentResult, type ConnectionEnrollmentActionKind, type ConnectionEnrollmentView } from '@agentmux/core/connections'
+import { parseConnectionEnrollmentDiagnostic, parseConnectionEnrollmentOperation, parseConnectionEnrollmentResult, type ConnectionEnrollmentActionKind, type ConnectionEnrollmentView } from '@agentmux/core/connections'
 import { ConnectionHost } from '@agentmux/connectors'
 import { DesktopConnectorSecrets } from '../../../apps/desktop/src/main/connector-secrets.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
@@ -342,6 +342,80 @@ it('keeps old unknown receipts valid and rejects extra or cross-stage diagnostic
   await f.closeOwner(); await f.reopen()
   expect(result(await f.cli(['enrollment', 'inspect', '--operation-id', f.input.operationId]))).toEqual(original)
   expect(JSON.stringify(stored(f))).toBe(raw); expect(f.begin).not.toHaveBeenCalled(); expect(f.authentication).not.toHaveBeenCalled()
+}, 20_000)
+
+it('preserves finite response diagnostics without accepting unsafe or cross-stage values', () => {
+  for (const nativeCode of [0, 17, -17, Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER]) {
+    const diagnostic = { stage: 'response', code: 'platform-error', httpStatus: 200, nativeCode }
+    expect(parseConnectionEnrollmentDiagnostic(diagnostic)).toEqual(diagnostic)
+  }
+  for (const nativeCode of ['17', 1.5, null, Infinity, NaN, Number.MAX_SAFE_INTEGER + 1, Number.MIN_SAFE_INTEGER - 1]) {
+    expect(() => parseConnectionEnrollmentDiagnostic({ stage: 'response', code: 'platform-error', nativeCode })).toThrow()
+  }
+  for (const stage of ['request', 'preparation', 'adapter', 'secure-storage']) {
+    expect(() => parseConnectionEnrollmentDiagnostic({ stage, code: 'cancelled', nativeCode: 17 })).toThrow()
+  }
+  expect(() => parseConnectionEnrollmentDiagnostic({ stage: 'response', code: 'platform-error', nativeCode: 17, message: 'private platform text' })).toThrow()
+})
+
+it('retains the original native creation rejection through durable inspect, public SDK and compiled CLI without replay', async () => {
+  const f = await defaultFixture(), calls: string[] = []
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now())
+  const responses = [
+    Response.json({ code: 0, data: { step_info: { token: 'private-diagnostic-qr' } } }, { headers: { 'x-flow-key': 'private-diagnostic-flow' } }),
+    Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { cross_login_uri: 'https://accounts.feishu.cn/cross' } } }),
+    new Response(null, { status: 302, headers: { location: 'https://ask.feishu.cn/cross-finish' } }),
+    new Response('Cross-login complete'),
+    new Response('Fixed landing'),
+    new Response('<script>window.user={"id":"private-diagnostic-user","tenantId":"private-diagnostic-tenant"};window.csrfToken="private-diagnostic-csrf";</script>', { headers: { 'content-type': 'text/html' } }),
+    Response.json({ code: 0, data: { url: 'https://images.example.invalid/private-diagnostic-avatar.png' } }),
+    Response.json({ code: 17, message: 'private-diagnostic-native-message', data: { token: 'private-diagnostic-secret' } })
+  ]
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    calls.push(new URL(url).pathname)
+    const response = responses.shift()
+    if (!response) throw Error('Unexpected extra native request')
+    return response
+  }))
+  let view = await f.sdk.call('connection.enrollment.begin', f.input)
+  for (let index = 0; index < 6 && !view.account; index++) {
+    clock.mockReturnValue(Math.max(Date.now() + 2000, view.challenge?.nextPollAt ?? 0))
+    view = await advance(f, view, 'continue-authentication')
+  }
+  expect({ authentication: view.operation!.authentication, diagnostic: view.operation!.diagnostic, calls, remaining: responses.length }).toMatchObject({ authentication: { stage: 'account' }, diagnostic: undefined, remaining: 2 })
+  expect(view.account).not.toBeNull()
+  view = await advance(f, view, 'confirm-account')
+  const originalDecision = decision(view, 'create')
+  view = await f.sdk.call('connection.enrollment.advance', originalDecision)
+  const expected = { stage: 'response', code: 'platform-error', httpStatus: 200, nativeCode: 17 }
+  expect(view.operation).toMatchObject({ operationId: f.input.operationId, connectionId: f.input.connectionId, creation: { upload: 'confirmed', create: 'unknown' }, credential: 'not-started', configuration: 'not-started', application: null, diagnostic: expected })
+  expect(view.actions.map(action => action.kind)).not.toContain('create')
+  expect(responses).toHaveLength(0)
+  expect(calls.filter(path => path.includes('upsert_by_template'))).toHaveLength(1)
+  const count = calls.length
+  await f.closeOwner(); await f.reopen()
+  const observed = await f.sdk.call('connection.enrollment.inspect', { operationId: f.input.operationId, requestTrace: { limit: 100 } })
+  const copied = result(await f.cli(['inspect', '--operation-id', f.input.operationId, '--request-trace']))
+  for (const value of [observed, copied]) {
+    expect(value.operation.diagnostic).toEqual(expected)
+    expect(value.requestTrace.operationId).toBe(f.input.operationId)
+    expect(value.requestTrace.entries.find((row: any) => row.action === 'create')).toMatchObject({ request: 'claimed', secureStorage: null })
+    expect(JSON.stringify(value)).not.toMatch(/private-diagnostic|native-message|csrf|cookie/)
+  }
+  expect((await f.sdk.call('connection.enrollment.begin', f.input)).operation!.diagnostic).toEqual(expected)
+  expect((await f.sdk.call('connection.enrollment.advance', originalDecision)).operation!.diagnostic).toEqual(expected)
+  expect(calls).toHaveLength(count)
+}, 30_000)
+
+it('keeps another provider response code diagnostic through the same public inspect contract', async () => {
+  const diagnostic = { stage: 'response' as const, code: 'platform-error' as const, nativeCode: -41 }
+  const f = await fixture({ create: async () => ({ kind: 'unknown', diagnostic }) })
+  const view = await create(f)
+  expect(view.operation!.diagnostic).toEqual(diagnostic)
+  await f.closeOwner(); await f.reopen()
+  expect((await inspect(f)).operation!.diagnostic).toEqual(diagnostic)
+  expect(result(await f.cli(['enrollment', 'inspect', '--operation-id', f.input.operationId])).operation.diagnostic).toEqual(diagnostic)
+  expect(f.create).toHaveBeenCalledTimes(1)
 }, 20_000)
 
 it('keeps repeated local recovery receipts out of the original intent row while retaining the earliest exact action', async () => {
