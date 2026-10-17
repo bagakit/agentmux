@@ -53,6 +53,27 @@ describe('finite reading diagnostic boundary', () => {
     expect(called).toBe(0)
   })
 
+  it('rebuilds event arrays without invoking caller methods, iterators or entry accessors', () => {
+    const source = original()
+    let called = 0
+    Object.defineProperty(source.events, 'map', { value() { called++; return this } })
+    Object.defineProperty(source.events, Symbol.iterator, { value() { called++; throw Error('untrusted iterator') } })
+    Object.defineProperty(source.events, 'toJSON', { value() { called++; throw Error('untrusted serializer') } })
+    let parsed!: ReadingDiagnosticRecord
+    expect(() => { parsed = parseReadingDiagnosticRecord(source) }).not.toThrow()
+    expect(parsed.events).not.toBe(source.events)
+    source.events[1]!.nativeSource!.nativeSessionId = 'later-mutation'
+    expect(parsed.events[1]!.nativeSource!.nativeSessionId).toBe('native-original')
+    expect(called).toBe(0)
+    const accessor = original()
+    Object.defineProperty(accessor.events, 0, { get() { called++; return source.events[0] } })
+    expect(() => parseReadingDiagnosticRecord(accessor)).toThrow()
+    expect(called).toBe(0)
+    const sparse = original()
+    delete (sparse.events as unknown[])[0]
+    expect(() => parseReadingDiagnosticRecord(sparse)).toThrow()
+  })
+
   it('checks exact sequence coverage, monotonic order, finite counts and prior-record identity', () => {
     const record = original()
     expect(() => parseReadingDiagnosticRecord({ ...record, previousLogId: record.logId })).toThrow()
