@@ -87,7 +87,7 @@ export function createFocusNavigationSummarySelector() {
     return summary
   }
 }
-function activityEntryTime(session: SessionSnapshot): number | undefined {
+export function focusActivityEntryTime(session: SessionSnapshot): number | undefined {
   const activity = session.kind === 'agent' ? session.semanticStatus : undefined
   if (!activity || !isAgentActivityStatusSource(activity.source)) return undefined
   const now = Date.now()
@@ -201,7 +201,7 @@ function agentContextWithConversation(session: SessionSnapshot, timeline: AgentT
       ? 'Activity not reported' : session.processState === 'running' && bucket === 'idle' && activitySemantic === 'idle'
         ? 'Idle' : bucket === 'working' && activitySemantic === 'active' ? 'Working' : sessionStatusLabel(session)
   const name = session.kind === 'agent' ? agentDisplayName({ userName, firstPrompt: firstPromptFromTimeline(timeline), fallbackLabel: session.label, providerLabel: session.providerId }) : userName ?? session.label
-  const lastActivityAt = focusLastTaskActivityAt(items, activityEntryTime(session), now)
+  const lastActivityAt = focusLastTaskActivityAt(items, focusActivityEntryTime(session), now)
   const stateEnteredAt = session.kind === 'agent' && session.currentActivity ? undefined : agentStateEnteredAt(session, now)
   let detail = 'No activity details observed', detailIsMessage = false
   let detailKind: FocusContext['detailKind'] = pending || bucket === 'attention' || state === 'disconnected' || state === 'exited' ? 'service' : 'activity'
@@ -259,7 +259,7 @@ function sameSessionPresentation(a: SessionSnapshot, b: SessionSnapshot, now: nu
     && (a.kind === 'agent' ? a.semanticStatus : undefined) === (b.kind === 'agent' ? b.semanticStatus : undefined)
     && (a.kind === 'agent' ? a.currentActivity : undefined) === (b.kind === 'agent' ? b.currentActivity : undefined)
     && (a.kind !== 'terminal' || a.status.exitCode === b.status.exitCode && a.status.exitReason === b.status.exitReason)
-    && activityEntryTime(a) === activityEntryTime(b)
+    && focusActivityEntryTime(a) === focusActivityEntryTime(b)
     && a.control.run.runId === b.control.run.runId && a.control.hostId === b.control.hostId
     && (a.control.kind === 'agent' ? a.control.agentSessionId : null) === (b.control.kind === 'agent' ? b.control.agentSessionId : null)
     && workingEntryTime(a) === workingEntryTime(b)

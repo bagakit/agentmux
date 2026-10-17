@@ -22,7 +22,6 @@ import { readSurveyPresentation } from '../lib/mobile-presentation'
 import { focusCardTrackHeight, type FocusLaneCounts, type FocusLaneMetrics } from '../lib/focus-lane-layout'
 import { resolveFocusReplyLines } from '../../../shared/focus-preferences'
 import { FocusToolbar } from './FocusToolbar'
-import { AgentCollaborationDialog, type CollaborationRequest } from './AgentCollaborationDialog'
 import { FocusHistorySearch } from './FocusHistorySearch'
 import { useFocusHistorySearch } from '../lib/use-focus-history-search'
 import { createFocusGoalLinksSelector } from '../lib/focus-goal-links'
@@ -156,8 +155,6 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const [bucketFilter, setBucketFilter] = useState<FocusBucket | 'all'>('all')
   const [filtersOpen, setFiltersOpen] = useState(false)
   useEffect(() => { if (!visible) setFiltersOpen(false) }, [visible])
-  const [collaboration, setCollaboration] = useState<CollaborationRequest | null>(null)
-  useEffect(() => { if (!visible) setCollaboration(null) }, [visible])
   const [requestId, setRequestId] = useState<string | null>(null)
   const [historyWindowRequest, setHistoryWindowRequest] = useState<{ at: number; sequence: number }>()
   const [workspaceRatio, setWorkspaceRatio] = useState(0.618)
@@ -320,8 +317,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     }</FocusLaneGroups> : null}</>
   }
   return <section className={`global-board-surface global-focus-surface ${showWorkspace ? 'global-board-surface--session-open' : ''}`} aria-label="Focus" data-focus-reply-lines={replyLines} hidden={!surfaceVisible} inert={!visible} aria-hidden={!surfaceVisible} style={{ display: surfaceVisible ? undefined : 'none', '--focus-workspace-width': `calc(${workspaceRatio * 100}% - 6px)`, '--focus-reply-lines': replyLines, '--focus-card-track-height': `${focusCardTrackHeight(replyLines)}px` } as CSSProperties}>
-    <AgentCollaborationDialog request={collaboration} onClose={() => setCollaboration(null)} onOpen={(context, reference) => focusExecutionSession(context.id, reference)} />
-    <FocusToolbar onOpenCollaboration={selected?.control ? () => setCollaboration({ kind: 'focus', subject: { hostId: selected.control!.hostId, agentSessionId: selected.control!.agentSessionId }, name: selected.name }) : undefined} active={visible} selectedId={shownSessionId} selected={selected} tab={selectedTab} reference={projection?.selection.length === 1 ? projection.selection[0] : undefined} onReview={() => setRequestId(shownSessionId)} onCloseWorkspace={closeWorkspace} regionOnly={regionOnly} onToggleRegion={projection ? onToggleRegion : undefined}>
+    <FocusToolbar onOpenCollaboration={selected?.control ? () => useAppStore.getState().openCollaborationMap({ kind: 'focus', subject: { hostId: selected.control!.hostId, agentSessionId: selected.control!.agentSessionId }, name: selected.name }) : undefined} active={visible} selectedId={shownSessionId} selected={selected} tab={selectedTab} reference={projection?.selection.length === 1 ? projection.selection[0] : undefined} onReview={() => setRequestId(shownSessionId)} onCloseWorkspace={closeWorkspace} regionOnly={regionOnly} onToggleRegion={projection ? onToggleRegion : undefined}>
       <div className={`focus-filters${isMacPlatform() ? ' focus-filters--mac' : ''}`}>
         <div className="global-board-toolbar__controls">
           <label className="global-board-search"><ThemeActionSearchIcon size={13} /><TextInput ref={searchRef} aria-label="Search contexts" placeholder="Search text, IDs or amux links" title="Filter names, activity, paths and original object IDs or links. Enter searches case-sensitive text in retained conversations." onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); historySearch.start() } }} value={query} onChange={(event) => setQuery(event.target.value)} /></label>

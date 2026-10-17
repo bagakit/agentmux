@@ -1,3 +1,4 @@
+import type { CollaborationMapTarget } from './lib/collaboration-map-navigation'
 import { noteShareRange, noteShareSiblingRange } from '../../shared/note-share-range'
 import { pendingNoteShares, promotedPendingNoteShares, clearPendingNoteShares, applyNoteDraftShareEcho, applyNoteDraftRestoreEcho, bindNoteDraftBlockIdentity, noteBlockFingerprint, noteNodeAtPath } from './lib/note-share-staging'
 import { noteShareUndoRecoveryMessage, removedSavedNoteIncludes } from './lib/note-share-removal'
@@ -924,6 +925,10 @@ export type AppState = {
   /** Original Mote action facts; ephemeral, shared by the status surface and read-only inspection. */
   moteContextOperations: MoteContextOperations
   mainSurface: MainSurface
+  spaceView: 'workbench' | 'map'
+  collaborationMapTarget: CollaborationMapTarget | null
+  setSpaceView(view: 'workbench' | 'map'): void
+  openCollaborationMap(target?: CollaborationMapTarget): void
   notebookRecoveries: NotebookRecovery[]
   recallNotebookId: string | null
   recallNoteId: string | null
@@ -4440,11 +4445,11 @@ export function fileNavigationSelection(state: AppState): string {
   if (state.mainSurface === 'recall') return JSON.stringify([state.mainSurface, state.recallNotebookId, state.recallNoteId, state.recallZoneSelection])
   if (state.mainSurface === 'survey') return JSON.stringify([state.mainSurface, state.activeWorkspaceId, state.surveyZoneSelection, state.workbenchSpaceSelection])
   const reference = mainRegionReference(state.workbenchSpaceSelection)
-  if (reference) return JSON.stringify([state.mainSurface, state.activeWorkspaceId, state.workbenchSpaceSelection,
+  if (reference) return JSON.stringify([state.mainSurface, state.spaceView, state.activeWorkspaceId, state.workbenchSpaceSelection,
     state.agentFocus.execution.sessionId, state.agentFocus.execution.reference, state.surveyZoneSelection])
   const layout = state.activeWorkspaceId ? state.layouts[state.activeWorkspaceId] : undefined
   const tabId = layout ? findGroup(layout, layout.activeGroupId)?.activeTabId : undefined
-  return JSON.stringify([state.mainSurface, state.activeWorkspaceId, layout?.activeGroupId, tabId,
+  return JSON.stringify([state.mainSurface, state.spaceView, state.activeWorkspaceId, layout?.activeGroupId, tabId,
     tabId ? state.tabs[tabId]?.layout.activeRegionId : undefined,
     state.agentFocus.execution.sessionId, state.agentFocus.execution.reference, state.agentFocus.pmo.sessionId, state.workbenchSpaceSelection, state.surveyZoneSelection])
 }
@@ -4782,6 +4787,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   nameAuthorityRevision: 0,
   nameAcknowledgementRevision: 0,
   mainSurface: 'workbench',
+  spaceView: 'workbench',
+  collaborationMapTarget: null,
   notebookRecoveries: [],
   recallNotebookId: null, recallNoteId: null,
   recallZoneSelection: null,
@@ -6277,6 +6284,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           set({ mainSurface: 'board', regionCaretFocus: null, workbenchNavigationInputPolicy: request.inputPolicy })
         } else if (request.target.kind === 'surface') {
           get().setMainSurface(desktopMainSurface[request.target.surface])
+          if (request.target.surface === 'space' && request.target.view !== undefined) {
+            if (request.target.view === 'map') get().openCollaborationMap()
+            else set({ spaceView: 'workbench' })
+          }
           set({ workbenchNavigationInputPolicy: request.inputPolicy })
         } else {
           const resolved = resolveDesktopSpaceSelection(get(), catalog, request.target)
@@ -6290,7 +6301,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           // surface/input policy in place until that focus has changed atomically.
           set({ workbenchSpaceSelection: resolved })
           if (resolved.tabId && resolved.regionId) get().focusRegion(resolved.workspaceId, resolved.tabId, resolved.regionId, 'pointer', resolved.groupId ?? undefined)
-          set({ activeWorkspaceId: resolved.workspaceId, mainSurface: 'workbench', retainedSpatialFocus: null,
+          set({ activeWorkspaceId: resolved.workspaceId, mainSurface: 'workbench', spaceView: 'workbench', retainedSpatialFocus: null,
             workbenchSpaceSelection: resolved, regionCaretFocus: null, workbenchNavigationInputPolicy: request.inputPolicy })
         }
       } catch (error) {
@@ -6302,7 +6313,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const expected = desktopSelection(get(), catalog)
       let caretIntentNonce: number | undefined
       if (navigationState !== 'rejected' && JSON.stringify(expected) === JSON.stringify(beforeSelection)) navigationState = 'unchanged'
-      if (navigationState !== 'rejected' && request.inputPolicy === 'target' && expected.space?.tabId && expected.space.regionId) {
+      if (navigationState !== 'rejected' && request.inputPolicy === 'target' && expected.spaceView !== 'map' && expected.space?.tabId && expected.space.regionId) {
         const observed = readDesktopPresentation(expected, get().tabs)
         if (observed.overlays.provenance === 'observed' && !observed.presentation.blockers.length) {
           get().focusRegion(expected.space.workspaceId, expected.space.tabId, expected.space.regionId, 'keyboard', expected.space.groupId ?? undefined)
@@ -6316,7 +6327,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const observed = readDesktopPresentation(actual, get().tabs)
         return observed.presentation.state === 'covered' ||
           ((observed.presentation.state === 'main-visible' || observed.presentation.state === 'floating' || observed.presentation.state === 'window') &&
-            (request.inputPolicy === 'preserve' || captureDesktopInput(get().tabs).fact.regionId === expected.space?.regionId))
+            (request.inputPolicy === 'preserve' || expected.spaceView === 'map' || captureDesktopInput(get().tabs).fact.regionId === expected.space?.regionId))
       }, signal)
       const save = navigationState === 'rejected' ? { layoutApplied: false, localStorageWritten: false, storageFlushRequested: false,
         diskDurability: 'unconfirmed' as const, reason: 'No selection was applied.' } : await saveWorkbenchSelection(true)
@@ -7487,6 +7498,21 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async renameTab(tabId, name, expectedNameRevision) {
     try { const result = await commitDisplayName({ kind: 'tab', id: tabId }, name, 'manual', expectedNameRevision); return result.applied && result.diskDurability === 'confirmed' }
     catch { return false }
+  },
+  setSpaceView(view) {
+    if (view === 'map') get().openCollaborationMap()
+    else set({ spaceView: view, workbenchNavigationInputPolicy: null })
+  },
+  openCollaborationMap(target) {
+    const state = get()
+    const choice = state.workbenchSpaceSelection ?? (state.activeWorkspaceId ? workbenchObjectLayout(state, state.activeWorkspaceId).choice : null)
+    const region = choice?.tabId && choice.regionId ? state.tabs[choice.tabId]?.regions[choice.regionId] : undefined
+    const session = region?.kind === 'agent' ? state.sessions.find(value => value.id === region.sessionId && value.kind === 'agent') : undefined
+    const current: CollaborationMapTarget = session?.kind === 'agent'
+      ? { kind: 'focus', subject: { hostId: session.control.hostId, agentSessionId: session.control.agentSessionId }, name: state.agentNames[session.id] ?? session.label }
+      : { kind: 'space', workspaceId: state.activeWorkspaceId ?? '', choice }
+    set({ mainSurface: 'workbench', spaceView: 'map', collaborationMapTarget: target ?? current,
+      regionCaretFocus: null, workbenchNavigationInputPolicy: null })
   },
   setMainSurface(mainSurface) {
     const state = get()
