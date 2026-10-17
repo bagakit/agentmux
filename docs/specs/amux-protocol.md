@@ -6,15 +6,7 @@
 
 ## 格式与业务归属
 
-| 形式 | 表达的内容 | 业务 owner |
-| --- | --- | --- |
-| `<amux>…</amux>` | 平台说明或本页定义的 A2A 子项容器，可独立或随原请求投递 | [注入上下文](../design/behavior/agent-capabilities-and-messaging.md#agentmux-注入上下文)与[A2A 通知](../design/behavior/a2a-collaboration.md#a2a-引用通知与主动取信) |
-| `<amux:a2a …>` | 容器中唯一一个 `a2a` 子项的简写；成对标签携带原信，自闭合标签引用原信 | [A2A 原信与队列](../design/behavior/a2a-collaboration.md#a2a-身份信封与持久化全局消息队列) |
-| `<amux><context …>…</context></amux>` | 原输入携带的 Browser 场景数据，正文仍在容器外 | [场景化用户输入](../design/behavior/conversation-input.md) |
-| `<amux:continue />` | 原恢复流程选择的默认接续文本 | [Session 恢复](../design/behavior/session-recovery.md) |
-| `<amux:reaction CODE />` | 用户选定快捷回复的含义标记 | [reaction 快捷回复](../design/behavior/conversation-input.md#回复卡片的-reaction-快捷回复) |
-| `--- amux : File/Browser ---` … `-----` | 原文件或 Browser 上下文的内容分享 | [对象地址与分享](../design/behavior/public-control.md#对象地址分享与方向) |
-| `amux://KIND/ID` | 一个准确对象的地址 | [对象地址与导航](../design/behavior/public-control.md#对象地址分享与方向) |
+当前支持的形式、名称、语法摘要和实际 formatter 生成的示例由 Core 的[可读协议定义](../../packages/core/src/amux-protocol-definition.ts)与[阅读目录](../../packages/core/src/agent-message-render.ts)持有；设置的 **Message Tool → amux Protocols**、搜索与本地发现直接消费该目录，不维护第二份完整名单。下文分别定义格式不变量与业务归属。
 
 这些形式共享可发现的名称，各有适用边界。它们不是一个通用 XML namespace、RPC 或可执行指令语言；不能把所有形式交给同一个 XML DOM 或扫描器来推断控制行为。Provider 原生协议、结构化消息记录、操作回执和外部 Skill 声明包保留其原合同。
 
@@ -198,3 +190,11 @@ Browser 使用同样定界，将首行的 `File` 换成 `Browser`。准确拼接
 表中源码是核对生产与读取边界的入口；具体候选的真实调用、采用和客户端消费须分别验收，不能用格式识别或规范更新代替产品交付。
 
 增加或修改一种表示时，先在本页明确格式和原内容边界，再沿原 producer、共同 reader、资源阅读、Copy 和实际消费者核对；涉及公共能力时按[公共能力贡献约定](../guides/public-capability-contributions.md)判断 CLI／RPC 影响。可读格式不持有另一份运行状态、消息 Store 或业务生命周期。
+
+## 通用命名协议与阅读目录
+
+完整独立的未知 `<amux:NAME … />` 或 `<amux:NAME …>正文</amux:NAME>` 可以生成通用只读声明卡。`NAME` 与属性名均匹配 `[a-z][a-z0-9-]*`；属性以空格分隔、值用双引号包裹，名称唯一。属性值按 XML 文本解码，不含原始尖括号、CR 或 LF。正文是不透明原文，不递归寻找协议，不交给 XML DOM 解释子协议；正文中的实体样例也保原文。纯卡片判定不吞前后空格、缩进、普通尾文或代码围栏。信封结构／属性中的 DOCTYPE、processing instruction、未知实体、不完整及含糊边界保持原文阅读。
+
+Core 已注册命名格式是保留名，先沿其精确合同读取；非法保留格式不进入未知类型分支。reaction 的裸 keyword 只在该原格式解释，不推广成通用 XML 属性。通用展示只声明“文本含此协议”，不认证或采用其来源、业务含义和执行资格。原 wire、原 body、source span 与整条 Copy 保持。
+
+目录是无状态编译期公开阅读能力，不是 Runtime 版本协商、控制派发器或消息账本。实际 producer／reader 复用同源标识和语法基元，目录示例调用原 formatter；已注册格式自动进入设置列表、搜索与原组件预览。格式、分享外框、对象链接按各自原阅读合同展示，不能为了卡片强制 XML 化。新增协议应在同一原定义追加，真实 producer 覆盖与 formatter／reader 验证守住遗漏；不从用户历史猜测支持清单。文档不手抄机器目录，业务行为仍归各原 owner。
