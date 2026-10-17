@@ -770,10 +770,21 @@ export class BrowserViewManager {
   }
 
   private requirePresentationDocument(sender: WebContents, frame: WebFrameMain | null): PresentationDocument {
-    if (this.presentationDisposed || this.window.isDestroyed() || sender !== this.window.webContents ||
-      sender.isDestroyed() || !frame || frame.detached || frame !== sender.mainFrame || frame.parent !== null ||
-      sender.isLoadingMainFrame() || !sender.getURL() || frame.url !== sender.getURL()) {
-      throw new Error('Untrusted Browser presentation document')
+    // Keep native validation order; explain the first rejected fact without disclosing page data.
+    const reason = this.presentationDisposed ? 'manager-disposed'
+      : this.window.isDestroyed() ? 'window-destroyed'
+      : sender !== this.window.webContents ? 'sender-mismatch'
+      : sender.isDestroyed() ? 'sender-destroyed'
+      : !frame ? 'frame-missing'
+      : frame.detached ? 'frame-detached'
+      : frame !== sender.mainFrame ? 'frame-mismatch'
+      : frame.parent !== null ? 'frame-not-top-level'
+      : sender.isLoadingMainFrame() ? 'document-loading'
+      : !sender.getURL() ? 'document-url-missing'
+      : frame.url !== sender.getURL() ? 'document-url-mismatch'
+      : null
+    if (reason || !frame) {
+      throw new Error(`Untrusted Browser presentation document (${reason})`)
     }
     if (!this.disposePresentationRequester) this.attachPresentationRequester(sender)
     const current = this.presentationDocument
