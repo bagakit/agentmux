@@ -99,6 +99,20 @@ export const ConversationView = memo(function ConversationView({
   if (describedRecords.length === 0 && !insertions?.length && projection.coverage.length === 0) return null
   const descriptions = new Map(describedRecords.filter(record => record.original.kind === 'native').map(record => [record.rawId, record]))
   const originals = new Map(layout.originalRecords.map(record => [record.records![0]!.id, record]))
+  const continuedProgress = new Set<string>()
+  let previousProgress: { author: string; turn?: string } | undefined
+  for (const record of describedRecords) {
+    const item = record.original.kind === 'native' ? record.original.item : undefined
+    if (record.role === 'process' || record.role === 'observation') {
+      if (previousProgress?.turn && item?.turnId && previousProgress.turn !== item.turnId) previousProgress = undefined
+      continue
+    }
+    const author = record.author?.kind === 'agent' ? record.author.agentSessionId : undefined
+    if (item?.messagePhase !== 'progress' || !author) { previousProgress = undefined; continue }
+    const turn = item.turnId ?? (previousProgress?.author === author ? previousProgress.turn : undefined)
+    if (previousProgress?.author === author && !(previousProgress.turn && turn && previousProgress.turn !== turn)) continuedProgress.add(record.id)
+    previousProgress = { author, ...(turn ? { turn } : {}) }
+  }
   const questions = new Map((page ? projectConversationQuestions({ agentSessionId: sessionId, executionHostId: reading.executionHostId, historyPage: page ?? undefined, answerContext: questionAnswerContext }) : [])
     .map(question => [question.recordId, question]))
   const locatedRecord = locatedMessageKey ? describedRecords.find(record => conversationMessageSourceKey(sessionId, record.source) === locatedMessageKey
@@ -110,7 +124,7 @@ export const ConversationView = memo(function ConversationView({
     const record = describedRecords[index]!
     if (record.original.kind === 'native') { beforeRecordId = record.rawId; continue }
     capturedInsertions.push({ key: record.presentationKey ?? record.id, ...(beforeRecordId === undefined ? {} : { beforeRecordId }),
-      role: record.role === 'process' ? 'process' : 'message', recordIds: [record.rawId],
+      role: record.role === 'process' ? 'process' : record.role === 'observation' ? 'anchor' : 'message', recordIds: [record.rawId],
       content: disclosure => <div data-conversation-layout-key={record.presentationKey ?? record.id}>{renderCaptured(record, disclosure, true)}{renderOriginals(record)}</div> })
   }
   capturedInsertions.reverse()
@@ -174,22 +188,33 @@ export const ConversationView = memo(function ConversationView({
         && (!questionAttempt?.original || questionAttempt.original.input.expectedRun.runId === questionReplyTarget.run.runId))
       const user = record.input
       const itemRef = conversationItemRef(record)
-      const speaker = record.role === 'process' ? undefined : record.speaker
+      const collaboration = item.collaboration?.kind === 'message' ? item.collaboration : undefined
+      // A native actor is scoped to its Provider conversation, never an AgentMux SID.
+      const speaker = record.role === 'process' || collaboration ? undefined : record.speaker
       const adopted = item.conversation?.adoptedInput
       const a2aNotificationId = adopted?.purpose === 'a2a-notification' && adopted.key.kind === 'prompt' ? adopted.key.submissionId : undefined
       const described = speaker && item.kind !== 'system-message' && !a2aNotificationId ? describeSpeaker?.(speaker) : undefined
       const body = <ConversationMessage sources={record.sources} {...(record.event ? { conversationEvent: record.event } : {})} messageId={messageIdForRecord?.(item) ?? user?.id ?? recordId} conversationSessionId={sessionId}
+          {...(collaboration ? { compact: true, recordedIdentity: true,
+            messageDetails: <dl className="conversation-input-details__facts">
+              <dt>原生来源</dt><dd>{collaboration.source.providerId} · <code>{collaboration.source.nativeSessionId}</code></dd>
+              <dt>原生发送者</dt><dd>{collaboration.sender ?? '未记录'}</dd>
+              <dt>原生接收者</dt><dd>{collaboration.recipient ?? '未记录'}</dd>
+              <dt>身份范围</dt><dd>原生会话中的参与者，不代表 AgentMux Session 身份或当前投递状态。</dd>
+            </dl> } : {})}
+          continuation={!original && continuedProgress.has(record.id) && locatedMessageKey !== conversationMessageSourceKey(sessionId, record.source)}
           renderSubmissionOriginal={source => { const original = originals.get(source.id); return original ? <ConversationOriginalRecordContent record={original} renderRecord={renderOriginal} /> : null }}
           {...(a2aNotificationId ? { a2aNotificationId } : {})}
           {...(completedNativeReply(item) ? { status: 'complete' } : {})}
           {...(itemRef ? { itemRef } : {})}
           located={locatedMessageKey === conversationMessageSourceKey(sessionId, record.source)}
-          {...(item.kind === 'system-message' ? { recordTitle: `${page.source.providerId} · ${item.title ?? 'System record'}` }
+          {...(collaboration ? { recordTitle: `协作回报 → ${collaboration.recipient ?? '接收者未记录'}` }
+            : item.kind === 'system-message' ? { recordTitle: `${page.source.providerId} · ${item.title ?? 'System record'}` }
             : user && item.title ? { recordTitle: item.title } : {})}
           nativeResourceRecord={{ source: page.source, recordId: item.id, ...(item.turnId === undefined ? {} : { turnId: item.turnId }) }}
           content={record.contentParts} {...(item.questionAnswers ? { questionAnswers: item.questionAnswers } : {})} {...(item.messagePhase ? { messagePhase: item.messagePhase } : {})} {...(user ? { inputSource: user.source, publicContent: user.publicContent, inputContext: user.inputContext, inputContextSource: user.inputContextSource } : {})}
           {...(speaker ? { speaker } : {})}
-          name={a2aNotificationId ? 'AgentMux' : item.kind === 'system-message' ? page.source.providerId : described?.name ?? (user ? 'Input' : speaker ? 'Assistant' : recordTitle(item))}
+          name={collaboration ? collaboration.sender ?? '原生发送者未记录' : a2aNotificationId ? 'AgentMux' : item.kind === 'system-message' ? page.source.providerId : described?.name ?? (user ? 'Input' : speaker ? 'Assistant' : recordTitle(item))}
           providerId={described?.providerId ?? page.source.providerId}
           {...(describeSpeaker ? { describeSpeaker } : {})}
           {...(item.startedAt === undefined ? {} : { createdAt: item.startedAt })}

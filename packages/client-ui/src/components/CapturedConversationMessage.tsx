@@ -4,7 +4,8 @@ import { ConversationSourceLabels } from './ConversationSourceLabels.js'
 import type { AgentTimelineItem } from '@agentmux/core'
 import { ConversationMessage, type ConversationMessageProps } from './ConversationMessage.js'
 import { conversationItemRef } from '@agentmux/core/conversation'
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
+import { conversationReplyPreview } from '../lib/conversation-reply-preview.js'
 import { formatClock } from '../lib/conversation-time.js'
 import { SemanticIcon } from '../theme/icons.js'
 import { conversationMessageSourceKey } from '../lib/conversation-message-location.js'
@@ -53,10 +54,10 @@ export function CapturedConversationMessage({ item, record, replyObservation, su
       </ConversationMessageDisclosure>
     </div>
   }
-  return <ReplyObservation key={JSON.stringify([item.agentSessionId, item.source, item.id])} item={item} observation={record?.role === 'observation' || Boolean(replyObservation)} compact={replyObservation?.compact ?? record?.role === 'observation'} reveal={props.located === true} sources={record?.sources}>{message}</ReplyObservation>
+  return <ReplyObservation key={JSON.stringify([item.agentSessionId, item.source, item.id])} item={item} active={props.active !== false} observation={record?.role === 'observation' || Boolean(replyObservation)} compact={replyObservation?.compact ?? record?.role === 'observation'} reveal={props.located === true} sources={record?.sources}>{message}</ReplyObservation>
 }
 
-function ReplyObservation({ item, observation, compact, reveal, children, sources }: { item: AgentTimelineItem; observation: boolean; compact: boolean; reveal: boolean; children: ReactNode; sources?: import('../lib/conversation-sources.js').ConversationSources | undefined }) {
+function ReplyObservation({ item, active, observation, compact, reveal, children, sources }: { item: AgentTimelineItem; active: boolean; observation: boolean; compact: boolean; reveal: boolean; children: ReactNode; sources?: import('../lib/conversation-sources.js').ConversationSources | undefined }) {
   const [choice, setChoice] = useState<boolean>()
   const [readOnce, setReadOnce] = useState(!compact)
   const [, selectionChanged] = useState(0)
@@ -76,7 +77,9 @@ function ReplyObservation({ item, observation, compact, reveal, children, source
     document.addEventListener('selectionchange', update)
     return () => document.removeEventListener('selectionchange', update)
   }, [selected, document])
-  const preview = (item.content ?? '').replace(/\s+/gu, ' ').trim().slice(0, 180)
+  const heldPreview = useRef('')
+  const preview = useMemo(() => active && observation ? conversationReplyPreview(item.content ?? '') : heldPreview.current, [active, observation, item.content])
+  useEffect(() => { if (active) heldPreview.current = preview }, [active, preview])
   return <div className={observation ? 'conversation-reply-observation' : undefined} data-captured-reply-observation={observation ? item.id : undefined} tabIndex={-1}
     data-message-source-key={observation ? conversationMessageSourceKey(item.agentSessionId, { kind: 'captured', recordId: item.id }) : undefined}>
     {observation ? <div className="conversation-reply-observation__controls">
@@ -84,10 +87,10 @@ function ReplyObservation({ item, observation, compact, reveal, children, source
         aria-label={expanded ? '收起采集内容' : '展开采集内容'} onClick={() => { setChoice(!expanded); if (!expanded) setReadOnce(true) }}>
         <SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />
         {expanded ? '收起原文' : <ConversationSourceLabels sources={sources?.main} observation={sources?.collectedReply ?? COLLECTED_REPLY_TITLE} />}
+        {!expanded ? <><time>{formatClock(item.createdAt)}</time>{preview ? <span className="conversation-reply-observation__preview">{preview}</span> : null}</> : null}
       </button>
-      {!expanded ? <><time>{formatClock(item.createdAt)}</time>{item.status !== 'complete' ? <span role="status" data-status={item.status}>{item.status === 'failed' ? '记录失败' : '记录中'}</span> : null}</> : null}
+      {!expanded && item.status !== 'complete' ? <span role="status" data-status={item.status}>{item.status === 'failed' ? '记录失败' : '记录中'}</span> : null}
     </div> : null}
-    {!expanded && preview ? <p className="conversation-reply-observation__preview">{preview}</p> : null}
     <div ref={body} id={bodyId} hidden={!expanded} inert={!expanded}>{expanded || readOnce ? children : null}</div>
   </div>
 }
