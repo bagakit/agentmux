@@ -36,7 +36,7 @@ afterEach(async () => {
 it('renders original content immediately, uses only recorded email and shares successful image lookup', async () => {
   const email = 'original+reserved&name@example.test'
   await render(email)
-  expect(host.querySelector<HTMLDetailsElement>('.git-workbench__raw-message')?.open).toBe(true)
+  expect(host.querySelector('.git-workbench__message')?.closest('details')).toBeNull()
   expect(host.querySelector('.git-workbench__message')?.textContent).toContain('The files stay readable.')
   expect(host.querySelector('[aria-label="Open diff for source.ts"]')).not.toBeNull()
   expect(host.querySelector('.git-workbench__author-initials')?.textContent).toBe('OA')

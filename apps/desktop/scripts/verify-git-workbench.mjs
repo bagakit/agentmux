@@ -624,7 +624,7 @@ async function narrowWidth(cdp, regionId) {
   return Math.max(500, value)
 }
 async function commitView(cdp, regionId, oid) {
-  return await waitFor('completed immutable commit details', () => visibleRead(cdp, `(() => {const detail=${visibleNode(pane(regionId) + ' .git-workbench__details')};if(!detail||detail.getAttribute('aria-busy')!=='false')return null;const oids=${selectors('.git-workbench__metadata code', 'detail')}.map(element=>element.textContent);if(!oids.includes(${JSON.stringify(oid)}))return null;return {oids,heading:${visibleNode('.git-workbench__message-heading', 'detail')}?.textContent,body:${visibleNode('.git-workbench__message', 'detail')}?.textContent,raw:detail.querySelector('.git-workbench__message')?.textContent,format:${visibleNode('[aria-label="Commit message format"]', 'detail')}?.textContent??null,parent:${visibleNode('[aria-label="Comparison parent"]', 'detail')}?.value??null,author:${visibleNode('.git-workbench__author-initials', 'detail')}?.getAttribute('aria-label'),changes:${selectors('[aria-label="File change summary"] li', 'detail')}.map(element=>element.textContent),files:${selectors('.git-workbench__files button', 'detail')}.map(element=>element.getAttribute('aria-label'))}})()`))
+  return await waitFor('completed immutable commit details', () => visibleRead(cdp, `(() => {const detail=${visibleNode(pane(regionId) + ' .git-workbench__details')};if(!detail||detail.getAttribute('aria-busy')!=='false')return null;const oids=[...detail.querySelectorAll('.git-workbench__metadata code')].map(element=>element.textContent);if(oids[0]!==${JSON.stringify(oid)})return null;return {oids,heading:${visibleNode('.git-workbench__message-heading', 'detail')}?.textContent,body:${visibleNode('.git-workbench__message', 'detail')}?.textContent,raw:detail.querySelector('.git-workbench__message')?.textContent,format:${visibleNode('[aria-label="Commit message format"]', 'detail')}?.textContent??null,parent:${visibleNode('[aria-label="Comparison parent"]', 'detail')}?.value??null,author:${visibleNode('.git-workbench__author-initials', 'detail')}?.getAttribute('aria-label'),changes:${selectors('[aria-label="File change summary"] li', 'detail')}.map(element=>element.textContent),files:${selectors('.git-workbench__files button', 'detail')}.map(element=>element.getAttribute('aria-label'))}})()`))
 }
 async function onlyHistory(cdp, regionId) {
   const result = await visibleRead(cdp, `({panels:${selectors('.git-history-panel')}.length,sidebar:${selectors('.source-control-history .git-history-panel')}.length,main:${selectors(pane(regionId) + ' .git-history-panel')}.length,references:${selectors('[aria-label="History reference"]')}.length,replaced:${selectors('.git-history-expanded')}.length})`)
@@ -886,7 +886,7 @@ try {
 
   await click(first.cdp, selectors(sidebar + ' [data-history-oid="' + featureOid + '"] > strong'))
   const standard = await commitView(first.cdp, repositoryRegion.regionId, featureOid)
-  assert.equal(standard.heading, 'Keep fixed commit messages and file changes readable')
+  assert.equal(standard.heading, receipt.fixture.standardSubject)
   assert.ok(standard.format.includes('feat') && standard.format.includes('review') && standard.format.includes('Breaking change'))
   assert.ok(standard.body.includes(receipt.fixture.standardBody))
   const standardRead = await control('git.commit', { ...publicTarget, oid: featureOid })
@@ -898,11 +898,10 @@ try {
   assert.deepEqual((await state()).graph.resources['region:' + independentRegionId], independentBefore,
     'Continuous sidebar choices cannot replace an independently fixed commit')
   await waitFor('complete original standard message is visibly readable by default', () => visibleRead(first.cdp,
-    'Boolean(' + visibleNode(repositoryPane + ' .git-workbench__raw-message[open] .git-workbench__message') + ')'))
+    'Boolean(' + visibleNode(repositoryPane + ' .git-workbench__message') + ')'))
   receipt.standardCommit = { dom: standard, read: standardRead }
   await capture(first.cdp, 'standard-message-dark-wide')
   await capture(first.cdp, 'standard-message-light-narrow', await narrowWidth(first.cdp, repositoryRegion.regionId), 'light')
-  await click(first.cdp, selectors(repositoryPane + ' .git-workbench__raw-message summary'))
 
   await click(first.cdp, selectors(sidebar + ' [data-history-oid="' + mergeOid + '"] > strong'))
   await commitView(first.cdp, repositoryRegion.regionId, mergeOid)
@@ -1004,11 +1003,10 @@ try {
   assert.ok(plain.body.includes('Literal <b>markup</b> remains text.'))
   assert.equal(await first.cdp.evaluate(selectors(repositoryPane + ' .git-workbench__message b').concat('.length')), 0)
   await waitFor('original nonstandard message is visibly readable by default', () => visibleRead(first.cdp,
-    'Boolean(' + visibleNode(repositoryPane + ' .git-workbench__raw-message[open] .git-workbench__message') + ')'))
+    'Boolean(' + visibleNode(repositoryPane + ' .git-workbench__message') + ')'))
   receipt.nonstandardCommit = plain
   await capture(first.cdp, 'old-tip-nonstandard-message-dark-wide')
   await capture(first.cdp, 'old-tip-nonstandard-message-light-narrow', await narrowWidth(first.cdp, repositoryRegion.regionId), 'light')
-  await click(first.cdp, selectors(repositoryPane + ' .git-workbench__raw-message summary'))
 
   const remoteMain = await reference(first.cdp, repositoryRegion.regionId, 'refs/remotes/origin/main')
   assert.equal(remoteMain.history.rows[0].oid, featureOid)
