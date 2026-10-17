@@ -273,6 +273,9 @@ type ReleasedBrowser = {
   cleanupOnly?: true
 }
 
+type ClosingBrowserView = Pick<ReleasedBrowser, 'id' | 'workspaceId' | 'storage' | 'requestedUrl' | 'viewport'> & { view: WebContentsView }
+const NATIVE_CLOSE_WARNING = 'Native page cleanup is unconfirmed. Its resource ownership is retained.'
+
 type BrowserRestoreInput = {
   workspaceId: string | null
   profileId: string | null
@@ -418,24 +421,72 @@ export class BrowserViewManager {
       try {
         retention = this.retention(entry)
         if (!entry.view.webContents.isDestroyed()) observed = identities([entry.view.webContents,
-          ...(entry.inputShield && !entry.inputShield.contents.isDestroyed() ? [entry.inputShield.contents] : [])])
+          ...(entry.inputShield && !entry.inputShield.contents.isDestroyed() ? [entry.inputShield.contents] : []),
+          ...this.closingOwners(entry.id).filter(owner => !owner.view.webContents.isDestroyed()).map(owner => owner.view.webContents)])
       } catch { /* Keep this original target; incomplete native observation is unknown. */ }
-      return { ...target, resource: { state: target.status === 'ready' ? 'live' as const : 'unknown' as const,
+      const warning = this.closingWarning(entry.id, target.warning)
+      return { ...target, ...(warning !== undefined ? { warning } : {}), resource: { state: target.status === 'ready' ? 'live' as const : 'unknown' as const,
         locations: [], processes: observed, retention } }
     })
-    const released = [...this.releasedEntries.values()].map<AgentMuxBrowserTarget>(entry => ({
+    const released = [...this.releasedEntries.values(), ...[...this.closingViews.keys()].filter(id => !this.entries.has(id) && !this.releasedEntries.has(id))
+      .map<ReleasedBrowser>(id => ({ ...this.closingOwners(id)[0]!, cleanupOnly: true }))]
+      .map<AgentMuxBrowserTarget>(entry => ({
       id: entry.id, workspaceId: entry.workspaceId, source: 'embedded', mode: entry.storage.mode,
       status: 'unavailable', url: entry.cleanupOnly ? '' : entry.requestedUrl, title: '', capabilities: [],
-      ...(entry.inputShield ? { warning: entry.cleanupOnly
+      ...(this.closingViews.has(entry.id) ? { warning: NATIVE_CLOSE_WARNING } : entry.inputShield ? { warning: entry.cleanupOnly
         ? 'This Browser was closed explicitly. Its original native input surface cleanup is unconfirmed; use Close to retry cleanup. Open a new Browser for a fresh page.'
         : 'The page was released, but its native input surface cleanup is unconfirmed. Reopen or close this original Browser to retry its retained cleanup.' } : {}),
-      resource: { state: entry.inputShield ? 'unknown' : 'released', locations: [],
-        processes: identities(entry.inputShield && !entry.inputShield.contents.isDestroyed() ? [entry.inputShield.contents] : []),
-        ...(entry.inputShield ? { retention: { status: 'unknown', reasons: ['close-unconfirmed'] } } : {}) }
+      resource: { state: entry.inputShield || this.closingViews.has(entry.id) ? 'unknown' : 'released', locations: [],
+        processes: identities([...(entry.inputShield && !entry.inputShield.contents.isDestroyed() ? [entry.inputShield.contents] : []),
+          ...this.closingOwners(entry.id).filter(owner => !owner.view.webContents.isDestroyed()).map(owner => owner.view.webContents)]),
+        ...(entry.inputShield || this.closingViews.has(entry.id) ? { retention: { status: 'unknown', reasons: ['close-unconfirmed'] } } : {}) }
     }))
     return [...live, ...released]
   }
   private readonly entries = new Map<string, BrowserEntry>()
+  /** Actual native handles awaiting destruction, grouped by their original Browser identity. */
+  private readonly closingViews = new Map<string, Map<WebContentsView, ClosingBrowserView>>()
+
+  private closingOwners(id?: string): ClosingBrowserView[] {
+    return id === undefined ? [...this.closingViews.values()].flatMap(views => [...views.values()])
+      : [...this.closingViews.get(id)?.values() ?? []]
+  }
+
+  private forgetClosingView(id: string, view: WebContentsView): void {
+    const retained = this.closingViews.get(id)
+    if (!retained?.delete(view)) return
+    if (!retained.size) this.closingViews.delete(id)
+    const current = this.entries.get(id)
+    if (current && current.view !== view && !current.view.webContents.isDestroyed()) {
+      try { this.emit(current) } catch (error) { console.warn('Browser cleanup update was not delivered:', error) }
+    }
+  }
+
+  private closeNativeView(owner: Pick<ReleasedBrowser, 'id' | 'workspaceId' | 'storage' | 'requestedUrl' | 'viewport'>, view: WebContentsView): void {
+    const contents = view.webContents
+    if (contents.isDestroyed()) { this.forgetClosingView(owner.id, view); return }
+    let views = this.closingViews.get(owner.id)
+    if (!views) { views = new Map(); this.closingViews.set(owner.id, views) }
+    if (!views.has(view)) {
+      views.set(view, { id: owner.id, workspaceId: owner.workspaceId, storage: owner.storage, requestedUrl: owner.requestedUrl, viewport: cloneBrowserViewport(owner.viewport), view })
+      contents.once('destroyed', () => this.forgetClosingView(owner.id, view))
+    }
+    // Explicit Close owns this attempt. Reads and late events never repeat it.
+    try { contents.close() } finally { if (contents.isDestroyed()) this.forgetClosingView(owner.id, view) }
+  }
+
+  private retryClosingViews(owners: readonly ClosingBrowserView[]): void {
+    const errors: unknown[] = []
+    for (const owner of owners) {
+      try { this.closeNativeView(owner, owner.view) } catch (error) { errors.push(error) }
+    }
+    if (errors.length === 1) throw errors[0]
+    if (errors.length) throw new AggregateError(errors, 'Browser native cleanup remains unconfirmed.')
+  }
+
+  private closingWarning(id: string, warning?: string): string | undefined {
+    return this.closingViews.has(id) ? [warning, NATIVE_CLOSE_WARNING].filter(Boolean).join('\n') : warning
+  }
   /** Lookup index only; nativeOwner still verifies the current authoritative entry and attachment. */
   private readonly browserIdsByView = new WeakMap<WebContentsView, string>()
   private readonly viewWindows = new WeakMap<WebContentsView, BrowserWindow>()
@@ -525,7 +576,8 @@ export class BrowserViewManager {
 
   resourceOwnerCounts(): { browserViews: number; releasedBrowserViews: number } {
     return {
-      browserViews: [...this.entries.values()].filter((entry) => !entry.view.webContents.isDestroyed()).length,
+      browserViews: new Set([...this.entries.values()].map(entry => entry.view).concat(this.closingOwners().map(owner => owner.view))
+        .filter(view => !view.webContents.isDestroyed())).size,
       releasedBrowserViews: this.releasedEntries.size
     }
   }
@@ -1043,7 +1095,7 @@ export class BrowserViewManager {
     const pids = new Set<number>()
     const live = [...this.entries.values()].flatMap(entry => [entry.view.webContents, ...(entry.inputShield ? [entry.inputShield.contents] : [])])
     const retired = [...this.releasedEntries.values()].flatMap(entry => entry.inputShield ? [entry.inputShield.contents] : [])
-    for (const contents of [...live, ...retired]) {
+    for (const contents of [...live, ...retired, ...this.closingOwners().map(owner => owner.view.webContents)]) {
       if (!contents || contents.isDestroyed()) continue
       for (const frame of contents.mainFrame.framesInSubtree) {
         if (!frame.detached && frame.osProcessId > 0) pids.add(frame.osProcessId)
@@ -1504,6 +1556,7 @@ export class BrowserViewManager {
       void entry.feedback?.hide()
       this.revokePresentationCapture(entry, 'source-replaced')
       this.clearFavicon(entry)
+      const previousStorage = entry.storage
       const previousPreviewScope = this.recoveryPreviewScope(id)
       this.cancelRecoveryPreview(entry)
       entry.view = candidate
@@ -1520,7 +1573,12 @@ export class BrowserViewManager {
       entry.annotationRevision += 1
       entry.error = null
       committed = true
-      if (!authoritativeView.webContents.isDestroyed()) authoritativeView.webContents.close()
+      try { this.closeNativeView({ id: entry.id, workspaceId: entry.workspaceId, storage: previousStorage, requestedUrl: url, viewport: entry.viewport }, authoritativeView) }
+      catch (error) {
+        // The new Profile already owns this Browser. Publish that fact even if old cleanup failed.
+        try { this.emit(entry) } catch (noticeError) { console.warn('Browser ownership update was not delivered:', noticeError) }
+        throw error
+      }
       this.synchronizeVisiblePage(entry, candidate)
       this.updateFavicon(entry, candidate)
       if (previousPreviewScope) void this.recoveryPreviews?.remove(previousPreviewScope)
@@ -1556,7 +1614,7 @@ export class BrowserViewManager {
       entry.storage.profileId === profileId || entry.pendingSwitch?.profileId === profileId
     )) || [...this.releasedEntries.values()].some((entry) => (
       entry.storage.profileId === profileId || entry.pendingSwitch?.profileId === profileId
-    ))
+    )) || this.closingOwners().some(owner => !owner.view.webContents.isDestroyed() && owner.storage.profileId === profileId)
   }
 
   setViewport(id: string, viewport: BrowserViewport): BrowserSnapshot {
@@ -3127,12 +3185,17 @@ export class BrowserViewManager {
     if (storage?.mode === 'private') return this.closePrivateOwner(id, storage)
     // Ordered behind any publication already in progress, independent of native teardown success.
     if (previewScope) void this.recoveryPreviews?.remove(previewScope)
-    if (!this.destroyOwner(id)) return
-    this.send({ type: 'closed', id })
+    const previous = this.closingOwners(id), errors: unknown[] = []
+    let removed = false
+    try { removed = this.destroyOwner(id) } catch (error) { errors.push(error) }
+    try { this.retryClosingViews(previous) } catch (error) { errors.push(error) }
+    if (errors.length === 1) throw errors[0]
+    if (errors.length) throw new AggregateError(errors, 'Browser closed with native cleanup failures.')
+    if (removed || previous.length) this.send({ type: 'closed', id })
   }
 
   private async closePrivateOwner(id: string, storage: Extract<BrowserStorage, { mode: 'private' }>, notify = true): Promise<void> {
-    const failures: unknown[] = []
+    const failures: unknown[] = [], previousClosures = this.closingOwners(id)
     const entry = this.entries.get(id)
     const previewScope = this.recoveryPreviewScope(id)
     if (entry) { entry.recoveryPreviewRetired = true; this.cancelRecoveryPreview(entry) }
@@ -3147,7 +3210,8 @@ export class BrowserViewManager {
     // destroyOwner can remove the map entry before native close throws. Keep using the captured
     // exact view to finish that consumer, independently of any later incarnation with this id.
     try { if (entry && !entry.view.webContents.isDestroyed() && !this.window.isDestroyed()) this.detachView(entry.view) } catch (error) { failures.push(error) }
-    try { if (entry && !entry.view.webContents.isDestroyed()) entry.view.webContents.close() } catch (error) { failures.push(error) }
+    try { if (entry && !entry.view.webContents.isDestroyed() && !this.closingViews.get(id)?.has(entry.view)) this.closeNativeView(entry, entry.view) } catch (error) { failures.push(error) }
+    try { this.retryClosingViews(previousClosures) } catch (error) { failures.push(error) }
     if (this.releasedEntries.get(id)?.storage === storage && !this.releasedEntries.get(id)?.inputShield) this.releasedEntries.delete(id)
     try { if (notify) this.send({ type: 'closed', id }) } catch (error) { failures.push(error) }
     try { await this.clearPrivateStorage(storage) } catch (error) { failures.push(error) }
@@ -3232,11 +3296,12 @@ export class BrowserViewManager {
     if (!this.window.isDestroyed()) {
       try { this.detachView(entry.view) } catch { /* already detached */ }
     }
-    if (!entry.view.webContents.isDestroyed()) entry.view.webContents.close()
+    this.closeNativeView(entry, entry.view)
     return true
   }
 
   dispose(): void {
+    const previousClosures = this.closingOwners(), cleanupErrors: unknown[] = [], privateClosures = new Set<string>()
     this.presentationDisposed = true
     this.invalidatePresentationRequester()
     this.disposePresentationRequester?.()
@@ -3246,17 +3311,23 @@ export class BrowserViewManager {
     for (const id of [...this.entries.keys(), ...this.releasedEntries.keys()]) {
       const storage = this.entries.get(id)?.storage ?? this.releasedEntries.get(id)?.storage
       if (storage?.mode === 'private') {
+        privateClosures.add(id)
         void this.closePrivateOwner(id, storage, false).catch(error => console.warn('Private website-data cleanup failed during disposal:', error))
       }
     }
     // Retire private incarnations before the existing normal teardown, whose synchronous error
     // contract is preserved. A normal native failure cannot strand a later private consumer.
-    for (const id of [...this.entries.keys(), ...this.releasedEntries.keys()]) this.destroyOwner(id)
+    for (const id of [...this.entries.keys(), ...this.releasedEntries.keys()]) {
+      try { this.destroyOwner(id) } catch (error) { cleanupErrors.push(error) }
+    }
+    try { this.retryClosingViews(previousClosures.filter(owner => !privateClosures.has(owner.id))) } catch (error) { cleanupErrors.push(error) }
     this.popupWindows.dispose()
     for (const unsubscribe of this.webAuthnSessions.values()) unsubscribe()
     this.webAuthnSessions.clear()
     void this.uploads?.dispose().catch(error => console.warn('Browser upload staging cleanup failed during disposal:', error))
     void this.recoveryPreviews?.dispose().catch(error => console.warn('Browser preview cleanup failed during disposal:', error))
+    if (cleanupErrors.length === 1) throw cleanupErrors[0]
+    if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'Browser native cleanup failed during disposal.')
   }
 
   /** Staging IO never blocks a healthy Browser; only this document's selected files are released. */
@@ -3749,6 +3820,7 @@ export class BrowserViewManager {
   private snapshot(entry: BrowserEntry): BrowserSnapshot {
     const contents = entry.view.webContents
     const persistenceWarning = this.operationJournal?.getPersistenceWarning()
+    const warning = this.closingWarning(entry.id, entry.activity.warning ?? persistenceWarning)
     return {
       id: entry.id,
       mode: entry.storage.mode,
@@ -3768,8 +3840,8 @@ export class BrowserViewManager {
       ...(entry.demonstration ? { demonstration: entry.demonstration } : {}),
       ...(entry.taskAssets ? { taskAssets: entry.taskAssets } : {}),
       appLinkPrompt: entry.appLinkPrompt,
-      activity: persistenceWarning
-        ? { ...entry.activity, warning: entry.activity.warning ?? persistenceWarning }
+      activity: warning
+        ? { ...entry.activity, warning }
         : entry.activity
     }
   }
