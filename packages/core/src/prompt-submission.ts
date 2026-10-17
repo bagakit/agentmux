@@ -193,7 +193,7 @@ type PromptSubmissionDeps = {
   providerArgs?: (session: AgentMuxAgentSession, run: CtxmuxAdapterRun) => readonly string[]
   /** Under the original Session input lock, refuse another saved producer contract. */
   assertUncontrolledInput?: (key: AgentPromptInputKey) => Promise<void>
-  withUncontrolledInputClaim?: (key: AgentPromptInputKey, claim: () => Promise<AgentMuxStoredAgentSession>) => Promise<AgentMuxStoredAgentSession>
+  withUncontrolledInputClaim?: (key: AgentPromptInputKey, claim: () => Promise<AgentMuxStoredAgentSession>, notificationId?: string) => Promise<AgentMuxStoredAgentSession>
   /** A newly committed claim only; never invoked by receipt-only rejoin. */
   onInputAccepted?: (key: AgentPromptInputKey, at: number) => Promise<void>
   assertAgentRun: (session: AgentMuxAgentSession, run: CtxmuxAdapterRun) => void
@@ -387,11 +387,15 @@ export class AgentPromptSubmissionCoordinator {
                 'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
             }
             const nativePredecessor = previous?.transport === 'native' || previous?.intent?.plan.kind === 'native-rpc'
+            // This private producer admits a different platform input through the
+            // original Provider's idle queue. It cannot replay the unknown input;
+            // its exact source, condition and idle fences are still checked below.
+            const independentIdleNotification = control?.idleOnly !== undefined && nativePredecessor && previous?.submissionId !== submissionId
             if (manual && previous && previous.submissionId !== submissionId && unfinished && !nativePredecessor &&
                 !previous.notApplied && !current.terminalPromptSubmission?.submit.notApplied) throw new AgentMuxError(
               'The original terminal input is incomplete. Recover that exact input; this independent message cannot replace its bytes.', 'AGENT_PROMPT_SUBMISSION_BUSY')
             if (previous?.submissionId === submissionId || current.terminalPromptSubmission?.submissionId === submissionId ||
-              (previous && unfinished && !previous.notApplied && !current.terminalPromptSubmission?.submit.notApplied && !(manual && nativePredecessor))) {
+              (previous && unfinished && !previous.notApplied && !current.terminalPromptSubmission?.submit.notApplied && !(manual && nativePredecessor) && !independentIdleNotification)) {
               if (!previous?.intent || !previous.submissionId || !sameRun(previous.intent.run, current.run)) {
                 throw new AgentMuxError('The original prompt Input request cannot be confirmed. Its message and Run are kept; use the terminal while delivery is reviewed.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
               }
@@ -519,7 +523,7 @@ export class AgentPromptSubmissionCoordinator {
     const updateSession: PromptSubmissionDeps['updateExactAgentSession'] = (id, expectedRun, update) => {
       const claim = () => this.deps.updateExactAgentSession(id, expectedRun, update, expectedFutureIntent?.intentId)
       return !control?.authorizeDispatch && this.deps.withUncontrolledInputClaim
-        ? this.deps.withUncontrolledInputClaim(inputKey, claim) : claim()
+        ? this.deps.withUncontrolledInputClaim(inputKey, claim, message?.a2aNotificationId) : claim()
     }
     const claimSession: PromptSubmissionDeps['updateExactAgentSession'] = async (id, expectedRun, update) => {
       if (control?.authorizeDispatch && !inputDispatch) assertAdmission(await refreshSession(id, expectedRun))
@@ -542,7 +546,7 @@ export class AgentPromptSubmissionCoordinator {
         return next
       }, expectedFutureIntent?.intentId, control?.authority?.binding)
       const result = await (!control?.authorizeDispatch && this.deps.withUncontrolledInputClaim
-        ? this.deps.withUncontrolledInputClaim(inputKey, claim) : claim())
+        ? this.deps.withUncontrolledInputClaim(inputKey, claim, message?.a2aNotificationId) : claim())
       if (createsClaim) {
         newClaim = { admission: structuredClone(result.promptCompletionAdmission!), terminal: structuredClone(result.terminalPromptSubmission) }
         await this.deps.onInputAccepted?.(inputKey, result.updatedAt)
