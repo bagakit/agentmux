@@ -39,7 +39,7 @@ it('the registered continuity module reaches Overview, search, narrow navigation
   })
   expect(dom.container.querySelector('[data-settings-target="continuity"]')).not.toBeNull()
   await dom.click('[data-settings-target="continuity"]')
-  expect(field('Recovery wait').value).toBe('0'); expect(field('Automatic recovery window').value).toBe('86400')
+  expect(field('Recovery wait').value).toBe('0'); expect(field('Automatic recovery window').value).toBe('24'); expect(field('Automatic recovery window unit').value).toBe('hours')
   expect(dom.container.querySelector('[data-settings-pane=continuity] [data-continuity-interruption-settings]')).toBeNull()
   expect(dom.container.textContent).toContain('confirmed activity or idle start')
   const saveSpy = vi.spyOn(api.config, 'save').mockImplementation(async (next, expected) => {

@@ -40,9 +40,10 @@ describe('read-only shortcuts through connected original SettingsPanel', () => {
     expect(api.config.save).not.toHaveBeenCalled()
   })
 
-  it('title search exposes the whole page; local command/chord queries and empty-state Clear keep connected focus', async () => {
+  it('explicit title search selection exposes the whole page; local command/chord queries and empty-state Clear keep connected focus', async () => {
     await dom.mount('overview')
     await fill(search('Search settings'), 'shortcuts')
+    await dom.click('[data-settings-search-section="keyboard-shortcuts"]')
     expect(dom.container.querySelector<HTMLElement>('.settings-page')!.dataset.settingsPage).toBe('keyboard-shortcuts')
     expect(rows().length).toBeGreaterThan(0)
     expect(rows().map(row => row.dataset.bindingId).sort()).toEqual(SHORTCUT_BINDINGS.map(binding => binding.id).sort())
