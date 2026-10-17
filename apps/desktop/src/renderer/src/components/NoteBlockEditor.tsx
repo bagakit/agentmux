@@ -2,7 +2,7 @@ import { retainNoteDraftEditor, retainNoteDraftNavigation, observeNoteDraftNavig
 import { NoteSharedContext } from '../lib/note-shared-context'
 import { RovingToolbar, RovingToolbarButton } from './RovingToolbar'
 import { createContext, lazy, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react'
-import { Decoration, Extension, type Editor, type JSONContent } from '@tiptap/core'
+import { Decoration, Extension, isTextSelection, type Editor, type JSONContent } from '@tiptap/core'
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, useEditorState, type NodeViewProps } from '@tiptap/react'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { desktopElementVisible } from '../lib/desktop-presentation'
@@ -174,6 +174,16 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
       if (event.isComposing || view.composing) return false
       if (wikiHandlers.current.keyDown(event)) return true
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); props.current.onSave(); return true }
+      if (event.key === 'Backspace' && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
+        const { selection, doc } = view.state
+        if (isTextSelection(selection) && selection.empty && selection.$from.depth === 1 && selection.$from.index(0) === 0
+          && selection.$from.parent.type.name === 'paragraph' && selection.$from.parent.content.size === 0 && doc.childCount > 1) {
+          // Backward join has no preceding block here. Remove only this empty
+          // paragraph so the next block keeps its own identity and attribution.
+          view.dispatch(view.state.tr.delete(0, selection.$from.parent.nodeSize).scrollIntoView())
+          return true
+        }
+      }
       return false
     }
   }, onSelectionUpdate({ editor, transaction }) {
