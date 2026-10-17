@@ -94,6 +94,32 @@ it.each([1, 32, 100])('bounds actual retained Workbench metadata and Pane reacti
   await status('owned-0', 'waiting', Date.now() + 1)
   expect(useAppStore.getState().sessions.find(session => session.id === 'owned-0')?.status.state).toBe('waiting')
   expect(useAppStore.getState().sessions.filter(session => session.id.startsWith('owned-')).map(session => session.control.run.runId)).toEqual(original.sessions.map(session => session.control.run.runId))
+  // Stable actions read the current Store when the real retained Tab is used.
+  // A changed close request remains a subscribed fact and must reach its dialog.
+  const actionTarget = `tab-${count > 1 ? 1 : 0}`
+  const targetGroup = original.layout.groups[0]!
+  const targetButton = dom.container.querySelector<HTMLButtonElement>(`[data-workbench-tab-id="${actionTarget}"]`)
+  expect(targetButton).not.toBeNull()
+  await act(async () => targetButton!.click())
+  expect(useAppStore.getState().layouts.workspace?.groups.find(group => group.id === targetGroup.id)?.activeTabId).toBe(actionTarget)
+  expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({
+    workspaceId: 'workspace', groupId: targetGroup.id, tabId: actionTarget, regionId: original.tabs[actionTarget]!.layout.activeRegionId
+  })
+  expect(dom.container.querySelector(`[data-workbench-tab-id="${actionTarget}"]`)?.classList.contains('workbench-tab--active')).toBe(true)
+  expect(originalTerminal?.isConnected).toBe(true)
+  expect(editor?.isConnected).toBe(true)
+  await act(async () => useAppStore.getState().requestCloseTab('workspace', targetGroup.id, actionTarget))
+  expect(useAppStore.getState().closeTabRequest).toBeNull()
+  const confirmation = document.querySelector('.confirmation-dialog')
+  expect(confirmation?.textContent).toContain('Stop Agent Session?')
+  expect(confirmation?.textContent).toContain('Keep Session & Close')
+  const cancel = confirmation?.querySelector<HTMLButtonElement>('.confirmation-dialog__cancel')
+  expect(cancel).not.toBeNull()
+  await act(async () => cancel!.click())
+  expect(document.querySelector('.confirmation-dialog')).toBeNull()
+  expect(useAppStore.getState().tabs[actionTarget]).toBe(original.tabs[actionTarget])
+  expect(useAppStore.getState().agentComposerDrafts['owned-0']).toBe('Original unsent draft')
+  expect(useAppStore.getState().sessions.filter(session => session.id.startsWith('owned-')).map(session => session.control.run.runId)).toEqual(original.sessions.map(session => session.control.run.runId))
 })
 
 function Reactions({ id, enabled }: { id: string; enabled: boolean }) {
