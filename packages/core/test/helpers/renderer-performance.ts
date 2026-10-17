@@ -1,13 +1,15 @@
+import { fixtureEpoch as _batchFixtureEpoch } from "../../../../test/fixture-values.mjs"
 import { createInputPerformanceRecorder } from '../../src/performance-diagnostics.js'
 import type { RendererPerformanceSnapshot, RendererTerminalWriteContext } from '../../src/metrics.js'
+import { RENDERER_TIMING_KINDS } from '../../src/renderer-performance.js'
 export function performanceFixture(): RendererPerformanceSnapshot {
   const timing = () => ({ count: 0, totalMs: 0, maxMs: 0 })
-  const kinds = ['session-event', 'terminal-write', 'long-task', 'input-delay', 'terminal-interaction'] as const
+  const kinds = RENDERER_TIMING_KINDS
   const kindCounts = () => Object.fromEntries(kinds.map(kind => [kind, 0])) as Record<typeof kinds[number], number>
   const kindTiming = () => Object.fromEntries(kinds.map(kind => [kind, timing()])) as Record<typeof kinds[number], ReturnType<typeof timing>>
   const consumer = () => ({ checks: 0, changes: 0, commits: 0 })
   const visibility = () => ({ visible: consumer(), hidden: consumer() })
-  return { startedAt: 1, observedAt: 2, recording: 'bounded-lifetime', selectorTiming: 'counts-only', writeTiming: 'parser-callback-wall',
+  return { startedAt: _batchFixtureEpoch(0, 0, 1), observedAt: _batchFixtureEpoch(0, 0, 2), recording: 'bounded-lifetime', selectorTiming: 'counts-only', writeTiming: 'parser-callback-wall',
     consumers: { composer: visibility(), sessionPane: visibility() }, sessionEvents: timing(),
     inputRequestDetails: createInputPerformanceRecorder().snapshot(),
     inputRequests: { user: { started: 0, completed: 0, failed: 0, pending: 0, wall: timing() }, protocol: { started: 0, completed: 0, failed: 0, pending: 0, wall: timing() }, paste: { started: 0, completed: 0, failed: 0, pending: 0, wall: timing() } },
