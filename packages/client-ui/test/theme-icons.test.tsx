@@ -9,6 +9,7 @@ import { SemanticIcon, semanticIconHref, createSemanticIconElement, iconMaskData
 import { mountThemeRuntime, previewTheme, updateThemeSelection } from '../src/theme/runtime.js'
 import { WorkflowSemanticIcon } from '../../../apps/desktop/src/renderer/src/components/semantic-icons/index.js'
 import { ConversationReactionActions } from '../src/components/ConversationReactionActions.js'
+import { ClientUiProvider, type ClientUiPlatform } from '../src/platform.js'
 import { PROMPT_REACTION_STARTERS } from '@agentmux/core/prompt-reaction'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
@@ -136,7 +137,10 @@ describe('shared semantic icon owner', () => {
     const reply = { kind: 'native' as const, agentSessionId: 'agent-1', providerId: 'codex', nativeSessionId: 'original-native', recordId: 'reply-original' }
     const definition = PROMPT_REACTION_STARTERS[0]!
     const onSend = vi.fn(async () => true)
-    const host = mount(<ConversationReactionActions definitions={[definition]} source={reply} onSend={onSend} />)
+    const platform: ClientUiPlatform = { overlayContainer: () => document.body, copyText: async () => true,
+      bindComposerFocus: () => () => {}, renderMessageAvatar: () => null, renderProjectIcon: () => null,
+      renderProjectLabel: () => null, renderIcon: () => null }
+    const host = mount(<ClientUiProvider platform={platform}><ConversationReactionActions definitions={[definition]} source={reply} onSend={onSend} /></ClientUiProvider>)
     const button = host.querySelector<HTMLButtonElement>('button')!
     const svg = button.querySelector<SVGSVGElement>('svg')!
     const before = { label: button.getAttribute('aria-label'), width: svg.getAttribute('width'), href: svg.querySelector('use')!.getAttribute('href') }

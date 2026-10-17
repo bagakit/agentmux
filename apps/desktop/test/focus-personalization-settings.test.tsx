@@ -12,10 +12,39 @@ import { useAppStore } from '../src/renderer/src/store'
 import { focusProjectRoots } from '../src/renderer/src/lib/focus-project-lanes'
 import { agentBookmarks } from '../src/renderer/src/lib/agent-bookmarks'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
+import { GRAPHITE_THEME, mountThemeRuntime, previewTheme } from '@agentmux/client-ui/theme'
 
 const dom = composerDOM(), Pane = focusSettingsModule.Pane
 const choose = (field: string, value: string | number) => dom.click(`input[name="focus-${field}"][value="${value}"]`)
 afterEach(() => vi.useRealTimers())
+
+it('the real Focus input example shares the customizable return drawing and original return action', async () => {
+  const release = mountThemeRuntime(window, { appAppearance: 'dark' })
+  try {
+    await dom.render(<FocusSettingsPreview values={resolveFocusPreferences(undefined)} active scene="reading" onScene={() => {}} />)
+    const card = dom.container.querySelector<HTMLElement>('[data-example-agent="example-agent-0"]')!
+    await act(async () => card.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+    const entries = dom.container.querySelectorAll<HTMLElement>('.agent-input-recall__entry')
+    expect(entries).toHaveLength(6)
+    const entry = entries[0]!
+    await act(async () => { entry.focus(); entry.click() })
+    const original = dom.container.querySelector<HTMLElement>('[aria-label="Example original input"]')!
+    expect(original).not.toBeNull()
+    const back = original.querySelector<HTMLButtonElement>('button')!, drawing = back.querySelector('svg')!
+    expect(back.textContent?.trim()).toBe('Recent inputs')
+    expect(drawing.getAttribute('data-semantic-icon')).toBe('navigation.back')
+    const theme = structuredClone(GRAPHITE_THEME)
+    theme.id = 'custom.example-return'; theme.icons = { 'navigation.back': { kind: 'paths', paths: [{ d: 'M3 4H21L12 20Z' }] } }
+    await act(async () => { expect(previewTheme(theme).applied).toBe(true) })
+    expect(original.querySelector('button')).toBe(back); expect(back.querySelector('svg')).toBe(drawing)
+    expect(drawing.querySelector('use')?.getAttribute('href')).toBe('#agentmux-icon-navigation.back')
+    expect(document.getElementById('agentmux-icon-navigation.back')?.querySelector('path')?.getAttribute('d')).toBe('M3 4H21L12 20Z')
+    await act(async () => back.click())
+    expect(dom.container.querySelector('[aria-label="Example original input"]')).toBeNull()
+    expect(dom.container.querySelector('[aria-label="Example Agent reading"]')).not.toBeNull()
+    expect(document.activeElement).toBe(entry)
+  } finally { release() }
+})
 
 it('previews all five settings through real shared content before saving, then merges only the authored changes', async () => {
   let config = { ...composerConfig }, current = useAppStore.getState()

@@ -9,6 +9,7 @@ import { agentContextForSession } from '../src/renderer/src/lib/focus-context'
 import { agentCardConversationFixture, waitForAgentCardReading } from './helpers/agent-card-conversation-fixture'
 import { FocusContextRow } from '../src/renderer/src/components/FocusContextRow'
 import { WorkspaceAgentRow } from '../src/renderer/src/components/WorkspaceAgentRow'
+import { GRAPHITE_THEME, mountThemeRuntime, previewTheme } from '@agentmux/client-ui/theme'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
 vi.mock('../src/renderer/src/components/AgentAvatar', async importOriginal => ({ ...await importOriginal<typeof import('../src/renderer/src/components/AgentAvatar')>(), AgentAvatar: () => createElement('span') }))
@@ -34,6 +35,29 @@ async function pointer(target: Element, type: 'pointerover' | 'pointerout', rela
   await act(async () => target.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerType: 'mouse', relatedTarget })))
 }
 const settle = () => act(async () => new Promise(resolve => setTimeout(resolve, 200)))
+
+it('the original input return control follows the shared semantic draft and retains its reading target', async () => {
+  const release = mountThemeRuntime(window, { appAppearance: 'dark' })
+  try {
+    await open()
+    const originalPanel = panel(), entry = await inspect(), original = detail()!
+    const back = original.querySelector<HTMLButtonElement>('[aria-label="Back to recent inputs"]')!
+    expect(back).not.toBeNull()
+    const drawing = back.querySelector('svg')!
+    expect(drawing.getAttribute('data-semantic-icon')).toBe('navigation.back')
+    const theme = structuredClone(GRAPHITE_THEME)
+    theme.id = 'custom.input-return'; theme.icons = { 'navigation.back': { kind: 'paths', paths: [{ d: 'M3 4H21L12 20Z' }] } }
+    await act(async () => { expect(previewTheme(theme).applied).toBe(true) })
+    expect(original.querySelector('[aria-label="Back to recent inputs"]')).toBe(back)
+    expect(back.querySelector('svg')).toBe(drawing)
+    expect(drawing.querySelector('use')?.getAttribute('href')).toBe('#agentmux-icon-navigation.back')
+    expect(document.getElementById('agentmux-icon-navigation.back')?.querySelector('path')?.getAttribute('d')).toBe('M3 4H21L12 20Z')
+    expect(original.textContent).toContain('COMPLETE ORIGINAL INPUT TAIL')
+    await act(async () => back.click())
+    expect(detail()).toBeNull(); expect(panel()).toBe(originalPanel); expect(document.activeElement).toBe(entry)
+  } finally { release() }
+})
+
 beforeEach(async () => {
   useAppStore.setState({ sessions: [agent, neighbor], timelines: { [agent.id]: timeline }, demands: {}, agentNames: {} })
   vi.spyOn(api.sessions, 'historyPage').mockResolvedValue(page)
