@@ -1460,11 +1460,7 @@ const mockApi: AgentMuxDesktopApi = {
     activatePresentation: async () => { throw new Error('Native Browser presentation requires the desktop app.') },
     onPresentationEvent: () => () => {},
     setBounds: async () => {},
-    release: async (id) => {
-      // The preview has no native WebContentsView, but keeping the id in the mock map models the
-      // same ownership boundary: release does not emit `closed` or remove the Renderer Region.
-      if (!mockBrowsers.has(id)) return
-    },
+    release: async (id, navigationId) => ({ browserId: id, navigationId, status: 'unknown', reasons: ['owner-unavailable'] }),
     restore: async (id, input) => {
       if (!isBrowserViewport(input.viewport)) throw new Error('Unknown browser viewport or invalid dimensions')
       const current = mockBrowsers.get(id)

@@ -1313,6 +1313,8 @@ export type BrowserSnapshot = {
    * 口子：冷启动复活一个「正在被驱动」的死标记，比不画更糟——它指的那段程序早就不在了。
    */
   driving: boolean
+  /** Transient Main admission facts; missing means unknown. */
+  retention?: import('@agentmux/core').AgentMuxBrowserRetention
   /**
    * 这一页正等着用户回答「要不要把这个应用链接交给系统」。`null` 表示没有待答的。
    *
@@ -1489,6 +1491,7 @@ export type BrowserPageFrameFailure = {
 
 export type BrowserEvent =
   | { type: 'updated'; browser: BrowserSnapshot }
+  | { type: 'released'; id: string; navigationId: string }
   | { type: 'unavailable'; id: string; error: string }
   | { type: 'closed'; id: string }
 
@@ -2074,7 +2077,7 @@ export type AgentMuxDesktopApi = {
     activatePresentation(leaseId: string, activation: BrowserPresentationActivation): Promise<BrowserPresentationActivationReceipt>
     onPresentationEvent(listener: (event: BrowserPresentationEvent) => void): () => void
     /** Release only the Main-owned native page surface; the Renderer Region remains present. */
-    release(id: string): Promise<void>
+    release(id: string, navigationId: string): Promise<import('@agentmux/core').AgentMuxBrowserReleaseReceipt>
     /** Rebuild a previously released native page from the retained Region projection. */
     restore(id: string, input: {
       workspaceId: string | null

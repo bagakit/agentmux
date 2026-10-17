@@ -717,7 +717,7 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.on(BROWSER_PRESENTATION_EVENT_CHANNEL, wrapped)
       return () => ipcRenderer.off(BROWSER_PRESENTATION_EVENT_CHANNEL, wrapped)
     },
-    release: (id: string) => ipcRenderer.invoke('browser:release', id),
+    release: (id: string, navigationId: string) => ipcRenderer.invoke('browser:release', id, navigationId),
     restore: (id: string, input: { workspaceId: string | null; profileId: string | null; mode?: import('@agentmux/core').AgentMuxBrowserMode; viewport: BrowserViewport }) =>
       ipcRenderer.invoke('browser:restore', id, input),
     close: (id: string) => ipcRenderer.invoke('browser:close', id),
