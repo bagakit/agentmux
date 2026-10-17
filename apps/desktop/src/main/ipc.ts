@@ -1,4 +1,5 @@
 import { ClientIncidentIpcOwner } from './client-incident-ipc.js'
+import { ClientIncidentRuntimeOwner } from './client-incident-runtime.js'
 import type { ClientIncidentArchive } from './client-incident-archive.js'
 import { isAgentSchedule } from '@agentmux/core'
 import { NoteFileMutations } from './note-file-mutations.js'
@@ -307,12 +308,18 @@ export async function registerIpc(args: {
     args.runtime.setTerminalViewColors({ foreground: palette.foreground, background: palette.background })
   }
   const initialRuntime = await args.runtime.prepare(config)
+  const incidentIpc = args.clientIncidents ? new ClientIncidentIpcOwner({ archive: args.clientIncidents, contents,
+    windowId: args.window.id, generation: () => args.runtime.rendererGeneration(contents),
+    buildId: () => args.loadedPackage?.sourceCommit ?? null, rendererBuildId: () => args.loadedRenderer?.()?.id ?? null }) : null
+  const runtimeIncidents = incidentIpc && args.clientIncidents
+    ? new ClientIncidentRuntimeOwner(args.runtime, args.clientIncidents, incidentIpc.mainProducer()) : null
   let initialBindingError: unknown
   try {
     const bound = configWithRuntimeBindings(config, initialRuntime)
     if (bound !== config) config = await args.configStore.save(bound)
   } catch (error) { initialBindingError = error }
-  args.runtime.commit(initialRuntime)
+  try { args.runtime.commit(initialRuntime) }
+  catch (error) { runtimeIncidents?.dispose(); throw error }
   // Directory metadata maintenance is advisory and never holds up the original Runtime/input.
   const scratchForIdentity = config.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)
   if (scratchForIdentity) void Promise.resolve().then(() => args.scratchTopics.normalizeDirectoryIdentities(scratchForIdentity, { shortenMotes: true }))
@@ -612,7 +619,7 @@ export async function registerIpc(args: {
     if (request.operation === 'settings.get' || request.operation === 'settings.set') return await executeSettingsControl(request, configOwner, notesStorageOwner)
     if (request.operation === 'settings.workspaces.add') return await executeSettingsWorkspaceAddControl(request, configOwner, id => args.runtime.executionHost(id))
     if (request.operation === 'settings.hosts.list' || request.operation === 'settings.hosts.update' || request.operation === 'settings.hosts.test' || request.operation === 'settings.hosts.upgrade-check' || request.operation === 'settings.hosts.upgrade' || request.operation === 'settings.hosts.upgrade-inspect') return await executeSettingsHostsControl(request, configOwner, args.runtime, hostUpgrades)
-    if (request.operation === 'settings.executors.refresh') return await executeSettingsExecutorRefreshControl(request, configOwner, args.runtime)
+    if (request.operation === 'settings.executors.refresh') return await executeSettingsExecutorRefreshControl(request, configOwner, runtimeIncidents ?? args.runtime)
     if (request.operation === 'settings.browser.links.list' || request.operation === 'settings.browser.links.forget') {
       return await executeSettingsBrowserControl(request, configOwner)
     }
@@ -670,9 +677,6 @@ export async function registerIpc(args: {
    */
   const requireTrustedSender = (channel: PrivilegedChannel, event: IpcMainInvokeEvent): void =>
     assertSenderTrusted(senderTrust(channel, event.sender, contents))
-  const incidentIpc = args.clientIncidents ? new ClientIncidentIpcOwner({ archive: args.clientIncidents, contents,
-    windowId: args.window.id, generation: () => args.runtime.rendererGeneration(contents),
-    buildId: () => args.loadedPackage?.sourceCommit ?? null, rendererBuildId: () => args.loadedRenderer?.()?.id ?? null }) : null
   handleWithEvent('clientIncidents:open', event => {
     requireTrustedSender('clientIncidents:open', event)
     return incidentIpc?.open(event) ?? null
@@ -1542,7 +1546,7 @@ export async function registerIpc(args: {
     }
     return await args.runtime.providerCatalog(options)
   })
-  handle('executors:detect', async (executorId: AgentExecutorId, hostId: string) => await refreshSettingsExecutor(executorId, hostId, configOwner, args.runtime))
+  handle('executors:detect', async (executorId: AgentExecutorId, hostId: string) => await refreshSettingsExecutor(executorId, hostId, configOwner, runtimeIncidents ?? args.runtime))
   handle('executors:discover', async (hostId: string) => {
     if (typeof hostId !== 'string' || !hostId.length) throw new TypeError('An exact execution Host ID is required.')
     return await args.runtime.discoverExecutors(hostId)
@@ -2392,6 +2396,7 @@ export async function registerIpc(args: {
   return async () => {
     acceptingControl = false
     await runOwnerDisposals([
+      { owner: 'client-incident-runtime', dispose: () => runtimeIncidents?.dispose() },
       { owner: 'terminal-brightness', dispose: disposeTerminalBrightness },
       { owner: 'spatial', dispose: () => disposeSpatial() },
       { owner: 'goal-attention', dispose: () => goalAttention?.dispose() },
