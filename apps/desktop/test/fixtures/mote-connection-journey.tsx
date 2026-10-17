@@ -21,9 +21,10 @@ import { useAppStore } from '../../src/renderer/src/store'
 import { createMoteApp, moteClick, settleMoteApp } from './mote-app'
 import { moteTopics, moteConfig } from './mote-workface'
 import { runCompiledObjectCli, objectCliEnvironment } from '../../../../packages/core/test/helpers/object-cli-rpc.js'
+import type { CredentialEncryption } from '../../src/main/connector-secrets'
 
 /** Original App/Profile/Agent menus -> trusted IPC -> public Core -> Main/Files/Connection Host. */
-export async function moteConnectionJourney() {
+export async function moteConnectionJourney(options: { encryption?: CredentialEncryption } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'amx-mote-choice-'))
   const workspace = { ...moteConfig.workspaces[0]!, path: root }
   // Exercise the loaded workface while the separate startup availability read finishes.
@@ -57,7 +58,7 @@ export async function moteConnectionJourney() {
   const writer = new NoteFileWriter(files)
   const publicFiles = new FileReadOwner({ catalog, workspace: id => id === workspace.id ? workspace : undefined,
     files: { read: writer.read.bind(writer), listFiles: files.listFiles.bind(files), write: writer.write.bind(writer) } })
-  const services = await createDesktopConnections({ directory: join(root, 'connections'), bindings: { spatial, checkpoint: async () => { throw new Error('This read-only menu does not bind or grant access') } }, encryption: {
+  const services = await createDesktopConnections({ directory: join(root, 'connections'), bindings: { spatial, checkpoint: async () => { throw new Error('This read-only menu does not bind or grant access') } }, encryption: options.encryption ?? {
     isEncryptionAvailable: () => false, encryptString: () => { throw new Error('No credential writes in a default choice') }, decryptString: () => { throw new Error('No credential reads in a default choice') }
   } })
   for (const suffix of ['a', 'b']) await services.connections.configure({ operationId: 'configure-' + suffix, expectedRevision: null, connection: {
