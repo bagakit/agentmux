@@ -3,6 +3,7 @@ import type { ConnectionRecord, ConnectionEnrollmentActionKind } from '@agentmux
 import type { MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import { useMoteBotSetup } from '../lib/use-mote-bot-setup'
 import { TextInput } from '@agentmux/client-ui/input'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { generatedBotName } from '../lib/bot-creation-preset'
 import { SelectionField } from './SelectionField'
 import { BotConfirmationCode } from './BotConfirmationCode'
@@ -14,6 +15,8 @@ import { ConnectionProfileTrace } from './settings/ConnectionProfileTrace'
 import { ConnectionRequestTrace } from './settings/ConnectionRequestTrace'
 import { BotSetupGuide, type BotSetupGuideStage } from './settings/BotSetupGuide'
 import '../styles/connector-experience.css'
+
+const LoadingIcon = semanticIconComponent('status.loading')
 
 const enrollmentActionLabel: Record<ConnectionEnrollmentActionKind, string> = {
   'continue-authentication': 'Check sign-in',
@@ -59,7 +62,7 @@ export function MoteBotSetup({
     available[0]
   const operation = setup.operation,
     raw = setup.requests.find((item) => item.input.operationId === setup.selectedId)
-  const selected = operation ?? raw,
+  const selected = operation ?? raw ?? setup.selectedId,
     ids = new Set(setup.operations.map((item) => item.operationId))
   const history = [
     ...setup.operations.map((item) => ({
@@ -84,11 +87,13 @@ export function MoteBotSetup({
     unfinished?.operationId ??
     setup.requests.find((item) => item.action === 'create' && !ids.has(item.input.operationId))?.input.operationId
   useEffect(() => {
-    if (!shortcut.current || !setup.historyReady || setup.loading || !setup.profile || !capability) return
+    if (!shortcut.current) return
+    if (setup.selectedId) { shortcut.current = false; onCreateIntentConsumed?.(); return }
+    if (!setup.historyReady || setup.loading || !setup.profile || !capability) return
     shortcut.current = false
     onCreateIntentConsumed?.()
     if (resumeId) void setup.check(resumeId)
-  }, [setup.historyReady, setup.loading, setup.profile, capability, resumeId])
+  }, [setup.selectedId, setup.historyReady, setup.loading, setup.profile, capability, resumeId])
   const enrollment = setup.enrollmentView?.operation && setup.enrollmentView.operation.operationId === operation?.enrollmentOperationId && setup.enrollmentView.operation.revision >= (operation?.enrollment?.revision ?? 0) ? setup.enrollmentView.operation : operation?.enrollment
   const initialSetup = enrollment?.initialSetup, initialProgress = initialSetup?.progress
   const challenge = setup.enrollmentView?.challenge,
@@ -115,7 +120,7 @@ export function MoteBotSetup({
       )?.label ?? enrollment.domain)
     : ''
   const savedConnection = enrollment?.configured?.connection
-  const profileTask = selected ? selected.action === 'sync' : !!record && !replacing
+  const profileTask = selected ? operation?.action === 'sync' || raw?.action === 'sync' : !!record && !replacing
   const originalImage = setup.profile?.source.expectedAvatarRevision === operation?.source.expectedAvatarRevision &&
     setup.profile?.source.expectedTopicRevision === operation?.source.expectedTopicRevision ? setup.profile?.image : null
   const hasCurrentAction = !!primaryEnrollmentAction || !!savedConnection && !enrollment?.initialPublication && !!onContinue
@@ -202,6 +207,7 @@ export function MoteBotSetup({
       <div className="mote-bot-task">
       {profileTask ? operation?.profileOperationId ? <ConnectionProfileProgress operation={operation.profile} started sourceConfirmed /> : <ConsoleProfileProgress started={!!selected} sourceConfirmed={selected ? !!operation?.snapshot : !!setup.profile} unconfirmed={selected && !operation?.setup ? 'request' : undefined} /> : <BotSetupGuide stage={guideStage} currentStatus={initialProgress ? initialProgress.state === 'complete' ? 'Confirmed' : initialSetupStageLabels[initialProgress.stage] : enrollment?.application && !savedConnection ? 'Created · saving' : undefined} confirmedSteps={[...(setup.profile || operation?.snapshot ? [1] : []), ...(enrollment?.authentication?.stage === 'confirmed' ? [2] : []), ...(enrollment?.application ? [3] : [])]} currentStep={!selected ? 1 : savedConnection ? 4 : enrollment?.application || primaryEnrollmentAction?.kind === 'create' ? 3 : 2} />}
       <div className="mote-bot-task__content">
+      {setup.checking ? <p role="status" data-bot-task-reading aria-busy="true"><LoadingIcon size={14} animation="spin" /> Reading the original saved result…</p> : null}
       {!selected ? (
         <>
           {setup.profile ? (
@@ -475,11 +481,12 @@ export function MoteBotSetup({
             </>
           ) : (
             <>
-              <p role="status">The result is not confirmed. Your original request is retained.</p>
+              {!setup.checking ? <p role="status">{raw ? 'The result is not confirmed. Your original request is retained.' : 'The original request could not be read. Its identifier is kept; no new setup was started.'}</p> : null}
+              {!raw ? <code>{setup.selectedId}</code> : null}
               <button
                 type="button"
                 className="primary-button"
-                onClick={() => void setup.check(raw!.input.operationId)}
+                onClick={() => void setup.check(setup.selectedId!)}
               >
                 Check original result
               </button>
@@ -494,7 +501,7 @@ export function MoteBotSetup({
       )}
       </div>
       </div>
-      {profileTask && selected ? <ConnectionProfileTrace operationId={operation?.profileOperationId ?? undefined} parentId={operation?.operationId ?? raw!.input.operationId} original={operation?.profile} /> : !profileTask ? <ConnectionRequestTrace source={enrollment ? { kind: 'enrollment', operationId: enrollment.operationId } : null} revision={enrollment?.revision} title={enrollment?.initialSetup ? "Sign-in & creation requests" : undefined} /> : null}
+      {profileTask && selected ? <ConnectionProfileTrace operationId={operation?.profileOperationId ?? undefined} parentId={operation?.operationId ?? setup.selectedId!} original={operation?.profile} /> : !profileTask ? <ConnectionRequestTrace source={enrollment ? { kind: 'enrollment', operationId: enrollment.operationId } : null} revision={enrollment?.revision} title={enrollment?.initialSetup ? "Sign-in & creation requests" : undefined} /> : null}
       {!profileTask && enrollment?.configured && initialSetup ? <ConnectionRequestTrace source={{ kind: 'setup', operationId: initialSetup.operationId }} revision={JSON.stringify(initialProgress)} title="Configuration & publication requests" /> : null}
       {resumeId || selected ? (
         <details className="mote-bot-history">

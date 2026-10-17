@@ -13,6 +13,7 @@ import { ConnectionProfilePanel } from './ConnectionProfilePanel'
 import { ConnectionSetupResult, connectionSummary } from './ConnectionSetupResult'
 import { ConnectionManagementSetup } from './ConnectionManagementSetup'
 import { MoteConnectionPanel } from '../MoteConnectionIdentity'
+import { botTaskSelectionKey } from '../../lib/bot-task-selection'
 import { MoteIdentityCards } from './MoteIdentityCards'
 import '../../styles/connector-identity-cards.css'
 import '../../styles/connector-experience.css'
@@ -43,7 +44,8 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
   }
   const [records, setRecords] = useState<ConnectionRecord[]>([]), [issue, setIssue] = useState(''), [busy, setBusy] = useState(false)
   const [listIssue, setListIssue] = useState('')
-  const [view, setView] = useState<'loading' | 'library' | 'enrollment' | 'new' | 'saved' | 'edit' | 'management' | 'mote'>('loading')
+  const [view, setView] = useState<'loading' | 'library' | 'enrollment' | 'new' | 'saved' | 'edit' | 'management' | 'mote'>(() =>
+    !navigationRequest?.moteLarkOrigin && !origin && useAppStore.getState().botTaskSelections[botTaskSelectionKey({ kind: 'enrollment' })] ? 'enrollment' : 'loading')
   const [moteSelection, setMoteSelection] = useState<{ origin: MoteLarkSettingsOrigin; create: boolean } | null>(null)
   useEffect(() => { if (!active) setMoteSelection(current => current?.create ? { ...current, create: false } : current) }, [active])
   const [libraryRevision, setLibraryRevision] = useState(0)

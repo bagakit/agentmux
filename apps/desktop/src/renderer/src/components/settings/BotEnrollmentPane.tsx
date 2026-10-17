@@ -15,6 +15,8 @@ import type {
   ConnectionRecord
 } from '@agentmux/core/connections'
 import { api } from '../../lib/api'
+import { setBotTaskSelection, useAppStore } from '../../store'
+import { botTaskSelectionKey } from '../../lib/bot-task-selection'
 import { SelectionField } from '../SelectionField'
 import { ConnectionSetupResult } from './ConnectionSetupResult'
 import { BrandIcon } from '../BrandIcon'
@@ -26,6 +28,7 @@ import { InitialBotSetupResult, initialSetupStageLabels } from './InitialBotSetu
 const BotIcon = semanticIconComponent('object.conversations')
 const BackIcon = semanticIconComponent('navigation.back')
 const CheckIcon = semanticIconComponent('status.completed')
+const LoadingIcon = semanticIconComponent('status.loading')
 const issuerKey = (issuer: ConnectionEnrollmentCapability) =>
   JSON.stringify([issuer.adapterId, issuer.domain])
 function checkedSetupMessage(operation: ConnectionEnrollmentOperation): string {
@@ -61,7 +64,8 @@ export function useBotEnrollment(active: boolean) {
   const [next, setNext] = useState<string | null>(null)
   const [catalogState, setCatalogState] = useState<'initial' | 'reading' | 'ready' | 'unconfirmed'>('initial')
   const [progressIssue, setProgressIssue] = useState<{ id: string; text: string } | null>(null)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(() => useAppStore.getState().botTaskSelections[botTaskSelectionKey({ kind: 'enrollment' })] ?? null)
+  const [checkingId, setChecking] = useState<string | null>(selectedId)
   const [issuer, setIssuer] = useState(''),
     [label, setLabel] = useState(generatedBotName)
   const [submissions, setSubmissions] = useState<ConnectionEnrollmentBeginInput[]>([])
@@ -73,7 +77,7 @@ export function useBotEnrollment(active: boolean) {
   const [feedback, setFeedback] = useState<{ text: string; detail?: string | undefined }>({ text: '' })
   const setIssue = (text: string, detail?: string) => setFeedback({ text, detail })
   const [pendingWrites, setPendingWrites] = useState<string[]>([])
-  const selection = useRef<string | null>(null),
+  const selection = useRef<string | null>(selectedId),
     selectionEpoch = useRef(0)
   const observationEpoch = useRef(0)
   const epoch = useRef(0),
@@ -134,7 +138,10 @@ export function useBotEnrollment(active: boolean) {
     setPrivateView(null)
     setDriving(false)
     currentInput.current = null
-    if (active) void read(undefined, current)
+    if (active) {
+      void read(undefined, current)
+      if (selection.current) void inspect(selection.current)
+    }
     return () => {
       epoch.current++
       listRead.current++
@@ -170,6 +177,7 @@ export function useBotEnrollment(active: boolean) {
       setSubmissions(previous => [...previous, input!])
       setSubmittedId(input.operationId)
       selection.current = input.operationId
+      setBotTaskSelection({ kind: 'enrollment' }, input.operationId)
       setPrivateView(null)
       setSelectedId(input.operationId)
       const result = await api.connections.call('connection.enrollment.begin', input)
@@ -191,6 +199,7 @@ export function useBotEnrollment(active: boolean) {
   const inspect = async (id = selection.current) => {
     if (!id) return
     setDriving(false)
+    setChecking(id)
     const operationId = id,
       current = epoch.current,
       occurrence = ++selectionEpoch.current
@@ -218,7 +227,7 @@ export function useBotEnrollment(active: boolean) {
           presentError(error)
         )
       }
-    }
+    } finally { if (current === epoch.current && selection.current === operationId && occurrence === selectionEpoch.current) setChecking(null) }
   }
   const advance = async (action?: ConnectionEnrollmentAction, automatic = false) => {
     if (!selectedId || !startWrite(selectedId)) return
@@ -296,6 +305,7 @@ export function useBotEnrollment(active: boolean) {
     next,
     catalogState,
     selectedId,
+    checking: active && checkingId === selectedId && selectedId !== null,
     submitted,
     submissions,
     issue: feedback.text,
@@ -313,6 +323,7 @@ export function useBotEnrollment(active: boolean) {
       if (!operationId) draft.current++
       selectionEpoch.current++
       selection.current = operationId
+      setBotTaskSelection({ kind: 'enrollment' }, operationId)
       setPrivateView(null)
       setDriving(false)
       currentInput.current = null
@@ -325,6 +336,7 @@ export function useBotEnrollment(active: boolean) {
       draft.current++
       selectionEpoch.current++
       selection.current = null
+      setBotTaskSelection({ kind: 'enrollment' }, null)
       setPrivateView(null)
       setDriving(false)
       setPreparing(false)
@@ -398,16 +410,16 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved, onContinue 
   const recover = view?.actions.find(action => action.kind === 'recover-local')
   const primary = (['secure-storage', 'journal'].includes(operation?.diagnostic?.stage ?? '') && !view?.actions.some(action => action.kind === 'read-credential') ? recover : undefined)
     ?? order.map(kind => view?.actions.find(action => action.kind === kind)).find(Boolean)
-  const heading = setupHeading(operation, view, !!current, enrollment.preparing, platform, !!busy)
+  const heading = setupHeading(operation, view, !!current || !!selectedId, enrollment.preparing, platform, !!busy)
   const renew = view?.actions.find(action => action.kind === 'renew-authentication' && action.actionId !== primary?.actionId)
-  const stage = saved ? 'saved' : operation?.application ? 'saving' : operation?.authentication?.stage ?? (current ? 'original' : 'start')
+  const stage = saved ? 'saved' : operation?.application ? 'saving' : operation?.authentication?.stage ?? (current || selectedId ? 'original' : 'start')
   const creationUnconfirmed = operation?.creation && [operation.creation.upload, operation.creation.create].some(state => state === 'unknown' || state === 'dispatching')
   const initialSetup = operation?.initialSetup, initialProgress = initialSetup?.progress
   const guideStage: BotSetupGuideStage = saved ? operation?.initialPublication && initialProgress?.state !== 'complete' ? initialProgress?.state === 'attention' ? 'attention' : 'connect' : 'ready'
     : operation?.application ? 'connect'
     : creationUnconfirmed ? 'attention'
     : enrollment.preparing ? 'scan'
-    : !current ? unfinished ? 'attention' : 'prepare'
+    : !current ? selectedId || unfinished ? 'attention' : 'prepare'
     : stage === 'account' ? 'account'
     : stage === 'confirmed' ? 'create'
     : view?.challenge || ['waiting', 'scanned', 'handoff'].includes(stage) ? 'scan'
@@ -419,7 +431,7 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved, onContinue 
     <div><strong>{name}</strong><span>{current ? enrollment.preset ? 'The name and image chosen for this bot' : 'The name and image already chosen for this setup are kept' : 'Uses the AgentMux image'}</span></div>
   </div>
   return <section className="connector-setup connector-enrollment" data-bot-enrollment data-enrollment-operation={selectedId ?? undefined} data-enrollment-stage={stage}>
-    {current ? <button className="connector-back connector-enrollment__text-action" onClick={() => { enrollment.select(null); void enrollment.read() }}><BackIcon size={13} />All bot setups</button> : null}
+    {current || selectedId ? <button className="connector-back connector-enrollment__text-action" onClick={() => { enrollment.select(null); void enrollment.read() }}><BackIcon size={13} />All bot setups</button> : null}
     <BotSetupGuide stage={guideStage} currentStatus={initialProgress ? initialProgress.state === 'complete' ? 'Confirmed' : initialSetupStageLabels[initialProgress.stage] : operation?.application && !saved ? 'Created · saving' : undefined} confirmedSteps={[...(current || label.trim() ? [1] : []), ...(operation?.authentication?.stage === 'confirmed' ? [2] : []), ...(operation?.application ? [3] : [])]} currentStep={!current ? 1 : saved ? 4 : operation?.application || creationUnconfirmed || stage === 'confirmed' ? 3 : 2} title={enrollment.preparing ? 'Preparing your sign-in' : undefined} description={saved ? operation?.initialPublication ? 'This bot keeps its original application while configuration and first publication continue.' : 'Continue with this saved identity. Your original setup is kept here.' : enrollment.preparing ? 'Preparing a sign-in code for this bot. You can return to this same setup.' : stage === 'scanned' ? 'Confirm the sign-in on your phone, then return to this same setup.' : stage === 'handoff' ? 'Your sign-in is being checked. Stay with this original setup.' : guideStage === 'connect' ? 'The bot has been created. Finish saving this same identity securely.' : undefined} />
     <header className="connector-enrollment__heading">
       {current ? <p className="connector-enrollment__identity"><strong>{current.label}</strong><span>{platform}</span></p> : null}
@@ -427,7 +439,11 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved, onContinue 
       <p className="connector-enrollment__summary">{saved && operation?.initialPublication ? 'Configuration and first publication use this original application and your confirmed account.' : saved && onContinue ? 'Continue with your saved sign-in. You’ll confirm the management account before reviewing this bot.' : heading.summary}</p>
       {operation?.diagnostic ? <p className="connector-enrollment__diagnosis" data-enrollment-diagnosis>{diagnosticCopy[operation.diagnostic.code]}</p> : null}
     </header>
-    {!current ? <>
+    {enrollment.checking ? <p role="status" data-bot-task-reading aria-busy="true"><LoadingIcon size={14} animation="spin" /> Reading the original saved result…</p> : null}
+    {!current ? selectedId ? <div className="connector-enrollment__resume" data-enrollment-unavailable>
+      {!enrollment.checking ? <p>The original setup could not be read. Its identifier is kept; no new setup was started.</p> : null}<code>{selectedId}</code>
+      <button className="small-button" onClick={() => void enrollment.inspect()}>Read stored result</button>{feedback}
+    </div> : <>
       {unfinished ? <div className="connector-enrollment__resume"><strong>{submitted!.label}</strong><p>Your previous setup is kept. Open it to check the result.</p><button data-enrollment-resume className="primary-button" onClick={() => enrollment.select(submitted!.operationId)}>Resume this setup</button>{feedback}</div> : <>
         <div className="connector-enrollment__identity-editor">
           <BrandIcon size={40} />

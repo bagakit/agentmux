@@ -16,8 +16,9 @@ import type {
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { topicPublicCopy } from '../../../shared/scratch-topics'
 import { api } from './api'
-import { retainMoteBotRequest, useAppStore } from '../store'
+import { retainMoteBotRequest, setBotTaskSelection, useAppStore } from '../store'
 import type { MoteBotRequest } from './mote-bot-request'
+import { botTaskSelectionKey } from './bot-task-selection'
 import { initialBotPublication } from './bot-creation-preset'
 
 export type SavedMoteBotProfile = {
@@ -72,6 +73,7 @@ export async function readSavedMoteBotProfile(
 
 /** A bounded UI reading window. Main owns the original operation and every child receipt. */
 export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: string) {
+  const retainedSelection = () => target ? useAppStore.getState().botTaskSelections[botTaskSelectionKey({ kind: 'mote', target })] ?? null : null
   const identity = JSON.stringify(target),
     historySource = JSON.stringify([identity, topicId]),
     lifetime = useRef(0),
@@ -81,7 +83,8 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     draft = useRef(0),
     creating = useRef<number | null>(null)
   const [operations, setOperations] = useState<MoteConnectionOperation[]>([]),
-    [selectedId, setSelected] = useState<string | null>(null)
+    [selectedId, setSelected] = useState<string | null>(retainedSelection)
+  const [checkingId, setChecking] = useState<string | null>(selectedId)
   const [profile, setProfile] = useState<SavedMoteBotProfile | null>(null),
     [capabilities, setCapabilities] = useState<ConnectionEnrollmentCapability[]>([])
   const [message, setMessage] = useState<{ kind: 'issue' | 'notice'; text: string }>({ kind: 'issue', text: '' })
@@ -96,7 +99,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     parentId: string
     value: ConnectionEnrollmentView
   } | null>(null)
-  const selection = useRef<string | null>(null),
+  const selection = useRef<string | null>(selectedId),
     feedback = useRef(0),
     sourceRead = useRef(0),
     listRead = useRef(0)
@@ -105,6 +108,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     selection.current = id
     feedback.current++
     setSelected(id)
+    if (target) setBotTaskSelection({ kind: 'mote', target }, id)
   }
   const raw = useAppStore((state) => state.moteBotRequests)
   const requests = Object.values(raw).filter(
@@ -175,13 +179,15 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     setOperations([])
     setHistoryRead(null)
     setEnrollmentView(null)
-    pick(null)
+    const retained = retainedSelection()
+    pick(retained)
     setProfile(null)
     setIssue('')
     setNext(null)
     draft.current++
     void refreshSource()
     void list()
+    if (retained) void check(retained)
     void api.connections
       .call('connection.enrollment.ls', { limit: 1 })
       .then((value) => {
@@ -320,6 +326,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     const token = lifetime.current,
       order = occurrence(id)
     pick(id)
+    setChecking(advance ? null : id)
     if (!automatic)
       setMessage({ kind: 'notice', text: advance ? 'Checking this setup…' : 'Reading the original result…' })
     if (advance) pending(id, true)
@@ -341,6 +348,8 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
           })
         : (await api.moteConnections.call('space.mote.connection.inspect', { operationId: id })).operation
       if (token === lifetime.current && order === occurrences.current.get(id)) {
+        if (operation && (!target || !sameMotePreferencesTarget(operation.source.target, target)))
+          throw new Error('This original request belongs to another Mote. Its identifier is kept; choose this Mote’s original task.')
         if (operation) accept(operation)
         if (operation?.enrollmentOperationId) {
           const observation = ++enrollmentRead.current
@@ -364,6 +373,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
       if (token === lifetime.current && order === occurrences.current.get(id) && selection.current === id)
         setIssue(presentError(error))
     } finally {
+      if (token === lifetime.current && order === occurrences.current.get(id) && selection.current === id) setChecking(null)
       if (advance) pending(id, false)
     }
   }
@@ -404,6 +414,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     operations,
     requests,
     selectedId,
+    checking: checkingId === selectedId && selectedId !== null,
     enrollmentView: enrollmentView?.parentId === selectedId ? enrollmentView.value : null,
     operation: selectedOperation,
     issue: message.text,
