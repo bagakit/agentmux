@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from 'react'
+import { useId, useState, type MouseEvent, type ReactNode } from 'react'
 import type { AgentInputMailboxItem } from '@agentmux/core/agent-input-mailbox'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import { ConversationMessage, type ConversationContentBoundary, type ConversationMessageProps, type ConversationReadingProps } from './ConversationMessage.js'
@@ -45,17 +45,24 @@ export function inputMailboxPresentation(item: AgentInputMailboxItem): Pick<Conv
 export type InputMailboxDisplayRow = { key: string; time: number; node: ReactNode }
 
 /** A journal reader. Opening, copying and refreshing never dispatch an input or grant control. */
-export function InputMailboxRecords({ mailbox, hostId, reading, onCopy, renderLocal, renderRecords, refreshInParent = false, compact = false }: {
+export function InputMailboxRecords({ mailbox, hostId, reading, onCopy, renderLocal, renderRecords, refreshInParent = false, coverageInParent = false, compact = false, query = '', selection }: {
   mailbox: ReturnType<typeof useAgentInputMailbox>; hostId: string; reading?: ConversationReadingProps | undefined
   onCopy?: ((text: string) => Promise<boolean>) | undefined
   /** The containing surface already owns one refresh action for this reader. */
   refreshInParent?: boolean
+  coverageInParent?: boolean
+  /** Filters only loaded original bodies, using the same literal query as input history. */
+  query?: string
+  /** A containing reader may own detail navigation and return focus. */
+  selection?: { key: string | null; onOpen(key: string, event: MouseEvent<HTMLButtonElement>): void }
   /** Use the mailbox record face while retaining this reader's original selection and details. */
   compact?: boolean
-  renderRecords?(rows: readonly InputMailboxDisplayRow[]): ReactNode
+  renderRecords?(rows: readonly InputMailboxDisplayRow[], selectedDetail: ReactNode): ReactNode
   renderLocal?(item: AgentInputMailboxItem): ReactNode
 }) {
-  const [selected, setSelected] = useState<string | null>(null)
+  const [localSelected, setSelected] = useState<string | null>(null)
+  const selected = selection ? selection.key : localSelected
+  let selectedDetail: ReactNode = null
   const id = useId()
   const platform = useClientUiPlatform()
   const failures = new Map(mailbox.failures.map(item => [inputMailboxItemKey(hostId,item),item]))
@@ -63,7 +70,7 @@ export function InputMailboxRecords({ mailbox, hostId, reading, onCopy, renderLo
     const failed = failures.get(inputMailboxItemKey(hostId,item))
     return failed && failed !== item
   })
-  const records = mailbox.items.map(item => {
+  const records = mailbox.items.filter(item => !query || inputMailboxPresentation(item).text?.includes(query)).map(item => {
       const key = inputMailboxItemKey(hostId,item), view = inputMailboxPresentation(item), local = selected === key ? renderLocal?.(item) : null
       const failed = failures.get(key)
       const author = view.speaker.role === 'external' ? externalSpeakerLabel(view.speaker) : view.speaker.role === 'agent' ? view.speaker.id : view.speaker.role === 'system' ? 'AgentMux' : view.speaker.role === 'human' ? 'Human' : 'Author unknown'
@@ -94,14 +101,15 @@ export function InputMailboxRecords({ mailbox, hostId, reading, onCopy, renderLo
         {local ? <details><summary>此设备的保留操作</summary>{local}</details> : null}
         {!compact || view.text === null ? originalFacts : null}
       </> : null
+      if (selected === key) selectedDetail = <article className="composer-mailbox__detail" data-record-key={key}>{detail}</article>
       return { key, time: item.recordedAt, node: <li key={key} data-input-mailbox-key={key} data-input-mailbox-kind={item.kind}>
         {compact ? <>
           <MailboxRecordRow recordKey={key} label={label} preview={preview || (view.text === null ? '原正文未随本条观察返回' : 'No text recorded.')}
             avatar={<span className="composer-mailbox__record-avatar">{described?.avatar ?? platform.renderMessageAvatar({ speaker: view.speaker, name: label, providerId: described?.providerId, project: described?.project })}</span>}
             metadata={Number.isNaN(observed.getTime()) ? <span>Time not recorded</span> : <time dateTime={observed.toISOString()} title={observed.toLocaleString()}>{observed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>}
             status={state ? <span className={unconfirmed ? 'composer-mailbox__risk' : undefined}>{state}</span> : null}
-            expanded={selected === key} controls={detailId} onOpen={() => setSelected(current => current === key ? null : key)} />
-          <div id={detailId} className="composer-mailbox__detail" hidden={selected !== key}>{detail}</div>
+            {...(selection ? {} : { expanded: selected === key, controls: detailId })} onOpen={(key, event) => selection ? selection.onOpen(key, event) : setSelected(current => current === key ? null : key)} />
+          {selection ? null : <div id={detailId} className="composer-mailbox__detail" hidden={selected !== key}>{detail}</div>}
         </> : <>
         <div className="input-history__meta"><span data-mailbox-author>{author}</span>{view.speaker.role === 'external' && view.source === view.speaker.external?.actor.application.domain ? null : <span>{view.source}</span>}<span>{failed && failed !== item ? '此前已读 · ' : ''}{view.state}</span><time>{observed.toLocaleString()}</time></div>
         <p className="input-history__excerpt">{view.text?.slice(0,320) ?? '原正文未随本条观察返回'}</p>
@@ -113,10 +121,10 @@ export function InputMailboxRecords({ mailbox, hostId, reading, onCopy, renderLo
     })
   return <section className="input-history input-mailbox" aria-label="发送信箱" data-input-mailbox-scope={mailbox.scope} data-compact={compact || undefined}>
     {!compact || !refreshInParent ? <div className="input-history__actions">{compact ? null : <strong>发送记录</strong>}{refreshInParent ? null : <button type="button" disabled={mailbox.loading} onClick={() => void mailbox.refresh()}>刷新发送记录</button>}</div> : null}
-    <p className="input-history__coverage" role="status">{mailbox.loading ? '正在读取已登记输入…' : '已登记输入 · 更早历史未确认'}</p>
+    {coverageInParent ? null : <p className="input-history__coverage" role="status">{mailbox.loading ? '正在读取已登记输入…' : '已登记输入 · 更早历史未确认'}</p>}
     {mailbox.error ? <p className="input-history__notice" role="status">{mailbox.error}</p> : null}
     {mailbox.failures.length ? <p className="input-history__notice" role="status">{retainedPrior ? '当前观察未确认；此前已读记录保留。' : '部分输入当前观察未确认。'}</p> : null}
-    {renderRecords ? renderRecords(records) : records.length ? <ol className="input-history__records" aria-label="已登记的发送记录">{records.map(record => record.node)}</ol> : !mailbox.loading && mailbox.page ? <p className="input-history__notice">本次读取未返回已登记输入；未登记的原输入仍未确认。</p> : null}
-    {mailbox.hasMore ? <button type="button" disabled={mailbox.loading} onClick={() => void mailbox.loadEarlier()}>读取更早的发送记录</button> : null}
+    {renderRecords ? renderRecords(records, selectedDetail) : records.length ? <ol className="input-history__records" aria-label="已登记的发送记录">{records.map(record => record.node)}</ol> : !mailbox.loading && mailbox.page ? <p className="input-history__notice">本次读取未返回已登记输入；未登记的原输入仍未确认。</p> : null}
+    {!selected && mailbox.hasMore ? <button type="button" disabled={mailbox.loading} onClick={() => void mailbox.loadEarlier()}>读取更早的发送记录</button> : null}
   </section>
 }

@@ -7,16 +7,21 @@ import { semanticIconComponent } from '../theme/icons.js'
 import type { useAgentInputHistory } from '../lib/use-agent-input-history.js'
 
 const SearchIcon = semanticIconComponent('action.search')
+const RefreshIcon = semanticIconComponent('action.refresh')
 const FillIcon = semanticIconComponent('action.paste')
 
 export type InputHistoryView = ReturnType<typeof useAgentInputHistory>
 export type InputHistoryLocalEntry = { id: string; text: string; inputOrigin?: { hostId: string; key: import('@agentmux/core/prompt-condition').AgentPromptInputKey } }
 
 /** Pure presentation: query and actions are injected from the original read/draft owners. */
-export function InputHistoryList({ history, localEntries = [], onRead, onFill, onCopy, onFillLocal, beforeRecords, renderRecords, additionalRecords = [] }: {
+export function InputHistoryList({ history, localEntries = [], onRead, onFill, onCopy, onFillLocal, beforeRecords, renderRecords, additionalRecords = [], onRefresh, refreshing, coverage }: {
   history: InputHistoryView; localEntries?: readonly InputHistoryLocalEntry[]
   additionalRecords?: readonly InputMailboxDisplayRow[]
   beforeRecords?: ReactNode
+  onRefresh?(): void
+  refreshing?: boolean
+  /** Combined source coverage belongs to the containing reader. */
+  coverage?: ReactNode
   renderRecords?(messages: readonly AgentSessionUserMessage[]): ReactNode
   onRead?(message: AgentSessionUserMessage): ReactNode
   onFill?(message: AgentSessionUserMessage): Promise<string | void>
@@ -63,9 +68,10 @@ export function InputHistoryList({ history, localEntries = [], onRead, onFill, o
           if (event.key === 'Enter' && isImeOwnedKeyboardEvent(event)) event.preventDefault()
         }} />
       <button type="submit" aria-label="查询当前 Agent 输入历史" title="查询当前 Agent 输入历史">{renderRecords ? <SearchIcon size={14} /> : '查询'}</button>
+      {onRefresh ? <button type="button" aria-label="Refresh inputs" title="Refresh inputs" disabled={refreshing} onClick={onRefresh}><RefreshIcon size={14} /></button> : null}
     </form>
-    <p className="input-history__coverage" role="status">{history.loading ? '正在读取… ' : ''}
-      {history.complete ? '已查完可用记录（本次读取）' : '当前为已读取范围'}{history.examined ? ` · 已检查 ${history.examined} 条` : ''}</p>
+    <div className="input-history__coverage" role="status">{coverage ?? <>{history.loading ? '正在读取… ' : ''}
+      {history.complete ? '已查完可用记录（本次读取）' : '当前为已读取范围'}{history.examined ? ` · 已检查 ${history.examined} 条` : ''}</>}</div>
     {beforeRecords}
     {renderRecords ? renderRecords(history.messages) : records.length ? <ol className="input-history__records" aria-label="当前 Agent 输入历史">
       {records.map(record => {
