@@ -274,7 +274,12 @@ describe('Workspace Zones original Store projection and navigation', () => {
     expect(context.issue).toContain('Git scope is unsupported')
     await dom.render(<WorkspaceZonesPanel workspace={display} onManageWorktrees={vi.fn()} />)
     expect(row(nestedZone).disabled).toBe(false)
-    expect(dom.container.querySelector('[role="status"]')?.textContent).toContain('Files remain available')
+    const notice = dom.container.querySelector<HTMLDetailsElement>('.workspace-zones-notice')!
+    expect(notice.open).toBe(false)
+    expect(notice.querySelector('summary')?.textContent).toBe('Files available. Choose a repository Zone for Git.')
+    expect(notice.querySelector('p')?.textContent).toBe(context.issue)
+    expect(dom.container.querySelector('[role="status"]')).toBeNull()
+    expect(row(nestedZone).getAttribute('aria-pressed')).toBe('true')
     expect(useAppStore.getState().config?.workspaces.find(value => value.id === remote.id)).toBe(remote)
   })
 
@@ -379,6 +384,7 @@ describe('Workspace Zones original Store projection and navigation', () => {
     expect(row(unknownZone).disabled).toBe(false)
     expect(row(unknownZone).getAttribute('aria-pressed')).toBe('true')
     expect(dom.container.querySelector('[role="status"]')?.textContent).toContain('unavailable')
+    expect(dom.container.querySelector('.workspace-zones-notice')).toBeNull()
     const before = useAppStore.getState()
     await clickZone(unknownZone)
     expect(useAppStore.getState().tabs).toBe(before.tabs)
