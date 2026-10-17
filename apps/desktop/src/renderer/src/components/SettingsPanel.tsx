@@ -117,6 +117,10 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
       setTargetIssue('This setting is not shown in the current view. Your edits are kept.')
       return
     }
+    // Native disclosure changes presentation only; the original field and draft stay mounted.
+    for (let parent: HTMLElement | null = target; parent && parent !== pane; parent = parent.parentElement) {
+      if (parent instanceof HTMLDetailsElement) parent.open = true
+    }
     const previousTabIndex = target.getAttribute('tabindex')
     target.tabIndex = -1
     target.focus({ preventScroll: true })
