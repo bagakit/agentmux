@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { app, BrowserWindow, ipcMain, desktopCapturer, type WebContentsView } from 'electron'
+import { app, BrowserWindow, ipcMain, desktopCapturer, nativeImage, type WebContentsView } from 'electron'
 import { connectLocalAgentMux, AgentMuxFileAgentSessionStore, connectAgentMuxRpc, connectHostedAgentMux } from '@agentmux/core'
 import { composeAgentPrompt } from '../../../../../packages/core/src/agent-outbound-message'
 import { AgentMuxControlServer } from '../../../../../packages/core/src/public-rpc-server'
@@ -20,9 +20,11 @@ import { createDesktopApplicationAccessOwner } from '../../../src/main/applicati
 import { desktopBusinessSocketPath } from '../../../src/main/desktop-host'
 
 const directory = process.env.AGENTMUX_CONTEXTUAL_ROOT!, source = process.env.AGENTMUX_CONTEXTUAL_SOURCE!
+const captureOnly = process.env.AGENTMUX_CONTEXTUAL_CAPTURE_ONLY === '1'
 app.on('window-all-closed', () => {})
 const receipt: any = { schema: 'agentmux.browser-contextual-composer.native.v1', passed: false, cases: [], ipc: [],
-  boundary: 'Private actual BrowserPane/WindowOverlay/NativeOverlay/Store → production sandbox preload/registerIpc/RuntimeController → Hosted SDK/Host capture reader/Core → shipped CodexProvider/real ctxmux PTY/repository controlled CLI. Renderer CDP interaction does not attest physical OS input or foreground focus. No user Browser, Agent, clipboard or upstream model is used.',
+  mode: captureOnly ? 'capture-only' : 'opinion-and-trace',
+  boundary: captureOnly ? 'Capture-only uses the original BrowserPane/WindowOverlay/NativeOverlay/Store and production sandbox preload/full Main. It exercises real Browser programs and viewport invariants without sending an opinion or qualifying Host/Provider admission. No user Browser, Agent, clipboard or upstream model is used.' : 'Private actual BrowserPane/WindowOverlay/NativeOverlay/Store → production sandbox preload/registerIpc/RuntimeController → Hosted SDK/Host capture reader/Core → shipped CodexProvider/real ctxmux PTY/repository controlled CLI. Renderer CDP interaction does not attest physical OS input or foreground focus. No user Browser, Agent, clipboard or upstream model is used.',
   physicalInputQualified: false, independentVisualReview: 'not-performed' }
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 async function until<T>(read: () => T | Promise<T>, label: string, attempts = 500): Promise<T> {
@@ -106,8 +108,10 @@ async function run() {
     if (observed.ready !== true) receipt.nativeCaptureAvailability = { status: 'unknown', sourceId, failure: observed.failure,
       next: 'The exact private window capture remains unconfirmed. Preserve Renderer and native document evidence separately.' }
   }
-  void evaluate(`window.agentmux.browser.runScript('contextual-browser', 'await waitForElement("Continue collaboration", 25000); return "finished"', ${JSON.stringify({ id: session.agentSessionId, name: snapshot.label })}, 'contextual-browser-program')`).then(report => { receipt.browserProgram = report })
-  await until(() => evaluate('contextualProof.facts().browser?.activity?.operation?.steps?.length > 0'), 'actual running Browser step')
+  if (!captureOnly) {
+    void evaluate(`window.agentmux.browser.runScript('contextual-browser', 'await waitForElement("Continue collaboration", 25000); return "finished"', ${JSON.stringify({ id: session.agentSessionId, name: snapshot.label })}, 'contextual-browser-program')`).then(report => { receipt.browserProgram = report })
+    await until(() => evaluate('contextualProof.facts().browser?.activity?.operation?.steps?.length > 0'), 'actual running Browser step')
+  }
   const before = await page.webContents.executeJavaScript('({width:innerWidth,height:innerHeight,x:scrollX,y:scrollY,events:pageProof.events.slice()})')
   contents.debugger.attach('1.3')
   const click = async (selector: string) => {
@@ -121,6 +125,17 @@ async function run() {
   const settled = () => evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
   const pageFacts = async () => ({ nativeBounds: page.getBounds(), document: await page.webContents.executeJavaScript('({width:innerWidth,height:innerHeight,x:scrollX,y:scrollY,visual:{width:visualViewport.width,height:visualViewport.height,scale:visualViewport.scale},events:pageProof.events.slice()})'),
     stage: (await evaluate('contextualProof.facts()')).stage, url: page.webContents.getURL() })
+  function capturedImage(bytes: Buffer) {
+    const png = bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+    const jpeg = bytes.length > 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255
+    assert.ok(png || jpeg, 'The native capture must retain its actual PNG or JPEG encoding')
+    const decoded = nativeImage.createFromBuffer(bytes)
+    assert.equal(decoded.isEmpty(), false, 'The original native capture must actually decode')
+    const pixels = decoded.getSize()
+    assert.ok(pixels.width > 0 && pixels.height > 0)
+    return { mimeType: png ? 'image/png' : 'image/jpeg', extension: png ? '.png' : '.jpg', pixels,
+      byteLength: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }
+  }
   async function capture(name: string) {
     for (const [surface, picture] of [['renderer', await contents.capturePage()], ['window', await window!.capturePage()], ['page', await page.webContents.capturePage()]] as const) {
       const file = name + '-' + surface + '.png'
@@ -146,26 +161,44 @@ async function run() {
         assert.equal(native.onScreen, true)
       }
       assert.equal(native.layer, 0)
-      const file = name + '-os-window.png'
-      ;(receipt.nativeCaptureAttempts ??= []).push({ native, sourceId, file })
+      const fileStem = name + '-os-window', file = fileStem + '.png'
+      ;(receipt.nativeCaptureAttempts ??= []).push({ native, sourceId, fileStem })
       if (process.env.AGENTMUX_CONTEXTUAL_CAPTURE_HANDOFF === '1') {
-        const request = { captureId: name, native, sourceId, file, pid: process.pid, foreground }
+        // Retry the exact native route in this unlocked window; a prior locked failure
+        // cannot establish that its OS capture is permanently unavailable.
+        if (foreground && receipt.nativePngAvailability?.status !== 'unknown') {
+          try {
+            execFileSync('/usr/sbin/screencapture', ['-x', '-l', match[1]!, join(directory, file)], { timeout: 5000, stdio: 'pipe' })
+            const image = capturedImage(await readFile(join(directory, file)))
+            assert.equal(image.mimeType, 'image/png', 'The native screencapture PNG output must keep its actual encoding')
+            receipt.nativePngAvailability = { status: 'captured', sourceId }
+            receipt.frames.push({ file, surface: 'os-native-window', native, sourceId, ...image,
+              boundary: 'Original screencapture bytes from this exact private foreground PID/CGWindowID; no composition, crop or re-encoding, separate from physical input proof' })
+            return
+          } catch (error) {
+            receipt.nativePngAvailability = { status: 'unknown', sourceId, failure: String(error),
+              next: 'Use the original CUA screenshot encoding for this exact window.' }
+          }
+        }
+        const request = { captureId: name, native, sourceId, fileStem, pid: process.pid, foreground, encodings: ['image/png', 'image/jpeg'] }
         await writeFile(join(directory, 'capture-request.json'), JSON.stringify(request))
         console.log('native-capture-ready:' + name)
         const captured = await until(async () => {
           try { const response = JSON.parse(await readFile(join(directory, 'capture-response.json'), 'utf8')); return response.captureId === name ? response : null }
           catch { return null }
-        }, 'actual CUA image for the original native capture request')
+        }, 'actual CUA image for the original native capture request', 2400)
         assert.equal(captured.windowId, native.windowId); assert.equal(captured.pid, process.pid)
         if (captured.status === 'unknown') {
           receipt.nativeCaptureAvailability = { status: 'unknown', sourceId, failure: captured.failure,
             next: 'The exact private window capture remains unconfirmed. Renderer images do not replace the native window.' }
           return
         }
-        assert.equal(captured.file, file)
-        const bytes = await readFile(join(directory, file))
-        assert.ok(bytes.byteLength > 1000, 'The actual capture must retain real full-window image bytes')
-        receipt.frames.push({ file, surface: 'os-native-window', native, sourceId, captured,
+        assert.ok(captured.file === fileStem + '.png' || captured.file === fileStem + '.jpg', 'The original capture stays at this exact requested image stem')
+        const image = capturedImage(await readFile(join(directory, captured.file)))
+        assert.equal(captured.mimeType, image.mimeType)
+        assert.equal(captured.file, fileStem + image.extension, 'The original image encoding determines its real extension')
+        assert.deepEqual(captured.pixels, image.pixels)
+        receipt.frames.push({ file: captured.file, surface: 'os-native-window', native, sourceId, captured, ...image,
           boundary: 'Actual CUA screenshot of this exact private window; complete original image bytes, no composition, separate from foreground or physical input proof' })
         return
       }
@@ -194,6 +227,7 @@ async function run() {
     console.log('native-action-ready:' + id)
     ;(receipt.nativeActions ??= []).push(request)
   }
+  if (!captureOnly) {
   if (nativeOpinion) await requestNativeAction('open-discussion', 'button[aria-label="Message Browser operator"]')
   else await click('button[aria-label="Message Browser operator"]')
   await until(() => evaluate('document.querySelector(".browser-contextual-composer__source")?.textContent.includes("Original collaboration page")'), 'actual captured scene in original nonmodal discussion')
@@ -269,6 +303,7 @@ async function run() {
   await until(() => receipt.browserProgram, 'original Browser completion')
   assert.equal(receipt.browserProgram.report.outcome.kind, 'completed')
   await click('button[aria-label="Close discussion"]')
+  }
   const operator = JSON.stringify({ id: session.agentSessionId, name: snapshot.label })
   async function startProgram(id: string) {
     await page.webContents.executeJavaScript('document.querySelector("#continue-proof")?.remove()')
@@ -291,6 +326,11 @@ async function run() {
     await click('.browser-operation-status__trigger')
     await until(() => evaluate('Boolean(document.querySelector("[aria-label=\\"Open browser activity timeline\\"]"))'), 'real activity disclosure')
     observations.push({ phase: 'open-menu', facts: await evaluate('contextualProof.facts()') })
+    if (captureOnly && !receipt.menuCaptured) {
+      await evaluate('contextualProof.appearance("dark")'); await settled()
+      await capture('menu-normal-responsive-dark')
+      receipt.menuCaptured = true
+    }
     await click('[aria-label="Open browser activity timeline"]')
     await until(() => evaluate('Boolean(document.querySelector("aside[aria-label=\\"Browser activity trace\\"]"))'), 'original trace reader')
     await settled()
@@ -352,6 +392,13 @@ async function run() {
   }
   receipt.trace = traceReceipts
   receipt.cases.push({ name: 'native-live-trace-viewport-and-original-dock-footprint', passed: true })
+  if (captureOnly) {
+    assert.equal(receipt.ipc.some((call: any) => call.channel === 'sessions:submitPrompt'), false, 'Capture-only cannot submit or replay an opinion')
+    assert.equal((await core.statusAgent(session.agentSessionId)).run.acceptedInputBytes, 0)
+    assert.equal(receipt.frames.filter((frame: any) => frame.surface === 'os-native-window').length, 13,
+      'Capture-only must retain every actual native window, including the original menu')
+    receipt.captureQualified = true
+  }
   receipt.passed = true
 }
 void run().catch(async error => {

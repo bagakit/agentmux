@@ -9,20 +9,24 @@ import { fixturePath } from './lib/fixture-values.mjs'
 
 const root = resolve(import.meta.dirname, '../../..'), require = createRequire(join(root, 'apps/desktop/package.json'))
 const { build, transform } = createRequire(join(root, 'packages/core/package.json'))('esbuild'), { build: viteBuild } = require('vite')
-const baselineOnly = process.argv.includes('--baseline')
+const captureOnly = process.argv.includes('--capture-only')
+const baselineOnly = captureOnly || process.argv.includes('--baseline')
 const foreground = process.argv.includes('--foreground')
 const captureHandoff = process.argv.includes('--capture-handoff')
 const nativeOpinion = process.argv.includes('--native-opinion')
-const output = join(root, '.tmp/browser-agent-collaboration', foreground ? 'contextual-composer-foreground-proof' : captureHandoff ? 'contextual-composer-capture-proof' : 'contextual-composer-proof')
-assert.ok(process.argv.slice(2).every(arg => ['--baseline', '--foreground', '--capture-handoff', '--native-opinion'].includes(arg)), 'Unsupported contextual proof argument')
+const output = join(root, '.tmp/browser-agent-collaboration', captureOnly ? 'contextual-composer-capture-proof' : foreground ? 'contextual-composer-foreground-proof' : captureHandoff ? 'contextual-composer-capture-proof' : 'contextual-composer-proof')
+assert.ok(process.argv.slice(2).every(arg => ['--baseline', '--foreground', '--capture-handoff', '--native-opinion', '--capture-only'].includes(arg)), 'Unsupported contextual proof argument')
+assert.ok(!captureOnly || captureHandoff && !nativeOpinion, 'Capture-only requires a capture handoff and cannot send an opinion')
 assert.ok(!nativeOpinion || captureHandoff, 'The actual OS opinion uses the external native handoff')
 assert.ok(!nativeOpinion || foreground, 'Actual OS opinion input needs the explicit foreground mode')
 assert.ok(!(foreground || captureHandoff) || process.platform === 'darwin', 'Exact native capture currently uses the macOS window source')
 await mkdir(output, { recursive: true })
 const hash = bytes => createHash('sha256').update(bytes).digest('hex'), sources = new Map()
 const receipt = { schema: 'agentmux.browser-contextual-composer.proof.v1', passed: false, diagnostic: baselineOnly,
+  mode: captureOnly ? 'capture-only' : 'opinion-and-trace',
   candidate: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), runs: [],
   sharedTreeMutations: 0, independentVisualReview: 'not-performed', physicalInputQualified: false,
+  captureQualified: false,
   boundary: 'Actual mounted BrowserPane/Store/NativeOverlay and sandbox preload/full Main registerIpc/RuntimeController, original Hosted/Core capture reader and shipped CodexProvider over real ctxmux PTY to a repository-controlled CLI. CDP Renderer interaction and Renderer captures do not qualify OS foreground input or a composed whole-window visual review.' }
 const save = () => writeFile(join(output, 'receipt.json'), JSON.stringify({ ...receipt, sources: Object.fromEntries(sources) }, null, 2))
 async function bind(file) { const name = relative(root, file), digest = hash(await readFile(file)); if (sources.has(name)) assert.equal(sources.get(name), digest, 'Changed proof input: ' + name); sources.set(name, digest) }
@@ -180,6 +184,7 @@ async function native(label, mutation) {
       if (foreground) env.AGENTMUX_CONTEXTUAL_FOREGROUND = '1'
       if (captureHandoff) env.AGENTMUX_CONTEXTUAL_CAPTURE_HANDOFF = '1'
       if (nativeOpinion) env.AGENTMUX_CONTEXTUAL_NATIVE_OPINION = '1'
+      if (captureOnly) env.AGENTMUX_CONTEXTUAL_CAPTURE_ONLY = '1'
     }
     console.log(label + ': private native fixture ' + directory)
     const result = await execute(require('electron'), [join(directory, 'bootstrap.cjs')], env)
@@ -188,7 +193,7 @@ async function native(label, mutation) {
     assert.equal(result.signal, null, 'Process failure is not behavioral RED')
     const actual = JSON.parse(await readFile(join(directory, 'native-receipt.json'), 'utf8'))
     await writeFile(join(output, label + '.json'), JSON.stringify(actual, null, 2))
-    for (const name of await readdir(directory)) if (name.endsWith('.png')) await copyFile(join(directory, name), join(output, label + '-' + name))
+    for (const name of await readdir(directory)) if (/\.(?:png|jpe?g)$/u.test(name) || name === 'cua-run-receipt.json') await copyFile(join(directory, name), join(output, label + '-' + name))
     assert.deepEqual(actual.cleanupFailures, [], 'All original private native owners must clean up')
     if (mutation) {
       assert.notEqual(result.code, 0); assert.equal(actual.passed, false)
@@ -197,7 +202,13 @@ async function native(label, mutation) {
       assert.equal(consumed.original, sources.get(mutation.file))
     } else {
       assert.equal(result.code, 0, JSON.stringify(actual.failure)); assert.equal(actual.passed, true)
-      assert.equal(actual.cases.length, 2); assert.equal(actual.trace.length, 9)
+      assert.equal(actual.cases.length, captureOnly ? 1 : 2); assert.equal(actual.trace.length, 9)
+      if (captureOnly) {
+        assert.equal(actual.mode, 'capture-only'); assert.equal(actual.nativeOpinion, undefined)
+        assert.equal(actual.ipc.some(call => call.channel === 'sessions:submitPrompt'), false, 'Capture-only cannot submit another opinion')
+        assert.equal(actual.captureQualified, true)
+        receipt.captureQualified = true
+      }
     }
     receipt.runs.push({ label, mutation: mutation?.id ?? null, consumed, actual }); await save()
     console.log(label + ': ' + (mutation ? 'AssertionRED' : 'GREEN'))
@@ -229,9 +240,9 @@ try {
     for (const mutation of mutations) await native('mutant-' + mutation.id, mutation)
     await native('native-restored')
     assert.equal(receipt.runs.length, mutations.length + 2)
-    for (const file of sources.keys()) await bind(join(root, file))
-    assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), receipt.candidate, 'The qualified candidate must stay exact')
-    receipt.passed = true
   }
+  for (const file of sources.keys()) await bind(join(root, file))
+  assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), receipt.candidate, 'The qualified candidate must stay exact')
+  receipt.passed = !baselineOnly
   await save()
-} catch (error) { receipt.failure = { message: error.message, stack: error.stack }; await save(); throw error }
+} catch (error) { receipt.captureQualified = false; receipt.failure = { message: error.message, stack: error.stack }; await save(); throw error }
