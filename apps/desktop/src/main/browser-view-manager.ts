@@ -187,7 +187,8 @@ type PresentationFirstPress = {
   result: BrowserPresentationActivationReceipt | null
 }
 
-type PresentationDocument = { frame: WebFrameMain; session: Session; url: string }
+type PresentationFrameIdentity = Pick<WebFrameMain, 'processId' | 'frameToken'>
+type PresentationDocument = PresentationFrameIdentity & { frame: WebFrameMain; session: Session; url: string }
 type PresentationLease = {
   id: string
   entry: BrowserEntry
@@ -511,8 +512,8 @@ export class BrowserViewManager {
 
   registerPresentation(sender: WebContents, frame: WebFrameMain | null, input: {
     browserId: string; occurrence: BrowserPresentationOccurrence; geometry: BrowserPresentationGeometry; window?: WorkbenchWindowDocument
-  }): BrowserPresentationLease {
-    const document = this.requirePresentationDocument(sender, frame)
+  }, originalDocument: PresentationFrameIdentity | null): BrowserPresentationLease {
+    const document = this.requirePresentationDocument(sender, frame, originalDocument)
     const entry = this.require(input.browserId)
     const occurrence = input.occurrence
     if (!occurrence?.presentationId?.trim() || !occurrence.location ||
@@ -769,7 +770,7 @@ export class BrowserViewManager {
     if (!Array.isArray(modifiers) || modifiers.some(value => !['shift', 'control', 'alt', 'meta'].includes(value)) || new Set(modifiers).size !== modifiers.length) throw new Error('Browser first press has invalid mouse modifiers')
   }
 
-  private requirePresentationDocument(sender: WebContents, frame: WebFrameMain | null): PresentationDocument {
+  private requirePresentationDocument(sender: WebContents, frame: WebFrameMain | null, originalDocument?: PresentationFrameIdentity | null): PresentationDocument {
     // Keep native validation order; explain the first rejected fact without disclosing page data.
     const reason = this.presentationDisposed ? 'manager-disposed'
       : this.window.isDestroyed() ? 'window-destroyed'
@@ -779,7 +780,7 @@ export class BrowserViewManager {
       : frame.detached ? 'frame-detached'
       : frame !== sender.mainFrame ? 'frame-mismatch'
       : frame.parent !== null ? 'frame-not-top-level'
-      : sender.isLoadingMainFrame() ? 'document-loading'
+      : originalDocument !== undefined && (!originalDocument || originalDocument.processId !== frame.processId || originalDocument.frameToken !== frame.frameToken) ? 'document-changed'
       : !sender.getURL() ? 'document-url-missing'
       : frame.url !== sender.getURL() ? 'document-url-mismatch'
       : null
@@ -789,7 +790,7 @@ export class BrowserViewManager {
     if (!this.disposePresentationRequester) this.attachPresentationRequester(sender)
     const current = this.presentationDocument
     if (current && !this.isPresentationDocumentCurrent(current)) this.invalidatePresentationRequester()
-    return this.presentationDocument ??= { frame, session: sender.session, url: sender.getURL() }
+    return this.presentationDocument ??= { frame, processId: frame.processId, frameToken: frame.frameToken, session: sender.session, url: sender.getURL() }
   }
 
   private isPresentationDocumentCurrent(document: PresentationDocument): boolean {
@@ -798,7 +799,8 @@ export class BrowserViewManager {
     return !sender.isDestroyed() &&
       document === this.presentationDocument && sender.session === document.session &&
       !document.frame.detached && sender.mainFrame === document.frame &&
-      !sender.isLoadingMainFrame() && document.frame.url === document.url && sender.getURL() === document.url
+      document.frame.processId === document.processId && document.frame.frameToken === document.frameToken &&
+      document.frame.url === document.url && sender.getURL() === document.url
   }
 
   private attachPresentationRequester(sender: WebContents): void {
@@ -810,7 +812,12 @@ export class BrowserViewManager {
       if (isMainFrame && this.presentationDocument) this.presentationDocument.url = url
     }
     const invalidate = (): void => this.invalidatePresentationRequester()
+    const onCommit = (): void => {
+      const document = this.presentationDocument, frame = sender.mainFrame
+      if (document && (document.processId !== frame.processId || document.frameToken !== frame.frameToken)) invalidate()
+    }
     sender.on('did-start-navigation', onNavigation)
+    sender.on('did-navigate', onCommit)
     sender.on('did-navigate-in-page', onSameDocument)
     sender.on('render-process-gone', invalidate)
     sender.on('destroyed', invalidate)
@@ -831,6 +838,7 @@ export class BrowserViewManager {
     }, { useSystemPicker: false })
     this.disposePresentationRequester = () => {
       sender.removeListener('did-start-navigation', onNavigation)
+      sender.removeListener('did-navigate', onCommit)
       sender.removeListener('did-navigate-in-page', onSameDocument)
       sender.removeListener('render-process-gone', invalidate)
       sender.removeListener('destroyed', invalidate)
