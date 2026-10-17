@@ -410,15 +410,22 @@ it('retains typed connection observations without upgrading unknown continuation
   expect(sent.mock.calls.some(([, report]) => report.kind === 'terminal-output-gap')).toBe(false)
   expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toContain('original')
   const absence = sent.mock.calls[2]![1]
-  await act(async () => fixture.receive!({ type: 'core', hostId: 'local', event: { type: 'terminal-snapshot', afterByte: 8,
+  const continued: RuntimeEvent = { type: 'core', hostId: 'local', event: { type: 'terminal-snapshot', afterByte: 8,
     agentSessionId: session.id, run: { nativeService: null, ...session.control.run, kind: 'agent', providerId: 'codex', executorId: 'codex',
       agentSessionId: session.id, workspacePath: session.workspacePath, pid: 123, state: 'running', cols: 80, rows: 24, observedAt: 3,
       latestOutputBytes: 8, acceptedInputBytes: 0 }, terminal: { type: 'basic-vt', checkpoint: { runId: session.control.run.runId,
         throughByte: 8, resizeRevision: 0, size: { cols: 80, rows: 24 }, restoreSize: { cols: 80, rows: 24 },
         restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 }, restoreBytes: new TextEncoder().encode('original'), resizes: [] },
-    replay: [], gap: null, resizeRevision: 0 } }))
+    replay: [], gap: null, resizeRevision: 0 } }
+  await act(async () => fixture.receive!(continued))
   await vi.waitFor(() => expect(sent).toHaveBeenCalledTimes(4))
   expect(sent.mock.calls[3]![1]).toMatchObject({ kind: 'terminal-recovered', relatedOccurrenceId: absence.occurrenceId,
     metadata: { continuationType: 'basic-vt', liveReady: true } })
+  // The next original attachment observation begins an independent attempt in TerminalView.
+  await act(async () => fixture.receive!(continued))
+  await vi.waitFor(() => expect(sent).toHaveBeenCalledTimes(5))
+  expect(sent.mock.calls[4]![1]).toMatchObject({ kind: 'terminal-recovered', relatedOccurrenceId: null,
+    metadata: { continuationType: 'basic-vt', liveReady: true } })
+  expect(sent.mock.calls[4]![1].attemptId).not.toBe(sent.mock.calls[3]![1].attemptId)
   expect(attach).toHaveBeenCalledTimes(1); expect(write).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled()
 })

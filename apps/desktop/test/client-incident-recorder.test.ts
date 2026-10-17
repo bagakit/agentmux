@@ -28,6 +28,72 @@ it('freezes the failed attempt before refresh and retains explicit association a
   expect(read.mock.calls.filter(([geometry]) => geometry)).toHaveLength(3)
 })
 
+it('ends a recovered failure association before the next independent attempt', () => {
+  const reports: AgentMuxClientIncidentReport[] = []
+  const recorder = createClientIncidentRecorder({ hostId: 'local', agentSessionId: 'agent', runId: 'run', regionId: () => null,
+    read: () => ({}), send: report => { reports.push(report) } })
+  const failure = recorder.capture('terminal-attach-failed', 'attach-failed')
+  recorder.begin('refresh-requested')
+  recorder.capture('terminal-recovered', 'observation-restored')
+  recorder.begin('attach-received')
+  recorder.capture('terminal-recovered', 'observation-restored')
+  expect(reports).toHaveLength(3)
+  expect(reports[1]!.relatedOccurrenceId).toBe(failure)
+  expect(reports[2]!.relatedOccurrenceId).toBeNull()
+  expect(reports[2]!.attemptId).not.toBe(reports[1]!.attemptId)
+})
+
+it('preserves unresolved failure across refresh and recovery of a different occurrence', () => {
+  const reports: AgentMuxClientIncidentReport[] = []
+  const recorder = createClientIncidentRecorder({ hostId: 'local', agentSessionId: 'agent', runId: 'run', regionId: () => null,
+    read: () => ({}), send: report => { reports.push(report) } })
+  const failure = recorder.capture('terminal-attach-failed', 'attach-failed')
+  recorder.begin('refresh-requested')
+  const refresh = recorder.capture('terminal-refresh', 'refresh-requested')
+  recorder.capture('terminal-refresh', 'refresh-completed', undefined, refresh)
+  recorder.capture('terminal-recovered', 'observation-restored', undefined, 'different-occurrence')
+  recorder.begin('attach-received')
+  recorder.capture('terminal-recovered', 'observation-restored')
+  expect(reports.map(report => report.relatedOccurrenceId)).toEqual([null, failure, refresh, 'different-occurrence', failure])
+})
+
+it('retains pending failure when recovery publication fails and clears only a later successful recovery', () => {
+  const reports: AgentMuxClientIncidentReport[] = []
+  const send = vi.fn((report: AgentMuxClientIncidentReport): void => { reports.push(report) })
+  const recorder = createClientIncidentRecorder({ hostId: 'local', agentSessionId: 'agent', runId: 'run', regionId: () => null,
+    read: () => ({}), send })
+  const failure = recorder.capture('terminal-attach-failed', 'attach-failed')
+  send.mockImplementationOnce(() => { throw Error('recovery publication unavailable') })
+  expect(recorder.capture('terminal-recovered', 'observation-restored')).toBeNull()
+  recorder.begin('refresh-requested')
+  recorder.capture('terminal-refresh', 'refresh-requested')
+  recorder.capture('terminal-recovered', 'observation-restored')
+  recorder.begin('attach-received')
+  recorder.capture('terminal-recovered', 'observation-restored')
+  expect(reports.map(report => report.relatedOccurrenceId)).toEqual([null, failure, failure, null])
+  expect(reports[1]!.metadata.reporterDropped).toBe(1)
+})
+
+it('does not clear a newer failure observed during recovery publication', () => {
+  const reports: AgentMuxClientIncidentReport[] = []
+  let recorder!: ReturnType<typeof createClientIncidentRecorder>, reentrantFailure: string | null = null
+  let publishNewFailure = true
+  recorder = createClientIncidentRecorder({ hostId: 'local', agentSessionId: 'agent', runId: 'run', regionId: () => null,
+    read: () => ({}), send: report => {
+      reports.push(report)
+      if (report.kind === 'terminal-recovered' && publishNewFailure) {
+        publishNewFailure = false
+        reentrantFailure = recorder.capture('terminal-replay-failed', 'replay-failed')
+      }
+    } })
+  const failure = recorder.capture('terminal-attach-failed', 'attach-failed')
+  recorder.capture('terminal-recovered', 'observation-restored')
+  recorder.begin('refresh-requested')
+  recorder.capture('terminal-refresh', 'refresh-requested')
+  expect(reentrantFailure).toEqual(expect.any(String))
+  expect(reports.map(report => report.relatedOccurrenceId)).toEqual([null, failure, failure, reentrantFailure])
+})
+
 it('bounds stage history, reports overwritten coverage and withholds arbitrary codes', () => {
   const reports: AgentMuxClientIncidentReport[] = [], read = vi.fn(() => ({ visible: true }))
   const recorder = createClientIncidentRecorder({ hostId: 'local', agentSessionId: null, runId: 'raw-run', regionId: () => null,
