@@ -1,12 +1,15 @@
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { WorkspaceLayout } from '@agentmux/layout'
 import { workbenchDisplayReferenceMatches } from './workbench-resource-display'
-import { pmoTeamsTopicFloatingAgentIssue, PMO_FLOATING_TAB_SLOT_PREFIX, type PmoTeamsTopicFloatingState } from './pmo-teams-topic-floating'
-import { sameWorkbenchProjectionSelection, workbenchProjectionLocationsMatchOwner, type WorkbenchProjection, type WorkbenchProjectionSelection } from './workbench-projection'
+import { pmoTeamsTopicFloatingTargetTabId, pmoTeamsTopicFloatingTargetTopicId, pmoTeamsTopicFloatingAgentIssue, PMO_FLOATING_TAB_SLOT_PREFIX, type PmoTeamsTopicFloatingState } from './pmo-teams-topic-floating'
+import { resolveWorkbenchZone, sameWorkbenchProjectionSelection, workbenchProjectionLocationsMatchOwner, type WorkbenchProjection, type WorkbenchProjectionSelection } from './workbench-projection'
 import type { WorkbenchTab } from './workbench-tabs'
+import { homeZoneId } from '../../../shared/space-addresses'
+import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 
 export type MoteWorkbenchProjectionResult = {
   catalog: AgentMuxSpaceCatalog | null
+  activeReference?: WorkbenchProjectionSelection | undefined
   projection: WorkbenchProjection | null
   choices: readonly WorkbenchProjectionSelection[]
   retainedTabId: string | undefined
@@ -15,7 +18,45 @@ export type MoteWorkbenchProjectionResult = {
 }
 
 /** Address resolution only. The shared projector still owns composition, visibility and content. */
-export function moteWorkbenchProjection(catalog: AgentMuxSpaceCatalog | null, tab: WorkbenchTab | undefined,
+export function moteWorkbenchProjection(catalog: AgentMuxSpaceCatalog | null, tabs: Readonly<Record<string, WorkbenchTab>>,
+  floating: PmoTeamsTopicFloatingState, onSelect: WorkbenchProjection['onSelect'], layouts: Readonly<Record<string, WorkspaceLayout>>): MoteWorkbenchProjectionResult {
+  const tabId = pmoTeamsTopicFloatingTargetTabId(floating, tabs, layouts[SCRATCH_WORKSPACE_ID], null)
+  const tab = tabId ? tabs[tabId] : undefined
+  // Without an exact occurrence, the public Zone owns composition and selection.
+  // A saved empty choice is a preference, not evidence of an empty entity.
+  if (catalog && !floating.agentTarget && !floating.targetAgent && (!floating.targetTabId || tab)) {
+    const topicId = pmoTeamsTopicFloatingTargetTopicId(floating, tabs)
+    const spaces = catalog.spaces.filter(space => space.kind === 'mote' && space.topicId === topicId)
+    const zoneId = spaces.length === 1 ? homeZoneId(spaces[0]!.spaceId) : undefined
+    const member = tab ? catalog.tabs.find(member => member.tabId === tab.id) : undefined
+    const targetMatches = !floating.targetTabId || tab?.workspaceId === SCRATCH_WORKSPACE_ID && tab.topicId === topicId && member?.zoneId === zoneId
+    const hasMembers = catalog.tabs.some(member => member.zoneId === zoneId)
+    const original = layouts[SCRATCH_WORKSPACE_ID]
+    const membersKnown = hasMembers || original && original.groups.every(group => group.tabOrder.every(id => Boolean(tabs[id])))
+    const held = floating.reference
+    const resourceLayout = zoneId ? catalog.zones.find(zone => zone.zoneId === zoneId) : undefined
+    const exactLocations = held ? catalog.locations.filter(location => sameWorkbenchProjectionSelection(held, location)) : []
+    const repeatedGroups = held ? new Set(catalog.locations.filter(location => location.tabId === held.tabId &&
+      location.displayWorkspaceId === held.displayWorkspaceId).map(location => location.groupId)) : new Set()
+    const ordinaryChoice = held === undefined || held === null && !floating.targetTabId || held &&
+      held.displayWorkspaceId === resourceLayout?.workspaceId && repeatedGroups.size === 1 &&
+      workbenchProjectionLocationsMatchOwner(catalog, held.tabId, exactLocations) &&
+      Boolean(tab?.regions[held.regionId]) && workbenchDisplayReferenceMatches(layouts[held.displayWorkspaceId], held)
+    const preferences = held ? [held] : tab ? [{ tabId: tab.id, regionId: tab.layout.activeRegionId }] : []
+    const projection = zoneId && ordinaryChoice && targetMatches && membersKnown ? resolveWorkbenchZone(zoneId, catalog, layouts, tabs,
+      PMO_FLOATING_TAB_SLOT_PREFIX.replace(/-slot$/, ''), preferences, onSelect) : null
+    if (projection) {
+      const layout = projection.composition ?? layouts[projection.displayWorkspaceId]
+      const activeReference = projection.selection.find(reference => reference.tabId === floating.targetTabId) ??
+        projection.selection.find(reference => reference.groupId === layout?.activeGroupId) ?? projection.selection[0]
+      return { catalog, projection, activeReference, choices: [], retainedTabId: activeReference?.tabId, issue: null, issueKind: null }
+    }
+  }
+  return moteOccurrenceProjection(catalog, tab, floating, onSelect, layouts)
+}
+
+/** Exact saved occurrences and Agent bookmarks keep their original recovery boundary. */
+function moteOccurrenceProjection(catalog: AgentMuxSpaceCatalog | null, tab: WorkbenchTab | undefined,
   floating: PmoTeamsTopicFloatingState, onSelect: WorkbenchProjection['onSelect'], layouts: Readonly<Record<string, WorkspaceLayout>>): MoteWorkbenchProjectionResult {
   const retained: MoteWorkbenchProjectionResult = { catalog, projection: null, choices: [], retainedTabId: floating.targetTabId ?? tab?.id, issue: null, issueKind: null }
   const identityIssue = pmoTeamsTopicFloatingAgentIssue(floating, tab)

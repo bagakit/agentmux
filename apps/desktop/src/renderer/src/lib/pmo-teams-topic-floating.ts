@@ -188,11 +188,7 @@ function initialFloatingSelection(floating: PmoTeamsTopicFloatingState): PmoTeam
   if (Object.hasOwn(floating, 'reference') && floating.reference !== undefined) return next
   const regionId = tab.layout.activeRegionId
   if (!tab.regions[regionId]) return next
-  const activeLayout = current.layouts[SCRATCH_WORKSPACE_ID]
-  const activeGroup = floating.targetTabId === undefined ? activeLayout?.groups.find(group =>
-    group.id === activeLayout.activeGroupId && group.activeTabId === tab.id && groupIds(activeLayout.root).includes(group.id)) : undefined
-  if (activeGroup) return { ...next, reference: {
-    displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId: activeGroup.id, tabId: tab.id, regionId } }
+  if (floating.targetTabId === undefined) return next
   const references = Object.entries(current.layouts).flatMap(([displayWorkspaceId, layout]) => {
     const visible = new Set(groupIds(layout.root))
     return layout.groups.filter(group => visible.has(group.id) && group.tabOrder.includes(tab.id))
@@ -244,10 +240,6 @@ export function pmoTeamsTopicFloatingViewTargets(
   const heldRegion = floating.reference ? heldTab?.regions[floating.reference.regionId] : undefined
   const heldSession = heldRegion?.kind === 'agent' ? sessionPresentationById(current.sessions).get(heldRegion.sessionId) : undefined
   if (pmoTeamsTopicFloatingAgentIssue(floating, heldTab, heldSession)) return undefined
-  const topicId = pmoTeamsTopicFloatingTargetTopicId(floating, tabs)
-  const tabId = pmoTeamsTopicFloatingTargetTabId(floating, tabs, layout, pmoSessionId)
-  const tab = tabId ? tabs[tabId] : undefined
-  if (!tab || !floating.agentTarget && (tab.workspaceId !== SCRATCH_WORKSPACE_ID || tab.topicId !== topicId)) return undefined
   if (projection) {
     const current = useAppStore.getState()
     const projected = projectWorkbenchProjection(current.layouts[projection.displayWorkspaceId], tabs, projection)
@@ -261,6 +253,10 @@ export function pmoTeamsTopicFloatingViewTargets(
     })
     return targets
   }
+  const topicId = pmoTeamsTopicFloatingTargetTopicId(floating, tabs)
+  const tabId = pmoTeamsTopicFloatingTargetTabId(floating, tabs, layout, pmoSessionId)
+  const tab = tabId ? tabs[tabId] : undefined
+  if (!tab || !floating.agentTarget && (tab.workspaceId !== SCRATCH_WORKSPACE_ID || tab.topicId !== topicId)) return undefined
   // An unknown address keeps only its original entity, never a guessed occurrence.
   return { [tab.id]: [{
     hostId: `${PMO_FLOATING_TAB_SLOT_PREFIX}:${tab.id}`, active: floating.open, visible: true, surface: 'mote'
@@ -286,7 +282,7 @@ export function keepPmoTeamsTopicFloatingPreview(): void { cancelClose() }
 export function pinPmoTeamsTopicFloating(): void {
   cancelClose()
   captureFocus()
-  update(initialFloatingSelection({ ...snapshot(), open: true, preview: false }))
+  update({ ...snapshot(), open: true, preview: false })
 }
 export function requestPmoTeamsTopicFloatingOpen(options?: { targetTopicId?: string; targetTabId?: string; reference?: WorkbenchProjectionSelection; onReturnFocus?: () => void }): void {
   cancelClose()
