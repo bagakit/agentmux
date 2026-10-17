@@ -58,18 +58,20 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
   const openProseLink = fileOpening.activateHttp
   const surfaceRef = useRef<HTMLElement>(null)
   const noteRef = useRef<ConversationAnnotationNoteHandle>(null)
+  const historyActions = useRef({ onCloseHistory, selectRegion })
+  historyActions.current = { onCloseHistory, selectRegion }
   const closeHistory = useCallback(() => {
     const document = surfaceRef.current?.ownerDocument
     const closingFocus = document?.activeElement
-    onCloseHistory?.()
-    selectRegion()
+    historyActions.current.onCloseHistory?.()
+    historyActions.current.selectRegion()
     document?.defaultView?.requestAnimationFrame(() => {
       const active = document.activeElement
       if (visible && historyReturnTrigger?.isConnected && !historyReturnTrigger.disabled &&
         !historyReturnTrigger.closest('[hidden], [inert], [aria-hidden="true"]') &&
         (!active || active === document.body || active === closingFocus)) historyReturnTrigger.focus()
     })
-  }, [onCloseHistory, selectRegion, visible, historyReturnTrigger])
+  }, [visible, historyReturnTrigger])
   const selectAnnotation = useCallback((selection: ConversationAnnotationSelection) => {
     selectRegion()
     noteRef.current?.select(selection, sessionId)
