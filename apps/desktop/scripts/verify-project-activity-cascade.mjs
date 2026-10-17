@@ -5,7 +5,7 @@ const base = 'apps/desktop/src/renderer/src/'
 await verifyRendererSourceMutations({
   name: 'activity-cascade',
   owningConfig: 'apps/desktop/scripts/fixtures/project-activity-cascade/vitest.mutations.config.mts',
-  evidenceRoot: resolve(import.meta.dirname, '../../../.bagakit/feature-tracker/activity-clarity/mutations-final'),
+  evidenceRoot: resolve(import.meta.dirname, '../../../.bagakit/feature-tracker/activity-navigation-result/mutations'),
   tests: ['apps/desktop/test/project-activity-spaces.test.ts', 'apps/desktop/test/project-activity-menu.test.tsx', 'apps/desktop/test/project-activity-clarity.test.tsx'],
   sources: [base + 'lib/project-activity-spaces.ts', base + 'components/ProjectActivityMenu.tsx',
     base + 'components/ProjectActivity.tsx', base + 'components/ProjectActivityMetrics.tsx',
@@ -27,6 +27,9 @@ await verifyRendererSourceMutations({
     { label: 'exact-unplaced-subject', file: base + 'components/ProjectActivityMenu.tsx',
       before: 'subjects.length !== 1 || subjects[0]?.hostId !== session.hostId || surfaces.some(surface => agentRegionExecution(surface)?.hostId !== session.hostId)',
       after: 'false' },
+    { label: 'original-selection-result', file: base + 'components/ProjectActivityMenu.tsx',
+      before: 'return state.selectSession(session.id)',
+      after: 'state.selectSession(session.id); return true' },
     { label: 'direct-single-group', file: base + 'components/ProjectActivityMenu.tsx',
       before: 'spaces.zones.length + (spaces.unplaced.length ? 1 : 0) === 1',
       after: 'spaces.zones.length + (spaces.unplaced.length ? 1 : 0) === -1' },
