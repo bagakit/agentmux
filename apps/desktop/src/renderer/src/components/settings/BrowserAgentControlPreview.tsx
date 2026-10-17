@@ -78,7 +78,7 @@ export function BrowserAgentControlPreview({ preferences, active, dirty }: { pre
             <div className="amux-browser-agent-glow" />
             <div className="amux-browser-agent-pointer" data-label-side={point.x > .5 ? 'left' : 'right'} data-label-above={preferences.showDiscussion || point.y > .7} style={{ transform: `translate3d(${position.left}px,${position.top}px,0)` }}>
               <svg className="amux-browser-agent-arrow" viewBox="0 0 18 24"><path d="M1 1 16 14l-7 1-3 7z" /></svg>
-              <span className="amux-browser-agent-label"><span className="amux-browser-agent-avatar"><AgentProviderIcon providerId="codex" size={17} /></span><span className="amux-browser-agent-label-text">Sample Agent<small>{phase === 'waiting' ? 'Waiting' : `Click · step ${step + 1}`}</small></span></span>
+              <span className="amux-browser-agent-label"><span className="amux-browser-agent-avatar"><AgentProviderIcon providerId="codex" size={17} /></span><span className="amux-browser-agent-label-text"><span className="amux-browser-agent-label-name">Sample Agent</span><small>{phase === 'waiting' ? 'Waiting' : `Click · step ${step + 1}`}</small></span></span>
             </div>
             {ripple !== null ? <div key={ripple} className="amux-browser-agent-ripple" style={position} /> : null}
           </div>

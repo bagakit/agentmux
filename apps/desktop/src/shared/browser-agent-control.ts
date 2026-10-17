@@ -72,7 +72,9 @@ export function browserAgentEffectsCss(preferences: BrowserAgentControlPreferenc
 .amux-browser-agent-pointer[data-label-above="true"] .amux-browser-agent-label{top:auto;bottom:5px}
 .amux-browser-agent-avatar{display:grid;place-items:center;flex:none;width:23px;height:23px;border-radius:50%;background:var(--amux-agent-color);color:#142019;font-size:10px;font-weight:700;overflow:hidden}
 .amux-browser-agent-label-text{min-width:0;overflow:hidden;text-overflow:ellipsis;font-weight:600}
-.amux-browser-agent-label small{display:block;font-size:10px;opacity:.72;font-weight:400}
+.amux-browser-agent-label-name{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;font-weight:500}
+.amux-browser-agent-label-separator{display:none}
+.amux-browser-agent-label small{display:block;font-size:10px;opacity:.72;font-weight:400;white-space:nowrap}
 .amux-browser-agent-ripple{position:absolute;width:${p.clickRadius * 2}px;height:${p.clickRadius * 2}px;margin:${-p.clickRadius}px 0 0 ${-p.clickRadius}px;border:2px solid var(--amux-agent-color);border-radius:50%;box-sizing:border-box;opacity:0;display:${p.clickRipple ? 'block' : 'none'};animation:amux-agent-click ${p.clickDurationMs}ms ease-out both}
 @keyframes amux-agent-click{0%{transform:scale(.12);opacity:.95;background:rgba(${rgb},.28)}100%{transform:scale(1);opacity:0;background:transparent}}
 @keyframes amux-agent-glow-breathe{0%,100%{opacity:${p.glowOpacity * .55}}50%{opacity:${p.glowOpacity}}}
