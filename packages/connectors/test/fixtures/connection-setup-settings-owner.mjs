@@ -9,9 +9,9 @@ import { DesktopConnectorSecrets } from '../../../../apps/desktop/src/main/conne
 const root = process.argv[2], mode = process.argv[3], key = Buffer.alloc(32, 13)
 const database = new DatabaseSync(join(root, 'connections.sqlite'))
 const secrets = new DesktopConnectorSecrets(database, {
-  isEncryptionAvailable: () => true,
-  encryptString: value => { const iv = randomBytes(12), cipher = createCipheriv('aes-256-gcm', key, iv); const bytes = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]); return Buffer.concat([iv, cipher.getAuthTag(), bytes]) },
-  decryptString: value => { const cipher = createDecipheriv('aes-256-gcm', key, value.subarray(0, 12)); cipher.setAuthTag(value.subarray(12, 28)); return Buffer.concat([cipher.update(value.subarray(28)), cipher.final()]).toString() }
+  isAsyncEncryptionAvailable: async () => true,
+  encryptStringAsync: async value => { const iv = randomBytes(12), cipher = createCipheriv('aes-256-gcm', key, iv); const bytes = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]); return Buffer.concat([iv, cipher.getAuthTag(), bytes]) },
+  decryptStringAsync: async value => { const cipher = createDecipheriv('aes-256-gcm', key, value.subarray(0, 12)); cipher.setAuthTag(value.subarray(12, 28)); return { result: (Buffer.concat([cipher.update(value.subarray(28)), cipher.final()]).toString()), shouldReEncrypt: false } }
 })
 let readStarted = false
 const originalStore = DesktopConnectorSecrets.prototype.store
