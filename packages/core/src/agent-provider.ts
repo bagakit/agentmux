@@ -123,6 +123,11 @@ export type AgentProviderPreparedPromptTransport = Readonly<{
 export type AgentProviderSessionStatusContext = AgentProviderPromptExecutionContext & { signal: AbortSignal }
 export type AgentProviderManagedLaunch = { plan: AgentLaunchPlan; nativeActor?: AgentPrivateNativeActor }
 export type AgentProviderNativeInputContext = { processId: number; nativeActor: AgentPrivateNativeActor; workspacePath: string; signal: AbortSignal }
+/** Provider resolves the actual input channel; a managed frontend actor is only one possible origin. */
+export type AgentProviderNativeInputPreparationContext = Omit<AgentProviderNativeInputContext, 'nativeActor'> & {
+  nativeActor?: AgentPrivateNativeActor
+  nativeHandle?: Readonly<AgentNativeSessionHandle>
+}
 /** Read the frozen original turn through the actor of an already successful native resume. */
 export type AgentProviderResumedTurnInterruptionContext = AgentProviderNativeInputContext & {
   nativeHandle: Readonly<AgentNativeSessionHandle>
@@ -130,10 +135,12 @@ export type AgentProviderResumedTurnInterruptionContext = AgentProviderNativeInp
 }
 export type AgentProviderPreparedNativeInput = {
   plan: AgentNativePromptInputPlan
+  /** Recheck the exact prepared source without sending, loading or replacing a conversation. */
+  assertCurrent(): Promise<void>
   /** Called only after Core persists the original claim and correlation. */
   send(prompt: string, plan: AgentNativePromptInputPlan): Promise<{ outcome: 'admitted'; turnId: string } |
     { outcome: 'admitted'; queuedSubmissionId: string } | { outcome: 'not-applied'; errorCode: number }>
-  dispose(): void
+  dispose(): void | Promise<void>
 }
 export type AgentProviderSessionStatusObservationContext = AgentProviderSessionStatusContext & {
   onStatus(status: AgentProviderSessionStatus): void
@@ -175,7 +182,7 @@ export type AgentProvider = {
   prepareManagedLaunch?(plan: AgentLaunchPlan, lifecycleOperationId: string, context: { kind: 'create' | 'resume' | 'fork'; prompt?: string }): Promise<AgentProviderManagedLaunch>
   /** Encode replies from an exact Provider-read record; no caller-supplied display text. */
   planQuestionReply?(record: AgentSessionHistoryItem, answers: readonly AgentSessionHistoryQuestionAnswer[]): string
-  prepareNativeInput?(context: AgentProviderNativeInputContext, target: { providerId: string; nativeSessionId: string; expectedTurnId?: string; idleOnly?: true }): Promise<AgentProviderPreparedNativeInput>
+  prepareNativeInput?(context: AgentProviderNativeInputPreparationContext, target: { providerId: string; nativeSessionId: string; expectedTurnId?: string; idleOnly?: true }): Promise<AgentProviderPreparedNativeInput>
   observeTerminalFrontend?(context: AgentProviderNativeInputContext & { onFrontend(observation: AgentTerminalFrontendObservation): void; onUnavailable(message: string): void }): Promise<{ dispose(): void }>
   reconnectTerminalFrontend?(context: AgentProviderNativeInputContext, request: { operationId: string; expectedFrontendId: string; nativeSessionId: string }): Promise<AgentTerminalFrontendObservation>
   resolveLaunchArgv(selections: LaunchOptionSelection): string[]
