@@ -165,7 +165,8 @@ export function parseConnectionEnrollmentDiagnostic(
 ): ConnectionEnrollmentDiagnostic {
   const p = object(value, ['stage', 'code', 'httpStatus', 'step', 'failure', 'nativeCode', 'boundary', 'redirectReason'])
   if (!['response', 'authentication'].includes(String(p.stage)) && p.httpStatus !== undefined) fail()
-  if (p.stage !== 'authentication' && (p.step !== undefined || p.failure !== undefined || p.nativeCode !== undefined || p.boundary !== undefined)) fail()
+  if (!['response', 'authentication'].includes(String(p.stage)) && p.nativeCode !== undefined) fail()
+  if (p.stage !== 'authentication' && (p.step !== undefined || p.failure !== undefined || p.boundary !== undefined)) fail()
   if (p.redirectReason !== undefined && (p.stage !== 'authentication' || p.failure !== 'redirect-unconfirmed')) fail()
   switch (p.stage) {
     case 'request':
@@ -174,7 +175,8 @@ export function parseConnectionEnrollmentDiagnostic(
       return {
         stage: p.stage,
         code: choice(p.code, ['http-status', 'platform-error', 'invalid-json', 'invalid-response']),
-        ...(p.httpStatus === undefined ? {} : { httpStatus: integer(p.httpStatus, 100, 599) })
+        ...(p.httpStatus === undefined ? {} : { httpStatus: integer(p.httpStatus, 100, 599) }),
+        ...(p.nativeCode === undefined ? {} : { nativeCode: integer(p.nativeCode, Number.MIN_SAFE_INTEGER) })
       }
     case 'challenge':
       return {
