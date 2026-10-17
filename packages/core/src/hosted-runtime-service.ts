@@ -120,7 +120,7 @@ function count(value: unknown): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new AgentMuxError('Invalid byte cursor.', 'INVALID_CONTROL_REQUEST')
   return value
 }
-type Consumer = { events?: InitialReader; histories: Set<() => void>; readers: Set<() => Promise<void>>; runs: Map<string, () => Promise<void>>; pending: number }
+type Consumer = { events?: InitialReader; stopMessages?: () => void; histories: Set<() => void>; readers: Set<() => Promise<void>>; runs: Map<string, () => Promise<void>>; pending: number }
 type RunReaders = { readers: Set<Reader>; open: Promise<AgentMuxRunAttachment>; closing?: Promise<void> }
 
 /** One semantic owner and one matching-Run dispatch index. Readers never own a Run's lifecycle. */
@@ -138,7 +138,7 @@ export class AgentMuxHostedRuntimeService {
     this.unsubscribe = client.onEvent(event => {
       if (event.type === 'connection-state' && event.observationOrigin?.boundary === 'core-ctxmux') this.connection = structuredClone(event)
       this.publish(event)
-    })
+    }, { observeMessages: false })
   }
   publishControlEndpointState(state: AgentMuxControlEndpointState): void {
     this.endpointState = { ...state, type: 'control-endpoint-state', evidence: { source: 'agentmux', observedAt: Date.now() } }
@@ -431,6 +431,7 @@ export class AgentMuxHostedRuntimeService {
       const dispose = async () => {
         events.close()
         if (consumer.events !== events) return
+        consumer.stopMessages?.(); delete consumer.stopMessages
         delete consumer.events
         // Legacy attachments deliver into this event destination. Independent
         // Attachment and history readers own their own output and remain open.
@@ -441,6 +442,12 @@ export class AgentMuxHostedRuntimeService {
       try { events = reader(emit, undefined, () => { void dispose().catch(error => this.releaseUnconfirmed(error)) }, true) }
       catch (error) { this.pruneConsumer(id, consumer); throw error }
       consumer.events = events
+      consumer.stopMessages = this.client.onEvent(event => {
+        if (consumer.events !== events || events.closed ||
+          event.type !== 'agent-message-changed' && event.type !== 'agent-message-observation') return
+        try { events.enqueue(hostedTransfer({ kind: 'event', event }, randomUUID())) }
+        catch (error) { events.fail(error) }
+      }, { observeMessages: true })
       if (this.endpointState) events.enqueue(hostedTransfer({ kind: 'event', event: this.endpointState }, randomUUID()))
       const abort = () => { void dispose().catch(error => this.releaseUnconfirmed(error)) }
       context.signal?.addEventListener('abort', abort, { once: true })
@@ -561,6 +568,7 @@ export class AgentMuxHostedRuntimeService {
   async releaseConsumer(id: string): Promise<boolean> {
     const consumer = this.consumers.get(id)
     if (!consumer) return false
+    consumer.stopMessages?.(); delete consumer.stopMessages
     consumer.events?.close()
     for (const release of [...consumer.histories]) release()
     const releases = await Promise.allSettled([...consumer.readers, ...consumer.runs.values()].map(release => release()))

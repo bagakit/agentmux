@@ -4,6 +4,25 @@ import { hostedCarrierPerformance } from './performance-diagnostics.js'
 import { AgentMuxError } from './errors.js'
 import { base64 } from '@scure/base'
 
+/** Only original journal metadata can identify an A2A arrival over the Host wire. */
+export function parseHostedMessageEvent(value: unknown): void {
+  const p = value as Record<string, unknown>
+  const invalid = () => { throw new AgentMuxError('The Host supplied invalid A2A observation metadata.', 'CONTROL_PROTOCOL_ERROR') }
+  if (!p || typeof p !== 'object' || Array.isArray(p)) invalid()
+  const identity = (key: string) => { if (typeof p[key] !== 'string' || !p[key]) invalid() }
+  if (p.type === 'agent-message-changed') {
+    if (Object.keys(p).some(key => !['type', 'messageId', 'sequence', 'messageSequence', 'recordKind', 'live', 'senderSessionId', 'recipientSessionId'].includes(key)) || typeof p.live !== 'boolean') invalid()
+    for (const key of ['messageId', 'senderSessionId', 'recipientSessionId']) identity(key)
+    for (const key of ['sequence', 'messageSequence']) if (!Number.isSafeInteger(p[key]) || (p[key] as number) < 1) invalid()
+    if (!['message', 'delivery', 'delivery-issue', 'a2a-notification', 'a2a-notification-result'].includes(p.recordKind as string) ||
+      (p.messageSequence as number) > (p.sequence as number) ||
+      (p.recordKind === 'message' ? p.messageSequence !== p.sequence : p.messageSequence === p.sequence)) invalid()
+  } else if (p.type === 'agent-message-observation') {
+    if (Object.keys(p).some(key => !['type', 'state', 'code', 'message'].includes(key)) || !['available', 'unavailable'].includes(p.state as string)) invalid()
+    for (const key of ['code', 'message']) if (p[key] !== undefined) identity(key)
+  } else invalid()
+}
+
 type TransferBudget = { minimumBytes: number }
 function reserveTransferBytes(budget: TransferBudget | undefined, bytes: number): void {
   if (!budget) return

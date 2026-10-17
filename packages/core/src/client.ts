@@ -859,6 +859,8 @@ export class AgentMuxClient {
   private readonly continuityInputsUnsubscribe: () => void
   private readonly publisher = new AgentMuxClientEventPublisher()
   private messageReadUsed = false
+  private messageEventReaders = 0
+  private messageLegacyEventReaders = 0
   private readonly messageNotifications: AgentMuxMessageNotifications
   private readonly messageNotificationsUnsubscribe: () => void
   private messageObservationDisposed = false
@@ -1981,16 +1983,60 @@ export class AgentMuxClient {
    * subscribe again. Other Consumers and Run capabilities remain available.
    */
   onEvent<Result>(listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions): () => void {
-    const release = this.publisher.onEvent(listener, options)
-    this.observeMessageReads()
-    return () => {
-      release()
-      if (!this.publisher.hasEventListeners) { this.messageObservation?.dispose(); this.messageObservation = undefined }
+    // Each selected registration takes its own current journal cut. A late reader
+    // cannot mistake an older shared observer's catch-up for a newly arrived message.
+    let active = true, through: number | undefined, stop = () => {}, opening: Promise<void> | undefined, retryCut = false
+    const selected = options?.observeMessages === true
+    const legacy = options?.observeMessages === undefined
+    let observation: ReturnType<typeof observeMessageJournal> | undefined
+    const establishCut = () => {
+      if (!active || !selected || through !== undefined || !observation) return
+      if (opening) { retryCut = true; return }
+      retryCut = false
+      const current = observation
+      opening = this.messageQueue.messageChanges().then(async cut => {
+        if (!active || this.messageObservation !== current) return
+        through = cut.cut.throughSequence
+        await current.refresh()
+      }).catch(error => {
+        if (active) this.publisher.publishTo(receive, { type: 'agent-message-observation', state: 'unavailable',
+          code: 'AGENT_MESSAGE_OBSERVATION_UNAVAILABLE', message: error instanceof Error ? error.message : String(error) })
+      }).finally(() => {
+        opening = undefined
+        if (retryCut) { retryCut = false; establishCut() }
+      })
     }
+    const receive = (event: AgentMuxClientEvent) => {
+      if (options?.observeMessages === false && (event.type === 'agent-message-changed' || event.type === 'agent-message-observation')) return
+      if (selected && (event.type === 'agent-message-changed' || event.type === 'agent-message-observation')) {
+        // Recovery establishes THIS reader's new current cut, never borrows an
+        // older reader's cursor and never replays the interval that was unknown.
+        if (through === undefined && (event.type === 'agent-message-changed' || event.state === 'available')) establishCut()
+        if (event.type === 'agent-message-changed' ? through === undefined || event.sequence <= through
+          : event.state === 'available' && through === undefined) return
+      }
+      return listener(event)
+    }
+    const release = this.publisher.onEvent(receive, { ...options, onError: error => { stop(); if (options?.onError) options.onError(error); else console.error(error) } })
+    if (selected) this.messageEventReaders++
+    if (legacy) this.messageLegacyEventReaders++
+    observation = this.observeMessageReads()
+    establishCut()
+    stop = () => {
+      if (!active) return
+      active = false
+      release()
+      if (selected) this.messageEventReaders--
+      if (legacy) this.messageLegacyEventReaders--
+      if (!this.messageEventReaders && !(this.messageReadUsed && this.messageLegacyEventReaders)) {
+        this.messageObservation?.dispose(); this.messageObservation = undefined
+      }
+    }
+    return stop
   }
 
   private observeMessageReads() {
-    if (this.messageObservationDisposed || !this.messageReadUsed || !this.publisher.hasEventListeners) return
+    if (this.messageObservationDisposed || !(this.messageReadUsed && this.messageLegacyEventReaders || this.messageEventReaders) || !this.publisher.hasEventListeners) return
     this.messageObservation ??= observeMessageJournal(this.messageQueue, event => {
       this.publisher.publish(event)
       if (!this.publisher.hasEventListeners) { this.messageObservation?.dispose(); this.messageObservation = undefined }

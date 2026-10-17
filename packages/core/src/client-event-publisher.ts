@@ -77,6 +77,12 @@ export class AgentMuxClientEventPublisher {
     if (event.type === 'agent-timeline') this.deliver(event, [...(this.timelineListeners.get(event.agentSessionId) ?? [])])
   }
 
+  /** A registration-local observation failure does not invalidate other readers. */
+  publishTo(listener: (event: AgentMuxClientEvent) => unknown, event: AgentMuxClientEvent): void {
+    const options = this.listeners.get(listener)
+    if (options) this.deliver(event, [[listener, options]])
+  }
+
   private deliver(event: AgentMuxClientEvent, listeners: Array<[(event: AgentMuxClientEvent) => unknown, AgentMuxClientEventListenerOptions]>): void {
     const failures: AgentMuxError[] = []
     for (const [listener, options] of listeners) {

@@ -89,7 +89,9 @@ class MessageJournalObserver {
             const next = await this.queue.messageChanges(this.cursor, this.cancellation.signal)
             if (this.disposed) return
             this.cursor = next.cut
-            for (const event of next.changes) this.emit(event)
+            // Catch-up repairs a reader's projection; it must not replay banners.
+            const live = this.state?.state === 'available'
+            for (const event of next.changes) this.emit({ ...event, live })
             if (next.hasMore) this.queued = true
             else this.available()
           } catch (error) { this.unavailable(error) }
