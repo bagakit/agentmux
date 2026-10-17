@@ -6,7 +6,8 @@ import type { AppConfig, HostConfig, HostCheckResult, SshHostConfig } from '../s
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { HostSettingsPane } from '../src/renderer/src/components/settings/HostSettingsPane'
 import { hostsSettingsModule } from '../src/renderer/src/components/settings/modules/hosts'
-import { amuxConversationSettingsModule } from '../src/renderer/src/components/settings/modules/amux-conversation'
+import { inappConversationSettingsModule } from '../src/renderer/src/components/settings/modules/inapp-conversation'
+import { mobileSettingsModule } from '../src/renderer/src/components/settings/modules/mobile'
 import { settingsModules, settingsNavGroups, visibleSettingsSections } from '../src/renderer/src/components/settings/settings-modules'
 import type { SettingsPageId } from '../src/renderer/src/components/settings/settings-modules'
 import { api } from '../src/renderer/src/lib/api'
@@ -67,20 +68,27 @@ function deferred<T>() { let resolve!: (value: T) => void; const promise = new P
 describe('Conversation Channels settings', () => {
   it('catalog: every navigation projection has the same conversation channel contributions without authorization guesses', async () => {
     const groups = settingsNavGroups(''), connections = groups.find(group => group.id === 'conversation-channels')
-    expect(groups.find(group => group.id === 'remote')?.items.map(item => item.id), 'Remote group owns exactly environments').toEqual(['hosts'])
-    expect(connections?.items.map(item => item.id), 'Conversation Channels owns the original native and external consumers').toEqual(['amux-conversation', 'lark'])
+    expect(groups.find(group => group.id === 'remote')?.items.map(item => item.id), 'Remote owns environments and mobile access').toEqual(['hosts', 'mobile'])
+    expect(connections?.items.map(item => item.id), 'Conversation Channels owns only the in-app and external conversations').toEqual(['inapp-conversation', 'lark'])
     expect(hostsSettingsModule.title).toBe('Environments')
     expect(groups.find(group => group.id === 'toolkit')?.items.map(item => item.id)).not.toContain('lark')
     expect(groups.some(group => group.id === 'connections')).toBe(false)
-    expect(groups.find(group => group.id === 'resources')!.items.some(item => item.id === 'hosts' || item.id === 'amux-conversation')).toBe(false)
-    expect(visibleSettingsSections('手机').map(item => item.id)).toContain('amux-conversation')
+    expect(groups.find(group => group.id === 'resources')!.items.some(item => ['hosts', 'mobile', 'inapp-conversation'].includes(item.id))).toBe(false)
+    const phoneResults = visibleSettingsSections('手机').map(item => item.id)
+    expect(phoneResults).toContain('mobile')
+    expect(phoneResults).not.toContain('inapp-conversation')
     expect(visibleSettingsSections('ssh').map(item => item.id)).toContain('hosts')
     expect(new Set(settingsModules.map(item => item.id)).size).toBe(settingsModules.length)
-    expect(amuxConversationSettingsModule.savedSummary()).toBe('Native conversations and device access')
+    expect(settingsModules.some(item => (item.id as string) === 'amux-conversation')).toBe(false)
+    expect(inappConversationSettingsModule.savedSummary()).toBe('Conversation view and shared preferences')
+    expect(mobileSettingsModule.savedSummary()).toBe('Phone and device access')
     await dom.render(<Shell section="overview" />)
     expect(dom.container.querySelector('#settings-overview-conversation-channels')).not.toBeNull()
     expect(dom.container.querySelector('#settings-overview-remote')).not.toBeNull()
-    expect(dom.container.querySelector('[data-settings-section="amux-conversation"]')).not.toBeNull()
+    expect([...dom.container.querySelectorAll<HTMLElement>('[aria-labelledby="settings-overview-conversation-channels"] [data-settings-section]')]
+      .map(node => node.dataset.settingsSection)).toEqual(['inapp-conversation', 'lark'])
+    expect([...dom.container.querySelectorAll<HTMLElement>('[aria-labelledby="settings-overview-remote"] [data-settings-section]')]
+      .map(node => node.dataset.settingsSection)).toEqual(['hosts', 'mobile'])
     expect(dom.container.querySelectorAll('[data-settings-pane]')).toHaveLength(0)
     expect(api.deviceManagement.ls).not.toHaveBeenCalled()
   })
@@ -153,10 +161,10 @@ describe('Conversation Channels settings', () => {
     vi.spyOn(api.deviceManagement, 'link').mockResolvedValue(structuredClone(deviceInvitation))
     await dom.render(<Shell section="hosts" />); await select(H); await toggleAdvanced(true); await fill(name(), 'Across device section')
     const originalPane = pane(), originalField = name(), originalDisclosure = editor().querySelector('.host-edit-disclosure')
-    await dom.click('[data-settings-target="amux-conversation"]')
+    await dom.click('[data-settings-target="mobile"]')
     expect(api.deviceManagement.ls).toHaveBeenCalledExactlyOnceWith({})
     expect(pane()).toBe(originalPane); expect(originalPane.hidden).toBe(true); expect(originalField.isConnected).toBe(true)
-    const invite = [...dom.container.querySelectorAll<HTMLButtonElement>('[data-settings-pane="amux-conversation"] button')].find(node => node.textContent?.includes('Copy connection link'))!
+    const invite = [...dom.container.querySelectorAll<HTMLButtonElement>('[data-settings-pane="mobile"] button')].find(node => node.textContent?.includes('Copy connection link'))!
     await act(async () => invite.click())
     expect(api.deviceManagement.link).toHaveBeenCalledExactlyOnceWith({})
     expect(dom.container.querySelector('[aria-label="Phone connection link"]')).not.toBeNull()
@@ -170,20 +178,80 @@ describe('Conversation Channels settings', () => {
     await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, appearance: { ...state.config!.appearance, terminalFontSize: 17 } } })))
     await select(H, 'projects'); await select(H)
     expect(api.deviceManagement.ls).toHaveBeenCalledTimes(reads)
-    await dom.click('[data-settings-target="amux-conversation"]')
+    await dom.click('[data-settings-target="mobile"]')
     expect(api.deviceManagement.ls).toHaveBeenCalledTimes(reads + 1)
     expect(api.deviceManagement.link).toHaveBeenCalledTimes(1)
   })
-  it('opens the original Input and Mailbox owner from native conversation settings without a channel switch', async () => {
+  it('in-app conversation reaches the original preference owners and read-only references while keeping input drafts and save baselines', async () => {
+    const completion = { command: '/', skill: '$', reference: '@', keywords: true }
+    const before = await api.config.get()
+    await api.config.save({ ...before, messageToolInitialLayout: 'one-line', messageToolCompletion: completion }, before)
+    const realSave = api.config.save.bind(api.config)
+    const write = vi.spyOn(api.config, 'save')
     const link = vi.spyOn(api.deviceManagement, 'link'), revoke = vi.spyOn(api.deviceManagement, 'revoke')
-    await dom.render(<Shell section="amux-conversation" />)
-    expect(api.deviceManagement.ls).toHaveBeenCalledExactlyOnceWith({})
-    const native = dom.container.querySelector('[data-settings-pane="amux-conversation"]')!
-    expect(native.querySelector('[data-message-tool-settings]')).toBeNull()
-    const input = [...native.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Open Input & Mailbox')!
-    expect(input).toBeDefined(); await act(async () => input.click())
-    expect(dom.container.querySelector('[data-settings-pane="message-tool"] [data-message-tool-settings]')).not.toBeNull()
-    expect(native.hasAttribute('hidden')).toBe(true)
+    const agentDrafts = useAppStore.getState().agentComposerDrafts
+    const viewModes = { 'agent-1': 'activity', 'agent-2': 'terminal' } as const
+    useAppStore.setState({ viewModes })
+    await dom.render(<Shell section="inapp-conversation" />)
+    const native = dom.container.querySelector<HTMLElement>('[data-settings-pane="inapp-conversation"]')!
+    expect(native).not.toBeNull()
+    expect(native.querySelector('[data-message-tool-settings], .settings-devices-pane, input, [role="switch"], [data-settings-save-bar]')).toBeNull()
+    expect(native.textContent).toContain('Show Activity')
+    expect(native.textContent).toContain('Show Terminal')
+    expect(useAppStore.getState().viewModes).toBe(viewModes)
+    const navigate = async (label: string, id: string) => {
+      const button = [...native.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === label)
+      expect(button, `Original InApp link ${label}`).toBeDefined()
+      await act(async () => button!.click())
+      const target = dom.container.querySelector<HTMLElement>(`[data-settings-pane="${id}"]`)!
+      expect(target).not.toBeNull(); expect(target.hidden).toBe(false); expect(target.inert).toBe(false)
+      expect(native.hidden).toBe(true)
+      expect(useAppStore.getState().viewModes).toBe(viewModes)
+      return target
+    }
+    const input = await navigate('Open Input & Mailbox', 'message-tool')
+    expect(input.querySelector('[data-message-tool-settings]')).not.toBeNull()
+    const command = input.querySelector<HTMLInputElement>('[aria-label="Commands prefix"]')!
+    const layout = input.querySelector<HTMLInputElement>('input[value="two-line"]')!
+    await fill(command, '!'); await act(async () => layout.click())
+    input.scrollTop = 137
+    await dom.click('[data-settings-target="inapp-conversation"]')
+    const appearance = await navigate('Open Appearance', 'appearance')
+    expect(appearance.querySelector('[aria-label="Terminal font size in pixels"]')).not.toBeNull()
+    await dom.click('[data-settings-target="inapp-conversation"]')
+    const shortcuts = await navigate('Open Keyboard shortcuts', 'keyboard-shortcuts')
+    expect(shortcuts.querySelectorAll('[data-binding-id]').length).toBeGreaterThan(0)
+    expect(shortcuts.querySelector('[data-settings-save-bar]')).toBeNull()
+    await dom.click('[data-settings-target="inapp-conversation"]')
+    const protocols = await navigate('Open amux Protocols', 'amux-protocols')
+    expect(protocols.querySelector('[aria-label="amux protocol reference"]')).not.toBeNull()
+    expect(protocols.querySelector('[data-settings-save-bar]')).toBeNull()
+    await dom.click('[data-settings-target="inapp-conversation"]')
+    expect(await navigate('Open Input & Mailbox', 'message-tool')).toBe(input)
+    expect(input.querySelector('[aria-label="Commands prefix"]')).toBe(command)
+    expect(command.value).toBe('!'); expect(layout.checked).toBe(true); expect(input.scrollTop).toBe(137)
+    expect(dom.container.querySelectorAll('[data-message-tool-settings]')).toHaveLength(1)
+    expect(write).not.toHaveBeenCalled()
+    const current = await api.config.get()
+    await act(async () => realSave({ ...current, copyPathsAsAbsolute: !current.copyPathsAsAbsolute }, current))
+    const latest = await api.config.get()
+    const saveCompletion = input.querySelector<HTMLButtonElement>('[data-message-tool-completion] [data-settings-save-bar] button')!
+    await act(async () => saveCompletion.click())
+    expect(write).toHaveBeenNthCalledWith(1,
+      { ...latest, messageToolCompletion: { ...completion, command: '!' } },
+      { ...latest, messageToolCompletion: completion })
+    const afterCompletion = await api.config.get()
+    const saveLayout = input.querySelector<HTMLButtonElement>('[data-settings-field="initial-layout"] [data-settings-save-bar] button')!
+    await act(async () => saveLayout.click())
+    expect(write).toHaveBeenNthCalledWith(2,
+      { ...afterCompletion, messageToolInitialLayout: 'two-line' },
+      { ...afterCompletion, messageToolInitialLayout: 'one-line' })
+    expect(write).toHaveBeenCalledTimes(2)
+    expect((await api.config.get()).messageToolCompletion).toEqual({ ...completion, command: '!' })
+    expect((await api.config.get()).messageToolInitialLayout).toBe('two-line')
+    expect(useAppStore.getState().agentComposerDrafts).toBe(agentDrafts)
+    expect(useAppStore.getState().viewModes).toBe(viewModes)
+    expect(api.deviceManagement.ls).not.toHaveBeenCalled()
     expect(link).not.toHaveBeenCalled(); expect(revoke).not.toHaveBeenCalled()
   })
   it('captures complete Host Test and never reuses Ready after a later input', async () => {
