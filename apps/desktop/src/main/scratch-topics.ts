@@ -29,6 +29,7 @@ import {
   DEFAULT_TOPIC_WIKI,
   DEFAULT_PMO_TEAMS_TOPIC_WIKI,
   MOTE_COORDINATION_ROLE,
+  TOPIC_KNOWLEDGE_GUIDANCE,
   PMO_TEAMS_TOPIC_ID,
   scratchTopicDirectoryName, scratchTopicIdFromDirectoryName,
   scratchTopicStorageRoots,
@@ -45,7 +46,7 @@ Add the facts and constraints every collaborator should know.
 
 ## Working notes
 
-Keep durable decisions here. Put deliverables in \`outcome/\` and source material in \`refs/\`.
+Keep a short current summary of confirmed decisions, open questions and links to useful knowledge here. Put deliverables in \`outcome/\` and source material in \`refs/\`.
 `
 
 function topicPrompt(directoryPath: string, wiki: { content: string; version: string }, mote: boolean): string {
@@ -701,7 +702,7 @@ Current user instructions, authorization, actual capabilities and authoritative 
 ${moteSoulForBehaviorContext(snapshot.soul.content, behaviorContext?.present ?? false)}`] : []),
         ...(behaviorContext ? [behaviorContext.prompt] : []),
         ...(memoryContext ? [memoryContext] : []),
-        ...(snapshot.kind === 'mote' ? [MOTE_COORDINATION_ROLE] : []),
+        ...(snapshot.kind === 'mote' ? [MOTE_COORDINATION_ROLE] : snapshot.kind === 'topic' ? [TOPIC_KNOWLEDGE_GUIDANCE] : []),
         ...(snapshot.readError ? [`Some original context could not be read. Keep existing work and inspect the original files before relying on missing context:\n${snapshot.readError}`] : []),
         snapshot.wiki?.enabled
         ? topicPrompt(absolutePath, {

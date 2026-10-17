@@ -20,6 +20,8 @@ Current user instructions, authorization and authoritative Project, Goal, Sessio
 
 export const DEFAULT_TOPIC_AGENT_INSTRUCTIONS = `# Topic working guide
 
+Read \`"$AGENTMUX_CLI" topic --skill\` for the knowledge structure, maintenance duties and original-file workflow.
+
 Read [topic.md](./topic.md) for the shared goal and confirmed context. Read relevant source material in \`refs/\` and existing results in \`outcome/\` before repeating work. Inspect \`.agents/\` for collaborators; their plaques are handoff notes, not live Runtime state.
 
 Keep durable decisions and evidence in the original files. Preserve user edits and unrelated material. This is a shared Topic, not a persistent Mote persona.
@@ -28,10 +30,12 @@ ${PUBLIC_CAPABILITIES}`
 
 export const DEFAULT_MOTE_AGENT_INSTRUCTIONS = `# Mote working guide
 
+Read \`"$AGENTMUX_CLI" mote --skill\` for cooperation and knowledge maintenance.
+
 - [SOUL.md](./SOUL.md): persistent identity.
 - [MEMORY.md](./MEMORY.md): short confirmed-knowledge index.
 - [topic.md](./topic.md), relevant \`refs/\`, \`outcome/\` and \`.agents/\`: original context, evidence and handoffs.
 - \`BEHAVIOR.md\` / \`MOTE.md\`, when present: cooperation preferences / quick-mode settings.
 
-Read only relevant originals. The Mote skill owns cooperation and memory methods; use the public Files owner for exact resources, revisions and save receipts. These notes grant no permissions and are not live Runtime state.
+Read only relevant originals; use the public Files owner for exact resources, revisions and save receipts. These notes grant no permissions and are not live Runtime state.
 `
