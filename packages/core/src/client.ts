@@ -73,6 +73,7 @@ import { parseBrowserInputContext, parseBrowserInputContextSource } from './brow
 import { hashAgentCapability, issueAgentCapability, resolveCapabilityAuthor, type AgentCapabilityBinding } from './agent-capability.js'
 import { planDiscussion } from './agent-discussion.js'
 import { agentSpawnContext, type AgentMuxSpawnCreator } from './agent-spawn.js'
+import { parseAgentSpawnQuery, type AgentMuxSpawnQuery, type AgentMuxSpawnPage } from './agent-spawn-query.js'
 import {
   DurableAgentMuxMessageQueue,
   validateAgentMuxMessageEnvelope,
@@ -338,6 +339,12 @@ function creationIntentDigest(input: AgentMuxAgentCreateInput, agentSessionId: s
     ...(creationCaller && (!author || creator!.agentSessionId !== author.agentSessionId || creator!.run.runId !== author.run.runId)
       ? { creationCaller: { agentSessionId: creator!.agentSessionId, run: creator!.run } } : {}),
     ...(initialMessage ? { initialMessage: { callerAgentSessionId: author!.agentSessionId, run: author!.run, threadId: initialMessage.threadId } } : {}) })
+}
+
+function creationPromptConfirmed(creation: NonNullable<AgentMuxAgentSession['creation']>,
+  contextRequested = creation.agentMuxContext !== undefined): boolean {
+  return (!contextRequested || creation.agentMuxContext === 'confirmed') &&
+    (creation.initialPrompt === 'not-requested' || creation.initialPrompt === 'confirmed')
 }
 
 export type AgentMuxTerminalCreateInput = {
@@ -807,12 +814,12 @@ export class AgentMuxClient {
         JSON.stringify(existing.creation.initialMessageOrigin) !== JSON.stringify(origin)) {
         throw new AgentMuxError('This operation belongs to another creation intent.', 'AGENT_CREATION_OPERATION_CONFLICT')
       }
-      return { session: existing, creation: existing.creation, promptConfirmed: existing.creation.initialPrompt === 'confirmed' }
+      return { session: existing, creation: existing.creation, promptConfirmed: creationPromptConfirmed(existing.creation) }
     }
     const pending = await this.registry.claimCreate(input.agentSessionId, agentLifecycleOperationIdentity('create', input.agentSessionId, input.createOperationId), intentDigest)
     if (pending) {
       const session = await this.completePreparedCreate(pending, await this.kernel.list())
-      return { session: this.projectSession(session), creation: session.creation!, promptConfirmed: false }
+      return { session: this.projectSession(session), creation: session.creation!, promptConfirmed: creationPromptConfirmed(session.creation!) }
     }
     const { config, descriptor } = await this.hostExecutorOwner.resolve(input.executorId)
     if (descriptor.configRevision !== input.executorRevision) throw new AgentMuxError('Target Executor configuration changed. Refresh its inventory before a new operation.', 'EXECUTOR_REVISION_CONFLICT')
@@ -2148,6 +2155,11 @@ export class AgentMuxClient {
     const pending = await this.registry.claimCreate(agentSessionId, correlation.operationId, correlation.preparedCreation.creation.intentDigest)
     if (!pending) throw new AgentMuxError('The original creation changed while inspecting. Read the same operation again without replaying.', 'AGENT_CREATION_UNCONFIRMED')
     return this.projectSession(await this.completePreparedCreate(pending, await this.kernel.list()))
+  }
+
+  /** Original creation metadata only; never connects, adopts, resumes or starts a Run. */
+  async listAgentSpawns(input: AgentMuxSpawnQuery): Promise<AgentMuxSpawnPage> {
+    return await this.store.listSpawns(parseAgentSpawnQuery(input))
   }
 
   /** Durable capability validation for ingress; a long-lived client cannot cache authorization. */
@@ -4270,13 +4282,12 @@ export class AgentMuxClient {
         JSON.stringify(existing.forkedFrom) !== JSON.stringify(forkSource) || existing.creation.intentDigest !== intentDigest) {
         throw new AgentMuxError('This creation operation is bound to another source or created Session.', 'AGENT_FORK_OPERATION_CONFLICT')
       }
-      return { session: structuredClone(existing), promptConfirmed: (!contextRequested || existing.creation.agentMuxContext === 'confirmed') &&
-        (existing.creation.initialPrompt === 'not-requested' || existing.creation.initialPrompt === 'confirmed'), creation: existing.creation }
+      return { session: structuredClone(existing), promptConfirmed: creationPromptConfirmed(existing.creation, contextRequested), creation: existing.creation }
     }
     const pending = await this.registry.claimCreate(agentSessionId, lifecycleOperationId, intentDigest)
     if (pending) {
       const session = await this.completePreparedCreate(pending, await this.kernel.list())
-      return { session: this.projectSession(session), creation: session.creation!, promptConfirmed: false }
+      return { session: this.projectSession(session), creation: session.creation!, promptConfirmed: creationPromptConfirmed(session.creation!, contextRequested) }
     }
     if (forkSource) {
       // A new fork needs only its exact source adopted. Original receipts and prepared
@@ -4412,7 +4423,7 @@ export class AgentMuxClient {
           capabilityHash: hashAgentCapability(invocationCapability), createdAt: preparedAt, updatedAt: preparedAt,
           creation: { createOperationId, intentDigest, ...(createdBy ? { createdBy } : {}),
             ...(initialEnvelope ? { initialMessageId: initialEnvelope.messageId } : {}),
-            initialPrompt: input.prompt?.trim() ? 'unknown' : 'not-requested', agentMuxContext: 'unknown', ...(admitted?.origin ? { initialMessageOrigin: admitted.origin } : {}), ...(admitted?.executorRevision ? { executorRevision: admitted.executorRevision } : {}) },
+            initialPrompt: input.prompt?.trim() ? 'unknown' : 'not-requested', ...(contextRequested ? { agentMuxContext: 'unknown' as const } : {}), ...(admitted?.origin ? { initialMessageOrigin: admitted.origin } : {}), ...(admitted?.executorRevision ? { executorRevision: admitted.executorRevision } : {}) },
           ...(forkSource ? { forkedFrom: structuredClone(forkSource) } : {}),
           ...(nativeResumeSource ? { nativeHandle: structuredClone(nativeResumeSource.nativeHandle) } : {}), ...(launchOptions ? { launchOptions } : {}) }
         reservation = await this.registry.prepareCreate(reservation, preparedCreation!)
@@ -4468,7 +4479,7 @@ export class AgentMuxClient {
         updatedAt: preparedCreation?.updatedAt ?? now,
         creation: { createOperationId, initialPrompt: input.prompt?.trim() ? 'unknown' : 'not-requested',
           intentDigest, ...(createdBy ? { createdBy, createdRun: runRef(run.runId) } : {}),
-          ...(initialEnvelope ? { initialMessageId: initialEnvelope.messageId } : {}), agentMuxContext: 'unknown',
+          ...(initialEnvelope ? { initialMessageId: initialEnvelope.messageId } : {}), ...(contextRequested ? { agentMuxContext: 'unknown' as const } : {}),
           ...(admitted?.origin ? { initialMessageOrigin: admitted.origin } : {}), ...(admitted?.executorRevision ? { executorRevision: admitted.executorRevision } : {}) },
         ...(forkSource ? { forkedFrom: structuredClone(forkSource) } : {}),
         ...(nativeResumeSource ? { nativeHandle: structuredClone(nativeResumeSource.nativeHandle) } : {}),

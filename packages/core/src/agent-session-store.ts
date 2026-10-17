@@ -10,6 +10,8 @@ import { parseCumulativeUsage } from './agent-usage-transcript.js'
 import { parseAgentForkSource } from './agent-fork.js'
 import { parseAgentMuxCreationOrigin } from './agent-creation-admission.js'
 import { parseAgentSpawnCreator } from './agent-spawn.js'
+import { agentSpawnIndexes, agentSpawnPage, parseAgentSpawnQuery, readAgentSpawnRows,
+  type AgentMuxSpawnPage, type AgentMuxSpawnQuery, type AgentMuxSpawnRecord } from './agent-spawn-query.js'
 import { assertCurrentAgentCapabilityBinding, type AgentCapabilityBinding } from './agent-capability.js'
 import { agentActivityTimelineItem } from './agent-activity-state.js'
 import { createHash, randomUUID } from 'node:crypto'
@@ -169,6 +171,8 @@ export type AgentMuxAgentSessionStore = {
   load(): Promise<readonly unknown[]>
   loadMetadata(signal?: AbortSignal): Promise<readonly AgentMuxStoredAgentSession[]>
   readMetadata(agentSessionId: string): Promise<AgentMuxStoredAgentSession | null>
+  /** Bounded original creation relations; never probes or restores a Run. */
+  listSpawns(input: AgentMuxSpawnQuery): Promise<AgentMuxSpawnPage>
   /** Exact original admission, including its retained retirement projection. */
   readContinuityControlReceipt(agentSessionId: string, operationId: string): Promise<ContinuityControlStoredResult | null>
   /** Exact original claim; history is never loaded into ordinary Session metadata. */
@@ -1379,7 +1383,8 @@ function normalizePreparedCreation(value: unknown): AgentMuxPreparedCreation {
   if (p.kind !== 'agent' || Object.keys(p).some(key => !['kind', 'agentSessionId', 'providerId', 'executorId', 'hostId', 'workspacePath',
     'hookBindingId', 'hookToken', 'capabilityHash', 'createdAt', 'updatedAt', 'creation', 'forkedFrom', 'nativeHandle', 'launchOptions', 'nativeActor'].includes(key))) throw new AgentMuxError('Invalid no-Run creation seed.', 'INVALID_AGENT_SESSION_STORE')
   const creation = parseAgentCreationFact(p.creation), forkedFrom = p.forkedFrom === undefined ? undefined : parseAgentForkSource(p.forkedFrom)
-  if (!creation.intentDigest || creation.createdRun || creation.persistence || creation.failure || creation.agentMuxContext !== 'unknown' ||
+  if (!creation.intentDigest || creation.createdRun || creation.persistence || creation.failure ||
+    creation.agentMuxContext !== undefined && creation.agentMuxContext !== 'unknown' ||
     forkedFrom && forkedFrom.expectedNativeHandle.providerId !== p.providerId) throw new AgentMuxError('Prepared creation intent is incomplete.', 'INVALID_AGENT_SESSION_STORE')
   return { kind: 'agent', agentSessionId: string(p.agentSessionId, 'agentSessionId'), providerId: string(p.providerId, 'providerId'),
     executorId: string(p.executorId, 'executorId'), hostId: string(p.hostId, 'hostId'), workspacePath: string(p.workspacePath, 'workspacePath', MAX_PATH_BYTES),
@@ -2174,7 +2179,26 @@ function assertLifecycleCommit(
   }
 }
 
+function spawnRecord(phase: AgentMuxSpawnRecord['phase'], value: unknown): AgentMuxSpawnRecord | null {
+  if (phase === 'retired') {
+    const retired = retiredAgentSession(value), creation = retired.history?.creation
+    return creation?.createdBy ? { agentSessionId: retired.agentSessionId, phase, currentRun: retired.run,
+      createdAt: retired.history!.createdAt, creation: { ...creation, createdBy: creation.createdBy } } : null
+  }
+  if (phase === 'prepared') {
+    const reservation = lifecycleReservation(value)
+    if (reservation.kind !== 'create' || !reservation.preparedCreation?.creation?.createdBy) return null
+    const seed = reservation.preparedCreation, creation = seed.creation!
+    return { agentSessionId: seed.agentSessionId, phase, currentRun: null, createdAt: seed.createdAt,
+      creation: { ...creation, createdBy: creation.createdBy! } }
+  }
+  const session = normalizeStoredAgentSession(value), creation = session.creation
+  return creation?.createdBy ? { agentSessionId: session.agentSessionId, phase, currentRun: session.run,
+    createdAt: session.createdAt, creation: { ...creation, createdBy: creation.createdBy } } : null
+}
+
 export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStore {
+  private readonly spawnQueryOwner = randomUUID()
   private readonly promptSubmissions = new Set<string>()
   private readonly sessions = new Map<string, AgentMuxStoredAgentSession>()
   private readonly promptAdmissions = new Map<string, AgentPromptSubmissionRecord>()
@@ -2252,6 +2276,16 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
   async readMetadata(agentSessionId: string): Promise<AgentMuxStoredAgentSession | null> {
     const value = this.sessions.get(agentSessionId)
     return value ? structuredClone(agentSessionMetadata(value)) : null
+  }
+  async listSpawns(input: AgentMuxSpawnQuery): Promise<AgentMuxSpawnPage> {
+    const query = parseAgentSpawnQuery(input)
+    const rows = [
+      ...[...this.sessions.values()].map(value => spawnRecord('active', value)),
+      ...this.retiredAgentSessions.filter(value => !this.sessions.has(value.agentSessionId)).map(value => spawnRecord('retired', value)),
+      ...[...this.reservations.values()].filter(value => !this.sessions.has(value.agentSessionId) &&
+        !this.retiredAgentSessions.some(retired => retired.agentSessionId === value.agentSessionId)).map(value => spawnRecord('prepared', value))
+    ].filter((value): value is AgentMuxSpawnRecord => value !== null)
+    return structuredClone(agentSpawnPage(query, this.spawnQueryOwner, rows))
   }
   async readHistorySource(agentSessionId: string, signal?: AbortSignal): Promise<AgentSessionHistoryDescriptor | null> {
     signal?.throwIfAborted()
@@ -2765,6 +2799,23 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         const value = document.sessions.find(session => session.agentSessionId === agentSessionId)
         return value ? agentSessionMetadata(value) : null
       })
+  }
+
+  async listSpawns(input: AgentMuxSpawnQuery): Promise<AgentMuxSpawnPage> {
+    const query = parseAgentSpawnQuery(input)
+    await this.tail
+    const available = () => { throw new AgentMuxError('The original indexed Session owner is unconfirmed; creation records remain retained.', 'AGENT_SESSION_STORE_READ_UNCONFIRMED') }
+    if (query.direction === 'created' && !await this.withReadDatabase(db =>
+      Boolean(db.prepare("SELECT 1 FROM sqlite_schema WHERE name='spawn_creator_reservations'").get()), available)) {
+      // Rebuildable indexes use the same original writer/lock. No business fact is
+      // copied and index failure never becomes a lifecycle or input precondition.
+      await this.enqueue(async () => { this.db.exec(agentSpawnIndexes); this.dirty = true })
+    }
+    return await this.withReadDatabase(db => {
+      const result = readAgentSpawnRows(db, query)
+      const records = result.rows.map(row => spawnRecord(row.phase, row.value)).filter((value): value is AgentMuxSpawnRecord => value !== null)
+      return agentSpawnPage(query, result.owner, records)
+    }, available)
   }
 
   private promptAdmission(db: DatabaseSync, agentSessionId: string, run: AgentMuxRunRef, submissionId: string): AgentPromptSubmissionRecord | null {

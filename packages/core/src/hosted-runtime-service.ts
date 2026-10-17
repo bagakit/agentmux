@@ -20,7 +20,7 @@ const OFFLINE_METHODS = new Set<AgentMuxHostedMethod>([
   'controlAgentContinuity',
   'listNativeAgentSessions', 'listHostNativeAgentSessions', 'readNativeAgentHistory', 'readHostNativeAgentHistory', 'readNativeAgentHistoryResource', 'readHostNativeAgentHistoryResource',
   'clientPerformanceDiagnostics', 'respondAgentInteraction', 'inspectAgentInteractionOperation', 'replySessionQuestion',
-  'listHostExecutors', 'configureHostExecutor',
+  'listHostExecutors', 'configureHostExecutor', 'listAgentSpawns',
   'readDeliveryAttempt', 'inspectAgentPromptSubmission', 'inspectAgentInput', 'readAgentInputMailbox', 'stopAgentInputWaiting', 'rejoinAgentInputWaiting', 'resolveAgentCreationSessionId', 'inspectAgentCreation', 'attestAgentCreation',
   'readAgentSession', 'readAgentSessions', 'readAgentFuturePromptIntent', 'listAgentFuturePromptIntents', 'sessionTimeline', 'readAgentSessionHistory', 'readAgentConversation', 'releaseConversationView', 'sessionHistoryCheckpoint', 'readSessionHistoryChanges', 'conversationCheckpoint', 'readConversationChanges', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
   'checkDeliveries', 'ackDeliveryBatch',

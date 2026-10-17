@@ -103,7 +103,7 @@ export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   'restartAgent' | 'inspectAgentRestart' | 'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentSession' | 'readAgentSessions' | 'readAgentSessionHistory' | 'readAgentConversation' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
   'ensureAgentContinuity' | 'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
   'inspectAgentInteractionOperation' | 'respondAgentInteraction' | 'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'notifyMessages' | 'inspectAgentPromptSubmission' | 'startDiscussion' | 'checkDeliveries' |
-  'submitAgentPrompt' | 'readAgentInputMailbox' | 'inspectAgentInput' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' |
+  'submitAgentPrompt' | 'readAgentInputMailbox' | 'inspectAgentInput' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' | 'listAgentSpawns' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readMessage' | 'listMessages' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' | 'readHostNativeAgentHistory' | 'readHostNativeAgentHistoryResource' |
   'readDeliveryAttempt' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'listHostExecutors' | 'configureHostExecutor'> & {
@@ -274,6 +274,7 @@ const NATIVE_FIELDS = {
   'agent.input.stop': ['ref', 'cancelOperationId'], 'agent.input.rejoin': ['ref'],
   'agent.send': ['target', 'text', 'messageId', 'threadId', 'correlationId', 'replyTo', 'operationId', 'execution', 'expectedRun', 'sourceChannel', 'admissionIntent'],
   'agent.discuss': ['executorId', 'providerId', 'text', 'operationId'],
+  'agent.spawn.ls': ['hostId', 'participantSessionId', 'direction', 'creatorRuntimeId', 'cursor', 'limit'],
   'agent.handoff': ['toAgentSessionId', 'taskId'], 'agent.output': ['agentSessionId', 'afterByte', 'follow'],
   'system.diagnostics.inspect': ['target', 'includeRaw', 'includeRelated', 'budget'],
   'message.delivery.inspect': ['logId', 'hostId'], 'message.delivery.report': ['hostId', 'record'],
@@ -1651,7 +1652,26 @@ export class AgentMuxRpcService {
           workspacePath: owner.session.workspacePath, body: rpcText(p.text, 'Discussion text'),
           operationId: rpcString(p.operationId, 'Operation ID') })
         result = { threadId: discussion.thread.threadId, delivery: discussion.thread.delivery.state,
-          targetAgentSessionId: discussion.session.agentSessionId }; break
+          targetAgentSessionId: discussion.session.agentSessionId, creation: discussion.session.creation! }; break
+      }
+      case 'agent.spawn.ls': {
+        const hostId = rpcString(p.hostId, 'Original creation Host'), participant = rpcString(p.participantSessionId, 'Spawn participant Session')
+        if (caller ? participant !== caller.agentSessionId : !context.principal || !['user', 'device'].includes(context.principal.kind)) {
+          throw new AgentMuxError('Spawn reading requires its original participant or an authenticated user/device. Existing Sessions remain available.', 'CONTROL_PERMISSION_DENIED')
+        }
+        const scopes = (await this.clients()).filter(scope => scope.hostId === hostId)
+        if (scopes.length !== 1) throw new AgentMuxError('The exact creation Host is unavailable or ambiguous; original receipts are retained.', 'CONTROL_UNAVAILABLE')
+        const { hostId: _host, ...query } = p
+        if (caller && caller.hostId !== hostId) {
+          const { runtimeId } = await caller.client.agentCreationAuthority()
+          if (p.direction !== 'created' || p.creatorRuntimeId !== undefined && p.creatorRuntimeId !== runtimeId) {
+            throw new AgentMuxError('A remote spawn query must stay with its authenticated original creator.', 'CONTROL_PERMISSION_DENIED')
+          }
+          query.creatorRuntimeId = runtimeId
+        } else if (caller && p.creatorRuntimeId !== undefined) {
+          throw new AgentMuxError('The original local creator query cannot claim another Runtime source.', 'CONTROL_PERMISSION_DENIED')
+        }
+        result = { hostId, ...await scopes[0]!.client.listAgentSpawns(query as import('./agent-spawn-query.js').AgentMuxSpawnQuery) }; break
       }
       case 'agent.handoff': {
         const owner = this.requireCaller(caller)

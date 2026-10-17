@@ -1,6 +1,7 @@
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlSuccessReceipt } from './control.js'
 import { AgentMuxError } from './errors.js'
 import { parseAgentForkSource } from './agent-fork.js'
+import { parseAgentSpawnCreator } from './agent-spawn.js'
 import { parseAgentNativeResumeSource } from './agent-native-sessions.js'
 import { parseNameChangeRecord } from './display-label.js'
 import { settingsResourceEnvelope } from './settings-resource-json.js'
@@ -424,7 +425,7 @@ function save(value: unknown, code: Code): AgentMuxSpatialSave {
 function report(value: unknown, code: Code): AgentMuxSpaceMutationReport {
   const source = fields(value, ['requestId', 'outcome', 'from', 'to', 'agent', 'resource', 'save', 'issues'], code)
   const agent = source.agent === null ? null : (() => {
-    const item = fields(source.agent, ['agentSessionId', 'runId', 'providerId', 'executorId', 'hostId', 'cwd', 'createOperationId', 'initialPrompt', 'agentMuxContext', 'forkedFrom', 'creationPersistence', 'creationFailure', 'executorRevision', 'initialMessageOrigin'], code)
+    const item = fields(source.agent, ['agentSessionId', 'runId', 'providerId', 'executorId', 'hostId', 'cwd', 'createOperationId', 'initialPrompt', 'agentMuxContext', 'forkedFrom', 'creationPersistence', 'creationFailure', 'executorRevision', 'initialMessageOrigin', 'createdBy', 'createdRun', 'initialMessageId'], code)
     return { agentSessionId: spaceControlId(item.agentSessionId, 'Agent Session', code), runId: nullableId(item.runId, 'Run', code),
       providerId: nullableId(item.providerId, 'Provider', code), executorId: nullableId(item.executorId, 'Executor', code), hostId: spaceControlId(item.hostId, 'Host', code),
       cwd: string(item.cwd, 'Execution cwd', code), createOperationId: nullableId(item.createOperationId, 'Creation operation', code),
@@ -433,6 +434,12 @@ function report(value: unknown, code: Code): AgentMuxSpaceMutationReport {
       ...(item.creationPersistence === undefined ? {} : { creationPersistence: member(item.creationPersistence, ['unconfirmed'], 'Creation persistence', code) }),
       ...(item.executorRevision === undefined ? {} : { executorRevision: string(item.executorRevision, 'Executor revision', code, 256) }),
       ...(item.initialMessageOrigin === undefined ? {} : { initialMessageOrigin: parseAgentMuxCreationOrigin(item.initialMessageOrigin) }),
+      ...(item.createdBy === undefined ? {} : { createdBy: parseAgentSpawnCreator(item.createdBy) }),
+      ...(item.createdRun === undefined ? {} : { createdRun: (() => {
+        const created = fields(item.createdRun, ['runId'], code)
+        return { runId: spaceControlId(created.runId, 'Creation Run', code) }
+      })() }),
+      ...(item.initialMessageId === undefined ? {} : { initialMessageId: spaceControlId(item.initialMessageId, 'Initial message', code) }),
       ...(item.creationFailure === undefined ? {} : { creationFailure: (() => {
         const failure = fields(item.creationFailure, ['step', 'code', 'message'], code)
         return { step: member(failure.step, ['session-commit', 'hook-bind', 'handshake'], 'Creation step', code),

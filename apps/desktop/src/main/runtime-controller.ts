@@ -1199,13 +1199,18 @@ export class RuntimeController {
         } : undefined
         if (hostIntent) {
           hostIntent.agentSessionId = request.agentSessionId ?? await client.resolveAgentCreationSessionId(hostIntent.createOperationId!)
-          if (request.initialMessage) {
-            const source = await this.authorizedCallerHost({ agentSessionId: request.initialMessage.callerAgentSessionId, capability: request.initialMessage.capability })
-            if (request.initialMessage.threadId) hostIntent.threadId = request.initialMessage.threadId
+          const creationCaller = request.creationCaller ?? (request.initialMessage
+            ? { agentSessionId: request.initialMessage.callerAgentSessionId, capability: request.initialMessage.capability } : undefined)
+          if (creationCaller) {
+            if (request.initialMessage && request.initialMessage.callerAgentSessionId !== creationCaller.agentSessionId) {
+              throw new AgentMuxError('This original creation admission cannot authenticate another first-message author.', 'AGENT_CREATION_SOURCE_MISMATCH')
+            }
+            const source = await this.authorizedCallerHost(creationCaller)
+            if (request.initialMessage?.threadId) hostIntent.threadId = request.initialMessage.threadId
             // Only the authoritative source sees its capability. The target consumes a signed,
             // one-creation admission against its explicitly registered source public key.
             hostIntent.initialMessageAdmission = await source.client.attestAgentCreation({
-              caller: { agentSessionId: request.initialMessage.callerAgentSessionId, capability: request.initialMessage.capability },
+              caller: creationCaller,
               target: { runtimeId: inventory!.runtimeId, intentDigest: hostAgentCreationIntent(hostIntent) }
             })
           }
@@ -1230,6 +1235,7 @@ export class RuntimeController {
           ...(request.nativeResumeSource === undefined ? {} : { nativeResumeSource: request.nativeResumeSource }),
           ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
           ...(request.initialMessage ? { initialMessage: request.initialMessage } : {}),
+          ...(request.creationCaller ? { creationCaller: request.creationCaller } : {}),
           ...(request.cols === undefined ? {} : { cols: request.cols }),
           ...(request.rows === undefined ? {} : { rows: request.rows })
         })

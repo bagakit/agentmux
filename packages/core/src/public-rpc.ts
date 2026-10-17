@@ -247,6 +247,7 @@ type NativeParams = ApplicationAccessParameterMap & MoteConnectionParamsMap & Go
     execution?: AgentPromptExecution; expectedRun?: import('./types.js').AgentMuxRunRef; sourceChannel?: import('./types.js').AgentMessageChannel;
     messageId?: string; threadId?: string; correlationId?: string; replyTo?: string }
   'agent.discuss': { executorId: string; providerId?: string; text: string; operationId: string }
+  'agent.spawn.ls': import('./agent-spawn-query.js').AgentMuxSpawnQuery & { hostId: string }
   'agent.handoff': { toAgentSessionId: string; taskId: string }
   'agent.output': { agentSessionId: string; afterByte?: number; follow?: boolean }
   'system.diagnostics.inspect': import('./diagnostic-evidence.js').AgentMuxDiagnosticEvidenceInspectParams
@@ -319,7 +320,8 @@ type NativeResult = ApplicationAccessResultMap & MoteConnectionResultMap & GoalD
   'agent.input.stop': import('./agent-input-wait.js').AgentInputWaitStopReceipt
   'agent.input.rejoin': import('./agent-input-wait.js').AgentInputSubmissionReceipt
   'agent.send': AgentMuxMessageReceipt & { agentSessionId?: string; inputReceipt?: import('./agent-input-wait.js').AgentInputSubmissionReceipt }
-  'agent.discuss': { threadId: string; delivery: string; targetAgentSessionId: string }
+  'agent.discuss': { threadId: string; delivery: string; targetAgentSessionId: string; creation: import('./types.js').AgentMuxAgentCreationFact }
+  'agent.spawn.ls': import('./agent-spawn-query.js').AgentMuxSpawnPage & { hostId: string }
   'agent.handoff': ReturnType<AgentMuxClient['handOff']>
   'agent.output': AgentMuxRpcOutputInitial & { replay: AgentMuxRpcOutputBytes[] }
   'system.diagnostics.inspect': import('./diagnostic-evidence.js').AgentMuxDiagnosticEvidenceResult
@@ -379,7 +381,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'space.state': 'short', 'space.commit': 'long', 'space.resolve': 'short', 'name.history': 'short', 'name.confirm': 'long',
   'agent.conversation.landmark.ls': 'short', 'agent.conversation.landmark.apply': 'long',
   whoami: 'short', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.restart': 'long', 'agent.restart.inspect': 'short', 'agent.refresh': 'short', 'agent.continuity.control': 'short', 'agent.native.confirm': 'long', 'agent.native.ls': 'long', 'agent.native.history': 'long', 'agent.native.history.resource': 'long', 'agent.context': 'long', 'agent.history': 'long', 'agent.conversation.release': 'short', 'agent.conversation.inspect': 'long', 'agent.conversation.checkpoint': 'long', 'agent.conversation.changes': 'long', 'agent.conversation.watch': 'long', 'agent.history.resource': 'long', 'agent.interaction.respond': 'long', 'agent.interaction.inspect': 'short', 'agent.question.reply': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
-  'agent.role.ls': 'short', 'agent.role.register': 'long', 'agent.role.resolve': 'short',
+  'agent.role.ls': 'short', 'agent.role.register': 'long', 'agent.role.resolve': 'short', 'agent.spawn.ls': 'short',
   'agent.input.ls': 'short', 'agent.input.submit': 'long', 'agent.input.inspect': 'short', 'agent.input.stop': 'short', 'agent.input.rejoin': 'long', 'agent.send': 'long', 'agent.discuss': 'long', 'agent.handoff': 'short',
   'system.diagnostics.inspect': 'short',
   'message.delivery.inspect': 'short', 'message.delivery.report': 'long',

@@ -57,7 +57,7 @@ import { AgentMuxError } from './errors.js'
 import { parseAgentSessionHistoryReadPage, type AgentSessionHistoryReadInput } from './session-history-reader.js'
 import { parseSessionHistoryResourceResult, type AgentSessionHistoryResourceParams } from './session-history-resource.js'
 import { parseHostedBootstrap } from './hosted-value.js'
-import { normalizeInteractionOperationReceipt, normalizeAgentSession } from './agent-session-store.js'
+import { normalizeInteractionOperationReceipt, normalizeAgentSession, parseAgentCreationFact } from './agent-session-store.js'
 import { agentInteractionResponseUnavailableReason } from './agent-interaction-state.js'
 import { validateAgentMuxMessageEnvelope } from './agent-global-message-queue.js'
 import { agentPromptInputId, validateAgentPromptAdmissionIntent, validateAgentPromptCondition, validateAgentPromptInputKey } from './agent-prompt-condition.js'
@@ -678,7 +678,34 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
           credentials && envelope.senderSessionId !== credentials.agentSessionId) fail()
         break
       }
-      case 'agent.discuss': record(p, ['threadId', 'delivery', 'targetAgentSessionId']); string(p.threadId); string(p.targetAgentSessionId); if (!isAgentDeliveryState(p.delivery)) fail(); break
+      case 'agent.discuss': record(p, ['threadId', 'delivery', 'targetAgentSessionId', 'creation']); string(p.threadId); string(p.targetAgentSessionId); if (!isAgentDeliveryState(p.delivery)) fail();
+        if (!isDeepStrictEqual(parseAgentCreationFact(p.creation), p.creation)) fail(); break
+      case 'agent.spawn.ls': {
+        record(p, ['hostId', 'participantSessionId', 'direction', 'creatorRuntimeId', 'records', 'nextCursor', 'coverage'])
+        if (p.hostId !== input.hostId || p.participantSessionId !== input.participantSessionId || p.direction !== input.direction ||
+          credentials && p.participantSessionId !== credentials.agentSessionId ||
+          input.creatorRuntimeId !== undefined && p.creatorRuntimeId !== input.creatorRuntimeId) fail()
+        string(p.participantSessionId); member(p.direction, ['created', 'creator']); string(p.creatorRuntimeId, true)
+        if (p.nextCursor !== null) string(p.nextCursor)
+        const coverage = record(p.coverage, ['scope', 'history'])
+        if (coverage.scope !== 'selected-owner' || coverage.history !== 'recorded-creations') fail()
+        let previous = ''
+        array(p.records, value => {
+          const row = record(value, ['agentSessionId', 'phase', 'currentRun', 'createdAt', 'creation'])
+          string(row.agentSessionId); const sid = row.agentSessionId as string
+          if (Buffer.compare(Buffer.from(sid), Buffer.from(previous)) <= 0) fail(); previous = sid
+          member(row.phase, ['prepared', 'active', 'retired']); timestamp(row.createdAt)
+          if (row.phase === 'prepared' ? row.currentRun !== null : row.currentRun === null) fail()
+          if (row.currentRun !== null) runRef(row.currentRun)
+          const creation = parseAgentCreationFact(row.creation)
+          const creator = creation.createdBy ?? fail()
+          if (!isDeepStrictEqual(creation, row.creation) || row.phase === 'prepared' && creation.createdRun) fail()
+          if (p.direction === 'creator' ? sid !== p.participantSessionId : creator.agentSessionId !== p.participantSessionId ||
+            (p.creatorRuntimeId === null ? creator.owner.kind !== 'local' : creator.owner.kind !== 'runtime' || creator.owner.runtimeId !== p.creatorRuntimeId)) fail()
+        })
+        if ((p.records as unknown[]).length > Number(input.limit ?? 50) || p.nextCursor !== null && !(p.records as unknown[]).length) fail()
+        break
+      }
       case 'agent.handoff': record(p, ['ownerAgentSessionId', 'originAwaits', 'taskId', 'at']); if (!rpcSessionTargetMatches(input.toAgentSessionId, String(p.ownerAgentSessionId)) || p.taskId !== input.taskId || p.originAwaits !== false) fail(); count(p.at); break
       case 'message.inbox.check': case 'message.inbox.ack': {
         record(p, method.endsWith('.check') ? ['consumerId', 'readerRun', 'generation', 'messages'] : ['consumerId', 'readerRun', 'nextGeneration', 'acknowledgedMessageIds'])

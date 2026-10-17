@@ -51,6 +51,7 @@ Discovery never grants access to another Agent's private messages or working sur
 Load only the journey needed now:
 - Independent Session communication: amux message --skill for the full shared contract.
 - Create an Agent: amux agent open --help for configured Executor discovery and opening workflow.
+- Original creator/child relations: amux agent spawn --help. Keep the original creation operation after an unknown receipt; never create a replacement to recover its result.
 - Saved native conversations or resume: amux agent native --help.
 - Original output, input mailbox, history or conversation: use that agent action's --help.
 - Authorized unmanaged prompt intake: agent input submit preserves the original prompt key;

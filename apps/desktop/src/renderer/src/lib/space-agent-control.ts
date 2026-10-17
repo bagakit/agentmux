@@ -371,6 +371,9 @@ function agentFact(session: AgentMuxAgentSession, hostId: string): AgentMuxSpace
     createOperationId: session.creation?.createOperationId ?? null, initialPrompt: session.creation?.initialPrompt ?? 'unknown',
     ...(session.creation?.executorRevision ? { executorRevision: session.creation.executorRevision } : {}),
     ...(session.creation?.initialMessageOrigin ? { initialMessageOrigin: session.creation.initialMessageOrigin } : {}),
+    ...(session.creation?.createdBy ? { createdBy: session.creation.createdBy } : {}),
+    ...(session.creation?.createdRun ? { createdRun: session.creation.createdRun } : {}),
+    ...(session.creation?.initialMessageId ? { initialMessageId: session.creation.initialMessageId } : {}),
     ...(session.creation?.agentMuxContext ? { agentMuxContext: session.creation.agentMuxContext } : {}),
     ...(session.creation?.persistence ? { creationPersistence: session.creation.persistence } : {}),
     ...(session.creation?.failure ? { creationFailure: session.creation.failure } : {}),
@@ -382,6 +385,9 @@ function snapshotFact(session: Extract<SessionSnapshot, { kind: 'agent' }>): Age
     createOperationId: session.creation?.createOperationId ?? null, initialPrompt: session.creation?.initialPrompt ?? 'unknown',
     ...(session.creation?.executorRevision ? { executorRevision: session.creation.executorRevision } : {}),
     ...(session.creation?.initialMessageOrigin ? { initialMessageOrigin: session.creation.initialMessageOrigin } : {}),
+    ...(session.creation?.createdBy ? { createdBy: session.creation.createdBy } : {}),
+    ...(session.creation?.createdRun ? { createdRun: session.creation.createdRun } : {}),
+    ...(session.creation?.initialMessageId ? { initialMessageId: session.creation.initialMessageId } : {}),
     ...(session.creation?.agentMuxContext ? { agentMuxContext: session.creation.agentMuxContext } : {}),
     ...(session.creation?.persistence ? { creationPersistence: session.creation.persistence } : {}),
     ...(session.creation?.failure ? { creationFailure: session.creation.failure } : {}),
@@ -699,6 +705,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
         ...(!forkParent && topicId && target.address.workspaceId === SCRATCH_WORKSPACE_ID ? { scratchTopicId: topicId } : {}),
         ...(request.content.prompt === undefined ? {} : { prompt: request.content.prompt }),
         ...(options?.agentMuxNote === undefined ? {} : { agentMuxNote: options.agentMuxNote }),
+        ...(request.caller ? { creationCaller: { agentSessionId: request.caller.agentSessionId, capability: request.caller.capability ?? '' } } : {}),
         ...(request.caller && request.content.prompt !== undefined ? { initialMessage: { callerAgentSessionId: request.caller.agentSessionId, capability: request.caller.capability ?? '' } } : {}) })
       report.agent = agentFact({ ...launched.created, ...(launched.creation ? { creation: launched.creation } : {}) }, launchHostId)
       if (launched.created.agentSessionId !== sessionId) return await fail('Core returned another Session; its healthy Run has been retained for inspection.', 'creation')

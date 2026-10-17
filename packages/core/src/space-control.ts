@@ -160,6 +160,9 @@ export type AgentMuxSpatialIssue = { step: string; code: string; message: string
 export type AgentMuxSpaceAgentFact = {
   executorRevision?: string
   initialMessageOrigin?: import('./agent-creation-admission.js').AgentMuxCreationOrigin
+  createdBy?: import('./agent-spawn.js').AgentMuxSpawnCreator
+  createdRun?: import('./types.js').AgentMuxRunRef
+  initialMessageId?: string
   agentSessionId: string
   runId: string | null
   providerId: string | null
