@@ -7,8 +7,8 @@ import type { useGitHistory } from './useGitHistory'
 import { usePathDisplay } from '../../../hooks/usePathDisplay'
 import { speakerColorHue } from '../../../lib/conversation-avatar-color'
 import { useGitHistoryDetails } from './GitHistoryDetails'
+import { GitHistoryRefPicker } from './GitHistoryRefPicker'
 
-const ThemeLayoutOpenRightIcon = semanticIconComponent('layout.open-right')
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 
 
@@ -67,11 +67,10 @@ type History = ReturnType<typeof useGitHistory>
 type Graph = ReturnType<typeof historyGraph>
 type PreviewEvents = ReturnType<typeof useGitHistoryDetails>['triggerEvents']
 
-export function GitHistoryPanel({ workspace, history, onSelectCommit, onOpenRepository, selectedOid, revealOid, viewportState }: {
+export function GitHistoryPanel({ workspace, history, onSelectCommit, selectedOid, revealOid, viewportState }: {
   workspace: WorkspaceRecord
   history: History
   onSelectCommit: (snapshot: GitCommitSnapshot) => void
-  onOpenRepository?: () => void
   selectedOid?: string
   revealOid?: string
   viewportState?: RefObject<GitHistoryViewportState | null>
@@ -118,16 +117,9 @@ export function GitHistoryPanel({ workspace, history, onSelectCommit, onOpenRepo
   }, [history.enabled, history.loading, history.error, ready?.nextCursor, readAhead])
   return <section className="git-history-panel" aria-label="Git history" aria-busy={history.loading}>
     <div className="git-history-controls">
-      <select aria-label="History reference" value={history.reference ?? ''}
-        onChange={event => history.selectReference(event.currentTarget.value || null)}
-        title={ready ? displayPath(ready.snapshot.repoPath, workspace.hostId) : undefined}>
-        <option value="">All branches</option>
-        {history.refs.filter(ref => ref.kind !== 'tag').map(ref =>
-          <option key={ref.name} value={ref.name}>{ref.kind === 'remote' ? 'Remote · ' : ''}{referenceLabel(ref)}</option>)}
-        {history.reference && !history.refs.some(ref => ref.name === history.reference) && <option value={history.reference}>{history.reference.replace(/^refs\/(heads|remotes)\//u, '')}</option>}
-      </select>
-      {onOpenRepository && <button className="small-button git-history-open-repository" title="Open repository history" aria-label="Open repository history"
-        onClick={() => onOpenRepository()}><ThemeLayoutOpenRightIcon size={13} /><span>Repository history</span></button>}
+      <GitHistoryRefPicker key={JSON.stringify([workspace.id, workspace.hostId, workspace.path])}
+        refs={history.refs} reference={history.reference} onSelect={history.selectReference} enabled={history.enabled} scope={scope}
+        title={ready ? displayPath(ready.snapshot.repoPath, workspace.hostId) : undefined} />
       <button className="icon-button" title="Refresh history" aria-label="Refresh history" disabled={!history.enabled || history.loading}
         onClick={() => { void history.refresh() }}><ThemeActionRefreshIcon size={13} /></button>
     </div>
