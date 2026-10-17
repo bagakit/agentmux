@@ -29,6 +29,7 @@ const ThemeActionStopIcon = semanticIconComponent('action.stop')
 const ThemeActionRestartIcon = semanticIconComponent('action.restart-session')
 const ThemeObjectInboxIcon = semanticIconComponent('object.inbox')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeObjectCollaborationIcon = semanticIconComponent('object.collaboration')
 const ThemeObjectConversationIcon = semanticIconComponent('object.conversation')
 const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
@@ -37,11 +38,12 @@ const ThemeActionMoreIcon = semanticIconComponent('action.more')
 const ThemeLayoutCloseRightIcon = semanticIconComponent('layout.close-right')
 
 
-export function FocusToolbar({ active = true, children, selectedId, selected, tab, reference, onReview, onCloseWorkspace, regionOnly, onToggleRegion }: {
-  active?: boolean; children: ReactNode; selectedId: string | null; selected: FocusContext | undefined; tab: WorkbenchTab | null; reference?: WorkbenchProjectionSelection | undefined; onReview(): void; onCloseWorkspace(): void; regionOnly?: boolean | undefined; onToggleRegion?: (() => void) | undefined
+export function FocusToolbar({ active = true, children, selectedId, selected, tab, reference, onReview, onCloseWorkspace, regionOnly, onToggleRegion, onOpenCollaboration }: {
+  active?: boolean; children: ReactNode; selectedId: string | null; selected: FocusContext | undefined; tab: WorkbenchTab | null; reference?: WorkbenchProjectionSelection | undefined; onReview(): void; onCloseWorkspace(): void; regionOnly?: boolean | undefined; onToggleRegion?: (() => void) | undefined; onOpenCollaboration?: (() => void) | undefined
 }) {
   return <header className="focus-toolbar">
     <div className="focus-toolbar__filters">{children}</div>
+    {onOpenCollaboration ? <button type="button" className="icon-button" aria-label="Open Agent collaboration graph" title="Agent collaboration" onClick={onOpenCollaboration}><ThemeObjectCollaborationIcon size={15} /></button> : null}
     {(tab || selectedId) ? <FocusToolbarContext active={active} key={JSON.stringify([selectedId, tab?.id])} selectedId={selectedId} selected={selected} tab={tab} reference={reference} onReview={onReview} onCloseWorkspace={onCloseWorkspace} regionOnly={regionOnly} onToggleRegion={onToggleRegion} /> : null}
   </header>
 }
