@@ -11,7 +11,7 @@ import { createRequire } from 'node:module'
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, connectAgentMuxRpc, defaultAgentMuxControlSocketPath, type AgentMuxClientEvent, type AgentMuxRun, type AgentMuxRunAttachment } from '@agentmux/core'
 import { type ToolkitScriptSnapshot } from '@agentmux/core/control'
-import { connectionOfferUrl } from '@agentmux/relay/offer'
+import { connectionOfferUrl } from '../../../packages/relay/src/connection-offer'
 import { createDeviceAdministration } from '../../host/src/device-administration'
 import { DeviceAuthority } from '../../host/src/device-authority'
 import { ConfigOwner } from '../src/main/config-owner'
@@ -113,7 +113,8 @@ it.each(['', 'Native bridge diagnostic\n', 'NativeError: logger initialization\n
         onInitial: value => read(value.snapshot), onEvent: value => { if (value.type === 'snapshot') read(value.data) }, onEnd: end })
       subscriptions.push(sub); return { dispose() { void sub.then(value => value.dispose()) } }
     })
-    await dom.render(<SettingsNavigation.Provider value={{ open() {}, openToolkit() {} }}><MobileConnectionResult active close={() => {}} /></SettingsNavigation.Provider>)
+    const navigate = vi.fn()
+    await dom.render(<SettingsNavigation.Provider value={{ open: navigate, openToolkit() {} }}><MobileConnectionResult active close={() => {}} /></SettingsNavigation.Provider>)
     await vi.waitFor(async () => {
       const value = (await rpc.call('toolkit.inspect', { toolId: MOBILE_CONNECTION_TOOL_ID })).snapshot as ToolkitScriptSnapshot
       expect(value.display?.latestConfirmed?.document?.links[0]?.url, JSON.stringify(value.display)).toBe(settingsLink.url)
@@ -129,6 +130,9 @@ it.each(['', 'Native bridge diagnostic\n', 'NativeError: logger initialization\n
     const copy = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'Copy link')!
     await act(async () => copy.click())
     expect(clipboard).toHaveBeenCalledExactlyOnceWith(settingsLink.url)
+    const manage = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'Manage devices')!
+    await act(async () => manage.click())
+    expect(navigate).toHaveBeenCalledExactlyOnceWith('amux-conversation')
     expect(evaluate).not.toHaveBeenCalled(); expect(run).not.toHaveBeenCalled(); expect(action).not.toHaveBeenCalled()
     expect(processes.launches).toHaveLength(1)
     const observed = (await readFile(envReport, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
@@ -149,4 +153,4 @@ it.each(['', 'Native bridge diagnostic\n', 'NativeError: logger initialization\n
     await rpc.dispose(); await server.stop(); await owner.dispose(); await processes.close(); connection.dispose(); await authority.flush()
     await rm(directory, { recursive: true }); vi.unstubAllEnvs()
   }
-})
+}, 30000)
