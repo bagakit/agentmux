@@ -5,14 +5,17 @@ import type { NoteLinkOpenRequest } from '@agentmux/client-ui/components/NoteRea
 import { api } from './api'
 import { sameNoteResource, useNotebookLibrary } from './notebook-library'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import type { NoteFileTarget } from './file-document-consumers'
+import { canvasSharedObservation } from './note-canvas-model'
 
 type Resolution = Extract<NotebookResolveResult, { mode: 'resolve' }>
 type Request = { link: NoteLinkOpenRequest; result?: Resolution; issue?: string; busy: boolean }
 
 /** Opening consumes the same original lookup as completion. It never writes a read-only source. */
-export function useNoteLinkNavigation(onOpen: (page: NotebookPage, blockId?: string) => void | Promise<void>, catalog?: NotebookState | null, active = true,
-  onResolved?: (link: NoteLinkOpenRequest, target: NoteLinkTarget) => boolean, sourceIdentity?: string) {
-  const current = useRef({ onOpen, catalog, active, onResolved }); current.current = { onOpen, catalog, active, onResolved }
+export function useNoteLinkNavigation(onOpen: (page: NotebookPage, blockId?: string, signal?: AbortSignal) => void | Promise<void>, catalog?: NotebookState | null, active = true,
+  onResolved?: (link: NoteLinkOpenRequest, target: NoteLinkTarget) => boolean, sourceIdentity?: string,
+  onOpenFile?: ((file: NoteFileTarget, blockId?: string, signal?: AbortSignal) => Promise<void>) | undefined) {
+  const current = useRef({ onOpen, catalog, active, onResolved, onOpenFile }); current.current = { onOpen, catalog, active, onResolved, onOpenFile }
   const [request, setRequest] = useState<Request | null>(null)
   const generation = useRef(0), controller = useRef<AbortController | null>(null)
   const close = useCallback(() => { generation.current++; controller.current?.abort(); controller.current = null; setRequest(null) }, [])
@@ -41,10 +44,19 @@ export function useNoteLinkNavigation(onOpen: (page: NotebookPage, blockId?: str
         if (!pending()) return
         page = fresh.pages[target.noteId]
       }
+      if (!page && link.target && current.current.onOpenFile) {
+        const graph = await api.notebooks.graph({ noteId: target.noteId }, { signal: cancel.signal })
+        if (!pending()) return
+        const content = canvasSharedObservation(graph, target.noteId)
+        if (!content) throw new Error('The original shared content is unconfirmed. Its exact link and your draft are kept; check the saved file and retry.')
+        await current.current.onOpenFile({ ...content.resource, noteId: target.noteId }, target.blockId, cancel.signal)
+        if (pending()) setRequest(null)
+        return
+      }
       if (!page || observed && !sameNoteResource(page.resource, observed.resource)) throw new Error('The exact Note resource is unconfirmed. The original query and target are retained; refresh its directory and retry.')
       if (!pending()) return
       if (!link.target && current.current.onResolved && !current.current.onResolved(link, target)) throw new Error('The original link changed while choosing its target. Your later draft is kept; choose its current link again.')
-      await current.current.onOpen(page, target.blockId)
+      await current.current.onOpen(page, target.blockId, cancel.signal)
       if (pending()) setRequest(null)
     } catch (error) { if (pending()) setRequest({ link, busy: false, issue: presentError(error) }) }
   }, [])

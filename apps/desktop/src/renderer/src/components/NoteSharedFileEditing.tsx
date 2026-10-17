@@ -1,5 +1,4 @@
 import type { Editor } from '@tiptap/core'
-import { Link2, SquareDot } from 'lucide-react'
 import { noteShareSiblingRange } from '../../../shared/note-share-range'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { FileReadParams } from '@agentmux/core/files'
@@ -15,10 +14,13 @@ import { setNoteComposition } from '../lib/note-live-merge'
 import { NoteBlockEditor, ReadOnlyBlock } from './NoteBlockEditor'
 import { useNoteCanvasObservation } from '../lib/use-note-canvas-observation'
 import { noteShareUndoRecoveryMessage } from '../lib/note-share-removal'
+import { NoteSharedDetails } from './NoteSharedDetails'
+import { noteSharedRelations } from '../lib/note-shared-relations'
+import { useNoteLinkNavigation } from '../lib/use-note-link-navigation'
 
 type EditorOwner = { focusedEditor: Editor | null; focusEditor(editor: Editor): void }
 type Observation = ReturnType<typeof useNoteCanvasObservation>
-type Scope = { include?: NoteInclude; target: NoteFileTarget; read?: FileReadParams | undefined; occurrence: string; active: boolean; knowledge: NoteKnowledge; onOpen(source: NoteSource, blockId: string): void }
+type Scope = { include?: NoteInclude; target: NoteFileTarget; read?: FileReadParams | undefined; occurrence: string; active: boolean; knowledge: NoteKnowledge; onOpen(source: NoteSource, blockId: string): void; onOpenOriginal?(target: NoteFileTarget, blockId?: string, signal?: AbortSignal): Promise<void> }
 /** One graph observation for all includes on this Note; typing never rescans the workspace. */
 export function NoteSharedFileEditing({ children, hasIncludes, ...scope }: Scope & { children: ReactNode; hasIncludes: boolean }) {
   const graph = useNoteCanvasObservation(scope.active && hasIncludes, false)
@@ -61,10 +63,10 @@ function SharedScope({ children, graph, trail, owner, ...scope }: Scope & { chil
   return <NoteSharedContext.Provider value={value}>{children}</NoteSharedContext.Provider>
 }
 /** Chrome is presentation only; source identity stays in the original Markdown declaration. */
-function SharedFrame({ children, source = false, status, attention = false, actions }: { children: ReactNode; source?: boolean; status?: string | undefined; attention?: boolean; actions?: ReactNode }) {
+function SharedFrame({ children, source = false, status, attention = false, actions, marker }: { children: ReactNode; source?: boolean; status?: string | undefined; attention?: boolean; actions?: ReactNode; marker?: ReactNode }) {
   const label = source ? 'Shared source' : 'Shared reference'
   return <section className="note-shared-content" data-shared-role={source ? 'source' : 'reference'} aria-label={label}>
-    <button type="button" className="note-shared-block__marker" aria-label={`${label} · edits update all uses`} title={`${label} · edits update all uses`}>{source ? <SquareDot size={13} /> : <Link2 size={13} />}</button>
+    {marker}
     <div className="note-shared-block__header" data-attention={attention || undefined}><span className="note-shared-block__label">{label}</span><span role={attention ? 'status' : undefined}>{status ?? 'Edits update all uses'}</span>{actions}</div>
     {children}<div className="note-shared-block__end">End of {source ? 'shared source' : 'shared reference'}</div>
   </section>
@@ -116,6 +118,9 @@ function SharedFile({ include, scope, graph, trail, owner, remove, readOnly }: {
   const fileIssue = useAppStore(state => target ? state.documentIssues[key] : undefined)
   const [issue, setIssue] = useState<string | null>(null)
   const read = useMemo(() => original ? parseNoteFile(original) : null, [original])
+  const links = useNoteLinkNavigation(async (page, blockId, signal) => {
+    if (scope.onOpenOriginal) await scope.onOpenOriginal({ ...page.resource, noteId: page.noteId }, blockId, signal)
+  }, graph.snapshot?.catalog, scope.active, undefined, key, scope.onOpenOriginal)
   useEffect(() => {
     if (!target || trail.includes(include.noteId)) return
     return useAppStore.getState().observeNoteFile(target, occurrence, false)
@@ -127,9 +132,9 @@ function SharedFile({ include, scope, graph, trail, owner, remove, readOnly }: {
   if (trail.includes(include.noteId)) return <p className="note-shared-notice" role="status">Circular reference · this use is kept without expanding itself.</p>
   if (pending) return <PendingSharedFile include={include} scope={scope} remove={remove} graph={graph} trail={nextTrail} owner={owner} />
   if (!target || !original || read?.status !== 'valid' || read.note.noteId !== include.noteId || read.note.kind !== 'shared-block') return <p className="note-shared-notice" role="status">{graph.issue ?? (graph.snapshot?.graph.duplicateNoteIds.includes(include.noteId) ? 'Multiple files have this shared identity. The original reference is kept.' : graph.busy ? 'Reading shared sources…' : fileIssue && 'message' in fileIssue ? fileIssue.message : 'The original shared content is not confirmed. Its reference is kept.')} <button type="button" className="note-text-button" onClick={graph.refresh}>Check shared sources</button></p>
-  const origin = read.note.origin
-  const source = Boolean(origin && 'blockId' in include && origin.sourceBlockId === include.blockId && include.referenceId === `${origin.operationId}:source`)
+  const source = graph.snapshot ? noteSharedRelations(graph.snapshot, include.noteId, read.note.origin, { target: scope.target, referenceId: include.referenceId }).uses.some(use => use.current && use.source) : false
   return <SharedFrame source={source} attention={saving || dirty} status={saving ? 'Saving…' : dirty ? 'Unsaved changes' : undefined}
+    marker={scope.onOpenOriginal && <NoteSharedDetails note={read.note} target={target} host={scope.target} include={include} graph={graph} active={scope.active} onOpen={scope.onOpenOriginal} />}
     actions={!readOnly && dirty && <button type="button" className="note-text-button" onClick={() => void useAppStore.getState().saveNoteFile(target)} disabled={saving}>Save</button>}>
     {original.noteEditing?.shareUndo ? <p className="note-knowledge-notice" role="status">{saving ? 'Saving this shared-reference removal…' : fileIssue && 'message' in fileIssue ? fileIssue.message : noteShareUndoRecoveryMessage(original.noteEditing)}
       {!saving && <><button type="button" className="note-text-button" onClick={() => void useAppStore.getState().inspectNoteShareUndo(target.workspaceId, target.path)}>Check this removal</button><button type="button" className="note-text-button" onClick={() => void useAppStore.getState().continueNoteShareUndo(target.workspaceId, target.path)}>Continue this removal</button></>}
@@ -137,6 +142,6 @@ function SharedFile({ include, scope, graph, trail, owner, remove, readOnly }: {
     <SharedScope {...scope} target={target} include={include} read={undefined} occurrence={occurrence} graph={graph} trail={nextTrail} owner={owner}>
       {readOnly ? <ReadOnlyBlock content={read.note.content} /> : <NoteBlockEditor note={read.note} knowledge={scope.knowledge} active={scope.active} showBacklinks={false} sourceIdentity={key}
         onChange={(raw, before) => useAppStore.getState().updateNoteFile(target, raw, before ?? original.content)}
-        onSave={() => void useAppStore.getState().saveNoteFile(target)} onIssue={setIssue} onOpen={scope.onOpen} onCompositionChange={composition} />}
-    </SharedScope></SharedFrame>
+        onSave={() => void useAppStore.getState().saveNoteFile(target)} onIssue={setIssue} onOpen={scope.onOpen} onOpenLink={links.openLink} onCompositionChange={composition} />}
+    </SharedScope>{links.dialog}</SharedFrame>
 }

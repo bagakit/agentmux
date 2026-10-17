@@ -251,7 +251,8 @@
 .note-shared-block::after { bottom: 0; }
 .note-shared-block:focus-within { border-color: var(--green); }
 .note-shared-content { position: relative; }
-.note-shared-block__marker { position: absolute; z-index: 3; inset-inline-start: -23px; top: -6px; width: 16px; height: 16px; display: grid; place-items: center; border: 0; border-radius: 4px; padding: 0; color: var(--text-3); background: var(--bg); cursor: help; }
+.note-shared-block__marker { position: absolute; z-index: 3; inset-inline-start: -29px; top: -6px; width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 4px; padding: 0; color: var(--text-3); background: var(--bg); cursor: pointer; }
+@container (max-width: 420px) { .note-shared-block { margin-inline-start: 20px; } }
 .note-shared-content[data-shared-role="source"] > .note-shared-block__marker { color: var(--text-2); }
 .note-shared-block__marker:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
 .note-shared-block__header { position: absolute; z-index: 2; inset-inline: 0; bottom: 100%; display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); min-height: 20px; color: var(--text-3); background: transparent; font: var(--fs-micro)/1.5 var(--font-sans); opacity: 0; visibility: hidden; pointer-events: none; }

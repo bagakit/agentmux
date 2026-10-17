@@ -21,7 +21,10 @@ import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 import { NoteFileView } from './NoteFileView'
 import { noteReadingStyle } from '../lib/note-reading-style'
-import { openNotebookPage } from '../lib/recall-notebooks'
+import { openNotebookFile } from '../lib/recall-notebooks'
+import type { NoteFileTarget } from '../lib/file-document-consumers'
+import { noteReadingReferenceIsSelected, rememberNoteReadingReturn } from '../lib/note-reading-return'
+import { NoteReadingReturn } from './NoteReadingReturn'
 import type { NotebookPage } from '@agentmux/core/notebook-catalog'
 import { useNotebookLibrary } from '../lib/notebook-library'
 import { useNoteSourceTitle } from '../lib/note-source-name'
@@ -156,13 +159,24 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
     void openAt(exact[0]!)
   }
   const originalResource = config?.workspaces.find(item => item.id === surface.workspaceId)
-  async function openPage(page: NotebookPage, blockId?: string) {
+  async function openOriginal(target: NoteFileTarget, blockId?: string, signal?: AbortSignal) {
     const state = useAppStore.getState(), reference = blockPresentation?.reference, tab = state.tabs[tabId]
     if (!reference || !tab?.space) throw new Error('The original display position is unconfirmed. The Note link and current draft are kept; restore this position and retry.')
-    const opened = await openNotebookPage(page, undefined, reference, blockId ? { noteId: page.noteId, blockId } : undefined,
-      { reference, space: tab.space, ...(presentation.projection ? { projection: presentation.projection } : {}) })
-    if (!opened) throw new Error('Later navigation was kept. The original link is retained; choose it again when ready.')
+    let placed: import('../lib/workbench-projection').WorkbenchProjectionSelection | undefined
+    const original = document && parseNoteFile(document), mapping = state.config?.workspaces.find(value => value.id === surface.workspaceId)
+    const opened = await openNotebookFile({ noteId: target.noteId, resource: target }, undefined, reference, blockId ? { noteId: target.noteId, blockId } : undefined,
+      { reference, space: tab.space, ...(presentation.projection ? { projection: presentation.projection } : {}), onPlaced: result => { placed = result } }, signal)
+    if (!opened) throw new Error('Opening the original file was not confirmed. Your current reading position and exact link are kept; retry when ready.')
+    const selected = useAppStore.getState()
+    if (!placed || selected.mainSurface !== state.mainSurface || !noteReadingReferenceIsSelected(selected, placed))
+      throw new Error('The original file was read, but its display position was not confirmed. Your source and draft are kept; retry opening this exact target.')
+    if (original?.status === 'valid' && mapping) {
+      rememberNoteReadingReturn({ from: reference, to: placed, surface: state.mainSurface,
+        original: { hostId: mapping.hostId, workspaceId: mapping.id, workspacePath: mapping.path, path: surface.path, noteId: original.note.noteId },
+        title: original.note.title ?? 'original Note' })
+    }
   }
+  async function openPage(page: NotebookPage, blockId?: string, signal?: AbortSignal) { await openOriginal({ ...page.resource, noteId: page.noteId }, blockId, signal) }
   const sharedRead = useMemo(() => {
     try { return noteHistoryReadParams(useAppStore.getState(), scratchTopicsForConfig(useAppStore.getState().config, useAppStore.getState().scratchTopicSnapshots) ?? [], tabId, surface.regionId) } catch { return undefined }
   }, [tabId, surface.regionId, surface.workspaceId, surface.path, config])
@@ -202,7 +216,8 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
     </button>)}</div>
       </Dialog.Content></DocumentOverlayPortal>
     </Dialog.Root>
-    <NoteSharedFileEditing target={{ workspaceId: surface.workspaceId, path: surface.path, hostId: originalResource?.hostId ?? '', workspacePath: originalResource?.path ?? '', noteId: sharedNote?.status === 'valid' ? sharedNote.note.noteId : '' }} read={sharedRead} occurrence={occurrence} active={presentation.active} hasIncludes={hasIncludes} knowledge={knowledge} onOpen={onOpen}>
+    <NoteReadingReturn />
+    <NoteSharedFileEditing target={{ workspaceId: surface.workspaceId, path: surface.path, hostId: originalResource?.hostId ?? '', workspacePath: originalResource?.path ?? '', noteId: sharedNote?.status === 'valid' ? sharedNote.note.noteId : '' }} read={sharedRead} occurrence={occurrence} active={presentation.active} hasIncludes={hasIncludes} knowledge={knowledge} onOpen={onOpen} onOpenOriginal={openOriginal}>
     <NoteFileView sourceCoverage={
       <details className="note-directory-sources" aria-label="Note sources"><summary>Source coverage <span>{!directoryFacts ? 'Loaded Notes only' : directoryFacts.status === 'reading' ? 'Checking this directory…'
         : directoryFacts.status === 'unknown' ? 'Directory unconfirmed' : directoryFacts.status === 'partial' ? 'Partial' : null}</span></summary>
@@ -213,7 +228,7 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
           <button type="button" className="note-text-button" aria-label={`Open Note source ${surface.workspaceId} · ${path}`} onClick={() => void openUnread(path)}>Open</button></div>)}</div> : null}
         {directoryFacts?.unconfirmedPaths.length ? <div className="note-scope"><strong>Unconfirmed sources</strong>{directoryFacts.unconfirmedPaths.map(path => <div key={path}>{path}</div>)}</div> : null}
       </details>
-    } {...(originalResource ? { resource: { hostId: originalResource.hostId, workspaceId: originalResource.id, workspacePath: originalResource.path, path: surface.path } } : {})} document={document} dirty={dirty} knowledge={knowledge} onCheckOriginal={() => void useAppStore.getState().refreshDocument(surface.workspaceId, surface.path)} onChange={(raw, before) => update(tabId, raw, before ?? document.content, surface.regionId)} onSave={onSave} onOpen={onOpen} onOpenPage={openPage} onCompositionChange={compositionChanged}
+    } {...(originalResource ? { resource: { hostId: originalResource.hostId, workspaceId: originalResource.id, workspacePath: originalResource.path, path: surface.path } } : {})} document={document} dirty={dirty} knowledge={knowledge} onCheckOriginal={() => void useAppStore.getState().refreshDocument(surface.workspaceId, surface.path)} onChange={(raw, before) => update(tabId, raw, before ?? document.content, surface.regionId)} onSave={onSave} onOpen={onOpen} onOpenPage={openPage} onOpenOriginal={openOriginal} onCompositionChange={compositionChanged}
       onSnapshotIssue={(displayed, incoming) => { if (originalResource) useAppStore.getState().retainNoteEditorDraft(tabId, surface.regionId, displayed, incoming, { hostId: originalResource.hostId, path: originalResource.path }, 'retain') }}
       onKeepDisplayedDraft={(displayed, incoming) => { if (originalResource) useAppStore.getState().retainNoteEditorDraft(tabId, surface.regionId, displayed, incoming, { hostId: originalResource.hostId, path: originalResource.path }, 'keep-displayed') }}
       {...(blockPresentation ? { onSelectedBlock } : {})} {...(restoredBlock ? { restoredBlock } : {})}
