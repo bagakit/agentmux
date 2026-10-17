@@ -11,6 +11,7 @@ import { DEFAULT_AGENT_SCHEDULE_CHECK_IN } from '@agentmux/core/schedule'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { useAppStore } from '../src/renderer/src/store'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
+import * as automationPreferences from '../src/shared/automation-preferences'
 
 const dom = composerDOM()
 const target = { hostId: 'local', agentSessionId: 'native-agent', providerId: 'codex', workspacePath: _hygiene_fixturePath("repo") }
@@ -43,6 +44,51 @@ async function clickText(text: string) {
 }
 
 describe('original calendar control', () => {
+  it.each([1, 32])('avoids repeated timezone work across %i hidden retained controls while their status stays live', async count => {
+    const timezone = vi.spyOn(automationPreferences, 'automationCalendarTimezone')
+    const targets = Array.from({ length: count }, (_, index) => ({ ...target, agentSessionId: `retained-arrangement-${index}` }))
+    const status = vi.fn(), listeners: ((record: ContinuousProgressLoop) => void)[] = []
+    vi.mocked(api.schedule.onChanged).mockImplementation(listener => { listeners.push(listener); return vi.fn() })
+    const render = () => dom.render(<>{targets.map(exact => <CalendarScheduleControl key={exact.agentSessionId}
+      target={exact} presented={false} onStatusChange={status} />)}</>)
+    await render()
+    await vi.waitFor(() => expect(dom.container.querySelectorAll('[data-schedule-state="inactive"]')).toHaveLength(count))
+    expect(dom.container.querySelectorAll('textarea')).toHaveLength(count)
+    const input = dom.container.querySelector('textarea')
+    timezone.mockClear()
+    for (let index = 0; index < 10; index++) await render()
+    expect(timezone).not.toHaveBeenCalled()
+    await act(async () => listeners.forEach(listener => listener(saved({ ...targets[0]!, status: 'paused' }))))
+    expect(status).toHaveBeenLastCalledWith('paused')
+    expect(dom.container.querySelector('[data-schedule-state="paused"]')).not.toBeNull()
+    expect(dom.container.querySelector('textarea')).toBe(input)
+    expect(timezone).not.toHaveBeenCalled()
+    expect(dom.draft()).toBe('Keep my draft')
+  })
+  it('resolves current display timezone once for actual saved rows and keeps the original form on reveal', async () => {
+    vi.mocked(api.schedule.list).mockResolvedValue({ schedules: [saved(), saved({ loopId: 'second-arrangement' })], executionScope: 'connected-host' })
+    const timezone = vi.spyOn(automationPreferences, 'automationCalendarTimezone'), status = vi.fn()
+    await dom.render(<CalendarScheduleControl target={target} presented={false} onStatusChange={status} />)
+    await vi.waitFor(() => expect(dom.container.querySelector('[data-schedule-state="active"]')).not.toBeNull())
+    const input = dom.container.querySelector('textarea')
+    await act(async () => useAppStore.setState({ config: { ...useAppStore.getState().config!, automation: { calendarTimezone: 'Asia/Tokyo' } } }))
+    timezone.mockClear()
+    await dom.render(<CalendarScheduleControl target={target} onStatusChange={status} />)
+    expect(dom.container.querySelectorAll('[data-schedule-id]')).toHaveLength(2)
+    expect(timezone.mock.calls.length).toBeGreaterThan(0)
+    expect(timezone.mock.calls.every(([value]) => value.calendarTimezone === 'Asia/Tokyo')).toBe(true)
+    // The original presentation clock refreshes on reveal; measure one subsequent render.
+    timezone.mockClear()
+    await dom.render(<CalendarScheduleControl target={target} onStatusChange={status} />)
+    expect(timezone).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ calendarTimezone: 'Asia/Tokyo' }))
+    const expectedDate = new Intl.DateTimeFormat(undefined, { timeZone: 'Asia/Tokyo', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(saved().nextCheckAt)
+    expect([...dom.container.querySelectorAll('.schedule-arrangement__when time')].map(time => time.textContent)).toEqual([expectedDate, expectedDate])
+    expect(dom.container.querySelector('textarea')).toBe(input)
+    timezone.mockClear()
+    await dom.render(<CalendarScheduleControl target={target} presented={false} onStatusChange={status} />)
+    expect(timezone).not.toHaveBeenCalled()
+    expect(dom.container.querySelectorAll('[data-schedule-id]')).toHaveLength(0)
+  })
   it.each([false, true])('replaces loading with a retryable read failure and preserves input and original arrangements (retained: %s)', async retained => {
     let reject!: (error: Error) => void, changed!: (record: ContinuousProgressLoop) => void
     vi.mocked(api.schedule.list).mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail }))
