@@ -7,12 +7,11 @@ import { resolve, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runProbeProcess, stopProbeProcesses, listProbeProcesses } from './probe-process.mjs'
 import { assertWorkspaceDistBuiltFromCurrentSource } from '../../../vitest.dist-freshness.ts'
+import { radixOverlayAliases } from './radix-overlay-aliases.ts'
 
 const repository = resolve(import.meta.dirname, '../../..'), desktop = join(repository, 'apps/desktop')
 const require = createRequire(join(desktop, 'package.json')), { build } = await import('vite')
-const clientRequire = createRequire(join(repository, 'packages/client-ui/package.json'))
-const esbuild = createRequire(require.resolve('vite'))('esbuild'), dialog = createRequire(clientRequire.resolve('@radix-ui/react-dialog'))
-const aliases = Object.fromEntries(['@radix-ui/react-dismissable-layer', '@radix-ui/react-focus-scope'].map(name => [name, dialog.resolve(name)]))
+const esbuild = createRequire(require.resolve('vite'))('esbuild')
 const fixture = join(desktop, 'scripts/fixtures/ui-layering')
 const mobileOnly = process.argv.includes('--mobile-only')
 const fullscreenOnly = process.argv.includes('--fullscreen-only')
@@ -112,7 +111,7 @@ registerHooks({ load(url, context, nextLoad) {
 } });
 import('./main.mjs').catch(error => { console.error(error); require('electron').app.exit(1); });
 `)
-  await build({ configFile: false, root: fixture, base: './', logLevel: 'error', resolve: { alias: aliases }, worker: { format: 'es' },
+  await build({ configFile: false, root: fixture, base: './', logLevel: 'error', resolve: { alias: radixOverlayAliases }, worker: { format: 'es' },
     plugins: [{ name: 'same-ui-layering-renderer-input', enforce: 'pre', async transform(source, id) {
       if (!id.startsWith(repository + '/') || id.includes('/node_modules/') || id.includes('?') || !/\.[jt]sx?$/.test(id)) return
       const original = await readFile(id, 'utf8'), name = relative(repository, id); consumed[name] = hash(original)
