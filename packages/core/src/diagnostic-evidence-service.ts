@@ -6,6 +6,7 @@ import { AgentMuxError } from './errors.js'
 import { DiagnosticEvidenceQuery, DIAGNOSTIC_EVIDENCE_DEFAULT_BUDGET, unavailableDiagnosticEvidence,
   type DiagnosticEvidenceReader } from '@agentmux/diagnostic-evidence'
 import { deliveryEvidenceReader, deliveryEvidenceRelations, relatedDeliveryEvidence } from './delivery-evidence-reader.js'
+import { relatedClientIncidentEvidence } from './client-incident-evidence.js'
 import type { AgentMuxRpcCoreClient, AgentMuxRpcServiceOptions } from './public-rpc-service.js'
 import type { AgentMuxDiagnosticEvidenceData, AgentMuxDiagnosticEvidenceInspectParams,
   AgentMuxDiagnosticEvidenceResult, AgentMuxDiagnosticEvidenceTarget, AgentMuxDiagnosticAuthorityObservation } from './diagnostic-evidence.js'
@@ -98,6 +99,7 @@ export async function inspectDiagnosticEvidence(query: DiagnosticEvidenceQuery, 
   } }
   return complete(await query.inspect(params.target, reader, {
     ...(signal ? { signal } : {}), ...(params.budget ? { budget: params.budget } : {}),
-    ...(params.includeRelated === false ? {} : { related: relatedDeliveryEvidence }), relations: deliveryEvidenceRelations,
+    ...(params.includeRelated === false ? {} : { related: read => [...relatedDeliveryEvidence(read), ...relatedClientIncidentEvidence(read)] }),
+    relations: deliveryEvidenceRelations,
   }))
 }
