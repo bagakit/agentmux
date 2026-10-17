@@ -58,10 +58,11 @@ const thirdTab = { ...createWorkbenchTab('third-mote-tab', { kind: 'launcher', r
 const defaultReference = { displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId: 'mote-group', tabId: defaultTab.id,
   regionId: defaultTab.layout.activeRegionId }
 
-function expectOriginalTabRow(ids: string[], selected: string | null = null) {
+function expectOriginalTabRow(ids: string[], selected: string | readonly string[] | null = null) {
   const tabs = Array.from(app.panel().querySelectorAll<HTMLButtonElement>('button[data-workbench-tab-id]'))
   expect([...new Set(tabs.map(tab => tab.dataset.workbenchTabId))].sort()).toEqual([...ids].sort())
-  expect(tabs.filter(tab => tab.classList.contains('workbench-tab--active')).map(tab => tab.dataset.workbenchTabId)).toEqual(selected ? [selected] : [])
+  const selectedIds = typeof selected === 'string' ? [selected] : selected ?? []
+  expect(tabs.filter(tab => tab.classList.contains('workbench-tab--active')).map(tab => tab.dataset.workbenchTabId)).toEqual(selectedIds)
   const rows = Array.from(app.panel().querySelectorAll<HTMLElement>('.pane-tabbar')).filter(row => row.querySelector('.workbench-tab-strip'))
   expect(rows.length).toBeGreaterThan(0)
   let creationCount = 0
@@ -117,7 +118,7 @@ it('actual App three Mote Tabs → original X/Keep Session & Close keeps both re
   expectQuiet(before, stop)
 })
 
-it.each([false, true])('a removed closing Group retains unselected original navigation with duplicate occurrence=$0', async duplicate => {
+it.each([false, true])('a removed closing Group continues the original Zone with duplicate occurrence=$0', async duplicate => {
   const state = useAppStore.getState(), closing = createWorkspaceLayout('mote-group', [defaultTab.id])
   const remaining = createWorkspaceLayout('remaining-group', [neighborTab.id, thirdTab.id])
   const background = createWorkspaceLayout('background-group', [customTab.id, ...(duplicate ? [neighborTab.id] : [])])
@@ -131,19 +132,25 @@ it.each([false, true])('a removed closing Group retains unselected original navi
   const before = useAppStore.getState(), stop = vi.spyOn(api.sessions, 'stop')
   await closeSelected()
   expect(useAppStore.getState().layouts[SCRATCH_WORKSPACE_ID]!.groups.some(group => group.id === 'mote-group')).toBe(false)
-  expect(persisted().targetTabId).toBeNull()
-  expect(persisted().reference).toBeUndefined()
-  expect(app.panel().dataset.moteTargetTab).toBeUndefined()
-  expectOriginalTabRow([neighborTab.id, thirdTab.id])
-  expect(app.panel().querySelector('.workbench-tab-slot')).toBeNull()
+  expect(persisted().targetTabId).toBe(neighborTab.id)
+  expect(persisted().reference).toEqual({ displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId: 'remaining-group',
+    tabId: neighborTab.id, regionId: neighborTab.layout.activeRegionId })
+  expect(app.panel().dataset.moteTargetTab).toBe(neighborTab.id)
+  // One original content owner cannot present the same Tab live twice. The
+  // confirmed continuation keeps its exact occurrence and all member buttons.
+  expectOriginalTabRow([neighborTab.id, thirdTab.id], neighborTab.id)
+  expect(app.panel().querySelector('[data-mote-empty-space]')).toBeNull()
+  const continuationLayout = useAppStore.getState().layouts
   const choice = app.panel().querySelector<HTMLButtonElement>(`button[data-workbench-tab-id="${thirdTab.id}"]`)!
   await moteClick(choice)
   expect(persisted().reference).toEqual({ displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId: 'remaining-group',
     tabId: thirdTab.id, regionId: thirdTab.layout.activeRegionId })
+  expectOriginalTabRow([neighborTab.id, thirdTab.id], duplicate ? [thirdTab.id, neighborTab.id] : thirdTab.id)
+  expect(useAppStore.getState().layouts).toBe(continuationLayout)
   expectQuiet(before, stop)
 })
 
-it('closing the last Tab in its Group leaves one other-Group Tab reachable but explicitly unselected', async () => {
+it('closing the last Tab in its Group selects the remaining original Zone member', async () => {
   const state = useAppStore.getState(), closing = createWorkspaceLayout('mote-group', [defaultTab.id])
   const remaining = createWorkspaceLayout('remaining-group', [neighborTab.id, customTab.id])
   useAppStore.setState({ mainSurface: 'board', layouts: { ...state.layouts, [SCRATCH_WORKSPACE_ID]: {
@@ -152,11 +159,12 @@ it('closing the last Tab in its Group leaves one other-Group Tab reachable but e
   await openSavedTarget(defaultTab.id, PMO_TEAMS_TOPIC_ID, defaultReference)
   const before = useAppStore.getState(), stop = vi.spyOn(api.sessions, 'stop')
   await closeSelected()
-  expect(persisted().targetTabId).toBeNull()
-  expect(persisted().reference).toBeUndefined()
-  expect(app.panel().dataset.moteTargetTab).toBeUndefined()
-  expectOriginalTabRow([neighborTab.id])
-  expect(app.panel().querySelector('.workbench-tab-slot')).toBeNull()
+  expect(persisted().targetTabId).toBe(neighborTab.id)
+  expect(persisted().reference).toEqual({ displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId: 'remaining-group',
+    tabId: neighborTab.id, regionId: neighborTab.layout.activeRegionId })
+  expect(app.panel().dataset.moteTargetTab).toBe(neighborTab.id)
+  expectOriginalTabRow([neighborTab.id], neighborTab.id)
+  expect(app.panel().querySelector('[aria-label="Message Agent"]')).not.toBeNull()
   expect(app.panel().querySelector('[data-mote-empty-space]')).toBeNull()
   expectQuiet(before, stop)
 })
@@ -176,26 +184,25 @@ it('an obsolete held reference cannot redirect a committed close away from its e
   expect(persisted()).toMatchObject({ targetTabId: neighborTab.id, reference: {
     ...defaultReference, tabId: neighborTab.id, regionId: neighborTab.layout.activeRegionId } })
   expect(useAppStore.getState().tabs[thirdTab.id]).toBe(thirdTab)
-  expectOriginalTabRow([neighborTab.id, thirdTab.id], neighborTab.id)
+  expectOriginalTabRow([neighborTab.id, thirdTab.id], [neighborTab.id, thirdTab.id])
   expectQuiet(before, stop)
 })
 
-it('original members stay navigable on the first render without any stored or retained display layout', async () => {
+it('original Zone members are selected without creating a missing durable display layout', async () => {
   const state = useAppStore.getState(), { [SCRATCH_WORKSPACE_ID]: removed, ...layouts } = state.layouts
   expect(removed).toBeDefined()
   useAppStore.setState({ mainSurface: 'board', layouts })
   await openSavedTarget(null)
   const before = useAppStore.getState(), stop = vi.spyOn(api.sessions, 'stop')
-  expectOriginalTabRow([defaultTab.id, neighborTab.id])
-  expect(persisted().targetTabId).toBeNull()
-  expect(app.panel().querySelector('.workbench-tab-slot')).toBeNull()
+  expectOriginalTabRow([defaultTab.id, neighborTab.id], defaultTab.id)
+  expect(persisted().targetTabId).toBe(defaultTab.id)
+  expect(app.panel().querySelector('[aria-label="Message Agent"]')).not.toBeNull()
   expect(app.panel().querySelector('[data-mote-empty-space]')).toBeNull()
-  expect(app.panel().querySelector('[aria-label="New discussion"]')).toBeNull()
-  expect(app.panel().textContent).toContain('Their display layout is not confirmed yet')
   await moteClick(app.panel().querySelector<HTMLButtonElement>(`button[data-workbench-tab-id="${neighborTab.id}"]`)!)
   expect(persisted().targetTabId).toBe(neighborTab.id)
-  expect(persisted().reference).toBeNull()
-  expect(app.panel().textContent).toContain('Original Tab retained')
+  expect(persisted().reference).toBeUndefined()
+  expectOriginalTabRow([defaultTab.id, neighborTab.id], neighborTab.id)
+  expect(app.panel().textContent).not.toContain('Original Tab retained')
   expect(useAppStore.getState().layouts).toBe(before.layouts)
   expectQuiet(before, stop)
 })
@@ -216,7 +223,7 @@ it('raw unloaded layout members keep empty-Mote creation unavailable until actua
   expectQuiet(before, stop)
 })
 
-it.each(['unplaced', 'other-display', 'ambiguous-display'] as const)('saved null exposes original $0 Tabs without inventing a location and recovers only an explicit choice', async location => {
+it.each(['unplaced', 'other-display', 'ambiguous-display'] as const)('saved empty preference selects original Zone members without adopting $0 display aliases', async location => {
   const state = useAppStore.getState()
   const external = createWorkspaceLayout('external-group', [defaultTab.id, neighborTab.id])
   if (location === 'ambiguous-display') {
@@ -229,30 +236,18 @@ it.each(['unplaced', 'other-display', 'ambiguous-display'] as const)('saved null
     ...(location !== 'unplaced' ? { project: external } : {}) } })
   await openSavedTarget(null)
   const before = useAppStore.getState(), stop = vi.spyOn(api.sessions, 'stop')
-  expect(persisted().targetTabId).toBeNull()
-  expect(app.panel().dataset.moteTargetTab).toBeUndefined()
-  expectOriginalTabRow([defaultTab.id, neighborTab.id])
-  expect(app.panel().querySelector('.workbench-tab-slot')).toBeNull()
+  expect(persisted().targetTabId).toBe(defaultTab.id)
+  expect(app.panel().dataset.moteTargetTab).toBe(defaultTab.id)
+  expectOriginalTabRow([defaultTab.id, neighborTab.id], defaultTab.id)
+  expect(app.panel().querySelectorAll('.pane-tabbar .workbench-tab-strip')).toHaveLength(1)
+  expect(app.panel().querySelector('[aria-label="Message Agent"]')).not.toBeNull()
   expect(app.panel().querySelector('[data-mote-empty-space]')).toBeNull()
   await moteClick(app.panel().querySelector<HTMLButtonElement>(`button[data-workbench-tab-id="${neighborTab.id}"]`)!)
   expect(persisted().targetTabId).toBe(neighborTab.id)
-  if (location === 'other-display') {
-    expect(persisted().reference).toEqual({ displayWorkspaceId: 'project', groupId: 'external-group',
-      tabId: neighborTab.id, regionId: neighborTab.layout.activeRegionId })
-    expect(app.panel().dataset.moteTargetTab).toBe(neighborTab.id)
-  } else {
-    expect(persisted().reference).toBeNull()
-    expect(app.panel().textContent).toContain('Original Tab retained')
-    if (location === 'unplaced') expect(app.panel().textContent).toContain('Group placement is not confirmed')
-    else {
-      expect(app.panel().textContent).toContain('The exact discussion location is not confirmed')
-      const choices = Array.from(app.panel().querySelectorAll<HTMLButtonElement>('button')).filter(choice => choice.textContent?.endsWith('· Location 2'))
-      expect(choices).toHaveLength(1)
-      await moteClick(choices[0]!)
-      expect(persisted().reference).toEqual({ displayWorkspaceId: 'project', groupId: 'second-external-group',
-        tabId: neighborTab.id, regionId: neighborTab.layout.activeRegionId })
-    }
-  }
+  expect(persisted().reference).toBeUndefined()
+  expect(app.panel().dataset.moteTargetTab).toBe(neighborTab.id)
+  expectOriginalTabRow([defaultTab.id, neighborTab.id], neighborTab.id)
+  expect(app.panel().textContent).not.toContain('Original Tab retained')
   expect(useAppStore.getState().layouts).toBe(before.layouts)
   expect(useAppStore.getState().tabs).toBe(before.tabs)
   expectQuiet(before, stop)
@@ -388,21 +383,24 @@ it('an unbound original Mote home stays unknown instead of borrowing another Top
   expect(app.launch).not.toHaveBeenCalled()
 })
 
-it('saved explicit null keeps every original Tab reachable without selecting, creating or starting one', async () => {
+it('saved empty preference selects an original Tab without creating or starting one', async () => {
   expect([defaultTab.id, neighborTab.id].map(id => useAppStore.getState().tabs[id])).toEqual([defaultTab, neighborTab])
   await openSavedTarget(null)
-  expect(app.panel().dataset.moteTargetTab).toBeUndefined()
-  expect(persisted().targetTabId).toBeNull()
-  expectOriginalTabRow([defaultTab.id, neighborTab.id])
+  expect(app.panel().dataset.moteTargetTab).toBe(defaultTab.id)
+  expect(persisted().targetTabId).toBe(defaultTab.id)
+  expect(persisted().reference).toEqual(defaultReference)
+  expectOriginalTabRow([defaultTab.id, neighborTab.id], defaultTab.id)
   expect(app.panel().querySelector('[data-mote-empty-space]')).toBeNull()
   expect(app.panel().textContent).not.toContain('What’s on your mind?')
-  expect(app.panel().querySelector('.workbench-tab-slot')).toBeNull()
+  expect(app.panel().querySelector('[aria-label="Message Agent"]')).not.toBeNull()
   expect(useAppStore.getState().tabs[defaultTab.id]).toBe(defaultTab)
   const before = useAppStore.getState()
   await app.remount()
-  expect(app.panel().dataset.moteTargetTab).toBeUndefined()
-  expect(persisted().targetTabId).toBeNull()
-  expectOriginalTabRow([defaultTab.id, neighborTab.id])
+  expect(app.panel().dataset.moteTargetTab).toBe(defaultTab.id)
+  expect(persisted().targetTabId).toBe(defaultTab.id)
+  expect(persisted().reference).toEqual(defaultReference)
+  expectOriginalTabRow([defaultTab.id, neighborTab.id], defaultTab.id)
+  expect(useAppStore.getState().layouts).toBe(before.layouts)
   expect(useAppStore.getState().tabs).toBe(before.tabs)
   expect(useAppStore.getState().sessions).toBe(before.sessions)
   expect(useAppStore.getState().agentComposerDrafts).toEqual(before.agentComposerDrafts)
@@ -604,17 +602,34 @@ it('post-delete file cleanup failure reports its error and still consumes the co
   expect(persisted().targetTabId).toBe(neighborTab.id)
 })
 
-it.each(['missing', 'other-topic', 'other-workspace', 'unplaced'] as const)('keeps exact %s saved target as unknown recovery', async kind => {
+it.each(['missing', 'other-topic', 'other-workspace'] as const)('keeps exact %s saved target as unknown recovery', async kind => {
   const { [defaultTab.id]: removed, ...tabs } = useAppStore.getState().tabs
   expect(removed).toBe(defaultTab)
   if (kind === 'other-topic') tabs[defaultTab.id] = { ...defaultTab, topicId: customMoteId }
   if (kind === 'other-workspace') tabs[defaultTab.id] = { ...defaultTab, workspaceId: 'project' }
-  if (kind === 'unplaced') tabs[defaultTab.id] = defaultTab
   useAppStore.setState({ tabs, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('mote-group', [neighborTab.id, customTab.id]) } })
   await openSavedTarget()
   expect(app.panel().dataset.moteTargetTab).toBe(defaultTab.id)
   expect(persisted().targetTabId).toBe(defaultTab.id)
   expect(app.panel().textContent).toContain('Original Tab retained')
   expect(useAppStore.getState().tabs[neighborTab.id]).toBe(neighborTab)
+  expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled()
+})
+
+it('selects a known original Tab without turning its missing placement into an exact saved address', async () => {
+  useAppStore.setState({ layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('mote-group', [neighborTab.id, customTab.id]) } })
+  const before = useAppStore.getState()
+  await openSavedTarget()
+  expect(app.panel().dataset.moteTargetTab).toBe(defaultTab.id)
+  expect(persisted().targetTabId).toBe(defaultTab.id)
+  expect(persisted().reference).toBeUndefined()
+  expect(app.panel().querySelector(`button[data-workbench-tab-id="${defaultTab.id}"].workbench-tab--active`)).not.toBeNull()
+  expect(app.panel().dataset.moteTargetSession).toBe(defaultAgent.id)
+  expect([...app.panel().querySelectorAll('[aria-label="Message Agent"]')].some(input => input.textContent?.includes('Default unsent'))).toBe(true)
+  expect(useAppStore.getState().tabs).toBe(before.tabs)
+  expect(useAppStore.getState().layouts).toBe(before.layouts)
+  expect(useAppStore.getState().sessions.map(session => [session.id, session.control, session.processState]))
+    .toEqual(before.sessions.map(session => [session.id, session.control, session.processState]))
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
   expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled()
 })
