@@ -573,7 +573,7 @@ export class DurableAgentMuxMessageQueue {
   async savePromptInput(intent: AgentInputJournalIntent, originalClaimAbsent?: () => Promise<boolean>): Promise<AgentInputJournalEntry | null> {
     return this.withLock(async () => {
       const key = validateAgentPromptInputKey(intent.key), existing = this.input(key)
-      if (key.kind === 'prompt' && this.notification(key.submissionId)) throw new AgentMuxError(
+      if (key.kind === 'prompt' && isDeepStrictEqual(this.notification(key.submissionId)?.key, key)) throw new AgentMuxError(
         'This input identity belongs to an original Inbox notification.', 'AGENT_PROMPT_OPERATION_CONFLICT')
       if (existing) {
         if (!isDeepStrictEqual(existing.intent.source, intent.source) || !isDeepStrictEqual(existing.intent.admissionIntent, intent.admissionIntent) || existing.intent.execution !== intent.execution) throw new AgentMuxError('Input identity already names another original content, author or target intent.', 'AGENT_PROMPT_OPERATION_CONFLICT')
@@ -651,7 +651,9 @@ export class DurableAgentMuxMessageQueue {
   async withUncontrolledInputClaim<T>(key: import('./agent-prompt-condition.js').AgentPromptInputKey, claim: () => Promise<T>, originalClaim?: () => Promise<boolean>, expectedNotificationId?: string): Promise<T> {
     return await this.withLock(async () => {
       const notice = key.kind === 'prompt' ? this.notification(key.submissionId) : undefined
-      if (notice ? expectedNotificationId !== notice.notificationId || notice.state !== 'pending' || !isDeepStrictEqual(notice.key, key) : expectedNotificationId !== undefined) throw new AgentMuxError(
+      const sameNotificationKey = notice !== undefined && isDeepStrictEqual(notice.key, key)
+      if (expectedNotificationId === undefined ? sameNotificationKey :
+          !notice || !sameNotificationKey || expectedNotificationId !== notice.notificationId || notice.state !== 'pending') throw new AgentMuxError(
         'This original notification no longer authorizes a new input claim.', 'A2A_NOTIFICATION_CONFLICT')
       if (this.input(key)) throw new AgentMuxError('The original controlled input requires its journal gate and intent.', 'AGENT_PROMPT_OPERATION_CONFLICT')
       if (this.db.prepare('SELECT 1 FROM input_intents WHERE input_id=?').get(agentInputJournalKey(key)) && (!originalClaim || !await originalClaim())) throw new AgentMuxError('This accepted original input has no available admission to rejoin. Its recorded identity is retained.', 'AGENT_INPUT_READ_UNCONFIRMED')
