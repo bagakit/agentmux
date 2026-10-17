@@ -11,7 +11,11 @@ for (let index = 0; index < args.length; index++) {
   if (args[index] === '--receipt' && !receiptArgument) receiptArgument = args[++index]
   else if (args[index] === '--consumer-proof' && !consumerProofArgument) consumerProofArgument = args[++index]
   else if (args[index] === '--consumer-only' && !consumerOnly) consumerOnly = true
-  else if (args[index] === '--mutation' && !mutationArgument) mutationArgument = args[++index]
+  else if (args[index] === '--mutation' && mutationArgument === undefined) {
+    const name = args[++index]
+    assert.ok(typeof name === 'string' && name.trim() && !name.startsWith('--'), 'A mutation selection requires its nonempty name')
+    mutationArgument = name
+  }
   else throw new Error('Use --receipt PATH, --consumer-proof PATH, or --consumer-only [--mutation NAME] for a bounded diagnostic')
 }
 assert.ok(!mutationArgument || consumerOnly, 'Selecting one mutation is only a scoped consumer diagnostic')
