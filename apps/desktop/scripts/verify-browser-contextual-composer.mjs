@@ -19,10 +19,12 @@ const foreground = process.argv.includes('--foreground')
 const captureHandoff = process.argv.includes('--capture-handoff')
 const nativeOpinion = process.argv.includes('--native-opinion')
 const outputIndex = process.argv.indexOf('--output')
+const coreBuildIndex = process.argv.indexOf('--core-build-receipt')
+const coreBuildFile = coreBuildIndex < 0 ? undefined : resolve(process.argv[coreBuildIndex + 1] ?? '')
 for (let index = 2; index < process.argv.length; index++) {
   const arg = process.argv[index]
-  if (arg === '--output') {
-    assert.equal(index, outputIndex, 'Only one evidence output is accepted')
+  if (arg === '--output' || arg === '--core-build-receipt') {
+    assert.equal(index, arg === '--output' ? outputIndex : coreBuildIndex, 'Only one path per proof option is accepted')
     assert.ok(process.argv[++index] && !process.argv[index].startsWith('--'), 'The output flag requires a path')
   } else assert.ok(arg.startsWith('--mutation=') || arg.startsWith('--capture-case=') ||
     ['--baseline', '--foreground', '--capture-handoff', '--native-opinion', '--capture-only', '--presence-only', '--selection-only'].includes(arg), 'Unsupported contextual proof argument')
@@ -63,6 +65,29 @@ async function bind(file) {
   sources.set(name, digest)
 }
 await bind(fileURLToPath(import.meta.url))
+let coreBuild
+async function checkCoreBuild() {
+  if (!coreBuildFile) return
+  const bytes = await readFile(coreBuildFile), qualified = JSON.parse(bytes)
+  assert.equal(qualified.passed, true); assert.deepEqual(qualified.sourceDrift, [])
+  assert.equal(qualified.coreTree, execFileSync('git', ['rev-parse', 'HEAD:packages/core'], { cwd: root, encoding: 'utf8' }).trim())
+  for (const group of ['sources', 'outputs']) {
+    const inputs = Object.entries(qualified[group])
+    assert.ok(inputs.length > 0, 'The compiled Core qualification must bind real ' + group)
+    for (const [file, digest] of inputs) {
+      assert.ok(file.startsWith(group === 'outputs' ? 'packages/core/dist/' : 'packages/core/') && !file.includes('..'))
+      assert.equal(hash(await readFile(join(root, file))), digest, 'Exact Core build ' + group + ': ' + file)
+    }
+  }
+  if (coreBuild) assert.equal(hash(bytes), receipt.coreBuild.sha256, 'Core build qualification is immutable during the consumer')
+  else {
+    coreBuild = qualified
+    receipt.coreBuild = { file: relative(root, coreBuildFile), sha256: hash(bytes), candidate: qualified.candidate,
+      coreTree: qualified.coreTree, sourceCount: Object.keys(qualified.sources).length, outputCount: Object.keys(qualified.outputs).length }
+    await bind(coreBuildFile)
+  }
+}
+await checkCoreBuild()
 const mutations = [
   { id: 'gui-frozen-capture-bridge', file: 'apps/desktop/src/renderer/src/components/BrowserContextualComposer.tsx',
     from: '...(capture ? { browserInput: { control: original.control, capture } } : {})', to: '/* private mutation: lose the original frozen GUI capture */',
@@ -109,7 +134,9 @@ for (const name of await readdir(join(root, 'packages'))) {
     const target = typeof spec === 'string' ? spec : spec.import
     if (!target?.startsWith('./dist/')) continue
     const source = resolve(dirname(manifest), target.replace(/^\.\/dist\/(?:src\/)?/u, './src/').replace(/\.js$/u, '.ts'))
-    try { await stat(source); aliases[key === '.' ? pkg.name : pkg.name + key.slice(1)] = source } catch {}
+    const name = key === '.' ? pkg.name : pkg.name + key.slice(1)
+    try { await stat(source); aliases[name] = source }
+    catch { if (coreBuild && pkg.name === '@agentmux/core') aliases[name] = resolve(dirname(manifest), target) }
   }
 }
 async function workspaceSource(name) {
@@ -315,6 +342,7 @@ try {
     assert.equal(receipt.runs.length, mutations.length + 2)
   }
   for (const file of sources.keys()) await bind(join(root, file))
+  await checkCoreBuild()
   const endingCandidate = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
   if (presenceOnly) { receipt.endingCandidate = endingCandidate; receipt.presenceDiagnosticComplete = true }
   else if (captureCase) receipt.endingCandidate = endingCandidate // Every consumed source was rechecked above; unrelated test commits do not repaint this scope.

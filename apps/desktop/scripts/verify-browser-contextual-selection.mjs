@@ -7,12 +7,14 @@ import { fileURLToPath } from 'node:url'
 
 const root = resolve(import.meta.dirname, '../../..'), args = process.argv.slice(2)
 const baseline = args.includes('--baseline'), handoff = args.includes('--capture-handoff'), foreground = args.includes('--foreground')
-let output = join(root, '.tmp/browser-agent-collaboration/contextual-selection-proof')
+let output = join(root, '.tmp/browser-agent-collaboration/contextual-selection-proof'), coreBuildReceipt
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--output') { assert.ok(args[i + 1] && !args[i + 1].startsWith('--')); output = resolve(args[++i]) }
+  else if (args[i] === '--core-build-receipt') { assert.ok(args[i + 1] && !args[i + 1].startsWith('--')); coreBuildReceipt = resolve(args[++i]) }
   else assert.ok(['--baseline', '--capture-handoff', '--foreground'].includes(args[i]), 'Unsupported selection proof argument')
 }
 assert.ok(!foreground || handoff, 'Foreground selection uses the exact private capture handoff')
+assert.ok(coreBuildReceipt, 'Selection must identify its exact source-qualified Core build receipt')
 await mkdir(output, { recursive: true })
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const receipt = { schema: 'agentmux.browser-contextual-selection.proof.v1', passed: false, baselineOnly: baseline,
@@ -44,11 +46,15 @@ async function consume(path) {
 try {
   const nativeDirectory = join(output, 'native')
   await run('apps/desktop/scripts/verify-browser-contextual-composer.mjs', ['--selection-only', '--output', nativeDirectory,
+    '--core-build-receipt', coreBuildReceipt,
     ...(handoff ? ['--capture-handoff'] : []), ...(foreground ? ['--foreground'] : [])], 'selection-native')
   const native = await consume(join(nativeDirectory, 'receipt.json'))
   assert.equal(native.selectionBaselineComplete, true)
   assert.equal(native.runs.length, 1)
   assert.equal(native.runs[0].actual.selection.passed, true)
+  assert.equal(native.runs[0].actual.selection.publicInspect.passed, true)
+  assert.ok(native.coreBuild?.sourceCount > 0 && native.coreBuild?.outputCount > 0)
+  receipt.coreBuild = native.coreBuild
   receipt.native = { file: relative(root, join(nativeDirectory, 'receipt.json')), sha256: hash(await readFile(join(nativeDirectory, 'receipt.json'))), wholeWindowCaptures: native.runs[0].actual.frames?.filter(frame => frame.surface === 'os-native-window').length ?? 0 }
   if (handoff) assert.equal(receipt.native.wholeWindowCaptures, 2, 'Selection handoff retains its exact normal and narrow native window images')
   if (!baseline) {
@@ -56,7 +62,8 @@ try {
     await run('apps/desktop/scripts/verify-browser-opinion-selection.mjs', ['--receipt', path], 'opinion-owner')
     const unit = await consume(path)
     assert.equal(unit.schema, 'agentmux.browser-opinion-selection.proof.v1'); assert.equal(unit.passed, true)
-    assert.equal(unit.runs.length, 7)
+    assert.equal(unit.runs.length, 9)
+    assert.ok(unit.runs.every(run => run.assertions === 14))
     receipt.opinion = { file: relative(root, path), sha256: hash(await readFile(path)) }
   }
   assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), receipt.candidate)
