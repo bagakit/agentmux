@@ -35,7 +35,7 @@ it('shows the current recovery exit, original phase/count/error and exact identi
   expect(details.open).toBe(true)
   expect(details.textContent).toContain('current-run')
   expect(details.textContent).toContain('Recovery phasepaused')
-  expect(details.textContent).toContain('Recovery attempts2 of 3')
+  expect(details.textContent).toContain('Recovery attempts2 of 2')
   expect(details.textContent).toContain(session.continuity!.error)
   expect(agentContextForSession(session, undefined, undefined, composerConfig.workspaces[0], null).detail)
     .toBe('Recovery process exited · Exit code 1')
