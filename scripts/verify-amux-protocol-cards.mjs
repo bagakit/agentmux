@@ -27,6 +27,22 @@ if (scope === 'join') {
   assert(visual.approved === true && visual.screenshots?.length > 0, 'Independent visual review is incomplete')
   assert(Object.keys(visual.inputs ?? {}).length > 0, 'Visual review has no bound source inputs')
   current(visual.inputs)
+  const boundArtifact = artifact => {
+    assert(artifact?.file && artifact.sha256, 'Missing bound review artifact')
+    assert(sha(readFileSync(resolve(root, artifact.file))) === artifact.sha256, `Review artifact changed: ${artifact.file}`)
+  }
+  boundArtifact(visual.captureReceipt)
+  const capture = read(visual.captureReceipt.file)
+  assert(capture.passed === true && capture.captureOnly === true && capture.buildPerformed === false, 'Missing successful source-only capture')
+  current(capture.sources)
+  assert(capture.images.length === visual.screenshots.length, 'Visual review does not cover the captured images')
+  for (const image of capture.images) {
+    const file = relative(root, resolve(root, dirname(visual.captureReceipt.file), image.file))
+    assert(visual.screenshots.some(screenshot => screenshot.file === file && screenshot.sha256 === image.sha256), `Unreviewed image: ${file}`)
+  }
+  visual.screenshots.forEach(boundArtifact)
+  assert(visual.reports?.length > 0, 'Missing independent visual review reports')
+  visual.reports.forEach(boundArtifact)
   console.log(JSON.stringify({ sourcePassed: true, visualApproved: true, buildPerformed: false }))
 } else {
   assert(Object.hasOwn(selections, scope), 'Use --scope reader, cards, settings or join')
