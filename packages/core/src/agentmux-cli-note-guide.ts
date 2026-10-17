@@ -64,9 +64,11 @@ not identity or uniqueness proof. Multiple Notes render and edit this same Markd
 Copy/hover never creates an entity. Paste is a reversible draft; the first explicit save with
 that occurrence still present extracts the selected source into one shared .note.md and replaces
 the original position with an include. Do not duplicate its body or create files on copy/paste.
+A heading selects its complete section within the same container, stopping before the next
+heading at the same or higher level; lower headings, paragraphs and lists move together.
 Use amux file share --help for the original destination/source baselines and exact resources.
 Only the original source include may declare forwardedBlockIds (Markdown forwarded= with
-comma-separated URI-encoded IDs) for its existing extracted descendants. Its root ID stays
+comma-separated URI-encoded IDs) for all moved block addresses, including existing forwarding declarations in nested includes. Its root ID stays
 on the source include. Preserve these old addresses there; do not copy the forwarding declaration
 to new occurrences. No paragraph IDs are invented to stand in for the shared file itself.
 Each create/source/destination outcome is separate; this is not an atomic cross-file commit.
