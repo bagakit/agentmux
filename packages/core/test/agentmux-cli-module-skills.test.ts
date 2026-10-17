@@ -182,7 +182,14 @@ describe('local progressive AgentMux module skills', () => {
         'do not persist the secret', 'amux mote playbook pmo', 'amux goal --skill',
         'Keep MEMORY.md a short current index', 'reusable results in outcome/',
         'refresh its short\nindex links', 'Update the relevant existing note when a conclusion changes',
-        'nothing useful changed, no extra note is needed'
+        'nothing useful changed, no extra note is needed',
+        'Fix the current task first', 'applicable conditions, concrete steps and failure',
+        'single-case evidence visibly limited', 'read the current linked original before applying it',
+        'narrow, correct or withdraw that same method', 'No useful method means no extra record',
+        'global installed skills or permissions', 'amux notebook --skill',
+        'create an ordinary Markdown note through Files', 'label a proposal',
+        'amux schedule --skill', 'amux schedule create --help',
+        'one finite reminder with a clear purpose', 'A reminder delivered is not work completed'
       ]) expect(mote.stdout, duty).toContain(duty)
 
       const pmo = await run(['--endpoint', selectedEndpoint, 'mote', 'playbook', 'pmo'])

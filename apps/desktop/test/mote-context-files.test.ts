@@ -158,6 +158,9 @@ it.each([
     if (kind === 'mote') {
       expect(system).toContain(memory)
       expect(system).toContain('mote playbook pmo')
+      expect(system).toContain('original knowledge, reusable methods and short memory index')
+      expect(system).toContain('Read current linked methods for later relevant work and revise them from real feedback.')
+      if (!custom) expect(system).toContain('for cooperation, active memory and method improvement, ideas and own-task reminders.')
       expect(system).not.toContain('"$AGENTMUX_CLI" topic --skill')
     } else {
       expect(system).not.toContain('Knowledge for Mote')
@@ -281,7 +284,9 @@ it('starts with blank Mote defaults, then carries public Files corrections acros
   const zone = {zoneId:homeZoneId(directoryIdentity('local',mote.identityDirectoryPath!)),kind:'temporary',workspaceId:h.workspace.id,hostId:'local',directoryPath:mote.physicalDirectoryPath!}
   const files = new WorkspaceFiles(id => ({id,kind:'local',label:'Private local',run:vi.fn(),exposeLoopbackPort:async port=>port,dispose:async()=>{}}))
   const owner = new FileReadOwner({catalog:async()=>({zones:[zone],bindings:[]} as any),workspace:id=>id===h.workspace.id?h.workspace:undefined,topicForDirectory:(workspace,directory)=>h.owner.readForDirectory(workspace,directory),files})
-  const server = new AgentMuxControlServer({socketPath:join(h.root,'memory.sock'),files:owner,coreClients:()=>[]})
+  let discussionCore: import('@agentmux/core').AgentMuxClient | null = null
+  const server = new AgentMuxControlServer({socketPath:join(h.root,'memory.sock'),files:owner,
+    coreClients:()=>discussionCore ? [{hostId:'local',client:discussionCore}] : []})
   await server.start()
   const client = await connectAgentMuxRpc({endpoint:{transport:'unix',path:server.path}})
   try {
@@ -299,22 +304,36 @@ it('starts with blank Mote defaults, then carries public Files corrections acros
     const preference = 'Preference: start with the conclusion.'
     const commitment = 'Open commitment: review the original experiment when its result is ready.'
     const source = 'Source: explicit user choice, ' + _hygiene_fixtureCivil(10, 12) + ', this Mote only.'
-    const content = '# Memory\n' + preference + '\n' + source + '\n\n' + commitment + '\nSource: explicit request, ' + _hygiene_fixtureCivil(10, 12) + ', this private discussion in this Mote only.\n'
+    const methodPath = 'outcome/compare-experiments.md'
+    const methodLink = '[Compare small experiments](' + methodPath + ')'
+    const method = '# Compare small experiments\n\nSource: explicit correction in this private discussion, ' + _hygiene_fixtureCivil(10, 12) + ', this Mote only.\n\nApplicability: early comparison when an observable baseline is available.\nMethod: compare one measurable outcome before broadening the experiment.\nCounterexamples: none recorded yet; do not infer universal applicability.\n\nRetained evidence: the original two experiment descriptions remain with their source.\n'
+    const revisedMethod = method.replace('Applicability: early comparison when an observable baseline is available.',
+      'Applicability: early comparison only when the same observable baseline and observation window are available.')
+      .replace('Counterexamples: none recorded yet; do not infer universal applicability.',
+        'Counterexample: unequal observation windows made the first comparison misleading. Source: the later private experiment result. Align the windows before applying this method; otherwise leave the comparison unknown.')
+    const content = '# Memory\n' + preference + '\n' + source + '\n\n' + commitment + '\nSource: explicit request, ' + _hygiene_fixtureCivil(10, 12) + ', this private discussion in this Mote only.\n\nMethod: ' + methodLink + ' — early comparisons with an observable baseline; read current applicability and counterexamples before reuse.\n'
     const {spawn}=await import('node:child_process')
     const writes: string[] = []
+    type Caller = { agentSessionId: string; capability: string }
+    async function command(args:string[], input = '', caller?:Caller) {
+      return await new Promise<{code:number|null;body:any}>((resolve,reject)=>{
+        const child=spawn(process.execPath,[cli,...args],{env:{...process.env,AGENTMUX_RPC_ENDPOINT:'unix:'+server.path,
+          AGENTMUX_AGENT_SESSION_ID:caller?.agentSessionId,AGENTMUX_AGENT_CAPABILITY:caller?.capability,AGENTMUX_ENV:undefined},stdio:['pipe','pipe','pipe']})
+        let output='',errors='';child.stdout.on('data',bytes=>output+=bytes);child.stderr.on('data',bytes=>errors+=bytes);child.on('error',reject)
+        child.on('close',code=>{try{resolve({code,body:JSON.parse(output||errors)})}catch{reject(Error(errors||output))}});child.stdin.end(input)
+      })
+    }
     async function save(text:string, expectedRevision:string) {
       writes.push(text)
-      return await new Promise<{code:number|null;body:any}>((resolve,reject)=>{
-        const child=spawn(process.execPath,[cli,'file','write','--zone',zone.zoneId,'--path','MEMORY.md','--resource',JSON.stringify(original.resource),'--expected-revision',expectedRevision],{env:{...process.env,AGENTMUX_RPC_ENDPOINT:'unix:'+server.path,AGENTMUX_AGENT_SESSION_ID:undefined,AGENTMUX_AGENT_CAPABILITY:undefined,AGENTMUX_ENV:undefined},stdio:['pipe','pipe','pipe']})
-        let output='',errors='';child.stdout.on('data',bytes=>output+=bytes);child.stderr.on('data',bytes=>errors+=bytes);child.on('error',reject)
-        child.on('close',code=>{try{resolve({code,body:JSON.parse(output)})}catch{reject(Error(errors||output))}});child.stdin.end(text)
-      })
+      return command(['file','write','--zone',zone.zoneId,'--path','MEMORY.md','--resource',JSON.stringify(original.resource),'--expected-revision',expectedRevision],text)
     }
     const { injectedContextCore } = await import('./helpers/injected-context-core')
     const { RuntimeController } = await import('../src/main/runtime-controller')
     const { DEFAULT_CONFIG } = await import('../src/main/config-store')
     const coreRoot = join(h.root, 'original-discussions'); await mkdir(coreRoot)
     const f = await injectedContextCore(coreRoot)
+    discussionCore = f.core
+    const authorize = vi.spyOn(f.core, 'authorizeRetainedAgentCaller')
     const runtime = new RuntimeController(f.store, async () => { throw Error('No unrelated Host') })
     const config = { ...structuredClone(DEFAULT_CONFIG), workspaces: [h.workspace], executors: {
       fixture: { providerId: 'claude' as const, label: 'Private context fixture', command: 'private-fixture', args: [], env: {}, injectAgentMuxGuide: false } } }
@@ -337,7 +356,23 @@ it('starts with blank Mote defaults, then carries public Files corrections acros
         expect(system.split(body)).toHaveLength(2) // Exact current MEMORY appears once in real Core context.
       }
       expect(f.core.agentSession(result.created.agentSessionId).workspacePath).toBe(topic.physicalDirectoryPath)
-      return { sid: result.created.agentSessionId, system, timeline: JSON.stringify(timeline) }
+      const nativeInput = f.start.mock.calls.at(-1)![0] as { cwd: string; env: Record<string,string> }
+      expect(nativeInput.env.AGENTMUX_AGENT_SESSION_ID).toBe(result.created.agentSessionId)
+      expect(nativeInput.env.AGENTMUX_AGENT_CAPABILITY).toEqual(expect.any(String))
+      return { sid: result.created.agentSessionId, system, timeline: JSON.stringify(timeline),
+        caller: { agentSessionId: nativeInput.env.AGENTMUX_AGENT_SESSION_ID!, capability: nativeInput.env.AGENTMUX_AGENT_CAPABILITY! } }
+    }
+    async function readLinkedMethod(discussion: Awaited<ReturnType<typeof launch>>, expected:string, revision:string,
+      resource: import('@agentmux/core').FileReadResource) {
+      expect(discussion.system).toContain(methodLink)
+      expect(discussion.system).not.toContain(expected) // The detailed method stays on demand in its original file.
+      const read = await command(['file','read','--zone',zone.zoneId,'--path',methodPath,'--host','local',
+        '--workspace',h.workspace.id,'--workspace-path',h.workspace.path], '', discussion.caller)
+      expect(read.code).toBe(0)
+      expect(read.body.result.resource).toEqual(resource)
+      expect(read.body.result.result).toMatchObject({status:'read',document:{content:expected,revision}})
+      expect(authorize.mock.calls.at(-1)?.[1]).toBe(discussion.sid)
+      return read.body.result
     }
     try {
       // Controlled file writes prove delivery, not autonomous model memory.
@@ -349,12 +384,26 @@ it('starts with blank Mote defaults, then carries public Files corrections acros
       expect(blank.system).toContain('No entries have been added to this index yet.')
       expect(blank.system).toContain('an empty index is not an empty knowledge library')
       expect(blank.system).toContain('mote --skill'); expect(blank.system).toContain('mote playbook pmo')
+      expect(blank.system).toContain('original knowledge, reusable methods and short memory index')
+      expect(blank.system).toContain('Read current linked methods for later relevant work and revise them from real feedback.')
+      expect(blank.system).toContain('for cooperation, active memory and method improvement, ideas and own-task reminders.')
       expect(blank.system).not.toContain('## Remember at useful moments')
       expect(blank.system).not.toContain('## Agree on the work')
       expect(blank.system).not.toContain(goalRoleGuidanceContract())
       expect(blank.system).not.toContain(preference); expect(blank.system).not.toContain(commitment)
       expect(writes).toEqual([]); expect(create).toHaveBeenCalledTimes(1); expect(f.start).toHaveBeenCalledTimes(1)
       for (const [name, text] of Object.entries(defaults)) expect(await readFile(join(mote.physicalDirectoryPath!, name), 'utf8')).toBe(text)
+
+      // The harness writes the method, then uses each real Core-issued identity to read it.
+      // No model or extra Agent is involved; a successful read is not evidence of adherence.
+      const absent = await client.call('file.read',{...params,path:methodPath})
+      expect(absent.result.status).toBe('deleted'); expect(absent.resource).not.toBeNull()
+      const createdMethod = await command(['file','create','--input','-'], JSON.stringify({zoneId:zone.zoneId,path:methodPath,
+        expectedResource:absent.resource,expectedRevision:null,content:method}))
+      expect(createdMethod.code).toBe(0); expect(createdMethod.body.result.result.status).toBe('written')
+      const methodRead = await client.call('file.read',{...params,path:methodPath})
+      expect(methodRead.resource).toEqual(absent.resource)
+      expect(methodRead.result).toMatchObject({status:'read',document:{content:method,revision:createdMethod.body.result.result.revision}})
 
       const saved=await save(content, original.result.document.revision)
       expect(saved.code).toBe(0);expect(saved.body.result.result.status).toBe('written')
@@ -363,12 +412,25 @@ it('starts with blank Mote defaults, then carries public Files corrections acros
       expect(confirmed.result).toMatchObject({status:'read',document:{content,revision:saved.body.result.result.revision}})
       const first = await launch('memory-before-correction', content)
       expect(first.system).toContain(preference); expect(first.system).toContain(source); expect(first.system).toContain(commitment)
+      await readLinkedMethod(first,method,createdMethod.body.result.result.revision,absent.resource!)
+      const denied = await command(['file','read','--zone',zone.zoneId,'--path',methodPath,'--host','local',
+        '--workspace',h.workspace.id,'--workspace-path',h.workspace.path], '', {...first.caller,capability:'not-an-issued-capability'})
+      expect(denied.code).not.toBe(0); expect(denied.body.error.code).toBe('AGENT_CAPABILITY_INVALID')
       const stale=await save('Old revision must not resurrect removed knowledge.', original.result.document.revision)
       expect(stale.code).toBe(1);expect(stale.body.result.result.status).toBe('conflict')
       expect(await readFile(join(mote.physicalDirectoryPath!,'MEMORY.md'),'utf8')).toBe(content)
 
       const correction = 'Preference: start with one concrete example.'
       const corrected = content.replace(preference, correction)
+      const methodChange = await command(['file','write','--zone',zone.zoneId,'--path',methodPath,'--resource',JSON.stringify(absent.resource),
+        '--expected-revision',createdMethod.body.result.result.revision], revisedMethod, first.caller)
+      expect(methodChange.code).toBe(0); expect(methodChange.body.result.result.status).toBe('written')
+      const currentMethod = await client.call('file.read',{...params,path:methodPath})
+      expect(currentMethod.resource).toEqual(absent.resource)
+      expect(currentMethod.result).toMatchObject({status:'read',document:{content:revisedMethod,revision:methodChange.body.result.result.revision}})
+      const staleMethod = await command(['file','write','--zone',zone.zoneId,'--path',methodPath,'--resource',JSON.stringify(absent.resource),
+        '--expected-revision',createdMethod.body.result.result.revision], method, first.caller)
+      expect(staleMethod.code).toBe(1); expect(staleMethod.body.result.result.status).toBe('conflict')
       const changed = await save(corrected, saved.body.result.result.revision)
       expect(changed.code).toBe(0); expect(changed.body.result.result.status).toBe('written')
       const reread = await client.call('file.read', params)
@@ -377,6 +439,8 @@ it('starts with blank Mote defaults, then carries public Files corrections acros
       const second = await launch('memory-after-correction', corrected)
       expect(second.system).toContain(correction); expect(second.system).toContain(source)
       expect(second.system).toContain(commitment); expect(second.system).not.toContain(preference)
+      await readLinkedMethod(second,revisedMethod,methodChange.body.result.result.revision,absent.resource!)
+      expect(await readFile(join(mote.physicalDirectoryPath!,methodPath),'utf8')).toBe(revisedMethod)
       const withdrawn = corrected.replace(correction, 'Withdrawn source: the earlier preference. No recall text.')
       const removed = await save(withdrawn, changed.body.result.result.revision)
       expect(removed.code).toBe(0); expect(removed.body.result.result.status).toBe('written')
@@ -406,6 +470,7 @@ it('starts with blank Mote defaults, then carries public Files corrections acros
       for (const system of [foreign.system, ordinary.system]) {
         expect(system).not.toContain(preference); expect(system).not.toContain(correction)
         expect(system).not.toContain(commitment); expect(system).not.toContain('Withdrawn source: the earlier preference.')
+        expect(system).not.toContain(methodLink); expect(system).not.toContain(method); expect(system).not.toContain(revisedMethod)
       }
       expect(new Set([blank.sid, first.sid, second.sid, third.sid, foreign.sid, ordinary.sid]).size).toBe(6)
       expect(create).toHaveBeenCalledTimes(6); expect(f.start).toHaveBeenCalledTimes(6); expect(f.stop).not.toHaveBeenCalled()
