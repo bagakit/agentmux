@@ -2,24 +2,29 @@ import type { DiagnosticEvidenceAuthority, DiagnosticEvidenceRead, DiagnosticEvi
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { isDeliveryLogId } from './delivery-log-id.js'
+import { parseReadingDiagnosticRecord, type ReadingDiagnosticRecord } from './reading-diagnostic.js'
 
+export const CLIENT_READING_INCIDENT_KINDS = ['conversation-reading-progress', 'conversation-reading-failure',
+  'conversation-reading-held', 'conversation-reading-recovered'] as const
 export const CLIENT_INCIDENT_KINDS = ['terminal-attach-failed', 'terminal-replay-failed', 'terminal-output-gap',
   'terminal-reveal-deadline', 'terminal-context-lost', 'terminal-refresh', 'terminal-recovered',
-  'capability-probe-failed', 'capability-probe-recovered', 'connection-failed', 'connection-recovered'] as const
+  'capability-probe-failed', 'capability-probe-recovered', 'connection-failed', 'connection-recovered', ...CLIENT_READING_INCIDENT_KINDS] as const
 export const CLIENT_INCIDENT_STAGES = ['attach-requested', 'attach-received', 'replay-started', 'replay-applied',
   'live-ready', 'revealed', 'reveal-deadline', 'attach-failed', 'refresh-requested', 'refresh-completed',
   'refresh-failed', 'context-lost', 'visibility', 'resize', 'connection-state', 'probe-started',
-  'probe-completed', 'probe-failed', 'observation-unavailable', 'observation-restored'] as const
+  'probe-completed', 'probe-failed', 'observation-unavailable', 'observation-restored', 'reading-observed'] as const
 export const CLIENT_INCIDENT_CODES = ['EIO', 'ENOSPC', 'EACCES', 'ENOENT', 'EDQUOT', 'EMFILE', 'ENFILE', 'EPIPE',
   'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EEXIST', 'ENOTDIR', 'EISDIR', 'EROFS', 'EINVAL', 'ABORT_ERR',
   'CONTROL_UNAVAILABLE', 'CONTROL_TIMEOUT', 'CONTROL_PROTOCOL_ERROR', 'CONTROL_CANCELLED', 'CONTROL_PERMISSION_DENIED',
   'RUNTIME_UNAVAILABLE', 'RUNTIME_OWNER_CHANGED', 'CTXMUX_run_not_found', 'STALE_AGENT_SESSION', 'STALE_AGENT_SESSION_BINDING',
   'UNKNOWN_AGENT_SESSION', 'INVALID_CONTROL_REQUEST'] as const
 export type AgentMuxClientIncidentKind = typeof CLIENT_INCIDENT_KINDS[number]
+export type AgentMuxClientReadingIncidentKind = typeof CLIENT_READING_INCIDENT_KINDS[number]
 export type AgentMuxClientIncidentStage = typeof CLIENT_INCIDENT_STAGES[number]
 export type AgentMuxClientIncidentCode = typeof CLIENT_INCIDENT_CODES[number]
 export const CLIENT_INCIDENT_MAX_STAGES = 16
-export const CLIENT_INCIDENT_MAX_REPORT_BYTES = 32 * 1024
+// The reading record has its own 32 KiB bound; reserve room for the common envelope.
+export const CLIENT_INCIDENT_MAX_REPORT_BYTES = 36 * 1024
 export const CLIENT_INCIDENT_MAX_PAGE = 32
 
 /** Only facts already held by the producer. No terminal text, error text or paths. */
@@ -41,14 +46,13 @@ export type AgentMuxClientIncidentReference =
   | { domain: 'native-recorder-failure'; hostId: string; agentSessionId: string; runId: string }
   | { domain: 'toolkit.performance-failure'; hostId: string; executionId: string }
   | { domain: 'performance.scene'; hostId: string; captureId: string }
-export type AgentMuxClientIncidentReport = {
+type ClientIncidentReportBase = {
   occurrenceId: string
   attemptId: string
   relatedOccurrenceId: string | null
   /** Original execution Host; the archive route is independently selected by the read target. */
   hostId: string
   regionId: string | null
-  kind: AgentMuxClientIncidentKind
   stage: AgentMuxClientIncidentStage
   code: AgentMuxClientIncidentCode | null
   agentSessionId: string | null
@@ -59,6 +63,15 @@ export type AgentMuxClientIncidentReport = {
   metadata: AgentMuxClientIncidentMetadata
   stages: Array<{ stage: AgentMuxClientIncidentStage; elapsedMs: number; metadata: AgentMuxClientIncidentMetadata }>
   references: AgentMuxClientIncidentReference[]
+}
+export type AgentMuxClientReadingIncidentReport = ClientIncidentReportBase & { kind: AgentMuxClientReadingIncidentKind; reading: ReadingDiagnosticRecord }
+export type AgentMuxClientIncidentReport = AgentMuxClientReadingIncidentReport |
+  ClientIncidentReportBase & { kind: Exclude<AgentMuxClientIncidentKind, AgentMuxClientReadingIncidentKind>; reading?: never }
+
+export function clientReadingIncidentKind(trigger: ReadingDiagnosticRecord['trigger']): AgentMuxClientReadingIncidentKind {
+  return trigger === 'failure' || trigger === 'slow-read' ? 'conversation-reading-failure'
+    : trigger === 'held' ? 'conversation-reading-held'
+      : trigger === 'recovered' ? 'conversation-reading-recovered' : 'conversation-reading-progress'
 }
 export type AgentMuxClientIncidentProducer = {
   kind: 'renderer' | 'main'
@@ -120,9 +133,15 @@ function id(value: unknown, nullable = false) {
 function number(value: unknown, nullable = false) {
   if (!(nullable && value === null) && (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > Number.MAX_SAFE_INTEGER)) fail()
 }
-function list(value: unknown, max: number, consume: (value: unknown) => void) {
+function list<T>(value: unknown, max: number, consume: (value: unknown) => T): T[] {
   if (!Array.isArray(value) || value.length > max) fail()
-  for (const item of value as unknown[]) consume(item)
+  const result: T[] = []
+  for (let index = 0; index < (value as unknown[]).length; index++) {
+    const entry = Object.getOwnPropertyDescriptor(value, index)
+    if (!entry || !Object.hasOwn(entry, 'value')) fail()
+    result.push(consume(entry!.value))
+  }
+  return result
 }
 function namespace(value: unknown, durable = false) {
   const p = object(value, durable ? ['kind', 'id', 'lifetime'] : ['kind', 'id'])
@@ -141,7 +160,7 @@ export function parseClientIncidentMetadata(value: unknown): AgentMuxClientIncid
   if (Object.hasOwn(p, 'processState')) member(p.processState, ['running', 'exited', 'lost', 'unknown'])
   if (Object.hasOwn(p, 'bufferType')) member(p.bufferType, ['normal', 'alternate'])
   if (Object.hasOwn(p, 'renderer')) member(p.renderer, ['webgl', 'dom', 'unknown'])
-  return p as AgentMuxClientIncidentMetadata
+  return { ...p } as AgentMuxClientIncidentMetadata
 }
 function reference(value: unknown) {
   const p = rpcRecord(value), common = ['domain', 'hostId']; id(p.hostId)
@@ -153,18 +172,38 @@ function reference(value: unknown) {
   } else if (p.domain === 'toolkit.performance-failure') { object(p, [...common, 'executionId']); id(p.executionId) }
   else if (p.domain === 'performance.scene') { object(p, [...common, 'captureId']); id(p.captureId) }
   else fail()
+  const authority = p.authority === undefined ? undefined : rpcRecord(p.authority)
+  return { ...p, ...(authority ? { authority: { kind: authority.kind, id: authority.id } } : {}) } as AgentMuxClientIncidentReference
 }
 export function parseClientIncidentReport(value: unknown): AgentMuxClientIncidentReport {
-  const p = object(value, ['occurrenceId', 'attemptId', 'relatedOccurrenceId', 'hostId', 'regionId', 'kind', 'stage', 'code',
-    'agentSessionId', 'runId', 'observedAt', 'elapsedMs', 'metadata', 'stages', 'references'])
+  const fields = ['occurrenceId', 'attemptId', 'relatedOccurrenceId', 'hostId', 'regionId', 'kind', 'stage', 'code',
+    'agentSessionId', 'runId', 'observedAt', 'elapsedMs', 'metadata', 'stages', 'references']
+  const p = object(value, [...fields, 'reading'], fields)
   for (const key of ['occurrenceId', 'attemptId', 'hostId']) id(p[key])
   for (const key of ['relatedOccurrenceId', 'regionId', 'agentSessionId', 'runId']) id(p[key], true)
   member(p.kind, CLIENT_INCIDENT_KINDS); member(p.stage, CLIENT_INCIDENT_STAGES); member(p.code, [...CLIENT_INCIDENT_CODES, null])
-  number(p.observedAt); number(p.elapsedMs, true); parseClientIncidentMetadata(p.metadata)
-  list(p.stages, CLIENT_INCIDENT_MAX_STAGES, value => { const s = object(value, ['stage', 'elapsedMs', 'metadata']); member(s.stage, CLIENT_INCIDENT_STAGES); number(s.elapsedMs); parseClientIncidentMetadata(s.metadata) })
-  list(p.references, 8, reference)
-  if (Buffer.byteLength(JSON.stringify(p)) > CLIENT_INCIDENT_MAX_REPORT_BYTES) fail()
-  return p as AgentMuxClientIncidentReport
+  number(p.observedAt); number(p.elapsedMs, true)
+  const metadata = parseClientIncidentMetadata(p.metadata)
+  const stages = list(p.stages, CLIENT_INCIDENT_MAX_STAGES, value => {
+    const s = object(value, ['stage', 'elapsedMs', 'metadata'])
+    member(s.stage, CLIENT_INCIDENT_STAGES); number(s.elapsedMs)
+    return { stage: s.stage, elapsedMs: s.elapsedMs, metadata: parseClientIncidentMetadata(s.metadata) }
+  })
+  const references = list(p.references, 8, reference)
+  let reading: ReadingDiagnosticRecord | undefined
+  if ((CLIENT_READING_INCIDENT_KINDS as readonly unknown[]).includes(p.kind)) {
+    reading = parseReadingDiagnosticRecord(p.reading)
+    const first = reading.events[0], last = reading.events.at(-1)
+    if (reading.scope.owner !== 'renderer' || p.kind !== clientReadingIncidentKind(reading.trigger) ||
+      p.stage !== 'reading-observed' || p.code !== null || (p.stages as unknown[]).length !== 0 ||
+      p.occurrenceId !== reading.logId || p.relatedOccurrenceId !== reading.previousLogId || p.attemptId !== reading.scope.consumerId ||
+      p.hostId !== reading.scope.hostId || p.agentSessionId !== reading.scope.agentSessionId || p.runId !== reading.scope.runId ||
+      p.observedAt !== (last?.wallMs ?? reading.startedAt) || p.elapsedMs !== (first && last ? last.monoMs - first.monoMs : null)) fail()
+  } else if (Object.hasOwn(p, 'reading') || p.stage === 'reading-observed') fail()
+  // Serialize only finite detached data, never a caller's iterator or toJSON.
+  const result = { ...p, metadata, stages, references, ...(reading ? { reading } : {}) }
+  if (new TextEncoder().encode(JSON.stringify(result)).byteLength > CLIENT_INCIDENT_MAX_REPORT_BYTES) fail()
+  return result as AgentMuxClientIncidentReport
 }
 export function parseClientIncidentTarget(value: unknown): AgentMuxClientIncidentTarget {
   const p = rpcRecord(value); member(p.domain, ['client.incident']); id(p.hostId)
@@ -191,8 +230,9 @@ export function parseClientIncidentRecord(value: unknown): AgentMuxClientInciden
   const producer = object(p.producer, ['kind', 'appInstanceId', 'producerInstanceId', 'windowId', 'documentGeneration', 'buildId'])
   member(producer.kind, ['main', 'renderer']); id(producer.appInstanceId); id(producer.producerInstanceId)
   for (const key of ['windowId', 'documentGeneration', 'buildId']) id(producer[key], true)
-  parseClientIncidentReport(p.report)
-  return p as AgentMuxClientIncidentRecord
+  const report = parseClientIncidentReport(p.report)
+  if (report.reading && report.reading.logId !== p.logId) fail()
+  return { ...p, producer: { ...producer }, authority: { ...archive }, report } as AgentMuxClientIncidentRecord
 }
 export function parseClientIncidentPage(value: unknown, target: Extract<AgentMuxClientIncidentTarget, { recent: unknown }>): AgentMuxClientIncidentPage {
   const p = object(value, ['kind', 'items', 'nextCursor', 'coverage']); member(p.kind, ['client-incident-page'])
