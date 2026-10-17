@@ -221,14 +221,17 @@ function DesktopApp() {
     if (current && (current.open !== moteFloating.open || current.targetTabId !== moteFloating.targetTabId ||
       current.targetTopicId !== moteFloating.targetTopicId || JSON.stringify(current.reference) !== JSON.stringify(moteFloating.reference))) return
     const topicId = pmoTeamsTopicFloatingTargetTopicId(current ?? moteFloating, state.tabs)
-    const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) ?? []
-    const scope = moteWorkbenchProjection(spatialCatalog(state, topics), state.tabs, current ?? moteFloating, () => {}, state.layouts).projection
+    const placed = workbenchDisplayReferenceMatches(state.layouts[reference.displayWorkspaceId], reference)
+    let scope: WorkbenchProjection | null = null
+    if (!placed) {
+      const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) ?? []
+      scope = moteWorkbenchProjection(spatialCatalog(state, topics), state.tabs, current ?? moteFloating, () => {}, state.layouts).projection
+    }
     const composition = scope?.composition ?? state.layouts[reference.displayWorkspaceId]
     const zoneId = scope?.entity.kind === 'zone' ? scope.entity.zoneId : undefined
     const member = zoneId && scope?.selectionMode === undefined &&
       composition?.groups.some(group => group.id === reference.groupId && group.tabOrder.includes(reference.tabId)) &&
       scope?.catalog.tabs.some(item => item.tabId === reference.tabId && item.zoneId === zoneId)
-    const placed = workbenchDisplayReferenceMatches(state.layouts[reference.displayWorkspaceId], reference)
     if (!tab?.regions[reference.regionId] || !current?.agentTarget && tab.topicId !== topicId || !placed && !member) {
       state.reportError(new Error('This exact discussion location is no longer confirmed. Its original content is kept; choose its current location.'))
       return
