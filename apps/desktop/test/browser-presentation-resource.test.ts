@@ -20,7 +20,8 @@ const native = vi.hoisted(() => {
     readonly session = new Session()
     url = _hygiene_fixtureFileUrl("app/renderer/index.html")
     dead = false
-    readonly mainFrame = { url: this.url, detached: false, parent: null, processId: 1, frameToken: 'original-frame' }
+    readonly mainFrame = { url: this.url, detached: false, destroyed: false, isDestroyed() { return this.destroyed },
+      parent: null, processId: 1, frameToken: 'original-frame' }
     documentRevision = 0
     readonly listeners = new Map<string, Set<(...args: any[]) => void>>()
     readonly navigationHistory = { canGoBack: () => false, canGoForward: () => false }
@@ -414,6 +415,40 @@ it('keeps the exact document eligible for registration and capture while resourc
     f.manager.updatePresentation(f.app as never, f.frame as never, lease.leaseId, geometry)
     expect(f.source.webContents.dead).toBe(false)
   } finally { loading.mockRestore() }
+})
+
+it('reconnects a recovered App document to the original page despite its historical detached marker', async () => {
+  const f = await fixture(), old = f.register('before-recovery'), original = f.identity()
+  const source = f.source.webContents, session = source.session, page = f.manager.target('browser')
+  f.app.emit('render-process-gone', {}, { reason: 'crashed', exitCode: 5 })
+  // Real Electron recovery reuses this wrapper with a new token and can retain detached=true.
+  f.frame.detached = true
+  f.frame.frameToken = 'recovered-document'
+  const current = f.register('after-recovery')
+  expect(() => f.manager.updatePresentation(f.app as never, f.frame as never, old.leaseId, geometry)).toThrow('Unknown')
+  expect(() => f.manager.registerPresentation(f.app as never, f.frame as never,
+    { browserId: 'browser', occurrence: occurrence('old-request'), geometry }, original)).toThrow('document-changed')
+  f.manager.updatePresentation(f.app as never, f.frame as never, current.leaseId, geometry)
+  const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, current.leaseId)
+  expect(f.request()).toEqual({ video: source.mainFrame })
+  f.manager.ackPresentationCapture(f.app as never, f.frame as never, capture.captureId,
+    { outcome: 'ready', trackIds: ['recovered-track'] })
+  await expect(f.manager.activatePresentation(f.app as never, f.frame as never, current.leaseId,
+    { kind: 'select', focus: 'preserve' })).resolves.toMatchObject({ outcome: 'selected' })
+  expect(f.coverage().at(-1)).toEqual({ leaseId: current.leaseId, captureId: capture.captureId })
+  expect(f.views).toEqual([f.source]); expect(source.session).toBe(session)
+  expect(f.manager.target('browser')).toEqual(page); expect(source.dead).toBe(false)
+  expect(source.focus).not.toHaveBeenCalled()
+})
+
+it('rejects an actually destroyed requester without retiring another current lease or the original page', async () => {
+  const f = await fixture(), current = f.register('current')
+  const destroyed = { ...f.frame, destroyed: true }
+  expect(() => f.manager.registerPresentation(f.app as never, destroyed as never,
+    { browserId: 'browser', occurrence: occurrence('destroyed'), geometry }, f.identity()))
+    .toThrow('Untrusted Browser presentation document (frame-destroyed)')
+  f.manager.updatePresentation(f.app as never, f.frame as never, current.leaseId, geometry)
+  expect(f.views).toEqual([f.source]); expect(f.source.webContents.dead).toBe(false)
 })
 
 it('retires a document registered during navigation when the same native wrapper commits a new document', async () => {
