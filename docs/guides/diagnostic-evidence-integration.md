@@ -44,6 +44,10 @@ amux system diagnostics inspect --domain delivery.core --host-id HOST --logid LO
 amux system diagnostics inspect --domain toolkit.performance-failure --host-id local --execution-id EXECUTION_ID
 amux system diagnostics inspect --domain toolkit.performance-failure --host-id local --execution-id EXECUTION_ID --include-raw
 amux system diagnostics inspect --domain native-recorder-failure --host-id HOST --session-id SID --run-id RUN
+amux system diagnostics inspect --domain reading.lifecycle --host-id HOST --recent --session-id SID --limit 8
+amux system diagnostics inspect --domain reading.lifecycle --host-id HOST --logid LOGID --authority CORE_INSTANCE_ID
+amux system diagnostics inspect --domain client.incident --host-id local --recent --session-id SID --limit 8
+amux system diagnostics inspect --domain client.incident --host-id local --logid LOGID --authority ARCHIVE_ID
 amux system diagnostics inspect --input mote-context-query.json
 ```
 
@@ -52,6 +56,8 @@ amux system diagnostics inspect --input mote-context-query.json
 默认公共 Host 复用已有 `forwardControl` 接原 client 的缺域读面；现有本地 domain 仍由原服务读取，不能因 GUI 在场换成同 logId 的另一 journal。能力发现先保本地，再并列原 client 的实际合同。验证须经过真实 Host factory、原 Main business endpoint、typed client 与默认 CLI；只直连 Main 不能证明默认入口接线，callback 存在不能证明 reader 安装。
 
 先查看 availability、失败阶段、已确认事实、issue、completeness 与原目标，再看关系的 verification。Native not-exposed 表示根因材料缺失，不能以关联成功补造根因。raw 明确请求且来源有权限才读取；retained 不等于本次 included，也不代表无限保留。
+
+对话更新延迟先查原 Core `reading.lifecycle` 与 client `client.incident` 的近期候选，再按各自引用准确读取；同 Session 只构成背景关联，不能把不同消费生命周期或跨进程 wall 时间拼成同一次耗时。Core 元数据仅覆盖当前实例；Renderer 消费阶段沿原 client 档案留存，卸载后是否可查取决于实际保存、预算和覆盖。`confirmed` 是原写入确认，重启后 `observed` 只说明现有原字节可读；近期为空、候选已淘汰或采集未覆盖均不能证明业务没有更新。无需通过重发、重开页面或恢复原工作面制造诊断材料。
 
 ## owner 的必要取舍
 
