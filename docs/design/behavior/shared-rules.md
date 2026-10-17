@@ -41,7 +41,7 @@
 > 当前确认的导航、Tab、分屏和会话栏需求见
 > [顶部与项目栏](../presentation/spaces-and-layout.md#顶部与项目栏)。
 > Scratch 的 Topic 与 Wiki 合同见
-> [Topic 的打开与默认终端](spaces-and-layout.md#topic-的打开与默认终端)。
+> [Topic 的打开与工作起点](spaces-and-layout.md#topic-的打开与工作起点)。
 
 ## 设计哲学
 

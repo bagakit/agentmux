@@ -324,9 +324,10 @@ Space 左侧 Folders 即使确认没有原图，也要从自动字母图标看�
 - 用户随后选择 Category、Topic、Tab、Region 或其他工作面时，新导航优先；迟到的读取、准备或恢复结果可以更新同一对象已确认的事实，不能重放旧导航、夺回焦点。仍在同一 Workspace 不代表旧导航仍有效。
 - Leader Topic 浮层的后台准备不能抢普通 Topic 的导航焦点，也不能重复挂载其他 Topic 的终端；重启后保留原工作面。
 
-### Topic 的打开与默认终端
+### Topic 的打开与工作起点
 
-- 首次打开没有已绑定 Tab／Region 的普通 Scratch Topic，进入该 Topic 的原 Workbench，并在确认落点形成一个可用 Terminal；仅 Launcher、后台选中或空白右侧不算打开成功。Scratch 工作面与其他 Workspace 一样进入窗口级 registry，Wiki 收纳身份不能把它过滤掉。
+- 打开已有且权威成员确认为空的普通 Topic，或关闭该 Topic 最后一个 Tab 后，直接显示该 Topic 原 Zone 的普通初始 Launcher，可选择 Agent、输入任务并显式启动，不再先点击 New Tab。虚拟初始页不创建持久占位 Tab／Region／Agent；显式创建 Topic 时的原默认 Terminal 创建沿原生命周期。Scratch 工作面与其他 Workspace 一样进入窗口级 registry，Wiki 收纳身份不能把它过滤掉。
+- 不同空 Topic 的未发送草稿各自保留。显式启动 Agent 或打开 Terminal／Browser／Note 时，创建目标沿当前准确 Topic／Zone、资源与显示 Group，不能继承无关活动 Tab 的 Topic；相邻 Topic 的隐藏工作面、草稿和健康 Run 保持。原成员尚未加载、原布局缺失或明确原 occurrence 尚未确认仍是未知，保留原引用与可达恢复说明，不能当作正常空态。
 - 已有工作面只聚焦原 Tab／Region／Session。重复点击、创建完成后的打开、恢复或另一投影的挂载不能增加第二个默认 Terminal；用户主动分割或打开的多个终端保真实布局，不隐藏、清空或删除健康 Run。
 - 启动或准备沿原 loading／失败服务窗，保留 Topic 的可见工作面、原因与可重试动作。重启先恢复既有分割与引用，不重跑首次创建；后台准备固定协调对象时可明确不抢当前目标。
 - 关闭入口在当前 Tab／Region 附近可发现，复用原精确关闭／停止、未保存确认与资源处理 owner；取消或关闭另一格不影响未选健康工作。
