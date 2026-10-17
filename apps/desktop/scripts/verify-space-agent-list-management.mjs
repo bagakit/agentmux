@@ -11,7 +11,7 @@ import { verifyRendererSourceMutations } from './lib/verify-renderer-source-muta
 const root = resolve(import.meta.dirname, '../../..'), desktop = join(root, 'apps/desktop')
 const captureOnly = process.argv.length === 3 && process.argv[2] === '--capture-only'
 assert.ok(process.argv.length === 2 || captureOnly, 'Use no arguments or --capture-only')
-const evidence = join(root, '.bagakit/feature-tracker/features/f-34b8fktjy/artifacts/space-agent-list-capture', 'attempt-' + crypto.randomUUID())
+const evidence = join(root, '.tmp/space-agent-list-management', 'attempt-' + crypto.randomUUID())
 await mkdir(evidence, { recursive: true })
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const component = 'apps/desktop/src/renderer/src/components/SurfaceToolDock.tsx'
