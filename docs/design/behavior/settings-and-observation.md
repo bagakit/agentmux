@@ -45,7 +45,7 @@ Agent 工作状态与待处理状态消费同一 Core 语义事实，不能从 r
 
 Message Tool 在 Settings 中有专门分组，依次提供五个独立入口：User Input、A2A、Automation、Prompts、amux Protocols。导航、搜索、Overview 和窄窗分类沿同一设置目录，不因归组复制配置、输入队列、资源库或协议解析器。User Input 持有初始一行／两行、快捷输入符与关键词建议，并就近展示同源发送／编辑快捷键；保留原配置键、默认、生效范围和单字段保存。
 
-A2A 设置持有面向用户的来信提醒偏好：跟随全局、静默或提示，复用 Notifications 的声音、呈现和停留时长。它不改变接收 Agent 的入箱、确认空闲时引用通知与按原 MID 主动取信合同，不代表已读、任务接受或授权。消息与原投递事实仍在准确 Agent 的 Inbox／Outbox，不在 Settings 另建收发箱。全局通知呈现仍归 Notifications。
+A2A 设置持有面向用户的后台来信提醒偏好：跟随全局遵从 Notifications 的关闭、停留时长和声音；静默不弹用户提醒；提示在全局关闭时仍用 Standard 时长，其余沿全局时长，声音始终沿全局。三种偏好都不对前台可见收件 Agent 重复弹窗，初始化、观察补读和重连不补弹旧信，同 MID 的后续回执不算新来信。它不改变接收 Agent 的入箱、确认空闲时引用通知与按原 MID 主动取信合同，不代表已读、任务接受或授权。消息与原投递事实仍在准确 Agent 的 Inbox／Outbox，不在 Settings 另建收发箱。全局通知呈现仍归 Notifications。
 
 Automation 集中恢复后的自动续行、持续推进的新任务默认周期／Prompt、日历安排默认时区和 quiet follow-up 默认策略（静默时段、沉默时长、最小间隔、每日预算）。恢复续行复用原 continuity 字段及固定续行正文；恢复方式、时机、失败重试和同操作复查仍归 Execution，两页各自只保存所编辑字段，不能用陈旧整份 policy 覆盖另一页。新建任务默认值只在新表单／新目标初始化时消费，不重写已编辑草稿或既有任务；保存不创建、启用、暂停、停止任务，也不发送输入。准确 Agent 的任务创建、周期／Prompt、日历、来源绑定和生命周期动作仍归 Progress。A2A 引用通知继续归 A2A，不收入 Automation；Browser 等其他领域的自动化也不归本页。
 
