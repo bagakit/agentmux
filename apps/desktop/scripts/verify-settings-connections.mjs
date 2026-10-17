@@ -46,13 +46,13 @@ async function owning() {
   const variants = operation === '--network-owning' ? ['network-target', 'network-late'] : operation === '--applications-owning' ? ['application-save-baseline', 'application-source', 'application-target', 'application-original'] : operation === '--topology-owning' ? ['route', 'graph'] : operation === '--remote-owning' ? ['remote', 'access', 'graph', 'single', 'drafts'] : ['catalog', 'single', 'drafts']
   const messages = { 'network-target': 'Network target', 'network-late': 'to be null', 'application-save-baseline': 'Later draft uses the confirmed save revision', 'application-source': 'Source context retains the actual registered target', 'application-target': 'Application panel consumes the exact selected Host', 'application-original': 'Original operation ID is preserved', route: 'Configured SSH user stays on its exact Host node', remote: 'Remote group owns exactly environments', access: 'Source trust belongs to the Apps & access facet', graph: 'Topology activation selects its exact Host detail', catalog: 'Conversation Channels owns the original native and external consumers', single: 'Only the selected Host has an editable connection subtree', drafts: 'Submenu selection preserves the original authored Host draft' }
   const vitest = desktopRequire.resolve('vitest/vitest.mjs'), config = resolve(fixture, 'vitest.config.mts')
-  const modes = [{ label: 'baseline', mutant: 'baseline', ...(operation === '--network-owning' ? { test: 'network' } : {}), ...(operation === '--applications-owning' ? { test: 'application-' } : operation === '--topology-owning' ? { test: 'graph:|route:|provenance:' } : {}) }, ...variants.flatMap(kind => [
+  const modes = [{ label: 'baseline', mutant: 'baseline', ...(operation === '--network-owning' ? { test: 'network|uses the existing per-sender' } : {}), ...(operation === '--applications-owning' ? { test: 'application-' } : operation === '--topology-owning' ? { test: 'graph:|route:|provenance:' } : {}) }, ...variants.flatMap(kind => [
     { label: kind + '-mutant', mutant: kind, test: (kind === 'remote' ? 'catalog' : kind) + ':' }, { label: kind + '-restored', mutant: 'baseline', test: (kind === 'remote' ? 'catalog' : kind) + ':' }
   ])]
   for (const mode of modes) {
     const directory = resolve(evidence, mode.label); await mkdir(directory)
     const output = resolve(directory, 'results.json'), log = []
-    const args = [vitest, 'run', '--config', config, '--reporter=json', '--outputFile', output]
+    const args = [vitest, 'run', ...(operation === '--network-owning' ? ['apps/desktop/test/host-network-settings-consumer.test.tsx', 'apps/desktop/test/host-runtime-observation-ipc.test.ts'] : []), '--config', config, '--reporter=json', '--outputFile', output]
     if (mode.test) args.push('--testNamePattern', mode.test)
     const execution = await runProbeProcess(process.execPath, args, { temporaryRoot: directory, cwd: root, timeoutMs: 30_000,
       env: { ...process.env, AGENTMUX_CONNECTIONS_EVIDENCE: directory, AGENTMUX_CONNECTIONS_MUTANT: mode.mutant }, onLine: line => log.push(line) })
@@ -72,7 +72,7 @@ async function owning() {
     } else {
       assert.equal(execution.exitCode, 0, JSON.stringify(failures.map(test => test.failureMessages)))
       assert.equal(result.success, true); assert.equal(result.numFailedTests, 0)
-      assert.ok(result.numPassedTests >= (mode.label === 'baseline' ? operation === '--network-owning' ? 8 : operation === '--applications-owning' ? 4 : operation === '--topology-owning' ? 3 : 10 : 1), 'Nonempty complete bounded cases')
+      assert.ok(result.numPassedTests >= (mode.label === 'baseline' ? operation === '--network-owning' ? 9 : operation === '--applications-owning' ? 4 : operation === '--topology-owning' ? 3 : 10 : 1), 'Nonempty complete bounded cases')
       assert.equal(applied.length, 0); assert.ok(loaded.every(input => input.originalSHA256 === input.consumedSHA256))
     }
     receipt.runs.push({ ...mode, execution, passed: mode.mutant === 'baseline', specificAssertionRED: mode.mutant !== 'baseline',
