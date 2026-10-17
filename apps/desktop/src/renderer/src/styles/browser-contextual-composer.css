@@ -48,7 +48,7 @@
   background: var(--surface-2); color: var(--text-2); border: 1px solid var(--line);
   border-radius: var(--radius-lg); box-shadow: var(--elev-2); pointer-events: auto;
 }
-.browser-opinion-selection__editor > .image-annotation-editor { flex: 1; min-height: 0; }
+.browser-opinion-selection__editor > .image-annotation-editor { position: relative; inset: auto; flex: 1; min-height: 0; }
 .browser-opinion-selection__provenance { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); padding: var(--sp-3) var(--sp-4); font: var(--fs-meta)/1.5 var(--font-sans); }
 .browser-opinion-selection__provenance > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .browser-opinion-selection__provenance small { color: var(--text-3); font-size: var(--fs-micro); }
