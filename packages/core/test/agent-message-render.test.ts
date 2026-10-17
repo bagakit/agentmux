@@ -26,7 +26,7 @@ describe('readable A2A message', () => {
     const prefix = parseAgentMuxMessagePrefix(wire)!
     expect(prefix).toMatchObject({ sourceLabel: 'Agent agent-source', declaredAgentSessionId: 'agent-source', declaredMessageId: 'message-id', body })
     expect(prefix.reminder?.text).toBe(AGENTMUX_A2A_REMINDER)
-    expect(prefix.reminder?.text).toContain('agent --skill')
+    expect(prefix.reminder?.text).toContain('message --skill')
     expect(wire).toBe(`<amux:a2a from="agent-source" msg-id="message-id">\n${body}\n${prefix.reminder!.raw}\n</amux:a2a>`)
   })
 

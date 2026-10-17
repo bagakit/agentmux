@@ -49,7 +49,7 @@ describe('leading application contexts compose with the shared source grammar', 
     '\n\n```text\n' + wrap('code') + '\n```', '\n\n<amux:a2a from="unfinished"',
     '\n\n[Message from Agent obsolete]\noriginal body', '\n\n<bagakit-msg type="note">incomplete'
   ])('leaves unrecognized tail unchanged after complete contexts', tail => {
-    expect(parseAgentMuxMessagePrefix(context + tail)).toEqual({ sourceLabel: '', declaredAgentSessionId: null, declaredContexts: [{ raw: context }], body: tail })
+    expect(parseAgentMuxMessagePrefix(context + tail)).toEqual({ kind: 'content', sourceLabel: '', declaredAgentSessionId: null, declaredContexts: [{ raw: context }], body: tail })
   })
 
   it.each([
