@@ -38,9 +38,13 @@ Settings 覆盖当前背景绑定时的原生 Browser 局部可见性与实体�
 
 内容槽沿同一工具控件表达对象差异：Folder 为 Files + Zones，知识分类为 Files + Topics，Mote 为 Files + Mote；Mote 仍呈现自己的 Profile／Ideas，而不是全局主题目录或 worktree 列表。准确对象名称优先，原目录与 Host 按需可读；单 Zone 不为了视觉对称增加空目录或重复选择器。共同选择、绑定和范围边界只见上述交互合同。
 
-Zone 行的主要名称、类型、分支和目录必须指向同一准确资源。仅当原 Workspace 与 Zone 的 Host、目录一致时，登记名称才可直接作为该资源的名称；不同目录以其准确目录标识呈现，来源 Workspace 的别名不得冒充该目录。尚未确认或较早观察的 Git 元信息如实可辨，不把登记名称当当前分支；未知行仍保留原 Zone 的导航与说明。保存和恢复的资源语义只归[Space 的统一工作面框架](../behavior/spaces-and-layout.md#space-的统一工作面框架)。
+Zone 行的主要名称、类型、分支和目录必须指向同一准确资源。仅当原 Workspace 与 Zone 的 Host、目录一致时，登记名称才可直接作为该资源的名称；不同目录以其准确目录标识呈现，来源 Workspace 的别名不得冒充该目录。原生 Git 确认的主工作树明确标为 Main worktree，关联树标为 Worktree，普通目录／已确认子目录各自可辨；detached 使用 Detached HEAD，bare 不伪装成有 checkout 分支的工作树。尚未确认或较早观察的 Git 元信息如实可辨，不把登记名称当当前分支；未知行仍保留原 Zone 的导航与说明。保存、观察和恢复的资源语义只归[Space 的统一工作面框架](../behavior/spaces-and-layout.md#space-的统一工作面框架)。
 
-Folder 的工具切换以 Files + Zones、Agents、Git 表达不同功能，沿原紧凑图标／液态选中面、tooltip 与完整可访问名称，不另加导航栏。Files + Zones 的 Zone 目录使用一处明确标题和连续 Selector 行，选中表示当前工作分区，Branch 与路径为识别信息，不再在该目录上方铺 Changes／History／Branches 切换或全仓库分支计数。各行以原目录类型的语义图标和无胶囊底的 Worktree／Folder 等短说明表达资源关系，主要名称与次要路径分层；同 Host、有明确共同坐标的路径可用相对摘要，完整路径与 Host 仍按需可读，远程或未知不伪装成本地。长分支名保留可辨识的阅读空间，不以重复 local、仓库根、状态徽章或大绿卡片挤占；安静的选中底与原勾选、清楚的键盘焦点分别表达。普通目录与保留的未知 Zone 都有原位置和可读说明；空 Zone 不冒充没有 Git。工作目录管理用可读文字与方向明确的入口，改动摘要在目录下方标明当前资源并沿元信息字号，不放大数量压过导航，也不常驻展开第二份 Changes 列表。具体 Git 工具与范围呈现见[Git 工作面与渐进详情](files-and-git.md#git-工作面与渐进详情)。
+Folder 的工具切换以 Files + Zones、Agents、Git 表达不同功能，沿原紧凑图标／液态选中面、tooltip 与完整可访问名称，不另加导航栏。Files + Zones 的目录采用 Working directories 等可理解的标题，数量说明是当前 Space 保存的工作面；若保留 Zones 标题，使用 Saved in this Space 的短副题解释范围。连续 Selector 行的选中表示当前工作分区，Branch 与路径为识别信息，不再在该目录上方铺 Changes／History／Branches 切换或全仓库分支计数。全部目录入口明确标为 All worktrees，并在观察完整时带 worktree 数量和未关联到此 Space 的数量；与已保存清单分层，窄栏可自然分为紧凑两行，不为放下一排技术字段缩字或挤走当前行。管理面沿同一准确目录核对 In this Space／Not in this Space，已关联多处时保全部原位置；入口和关系含义沿上述行为合同，不以分支名作对应。
+
+各行以原目录类型的语义图标和无胶囊底的类型短说明表达资源关系，主要名称与次要路径分层；同 Host、有明确共同坐标的路径可用相对摘要，完整路径与 Host 仍按需可读，远程或未知不伪装成本地。长分支名作为整体换行或受控省略，完整内容经 hover／键盘入口可读，不拆出孤立尾词；不以重复 local、仓库根、状态徽章或大绿卡片挤占。安静的选中底与原勾选、清楚的键盘焦点分别表达；普通目录与保留的未知 Zone 都有原位置和可读说明，空 Zone 不冒充没有 Git。改动摘要在目录下方标明当前资源并沿元信息字号，不放大数量压过导航，也不常驻展开第二份 Changes 列表。具体 Git 工具与范围呈现见[Git 工作面与渐进详情](files-and-git.md#git-工作面与渐进详情)。
+
+局部目录或 Git 关系提示放在受影响行，以 Directory not found、Not a directory、Directory check unavailable 或 Git relationship unconfirmed 等用户可理解的短语区分已知路径问题与观察未知，不常驻 Directory alias、内部 ID 或完整技术路径组成的全局 amber 墙。原始原因、原 Host／路径、观察时间和恢复动作沿就地可展开详情完整保留；无法归到具体行的读取问题只用一处紧凑服务说明，成功的仓库观察仍可读。已确认 Files 可用而 Git 范围不适用时，简短说明可用内容及应选择的仓库工作目录，完整原因按需展开；真正未知或 unavailable 的持续说明与恢复入口不被折叠成正常。正常、窄栏和明暗主题中，当前所选行的名称、类型／路径、勾选及键盘入口保持可见可达，辅助提示不挤占主要导航。
 
 正常与窄窗都让树中当前位置、当前功能组和原正文动作可读可达；Zone、Tab、Region 不同加载层级沿原公共 chrome 呈现，低层级不套上层多余工具带。已有正文的未知与恢复说明留在原服务窗并让已可用的原内容仍可见可操作，无可见正文时沿[空工作面的默认呈现](#空工作面的默认呈现)。不以卡片墙、另造文件面板或专属 Tab 排布来包装一种 Space。具体身份、绑定与加载行为不在本页重复定义。
 
