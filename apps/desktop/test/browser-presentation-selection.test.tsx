@@ -3,6 +3,7 @@ import { appendFile } from 'node:fs/promises'
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { appendFile } from 'node:fs/promises'
 import { selectedBrowserPresentationId } from '../src/renderer/src/lib/browser-presentation-selection'
 import type { WorkbenchBrowserPresentation } from '../src/renderer/src/components/BrowserPresentationStage'
 

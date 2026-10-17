@@ -9,13 +9,17 @@ import type { BrowserSnapshot } from '../src/shared/contracts'
 
 const initial = useAppStore.getState()
 let container: HTMLDivElement, root: ReturnType<typeof createClientUiRoot>
-let page: BrowserSnapshot
+let page: BrowserSnapshot & { nativeOwnerReleased?: true }
+let rendered: boolean
 function deferred<T>() { let resolve!: (value: T) => void, reject!: (cause: Error) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
 const close = vi.fn()
-function render(released: boolean, snapshot = page) { return act(async () => root.render(<BrowserPane tab={{ ...snapshot, kind: 'browser', browserId: snapshot.id, regionId: 'original-region', workspaceId: 'original-workspace' }} visible released={released} onRegionClose={close} />)) }
+function render(released: boolean, snapshot = page) {
+  if (!rendered) { rendered = true; if (released) { page.nativeOwnerReleased = true; snapshot = { ...snapshot, nativeOwnerReleased: true } } }
+  return act(async () => root.render(<BrowserPane tab={{ ...snapshot, kind: 'browser', browserId: snapshot.id, regionId: 'original-region', workspaceId: 'original-workspace' }} visible released={released} onRegionClose={close} />)) }
 function address() { const field = container.querySelector<HTMLInputElement>('input[aria-label="Browser address"]'); expect(field).not.toBeNull(); return field! }
 async function fill(value: string) { await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(address(), value); address().dispatchEvent(new Event('input', { bubbles: true })) }) }
 beforeEach(async () => {
+  rendered = false
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   page = await api.browser.create('recovery-page', 'https://example.invalid/original', 'original-workspace')
   const config = await api.config.get()
@@ -69,7 +73,7 @@ it('does not restore a present owner on unrelated normal commits', async () => {
 
 it('keeps the pending request through a URL update and a new presentation callback', async () => {
   const waiting = deferred<BrowserSnapshot>(), restore = vi.spyOn(api.browser, 'restore').mockReturnValue(waiting.promise)
-  const release = vi.spyOn(api.browser, 'release').mockResolvedValue(undefined)
+  const release = vi.spyOn(api.browser, 'release').mockImplementation(async (browserId,navigationId)=>({browserId,navigationId,status:'retained',reasons:['visible']}))
   await render(true); await render(false)
   const confirm = vi.fn()
   await act(async () => root.render(<BrowserPane tab={{ ...page, url: page.url + '/updated', kind: 'browser', browserId: page.id, regionId: 'original-region', workspaceId: 'original-workspace' }} visible released={false} onControlConfirmation={confirm} />))
@@ -78,20 +82,20 @@ it('keeps the pending request through a URL update and a new presentation callba
   expect(confirm).toHaveBeenCalledWith('original-region', false)
 })
 it('does not release a late healthy Main owner merely because its Renderer unmounted', async () => {
-  const waiting = deferred<BrowserSnapshot>(), release = vi.spyOn(api.browser, 'release').mockResolvedValue(undefined)
+  const waiting = deferred<BrowserSnapshot>(), release = vi.spyOn(api.browser, 'release').mockImplementation(async (browserId,navigationId)=>({browserId,navigationId,status:'retained',reasons:['visible']}))
   vi.spyOn(api.browser, 'restore').mockReturnValue(waiting.promise)
   await render(true); await render(false); await act(async () => root.render(null)); await act(async () => waiting.resolve(page))
   expect(release).not.toHaveBeenCalled(); expect(container.childElementCount).toBe(0)
 })
-it('releases a late owner only when the latest real policy explicitly parked that same Browser', async () => {
-  const waiting = deferred<BrowserSnapshot>(), release = vi.spyOn(api.browser, 'release').mockResolvedValue(undefined)
+it('requires a new exact-source admission before considering a late restored owner released', async () => {
+  const waiting = deferred<BrowserSnapshot>(), release = vi.spyOn(api.browser, 'release').mockImplementation(async (browserId,navigationId)=>({browserId,navigationId,status:'retained',reasons:['visible']}))
   vi.spyOn(api.browser, 'restore').mockReturnValue(waiting.promise)
   await render(true); await render(false); await render(true); await act(async () => waiting.resolve(page))
-  expect(release.mock.calls).toEqual([[page.id], [page.id]]); expect(container.textContent).toContain('Browser parked')
+  expect(release.mock.calls).toEqual([[page.id,page.navigationId]]); expect(container.textContent).not.toContain('Browser parked')
 })
 it('refuses a foreign restore result without applying or releasing that page', async () => {
   vi.spyOn(api.browser, 'restore').mockResolvedValue({ ...page, id: 'foreign-browser' })
-  const release = vi.spyOn(api.browser, 'release').mockResolvedValue(undefined), apply = vi.spyOn(useAppStore.getState(), 'applyBrowserEvent')
+  const release = vi.spyOn(api.browser, 'release').mockImplementation(async (browserId,navigationId)=>({browserId,navigationId,status:'retained',reasons:['visible']})), apply = vi.spyOn(useAppStore.getState(), 'applyBrowserEvent')
   await render(true); await render(false)
   expect(container.textContent).toContain('different page identity'); expect(apply).not.toHaveBeenCalled(); expect(release).not.toHaveBeenCalled()
 })
@@ -99,7 +103,7 @@ it('refuses a foreign restore result without applying or releasing that page', a
 it('keeps a pending Main connection through a child render fault and local view retry', async () => {
   const waiting = deferred<BrowserSnapshot>(), retried = deferred<BrowserSnapshot>()
   const restore = vi.spyOn(api.browser, 'restore').mockReturnValueOnce(waiting.promise).mockReturnValueOnce(retried.promise)
-  const release = vi.spyOn(api.browser, 'release').mockResolvedValue(undefined), reload = vi.spyOn(api.browser, 'reload')
+  const release = vi.spyOn(api.browser, 'release').mockImplementation(async (browserId,navigationId)=>({browserId,navigationId,status:'retained',reasons:['visible']})), reload = vi.spyOn(api.browser, 'reload')
   vi.spyOn(console, 'error').mockImplementation(() => {})
   await render(true); await render(false); await fill('draft survives both failures')
   let fault = true
@@ -119,4 +123,33 @@ it('keeps a pending Main connection through a child render fault and local view 
   expect(restore).toHaveBeenCalledTimes(2); expect(restore.mock.calls[1]).toEqual(restore.mock.calls[0])
   await act(async () => retried.resolve(page))
   expect(container.textContent).not.toContain('Restoring browser'); expect(address().value).toBe('draft survives both failures')
+})
+
+
+it.each(['retained','unknown'] as const)('keeps real controls and drafts when the release result is %s',async status=>{
+  const waiting=deferred<Awaited<ReturnType<typeof api.browser.release>>>()
+  const release=vi.spyOn(api.browser,'release').mockReturnValue(waiting.promise),restore=vi.spyOn(api.browser,'restore')
+  await render(false);await fill('original user input');address().setSelectionRange(3,8)
+  await render(true)
+  expect(release).toHaveBeenCalledExactlyOnceWith(page.id,page.navigationId)
+  expect(container.textContent).not.toContain('Browser parked');expect(address().disabled).toBe(false)
+  expect(address().selectionStart).toBe(3);expect(address().selectionEnd).toBe(8)
+  await act(async()=>waiting.resolve({browserId:page.id,navigationId:page.navigationId,status,reasons:['close-unconfirmed']}))
+  await render(false)
+  expect(address().value).toBe('original user input');expect(restore).not.toHaveBeenCalled();expect(container.textContent).not.toContain('Browser parked')
+})
+it('does not rebuild a hidden released page merely because the policy stopped requesting release',async()=>{
+  const restore=vi.spyOn(api.browser,'restore')
+  await act(async()=>root.render(<BrowserPane tab={{...page,nativeOwnerReleased:true,kind:'browser',browserId:page.id,regionId:'original-region',workspaceId:'original-workspace'}} visible={false} released={false}/>))
+  expect(restore).not.toHaveBeenCalled();expect(container.textContent).toContain('Browser parked')
+})
+it('does not let an old restore overwrite a newer source that was released again',async()=>{
+  const older=deferred<BrowserSnapshot>(),newer=deferred<BrowserSnapshot>()
+  const restore=vi.spyOn(api.browser,'restore').mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise)
+  const apply=vi.spyOn(useAppStore.getState(),'applyBrowserEvent')
+  await render(true);await render(false)
+  await render(false,{...page,navigationId:'later-document',nativeOwnerReleased:true})
+  await act(async()=>older.resolve({...page,navigationId:'later-document'}))
+  expect(restore).toHaveBeenCalledTimes(2)
+  expect(apply).not.toHaveBeenCalled();expect(container.textContent).toContain('Restoring browser')
 })

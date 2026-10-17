@@ -64,10 +64,11 @@ describe('independent Browser/Monaco surface memory budget', () => {
       candidate('unrebuildable', 'monaco', 0, { canRebuild: false }),
       candidate('protected', 'monaco', 0, { protected: true }),
       candidate('context-hidden', 'browser', 0, { navigationContextActive: false }),
+      candidate('context-hidden-editor', 'monaco', 0, { navigationContextActive: false }),
       candidate('visible', 'monaco', 0, { visible: true })
     ]
     const policy = { nowMs: 1_000, releaseDelayMs: 1, hotRetainMs: 1, hotRetainLimit: 0 }
-    expect(selectSurfaceMemoryReleases(candidates, policy)).toEqual(new Set())
+    expect(selectSurfaceMemoryReleases(candidates, policy)).toEqual(new Set(['context-hidden']))
     expect(selectSurfaceMemoryReleases(candidates, { ...policy, parkingEnabled: false })).toEqual(new Set())
     expect(selectSurfaceMemoryReleases(candidates, { ...policy, measurementActive: true })).toEqual(new Set())
     expect(selectSurfaceMemoryReleases(
