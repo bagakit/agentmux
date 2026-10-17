@@ -1,5 +1,7 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 const { fixturePath: _hygiene_fixturePath, fixtureTime: _hygiene_fixtureTime } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { installGitHistoryViewport } from './helpers/git-history-viewport'
+import { selectHistoryReference } from './helpers/git-history-reference'
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -28,7 +30,7 @@ const refs = [
   { name: 'HEAD', kind: 'head' as const, oid: oid(1) },
   { name: 'refs/tags/preview', kind: 'tag' as const, oid: oid(1) }
 ]
-const snapshot: GitHistorySnapshot = { hostId: 'local', repoPath: _hygiene_fixturePath("repo"), selectedRef: null, roots: [oid(1)], refs, checkedAt: 1 }
+const snapshot: GitHistorySnapshot = { hostId: 'local', repoPath: _hygiene_fixturePath("repo"), selectedRef: null, roots: [oid(1)], refs, checkedAt: _tailFixtureEpoch(0, 0, 1) }
 const commit = (n: number): GitHistoryCommit => ({ oid: oid(n), subject: `Keep the full title readable for commit ${n}`, author: 'History author',
   authoredAt: _hygiene_fixtureTime(-67225600000), parents: n === 1 ? [oid(2), oid(3)] : [oid(n + 1)], refs: refs.filter(ref => ref.oid === oid(n)) })
 const page = (values: number[], next: number | null, scope = snapshot): GitHistoryResult => ({ kind: 'ready', snapshot: scope,
@@ -42,11 +44,11 @@ const details = () => document.querySelector<HTMLElement>('[role="dialog"][data-
 const wait = async (ms = 250) => act(async () => { await vi.advanceTimersByTimeAsync(ms) })
 const enter = async (node: Element) => act(async () => { node.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })) })
 const leave = async (node: Element, relatedTarget: EventTarget | null = null) => act(async () => { node.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, relatedTarget })) })
-const select = async (value: string) => act(async () => { const picker = dom.container.querySelector('select')!; picker.value = value; picker.dispatchEvent(new Event('change', { bubbles: true })) })
+const select = async (value: string) => selectHistoryReference(dom.container, value)
 const scrollTo = async (top: number) => act(async () => { const host = scroll(); expect(host).not.toBeNull(); host.scrollTop = top; host.dispatchEvent(new Event('scroll', { bubbles: true })) })
 const hideDocument = async (hidden: boolean) => act(async () => { Object.defineProperty(document, 'visibilityState', { configurable: true, value: hidden ? 'hidden' : 'visible' }); document.dispatchEvent(new Event('visibilitychange')) })
 async function render(visible = true, value = workspace) { await dom.render(<SurfaceToolDock workspace={value} visible={visible} />) }
-async function open() { await render(); await dom.click('[data-surface-mode="history"]'); expect(rows().length).toBeGreaterThan(0) }
+async function open() { await render(); await dom.click('[data-space-tool="git"]'); await dom.click('[data-surface-mode="history"]'); expect(rows().length).toBeGreaterThan(0) }
 async function retry() { const button = dom.container.querySelector<HTMLButtonElement>('.git-history-error button') ?? dom.container.querySelector<HTMLButtonElement>('.git-history-footer button'); expect(button).not.toBeNull(); await act(async () => button!.click()) }
 beforeEach(() => {
   installGitHistoryViewport()
@@ -143,7 +145,7 @@ describe('Git History reading through the production SurfaceToolDock and hook', 
 
   it('opens the correct node/reference facts, reports unknown time, and invalidates old details on scroll, snapshot or hidden state', async () => {
     const initial = page([1, 2], null) as Extract<GitHistoryResult, { kind: 'ready' }>; initial.commits[0]!.authoredAt = null
-    history.mockResolvedValueOnce(initial).mockResolvedValueOnce(page([1, 2], null, { ...snapshot, checkedAt: 2 }))
+    history.mockResolvedValueOnce(initial).mockResolvedValueOnce(page([1, 2], null, { ...snapshot, checkedAt: _tailFixtureEpoch(0, 0, 2) }))
     await open(); const node = dom.container.querySelector(`[data-commit-oid="${oid(1)}"]`)!
     await enter(node); await wait(); expect(details()).not.toBeNull(); expect(details()!.textContent).toContain(oid(1)); expect(details()!.textContent).toMatch(/unknown/iu)
     await scrollTo(100); expect(details()).toBeNull()
