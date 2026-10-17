@@ -78,6 +78,7 @@ it('ordinary App footer opens Overview without mounting or probing the resource 
   const before = useAppStore.getState()
   expect(dom.container.querySelector('.settings-page')).toBeNull()
   await dom.click('.window-status-bar [aria-label="Settings"]')
+  const panel = connected<HTMLElement>('.settings-page')
   expect(overviewIsShown()).toBe(true)
   expect(dom.container.querySelector('.settings-content__header h2')?.textContent).toBe('Overview')
   expect(mountedPanes()).toEqual([])
@@ -88,7 +89,9 @@ it('ordinary App footer opens Overview without mounting or probing the resource 
   expect(footer.closest('[inert], [aria-hidden="true"]')).toBeNull()
   expect(connected('.app-shell__workspace').inert).toBe(true)
   await dom.click('[aria-label="Close settings"]')
-  expect(dom.container.querySelector('.settings-page')).toBeNull()
+  expect(connected('.settings-page')).toBe(panel)
+  expect(panel.hidden).toBe(true)
+  expect(panel.inert).toBe(true)
   expect(useAppStore.getState().tabs).toBe(before.tabs)
   expect(useAppStore.getState().layouts).toBe(before.layouts)
   expect(useAppStore.getState().sessions).toBe(before.sessions)
@@ -100,15 +103,16 @@ it('Overview, sidebar and actual navigation share every configuration module wit
   await dom.render(<SettingsPanel onClose={() => {}} />)
   const catalog = visibleSettingsSections('')
   expect(catalog.map(entry => entry.id)).toEqual([
-    'profile', 'appearance', 'notifications', 'browser', 'general', 'keyboard-shortcuts',
-    'hosts', 'amux-conversation', 'toolkit', 'agents', 'prompts', 'space', 'focus', 'goals', 'survey', 'notes', 'mote'
+    'profile', 'appearance', 'notifications', 'continuity', 'general', 'keyboard-shortcuts',
+    'browser', 'browser-agent-control', 'message-tool', 'prompts', 'amux-protocols',
+    'hosts', 'mobile', 'inapp-conversation', 'lark', 'toolkit', 'agents', 'space', 'focus', 'goals', 'survey', 'notes', 'mote'
   ])
   const links = [...overview().querySelectorAll<HTMLButtonElement>('[data-settings-section]')]
   expect(links.map(link => link.dataset.settingsSection)).toEqual(catalog.map(entry => entry.id))
   expect([...dom.container.querySelectorAll('nav[aria-label="Settings sections"] p')].map(node => node.textContent))
-    .toEqual(['Preferences', 'Connections', 'Mods', 'Resources', 'Work', 'Mote'])
+    .toEqual(['Preferences', 'Browser use', 'Message Tool', 'Remote', 'Conversation Channels', 'Mods', 'Resources', 'Work', 'Mote'])
   expect([...overview().querySelectorAll('.settings-overview__group > header h3')].map(node => node.textContent))
-    .toEqual(['Preferences', 'Connections', 'Mods', 'Resources', 'Work', 'Mote'])
+    .toEqual(['Preferences', 'Browser use', 'Message Tool', 'Remote', 'Conversation Channels', 'Mods', 'Resources', 'Work', 'Mote'])
   expect(overview().querySelectorAll('img')).toHaveLength(1)
   const banner = connected<HTMLImageElement>('.settings-overview__art', overview())
   expect(banner.alt).toBe(''); expect(banner.getAttribute('aria-hidden')).toBe('true')
@@ -130,19 +134,25 @@ it('Overview, sidebar and actual navigation share every configuration module wit
   expect(dom.container.querySelector('[data-settings-pane="overview"]')).toBeNull()
 })
 
-it('keeps empty and whitespace queries on Overview, then searches the original sections without resetting Clear to Overview', async () => {
+it('keeps empty and whitespace queries on Overview, then returns search to the original section with its draft', async () => {
   await dom.render(<SettingsPanel onClose={() => {}} />)
   const search = connected<HTMLInputElement>('[aria-label="Search settings"]')
   expect(overviewIsShown()).toBe(true)
   await input('[aria-label="Search settings"]', '   ')
   expect(overviewIsShown()).toBe(true)
   expect(mountedPanes()).toEqual([])
-  await input('[aria-label="Search settings"]', 'font')
+  await section('Appearance')
   const appearance = pane('appearance')
-  expect(appearance.hidden).toBe(false)
+  await input('[aria-label="Search settings"]', 'font')
+  expect(connected('.settings-content__header h2').textContent).toBe('Search results')
+  expect(appearance.hidden).toBe(true)
+  expect(appearance.inert).toBe(true)
   expect(overviewIsShown()).toBe(false)
   expect([...dom.container.querySelectorAll('nav[aria-label="Settings sections"] button:not([data-settings-overview-nav])')]
-    .map(node => node.textContent)).toEqual(['Appearance'])
+    .map(node => node.textContent)).toEqual(['Appearance', 'Recall'])
+  await dom.click('[data-settings-search-section="appearance"]')
+  expect(pane('appearance')).toBe(appearance)
+  expect(appearance.hidden).toBe(false)
   await input('[aria-label="Terminal font size in pixels"]', '19')
   const clear = connected<HTMLButtonElement>('[aria-label="Clear settings search"]')
   clear.focus()
@@ -164,6 +174,9 @@ it('external section and same-section Executor re-entry clear a stale query and 
   const close = vi.fn()
   await dom.render(<SettingsPanel onClose={close} />)
   await input('[aria-label="Search settings"]', 'font')
+  expect(connected('.settings-content__header h2').textContent).toBe('Search results')
+  expect(mountedPanes()).toEqual([])
+  await dom.click('[data-settings-search-section="appearance"]')
   expect(pane('appearance').hidden).toBe(false)
   await dom.render(<SettingsPanel onClose={close} initialSection="general" />)
   expect(connected<HTMLInputElement>('[aria-label="Search settings"]').value).toBe('')

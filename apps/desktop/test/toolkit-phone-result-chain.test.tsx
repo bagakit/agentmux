@@ -124,7 +124,7 @@ it.each(['', 'Native bridge diagnostic\n', 'NativeError: logger initialization\n
     expect(clipboard).toHaveBeenCalledExactlyOnceWith(settingsLink.url)
     const manage = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'Manage devices')!
     await act(async () => manage.click())
-    expect(navigate).toHaveBeenCalledExactlyOnceWith('amux-conversation')
+    expect(navigate).toHaveBeenCalledExactlyOnceWith('mobile')
     expect(evaluate).not.toHaveBeenCalled(); expect(run).not.toHaveBeenCalled(); expect(action).not.toHaveBeenCalled()
     expect(processes.launches).toHaveLength(1)
     const observed = (await readFile(envReport, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
