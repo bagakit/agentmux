@@ -35,19 +35,19 @@ type HistoryPosition = { position: Position; after: Position; checkpoint: Conver
 type Snapshot = { rows: ConversationSourceRecord[]; batch: Batch; units: ConversationUnit[]; coverage: ConversationSourceCoverage[];
   order: ReturnType<typeof projection>['order']; revision: number; checkpoint: ConversationFrontier; committed: boolean; requestKey: string; outside: ConversationReadWindow['outside']; history: HistoryPosition[]; anchor?: ConversationReadWindow['anchor']; inputAdoption: ConversationInputAdoptionContext }
 type ReadingView = ConversationRef & { id: string; scope: ConversationFrontier['scope']; revision: number; rows: ConversationSourceRecord[];
-  checkpoint: ConversationFrontier; snapshots: Map<string, Snapshot>; observers: number; outside: ConversationReadWindow['outside']; history: HistoryPosition[]; anchor?: ConversationReadWindow['anchor']; inputAdoption: ConversationInputAdoptionContext }
+  checkpoint: ConversationFrontier; snapshots: Map<string, Snapshot>; observers: number; readers: number; outside: ConversationReadWindow['outside']; history: HistoryPosition[]; anchor?: ConversationReadWindow['anchor']; inputAdoption: ConversationInputAdoptionContext }
 const MAX_VIEW_RECORDS = 1200
 const MAX_UNOBSERVED_VIEWS = 16
 /** Temporary state of this original Reader. Durable originals remain in their original owners. */
 export class ConversationReaderState {
   private readonly views = new Map<string, ReadingView>()
   private trimParked(limit = MAX_UNOBSERVED_VIEWS): void {
-    const parked = [...this.views.values()].filter(view => view.observers === 0)
+    const parked = [...this.views.values()].filter(view => view.observers === 0 && view.readers === 0)
     for (const view of parked.slice(0, Math.max(0, parked.length - limit))) this.views.delete(view.id)
   }
   create(ref: ConversationRef, checkpoint: ConversationFrontier): ReadingView {
     this.trimParked(MAX_UNOBSERVED_VIEWS - 1)
-    const view: ReadingView = { ...ref, id: randomUUID(), scope: checkpoint.scope, revision: 0, rows: [], history: [], checkpoint, snapshots: new Map(), observers: 0, outside: { older: null, newer: null }, inputAdoption: { witnesses: [] } }
+    const view: ReadingView = { ...ref, id: randomUUID(), scope: checkpoint.scope, revision: 0, rows: [], history: [], checkpoint, snapshots: new Map(), observers: 0, readers: 0, outside: { older: null, newer: null }, inputAdoption: { witnesses: [] } }
     this.views.set(view.id, view); return view
   }
   get(id: string, ref: ConversationRef, scope: ConversationFrontier['scope']): ReadingView {
@@ -55,6 +55,16 @@ export class ConversationReaderState {
     if (!view) return fail('The original temporary reading window expired. Retain its displayed originals and exact source references for a new read.', 'AGENT_CONVERSATION_VIEW_EXPIRED')
     if (view.hostId !== ref.hostId || view.agentSessionId !== ref.agentSessionId || !same(view.scope, scope)) return fail('The original temporary reading window changed scope. Retain its displayed originals and exact anchor.')
     this.views.delete(id); this.views.set(id, view); return view
+  }
+  holdRead(view: ReadingView): () => void {
+    view.readers++
+    return () => {
+      view.readers--
+      // Explicit release/disposal owns removal; finishing IO cannot revive it.
+      if (this.views.get(view.id) !== view) return
+      this.views.delete(view.id); this.views.set(view.id, view)
+      this.trimParked()
+    }
   }
   observe(token: string, ref: ConversationRef, scope: ConversationFrontier['scope']): { scope: ConversationFrontier['scope']; dispose(): void } {
     const cursor = decode(token, ref, 'inspect')
@@ -361,171 +371,174 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
     if (!state.viewId) { state.viewId = token.viewId; state.viewRevision = token.viewRevision! }
   }
   const view = state.viewId ? port.state.get(state.viewId, ref, state.scope) : port.state.create(ref, state.checkpoint!)
-  state.viewId = view.id
-  if (mode === 'changes' && view.anchor) return fail('This view inspects one exact original version. Reopen history explicitly to follow later changes.')
-  const requestKey = hash(JSON.stringify([mode, state.viewRevision ?? view.revision, state.checkpoint, state.position, state.anchor, state.pageIndex, state.direction]))
-  if (!state.snapshotId) {
-    const repeated = [...view.snapshots].find(([, snapshot]) => snapshot.requestKey === requestKey)
-    if (repeated) { state.snapshotId = repeated[0]; state.batch = { index: 0, offset: 0 } }
-  }
-  let snapshot: Snapshot
-  if (state.snapshotId) {
-    const retained = view.snapshots.get(state.snapshotId)
-    if (!retained || !state.batch) return fail('The original frozen window expired. Retain its exact anchor and displayed originals.')
-    snapshot = retained
-  } else {
-    if (state.viewRevision !== undefined && state.viewRevision !== view.revision || mode === 'changes' && view.revision > 0 && !same(view.checkpoint, state.checkpoint)) return fail('This operation does not continue the accepted window revision and original source cut.')
-    const history = [...view.history], pageIndex = state.pageIndex ?? history.length, previousPosition = history[pageIndex]
-    const originalPort = previousPosition?.head ? { ...port, nativePage: async () => previousPosition.head!.page } : port
-    const loaded: { rows: ConversationSourceRecord[]; batch: Batch; nativePage?: AgentSessionHistoryPage } = mode === 'changes' ? await changesBatch(ref, port, state, input.limit ?? 30)
-      : ('anchor' in input && input.anchor || 'record' in input && input.record) ? await anchorBatch(input, port, state) : await inspectBatch(ref, originalPort, state, previousPosition?.limit ?? input.limit ?? 30)
-    if (mode === 'inspect' && !state.anchor) {
-      if (pageIndex > history.length) return fail('The original page position is not adjacent to this window.')
-      const page = 'nativePage' in loaded ? loaded.nativePage : undefined
-      const native = loaded.rows.filter(row => row.original.kind === 'native'), captured = loaded.rows.filter(row => row.order.kind === 'captured-stream')
-      if (previousPosition?.native) for (const row of native) if (row.order.kind === 'native-page') row.order = { ...row.order, pageWitness: previousPosition.native.witness }
-      const capturedPositions = captured.flatMap(row => row.order.kind === 'captured-stream' ? [row.order.firstSequence] : [])
-      const position: HistoryPosition = { position: { ...state.position, ...(page?.replayCursor ? { native: page.replayCursor } : {}) },
-        after: loaded.batch.after, checkpoint: loaded.batch.end ?? state.checkpoint!, limit: previousPosition?.limit ?? input.limit ?? 30, more: loaded.batch.more,
-        ...(native.length && native[0]!.order.kind === 'native-page' ? { native: { witness: native[0]!.order.pageWitness!, first: native[0]!.id, last: native.at(-1)!.id, count: native.length } } : {}),
-        ...(capturedPositions.length ? { captured: { first: Math.min(...capturedPositions), last: Math.max(...capturedPositions), count: captured.length } } : {}),
-        ...(previousPosition?.head ? { head: previousPosition.head } : page && !page.replayCursor && state.position.native === undefined ? { head: { page, rows: native } } : {}) }
-      if (previousPosition && (!same(previousPosition.native, position.native) || !same(previousPosition.captured, position.captured) || !same(previousPosition.after, position.after))) return fail('The original page no longer has its accepted record boundaries. Its displayed originals remain available.')
-      history[pageIndex] = position
+  const releaseRead = port.state.holdRead(view)
+  try {
+    state.viewId = view.id
+    if (mode === 'changes' && view.anchor) return fail('This view inspects one exact original version. Reopen history explicitly to follow later changes.')
+    const requestKey = hash(JSON.stringify([mode, state.viewRevision ?? view.revision, state.checkpoint, state.position, state.anchor, state.pageIndex, state.direction]))
+    if (!state.snapshotId) {
+      const repeated = [...view.snapshots].find(([, snapshot]) => snapshot.requestKey === requestKey)
+      if (repeated) { state.snapshotId = repeated[0]; state.batch = { index: 0, offset: 0 } }
     }
-    const accepted = loaded.rows, records = new Map(view.rows.map(record => [record.id, record]))
-    const native = view.rows.filter(record => record.original.kind === 'native').map(record => record.id)
-    const additions: string[] = []
-    for (const record of accepted) {
-      const prior = records.get(record.id)
-      // A hash verifies bytes only. The declared changes cut, never a hash comparison,
-      // permits a newer original version; frozen history cannot silently replace one.
-      if (prior && prior.revision !== record.revision && mode !== 'changes') return fail('An original record changed inside this frozen history window. Retain the original version and explicitly refresh its source.')
-      if (prior && prior.order.kind === 'captured-stream' && record.order.kind === 'captured-stream' &&
-          (prior.order.epoch !== record.order.epoch || prior.order.firstSequence !== record.order.firstSequence)) return fail('An accepted captured record changed its original source position.')
-      if (!prior && record.original.kind === 'native') additions.push(record.id)
-      records.set(record.id, prior ? { ...record, order: prior.order } : record)
-    }
-    let nativeIds = mode === 'changes' || state.direction === 'newer' ? [...native, ...additions] : [...additions, ...native]
-    if (mode === 'inspect' && history.length) {
-      const order = new Map(history.flatMap((page, index) => page.native ? [[page.native.witness, index] as const] : []))
-      const known: string[] = [], appended: string[] = []
-      for (const id of nativeIds) { const position = records.get(id)!.order; (position.kind === 'native-page' && order.has(position.pageWitness ?? '') ? known : appended).push(id) }
-      known.sort((a, b) => {
-        const left = records.get(a)!.order, right = records.get(b)!.order
-        return left.kind === 'native-page' && right.kind === 'native-page' ? order.get(right.pageWitness!)! - order.get(left.pageWitness!)! || left.indexInPage - right.indexInPage : 0
-      })
-      nativeIds = [...known, ...appended]
-    }
-    const captured = [...records.values()].filter(record => record.original.kind === 'captured').sort((a, b) =>
-      a.order.kind === 'captured-stream' && b.order.kind === 'captured-stream' ? a.order.firstSequence - b.order.firstSequence : 0)
-    let rows = [...nativeIds.map(id => records.get(id)!), ...captured]
-    const knownInputs = conversationInputAdoptionEdges(rows, view.inputAdoption)
-    const witnesses = knownInputs.witnesses
-    // Retain only bounded identity witnesses in this original temporary view. An
-    // overflow preserves known counterevidence and makes adoption unknown, never first-wins.
-    const inputAdoption: ConversationInputAdoptionContext = knownInputs.unconfirmed || witnesses.length > MAX_VIEW_RECORDS || Buffer.byteLength(JSON.stringify(witnesses)) > CONVERSATION_MAX_UNIT_BYTES
-      ? { ...view.inputAdoption, unconfirmed: true } : { witnesses }
-    // Bound the temporary accepted window before duplicating bodies into a projection.
-    // Whole existing event groups leave the window; their original owners and exact
-    // versioned anchors remain available. Incoming originals never disappear here.
-    const previous = [...view.snapshots.values()].find(value => value.committed && value.revision === view.revision)
-    const protectedIds = new Set(accepted.flatMap(record => [record.id,
-      ...(knownInputs.targets.get(record.id) ? [conversationRecordId(knownInputs.targets.get(record.id)!)] : []),
-      ...(record.original.item.conversation?.sameEvent ? [conversationRecordId(record.original.item.conversation.sameEvent)] : [])]))
-    const outside = { ...view.outside }, sizes = new Map(rows.map(record => [record.id, Buffer.byteLength(JSON.stringify(record))]))
-    const heads = new Map(history.flatMap(position => position.head?.rows ?? []).map(row => [row.id, row]))
-    const positionBytes = Buffer.byteLength(JSON.stringify(history.map(({ head: _head, ...position }) => position)))
-    let retainedCount = new Set([...sizes.keys(), ...heads.keys()]).size
-    let retainedBytes = positionBytes + [...sizes.values()].reduce((sum, size) => sum + size, 0) +
-      [...heads.values()].filter(row => !sizes.has(row.id) || records.get(row.id)?.revision !== row.revision)
-        .reduce((sum, row) => sum + Buffer.byteLength(JSON.stringify(row)), 0)
-    const removed = new Set<string>(), boundary = (unit: ConversationUnit) => {
-      const record = unit.records.find(record => record.id === unit.event.anchorId) ?? unit.records[0]!
-      return { record: record.reference!, revision: record.revision }
-    }
-    const evict = (unit: ConversationUnit) => {
-      for (const record of unit.records) if (!removed.has(record.id)) {
-        removed.add(record.id)
-        const head = heads.get(record.id)
-        if (!head) retainedCount--
-        // A retained unrepeatable head may hold an older immutable body for this
-        // identity. Removing its live version frees only that version's bytes.
-        if (!head || head.revision !== record.revision) retainedBytes -= sizes.get(record.id) ?? 0
+    let snapshot: Snapshot
+    if (state.snapshotId) {
+      const retained = view.snapshots.get(state.snapshotId)
+      if (!retained || !state.batch) return fail('The original frozen window expired. Retain its exact anchor and displayed originals.')
+      snapshot = retained
+    } else {
+      if (state.viewRevision !== undefined && state.viewRevision !== view.revision || mode === 'changes' && view.revision > 0 && !same(view.checkpoint, state.checkpoint)) return fail('This operation does not continue the accepted window revision and original source cut.')
+      const history = [...view.history], pageIndex = state.pageIndex ?? history.length, previousPosition = history[pageIndex]
+      const originalPort = previousPosition?.head ? { ...port, nativePage: async () => previousPosition.head!.page } : port
+      const loaded: { rows: ConversationSourceRecord[]; batch: Batch; nativePage?: AgentSessionHistoryPage } = mode === 'changes' ? await changesBatch(ref, port, state, input.limit ?? 30)
+        : ('anchor' in input && input.anchor || 'record' in input && input.record) ? await anchorBatch(input, port, state) : await inspectBatch(ref, originalPort, state, previousPosition?.limit ?? input.limit ?? 30)
+      if (mode === 'inspect' && !state.anchor) {
+        if (pageIndex > history.length) return fail('The original page position is not adjacent to this window.')
+        const page = 'nativePage' in loaded ? loaded.nativePage : undefined
+        const native = loaded.rows.filter(row => row.original.kind === 'native'), captured = loaded.rows.filter(row => row.order.kind === 'captured-stream')
+        if (previousPosition?.native) for (const row of native) if (row.order.kind === 'native-page') row.order = { ...row.order, pageWitness: previousPosition.native.witness }
+        const capturedPositions = captured.flatMap(row => row.order.kind === 'captured-stream' ? [row.order.firstSequence] : [])
+        const position: HistoryPosition = { position: { ...state.position, ...(page?.replayCursor ? { native: page.replayCursor } : {}) },
+          after: loaded.batch.after, checkpoint: loaded.batch.end ?? state.checkpoint!, limit: previousPosition?.limit ?? input.limit ?? 30, more: loaded.batch.more,
+          ...(native.length && native[0]!.order.kind === 'native-page' ? { native: { witness: native[0]!.order.pageWitness!, first: native[0]!.id, last: native.at(-1)!.id, count: native.length } } : {}),
+          ...(capturedPositions.length ? { captured: { first: Math.min(...capturedPositions), last: Math.max(...capturedPositions), count: captured.length } } : {}),
+          ...(previousPosition?.head ? { head: previousPosition.head } : page && !page.replayCursor && state.position.native === undefined ? { head: { page, rows: native } } : {}) }
+        if (previousPosition && (!same(previousPosition.native, position.native) || !same(previousPosition.captured, position.captured) || !same(previousPosition.after, position.after))) return fail('The original page no longer has its accepted record boundaries. Its displayed originals remain available.')
+        history[pageIndex] = position
       }
-      outside[mode === 'changes' || state.direction === 'newer' ? 'older' : 'newer'] = boundary(unit)
+      const accepted = loaded.rows, records = new Map(view.rows.map(record => [record.id, record]))
+      const native = view.rows.filter(record => record.original.kind === 'native').map(record => record.id)
+      const additions: string[] = []
+      for (const record of accepted) {
+        const prior = records.get(record.id)
+        // A hash verifies bytes only. The declared changes cut, never a hash comparison,
+        // permits a newer original version; frozen history cannot silently replace one.
+        if (prior && prior.revision !== record.revision && mode !== 'changes') return fail('An original record changed inside this frozen history window. Retain the original version and explicitly refresh its source.')
+        if (prior && prior.order.kind === 'captured-stream' && record.order.kind === 'captured-stream' &&
+            (prior.order.epoch !== record.order.epoch || prior.order.firstSequence !== record.order.firstSequence)) return fail('An accepted captured record changed its original source position.')
+        if (!prior && record.original.kind === 'native') additions.push(record.id)
+        records.set(record.id, prior ? { ...record, order: prior.order } : record)
+      }
+      let nativeIds = mode === 'changes' || state.direction === 'newer' ? [...native, ...additions] : [...additions, ...native]
+      if (mode === 'inspect' && history.length) {
+        const order = new Map(history.flatMap((page, index) => page.native ? [[page.native.witness, index] as const] : []))
+        const known: string[] = [], appended: string[] = []
+        for (const id of nativeIds) { const position = records.get(id)!.order; (position.kind === 'native-page' && order.has(position.pageWitness ?? '') ? known : appended).push(id) }
+        known.sort((a, b) => {
+          const left = records.get(a)!.order, right = records.get(b)!.order
+          return left.kind === 'native-page' && right.kind === 'native-page' ? order.get(right.pageWitness!)! - order.get(left.pageWitness!)! || left.indexInPage - right.indexInPage : 0
+        })
+        nativeIds = [...known, ...appended]
+      }
+      const captured = [...records.values()].filter(record => record.original.kind === 'captured').sort((a, b) =>
+        a.order.kind === 'captured-stream' && b.order.kind === 'captured-stream' ? a.order.firstSequence - b.order.firstSequence : 0)
+      let rows = [...nativeIds.map(id => records.get(id)!), ...captured]
+      const knownInputs = conversationInputAdoptionEdges(rows, view.inputAdoption)
+      const witnesses = knownInputs.witnesses
+      // Retain only bounded identity witnesses in this original temporary view. An
+      // overflow preserves known counterevidence and makes adoption unknown, never first-wins.
+      const inputAdoption: ConversationInputAdoptionContext = knownInputs.unconfirmed || witnesses.length > MAX_VIEW_RECORDS || Buffer.byteLength(JSON.stringify(witnesses)) > CONVERSATION_MAX_UNIT_BYTES
+        ? { ...view.inputAdoption, unconfirmed: true } : { witnesses }
+      // Bound the temporary accepted window before duplicating bodies into a projection.
+      // Whole existing event groups leave the window; their original owners and exact
+      // versioned anchors remain available. Incoming originals never disappear here.
+      const previous = [...view.snapshots.values()].find(value => value.committed && value.revision === view.revision)
+      const protectedIds = new Set(accepted.flatMap(record => [record.id,
+        ...(knownInputs.targets.get(record.id) ? [conversationRecordId(knownInputs.targets.get(record.id)!)] : []),
+        ...(record.original.item.conversation?.sameEvent ? [conversationRecordId(record.original.item.conversation.sameEvent)] : [])]))
+      const outside = { ...view.outside }, sizes = new Map(rows.map(record => [record.id, Buffer.byteLength(JSON.stringify(record))]))
+      const heads = new Map(history.flatMap(position => position.head?.rows ?? []).map(row => [row.id, row]))
+      const positionBytes = Buffer.byteLength(JSON.stringify(history.map(({ head: _head, ...position }) => position)))
+      let retainedCount = new Set([...sizes.keys(), ...heads.keys()]).size
+      let retainedBytes = positionBytes + [...sizes.values()].reduce((sum, size) => sum + size, 0) +
+        [...heads.values()].filter(row => !sizes.has(row.id) || records.get(row.id)?.revision !== row.revision)
+          .reduce((sum, row) => sum + Buffer.byteLength(JSON.stringify(row)), 0)
+      const removed = new Set<string>(), boundary = (unit: ConversationUnit) => {
+        const record = unit.records.find(record => record.id === unit.event.anchorId) ?? unit.records[0]!
+        return { record: record.reference!, revision: record.revision }
+      }
+      const evict = (unit: ConversationUnit) => {
+        for (const record of unit.records) if (!removed.has(record.id)) {
+          removed.add(record.id)
+          const head = heads.get(record.id)
+          if (!head) retainedCount--
+          // A retained unrepeatable head may hold an older immutable body for this
+          // identity. Removing its live version frees only that version's bytes.
+          if (!head || head.revision !== record.revision) retainedBytes -= sizes.get(record.id) ?? 0
+        }
+        outside[mode === 'changes' || state.direction === 'newer' ? 'older' : 'newer'] = boundary(unit)
+      }
+      const candidates = previous ? mode === 'changes' || state.direction === 'newer' ? [...previous.units].reverse() : previous.units : []
+      for (const unit of candidates) {
+        if (retainedCount <= MAX_VIEW_RECORDS && retainedBytes <= CONVERSATION_MAX_UNIT_BYTES) break
+        if (!unit.records.some(record => protectedIds.has(record.id))) evict(unit)
+      }
+      rows = rows.filter(record => !removed.has(record.id))
+      if (retainedCount > MAX_VIEW_RECORDS || retainedBytes > CONVERSATION_MAX_UNIT_BYTES) return fail('This exact event contribution exceeds the temporary window assembly bound. Its original source and continuation are retained.', 'AGENT_SESSION_HISTORY_BUDGET')
+      let projected = projection(ref, state.scope, rows, loaded.batch.coverage, inputAdoption)
+      let unitBytes = projected.units.reduce((sum, unit) => sum + Buffer.byteLength(JSON.stringify(unit)), 0)
+      for (const unit of mode === 'changes' || state.direction === 'newer' ? projected.units : [...projected.units].reverse()) {
+        if (unitBytes <= CONVERSATION_MAX_UNIT_BYTES) break
+        if (unit.records.some(record => protectedIds.has(record.id))) continue
+        unitBytes -= Buffer.byteLength(JSON.stringify(unit)); evict(unit)
+      }
+      if (unitBytes > CONVERSATION_MAX_UNIT_BYTES) return fail('This exact event exceeds its wire assembly bound. Its original source and continuation are retained.', 'AGENT_SESSION_HISTORY_BUDGET')
+      if (removed.size) { rows = rows.filter(record => !removed.has(record.id)); projected = projection(ref, state.scope, rows, loaded.batch.coverage, inputAdoption) }
+      const { events: _events, ...originalBatch } = loaded.batch
+      const batch: Batch = { ...originalBatch, records: [], index: 0, offset: 0, digests: [] }
+      snapshot = { rows, batch, units: projected.units.reverse(), coverage: projected.coverage, order: projected.order,
+        ...(state.anchor ? { anchor: state.anchor } : {}), revision: view.revision + 1, checkpoint: loaded.batch.end ?? state.checkpoint!, committed: false, requestKey, outside, history, inputAdoption }
+      state.viewRevision = view.revision; state.snapshotId = randomUUID(); state.batch = { index: 0, offset: 0 }
+      view.snapshots.set(state.snapshotId, snapshot)
+      while (view.snapshots.size > 3) view.snapshots.delete(view.snapshots.keys().next().value!)
     }
-    const candidates = previous ? mode === 'changes' || state.direction === 'newer' ? [...previous.units].reverse() : previous.units : []
-    for (const unit of candidates) {
-      if (retainedCount <= MAX_VIEW_RECORDS && retainedBytes <= CONVERSATION_MAX_UNIT_BYTES) break
-      if (!unit.records.some(record => protectedIds.has(record.id))) evict(unit)
+    const batch = snapshot.batch, units = snapshot.units
+    const digests = batch.digests.length ? batch.digests : units.map(unit => ({ id: unit.event.id, sha256: hash(JSON.stringify(unit)) }))
+    batch.digests = digests
+    const budgetBytes = input.maxBytes ?? CONVERSATION_DEFAULT_READ_BYTES, items: ConversationUnitEntry[] = []
+    const navigation = historyNavigation(snapshot.rows, snapshot.history)
+    const historyCursor = (index: number | null, direction?: 'newer'): string | null => {
+      if (index === null) return null
+      const position = snapshot.history[index], tail = snapshot.history.at(-1)
+      if (!position && !tail) return null
+      return encode({ ...ref, version: 1, mode: 'inspect', scope: state.scope, position: position?.position ?? tail!.after,
+        checkpoint: position?.checkpoint ?? tail!.checkpoint, viewId: view.id, viewRevision: snapshot.revision, pageIndex: index, ...(direction ? { direction } : {}) })
     }
-    rows = rows.filter(record => !removed.has(record.id))
-    if (retainedCount > MAX_VIEW_RECORDS || retainedBytes > CONVERSATION_MAX_UNIT_BYTES) return fail('This exact event contribution exceeds the temporary window assembly bound. Its original source and continuation are retained.', 'AGENT_SESSION_HISTORY_BUDGET')
-    let projected = projection(ref, state.scope, rows, loaded.batch.coverage, inputAdoption)
-    let unitBytes = projected.units.reduce((sum, unit) => sum + Buffer.byteLength(JSON.stringify(unit)), 0)
-    for (const unit of mode === 'changes' || state.direction === 'newer' ? projected.units : [...projected.units].reverse()) {
-      if (unitBytes <= CONVERSATION_MAX_UNIT_BYTES) break
-      if (unit.records.some(record => protectedIds.has(record.id))) continue
-      unitBytes -= Buffer.byteLength(JSON.stringify(unit)); evict(unit)
+    const next = (index: number, offset: number): string | null => {
+      if (index < units.length) return encode({ ...state, position: {}, batch: { index, offset } })
+      return mode === 'inspect' ? historyCursor(navigation.older) : null
     }
-    if (unitBytes > CONVERSATION_MAX_UNIT_BYTES) return fail('This exact event exceeds its wire assembly bound. Its original source and continuation are retained.', 'AGENT_SESSION_HISTORY_BUDGET')
-    if (removed.size) { rows = rows.filter(record => !removed.has(record.id)); projected = projection(ref, state.scope, rows, loaded.batch.coverage, inputAdoption) }
-    const { events: _events, ...originalBatch } = loaded.batch
-    const batch: Batch = { ...originalBatch, records: [], index: 0, offset: 0, digests: [] }
-    snapshot = { rows, batch, units: projected.units.reverse(), coverage: projected.coverage, order: projected.order,
-      ...(state.anchor ? { anchor: state.anchor } : {}), revision: view.revision + 1, checkpoint: loaded.batch.end ?? state.checkpoint!, committed: false, requestKey, outside, history, inputAdoption }
-    state.viewRevision = view.revision; state.snapshotId = randomUUID(); state.batch = { index: 0, offset: 0 }
-    view.snapshots.set(state.snapshotId, snapshot)
-    while (view.snapshots.size > 3) view.snapshots.delete(view.snapshots.keys().next().value!)
-  }
-  const batch = snapshot.batch, units = snapshot.units
-  const digests = batch.digests.length ? batch.digests : units.map(unit => ({ id: unit.event.id, sha256: hash(JSON.stringify(unit)) }))
-  batch.digests = digests
-  const budgetBytes = input.maxBytes ?? CONVERSATION_DEFAULT_READ_BYTES, items: ConversationUnitEntry[] = []
-  const navigation = historyNavigation(snapshot.rows, snapshot.history)
-  const historyCursor = (index: number | null, direction?: 'newer'): string | null => {
-    if (index === null) return null
-    const position = snapshot.history[index], tail = snapshot.history.at(-1)
-    if (!position && !tail) return null
-    return encode({ ...ref, version: 1, mode: 'inspect', scope: state.scope, position: position?.position ?? tail!.after,
-      checkpoint: position?.checkpoint ?? tail!.checkpoint, viewId: view.id, viewRevision: snapshot.revision, pageIndex: index, ...(direction ? { direction } : {}) })
-  }
-  const next = (index: number, offset: number): string | null => {
-    if (index < units.length) return encode({ ...state, position: {}, batch: { index, offset } })
-    return mode === 'inspect' ? historyCursor(navigation.older) : null
-  }
-  const target = { ...ref, hostId: port.readHostId ?? ref.hostId }
-  const result = (index: number, offset: number, entries = items) => {
-    const complete = index >= units.length
-    const checkpoint = { ...target, sourceHostId: ref.hostId, frontier: complete ? snapshot.checkpoint : state.checkpoint! }
-    return { ...target, sourceHostId: ref.hostId, scope: state.scope, coverage: snapshot.coverage, order: { ...snapshot.order, direction: 'newest-first' as const }, items: entries, nextCursor: next(index, offset), budgetBytes,
-      window: { id: view.id, revision: snapshot.revision, itemCount: units.length, complete,
-        ...(snapshot.anchor ? { anchor: { ...snapshot.anchor, frontier: checkpoint } } : {}),
-        view: complete ? encode({ ...ref, version: 1, mode: 'inspect', scope: state.scope, position: {}, viewId: view.id, viewRevision: snapshot.revision }) : null,
-        replay: encode({ ...state, position: {}, batch: state.batch! }), checkpoint, outside: snapshot.outside, navigation: { older: complete ? historyCursor(navigation.older) : null, newer: complete ? historyCursor(navigation.newer, 'newer') : null } },
-      ...(mode === 'changes' ? { checkpoint, more: !complete || batch.more } : {}) }
-  }
-  const fits = (entry: ConversationUnitEntry, index: number, offset: number) => Buffer.byteLength(JSON.stringify(result(index, offset, [...items, entry]))) <= budgetBytes
-  let index = state.batch!.index, offset = state.batch!.offset
-  while (index < units.length && items.length < (input.limit ?? 30)) {
-    const unit = units[index]!, buffer = Buffer.from(JSON.stringify(unit)), whole: ConversationUnitEntry = { kind: 'item', item: unit }
-    if (!offset && fits(whole, index + 1, 0)) { items.push(whole); index++; continue }
-    const fragment = (length: number): ConversationUnitEntry => ({ kind: 'fragment', itemId: unit.event.id, encoding: 'json-utf8-base64', sha256: digests[index]!.sha256, offsetBytes: offset, totalBytes: buffer.length, dataBase64: buffer.subarray(offset, offset + length).toString('base64') })
-    let low = 0, high = buffer.length - offset
-    while (low < high) { const middle = Math.ceil((low + high) / 2), complete = offset + middle === buffer.length; if (fits(fragment(middle), complete ? index + 1 : index, complete ? 0 : offset + middle)) low = middle; else high = middle - 1 }
-    if (!low) break
-    items.push(fragment(low)); offset += low; if (offset === buffer.length) { index++; offset = 0 }; break
-  }
-  const page = result(index, offset)
-  if (Buffer.byteLength(JSON.stringify(page)) > budgetBytes || index < units.length && !items.length) return fail('The original unit and continuation cannot fit this budget. Increase maxBytes; no record or cut was skipped.', 'AGENT_SESSION_HISTORY_BUDGET')
-  const parsed = mode === 'changes' ? parseConversationChangesPage(page, { ...input, ...target, checkpoint: { ...(input as ConversationChangesInput).checkpoint, ...target } } as ConversationChangesInput) : parseConversationReadPage(page, { ...input, ...target })
-  port.signal?.throwIfAborted()
-  if (page.window.complete && !snapshot.committed) {
-    if (view.revision !== state.viewRevision) return fail('Another read already advanced this accepted window. Retain this response as uncommitted and read the current view.')
-    view.rows = snapshot.rows; view.revision = snapshot.revision; view.checkpoint = snapshot.checkpoint; view.outside = snapshot.outside; view.history = snapshot.history; if (snapshot.anchor) view.anchor = snapshot.anchor; view.inputAdoption = snapshot.inputAdoption; snapshot.committed = true
-  }
-  return parsed
+    const target = { ...ref, hostId: port.readHostId ?? ref.hostId }
+    const result = (index: number, offset: number, entries = items) => {
+      const complete = index >= units.length
+      const checkpoint = { ...target, sourceHostId: ref.hostId, frontier: complete ? snapshot.checkpoint : state.checkpoint! }
+      return { ...target, sourceHostId: ref.hostId, scope: state.scope, coverage: snapshot.coverage, order: { ...snapshot.order, direction: 'newest-first' as const }, items: entries, nextCursor: next(index, offset), budgetBytes,
+        window: { id: view.id, revision: snapshot.revision, itemCount: units.length, complete,
+          ...(snapshot.anchor ? { anchor: { ...snapshot.anchor, frontier: checkpoint } } : {}),
+          view: complete ? encode({ ...ref, version: 1, mode: 'inspect', scope: state.scope, position: {}, viewId: view.id, viewRevision: snapshot.revision }) : null,
+          replay: encode({ ...state, position: {}, batch: state.batch! }), checkpoint, outside: snapshot.outside, navigation: { older: complete ? historyCursor(navigation.older) : null, newer: complete ? historyCursor(navigation.newer, 'newer') : null } },
+        ...(mode === 'changes' ? { checkpoint, more: !complete || batch.more } : {}) }
+    }
+    const fits = (entry: ConversationUnitEntry, index: number, offset: number) => Buffer.byteLength(JSON.stringify(result(index, offset, [...items, entry]))) <= budgetBytes
+    let index = state.batch!.index, offset = state.batch!.offset
+    while (index < units.length && items.length < (input.limit ?? 30)) {
+      const unit = units[index]!, buffer = Buffer.from(JSON.stringify(unit)), whole: ConversationUnitEntry = { kind: 'item', item: unit }
+      if (!offset && fits(whole, index + 1, 0)) { items.push(whole); index++; continue }
+      const fragment = (length: number): ConversationUnitEntry => ({ kind: 'fragment', itemId: unit.event.id, encoding: 'json-utf8-base64', sha256: digests[index]!.sha256, offsetBytes: offset, totalBytes: buffer.length, dataBase64: buffer.subarray(offset, offset + length).toString('base64') })
+      let low = 0, high = buffer.length - offset
+      while (low < high) { const middle = Math.ceil((low + high) / 2), complete = offset + middle === buffer.length; if (fits(fragment(middle), complete ? index + 1 : index, complete ? 0 : offset + middle)) low = middle; else high = middle - 1 }
+      if (!low) break
+      items.push(fragment(low)); offset += low; if (offset === buffer.length) { index++; offset = 0 }; break
+    }
+    const page = result(index, offset)
+    if (Buffer.byteLength(JSON.stringify(page)) > budgetBytes || index < units.length && !items.length) return fail('The original unit and continuation cannot fit this budget. Increase maxBytes; no record or cut was skipped.', 'AGENT_SESSION_HISTORY_BUDGET')
+    const parsed = mode === 'changes' ? parseConversationChangesPage(page, { ...input, ...target, checkpoint: { ...(input as ConversationChangesInput).checkpoint, ...target } } as ConversationChangesInput) : parseConversationReadPage(page, { ...input, ...target })
+    port.signal?.throwIfAborted()
+    if (page.window.complete && !snapshot.committed) {
+      if (view.revision !== state.viewRevision) return fail('Another read already advanced this accepted window. Retain this response as uncommitted and read the current view.')
+      view.rows = snapshot.rows; view.revision = snapshot.revision; view.checkpoint = snapshot.checkpoint; view.outside = snapshot.outside; view.history = snapshot.history; if (snapshot.anchor) view.anchor = snapshot.anchor; view.inputAdoption = snapshot.inputAdoption; snapshot.committed = true
+    }
+    return parsed
+  } finally { releaseRead() }
 }
 export async function readAgentConversation(input: ConversationTimelineReadInput, port: ConversationReaderPort): Promise<AgentConversationReadPage> {
   return await read(parseConversationTimelineReadInput(input), port, 'inspect') as AgentConversationReadPage
