@@ -5,54 +5,23 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { BotSetupGuide } from '../src/renderer/src/components/settings/BotSetupGuide'
 
 let container: HTMLDivElement, root: Root
-beforeEach(() => {
-  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  container = document.createElement('div')
-  document.body.append(container)
-  root = createRoot(container)
+beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); container = document.createElement('div'); document.body.append(container); root = createRoot(container) })
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+it('keeps all numbered milestones visible while the current stage changes', async () => {
+  await act(async () => root.render(<BotSetupGuide stage="prepare" />))
+  expect(container.querySelectorAll('li')).toHaveLength(4)
+  expect(container.querySelector('[aria-current="step"]')?.textContent).toContain('Identity')
+  await act(async () => root.render(<BotSetupGuide stage="scan" confirmedSteps={[1]} />))
+  expect(container.querySelectorAll('li')).toHaveLength(4)
+  expect(container.querySelector('[aria-current="step"]')?.textContent).toContain('Sign in')
+  expect(container.querySelector('[data-step="1"]')?.getAttribute('data-state')).toBe('recorded')
+  expect(container.querySelector('button,input,svg,[aria-live]')).toBeNull()
 })
-afterEach(async () => {
-  await act(async () => root.unmount())
-  container.remove()
-  vi.restoreAllMocks()
-  vi.unstubAllGlobals()
-})
-
-it('pauses local motion when offscreen or the document is hidden and releases its visibility consumer', async () => {
-  let notify!: IntersectionObserverCallback
-  const observe = vi.fn(), disconnect = vi.fn()
-  vi.stubGlobal('IntersectionObserver', class {
-    constructor(callback: IntersectionObserverCallback) { notify = callback }
-    observe = observe
-    disconnect = disconnect
-  })
-  const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
-  await act(async () => root.render(<BotSetupGuide stage="scan" />))
-  const figure = container.querySelector('figure')!
-  const intersect = (isIntersecting: boolean) => notify([{ isIntersecting } as IntersectionObserverEntry], {} as IntersectionObserver)
-  expect(figure.dataset.motion).toBe('off')
-  expect(observe).toHaveBeenCalledWith(figure)
-  await act(async () => intersect(true))
-  expect(figure.dataset.motion).toBe('on')
-  hidden.mockReturnValue(true)
-  await act(async () => document.dispatchEvent(new Event('visibilitychange')))
-  expect(figure.dataset.motion).toBe('off')
-  hidden.mockReturnValue(false)
-  await act(async () => document.dispatchEvent(new Event('visibilitychange')))
-  expect(figure.dataset.motion).toBe('on')
-  await act(async () => intersect(false))
-  expect(figure.dataset.motion).toBe('off')
-  await act(async () => root.render(null))
-  expect(disconnect).toHaveBeenCalledOnce()
-})
-
-it('explains the supplied stage without introducing actions, live status or a second sign-in code', async () => {
-  await act(async () => root.render(<BotSetupGuide stage="scan" />))
-  expect(container.querySelector('figcaption')?.textContent).toContain('confirm with your management account')
-  expect(container.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
-  expect(container.querySelector('svg')?.getAttribute('focusable')).toBe('false')
-  expect(container.querySelector('button, input, [role="status"], [aria-live], [data-confirmation-code]')).toBeNull()
-  await act(async () => root.render(<BotSetupGuide stage="attention" />))
-  expect(container.querySelector('figcaption')?.textContent).toContain('original setup')
-  expect(container.querySelector('figure')?.dataset.botSetupGuide).toBe('attention')
+it('does not infer completed steps from the current number or from an existing application', async () => {
+  await act(async () => root.render(<BotSetupGuide stage="attention" currentStep={4} existingApplication confirmedSteps={[1]} />))
+  expect(container.querySelector('[data-step="2"]')?.getAttribute('data-state')).toBe('upcoming')
+  expect(container.querySelector('[data-step="2"]')?.textContent).not.toContain('Confirmed')
+  expect(container.querySelector('[data-step="3"]')?.textContent).toContain('Already saved')
+  expect(container.querySelector('[data-step="3"]')?.textContent).not.toContain('Create bot')
+  expect(container.querySelector('[data-step="4"]')?.textContent).toContain('Needs attention')
 })
