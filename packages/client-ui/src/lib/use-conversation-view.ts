@@ -12,6 +12,7 @@ export type ConversationViewOperation = 'latest' | 'older' | 'newer' | 'changes'
 type Operation = ConversationViewOperation
 export type ConversationSourceRead = { reference: ConversationRef; nativeSource: NonNullable<ConversationTimelineReadInput['nativeSource']> }
 type Selection = Pick<ConversationTimelineReadInput, 'nativeSource' | 'anchor' | 'limit' | 'preserveCurrent'>
+type ObservedConversation = { view: ConversationWindowSnapshot['window']['view']; frame: ReturnType<typeof conversationDiagnosticFrame> }
 type PendingFrame = { snapshot: ConversationWindowSnapshot; historical: boolean; operation: Operation; selection: Selection }
 type ViewState = { snapshot: ConversationWindowSnapshot | null; loading: boolean; operation: Operation | null; sourceRead: ConversationSourceRead | null; error: Error | null; errorOperation: Operation | null; sourceError: Error | null; observationError: Error | null; held: boolean; historical: boolean; newerAvailable: boolean }
 const empty = (): ViewState => ({ snapshot: null, loading: false, operation: null, sourceRead: null, error: null, errorOperation: null, sourceError: null, observationError: null, held: false, historical: false, newerAvailable: false })
@@ -45,7 +46,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
   const committed = useRef({ state, key, snapshot, active })
   useLayoutEffect(() => { committed.current = { state, key, snapshot, active } }, [state, key, snapshot, active])
   const owner = useRef<{ key: string; controller: AbortController; snapshot: ConversationWindowSnapshot | null;
-    request: AbortController | null; handle: ConversationObservationHandle | null; observed: ConversationWindowSnapshot | null; inFlight: Promise<void> | null; timer: ReturnType<typeof setTimeout> | null;
+    request: AbortController | null; handle: ConversationObservationHandle | null; observed: ObservedConversation | null; inFlight: Promise<void> | null; timer: ReturnType<typeof setTimeout> | null;
     retryTimer: ReturnType<typeof setTimeout> | null; retryDelay: number; historical: boolean; dirty: boolean; held: boolean;
     binding: ConversationWindowSnapshot | null; failures: Map<string, Error>; pending: PendingFrame | null; invalidations: number; unavailable: number;
     note(event: ConversationDiagnosticEvent): void; flush(trigger: 'progress' | 'held' | 'failure' | 'recovered' | 'release'): void;
@@ -73,7 +74,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
     const parked = retained.current?.key === key && retained.current.client === client ? retained.current : null
     if (retryOperation.current.client !== client || retryOperation.current.key !== key) retryOperation.current = { client, key, kind: 'latest', selection: {} }
     const current = { key, controller: new AbortController(), snapshot: parked?.snapshot ?? null as ConversationWindowSnapshot | null,
-      request: null as AbortController | null, handle: null as ConversationObservationHandle | null, observed: null as ConversationWindowSnapshot | null, inFlight: null as Promise<void> | null,
+      request: null as AbortController | null, handle: null as ConversationObservationHandle | null, observed: null as ObservedConversation | null, inFlight: null as Promise<void> | null,
       timer: null as ReturnType<typeof setTimeout> | null, retryTimer: null as ReturnType<typeof setTimeout> | null, retryDelay: 100,
       historical: parked?.historical ?? false, dirty: false, held: Boolean(parked?.pending), pending: parked?.pending ?? null,
       binding: null as ConversationWindowSnapshot | null, failures: new Map<string, Error>(), invalidations: 0, unavailable: 0,
@@ -103,8 +104,8 @@ export function useConversationView(client: ConversationViewClient | null, refer
       if (reason) { deferred('changes', reason); return }
       current.timer = setTimeout(() => { current.timer = null; void read('changes') }, 50)
     }
-    const release = (snapshot: ConversationWindowSnapshot | null) => {
-      if (snapshot?.window.view) void client.releaseConversationView({ ...ref, view: snapshot.window.view }).catch(() => {})
+    const release = (view: ConversationWindowSnapshot['window']['view'] | undefined) => {
+      if (view) void client.releaseConversationView({ ...ref, view }).catch(() => {})
     }
     const reconnect = () => {
       if (!alive() || current.retryTimer) return
@@ -117,11 +118,13 @@ export function useConversationView(client: ConversationViewClient | null, refer
     const watchError = (failures: Map<string, Error>) => failures.size
       ? Object.assign(new Error([...failures.values()].map(error => error.message).join(' ')), { code: ([...failures.values()][0] as Error & { code?: string }).code }) : null
     const bind = async (snapshot: ConversationWindowSnapshot, isCurrent: () => boolean, recover: boolean, attemptId: string) => {
-      if (current.handle && !current.handle.closed.aborted && current.observed?.window.id === snapshot.window.id && !(recover && current.failures.size)) return
-      const oldHandle = current.handle, oldSnapshot = current.observed, oldWatchId = current.diagnosticWatchId
+      if (current.handle && !current.handle.closed.aborted && current.observed?.frame.windowId === snapshot.window.id && !(recover && current.failures.size)) return
+      const oldHandle = current.handle, oldObserved = current.observed, oldWatchId = current.diagnosticWatchId
       const failures = new Map<string, Error>()
       let handle: ConversationObservationHandle | null = null, opening = true
       const watchId = String(++watches)
+      // A live observer needs original identity and diagnostics, not the old body.
+      const frame = conversationDiagnosticFrame(snapshot), scope = snapshot.scope
       current.binding = snapshot
       note({ phase: 'watch-opening', watchId, attemptId, ...conversationDiagnosticFrame(snapshot) })
       flush('progress')
@@ -137,7 +140,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
           failures.set(conversationSourceKey(observation.source), Object.assign(new Error(observation.message), { code: observation.code }))
           if (!opening) setState(value => ({ ...value, observationError: watchError(failures) }))
         } else {
-          note({ phase: 'invalidation-received', watchId, ...conversationDiagnosticFrame(snapshot), sourceHostId: observation.sourceHostId,
+          note({ phase: 'invalidation-received', watchId, ...frame, sourceHostId: observation.sourceHostId,
             ...conversationDiagnosticSource(observation.source) })
           current.invalidations++
           if (!opening) {
@@ -151,10 +154,10 @@ export function useConversationView(client: ConversationViewClient | null, refer
       } finally { opening = false; if (current.binding === snapshot) current.binding = null }
       if (!isCurrent()) {
         note({ phase: 'watch-closed', watchId, attemptId, reason: 'cancelled', ...conversationDiagnosticFrame(snapshot) })
-        handle.dispose(); if (snapshot.window.id !== current.snapshot?.window.id) release(snapshot); return
+        handle.dispose(); if (snapshot.window.id !== current.snapshot?.window.id) release(snapshot.window.view); return
       }
       if (handle.sourceHostId !== snapshot.sourceHostId || handle.scope.sources.length !== snapshot.scope.sources.length ||
-        handle.scope.sources.some(source => !snapshot.scope.sources.some(original => conversationSourceKey(source) === conversationSourceKey(original)))) {
+        handle.scope.sources.some(source => !scope.sources.some(original => conversationSourceKey(source) === conversationSourceKey(original)))) {
         note({ phase: 'watch-closed', watchId, attemptId, reason: 'protocol', ...conversationDiagnosticFrame(snapshot) })
         handle.dispose(); throw Object.assign(new Error('The observation returned another original source scope. The accepted frame is retained.'), { code: 'CONTROL_PROTOCOL_ERROR' })
       }
@@ -164,25 +167,25 @@ export function useConversationView(client: ConversationViewClient | null, refer
       }
       // Startup notifications qualify the observer; checkpoint/read coverage is
       // a separate fact and cannot revoke an observer that opened successfully.
-      if (failures.size && oldHandle && !oldHandle.closed.aborted && oldSnapshot?.window.id === snapshot.window.id) {
+      if (failures.size && oldHandle && !oldHandle.closed.aborted && oldObserved?.frame.windowId === snapshot.window.id) {
         note({ phase: 'watch-closed', watchId, attemptId, reason: 'source-unavailable', ...conversationDiagnosticFrame(snapshot) })
         handle.dispose()
         for (const [source, error] of failures) current.failures.set(source, error)
         setState(value => ({ ...value, observationError: watchError(current.failures) }))
         return
       }
-      current.handle = handle; current.observed = snapshot; current.failures = failures
+      current.handle = handle; current.observed = { view: snapshot.window.view, frame }; current.failures = failures
       current.diagnosticWatchId = watchId
       note({ phase: 'watch-opened', watchId, attemptId, ...conversationDiagnosticFrame(snapshot) })
       setState(value => ({ ...value, observationError: watchError(failures) }))
       current.retryDelay = 100
       if (current.retryTimer) { clearTimeout(current.retryTimer); current.retryTimer = null }
-      if (oldHandle && oldWatchId) note({ phase: 'watch-closed', watchId: oldWatchId, reason: 'navigation', ...(oldSnapshot ? conversationDiagnosticFrame(oldSnapshot) : {}) })
-      oldHandle?.dispose(); if (oldSnapshot?.window.id !== snapshot.window.id) release(oldSnapshot)
+      if (oldHandle && oldWatchId) note({ phase: 'watch-closed', watchId: oldWatchId, reason: 'navigation', ...oldObserved?.frame })
+      oldHandle?.dispose(); if (oldObserved?.frame.windowId !== snapshot.window.id) release(oldObserved?.view)
       const installed = handle
       handle.closed.addEventListener('abort', () => {
         if (alive() && current.handle === installed) {
-          note({ phase: 'watch-closed', watchId, reason: 'source-unavailable', ...conversationDiagnosticFrame(snapshot) })
+          note({ phase: 'watch-closed', watchId, reason: 'source-unavailable', ...frame })
           flush('failure')
           setState(value => ({ ...value, observationError: errorOf(installed.closed.reason ?? 'Conversation observation ended. The original window remains available.') }))
           reconnect()
@@ -309,7 +312,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
         } catch (error) { if (isCurrent()) {
           note({ phase: 'read-failed', attemptId: attempt.id, operation: kind, reason: diagnosticErrorReason(error) })
           flush('failure')
-          if (complete && complete.window.id !== current.snapshot?.window.id) release(complete)
+          if (complete && complete.window.id !== current.snapshot?.window.id) release(complete.window.view)
           retryOperation.current = { client, key, kind, selection }
           setState(value => ({ ...value, error: errorOf(error), errorOperation: kind }))
           const code = (error as { code?: string })?.code
@@ -327,7 +330,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
             ...(requestSignal.aborted ? { reason: 'cancelled' as const } : {}) })
           flush('progress')
           signal.removeEventListener('abort', abortRead)
-          if (!isCurrent()) { if (complete && complete.window.id !== current.snapshot?.window.id) release(complete); return }
+          if (!isCurrent()) { if (complete && complete.window.id !== current.snapshot?.window.id) release(complete.window.view); return }
           current.inFlight = null
           current.attempt = null
           setState(value => ({ ...value, loading: false, operation: null, sourceRead: null }))
@@ -345,7 +348,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
         current.attempt.superseded = true
         note({ phase: 'read-superseded', attemptId: current.attempt.id, operation: current.attempt.operation, reason: 'disposed' })
       }
-      if (current.handle && current.diagnosticWatchId) note({ phase: 'watch-closed', watchId: current.diagnosticWatchId, reason: 'disposed', ...(current.observed ? conversationDiagnosticFrame(current.observed) : {}) })
+      if (current.handle && current.diagnosticWatchId) note({ phase: 'watch-closed', watchId: current.diagnosticWatchId, reason: 'disposed', ...current.observed?.frame })
       note({ phase: 'consumer-ended', reason: 'disposed' }); flush('release')
       current.controller.abort(); if (current.timer) clearTimeout(current.timer); if (current.retryTimer) clearTimeout(current.retryTimer)
       current.handle?.dispose()
@@ -378,7 +381,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
       pending: current?.held ? current.snapshot : null,
       dirty: current?.dirty ?? null, inFlight: Boolean(current?.inFlight),
       watch: { binding: Boolean(current?.binding), bound: Boolean(current?.handle), closed: current?.handle?.closed.aborted ?? null,
-        windowId: current?.observed?.window.id ?? null, invalidations: current?.invalidations ?? 0, unavailable: current?.unavailable ?? 0 } }
+        windowId: current?.observed?.frame.windowId ?? null, invalidations: current?.invalidations ?? 0, unavailable: current?.unavailable ?? 0 } }
   }, [])
   const retry = useCallback(() => {
     const value = committed.current.state
