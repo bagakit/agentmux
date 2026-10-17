@@ -14,7 +14,6 @@ import { folderSpaceIconTarget } from '../lib/space-object-appearance'
 import { useDirectorySessions } from '../lib/workbench-session-subscriptions'
 import { folderLastActivityAt } from '../lib/space-folder-icon-recency'
 import { ProjectActivity } from './ProjectActivity'
-import { activityContextsForWorkspaces } from '../lib/activity-groups'
 import { SpaceDisclosure, SpaceSectionHeader } from './SpaceSectionHeader'
 
 const ThemeObjectLinkIcon = semanticIconComponent('object.link')
@@ -82,7 +81,7 @@ export function ProjectGroupsTree({ projects, query, activeProjectId, onCreate, 
           const label = `${member.name} · ${hostLabel} · ${hostIdentity.id ?? 'Unknown Host'}${member.project ? '' : ' · Registration unavailable'}`
           const target = member.hostId ? folderSpaceIconTarget({ hostId: member.hostId, repoPath: member.path, name: member.name }) : null
           const manualIcon = target ? icons[target.key] ?? null : null
-          return <MemberPresence key={member.id} project={member.project} visible={visible}>{(sessions, lastActivityAt, contexts) => <div className="project-group__member-shell">
+          return <MemberPresence key={member.id} project={member.project} visible={visible}>{(sessions, lastActivityAt) => <div className="project-group__member-shell">
           <button type="button" key={member.id} className={`project-rail-row project-group__member${selected ? ' project-rail-row--active' : ''}`}
             style={{ '--rail-depth': 2 } as CSSProperties} data-space-nav={`${key}:member:${member.id}`} data-space-parent={key}
             data-project-group-member={member.id} aria-label={label} aria-current={selected ? 'page' : undefined}
@@ -93,7 +92,7 @@ export function ProjectGroupsTree({ projects, query, activeProjectId, onCreate, 
               lastActivityAt={lastActivityAt} visible={visible} /> : <span className="project-rail-row__icon" aria-hidden="true" title="Project registration unavailable"><ThemeObjectFolderIcon size={14} /></span>}
             <span className="project-rail-row__identity"><strong>{member.name}</strong><small><HostBadge context="Host" host={hostIdentity} />{member.project ? '' : ' · Unavailable'}</small></span>
           </button>
-          {sessions.some(session => session.kind === 'agent') ? <ProjectActivity compact visible={visible} sessions={sessions} contexts={contexts} /> : null}
+          {sessions.some(session => session.kind === 'agent') ? <ProjectActivity compact visible={visible} sessions={sessions} /> : null}
           </div>}</MemberPresence>
         })}
       </div>
@@ -105,18 +104,16 @@ const NO_WORKSPACES: readonly WorkspaceRecord[] = []
 function MemberPresence({ project, visible, children }: {
   project: WorkspaceProject | undefined
   visible: boolean
-  children(sessions: SessionSnapshot[], lastActivityAt: number | null, contexts: ReturnType<typeof activityContextsForWorkspaces>): ReactNode
+  children(sessions: SessionSnapshot[], lastActivityAt: number | null): ReactNode
 }) {
   const workspaces = project?.workspaces ?? NO_WORKSPACES
   const sessions = useDirectorySessions(workspaces, visible)
   const lastActivityAt = useMemo(() => folderLastActivityAt(sessions, Date.now()), [sessions])
-  const contexts = useMemo(() => activityContextsForWorkspaces(workspaces), [workspaces])
-  return children(sessions, lastActivityAt, contexts)
+  return children(sessions, lastActivityAt)
 }
 
 function GroupActivity({ projects, projectIds, visible }: { projects: readonly WorkspaceProject[]; projectIds: readonly string[]; visible: boolean }) {
   const workspaces = useMemo(() => projectIds.flatMap(id => projects.find(project => project.id === id)?.workspaces ?? []), [projects, projectIds])
   const sessions = useDirectorySessions(workspaces, visible)
-  const contexts = useMemo(() => activityContextsForWorkspaces(workspaces), [workspaces])
-  return sessions.some(session => session.kind === 'agent') ? <ProjectActivity compact visible={visible} sessions={sessions} contexts={contexts} /> : null
+  return sessions.some(session => session.kind === 'agent') ? <ProjectActivity compact visible={visible} sessions={sessions} /> : null
 }
