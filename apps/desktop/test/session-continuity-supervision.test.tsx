@@ -117,6 +117,33 @@ it('reads only the current intent and leaves unrelated or fully normal Sessions 
   expect(currentContinuitySupervision(session)).toBeNull()
 })
 
+it('quietly observes an attached frontend without inventing native context or hiding unknown original input', () => {
+  const session = fixture('observing'), root = session.continuityOperations['original-intent']!
+  root.supervision!.reason = 'frontend-attached'
+  session.terminalFrontend = { run: session.control.run, frontendId: 'repaired-frontend', state: 'attached', backendState: 'running', source: 'managed-process', observedAt: _historyFixtureEpoch(0, 0, 1) }
+  root.previousInput = { scope: 'typed-prompt', outcome: 'none' }
+  expect(root.supervision!.contextEvidence).toBeUndefined()
+  expect(continuitySupervisionPresentation(session)).toBeNull()
+  root.previousInput = { scope: 'typed-prompt', outcome: 'unknown' }
+  expect(continuitySupervisionPresentation(session)!.title).toBe('Original input needs review')
+  expect(continuitySupervisionPresentation(session)!.contextDetail).toContain('not yet confirmed')
+  root.previousInput = { scope: 'typed-prompt', outcome: 'none' }
+  root.nativeTarget = { ...root.nativeTarget!, sessionId: 'foreign-original' }
+  expect(continuitySupervisionPresentation(session)!.title).toBe('Original recovery target is unconfirmed')
+})
+
+it('does not ask to review absent input after an exact normal frontend exit and keeps real unknown input visible', () => {
+  const session = fixture('settled'), root = session.continuityOperations['original-intent']!
+  root.supervision!.reason = 'frontend-normal-exit'
+  root.previousInput = { scope: 'typed-prompt', outcome: 'none' }
+  expect(continuitySupervisionPresentation(session)).toBeNull()
+  root.previousInput = { scope: 'typed-prompt', outcome: 'unknown' }
+  expect(continuitySupervisionPresentation(session)!.title).toBe('Original input needs review')
+  root.previousInput = { scope: 'typed-prompt', outcome: 'none' }
+  root.nativeTarget = { ...root.nativeTarget!, sessionId: 'foreign-original' }
+  expect(continuitySupervisionPresentation(session)!.title).toBe('Original recovery target is unconfirmed')
+})
+
 it('commits the original packet before dispatch and reuses it after an unknown reply and rehydration', async () => {
   const calls: AgentMuxContinuityControlInput[] = [], dispatchSnapshots: any[] = [], flush = vi.mocked(api.ui.requestStorageFlush)
   const control = vi.spyOn(api.sessions, 'controlContinuity').mockImplementation(async (_host, input) => {
