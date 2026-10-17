@@ -60,7 +60,8 @@ export function bindContinuityLaunchInput(operation: AgentMuxContinuityOperation
 
 /** Called by the Run lifecycle commit, before another input can claim this Run. */
 export function createContinuityInputDelivery(operation: AgentMuxContinuityOperation, initialInputByte?: number): AgentMuxContinuityInputDelivery | undefined {
-  if (operation.intentOperationId || operation.trigger === 'input' || !operation.interruptedWorking || !operation.newRun || !operation.nativeTarget) return
+  if ((operation.intentOperationId && operation.resumedInterruption?.rootOperationId !== operation.intentOperationId) ||
+      operation.trigger === 'input' || !operation.interruptedWorking || !operation.newRun || !operation.nativeTarget) return
   const inputs = operation.recoveryInputs
   if (!inputs?.reminder.trim() && !inputs?.continuation.trim()) return
   const previousInput = operation.previousInput ?? { scope: 'typed-prompt' as const, outcome: 'unknown' as const }
@@ -93,6 +94,7 @@ type Dependencies = {
   read(id: string): AgentMuxStoredAgentSession
   status(session: AgentMuxStoredAgentSession): Promise<CtxmuxAdapterRun>
   update(id: string, operationId: string, update: (delivery: AgentMuxContinuityInputDelivery) => void): Promise<void>
+  updateOperation?(id: string, operationId: string, update: (operation: AgentMuxContinuityOperation) => void): Promise<void>
   inspect(key: AgentPromptInputKey): Promise<AgentPromptSubmissionRecord | null>
   submit(input: AgentMuxAgentPromptInput, context: AgentInputCallContext): Promise<unknown>
   failed(id: string, error: unknown): void
@@ -133,6 +135,10 @@ export class AgentSessionContinuityInputs {
   /** Explicit new terminal input supersedes only not-yet-dispatched automatic work. */
   async userInput(id: string, runId: string): Promise<void> {
     if (this.controller.signal.aborted) return
+    for (const op of Object.values(this.deps.read(id).continuityOperations ?? {})) if (op.newRun?.runId === runId &&
+        op.resumedInputBoundary && !op.resumedInputBoundary.superseded && !op.recoveryDelivery) {
+      await this.deps.updateOperation?.(id, op.operationId, value => { if (value.resumedInputBoundary) value.resumedInputBoundary.superseded = true })
+    }
     for (const operationId of this.operations.get(id) ?? []) {
       const operation = this.deps.read(id).continuityOperations?.[operationId]
       const delivery = operation?.recoveryDelivery
@@ -145,6 +151,16 @@ export class AgentSessionContinuityInputs {
   /** Credit only a real protocol ACK which immediately follows this plan's known boundary. */
   async protocolAccepted(id: string, runId: string, protocolOperationId: string, range: { startByte: number; endByte: number }): Promise<void> {
     if (this.controller.signal.aborted) return
+    for (const op of Object.values(this.deps.read(id).continuityOperations ?? {})) if (op.newRun?.runId === runId &&
+        op.resumedInputBoundary && !op.resumedInputBoundary.superseded && !op.recoveryDelivery) {
+      await this.deps.updateOperation?.(id, op.operationId, value => {
+        const boundary = value.resumedInputBoundary, handshake = this.deps.read(id).terminalHandshake
+        if (!boundary || boundary.superseded) return
+        let end = boundary.protocolInput?.endByte ?? boundary.initialInputByte
+        if (handshake?.acknowledged && handshake.run.runId === runId && handshake.inputByteRange.startByte === end) end = handshake.inputByteRange.endByte
+        if (range.startByte === end) boundary.protocolInput = { operationId: protocolOperationId, ...range }
+      })
+    }
     for (const operationId of this.operations.get(id) ?? []) {
       const operation = this.deps.read(id).continuityOperations?.[operationId]
       const delivery = operation?.recoveryDelivery

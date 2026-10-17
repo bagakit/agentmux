@@ -37,7 +37,7 @@ export async function inspectAgentSessionInterruption(
       if (!evidence) return result
       const state = evidence.state === 'ended' && evidence.endReason === 'interrupted' ? 'interrupted'
         : evidence.state === 'idle' || evidence.state === 'ended' && ['completed', 'failed'].includes(evidence.endReason ?? '') ? 'not-interrupted' : 'unknown'
-      return { ...result, state, evidenceId: evidence.id, ...(evidence.nativeTurnId ? { nativeTurnId: evidence.nativeTurnId } : {}),
+      return { ...result, state, evidenceId: evidence.id, nativeSourceId: evidence.sourceId, ...(evidence.nativeTurnId ? { nativeTurnId: evidence.nativeTurnId } : {}),
         ...(evidence.observedAt === undefined ? {} : { nativeObservedAt: evidence.observedAt }),
         reason: state === 'interrupted' ? 'native-turn-interrupted' : state === 'not-interrupted' ? 'native-turn-not-interrupted' : 'native-turn-end-unconfirmed' }
     } catch {
