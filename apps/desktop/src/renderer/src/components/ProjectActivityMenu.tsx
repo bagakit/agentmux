@@ -15,7 +15,7 @@ import { projectActivityRow } from '../lib/project-activity-row'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import * as Menu from './HoverDropdownMenu'
-import { activityMetrics, ActivityMetrics } from './ProjectActivityMetrics'
+import { activityMetrics } from './ProjectActivityMetrics'
 import { AgentContextContent } from './AgentContextContent'
 import { useAgentInformationPreview } from './AgentInformationPreview'
 
@@ -49,9 +49,9 @@ function openActivityAgent(session: AgentSession, location?: AgentMuxSpaceLocati
   return true
 }
 
-function ActivityAgent({ session, context: base, identity, location, onNavigate }: {
+function ActivityAgent({ session, context: base, identity, location, positionHint, onNavigate }: {
   session: AgentSession; context: FocusContext; identity?: FocusContextIdentity | undefined
-  location?: AgentMuxSpaceLocation; onNavigate(): void
+  location?: AgentMuxSpaceLocation; positionHint?: string; onNavigate(): void
 }) {
   const document = useWorkbenchDocument()
   const timeline = useAppStore(state => state.timelines[session.id])
@@ -79,13 +79,14 @@ function ActivityAgent({ session, context: base, identity, location, onNavigate 
     <button ref={hover.anchor} type="button" className={`focus-context focus-context--card project-activity-agent${selected ? ' is-selected' : ''}`}
       data-session-id={session.id} data-region-id={location?.regionId} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic}
       aria-label={`${context.name} · ${context.stateLabel} · ${context.detail}${age ? ` · ${age}` : ''}`}
-      aria-description={context.originAddress ?? 'No confirmed display position. Open the original Agent.'}
+      aria-description={[context.originAddress ?? 'No confirmed display position. Open the original Agent.', identity && identity.occurrenceCount > 1 ? `Same Agent · ${identity.occurrenceCount} positions` : null].filter(Boolean).join(' · ')}
       aria-describedby={hover.describedBy} title={age ?? undefined} {...hover.triggerEvents}
       onKeyDown={event => {
         hover.triggerEvents.onKeyDown(event)
         if (event.key === 'ArrowRight' && event.defaultPrevented) branch.enterKeyboard()
       }}>
-      <AgentContextContent context={context} identity={hover.position} presentation="card" />
+      <AgentContextContent context={context} presentation="card" />
+      {identity && identity.occurrenceCount > 1 ? <span className="project-activity-agent__occurrence">Same Agent · {identity.occurrenceCount} positions{positionHint ? ` · ${positionHint}` : ''}</span> : null}
     </button>
   </Menu.Item>
 }
@@ -105,12 +106,13 @@ export function ProjectActivityMenu({ sessions, onNavigate }: { sessions: AgentS
   const spaces = useMemo(() => buildActivitySpaces(sessions, catalog, tabs, agentRegionExecution), [sessions, catalog, tabs])
   const identitySelector = useMemo(createFocusContextIdentitySelector, [])
   const identities = useMemo(() => identitySelector(catalog, tabs, contexts, config, layouts, agentRegionExecution), [identitySelector, catalog, tabs, contexts, config, layouts])
+  const readingHint = config?.focus?.previewTrigger === 'keyboard' ? 'Select an Agent · → to read · Enter to open' : 'Hover an Agent to read · Click to open'
   const metricLabel = activityMetrics(sessions).map(metric => `${metric.count} ${metric.label}`).join(' · ')
-  function row(session: AgentSession, location?: AgentMuxSpaceLocation) {
+  function row(session: AgentSession, location?: AgentMuxSpaceLocation, showRegion = false) {
     const key = focusContextIdentityKey(session.hostId, session.id), context = byId.get(key)!
     const original = location ? { ...context, originAddress: `${positionLabel(location)} · Region ${Object.keys(tabs[location.tabId]!.regions).indexOf(location.regionId) + 1}` } : context
     return <ActivityAgent key={location?.regionId ?? key} session={session} context={original} identity={identities.get(key)}
-      {...(location ? { location } : {})} onNavigate={onNavigate} />
+      {...(location ? { location } : {})} {...(showRegion && location ? { positionHint: `Region ${Object.keys(tabs[location.tabId]!.regions).indexOf(location.regionId) + 1}` } : {})} onNavigate={onNavigate} />
   }
   function positionLabel(location: AgentMuxSpaceLocation) {
     const workspace = config?.workspaces.find(workspace => workspace.id === location.displayWorkspaceId)
@@ -118,38 +120,55 @@ export function ProjectActivityMenu({ sessions, onNavigate }: { sessions: AgentS
     const index = layout ? groupIds(layout.root).indexOf(location.groupId) : -1
     return `${workspace?.name ?? 'Display workspace'} · ${index >= 0 ? `Group ${index + 1}` : 'Group unconfirmed'}`
   }
+  function zoneTitle(zone: ActivityZone) {
+    return [zone.path ? displayPath(zone.path, zone.hostId ?? undefined) : null, zone.hostId].filter(Boolean).join(' · ')
+  }
+  function zoneContents(zone: ActivityZone) {
+    return zone.tabs.map(tab => <Menu.Group key={tab.key}>
+      <Menu.Label className="project-activity-tab" data-tab-id={tab.location.tabId}
+        title={`${tab.label} · ${positionLabel(tab.location)}`}>
+        <span>{tab.label}</span>{zone.tabs.filter(candidate => candidate.label === tab.label).length > 1 ? <small>{positionLabel(tab.location)}</small> : null}
+      </Menu.Label>
+      {tab.agents.map(agent => row(agent.session, agent.location, tab.agents.filter(candidate => candidate.session.id === agent.session.id && candidate.session.hostId === agent.session.hostId).length > 1))}
+    </Menu.Group>)
+  }
   function zoneMenu(zone: ActivityZone) {
     const label = activityMetrics(zone.sessions).map(metric => `${metric.count} ${metric.label}`).join(' · ')
-    const path = zone.path ? displayPath(zone.path, zone.hostId ?? undefined) : null
     return <Menu.Sub key={zone.key}>
-      <Menu.SubTrigger className="project-activity-zone" data-zone-id={zone.zoneId ?? undefined} aria-label={`${zone.label} · ${label}`} title={[path, zone.hostId].filter(Boolean).join(' · ')}>
-        <span className="project-activity-zone__identity"><strong>{zone.label}</strong><small>{zone.sessions.length} {zone.sessions.length === 1 ? 'Agent' : 'Agents'} · {zone.zoneId ? 'Zone' : 'Unbound workfaces'}</small>{path ? <em>{path}</em> : null}</span>
-        <ActivityMetrics sessions={zone.sessions} /><Disclosure size={13} aria-hidden="true" />
+      <Menu.SubTrigger className="project-activity-zone" data-zone-id={zone.zoneId ?? undefined} aria-label={`${zone.label} · ${label}`} title={zoneTitle(zone)}>
+        <span className="project-activity-zone__identity"><strong>{zone.label}</strong><small title={label}>{label}</small></span>
+        <Disclosure size={13} aria-hidden="true" />
       </Menu.SubTrigger>
       <Menu.Portal><Menu.SubContent className="tab-context-menu project-activity-submenu" sideOffset={4} collisionPadding={8}>
-        <Menu.Label className="project-activity-submenu__heading">{zone.label}<ActivityMetrics sessions={zone.sessions} /></Menu.Label>
-        {zone.tabs.map(tab => <Menu.Group key={tab.key}>
-          <Menu.Label className="project-activity-tab" data-tab-id={tab.location.tabId}
-            title={`${tab.label} · ${positionLabel(tab.location)}`}>
-            <span>{tab.label}</span>{zone.tabs.filter(candidate => candidate.label === tab.label).length > 1 ? <small>{positionLabel(tab.location)}</small> : null}
-          </Menu.Label>
-          {tab.agents.map(agent => row(agent.session, agent.location))}
-        </Menu.Group>)}
+        <Menu.Label className="project-activity-submenu__heading" title={zoneTitle(zone)}>{zone.label}</Menu.Label>
+        {zoneContents(zone)}
+        <Menu.Label className="project-activity-menu__hint">{readingHint}</Menu.Label>
       </Menu.SubContent></Menu.Portal>
     </Menu.Sub>
   }
-  return <Menu.Portal><Menu.Content className="tab-context-menu project-activity-menu" side="bottom" align="end" sideOffset={4} collisionPadding={8}>
-    <Menu.Label className="project-activity-menu__heading"><strong>Agent activity</strong><ActivityMetrics sessions={sessions} /></Menu.Label>
-    <Menu.Label className="composer-menu__hint">{metricLabel}</Menu.Label>
-    {spaces.zones.map(zoneMenu)}
-    {spaces.unplaced.length ? <Menu.Sub>
-      <Menu.SubTrigger className="project-activity-zone" data-unplaced>
-        <span className="project-activity-zone__identity"><strong>No confirmed position</strong><small>{spaces.unplaced.length} {spaces.unplaced.length === 1 ? 'Agent' : 'Agents'} · Original sessions remain available</small></span>
-        <ActivityMetrics sessions={spaces.unplaced} /><Disclosure size={13} aria-hidden="true" />
-      </Menu.SubTrigger>
-      <Menu.Portal><Menu.SubContent className="tab-context-menu project-activity-submenu" sideOffset={4} collisionPadding={8}>
-        <Menu.Label className="project-activity-tab">No confirmed display position</Menu.Label>{spaces.unplaced.map(session => row(session))}
-      </Menu.SubContent></Menu.Portal>
-    </Menu.Sub> : null}
+  const unplacedLabel = activityMetrics(spaces.unplaced).map(metric => `${metric.count} ${metric.label}`).join(' · ')
+  const direct = spaces.zones.length + (spaces.unplaced.length ? 1 : 0) === 1
+  return <Menu.Portal><Menu.Content className="tab-context-menu project-activity-menu" data-direct={direct || undefined} side="bottom" align="end" sideOffset={4} collisionPadding={8}>
+    <Menu.Label className="project-activity-menu__heading"><strong>Agent activity</strong><span>{sessions.length} {sessions.length === 1 ? 'Agent' : 'Agents'}</span></Menu.Label>
+    <Menu.Label className="project-activity-menu__summary">{metricLabel}</Menu.Label>
+    {direct ? <>
+      {spaces.zones.map(zone => <Menu.Group key={zone.key}>
+        <Menu.Label className="project-activity-submenu__heading" title={zoneTitle(zone)}>{zone.label}</Menu.Label>{zoneContents(zone)}
+      </Menu.Group>)}
+      {spaces.unplaced.length ? <Menu.Group><Menu.Label className="project-activity-tab">No confirmed position</Menu.Label>{spaces.unplaced.map(session => row(session))}</Menu.Group> : null}
+    </> : <>
+      {spaces.zones.map(zoneMenu)}
+      {spaces.unplaced.length ? <Menu.Sub>
+        <Menu.SubTrigger className="project-activity-zone" data-unplaced>
+          <span className="project-activity-zone__identity"><strong>No confirmed position</strong><small title={unplacedLabel}>{unplacedLabel}</small></span>
+          <Disclosure size={13} aria-hidden="true" />
+        </Menu.SubTrigger>
+        <Menu.Portal><Menu.SubContent className="tab-context-menu project-activity-submenu" sideOffset={4} collisionPadding={8}>
+          <Menu.Label className="project-activity-submenu__heading">No confirmed position</Menu.Label>{spaces.unplaced.map(session => row(session))}
+          <Menu.Label className="project-activity-menu__hint">{readingHint}</Menu.Label>
+        </Menu.SubContent></Menu.Portal>
+      </Menu.Sub> : null}
+    </>}
+    <Menu.Label className="project-activity-menu__hint">{direct ? readingHint : 'Hover a group to see its Agents'}</Menu.Label>
   </Menu.Content></Menu.Portal>
 }
