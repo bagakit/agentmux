@@ -1,10 +1,12 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { act } from 'react'
 import { createWorkspaceLayout } from '@agentmux/layout'
+import * as spaceAgentControl from '../src/renderer/src/lib/space-agent-control'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
-import { createMoteApp, moteClick, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
+import { createMoteApp, moteClick, motePointer, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
 import { defaultTab, neighborTab, ordinaryTab, savedMoteKey } from './fixtures/mote-workface'
 
 let app: MoteAppFixture
@@ -132,4 +134,47 @@ it('keeps an unplaced Space failure and its Retry visible in the original Mote',
   expect(document.querySelector('[data-mote-context-retry="open-space"]')).not.toBeNull()
   expect(document.body.textContent).toContain('Original Space request failed')
   expect(app.panel().querySelector('[aria-label="Message Agent"]')).not.toBeNull()
+})
+
+
+for (const unrelatedCount of [0, 128]) it('keeps placed selection callback local during global directory observation failure with unrelated members=' + unrelatedCount, async () => {
+  const state = useAppStore.getState()
+  const unrelated = Object.fromEntries(Array.from({ length: unrelatedCount }, (_, index) => {
+    const tab = createWorkbenchTab('unrelated-' + index, { kind: 'launcher', workspaceId: 'project', regionId: 'unrelated-region-' + index })
+    return [tab.id, tab]
+  }))
+  useAppStore.setState({ tabs: { ...state.tabs, ...unrelated } })
+  localStorage.setItem(savedMoteKey, JSON.stringify({ open: true, targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: null, reference: null }))
+  await app.mount()
+  const original = useAppStore.getState()
+  const selected = app.panel().dataset.moteTargetTab
+  const tabId = selected === defaultTab.id ? neighborTab.id : defaultTab.id
+  const button = app.panel().querySelector<HTMLButtonElement>('button[data-workbench-tab-id="' + tabId + '"]')!
+  await motePointer(button, 'down')
+  const buildCatalog = spaceAgentControl.spatialCatalog
+  let selecting = false
+  const executionReads: { tabs: string[]; sessions: number }[] = []
+  const directory = vi.spyOn(spaceAgentControl, 'spatialCatalog').mockImplementation((facts, topics) => {
+    if (selecting) {
+      executionReads.push({ tabs: Object.keys(facts.tabs), sessions: facts.sessions.length })
+      if (Object.keys(facts.tabs).length > 1) throw new Error('Global directory observation is unavailable')
+    }
+    return buildCatalog(facts, topics)
+  })
+  await act(async () => {
+    selecting = true
+    try { button.click() } finally { selecting = false }
+  })
+  await settleMoteApp()
+  expect(app.panel().dataset.moteTargetTab).toBe(tabId)
+  expect(app.panel().querySelector('button[data-workbench-tab-id="' + tabId + '"].workbench-tab--active')).not.toBeNull()
+  expect(app.panel().querySelector('[aria-label="Message Agent"]')).not.toBeNull()
+  // Scope the cost contract to the synchronous selection callback. Subsequent
+  // rendering owns separate catalogs; selection retains its local identity check.
+  expect(directory).toHaveBeenCalled()
+  expect(executionReads).toEqual([{ tabs: [tabId], sessions: 1 }])
+  expect(useAppStore.getState().tabs).toBe(original.tabs)
+  expect(useAppStore.getState().layouts).toBe(original.layouts)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(original.agentComposerDrafts)
+  expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
 })
