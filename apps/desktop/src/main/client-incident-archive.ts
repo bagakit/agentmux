@@ -335,7 +335,7 @@ export class ClientIncidentArchive {
     if ('recent' in target) return this.recent(target, bounds.maxBytes)
     const entry = this.manifest!.entries.find(item => item.summary.recordRef.logId === target.logId)
     if (!entry) return { ...this.result(target), availability: this.manifest!.evicted.includes(target.logId) ? 'evicted' as const : 'not-found' as const,
-      completeness: 'complete' as const }
+      completeness: this.manifest!.evicted.includes(target.logId) ? 'complete' as const : 'unknown' as const }
     const memory = this.memory.get(target.logId)
     if (memory) return this.found(target, memory, entry.summary.persistence, bounds.maxBytes)
     return this.readOriginal(target, bounds, entry)
