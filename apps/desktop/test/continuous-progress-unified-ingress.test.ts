@@ -16,7 +16,7 @@ import type { CtxmuxRunAdapter } from '../../../packages/core/src/ctxmux-run-ada
 import { RuntimeController } from '../src/main/runtime-controller.js'
 import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager.js'
 import { ContinuousProgressLoopStore } from '../src/main/continuous-progress-loop-store.js'
-import { nextCalendarOccurrence } from '../src/main/agent-schedule-calendar.js'
+import { nextCalendarOccurrence } from '@agentmux/core/schedule-calendar'
 import { privateTracker } from './helpers/continuous-progress-tracker'
 import { isolateCoreFixtureEnvironment } from './helpers/isolate-core-environment'
 import { deliverContinuousProgress } from '../src/main/continuous-progress-delivery.js'

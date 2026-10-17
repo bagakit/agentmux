@@ -5,6 +5,21 @@ import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-valu
 
 
 describe('ContinuousProgressScheduler', () => {
+  it('copies only matching execution-directory or exact-target records for scoped readers', () => {
+    const scheduler = new ContinuousProgressScheduler()
+    const base = { hostId: 'original-host', agentSessionId: 'first', providerId: 'generic', workspacePath: new URL("private/home", new URL('/', import.meta.url)).pathname, loopId: 'first', prompt: 'original', nextCheckAt: 1000, intervalMs: 1000, status: 'active' as const }
+    scheduler.restore([base, { ...base, loopId: 'second', agentSessionId: 'second', providerId: 'another-provider' },
+      ...Array.from({ length: 100 }, (_, index) => ({ ...base, loopId: 'neighbor-' + index, workspacePath: new URL("private/home-other", new URL('/', import.meta.url)).pathname, prompt: 'Unrelated large body '.repeat(1024) })),
+      { ...base, loopId: 'other-host', hostId: 'other-host' }])
+    const clone = vi.spyOn(globalThis, 'structuredClone')
+    try {
+      expect(scheduler.list({ hostId: base.hostId, workspacePath: base.workspacePath }).map(record => record.loopId)).toEqual(['first', 'second'])
+      expect(clone).toHaveBeenCalledTimes(2)
+      clone.mockClear()
+      expect(scheduler.list({ hostId: base.hostId, workspacePath: base.workspacePath, agentSessionId: base.agentSessionId, providerId: base.providerId }).map(record => record.loopId)).toEqual(['first'])
+      expect(clone).toHaveBeenCalledTimes(1)
+    } finally { clone.mockRestore() }
+  })
   it('creates, claims once per interval, and advances the next check', () => {
     let now = 1000
     const s = new ContinuousProgressScheduler({ now: () => now, id: (() => { let n = 0; return () => `id-${++n}` })() })
