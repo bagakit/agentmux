@@ -4,7 +4,7 @@ import { createServer, type Server, type Socket } from 'node:net'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { DesktopClientObservation } from '../src/shared/client-observation'
+import { parseDesktopClientObservation, type DesktopClientObservation } from '../src/shared/client-observation'
 
 const repository = resolve(import.meta.dirname, '../../..')
 const installerPath = process.env.AGENTMUX_UI_OBSERVATION_SOURCE ?? join(repository, 'apps/desktop/scripts/package-runtime-upgrade.mjs')
@@ -47,7 +47,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
 
-async function fixture(mode: 'success' | 'rpc-error' | 'invalid-observation', startupDetail?: unknown) {
+async function fixture(mode: 'success' | 'rpc-error' | 'invalid-observation', startupDetail?: unknown, desktopDetail?: unknown) {
   const root = await mkdtemp(_hygiene_fixturePath("tmp/amx-ui-reader-")); roots.push(root)
   const endpoint = join(root, 'rpc.sock'), disposed = join(root, 'disposed.txt')
   const core = join(root, 'current.app/Contents/Resources/app/node_modules/@agentmux/core')
@@ -78,6 +78,7 @@ export async function connectAgentMuxRpc(...args) {
       requests.push(request)
       const current = structuredClone(observation)
       if (startupDetail !== undefined) Object.assign(current.workbench, { startupAgentAvailability: startupDetail })
+      if (desktopDetail !== undefined) Object.assign(current.workbench, { desktop: desktopDetail })
       const body = mode === 'rpc-error' ? { error: { code: -32000, message: 'Private observation unavailable' } }
         : { result: { observation: mode === 'invalid-observation' ? { ...current, main: { ...current.main, pid: 0 } } : current } }
       // Keep the server side open: the bounded reader must close its own connection.
@@ -114,6 +115,30 @@ it.each([
 
 it('the actual inspector child still refuses invalid required identity beside unknown auxiliary detail', async () => {
   const f = await fixture('invalid-observation', { phase: 'unconfirmed' })
+  const read = await installer.observeUiClient(f.app).then(() => ({ ok: true }), (error: Error) => ({ ok: false, error: error.message }))
+  expect(read).toMatchObject({ ok: false, error: expect.stringContaining('pid') })
+  expect(f.requests).toHaveLength(1)
+  expect(await readFile(f.disposed, 'utf8')).toBe('disposed\n')
+  expect(f.counts()).toEqual({ connections: 1, closed: 1, open: 0 })
+})
+
+const legacyDesktop = (() => {
+  const { focusView: _focusView, ...selection } = observation.workbench.desktop.selection
+  return { ...structuredClone(observation.workbench.desktop), selection: { ...selection, spaceView: null } }
+})()
+it.each([legacyDesktop, { provenance: 'unavailable', detail: ['selection', { input: 'unknown' }] }])(
+  'the actual inspector child retains auxiliary desktop observations without granting installation authority: %j', async desktop => {
+    const f = await fixture('success', undefined, desktop)
+    const read = await installer.observeUiClient(f.app).then((value: unknown) => ({ ok: true, value }), (error: Error) => ({ ok: false, error: error.message }))
+    expect(read).toEqual({ ok: true, value: { ...observation, workbench: { ...observation.workbench, desktop } } })
+    expect(() => parseDesktopClientObservation({ ...observation, workbench: { ...observation.workbench, desktop } }), 'The current public producer stays strict').toThrow()
+    expect(f.requests).toEqual([{ jsonrpc: '2.0', id: expect.any(String), method: 'app.inspect', params: {} }])
+    expect(await readFile(f.disposed, 'utf8')).toBe('disposed\n')
+    expect(f.counts()).toEqual({ connections: 1, closed: 1, open: 0 })
+  })
+
+it('the actual inspector child refuses invalid required identity beside opaque desktop observation', async () => {
+  const f = await fixture('invalid-observation', undefined, { provenance: 'unknown' })
   const read = await installer.observeUiClient(f.app).then(() => ({ ok: true }), (error: Error) => ({ ok: false, error: error.message }))
   expect(read).toMatchObject({ ok: false, error: expect.stringContaining('pid') })
   expect(f.requests).toHaveLength(1)
