@@ -651,10 +651,10 @@ setInterval(tick,100);
   // MRU focus through an unrelated pointer event. It does not grant permission to send old intent.
   await activateButton(first.cdp, `document.querySelector('[data-workbench-region-id="${agentRegionId}"] .composer__mailbox')`)
   await waitFor('actual mailbox visible', () => first.cdp.evaluate("document.querySelector('.composer-mailbox').getClientRects().length > 0 && document.querySelector('.composer-mailbox').dataset.state === 'open'"))
-  await activateButton(first.cdp, "document.querySelector('.composer-mailbox [role=tab][id$=\"-outbox-tab\"]')")
+  await activateButton(first.cdp, "document.querySelector('.composer-mailbox [role=tab][id$=\"-user-tab\"]')")
   // Native key dispatch returns before React has necessarily projected the selected tab.
   // Wait for the actual seeded rows, then assert exact content/timestamps below. Empty never passes.
-  await waitFor('selected outbox projects all seeded rows', async () => (await surface(first.cdp)).outbox.length === 3)
+  await waitFor('selected User Messages projects all seeded queue rows', async () => (await surface(first.cdp)).outbox.length === 3)
   const beforeMove = await surface(first.cdp)
   assert.deepEqual(beforeMove.outbox, [
     { text: 'Private first pending intent', datetime: new Date(_hygiene_fixtureTime(23606400000)).toISOString(), unknownTime: false },
@@ -668,8 +668,8 @@ setInterval(tick,100);
     : "document.querySelector('.composer-outbox .composer-mailbox__full-text')?.textContent === 'Private last pending intent'"
   await waitFor('selected original queue detail', () => first.cdp.evaluate(selectedLastDetail))
   const moveLastUp = pendingEditProof || demandCollaborationProof
-    ? "Array.from(document.querySelectorAll('.composer-outbox__actions button')).find(button => button.getAttribute('aria-label') === 'Move up')"
-    : "Array.from(document.querySelectorAll('.composer-outbox__actions button')).find(button => button.textContent === 'Move up')"
+    ? "Array.from(document.querySelectorAll('.composer-mailbox__record-actions button')).find(button => button.getAttribute('aria-label') === 'Move up')"
+    : "Array.from(document.querySelectorAll('.composer-mailbox__record-actions button')).find(button => button.textContent === 'Move up')"
   await activateButton(first.cdp, moveLastUp)
   await activateButton(first.cdp, moveLastUp)
   if (!demandCollaborationProof && !pendingEditProof) await activateButton(first.cdp, "document.querySelector('.composer-mailbox__back button')")
