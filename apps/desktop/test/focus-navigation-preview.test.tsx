@@ -1,12 +1,15 @@
-import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
-import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, createElement, Profiler } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import type { AgentTimelineSnapshot } from '@agentmux/core'
+import type { SessionSnapshot } from '../src/shared/contracts'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
-import { PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { agentContextForSession } from '../src/renderer/src/lib/focus-context'
+import { FocusContextStateMark } from '../src/renderer/src/components/FocusContextState'
+import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
+import { seedMoteWorkface } from './fixtures/mote-workface'
 vi.mock('../src/renderer/src/components/PmoTeamsTopicEntry', () => ({ PmoTeamsTopicEntry: () => createElement('button', null, 'PMO') }))
 import { SurfaceSwitch } from '../src/renderer/src/components/TopRowChrome'
 const baseline = useAppStore.getState()
@@ -16,135 +19,84 @@ const preview = () => document.querySelector<HTMLElement>('#surface-navigation-t
 const focus = () => container.querySelector<HTMLButtonElement>('button[aria-label^="Focus: show execution contexts."]')!
 const hover = () => act(async () => { focus().dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); vi.advanceTimersByTime(150) })
 const leave = () => act(async () => focus().dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })))
-const items = (id: string, kind: string, content: string) => ({ items: [{ id: `${id}-item`, kind, status: 'complete', title: content, content, createdAt: _tailFixtureEpoch(0, 0, 1000), updatedAt: _tailFixtureEpoch(0, 0, 1000) }] }) as never
+const agent = (id: string, state: SessionSnapshot['status']['state']) => ({ ...composerSession(id), status: { state, source: 'native-hook' as const, observedAt: Date.now() } })
+function timeline(id: string, kind: 'user_message' | 'assistant_message', content: string): AgentTimelineSnapshot {
+  return { agentSessionId: id, sourceHostId: 'local', revision: 1, items: [{ id: `${id}-item`, agentSessionId: id, source: 'native-hook', kind, status: 'complete', title: 'Record', content, createdAt: Date.now(), updatedAt: Date.now() }] }
+}
 beforeEach(async () => {
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
-  const config = await api.config.get(), { sessions } = await api.sessions.snapshot(), base = sessions[0]!
-  useAppStore.setState({ config, mainSurface: 'workbench', agentNames: { working: 'Build the parser', attention: 'Review the change', result: 'Ready for review', idle: 'My current context' },
-    sessions: ['working', 'attention', 'result', 'idle', 'offline'].map((id, index) => ({ ...base, id, status: { source: 'native-hook' as const, observedAt: Date.now(), state: ['working', 'waiting', 'done', 'running', 'disconnected'][index] as typeof base.status.state } })),
-    timelines: { working: items('working', 'user_message', 'Compile the parser'), result: items('result', 'assistant_message', 'Parser tests pass') },
-    agentFocus: { execution: { sessionId: 'idle', history: [] }, pmo: { sessionId: null } } })
-  commits.mockClear()
-  await act(async () => root.render(createElement(Profiler, { id: 'navigation', onRender: commits }, createElement(SurfaceSwitch))))
+  useAppStore.setState({ config: composerConfig, mainSurface: 'workbench', agentNames: { working: 'Build the parser', attention: 'Review the change', result: 'Ready for review', unknown: 'Previous Agent' },
+    sessions: [agent('working', 'working'), { ...agent('attention', 'waiting'), pendingInteraction: { kind: 'permission', id: 'request', title: 'Allow access to the selected project?', operation: 'read' } as never }, agent('result', 'done'), agent('unknown', 'running'), { ...agent('interrupted', 'working'), processState: 'interrupted' }],
+    timelines: { working: timeline('working', 'user_message', 'Compile the parser'), result: timeline('result', 'assistant_message', 'Parser tests pass'), attention: timeline('attention', 'assistant_message', 'Old reply must not hide the request') },
+    scratchTopicSnapshots: {}, agentComposerDrafts: { unknown: 'Keep the original draft' },
+    agentFocus: { execution: { sessionId: 'unknown', history: [] }, pmo: { sessionId: null } } })
+  commits.mockClear(); await act(async () => root.render(<Profiler id="navigation" onRender={commits}><SurfaceSwitch /></Profiler>))
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); document.getElementById('agentmux-window-overlay-host')?.remove(); useAppStore.setState(baseline, true); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers() })
-it('opens a bounded live snapshot on hover, retaining the current context and prioritizing attention and work', async () => {
+
+it('prioritizes real attention over execution MRU and uses the standard read-only face and group glyphs', async () => {
+  const before = useAppStore.getState(), source = vi.spyOn(api.sessions, 'historySources'), page = vi.spyOn(api.sessions, 'historyPage'), appearance = vi.spyOn(api.workspaces, 'appearance')
   expect(preview()).toBeNull(); await hover(); expect(preview()?.getAttribute('role')).toBe('tooltip')
-  expect(preview()?.querySelector('[data-preview-count="working"]')?.textContent).toBe('1Working')
-  expect(preview()?.querySelector('[data-preview-count="attention"]')?.textContent).toBe('1Attention')
-  expect(preview()?.querySelector('[data-preview-count="results"]')?.textContent).toBe('1Results')
-  expect(preview()?.querySelector('[data-preview-count="idle"]')?.textContent).toBe('1Idle')
-  expect([...preview()!.querySelectorAll('[data-preview-session]')].map(row => row.getAttribute('data-preview-session'))).toEqual(['idle', 'attention', 'working'])
-  expect(preview()?.textContent).toContain('FocusedMy current context'); expect(preview()?.textContent).not.toContain('Viewing'); expect(preview()?.textContent).toContain('1 disconnected')
-  expect(preview()?.textContent).toContain('Prompt · Compile the parser'); expect(preview()?.textContent).toContain(useAppStore.getState().config!.workspaces[0]!.name)
-  expect(useAppStore.getState().mainSurface).toBe('workbench'); expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('idle')
-  expect(focus().hasAttribute('title')).toBe(false)
-  expect(preview()?.querySelector('button, input, [tabindex]')).toBeNull()
-  await act(async () => useAppStore.setState(state => ({ agentNames: { ...state.agentNames, working: 'Parser ready' }, sessions: state.sessions.map(s => s.id === 'attention' ? { ...s, status: { ...s.status, state: 'done' } } : s), timelines: { ...state.timelines, working: items('working', 'assistant_message', 'Compiled successfully') } })))
-  expect(preview()?.textContent).toContain('Parser ready'); expect(preview()?.textContent).toContain('Response · Compiled successfully')
-  expect(preview()?.querySelector('[data-preview-count="attention"]')?.textContent).toBe('0Attention')
-})
-it('ignores unrelated bytes and detaches detailed preview when closed', async () => {
-  await hover(); const before = commits.mock.calls.length; expect(before).toBeGreaterThan(0)
-  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(s => ({ ...s, latestOutputBytes: s.latestOutputBytes + 128 })) })))
-  expect(commits.mock.calls.length).toBe(before)
-  await leave(); expect(preview()).toBeNull(); const closed = commits.mock.calls.length
-  await act(async () => useAppStore.setState(state => ({ timelines: { ...state.timelines, working: items('working', 'assistant_message', 'Changed while closed') } })))
-  expect(commits.mock.calls.length).toBe(closed)
-  await hover(); expect(preview()?.textContent).toContain('Response · Changed while closed')
-})
-it('dismisses the mounted preview when its surface is activated and preserves the original context', async () => {
-  await hover()
-  expect(preview()?.querySelectorAll('[data-preview-session]').length).toBe(3)
-  const context = useAppStore.getState().agentFocus.execution.sessionId
-  await act(async () => focus().click())
-  expect(useAppStore.getState().mainSurface).toBe('agents')
-  expect(useAppStore.getState().agentFocus.execution.sessionId).toBe(context)
-  expect(preview()).toBeNull()
-  expect(focus().hasAttribute('aria-describedby')).toBe(false)
-  await leave(); await hover()
-  expect(preview()).not.toBeNull()
-})
-it('does not build a pointer preview on the way to activating its surface', async () => {
-  await act(async () => focus().dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
-  expect(preview()).toBeNull()
-  await act(async () => {
-    focus().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
-    focus().focus()
-  })
-  expect(preview()).toBeNull()
-  await act(async () => focus().click())
-  await act(async () => vi.advanceTimersByTime(1000))
-  expect(useAppStore.getState().mainSurface).toBe('agents')
-  expect(preview()).toBeNull()
-})
-it('cancels pending hover on Escape or window blur and preserves keyboard focus after a cancelled pointer gesture', async () => {
-  await act(async () => focus().dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
-  await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
-  await act(async () => vi.advanceTimersByTime(150))
-  expect(preview()).toBeNull()
-  await leave()
-  await act(async () => focus().dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
-  await act(async () => window.dispatchEvent(new Event('blur')))
-  await act(async () => vi.advanceTimersByTime(150))
-  expect(preview()).toBeNull()
-  await act(async () => focus().focus())
-  expect(preview()).not.toBeNull()
-  await act(async () => focus().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })))
-  await act(async () => focus().blur())
-  await act(async () => focus().focus())
-  expect(preview()).not.toBeNull()
-})
-it('keeps selected disconnected contexts count-only without changing the original focus', async () => {
-  await act(async () => useAppStore.setState(state => ({
-    agentNames: { ...state.agentNames, offline: 'Saved offline task' },
-    timelines: { ...state.timelines, offline: items('offline', 'assistant_message', 'Offline activity detail') },
-    agentFocus: { ...state.agentFocus, execution: { ...state.agentFocus.execution, sessionId: 'offline' } }
-  })))
-  await hover()
   expect([...preview()!.querySelectorAll('[data-preview-session]')].map(row => row.getAttribute('data-preview-session'))).toEqual(['attention', 'working', 'result'])
-  expect(preview()?.textContent).toContain('5 contexts')
-  expect(preview()?.textContent).toContain('1 disconnected')
-  expect(preview()?.textContent).not.toContain('Saved offline task')
-  expect(preview()?.textContent).not.toContain('Offline activity detail')
-  expect(preview()?.querySelector('.focus-navigation-preview__viewing')).toBeNull()
-  expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('offline')
-  expect(useAppStore.getState().sessions.find(session => session.id === 'offline')?.status.state).toBe('disconnected')
-  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.filter(session => session.id === 'offline') })))
-  expect([...preview()!.querySelectorAll('[data-preview-session]')]).toEqual([])
-  expect(preview()?.textContent).toContain('No active contexts')
-  expect(preview()?.textContent).toContain('1 context')
-  expect(preview()?.textContent).toContain('1 disconnected')
-  expect(preview()?.textContent).not.toContain('Offline activity detail')
-  expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('offline')
-  await act(async () => focus().click())
-  expect(useAppStore.getState().mainSurface).toBe('agents')
-  expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('offline')
+  expect(preview()?.textContent).not.toContain('Focused'); expect(preview()?.textContent).not.toContain('Old reply must not hide the request')
+  expect(preview()?.textContent).toContain('Allow access to the selected project?'); expect(preview()?.textContent).toContain('Parser tests pass')
+  expect(preview()?.textContent).toContain(composerConfig.workspaces[0]!.name); expect(preview()?.textContent).toContain('2 more')
+  expect(preview()?.querySelector('[data-preview-count="idle"] [data-semantic-icon="status.neutral"]')).not.toBeNull()
+  expect(preview()?.querySelector('[data-preview-session="attention"] .focus-context__state [data-semantic-icon="status.needs-input"]')).not.toBeNull()
+  expect(preview()?.querySelector('[data-preview-session] [data-executor-id="codex"]')).not.toBeNull()
+  expect(preview()?.querySelector('button, input, [tabindex]')).toBeNull(); expect(focus().hasAttribute('title')).toBe(false)
+  expect(source).not.toHaveBeenCalled(); expect(page).not.toHaveBeenCalled(); expect(appearance).not.toHaveBeenCalled()
+  expect(useAppStore.getState().sessions).toBe(before.sessions); expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
 })
-it('excludes PMO from both the badge and preview, and does not keep an old result after a new prompt', async () => {
-  await act(async () => useAppStore.setState(state => ({
-    config: { ...state.config!, workspaces: [...state.config!.workspaces, { ...state.config!.workspaces[0]!, id: '__scratch__', name: 'Scratch', path: _hygiene_fixturePath("fixture/scratch") }] },
-    sessions: [...state.sessions, { ...state.sessions[0]!, id: 'pmo', workspacePath: (_hygiene_fixturePath("fixture/scratch/") + (scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID)) + "") }],
-    agentNames: { ...state.agentNames, pmo: 'PMO coordinator' }
-  })))
-  await hover()
-  expect(preview()?.textContent).toContain('5 contexts')
-  expect(preview()?.textContent).not.toContain('PMO coordinator')
-  expect(focus().querySelector('[data-focus-count="working"]')?.textContent).toBe('1')
-  expect(preview()?.querySelector('[data-preview-count="working"]')?.textContent).toBe('1Working')
-  await act(async () => useAppStore.setState(state => ({ timelines: { ...state.timelines, result: items('result', 'user_message', 'Start another task') } })))
-  expect(preview()?.querySelector('[data-preview-count="results"]')?.textContent).toBe('0Results')
-  expect(preview()?.querySelector('[data-preview-count="idle"]')?.textContent).toBe('2Idle')
+it.each(['working', 'waiting', 'error', 'unknown', 'unsupported', 'interrupted', 'unobserved', 'disconnected'] as const)('keeps the actual footer %s mark identical to the shared Agent card mark', async kind => {
+  const base = agent(kind, kind === 'waiting' ? 'waiting' : kind === 'error' ? 'error' : kind === 'disconnected' ? 'disconnected' : kind === 'working' || kind === 'interrupted' ? 'working' : 'running')
+  const session = { ...base, ...(kind === 'unsupported' ? { capabilities: { ...base.capabilities, timeline: 'unavailable' as const } } : {}), ...(kind === 'interrupted' || kind === 'unobserved' || kind === 'disconnected' ? { processState: 'interrupted' as const } : {}), ...(kind === 'unobserved' ? { runUnobserved: true } : {}) }
+  await act(async () => useAppStore.setState({ sessions: [session], timelines: {} })); await hover()
+  const context = agentContextForSession(session, undefined, kind, composerConfig.workspaces[0], null)
+  await act(async () => root.render(<><SurfaceSwitch /><div data-card-reference><FocusContextStateMark context={context} /></div></>))
+  const expected = { working: 'status.working', waiting: 'status.needs-input', error: 'status.failed', unknown: 'status.activity-unknown', unsupported: 'status.activity-unknown', interrupted: 'status.interrupted', unobserved: 'status.presence-unknown', disconnected: 'status.interrupted' }[kind]
+  // Replacing the tree above creates a new footer owner; explicitly focus its original trigger.
+  await act(async () => focus().focus())
+  expect(preview()?.querySelector('[data-preview-session] .focus-state-mark [data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe(expected)
+  expect(container.querySelector('[data-card-reference] [data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe(expected)
+  expect(preview()?.querySelector('[data-preview-session]')?.getAttribute('aria-label')).toContain(context.stateLabel)
 })
-it('supports keyboard reading, Escape and blur without navigation, and preserves click navigation and empty truth', async () => {
-  await act(async () => focus().focus()); expect(preview()).toBeTruthy()
-  await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))); expect(preview()).toBeNull()
-  await hover(); await act(async () => window.dispatchEvent(new Event('blur'))); expect(preview()).toBeNull()
-  await act(async () => useAppStore.setState({ sessions: [], timelines: {} })); await hover()
-  expect(preview()?.textContent).toContain('No execution contexts yet'); expect(preview()?.textContent).toContain('0 contexts')
-  await act(async () => focus().click()); expect(useAppStore.getState().mainSurface).toBe('agents')
-  expect(preview()).toBeNull()
-  expect(focus().hasAttribute('aria-describedby')).toBe(false)
+it('separates working, pending request and real error counts with their current shared glyphs', async () => {
+  await act(async () => useAppStore.setState(state => ({ sessions: [...state.sessions, { ...agent('failure', 'error'), status: { ...agent('failure', 'error').status, detail: 'Model request failed' } }] })))
+  for (const [count, glyph] of [['working', 'status.working'], ['requests', 'status.needs-input'], ['errors', 'status.failed']]) {
+    const slot = focus().querySelector(`[data-focus-count="${count}"]`)!; expect(slot.textContent).toBe('1'); expect(slot.querySelector(`[data-semantic-icon="${glyph}"]`)).not.toBeNull()
+  }
+  expect(focus().getAttribute('aria-label')).toContain('1 failed'); await hover(); expect(preview()?.textContent).toContain('Model request failed')
+})
+it('ignores unrelated bytes and detaches detailed projection when closed', async () => {
+  await hover(); const before = commits.mock.calls.length
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(s => ({ ...s, latestOutputBytes: s.latestOutputBytes + 128 })) })))
+  expect(commits.mock.calls.length).toBe(before); await leave(); const closed = commits.mock.calls.length
+  await act(async () => useAppStore.setState(state => ({ timelines: { ...state.timelines, working: timeline('working', 'assistant_message', 'Changed while closed') } })))
+  expect(commits.mock.calls.length).toBe(closed); await hover(); expect(preview()?.textContent).toContain('Changed while closed')
+})
+it('keeps explicit navigation and cancels pointer intent on activation, Escape, blur and document hiding', async () => {
+  const before = useAppStore.getState()
+  await act(async () => { focus().dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); focus().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); focus().focus(); focus().click(); vi.advanceTimersByTime(300) })
+  expect(preview()).toBeNull(); expect(useAppStore.getState().mainSurface).toBe('agents'); expect(useAppStore.getState().agentFocus).toBe(before.agentFocus)
+  for (const dismiss of [() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })), () => window.dispatchEvent(new Event('blur')), () => { vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden'); document.dispatchEvent(new Event('visibilitychange')) }]) {
+    await leave(); await act(async () => { focus().dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); dismiss(); vi.advanceTimersByTime(300) }); expect(preview()).toBeNull()
+  }
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+})
+it('retains interrupted and unobserved contexts in the original neutral group and updates actual accepted detail', async () => {
+  const interrupted = useAppStore.getState().sessions.find(s => s.id === 'interrupted')!
+  await act(async () => useAppStore.setState({ sessions: [interrupted], timelines: {} })); await hover()
+  expect(preview()?.querySelector('[data-preview-session="interrupted"]')).not.toBeNull(); expect(preview()?.textContent).toContain('Run interrupted')
+  await act(async () => useAppStore.setState({ sessions: [{ ...interrupted, runUnobserved: true }] }))
+  expect(preview()?.textContent).toContain('Run not observed'); expect(preview()?.querySelector('[data-semantic-icon="status.presence-unknown"]')).not.toBeNull()
+})
+it('uses the original confirmed PMO membership and preserves truthful empty navigation', async () => {
+  await act(async () => { seedMoteWorkface(); useAppStore.setState(state => ({ sessions: state.sessions.map(session => ({ ...session, status: { ...session.status, observedAt: Date.now() } })) })) }); await hover()
+  expect([...preview()!.querySelectorAll('[data-preview-session]')].map(row => row.getAttribute('data-preview-session'))).toEqual(['ordinary-agent', 'execution-agent'])
+  expect(focus().querySelector('[data-focus-count="working"]')?.textContent).toBe('2')
+  await act(async () => useAppStore.setState({ sessions: [], timelines: {} }))
+  expect(preview()?.textContent).toContain('0 contexts'); expect(preview()?.textContent).toContain('No execution contexts yet')
+  await act(async () => focus().click()); expect(useAppStore.getState().mainSurface).toBe('agents'); expect(preview()).toBeNull()
 })

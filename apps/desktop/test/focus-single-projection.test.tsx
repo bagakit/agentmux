@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentConversationRecord } from '@agentmux/core/conversation'
 import type { AgentTimelineSnapshot } from '@agentmux/core'
-import { projectConversationRecords } from '@agentmux/core/conversation'
+import { projectConversationSummary } from '@agentmux/core/conversation'
 import { FocusNavigationButton } from '../src/renderer/src/components/FocusNavigationButton'
 import { agentContextForSession } from '../src/renderer/src/lib/focus-context'
 import { useAppStore } from '../src/renderer/src/store'
@@ -13,10 +13,10 @@ import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
 
 vi.mock('@agentmux/core/conversation', async importOriginal => {
   const actual = await importOriginal<typeof import('@agentmux/core/conversation')>()
-  return { ...actual, projectConversationRecords: vi.fn(actual.projectConversationRecords) }
+  return { ...actual, projectConversationSummary: vi.fn(actual.projectConversationSummary) }
 })
 
-const project = vi.mocked(projectConversationRecords)
+const project = vi.mocked(projectConversationSummary)
 const initial = useAppStore.getState()
 const session = composerSession('focus-original')
 const workspace = composerConfig.workspaces[0]!
