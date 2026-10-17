@@ -1,5 +1,6 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { SettingsModule } from '../settings-catalog'
+import '../inapp-conversation-settings.css'
 
 export const inappConversationSettingsModule = {
   id: 'inapp-conversation',
@@ -16,23 +17,23 @@ export const inappConversationSettingsModule = {
   ],
   savedSummary: () => 'Conversation view and shared preferences',
   Pane({ onNavigate }) {
-    return <div className="settings-pane-stack" data-inapp-conversation-settings>
-      <section className="settings-group" data-settings-field="conversation-view">
-        <header><span>Conversation view</span></header>
+    return <div className="settings-pane-stack inapp-conversation" data-inapp-conversation-settings>
+      <section className="inapp-conversation__intro" data-settings-field="conversation-view">
+        <h3>One Session, two views</h3>
         <p className="settings-group-note">Read messages and work in the same Agent Session. Use Show Activity or Show Terminal in its input toolbar to switch that Agent’s view.</p>
       </section>
-      <section className="settings-group" data-settings-field="input-preferences">
-        <header><span>User Input</span></header>
-        <p className="settings-group-note">Choose input layout, shortcut prefixes and prompt suggestions. These preferences are shared with other views using the same input.</p>
+      <section className="inapp-conversation__destination" data-settings-field="input-preferences">
+        <div><h3>User Input</h3>
+        <p className="settings-group-note">Choose input layout, shortcut prefixes and prompt suggestions. These preferences are shared with other views using the same input.</p></div>
         <button type="button" className="small-button" onClick={() => onNavigate('message-tool')}>Open User Input</button>
       </section>
-      <section className="settings-group" data-settings-field="appearance-preferences">
-        <header><span>Appearance</span></header>
-        <p className="settings-group-note">Use the app’s shared theme and appearance settings.</p>
+      <section className="inapp-conversation__destination" data-settings-field="appearance-preferences">
+        <div><h3>Appearance</h3>
+        <p className="settings-group-note">Set the shared app theme, typography and reading density.</p></div>
         <button type="button" className="small-button" onClick={() => onNavigate('appearance')}>Open Appearance</button>
       </section>
-      <section className="settings-group" data-settings-field="references">
-        <header><span>References</span></header>
+      <section className="inapp-conversation__references" data-settings-field="references">
+        <h3>Reading & controls</h3>
         <p className="settings-group-note">Read the existing keyboard bindings and supported message formats.</p>
         <div className="settings-workflows__inline-action">
           <button type="button" className="small-button" onClick={() => onNavigate('keyboard-shortcuts')}>Open Keyboard shortcuts</button>

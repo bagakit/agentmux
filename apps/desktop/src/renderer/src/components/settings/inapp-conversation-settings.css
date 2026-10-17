@@ -1,0 +1,12 @@
+.inapp-conversation { gap: 0; }
+.inapp-conversation h3 { margin: 0 0 var(--sp-2); color: var(--text); font-size: var(--fs-body); font-weight: 600; }
+.inapp-conversation .settings-group-note { max-width: 70ch; margin: 0; font-size: var(--fs-meta); line-height: 1.6; }
+.inapp-conversation__intro { padding-bottom: var(--sp-5); }
+.inapp-conversation__destination { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-5); padding: var(--sp-5) 0; border-top: 1px solid var(--line-soft); }
+.inapp-conversation__destination > div { min-width: 0; }
+.inapp-conversation__destination > button { flex: none; }
+.inapp-conversation__references { padding-top: var(--sp-5); border-top: 1px solid var(--line-soft); }
+.inapp-conversation__references .settings-workflows__inline-action { margin-top: var(--sp-3); }
+@media (max-width: 620px) {
+  .inapp-conversation__destination { align-items: flex-start; flex-direction: column; gap: var(--sp-3); }
+}
