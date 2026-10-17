@@ -110,6 +110,7 @@ function fakeWindow() {
     sent,
     window: {
       isDestroyed: () => false,
+      getContentBounds: () => ({ x: 0, y: 0, width: 1024, height: 768 }),
       contentView: { addChildView() {}, removeChildView() {} },
       webContents: { isDestroyed: () => false, send: (_channel: string, event: unknown) => { sent.push(event) } }
     }
