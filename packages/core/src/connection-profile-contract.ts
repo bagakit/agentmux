@@ -4,7 +4,6 @@ import type { ConnectionEnrollmentCallContext } from './connection-enrollment-co
 export type ConnectionProfileReason = 'adapter-unavailable' | 'credential-unavailable' | 'connection-revised' | 'source-unconfirmed' | 'storage-unconfirmed' | 'permission-required' | 'creation-origin-unsupported' | 'application-under-review' | 'platform-rejected' | 'effect-unconfirmed' | 'online-unconfirmed'
 export type DesiredConnectionProfile = { name?: string; description?: string; avatar?: { pngDataUrl: string } }
 export type ConnectionProfileGet = { connectionId: string; expectedConnectionRevision: number }
-export type ConnectionProfileSync = ConnectionProfileGet & { operationId: string; desired: DesiredConnectionProfile }
 export type ProfileEffectState = 'not-required' | 'not-dispatched' | 'dispatching' | 'confirmed' | 'refused' | 'unknown'
 export const CONNECTION_PROFILE_TRANSPORT_CODES = ['ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ERR_NETWORK', 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'CERT_HAS_EXPIRED', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIGNED_CERT_IN_CHAIN'] as const
 /** Original Provider facts only. An absent numeric field means it was not recorded. */
@@ -43,19 +42,17 @@ export type ConnectionProfileListInput = { connectionId: string; cursor?: string
 export type ConnectionProfileListResult = { operations: ConnectionProfileOperation[]; next: string | null }
 export interface ConnectionProfilePort {
   get(input: ConnectionProfileGet, context?: ConnectionEnrollmentCallContext): Promise<ConnectionProfileObservation>
-  sync(input: ConnectionProfileSync, context: ConnectionEnrollmentCallContext): Promise<ConnectionProfileOperation>
-  advance(input: ConnectionProfileOperationInput, context: ConnectionEnrollmentCallContext): Promise<ConnectionProfileOperation>
   inspect(input: ConnectionProfileOperationInput, context?: ConnectionEnrollmentCallContext): Promise<{ operation: ConnectionProfileOperation | null }>
   list(input: ConnectionProfileListInput, context?: ConnectionEnrollmentCallContext): Promise<ConnectionProfileListResult>
 }
 export type ConnectionProfileParamsMap = {
-  'connection.profile.get': ConnectionProfileGet; 'connection.profile.sync': ConnectionProfileSync
-  'connection.profile.advance': ConnectionProfileOperationInput; 'connection.profile.inspect': ConnectionProfileOperationInput
+  'connection.profile.get': ConnectionProfileGet
+  'connection.profile.inspect': ConnectionProfileOperationInput
   'connection.profile.ls': ConnectionProfileListInput
 }
 export type ConnectionProfileResultMap = {
-  'connection.profile.get': ConnectionProfileObservation; 'connection.profile.sync': ConnectionProfileOperation
-  'connection.profile.advance': ConnectionProfileOperation; 'connection.profile.inspect': { operation: ConnectionProfileOperation | null }
+  'connection.profile.get': ConnectionProfileObservation
+  'connection.profile.inspect': { operation: ConnectionProfileOperation | null }
   'connection.profile.ls': ConnectionProfileListResult
 }
 export type ConnectionProfileMethod = keyof ConnectionProfileParamsMap

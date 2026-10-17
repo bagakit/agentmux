@@ -612,8 +612,6 @@ export class AgentMuxRpcService {
         if (!profile) throw new AgentMuxError('Profile operations are unavailable on this Host. Existing connections remain available.', 'CONTROL_UNAVAILABLE')
         const callContext = { ...administration, ...(context.signal ? { signal: context.signal } : {}) }
         const result = method === 'connection.profile.get' ? await profile.get(parseConnectionProfileParams(method, params), callContext)
-          : method === 'connection.profile.sync' ? await profile.sync(parseConnectionProfileParams(method, params), callContext)
-          : method === 'connection.profile.advance' ? await profile.advance(parseConnectionProfileParams(method, params), callContext)
           : method === 'connection.profile.ls' ? await profile.list(parseConnectionProfileParams(method, params), callContext)
           : await profile.inspect(parseConnectionProfileParams(method, params), callContext)
         return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>

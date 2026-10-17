@@ -80,7 +80,7 @@ export class ConnectionHost implements ConnectionPort {
       try { return this.profileHost = new ConnectionProfileHost(this, options.secrets) }
       catch { throw new AgentMuxError('Profile storage is unavailable. Existing connections remain available; retry this original profile operation.', 'CONNECTION_PROFILE_UNAVAILABLE') }
     }
-    this.profile = { get: async (input, context) => profile().get(input, context), sync: async (input, context) => profile().sync(input, context), advance: async (input, context) => profile().advance(input, context), inspect: async (input, context) => profile().inspect(input, context), list: async (input, context) => profile().list(input, context) }
+    this.profile = { get: async (input, context) => profile().get(input, context), inspect: async (input, context) => profile().inspect(input, context), list: async (input, context) => profile().list(input, context) }
     const setup = (): ConnectionSetupHost => {
       if (this.closed) throw new AgentMuxError('The original management owner is closed. Inspect the same request on its Host.', 'CONNECTION_SETUP_UNCONFIRMED')
       if (this.setupHost) return this.setupHost
@@ -253,6 +253,11 @@ export class ConnectionHost implements ConnectionPort {
   async resolveCredential(connectionId: string): Promise<string | null> {
     const config = this.readConfiguration(connectionId)?.config
     return config?.enabled ? this.options.secrets.resolve(config.credentialRef) : null
+  }
+  /** Read-only original Profile fact shared with this application's current Setup owner. */
+  unresolvedProfileWrite(application: import('@agentmux/core/connections').ConnectionApplication, actor: import('@agentmux/core/connections').ConnectionEnrollmentCallContext['actor']) {
+    this.profileHost ??= new ConnectionProfileHost(this, this.options.secrets)
+    return this.profileHost.unresolvedApplicationWrite(application, actor)
   }
   close(): void { this.closed = true; this.profileHost?.close(); this.setupHost?.close(); this.enrollmentHost?.close(); this.closeRoomDiscovery(); if (!this.options.database) this.database.close() }
 }
