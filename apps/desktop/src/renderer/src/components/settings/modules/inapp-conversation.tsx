@@ -4,7 +4,7 @@ import type { SettingsModule } from '../settings-catalog'
 export const inappConversationSettingsModule = {
   id: 'inapp-conversation',
   group: 'conversation-channels',
-  title: 'InApp Conversation',
+  title: 'InApp',
   description: 'The app conversation view, shared input preferences and reading references.',
   icon: semanticIconComponent('object.conversations'),
   keywords: 'inapp in-app conversation activity terminal view reading input messages 对话 应用内 阅读 消息',
