@@ -1297,6 +1297,13 @@ function BrowserPaneContent({
       {addressError ? <p className="browser-address-error" role="alert">{addressError}{research.current ? <button type="button" className="small-button" disabled={busy} onClick={() => void startResearch()}>Retry same research</button> : null}{privateCreation.current ? <button type="button" className="small-button" disabled={busy} onClick={() => void startPrivatePage()}>Retry same private page</button> : null}</p> : null}
       {inputHistoryNotice ? <p className="browser-address-error" role="status">{inputHistoryNotice}</p> : null}
       <BrowserOperationWarning activity={browserActivity} />
+      {!connectionUnavailable && !tab.nativeOwnerReleased && tab.retention?.status === 'unknown' && tab.retention.reasons.includes('close-unconfirmed') ? <ServiceWindowNotice notice={{
+        kind: 'indeterminate', notice: {
+          step: 'Browser close unconfirmed',
+          mode: 'This page remains available.',
+          restore: 'Keep browsing. If it closes, reopen this same Browser. The close request is not repeated.'
+        }
+      }} /> : null}
       {/* 页面与详情共享布局，正常并排，极窄 Pane 沿 SSOT 改为有限高度阅读区。
           原生 WebContentsView 跟随 stage 的真实矩形，详情不覆盖页面。 */}
       <ServiceWindowNotice notice={annotationSync.notice} title={annotationSync.retryAvailable ? 'Browser annotations unconfirmed' : 'Restoring Browser annotations'} disclosure={{
