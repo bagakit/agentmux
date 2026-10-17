@@ -1,6 +1,6 @@
 import type {
   GitBranchComparisonSnapshot, GitCommitDetailsInput, GitCommitDetailsResult, GitCommitSnapshot,
-  GitDiffDescriptor, GitDiffSide, GitFileDiff, GitHistoryInput, GitHistoryResult, GitHistorySnapshot
+  GitDiffDescriptor, GitDiffSide, GitFileDiff, GitHistoryInput, GitHistoryResult, GitHistorySnapshot, GitWorktreesResult
 } from '@agentmux/git/types'
 import { isDeepStrictEqual } from 'node:util'
 import { AgentMuxError } from './errors.js'
@@ -20,12 +20,14 @@ export type WorktreeCloseoutReceipt = {
   reason: string | null
 }
 export type GitParameterMap = {
+  'git.worktrees': GitTarget
   'git.worktree.close': WorktreeCloseoutParams
   'git.history': GitTarget & GitHistoryInput
   'git.commit': GitTarget & GitCommitDetailsInput
   'git.diff': GitTarget & { input: GitDiffDescriptor }
 }
 export type GitResultMap = {
+  'git.worktrees': GitWorktreesResult
   'git.worktree.close': WorktreeCloseoutReceipt
   'git.history': GitHistoryResult
   'git.commit': GitCommitDetailsResult
@@ -42,6 +44,7 @@ export interface AgentMuxRpcGitOwner {
   call<M extends GitMethod>(method: M, params: GitParameterMap[M], context?: AgentMuxRpcCallContext): Promise<GitResultMap[M]>
 }
 export const AGENTMUX_RPC_GIT_METHODS = {
+  'git.worktrees': 'long',
   'git.history': 'long', 'git.commit': 'long', 'git.diff': 'long', 'git.worktree.close': 'long'
 } as const satisfies Record<GitMethod, 'short' | 'long'>
 export function isGitMethod(value: unknown): value is GitMethod {
@@ -56,7 +59,7 @@ function text(value: unknown, code: string): asserts value is string {
 }
 function absolutePath(value: unknown, code: string): asserts value is string {
   text(value, code)
-  if (!value.startsWith('/')) invalid('The original absolute Git resource path is required.', code)
+  if (!(value.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(value) || value.startsWith('\\\\'))) invalid('The original absolute Git resource path is required.', code)
 }
 function filePath(value: unknown, code: string): asserts value is string {
   text(value, code)
@@ -121,7 +124,7 @@ function diffDescriptor(value: unknown, code: string): GitDiffDescriptor {
 }
 export function parseGitParams<M extends GitMethod>(method: M, value: unknown, code = 'INVALID_CONTROL_REQUEST'): GitParameterMap[M] {
   const p = rpcRecord(value, ['workspaceId', 'expectedResource',
-    ...(method === 'git.worktree.close' ? ['operationId', 'discardChanges'] : method === 'git.history' ? ['ref', 'limit', 'cursor'] : method === 'git.commit' ? ['oid', 'parentOid'] : ['input'])], code)
+    ...(method === 'git.worktrees' ? [] : method === 'git.worktree.close' ? ['operationId', 'discardChanges'] : method === 'git.history' ? ['ref', 'limit', 'cursor'] : method === 'git.commit' ? ['oid', 'parentOid'] : ['input'])], code)
   parseTarget(p, code)
   if (method === 'git.worktree.close') {
     identity(p.operationId, code)
@@ -136,7 +139,7 @@ export function parseGitParams<M extends GitMethod>(method: M, value: unknown, c
       if (cursor.snapshot.hostId !== (p.expectedResource as GitExpectedResource).hostId ||
           p.ref !== undefined && p.ref !== cursor.snapshot.selectedRef) invalid('Git cursor belongs to another Host or reference.', code)
     }
-  } else {
+  } else if (method === 'git.diff') {
     const input = diffDescriptor(p.input, code)
     if (input.snapshot.hostId !== (p.expectedResource as GitExpectedResource).hostId) invalid('Git diff belongs to another Host.', code)
   }
@@ -177,7 +180,30 @@ function side(value: unknown, code: string): GitDiffSide {
 }
 export function parseGitResult<M extends GitMethod>(method: M, value: unknown, params: GitParameterMap[M]): GitResultMap[M] {
   const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, undefined, code)
-  if (method === 'git.worktree.close') {
+  if (method === 'git.worktrees') {
+    rpcRecord(p, ['kind', 'hostId', 'workspacePath', 'checkedAt', ...(p.kind === 'ready' ? ['repoPath', 'worktrees', 'warnings'] : p.kind === 'unavailable' ? ['reason'] : [])], code)
+    identity(p.hostId, code); absolutePath(p.workspacePath, code)
+    if (p.hostId !== params.expectedResource.hostId || p.workspacePath !== params.expectedResource.workspacePath ||
+      typeof p.checkedAt !== 'number' || !Number.isFinite(p.checkedAt)) invalid('Git worktrees belong to another resource or invalid observation.', code)
+    if (p.kind === 'ready') {
+      absolutePath(p.repoPath, code)
+      array(p.worktrees, code, item => {
+        const entry = rpcRecord(item, ['path', 'branch', 'kind', 'detached', 'aliases'], code)
+        absolutePath(entry.path, code)
+        array(entry.aliases, code, value => absolutePath(value, code))
+        if (entry.branch !== null) {
+          text(entry.branch, code)
+          if (!entry.branch || /[\r\n]/u.test(entry.branch)) invalid('Git worktree branch is invalid.', code)
+        }
+        if (!['main', 'linked', 'bare'].includes(String(entry.kind)) || typeof entry.detached !== 'boolean' ||
+          (entry.kind === 'bare' ? entry.branch !== null || entry.detached : entry.detached ? entry.branch !== null : entry.branch === null)) invalid('Git worktree metadata is inconsistent.', code)
+      })
+      const paths = (p.worktrees as { path: string; aliases: string[] }[]).flatMap(item => [item.path, ...item.aliases])
+      if (!paths.length || new Set(paths).size !== paths.length) invalid('Git worktree collection is incomplete or duplicated.', code)
+      array(p.warnings, code, item => text(item, code))
+    } else if (p.kind === 'unavailable') text(p.reason, code)
+    else if (p.kind !== 'not-a-git-repository') invalid('Git worktree observation is invalid.', code)
+  } else if (method === 'git.worktree.close') {
     rpcRecord(p, ['workspaceId', 'targetWorkspaceId', 'movedTabIds', 'workface', 'cleanup', 'reason'], code)
     identity(p.workspaceId, code); identity(p.targetWorkspaceId, code)
     array(p.movedTabIds, code, item => identity(item, code))

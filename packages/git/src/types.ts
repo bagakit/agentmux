@@ -215,6 +215,15 @@ export interface GitHistoryApi {
   history(workspaceId: string, input?: GitHistoryInput): Promise<GitHistoryResult>
 }
 
+/** Readonly observation at the exact registered resource; never inferred from saved branch labels. */
+export type GitWorktreesTarget = { workspaceId: string; expectedResource: { hostId: string; workspacePath: string } }
+export type GitWorktreeEntry = { path: string; branch: string | null; kind: 'main' | 'linked' | 'bare'; detached: boolean; aliases: string[] }
+export type GitWorktreesResult =
+  | { kind: 'ready'; hostId: string; workspacePath: string; repoPath: string; checkedAt: number; worktrees: GitWorktreeEntry[]; warnings: string[] }
+  | { kind: 'not-a-git-repository'; hostId: string; workspacePath: string; checkedAt: number }
+  | { kind: 'unavailable'; hostId: string; workspacePath: string; checkedAt: number; reason: string }
+export interface GitWorktreesApi { worktrees(input: GitWorktreesTarget): Promise<GitWorktreesResult> }
+
 /** One immutable commit and the direct parent selected for its file comparison. */
 export type GitCommitDetailsInput = { oid: string; parentOid?: string }
 export type GitCommitSnapshot = {

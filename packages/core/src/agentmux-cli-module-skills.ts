@@ -311,13 +311,17 @@ Before opening or moving an editor workface, read amux space --skill for placeme
 Use the exact file action's --help for its arguments, original revision and receipt contract.`
   },
   git: {
-    summary: 'Git history/diff, exact Desktop presentation and worktree closeout',
+    summary: 'Git history/diff, native worktree observations, exact Desktop presentation and worktree closeout',
     roles: 'Agents inspecting repositories or closing completed worktrees',
     when: 'Read commits, display original repository history or close a worktree',
     guide: `The Git owner reads an exact resource repository. Commits, parent-selected trees and
 diff snapshots retain their original identities; a displayed history is not a checkout or
 workspace mutation. Begin with global resource discovery, then preserve complete OIDs and
 the returned pagination/snapshot facts through each read and presentation request.
+Use git worktrees with the original Workspace/Host/path to observe main, linked and bare
+worktree paths, current branches and detached HEAD without creating Zones or changing cwd.
+Non-Git and unavailable are distinct; preserve the old workface and treat older observations
+as historical while retrying the same exact resource. Registration names are not current branches.
 
 Use git worktree close for product closeout after integrating the work. It gathers the
 original Tabs into the same project's default workspace while retaining Session/Run and

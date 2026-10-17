@@ -1,12 +1,14 @@
 import { AgentMuxError, parseGitParams, parseGitResult, type AgentMuxRpcGitOwner, type AgentMuxRpcCallContext, type GitMethod, type GitParameterMap, type GitResultMap, type WorktreeCloseoutParams, type WorktreeCloseoutReceipt } from '@agentmux/core'
 import type { AppConfig } from '../shared/contracts.js'
 import type { GitService } from './git-service.js'
+import type { WorktreeService } from './worktree-service.js'
 
 /** The original resource authorizes reads and closeout; mutations stay at their existing owner. */
 export class GitPublicControl implements AgentMuxRpcGitOwner {
   constructor(private readonly ports: {
     config(): AppConfig
     git: Pick<GitService, 'history' | 'commitDetails' | 'commitDiff' | 'branchDiff'>
+    worktrees?: Pick<WorktreeService, 'observe'>
     closeWorktree?(params: WorktreeCloseoutParams): Promise<WorktreeCloseoutReceipt>
   }) {}
 
@@ -24,7 +26,10 @@ export class GitPublicControl implements AgentMuxRpcGitOwner {
     const config = this.ports.config()
     this.assertTarget(params, config)
     let result: GitResultMap[GitMethod]
-    if (method === 'git.history') {
+    if (method === 'git.worktrees') {
+      result = this.ports.worktrees ? await this.ports.worktrees.observe(params.workspaceId, config)
+        : { kind: 'unavailable', ...params.expectedResource, checkedAt: Date.now(), reason: 'Git worktree observation is unavailable. Existing Zones and workfaces remain available.' }
+    } else if (method === 'git.history') {
       const { workspaceId, expectedResource: _resource, ...input } = params as GitParameterMap['git.history']
       result = await this.ports.git.history(workspaceId, input, config)
     } else if (method === 'git.commit') {
