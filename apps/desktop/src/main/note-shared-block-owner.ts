@@ -45,7 +45,12 @@ function replaceRange(node: Node, blockId: string, replacement: Node, count: num
 }
 function replace(note: NoteDocument, promotion: FileSharePromotion): NoteDocument {
   const selected = findRange(note, promotion.sourceBlockId)
-  const forwardedBlockIds = selected.nodes.flatMap(node => nodes(node, node => typeof node.attrs?.blockId === 'string' && node.attrs.blockId !== promotion.sourceBlockId)).map(node => node.attrs!.blockId as string)
+  const moved = selected.nodes.flatMap(node => nodes(node, () => true))
+  const declared = moved.flatMap(node => node.type === 'noteInclude' && Array.isArray(node.attrs?.forwardedBlockIds) ? node.attrs.forwardedBlockIds as string[] : [])
+  if (declared.includes(promotion.sourceBlockId)) throw new AgentMuxError('The selected original address has conflicting saved forwarding declarations. Preserve the source and choose an unambiguous block.', 'NOTE_SHARE_SOURCE_CHANGED')
+  // Only the outer route is deduplicated; declarations inside the moved content stay intact,
+  // so duplicate or conflicting original addresses remain ambiguous at the next hop.
+  const forwardedBlockIds = [...new Set([...moved.flatMap(node => typeof node.attrs?.blockId === 'string' && node.attrs.blockId !== promotion.sourceBlockId ? [node.attrs.blockId as string] : []), ...declared])]
   const content = replaceRange(note.content, promotion.sourceBlockId, include(promotion, forwardedBlockIds), selected.count)[0]!
   return { ...note, content }
 }
