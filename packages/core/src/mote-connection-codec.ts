@@ -163,7 +163,7 @@ export function parseMoteConnectionOperation(v: unknown): MoteConnectionOperatio
     snapshot,
     connection,
     enrollmentOperationId: p.enrollmentOperationId === null ? null : id(p.enrollmentOperationId),
-    profileOperationId: id(p.profileOperationId),
+    profileOperationId: p.profileOperationId === null ? null : id(p.profileOperationId),
     defaultSave,
     enrollment: p.enrollment === null ? null : parseConnectionEnrollmentOperation(p.enrollment),
     profile: p.profile === null ? null : parseConnectionProfileOperation(p.profile),
@@ -190,7 +190,7 @@ export function parseMoteConnectionOperation(v: unknown): MoteConnectionOperatio
   }
   if (
     (result.action === 'create') !== (result.enrollmentOperationId !== null) ||
-    (result.action === 'sync' && (defaultSave !== null || result.defaultLink.state !== 'not-requested' || !connection))
+    (result.action === 'sync' && (!result.profileOperationId || defaultSave !== null || result.defaultLink.state !== 'not-requested' || !connection))
   )
     fail()
   if (

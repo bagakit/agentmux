@@ -74,10 +74,9 @@ export function MoteBotSetup({
   ]
   const unfinished = setup.operations.find(
     (item) =>
-      (item.action === 'create' &&
-        (!item.enrollment?.configured || item.defaultLink.state !== 'saved')) ||
-      !item.profile ||
-      !['confirmed', 'refused'].includes(item.profile.patch.state)
+      item.action === 'create'
+        ? !item.enrollment?.configured || item.defaultLink.state !== 'saved'
+        : !item.profile || !['confirmed', 'refused'].includes(item.profile.patch.state)
   )
   const resumeId =
     unfinished?.operationId ??
@@ -413,7 +412,7 @@ export function MoteBotSetup({
                 profileTask ? <ConnectionProfileResult operation={operation.profile} /> : <details className="bot-profile-details"><summary>Profile sync result</summary>
                 <ConnectionProfileResult operation={operation.profile} />
                 </details>
-              ) : operation.connection ? (
+              ) : profileTask && operation.connection ? (
                 <p className="mote-details__hint">
                   The profile update has not been confirmed yet. The saved connection is kept.
                 </p>
@@ -485,7 +484,7 @@ export function MoteBotSetup({
       )}
       </div>
       </div>
-      {profileTask && selected ? <ConnectionProfileTrace operationId={operation?.profileOperationId} parentId={operation?.operationId ?? raw!.input.operationId} original={operation?.profile} /> : !profileTask ? <ConnectionRequestTrace source={enrollment ? { kind: 'enrollment', operationId: enrollment.operationId } : null} revision={enrollment?.revision} /> : null}
+      {profileTask && selected ? <ConnectionProfileTrace operationId={operation?.profileOperationId ?? undefined} parentId={operation?.operationId ?? raw!.input.operationId} original={operation?.profile} /> : !profileTask ? <ConnectionRequestTrace source={enrollment ? { kind: 'enrollment', operationId: enrollment.operationId } : null} revision={enrollment?.revision} /> : null}
       {resumeId || selected ? (
         <details className="mote-bot-history">
           <summary>Create another bot</summary>
