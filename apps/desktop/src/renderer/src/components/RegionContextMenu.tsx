@@ -217,7 +217,7 @@ export function RegionContextMenu({
   const restart = useSessionRestart(active)
   const origin = useRef<HTMLElement | null>(null)
   const target = useAppStore(state => {
-    if (!agentSessionId) return undefined
+    if ((!contextOpen && !moreOpen) || !agentSessionId) return undefined
     const execution = agentRegionExecution({ tabId, regionId, agentSessionId })
     if (!execution) return undefined
     const matches = (agentSessionPresentationIndex(state.sessions).get(agentSessionId) ?? []).filter(session =>
