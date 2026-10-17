@@ -168,6 +168,7 @@ export const PRIVILEGED_SENDER_LABELS = {
   'browser:ackPresentationCapture': 'Browser presentation',
   'browser:activatePresentation': 'Browser presentation',
   'browser:listProfiles': 'Browser Profile',
+  'browser:getRecoveryPreview': 'Browser recovery preview',
   'browser:createProfile': 'Browser Profile',
   'browser:deleteProfile': 'Browser Profile',
   'browser:detectProfileImportSources': 'Browser Profile',

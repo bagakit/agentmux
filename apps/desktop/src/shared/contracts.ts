@@ -1987,6 +1987,8 @@ export type AgentMuxDesktopApi = {
   }
   toolkit: ToolkitDesktopApi
   browser: {
+    /** Historical appearance only; never acquires or restores a native page. */
+    getRecoveryPreview(id: string): Promise<import('./browser-recovery-preview').BrowserRecoveryPreviewReadResult>
     captureInputContext(browserId: string): Promise<import('./browser-input-context-capture').BrowserInputScene>
     captureInputFrame(browserId: string): Promise<import('./browser-input-context-capture').BrowserInputFrameResult>
     prepareInputSelection(input: import('./browser-input-context-capture').BrowserInputSelectionPrepare): Promise<import('./browser-input-context-capture').BrowserInputSelectionReceipt>
