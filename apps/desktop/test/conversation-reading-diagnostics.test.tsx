@@ -295,7 +295,7 @@ it('publishes real Activity read, Range hold, release and DOM commit through the
     conversationReading={{ ...props.conversationReading!, enabled, consumer: { ...props.conversationReading!.consumer!, visible } }} />))
   await render()
   await wait(() => { expect(dom.host.querySelector('.wf-head')).not.toBeNull(); expect(current().loading).toBe(false); expect(current().dirty).toBe(false) })
-  expect(events(records).some(event => event.phase === 'consumer-visible'), 'Initial visibility belongs to the live consumer lifetime').toBe(true)
+  await wait(() => expect(events(records).some(event => event.phase === 'consumer-visible'), 'Initial visibility belongs to the live consumer lifetime').toBe(true))
   const firstFrame = current().accepted!
   const head = dom.host.querySelector('.wf-head')!, range = document.createRange()
   range.selectNodeContents(head); window.getSelection()!.addRange(range)
@@ -322,8 +322,10 @@ it('publishes real Activity read, Range hold, release and DOM commit through the
   } }, { source: 'agentmux', observedAt: 1 }, 'local')
   await wait(() => expect(dom.host.querySelector('[data-submission-id="captured-only"]')).not.toBeNull())
   await wait(() => { expect(current().loading).toBe(false); expect(current().dirty).toBe(false) })
-  expect(events(records)).toContainEqual(expect.objectContaining({ phase: 'invalidation-received', sourceKind: 'native' }))
-  expect(events(records)).toContainEqual(expect.objectContaining({ phase: 'invalidation-received', sourceKind: 'captured' }))
+  await wait(() => {
+    expect(events(records)).toContainEqual(expect.objectContaining({ phase: 'invalidation-received', sourceKind: 'native' }))
+    expect(events(records)).toContainEqual(expect.objectContaining({ phase: 'invalidation-received', sourceKind: 'captured' }))
+  })
   const before = reads.map(read => read.mock.calls.length)
   await render(false)
   await wait(() => expect(events(records).some(event => event.phase === 'consumer-hidden')).toBe(true))
