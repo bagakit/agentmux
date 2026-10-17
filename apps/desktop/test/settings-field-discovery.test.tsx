@@ -31,6 +31,7 @@ import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { settingsCatalog, settingsModules } from '../src/renderer/src/components/settings/settings-modules'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
+import { getSemanticIconCatalog } from '@agentmux/client-ui/icons'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 const dom = composerDOM()
 let scrollTarget: ReturnType<typeof vi.spyOn>
@@ -203,6 +204,29 @@ it('real original General and Appearance fields are direct targets while origina
   }
   expect(save).not.toHaveBeenCalled(); expect(reveal).not.toHaveBeenCalled()
   expect(scrollTarget).toHaveBeenCalled()
+})
+
+it('finds icon customization through the original Appearance target and opens the shared complete editor without saving', async () => {
+  const save = vi.spyOn(api.config, 'save')
+  await dom.render(<SettingsPanel onClose={() => {}} />)
+  for (const term of ['icon', 'icons', 'semantic icons', '图标']) {
+    await fill('[aria-label="Search settings"]', term)
+    expect(settingsCatalog.searchResults(term).some(item => item.module.id === 'appearance' && item.targets.some(target => target.id === 'workspace-theme'))).toBe(true)
+    await dom.click(result('appearance:workspace-theme'))
+    const target = connected('[data-settings-pane="appearance"] [data-settings-field="workspace-theme"]')
+    expect(target.hasAttribute('data-settings-search-highlight')).toBe(true)
+    expect(target.textContent).toContain('semantic icons')
+    expect(target.textContent).toContain('Preview in this window')
+  }
+  const customize = [...dom.container.querySelectorAll<HTMLButtonElement>('[data-settings-pane="appearance"] button')]
+    .find(button => button.textContent?.trim() === 'Customize selected theme')
+  expect(customize).toBeDefined()
+  await act(async () => customize!.click())
+  const catalog = getSemanticIconCatalog()
+  expect(catalog.icons.length).toBeGreaterThan(400)
+  expect(dom.container.querySelectorAll('.theme-icon-editor__meaning')).toHaveLength(catalog.icons.length)
+  expect(dom.container.querySelector('[aria-label="Semantic icon editor"]')).not.toBeNull()
+  expect(save).not.toHaveBeenCalled()
 })
 
 it('all static field contributions have unique local target identities and remain statically searchable', () => {
