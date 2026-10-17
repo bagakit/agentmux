@@ -68,7 +68,22 @@ it('discovers exactly the five parent operations on the original public registry
   ).toEqual(methods)
 })
 
-it('creates from original Main saved files and PNG through default Host, official SDK and compiled CLI with separate receipts', async () => {
+it('discovers optional explicit naming and unchanged sync behavior through actual compiled CLI help and skill', async () => {
+  const f = await fixture(), env = objectCliEnvironment(f.root)
+  const help = await runCompiledObjectCli(['space', 'mote', 'connection', 'create', '--help'], env)
+  expect(help.code, help.stderr).toBe(0)
+  expect(help.stdout).toContain('Optional name freezes the bot name for this creation')
+  expect(help.stdout).toContain('omit name to use the exact saved Mote name')
+  expect(help.stdout).toContain('a changed name on the same operationId conflicts')
+  const skill = await runCompiledObjectCli(['connection', '--skill'], env)
+  expect(skill.code, skill.stderr).toBe(0)
+  expect(skill.stdout).toContain('Create --input')
+  expect(skill.stdout).toContain('accepts optional name to freeze an explicit bot name')
+  expect(skill.stdout).toContain('Sync still uses the saved Mote name and does not accept name')
+  expect(f.counts.begin).toBe(0)
+})
+
+it.each([undefined, 'AMUX-Orion'])('creates from original Main saved files and PNG through default Host, official SDK and compiled CLI using name %s with separate receipts', async name => {
   const http: Array<{ method?: string; url?: string; data?: Record<string, unknown> }> = [],
     effects: Array<{ kind: string; preclaimed: boolean }> = []
   let f!: Awaited<ReturnType<typeof fixture>>
@@ -122,10 +137,12 @@ it('creates from original Main saved files and PNG through default Host, officia
     }
   })
   f = await fixture({})
-  const input = await f.input()
+  const input = { ...await f.input(), ...(name === undefined ? {} : { name }) }, expectedName = name ?? 'Saved public name'
   expect(body(await cli(f, 'ls', { target: f.target() })).operations).toEqual([])
   const pending = body(await cli(f, 'create', input))
   expect(pending.enrollment.authentication.stage).toBe('waiting')
+  expect(pending.snapshot.name).toBe(expectedName)
+  expect(pending.enrollment).toMatchObject({ label: expectedName, preset: { name: expectedName } })
   expect(pending.defaultSave).toBeNull()
   expect(pending.profile).toBeNull()
   let child = await f.client.call('connection.enrollment.inspect', { operationId: pending.enrollmentOperationId })
@@ -147,24 +164,29 @@ it('creates from original Main saved files and PNG through default Host, officia
   expect(native.calls.some(call => call.target.pathname === '/developers/v1/app/create')).toBe(false)
   const nativeCreate = JSON.parse(String(creationRequests[0]!.input.body))
   expect(nativeCreate).toMatchObject({ appManifestTemplateID: 'developer_console', createAppUserCustomField: {
-    i18n: { zh_cn: { name: 'Saved public name', description: 'Saved public summary.' } },
+    i18n: { zh_cn: { name: expectedName, description: 'Saved public summary.' } },
     avatar: 'https://images.example.invalid/mote-1.png', primaryLang: 'zh_cn'
   } })
   expect(Buffer.from(http.find((r) => r.url?.endsWith('/app_avatar/upload'))!.data!.avatar as Buffer)).toEqual(imagePng())
   expect(complete).toMatchObject({
+    snapshot: { name: expectedName },
     operationId: input.operationId,
     defaultLink: { state: 'saved' },
     defaultSave: { observedReceipt: { status: 'saved' } },
     enrollment: { configuration: 'configured' },
-    profile: { upload: { state: 'confirmed' }, patch: { state: 'confirmed' }, publication: 'platform-review-required' }
+    profile: { desired: { name: expectedName }, upload: { state: 'confirmed' }, patch: { state: 'confirmed' }, publication: 'platform-review-required' }
   })
   expect(effects).toEqual(['begin', 'authentication', 'authentication', 'authentication', 'authentication', 'authentication', 'upload', 'create', 'credential', 'upload', 'patch'].map((kind) => ({ kind, preclaimed: true })))
   expect(http.find((r) => r.method === 'PATCH')!.data).toMatchObject({
     i18ns: [
       { i18n_key: 'en_us', name: 'Keep English' },
-      { i18n_key: 'zh_cn', name: 'Saved public name', description: 'Saved public summary.' }
+      { i18n_key: 'zh_cn', name: expectedName, description: 'Saved public summary.' }
     ]
   })
+  expect((await f.client.call('connection.inspect', { connectionId: complete.connection.connectionId })).connection?.config.label).toBe(expectedName)
+  expect(await readFile(join(f.motes[0]!.directory, 'topic.md'), 'utf8')).toBe('# Saved public name\n\nSaved public summary.\n')
+  await expect(f.client.call('space.mote.connection.create', { ...input, name: 'Changed manual name' })).rejects.toMatchObject({ code: 'CONNECTION_OPERATION_CONFLICT' })
+  expect((await cli(f, 'create', { ...input, name: 'Another manual name' })).code).not.toBe(0)
   expect(JSON.stringify([pending, complete, http])).not.toContain('DO-NOT-PUBLISH-SOUL')
   expect(JSON.stringify(complete)).not.toContain('private-original')
   expect(JSON.stringify(complete)).not.toContain('data:image')
@@ -178,6 +200,67 @@ it('creates from original Main saved files and PNG through default Host, officia
   expect(pref).not.toHaveBeenCalled()
   expect(effects).toHaveLength(before)
 }, 45_000)
+
+it('freezes an explicit manual name across source edits and owner reopening while later sync still uses the saved Mote name', async () => {
+  const f = await fixture(), input = { ...await f.input(), name: 'AMUX- 旅伴' }
+  const pending = await f.client.call('space.mote.connection.create', input)
+  expect(pending.snapshot.name).toBe(input.name)
+  const row = JSON.parse(String(f.connections.database!.prepare('SELECT record_json FROM mote_connection_operation WHERE operation_id=?').get(input.operationId)!.record_json))
+  expect(row.input.name).toBe(input.name)
+  expect(row.enrollmentInput).toMatchObject({ label: input.name, preset: { name: input.name } })
+  await writeFile(join(f.motes[0]!.directory, 'topic.md'), '# Later saved Mote name\n\nLater saved summary.\n')
+  await f.close()
+  const resumed = await moteConnectionOwner(f.root, { generic: true }); clean.push(resumed.close)
+  expect(body(await cli(resumed, 'create', input))).toEqual(pending)
+  expect((await resumed.client.call('space.mote.connection.inspect', { operationId: input.operationId })).operation).toEqual(pending)
+  const complete = await confirmAndCreateMote(resumed, input.operationId)
+  expect(complete.snapshot).toEqual(pending.snapshot)
+  expect(complete.profile?.desired.name).toBe(input.name)
+  expect((await resumed.client.call('connection.inspect', { connectionId: complete.connection!.connectionId })).connection?.config.label).toBe(input.name)
+  const changed = { ...input, name: 'AMUX-New' }
+  await expect(resumed.client.call('space.mote.connection.create', changed)).rejects.toMatchObject({ code: 'CONNECTION_OPERATION_CONFLICT' })
+  expect((await cli(resumed, 'create', changed)).code).not.toBe(0)
+  const current = await resumed.input('sync-saved-source'), synced = body(await cli(resumed, 'sync', {
+    operationId: current.operationId, source: current.source, connection: complete.connection,
+    expectedConnectionRevision: 1, avatar: current.avatar
+  }))
+  expect(synced.snapshot.name).toBe('Later saved Mote name')
+  expect(synced.profile.desired.name).toBe('Later saved Mote name')
+  expect(synced.enrollmentOperationId).toBeNull()
+  expect(synced.defaultLink.state).toBe('not-requested')
+  expect(resumed.counts).toEqual({ begin: 0, authentication: 1, creationUpload: 1, create: 1, credential: 1, upload: 2, patch: 2 })
+  expect(await readFile(join(f.motes[0]!.directory, 'topic.md'), 'utf8')).toBe('# Later saved Mote name\n\nLater saved summary.\n')
+}, 30_000)
+
+it('rejects a different explicit frozen name in public create replies while keeping the original durable operation available', async () => {
+  const f = await fixture(), input = { ...await f.input(), name: 'AMUX-Exact' }
+  const pending = await f.client.call('space.mote.connection.create', input), foreign = structuredClone(pending)
+  foreign.snapshot.name = 'Different returned name'
+  foreign.enrollment!.label = foreign.snapshot.name
+  foreign.enrollment!.preset!.name = foreign.snapshot.name
+  expect(parseMoteConnectionOperation(foreign).snapshot.name).toBe(foreign.snapshot.name)
+  const reply = vi.spyOn(f.parent, 'create').mockResolvedValue(foreign)
+  await expect(f.client.call('space.mote.connection.create', input)).rejects.toMatchObject({ code: 'INVALID_MOTE_CONNECTION_DATA' })
+  expect((await cli(f, 'create', input)).code).not.toBe(0)
+  expect(() => parseMoteConnectionResult('space.mote.connection.create', foreign, input)).toThrow()
+  const { name: _name, ...withoutName } = input
+  expect(parseMoteConnectionResult('space.mote.connection.create', foreign, withoutName).snapshot.name).toBe(foreign.snapshot.name)
+  reply.mockRestore()
+  expect((await f.client.call('space.mote.connection.inspect', { operationId: input.operationId })).operation).toEqual(pending)
+  expect(await f.client.call('space.mote.connection.create', input)).toEqual(pending)
+  expect(f.counts.begin).toBe(1)
+})
+
+it('rejects malformed explicit create names and any sync name before parent admission or native requests', async () => {
+  const f = await fixture(), input = await f.input()
+  for (const name of ['', ' ', 'bad\nname', 'bad\u0000name', null, 7, {}]) {
+    await expect(f.client.call('space.mote.connection.create', { ...input, name } as never)).rejects.toMatchObject({ code: 'INVALID_MOTE_CONNECTION_DATA' })
+    expect((await cli(f, 'create', { ...input, name })).code).not.toBe(0)
+  }
+  expect((await f.client.call('space.mote.connection.ls', { target: f.target() })).operations).toEqual([])
+  expect(f.counts).toEqual({ begin: 0, authentication: 0, creationUpload: 0, create: 0, credential: 0, upload: 0, patch: 0 })
+  await expect(f.client.call('space.mote.connection.sync', { operationId: 'invalid-sync-name', source: input.source, avatar: input.avatar, connection: { connectionId: 'saved-bot', application: { domain: input.domain, appId: 'saved-app' } }, expectedConnectionRevision: 1, name: 'Forbidden sync name' } as never)).rejects.toMatchObject({ code: 'INVALID_MOTE_CONNECTION_DATA' })
+})
 
 it('retains immutable child identity and snapshot when the original saved topic changes after registration', async () => {
   const f = await fixture(),
