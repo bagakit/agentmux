@@ -649,6 +649,10 @@ const api: AgentMuxPreloadApi = {
   },
   browser: {
     captureInputContext: browserId => ipcRenderer.invoke('browser:captureInputContext', browserId),
+    captureInputFrame: browserId => ipcRenderer.invoke('browser:captureInputFrame', browserId),
+    prepareInputSelection: input => ipcRenderer.invoke('browser:prepareInputSelection', input),
+    readInputSelection: operationId => ipcRenderer.invoke('browser:readInputSelection', operationId),
+    readSelectionImage: reference => ipcRenderer.invoke('browser:readSelectionImage', reference),
     freezeInputContext: input => ipcRenderer.invoke('browser:freezeInputContext', input),
     listRetainedUploads: () => ipcRenderer.invoke('browser:listRetainedUploads'),
     discardRetainedUpload: (selectionId, document) => ipcRenderer.invoke('browser:discardRetainedUpload', selectionId, document),
