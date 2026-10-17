@@ -9,12 +9,13 @@ const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
 
 
 /** Original upload snapshots, retained without reconnecting or reading a page. */
-export function RetainedBrowserUploads() {
+export function RetainedBrowserUploads({ active }: { active: boolean }) {
   const dialogDocument = useWorkbenchWindowDocument() ?? undefined
   const [retained, setRetained] = useState<BrowserRetainedUploads | null>(null)
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   useEffect(() => {
+    if (!active) return
     let current = true
     const read = async (): Promise<void> => {
       try { const value = await api.browser.listRetainedUploads(); if (current) setRetained(value) }
@@ -23,7 +24,7 @@ export function RetainedBrowserUploads() {
     const release = api.browser.onTargetsChanged(() => { void read() })
     void read()
     return () => { current = false; release() }
-  }, [])
+  }, [active])
   if (!retained?.selections.length && !notice && !retained?.warning) return null
   return <section className="settings-group external-browser-connections">
     <header><span>Selected files</span><small>{retained?.selectionCount ?? 0} selections · {formatBytes(retained?.byteLength ?? 0)}</small></header>
