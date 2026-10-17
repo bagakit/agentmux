@@ -63,11 +63,15 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   const currentError = useAppStore(state => state.error)
   const errorDismissed = useAppStore(state => state.errorDismissed)
   const errorContext = useAppStore(state => state.errorNoticeContext)
+  const currentWorkflowErrorId = useMemo(() => currentError &&
+    (!errorDismissed || errorContext?.startupSessionSnapshot || errorContext?.startupProviderCatalog) &&
+    !errorContext?.lifecycle && !errorContext?.cause ? notificationEventIdentity(currentError, errorContext) : null,
+  [currentError, errorDismissed, errorContext])
   const clearReadEvents = useAppStore(state => state.clearReadNotificationEvents)
   // Window records have no complete startup snapshot. Only reading facts persist across restarts.
   const eventInbox = useReadReceipts('global:events', Object.fromEntries(events.map(event => [event.id, 'read'])), !loading, false)
-  const currentErrorInbox = useServiceNotices('global:workflow', currentError && (!errorDismissed || errorContext?.startupSessionSnapshot || errorContext?.startupProviderCatalog) && !errorContext?.lifecycle && !errorContext?.cause &&
-    !events.some(event => event.id === notificationEventIdentity(currentError, errorContext)) ? [{ id: 'current', cause: notificationEventIdentity(currentError, errorContext), notice: {
+  const currentErrorInbox = useServiceNotices('global:workflow', currentWorkflowErrorId && currentError &&
+    !events.some(event => event.id === currentWorkflowErrorId) ? [{ id: 'current', cause: currentWorkflowErrorId, notice: {
       kind: 'indeterminate', notice: { step: errorContext?.summary ?? 'Operation needs attention',
         mode: currentError, restore: 'Review the original operation before retrying.' }
     } }] : [], !loading)
