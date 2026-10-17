@@ -102,6 +102,10 @@ export async function enrollmentInitialFixture(unknownEffect: string | null = nu
     const result = await runCompiledObjectCli(['--endpoint', 'unix:' + socketPath, 'connection', 'enrollment', ...args], objectCliEnvironment(root), value === undefined ? '' : JSON.stringify(value))
     expect(result.code, result.stdout + result.stderr).toBe(0); return JSON.parse(result.stdout).result
   }
-  return { input: enrollmentInput, admitted, finishCreation, enrollmentAction, get enrollment() { return enrollment }, get sdk() { return sdk }, requests, cli, get services() { return services }, reopen: async () => { await close(); await open() }, unblock: web.unblock }
+  const connectionCli = async (args: string[]) => {
+    const result = await runCompiledObjectCli(['--endpoint', 'unix:' + socketPath, 'connection', ...args], objectCliEnvironment(root))
+    expect(result.code, result.stdout + result.stderr).toBe(0); return JSON.parse(result.stdout).result
+  }
+  return { input: enrollmentInput, admitted, finishCreation, enrollmentAction, get enrollment() { return enrollment }, get sdk() { return sdk }, requests, cli, connectionCli, get services() { return services }, reopen: async () => { await close(); await open() }, unblock: web.unblock }
 }
 
