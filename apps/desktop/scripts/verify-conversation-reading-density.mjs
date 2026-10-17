@@ -12,70 +12,6 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const read = async file => JSON.parse(await readFile(file, 'utf8'))
 const own = 'apps/desktop/scripts/verify-conversation-reading-density.mjs'
 const command = promisify(execFile)
-async function consumeQualifiedCandidate(candidateRoot) {
-  const candidate = resolve(candidateRoot)
-  assert.notEqual(candidate, root, 'The explicit candidate must name its own checkout')
-  const git = async (cwd, ...args) => (await command('git', args, { cwd, maxBuffer: 8 * 1024 * 1024 })).stdout.trim()
-  const allowedTooling = new Set([own, 'apps/desktop/scripts/fixtures/conversation-reading-density/main.cjs'])
-  const dirty = new Set(((await git(candidate, 'diff', '--name-only', 'HEAD')) + '\n' + (await git(candidate, 'diff', '--cached', '--name-only'))).split('\n').filter(Boolean))
-  assert.equal(await git(candidate, 'diff', '--name-only', '--diff-filter=U'), '', 'An unresolved merge is not a qualified candidate')
-  for (const file of dirty) assert.ok(allowedTooling.has(file), 'Only the two reviewed main tooling overlays are allowed: ' + file)
-  const delivery = await read(join(area, 'delivery-main.json'))
-  assert.equal(typeof delivery.head, 'string', 'The accepted delivery main snapshot is explicit')
-  const mainHead = await git(root, 'rev-parse', delivery.head), observedMainHead = await git(root, 'rev-parse', 'refs/heads/main'), candidateHead = await git(candidate, 'rev-parse', 'HEAD')
-  await git(root, 'merge-base', '--is-ancestor', mainHead, observedMainHead)
-  await git(root, 'merge-base', '--is-ancestor', candidateHead, mainHead)
-  const pointer = await read(join(candidate, '.local/conversation-duplication/reading-current.json'))
-  const candidateDirectory = resolve(candidate, pointer.directory)
-  assert.ok(candidateDirectory.startsWith(join(candidate, '.local/conversation-duplication/reading-')), 'The source receipt belongs to the original candidate')
-  const receiptFile = join(candidateDirectory, 'receipt.json'), receipt = await read(receiptFile)
-  assert.equal(hash(await readFile(receiptFile)), pointer.receiptSha256)
-  assert.equal(receipt.schema, 'agentmux.conversation-reading-density.v1'); assert.equal(receipt.passed, true)
-  for (const file of [own, config, 'packages/client-ui/src/components/ConversationView.tsx', 'apps/desktop/src/renderer/src/components/ActivityView.tsx', 'apps/mobile/src/conversation/MobileConversationSurface.tsx']) assert.ok(receipt.sources[file], 'The original task owner and product consumers must be qualified: ' + file)
-  const tree = async (cwd, head) => new Map((await git(cwd, 'ls-tree', '-rz', '--full-tree', head)).split('\0').filter(Boolean).map(entry => {
-    const tab = entry.indexOf('\t'); return [entry.slice(tab + 1), entry.slice(0, tab).split(' ')[2]]
-  }))
-  const candidateTree = await tree(candidate, candidateHead), mainTree = await tree(root, mainHead), observedMainTree = await tree(root, observedMainHead)
-  const toolingOverlaySha = []
-  const effectiveTree = new Map(candidateTree)
-  for (const file of dirty) {
-    const blob = await git(candidate, 'hash-object', '--', file)
-    assert.equal(blob, observedMainTree.get(file), 'A tooling overlay must exactly match its committed main blob: ' + file)
-    effectiveTree.set(file, blob)
-    toolingOverlaySha.push({ path: file, blob, sha256: hash(await readFile(join(candidate, file))) })
-  }
-  const featureOwners = [own, config,
-    'packages/core/src/providers/codex-saved-history.ts', 'packages/core/src/session-history.ts', 'packages/core/src/types.ts', 'packages/core/src/conversation-timeline.ts',
-    'packages/core/test/codex-native-collaboration.test.ts', 'packages/core/test/vitest.native-collaboration.config.mts',
-    'packages/client-ui/src/components/ConversationView.tsx', 'packages/client-ui/src/components/ConversationMessage.tsx',
-    'packages/client-ui/src/components/CapturedConversationMessage.tsx', 'packages/client-ui/src/components/NativeProcessObservation.tsx',
-    'packages/client-ui/src/components/WorkflowObservation.tsx', 'packages/client-ui/src/lib/conversation-reply-preview.ts', 'packages/client-ui/src/styles/conversation-message.css',
-    'apps/desktop/src/renderer/src/components/ActivityView.tsx', 'apps/mobile/src/conversation/MobileConversationSurface.tsx',
-    'apps/desktop/test/conversation-reading-density.test.tsx', 'apps/desktop/test/conversation-reading-activity-density.test.tsx',
-    'apps/desktop/test/conversation-source-roles.test.tsx', 'apps/desktop/test/conversation-process-collapse.test.tsx', 'apps/desktop/test/conversation-chronological-reading.test.tsx',
-    ...[...candidateTree.keys()].filter(file => file.startsWith('apps/desktop/scripts/fixtures/conversation-reading-density/'))]
-  const ownerPaths = new Set(featureOwners)
-  for (const file of ownerPaths) {
-    assert.ok(candidateTree.has(file), 'The accepted contribution must exist in the qualified candidate: ' + file)
-    assert.equal(effectiveTree.get(file), (allowedTooling.has(file) ? observedMainTree : mainTree).get(file), 'An accepted contribution differs from its explicit delivery/tooling main snapshot: ' + file)
-  }
-  let trackedInputs = 0
-  const laterMainDrift = []
-  for (const file of Object.keys(receipt.sources)) {
-    if (!candidateTree.has(file)) continue // Generated dist remains bound by the original candidate's source hashes.
-    trackedInputs++
-    if (effectiveTree.get(file) !== observedMainTree.get(file)) laterMainDrift.push({ path: file, candidateBlob: effectiveTree.get(file), mainBlob: observedMainTree.get(file) ?? null })
-  }
-  assert.ok(trackedInputs > 0, 'Nonempty exact main/candidate source comparison')
-  const action = process.argv.includes('--verify') ? '--verify' : '--check-prepared'
-  assert.ok(process.argv.includes('--prepare') || process.argv.includes('--check-prepared') || process.argv.includes('--verify'), 'Explicit candidate routing consumes prepared proof only')
-  const env = { ...process.env }; delete env.AGENTMUX_READING_DENSITY_CANDIDATE_ROOT
-  const result = await command(process.execPath, [join(candidate, own), action], { cwd: candidate, env, maxBuffer: 8 * 1024 * 1024 })
-  process.stdout.write(result.stdout)
-  console.log(JSON.stringify({ consumedOriginalCandidate: true, deliveryMainHead: mainHead, observedMainHead, candidateHead, candidateRoot: candidate, trackedInputs,
-    baseHead: candidateHead, toolingOverlaySha, ownerInputs: ownerPaths.size, laterMainDrift, action,
-    boundary: 'Qualifies this contribution at the explicit delivery main ancestor with only the listed reviewed main tooling overlays. Product/test owners and actual consumers match that delivery snapshot; later observed main changes are listed, not claimed tested. All candidate source/build/artifact identities stay exact. No workspace adoption, expensive rerun, Tracker mutation or claim about root worktree edits.' }))
-}
 const configText = await readFile(join(root, config), 'utf8')
 const mutations = [...configText.matchAll(/^\s*'([^']+)': \[/gmu)].map(match => match[1])
 assert.ok(mutations.length > 0 && new Set(mutations).size === mutations.length, 'Nonempty unique mutations from the actual owning config')
@@ -285,8 +221,7 @@ async function verify(preparedOnly = false) {
     images: capture.frames.length, sourceSha256: pointer.sourceSha256, captureSha256: pointer.captureSha256 }))
 }
 await mkdir(area, { recursive: true })
-if (process.env.AGENTMUX_READING_DENSITY_CANDIDATE_ROOT) await consumeQualifiedCandidate(process.env.AGENTMUX_READING_DENSITY_CANDIDATE_ROOT)
-else if (process.argv.includes('--resume-capture')) await prepare(true)
+if (process.argv.includes('--resume-capture')) await prepare(true)
 else if (process.argv.includes('--prepare')) await prepare()
 else if (process.argv.includes('--check-prepared')) await verify(true)
 else if (process.argv.includes('--verify')) await verify()
