@@ -19,11 +19,18 @@ export default defineConfig({ ...base, cacheDir: '.cache/retained-activity',
       code = code.replace(probe[0]!, probe[1]! + probe[0]!)
     }
     const mutation = process.env.AGENTMUX_RETAINED_MUTANT
-    if (mutation && file.endsWith(mutation === 'primary' ? '/SessionPane.tsx' : '/SessionActivityPresentation.tsx')) {
+    if ((mutation === 'primary' || mutation === 'secondary') && file.endsWith(mutation === 'primary' ? '/SessionPane.tsx' : '/SessionActivityPresentation.tsx')) {
       const anchor = mutation === 'primary' ? 'retainActivityControls(activityContent.current, {' : 'retainActivityControls(presented.current.content, {'
       if (code.split(anchor).length !== 2) throw Error('Non-unique retained Activity mutation')
       code = code.replace(anchor, anchor.replace('retainActivityControls', 'cloneElement'))
       if (mutation === 'secondary') code = "import { cloneElement } from 'react'\n" + code
+    }
+    if (file.endsWith('/retained-activity.ts') && (mutation === 'reading-shallow' || mutation === 'consumer-ignored')) {
+      const anchor = mutation === 'reading-shallow'
+        ? 'sameReadingControls(content.props.conversationReading, controls.conversationReading)'
+        : 'shallow(previousConsumer, currentConsumer) && '
+      if (code.split(anchor).length !== 2) throw Error('Non-unique retained reading controls mutation')
+      code = code.replace(anchor, mutation === 'reading-shallow' ? anchor.replace('sameReadingControls', 'shallow') : '')
     }
     const log = process.env.AGENTMUX_RETAINED_LOADED
     if (log) appendFileSync(log, JSON.stringify({ path: file, originalSHA256: hash(source), effectiveSHA256: hash(code),
