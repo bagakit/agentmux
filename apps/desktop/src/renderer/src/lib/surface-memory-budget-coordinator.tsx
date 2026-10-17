@@ -55,11 +55,6 @@ export function useBrowserSurfaceReleased(regionId: string): boolean {
   return useContext(SurfaceMemoryBudgetContext).browserRegionIds.has(regionId)
 }
 
-/** The same budget facts let page directories distinguish retained descriptors from live owners. */
-export function useReleasedBrowserRegionIds(): ReadonlySet<string> {
-  return useContext(SurfaceMemoryBudgetContext).browserRegionIds
-}
-
 type CoordinatorOptions = {
   workbenchVisible: boolean
   projectedVisibleTabIds?: ReadonlySet<string> | undefined
@@ -138,7 +133,7 @@ export function useSurfaceMemoryBudget({
       }
       const wasContextActive = region.navigationContextActive
       region.navigationContextActive = candidate.navigationContextActive
-      if (candidate.navigationContextActive && wasContextActive === false && !candidate.visible) {
+      if (candidate.kind !== 'browser' && candidate.navigationContextActive && wasContextActive === false && !candidate.visible) {
         region.hiddenSinceMs = now
         changed = true
       }
@@ -179,11 +174,12 @@ export function useSurfaceMemoryBudget({
   )
   const releaseCooldownUntilMs = releaseCooldownUntilRef.current
   const policy = useMemo(() => ({
-    nowMs,
+    // A delayed renderer commit must schedule against the actual clock, not the old timer tick.
+    nowMs: Date.now(),
     parkingEnabled,
     measurementActive,
     releaseCooldownUntilMs
-  }), [measurementActive, nowMs, parkingEnabled, releaseCooldownUntilMs])
+  }), [bookkeepingRevision, candidateKey, measurementActive, nowMs, parkingEnabled, releaseCooldownUntilMs])
   const released = useMemo(
     () => selectSurfaceMemoryReleases(stampedCandidates, policy),
     [policy, stampedCandidates]

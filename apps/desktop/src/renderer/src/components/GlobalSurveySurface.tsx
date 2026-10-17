@@ -13,7 +13,6 @@ import { useStore } from 'zustand'
 import type { SurveyBrowserPreparation } from '../lib/survey-browser-creation'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import { useReleasedBrowserRegionIds } from '../lib/surface-memory-budget-coordinator'
 import { surveyInitialZoneSelection, surveySelectReference, surveySelectedBrowser, surveyZoneItems, type ResolvedSurveyZoneSelection } from '../lib/survey-workface'
 import { workbenchProjectionSlotId, workbenchRegionProjectionSlotId, type WorkbenchProjection, type WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { workbenchSurfaces } from '../lib/workbench-tabs'
@@ -117,7 +116,6 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   }, [catalog, currentZone])
   const currentPanel = selection?.active && currentZone && catalog?.tabs.some(tab => tab.tabId === selection.active!.tabId && tab.zoneId === currentZone.zoneId)
     && catalog.regions.some(region => region.regionId === selection.active!.regionId && region.tabId === selection.active!.tabId) ? selection.active : null
-  const releasedBrowserRegionIds = useReleasedBrowserRegionIds()
   const currentBrowser = surveySelectedBrowser(tabs, selection)
   const [query, setQuery] = useState('')
   const [opening, setOpening] = useState(false)
@@ -200,7 +198,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     const operators = new Map<string, SelectorPresenceAgent>()
     const sessionIndex = sessionPresentationById(sessions)
     const labels = browsers.map(browser => {
-      const control = releasedBrowserRegionIds.has(browser.regionId) || unconfirmedBrowserRegionIds?.has(browser.regionId) || browser.nativeOwnerUnavailable || !browser.navigationId
+      const control = browser.nativeOwnerReleased || unconfirmedBrowserRegionIds?.has(browser.regionId) || browser.nativeOwnerUnavailable || !browser.navigationId
         ? 'unknown' : browser.driving ? 'agent' : browser.activity?.control === 'human' ? 'human' : browser.activity ? 'idle' : 'unknown'
       const operation = browser.activity?.operation
       const operator = control === 'agent' && operation?.browserId === browser.browserId && operation.finishedAt === undefined && ['preparing', 'running', 'waiting'].includes(operation.phase) ? operation.operator : undefined

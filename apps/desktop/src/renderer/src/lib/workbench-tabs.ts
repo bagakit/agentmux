@@ -92,6 +92,8 @@ export type BrowserWorkbenchSurface = BrowserSnapshot & {
   nativeOwnerDeferred?: true
   /** A restored descriptor did not save a viewport; the display default is not a durable fact. */
   restoredViewportUnknown?: true
+  /** Confirmed native destruction; never a budget request. Transient. */
+  nativeOwnerReleased?: true
   regionId: string
   kind: 'browser'
   workspaceId: string
