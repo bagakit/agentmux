@@ -23,9 +23,10 @@ import { SessionPane } from '../src/renderer/src/components/SessionPane'
 import { AgentLifecycleFeedback } from '../src/renderer/src/components/AgentLifecycleFeedback'
 import { TerminalView } from '../src/renderer/src/components/TerminalView'
 import { readTerminalViewObservation, registerTerminalViewObservation } from '../src/renderer/src/lib/terminal-view-observation'
+import { TERMINAL_REVEAL_DEADLINE_MS } from '../src/renderer/src/lib/terminal-reveal'
 
 // Browser xterm open/parser/buffers/selection and owner-size adoption are real; layout, addons and Run boundary are not.
-const fixture = vi.hoisted(() => ({ terminals: [] as BrowserTerminal[], receive: null as ((event: RuntimeEvent) => void) | null, refresh: null as (() => Promise<void>) | null, diagnosticRegionFailure: false }))
+const fixture = vi.hoisted(() => ({ terminals: [] as BrowserTerminal[], receive: null as ((event: RuntimeEvent) => void) | null, refresh: null as (() => Promise<void>) | null, diagnosticRegionFailure: false, contextLoss: null as (() => void) | null, renderListeners: [] as Array<() => void> }))
 vi.mock('../src/renderer/src/lib/client-incident-recorder', async () => {
   const actual = await vi.importActual<typeof import('../src/renderer/src/lib/client-incident-recorder')>('../src/renderer/src/lib/client-incident-recorder')
   return { ...actual, createClientIncidentRecorder(input: Parameters<typeof actual.createClientIncidentRecorder>[0]) {
@@ -38,10 +39,16 @@ vi.mock('../src/renderer/src/lib/client-incident-recorder', async () => {
 vi.mock('@xterm/xterm', async () => {
   const { Terminal } = await vi.importActual<typeof import('@xterm/xterm')>('@xterm/xterm')
   return { Terminal: class extends Terminal {
-    constructor(options: ConstructorParameters<typeof Terminal>[0]) { super(options); fixture.terminals.push(this) }
+    constructor(options: ConstructorParameters<typeof Terminal>[0]) {
+      super(options); fixture.terminals.push(this)
+      Object.defineProperty(this, 'onRender', { value: (listener: (event: { start: number; end: number }) => void) => {
+        const notify = () => listener({ start: 0, end: 23 })
+        fixture.renderListeners.push(notify)
+        return { dispose() { fixture.renderListeners = fixture.renderListeners.filter(item => item !== notify) } }
+      } })
+    }
     refresh() {}
     focus() {}
-    onRender = () => ({ dispose() {} })
     registerLinkProvider() { return { dispose() {} } }
     attachCustomKeyEventHandler() {}
   } }
@@ -49,7 +56,10 @@ vi.mock('@xterm/xterm', async () => {
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: class { activate() {} dispose() {} fit() {} proposeDimensions() { return { cols: 80, rows: 24 } } } }))
 vi.mock('@xterm/addon-search', () => ({ SearchAddon: class { activate() {} dispose() {} onDidChangeResults() { return { dispose() {} } } } }))
 vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: class { activate() {} dispose() {} } }))
-vi.mock('@xterm/addon-webgl', () => ({ WebglAddon: class { activate() {} dispose() {} onContextLoss() { return { dispose() {} } } } }))
+vi.mock('@xterm/addon-webgl', () => ({ WebglAddon: class { activate() {} dispose() {} onContextLoss(listener: () => void) {
+  fixture.contextLoss = listener
+  return { dispose() { fixture.contextLoss = null } }
+} } }))
 vi.mock('../src/renderer/src/lib/terminal-viewport-sync', async () => {
   const { TerminalViewportSynchronizer } = await vi.importActual<typeof import('../src/renderer/src/lib/terminal-viewport-sync')>('../src/renderer/src/lib/terminal-viewport-sync')
   // Actual owner-size adoption and xterm resize; only synthetic DOM fit scheduling is excluded.
@@ -114,13 +124,17 @@ function observed(runId = session.control.run.runId): AgentMuxTerminalViewObserv
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('OffscreenCanvas', undefined)
+  // The shared Realm dispatcher consumes the actual preload transport, with a fresh owner per fixture.
+  vi.stubGlobal('agentmux', { clientIncidents: {
+    open: () => api.clientIncidents.open(),
+    report: (...args: Parameters<typeof api.clientIncidents.report>) => api.clientIncidents.report(...args)
+  } })
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => ({ font: '',
     measureText: () => ({ width: 8, actualBoundingBoxDescent: 2, actualBoundingBoxAscent: 10 }) }) as unknown as CanvasRenderingContext2D)
   vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('xterm-char-measure-element') ? 256 : 640 })
   vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(16)
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, top: 0, left: 0, width: 640, height: 384, right: 640, bottom: 384, toJSON() {} })
-  fixture.terminals.length = 0; fixture.receive = null; fixture.diagnosticRegionFailure = false; releases = []
-  vi.stubGlobal('agentmux', { clientIncidents: api.clientIncidents })
+  fixture.terminals.length = 0; fixture.receive = null; fixture.diagnosticRegionFailure = false; fixture.contextLoss = null; fixture.renderListeners = []; releases = []
   attach = vi.spyOn(api.sessions, 'attach').mockResolvedValue(replay(lines))
   vi.spyOn(api.sessions, 'detach').mockResolvedValue(undefined)
   vi.spyOn(api.sessions, 'onEvent').mockImplementation(receive => { fixture.receive = receive; return () => { fixture.receive = null } })
@@ -151,8 +165,9 @@ function frozenState() {
 }
 function deferred<T>() {
   let resolve!: (value: T) => void
-  const promise = new Promise<T>(r => { resolve = r })
-  return { promise, resolve }
+  let reject!: (error: unknown) => void
+  const promise = new Promise<T>((r, fail) => { resolve = r; reject = fail })
+  return { promise, resolve, reject }
 }
 
 it('archives the real Terminal failure and frozen refresh before default-Host CLI discovery and original read', async () => {
@@ -276,4 +291,134 @@ it('keeps the original Terminal error, reveal and refresh usable when diagnostic
   expect(attach).toHaveBeenCalledOnce(); expect(write).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled()
   expect(getters).toBe(0)
   expect(JSON.stringify(delivery.mock.calls)).not.toContain('private diagnostic')
+})
+
+function reportSink() {
+  vi.spyOn(api.clientIncidents, 'open').mockResolvedValue({ token: 'document-token' })
+  return vi.spyOn(api.clientIncidents, 'report').mockResolvedValue({ accepted: true })
+}
+function output(startByte: number, data: string): RuntimeEvent {
+  const dataBytes = new TextEncoder().encode(data)
+  return { type: 'core', hostId: 'local', event: { type: 'terminal-output', agentSessionId: session.id, run: session.control.run,
+    data, dataBytes, evidence: { source: 'terminal-output', observedAt: 1, outputByteRange: { startByte, endByte: startByte + dataBytes.length } } } }
+}
+it.each(['success', 'failure'] as const)('retains a pending reveal deadline and late original %s as distinct original observations', async outcome => {
+  const sent = reportSink(), pending = deferred<SessionAttachResult>()
+  attach.mockReturnValue(pending.promise)
+  let deadline: (() => void) | undefined
+  const timer = globalThis.setTimeout
+  vi.spyOn(globalThis, 'setTimeout').mockImplementation(((callback: () => void, delay?: number, ...args: unknown[]) => {
+    if (delay === TERMINAL_REVEAL_DEADLINE_MS) deadline = callback
+    return timer(callback, delay, ...args)
+  }) as typeof setTimeout)
+  await render()
+  expect(deadline).toBeTypeOf('function')
+  vi.spyOn(Date, 'now').mockReturnValue(Date.now() + TERMINAL_REVEAL_DEADLINE_MS + 1)
+  await act(async () => deadline!())
+  await vi.waitFor(() => expect(sent).toHaveBeenCalledTimes(1))
+  expect(sent.mock.calls[0]![1]).toMatchObject({ kind: 'terminal-reveal-deadline', metadata: { liveReady: false, revealed: false } })
+  const deadlineReport = structuredClone(sent.mock.calls[0]![1])
+  await act(async () => {
+    if (outcome === 'success') pending.resolve(replay('late original output'))
+    else pending.reject(Object.assign(new Error('private late attachment failure'), { code: 'EIO' }))
+  })
+  await vi.waitFor(() => expect(sent).toHaveBeenCalledTimes(2))
+  expect(sent.mock.calls[0]![1]).toEqual(deadlineReport)
+  expect(sent.mock.calls[1]![1]).toMatchObject({ kind: outcome === 'success' ? 'terminal-recovered' : 'terminal-attach-failed',
+    relatedOccurrenceId: deadlineReport.occurrenceId, attemptId: deadlineReport.attemptId,
+    metadata: { liveReady: outcome === 'success', revealed: true } })
+  expect(fixture.terminals).toHaveLength(1)
+  expect(write).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled()
+})
+
+it.each([0, 100])('freezes context, visibility and resize with %s unrelated Sessions and constant diagnostic reads', async unrelated => {
+  const sent = reportSink(), terminal = await ready('original')
+  for (const listener of [...fixture.renderListeners]) listener()
+  const length = vi.spyOn(terminal.buffer.active, 'length', 'get')
+  for (let i = 0; i < 1000; i++) for (const listener of [...fixture.renderListeners]) listener()
+  expect(length).not.toHaveBeenCalled()
+  expect(sent).not.toHaveBeenCalled()
+  await act(async () => useAppStore.setState({ sessions: [session, ...Array.from({ length: unrelated }, (_, i) => ({ ...session,
+    id: `unrelated-${i}`, control: { ...session.control, agentSessionId: `unrelated-${i}`, run: { runId: `unrelated-run-${i}` } } }))] }))
+  await render(session, { visible: false })
+  await render(session, { visible: true })
+  await act(async () => fixture.receive!({ type: 'core', hostId: 'local', event: { type: 'terminal-resized',
+    agentSessionId: session.id, run: session.control.run, throughByte: 8, resizeRevision: 1, cols: 81, rows: 24 } }))
+  await vi.waitFor(() => expect(terminal.cols).toBe(81))
+  length.mockClear()
+  await act(async () => fixture.contextLoss!())
+  await vi.waitFor(() => expect(sent).toHaveBeenCalledTimes(1))
+  const report = sent.mock.calls[0]![1]
+  expect(report).toMatchObject({ kind: 'terminal-context-lost', metadata: { liveReady: true, visible: true, renderer: 'webgl', cols: 81 } })
+  expect(report.stages.map(item => item.stage)).toEqual(expect.arrayContaining(['visibility', 'resize', 'replay-started', 'replay-applied', 'revealed', 'live-ready']))
+  expect(report.metadata.renderCallbacks).toBe(1001)
+  // One ring snapshot and one immutable trigger snapshot, independent of unrelated consumers.
+  expect(length).toHaveBeenCalledTimes(2)
+  expect(attach).toHaveBeenCalledTimes(1); expect(fixture.terminals).toHaveLength(1)
+  expect(write).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled()
+})
+
+it('archives failed live history recovery and the actual output gap once per episode without closing healthy input', async () => {
+  const sent = reportSink(), terminal = await ready('original')
+  vi.spyOn(api.sessions, 'replay').mockRejectedValue(Object.assign(new Error('private history message'), { code: 'EIO' }))
+  await act(async () => fixture.receive!(output(20, 'tail')))
+  await vi.waitFor(() => expect(sent.mock.calls.map(([, report]) => report.kind)).toEqual(['terminal-replay-failed', 'terminal-output-gap']))
+  await act(async () => fixture.receive!(output(40, 'later')))
+  await vi.waitFor(() => expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toContain('later'))
+  expect(sent).toHaveBeenCalledTimes(2)
+  expect(sent.mock.calls[0]![1]).toMatchObject({ stage: 'replay-failed', code: 'EIO', metadata: { liveReady: true } })
+  expect(JSON.stringify(sent.mock.calls)).not.toContain('private history message')
+  await act(async () => terminal.input('x'))
+  expect(write).toHaveBeenCalledExactlyOnceWith(session.control, 'x', 'user', expect.objectContaining({ source: 'user' }))
+  expect(recover).not.toHaveBeenCalled()
+})
+
+it('retains invalid reconnect replay separately from continuation absence and keeps its canvas', async () => {
+  const sent = reportSink(), terminal = await ready('original')
+  const run = { nativeService: null, runId: session.control.run.runId, kind: 'agent' as const, providerId: 'codex', executorId: 'codex',
+    agentSessionId: session.id, workspacePath: session.workspacePath, pid: 123, state: 'running' as const,
+    cols: 80, rows: 24, observedAt: 2, latestOutputBytes: 8, acceptedInputBytes: 0 }
+  await act(async () => fixture.receive!({ type: 'core', hostId: 'local', event: { type: 'terminal-snapshot', agentSessionId: session.id,
+    afterByte: 8, run, terminal: { type: 'basic-vt', checkpoint: { runId: run.runId, throughByte: 8, resizeRevision: 3,
+      size: { cols: 80, rows: 24 }, restoreSize: { cols: 80, rows: 24 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 },
+      restoreBytes: new Uint8Array(), resizes: [] }, replay: [], gap: null, resizeRevision: 4 } }))
+  await vi.waitFor(() => expect(sent.mock.calls.some(([, report]) => report.kind === 'terminal-replay-failed')).toBe(true))
+  expect(sent.mock.calls.find(([, report]) => report.kind === 'terminal-replay-failed')![1]).toMatchObject({ stage: 'replay-failed', code: 'CTXMUX_EVENT_INVALID' })
+  expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toContain('original')
+  expect(attach).toHaveBeenCalledTimes(1)
+  expect(write).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled()
+})
+
+it('retains typed connection observations without upgrading unknown continuation to a byte gap', async () => {
+  const sent = reportSink(), terminal = await ready('original')
+  const evidence = { source: 'terminal-output' as const, observedAt: 2 }
+  const core = { type: 'attachment-state' as const, run: session.control.run, agentSessionId: session.id, afterByte: 8, evidence }
+  await act(async () => fixture.receive!({ type: 'core', hostId: 'local', event: { ...core, state: 'unavailable',
+    diagnostic: { code: 'ECONNRESET', message: 'private connection message' } } }))
+  await vi.waitFor(() => expect(sent).toHaveBeenCalledTimes(1))
+  const originalFailure = sent.mock.calls[0]![1]
+  await act(async () => fixture.receive!({ type: 'core', hostId: 'local', event: { ...core, state: 'restored' } }))
+  await vi.waitFor(() => expect(sent).toHaveBeenCalledTimes(2))
+  expect(sent.mock.calls[1]![1]).toMatchObject({ kind: 'terminal-recovered', stage: 'observation-restored', relatedOccurrenceId: originalFailure.occurrenceId })
+  await act(async () => fixture.receive!({ type: 'core', hostId: 'local', event: { type: 'terminal-snapshot', afterByte: 8,
+    agentSessionId: session.id, run: { nativeService: null, ...session.control.run, kind: 'agent', providerId: 'codex', executorId: 'codex',
+      agentSessionId: session.id, workspacePath: session.workspacePath, pid: 123, state: 'running', cols: 80, rows: 24, observedAt: 2,
+      latestOutputBytes: 8, acceptedInputBytes: 0 }, terminal: { type: 'unknown', reason: 'origin_unknown' }, replay: [], gap: null, resizeRevision: 0 } }))
+  await vi.waitFor(() => expect(sent).toHaveBeenCalledTimes(3))
+  expect(sent.mock.calls[2]![1]).toMatchObject({ kind: 'terminal-continuation-unavailable', stage: 'observation-unavailable',
+    metadata: { continuationType: 'unknown', continuationReason: 'origin_unknown', liveReady: true } })
+  expect(sent.mock.calls.some(([, report]) => report.kind === 'terminal-output-gap')).toBe(false)
+  expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toContain('original')
+  const absence = sent.mock.calls[2]![1]
+  await act(async () => fixture.receive!({ type: 'core', hostId: 'local', event: { type: 'terminal-snapshot', afterByte: 8,
+    agentSessionId: session.id, run: { nativeService: null, ...session.control.run, kind: 'agent', providerId: 'codex', executorId: 'codex',
+      agentSessionId: session.id, workspacePath: session.workspacePath, pid: 123, state: 'running', cols: 80, rows: 24, observedAt: 3,
+      latestOutputBytes: 8, acceptedInputBytes: 0 }, terminal: { type: 'basic-vt', checkpoint: { runId: session.control.run.runId,
+        throughByte: 8, resizeRevision: 0, size: { cols: 80, rows: 24 }, restoreSize: { cols: 80, rows: 24 },
+        restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 }, restoreBytes: new TextEncoder().encode('original'), resizes: [] },
+    replay: [], gap: null, resizeRevision: 0 } }))
+  await vi.waitFor(() => expect(sent).toHaveBeenCalledTimes(4))
+  expect(sent.mock.calls[3]![1]).toMatchObject({ kind: 'terminal-recovered', relatedOccurrenceId: absence.occurrenceId,
+    metadata: { continuationType: 'basic-vt', liveReady: true } })
+  expect(attach).toHaveBeenCalledTimes(1); expect(write).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled()
 })
