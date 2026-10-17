@@ -3,6 +3,7 @@ import { Background, BaseEdge, EdgeLabelRenderer, Handle, MarkerType, Position, 
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import type { FocusContext } from '../lib/focus-context'
 import { collaborationSubjectKey, type CollaborationAgent, type CollaborationArea, type CollaborationRelation } from '../lib/agent-collaboration'
+import { collaborationConnections, collaborationAreaNode, collaborationAgentNode } from '../lib/collaboration-presentation'
 import type { CollaborationPulse } from '../lib/use-collaboration-reading'
 import { routeCollaboration, type CollaborationBox, type CollaborationPath } from '../lib/collaboration-routing'
 import { FocusContextCardBody } from './FocusContextCardBody'
@@ -13,7 +14,7 @@ import '../styles/collaboration.css'
 
 export type CollaborationSelection = { kind: 'agent' | 'relation'; id: string; relatedIds?: readonly string[] } | null
 type AgentData = { agent: CollaborationAgent; selected: boolean; identity?: FocusContextIdentity | undefined; goals?: FocusGoalLinks | undefined; onSelect(): void; onOpen(id: string): void }
-type AreaData = { area: CollaborationArea; folded: boolean; onToggle(): void }
+type AreaData = { area: CollaborationArea; folded: boolean; internal: readonly CollaborationRelation[]; onInspect(): void; onToggle(): void }
 type AgentNode = Node<AgentData, 'agent'>
 type AreaNode = Node<AreaData, 'area'>
 type GraphNode = AgentNode | AreaNode
@@ -33,6 +34,7 @@ function AreaNodeView({ data }: NodeProps<AreaNode>) {
     <button type="button" className="collaboration-area__heading nodrag nopan" aria-expanded={!data.folded} onClick={data.onToggle} title={data.area.issue ?? undefined}>
       <SemanticIcon name={data.folded ? 'navigation.next' : 'navigation.down'} size={12} /><span>{data.area.name}</span><small>{data.area.members.length}</small>
     </button>
+    {data.folded && data.internal.length ? <button type="button" className="collaboration-area__internal nodrag nopan" aria-label={`${data.area.name}: ${data.internal.length} internal connections`} onClick={data.onInspect}>{data.internal.length} internal</button> : null}
     {data.folded ? <><CollaborationPorts direction="in" /><CollaborationPorts direction="out" /></> : null}
   </div>
 }
@@ -61,44 +63,37 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
     const placed = new Set(areas.flatMap(area => area.members)), unplaced = [...visibleIds].filter(id => !placed.has(id))
     return unplaced.length ? [...areas, { id: 'unplaced-references', name: 'Related Agents', kind: 'unplaced' as const, members: unplaced }] : areas
   }, [areas, visibleIds])
+  const presentation = useMemo(() => collaborationConnections(graphAreas, relations, folded), [graphAreas, relations, folded])
   const nodes = useMemo<GraphNode[]>(() => {
     const result: GraphNode[] = [], heights = [0, 0]
     graphAreas.forEach((area, index) => {
       const column = index % 2, x = column * 630, y = heights[column]!, expandedHeight = 56 + Math.max(1, Math.ceil(area.members.length / 2)) * 108
       heights[column] = y + expandedHeight + 46
-      const collapsed = folded.has(area.id), areaId = JSON.stringify(['area', area.id])
-      result.push({ id: areaId, type: 'area', position: { x, y }, width: 586, height: collapsed ? 48 : expandedHeight, style: { width: 586, height: collapsed ? 48 : expandedHeight }, data: { area, folded: collapsed, onToggle: () => setFolded(previous => { const next = new Set(previous); if (!next.delete(area.id)) next.add(area.id); return next }) }, selectable: false, draggable: false })
+      const collapsed = folded.has(area.id), areaId = collaborationAreaNode(area.id), internal = presentation.internal.get(area.id) ?? []
+      result.push({ id: areaId, type: 'area', position: { x, y }, width: 586, height: collapsed ? 48 : expandedHeight, style: { width: 586, height: collapsed ? 48 : expandedHeight }, data: { area, folded: collapsed, internal, onInspect: () => { if (internal[0]) onSelect({ kind: 'relation', id: internal[0].id, relatedIds: internal.map(relation => relation.id) }) }, onToggle: () => setFolded(previous => { const next = new Set(previous); if (!next.delete(area.id)) next.add(area.id); return next }) }, selectable: false, draggable: false })
       if (collapsed) return
       area.members.forEach((id, at) => {
         const agent = agents.get(id)
         if (!agent) return
         const context = agent.context, presentationKey = context && JSON.stringify([context.hostId, context.id])
-        result.push({ id: JSON.stringify([area.id, id]), type: 'agent', parentId: areaId, width: 250, height: 94, position: { x: 18 + at % 2 * 300, y: 44 + Math.floor(at / 2) * 108 }, style: { width: 250, height: 94, pointerEvents: 'all' }, draggable: false, selectable: false,
+        result.push({ id: collaborationAgentNode(area.id, id), type: 'agent', parentId: areaId, width: 250, height: 94, position: { x: 18 + at % 2 * 300, y: 44 + Math.floor(at / 2) * 108 }, style: { width: 250, height: 94, pointerEvents: 'all' }, draggable: false, selectable: false,
           data: { agent, selected: selection?.kind === 'agent' && selection.id === id, identity: presentationKey ? identities?.get(presentationKey) : undefined, goals: presentationKey ? goals?.get(presentationKey) : undefined,
             onSelect: () => onSelect({ kind: 'agent', id }), onOpen: () => { if (context) onOpen(context) } } })
       })
     })
     return result
-  }, [graphAreas, agents, folded, selection, identities, goals, onSelect, onOpen])
+  }, [graphAreas, agents, folded, presentation, selection, identities, goals, onSelect, onOpen])
   const edges = useMemo<RelationEdge[]>(() => {
-    const result = new Map<string, RelationEdge>(), byNode = new Map(nodes.map(node => [node.id, node]))
+    const byNode = new Map(nodes.map(node => [node.id, node]))
     const worldX = (id: string) => { const node = byNode.get(id)!; return node.position.x + (node.parentId ? byNode.get(node.parentId)!.position.x : 0) }
-    for (const relation of relations) {
-      const sourceAreas = graphAreas.filter(area => area.members.includes(relation.source)), targetAreas = graphAreas.filter(area => area.members.includes(relation.target))
-      const shared = sourceAreas.find(area => targetAreas.includes(area)), sourceArea = shared ?? sourceAreas[0], targetArea = shared ?? targetAreas[0]
-      if (!sourceArea || !targetArea) continue
-      const endpoint = (area: CollaborationArea, id: string) => folded.has(area.id) ? JSON.stringify(['area', area.id]) : JSON.stringify([area.id, id])
-      const source = endpoint(sourceArea, relation.source), target = endpoint(targetArea, relation.target)
-      if (source === target) continue
-      const id = JSON.stringify([relation.kind, source, target]), held = result.get(id), forward = worldX(source) <= worldX(target)
-      const pulse = pulses.filter(pulse => relation.kind === pulse.kind && relation.source === collaborationSubjectKey({ hostId: pulse.hostId, agentSessionId: pulse.sender }) && relation.target === collaborationSubjectKey({ hostId: pulse.hostId, agentSessionId: pulse.recipient })).at(-1)
-      const active = pulse?.id ?? 0, startedAt = pulse?.startedAt ?? 0
-      if (held) { held.data!.relations.push(relation); held.data!.count += relation.evidence.length; if (active > held.data!.active) { held.data!.active = active; held.data!.startedAt = startedAt }; held.selected ||= selection?.kind === 'relation' && selection.id === relation.id }
-      else result.set(id, { id, type: 'relation', source, target, sourceHandle: `${relation.kind}-out-${forward ? 'right' : 'left'}`, targetHandle: `${relation.kind}-in-${forward ? 'left' : 'right'}`, data: { relations: [relation], active, startedAt, count: relation.evidence.length }, selected: selection?.kind === 'relation' && selection.id === relation.id,
-        markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 }, className: `collaboration-edge-group--${relation.kind}` })
-    }
-    return [...result.values()]
-  }, [relations, graphAreas, folded, pulses, selection, nodes])
+    return presentation.connections.map(connection => {
+      const { id, source, target, relations } = connection, kind = relations[0]!.kind, forward = worldX(source) <= worldX(target)
+      const pulse = pulses.filter(pulse => relations.some(relation => relation.kind === pulse.kind && relation.source === collaborationSubjectKey({ hostId: pulse.hostId, agentSessionId: pulse.sender }) && relation.target === collaborationSubjectKey({ hostId: pulse.hostId, agentSessionId: pulse.recipient }))).at(-1)
+      return { id, type: 'relation', source, target, sourceHandle: `${kind}-out-${forward ? 'right' : 'left'}`, targetHandle: `${kind}-in-${forward ? 'left' : 'right'}`,
+        data: { relations, active: pulse?.id ?? 0, startedAt: pulse?.startedAt ?? 0, count: relations.reduce((count, relation) => count + relation.evidence.length, 0) }, selected: selection?.kind === 'relation' && relations.some(relation => relation.id === selection.id),
+        markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 }, className: `collaboration-edge-group--${kind}` }
+    })
+  }, [presentation, pulses, selection, nodes])
   const boxes = useMemo<CollaborationBox[]>(() => {
     const byId = new Map(nodes.map(node => [node.id, node]))
     return nodes.flatMap(node => {
