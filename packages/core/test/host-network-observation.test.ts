@@ -7,6 +7,7 @@ import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
 import { connectSshAgentMux } from '../src/runtime-client.js'
 import { observeHostNetwork, parseHostNetworkObservation } from '../src/host-network-observation.js'
 import { parseSshNetworkConfiguration } from '../src/ssh-network-configuration.js'
+import * as network from '../src/runtime-network.js'
 import { parseSettingsCommand } from '../src/settings-cli.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
@@ -87,7 +88,8 @@ it('network: result parsing refuses mixed targets, negative timing and extra pri
   const f = await fixture(), result = await f.service.call('settings.hosts.network', { hostId: 'selected' }, user)
   expect(() => parseHostNetworkObservation({ ...result, routeHostId: 'another' }, 'selected')).toThrow()
   if (result.target.state !== 'available') throw new Error('Actual original target is required')
-  expect(() => parseHostNetworkObservation({ ...result, target: { ...result.target, value: { ...result.target.value, requestDurationMs: -1 } } }, 'selected')).toThrow()
+  const available = result.target.value
+  expect(() => parseHostNetworkObservation({ ...result, target: { ...result.target, value: { ...available, requestDurationMs: -1 } } }, 'selected')).toThrow()
   expect(() => parseHostNetworkObservation({ ...result, proxyCommand: 'private-command' }, 'selected')).toThrow()
 })
 it('network: OpenSSH machine configuration keeps jump order and policy without revealing an opaque proxy command', () => {
@@ -102,7 +104,7 @@ it('network: OpenSSH machine configuration keeps jump order and policy without r
   expect(() => parseSshNetworkConfiguration(base + 'port 22\n')).toThrow()
   expect(() => parseSshNetworkConfiguration(base.replace('serveraliveinterval 17\n', ''))).toThrow()
 })
-it.skipIf(process.env.AGENTMUX_REAL_SSH_ROUTE_E2E !== '1')('network: real SSH keeps its existing channel and input while a new configuration evaluation reveals a different configured jump', async () => {
+async function sshNetworkFixture() {
   const scope = await headlessFixture(); closes.push(scope.cleanup)
   const ssh = await sshRouteFixture(); closes.push(ssh.cleanup)
   const route = await ssh.route(); vi.stubEnv('PATH', ssh.root + ':' + process.env.PATH)
@@ -116,6 +118,10 @@ it.skipIf(process.env.AGENTMUX_REAL_SSH_ROUTE_E2E !== '1')('network: real SSH ke
   const configuration = { ...route, id: target.hostId, kind: 'ssh', label: 'Private SSH network', remoteSocketPath: scope.socketPath, runtimeId: scope.owner.runtimeId }
   // The fixture's stop function is not part of a persisted Host configuration.
   const { stop: _stop, ...saved } = configuration
+  return { scope, ssh, client, target, native, run, saved }
+}
+it.skipIf(process.env.AGENTMUX_REAL_SSH_ROUTE_E2E !== '1')('network: real SSH keeps its existing channel and input while a new configuration evaluation reveals a different configured jump', async () => {
+  const { scope, ssh, client, target, native, run, saved } = await sshNetworkFixture()
   const options = { coreClients: () => [{ hostId: target.hostId, client }], hostConfiguration: () => saved }
   const service = new AgentMuxRpcService(options); closes.push(() => service.dispose())
   const channelsBefore = await ssh.channelPids()
@@ -131,5 +137,37 @@ it.skipIf(process.env.AGENTMUX_REAL_SSH_ROUTE_E2E !== '1')('network: real SSH ke
   const cli = await runCompiledObjectCli(['settings', 'hosts', 'network', '--host', target.hostId], objectCliEnvironment(scope.root, { AGENTMUX_RPC_ENDPOINT: `unix:${rpcPath}`, PATH: process.env.PATH! }))
   expect(cli.code).toBe(0)
   expect(JSON.parse(cli.stdout).result.target.state).toBe('available')
+  await client.stopTerminal(run)
+}, 60_000)
+it.skipIf(process.env.AGENTMUX_REAL_SSH_ROUTE_E2E !== '1')('network: authenticated managed CLI reads the selected existing SSH Host without gaining direct Runtime authority', async () => {
+  const { scope, ssh, client, target, native, run, saved } = await sshNetworkFixture()
+  const source = await rpcOwnerFixture(['network-reading-agent']); closes.push(source.close)
+  const forwarded = vi.spyOn(client, 'forwardRpc'), interfaces = vi.spyOn(network, 'readNetworkInterfaces')
+  const rpcPath = join(scope.root, 'managed-network.sock')
+  const server = new AgentMuxControlServer({ socketPath: rpcPath,
+    coreClients: () => [{ hostId: target.hostId, client }, ...source.coreClients()],
+    hostConfiguration: id => id === target.hostId ? saved : null })
+  await server.start(); closes.push(() => server.stop())
+  const env = objectCliEnvironment(scope.root, { AGENTMUX_RPC_ENDPOINT: `unix:${rpcPath}`, PATH: process.env.PATH!,
+    AGENTMUX_AGENT_SESSION_ID: source.credentials.agentSessionId, AGENTMUX_AGENT_CAPABILITY: source.credentials.capability })
+  const args = ['settings', 'hosts', 'network', '--host', target.hostId]
+  const channelsBefore = await ssh.channelPids()
+  const denied = await runCompiledObjectCli(args, { ...env, AGENTMUX_AGENT_CAPABILITY: 'invalid-source-capability' })
+  expect(denied.code).not.toBe(0); expect(denied.stderr).toContain('AGENT_CAPABILITY_INVALID')
+  expect(forwarded).not.toHaveBeenCalled(); expect(interfaces).not.toHaveBeenCalled()
+  expect(await ssh.channelPids()).toEqual(channelsBefore)
+  const cli = await runCompiledObjectCli(args, env)
+  expect(cli.code, cli.stderr).toBe(0)
+  expect(JSON.parse(cli.stdout).result).toMatchObject({ routeHostId: target.hostId,
+    target: { state: 'available', value: { sample: { owner: { runtimeId: scope.owner.runtimeId, ownerInstanceId: scope.owner.ownerInstanceId, processId: scope.owner.processId } } } },
+    observer: { state: 'available', value: { processId: process.pid } } })
+  expect(cli.stdout + cli.stderr).not.toContain(source.credentials.capability)
+  expect(forwarded).toHaveBeenCalledOnce(); expect(interfaces).toHaveBeenCalledOnce()
+  expect((await ssh.channelPids()).length).toBe(channelsBefore.length + 1)
+  if (!client.forwardRpc) throw new Error('The original SSH public transport is required')
+  await expect(client.forwardRpc('runtime.network.inspect', { fence: { runtimeId: scope.owner.runtimeId, ownerInstanceId: scope.owner.ownerInstanceId } },
+    { caller: source.credentials })).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
+  await client.writeTerminal(run, { operationId: 'network-after-managed-read', ownerInstanceId: native.instanceId, expectedByte: 0, data: 'M' })
+  await until(() => client.listRuns(), values => values.some(value => value.runId === run.runId && value.pid === run.pid && value.acceptedInputBytes === 1), 'original input after managed network read')
   await client.stopTerminal(run)
 }, 60_000)
