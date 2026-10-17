@@ -60,7 +60,7 @@ export function MoteProfileSetup({ operation, automatic, onOperation }: {
     const request = ++sequence.current
     try {
       let value = await api.connections.call('connection.setup.inspect', { operationId: id })
-      if (value.profileUpdate?.publicationDraft) value = await api.connections.call('connection.setup.inspect', { operationId: id, applicationConfiguration: { effect: 'create-application-version', draft: value.profileUpdate.publicationDraft } })
+      if (value.profileUpdate?.stage === 'publication-create') value = await api.connections.call('connection.setup.inspect', { operationId: id, applicationConfiguration: { effect: 'create-application-version', ...(value.profileUpdate.publicationDraft ? { draft: value.profileUpdate.publicationDraft } : {}) } })
       if (active.current && request === sequence.current) accept(value)
     } catch (error) { if (active.current && request === sequence.current) setReading(previous => ({ ...previous, issue: presentError(error) })) }
   }
@@ -105,7 +105,7 @@ export function MoteProfileSetup({ operation, automatic, onOperation }: {
   const account = view?.continuation?.account
   const authentication = summary?.authentication
   const authActions = view?.continuation?.stage !== 'confirmed' ? view?.continuation?.actions ?? [] : []
-  const publication = view?.profileUpdate?.publicationDraft && view.applicationConfiguration?.effect === 'create-application-version' ? view.applicationConfiguration : null
+  const publication = view?.applicationConfiguration?.effect === 'create-application-version' ? view.applicationConfiguration : null
   const actions: Action[] = [...authActions, ...(view?.profileUpdate?.actions ?? []), ...(publication?.actions.filter(action => action.kind === 'create-application-version') ?? [])]
   const label = (action: Action) => action.kind === 'confirm-account' ? 'Use this account & update bot'
     : action.kind === 'renew' ? 'Get a new sign-in code'
@@ -120,9 +120,9 @@ export function MoteProfileSetup({ operation, automatic, onOperation }: {
       <p className="mote-details__hint">Uses this Mote’s saved details and publishes them to the same bot. Its current audience is kept. Other Motes and groups sharing this bot will see the change.</p>
       {view?.challenge ? <div className="mote-bot-confirmation" data-mote-profile-code><BotConfirmationCode url={view.challenge.qrPayload} title="Sign in to manage this bot" /><p>Scan with Feishu, then confirm the account and enterprise here.</p></div> : null}
       {account ? <dl className="connector-management__account" aria-label="Account and enterprise to confirm"><div><dt>Account</dt><dd>{account.userName ?? account.userId}</dd></div><div><dt>Enterprise</dt><dd>{account.tenantName ?? account.tenantId}</dd></div></dl> : null}
-      {publication?.review ? <section className="connector-next-step" aria-label="Pending changes to review"><div><strong>Review the other pending changes</strong><p>Publishing includes these application changes along with this profile update. Confirm the complete version before continuing.</p>
+      {publication?.review && (publication.review.changes.length || publication.review.issues.length) ? <section className="connector-next-step" aria-label="Publication checks"><div><strong>{publication.review.changes.length ? 'Review the other pending changes' : 'Publication checks need attention'}</strong><p>{publication.review.changes.length ? 'Publishing includes these application changes along with this profile update. Confirm the complete version before continuing.' : 'The profile update is kept. Resolve these publication checks before continuing.'}</p>
         {publication.review.changes.map(change => <div key={change.category}><strong>{change.category}</strong><ul>{change.details.map(detail => <li key={detail}>{detail}</li>)}</ul></div>)}
-        <p>The complete current audience is kept. Version: {publication.draft?.kind === 'create-version' ? publication.draft.version : 'Not confirmed'}.</p>
+        <p>{publication.review.audience ? 'The complete current audience is kept.' : 'The current audience is not confirmed yet.'} Version: {publication.draft?.kind === 'create-version' ? publication.draft.version : 'Not confirmed'}.</p>
         {publication.review.issues.map(issue => <p key={issue} role="status">{issue}</p>)}
       </div></section> : null}
       <div className="mote-bot-actions" aria-busy={busy}>
