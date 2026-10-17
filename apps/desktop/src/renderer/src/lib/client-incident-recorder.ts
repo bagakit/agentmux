@@ -1,47 +1,11 @@
-import { safeClientIncidentCode, type AgentMuxClientIncidentKind, type AgentMuxClientIncidentMetadata,
+import { safeClientIncidentCode, type AgentMuxClientIncidentKind, type AgentMuxClientReadingIncidentKind, type AgentMuxClientIncidentMetadata,
   type AgentMuxClientIncidentReport, type AgentMuxClientIncidentStage } from '@agentmux/core/client-incident'
-import { api } from './api'
+import { createClientIncidentDispatcher, type ClientIncidentDispatcher } from './client-incident-dispatcher'
+export { createClientIncidentDispatcher } from './client-incident-dispatcher'
 
-// One slow IPC owns its slot until it really settles. A busy archive never holds up Terminal work.
-const dispatchers = new WeakMap<Document, { send(report: AgentMuxClientIncidentReport): void; dropped(): number }>()
-export function clientIncidentDispatcher(document: Document) {
-  let dispatcher = dispatchers.get(document)
-  if (dispatcher) return dispatcher
-  const queue: AgentMuxClientIncidentReport[] = []
-  let sending = false, dropped = 0, token: string | null = null
-  const drain = async () => {
-    if (sending) return
-    sending = true
-    try {
-      if (!token) token = (await api.clientIncidents.open())?.token ?? null
-      if (!token) { dropped += queue.length; queue.length = 0; return }
-      while (queue.length) {
-        const report = queue.shift()!
-        try {
-          const receipt = await api.clientIncidents.report(token, report)
-          if (!receipt.accepted) dropped++
-        } catch {
-          // The report may have been accepted. Do not replay it or let a failed token poison later attempts.
-          dropped++; token = null
-          dropped += queue.length; queue.length = 0
-          break
-        }
-      }
-    } catch { dropped += queue.length; queue.length = 0; token = null }
-    finally { sending = false }
-  }
-  dispatcher = {
-    send(report) {
-      // A report contains at most a small metadata ring. Bound queued work independently of Run count.
-      if (queue.length >= 32) { dropped++; return }
-      queue.push(report)
-      void drain()
-    },
-    dropped: () => dropped
-  }
-  dispatchers.set(document, dispatcher)
-  return dispatcher
-}
+// One transport owner per JS Realm; detached documents share this original owner.
+const dispatcher = createClientIncidentDispatcher(() => typeof window === 'undefined' ? undefined : window.agentmux?.clientIncidents)
+export function clientIncidentDispatcher(): ClientIncidentDispatcher { return dispatcher }
 
 /** Stage facts only: this owner never reads text, scans pixels, samples profiles or changes Run control. */
 export function createClientIncidentRecorder(input: {
@@ -70,7 +34,7 @@ export function createClientIncidentRecorder(input: {
   return {
     begin(stage: AgentMuxClientIncidentStage) { attemptId = id(); mark(stage) },
     mark,
-    capture(kind: AgentMuxClientIncidentKind, stage: AgentMuxClientIncidentStage, error?: unknown,
+    capture(kind: Exclude<AgentMuxClientIncidentKind, AgentMuxClientReadingIncidentKind>, stage: AgentMuxClientIncidentStage, error?: unknown,
       relatedOccurrenceId: string | null = lastFailure): string {
       const occurrenceId = id()
       mark(stage)
