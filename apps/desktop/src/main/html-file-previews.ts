@@ -5,7 +5,7 @@ import type { WorkspaceRecord } from '../shared/contracts.js'
 import { WORKSPACE_FILE_MAX_BYTES } from '../shared/workspace-file-bytes.js'
 import type { WorkspaceFiles } from './workspace-files.js'
 
-type Preview = { workspace: WorkspaceRecord; path: string; content: Buffer }
+type Preview = { workspace: WorkspaceRecord; path: string; content: Buffer; reads: Set<AbortController> }
 
 const mimeTypes: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.htm': 'text/html; charset=utf-8',
@@ -45,7 +45,7 @@ export class HtmlFilePreviews {
   async open(workspace: WorkspaceRecord, path: string, content: string): Promise<{ id: string; url: string }> {
     if (this.disposed) throw new Error('HTML preview service is closed.')
     const generation = this.generation
-    const preview: Preview = { workspace: { ...workspace }, path: relativePath(path), content: Buffer.alloc(0) }
+    const preview: Preview = { workspace: { ...workspace }, path: relativePath(path), content: Buffer.alloc(0), reads: new Set() }
     if (!this.workspaceMatches(preview)) throw new Error('The preview Workspace resource changed. Reopen preview to retry.')
     if (Buffer.byteLength(content, 'utf8') > WORKSPACE_FILE_MAX_BYTES) throw new Error('HTML preview exceeds the 16 MiB document budget. The original source is still available.')
     preview.content = Buffer.from(content, 'utf8')
@@ -57,10 +57,17 @@ export class HtmlFilePreviews {
     return { id, url: `${origin}/${id}/${preview.path.split('/').map(encodeURIComponent).join('/')}` }
   }
 
-  release(id: string): void { this.previews.delete(id) }
+  release(id: string): void {
+    const preview = this.previews.get(id)
+    this.previews.delete(id)
+    for (const read of preview?.reads ?? []) read.abort()
+  }
 
   /** The original Renderer ended; its pending opens cannot create new leases after this point. */
-  releaseAll(): void { ++this.generation; this.previews.clear() }
+  releaseAll(): void {
+    ++this.generation
+    for (const id of this.previews.keys()) this.release(id)
+  }
 
   async dispose(): Promise<void> {
     this.disposed = true
@@ -120,6 +127,7 @@ export class HtmlFilePreviews {
     response.setHeader('Access-Control-Allow-Origin', '*')
     response.setHeader('Content-Security-Policy', previewCsp)
     const fail = (status: number, message: string): void => {
+      if (response.destroyed) return
       response.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8' })
       response.end(request.method === 'HEAD' ? undefined : message)
     }
@@ -144,7 +152,18 @@ export class HtmlFilePreviews {
       }).join('/'))
       let bytes: Uint8Array = preview.content
       if (path !== preview.path) {
-        const snapshot = await this.files.snapshotBytes(preview.workspace, path)
+        const read = new AbortController(), cancel = () => read.abort()
+        preview.reads.add(read)
+        response.once('close', cancel)
+        let snapshot
+        try {
+          if (response.destroyed) cancel()
+          snapshot = await this.files.snapshotBytes(preview.workspace, path, { signal: read.signal })
+          read.signal.throwIfAborted()
+        } finally {
+          response.off('close', cancel)
+          preview.reads.delete(read)
+        }
         // Both the lease and original resource must still own these bytes after the asynchronous read.
         if (!this.current(id, preview)) { fail(410, 'The preview resource changed. Reopen preview to retry.'); return }
         if (snapshot.totalBytes > WORKSPACE_FILE_MAX_BYTES) { fail(413, 'Preview resource exceeds the 16 MiB transfer budget.'); return }
