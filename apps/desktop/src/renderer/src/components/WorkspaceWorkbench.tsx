@@ -1103,11 +1103,14 @@ function WorkbenchRegionBranch({
   )
 }
 
-function EmptyWorkbench({ onCreate, visible }: { onCreate(): void; visible: boolean }) {
+function EmptyWorkbench({ onCreate, visible, tabGroupId, creationTarget }: { onCreate(): void; visible: boolean;
+  tabGroupId: string; creationTarget?: { workspaceId: string; displayWorkspaceId: string; zoneId: string } | undefined }) {
   const mote = useContext(MoteWorkfaceContext)
   const bindings = useAppStore(state => mote ? state.spaceZoneBindings : null)
   const target = useMemo(() => mote && bindings ? topicSpaceIconTarget(mote.workspace, mote.topic, bindings) : null, [mote, bindings])
   const icon = useAppStore(state => target ? state.spaceObjectIcons[target.key] ?? null : null)
+  if (!mote && creationTarget) return <NewTabSurface key={creationTarget.zoneId} tabGroupId={tabGroupId}
+    visible={visible} creationTarget={creationTarget} />
   return <WorkbenchEmptyState name={mote?.topic.title} topicId={mote?.topic.id}
     identity={mote ? <SpaceObjectIcon kind="mote" name={mote.topic.title} manualIcon={icon} avatarObjectKey={target?.key}
       avatarWorkspaceId={mote.workspace.id} avatarTopicId={mote.topic.id} visible={visible} moteAvailability="no-agent" /> : undefined}
@@ -1178,6 +1181,12 @@ function PaneGroup({
   ))
   const activeTab = tabs.find((tab) => tab.id === group.activeTabId) ?? null
   const showEmptySpace = emptyZone && !activeTab
+  const selectedZoneId = useAppStore(state => state.workbenchSpaceSelection?.workspaceId === workspaceId
+    ? state.workbenchSpaceSelection.zoneId : null)
+  const projectedZone = projection ? workbenchProjectionZone(projection) : undefined
+  const emptyCreationTarget = projectedZone ? { workspaceId: projectedZone.workspaceId,
+    displayWorkspaceId: workspaceId, zoneId: projectedZone.zoneId }
+    : selectedZoneId ? { workspaceId, displayWorkspaceId: workspaceId, zoneId: selectedZoneId } : undefined
   const retainedSpatialFocus = useAppStore(state => state.retainedSpatialFocus)
   const focusMoved = retainedSpatialFocus?.displayWorkspaceId === workspaceId && layout.activeGroupId === group.id &&
     (!activeTab || !activeTab.regions[retainedSpatialFocus.regionId])
@@ -1291,10 +1300,11 @@ function PaneGroup({
       <div className="pane-body" key="original-body">
         {recoveryNotice}
         <div className="pane-body__content">
-        {bodyTabs.length > 0 && !group.activeTabId ? <div className="pane-state">
+        {bodyTabs.length > 0 && !group.activeTabId && !showEmptySpace ? <div className="pane-state">
           <strong>{mote ? 'Original discussions retained' : 'Choose a Tab'}</strong><span>{mote ? 'The last Agent location is not confirmed yet. Your original Tabs remain available above.' : 'Select a Tab above to display it here.'}</span>
         </div> : null}
-        {showEmptySpace ? <EmptyWorkbench visible={surfaceVisible} onCreate={() => onNewTab(group.id)} /> : null}
+        {showEmptySpace ? <EmptyWorkbench visible={surfaceVisible} tabGroupId={group.id}
+          creationTarget={emptyCreationTarget} onCreate={() => onNewTab(group.id)} /> : null}
         {/* 每个 Tab 都留在 DOM 里，不活动的靠 CSS 隐藏。
             此前这里只挂 activeTab，"不可见"实现为"不渲染"——切走即卸载整棵子树，xterm 实例
             随之销毁；切回时 TerminalView 的 hydrating 从 true 起步，必然重放全部 scrollback，
@@ -2032,7 +2042,7 @@ export function WorkspaceWorkbench({
     const confirmedEmpty = membersConfirmed && layout && (topicId ? moteContext && !moteContext.issue : true)
     return <div ref={workbenchRef} className="workspace-workbench" data-workbench-pending-owner>
       {presentationAction ? <header className="pane-tabbar pane-tabbar--root"><div className="pane-tabbar__actions">{presentationAction}</div></header> : null}
-      {confirmedEmpty ? <EmptyWorkbench visible={visible} onCreate={() => newTab(layout.activeGroupId)} />
+      {confirmedEmpty ? <EmptyWorkbench visible={visible} tabGroupId={layout.activeGroupId} onCreate={() => newTab(layout.activeGroupId)} />
         : <div role="status" className="workbench-restore-notice">Original context retained · Workspace members are still restoring</div>}
     </div>
   }

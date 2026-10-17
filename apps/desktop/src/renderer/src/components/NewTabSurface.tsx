@@ -43,6 +43,7 @@ import { PMO_TEAMS_TOPIC_ID } from '../../../shared/scratch-topics'
 import { primaryMoteExecutorId, primaryMoteHasBot } from '../lib/primary-mote-executor'
 import { SettingsNavigation } from './SettingsNavigation'
 import { useContext } from 'react'
+import { WorkbenchProjectionContext } from '../lib/workbench-projection'
 
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
@@ -57,16 +58,20 @@ export function NewTabSurface({
   tabGroupId,
   tabId,
   regionId,
+  creationTarget,
   visible = true
 }: {
   tabGroupId: string
   tabId?: string
   regionId?: string
+  /** Confirmed empty Zone; materialize only on an explicit action. */
+  creationTarget?: { workspaceId: string; displayWorkspaceId: string; zoneId: string }
   /** Hidden Workbench slots stay mounted, but only the visible launcher may own the warm PTY. */
   visible?: boolean
 }) {
   const presentationActive = useWorkbenchPresentationActive()
   const presentation = useWorkbenchBrowserPresentation()
+  const projection = useContext(WorkbenchProjectionContext)
   const settings = useContext(SettingsNavigation)
   const surfaceRef = useRef<HTMLElement>(null)
   const [regionHeight, setRegionHeight] = useState<number | null>(null)
@@ -108,7 +113,9 @@ export function NewTabSurface({
   const [manualChoice, setManualChoice] = useState<{ regionId: string | undefined; executorId: string; moteId?: string | undefined } | null>(null)
   const insertionRef = useRef<ComposerInsertionHandle>(null)
   // Every Launcher has an input owner, including a Workspace's first empty Tab Group.
-  const launcherId = warmLauncherId({ tabGroupId, regionId })
+  const launcherId = creationTarget && !regionId
+    ? `zone:${JSON.stringify([creationTarget.zoneId, creationTarget.displayWorkspaceId, tabGroupId])}`
+    : warmLauncherId({ tabGroupId, regionId })
   const { prompt, setPrompt, names, setName, optionsByProvider, selectOption } = useLauncherInputs(regionId, launcherId)
   const [optionsExpanded, setOptionsExpanded] = useState(false)
   const [fileReferencesOpen, setFileReferencesOpen] = useState(false)
@@ -152,7 +159,7 @@ export function NewTabSurface({
   // 判定（resolveLauncherWorkspaceId）。分开算的症状不是报错：标题写着 A、点下去建到 B。
   const workspace = config?.workspaces.find((item) => item.id === resolveLauncherWorkspaceId({
     launcherWorkspaceId,
-    launcherTabWorkspaceId: tabWorkspaceId,
+    launcherTabWorkspaceId: tabWorkspaceId ?? creationTarget?.workspaceId,
     activeWorkspaceId
   }))
   const host = workspace ? config?.hosts.find((candidate) => candidate.id === workspace.hostId) : undefined
@@ -305,14 +312,8 @@ export function NewTabSurface({
   function launchFromLauncher(): void {
     if (!launcherCanLaunch(readiness)) return
     void run('agent', () => {
-      let target = launcherRef
-      if (!target && workspace) {
-        const createdId = useAppStore.getState().openLauncher({ workspaceId: workspace.id, tabGroupId, reveal: false,
-          initialInputs: { prompt, names, optionsByProvider } })
-        const created = createdId ? useAppStore.getState().tabs[createdId] : undefined
-        if (!created) return Promise.resolve()
-        target = { tabId: created.id, regionId: created.layout.activeRegionId }
-      }
+      const target = materializeLauncher()
+      if (!target) return Promise.resolve()
       return launchAgent(
         executorId,
         expandSemanticReferences(prompt),
@@ -325,19 +326,26 @@ export function NewTabSurface({
     })
   }
 
+  function materializeLauncher() {
+    if (launcherRef) return launcherRef
+    if (!workspace) return undefined
+    const createdId = useAppStore.getState().openLauncher({ workspaceId: workspace.id, ...creationTarget, tabGroupId,
+      reveal: Boolean(creationTarget && !projection),
+      initialInputs: { prompt, names, optionsByProvider, sourceLauncherId: launcherId } })
+    const created = createdId ? useAppStore.getState().tabs[createdId] : undefined
+    if (!created) return undefined
+    const target = { tabId: created.id, regionId: created.layout.activeRegionId }
+    if (projection) projection.onSelect({ displayWorkspaceId: creationTarget?.displayWorkspaceId ?? workspace.id,
+      groupId: tabGroupId, ...target })
+    return target
+  }
+
   function chooseExecutionWorkspace(workspaceId: string): void {
     if (busy) return
     try {
       const state = useAppStore.getState()
-      let target = launcherRef
-      if (!target) {
-        if (!workspace) throw new Error('The original display Group is unavailable; restore its project before creating a new Launcher')
-        const createdId = state.openLauncher({ workspaceId: workspace.id, tabGroupId, reveal: false,
-          initialInputs: { prompt, names, optionsByProvider } })
-        const created = createdId ? useAppStore.getState().tabs[createdId] : undefined
-        if (!created) return
-        target = { tabId: created.id, regionId: created.layout.activeRegionId }
-      }
+      const target = materializeLauncher()
+      if (!target) return
       state.setLauncherExecutionWorkspace(target, workspaceId, executorId)
     } catch (cause) { setError(presentError(cause)) }
   }
@@ -420,6 +428,7 @@ export function NewTabSurface({
       {regionId ? <AgentLifecycleFeedback owner={{ regionId }} visible={visible} busy={busy !== null} retry={launchFromLauncher} /> : null}
       {error ? <div className="surface-inline-error" role="alert">{error}</div> : null}
       <LauncherSecondarySurfaces workspace={workspace} tabGroupId={tabGroupId} launcherRef={launcherRef} launcherId={launcherId}
+        materializeLauncher={creationTarget ? materializeLauncher : undefined}
         sections={sections} onSectionChange={setSection} warmPreview={warmPreview}
         terminalThemeId={terminalThemeId} terminalFontSize={terminalFontSize} visible={visible} busy={busy}
         onRun={run} />

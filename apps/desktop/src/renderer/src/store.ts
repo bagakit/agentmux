@@ -1132,7 +1132,7 @@ export type AppState = {
   setTabDisplayPlacement(tabId: string, displayWorkspaceId: string, groupId: string, present: boolean): Promise<AgentMuxSpaceBindingReport>
   openLauncher(target: { workspaceId: string; displayWorkspaceId?: string; tabGroupId?: string; topicId?: string; zoneId?: string; reveal: boolean;
     /** Claim an empty Group's original input in its new real Region, without navigating another surface. */
-    initialInputs?: { prompt: string; names: LauncherNames; optionsByProvider: LauncherProviderOptions }
+    initialInputs?: { prompt: string; names: LauncherNames; optionsByProvider: LauncherProviderOptions; sourceLauncherId?: string }
   }): string | undefined
   closeTab(
     workspaceId: string,
@@ -6816,7 +6816,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       catch (error) { state.reportError(error, { kind: 'indeterminate' }); return }
     }
     if (initialInputs) useLauncherState.getState().copyUtilityDraft(
-      warmLauncherId({ tabGroupId: targetTabGroupId, regionId: undefined }),
+      initialInputs.sourceLauncherId ?? warmLauncherId({ tabGroupId: targetTabGroupId, regionId: undefined }),
       warmLauncherId({ tabGroupId: targetTabGroupId, regionId: tab.layout.activeRegionId }))
     set((state) => ({
       // Only a successful explicit main-surface navigation changes global selection.
@@ -6840,7 +6840,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // Publish the durable Region owner before releasing only its unchanged Group inputs.
     // Utility drafts and Note receipts retain the original Group record.
     if (initialInputs) useLauncherState.getState().clearAgentInputsIfUnchanged(
-      warmLauncherId({ tabGroupId: targetTabGroupId, regionId: undefined }), initialInputs)
+      initialInputs.sourceLauncherId ?? warmLauncherId({ tabGroupId: targetTabGroupId, regionId: undefined }), initialInputs)
     return tab.id
   },
   closeTab(workspaceId, tabGroupId, tabId, options) {
