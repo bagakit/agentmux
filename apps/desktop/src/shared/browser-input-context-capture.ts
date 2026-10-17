@@ -33,6 +33,7 @@ export type BrowserInputSelectionArtifact = {
   path: string; sha256: string; byteLength: number; diskDurability: 'confirmed'; width: number; height: number
 }
 export type BrowserInputSelectionReceipt = { operationId: string; scene: BrowserInputScene; artifact: BrowserInputSelectionArtifact }
+export type BrowserInputSelectionRead = { operationId: string; state: 'absent' | 'unconfirmed' | 'prepared'; receipt?: BrowserInputSelectionReceipt }
 export type BrowserInputContextFreeze = {
   scene: BrowserInputSceneReference
   control: AgentSessionControl

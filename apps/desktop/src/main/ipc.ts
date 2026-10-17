@@ -9,8 +9,7 @@ import type { PerformanceSceneOwner } from './performance-scene.js'
 import { isApplicationAccessMethod, parseApplicationAccessParams, type AgentMuxApplicationAccessOwner } from '@agentmux/core'
 import { registerConversationReadIpc } from './conversation-read-ipc'
 import { registerBrowserResourceIpc } from './browser-resource-ipc.js'
-import { BrowserInputContextCaptureFiles, BrowserInputContextCaptures } from './browser-input-context-capture.js'
-import { registerBrowserInputContextIpc } from './browser-input-context-ipc.js'
+import { createBrowserInputContextPorts, registerBrowserInputContextIpc } from './browser-input-context-ipc.js'
 import { RendererV8Profiler } from './renderer-v8-profile.js'
 import { RendererMemoryInspector } from './renderer-memory.js'
 import { RendererAnimationInspector } from './renderer-animations.js'
@@ -444,9 +443,10 @@ export async function registerIpc(args: {
   const disposeBrowserFeedbackPreferences = configOwner.subscribe((saved, previous) => {
     if (JSON.stringify(saved.browser.agentControl) !== JSON.stringify(previous.browser.agentControl)) browsers.refreshAgentFeedback()
   })
-  const inputContextCaptures = new BrowserInputContextCaptures({ hostId: deliveryAttempts.hostId,
-    source: id => browsers.inputContext(id, deliveryAttempts.hostId),
-    files: new BrowserInputContextCaptureFiles(join(app.getPath('userData'), 'browser-input-context')) })
+  const browserInputContextPorts = createBrowserInputContextPorts({ hostId: deliveryAttempts.hostId,
+    browsers, home: app.getPath('home'), directory: join(app.getPath('userData'), 'browser-input-context'),
+    createFromBuffer: bytes => nativeImage.createFromBuffer(bytes) })
+  const inputContextCaptures = browserInputContextPorts.captures
   const ensureBrowser = (id: string, input?: Parameters<BrowserViewManager['restore']>[1]) => browsers.ensure(id, async () => {
     let saved = browserColdDescriptor((await spatialState.read())?.graph ?? null, id)
     workspace(config, saved.workspaceId)
@@ -649,7 +649,7 @@ export async function registerIpc(args: {
    */
   const requireTrustedSender = (channel: PrivilegedChannel, event: IpcMainInvokeEvent): void =>
     assertSenderTrusted(senderTrust(channel, event.sender, contents))
-  registerBrowserInputContextIpc({ handle: handleWithEvent, trust: requireTrustedSender, captures: inputContextCaptures })
+  registerBrowserInputContextIpc({ handle: handleWithEvent, trust: requireTrustedSender, ...browserInputContextPorts })
 
   const acceptWorkbenchWindow = (event: Electron.IpcMainEvent, response: import('../shared/workbench-windows.js').WorkbenchWindowResponse) => args.workbenchWindows.accept(event, response)
   ipcMain.on(WORKBENCH_WINDOW_RESPONSE, acceptWorkbenchWindow)

@@ -1986,6 +1986,10 @@ export type AgentMuxDesktopApi = {
   toolkit: ToolkitDesktopApi
   browser: {
     captureInputContext(browserId: string): Promise<import('./browser-input-context-capture').BrowserInputScene>
+    captureInputFrame(browserId: string): Promise<import('./browser-input-context-capture').BrowserInputFrameResult>
+    prepareInputSelection(input: import('./browser-input-context-capture').BrowserInputSelectionPrepare): Promise<import('./browser-input-context-capture').BrowserInputSelectionReceipt>
+    readInputSelection(operationId: string): Promise<import('./browser-input-context-capture').BrowserInputSelectionRead>
+    readSelectionImage(reference: import('@agentmux/core/browser-input-context').BrowserInputImageReference): Promise<PastedImage | null>
     freezeInputContext(input: import('./browser-input-context-capture').BrowserInputContextFreeze): Promise<import('./browser-input-context-capture').BrowserInputContextFreezeReceipt>
     listRetainedUploads(): Promise<import('./browser-upload.js').BrowserRetainedUploads>
     discardRetainedUpload(selectionId: string, document?: WorkbenchWindowDocument): Promise<boolean>
