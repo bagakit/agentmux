@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { BrowserTraceReadingHost } from '../src/renderer/src/components/BrowserTraceReadingHost'
 import { composerDOM } from './helpers/composer-dom-fixture'
 
@@ -46,4 +46,23 @@ it('does not resurrect a closed idle dock when a later Agent operation starts', 
   await render(false, true); expect(dom.container.querySelector('aside')).not.toBeNull()
   await render(false, false); expect(dom.container.querySelector('aside')).toBeNull()
   await render(false, true); expect(dom.container.querySelector('aside')).toBeNull()
+})
+
+it('positions an active reader after its enclosing surface ref is reattached by the same commit', async () => {
+  let surface: HTMLElement | null = null
+  const locate = () => surface
+  function EnclosingSurface({ open, revision = 0 }: { open: boolean; revision?: number }) {
+    return <section ref={node => { surface = node }} data-revision={revision}><div className="browser-toolbar" />
+      <BrowserTraceReadingHost mode="floating" open={open} held visible anchor={locate} onReopen={() => {}}>Original trace</BrowserTraceReadingHost>
+    </section>
+  }
+  await dom.render(<EnclosingSurface open={false} />)
+  await dom.render(<EnclosingSurface open />)
+  await vi.waitFor(() => {
+    const panel = document.querySelector<HTMLElement>('[aria-label="Browser activity trace"]')!
+    expect(panel).not.toBeNull(); expect(panel.style.visibility).toBe('visible')
+    expect(panel.style.left).not.toBe(''); expect(panel.style.top).not.toBe('')
+  })
+  await dom.render(<EnclosingSurface open revision={1} />)
+  expect(document.querySelector<HTMLElement>('[aria-label="Browser activity trace"]')!.style.visibility).toBe('visible')
 })
