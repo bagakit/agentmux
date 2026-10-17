@@ -193,11 +193,10 @@ it('copies the canonical Agent link from the original alias card', async () => {
   await act(async () => item!.click()); await settle()
   expect(copy).toHaveBeenCalledExactlyOnceWith('amux://agent/canonical-original-agent')
 })
-it.each(['missing-control', 'stale-run', 'unobserved-run'] as const)('refuses only the card operation with %s and keeps the healthy original workface', async reason => {
+it.each(['missing-control', 'stale-run'] as const)('refuses only the card operation with %s and keeps the healthy original workface', async reason => {
   await exactTarget(target, [first], reason !== 'missing-control')
-  if (reason !== 'missing-control') await act(async () => useAppStore.setState({ sessions: [first,
-    reason === 'stale-run' ? { ...target, control: { ...target.control, run: { runId: 'changed-before-menu' } } }
-      : { ...target, runUnobserved: true }] }))
+  if (reason === 'stale-run') await act(async () => useAppStore.setState({ sessions: [first,
+    { ...target, control: { ...target.control, run: { runId: 'changed-before-menu' } } }] }))
   const before = useAppStore.getState()
   await act(async () => card().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }))); await settle()
   const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Stop Agent')
@@ -206,14 +205,17 @@ it.each(['missing-control', 'stale-run', 'unobserved-run'] as const)('refuses on
   expect(useAppStore.getState().errorNoticeContext?.summary).toContain('original work surface is kept')
   expect(useAppStore.getState().sessions).toBe(before.sessions); retained(before)
 })
-it('rechecks the original presentation Host, canonical identity and observed Run at confirmation', async () => {
+it('passes an exact original control to Core when the Run becomes unobserved during confirmation', async () => {
   const remote = { ...target, hostId: 'remote', control: { ...target.control, hostId: 'remote' } }
+  vi.mocked(api.sessions.stop).mockRejectedValueOnce(new Error('Original Core stop receipt is unknown'))
   await exactTarget(remote, [target]); await open()
   await act(async () => useAppStore.setState({ sessions: [target, { ...remote, runUnobserved: true }] }))
   const before = useAppStore.getState()
   await act(async () => confirm().click()); await settle()
-  expect(api.sessions.stop).not.toHaveBeenCalled(); retained(before)
+  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(remote.control); retained(before)
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
   expect(useAppStore.getState().errorNoticeContext?.subject).toEqual(remote.control)
+  expect(useAppStore.getState().errorNoticeContext?.summary).toContain('unconfirmed')
 })
 
 it('keeps Copy available for an unobserved canonical identity and reports without writing the clipboard', async () => {
@@ -227,4 +229,16 @@ it('keeps Copy available for an unobserved canonical identity and reports withou
   expect(useAppStore.getState().error).toContain('canonical Agent identity is not confirmed')
   expect(useAppStore.getState().errorNoticeContext?.summary).toContain('Refresh this Agent’s identity')
   expect(useAppStore.getState().sessions).toBe(before.sessions); retained(before)
+})
+
+it('admits the original card with an unobserved Run and retains the Core failure service window', async () => {
+  const original = { ...target, runUnobserved: true as const }
+  await exactTarget(original)
+  vi.mocked(api.sessions.stop).mockRejectedValueOnce(new Error('Core could not confirm the original stop result'))
+  const before = useAppStore.getState(); await open(); await act(async () => confirm().click()); await settle()
+  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(original.control)
+  expect(useAppStore.getState().sessions).toBe(before.sessions); retained(before)
+  expect(useAppStore.getState().error).toContain('Core could not confirm')
+  expect(useAppStore.getState().errorNoticeContext?.subject).toEqual(original.control)
+  expect(useAppStore.getState().errorNoticeContext?.summary).toContain('Review its status, then retry Stop Agent')
 })

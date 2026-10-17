@@ -143,7 +143,7 @@ it('keeps a confirmed failed result readable and requires a fresh confirmation b
     ...result(operationId, 'failed'), newRun: { runId: 'failed-start-run' },
     detail: 'The replacement Run exited during startup.',
     failure: { code: 'AGENT_TERMINAL_HANDSHAKE_FAILED', message: 'Original startup failed', observedAt: _tailFixtureEpoch(0, 0, 100) },
-    session: { ...target, control: { ...target.control, run: { runId: 'failed-start-run' } } }
+    session: { ...target, runUnobserved: true, control: { ...target.control, run: { runId: 'failed-start-run' } } }
   }))
   await open(); await act(async () => confirm().click()); await settle()
   const originalId = vi.mocked(api.sessions.restart).mock.calls[0]![1]
@@ -178,12 +178,19 @@ it.each(['same-id-other-host', 'presentation-alias'] as const)('restarts the exa
   expect(confirm().textContent).toBe('Retry original restart')
   for (const key of ['tabs', 'layouts', 'agentComposerDrafts', 'timelines'] as const) expect(useAppStore.getState()[key]).toBe(before[key])
 })
-it('refuses a newly unobserved Run before confirmation without borrowing a same-ID neighbor', async () => {
+it('admits the exact unobserved Run to Core and retains the original unknown restart receipt', async () => {
+  vi.mocked(api.sessions.restart).mockRejectedValueOnce(new Error('Core original restart response is unknown'))
+    .mockImplementationOnce(async (_control, operationId) => result(operationId, 'unconfirmed'))
   await open(); await act(async () => useAppStore.setState({ sessions: [{ ...target, runUnobserved: true }, other] }))
   const before = useAppStore.getState(); await act(async () => confirm().click()); await settle()
-  expect(api.sessions.restart).not.toHaveBeenCalled()
-  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('No restart was sent')
+  expect(api.sessions.restart).toHaveBeenCalledExactlyOnceWith(target.control, expect.any(String), false)
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Core original restart response is unknown')
+  expect(confirm().textContent).toBe('Check restart')
+  const operationId = vi.mocked(api.sessions.restart).mock.calls[0]![1]
+  await act(async () => confirm().click()); await settle()
+  expect(api.sessions.restart).toHaveBeenNthCalledWith(2, target.control, operationId, true)
   expect(useAppStore.getState().sessions).toBe(before.sessions)
+  for (const key of ['tabs', 'layouts', 'agentComposerDrafts', 'timelines'] as const) expect(useAppStore.getState()[key]).toBe(before[key])
 })
 
 it.each(['same-id-other-host', 'presentation-alias'] as const)('projects the canonical restart receipt into its original %s presentation only', async scenario => {

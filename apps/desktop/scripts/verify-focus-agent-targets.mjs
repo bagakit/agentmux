@@ -11,6 +11,9 @@ await verifyRendererSourceMutations({
     'apps/desktop/test/helpers/composer-dom-fixture.tsx', 'apps/desktop/test/helpers/client-ui-render.tsx',
     'apps/desktop/test/helpers/agent-information-root.tsx', 'apps/desktop/scripts/lib/fixture-values.mjs', 'test/fixture-values.mjs'],
   mutations: [
+    { label: 'observation-gap-must-not-block-exact-core-control', file: target,
+      before: 'return Boolean(session && session.control.run.runId === control.run.runId)',
+      after: 'return Boolean(session && !session.runUnobserved && session.control.run.runId === control.run.runId)' },
     { label: 'original-presentation-and-control-must-select-target', file: target,
       before: 'session.id === target.id && session.hostId === target.hostId &&\n    session.control.hostId === control.hostId && session.control.agentSessionId === control.agentSessionId',
       after: 'session.id === target.id' },

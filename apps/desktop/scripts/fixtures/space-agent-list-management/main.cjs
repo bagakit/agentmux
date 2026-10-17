@@ -115,6 +115,7 @@ app.whenReady().then(async () => {
       assert.deepEqual((await facts()).clipboard, ['amux://agent/canonical-gamma'], 'Single alias Copy preserves its canonical Agent identity')
       await selectMenu('Stop Agent'); await until('!!document.querySelector(".confirmation-dialog")')
       assert.deepEqual((await facts()).controls, [], 'Original shared Stop still requires confirmation')
+      assert.equal(await read(`spaceListScene.facts().sessions.find(session=>session.id==='gamma'&&session.control.hostId==='local').runUnobserved`), true, 'The exact original control remains available despite an observation gap')
       await click('[data-confirm-label="Stop Agent"]'); await until('!document.querySelector(".confirmation-dialog")')
       assert.deepEqual((await facts()).controls, [{ kind: 'agent', hostId: 'local', agentSessionId: 'canonical-gamma', run: { runId: 'private-original-gamma' } }], 'Single alias Stop never borrows the same-ID Agent on another Host')
       await selectMenu('Restart Session…'); await until('!!document.querySelector(".confirmation-dialog")')
