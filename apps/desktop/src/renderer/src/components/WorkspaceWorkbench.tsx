@@ -13,6 +13,8 @@ import { trustedRendererEventTimestamp } from '../lib/renderer-event-clock'
 import { workbenchProjectionTabReference } from '../lib/workbench-projection'
 import { projectedNameRevision } from '../lib/name-authority'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
+import { SurfaceState } from './SurfaceState'
+import type { RenderableServiceNotice } from '../lib/service-window-notice'
 import {
   DndContext,
   DragOverlay,
@@ -1155,7 +1157,7 @@ function PaneGroup({
   viewHostPrefix: string
   onNewTab(groupId: string): void
   emptyZone?: boolean
-  recoveryNotice?: ReactNode
+  recoveryNotice?: ((layout: 'inline' | 'surface') => ReactNode) | undefined
 }) {
   const projection = useContext(WorkbenchProjectionContext)
   const mote = useContext(MoteWorkfaceContext)
@@ -1299,11 +1301,12 @@ function PaneGroup({
       </header>
       <div className="pane-content">
       <div className="pane-body" key="original-body">
-        {recoveryNotice}
+        {activeTab || showEmptySpace ? recoveryNotice?.('inline') : null}
         <div className="pane-body__content">
-        {bodyTabs.length > 0 && !group.activeTabId && !showEmptySpace ? <div className="pane-state">
-          <strong>{mote ? 'Original discussions retained' : 'Choose a Tab'}</strong><span>{mote ? 'The last Agent location is not confirmed yet. Your original Tabs remain available above.' : 'Select a Tab above to display it here.'}</span>
-        </div> : null}
+        {!activeTab && !showEmptySpace ? recoveryNotice?.('surface') : null}
+        {bodyTabs.length > 0 && !group.activeTabId && !showEmptySpace && !recoveryNotice ? <SurfaceState
+          title={mote ? 'Original discussions retained' : 'Choose a Tab'}
+          description={mote ? 'The last Agent location is not confirmed yet. Your original Tabs remain available above.' : 'Select a Tab above to display it here.'} /> : null}
         {showEmptySpace ? <EmptyWorkbench visible={surfaceVisible} tabGroupId={group.id}
           creationTarget={emptyCreationTarget} onCreate={() => onNewTab(group.id)} /> : null}
         {/* 每个 Tab 都留在 DOM 里，不活动的靠 CSS 隐藏。
@@ -1391,7 +1394,7 @@ function SplitNode({
   viewHostPrefix: string
   onNewTab(groupId: string): void
   emptyZone?: boolean
-  recoveryNotice?: ReactNode
+  recoveryNotice?: ((layout: 'inline' | 'surface') => ReactNode) | undefined
 }) {
   if (node.type === 'leaf') {
     const group = layout.groups.find((candidate) => candidate.id === node.groupId)
@@ -1471,7 +1474,7 @@ function SplitBranch({
   viewHostPrefix: string
   onNewTab(groupId: string): void
   emptyZone?: boolean
-  recoveryNotice?: ReactNode
+  recoveryNotice?: ((layout: 'inline' | 'surface') => ReactNode) | undefined
 }) {
   const projection = useContext(WorkbenchProjectionContext)
   const updateSplitRatio = useAppStore.getState().updateSplitRatio
@@ -2042,7 +2045,7 @@ export function WorkspaceWorkbench({
 
   if (categoryWorkspace) return <div ref={workbenchRef} className="workspace-workbench topic-category-overview">
     {leadingChrome ? <header className="pane-tabbar pane-tabbar--root">{leadingChrome}</header> : null}
-    <div className="pane-state"><strong>Select a Topic</strong><span>Choose a Topic from the directory to open its discussions.</span></div>
+    <SurfaceState title="Select a Topic" description="Choose a Topic from the directory to open its discussions." />
   </div>
   const hasContextTabs = Object.values(tabs).some(tab => tab.workspaceId === workspaceId && (!topicId || tab.topicId === topicId))
   const membersConfirmed = Boolean(storedLayout && storedLayout.groups.every(group => group.tabOrder.every(id => Boolean(tabs[id]))))
@@ -2051,7 +2054,7 @@ export function WorkspaceWorkbench({
     return <div ref={workbenchRef} className="workspace-workbench" data-workbench-pending-owner>
       {presentationAction ? <header className="pane-tabbar pane-tabbar--root"><div className="pane-tabbar__actions">{presentationAction}</div></header> : null}
       {confirmedEmpty ? <EmptyWorkbench visible={visible} tabGroupId={layout.activeGroupId} onCreate={() => newTab(layout.activeGroupId)} />
-        : <div role="status" className="workbench-restore-notice">Original context retained · Workspace members are still restoring</div>}
+        : <SurfaceState role="status" title="Original context retained" description="Workspace members are still restoring" />}
     </div>
   }
   const showUnselectedBody = viewOwnership === 'projection' && !projection && !retainedTabId && hasContextTabs
@@ -2064,17 +2067,22 @@ export function WorkspaceWorkbench({
     : Boolean(!hasContextTabs && membersConfirmed && !moteContext?.issue && storedLayout && objectLayout.confirmed && objectLayout.choice?.zoneId && objectLayout.choice.tabId === null &&
       objectLayout.layout?.groups.every(group => group.tabOrder.length === 0))
   const scopeIssues = viewOwnership === 'owner' ? objectLayout.issues : zoneLayout?.issues ?? []
-  const projectionNotice = scopeIssues.length ? <ServiceWindowNotice
-    notice={{ kind: 'indeterminate', notice: { step: 'Original work surface retained', mode: scopeIssues.join(' '),
-      restore: 'Select a Tab in its Group, or reopen the original work surface in Space.' } }} />
-    : !storedLayout && residentLayout && !projection ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+  const projectionIssue: RenderableServiceNotice | null = scopeIssues.length ?
+    { kind: 'indeterminate', notice: { step: 'Original work surface retained', mode: scopeIssues.join(' '),
+      restore: 'Select a Tab in its Group, or reopen the original work surface in Space.' } }
+    : !storedLayout && residentLayout && !projection ? { kind: 'indeterminate', notice: {
       step: 'Original work surface retained', mode: 'Display layout is still restoring. Existing content and drafts are kept.',
-      restore: 'Reopen the original work surface in Space to continue recovery.' } }} /> : null
+      restore: 'Reopen the original work surface in Space to continue recovery.' } } : null
+  const projectionNotice = projectionIssue ? <ServiceWindowNotice notice={projectionIssue} /> : null
+  const projectionState = projectionIssue ? <ServiceWindowNotice notice={projectionIssue} layout="surface" /> : null
   const retainedNotice = retainedTabId && !showReferenceBody ? <RetainedWorkbenchNotice key={retainedBodyScope}
     workspaceId={workspaceId} targetTabId={retainedTabId} available={Boolean(original)} visible={visible}
     active={retainUnplacedTab} issues={scopeIssues} /> : null
-  const contentNotice = retainedNotice ? <>{!retainUnplacedTab ? projectionNotice : null}{retainedNotice}</> : projectionNotice
-  if (!layout && viewOwnership !== 'owner' && !retainUnplacedTab && !showUnselectedBody) return projection ? <div className="workspace-workbench" data-workbench-pending-owner><div className="pane-body">{projectionNotice}</div></div> : null
+  const contentNotice = retainedNotice || projectionIssue ? (layout: 'inline' | 'surface') => <>
+    {!retainedNotice || !retainUnplacedTab ? <ServiceWindowNotice notice={projectionIssue} layout={layout} /> : null}
+    {retainedNotice}
+  </> : undefined
+  if (!layout && viewOwnership !== 'owner' && !retainUnplacedTab && !showUnselectedBody) return projection ? <div className="workspace-workbench" data-workbench-pending-owner><div className="pane-body">{projectionState}</div></div> : null
   if (layout && viewOwnership === 'projection' && projection?.entity.kind === 'region') {
     const reference = projection.selection.length === 1 ? projection.selection[0] : undefined
     const confirmed = reference && reference.regionId === projection.entity.regionId && reference.displayWorkspaceId === workspaceId &&
@@ -2082,10 +2090,10 @@ export function WorkspaceWorkbench({
       !projectionContext?.unsupportedTabIds.has(reference.tabId)
     return <WorkbenchProjectionContext.Provider value={projectionContext}>
       <div ref={workbenchRef} className="workspace-workbench">
-        <div className="pane-body">{projectionNotice}
+        <div className="pane-body">{confirmed ? projectionNotice : projectionState}
         {confirmed ? <div key={workbenchRegionProjectionSlotId(effectiveViewHostPrefix, reference)} id={workbenchRegionProjectionSlotId(effectiveViewHostPrefix, reference)}
           data-workbench-tab-id={reference.tabId} data-workbench-group-id={reference.groupId} className="workbench-region-slot" />
-          : projectionNotice ? null : <div role="status" className="workbench-restore-notice">The exact Region occurrence is not confirmed here. Its content and reference are kept; choose its original location.</div>}
+          : projectionNotice ? null : <SurfaceState role="status" title="Original Region retained" description="The exact Region occurrence is not confirmed here. Its content and reference are kept; choose its original location." />}
         </div>
       </div>
     </WorkbenchProjectionContext.Provider>
@@ -2101,10 +2109,10 @@ export function WorkspaceWorkbench({
       !projectionContext?.unsupportedTabIds.has(tab.id)
     return <WorkbenchProjectionContext.Provider value={projectionContext}>
       <div ref={workbenchRef} className="workspace-workbench">
-        <div className="pane-body">{projectionNotice}
+        <div className="pane-body">{confirmed ? projectionNotice : projectionState}
         {confirmed ? <div key={workbenchProjectionSlotId(effectiveViewHostPrefix, reference)} id={workbenchProjectionSlotId(effectiveViewHostPrefix, reference)}
           data-workbench-tab-id={tab.id} data-workbench-group-id={reference.groupId} className="workbench-tab-slot" />
-          : projectionNotice ? null : <div role="status" className="workbench-restore-notice">The exact Tab occurrence is not confirmed here. Its content and reference are kept; choose its original location.</div>}
+          : projectionNotice ? null : <SurfaceState role="status" title="Original Tab retained" description="The exact Tab occurrence is not confirmed here. Its content and reference are kept; choose its original location." />}
         </div>
       </div>
     </WorkbenchProjectionContext.Provider>
@@ -2153,7 +2161,7 @@ export function WorkspaceWorkbench({
           emptyZone={emptyZone}
           recoveryNotice={contentNotice}
         /> : <><header className="pane-tabbar pane-tabbar--root">{leadingChrome}</header>
-          <div className="pane-body">{contentNotice ?? <div role="status" className="workbench-restore-notice">Original Tab retained · Workspace layout is still restoring</div>}</div></>}
+          <div className="pane-body">{retainedNotice ?? projectionState ?? <SurfaceState title="Original Tab retained" description="Workspace layout is still restoring" role="status" />}</div></>}
         </WorkbenchProjectionContext.Provider>
         </div>
       </div>

@@ -1,3 +1,4 @@
+import { SurfaceState } from './SurfaceState'
 import { useWorkbenchWindowDocument } from '../lib/workbench-document'
 import { moteDefaultExecutor } from '../lib/mote-quick-preferences'
 import { scratchTopicsForWorkspace, scratchTopicKind } from '../lib/scratch-topic-snapshots'
@@ -73,7 +74,7 @@ export function NewTabSurface({
   const presentation = useWorkbenchBrowserPresentation()
   const projection = useContext(WorkbenchProjectionContext)
   const settings = useContext(SettingsNavigation)
-  const surfaceRef = useRef<HTMLElement>(null)
+  const surfaceRef = useRef<HTMLDivElement>(null)
   const [regionHeight, setRegionHeight] = useState<number | null>(null)
   const restoreAgentsFocus = useRef<LauncherSectionMode | null>(null)
   const [documentVisible, setDocumentVisible] = useState(() => !document.hidden)
@@ -356,9 +357,9 @@ export function NewTabSurface({
     onRemoteFiles: () => setFileReferencesOpen(true) })
 
   return (
-    <section ref={surfaceRef} className="launch-surface" data-agent-section={sections.agents} data-motion-active={motionActive}
+    <SurfaceState ref={surfaceRef} className="launch-surface" data-agent-section={sections.agents} data-motion-active={motionActive}
       data-density={regionHeight !== null && regionHeight < 520 ? 'compact' : 'normal'}
-      style={regionHeight === null ? undefined : { '--launcher-region-height': `${regionHeight}px` } as CSSProperties}>
+      style={regionHeight === null ? undefined : { '--launcher-region-height': `${regionHeight}px` } as CSSProperties} body={<>
       <LauncherEnvironment workspace={workspace} host={host} check={hostCheck} displayPath={displayPath} active={motionActive}
         hosts={config?.hosts ?? []} workspaces={config?.workspaces ?? []} onSelectWorkspace={chooseExecutionWorkspace}
         selectionDisabled={busy !== null} onManageProjects={() => settings?.open('hosts')} />
@@ -433,6 +434,6 @@ export function NewTabSurface({
         terminalThemeId={terminalThemeId} terminalFontSize={terminalFontSize} visible={visible} busy={busy}
         onRun={run} />
       {sections.agents === 'hidden' ? <div className="launcher-restores"><button type="button" className="launcher-restore" aria-label="Restore Agents" onClick={() => setSection('agents', 'expanded')}><AgentAvatar executorId={executorId} label={selectedExecutor?.label ?? executorId} providerId={selectedProviderId} size={15} />Agents · {selectedExecutor?.label ?? executorId}<ThemeNavigationDownIcon size={12} /></button></div> : null}
-    </section>
+    </>} />
   )
 }

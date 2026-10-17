@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { serviceNoticeAriaLive, type RenderableServiceNotice } from '../lib/service-window-notice'
 import { ServiceNoticeDisclosure } from './ServiceNoticeDisclosure'
 import type { ServiceNoticeItem } from '../lib/use-service-notices'
+import { SurfaceState } from './SurfaceState'
 
 const ThemeStatusInfoIcon = semanticIconComponent('status.info')
 
@@ -24,7 +25,7 @@ export type ServiceNoticeDisclosureIdentity = Pick<ServiceNoticeItem, 'id' | 'oc
  * 拿到 null 就渲染 null（healthy 与 agent-broken 都不由服务窗承载）——调用方把判定结果直接传进来。
  */
 export function ServiceWindowNotice({
-  notice, summary, disclosure, actions, title
+  notice, summary, disclosure, actions, title, layout = 'inline'
 }: {
   notice: RenderableServiceNotice | null
   /** Concise three facts supplied by the same projection owner; original text stays in details. */
@@ -33,6 +34,7 @@ export function ServiceWindowNotice({
   disclosure?: ServiceNoticeDisclosureIdentity
   actions?: ReactNode
   title?: string
+  layout?: 'inline' | 'surface'
 }) {
   if (disclosure) {
     const { scope, available, visible, ...identity } = disclosure
@@ -50,28 +52,23 @@ export function ServiceWindowNotice({
   const visible = summary ?? notice.notice
   return (
     <aside
-      className="service-window"
+      className={`service-window service-window--${layout}`}
       data-kind={notice.kind}
       role={ariaLive === 'assertive' ? 'alert' : 'status'}
       aria-live={ariaLive}
     >
-      <span className="service-window__icon" aria-hidden="true">
-        <ThemeStatusInfoIcon size={14} />
-      </span>
-      <div className="service-window__body">
-        <strong className="service-window__step">{visible.step}</strong>
-        <span className="service-window__mode">{visible.mode}</span>
-        <span className="service-window__restore">{visible.restore}</span>
-        {summary ? <details className="service-window__details">
-          <summary>Details</summary>
+      <SurfaceState layout={layout}
+        identity={<span className="service-window__icon" aria-hidden="true"><ThemeStatusInfoIcon size={layout === 'surface' ? 24 : 14} /></span>}
+        title={visible.step}
+        description={<><span className="service-window__mode">{visible.mode}</span><span className="service-window__restore">{visible.restore}</span></>}
+        actions={actions}
+        details={summary ? { summary: 'Details', content:
           <div className="service-window__original" tabIndex={0} aria-label={`Complete details: ${notice.notice.step}`}>
             <strong>{notice.notice.step}</strong>
             <span>{notice.notice.mode}</span>
             <span>{notice.notice.restore}</span>
           </div>
-        </details> : null}
-      </div>
-      {actions}
+        } : undefined} />
     </aside>
   )
 }
