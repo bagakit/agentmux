@@ -15,8 +15,7 @@ import { resolveFocusRecentActivityHours, type FocusRecentActivityHours } from '
 import type { AppConfig } from '../src/shared/contracts'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
 
-// Native PTY painting and an unrelated Avatar disclosure do not participate in lane ordering.
-vi.mock('../src/renderer/src/components/AgentAvatar', async importOriginal => ({ ...await importOriginal<typeof import('../src/renderer/src/components/AgentAvatar')>(), AgentAvatar: () => null }))
+// Native PTY painting does not participate in lane ordering.
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () => null }))
 
 const dom = composerDOM()
