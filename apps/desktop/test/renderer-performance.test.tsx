@@ -1,5 +1,5 @@
 import { rendererMemoryFixture } from '../../../packages/core/test/helpers/toolkit-metrics'
-import { terminalWriteContextFixture } from '../../../packages/core/test/helpers/renderer-performance'
+import { terminalWriteContextFixture, terminalCostFixture as terminal } from '../../../packages/core/test/helpers/renderer-performance'
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -8,17 +8,8 @@ import { createRendererPerformance, rendererPerformance } from '../src/renderer/
 import { useObservedAppStore, useObservedConsumerCommit } from '../src/renderer/src/lib/use-observed-app-store'
 import { useAppStore } from '../src/renderer/src/store'
 import { parseMetricsRendererResult, parseRendererPerformanceSnapshot } from '@agentmux/core/control'
-import type { RendererTerminalCost } from '@agentmux/core/control'
 import { TerminalLiveOutputQueue } from '@agentmux/client-ui/terminal/live-output'
 
-const terminal = (id: number): RendererTerminalCost => ({ sessionId: `session-${id}`, runId: `run-${id}`, regionId: null,
-  visible: true, visibleSinceAt: 1, readySinceAt: null, revealed: false, liveReady: false, acceptsInput: false, replaying: true,
-  inFlightWrites: 0, queuedItems: 0, queuedBytes: 0, pendingItems: 0, pendingBytes: 0, cols: 80, rows: 24, normalLines: 24, alternateLines: 24,
-  interaction: { observedSinceAt: 1,
-    keydown: { count: 0, unknownDelayCount: 0, delay: { count: 0, totalMs: 0, maxMs: 0 } },
-    wheel: { count: 0, unknownDelayCount: 0, delay: { count: 0, totalMs: 0, maxMs: 0 } },
-    writeRequests: { started: 0, completed: 0, failed: 0, pending: 0, wall: { count: 0, totalMs: 0, maxMs: 0 }, lastStartedAt: null, lastSettledAt: null },
-    lastEvent: null } })
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 it('retains bounded independent facts, releases terminal readers, and does not inspect excess terminals', () => {

@@ -13,6 +13,7 @@ import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { TerminalView } from '../src/renderer/src/components/TerminalView'
 import { TERMINAL_REPLAY_BATCH_BYTES } from '@agentmux/client-ui/terminal/replay'
 import { rendererPerformance } from '../src/renderer/src/lib/renderer-performance'
+import { parseRendererPerformanceSnapshot } from '@agentmux/core/control'
 import { readTerminalViewObservation } from '../src/renderer/src/lib/terminal-view-observation'
 
 // Real public xterm parser/buffers/modes, TerminalView, Store and viewport synchronizer.
@@ -174,6 +175,45 @@ it('imports prefix and suffix at their distinct owner grids with temporary scrol
 async function delivered(event: RuntimeEvent) {
   await act(async () => { receive(event); await new Promise(resolve => setTimeout(resolve,25)) })
 }
+
+it('reports ordinary writes by exact terminal instance, cause and real parser completion without retaining mutable counters', async () => {
+  const seed = 'checkpoint seed\r\n', tail = 'history tail'
+  const result = continuation(seed, tail)
+  const terminal = await ready(result)
+  const read = () => parseRendererPerformanceSnapshot(rendererPerformance.snapshot()).terminals.find(row => row.runId === session.control.run.runId)!
+  const initial = read()
+  expect(initial).toMatchObject({ hostId: session.control.hostId, sessionId: session.id, regionId: origin.regionId,
+    writes: { checkpoint: { started: 1, completed: 1, bytes: encoder.encode(seed).length, stringCodeUnits: 0, callbackWall: { count: 1 } },
+      history: { started: 1, completed: 1, bytes: encoder.encode(tail).length, callbackWall: { count: 1 } },
+      live: { started: 0, completed: 0, bytes: 0, callbackWall: { count: 0 } } } })
+  expect(initial.instanceId).toBeGreaterThan(0)
+  fixture.holdCallbacks = true
+  await act(async () => { receive(output(result.session.latestOutputBytes, 'ordinary')); await vi.waitFor(() => expect(fixture.callbacks).toHaveLength(1)) })
+  expect(read().writes.live).toMatchObject({ started: 1, completed: 0, bytes: 8, callbackWall: { count: 0 } })
+  await act(async () => { fixture.holdCallbacks = false; fixture.callbacks.splice(0).forEach(callback => callback()); await vi.waitFor(() => expect(read().writes.live.completed).toBe(1)) })
+  const completed = read()
+  expect(completed.writes.live.callbackWall.count).toBe(1)
+  expect(completed.writes.live.callbackWall.totalMs).toBeGreaterThan(0)
+  expect(completed.writes.live.callbackWall.maxMs).toBe(completed.writes.live.callbackWall.totalMs)
+  completed.writes.live.started = 999
+  completed.writes.live.callbackWall.count = 999
+  expect(read().writes.live).toMatchObject({ started: 1, completed: 1, callbackWall: { count: 1 } })
+  await render(result.session, false)
+  await delivered(output(result.session.latestOutputBytes + 8, ' hidden'))
+  expect(read()).toMatchObject({ visible: false, instanceId: initial.instanceId, writes: { live: { started: 2, completed: 2, bytes: 15 } } })
+  expect(contents(terminal)).toContain('history tailordinary hidden')
+  expect(initial.writes.live).toMatchObject({ started: 0, completed: 0, bytes: 0 })
+  const second = { ...session, id: 'second-agent', hostId: 'second-host', control: { ...session.control, hostId: 'second-host', agentSessionId: 'second-core-session', run: { runId: 'second-run' } } }
+  state(second); attach.mockResolvedValue(replay('second', second)); await render(second)
+  await act(async () => await vi.waitFor(() => expect(rendererPerformance.snapshot().terminals.find(row => row.runId === 'second-run')?.liveReady).toBe(true)))
+  const replaced = parseRendererPerformanceSnapshot(rendererPerformance.snapshot()).terminals
+  expect(replaced.some(row => row.instanceId === initial.instanceId)).toBe(false)
+  const secondRow = replaced.find(row => row.runId === 'second-run')!
+  expect(secondRow.hostId).toBe('second-host'); expect(secondRow.sessionId).toBe('second-core-session')
+  expect(secondRow.instanceId).toBeGreaterThan(initial.instanceId)
+  expect(secondRow.writes).toMatchObject({ history: { started: 1, completed: 1, bytes: 6 }, live: { started: 0, completed: 0 } })
+  expect(recover).not.toHaveBeenCalled()
+})
 
 it('restores both buffers and declared mouse modes from an independent seed after raw prefix eviction', async () => {
   const history = Array.from({length:45},(_,i)=>'normal-'+i+'\r\n').join('')
