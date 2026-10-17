@@ -57,19 +57,53 @@ it('retains pending watch opening before a source owner resolves and observes ca
   expect(f.controls.every(control => control.mock.calls.length === 0)).toBe(true)
 })
 
-it('preserves source-watch invalidation separately and bounds repeated notification publications', async () => {
+it('publishes each original invalidation before consumer receipt while retaining bounded first and latest snapshots', async () => {
   const f = await fixture(), observations: unknown[] = []
-  const watch = await f.client.observeConversation(ref, value => observations.push(value)); releases.push(async () => watch.dispose())
+  const atReceipt: Array<ReturnType<typeof f.client.findReadingDiagnostics>> = []
+  const watch = await f.client.observeConversation(ref, value => { observations.push(value); atReceipt.push(f.client.findReadingDiagnostics(query)) }); releases.push(async () => watch.dispose())
   for (let index = 0; index < 4; index++) {
     await appendFile(f.path, jsonl([row(`native-${index}`)]))
     await vi.waitFor(() => expect(observations.length).toBeGreaterThan(index))
   }
   const index = await f.client.findReadingDiagnostics(query), records = await originals(f.client)
   expect(records.some(record => record.events.some(event => event.phase === 'source-invalidated' && event.nativeSource?.nativeSessionId === 'native-main'))).toBe(true)
-  // Opening, opened and the first invalidation publish; later notifications update the same bounded ring.
-  expect(index.records).toHaveLength(3)
+  // Every original notification is publicly inspectable before disposal; older progress IDs are evicted.
+  expect(index.records).toHaveLength(2)
+  for (const [offset, observed] of (await Promise.all(atReceipt)).entries()) expect(observed.records[0]?.lastSequence).toBeGreaterThanOrEqual(offset + 3)
+  expect(records.some(record => record.events.filter(event => event.phase === 'source-invalidated').length >= 4)).toBe(true)
+  expect(index.coverage.evictedRecords).toBeGreaterThan(0)
   watch.dispose()
   expect((await originals(f.client)).some(record => record.events.filter(event => event.phase === 'source-invalidated').length >= 4)).toBe(true)
+})
+
+it('keeps first and latest progress immutable and prioritizes both original failures over healthy publication pressure', () => {
+  const source = new CoreReadingDiagnosticSource(), attempt = source.begin(ref)!
+  const latest = () => source.find(query).records[0]!.reference.logId
+  attempt.recorder.record({ phase: 'source-watch-opening' }); attempt.recorder.flush('progress')
+  const opening = latest()
+  attempt.recorder.record({ phase: 'source-watch-unavailable', reason: 'source-unavailable' }); attempt.recorder.flush('failure')
+  const firstFailure = latest(), originalFailure = source.read({ domain: 'reading.lifecycle', hostId: 'local', logId: firstFailure }).data
+  attempt.recorder.record({ phase: 'source-invalidated' }); attempt.recorder.flush('progress')
+  const previousProgress = latest()
+  attempt.recorder.record({ phase: 'source-watch-unavailable', reason: 'source-changed' }); attempt.recorder.flush('failure')
+  const secondFailure = latest()
+  for (let index = 0; index < 80; index++) {
+    attempt.recorder.record({ phase: 'source-invalidated' }); attempt.recorder.flush('progress')
+  }
+  const own = source.find(query)
+  expect(own.records).toHaveLength(4)
+  expect(source.read({ domain: 'reading.lifecycle', hostId: 'local', logId: opening }).availability).toBe('found')
+  expect(source.read({ domain: 'reading.lifecycle', hostId: 'local', logId: previousProgress }).availability).toBe('not-found')
+  expect(source.read({ domain: 'reading.lifecycle', hostId: 'local', logId: firstFailure }).data).toEqual(originalFailure)
+  expect(source.read({ domain: 'reading.lifecycle', hostId: 'local', logId: own.records[0]!.reference.logId }).data?.events.at(-1)?.phase).toBe('source-invalidated')
+  attempt.end()
+  for (let index = 0; index < 80; index++) {
+    const healthy = source.begin(ref)!
+    healthy.recorder.record({ phase: 'source-read-completed' }); healthy.recorder.flush('progress'); healthy.end()
+  }
+  for (const logId of [firstFailure, secondFailure]) expect(source.read({ domain: 'reading.lifecycle', hostId: 'local', logId }).availability).toBe('found')
+  expect(source.find(query).coverage.retainedRecords).toBe(64)
+  expect(source.find(query).coverage.evictedRecords).toBeGreaterThan(80)
 })
 
 it('rejects another raw source Host and another instance authority, without scanning an unrelated namespace', async () => {
