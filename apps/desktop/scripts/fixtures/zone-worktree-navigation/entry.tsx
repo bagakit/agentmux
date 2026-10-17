@@ -45,6 +45,16 @@ const calls: { method: string; args: unknown[] }[] = []
 const read = (method: string, args: unknown[]) => calls.push({ method, args })
 const rejectWrite = async (...args: unknown[]) => { read('forbidden-write', args); throw new Error('Capture fixture does not authorize filesystem, Git or Runtime writes') }
 api.ui.requestStorageFlush = async () => undefined
+api.git.worktrees = async input => {
+  read('git.worktrees', [input])
+  const resource = workspaces.find(value => value.id === input.workspaceId)
+  if (!resource || resource.hostId !== input.expectedResource.hostId || resource.path !== input.expectedResource.workspacePath) throw new Error('Unknown exact fixture resource')
+  if (resource.id === plain.id) return { kind: 'not-a-git-repository', ...input.expectedResource, checkedAt: 1 }
+  return { kind: 'ready', ...input.expectedResource, repoPath: display.path, checkedAt: 1, warnings: [], worktrees: [
+    { path: display.path, branch: 'main', kind: 'main', detached: false, aliases: [] },
+    { path: worktree.path, branch: 'feature/explain-zone-worktree-relationships-with-long-reference', kind: 'linked', detached: false, aliases: [] }
+  ] }
+}
 api.files.readDirectory = async (workspaceId, path) => {
   read('files.readDirectory', [workspaceId, path])
   return path === '' ? [{ name: 'src', path: 'src', isDirectory: true, isSymlink: false },

@@ -37,6 +37,12 @@ describe('Workspace Zones original Store projection and navigation', () => {
   let raf: typeof requestAnimationFrame
 
   beforeEach(() => {
+    vi.spyOn(api.git, 'worktrees').mockResolvedValue({ kind: 'ready', hostId: display.hostId, workspacePath: display.path,
+      repoPath: display.path, checkedAt: 1, warnings: [], worktrees: [
+        { path: display.path, branch: 'main', kind: 'main', detached: false, aliases: [] },
+        { path: first.path, branch: 'same', kind: 'linked', detached: false, aliases: [] },
+        { path: second.path, branch: 'same', kind: 'linked', detached: false, aliases: [] }
+      ] })
     raf = globalThis.requestAnimationFrame
     vi.stubGlobal('requestAnimationFrame', undefined)
     vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue(undefined)
@@ -106,7 +112,7 @@ describe('Workspace Zones original Store projection and navigation', () => {
       .map(zoneId => row(zoneId).querySelector('.workspace-zone-entry__kind')?.textContent))
       .toEqual(['Folder', 'Worktree', 'Worktree', 'Folder', 'Worktree', 'Unknown', 'Home', 'Folder'])
     expect([rootZone, firstZone, secondZone, remoteZone, duplicateZone, unknownZone, nested.zoneId, folderZone].map(rowName))
-      .toEqual(['Project', 'Same', 'Same', 'Remote directory', 'Same', 'missing-resource', 'Project', 'Project'])
+      .toEqual(['Project', 'Same', 'Same', 'Remote directory', 'Same', 'missing-resource', 'topic', 'nested-folder'])
     expect(row(nested.zoneId).getAttribute('aria-pressed')).toBe('true')
     expect(row(nested.zoneId).querySelector('[aria-label="Selected Zone"]')).not.toBeNull()
     expect(row(rootZone).querySelector('[aria-label="Selected Zone"]')).toBeNull()
@@ -130,7 +136,7 @@ describe('Workspace Zones original Store projection and navigation', () => {
     expect(context.files).toBeNull()
     const before = useAppStore.getState(), execute = vi.spyOn(before, 'executeControl'), report = vi.spyOn(before, 'reportError')
     await dom.render(<WorkspaceZonesPanel workspace={display} onManageWorktrees={vi.fn()} />)
-    expect(rowName(firstZone)).toBe(first.name)
+    expect(rowName(firstZone)).toBe(first.id)
     expect(row(firstZone).querySelector('.workspace-zone-entry__kind')?.textContent).toBe('Unknown')
     expect(row(firstZone).querySelector('.workspace-zone-entry__path')).toBeNull()
     expect(row(firstZone).title).toContain('conflict')

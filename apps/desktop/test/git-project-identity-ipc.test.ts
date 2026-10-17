@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
@@ -16,7 +17,7 @@ import type { WorkspaceFiles } from '../src/main/workspace-files'
 const fixture = vi.hoisted(() => ({ path: '', api: undefined as unknown as AgentMuxPreloadApi,
   handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown>(),
   invokes: [] as Array<{ channel: string; values: unknown[] }>,
-  sender: { id: 1, isDestroyed: () => false, send: vi.fn(), once: vi.fn(), off: vi.fn(), session: { flushStorageData: vi.fn() } } }))
+  sender: { id: 1, isDestroyed: () => false, send: vi.fn(), on: vi.fn(), once: vi.fn(), off: vi.fn(), session: { flushStorageData: vi.fn() } } }))
 vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
   app: { getPath: () => fixture.path, getAppPath: () => fixture.path },
   contextBridge: { exposeInMainWorld: (_key: string, value: AgentMuxPreloadApi) => { fixture.api = value } },
@@ -28,15 +29,17 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
     if (!handler) throw new Error(`Missing registered Main handler: ${channel}`)
     return await handler({ sender: fixture.sender } as unknown as IpcMainInvokeEvent, ...values)
   }, on: vi.fn(), off: vi.fn(), send: vi.fn() },
-  clipboard: {}, dialog: {}, nativeImage: {}, shell: {} }))
+  clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, safeStorage: { isEncryptionAvailable: () => false } }))
 vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/core')>(),
   AgentMuxControlServer: class { async start() {} async stop() {} } }))
-vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({ list: async () => [] }) }))
+vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({ list: async () => [], snapshot: async () => ({ demands: [] }), subscribe: () => () => {} }) }))
+vi.mock('../src/main/connector-host', () => ({ createDesktopConnections: async () => ({ connections: {}, secrets: {}, close: async () => {} }) }))
 vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
 vi.mock('../src/main/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private-journal.json',
   BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('../src/main/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
-vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class { dispose() {} } }))
+vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class { setPresentationWindowOwner() {} release() {} dispose() {} } }))
+vi.mock('../src/main/native-overlay-windows', () => ({ NativeOverlayWindows: class { dispose() {} } }))
 vi.mock('../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ notify: () => ({ status: 'shown' }), dispose() {} }) }))
 
 import '../src/preload/index'
@@ -57,14 +60,16 @@ beforeEach(async () => {
   host = new LocalExecutionHost({ id: 'original-host' })
   await git('init', '-q'); await git('remote', 'add', 'origin', 'git@code.example:Team/project.git')
   const runtime = { resourceSampler: { setObservationSources: () => () => {} }, setContinuousProgressInputObserver: () => () => {},
+    observeCoreEvents: () => () => {}, observeInputOccupation: () => () => {},
     setTerminalViewColors: () => {}, prepare: async () => ({}), commit: () => {}, attach: () => () => {},
     executionHost: (id: string) => { expect(id).toBe('original-host'); return host } } as unknown as RuntimeController
   dispose = await registerIpc({ initialConfig: ({ ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: 'repo', hostId: 'original-host', path: root,
       name: 'Original project', kind: 'folder' }] }), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: fixture.sender } as unknown as BrowserWindow, runtime,
     configStore: { get: async () => ({ ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: 'repo', hostId: 'original-host', path: root,
       name: 'Original project', kind: 'folder' }] }) } as unknown as ConfigStore,
-    scratchTopics: { setNameAudit: () => {} } as unknown as ScratchTopics, workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles,
-    progressLoops: { subscribe: () => () => {} } as unknown as Parameters<typeof registerIpc>[0]['progressLoops'] })
+    scratchTopics: { setNameAudit: () => {} } as unknown as ScratchTopics, workspaceFiles: { listFiles: async () => [], dispose: async () => {} } as unknown as WorkspaceFiles,
+    progressLoops: { subscribe: () => () => {} } as unknown as Parameters<typeof registerIpc>[0]['progressLoops'],
+    workbenchWindows: { setNativeOwner: () => () => {} } as unknown as Parameters<typeof registerIpc>[0]['workbenchWindows'] })
   expect(fixture.handlers.has('git:projectIdentity')).toBe(true)
 })
 afterEach(async () => {
@@ -85,4 +90,14 @@ it('keeps unavailable source observation distinct across both original bridge la
   await git('remote', 'set-url', 'origin', _hygiene_fixturePath("private/unconfirmed-source.git"))
   expect(await fixture.api.git.projectIdentity('repo')).toMatchObject({ kind: 'unavailable', hostId: 'original-host', workspacePath: root })
   expect(fixture.invokes).toEqual([{ channel: 'git:projectIdentity', values: ['repo'] }])
+})
+
+it('reads native worktrees through the registered preload/Main owner and rejects an incorrect expected Host', async () => {
+  const input = { workspaceId: 'repo', expectedResource: { hostId: 'original-host', workspacePath: root } }
+  const result = await fixture.api.git.worktrees(input)
+  expect(result).toMatchObject({ kind: 'ready', hostId: 'original-host', workspacePath: root,
+    worktrees: [{ path: root, kind: 'main', detached: false, branch: expect.any(String) }] })
+  expect(fixture.invokes).toEqual([{ channel: 'git:worktrees', values: [input] }])
+  await expect(fixture.api.git.worktrees({ ...input, expectedResource: { ...input.expectedResource, hostId: 'foreign' } }))
+    .rejects.toMatchObject({ code: 'GIT_RESOURCE_MISMATCH' })
 })
