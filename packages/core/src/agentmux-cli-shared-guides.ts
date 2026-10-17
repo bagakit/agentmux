@@ -40,6 +40,11 @@ Inspect app snapshot and space inspect for the exact existing Git Region before 
 Wrong or unavailable targets reject only this request; existing workspaces and Agents remain available.`
 
 export const DIAGNOSTIC_GUIDE = `Read system diagnostics inspect --list for actual injected readers.
+reading.lifecycle uses --recent with optional --session-id/--run-id/--since/--until filters
+to discover original references; --logid reads one exact record. Keep the original cursor/query and namespace.
+Core source metadata is bounded current-instance memory, not durable history or proof that no issue occurred.
+Client presentation metadata belongs to client.incident and its actual archive coverage. A received invalidation is not a source write time.
+No query starts a Reader, Runtime recovery, sampling, refresh or input.
 For mote.context.client, use --input FILE|- containing the complete typed query.
 Freeze scope.hostId/directoryPath from the resource Workspace row in app snapshot --include workspaces,
 topicId from Mote discovery, and Tab/reference from app inspect or space ls. A Mote's physical
