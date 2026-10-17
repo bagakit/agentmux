@@ -43,6 +43,14 @@ Mailbox 数据同样只在已有 store/API 边界提供：两条来信、四条�
 
 ## 采集与维护
 
+窄屏工具行回归沿同一真实产品接线执行：
+
+```sh
+node apps/desktop/scripts/verify-agent-region-identity-menu.mjs --visual-only --composer-toolbar-owning
+```
+
+该切片在 640／400／360／320px Region、明暗主题中输入未发送草稿，实际切换两行、大输入与一行三态；核对左右工具同排、右侧操作完整可见，并用真实 Tab 逐个进入左侧工具、打开 Skills 菜单。通过原 Session 用量和 Provider catalog 接缝提供 58% Context 与一条命令，确保 320px 真正发生工具横向溢出，未改变输入资格或实现第二份候选逻辑。24 张三态完整画面与两张窄屏滚动端点用于独立看图，原终端实例与草稿保持。反向编译在私有 Renderer 恢复旧折行规则、或切断原左侧工具带聚焦滚入，须分别在同一工具行／键盘命中断言失败；不改磁盘产品源码，也不发送、截屏或打开用户文件选择器。它继续使用下述 preview API 边界，不证明安装或真实 CLI。
+
 在仓库根目录执行：
 
 ```sh
