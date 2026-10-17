@@ -78,6 +78,8 @@ export type ConversationMessageProps = {
   content: string | readonly AgentSessionHistoryContentPart[]
   /** Original input wire may carry an envelope; an already decoded journal body must not be unwrapped again. */
   contentBoundary?: ConversationContentBoundary
+  /** Original Core notice identity, supplied only by the qualified platform record. */
+  a2aNotificationId?: string | undefined
   /** Recorded Provider reply semantics; clients never parse message text for these facts. */
   questionAnswers?: readonly AgentSessionHistoryQuestionAnswer[]
   /** Non-blocking notice from the Provider's recorded reading projection. */
@@ -151,7 +153,7 @@ function partHasRenderableContent(part: AgentSessionHistoryContentPart): boolean
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
   active = true, compact = false, expandedContent = false, detailsOnlyMetadata = false, recordTitle, messagePhase, recordedIdentity = false, messageDetails, renderSubmissionOriginal, messageActions, located = false, copyText, onCopy,
-  speaker: recordedSpeaker, conversationEvent, sources, conversationSessionId, itemRef, inputSource, publicContent, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, contentBoundary = 'wire', questionAnswers, questionDiagnostic, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
+  speaker: recordedSpeaker, conversationEvent, sources, conversationSessionId, itemRef, inputSource, publicContent, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, contentBoundary = 'wire', a2aNotificationId, questionAnswers, questionDiagnostic, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
   openWorkspaceFile, readPastedImage, readHistoryResource, nativeResourceRecord, openHttpLink, onContinue, onSelectAnnotation, expandedTraces: controlledTraces, onToggleTrace: controlledToggle, traceDisclosure
 }: ConversationMessageProps) {
   const platform = useClientUiPlatform()
@@ -182,15 +184,19 @@ export function ConversationMessage({
     conversationSessionId !== undefined && conversationSessionId.length > 0 && speaker.id !== conversationSessionId
   const inputOrigin = inputSource ? describeConversationInputSource(inputSource) : undefined
   const isSystemContext = speaker?.role === 'system'
-  const systemSummary = isSystemContext ? parts.find(part => part.kind === 'text')?.text.slice(0, 240).replace(/\s+/gu, ' ').trim() : undefined
+  const rawSystemSummary = isSystemContext ? parts.find(part => part.kind === 'text')?.text.slice(0, 240).replace(/\s+/gu, ' ').trim() : undefined
   const isIncoming = speaker?.role === 'human' || speaker?.role === 'external' || isPeerAgent
   const inputMarkdown = isIncoming || recordedIdentity && speaker?.role === 'unknown'
   const files = useMemo(() => (speaker?.role === 'agent' || conversationEvent?.role === 'observation') && !isPeerAgent && !compact && messagePhase !== 'progress' && status === 'complete' && openWorkspaceFile
     ? conversationFiles(parts, workspaceRoot, homeDir) : [],
   [speaker?.role, conversationEvent?.role, isPeerAgent, compact, messagePhase, status, openWorkspaceFile, content, workspaceRoot, homeDir])
   const firstText = parts[0]?.kind === 'text' ? sessionHistoryTextForReading(parts[0]) : undefined
-  const prefix = useMemo(() => contentBoundary === 'wire' && !hasQuestionAnswers && inputMarkdown && firstText !== undefined ? parseAgentMuxMessagePrefix(firstText) : null,
-    [contentBoundary, hasQuestionAnswers, inputMarkdown, firstText])
+  const prefix = useMemo(() => {
+    if (contentBoundary !== 'wire' || hasQuestionAnswers || !(inputMarkdown || a2aNotificationId) || firstText === undefined) return null
+    const parsed = parseAgentMuxMessagePrefix(firstText)
+    return a2aNotificationId && parsed?.kind !== 'references' ? null : parsed
+  }, [contentBoundary, hasQuestionAnswers, inputMarkdown, a2aNotificationId, firstText])
+  const systemSummary = a2aNotificationId && prefix?.kind === 'references' ? `${prefix.references.length} A2A Inbox reference${prefix.references.length === 1 ? '' : 's'}` : rawSystemSummary
   const isDeclaredSender = prefix !== null && prefix.sourceLabel.length > 0 && recordedSpeaker?.role === 'unknown'
   const [systemContextOpen, setSystemContextOpen] = useState(false)
   const systemContentId = useId()
@@ -366,6 +372,7 @@ export function ConversationMessage({
       data-message-phase={messagePhase}
       data-recorded-identity={recordedIdentity || undefined}
       data-message-id={messageId || undefined}
+      data-a2a-notification-id={a2aNotificationId}
       data-message-source-key={conversationMessageSourceKey(itemRef?.agentSessionId ?? conversationSessionId, itemRef?.source ?? inputSource)}
       data-conversation-item-ref={itemRef ? JSON.stringify(itemRef) : undefined}
       data-message-located={located || undefined}
@@ -465,7 +472,7 @@ export function ConversationMessage({
                 {...(openHttpLink ? { openHttpLink } : {})}
               />
             ) : part.resourceType === 'text' && readHistoryResource && nativeResourceRecord ? (
-              <ConversationResourceText sources={sources?.parts[index]} active={active} key={key} part={part} partIndex={index} record={nativeResourceRecord} readResource={readHistoryResource} workspaceRoot={workspaceRoot} homeDir={homeDir} inputMode={inputMarkdown} contentBoundary={contentBoundary}
+              <ConversationResourceText sources={sources?.parts[index]} active={active} key={key} part={part} partIndex={index} record={nativeResourceRecord} readResource={readHistoryResource} workspaceRoot={workspaceRoot} homeDir={homeDir} inputMode={inputMarkdown} contentBoundary={contentBoundary} {...(a2aNotificationId ? { a2aNotificationId } : {})}
                 {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
             ) : part.resourceType === 'image' && readHistoryResource && nativeResourceRecord ? (
               <ConversationResourceImage active={active} key={key} part={part} partIndex={index} record={nativeResourceRecord} readResource={readHistoryResource} />

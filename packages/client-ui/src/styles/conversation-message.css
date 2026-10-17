@@ -343,6 +343,14 @@
 
 .log-turn__packet-text { margin-block: 0; }
 
+.log-turn__references { min-width: 0; font-size: var(--fs-meta); color: var(--text-2); }
+.log-turn__references > p { margin-block: var(--sp-1); }
+.log-turn__references > ul { margin-block: var(--sp-2); padding-inline-start: var(--sp-4); }
+.log-turn__references li { padding-block: var(--sp-1); }
+.log-turn__references li > span { display: block; }
+.log-turn__references code { font-size: var(--fs-micro); white-space: pre-wrap; overflow-wrap: anywhere; }
+.log-turn__references-hint { color: var(--text-3); }
+
 /* Authored context remains in its original record and is never an identity fact. */
 :is(.log-turn__declared-context, .log-turn__reminder) { margin-block: var(--sp-1) var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
 :is(.log-turn__declared-context, .log-turn__reminder) > summary { display: inline-flex; align-items: center; gap: var(--sp-1); padding-block: var(--sp-1); list-style: none; cursor: pointer; }

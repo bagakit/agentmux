@@ -140,7 +140,7 @@ export function speakerOfUserMessage(message: Pick<AgentSessionUserMessage, 'aut
 export function conversationAgentReference(speaker: ConversationSpeaker | undefined, prefix: AgentMuxMessagePrefix | null):
   { speaker: ConversationSpeaker; declared: boolean } | undefined {
   if (speaker?.role === 'agent' && speaker.id.length > 0) return { speaker, declared: false }
-  if (speaker?.role === 'unknown' && prefix?.declaredAgentSessionId) {
+  if (speaker?.role === 'unknown' && prefix?.kind === 'content' && prefix.declaredAgentSessionId) {
     return { speaker: { role: 'agent', id: prefix.declaredAgentSessionId }, declared: true }
   }
   return undefined

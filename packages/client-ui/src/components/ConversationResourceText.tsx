@@ -16,13 +16,14 @@ import { ConversationInputText } from './ConversationInputText.js'
 import type { ConversationContentBoundary } from './ConversationMessage.js'
 
 export function ConversationResourceText({ sources, active = true, part, partIndex, record, readResource, workspaceRoot = '', homeDir = '', inputMode = false,
-  contentBoundary = 'wire', openWorkspaceFile, readPastedImage, openHttpLink }: {
+  contentBoundary = 'wire', a2aNotificationId, openWorkspaceFile, readPastedImage, openHttpLink }: {
   sources?: ConversationSourceDisplay | undefined
   active?: boolean
   part: Extract<AgentSessionHistoryContentPart, { kind: 'resource' }>; partIndex: number
   record: ConversationNativeResourceRecord; readResource: ConversationHistoryResourceReader
   workspaceRoot?: string; homeDir?: string; inputMode?: boolean
   contentBoundary?: ConversationContentBoundary
+  a2aNotificationId?: string
   openWorkspaceFile?: OpenWorkspaceFile; readPastedImage?: ReadPastedImage; openHttpLink?: (url: string, event: LinkClickModifiers) => void
 }) {
   const pending = useRef<AbortController | null>(null), mounted = useRef(true)
@@ -52,8 +53,11 @@ export function ConversationResourceText({ sources, active = true, part, partInd
   }
   const copyableText = content?.kind === 'text' ? content.text : content?.kind === 'resource' ? content.resourceType === 'image' || content.resourceType === 'file' ? part.reference : content.reference : null
   const text = content?.kind === 'text' ? sessionHistoryTextForReading(content) : ''
-  const prefix = useMemo(() => contentBoundary === 'wire' && inputMode && partIndex === 0 && content?.kind === 'text' ? parseAgentMuxMessagePrefix(text) : null,
-    [contentBoundary, inputMode, partIndex, content, text])
+  const prefix = useMemo(() => {
+    if (contentBoundary !== 'wire' || !(inputMode || a2aNotificationId) || partIndex !== 0 || content?.kind !== 'text') return null
+    const parsed = parseAgentMuxMessagePrefix(text)
+    return a2aNotificationId && parsed?.kind !== 'references' ? null : parsed
+  }, [contentBoundary, inputMode, a2aNotificationId, partIndex, content, text])
   return <div className="conversation-resource-text">
     <div className="conversation-resource-text__controls">
       {!content ? <button type="button" onClick={() => { void load() }} disabled={loading}>
