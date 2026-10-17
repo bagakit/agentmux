@@ -135,6 +135,8 @@ Folder 的内容入口为 **Files + Zones**，原 Branches 区域表达的是 Zo
 
 Folder 的 Zone 导航须让人辨认其已确认的目录／worktree 类型、分支和准确位置，不能只显示内部标识或从路径长相猜类型。方向键及 Home／End 在目录内移动键盘焦点，Enter／Space 明确进入原工作分区；仅移动焦点不 checkout 或改变所选 Zone。工作目录管理入口明确说明进入 Git 的 worktree 管理，不能以未标明含义的加号暗示已经创建；创建仍由原 Git owner 完成。改动摘要与当前 Zone 的准确资源相邻并标明该范围，不以醒目的孤立数量充当导航主体；未知仍沿原说明和恢复路径。
 
+同一 Zone 的资源投影在保存回执、跨进程观察与普通重启后保留原已确认 Host、准确目录和资源未知状态；显式目录不能因还原丢字段而退回登记 Workspace 的根目录。默认沿 Workspace 根目录的上下文仍随该原记录的明确路径重设更新，不能为保留显式目录而冻结旧默认根。目录名称可沿原命名 owner 表达人类别名，但不能冒充另一目录的名称或当前 Git 分支；类型、分支与仓库关系沿准确 Host／目录的原 Git 观测 owner，不从登记时的名称、旧分支或路径形状推定当前事实。观测暂不可用保留原 Zone、工作面与可用能力，并如实表达未知或上次观察；不把全部 Git worktree 自动变成 Zone，也不因修正资源呈现重发 Zone／Tab／Region 或 Session 身份。
+
 Folder 的二级功能组为 Files + Zones、Agents 与 Git。Files + Zones 回答“在哪条工作线上工作”，Agents 回答“哪些 Agent 可继续协作”，Git 回答“准确资源改了什么、版本怎样演进”。切换功能组不切换 Zone 或工作目录，不创建或关闭原 Tab/Region/Session，不抢原输入。分支与 worktree 是 Git 项目下关联的资源事实，不取代 Zone 身份，也不把 Zone 限定为 Git；普通目录无需 Git 探测成功即可选择其 Zone。Git 引用筛选与 Zone 导航是不同意图，不能以历史或比较选择暗中切换工作分区；Git 资源范围、Changes 与完整操作只见[文件与 Git](files-and-git.md#git-源码控制与-pr)。Topic／Mote 继续使用各自原内容入口，不因新增 Folder Git 工具改变对象、布局或共享资源身份。
 
 共同框架统一对象上下文、成员 Zone、功能工具与准确资源的分工，不把 Folder 的 worktree 目录套给所有类型。知识分类以具体 Topic 作为成员 Zone，保原 Topics／Knowledge 与右侧 Tabstrip；Mote 内容入口说明当前持久对象，保原 Profile／Ideas 和资料，不因共用 Scratch 就称为全局 Topics。只有一个 Zone 不强加另一层选择，多个合法绑定不因简化而失去原入口。文件位置来自原内容 scope 的准确 Host／目录，不拿展示位置或共享 Scratch 根冒充对象目录；元数据未知时保原身份、工作面及已有可用内容，并持续说明原未知和恢复动作。
