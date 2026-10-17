@@ -5,7 +5,7 @@ import { createTerminalInteractionObservation } from '../lib/terminal-interactio
 import { tabSwitchObservation } from '../lib/tab-switch-observation'
 import { useWorkbenchBrowserPresentation, type WorkbenchPresentation } from '../lib/workbench-presentation'
 import { subscribeTerminalInput } from '@agentmux/client-ui/terminal/input'
-import type { AgentMuxTerminalViewObservation, RendererTabSwitchTerminal, RendererTerminalWriteContext } from '@agentmux/core/control'
+import type { AgentMuxTerminalViewObservation, RendererTabSwitchTerminal, RendererTerminalCleanupContext, RendererTerminalWriteContext } from '@agentmux/core/control'
 import type { AgentMuxRunAttachment, AgentMuxTerminalResize } from '@agentmux/core'
 import { terminalContinuationSteps } from '@agentmux/core/terminal-continuation'
 import { registerTerminalViewObservation, type TerminalInputGeometry } from '../lib/terminal-view-observation'
@@ -831,12 +831,30 @@ export function TerminalView({
     })
     let webgl: WebglAddon | null = null
     let webglContextLoss: { dispose(): void } | null = null
+    const observeDisposal = (operation: RendererTerminalCleanupContext['operation'], dispose: () => void): void => {
+      let start: number | undefined, context: Omit<RendererTerminalCleanupContext, 'outcome'> | undefined
+      try {
+        start = rendererPerformance.start()
+        context = { hostId: session.control.hostId,
+          sessionId: session.control.kind === 'agent' ? session.control.agentSessionId : session.id,
+          runId: session.control.run.runId, regionId: linkOriginRef.current.regionId ?? null,
+          instanceId: performanceInstance, operation }
+      } catch { console.warn('[terminal] Cleanup timing observation unavailable') }
+      let outcome: RendererTerminalCleanupContext['outcome'] = 'threw'
+      try { dispose(); outcome = 'returned' }
+      finally {
+        if (start !== undefined && context) {
+          try { rendererPerformance.terminalCleanup(start, { ...context, outcome }) }
+          catch { console.warn('[terminal] Cleanup timing observation unavailable') }
+        }
+      }
+    }
     const releaseWebgl = (): void => {
       webglContextLoss?.dispose()
       webglContextLoss = null
       const addon = webgl
       webgl = null
-      addon?.dispose()
+      if (addon) observeDisposal('webgl-dispose', () => addon.dispose())
       resourceOwners.setAddons(3)
     }
     // Visibility owns only the GPU addon. The retained parser and Run attachment keep their
@@ -1810,7 +1828,7 @@ export function TerminalView({
       }
       if (pasteTargetRef.current === pasteInput) pasteTargetRef.current = null
       releaseViewportMemoryMarker(terminal)
-      terminal.dispose()
+      observeDisposal('xterm-dispose', () => terminal.dispose())
       releasePerformance()
       resourceOwners.release()
     }

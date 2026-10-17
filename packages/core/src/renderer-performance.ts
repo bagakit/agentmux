@@ -64,7 +64,8 @@ export type RendererTabSwitchCost = {
   state: 'pending' | 'observed' | 'superseded'; mode: 'unknown' | 'terminal' | 'activity' | 'other'
   terminal: RendererTabSwitchTerminal | null
 }
-export type RendererTimingKind = 'session-event' | 'terminal-write' | 'long-task' | 'input-delay' | 'terminal-interaction'
+export const RENDERER_TIMING_KINDS = ['session-event', 'terminal-write', 'long-task', 'input-delay', 'terminal-interaction', 'terminal-cleanup'] as const
+export type RendererTimingKind = typeof RENDERER_TIMING_KINDS[number]
 export type RendererTimingEpoch = {
   startMonoMs: number; endMonoMs: number; timings: Record<RendererTimingKind, RendererWorkTiming>
 }
@@ -81,6 +82,12 @@ export type RendererSlowEvent = {
   occurredAtMonoMs: number | null; deliveredAtMonoMs: number
   retainedAs: Array<'latest' | 'current-peak' | 'previous-peak'>
   terminal: (RendererTerminalWriteContext & { payload: { unit: 'bytes' | 'string-code-units'; length: number } }) | null
+  cleanup: RendererTerminalCleanupContext | null
+}
+/** Synchronous call observation only; returned does not acknowledge asynchronous resource release. */
+export type RendererTerminalCleanupContext = {
+  hostId: string; sessionId: string; runId: string; regionId: string | null; instanceId: number
+  operation: 'webgl-dispose' | 'xterm-dispose'; outcome: 'returned' | 'threw'
 }
 /** Captured when a parser write begins, never inferred from focus or completion state. */
 export type RendererTerminalWriteContext = {
@@ -102,7 +109,7 @@ export type RendererPerformanceSnapshot = {
   /** At most 16 recent exact-occurrence observations. Missing stages stay null. */
   tabSwitches: RendererTabSwitchCost[]
   tabSwitchesOmitted: number
-  /** Latest four and current/previous epoch peaks per kind, deduplicated by id; <=30 detached records. */
+  /** Latest four and current/previous epoch peaks per kind, deduplicated by id; <=36 detached records. */
   slowEvents: RendererSlowEvent[]
   slowEventsOmitted: Record<RendererTimingKind, number>
   timingEpochs: RendererTimingEpochs

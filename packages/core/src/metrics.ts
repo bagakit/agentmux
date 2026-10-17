@@ -13,8 +13,8 @@ import type { RendererTraceInput, RendererTraceResult } from './renderer-trace.j
 import type { RendererV8ProfileInput, RendererV8ProfileResult } from './renderer-v8-profile.js'
 import { readInputObservation } from './performance-diagnostics.js'
 import type { ClientPerformanceDiagnostics, InputPerformanceSnapshot } from './performance-diagnostics.js'
-import type { RendererPerformanceSnapshot } from './renderer-performance.js'
-export type * from './renderer-performance.js'
+import { RENDERER_TIMING_KINDS, type RendererPerformanceSnapshot } from './renderer-performance.js'
+export * from './renderer-performance.js'
 import { AgentMuxError } from './errors.js'
 import type { AgentMuxRuntimeResourceSnapshot } from './types.js'
 import type { RuntimeStorageUsage } from './runtime-storage-usage.js'
@@ -181,7 +181,7 @@ const tabSwitchParser = record({ id: count,
   mode: v => { if (!['unknown', 'terminal', 'activity', 'other'].includes(v as string)) invalid() },
   terminal: nullable(record({ sessionId: identity, runId: identity, readySinceAt: nullable(number),
     visible: boolean, revealed: boolean, liveReady: boolean, acceptsInput: boolean, readOnly: boolean, replaying: boolean })) })
-const timingKinds = ['session-event', 'terminal-write', 'long-task', 'input-delay', 'terminal-interaction'] as const
+const timingKinds = RENDERER_TIMING_KINDS
 const timingKind: Parser = v => { if (!timingKinds.includes(v as typeof timingKinds[number])) invalid() }
 const timingKindRecord = (parse: Parser): Parser => record(Object.fromEntries(timingKinds.map(kind => [kind, parse])))
 const timingEpochParser = record({ startMonoMs: number, endMonoMs: number, timings: timingKindRecord(timingParser) })
@@ -194,9 +194,12 @@ const slowEventParser = record({ id: count, kind: timingKind, detail: text, obse
   occurredAtMonoMs: nullable(number), deliveredAtMonoMs: number, retainedAs: retentionParser,
   terminal: nullable(record({ hostId: identity, sessionId: identity, runId: identity, regionId: nullable(identity), instanceId: count,
     cause: v => { if (!['live', 'history', 'checkpoint'].includes(v as string)) invalid() },
-    payload: record({ unit: v => { if (!['bytes', 'string-code-units'].includes(v as string)) invalid() }, length: count }) })) })
+    payload: record({ unit: v => { if (!['bytes', 'string-code-units'].includes(v as string)) invalid() }, length: count }) })),
+  cleanup: nullable(record({ hostId: identity, sessionId: identity, runId: identity, regionId: nullable(identity), instanceId: count,
+    operation: v => { if (!['webgl-dispose', 'xterm-dispose'].includes(v as string)) invalid() },
+    outcome: v => { if (!['returned', 'threw'].includes(v as string)) invalid() } })) })
 const slowEventsParser: Parser = value => {
-  boundedArray(30, slowEventParser)(value)
+  boundedArray(6 * timingKinds.length, slowEventParser)(value)
   const events = value as RendererPerformanceSnapshot['slowEvents']
   if (new Set(events.map(event => event.id)).size !== events.length) invalid()
   for (const kind of timingKinds) {
@@ -204,7 +207,10 @@ const slowEventsParser: Parser = value => {
     if (records.length > 6) invalid()
     for (const flag of retentionFlags) if (records.filter(event => event.retainedAs.includes(flag)).length > (flag === 'latest' ? 4 : 1)) invalid()
   }
-  for (const event of events) if ((event.kind === 'terminal-write') !== (event.terminal !== null)) invalid()
+  for (const event of events) {
+    if ((event.kind === 'terminal-write') !== (event.terminal !== null)) invalid()
+    if ((event.kind === 'terminal-cleanup') !== (event.cleanup !== null)) invalid()
+  }
 }
 const performanceParser = record({ startedAt: number, observedAt: number, recording: literal('bounded-lifetime'),
   selectorTiming: literal('counts-only'), writeTiming: literal('parser-callback-wall'),
