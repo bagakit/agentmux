@@ -44,7 +44,7 @@ function budget(value: unknown, code: Code): void {
 }
 
 function parseDesktopFocusTarget(value: unknown, code: Code): AgentMuxDesktopFocusTarget {
-  const source = fields(value, ['kind', 'spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId', 'goalId', 'surface'], code)
+  const source = fields(value, ['kind', 'spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId', 'goalId', 'surface', 'view'], code)
   if (source.kind === 'space') {
     fields(source, ['kind', 'spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId'], code)
     const { kind: _, ...raw } = source
@@ -57,8 +57,13 @@ function parseDesktopFocusTarget(value: unknown, code: Code): AgentMuxDesktopFoc
     return { kind: 'goal', goalId: spaceControlId(source.goalId, 'Goal ID', code) }
   }
   if (source.kind === 'surface') {
+    const surface = member(source.surface, surfaces, 'Surface', code)
+    if (surface === 'space') {
+      fields(source, ['kind', 'surface', 'view'], code)
+      return { kind: 'surface', surface, ...(Object.hasOwn(source, 'view') ? { view: member(source.view, ['workbench', 'map'], 'Space view', code) } : {}) }
+    }
     fields(source, ['kind', 'surface'], code)
-    return { kind: 'surface', surface: member(source.surface, surfaces, 'Surface', code) }
+    return { kind: 'surface', surface }
   }
   return fail('Focus target is invalid.', code)
 }
@@ -95,10 +100,12 @@ function spaceSelection(value: unknown, code: Code): AgentMuxDesktopSpaceSelecti
   return result
 }
 function selection(value: unknown, code: Code): AgentMuxDesktopSelection {
-  const source = fields(value, ['surface', 'mainSurface', 'space', 'goalId'], code)
+  const source = fields(value, ['surface', 'mainSurface', 'spaceView', 'space', 'goalId'], code)
   const surface = member(source.surface, surfaces, 'Surface', code)
   if (source.mainSurface !== mainSurfaces[surface]) fail('Public and internal Surface disagree.', code)
-  return { surface, mainSurface: mainSurfaces[surface], space: spaceSelection(source.space, code), goalId: nullableId(source.goalId, 'Selected Goal', code) }
+  const spaceView = surface === 'space' ? member(source.spaceView, ['workbench', 'map'], 'Space view', code) : null
+  if (surface !== 'space' && source.spaceView !== null) fail('A non-Space Surface cannot select a Space view.', code)
+  return { surface, mainSurface: mainSurfaces[surface], spaceView, space: spaceSelection(source.space, code), goalId: nullableId(source.goalId, 'Selected Goal', code) }
 }
 function documentIdentity(source: Record<string, unknown>, required: boolean, code: Code): { windowId?: string; documentGeneration?: string } {
   const hasWindow = Object.hasOwn(source, 'windowId'), hasDocument = Object.hasOwn(source, 'documentGeneration')
@@ -174,16 +181,21 @@ export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControl
   if ((navigation.state === 'applied' || navigation.state === 'unchanged')) {
     const requested = navigation.requested, actual = navigation.selection
     if (requested.kind === 'goal' && (actual.goalId !== requested.goalId || actual.surface !== 'goals')) fail('Goal receipt target is mismatched.', code)
-    if (requested.kind === 'surface' && actual.surface !== requested.surface) fail('Surface receipt target is mismatched.', code)
+    if (requested.kind === 'surface' && (actual.surface !== requested.surface || requested.surface === 'space' && requested.view !== undefined && actual.spaceView !== requested.view)) fail('Surface receipt target is mismatched.', code)
     if (requested.kind === 'space') {
       const { kind: _, ...parent } = requested
-      if (actual.surface !== 'space' || !actual.space || Object.entries(parent).some(([key, id]) => actual.space![(key === 'displayWorkspaceId' ? 'workspaceId' : key) as keyof AgentMuxDesktopSpaceSelection] !== id)) {
+      if (actual.surface !== 'space' || ((requested.tabId !== undefined || requested.regionId !== undefined) && actual.spaceView !== 'workbench') || !actual.space || Object.entries(parent).some(([key, id]) => actual.space![(key === 'displayWorkspaceId' ? 'workspaceId' : key) as keyof AgentMuxDesktopSpaceSelection] !== id)) {
         fail('Space receipt parent identities are mismatched.', code)
       }
     }
   }
+  const map = navigation.selection.surface === 'space' && navigation.selection.spaceView === 'map'
+  if (map && (result.presentation.tabId !== null || result.presentation.regionId !== null || result.presentation.windowId !== undefined ||
+    result.presentation.documentGeneration !== undefined || result.presentation.state === 'floating' || result.presentation.state === 'window')) {
+    fail('A map presentation cannot identify a retained, borrowed or native Region.', code)
+  }
   if (result.presentation.state === 'main-visible' || result.presentation.state === 'floating' || result.presentation.state === 'window') {
-    const presented = navigation.selection.surface === 'space' ? navigation.selection.space : null
+    const presented = navigation.selection.surface === 'space' && !map ? navigation.selection.space : null
     if (result.presentation.provenance !== 'observed' || result.presentation.tabId !== (presented?.tabId ?? null) ||
       result.presentation.regionId !== (presented?.regionId ?? null) ||
       (result.presentation.state === 'floating' && (!presented?.tabId || !presented.regionId))) {

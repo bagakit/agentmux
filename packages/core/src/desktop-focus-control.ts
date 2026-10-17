@@ -2,11 +2,13 @@ import type { AgentMuxSpaceSelector, AgentMuxSpatialIssue, AgentMuxSpatialSave }
 
 /** Client presentation facts. Core neither owns nor initializes a desktop surface. */
 export type AgentMuxDesktopSurface = 'space' | 'focus' | 'goals' | 'survey' | 'recall'
+export type AgentMuxDesktopSpaceView = 'workbench' | 'map'
 export type AgentMuxDesktopMainSurface = 'workbench' | 'agents' | 'board' | 'survey' | 'recall'
 export type AgentMuxDesktopFocusTarget =
   | ({ kind: 'space' } & AgentMuxSpaceSelector)
   | { kind: 'goal'; goalId: string }
-  | { kind: 'surface'; surface: AgentMuxDesktopSurface }
+  | { kind: 'surface'; surface: 'space'; view?: AgentMuxDesktopSpaceView }
+  | { kind: 'surface'; surface: Exclude<AgentMuxDesktopSurface, 'space'> }
 export type AgentMuxDesktopInputPolicy = 'preserve' | 'target'
 export type AgentMuxDesktopSpaceSelection = {
   spaceId: string | null; zoneId: string | null;
@@ -17,6 +19,7 @@ export type AgentMuxDesktopSpaceSelection = {
 }
 export type AgentMuxDesktopSelection = {
   surface: AgentMuxDesktopSurface; mainSurface: AgentMuxDesktopMainSurface
+  spaceView: AgentMuxDesktopSpaceView | null
   space: AgentMuxDesktopSpaceSelection | null; goalId: string | null
 }
 export type AgentMuxDesktopProvenance = 'observed' | 'unavailable' | 'unknown'
