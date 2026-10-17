@@ -1,6 +1,8 @@
 import { sha256 } from '@noble/hashes/sha2.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
+import { CONNECTION_PROFILE_TRANSPORT_CODES } from './connection-profile-contract.js'
+export { CONNECTION_PROFILE_TRANSPORT_CODES } from './connection-profile-contract.js'
 import type { ConnectionProfileMethod, ConnectionProfileObservation, ConnectionProfileOperation, ConnectionProfileParamsMap, ConnectionProfileResultMap, ConnectionProfileReason, DesiredConnectionProfile } from './connection-profile-contract.js'
 
 export const CONNECTION_PROFILE_RPC_METHODS = { 'connection.profile.get': 'long', 'connection.profile.sync': 'long', 'connection.profile.advance': 'long', 'connection.profile.inspect': 'long', 'connection.profile.ls': 'long' } as const
@@ -49,8 +51,18 @@ export function parseConnectionProfileOperation(v: unknown): ConnectionProfileOp
   if (!Array.isArray(p.fields) || !p.fields.length || new Set(p.fields).size !== p.fields.length) fail()
   const fields = (p.fields as unknown[]).map(f => choice(f,['name','description','avatar'] as const)), desired = { ...(d.name === undefined ? {} : { name: text(d.name) }), ...(d.description === undefined ? {} : { description: description(d.description) }), ...(d.avatarSha256 === undefined ? {} : { avatarSha256: text(d.avatarSha256) }) }
   if (desired.avatarSha256 !== undefined && !/^[a-f0-9]{64}$/u.test(desired.avatarSha256) || fields.includes('name') !== (d.name !== undefined) || fields.includes('description') !== (d.description !== undefined) || fields.includes('avatar') !== (d.avatarSha256 !== undefined)) fail()
-  const stage = (v: unknown) => { const s = object(v,['state']); return { state: choice(s.state,['not-required','not-dispatched','dispatching','confirmed','refused','unknown']) } }
-  const result: ConnectionProfileOperation = { operationId:id(p.operationId),connectionId:id(p.connectionId),connectionRevision:integer(p.connectionRevision),application:application(p.application),language:p.language===null?null:text(p.language),fields,desired,upload:stage(p.upload),patch:stage(p.patch),publication:choice(p.publication,['not-requested','platform-review-required']),online:p.online === null ? null : parseConnectionProfileObservation(p.online),...(p.managementUrl === undefined ? {} : { managementUrl: url(p.managementUrl) }), ...reason(p.reason) }
+  const stage = (v: unknown, slot: 'upload' | 'patch') => {
+    const s = object(v,['state','diagnostic']), state = choice(s.state,['not-required','not-dispatched','dispatching','confirmed','refused','unknown'])
+    if (s.diagnostic === undefined) return { state }
+    const d = object(s.diagnostic,['stage','nativeCode','httpStatus','transportCode'])
+    const diagnostic = { stage: choice(d.stage,slot === 'upload' ? ['upload'] as const : ['prepare-patch','patch'] as const),
+      ...(d.nativeCode === undefined ? {} : { nativeCode: (() => { if (!Number.isSafeInteger(d.nativeCode)) fail(); return d.nativeCode as number })() }),
+      ...(d.httpStatus === undefined ? {} : { httpStatus: (() => { const status=integer(d.httpStatus,599); if(status<100)fail(); return status })() }),
+      ...(d.transportCode === undefined ? {} : { transportCode: choice(d.transportCode,CONNECTION_PROFILE_TRANSPORT_CODES) }) }
+    if (!['not-dispatched','unknown','refused'].includes(state) || diagnostic.stage === 'prepare-patch' && state !== 'not-dispatched') fail()
+    return { state, diagnostic }
+  }
+  const result: ConnectionProfileOperation = { operationId:id(p.operationId),connectionId:id(p.connectionId),connectionRevision:integer(p.connectionRevision),application:application(p.application),language:p.language===null?null:text(p.language),fields,desired,upload:stage(p.upload,'upload'),patch:stage(p.patch,'patch'),publication:choice(p.publication,['not-requested','platform-review-required']),online:p.online === null ? null : parseConnectionProfileObservation(p.online),...(p.managementUrl === undefined ? {} : { managementUrl: url(p.managementUrl) }), ...reason(p.reason) }
   if ((result.upload.state === 'not-required') !== !fields.includes('avatar') || result.patch.state === 'not-required' || (result.patch.state === 'confirmed') !== (result.publication === 'platform-review-required')) fail()
   if (result.patch.state !== 'not-dispatched' && !['confirmed', 'not-required'].includes(result.upload.state)) fail()
   if (result.online && (result.online.connectionId !== result.connectionId || result.online.connectionRevision !== result.connectionRevision || JSON.stringify(result.online.application) !== JSON.stringify(result.application))) fail()

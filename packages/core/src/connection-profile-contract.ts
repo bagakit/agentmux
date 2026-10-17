@@ -6,6 +6,14 @@ export type DesiredConnectionProfile = { name?: string; description?: string; av
 export type ConnectionProfileGet = { connectionId: string; expectedConnectionRevision: number }
 export type ConnectionProfileSync = ConnectionProfileGet & { operationId: string; desired: DesiredConnectionProfile }
 export type ProfileEffectState = 'not-required' | 'not-dispatched' | 'dispatching' | 'confirmed' | 'refused' | 'unknown'
+export const CONNECTION_PROFILE_TRANSPORT_CODES = ['ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ERR_NETWORK', 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'CERT_HAS_EXPIRED', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIGNED_CERT_IN_CHAIN'] as const
+/** Original Provider facts only. An absent numeric field means it was not recorded. */
+export type ConnectionProfileDiagnostic = {
+  stage: 'upload' | 'prepare-patch' | 'patch'
+  nativeCode?: number
+  httpStatus?: number
+  transportCode?: typeof CONNECTION_PROFILE_TRANSPORT_CODES[number]
+}
 /** Online fields are observations, never proof that an original write was published. */
 export type ConnectionProfileObservation = {
   connectionId: string; connectionRevision: number; application: ConnectionApplication
@@ -24,7 +32,7 @@ export type ConnectionProfileOperation = {
   language: string | null
   fields: Array<'name' | 'description' | 'avatar'>
   desired: { name?: string; description?: string; avatarSha256?: string }
-  upload: { state: ProfileEffectState }; patch: { state: ProfileEffectState }
+  upload: { state: ProfileEffectState; diagnostic?: ConnectionProfileDiagnostic }; patch: { state: ProfileEffectState; diagnostic?: ConnectionProfileDiagnostic }
   publication: 'not-requested' | 'platform-review-required'
   online: ConnectionProfileObservation | null
   managementUrl?: string

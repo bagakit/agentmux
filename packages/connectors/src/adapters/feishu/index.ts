@@ -9,7 +9,7 @@ import { FEISHU_MESSAGE_EVENT, feishuFailure, feishuIdentity, readFeishuMessage,
 import { feishuParentAddressing } from './reply.js'
 import { readFeishuAction } from './action.js'
 import { FeishuPublicationAdapter } from './publication.js'
-import { createFeishuProfile } from './profile.js'
+import { createFeishuProfile, FeishuSdkRequestFailure, feishuSdkRequestFailure } from './profile.js'
 import { createFeishuEnrollment } from './enrollment.js'
 import { createFeishuRooms } from './rooms.js'
 import { createFeishuRoomDiscovery } from './room-discovery.js'
@@ -58,6 +58,9 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
         const signal = receiverSignal ?? this.requests.getStore()
         if (signal?.aborted || input.signal?.aborted) feishuFailure('FEISHU_SDK_REQUEST_CANCELLED')
         const result = await transport.request<T, R, D>({ ...input, ...(signal ? { signal } : {}) })
+        // This SDK leaf unwraps data and would otherwise discard its actual native failure code.
+        const payload = result as { code?: unknown } | null
+        if (['https://open.feishu.cn/open-apis/application/v7/app_avatar/upload', 'https://open.larksuite.com/open-apis/application/v7/app_avatar/upload'].includes(input.url ?? '') && Number.isSafeInteger(payload?.code) && payload!.code !== 0) throw new FeishuSdkRequestFailure({ nativeCode: Number(payload!.code) })
         if (input.url?.endsWith('/callback/ws/endpoint')) {
           const response = result as { code?: unknown; data?: { URL?: unknown } }
           if (response.code === 0) {
@@ -67,7 +70,7 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
           }
         }
         return result
-      } catch { return feishuFailure('FEISHU_SDK_REQUEST_FAILED') }
+      } catch (error) { throw feishuSdkRequestFailure(error) }
     }
     // The SDK token manager uses post directly rather than request. Keep that exchange in the same caller lifetime.
     http.post = <T, R = T, D = unknown>(url: string, data?: D, options?: HttpRequestOptions<D>): Promise<R> => http.request<T, R, D>({ ...options, method: 'POST', url, ...(data === undefined ? {} : { data }) })
