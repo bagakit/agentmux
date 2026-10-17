@@ -16,7 +16,7 @@ function SourceIssue({ source }: { source?: HostRuntimeSource<unknown> | null | 
 }
 function Interfaces({ title, source, current, addresses, identity, sampledAt }: { title: string; source: HostRuntimeSource<unknown>; current?: HostRuntimeSource<unknown> | undefined; addresses: NetworkInterfaceAddress[]; identity: string; sampledAt: number }) {
   return <details className="host-network__addresses">
-    <summary><span>{title}</span><small>{addresses.length} addresses</small></summary>
+    <summary><span>{title}</span><small>{addresses.length} {addresses.length === 1 ? 'address' : 'addresses'}</small></summary>
     <p className="host-network__hint">{identity}. Addresses visible in this process’s network namespace.</p>
     <SourceTime source={source} current={current} /><small className="host-network__source-time">Sampled <time dateTime={new Date(sampledAt).toISOString()}>{time(sampledAt)}</time> by this source</small>
     <div className="host-network__address-list">{addresses.length ? addresses.map((address, index) => <div key={`${address.name}:${address.address}:${index}`}>
