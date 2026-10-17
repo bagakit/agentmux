@@ -5,6 +5,7 @@ import { parseFileShareParams, parseFileShareResult, parseFileShareInspectParams
 import { isApplicationAccessMethod, parseApplicationAccessParams, parseApplicationAccessResult } from './application-access.js'
 import { parseAgentInputMailboxPage } from './agent-input-mailbox-codec.js'
 import { parseRuntimeDiagnostics } from './runtime-observation-codec.js'
+import { parseRuntimeNetworkSnapshot } from './runtime-network.js'
 import { parseAgentContinuityControlInput, parseAgentContinuityControlResult } from './agent-session-continuity-control.js'
 import { parseConversationLandmarkPage, parseConversationLandmarkQuery, parseConversationLandmarkWritePage, parseConversationLandmarkWrite } from './conversation-landmarks.js'
 import { isMoteConnectionMethod, parseMoteConnectionParams, parseMoteConnectionResult } from './mote-connection-codec.js'
@@ -435,6 +436,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         if (p.runtimeDiagnostics !== null) parseRuntimeDiagnostics(p.runtimeDiagnostics)
         return { ...p, native: nativePage }
       }
+      case 'runtime.network.inspect': return parseRuntimeNetworkSnapshot(value, input.fence as import('./hosted-client-contract.js').AgentMuxRuntimeFence)
       case 'runtime.bootstrap': parseRpcHostedBootstrap(p); break
       case 'runtime.invoke': record(p, ['value']); if (!Object.hasOwn(p, 'value')) fail(); break
       case 'runtime.release-consumer': record(p, ['released']); bool(p.released); break

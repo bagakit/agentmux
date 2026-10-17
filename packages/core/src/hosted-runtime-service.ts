@@ -5,6 +5,7 @@ import type { AgentMuxControlEndpointState } from './control-endpoint-state.js'
 import type { AgentMuxClient } from './client.js'
 import type { AgentMuxClientEvent, AgentMuxRunAttachment, AgentMuxRunRef } from './types.js'
 import { AgentMuxError } from './errors.js'
+import { readNetworkInterfaces } from './runtime-network.js'
 import { observeRead as observe } from './observation-read.js'
 import { parseAgentMuxCreationTrustInput } from './agent-creation-admission.js'
 import { rpcString } from './rpc-business-codec.js'
@@ -216,6 +217,10 @@ export class AgentMuxHostedRuntimeService {
     const p = record(params, AGENTMUX_HOSTED_RPC_FIELDS[method as AgentMuxHostedRuntimeMethod])
     if (method === 'runtime.owner.identity') return { owner: this.owner(p.expectedRuntimeId) }
     this.assertFence(p.fence)
+    if (method === 'runtime.network.inspect') {
+      context.signal?.throwIfAborted()
+      return { owner: this.owner(), observedAt: Date.now(), interfaces: readNetworkInterfaces() }
+    }
     if (method === 'runtime.owner.shutdown') {
       if (!this.shutdown || !context.afterResponse) throw new AgentMuxError('This service has no shutdown owner.', 'RUNTIME_SHUTDOWN_UNAVAILABLE')
       context.afterResponse.push(() => this.shutdown!())

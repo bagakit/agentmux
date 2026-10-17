@@ -332,7 +332,7 @@ export class AgentMuxRpcService {
     const p = rpcRecord(params, AGENTMUX_HOSTED_RPC_FIELDS[method as AgentMuxHostedRuntimeMethod])
     if (!this.ports.hostedRuntime) throw new AgentMuxError('The borrowed Runtime Host business owner is unavailable. Existing Runs are retained.', 'CONTROL_UNAVAILABLE')
     const owner = await this.ports.hostedRuntime()
-    if (method === 'runtime.owner.identity' || method === 'runtime.owner.shutdown') return { owner, params: p }
+    if (method === 'runtime.owner.identity' || method === 'runtime.owner.shutdown' || method === 'runtime.network.inspect') return { owner, params: p }
     const consumer = rpcString(p.consumerId, 'Host consumer ID')
     const consumerId = createHash('sha256').update(context.principal.kind + '\0' + principalId + '\0' + consumer).digest('hex')
     return { owner, params: { ...p, consumerId } }
