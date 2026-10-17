@@ -12,7 +12,7 @@ export function agentMenuSession(sessions: readonly SessionSnapshot[], target: A
 }
 
 export function agentMenuRunMatches(session: ReturnType<typeof agentMenuSession>, control: AgentSessionControl): boolean {
-  return Boolean(session && !session.runUnobserved && session.control.run.runId === control.run.runId)
+  return Boolean(session && session.control.run.runId === control.run.runId)
 }
 
 export function retainAgentMenuTarget(target: AgentMenuTarget & { control: AgentSessionControl }) {
