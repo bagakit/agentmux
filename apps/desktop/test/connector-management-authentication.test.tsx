@@ -4,7 +4,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { AgentMuxControlServer } from '@agentmux/core'
+import { AgentMuxControlServer, AgentMuxRpcService } from '@agentmux/core'
+import { ConnectionSetupHost } from '@agentmux/connectors'
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionRecord, ConnectionResultMap, ConnectionSetupAdvance, ConnectionSetupBegin, ConnectionSetupView } from '@agentmux/core/connections'
 import { createDesktopConnections } from '../src/main/connector-host.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
@@ -12,6 +13,8 @@ import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { api } from '../src/renderer/src/lib/api'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { enrollmentEncryption } from '../../../packages/connectors/test/fixtures/connection-enrollment.js'
+import { moteEnrollmentWeb } from './fixtures/mote-enrollment-web'
+import { imagePng } from './fixtures/mote-identity-image'
 
 const dom = composerDOM(), goal = { kind: 'agent-conversation', interaction: 'messages' } as const
 const TOKEN = 'fixture-settings-private-qr', FLOW = 'fixture-settings-private-flow'
@@ -125,6 +128,41 @@ async function unchanged(saved: Awaited<ReturnType<typeof seed>>) {
   expect((await forward('connection.inspect', { connectionId: saved.connection.config.connectionId })).connection).toEqual(saved.connection)
 }
 async function settle() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) }) }
+
+async function enrollmentWithInitialSetup(pauseBeforeSecureHandoff = false) {
+  const issuer = moteEnrollmentWeb()
+  vi.stubGlobal('fetch', vi.fn(issuer.fetch))
+  const input = { operationId: 'management-enrollment', connectionId: 'management-enrollment-bot', adapterId: 'feishu', domain: 'open.feishu.cn', label: 'Created bot',
+    preset: { name: 'AMUX original bot', description: 'Original profile', avatar: { pngDataUrl: 'data:image/png;base64,' + imagePng().toString('base64') } },
+    initialPublication: { version: '1.0.0', notes: 'Enable AMUX conversations.' } }
+  let originalInput: ConnectionSetupBegin | null = null
+  const actualBegin = ConnectionSetupHost.prototype.begin
+  const begin = vi.spyOn(ConnectionSetupHost.prototype, 'begin').mockImplementation(async function (value, context) {
+    if (!originalInput) { originalInput = structuredClone(value); if (pauseBeforeSecureHandoff) secureAvailable = false }
+    return await actualBegin.call(this, value, context)
+  })
+  let enrollment = await forward('connection.enrollment.begin', input)
+  while (!enrollment.account) {
+    const action = enrollment.actions.find(action => action.kind === 'continue-authentication')!
+    expect(action, 'Continue the actual Enrollment until its account is available').toBeDefined()
+    if (enrollment.challenge) await new Promise(resolve => setTimeout(resolve, Math.max(0, enrollment.challenge!.nextPollAt - Date.now())))
+    enrollment = await forward('connection.enrollment.advance', { operationId: input.operationId, ownRevision: action.ownRevision, decision: { actionId: action.actionId, kind: 'continue-authentication' } })
+  }
+  for (const kind of ['confirm-account', 'create'] as const) {
+    const action = enrollment.actions.find(action => action.kind === kind)!
+    expect(action, 'Consume the actual Enrollment action').toBeDefined()
+    try { enrollment = await forward('connection.enrollment.advance', { operationId: input.operationId, ownRevision: action.ownRevision, decision: { actionId: action.actionId, kind } }) }
+    catch (error) { if (!pauseBeforeSecureHandoff || kind !== 'create') throw error; expect(error).toMatchObject({ code: 'CONNECTION_CREDENTIAL_UNAVAILABLE' }) }
+  }
+  secureAvailable = true
+  enrollment = await forward('connection.enrollment.inspect', { operationId: input.operationId })
+  expect(enrollment.operation?.configured).not.toBeNull()
+  expect(originalInput).toMatchObject({ goal: { kind: 'agent-conversation', interaction: 'cards' }, initialPublication: input.initialPublication,
+    source: { kind: 'enrollment', operationId: input.operationId } })
+  const setupId = enrollment.operation!.initialSetup!.operationId
+  expect((await forward('connection.setup.inspect', { operationId: setupId })).operation?.operationId).toBe(setupId)
+  return { connection: enrollment.operation!.configured!.connection, setupId, originalInput: originalInput!, issuer, begin }
+}
 
 it('the real Settings task follows native scan and phone confirmation, then explicitly confirms the exact account and keeps the saved bot separate', async () => {
   const saved = await seed()
@@ -378,4 +416,60 @@ it.each(['before admission', 'after admission'] as const)('an original local ins
     expect(native.map(value => new URL(value.url).pathname)).toEqual(['/accounts/qrlogin/init'])
   }
   expectNoSetupWrites(); await unchanged(saved)
+}, 30_000)
+
+it('opens the original cards task produced by actual Enrollment through Settings without changing its goal or repeating platform work', async () => {
+  const original = await enrollmentWithInitialSetup(), before = original.issuer.calls.length
+  calls = []
+  await mount(); await select(original.connection); await enter(original.connection)
+  await click(`[data-management-original="${original.setupId}"]`)
+  await waitStage('confirmed')
+  const selected = setupCalls('connection.setup.inspect').find(call => (call.input as { operationId: string }).operationId === original.setupId && view(call)?.operation)!
+  expect(view(selected).operation).toMatchObject({ operationId: original.setupId, goal: original.originalInput.goal, source: original.originalInput.source, initialPublication: original.originalInput.initialPublication })
+  expect(panel()?.textContent).toContain('Prepare your bot for conversations')
+  expect(panel()?.textContent).not.toContain('could not be matched')
+  expect(setupCalls('connection.setup.begin')).toEqual([]); expect(setupCalls('connection.setup.advance')).toEqual([])
+  expect(original.issuer.calls).toHaveLength(before); expect(original.issuer.creates).toBe(1)
+}, 30_000)
+
+it('continues the original admitted Enrollment cards intent with its exact source and initial publication after secure handoff was unavailable', async () => {
+  const original = await enrollmentWithInitialSetup(true), before = original.issuer.calls.length
+  calls = []
+  await mount(); await select(original.connection); await enter(original.connection)
+  await click(`[data-management-original="${original.setupId}"]`)
+  await waitStage('unknown')
+  await click('[data-management-resume]')
+  await ready(() => expect(setupCalls('connection.setup.begin')).toHaveLength(1))
+  const resumed = setupCalls('connection.setup.begin')[0]!
+  expect(resumed.input).toEqual(original.originalInput)
+  await ready(() => expect(resumed.delivered).toBe(true))
+  await waitStage('confirmed')
+  expect(original.issuer.creates).toBe(1)
+  expect(original.issuer.calls.slice(before).some(call => call.target.pathname.includes('/manifest/upsert_by_template') || call.target.pathname.includes('/qrlogin/'))).toBe(false)
+}, 30_000)
+
+it.each(['foreign target', 'revised target', 'foreign actor'] as const)('keeps the original cards read boundary for %s', async boundary => {
+  const saved = await seed(), input = { ...beginInput('management-scoped-cards', saved.connection), goal: { kind: 'agent-conversation', interaction: 'cards' } as const }
+  if (boundary === 'foreign actor') {
+    const foreign = new AgentMuxRpcService({ connections: services.connections })
+    await foreign.call('connection.setup.begin', input, { principal: { kind: 'device', id: 'another-original-actor' } })
+  } else await forward('connection.setup.begin', input)
+  let current = saved.connection
+  if (boundary === 'revised target') current = (await forward('connection.configure', { operationId: 'management-scoped-revision', expectedRevision: saved.connection.revision, connection: { ...saved.connection.config, label: 'Same bot, new revision' } })).connection
+  if (boundary === 'foreign target') {
+    const another = await seed('management-other-bot', 'cli_management_other')
+    const other = { ...beginInput('management-other-cards', another.connection), goal: input.goal }
+    await forward('connection.setup.begin', other)
+    vi.mocked(api.connections.call).mockImplementation(async (method, value) => method === 'connection.setup.inspect' && (value as { operationId: string }).operationId === input.operationId
+      ? await forward(method, { ...(value as any), operationId: other.operationId }) : await forward(method, value as never))
+  }
+  const before = native.length; calls = []
+  await mount(); await select(current); await enter(current)
+  await click(`[data-management-original="${input.operationId}"]`)
+  await waitStage(boundary === 'revised target' ? 'revised' : 'unknown')
+  if (boundary === 'foreign target') expect(panel()?.textContent).toContain('could not be matched')
+  if (boundary === 'foreign actor') expect(setupCalls('connection.setup.inspect').find(call => (call.input as { operationId: string }).operationId === input.operationId)?.error).toMatchObject({ code: 'CONNECTION_SETUP_AUTHORITY_REQUIRED' })
+  expect(panel()?.querySelector('[data-management-code]')).toBeNull(); expect(panel()?.querySelector('[data-management-confirm]')).toBeNull()
+  expect(setupCalls('connection.setup.begin')).toEqual([]); expect(setupCalls('connection.setup.advance')).toEqual([])
+  expect(native).toHaveLength(before)
 }, 30_000)
