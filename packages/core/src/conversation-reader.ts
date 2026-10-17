@@ -23,8 +23,7 @@ export type ConversationReaderPort = {
   signal?: AbortSignal
 }
 type Position = { native?: string | null; capturedBefore?: number | null; capturedCut?: { epoch: string; sequence: number }; unavailable?: ConversationSourceCoverage[] }
-type Locator = { id: string; reference: ConversationItemRef; revision: string; order: ConversationSourceRecord['order']; source: 'native' | 'captured' }
-type Batch = { records: Locator[]; events?: string[]; index: number; offset: number; digests: { id: string; sha256: string }[];
+type Batch = { index: number; offset: number; digests: { id: string; sha256: string }[];
   after: Position; coverage: ConversationSourceCoverage[]; end?: ConversationFrontier; more: boolean }
 type Cursor = ConversationRef & { version: 1; mode: 'inspect' | 'changes'; scope: ConversationFrontier['scope']; position: Position;
   batch?: Pick<Batch, 'index' | 'offset'>; checkpoint?: ConversationFrontier; anchor?: ConversationVersionedAnchor; viewId?: string; viewRevision?: number; snapshotId?: string; pageIndex?: number; direction?: 'newer' }
@@ -33,7 +32,7 @@ type HistoryPosition = { position: Position; after: Position; checkpoint: Conver
   captured?: { first: number; last: number; count: number };
   head?: { page: AgentSessionHistoryPage; rows: ConversationSourceRecord[] } }
 type Snapshot = { rows: ConversationSourceRecord[]; batch: Batch; units: ConversationUnit[]; coverage: ConversationSourceCoverage[];
-  order: ReturnType<typeof projection>['order']; revision: number; checkpoint: ConversationFrontier; committed: boolean; requestKey: string; outside: ConversationReadWindow['outside']; history: HistoryPosition[]; anchor?: ConversationReadWindow['anchor']; inputAdoption: ConversationInputAdoptionContext }
+  order: ReturnType<typeof projection>['order']; revision: number; checkpoint: ConversationFrontier; committed: boolean; requestKey: string; outside: ConversationReadWindow['outside']; history: HistoryPosition[]; anchor?: ConversationReadWindow['anchor']; inputAdoption: ConversationInputAdoptionContext; navigation?: ReturnType<typeof historyNavigation> }
 type ReadingView = ConversationRef & { id: string; scope: ConversationFrontier['scope']; revision: number; rows: ConversationSourceRecord[];
   checkpoint: ConversationFrontier; snapshots: Map<string, Snapshot>; observers: number; readers: number; outside: ConversationReadWindow['outside']; history: HistoryPosition[]; anchor?: ConversationReadWindow['anchor']; inputAdoption: ConversationInputAdoptionContext }
 const MAX_UNOBSERVED_VIEWS = 16
@@ -241,7 +240,7 @@ async function inspectBatch(ref: ConversationRef, port: ConversationReaderPort, 
   }
   for (let index = 0; index < coverage.length; index++) if (coverage[index]!.source.kind === 'native-unavailable' || coverage[index]!.source.kind === 'captured' && !state.position.capturedCut)
     coverage[index] = unavailable(coverage[index]!.source, new AgentMuxError('This original scope has no accepted source identity. Read a new explicit scope to discover one.', 'AGENT_CONVERSATION_SOURCE_UNAVAILABLE'))
-  return { rows, ...(nativePage ? { nativePage } : {}), batch: { records: [], index: 0, offset: 0, digests: [], after, coverage, end: checkpoint,
+  return { rows, ...(nativePage ? { nativePage } : {}), batch: { index: 0, offset: 0, digests: [], after, coverage, end: checkpoint,
     more: native !== undefined && after.native !== null || !!state.position.capturedCut && after.capturedBefore !== null } }
 }
 async function changesBatch(ref: ConversationRef, port: ConversationReaderPort, state: Cursor, limit: number, originals: ReadonlyMap<string, ConversationSourceRecord>): Promise<{ rows: ConversationSourceRecord[]; batch: Batch }> {
@@ -295,7 +294,7 @@ async function changesBatch(ref: ConversationRef, port: ConversationReaderPort, 
       } catch (error) { port.signal?.throwIfAborted(); coverage[at] = unavailable(source, error, String(cut.sequence)) }
     } else coverage[at] = unavailable(source, new AgentMuxError('The original frontier has no resolved source identity. Later discovery requires a new explicit checkpoint.', 'AGENT_CONVERSATION_SOURCE_UNAVAILABLE'))
   }
-  return { rows, batch: { records: rows.map(r => ({ id: r.id, reference: r.reference!, revision: r.revision, order: r.order, source: r.original.kind })), index: 0, offset: 0, digests: [], after: state.position, coverage, end: { ...ref, scope: state.scope, cuts }, more } }
+  return { rows, batch: { index: 0, offset: 0, digests: [], after: state.position, coverage, end: { ...ref, scope: state.scope, cuts }, more } }
 }
 async function anchorBatch(input: ConversationTimelineReadInput, port: ConversationReaderPort, state: Cursor) {
   const anchor = input.anchor, reference = input.record ?? anchor!.record, rows: ConversationSourceRecord[] = [], source = reference.source, coverage = state.scope.sources.map(initialCoverage)
@@ -324,7 +323,7 @@ async function anchorBatch(input: ConversationTimelineReadInput, port: Conversat
     const kind = source.kind, index = coverage.findIndex(c => c.source.kind === kind)
     if (index >= 0) coverage[index] = { ...unavailable(coverage[index]!.source, error), gaps: [{ code: 'AGENT_CONVERSATION_VERSION_UNAVAILABLE', message: error instanceof Error ? error.message : 'The original version is unavailable.', record: reference }] }
   }
-  return { rows, batch: { records: rows.map(r => ({ id: r.id, reference: r.reference!, revision: r.revision, order: r.order, source: r.original.kind })), index: 0, offset: 0, digests: [], after: { native: null, capturedBefore: null }, coverage, more: false } as Batch }
+  return { rows, batch: { index: 0, offset: 0, digests: [], after: { native: null, capturedBefore: null }, coverage, more: false } as Batch }
 }
 /** Original accepted page adjacency, never timestamps or opaque-cursor ordering. */
 function historyNavigation(rows: readonly ConversationSourceRecord[], history: readonly HistoryPosition[]) {
@@ -501,8 +500,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
       }
       if (unitBytes > CONVERSATION_MAX_UNIT_BYTES) return fail('This exact event exceeds its wire assembly bound. Its original source and continuation are retained.', 'AGENT_SESSION_HISTORY_BUDGET')
       if (removed.size) { rows = rows.filter(record => !removed.has(record.id)); projected = projection(ref, state.scope, rows, loaded.batch.coverage, inputAdoption) }
-      const { events: _events, ...originalBatch } = loaded.batch
-      const batch: Batch = { ...originalBatch, records: [], index: 0, offset: 0, digests: [] }
+      const batch: Batch = { ...loaded.batch, index: 0, offset: 0, digests: [] }
       snapshot = { rows, batch, units: projected.units.reverse(), coverage: projected.coverage, order: projected.order,
         ...(state.anchor ? { anchor: state.anchor } : {}), revision: view.revision + 1, checkpoint: loaded.batch.end ?? state.checkpoint!, committed: false, requestKey, outside, history, inputAdoption }
       state.viewRevision = view.revision; state.snapshotId = randomUUID(); state.batch = { index: 0, offset: 0 }
@@ -513,7 +511,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
     const digests = batch.digests.length ? batch.digests : units.map(unit => ({ id: unit.event.id, sha256: hash(JSON.stringify(unit)) }))
     batch.digests = digests
     const budgetBytes = input.maxBytes ?? CONVERSATION_DEFAULT_READ_BYTES, items: ConversationUnitEntry[] = []
-    const navigation = historyNavigation(snapshot.rows, snapshot.history)
+    const navigation = snapshot.navigation ??= historyNavigation(snapshot.rows, snapshot.history)
     const historyCursor = (index: number | null, direction?: 'newer'): string | null => {
       if (index === null) return null
       const position = snapshot.history[index], tail = snapshot.history.at(-1)
