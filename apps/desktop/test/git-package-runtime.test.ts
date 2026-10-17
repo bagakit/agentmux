@@ -1,5 +1,4 @@
 import { execFileSync } from 'node:child_process'
-import { constants as fsConstants } from 'node:fs'
 import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -24,8 +23,8 @@ it('the actual packaging dependency materializer copies a standalone usable neut
     return declaration!.getText(source)
   })
   // Execute unchanged private packaging functions, without launching/signing/installing an App.
-  const materialize = new Function('readFile', 'mkdir', 'cp', 'readdir', 'join', 'dirname', 'lstat', 'realpath', 'fsConstants', 'repositoryRoot',
-    functions.join('\n') + '\nreturn materializeDependency;')(readFile, mkdir, cp, readdir, join, dirname, lstat, realpath, fsConstants, root) as
+  const materialize = new Function('readFile', 'mkdir', 'cp', 'readdir', 'join', 'dirname', 'lstat', 'realpath', 'repositoryRoot',
+    functions.join('\n') + '\nreturn materializeDependency;')(readFile, mkdir, cp, readdir, join, dirname, lstat, realpath, root) as
     (source: string, name: string, destination: string) => Promise<void>
   const temporary = await mkdtemp(join(tmpdir(), 'agentmux-git-runtime-'))
   try {
