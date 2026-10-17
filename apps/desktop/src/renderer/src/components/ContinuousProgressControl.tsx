@@ -11,9 +11,11 @@ import { CalendarScheduleControl } from './CalendarScheduleControl'
 export type ContinuousProgressStatus = 'inactive' | 'active' | 'paused' | 'unconfirmed'
 
 /** Existing Main loop owner is observed only for this Session, even while its mailbox page is hidden. */
-export function ContinuousProgressControl({ session, onStatusChange }: {
+export function ContinuousProgressControl({ session, onStatusChange, presented = true }: {
   session: Extract<SessionSnapshot, { kind: 'agent' }>
   onStatusChange?: (status: ContinuousProgressStatus) => void
+  /** Only the detail DOM waits for first use; observation and action state stay mounted. */
+  presented?: boolean
 }) {
   const displayPath = usePathDisplay()
   const target = useMemo(() => ({ hostId: session.control.hostId, agentSessionId: session.control.agentSessionId,
@@ -69,7 +71,8 @@ export function ContinuousProgressControl({ session, onStatusChange }: {
   useEffect(() => { onStatusChange?.(combinedStatus) }, [onStatusChange, combinedStatus])
   const action = (kind: 'pause' | 'resume' | 'stop' | 'check') => loop && void run(() => api.continuousProgress.action(target, loop.loopId, kind))
   return <div className="continuous-progress-control" data-progress-state={status}>
-    <CalendarScheduleControl target={target} onStatusChange={setCalendarStatus} />
+    <CalendarScheduleControl target={target} onStatusChange={setCalendarStatus} presented={presented} />
+    {presented ? <>
     <details className="continuous-progress-control__details" data-progress-details="interval" onToggle={event => event.stopPropagation()}>
       <summary>Continuous progress</summary>
       <div className="continuous-progress-control__detail-body">
@@ -126,5 +129,6 @@ export function ContinuousProgressControl({ session, onStatusChange }: {
         <dt>Workspace</dt><dd title={displayPath(target.workspacePath, target.hostId)}>{displayPath(target.workspacePath, target.hostId)}</dd>
       </dl>
     </details>
+    </> : null}
   </div>
 }

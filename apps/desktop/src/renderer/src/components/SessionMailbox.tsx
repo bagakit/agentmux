@@ -206,6 +206,9 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
     return () => document.removeEventListener('keydown', dismissPreview, true)
   }, [open, visible, document])
   const [folder, setFolder] = useState<Folder>('inbox')
+  const progressVisible = open && visible && folder === 'progress'
+  const [progressPresented, setProgressPresented] = useState(false)
+  useEffect(() => { if (progressVisible) setProgressPresented(true) }, [progressVisible])
   useEffect(() => { onHistoryVisible?.(open && visible && folder === 'user'); return () => onHistoryVisible?.(false) },
     [open, visible, folder, onHistoryVisible])
   const folderLabels = { inbox: 'A2A Inbox', outbox: 'A2A Outbox', user: 'User Messages', system: 'Notices', progress: 'Progress', collaboration: 'Collaboration' }
@@ -594,7 +597,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
         </ol> : <MailboxEmpty title={system.available ? 'No current notices' : 'Waiting for Session status'} /> : null}
       </div>
       {progressSession ? <div id={`${id}-progress`} role="tabpanel" aria-labelledby={`${id}-progress-tab`} hidden={folder !== 'progress'}>
-        <ContinuousProgressControl session={progressSession} onStatusChange={onProgressStatus} />
+        <ContinuousProgressControl session={progressSession} onStatusChange={onProgressStatus} presented={progressVisible || progressPresented} />
       </div> : null}
       {effectiveControl ? <div id={`${id}-collaboration`} role="tabpanel" aria-labelledby={`${id}-collaboration-tab`} hidden={folder !== 'collaboration'}>
         {readingMounted && folder === 'collaboration' ? <MailboxCollaboration key={scope} control={effectiveControl} active={open && visible} reading={reading} onCopy={onCopyQueued} /> : null}
