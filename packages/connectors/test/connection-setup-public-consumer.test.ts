@@ -86,7 +86,7 @@ it('compiled CLI and SDK reach the default QR leaf and original encrypted owner 
   expect(await f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId })).toEqual(pending)
   expect(result(await f.cli(['inspect', '--operation-id', f.input.operationId]))).toEqual(pending)
   const list = result<{ operations: unknown[]; next: string | null }>(await f.cli(['ls', '--connection', f.input.connectionId]))
-  expect(list).toEqual({ operations: [pending.operation], next: null, support: { connectionRevision: 1, capabilities: ['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation'] } })
+  expect(list).toEqual({ operations: [pending.operation], next: null, support: { connectionRevision: 1, capabilities: ['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation', 'initial-setup'] } })
   expect(await f.sdk.call('connection.setup.ls', { connectionId: f.input.connectionId })).toEqual(list)
   expect(JSON.stringify(list)).not.toContain(TOKEN); expect(JSON.stringify(list)).not.toContain(FLOW)
   expect(await f.sdk.call('connection.inspect', { connectionId: f.input.connectionId })).toEqual(before)
@@ -245,7 +245,7 @@ it.each(['challenge', 'unknown'] as const)('a real owner process restart retains
   else { expect(observed.operation).toMatchObject({ ...input, application: config.application, request: { state: 'unknown', attemptId: expect.any(String) } }); expect(observed.challenge).toBeNull() }
   expect(observed.operation?.request.attemptId).toBe(claimed.operation?.request.attemptId)
   expect(result(await cli(['setup', 'begin', '--input', '-'], input))).toEqual(observed)
-  expect(result(await cli(['setup', 'ls', '--connection', input.connectionId]))).toEqual({ operations: [observed.operation], next: null, support: { connectionRevision: 1, capabilities: ['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation'] } })
+  expect(result(await cli(['setup', 'ls', '--connection', input.connectionId]))).toEqual({ operations: [observed.operation], next: null, support: { connectionRevision: 1, capabilities: ['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation', 'initial-setup'] } })
   expect(result<{ connection: unknown }>(await cli(['inspect', '--connection', input.connectionId])).connection).toMatchObject({ config, revision: 1 })
   const effects = (await readFile(join(root, 'native-effects.ndjson'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
   expect(effects).toEqual([{ method: 'POST', path: '/accounts/qrlogin/init' }])
