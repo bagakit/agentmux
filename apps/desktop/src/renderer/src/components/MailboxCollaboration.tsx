@@ -15,7 +15,7 @@ type Page = AgentMuxRpcResult<'message.dispatch.ls'>
 type Observation = AgentMuxRpcResult<'message.dispatch.read'>
 const reason = (error: unknown) => error instanceof Error ? error.message : String(error)
 
-function OriginalMessage({ record, reading, onCopy }: { record: DurableAgentMuxMessage; reading?: ConversationReadingProps | undefined; onCopy?: ((text: string) => Promise<boolean>) | undefined }) {
+export function MailboxOriginalMessage({ record, reading, onCopy }: { record: DurableAgentMuxMessage; reading?: ConversationReadingProps | undefined; onCopy?: ((text: string) => Promise<boolean>) | undefined }) {
   const [expanded, setExpanded] = useState(false)
   const { envelope: message, delivery } = record
   return <details className="mailbox-collaboration__message" data-message-id={message.messageId} onToggle={event => { if (event.target === event.currentTarget) setExpanded(event.currentTarget.open) }}>
@@ -159,11 +159,11 @@ export function MailboxCollaboration({ control, active, reading, onCopy }: {
           <dt>Owner</dt><dd><button type="button" className="composer-tool" onClick={() => void openAgent(original.dispatch.ownerAgentSessionId)}>{original.dispatch.ownerAgentSessionId}</button></dd>
           <dt>Worker</dt><dd><button type="button" className="composer-tool" onClick={() => void openAgent(original.dispatch.workerAgentSessionId)}>{original.dispatch.workerAgentSessionId}</button></dd></dl>
         {navigationIssue?.source === selected ? <p role="status">{navigationIssue.message}</p> : null}
-        <OriginalMessage key={original.source.envelope.messageId} record={original.source} reading={reading} onCopy={onCopy} />
+        <MailboxOriginalMessage key={original.source.envelope.messageId} record={original.source} reading={reading} onCopy={onCopy} />
         <h3>Supervision events</h3>
         {original.dispatch.events.length ? <ol>{original.dispatch.events.map(event => <li key={event.replyMessageId}><strong>{event.kind}</strong> · {event.replyMessageId} · <MailboxTime value={event.at} /></li>)}</ol> : <p>No supervision events recorded.</p>}
         <h3>Original replies</h3>
-        {original.replies.length ? original.replies.map(reply => <OriginalMessage key={reply.envelope.messageId} record={reply} reading={reading} onCopy={onCopy} />) : <p>No replies recorded.</p>}
+        {original.replies.length ? original.replies.map(reply => <MailboxOriginalMessage key={reply.envelope.messageId} record={reply} reading={reading} onCopy={onCopy} />) : <p>No replies recorded.</p>}
         {original.identityDiagnostics.length ? <details className="mailbox-collaboration__diagnostics"><summary>Current identity observation is unconfirmed ({original.identityDiagnostics.length})</summary>
           {original.identityDiagnostics.map(item => <p key={JSON.stringify([item.agentSessionId, item.runId, item.code])}>{item.agentSessionId} · {item.runId} · {item.code}: {item.message}</p>)}
           <p>Original recorded identities remain above. Current Run health is not established by this observation.</p></details> : null}
