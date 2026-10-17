@@ -31,4 +31,3 @@ export async function offlineEndpoint(home: string, inputs: string[], workspace?
     (workspace ? `\n[projects.${JSON.stringify(workspace)}]\ntrust_level="trusted"\n` : ''))
   return { endpoint, sockets, requests }
 }
-
