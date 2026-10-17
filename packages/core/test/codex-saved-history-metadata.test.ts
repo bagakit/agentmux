@@ -29,7 +29,12 @@ afterEach(async () => {
   for (const close of closes.splice(0).reverse()) await close()
   for (const f of fixtures.splice(0)) {
     expect(f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0, 0])
-    expect(await readFile(f.storePath)).toEqual(f.before)
+    if (f.unifiedCapturedRead) {
+      // Opening the unified reader initializes its captured stream in the same
+      // SQLite owner. Protect the original Session and native bytes, not page layout.
+      expect(await f.store.readMetadata(f.session.agentSessionId)).toEqual(f.session)
+      expect(await readFile(f.transcriptPath)).toEqual(f.nativeBefore)
+    } else expect(await readFile(f.storePath)).toEqual(f.before)
     await f.client.dispose()
     await Promise.allSettled(f.pending)
     await rm(f.root, { recursive: true, force: true })
@@ -58,7 +63,8 @@ async function createFixture(rows: unknown[]) {
   const client = new AgentMuxClient({ store }), kernel = Reflect.get(client, 'kernel')
   const controls = ['connect', 'start', 'input', 'resize', 'stop', 'attach', 'status'].map(name =>
     vi.spyOn(kernel, name).mockImplementation(() => { throw Error('Reading cannot operate a Run') }))
-  const value = { root, transcriptPath, storePath, session, client, before, controls, pending }
+  const value = { root, transcriptPath, storePath, store, session, client, before, controls, pending,
+    nativeBefore: await readFile(transcriptPath), unifiedCapturedRead: false }
   return value
 }
 
@@ -114,14 +120,18 @@ it('the public resource reader can locate a saved message using its recorded met
 
 it('public RPC and compiled history CLI return the same qualified message metadata', async () => {
   const f = await fixture([message('public-reply', { internal_chat_message_metadata_passthrough: { turn_id: 'public-turn' } })])
+  f.unifiedCapturedRead = true
   const server = new AgentMuxControlServer({ socketPath: join(f.root, 'control.sock'), coreClients: () => [{ hostId: 'local', client: f.client }] })
   await server.start(); closes.push(() => server.stop())
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); closes.push(() => rpc.dispose())
   const input = { hostId: 'local', agentSessionId: f.session.agentSessionId, source: 'native' as const }
-  for (const method of ['agent.history', 'agent.conversation.inspect'] as const) {
-    const page = await rpc.call(method, input)
-    expect(page.items).toEqual([{ kind: 'item', item: expect.objectContaining({ id: 'public-reply', startedAt: AT, turnId: 'public-turn' }) }])
-  }
+  const history = await rpc.call('agent.history', input)
+  const original = expect.objectContaining({ id: 'public-reply', startedAt: AT, turnId: 'public-turn' })
+  expect(history.items).toEqual([{ kind: 'item', item: original }])
+  const conversation = await rpc.call('agent.conversation.inspect', { hostId: input.hostId, agentSessionId: input.agentSessionId })
+  expect(conversation.items).toEqual([{ kind: 'item', item: expect.objectContaining({
+    event: expect.objectContaining({ role: 'message' }), records: [expect.objectContaining({ original: { kind: 'native', item: original } })]
+  }) }])
   const result = await runCompiledObjectCli(['agent', 'history', '--host', 'local', '--session', f.session.agentSessionId, '--source', 'native'], objectCliEnvironment(f.root))
   expect(result.code, result.stderr).toBe(0)
   expect(JSON.parse(result.stdout).result.items).toEqual([{ kind: 'item', item: expect.objectContaining({ id: 'public-reply', startedAt: AT, turnId: 'public-turn' }) }])
