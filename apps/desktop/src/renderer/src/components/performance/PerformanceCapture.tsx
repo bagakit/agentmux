@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { parseRendererTraceResult, parseRendererV8ProfileResult,
-  type MetricsObservation, type RendererTraceResult, type RendererV8ProfileResult, type RendererV8ProfileTarget } from '@agentmux/core/control'
+import { parseRendererTraceResult, parseRendererV8ProfileResult, parseRendererAnimationsResult,
+  type MetricsObservation, type RendererTraceResult, type RendererV8ProfileResult, type RendererV8ProfileTarget, type RendererAnimationsResult } from '@agentmux/core/control'
 import { api } from '../../lib/api'
 import { analyseRendererProfile, profileFlameRows, type ProfileAnalysis } from '../../lib/renderer-profile-analysis'
+import { AnimationInspectionResult } from './PerformanceAnimations'
 
 type Capture = { kind: 'profile'; result: RendererV8ProfileResult } | { kind: 'trace'; result: RendererTraceResult }
 type Captured = { key: string; value: Capture }
@@ -88,7 +89,8 @@ export function PerformanceCapture({ observation, externalBusy = false, onBusyCh
   observation: MetricsObservation | null | undefined; externalBusy?: boolean | undefined; onBusyChange?: ((busy: boolean) => void) | undefined
 }) {
   const target = currentPerformanceCaptureTarget(observation), key = JSON.stringify(target)
-  const [busy, setBusy] = useState<'profile' | 'trace' | null>(null), [capture, setCapture] = useState<Captured | null>(null)
+  const [busy, setBusy] = useState<'profile' | 'trace' | 'animations' | null>(null), [capture, setCapture] = useState<Captured | null>(null)
+  const [animations, setAnimations] = useState<{ key: string; result: RendererAnimationsResult } | null>(null)
   const [completedProfile, setCompletedProfile] = useState<Captured | null>(null)
   const [error, setError] = useState<string | null>(null)
   const connected = useRef(true), inFlight = useRef(false)
@@ -110,15 +112,31 @@ export function PerformanceCapture({ observation, externalBusy = false, onBusyCh
       if (connected.current) setError(reason instanceof Error ? reason.message : String(reason))
     } finally { inFlight.current = false; onBusyChange?.(false); if (connected.current) setBusy(null) }
   }
+  const inspectAnimations = async () => {
+    if (!target || inFlight.current || externalBusy) return
+    const sourceKey = key, input = { target: { ...target } }
+    inFlight.current = true; setBusy('animations'); setError(null); onBusyChange?.(true)
+    try {
+      const result = parseRendererAnimationsResult(await api.performance.inspectAnimations(input), input)
+      if (connected.current) setAnimations({ key: sourceKey, result })
+    } catch (reason) {
+      if (connected.current) setError(reason instanceof Error ? reason.message : String(reason))
+    } finally { inFlight.current = false; onBusyChange?.(false); if (connected.current) setBusy(null) }
+  }
+  // Retained rows change only with their original result or the exact current target.
+  const animationView = useMemo(() => animations ? <AnimationInspectionResult result={animations.result} sourceChanged={animations.key !== key}
+    onExport={() => downloadPerformanceJSON(animations.result, 'renderer-animations.json')} /> : null, [animations, key])
   return <details className="performance-disclosure performance-capture" data-performance-capture>
-    <summary>Analyse this window <span>Explicit 2s capture</span></summary>
+    <summary>Analyse this window <span>Explicit diagnostics</span></summary>
     <p className="performance-note">Capture while reproducing the lag. V8 samples explain JavaScript; timeline records rendering stages. Neither is a leak verdict.</p>
     {!target ? <p className="performance-state">The current Renderer process instance is unconfirmed. Wait for matching window and process readings.</p> : null}
     <div className="performance-capture-actions">
-      <button type="button" disabled={!target || busy !== null || externalBusy} onClick={() => void run('profile')}>{busy === 'profile' ? 'Sampling…' : 'Sample JavaScript · 2s'}</button>
-      <button type="button" disabled={!target || busy !== null || externalBusy} onClick={() => void run('trace')}>{busy === 'trace' ? 'Tracing…' : 'Capture timeline · 2s'}</button>
+      <button type="button" data-performance-action="profile" disabled={!target || busy !== null || externalBusy} onClick={() => void run('profile')}>{busy === 'profile' ? 'Sampling…' : 'Sample JavaScript · 2s'}</button>
+      <button type="button" data-performance-action="trace" disabled={!target || busy !== null || externalBusy} onClick={() => void run('trace')}>{busy === 'trace' ? 'Tracing…' : 'Capture timeline · 2s'}</button>
+      <button type="button" data-performance-action="animations" disabled={!target || busy !== null || externalBusy} onClick={() => void inspectAnimations()}>{busy === 'animations' ? 'Inspecting…' : 'Inspect animations'}</button>
     </div>
     {error ? <p className="performance-state" data-tone="warning">{error}</p> : null}
+    {animationView}
     {capture && capture !== completedProfile ? <CaptureResult key="latest" capture={capture.value} sourceChanged={capture.key !== key} /> : null}
     {completedProfile ? <CaptureResult key={completedProfile.value.result.timing.requestedAt} capture={completedProfile.value} sourceChanged={completedProfile.key !== key} retained={capture !== completedProfile} /> : null}
   </details>

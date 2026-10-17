@@ -102,6 +102,7 @@ projectInitialTheme(initialTheme)
 const api: AgentMuxPreloadApi = {
   conversation: createPreloadConversationRead(ipcRenderer),
   performance: {
+    inspectAnimations: input => ipcRenderer.invoke('metrics:inspectAnimations', input),
     captureAllocations: input => ipcRenderer.invoke('metrics:captureAllocations', input),
     captureScene: input => ipcRenderer.invoke('metrics:captureScene', input),
     inspectScene: input => ipcRenderer.invoke('metrics:inspectScene', input),
