@@ -231,7 +231,7 @@ AgentMux 不接管 harness 的模型循环、工具执行、上下文压缩或�
 
 ## Steer 与 Provider 输入能力
 
-普通当前终端输入保持其原目标合同；显式寻址原生对话的意图必须携带准确原来源，并由原 Run 内可核对的 actor、轮次及请求合同接纳。已保存历史可读不代表读取它的进程拥有原 actor 写资格，原生 client correlation 也不代表可重放。无原通道、错来源或失效目标只拒绝该次定向操作，保留原操作及健康终端输入。共同信箱、采用关系及接入方边界分别见[输入与邮箱](conversation-input.md#统一发送信箱与原生采用)和[Conversation 协议](../../specs/conversation-protocol.md#mailbox-consumption)，不由各客户端重定义。
+普通当前终端输入保持其原目标合同；显式寻址原生对话的意图必须携带准确原来源，并由 Provider 核对的原生输入通道、轮次及请求合同接纳。已保存历史可读不代表读取它的进程拥有原 actor 写资格，原生 client correlation 也不代表可重放。无原通道、错来源或失效目标只拒绝该次定向操作，保留原操作及健康终端输入。共同信箱、采用关系及接入方边界分别见[输入与邮箱](conversation-input.md#统一发送信箱与原生采用)和[Conversation 协议](../../specs/conversation-protocol.md#mailbox-consumption)，不由各客户端重定义。
 
 用户反馈工作中的 steer 被“composer readiness epoch already consumed”拒绝。Provider 负责具体 CLI 的可用输入方式及就绪证据，Core 负责同一 Run 的并发提交、去重和交付。不能把 turn 完成信号当成所有输入的唯一机会，使本可接受 steer 的健康 Agent 被内部纪元卡住；也不能绕过尚未完成的提交或把未知输入状态猜成安全。已入队未投出的消息必须保留；提示准确说清当前等待对象，不能承诺永远等不到的自动恢复，也不能建议结束健康 Session 来修复流程。
 
