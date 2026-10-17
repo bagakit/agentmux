@@ -151,7 +151,15 @@ export function AgentComposer({
         placeholder={placeholder}
       />
       <div className="composer__toolbar">
-        <div>
+        <div onFocusCapture={(event) => {
+          // Keep keyboard focus inside this scroll strip without moving the editor or terminal.
+          const strip = event.currentTarget
+          if (strip.contains(event.target)) {
+            const viewport = strip.getBoundingClientRect(), focused = event.target.getBoundingClientRect()
+            if (focused.left < viewport.left) strip.scrollLeft += focused.left - viewport.left
+            else if (focused.right > viewport.right) strip.scrollLeft += focused.right - viewport.right
+          }
+        }}>
           {typeof tools === 'function' ? tools(referenceTools) : <>{tools}{referenceTools}</>}
           {/* Absence hides: only a Provider that declared an addressable posture control renders this,
               and only while the composer can write to the live process. */}
