@@ -35,6 +35,20 @@ async function signIn() {
   return request.operationId
 }
 const currentStep = () => progress().querySelector('[aria-current="step"]')?.getAttribute('data-step')
+const result = () => {
+  const node = document.querySelector('[data-profile-result]')
+  expect(node, 'The original profile update keeps a readable outcome').not.toBeNull()
+  return node!
+}
+const savedProgressButton = () => [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'View saved progress')!
+function incompleteAudience() {
+  const transport = f.registration.getMockImplementation()!
+  f.registration.mockImplementation(async (url, input) => {
+    const response = await transport(url, input)
+    return new URL(url instanceof Request ? url.url : String(url)).pathname.includes('/visible/online/')
+      ? Response.json({ code: 0, data: { whiteList: native.audience } }) : response
+  })
+}
 async function trace() {
   await act(async () => { const detail = document.querySelector<HTMLDetailsElement>('[data-connection-request-trace]') ?? document.querySelector<HTMLDetailsElement>('.connector-request-trace'); expect(detail).not.toBeNull(); detail!.open = true; detail!.dispatchEvent(new Event('toggle')) })
   await vi.waitFor(() => expect(document.querySelector('.connector-request-trace table')).not.toBeNull())
@@ -42,13 +56,7 @@ async function trace() {
 
 it('updates the original profile before an incomplete publication audience stops publishing with its exact issue', async () => {
   await ready()
-  const transport = f.registration.getMockImplementation()!
-  f.registration.mockImplementation(async (url, input) => {
-    const response = await transport(url, input)
-    return new URL(url instanceof Request ? url.url : String(url)).pathname.includes('/visible/online/')
-      ? Response.json({ code: 0, data: { whiteList: native.audience } })
-      : response
-  })
+  incompleteAudience()
   await signIn()
   await vi.waitFor(() => expect(native.written, 'Future publication metadata cannot prevent the authorized profile write').toBe(true), { timeout: 15_000 })
   await vi.waitFor(() => {
@@ -61,6 +69,183 @@ it('updates the original profile before an incomplete publication audience stops
   expect(native.requests.some(request => request.path.includes('/app_version/create/') || request.path.includes('/publish/commit/'))).toBe(false)
   expect(native.current.name).toBe('Saved public name')
   expect(f.creationCount).toBe(1)
+  expect(result().textContent).toContain('Profile updated, not published')
+  expect(result().getAttribute('data-state')).toBe('attention')
+  await trace()
+  const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  const before = f.registration.mock.calls.length
+  await f.click('Copy diagnosis')
+  await vi.waitFor(() => expect(copy).toHaveBeenCalledTimes(1))
+  const diagnosis = JSON.parse(copy.mock.calls[0]![0])
+  const setupId = document.querySelector('[data-console-profile-task]')!.getAttribute('data-console-profile-task')!
+  const original = await f.client.call('connection.setup.inspect', { operationId: setupId })
+  expect(diagnosis.setupObservation).toMatchObject({
+    scope: 'single-view-observation', operationId: setupId, revision: original.operation!.revision,
+    profileUpdate: { stage: 'publication-create', state: 'attention', actionKinds: ['refresh-publication-checks'] },
+    publication: { capability: original.applicationConfiguration!.capability, reason: original.applicationConfiguration!.reason ?? null, review: { issues: ['Both complete current visibility ranges are required'] } }
+  })
+  expect(diagnosis.setupObservation.publication.sources).toHaveLength(5)
+  expect(diagnosis.setupObservation.publication.sources).toEqual(expect.arrayContaining([
+    { subject: 'publication-visibility', request: 'confirmed', secureStorage: 'stored' },
+    { subject: 'publication-versions', request: 'confirmed', secureStorage: 'stored' }
+  ]))
+  expect(diagnosis.next).toBeNull()
+  expect(diagnosis.entries.some((entry: any) => entry.effect === 'update-application-profile' && entry.request === 'confirmed' && entry.secureStorage === 'stored')).toBe(true)
+  expect(JSON.stringify(diagnosis.setupObservation)).not.toMatch(/Saved public name|Saved public summary|original-member|account|qrPayload|pngDataUrl|base64|csrf|cookie|https?:\/\//iu)
+  expect(f.registration.mock.calls).toHaveLength(before)
+}, 30_000)
+
+it('keeps the checked result and progress mounted while the real local progress response is pending', async () => {
+  await ready(); incompleteAudience(); await signIn()
+  await vi.waitFor(() => expect(result().textContent).toContain('Profile updated, not published'), { timeout: 15_000 })
+  await vi.waitFor(() => expect(savedProgressButton().getAttribute('aria-busy')).toBe('false'))
+  const previousProgress = progress(), previousResult = result(), publicationChecks = document.querySelector('[aria-label="Publication checks"]')
+  const handler = f.handlers.get('connections:call')!
+  let arrive!: () => void, release!: () => void
+  const arrived = new Promise<void>(resolve => { arrive = resolve }), held = new Promise<void>(resolve => { release = resolve })
+  f.handlers.set('connections:call', async (event, method, input) => {
+    const value = await handler(event, method, input)
+    if (method === 'connection.setup.inspect' && !input.requestTrace) { arrive(); await held }
+    return value
+  })
+  const before = f.registration.mock.calls.length
+  try {
+    await f.click('View saved progress'); await arrived
+    for (let turn = 0; turn < 2; turn++) {
+      await f.settle()
+      expect(savedProgressButton().getAttribute('aria-busy')).toBe('true')
+      expect(document.querySelector('[data-profile-activity]')?.getAttribute('data-working')).toBe('true')
+      expect(document.querySelector('[data-profile-activity]')?.getAttribute('role')).toBe('status')
+      expect(document.querySelector('[data-profile-activity] svg')).not.toBeNull()
+      expect(document.querySelector('[data-profile-activity]')?.textContent).toContain('Checking saved progress')
+      expect(progress()).toBe(previousProgress)
+      expect(result()).toBe(previousResult)
+      expect(document.querySelector('[aria-label="Publication checks"]')).toBe(publicationChecks)
+      expect(currentStep()).toBe('4')
+      expect(result().textContent).toContain('Profile updated, not published')
+      expect(progress().textContent).not.toContain('Result unavailable')
+      expect(f.registration.mock.calls).toHaveLength(before)
+    }
+  } finally { await act(async () => release()) }
+  await vi.waitFor(() => expect(savedProgressButton().getAttribute('aria-busy')).toBe('false'))
+  expect(progress()).toBe(previousProgress); expect(result()).toBe(previousResult)
+  expect(document.querySelector('[data-profile-activity]')?.textContent).toContain('Saved progress checked.')
+  expect(document.querySelector('[data-profile-activity]')?.getAttribute('data-working')).toBe('false')
+  expect(f.registration.mock.calls).toHaveLength(before)
+}, 30_000)
+
+it('keeps the manual query busy after a later background inspection completes during the original held write', async () => {
+  await ready()
+  const write = native.hold('/base_info/'), handler = f.handlers.get('connections:call')!
+  let holdNext = false, inspection = 0, manualInspection = 0, laterReads = 0, arrive!: () => void, release!: () => void
+  const arrived = new Promise<void>(resolve => { arrive = resolve }), held = new Promise<void>(resolve => { release = resolve })
+  f.handlers.set('connections:call', async (event, method, input) => {
+    const local = method === 'connection.setup.inspect' && !input.requestTrace
+    const ordinal = local ? ++inspection : 0, manual = local && holdNext
+    if (manual) { holdNext = false; manualInspection = ordinal }
+    const value = await handler(event, method, input)
+    if (manual) { arrive(); await held }
+    else if (local && manualInspection && ordinal > manualInspection) laterReads++
+    return value
+  })
+  try {
+    await signIn(); await write.arrived
+    await vi.waitFor(() => expect(currentStep()).toBe('3'), { timeout: 10_000 })
+    const previousProgress = progress(), previousResult = result(), before = f.registration.mock.calls.length
+    await act(async () => { holdNext = true; savedProgressButton().click() })
+    await arrived
+    await vi.waitFor(() => expect(laterReads).toBeGreaterThan(0), { timeout: 4000 })
+    expect(savedProgressButton().getAttribute('aria-busy')).toBe('true')
+    expect(savedProgressButton().querySelector('svg')).not.toBeNull()
+    expect(document.querySelector('[data-profile-activity]')?.getAttribute('data-working')).toBe('true')
+    expect(progress()).toBe(previousProgress); expect(result()).toBe(previousResult)
+    expect(f.registration.mock.calls).toHaveLength(before)
+    expect(native.requests.filter(request => request.path.includes('/base_info/'))).toHaveLength(1)
+    await act(async () => release())
+    await vi.waitFor(() => expect(savedProgressButton().getAttribute('aria-busy')).toBe('false'))
+    expect(document.querySelector('[data-profile-activity]')?.getAttribute('data-working')).toBe('true')
+    expect(native.submitted).toBe(false)
+  } finally { await act(async () => { release(); write.release() }) }
+  await vi.waitFor(() => expect(progress().textContent).toContain('original profile version is approved'), { timeout: 15_000 })
+  expect(native.requests.filter(request => request.path.includes('/base_info/'))).toHaveLength(1)
+  expect(f.creationCount).toBe(1)
+}, 30_000)
+
+it('retains the original result while an account-confirmed parent hands off to its pending local child read', async () => {
+  await ready(); incompleteAudience()
+  await f.click('Sync Mote profile')
+  await vi.waitFor(() => expect(document.querySelector('[data-mote-profile-action="confirm-account"]')).not.toBeNull(), { timeout: 15_000 })
+  const setupId = document.querySelector('[data-console-profile-task]')!.getAttribute('data-console-profile-task')!
+  const previous = await f.client.call('connection.setup.inspect', { operationId: setupId })
+  const previousProgress = progress(), previousResult = result(), handler = f.handlers.get('connections:call')!
+  let confirmedRevision: number | undefined, arrive!: () => void, release!: () => void
+  const arrived = new Promise<void>(resolve => { arrive = resolve }), held = new Promise<void>(resolve => { release = resolve })
+  f.parentCalls.mockImplementation(async (method, input) => {
+    const value = await f.forward(method, input)
+    if (method === 'space.mote.connection.advance' && value.setup?.authentication?.stage === 'confirmed') confirmedRevision = value.setup.revision
+    return value
+  })
+  f.handlers.set('connections:call', async (event, method, input) => {
+    const value = await handler(event, method, input)
+    if (method === 'connection.setup.inspect' && !input.requestTrace && confirmedRevision !== undefined) { arrive(); await held }
+    return value
+  })
+  try {
+    await f.click('Use this account & update bot'); await arrived; await f.settle()
+    expect(confirmedRevision).toBeGreaterThan(previous.operation!.revision)
+    expect(progress()).toBe(previousProgress); expect(result()).toBe(previousResult)
+    expect(progress().textContent).not.toContain('Result unavailable')
+    expect(result().textContent).toContain('Showing the last checked result.')
+    expect(document.querySelector('[data-profile-activity]')?.getAttribute('data-working')).toBe('true')
+    expect(document.querySelector('[data-mote-profile-action="confirm-account"]')).toBeNull()
+    expect(document.querySelector('[data-mote-profile-code]')).toBeNull()
+    expect(document.querySelector('[data-mote-profile-action="continue-profile-update"]')).toBeNull()
+    expect(native.requests.filter(request => request.path.includes('/base_info/'))).toHaveLength(1)
+    expect(native.requests.filter(request => request.path.includes('/upload/image'))).toHaveLength(1)
+    expect(native.submitted).toBe(false)
+  } finally { await act(async () => release()) }
+  await vi.waitFor(() => expect(result().textContent).toContain('Profile updated, not published'))
+  expect(progress()).toBe(previousProgress); expect(result()).toBe(previousResult)
+  expect(currentStep()).toBe('4')
+  expect(native.requests.filter(request => request.path.includes('/base_info/'))).toHaveLength(1)
+  expect(native.requests.filter(request => request.path.includes('/upload/image'))).toHaveLength(1)
+  expect(native.submitted).toBe(false); expect(f.creationCount).toBe(1)
+}, 30_000)
+
+it('identifies the last checked result after a local progress query fails without replaying any request', async () => {
+  await ready(); incompleteAudience(); await signIn()
+  await vi.waitFor(() => expect(result().textContent).toContain('Profile updated, not published'), { timeout: 15_000 })
+  await vi.waitFor(() => expect(savedProgressButton().getAttribute('aria-busy')).toBe('false'))
+  const previousProgress = progress(), previousResult = result(), checks = document.querySelector('[aria-label="Publication checks"]')
+  const setupId = document.querySelector('[data-console-profile-task]')!.getAttribute('data-console-profile-task')!
+  const original = await f.client.call('connection.setup.inspect', { operationId: setupId })
+  const refresh = original.profileUpdate!.actions.find(action => action.kind === 'refresh-publication-checks')!
+  expect(refresh).toBeTruthy()
+  const handler = f.handlers.get('connections:call')!
+  f.handlers.set('connections:call', async (event, method, input) => {
+    if (method === 'connection.setup.inspect' && !input.requestTrace) throw new Error('Controlled local progress read failure')
+    return handler(event, method, input)
+  })
+  const before = f.registration.mock.calls.length
+  await f.click('View saved progress')
+  await vi.waitFor(() => expect(document.body.textContent).toContain('Controlled local progress read failure'))
+  expect(progress()).toBe(previousProgress); expect(result()).toBe(previousResult)
+  expect(document.querySelector('[aria-label="Publication checks"]')).toBe(checks)
+  expect(result().textContent).toContain('Profile updated, not published')
+  expect(result().textContent).toContain('Showing the last checked result. The latest check could not be completed.')
+  expect(document.querySelector('[data-profile-activity]')?.textContent).toContain('Showing the last checked result')
+  expect(document.querySelector('[data-profile-activity]')?.textContent).not.toContain('Saved progress checked.')
+  expect(savedProgressButton().getAttribute('aria-busy')).toBe('false')
+  expect(currentStep()).toBe('4')
+  expect(document.querySelector('[data-mote-profile-action="refresh-publication-checks"]')).not.toBeNull()
+  expect(f.registration.mock.calls).toHaveLength(before)
+  await f.click('Refresh publication checks')
+  await vi.waitFor(() => expect(f.registration.mock.calls).toHaveLength(before + 5))
+  const request = f.parentCalls.mock.calls.filter(([method]) => method === 'space.mote.connection.advance').at(-1)![1]
+  expect(request).toMatchObject({ setup: { operationId: setupId, expectedRevision: refresh.expectedRevision, decision: { actionId: refresh.actionId, value: 'continue' } } })
+  expect(native.requests.filter(request => request.path.includes('/base_info/'))).toHaveLength(1)
+  expect(native.requests.filter(request => request.path.includes('/upload/image'))).toHaveLength(1)
+  expect(native.requests.some(request => request.path.includes('/app_version/create/') || request.path.includes('/publish/commit/'))).toBe(false)
 }, 30_000)
 
 it('publishes the saved profile with native version labels and current entries without unrelated manual form metadata', async () => {
@@ -132,7 +317,7 @@ it('refreshes blocked publication checks without publishing until a separate ori
   expect(native.requests.filter(request => request.path.includes('/base_info/'))).toHaveLength(1)
   expect(native.requests.filter(request => request.path.includes('/upload/image'))).toHaveLength(1)
   expect(currentStep()).toBe('4')
-  await f.click('Continue this update')
+  await f.click('Publish updated profile')
   await vi.waitFor(() => expect(progress().textContent).toContain('original profile version is approved'), { timeout: 15_000 })
   expect(native.requests.filter(request => request.path.includes('/app_version/create/'))).toHaveLength(1)
   expect(native.submitted).toBe(true)
@@ -298,6 +483,38 @@ it.each(['/app/upload/image', '/base_info/'])('keeps an unknown Console %s at it
   expect(f.creationCount).toBe(1)
 }, 30_000)
 
+it('prioritizes an unknown original publication write over its otherwise readable review', async () => {
+  await ready(); native.fail('/app_version/create/')
+  await signIn()
+  await vi.waitFor(() => {
+    expect(currentStep()).toBe('4')
+    expect(result().textContent).toContain('Publication result not confirmed')
+  }, { timeout: 15_000 })
+  expect(result().textContent).not.toContain('Profile updated, not published')
+  expect(document.querySelector('[data-publication-unavailable]')?.textContent).toContain('The original publication result is unconfirmed')
+  expect(document.querySelector('[data-mote-profile-action="continue-profile-update"]')).toBeNull()
+  expect(document.querySelector('[data-mote-profile-action="refresh-publication-checks"]')).toBeNull()
+  const setupId = document.querySelector('[data-console-profile-task]')!.getAttribute('data-console-profile-task')!
+  for (const kind of ['read-publication-pending', 'read-publication-versions', 'read-publication-visibility', 'read-publication-sharing', 'read-publication-features'] as const) {
+    const original = await f.client.call('connection.setup.inspect', { operationId: setupId, applicationInspection: {} })
+    const action = original.applicationInspection!.actions.find(action => action.kind === kind)!
+    expect(action, 'Independent current reads do not resolve an unknown publication write').toBeTruthy()
+    await f.client.call('connection.setup.advance', { operationId: setupId, expectedRevision: action.expectedRevision, decision: { actionId: action.actionId, value: 'continue' } })
+  }
+  const view = await f.client.call('connection.setup.inspect', { operationId: setupId })
+  expect(view.applicationConfiguration?.reason).toBe('original-effect-unconfirmed')
+  if (view.applicationConfiguration?.effect !== 'create-application-version') throw new Error('Missing original publication review')
+  expect(view.applicationConfiguration.review).not.toBeNull()
+  const before = f.registration.mock.calls.length
+  await f.click('View saved progress')
+  await vi.waitFor(() => expect(savedProgressButton().getAttribute('aria-busy')).toBe('false'))
+  expect(result().textContent).toContain('Publication result not confirmed')
+  expect(f.registration.mock.calls).toHaveLength(before)
+  expect(native.requests.filter(request => request.path.includes('/app_version/create/'))).toHaveLength(1)
+  expect(native.requests.some(request => request.path.includes('/publish/commit/'))).toBe(false)
+  expect(f.creationCount).toBe(1)
+}, 30_000)
+
 it('shows the held write and keeps prior confirmed steps while the original reply is pending', async () => {
   await ready()
   const held = native.hold('/base_info/')
@@ -355,8 +572,9 @@ it('keeps recorded sign-in visible when the original management progress cannot 
   await signIn()
   await vi.waitFor(() => expect(document.body.textContent).toContain('Controlled progress read failure'), { timeout: 15_000 })
   expect(progress().querySelector('[data-step="2"]')?.getAttribute('data-state')).toBe('recorded')
-  expect(currentStep()).toBeUndefined()
-  expect(progress().textContent).toContain('progress is not available')
+  expect(currentStep()).toBe('2')
+  expect(result().textContent).toContain('Showing the last checked result. The latest check could not be completed.')
+  expect(progress().textContent).not.toContain('Result unavailable')
   const before = native.requests.length
   await f.remount()
   await f.click('Saved public name · Profile update')
