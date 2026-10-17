@@ -43,7 +43,7 @@ export async function confirmNativeInputAdoption(item: AgentSessionHistoryItem, 
       (intent.execution ?? 'default') === 'default' && plan.operation === 'queue-idle' && plan.expectedTurnId === undefined &&
       item.contentParts.length === 1 && item.contentParts[0]?.kind === 'text' && item.contentParts[0].text === intent.prompt
     if (!addressed && !defaultInput && !notification) return unconfirmed()
-    return { ...original, conversation: { ...conversation, adoptedInput: { key } } }
+    return { ...original, conversation: { ...conversation, adoptedInput: { key, ...(notification ? { purpose: 'a2a-notification' as const } : {}) } } }
   } catch {
     signal?.throwIfAborted()
     return unconfirmed()
