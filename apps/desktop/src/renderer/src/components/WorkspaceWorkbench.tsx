@@ -56,7 +56,7 @@ import { projectWorkbenchProjection, selectWorkbenchProjectionTab, sameWorkbench
 import { StableWorkbenchView } from './StableWorkbenchView'
 import { workbenchDisplayTabs, workbenchDisplayReferenceMatches, workbenchDisplayOccurrenceAmbiguous } from '../lib/workbench-resource-display'
 import { workbenchNavigationTabs } from '../lib/workbench-navigation-catalog'
-import { useWorkbenchRetainedRegionId, useWorkbenchBrowserPresentation, focusedPrimaryWorkbenchTarget, focusedSecondaryWorkbenchTarget, committedSecondaryWorkbenchTarget, workbenchHomePresentationReferences, workbenchBrowserWindowTarget, WorkbenchBrowserTargetsContext, workbenchBrowserStageHostId, workbenchSessionStageHostId, type BrowserControlConfirmation, type WorkbenchViewTarget, type WorkbenchViewTargets } from '../lib/workbench-presentation'
+import { useWorkbenchRetainedRegionId, useWorkbenchBrowserPresentation, focusedPrimaryWorkbenchTarget, focusedSecondaryWorkbenchTarget, committedPrimaryWorkbenchTarget, committedSecondaryWorkbenchTarget, workbenchHomePresentationReferences, workbenchBrowserWindowTarget, WorkbenchBrowserTargetsContext, workbenchBrowserStageHostId, workbenchSessionStageHostId, type BrowserControlConfirmation, type WorkbenchViewTarget, type WorkbenchViewTargets } from '../lib/workbench-presentation'
 import { opensContextMenuFromKeyboard } from '../lib/context-menu-key'
 import { SessionPane } from './SessionPane'
 import { SessionRegionHost } from './SessionRegionHost'
@@ -2164,6 +2164,7 @@ export function WorkspaceWorkbench({
         const proposedProjection = confirmedReferenceGroup(secondaryInputTarget) ? undefined : (confirmedReferenceGroup(inputTarget) ? inputTarget : undefined) ??
           (navigationInputPolicy !== 'target' ? [...targets].reverse().find(target => target.visible !== false && target.surface !== 'space' && !target.reference) : undefined) ??
           mainTarget ??
+          (repeatableContent ? committedPrimaryWorkbenchTarget(tab, targets.filter(target => target.surface === 'focus')) : undefined) ??
           (visibleExternal.length === 1 ? visibleExternal[0] : undefined) ??
           (repeatableContent ? targets.find(target => target.surface === 'space') : undefined) ??
           [...targets].reverse().find(target => target.visible !== false && target.surface !== 'space') ?? targets.find(target => target.visible !== false) ??

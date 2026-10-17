@@ -33,6 +33,20 @@ function committedTabMarkerMatches(tab: WorkbenchTab, prefix: 'primary' | 'view'
   return Object.keys(tab.regions).some(regionId => marker === workbenchRegionProjectionSlotId(prefix, { ...reference, regionId }))
 }
 
+/** A mode change retains this exact live Tab placement; it does not claim input. */
+export function committedPrimaryWorkbenchTarget(tab: WorkbenchTab, targets: readonly WorkbenchViewTarget[]): WorkbenchViewTarget | undefined {
+  const matches = targets.filter(target => {
+    const reference = target.reference
+    if (!target.active || target.visible !== true || reference?.tabId !== tab.id ||
+      !Object.hasOwn(tab.regions, reference.regionId) || target.projection?.entity.kind === 'region') return false
+    const slot = document.getElementById(target.hostId)
+    const primary = slot && [...slot.children].filter(child => child instanceof HTMLElement && child.dataset.workbenchPrimaryTabId === tab.id)
+    return primary?.length === 1 && primary[0] instanceof HTMLElement && primary[0].isConnected &&
+      committedTabMarkerMatches(tab, 'primary', reference, primary[0].dataset.workbenchPrimaryReference)
+  })
+  return matches.length === 1 ? matches[0] : undefined
+}
+
 /** Only the actual primary editable input can retain its committed, exact host. */
 export function focusedPrimaryWorkbenchTarget(tab: WorkbenchTab, targets: readonly WorkbenchViewTarget[]): WorkbenchViewTarget | undefined {
   const input = document.activeElement
