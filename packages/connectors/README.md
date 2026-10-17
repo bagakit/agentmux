@@ -781,8 +781,8 @@ Present it only on that confirmation surface and redact ordinary logs. Inspect
 and list perform local reads; a changed bot revision withholds the old challenge
 and account while preserving the original request.
 
-A repeated begin with the same input reads that original result or reconciles its
-original local secure handoff. Unknown native requests are not replayed. Paused
+Without an initial-publication intent, a repeated begin with the same input reads
+that original result or reconciles its original local secure handoff. Unknown native requests are not replayed. Paused
 bots and disabled automatic traffic retain explicit management access. The
 request ACK, secure handoff and active challenge remain separate facts.
 
@@ -801,8 +801,8 @@ secure-store ACK. The advance input is:
 `continue` performs at most one claimed HTTP request, including one redirect hop.
 Known waiting/scanned status permits a new observation action. Phone scanning,
 login handoff and the exact account/enterprise confirmation are separate stages.
-For a returned `confirm-account` action, use `value: "confirm"`; only that explicit
-original confirmation marks this management session confirmed. It does not prove
+For an ordinary management request, a returned `confirm-account` action uses
+`value: "confirm"`; that original confirmation marks this management session confirmed. It does not prove
 saved-application management permission or tenant membership.
 
 A repeated advance reads its original receipt or finishes only its original local
@@ -824,12 +824,55 @@ programs, missing stable IDs, inert or conflicting responses stay unknown. The
 public console response establishes the initializer syntax only: its empty user
 object does not establish a logged-in account or enterprise.
 
-App-management eligibility, configuration and publication remain unimplemented
-continuations. This reference-native Feishu authentication is not live tenant
-qualification. A new ordinary application uses the separate Enrollment intent
+Authentication alone is not live tenant qualification, configuration or publication.
+The separate typed application inspection and finite configuration actions keep
+their original receipts and current observations independent. A new ordinary application uses the separate Enrollment intent
 below; confirming a management login does not authorize creation. Web creation
 is offered only for adapter-declared domains. Existing saved and manual
 connections remain usable independently.
+
+### Automatic initial conversation setup
+
+A new creation may explicitly authorize the complete initial setup in the same
+`connection.setup.begin` input:
+
+```json
+{
+  "operationId": "initial-management",
+  "connectionId": "new-bot",
+  "expectedConnectionRevision": 1,
+  "goal": { "kind": "agent-conversation", "interaction": "cards" },
+  "source": { "kind": "enrollment", "operationId": "original-enrollment", "expectedRevision": 5 },
+  "initialPublication": { "version": "1.0.0", "notes": "Enable AMUX conversations." }
+}
+```
+
+`initialPublication` requires the exact saved Enrollment source. The original
+actor, creator, application and source revision qualify its local management
+handoff. This explicit intent covers confirming that same saved creator,
+enabling messaging, persistent event delivery, the minimal conversation
+permissions and message reception; `cards` additionally covers independent
+persistent callbacks and card actions. Each operation uses the current offered
+read/action and the existing Setup child journal. Native entry choices remain
+inside the adapter. There is no additional workflow or configuration store.
+
+The Host then creates only the first version, visible to its original creator,
+and submits that exact returned version ID. An existing independent version is
+not selected or replaced. Source and write acknowledgements remain separate;
+unknown writes stop at their original stage and are never replayed or rerouted.
+The same complete begin input resumes the original intent. Explicit finite
+`advance` actions retain their own semantics and receipts; after an account or
+local-storage recovery, repeat the original begin to resume automatic work.
+
+`initialSetup` in begin/inspect/advance is a local projection of those original
+journals. It reports the exact stage and `pending`, `running`, `attention`,
+`approval-required` or `complete`, with the exact version ID when known.
+`inspect` remains read-only and performs no platform request. Repeating begin
+may read the exact submitted version again; it never resubmits it. Platform
+review remains visible. Completion requires an approved exact-version read and
+does not claim a live receiver or successful message delivery. `setup ls`
+reports local `initial-setup` support only for an adapter-declared original
+Enrollment continuation and first-version draft capability.
 
 ## Original request evidence
 
@@ -958,6 +1001,15 @@ replace it. After uncertain delivery or a process loss, inspect the same operati
 never replays an unknown upload or PATCH. A live Host can save its matching
 verified response after transient journal failure without repeating the effect.
 Different application identities remain independently usable.
+
+Failed upload/PATCH slots may include an optional `diagnostic` with the original
+`stage`, an observed numeric `nativeCode`, an available real `httpStatus`, and a
+finite allowlisted `transportCode`. These fields do not change effect or replay
+eligibility. Stage-only means numeric/transport details were not recorded;
+historical absent diagnostics remain absent. `inspect` and the public CLI read
+the same saved facts without platform calls. Diagnostics include no raw exception,
+URL, request body, headers or credentials. The native avatar-upload leaf retains its
+nonzero code before SDK data unwrapping while preserving an unknown upload.
 
 The official leaf uses the application's own credentials, without user OAuth.
 Name and description target the leaf's recorded language (`zh_cn` for Feishu,
