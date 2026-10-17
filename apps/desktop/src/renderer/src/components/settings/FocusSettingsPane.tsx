@@ -1,49 +1,60 @@
-import { FOCUS_RECENT_ACTIVITY_HOURS, resolveFocusRecentActivityHours, type FocusRecentActivityHours, resolveFocusLinkDestination, type FocusLinkDestination } from '../../../../shared/focus-preferences'
+import { useState } from 'react'
+import { FOCUS_RECENT_ACTIVITY_HOURS, FOCUS_REPLY_LINES, FOCUS_RECENT_INPUTS, resolveFocusPreferences, type FocusPreferences } from '../../../../shared/focus-preferences'
+import { useAppStore } from '../../store'
+import { FocusTimelineRulerSettings } from '../FocusTimelineRulerSettings'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
-import { useSettingDraft } from './use-setting-draft'
+import { useSettingDraftRecord } from './use-setting-draft'
+import { FocusSettingsPreview, type FocusPreviewScene } from './FocusSettingsPreview'
 import '../../styles/settings-focus.css'
 
-export function FocusSettingsPane({ recentActivityHours, linkDestination, onSave }: {
-  recentActivityHours: FocusRecentActivityHours | undefined
-  linkDestination?: FocusLinkDestination
-  onSave(value: FocusRecentActivityHours, expected: FocusRecentActivityHours, link?: FocusLinkDestination, expectedLink?: FocusLinkDestination): Promise<void>
+export type FocusSettingsValues = Required<FocusPreferences>
+function Choices<T extends string | number>({ id, legend, value, options, onChange }: {
+  id: string; legend: string; value: T; options: readonly { value: T; label: string; hint?: string }[]; onChange(value: T): void
 }) {
-  const saved = resolveFocusRecentActivityHours(recentActivityHours)
-  const draft = useSettingDraft(saved)
-  const linkDraft = useSettingDraft(resolveFocusLinkDestination(linkDestination))
-  const saveState = useSettingsSave()
-  async function save(): Promise<void> {
-    const submitted = draft.beginSave()
-    const submittedLink = linkDraft.beginSave()
-    const saved = await saveState.run(() => linkDraft.dirty
-      ? onSave(submitted.value, submitted.expected, submittedLink.value, submittedLink.expected)
-      : onSave(submitted.value, submitted.expected))
-    submitted.finish(saved)
-    submittedLink.finish(saved)
+  return <fieldset className="focus-settings-window" data-settings-field={id}><legend>{legend}</legend>{options.map(option => <label key={option.value} data-selected={value === option.value}>
+    <input type="radio" name={`focus-${id}`} value={option.value} checked={value === option.value} onChange={() => onChange(option.value)} />
+    <span><strong>{option.label}</strong>{option.hint ? <small>{option.hint}</small> : null}</span>
+  </label>)}</fieldset>
+}
+
+export function FocusSettingsPane({ preferences, active = true, onSave }: {
+  preferences?: FocusPreferences | undefined; active?: boolean
+  onSave(value: FocusSettingsValues, expected: FocusSettingsValues): Promise<void>
+}) {
+  const draft = useSettingDraftRecord(resolveFocusPreferences(preferences)), saveState = useSettingsSave()
+  const [scene, setScene] = useState<FocusPreviewScene>('board')
+  const ruler = useAppStore(state => state.focusTimelineRuler), saveRuler = useAppStore(state => state.setFocusTimelineRuler)
+  function change<K extends keyof FocusSettingsValues>(key: K, value: FocusSettingsValues[K], nextScene: FocusPreviewScene) {
+    draft.setField(key, value); setScene(nextScene)
   }
-  return <div className="settings-pane-stack">
-    <section className="settings-group" data-settings-field="recent-activity">
-      <header><span>Recent activity</span><small>Saved: {saved} hours</small></header>
-      <p className="focus-settings-description">Keep projects with recent task activity ahead of older work in Focus.</p>
-      <fieldset className="focus-settings-window"><legend>Recent activity window</legend>
-        {FOCUS_RECENT_ACTIVITY_HOURS.map(hours => <label key={hours} data-selected={draft.value === hours}>
-          <input type="radio" name="focus-recent-activity" value={hours} checked={draft.value === hours} onChange={() => draft.setValue(hours)} />
-          <span>{hours === 168 ? '1 week' : `${hours} hours`}</span>
-        </label>)}
-      </fieldset>
-      <p className="focus-settings-description">Attention and Working stay first. Older projects and activity with unknown time remain available.</p>
-    </section>
-    <section className="settings-group" data-settings-field="link-destination">
-      <header><span>Open links in Focus</span></header>
-      <fieldset className="focus-settings-window"><legend>Default destination</legend>
-        {(['region', 'tab'] as const).map(destination => <label key={destination} data-selected={linkDraft.value === destination}>
-          <input type="radio" name="focus-link-destination" checked={linkDraft.value === destination} onChange={() => linkDraft.setValue(destination)} />
-          <span>{destination === 'region' ? 'Beside the Agent' : 'New Tab in Space'}</span>
-        </label>)}
-      </fieldset>
-      <p className="focus-settings-description">Click a link to open it. Alt-click chooses its position. A Region keeps the Agent and opens the resource beside it; a Tab takes you to Space.</p>
-    </section>
-    <p className="focus-settings-footnote">Time ruler and time zone are adjusted directly in the Focus timeline.</p>
-    <SettingsSaveBar save={saveState} dirty={draft.dirty || linkDraft.dirty} onSave={() => void save()} />
+  async function save() { const submitted = draft.beginSave(); submitted.finish(await saveState.run(() => onSave(submitted.value, submitted.expected))) }
+  function reset() {
+    const defaults = resolveFocusPreferences(undefined)
+    for (const key of Object.keys(defaults) as (keyof FocusSettingsValues)[]) draft.setField(key, defaults[key])
+  }
+  return <div className="settings-pane-stack focus-settings" data-active={active}>
+    <div className="focus-settings__intro"><p>Make room for the work you want to see.</p><button type="button" className="small-button" onClick={reset}>Restore defaults</button></div>
+    <div className="focus-settings__workspace">
+      <div className="focus-settings__controls">
+        <section className="settings-group"><header><span>Project scanning</span></header>
+          <Choices id="recent-activity" legend="Recent activity window" value={draft.value.recentActivityHours} options={FOCUS_RECENT_ACTIVITY_HOURS.map(value => ({ value, label: value === 168 ? '1 week' : `${value} hours` }))} onChange={value => change('recentActivityHours', value, 'board')} />
+          <p className="focus-settings-description">Recent work moves forward. Attention and Working stay first; older projects remain available.</p>
+          <Choices id="reply-lines" legend="Reply excerpt" value={draft.value.replyLines} options={FOCUS_REPLY_LINES.map(value => ({ value, label: `${value} ${value === 1 ? 'line' : 'lines'}`, hint: value === 1 ? 'Scan faster' : value === 2 ? 'Balanced' : 'More context' }))} onChange={value => change('replyLines', value, 'board')} />
+        </section>
+        <section className="settings-group"><header><span>Agent reading</span></header>
+          <Choices id="preview-trigger" legend="Automatic preview" value={draft.value.previewTrigger} options={[{ value: 'quick', label: 'Quick', hint: 'A short pause' }, { value: 'deliberate', label: 'Deliberate', hint: 'Fewer accidental opens' }, { value: 'keyboard', label: 'Keyboard only', hint: 'Use the reading key' }]} onChange={value => change('previewTrigger', value, 'reading')} />
+          <p className="focus-settings-description">Shared by Focus and other Agent cards. Clicking still opens the Agent.</p>
+          <Choices id="recent-inputs" legend="Recent inputs in a new preview" value={draft.value.recentInputs} options={FOCUS_RECENT_INPUTS.map(value => ({ value, label: `${value} inputs` }))} onChange={value => change('recentInputs', value, 'reading')} />
+          <p className="focus-settings-description">Uses the existing reading window. Open bookmarks keep the text you are reading.</p>
+        </section>
+        <section className="settings-group"><header><span>Opening resources</span></header>
+          <Choices id="link-destination" legend="Open links in Focus" value={draft.value.linkDestination} options={[{ value: 'region', label: 'Beside the Agent', hint: 'Keep both in view' }, { value: 'tab', label: 'New Tab in Space', hint: 'Give the resource room' }]} onChange={value => change('linkDestination', value, 'links')} />
+          <p className="focus-settings-description">Alt-click chooses a position for that link.</p>
+        </section>
+        <div className="focus-settings__timeline" data-settings-field="timeline"><span><strong>Timeline</strong><small>Use the same ruler and time zone settings as Focus.</small></span><FocusTimelineRulerSettings active={active} preferences={ruler} onChange={saveRuler} dateChoice={null} onSelectDate={() => {}} onCancelDate={() => {}} /></div>
+      </div>
+      <FocusSettingsPreview values={draft.value} active={active} scene={scene} onScene={setScene} />
+    </div>
+    <SettingsSaveBar save={saveState} dirty={draft.dirty} onSave={() => void save()} />
   </div>
 }
