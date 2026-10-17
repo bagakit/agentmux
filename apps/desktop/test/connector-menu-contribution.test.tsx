@@ -89,7 +89,7 @@ it('uses the mounted App and Settings master to withdraw and restore one complet
     expect(groups()).toHaveLength(1)
     expect(groups()[0]!.getAttribute('role')).toBe('group')
     expect(groups()[0]!.getAttribute('aria-label')).toBe(groupLabel)
-    expect(menu.querySelectorAll('[data-connector-menu-separator]')).toHaveLength(0)
+    expect(menu.querySelectorAll('[data-connector-menu-separator]')).toHaveLength(1)
     expect(groups()[0]!.querySelectorAll('[role="menuitem"]')).toHaveLength(4)
   }
   const before = useAppStore.getState(), bots = (await f.services.connections.list()).connections.map(record => record.config)

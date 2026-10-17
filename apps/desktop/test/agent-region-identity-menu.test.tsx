@@ -95,8 +95,12 @@ it('keeps the full name accessible while moving executor and Session context int
   expect(context!.textContent).toContain(`Session: ${sessionIds[0]}`)
   expect(context!.textContent).toContain('Executor:')
   await act(async()=>details.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true,cancelable:true})))
+  const row=menu.querySelector<HTMLElement>('.workbench-menu-row[aria-label="Copy link"]')
+  expect(row,'compact copy shortcuts stay in the original root').not.toBeNull()
+  expect([...row!.querySelectorAll('[role="menuitem"]')].map(item=>item.getAttribute('aria-label'))).toEqual(['Copy Region Link'])
+  expect([...row!.querySelectorAll('[role="menuitem"]')].every(item=>item.closest('[role="menu"]')===menu)).toBe(true)
   const copy=vi.spyOn(api.ui,'writeClipboardText').mockResolvedValue(undefined)
-  await select(menuItem(await submenu(menu,'Copy link'),'Copy Region Link'))
+  await select(menuItem(menu,'Copy Region Link'))
   expect(copy).toHaveBeenCalledExactlyOnceWith(formatRegionAddress(leftId))
 })
 it('the actual identity follows user name, first prompt, Session label and then the current Provider label',async()=>{
@@ -130,18 +134,18 @@ it('read-only observation keeps the same Agent identity while the original polic
 })
 it.each(['mouse','touch'])('the actual Copy Region item keeps its origin while its neighbor is active (%s)',async(pointerType)=>{
   const copy=vi.spyOn(api.ui,'writeClipboardText').mockResolvedValue(undefined);await mount();const menu=await menuWithRightActive()
-  await select(menuItem(await submenu(menu,'Copy link'),'Copy Region Link'),pointerType);expect(copy).toHaveBeenCalledExactlyOnceWith(formatRegionAddress(leftId))
+  await select(menuItem(menu,'Copy Region Link'),pointerType);expect(copy).toHaveBeenCalledExactlyOnceWith(formatRegionAddress(leftId))
   expect(useAppStore.getState().tabs[tabId]!.layout.activeRegionId).toBe(rightId)
 })
 it('keyboard selection retains the exact original Region and the active neighbor',async()=>{
   const copy=vi.spyOn(api.ui,'writeClipboardText').mockResolvedValue(undefined);await mount();const menu=await menuWithRightActive()
-  const links=await submenu(menu,'Copy link')
+  const links=menu
   await act(async()=>{const item=menuItem(links,'Copy Region Link');item.focus();item.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))})
   expect(copy).toHaveBeenCalledExactlyOnceWith(formatRegionAddress(leftId));expect(useAppStore.getState().tabs[tabId]!.layout.activeRegionId).toBe(rightId)
 })
 it('the actual Split item targets its original left Region, and keeps the neighbor Session and draft',async()=>{
   const split=vi.spyOn(useAppStore.getState(),'splitRegion');await mount();const before=structuredClone(useAppStore.getState().sessions),menu=await menuWithRightActive()
-  const layout=await submenu(menu,'Split and layout')
+  const layout=menu
   const splitItems=[...layout.querySelectorAll<HTMLElement>('[role="menuitem"]')].filter(item=>item.getAttribute('aria-label')?.startsWith('Split '));expect(splitItems.length).toBeGreaterThan(0)
   await select(splitItems[0]!);expect(split).toHaveBeenCalled();expect(split.mock.calls[0]!.slice(0,3)).toEqual([workspaceId,tabId,leftId])
   expect(useAppStore.getState().tabs[tabId]!.regions[rightId]!.sessionId).toBe(sessionIds[1]);expect(useAppStore.getState().sessions).toEqual(before);expect(useAppStore.getState().agentComposerDrafts[sessionIds[1]!]).toBe('Keep this draft')
@@ -161,7 +165,7 @@ async function contextMenuWithRightActive(){
 }
 it('the same split Agent exposes identical live actions through More and right-click, with Take over independent of the active neighbor',async()=>{
   await mount()
-  const more=await menuWithRightActive(),labels=(root:HTMLElement)=>[...root.querySelectorAll('[role="menuitem"]')].map(item=>item.textContent?.trim())
+  const more=await menuWithRightActive(),labels=(root:HTMLElement)=>[...root.querySelectorAll('[role="menuitem"]')].map(item=>(item.getAttribute('aria-label')??item.textContent)?.trim())
   const expected=labels(more);expect(expected).toContain('Take over')
   await act(async()=>more.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true})))
   const context=await contextMenuWithRightActive()
@@ -175,7 +179,7 @@ it('the same split Agent exposes identical live actions through More and right-c
 })
 it('right-click link selection retains the invoking Region and does not borrow the active neighbor',async()=>{
   const copy=vi.spyOn(api.ui,'writeClipboardText').mockResolvedValue(undefined)
-  await mount();const context=await contextMenuWithRightActive(),links=await submenu(context,'Copy link')
+  await mount();const context=await contextMenuWithRightActive(),links=context
   await select(menuItem(links,'Copy Region Link'))
   expect(copy).toHaveBeenCalledExactlyOnceWith(formatRegionAddress(leftId))
 })
