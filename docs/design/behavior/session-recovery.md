@@ -466,6 +466,7 @@ Take over 是用户明确选择一位新 Agent，先理解原会话留下的工�
 ### 打包、安装与启动事实
 
 - 候选包在签名、身份和安装前启动验证任一步失败时，保留旧的 canonical 安装并明确报告失败阶段，不能把旧包或半成品误报为最新版。
+- 干净打包先沿锁定依赖的官方安装入口准备所需运行时，再执行原产物检查与构建；不依赖开发目录残留，不另造下载器或借用其他 App。
 - **用户启动的必须是同一份已验证候选**。`package:mac` 只产生
   `apps/desktop/release/mac/AgentMux.app` 与同批 DMG；`package:mac:install`
   只把这份候选原子替换到约定的 `~/Applications/AgentMux.app`。`apps/desktop/out`
