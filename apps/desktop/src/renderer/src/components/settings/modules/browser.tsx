@@ -1,18 +1,18 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { api } from '../../../lib/api'
 import { useAppStore } from '../../../store'
-import { BrowserSettingsPane } from '../BrowserSettingsPane'
+import { BrowserSettingsPane, type BrowserPreferences } from '../BrowserSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
 
 const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
 
 
-async function saveBrowser(agentAutomation: boolean, expected: boolean): Promise<void> {
+async function saveBrowser(value: BrowserPreferences, expected: BrowserPreferences): Promise<void> {
   const current = useAppStore.getState().config
   if (!current) return
   await api.config.save(
-    { ...current, browser: { ...current.browser, agentAutomation } },
-    { ...current, browser: { ...current.browser, agentAutomation: expected } }
+    { ...current, browser: { ...current.browser, ...value } },
+    { ...current, browser: { ...current.browser, ...expected } }
   )
 }
 
@@ -20,11 +20,12 @@ export const browserSettingsModule = {
   id: 'browser',
   group: 'preferences',
   title: 'Browser',
-  description: 'Choose how agents interact with your pages.',
+  description: 'Manage browser resources and agent access.',
   icon: ThemeObjectBrowserIcon,
-  keywords: 'browser agent automation drive page script run snapshot click permission enable disable',
+  keywords: 'browser resources memory release restore process idle agent automation drive page permission',
   searchTargets: [
     { id: 'agent-automation', title: 'Agent automation', keywords: 'browser script page permission enable disable' },
+    { id: 'browser-resources', title: 'Browser resources', keywords: 'memory process release restore idle pages' },
   ],
   savedSummary: (config) => config.browser.agentAutomation === true ? 'Automation on' : 'Automation off',
   Pane({ config, active }) {
