@@ -1,9 +1,11 @@
 import { civilClock } from "../lib/civil-clock"
 import { useEffect, useRef, useState } from 'react'
 import type { ContinuousProgressLoop, ContinuousProgressTarget, ScheduleParamsMap } from '@agentmux/core'
-import { parseAgentScheduleCalendar, DEFAULT_AGENT_SCHEDULE_CHECK_IN, type AgentScheduleCalendar } from '@agentmux/core/schedule'
+import { parseAgentScheduleCalendar, type AgentScheduleCalendar } from '@agentmux/core/schedule'
 import { api } from '../lib/api'
 import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
+import { useAppStore } from '../store'
+import { resolveAutomationPreferences, automationCalendarTimezone, automationCheckInPolicy } from '../../../shared/automation-preferences'
 
 export type CalendarScheduleStatus = 'inactive' | 'active' | 'paused' | 'unconfirmed'
 type Pending = { action: 'create'; params: ScheduleParamsMap['schedule.create'] } | { action: 'pause' | 'resume' | 'cancel'; params: ScheduleParamsMap['schedule.pause'] }
@@ -27,9 +29,12 @@ export function CalendarScheduleControl({ target: requestedTarget, onStatusChang
   /** The controller continues observing its original target before its details are presented. */
   presented?: boolean
 }) {
-  const occurrence = useRef({ target: requestedTarget, initialMessage, initialMessageContext, alive: true })
-  if (!sameTarget(occurrence.current.target, requestedTarget)) occurrence.current = { target: requestedTarget, initialMessage, initialMessageContext, alive: true }
+  const [initialDefaults] = useState(() => resolveAutomationPreferences(useAppStore.getState().config?.automation))
+  const occurrence = useRef({ target: requestedTarget, initialMessage, initialMessageContext, defaults: initialDefaults, alive: true })
+  if (!sameTarget(occurrence.current.target, requestedTarget)) occurrence.current = { target: requestedTarget, initialMessage, initialMessageContext,
+    defaults: resolveAutomationPreferences(useAppStore.getState().config?.automation), alive: true }
   const target = occurrence.current.target
+  const checkInPolicy = automationCheckInPolicy(occurrence.current.defaults)
   const [schedules, setSchedules] = useState<ContinuousProgressLoop[]>([])
   const [observed, setObserved] = useState<ContinuousProgressTarget>()
   const [error, setError] = useState<string>()
@@ -37,7 +42,7 @@ export function CalendarScheduleControl({ target: requestedTarget, onStatusChang
   const [pending, setPending] = useState<Pending>()
   const [open, setOpen] = useState(false)
   const [kind, setKind] = useState<AgentScheduleCalendar['kind']>('daily')
-  const [timezone, setTimezone] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone)
+  const [timezone, setTimezone] = useState(() => automationCalendarTimezone(initialDefaults))
   const [time, setTime] = useState(civilClock(9, 0))
   const [date, setDate] = useState(() => {
     const local = new Date()
@@ -48,6 +53,7 @@ export function CalendarScheduleControl({ target: requestedTarget, onStatusChang
   const [prompt, setPrompt] = useState('')
   const [checkIn, setCheckIn] = useState(false)
   const [formNotice, setFormNotice] = useState<string>()
+  const nextForm = useRef(false)
   const current = useRef(target); current.current = target
   const locked = useRef(false), updates = useRef(0)
   const accept = (schedule: ContinuousProgressLoop, captured: ContinuousProgressTarget) => {
@@ -65,7 +71,8 @@ export function CalendarScheduleControl({ target: requestedTarget, onStatusChang
   useEffect(() => {
     let alive = true
     const owner = occurrence.current; owner.alive = true
-    locked.current = false; setSchedules([]); setObserved(undefined); setError(undefined); setPending(undefined); setBusy(false); setOpen(!!owner.initialMessage); setPrompt(owner.initialMessage ?? ''); setCheckIn(false); setFormNotice(undefined)
+    nextForm.current = false
+    locked.current = false; setSchedules([]); setObserved(undefined); setError(undefined); setPending(undefined); setBusy(false); setOpen(!!owner.initialMessage); setPrompt(owner.initialMessage ?? ''); setCheckIn(false); setTimezone(automationCalendarTimezone(owner.defaults)); setFormNotice(undefined)
     const before = updates.current
     const dispose = api.schedule.onChanged(schedule => {
       if (!alive || !matches(schedule, target)) return
@@ -89,7 +96,7 @@ export function CalendarScheduleControl({ target: requestedTarget, onStatusChang
       if (request.action === 'create' && (receipt.schedule.creationOperationId !== request.params.operationId || receipt.schedule.prompt !== request.params.prompt))
         throw new Error('The saved arrangement does not confirm this original request. Your message and original operation are kept.')
       accept(receipt.schedule, captured); setError(undefined); setPending(undefined)
-      if (request.action === 'create') { setPrompt(''); setOpen(false) }
+      if (request.action === 'create') { setPrompt(''); setOpen(false); nextForm.current = true }
     } catch (failure) { if (current.current === captured && occurrence.current === owner && owner.alive) setError(errorMessage(failure)) }
     finally { if (current.current === captured && occurrence.current === owner && owner.alive) { locked.current = false; setBusy(false) } }
   }
@@ -106,7 +113,7 @@ export function CalendarScheduleControl({ target: requestedTarget, onStatusChang
           : result.schedule.status === (request.action === 'resume' ? 'active' : request.action === 'pause' ? 'paused' : 'stopped') && result.schedule.lastMutation?.operationId === request.params.operationId
         if (complete && result.schedule.lastOutcome !== 'unknown') {
           setError(undefined); setPending(undefined)
-          if (request.action === 'create') { setPrompt(''); setOpen(false) }
+          if (request.action === 'create') { setPrompt(''); setOpen(false); nextForm.current = true }
         } else setError('The original operation is still unconfirmed. The saved arrangement is shown below; retry keeps the same operation.')
       } else setError('The connected Host did not find the original operation. Your message and original operation are kept; retry uses the same request.')
     } catch (failure) { if (current.current === captured && occurrence.current === owner && owner.alive) setError(errorMessage(failure)) }
@@ -134,7 +141,7 @@ export function CalendarScheduleControl({ target: requestedTarget, onStatusChang
     try {
       const calendar = parseAgentScheduleCalendar({ kind, timezone, time, ...(kind === 'once' ? { date } : {}), ...(kind === 'weekly' ? { weekday: Number(weekday) } : {}), ...(kind === 'monthly' || kind === 'yearly' ? { day: Number(day) } : {}), ...(kind === 'yearly' ? { month: Number(month) } : {}), policies: { gap: 'skip', fold, monthEnd: 'clamp', overdue: 'latest' } })
       const message = occurrence.current.initialMessageContext ? prompt + '\n\n' + occurrence.current.initialMessageContext : prompt
-      void perform({ action: 'create', params: { target, calendar, prompt: message, operationId: 'schedule-' + crypto.randomUUID(), ...(checkIn ? { checkIn: structuredClone(DEFAULT_AGENT_SCHEDULE_CHECK_IN) } : {}) } })
+      void perform({ action: 'create', params: { target, calendar, prompt: message, operationId: 'schedule-' + crypto.randomUUID(), ...(checkIn ? { checkIn: checkInPolicy } : {}) } })
     } catch (failure) { setError(errorMessage(failure)) }
   }
   function mutate(schedule: ContinuousProgressLoop, action: 'pause' | 'resume' | 'cancel') {
@@ -154,7 +161,16 @@ export function CalendarScheduleControl({ target: requestedTarget, onStatusChang
       {schedule.lastOutcome === 'unknown' && schedule.creationOperationId ? <button type="button" className="small-button" disabled={busy} onClick={() => void inspectSaved(schedule)}>Check original arrangement</button> : null}
       {schedule.status !== 'stopped' ? <div className="calendar-schedules__actions"><button type="button" className="small-button" disabled={busy || !!pending} onClick={() => mutate(schedule, schedule.status === 'active' ? 'pause' : 'resume')}>{schedule.status === 'active' ? 'Pause arrangement' : 'Resume arrangement'}</button><button type="button" className="small-button" disabled={busy || !!pending} onClick={() => mutate(schedule, 'cancel')}>Cancel arrangement</button></div> : null}
     </li>)}</ol> : !error && observed === target && !open ? <p className="continuous-progress-control__help">No saved arrangements for this Agent.</p> : null}
-    <details className="continuous-progress-control__details" open={open} onToggle={event => { event.stopPropagation(); setOpen(event.currentTarget.open) }}>
+    <details className="continuous-progress-control__details" open={open} onToggle={event => {
+      event.stopPropagation()
+      if (event.currentTarget.open && nextForm.current) {
+        const owner = occurrence.current
+        owner.defaults = resolveAutomationPreferences(useAppStore.getState().config?.automation)
+        setTimezone(automationCalendarTimezone(owner.defaults)); setCheckIn(false); setPrompt(owner.initialMessage ?? ''); setFormNotice(undefined)
+        nextForm.current = false
+      }
+      setOpen(event.currentTarget.open)
+    }}>
       <summary>New arrangement</summary>
       {open ? <form className="calendar-schedules__form" onSubmit={event => { event.preventDefault(); create() }}>
         <div className="calendar-schedules__fields">
@@ -169,7 +185,7 @@ export function CalendarScheduleControl({ target: requestedTarget, onStatusChang
         {occurrence.current.initialMessageContext ? <details className="calendar-schedules__rules"><summary>Request context</summary><p className="calendar-schedules__context">{occurrence.current.initialMessageContext}</p></details> : null}
         <label><input aria-label="Enable quiet follow-up" type="checkbox" checked={checkIn} disabled={busy || !!pending} onChange={event => { setCheckIn(event.target.checked); setFormNotice(undefined) }} />Enable quiet follow-up</label>
         {formNotice ? <p className="calendar-schedules__notice" role="status">{formNotice}</p> : null}
-        {checkIn ? <p className="continuous-progress-control__help">The Agent asks one short question from this conversation’s confirmed context. Quiet from {civilClock(22)} to {civilClock(8)} in the saved time zone; at least 18h silence, 20h between attempts, and one attempt per local day. Another question waits for a confirmed human reply. Unconfirmed context keeps this occurrence due.</p> : null}
+        {checkIn ? <p className="continuous-progress-control__help">The Agent asks one short question from this conversation’s confirmed context. Quiet from {checkInPolicy.quiet.start} to {checkInPolicy.quiet.end} in the saved time zone; at least {checkInPolicy.silenceMs / 3_600_000}h silence, {checkInPolicy.minIntervalMs / 3_600_000}h between attempts, and {checkInPolicy.dailyBudget} {checkInPolicy.dailyBudget === 1 ? 'attempt' : 'attempts'} per local day. Another question waits for a confirmed human reply. Unconfirmed context keeps this occurrence due.</p> : null}
         <details className="calendar-schedules__rules" onToggle={event => event.stopPropagation()}><summary>Time rules · {timezone}</summary><label>IANA time zone<TextInput aria-label="Arrangement time zone" value={timezone} required disabled={busy || !!pending} onChange={event => setTimezone(event.target.value)} /></label><label>Repeated DST time<select aria-label="Repeated DST time" value={fold} disabled={busy || !!pending} onChange={event => setFold(event.target.value as 'earlier' | 'later')}><option value="earlier">Earlier occurrence</option><option value="later">Later occurrence</option></select></label><p className="continuous-progress-control__help">Nonexistent DST times are skipped. Short months use their last day. After a delay, only the latest due occurrence is eligible.</p></details>
         <button type="submit" className="small-button" disabled={busy || !!pending || !prompt.trim()}>Save arrangement</button>
       </form> : null}

@@ -565,6 +565,8 @@ export type AppConfig = {
   goals?: import('./goals-preferences').GoalsPreferences
   /** Authored continuity preferences; Core resolves defaults when a new recovery intent is admitted. */
   continuity?: Partial<import('@agentmux/core').AgentMuxContinuityPolicy>
+  /** New-task form defaults only; saving preferences never creates or changes a task. */
+  automation?: import('./automation-preferences').AutomationPreferences
   /** Retained historical preference data. Availability observation never gates startup. */
   startup?: { skipAgentAvailabilityCheckWait?: boolean }
   // Optional so the field can land without a version bump or a migration: `ConfigStore.get` fills the

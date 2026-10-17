@@ -10,6 +10,12 @@
 .continuity-number input, .continuity-count { width: 100px; min-width: 0; font: inherit; font-size: var(--fs-meta); font-variant-numeric: tabular-nums; }
 .continuity-count { flex: none; }
 .continuity-preview { margin-top: var(--sp-4); border-top: 1px solid var(--line); padding-top: var(--sp-3); }
+.continuity-preview summary { color: var(--text-2); font-size: var(--fs-meta); line-height: 1.6; cursor: pointer; }
 .continuity-preview pre { margin: var(--sp-3) 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: var(--fs-meta); line-height: 1.65; color: var(--text-2); }
 .continuity-setting-row select:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.automation-defaults-prompt { display: grid; min-width: 0; gap: var(--sp-3); padding: var(--sp-3) 0; }
+.automation-defaults-prompt label { display: grid; gap: var(--sp-1); }
+.automation-defaults-prompt small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.automation-defaults-prompt textarea { box-sizing: border-box; width: 100%; min-width: 0; min-height: 100px; padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font: inherit; font-size: var(--fs-body); line-height: 1.6; resize: vertical; }
+.automation-defaults .continuity-setting-row > input { box-sizing: border-box; min-width: 0; max-width: 100%; font: inherit; font-size: var(--fs-meta); }
 @media (max-width: 620px) { .continuity-setting-row { align-items: flex-start; flex-direction: column; gap: var(--sp-2); } .continuity-setting-row select { width: 100%; } .continuity-number { width: 100%; } .continuity-number input { flex: 1; width: 0; } }

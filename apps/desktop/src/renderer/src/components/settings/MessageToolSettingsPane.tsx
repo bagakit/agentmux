@@ -70,9 +70,5 @@ export function MessageToolSettingsPane({ initialLayout, completion, onSave, onS
       <header><span>Keyboard shortcuts</span></header>
       <KeyboardShortcutsPane group="message-tool" />
     </section>
-    <section className="settings-group" aria-label="Mailbox" data-settings-field="mailbox">
-      <header><span>Mailbox</span></header>
-      <p className="settings-workflows__note">Open the mailbox beside Send to read replies, manage queued messages, or search this Agent’s input history. Each Agent keeps its own records; history shows the source when recorded.</p>
-    </section>
   </div>
 }

@@ -11,6 +11,7 @@ import { resolveGoalsCommonActions, resolveGoalsPreferences, type GoalsPreferenc
 import { resolveNotesPreferences, type NotesPreferences } from './notes-preferences'
 import { resolveBrowserStartPage, type BrowserStartPageConfig } from './browser-start-page'
 import { resolveBrowserAgentControl, type BrowserAgentControlPreferences } from './browser-agent-control'
+import { resolveAutomationPreferences, type AutomationPreferences, type AutomationDefaults } from './automation-preferences'
 
 export function configValuesEqual(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true
@@ -26,6 +27,8 @@ export function configValuesEqual(a: unknown, b: unknown): boolean {
 function effective(path: string, value: unknown): unknown {
   if (path === 'a2a') return { notifications: resolveA2ANotifications({ a2a: value as AppConfig['a2a'] }) }
   if (path === 'a2a.notifications') return value ?? DEFAULT_A2A_NOTIFICATION
+  if (path === 'automation') return resolveAutomationPreferences(value as AutomationPreferences | undefined)
+  if (path.startsWith('automation.')) return value ?? resolveAutomationPreferences()[path.slice('automation.'.length) as keyof AutomationDefaults]
   if (path === 'browser.automaticMemoryRelease') return value ?? true
   if (path === 'browser.agentControl') return resolveBrowserAgentControl(value as Partial<BrowserAgentControlPreferences> | undefined)
   if (path.startsWith('browser.agentControl.')) return value ?? resolveBrowserAgentControl()[path.slice('browser.agentControl.'.length) as keyof BrowserAgentControlPreferences]
@@ -86,7 +89,7 @@ export function applyConfigEdit(current: AppConfig, before: AppConfig, after: Ap
     if (configValuesEqual(effective(path, expected), effective(path, requested))) return actual
     if (configValuesEqual(effective(path, actual), effective(path, requested))) return actual
     // Optional domains still merge authored fields/identities after a concurrent first edit.
-    if (path === 'a2a' || path === 'notes' || path === 'goals' || path === 'continuity' || path === 'browser.startPage' || path === 'browser.agentControl') {
+    if (path === 'a2a' || path === 'notes' || path === 'goals' || path === 'continuity' || path === 'automation' || path === 'browser.startPage' || path === 'browser.agentControl') {
       // Compare effective defaults without persisting fields the user did not edit.
       actual = actual ?? {}; expected = effective(path, expected); requested = effective(path, requested)
     } else if (path === 'messageToolCompletion' || path === 'profile' || path === 'focus' || path === 'goalsCommonActions' || path === 'toolkit' || path === 'toolkit.performance' || path === 'toolkit.mobileConnection' || path === 'toolkit.tools') {

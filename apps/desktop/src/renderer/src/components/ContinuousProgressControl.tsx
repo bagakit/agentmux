@@ -7,6 +7,8 @@ import { ContinuousProgressPanel } from './ContinuousProgressPanel'
 import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { CalendarScheduleControl } from './CalendarScheduleControl'
+import { useAppStore } from '../store'
+import { resolveAutomationPreferences } from '../../../shared/automation-preferences'
 
 export type ContinuousProgressStatus = 'inactive' | 'active' | 'paused' | 'unconfirmed'
 
@@ -21,22 +23,27 @@ export function ContinuousProgressControl({ session, onStatusChange, presented =
   const target = useMemo(() => ({ hostId: session.control.hostId, agentSessionId: session.control.agentSessionId,
     providerId: session.providerId, workspacePath: session.workspacePath }),
   [session.control.hostId, session.control.agentSessionId, session.providerId, session.workspacePath])
+  const [initialDefaults] = useState(() => resolveAutomationPreferences(useAppStore.getState().config?.automation))
+  const form = useRef({ target, defaults: initialDefaults })
+  if (form.current.target !== target) form.current = { target, defaults: resolveAutomationPreferences(useAppStore.getState().config?.automation) }
   const [loops, setLoops] = useState<ContinuousProgressLoop[]>([])
   const [observedTarget, setObservedTarget] = useState<typeof target>()
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
   const [calendarStatus, setCalendarStatus] = useState<ContinuousProgressStatus>('unconfirmed')
-  const [interval, setInterval] = useState('30')
-  const [prompt, setPrompt] = useState('')
+  const [interval, setInterval] = useState(() => String(initialDefaults.progressIntervalMs / 60_000))
+  const [prompt, setPrompt] = useState(initialDefaults.progressPrompt)
   const [bindSource, setBindSource] = useState(false)
   const [sourceRoot, setSourceRoot] = useState('')
   const [sourceId, setSourceId] = useState('')
   const [readerPath, setReaderPath] = useState('')
+  const hadLoop = useRef(false)
   const current = useRef(target); current.current = target
   const updates = useRef(0)
   useEffect(() => {
     let alive = true
-    setLoops([]); setError(undefined); setBusy(false); setPrompt(''); setInterval('30'); setBindSource(false); setSourceRoot(''); setSourceId(''); setReaderPath('')
+    hadLoop.current = false
+    setLoops([]); setError(undefined); setBusy(false); setPrompt(form.current.defaults.progressPrompt); setInterval(String(form.current.defaults.progressIntervalMs / 60_000)); setBindSource(false); setSourceRoot(''); setSourceId(''); setReaderPath('')
     const before = updates.current
     const dispose = api.continuousProgress.onChanged(loop => {
       if (!alive || loop.calendar || loop.hostId !== target.hostId || loop.agentSessionId !== target.agentSessionId ||
@@ -65,6 +72,15 @@ export function ContinuousProgressControl({ session, onStatusChange, presented =
   }
   const loop = observedTarget === target ? loops.find(loop => loop.status !== 'stopped') : undefined
   const displayed = loop ?? (observedTarget === target ? loops.at(-1) : undefined)
+  useEffect(() => {
+    if (loop) { hadLoop.current = true; return }
+    if (observedTarget !== target || !hadLoop.current) return
+    hadLoop.current = false
+    const defaults = resolveAutomationPreferences(useAppStore.getState().config?.automation)
+    form.current.defaults = defaults
+    setInterval(String(defaults.progressIntervalMs / 60_000)); setPrompt(defaults.progressPrompt)
+    setBindSource(false); setSourceRoot(''); setSourceId(''); setReaderPath('')
+  }, [target, loop?.loopId, observedTarget])
   const status: ContinuousProgressStatus = error || displayed?.lastOutcome === 'unknown' || observedTarget !== target
     ? 'unconfirmed' : loop?.status === 'active' ? 'active' : loop?.status === 'paused' ? 'paused' : 'inactive'
   const combinedStatus = [status, calendarStatus].includes('unconfirmed') ? 'unconfirmed' : [status, calendarStatus].includes('active') ? 'active' : [status, calendarStatus].includes('paused') ? 'paused' : 'inactive'
