@@ -26,7 +26,11 @@ it('consumes recorded authorship from the actual shared editor canonical save re
  expect(latest).not.toBe(content)
  await act(async()=>{[...dom.container.querySelectorAll('button')].find(b=>b.textContent==='保存原笔记')!.click();await new Promise(r=>setTimeout(r,0))})
  expect(save).toHaveBeenCalledOnce()
- expect([...dom.container.querySelectorAll('[title]')].map(el=>el.getAttribute('title')).join('\n')).toContain('Last edited: Agent fresh-agent')
+ await act(async()=>dom.container.querySelector<HTMLButtonElement>('[data-author-block="review-block"]')!.click())
+ const authors=document.querySelector('[role="dialog"][aria-label="Block authors"]')!
+ expect(authors).not.toBeNull()
+ expect(authors.textContent).toContain('Created byAgent · old-agent')
+ expect(authors.textContent).toContain('Last edited byAgent · fresh-agent')
 })
 
 it('keeps later draft bytes and leaves their latest author unknown after an earlier save is acknowledged',async()=>{
@@ -45,6 +49,8 @@ it('keeps later draft bytes and leaves their latest author unknown after an earl
  expect(later).not.toBe(sent)
  await act(async()=>{release();await Promise.resolve()})
  expect(latest).toBe(later);expect(dom.container.textContent).toContain('LATER UNSAVED')
- const titles=[...dom.container.querySelectorAll('[title]')].map(el=>el.getAttribute('title')).join('\n')
- expect(titles).toContain('Created: Agent old-agent');expect(titles).toContain('Last edited: Unknown');expect(titles).not.toContain('Last edited: Agent saved-agent')
+ await act(async()=>dom.container.querySelector<HTMLButtonElement>('[data-author-block="review-block"]')!.click())
+ const authors=document.querySelector('[role="dialog"][aria-label="Block authors"]')!
+ expect(authors).not.toBeNull()
+ expect(authors.textContent).toContain('Created byAgent · old-agent');expect(authors.textContent).toContain('Last edited byAuthor unconfirmed');expect(authors.textContent).not.toContain('saved-agent')
 })
