@@ -17,7 +17,7 @@ export function ConnectorRoomJoinLink({ submitted, operation, pending, prominent
     try { await api.ui.openExternal(link.url); setFeedback('Join link handed to your system. Membership and Agent access still need confirmation.') }
     catch (error) { setFeedback(presentError(error)) }
   }
-  return <details className="agent-connector-disclosure" open={prominent || undefined} aria-label="Joining this group"><summary>Join this group</summary><div className="agent-connector-fields">
+  const body = <div className="agent-connector-fields">
     <p className="agent-connector-note">Open a join link in your chat application to request entry. Your own membership is not verified here; the group may require approval.</p>
     <p className="agent-connector-note">Joining and permission to use this Agent are separate.</p>
     {!submitted ? <button className="small-button" disabled={pending} onClick={onCreate}>Create join link</button>
@@ -31,7 +31,9 @@ export function ConnectorRoomJoinLink({ submitted, operation, pending, prominent
         <details className="agent-connector-disclosure"><summary>Join link receipt</summary><ConnectorRoomJoinReceipt operation={operation} /></details>
       </>}
     {feedback ? <p role="status" className="agent-connector-note">{feedback}</p> : null}
-  </div></details>
+  </div>
+  return prominent ? <section className="agent-connector-fields" aria-label="Joining this group"><h3>Join this group</h3>{body}</section>
+    : <details className="agent-connector-disclosure" aria-label="Joining this group"><summary>Join this group</summary>{body}</details>
 }
 
 /** A historical receipt is readable without becoming the current request or a new effect. */
