@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Editor } from '@tiptap/core'
@@ -24,7 +24,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { afterNoteComposition } from '../src/renderer/src/lib/note-live-merge'
 import { useNotebookLibrary } from '../src/renderer/src/lib/notebook-library'
 import { createWorkbenchTab, documentKey, type FileWorkbenchSurface } from '../src/renderer/src/lib/workbench-tabs'
-import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
+import { directoryIdentity, homeZoneId, workspaceZoneId } from '../src/shared/space-addresses'
 import { newNoteDocument, readNoteDocument, serializeNoteDocument } from '../src/shared/note-document'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 import { NoteSnapshotTestWorker } from './note-snapshot-test-worker'
@@ -774,4 +774,224 @@ it('previews and shares a whole heading section with distinct source and referen
   await act(async () => f.rich(0, true).commands.insertContentAt(1, 'Together '))
   await vi.waitFor(() => expect(f.rich(1, true).getText()).toContain('Together Shared chapter'))
   expect(f.rich(0).getText()).toContain('Outside chapter prose')
+})
+
+it('keeps a self-containing pending heading finite, undoable and editable', async () => {
+  const f = await fixture(), key = documentKey(f.workspace.id, 'source.note.md')
+  const source = newNoteDocument('', 'source', 'unused')
+  source.content.content = [
+    { type: 'heading', attrs: { level: 2, blockId: 'self-section' }, content: [{ type: 'text', text: 'A live chapter' }] },
+    { type: 'paragraph', attrs: { blockId: 'self-body' }, content: [{ type: 'text', text: 'The same original body' }] }
+  ]
+  const written = await f.writer.write(f.workspace, { path: 'source.note.md', content: serializeNoteDocument(source), expectedRevision: f.documents[key]!.revision })
+  expect(written.status).toBe('written')
+  const read = await f.writer.read(f.workspace, 'source.note.md'); if (read.status !== 'read') throw Error('Source must read')
+  useAppStore.setState(state => ({ documents: { ...state.documents, [key]: read.document } }))
+  await f.mount(); await f.paste(await f.copy(), 0)
+  await vi.waitFor(() => expect(dom.container.textContent).toContain('Circular reference'))
+  const original = f.rich(0)
+  expect(original.getJSON().content!.filter(node => node.type === 'noteInclude')).toHaveLength(1)
+  expect(dom.container.querySelectorAll('[data-test-note="source-region"] .note-shared-block').length).toBeLessThanOrEqual(2)
+  await act(async () => { await f.save(0) })
+  expect(useAppStore.getState().documentIssues[key]).toMatchObject({ code: 'NOTE_SHARE_DEPENDENCY_UNCONFIRMED' })
+  expect((await readdir(f.root)).filter(path => path.startsWith('block-'))).toEqual([])
+  await act(async () => original.commands.undo())
+  expect(original.getJSON().content!.some(node => node.type === 'noteInclude')).toBe(false)
+  await act(async () => original.commands.insertContentAt(1, 'Still editable '))
+  expect(original.getText()).toContain('Still editable A live chapter')
+  expect((await readdir(f.root)).filter(path => path.startsWith('block-'))).toEqual([])
+})
+
+it('previews nested pending shares in their source scope and marks their exact original range', async () => {
+  const f = await fixture(3)
+  await f.mount()
+  const destination = f.rich(1)
+  await act(async () => { destination.view.focus(); destination.commands.setTextSelection(1); destination.commands.setNode('heading', { level: 2 }) })
+  await f.paste(await f.copy())
+  const section = dom.container.querySelector('[data-test-note="destination-region"]')!
+  await act(async () => { destination.view.focus(); destination.commands.setTextSelection(1) })
+  await act(async () => section.querySelector<HTMLButtonElement>('.note-block-action')!.click())
+  const nestedClipboard = f.clipboard()
+  await f.paste(nestedClipboard, 2)
+  await vi.waitFor(() => {
+    const preview = dom.container.querySelector('[data-test-note="another-region"]')!
+    expect(preview.textContent).toContain('Original knowledge')
+    expect(preview.textContent).not.toContain('The original shared content is not confirmed')
+  })
+  await vi.waitFor(() => expect(dom.container.querySelector('[data-test-note="source-region"] [data-note-shared-source="pending"]')).not.toBeNull())
+  await act(async () => destination.commands.undo())
+  await vi.waitFor(() => expect(dom.container.querySelector('[data-test-note="source-region"] [data-note-shared-source="pending"]')).toBeNull())
+})
+
+it('shows copy success and clipboard failure beside the original block without saving it', async () => {
+  const f = await fixture(); await f.mount(); await f.copy()
+  const source = dom.container.querySelector('[data-test-note="source-region"]')!
+  expect(source.querySelector('[aria-label="Reference copied"]')).not.toBeNull()
+  expect(source.querySelector('.note-block-copy-feedback')?.textContent).toBe('Copied · paste to share')
+  expect((await readdir(f.root)).filter(path => path.startsWith('block-'))).toEqual([])
+  Object.defineProperty(document, 'execCommand', { configurable: true, value: () => false })
+  await act(async () => source.querySelector<HTMLButtonElement>('.note-block-action')!.click())
+  expect(source.querySelector('.note-block-copy-feedback[data-failed]')?.textContent).toContain('Copy was not confirmed')
+  expect(f.rich(0).getText()).toContain('Original knowledge')
+})
+
+
+it('saves retained inner dependencies before an outer shared chapter without persisting missing files', async () => {
+  const f = await fixture(3); await f.mount()
+  const destination = f.rich(1)
+  await act(async () => { destination.view.focus(); destination.commands.setTextSelection(1); destination.commands.setNode('heading', { level: 2 }) })
+  await f.paste(await f.copy())
+  await act(async () => { destination.view.focus(); destination.commands.setTextSelection(1) })
+  await act(async () => dom.container.querySelector<HTMLButtonElement>('[data-test-note="destination-region"] .note-block-action')!.click())
+  await f.paste(f.clipboard(), 2)
+  await act(async () => { await f.save(2) })
+  const names = (await readdir(f.root)).filter(path => path.startsWith('block-'))
+  expect(names, JSON.stringify({ issues: useAppStore.getState().documentIssues, clipboard: f.clipboard().getData('application/x-agentmux-note-share'), nodes: destination.getJSON() })).toHaveLength(2)
+  const shared = await Promise.all(names.map(async path => readNoteDocument(await readFile(join(f.root, path), 'utf8'))))
+  const ids = new Set(shared.flatMap(value => value.status === 'valid' ? [value.note.noteId] : []))
+  const embedded: string[] = []
+  const visit = (node: import('@tiptap/core').JSONContent) => { if (node.type === 'noteInclude') embedded.push(String(node.attrs?.noteId)); node.content?.forEach(visit) }
+  for (const read of shared) if (read.status === 'valid') visit(read.note.content)
+  expect(embedded).toHaveLength(1)
+  expect(embedded.every(id => ids.has(id))).toBe(true)
+  await vi.waitFor(() => {
+    const outer = dom.container.querySelector('[data-test-note="another-region"]')!
+    expect(outer.textContent).toContain('Original knowledge')
+    expect(outer.querySelector('.note-shared-notice')).toBeNull()
+    expect(dom.container.querySelector('[data-test-note="destination-region"] [data-shared-role="source"]')).not.toBeNull()
+  })
+  const requests = vi.mocked(api.files.sharePublic).mock.calls.map(([request]) => request)
+  expect(requests).toHaveLength(2)
+  expect(requests[0]!.destination.expectedResource.path).toBe('destination.note.md')
+  expect(requests[1]!.destination.expectedResource.path).toBe('another.note.md')
+})
+
+it('copies a pending include with its original proposal so another use can save it', async () => {
+  const f = await fixture(3); await f.mount(); await f.paste(await f.copy())
+  const destination = f.rich(1)
+  await act(async () => { destination.view.focus(); destination.commands.setNodeSelection(destination.state.doc.content.size - 1) })
+  const { copyNoteBlock, writeNoteShareClipboard } = await import('../src/renderer/src/lib/note-share-staging')
+  const first = JSON.parse(f.clipboard().getData('application/x-agentmux-note-share'))
+  const { zoneId, spaceId, expectedResource } = first.read
+  writeNoteShareClipboard(document, copyNoteBlock(destination, destination.state.selection.from, { ...first.source, path: 'destination.note.md', noteId: 'destination' }, { zoneId, spaceId, expectedResource, path: 'destination.note.md' }), 'Original knowledge')
+  const copied = f.clipboard(), payload = JSON.parse(copied.getData('application/x-agentmux-note-share'))
+  expect(payload.source.noteId).toBe('source')
+  expect(payload.include).toBeUndefined()
+  await f.paste(copied, 2); await act(async () => { await f.save(2) })
+  expect((await readdir(f.root)).filter(path => path.startsWith('block-'))).toHaveLength(1)
+  await vi.waitFor(() => expect(dom.container.querySelector('[data-test-note="another-region"] .note-shared-block .note-block-content')?.textContent).toContain('Original knowledge'))
+})
+
+it.each([false, true])('saves a legitimate shared DAG including a hidden destination: %s', async (hidden) => {
+ const f = await fixture(3); await f.mount()
+ await act(async () => { const editor = f.rich(1); editor.view.focus(); editor.commands.setTextSelection(2); editor.commands.setHeading({ level: 2 }) })
+ const original = await f.copy()
+ await f.paste(original, 1)
+ await f.paste(original, 2)
+ await act(async () => { const editor = f.rich(1); editor.view.focus(); editor.commands.setTextSelection(2) })
+ await act(async () => dom.container.querySelector<HTMLButtonElement>('[data-test-note="destination-region"] .note-block-action')!.click())
+ await f.paste(f.clipboard(), 2)
+ if (hidden) await f.mount([0, 1])
+ await act(async () => { await f.save(2) })
+ const names = (await readdir(f.root)).filter(name => name.startsWith('block-'))
+ expect(names, JSON.stringify(useAppStore.getState().documentIssues)).toHaveLength(2)
+ expect(vi.mocked(api.files.sharePublic).mock.calls).toHaveLength(2)
+})
+
+it.each([false, true])('keeps the original inner request after its reply is lost, applied: %s', async (applied) => {
+ const f = await fixture(3); await f.mount()
+ await act(async () => { const editor = f.rich(1); editor.view.focus(); editor.commands.setTextSelection(2); editor.commands.setHeading({ level: 2 }) })
+ await f.paste(await f.copy(), 1)
+ await act(async () => { const editor = f.rich(1); editor.view.focus(); editor.commands.setTextSelection(2) })
+ await act(async () => dom.container.querySelector<HTMLButtonElement>('[data-test-note="destination-region"] .note-block-action')!.click())
+ await f.paste(f.clipboard(), 2)
+ await f.mount([0, 1])
+ const share = vi.mocked(api.files.sharePublic), original = share.getMockImplementation()!
+ share.mockImplementationOnce(async request => { if (applied) await original(request); throw Object.assign(Error('Reply transport lost'), { code: 'EPIPE' }) })
+ const save = () => f.save(2)
+ await act(async () => await save())
+ const first = useAppStore.getState().documents[documentKey(f.workspace.id, 'destination.note.md')]!.noteEditing!.share!
+ expect(first).toBeTruthy()
+ expect(share.mock.calls).toHaveLength(1)
+ expect(Object.keys(useAppStore.getState().documents[documentKey(f.workspace.id, 'another.note.md')]!.noteEditing!.shares!)).toHaveLength(1)
+ await act(async () => await save())
+ expect(vi.mocked(api.files.inspectSharePublic).mock.calls).toHaveLength(1)
+ expect(vi.mocked(api.files.inspectSharePublic).mock.calls[0]![0]).toMatchObject({ mode: 'request', request: { operationId: first.params.operationId } })
+ expect(share.mock.calls).toHaveLength(applied ? 2 : 1)
+ if (applied) {
+  expect((await readdir(f.root)).filter(name => name.startsWith('block-'))).toHaveLength(2)
+ } else {
+  expect((await readdir(f.root)).filter(name => name.startsWith('block-'))).toHaveLength(0)
+  expect(useAppStore.getState().documents[documentKey(f.workspace.id, 'destination.note.md')]!.noteEditing!.share!.params.operationId).toBe(first.params.operationId)
+ }
+})
+
+it('rejects an actual self-containing heading before writing and preserves ordinary Undo', async () => {
+ const f = await fixture(); await f.mount()
+ await act(async () => { const editor = f.rich(0); editor.commands.setTextSelection(2); editor.commands.setHeading({ level: 2 }) })
+ await f.paste(await f.copy(), 0)
+ await act(async () => await f.save(0))
+ expect(api.files.sharePublic).not.toHaveBeenCalled()
+ expect((await readdir(f.root)).filter(name => name.startsWith('block-'))).toHaveLength(0)
+ expect(useAppStore.getState().documentIssues[documentKey(f.workspace.id, 'source.note.md')]).toMatchObject({ message: expect.stringContaining('contains its own shared use') })
+ await act(async () => { f.rich(0).commands.undo(); f.rich(0).commands.insertContent(' ordinary input') })
+ expect(f.rich(0).getText()).toContain('ordinary input')
+})
+
+it('does not save inner pending sources after the copied source identity changed', async () => {
+ const f = await fixture(3); await f.mount()
+ await act(async () => { const editor = f.rich(1); editor.commands.setTextSelection(2); editor.commands.setHeading({ level: 2 }) })
+ await f.paste(await f.copy(), 1)
+ await act(async () => f.rich(1).commands.setTextSelection(2))
+ await act(async () => dom.container.querySelector<HTMLButtonElement>('[data-test-note="destination-region"] .note-block-action')!.click())
+ await f.paste(f.clipboard(), 2)
+ await f.mount([0, 1])
+ const key = documentKey(f.workspace.id, 'destination.note.md'), state = useAppStore.getState(), parsed = readNoteDocument(state.documents[key]!.content)
+ if (parsed.status !== 'valid') throw Error('Expected original note')
+ const raw = serializeNoteDocument({ ...parsed.note, noteId: 'another-original' })
+ await writeFile(join(f.root, 'destination.note.md'), raw)
+ useAppStore.setState({ documents: { ...state.documents, [key]: { ...state.documents[key]!, content: raw, revision: noteHistoryRevision(raw) } } })
+ await act(async () => await f.save(2))
+ expect(api.files.sharePublic).not.toHaveBeenCalled()
+ expect((await readdir(f.root)).filter(name => name.startsWith('block-'))).toHaveLength(0)
+ expect(Object.keys(useAppStore.getState().documents[key]!.noteEditing!.shares!)).toHaveLength(1)
+})
+
+it('restores pending source boundaries for every source after remounting the retained drafts', async () => {
+ const f = await fixture(3); await f.mount()
+ await act(async () => { const editor = f.rich(1); editor.commands.setTextSelection(2); editor.commands.setHeading({ level: 2 }) })
+ await f.paste(await f.copy(), 1)
+ await act(async () => f.rich(1).commands.setTextSelection(2))
+ await act(async () => dom.container.querySelector<HTMLButtonElement>('[data-test-note="destination-region"] .note-block-action')!.click())
+ await f.paste(f.clipboard(), 2)
+ await vi.waitFor(() => {
+  expect(dom.container.querySelector('[data-test-note="source-region"] [data-note-shared-source="pending"]')).not.toBeNull()
+  expect(dom.container.querySelector('[data-test-note="destination-region"] [data-note-shared-source="pending"]')).not.toBeNull()
+ })
+ await f.mount([])
+ await f.mount()
+ await vi.waitFor(() => {
+  expect(dom.container.querySelector('[data-test-note="source-region"] [data-note-shared-source="pending"]')).not.toBeNull()
+  expect(dom.container.querySelector('[data-test-note="destination-region"] [data-note-shared-source="pending"]')).not.toBeNull()
+ })
+})
+
+it('does not submit a sharing write to another resource named by a mismatched clipboard read', async () => {
+ const f = await fixture(); await f.mount()
+ const copied = await f.copy(), payload = JSON.parse(copied.getData('application/x-agentmux-note-share'))
+ const second = { ...f.workspace, id: 'other-notes', path: join(f.root, 'other-workspace') }
+ await mkdir(second.path)
+ await writeFile(join(second.path, 'source.note.md'), await readFile(join(f.root, 'source.note.md'), 'utf8'))
+ const secondZone = workspaceZoneId(directoryIdentity(second.hostId, second.path), second.id)
+ await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, workspaces: [...state.config!.workspaces, second] } })))
+ payload.read = { ...payload.read, zoneId: secondZone, spaceId: directoryIdentity(second.hostId, second.path), expectedResource: { hostId: second.hostId, workspaceId: second.id, workspacePath: second.path } }
+ const data = new DataTransfer(); data.setData('application/x-agentmux-note-share', JSON.stringify(payload))
+ const read = vi.mocked(api.files.readPublic), original = read.getMockImplementation()!
+ read.mockImplementation(async params => params.expectedResource.workspaceId === second.id ? {
+  resource: { hostId: second.hostId, workspaceId: second.id, workspacePath: second.path, zoneId: secondZone, zonePath: second.path, path: params.path }, result: await f.writer.read(second, params.path)
+ } : await original(params))
+ await f.paste(data)
+ await act(async () => await f.save())
+ expect(vi.mocked(api.files.sharePublic).mock.calls, JSON.stringify(vi.mocked(api.files.sharePublic).mock.calls)).toHaveLength(0)
+ expect(await readFile(join(second.path, 'source.note.md'), 'utf8')).toBe(await readFile(join(f.root, 'source.note.md'), 'utf8'))
 })
