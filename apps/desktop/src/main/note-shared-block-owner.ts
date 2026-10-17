@@ -1,3 +1,4 @@
+import { noteShareRange } from '../shared/note-share-range.js'
 import type { NoteSharedUndoOwner } from './note-shared-undo-owner.js'
 import type { FileShareUndoParams, FileShareUndoResult } from '@agentmux/core/files'
 import type { NoteHistoryWriteAction } from './note-history-actions.js'
@@ -21,16 +22,14 @@ function parsed(content: string, noteId?: string): NoteDocument {
   return read.note
 }
 function nodes(node: Node, predicate: (node: Node) => boolean): Node[] { return [...(predicate(node) ? [node] : []), ...(node.content ?? []).flatMap(child => nodes(child, predicate))] }
-function findBlock(note: NoteDocument, blockId: string): { node: Node; parent?: Node; index: number } {
-  const matches: { node: Node; parent?: Node; index: number }[] = []
-  function visit(node: Node, parent?: Node, index = 0) { if (node.attrs?.blockId === blockId) matches.push({ node, ...(parent ? { parent } : {}), index }); node.content?.forEach((child, index) => visit(child, node, index)) }
-  visit(note.content)
-  if (matches.length !== 1 || matches[0]!.node.type === 'noteInclude') throw new AgentMuxError('The original source block is missing, duplicated or already shared. Keep the draft and copy its current source again.', 'NOTE_SHARE_SOURCE_CHANGED')
-  return matches[0]!
+function findRange(note: NoteDocument, blockId: string) {
+  const range = noteShareRange(note.content, blockId)
+  if (!range) throw new AgentMuxError('The original source block is missing, duplicated or already shared. Keep the draft and copy its current source again.', 'NOTE_SHARE_SOURCE_CHANGED')
+  return range
 }
 function include(promotion: FileSharePromotion, forwardedBlockIds: string[]): Node { return { type: 'noteInclude', attrs: { blockId: promotion.sourceBlockId, referenceId: promotion.operationId + ':source', noteId: promotion.shared.noteId, workspaceId: promotion.shared.expectedResource.workspaceId, path: promotion.shared.expectedResource.path, ...(forwardedBlockIds.length ? { forwardedBlockIds } : {}) } } }
 /** Split the original list around an extracted item so no invalid listItem/include schema is invented. */
-function replaceBlock(node: Node, blockId: string, replacement: Node): Node[] {
+function replaceRange(node: Node, blockId: string, replacement: Node, count: number): Node[] {
   if (node.attrs?.blockId === blockId) return [replacement]
   if (!node.content) return [node]
   if (node.type === 'bulletList' || node.type === 'orderedList') {
@@ -40,12 +39,14 @@ function replaceBlock(node: Node, blockId: string, replacement: Node): Node[] {
       ...(index + 1 < node.content.length ? [{ ...node, ...(node.type === 'orderedList' ? { attrs: { ...node.attrs, start: Number(node.attrs?.start ?? 1) + index + 1 } } : {}), content: node.content.slice(index + 1) }] : [])
     ]
   }
-  return [{ ...node, content: node.content.flatMap(child => replaceBlock(child, blockId, replacement)) }]
+  const index = node.content.findIndex(child => child.attrs?.blockId === blockId)
+  if (index >= 0) return [{ ...node, content: [...node.content.slice(0, index), replacement, ...node.content.slice(index + count)] }]
+  return [{ ...node, content: node.content.flatMap(child => replaceRange(child, blockId, replacement, count)) }]
 }
 function replace(note: NoteDocument, promotion: FileSharePromotion): NoteDocument {
-  const selected = findBlock(note, promotion.sourceBlockId).node
-  const forwardedBlockIds = nodes(selected, node => typeof node.attrs?.blockId === 'string' && node.attrs.blockId !== promotion.sourceBlockId).map(node => node.attrs!.blockId as string)
-  const content = replaceBlock(note.content, promotion.sourceBlockId, include(promotion, forwardedBlockIds))[0]!
+  const selected = findRange(note, promotion.sourceBlockId)
+  const forwardedBlockIds = selected.nodes.flatMap(node => nodes(node, node => typeof node.attrs?.blockId === 'string' && node.attrs.blockId !== promotion.sourceBlockId)).map(node => node.attrs!.blockId as string)
+  const content = replaceRange(note.content, promotion.sourceBlockId, include(promotion, forwardedBlockIds), selected.count)[0]!
   return { ...note, content }
 }
 /** Only Markdown owns the new entity. Existing history proves each separate file write, never an atomic cross-file commit. */
@@ -131,16 +132,16 @@ export class NoteSharedBlockOwner {
     const fingerprint = originalFingerprint ?? noteHistoryRevision(JSON.stringify(['agentmux.note.shared-save.v1', params, context?.actor ?? null]))
     const destinationNote = parsed(params.destination.content), shared = new Map<string, { request: FileCreateParams; promotion: FileSharePromotion }>(), groups = new Map<string, SourcePlan>()
     for (const promotion of params.promotions) {
-      const original = parsed(promotion.source.content, promotion.sourceNoteId), selected = findBlock(original, promotion.sourceBlockId)
+      const original = parsed(promotion.source.content, promotion.sourceNoteId), selected = findRange(original, promotion.sourceBlockId)
       if (original.kind === 'shared-block') throw new AgentMuxError('Reuse this existing shared file directly instead of creating another entity for its same content.', 'NOTE_SHARE_ALREADY_SHARED')
       if (!nodes(destinationNote.content, node => node.type === 'noteInclude' && node.attrs?.referenceId === promotion.referenceId && node.attrs.noteId === promotion.shared.noteId && node.attrs.path === promotion.shared.expectedResource.path && (node.attrs.workspaceId === promotion.shared.expectedResource.workspaceId || node.attrs.workspaceId == null && promotion.shared.expectedResource.workspaceId === params.destination.expectedResource.workspaceId)).length) throw new AgentMuxError('This staged occurrence was removed or changed before save. No shared file was created.', 'NOTE_SHARE_OCCURRENCE_REMOVED')
       if (key(promotion.source) === key(promotion.shared)) throw new AgentMuxError('A shared file must be a distinct absent Markdown resource.', 'NOTE_SHARE_TARGET_INVALID')
-      if (nodes(selected.node, node => node.type === 'noteInclude' && node.attrs?.noteId === promotion.shared.noteId).length) throw new AgentMuxError('The proposed extraction would include itself. Keep the original source and draft.', 'NOTE_SHARE_CYCLE')
-      const extracted = selected.node.type === 'listItem' ? { type: selected.parent!.type!, ...(selected.parent!.type === 'orderedList' ? { attrs: { ...selected.parent!.attrs, start: Number(selected.parent!.attrs?.start ?? 1) + selected.index } } : selected.parent!.attrs ? { attrs: selected.parent!.attrs } : {}), content: [structuredClone(selected.node)] } : structuredClone(selected.node)
+      if (selected.nodes.some(node => nodes(node, node => node.type === 'noteInclude' && node.attrs?.noteId === promotion.shared.noteId).length)) throw new AgentMuxError('The proposed extraction would include itself. Keep the original source and draft.', 'NOTE_SHARE_CYCLE')
+      const extracted = selected.nodes[0]!.type === 'listItem' ? { type: selected.parent.type!, ...(selected.parent.type === 'orderedList' ? { attrs: { ...selected.parent.attrs, start: Number(selected.parent.attrs?.start ?? 1) + selected.index } } : selected.parent.attrs ? { attrs: selected.parent.attrs } : {}), content: structuredClone(selected.nodes) } : null
       const note: NoteDocument = { schema: original.schema, noteId: promotion.shared.noteId, kind: 'shared-block', ...(promotion.shared.title ? { title: promotion.shared.title } : {}),
         origin: { operationId: promotion.operationId, sourceNoteId: promotion.sourceNoteId, sourcePath: promotion.source.expectedResource.path, sourceRevision: promotion.source.expectedRevision, sourceBlockId: promotion.sourceBlockId, sourceOperationId: key(promotion.source) === key(params.destination) ? params.destination.operationId! : fileShareSourceOperation(params, promotion.source),
           requestFingerprint: fingerprint, destination: { noteId: destinationNote.noteId, path: params.destination.expectedResource.path, operationId: params.destination.operationId!, expectedRevision: params.destination.expectedRevision } },
-        content: { type: 'doc', content: [extracted] } }
+        content: { type: 'doc', content: extracted ? [extracted] : structuredClone(selected.nodes) } }
       const { noteId: _noteId, title: _title, ...target } = promotion.shared
       const content = serializeNoteDocument(note)
       parsed(content, note.noteId)
@@ -158,8 +159,8 @@ export class NoteSharedBlockOwner {
       let note = ownDestination ? parsed(destination.content, group.noteId) : parsed(group.original.content, group.noteId)
       for (const promotion of group.promotions) {
         // Never extract a stale clipboard body after an intervening source edit.
-        const original = findBlock(parsed(group.original.content), promotion.sourceBlockId).node, current = findBlock(note, promotion.sourceBlockId).node
-        if (JSON.stringify(current) !== JSON.stringify(original)) throw new AgentMuxError('The selected original block changed in this draft. Preserve it and copy its current source again.', 'NOTE_SHARE_SOURCE_CHANGED')
+        const original = findRange(parsed(group.original.content), promotion.sourceBlockId).nodes, current = findRange(note, promotion.sourceBlockId).nodes
+        if (JSON.stringify(current) !== JSON.stringify(original)) throw new AgentMuxError('The selected original range changed in this draft. Preserve it and copy its current source again.', 'NOTE_SHARE_SOURCE_CHANGED')
         note = replace(note, promotion)
       }
       const content = serializeNoteDocument(note)
