@@ -267,3 +267,33 @@ it.each(['running', 'exited'] as const)('secondary Focus Activity presentations 
   expect(container.querySelectorAll('.session-takeover')).toHaveLength(1)
   expect(useAppStore.getState().sessions).toBe(before)
 })
+
+
+it.each(['more', 'context'] as const)('the actual %s menu groups controls separately from conversation information', async entry => {
+  await mount()
+  const menu = entry === 'more' ? await menuWithRightActive() : await contextMenuWithRightActive()
+  const controls = menu.querySelector('[role="group"][aria-label="Agent controls"]')!
+  const conversation = menu.querySelector('[role="group"][aria-label="Conversation"]')!
+  expect(controls).not.toBeNull(); expect(conversation).not.toBeNull()
+  const labels = (root: ParentNode) => [...root.querySelectorAll('[role="menuitem"]')].map(node => node.textContent?.trim())
+  expect(labels(controls)).toEqual(['Take over', 'Fork current conversation…', 'Restart Session…', 'Stop Agent'])
+  expect(labels(conversation)).toEqual(['Conversation history', 'Session details'])
+  expect(controls.compareDocumentPosition(conversation) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+  expect(menu.querySelector('[data-terminal-menu-tools]')).toBeNull()
+})
+
+
+it('a plain terminal More menu has no empty Agent control group', async () => {
+  const session = useAppStore.getState().sessions[0]!
+  useAppStore.setState({ sessions: [{ ...session, kind: 'terminal', providerId: null,
+    control: { kind: 'terminal', hostId: session.hostId, runId: session.control.run.runId, run: session.control.run } }] })
+  await act(async () => root.render(<SessionPane sessionId={session.id} surfaceKind="terminal" interactiveResize={false} visible linkOrigin={{workspaceId,tabId,regionId:leftId}} />))
+  const trigger = container.querySelector<HTMLElement>('.agent-region-header__more')!
+  expect(trigger).not.toBeNull()
+  await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
+  const menu = document.querySelector<HTMLElement>('.agent-region-menu')!
+  expect(menu).not.toBeNull()
+  expect(menu.querySelector('[role="group"][aria-label="Agent controls"]')).toBeNull()
+  expect(menu.querySelector('.agent-region-menu__summary')?.nextElementSibling?.getAttribute('aria-label')).toBe('Conversation')
+  expect(menuItem(menu, 'Terminal details')).toBeDefined()
+})
