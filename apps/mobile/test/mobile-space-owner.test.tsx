@@ -56,7 +56,7 @@ async function fixture(initialContext?: MobileSpatialContext | 'RESTORE_EXACT') 
     if (method === 'app.snapshot') return { workspaces: [{ workspaceId: workspace.id, hostId: workspace.hostId, name: workspace.name, path, kind: workspace.kind, projectId: null, repoPath: null, branch: null }], unavailable: [] }
     if (method === 'browser.targets') {
       if (browserFailure) throw new Error('原 Browser 观察暂缺')
-      return parseBrowserTargetsResult({ targets: [
+      return parseBrowserTargetsResult({ coverage: 'complete', targets: [
         { id: 'wrong-first-browser', title: '干扰网页', url: 'https://wrong.example', status: 'ready', source: 'embedded', workspaceId: workspace.id, navigationId: 'navigation-wrong', capabilities: [] },
         { id: 'browser-original-owner', title: '准确原网页', url: 'http://original.example/read', status: 'ready', source: 'embedded', workspaceId: workspace.id, navigationId: 'navigation-original', capabilities: [] }
       ] })
