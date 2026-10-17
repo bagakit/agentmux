@@ -15,6 +15,8 @@ export type MoteConnectionCreate = {
   adapterId: string
   domain: string
   avatar: 'include-saved' | 'omit'
+  /** Omit to use the exact saved Mote name; an explicit name is frozen for this creation. */
+  name?: string
 }
 export type MoteConnectionSync = {
   operationId: string

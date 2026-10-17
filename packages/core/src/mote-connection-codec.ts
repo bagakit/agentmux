@@ -90,7 +90,7 @@ export function parseMoteConnectionParams<M extends MoteConnectionMethod>(m: M, 
   const p = obj(
     v,
     m === 'space.mote.connection.create'
-      ? ['operationId', 'source', 'adapterId', 'domain', 'avatar']
+      ? ['operationId', 'source', 'adapterId', 'domain', 'avatar', 'name']
       : ['operationId', 'source', 'connection', 'expectedConnectionRevision', 'avatar']
   )
   const source = parseMoteConnectionSource(p.source),
@@ -105,7 +105,7 @@ export function parseMoteConnectionParams<M extends MoteConnectionMethod>(m: M, 
     } as MoteConnectionParamsMap[M]
   const domain = text(p.domain)
   if (!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(domain)) fail()
-  return { ...base, adapterId: id(p.adapterId), domain } as MoteConnectionParamsMap[M]
+  return { ...base, adapterId: id(p.adapterId), domain, ...(p.name === undefined ? {} : { name: text(p.name) }) } as MoteConnectionParamsMap[M]
 }
 export function parseMoteConnectionOperation(v: unknown): MoteConnectionOperation {
   const p = obj(v, [
@@ -256,7 +256,8 @@ export function parseMoteConnectionResult<M extends MoteConnectionMethod>(
     if (
       operation.action !== (m === 'space.mote.connection.create' ? 'create' : 'sync') ||
       JSON.stringify(operation.source) !== JSON.stringify(request.source) ||
-      (request.avatar === 'include-saved') !== (operation.snapshot.avatarSha256 !== null)
+      (request.avatar === 'include-saved') !== (operation.snapshot.avatarSha256 !== null) ||
+      ('name' in request && request.name !== undefined && operation.snapshot.name !== request.name)
     )
       fail()
     if (
