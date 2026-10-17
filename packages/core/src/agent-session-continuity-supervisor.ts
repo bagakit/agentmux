@@ -297,11 +297,11 @@ export class AgentSessionContinuitySupervisor {
       }
       if (session.nativeActor?.frontendControl) {
         if (exactFrontend?.state === 'detached' && exactFrontend.exitCode === 0) return await settle('settled', 'frontend-normal-exit', process)
-        // A capability ACK proves that connection only, not completed bootstrap.
+        // Provider attachment is a connection fact, independent of terminal capability.
+        // An old ACK without this generation stays untouched; neither fact proves bootstrap.
         // Keep this admitted intent quiet but live for a later exact frontend exit;
         // every further attempt still consumes its original, durable finite budget.
-        if (exactFrontend?.state === 'attached' && (!active.frontendReconnect || exactFrontend.frontendId === active.frontendReconnect.frontendId) &&
-          session.terminalHandshake?.frontendId === exactFrontend.frontendId && session.terminalHandshake.acknowledged) {
+        if (exactFrontend?.state === 'attached' && (!active.frontendReconnect || exactFrontend.frontendId === active.frontendReconnect.frontendId)) {
           if (supervision.phase !== 'observing' || supervision.reason !== 'frontend-attached') await this.save(session, root,
             { ...supervision, phase: 'observing', reason: 'frontend-attached', process, observedAt: Date.now() })
           return

@@ -43,8 +43,7 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
     publish({ ...frontend, backendState: 'stopping', observedAt: Date.now() })
     tui?.kill('SIGTERM'); server.kill('SIGTERM')
   }
-  const spawnTui = async (endpoint: string, args: string[]): Promise<AgentTerminalFrontendObservation> => {
-    const frontendId = randomUUID()
+  const spawnTui = async (endpoint: string, args: string[], frontendId: string = randomUUID()): Promise<AgentTerminalFrontendObservation> => {
     publish({ frontendId, state: 'starting', backendState: 'running', source: 'managed-process', observedAt: Date.now() })
     const child = spawn(plan.command, ['--remote', endpoint, '--remote-auth-token-env', CODEX_NATIVE_TOKEN_ENV, ...args],
       { cwd: process.cwd(), env: process.env, detached: false, stdio: ['inherit', 'inherit', 'pipe'] })
@@ -82,8 +81,35 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
   }
   process.on('SIGTERM', stop); process.on('SIGINT', stop)
   try {
-    const deadline = Date.now() + 10_000
     let endpoint: string | undefined
+    const detached = (expectedId: string): boolean => frontend.frontendId === expectedId && frontend.state === 'detached'
+    const operations = new Map<string, { request: string; result: Promise<AgentTerminalFrontendObservation> }>()
+    control = await openCodexFrontendControl(token, { actorId, lifecycleOperationId, processId: process.pid }, {
+      current: () => ({ ...frontend }),
+      reconnect: request => {
+        const key = JSON.stringify(request), previous = operations.get(request.operationId)
+        if (previous) {
+          if (previous.request !== key) throw new ManagedNativeLaunchError('The original frontend operation has another immutable target.')
+          return previous.result
+        }
+        const result = (async () => {
+          if (stopping || backendEnded || frontend.backendState !== 'running') throw new ManagedNativeLaunchError('The original backend is stopping or ended. Its Session is preserved.')
+          if (!detached(request.expectedFrontendId)) throw new ManagedNativeLaunchError('The original frontend generation changed. Re-read this Session before reconnecting.')
+          const connection = await connectCodexNativeActor(endpoint!, token, new AbortController().signal, 'agentmux_frontend_reconnect')
+          try {
+            const value = await connection.request('thread/read', { threadId: request.nativeSessionId, includeTurns: false })
+            if (value?.thread?.id !== request.nativeSessionId || value.thread.canAcceptDirectInput !== true) throw new ManagedNativeLaunchError('The original loaded native thread is unconfirmed. No replacement was started.')
+            if (stopping || backendEnded || !detached(request.expectedFrontendId)) throw new ManagedNativeLaunchError('The original frontend or backend changed before reconnect.')
+            // The original argv can contain an already delivered prompt. Never replay it.
+            const flags = plan.frontendArgs
+            return await spawnTui(endpoint!, ['resume', request.nativeSessionId, ...flags])
+          } finally { connection.dispose() }
+        })()
+        operations.set(request.operationId, { request: key, result })
+        return result
+      }
+    })
+    const deadline = Date.now() + 10_000
     while (!endpoint && !serverError && !backendEnded && Date.now() < deadline) {
       const listeners = await nativeProcessTcpListeners(process.pid, new AbortController().signal).catch(() => [])
       if (listeners.length > 1) throw new ManagedNativeLaunchError('The original native actor listener is ambiguous.')
@@ -115,35 +141,7 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
       }
       // Keep this original subscription alive: TUI resumes the same loaded object, without overrides.
     }
-    const originalEndpoint = endpoint
-    const detached = (expectedId: string): boolean => frontend.frontendId === expectedId && frontend.state === 'detached'
-    const operations = new Map<string, { request: string; result: Promise<AgentTerminalFrontendObservation> }>()
-    control = await openCodexFrontendControl(token, { actorId, lifecycleOperationId, processId: process.pid }, {
-      current: () => ({ ...frontend }),
-      reconnect: request => {
-        const key = JSON.stringify(request), previous = operations.get(request.operationId)
-        if (previous) {
-          if (previous.request !== key) throw new ManagedNativeLaunchError('The original frontend operation has another immutable target.')
-          return previous.result
-        }
-        const result = (async () => {
-          if (stopping || backendEnded || frontend.backendState !== 'running') throw new ManagedNativeLaunchError('The original backend is stopping or ended. Its Session is preserved.')
-          if (!detached(request.expectedFrontendId)) throw new ManagedNativeLaunchError('The original frontend generation changed. Re-read this Session before reconnecting.')
-          const connection = await connectCodexNativeActor(originalEndpoint, token, new AbortController().signal, 'agentmux_frontend_reconnect')
-          try {
-            const value = await connection.request('thread/read', { threadId: request.nativeSessionId, includeTurns: false })
-            if (value?.thread?.id !== request.nativeSessionId || value.thread.canAcceptDirectInput !== true) throw new ManagedNativeLaunchError('The original loaded native thread is unconfirmed. No replacement was started.')
-            if (stopping || backendEnded || !detached(request.expectedFrontendId)) throw new ManagedNativeLaunchError('The original frontend or backend changed before reconnect.')
-            // The original argv can contain an already delivered prompt. Never replay it.
-            const flags = plan.frontendArgs
-            return await spawnTui(originalEndpoint, ['resume', request.nativeSessionId, ...flags])
-          } finally { connection.dispose() }
-        })()
-        operations.set(request.operationId, { request: key, result })
-        return result
-      }
-    })
-    await spawnTui(endpoint, plan.args)
+    await spawnTui(endpoint, plan.args, frontend.frontendId)
     // Frontend exit is an attachment fact. Only the backend/explicit Stop ends this Run.
     const ended = await backendExit
     if (ended.error) throw ended.error
