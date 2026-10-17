@@ -21,35 +21,34 @@ export function AgentRegionMenuContent({ name, executorLabel, sessionId, session
   contextualActions?: ReactNode
 }) {
   const Menu = useContext(WorkbenchMenuScope)
+  const takeOver = onTakeOver && !readOnly && sessionKind === 'agent' ? <Menu.Item className="tab-context-menu__item" onSelect={onTakeOver}>
+    <ForwardIcon size={14} /><span>Take over</span>
+  </Menu.Item> : null
   return <>
+    {contextualActions}
+    {contextualActions ? <Menu.Separator className="tab-context-menu__separator" /> : null}
     <Menu.Label className="agent-region-menu__summary">
       <strong title={name}>{name}</strong>
       <span>{executorLabel} · {executionHost.label}{executionHost.configured ? '' : executionHost.id ? ' · Not configured' : ''}{readOnly ? ' · Read-only' : ''}</span>
     </Menu.Label>
-    {contextualActions}
-    {contextualActions ? <Menu.Separator className="tab-context-menu__separator" /> : null}
-    <Menu.Group aria-label="Conversation">
-      {onTakeOver && !readOnly && sessionKind === 'agent' ? <Menu.Item className="tab-context-menu__item" onSelect={onTakeOver}>
-        <ForwardIcon size={14} /><span>Take over</span>
-      </Menu.Item> : null}
+    <AgentRegionMenuActions entries={entries} controls={takeOver || currentConversationActions ? <>{takeOver}{currentConversationActions}</> : null} conversation={<>
       {onHistory ? <Menu.Item className="tab-context-menu__item" onSelect={onHistory}>
         <HistoryIcon size={14} /><span>Conversation history</span>
       </Menu.Item> : null}
-      {currentConversationActions}
-    </Menu.Group>
-    <AgentRegionMenuActions entries={entries} details={<AgentMenuSubmenu
-      label={sessionKind === 'agent' ? 'Session details' : 'Terminal details'} icon={<InformationIcon size={14} />} className="agent-region-menu__details">
-      <Menu.Label className="agent-region-menu__context">
-        <span>{name}</span>
-        {sessionKind === 'agent' ? <><span>Executor: {executorLabel}</span><span>Session: {sessionId}</span></> : <span>Terminal: {sessionId}</span>}
-        <span>Host: {executionHost.label}{executionHost.configured ? '' : executionHost.id ? ' · Not configured' : ''}</span>
-        <span>Host ID: {executionHost.id ?? 'Unknown'}</span>
-        <span>Directory: {executionHost.cwd || 'Unknown'}</span>
-      </Menu.Label>
-      {nativeSourceActions}
-      {onRefreshObservation ? <Menu.Item className="tab-context-menu__item" disabled={refreshing} onSelect={onRefreshObservation}>
-        <RefreshIcon size={14} /><span>{refreshing ? 'Refreshing observation…' : 'Refresh observation'}</span>
-      </Menu.Item> : null}
-    </AgentMenuSubmenu>} />
+      <AgentMenuSubmenu
+        label={sessionKind === 'agent' ? 'Session details' : 'Terminal details'} icon={<InformationIcon size={14} />} className="agent-region-menu__details">
+        <Menu.Label className="agent-region-menu__context">
+          <span>{name}</span>
+          {sessionKind === 'agent' ? <><span>Executor: {executorLabel}</span><span>Session: {sessionId}</span></> : <span>Terminal: {sessionId}</span>}
+          <span>Host: {executionHost.label}{executionHost.configured ? '' : executionHost.id ? ' · Not configured' : ''}</span>
+          <span>Host ID: {executionHost.id ?? 'Unknown'}</span>
+          <span>Directory: {executionHost.cwd || 'Unknown'}</span>
+        </Menu.Label>
+        {nativeSourceActions}
+        {onRefreshObservation ? <Menu.Item className="tab-context-menu__item" disabled={refreshing} onSelect={onRefreshObservation}>
+          <RefreshIcon size={14} /><span>{refreshing ? 'Refreshing observation…' : 'Refresh observation'}</span>
+        </Menu.Item> : null}
+      </AgentMenuSubmenu>
+    </>} />
   </>
 }
