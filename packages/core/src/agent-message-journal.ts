@@ -86,17 +86,18 @@ export const messageObservationJournalSchema = `
 `
 
 export const messageObservationQuery = `WITH changed AS (
-  SELECT position.sequence, COALESCE(json_extract(r.json, '$.envelope.messageId'), json_extract(r.json, '$.messageId')) AS message_id,
+  SELECT position.sequence, json_extract(r.json, '$.kind') AS record_kind,
+    COALESCE(json_extract(r.json, '$.envelope.messageId'), json_extract(r.json, '$.messageId')) AS message_id,
     COALESCE(json_extract(r.json, '$.notification.notificationId'), json_extract(r.json, '$.notificationId')) AS notification_id
   FROM message_observation_records position JOIN records r ON r.sequence=position.sequence
   WHERE position.sequence > ? AND position.sequence <= ? ORDER BY position.sequence LIMIT 100),
   expanded AS (
-    SELECT sequence, message_id FROM changed WHERE message_id IS NOT NULL
+    SELECT sequence, record_kind, message_id FROM changed WHERE message_id IS NOT NULL
     UNION ALL
-    SELECT changed.sequence, reference.value AS message_id FROM changed
+    SELECT changed.sequence, changed.record_kind, reference.value AS message_id FROM changed
       JOIN a2a_notifications n ON n.notification_id=changed.notification_id
       JOIN records original ON original.sequence=n.original_sequence, json_each(original.json, '$.notification.messageIds') reference)
-  SELECT expanded.sequence, expanded.message_id,
+  SELECT expanded.sequence, expanded.record_kind, expanded.message_id, m.message_sequence,
     json_extract(original.json, '$.envelope.senderSessionId') AS sender_id,
     json_extract(original.json, '$.envelope.recipientSessionId') AS recipient_id,
     json_extract(original.json, '$.envelope.sender.kind') AS sender_kind,

@@ -21,6 +21,8 @@ export type AgentMuxClientEventListener<Result = void> = (event: AgentMuxClientE
   Result & (Result extends PromiseLike<unknown> ? never : unknown)
 
 export type AgentMuxClientEventListenerOptions = {
+  /** true selects future A2A changes/current cut; undefined lazily observes after listMessages; false excludes all A2A observation. */
+  observeMessages?: boolean
   /** Called when this Consumer is detached. Fix the callback and explicitly register it again. */
   onError?(error: { code: string; message: string }): void
 }
@@ -1723,7 +1725,10 @@ export type AgentMuxObservationOrigin =
   | { kind: 'runtime-connection'; boundary: 'core-ctxmux' | 'consumer-core' }
 
 export type AgentMuxClientEvent = (
-  | { type: 'agent-message-changed'; messageId: string; sequence: number; senderSessionId: string; recipientSessionId: string }
+  /** Original journal change; live=false is initial/recovered catch-up, never a fresh user alert. */
+  | { type: 'agent-message-changed'; messageId: string; sequence: number; messageSequence: number; live: boolean;
+      recordKind: 'message' | 'delivery' | 'delivery-issue' | 'a2a-notification' | 'a2a-notification-result';
+      senderSessionId: string; recipientSessionId: string }
   /** Derived journal observation for human reading; never Input or Agent consumption authority. */
   | { type: 'agent-message-observation'; state: 'available' | 'unavailable'; code?: string; message?: string }
   | {

@@ -15,7 +15,7 @@ import { AGENTMUX_HOSTED_METHODS, type AgentMuxRuntimeOwnerIdentity, type AgentM
   type AgentMuxHostedBootstrap, type AgentMuxHostedMethod, type AgentMuxHostedInvocation,
   type AgentMuxHostedSubscription, type AgentMuxRuntimeFence, type AgentMuxHostedForwardRpc, type AgentMuxHostedSubscribeRpc,
   type AgentMuxHostedAttachmentTarget, type AgentMuxHostedStreamValue } from './hosted-client-contract.js'
-import { decodeHostedValue, encodeHostedValue, AgentMuxHostedTransferReader, parseHostedBootstrap, parseHostedAgentSessionRead, parseHostedRuntimeOwnerIdentity, parseHostedNativeConnection } from './hosted-value.js'
+import { decodeHostedValue, encodeHostedValue, AgentMuxHostedTransferReader, parseHostedBootstrap, parseHostedAgentSessionRead, parseHostedRuntimeOwnerIdentity, parseHostedNativeConnection, parseHostedMessageEvent } from './hosted-value.js'
 import { parseSessionHistoryResourceOptions, parseSessionHistoryResourceReadResult } from './session-history-resource.js'
 import { parseOutputGapEvidence } from './output-gap-evidence.js'
 import { createHostedOutputObservation } from './hosted-output-observer.js'
@@ -90,6 +90,14 @@ export async function connectHostedAgentMux(options: {
     await controlConnecting
   }
   const emit = (event: AgentMuxClientEvent): void => {
+    if (event.type === 'agent-message-changed' || event.type === 'agent-message-observation') {
+      try { parseHostedMessageEvent(event) }
+      catch (error) {
+        publisher.publish({ type: 'agent-message-observation', state: 'unavailable', code: 'CONTROL_PROTOCOL_ERROR',
+          message: error instanceof Error ? error.message : String(error) })
+        return
+      }
+    }
     if (event.type === 'control-endpoint-state') {
       try {
         const { type: _type, evidence, ...state } = event
@@ -750,7 +758,10 @@ export async function connectHostedAgentMux(options: {
       // A second sweep would make GUI exit wait on unrelated Native cleanup receipts.
       attached.clear()
     },
-    onEvent: <Result>(listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions) => publisher.onEvent(listener, options, () => endpointState ? structuredClone(endpointState) : undefined)
+    onEvent: <Result>(listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions) => publisher.onEvent(event => {
+      if (options?.observeMessages === false && (event.type === 'agent-message-changed' || event.type === 'agent-message-observation')) return
+      return listener(event)
+    }, options, () => endpointState ? structuredClone(endpointState) : undefined)
   }
   for (const method of AGENTMUX_HOSTED_METHODS) client[method] = async (...args: unknown[]) => {
     if (method === 'releaseRunAttachment') {

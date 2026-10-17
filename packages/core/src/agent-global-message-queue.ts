@@ -1067,7 +1067,8 @@ export class DurableAgentMuxMessageQueue {
       // Advance past unrelated journal facts without extracting their bodies.
       return { cut: { incarnation, throughSequence: boundary }, hasMore: positions.length === 100,
         changes: rows.filter(row => row.sender_kind === 'agent-session' && row.recipient_kind === 'agent-session')
-          .map(row => ({ type: 'agent-message-changed' as const, sequence: Number(row.sequence), messageId: String(row.message_id),
+          .map(row => ({ type: 'agent-message-changed' as const, sequence: Number(row.sequence), messageSequence: Number(row.message_sequence),
+          recordKind: String(row.record_kind) as Extract<import('./types.js').AgentMuxClientEvent, { type: 'agent-message-changed' }>['recordKind'], messageId: String(row.message_id),
           senderSessionId: String(row.sender_id), recipientSessionId: String(row.recipient_id) })) }
     }
     return this.withLock(async () => {
