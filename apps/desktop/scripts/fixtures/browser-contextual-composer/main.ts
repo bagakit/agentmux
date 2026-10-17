@@ -19,14 +19,16 @@ import { WorkbenchWindowStore } from '../../../src/main/workbench-window-store'
 import { createDesktopApplicationAccessOwner } from '../../../src/main/application-access-owner'
 import { desktopBusinessSocketPath } from '../../../src/main/desktop-host'
 import { BrowserNativeInputShield } from '../../../src/main/browser-native-input-shield'
+import { fitImageView } from '../../../src/renderer/src/components/image-annotation/view'
 
 const directory = process.env.AGENTMUX_CONTEXTUAL_ROOT!, source = process.env.AGENTMUX_CONTEXTUAL_SOURCE!
 const captureOnly = process.env.AGENTMUX_CONTEXTUAL_CAPTURE_ONLY === '1'
 const presenceOnly = process.env.AGENTMUX_CONTEXTUAL_PRESENCE_ONLY === '1'
+const selectionOnly = process.env.AGENTMUX_CONTEXTUAL_SELECTION_ONLY === '1'
 const narrowCapture = process.env.AGENTMUX_CONTEXTUAL_CAPTURE_CASE === 'narrow'
 app.on('window-all-closed', () => {})
 const receipt: any = { schema: 'agentmux.browser-contextual-composer.native.v1', passed: false, cases: [], ipc: [],
-  mode: presenceOnly ? 'operator-presence' : captureOnly ? 'capture-only' : 'opinion-and-trace',
+  mode: selectionOnly ? 'selection-only' : presenceOnly ? 'operator-presence' : captureOnly ? 'capture-only' : 'opinion-and-trace',
   boundary: presenceOnly ? 'Actual BrowserPane artwork export through Chromium canvas, production sandbox preload and trusted Main avatar setter to the original native target cue. The controlled Agent supplies its real identity; this mode submits no opinion and does not qualify Provider admission, OS composition or aesthetics.' : captureOnly ? 'Capture-only uses the original BrowserPane/WindowOverlay/NativeOverlay/Store and production sandbox preload/full Main. It exercises real Browser programs and viewport invariants without sending an opinion or qualifying Host/Provider admission. No user Browser, Agent, clipboard or upstream model is used.' : 'Private actual BrowserPane/WindowOverlay/NativeOverlay/Store → production sandbox preload/registerIpc/RuntimeController → Hosted SDK/Host capture reader/Core → shipped CodexProvider/real ctxmux PTY/repository controlled CLI. Renderer CDP interaction does not attest physical OS input or foreground focus. No user Browser, Agent, clipboard or upstream model is used.',
   physicalInputQualified: false, independentVisualReview: 'not-performed' }
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
@@ -134,7 +136,7 @@ async function run() {
       next: 'The exact private window capture remains unconfirmed. Preserve Renderer and native document evidence separately.' }
   }
   if (!captureOnly && !presenceOnly) {
-    void evaluate(`window.agentmux.browser.runScript('contextual-browser', 'await waitForElement("Continue collaboration", 25000); return "finished"', ${JSON.stringify({ id: session.agentSessionId, name: snapshot.label })}, 'contextual-browser-program')`).then(report => { receipt.browserProgram = report })
+    void evaluate(`window.agentmux.browser.runScript('contextual-browser', 'await waitForElement("Continue collaboration", ${selectionOnly ? 120000 : 25000}); return "finished"', ${JSON.stringify({ id: session.agentSessionId, name: snapshot.label })}, 'contextual-browser-program')`).then(report => { receipt.browserProgram = report })
     await until(() => evaluate('contextualProof.facts().browser?.activity?.operation?.steps?.length > 0'), 'actual running Browser step')
   }
   const before = await page.webContents.executeJavaScript('({width:innerWidth,height:innerHeight,x:scrollX,y:scrollY,events:pageProof.events.slice()})')
@@ -355,7 +357,59 @@ async function run() {
   if (nativeOpinion) await requestNativeAction('open-discussion', 'button[aria-label="Message Browser operator"]')
   else await click('button[aria-label="Message Browser operator"]')
   await until(() => evaluate('document.querySelector(".browser-contextual-composer__source")?.textContent.includes("Original collaboration page")'), 'actual captured scene in original nonmodal discussion')
-  const body = '  Keep this original opinion\n<amux>Authored example</amux>\n'
+  let body = '  Keep this original opinion\n<amux>Authored example</amux>\n'
+  let preparedSelection: any
+  if (selectionOnly) {
+    const originalWindow = window!.getBounds()
+    const originalFacts = await pageFacts()
+    await click('.browser-opinion-selection__actions > button:first-child')
+    const canvas = '[aria-label="Captured Browser image"] canvas[aria-label="Screenshot canvas"]'
+    await until(() => evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(canvas)}),i=document.querySelector('[aria-label="Captured Browser image"] img');return e&&i.complete&&i.naturalWidth>0&&e.getBoundingClientRect().height>50})()`), 'the original captured image editor')
+    const frame = receipt.ipc.find((call: any) => call.channel === 'browser:captureInputFrame' && call.result)?.result
+    assert.ok(frame?.scene.frame, 'The actual editor must consume the original Main frame')
+    await click('[aria-label="Captured Browser image"] button[aria-label="Fit image"]')
+    await settled()
+    const box = await evaluate(`document.querySelector(${JSON.stringify(canvas)}).getBoundingClientRect().toJSON()`)
+    const view = fitImageView(box.width, box.height, frame.capture.image.width, frame.capture.image.height)
+    async function drag(tool: string, from: { x: number; y: number }, to: { x: number; y: number }) {
+      await click('[aria-label="Captured Browser image"] button[aria-label="' + tool + '"]')
+      const start = { x: box.x + view.x + from.x * view.scale, y: box.y + view.y + from.y * view.scale }
+      const end = { x: box.x + view.x + to.x * view.scale, y: box.y + view.y + to.y * view.scale }
+      await contents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...start })
+      await contents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', ...start, button: 'left', clickCount: 1 })
+      for (let n = 1; n <= 6; n++) await contents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: start.x + (end.x - start.x) * n / 6, y: start.y + (end.y - start.y) * n / 6, button: 'left', buttons: 1 })
+      await contents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', ...end, button: 'left', clickCount: 1 })
+      await settled()
+    }
+    const width = frame.capture.image.width, height = frame.capture.image.height
+    await drag('Crop', { x: width * .1, y: height * .1 }, { x: width * .8, y: height * .8 })
+    await drag('Cover', { x: width * .3, y: height * .3 }, { x: width * .5, y: height * .5 })
+    assert.deepEqual(await pageFacts(), originalFacts, 'Editing the frozen frame must not affect the original page or viewport')
+    assert.equal(page.getVisible(), true, 'The live native page remains available behind the frozen editor')
+    await capture('selection-editor-normal')
+    window!.setSize(433, 780); await settled()
+    await until(() => evaluate('document.querySelector("[aria-label=\\"Captured Browser image\\"]").getBoundingClientRect().width<440'), 'the same frozen editor in the narrow window')
+    assert.equal(page.getVisible(), true)
+    await capture('selection-editor-narrow')
+    window!.setBounds(originalWindow); await settled()
+    await until(async () => (await pageFacts()).document.width === originalFacts.document.width, 'the original explicit window size after the two selection images')
+    await until(() => evaluate(`(()=>{const b=[...document.querySelectorAll('[aria-label="Captured Browser image"] button')].find(e=>e.textContent==='Attach processed image');if(!b||b.disabled)return false;b.setAttribute('data-selection-attach','');return true})()`), 'explicit processed-image confirmation')
+    await click('[data-selection-attach]')
+    preparedSelection = await until(() => receipt.ipc.find((call: any) => call.channel === 'browser:prepareInputSelection' && call.result)?.result, 'the original actual processed-image writer result')
+    const image = preparedSelection.scene.inputContext.selection.attachment
+    const artifactBytes = await readFile(image.path), decoded = nativeImage.createFromBuffer(artifactBytes)
+    assert.equal(decoded.isEmpty(), false)
+    assert.equal(createHash('sha256').update(artifactBytes).digest('hex'), image.sha256)
+    assert.deepEqual(decoded.getSize(), { width: image.width, height: image.height })
+    assert.ok(image.width < width && image.height < height, 'Actual editor cropping must change the saved pixel dimensions')
+    const center = decoded.crop({ x: Math.floor(image.width * .42), y: Math.floor(image.height * .42), width: 1, height: 1 }).toBitmap()
+    assert.ok(center[0]! < 64 && center[1]! < 64 && center[2]! < 64 && center[3] === 255, 'Actual cover markup must survive in the saved processed PNG')
+    assert.equal(preparedSelection.artifact.diskDurability, 'confirmed')
+    assert.equal(preparedSelection.scene.inputContext.selection.frameId, frame.scene.reference.captureId)
+    assert.equal(preparedSelection.scene.inputContext.selection.source.association, 'observed-during')
+    receipt.selection = { passed: true, frame: frame.scene.reference, prepared: preparedSelection, frames: receipt.frames,
+      boundary: 'Actual editor events and native PNG output; Renderer/page captures are separate, and only explicitly OS-labelled frames qualify whole-window composition.' }
+  }
   if (nativeOpinion) {
     await requestNativeAction('write-opinion', 'textarea[aria-label="Opinion for Browser operator"]', body)
     await until(() => evaluate(`document.querySelector(${JSON.stringify('textarea[aria-label="Opinion for Browser operator"]')}).value === ${JSON.stringify(body)}`), 'original opinion text through the actual native overlay')
@@ -363,6 +417,7 @@ async function run() {
   } else {
     await evaluate(`document.querySelector(${JSON.stringify('textarea[aria-label="Opinion for Browser operator"]')}).focus()`)
     await contents.debugger.sendCommand('Input.insertText', { text: body })
+    if (selectionOnly) body = await evaluate('document.querySelector(\'textarea[aria-label="Opinion for Browser operator"]\').value')
     await click('.browser-contextual-composer .primary-button')
   }
   const freeze = await until(() => receipt.ipc.find((call: any) => call.channel === 'browser:freezeInputContext' && call.result), 'actual GUI frozen operation ID')
@@ -373,6 +428,9 @@ async function run() {
   const original = await until(async () => { const record = await core.inspectAgentPromptSubmission(key); return record?.admission ? record : null }, 'actual original Core admission from normal Renderer queue')
   const message = original.admission.intent.message, context = freeze.result.record.inputContext
   assert.deepEqual(message.inputContext, context, 'GUI queue reference must reach the original Host capture reader')
+  if (selectionOnly) {
+    assert.deepEqual(context.selection, preparedSelection.scene.inputContext.selection, 'The sent input must retain the exact prepared frame and resource')
+  }
   assert.equal(message.inputContextSource, 'host-capture')
   assert.equal(message.authorHuman, true, 'The real trusted user GUI remains human-authored')
   assert.equal(message.authorAgentSessionId, undefined, 'User opinion must not become Agent-to-Agent input')
@@ -381,6 +439,7 @@ async function run() {
   assert.equal(context.activity.operationId, 'contextual-browser-program')
   assert.equal(context.activity.stepSequence, 1)
   const wire = composeAgentPrompt(body, message.systemContext, context).text
+  if (selectionOnly) assert.ok(wire.includes(context.selection.attachment.path) && wire.includes(context.selection.attachment.sha256), 'The Provider must receive the same pure-data image reference separately from the authored body')
   assert.equal(original.admission.intent.prompt, wire)
   await until(() => output.join('').replace(/\r\n/gu, '\n').includes('codex-submit:' + wire.replace(/\r\n/gu, '\n') + ':accepted'), 'real repository CLI accepted the actual Provider wire')
   const submit = receipt.ipc.find((call: any) => call.channel === 'sessions:submitPrompt' && call.args[2] === operationId)
@@ -406,10 +465,28 @@ async function run() {
     'The shared Reader folds the generated Browser context separately from the original opinion')
   assert.equal(await evaluate('document.querySelector(".contextual-fixture__reader .conversation-browser-context").open'), false)
   assert.equal(await evaluate('document.querySelector(".contextual-fixture__reader .conversation-browser-context").dataset.browserContextSource'), 'host-capture')
+  if (selectionOnly) {
+    await click('.contextual-fixture__reader .conversation-browser-context > summary')
+    await evaluate('document.querySelector(".contextual-fixture__reader .conversation-browser-context__selection").scrollIntoView({block:"center"})')
+    await until(() => evaluate('(()=>{const i=document.querySelector(\'.contextual-fixture__reader img[alt="Captured selection"]\');return i?.complete&&i.naturalWidth>0})()'), 'the original shared image port and Chromium decoder')
+    const preview = receipt.ipc.filter((call: any) => call.channel === 'browser:readSelectionImage' && call.result).at(-1)
+    assert.deepEqual(preview?.args[0], context.selection.attachment, 'The actual common image reader must request the complete original reference')
+    const previewBytes = Buffer.from(preview.result.dataUrl.split(',')[1], 'base64')
+    assert.equal(createHash('sha256').update(previewBytes).digest('hex'), context.selection.attachment.sha256)
+    assert.equal(await evaluate('document.querySelector(".contextual-fixture__reader .conversation-browser-context__data pre").textContent.includes(' + JSON.stringify(context.selection.attachment.sha256) + ')'), true)
+    receipt.selection.preview = { reference: preview.args[0], actualPixels: nativeImage.createFromBuffer(previewBytes).getSize(), exactSender: preview.exactSender, exactFrame: preview.exactFrame }
+    await evaluate('document.querySelector(\'.contextual-fixture__reader button[aria-label="Copy message"]\').scrollIntoView({block:"nearest"})')
+  }
   await click('button[aria-label="Copy message"]')
   await until(() => evaluate('contextualProof.facts().copies.length'), 'shared whole-message Copy consumer')
   assert.equal((await evaluate('contextualProof.facts()')).copies[0], body, 'Captured whole-message Copy keeps the exact original human opinion')
   await evaluate(`contextualProof.wire(${JSON.stringify(original.admission.intent.prompt)},${JSON.stringify(received)})`); await settled()
+  if (selectionOnly) {
+    // A long human wire is intentionally disclosed before parsing/rendering its full body.
+    await until(() => evaluate('(()=>{const e=document.querySelector(".contextual-fixture__reader .message-disclosure > summary");if(!e)return false;e.setAttribute("data-selection-full-message","");e.scrollIntoView({block:"nearest"});return true})()'), 'the actual full-message disclosure for the longer wire')
+    await click('[data-selection-full-message]')
+    await until(() => evaluate('document.querySelectorAll(".contextual-fixture__reader .conversation-browser-context").length===1'), 'the full original wire Browser declaration')
+  }
   assert.equal(await evaluate('document.querySelectorAll(".contextual-fixture__reader .conversation-browser-context").length'), 1, 'The shared wire Reader presents the actually received Browser context once')
   assert.equal(await evaluate('document.querySelector(".contextual-fixture__reader .conversation-browser-context").dataset.browserContextSource'), 'caller-declared', 'Native wire cannot borrow the Main capture source')
   await click('button[aria-label="Copy message"]')
@@ -423,6 +500,7 @@ async function run() {
   receipt.cases.push({ name: 'actual-browser-opinion-through-original-queue-main-host-core-provider', passed: true })
   console.log('Actual GUI opinion, Provider wire and shared Reader consumers: GREEN')
   await writeFile(join(directory, 'baseline-renderer.png'), (await contents.capturePage()).toPNG())
+  if (selectionOnly) { receipt.passed = true; return }
   await page.webContents.executeJavaScript('document.body.insertAdjacentHTML("beforeend","<button>Continue collaboration</button>")')
   await until(() => receipt.browserProgram, 'original Browser completion')
   assert.equal(receipt.browserProgram.report.outcome.kind, 'completed')

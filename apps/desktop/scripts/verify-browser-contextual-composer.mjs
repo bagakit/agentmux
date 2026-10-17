@@ -12,8 +12,9 @@ const { build, transform } = createRequire(join(root, 'packages/core/package.jso
 const captureOnly = process.argv.includes('--capture-only')
 const mutationId = process.argv.find(arg => arg.startsWith('--mutation='))?.slice('--mutation='.length)
 const presenceOnly = process.argv.includes('--presence-only')
+const selectionOnly = process.argv.includes('--selection-only')
 const captureCase = process.argv.find(arg => arg.startsWith('--capture-case='))?.slice('--capture-case='.length)
-const baselineOnly = Boolean(mutationId) || captureOnly || presenceOnly || process.argv.includes('--baseline')
+const baselineOnly = Boolean(mutationId) || captureOnly || presenceOnly || selectionOnly || process.argv.includes('--baseline')
 const foreground = process.argv.includes('--foreground')
 const captureHandoff = process.argv.includes('--capture-handoff')
 const nativeOpinion = process.argv.includes('--native-opinion')
@@ -24,13 +25,14 @@ for (let index = 2; index < process.argv.length; index++) {
     assert.equal(index, outputIndex, 'Only one evidence output is accepted')
     assert.ok(process.argv[++index] && !process.argv[index].startsWith('--'), 'The output flag requires a path')
   } else assert.ok(arg.startsWith('--mutation=') || arg.startsWith('--capture-case=') ||
-    ['--baseline', '--foreground', '--capture-handoff', '--native-opinion', '--capture-only', '--presence-only'].includes(arg), 'Unsupported contextual proof argument')
+    ['--baseline', '--foreground', '--capture-handoff', '--native-opinion', '--capture-only', '--presence-only', '--selection-only'].includes(arg), 'Unsupported contextual proof argument')
 }
-const output = outputIndex < 0 ? join(root, '.tmp/browser-agent-collaboration', mutationId ? 'contextual-composer-mutant-proof' : presenceOnly ? 'operator-presence-renderer-proof' : captureOnly ? 'contextual-composer-capture-proof' : foreground ? 'contextual-composer-foreground-proof' : captureHandoff ? 'contextual-composer-capture-proof' : 'contextual-composer-proof') : resolve(process.argv[outputIndex + 1])
+const output = outputIndex < 0 ? join(root, '.tmp/browser-agent-collaboration', selectionOnly ? 'contextual-selection-proof' : mutationId ? 'contextual-composer-mutant-proof' : presenceOnly ? 'operator-presence-renderer-proof' : captureOnly ? 'contextual-composer-capture-proof' : foreground ? 'contextual-composer-foreground-proof' : captureHandoff ? 'contextual-composer-capture-proof' : 'contextual-composer-proof') : resolve(process.argv[outputIndex + 1])
 assert.ok(process.argv.filter(arg => arg.startsWith('--capture-case=')).length <= 1 &&
   (captureCase === undefined || captureCase === 'narrow' && captureOnly && !mutationId && !presenceOnly), 'A scoped capture retains only the requested narrow visual evidence')
 assert.ok(!mutationId || !foreground && !captureHandoff && !captureOnly && !nativeOpinion && !presenceOnly, 'A scoped mutation is a background diagnostic only')
 assert.ok(!presenceOnly || !captureOnly && !foreground && !captureHandoff && !nativeOpinion, 'The presence diagnostic is background-only and cannot send an opinion')
+assert.ok(!selectionOnly || !captureOnly && !presenceOnly && !mutationId && !nativeOpinion, 'Selection uses one original opinion and never runs the old matrices')
 assert.ok(!captureOnly || captureHandoff && !nativeOpinion, 'Capture-only requires a capture handoff and cannot send an opinion')
 assert.ok(!nativeOpinion || captureHandoff, 'The actual OS opinion uses the external native handoff')
 assert.ok(!nativeOpinion || foreground, 'Actual OS opinion input needs the explicit foreground mode')
@@ -42,7 +44,7 @@ if (presenceOnly) {
 }
 const hash = bytes => createHash('sha256').update(bytes).digest('hex'), sources = new Map()
 const receipt = { schema: 'agentmux.browser-contextual-composer.proof.v1', passed: false, diagnostic: baselineOnly,
-  mode: presenceOnly ? 'operator-presence' : captureOnly ? 'capture-only' : 'opinion-and-trace',
+  mode: selectionOnly ? 'selection-only' : presenceOnly ? 'operator-presence' : captureOnly ? 'capture-only' : 'opinion-and-trace',
   candidate: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), runs: [],
   sharedTreeMutations: 0, independentVisualReview: 'not-performed', physicalInputQualified: false,
   captureQualified: false,
@@ -236,6 +238,7 @@ async function native(label, mutation) {
       AGENTMUX_RUNTIME_DIRECTORY: join(directory, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(directory, 'state'),
       AGENTMUX_AGENT_SESSION_STORE: join(directory, 'sessions.json'), AGENTMUX_MESSAGE_QUEUE_PATH: join(directory, 'messages.ndjson') })
     if (presenceOnly) env.AGENTMUX_CONTEXTUAL_PRESENCE_ONLY = '1'
+    if (selectionOnly) env.AGENTMUX_CONTEXTUAL_SELECTION_ONLY = '1'
     if ((foreground || captureHandoff) && !mutation) {
       const helper = join(root, 'apps/desktop/scripts/fixtures/browser-contextual-composer/native-window.swift')
       await bind(helper)
@@ -266,6 +269,11 @@ async function native(label, mutation) {
         assert.equal(actual.mode, 'operator-presence'); assert.equal(actual.presence.passed, true)
         assert.equal(actual.cases.length, 1)
         assert.equal(actual.ipc.some(call => call.channel === 'sessions:submitPrompt'), false, 'Presence inspection cannot submit an opinion')
+      } else if (selectionOnly) {
+        assert.equal(actual.mode, 'selection-only'); assert.equal(actual.selection.passed, true)
+        assert.equal(actual.cases.length, 1); assert.equal(actual.trace, undefined)
+        assert.equal(actual.ipc.filter(call => call.channel === 'sessions:submitPrompt').length, 1, 'Selection sends its original opinion exactly once')
+        receipt.selectionBaselineComplete = true
       } else { assert.equal(actual.cases.length, captureOnly ? 1 : 2); assert.equal(actual.trace.length, captureCase ? 3 : 9) }
       if (captureOnly) {
         assert.equal(actual.mode, 'capture-only'); assert.equal(actual.nativeOpinion, undefined)
