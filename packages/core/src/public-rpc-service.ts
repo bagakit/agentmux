@@ -91,6 +91,7 @@ import { parseRpcNativeResult } from './rpc-native-codec.js'
 import { parseNativeHistoryParams, parseNativeHistoryResult, parseNativeHistoryResourceParams, parseNativeHistoryResourceResult } from './public-rpc-native-history.js'
 import { parseAgentRestartInput } from './agent-session-restart.js'
 import { observeHostRuntime } from './host-runtime-observation.js'
+import { observeHostNetwork } from './host-network-observation.js'
 import { isHostSettingsMethod, parseHostSettingsParams, parseHostSettingsResult, type HostSettingsMethod } from './public-rpc-host-settings.js'
 import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMuxRpcMethod,
   type AgentMuxRpcParams, type AgentMuxRpcResult, type AgentMuxRpcCredentials,
@@ -696,7 +697,7 @@ export class AgentMuxRpcService {
     }
     if (isHostSettingsMethod(method)) {
       const input = parseHostSettingsParams(method, params)
-      if (method === 'settings.hosts.inspect' && !this.ports.coreClients && !this.local) throw new AgentMuxError(
+      if ((method === 'settings.hosts.inspect' || method === 'settings.hosts.network') && !this.ports.coreClients && !this.local) throw new AgentMuxError(
         'No existing Host Runtime client is available to observe. This read did not start a Runtime.', 'CONTROL_UNAVAILABLE')
       if (method === 'settings.hosts.trust-source' &&
           (context.caller !== undefined || context.principal?.kind !== 'user')) {
@@ -711,16 +712,26 @@ export class AgentMuxRpcService {
       }
       if (targets.length !== 1) throw new AgentMuxError('The exact route Host is unknown or ambiguous.', targets.length ? 'AMBIGUOUS_AGENT_SESSION' : 'UNKNOWN_HOST')
       const client = targets[0]!.client
-      if (method === 'settings.hosts.inspect') {
-        const query = parseHostSettingsParams('settings.hosts.inspect', params)
+      if (method === 'settings.hosts.inspect' || method === 'settings.hosts.network') {
+        const query = parseHostSettingsParams(method, params)
         const configuration = structuredClone(this.ports.hostConfiguration?.(input.hostId) ?? null)
         if (query.expected !== undefined && !isDeepStrictEqual(query.expected, configuration)) throw new AgentMuxError(
           'The original Host configuration changed or could not be confirmed. Reload this connection before observing it.', 'HOST_CONFIGURATION_CHANGED')
-        const result = await observeHostRuntime(input.hostId, client, async () => {
+        const readOwner = async () => {
           if (client.runtimeOwnerIdentity) return client.runtimeOwnerIdentity()
           const owner = await this.ports.hostedRuntime?.()
           return owner?.client === client ? (await owner.call('runtime.owner.identity', {})).owner : null
-        }, context.signal, configuration)
+        }
+        if (method === 'settings.hosts.network' && configuration === null) throw new AgentMuxError('The saved Host configuration is unavailable. No network probe was sent.', 'HOST_CONFIGURATION_CHANGED')
+        const result = method === 'settings.hosts.inspect'
+          ? await observeHostRuntime(input.hostId, client, readOwner, context.signal, configuration)
+          : await observeHostNetwork(input.hostId, configuration!, readOwner, async (fence, signal) => {
+            const originalContext = { ...context, signal, runtimeFence: fence }
+            if (client.forwardRpc) return await client.forwardRpc('runtime.network.inspect', { fence }, originalContext)
+            const owner = await this.ports.hostedRuntime?.()
+            if (owner?.client !== client) throw new AgentMuxError('The original network owner is unavailable. No other Runtime was queried.', 'RUNTIME_OWNER_UNCONFIRMED')
+            return await owner.call('runtime.network.inspect', { fence }, originalContext)
+          }, context.signal)
         const current = (await this.clients()).filter(entry => entry.hostId === input.hostId)
         if (current.length !== 1 || current[0]!.client !== client || !isDeepStrictEqual(configuration, this.ports.hostConfiguration?.(input.hostId) ?? null)) throw new AgentMuxError(
           'The original Host route changed during this observation. Read the current saved connection again.', 'HOST_CONFIGURATION_CHANGED')

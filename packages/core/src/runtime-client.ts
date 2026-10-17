@@ -39,6 +39,15 @@ export type AgentMuxSshRuntimeClientOptions = {
   }
 }
 
+/** One mapping for connection, route repair and explicit configuration inspection. */
+export function agentMuxSshEndpoint(target: AgentMuxSshRuntimeClientOptions['target']): Extract<AgentMuxRpcEndpoint, { transport: 'ssh' }> {
+  return { transport: 'ssh', host: target.hostname,
+    ...(target.user === undefined ? {} : { user: target.user }), ...(target.port === undefined ? {} : { port: target.port }),
+    ...(target.identityFile === undefined ? {} : { identityFile: target.identityFile }),
+    ...(target.remoteCommand === undefined ? {} : { command: target.remoteCommand }),
+    ...(target.remoteSocketPath === undefined ? {} : { socketPath: target.remoteSocketPath }) }
+}
+
 /** Connect physical Run capabilities without awaiting Session/catalog observation.
  * Call client.connect() explicitly to load semantics; failures remain diagnostic
  * and can be retried on this same Client without replacing healthy Runs.
@@ -74,13 +83,7 @@ export async function connectSshAgentMux(
 ): Promise<AgentMuxSshHostedClient> {
   // This endpoint belongs only to this consumer and its RPC transport. Updating
   // its launcher does not replace the current channel or any observation lease.
-  const endpoint: Extract<AgentMuxRpcEndpoint, { transport: 'ssh' }> = { transport: 'ssh', host: options.target.hostname,
-    ...(options.target.user === undefined ? {} : { user: options.target.user }),
-    ...(options.target.port === undefined ? {} : { port: options.target.port }),
-    ...(options.target.identityFile === undefined ? {} : { identityFile: options.target.identityFile }),
-    ...(options.target.remoteCommand === undefined ? {} : { command: options.target.remoteCommand }),
-    ...(options.target.remoteSocketPath === undefined ? {} : { socketPath: options.target.remoteSocketPath })
-  }
+  const endpoint = agentMuxSshEndpoint(options.target)
   const rpc = await connectAgentMuxRpc({ endpoint })
   try {
     const client = await connectHostedAgentMux({ rpc,
@@ -98,11 +101,7 @@ export async function connectSshAgentMux(
     return Object.assign(client, { async prepareRoute(target: AgentMuxSshRuntimeClientOptions['target'], signal?: AbortSignal) {
       const expected = options.expectedRuntimeId ?? client.runtimeOwnerIdentity()?.runtimeId
       if (!expected || target.hostId !== options.target.hostId) throw new AgentMuxError('Route repair requires the original bound SSH Host.', 'INVALID_CONTROL_REQUEST')
-      const next: Extract<AgentMuxRpcEndpoint, { transport: 'ssh' }> = { transport: 'ssh', host: target.hostname,
-        ...(target.user === undefined ? {} : { user: target.user }), ...(target.port === undefined ? {} : { port: target.port }),
-        ...(target.identityFile === undefined ? {} : { identityFile: target.identityFile }),
-        ...(target.remoteCommand === undefined ? {} : { command: target.remoteCommand }),
-        ...(target.remoteSocketPath === undefined ? {} : { socketPath: target.remoteSocketPath }) }
+      const next = agentMuxSshEndpoint(target)
       return await rpc.prepareSshRoute(next, expected, signal)
     }, setRemoteCommand(command?: string): void {
       rpc.setSshRemoteCommand(command)
