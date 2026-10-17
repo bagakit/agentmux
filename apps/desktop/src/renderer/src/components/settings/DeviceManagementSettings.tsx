@@ -5,6 +5,7 @@ import type { AgentMuxRpcResult } from '@agentmux/core'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../../lib/api'
 import { ConnectionLinkCode } from '../toolkit/ConnectionLinkCode'
+import './mobile-settings.css'
 
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeActionCopyIcon = semanticIconComponent('action.copy')
@@ -64,9 +65,10 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
   const devices = list?.devices.filter(device => device.revokedAt === undefined) ?? []
   return <section className="settings-group device-management" data-device-view="settings">
     <div className="device-management__connection">
-      <h3>Connect your phone</h3>
-      <p className="settings-group-note">Connect both devices to the same Wi-Fi, then scan the code with your phone’s camera or open the copied link.</p>
-      <p className="settings-group-note">{list ? `${devices.filter(device => device.online === true).length} connected · ${devices.length} authorized` : 'Device status not yet confirmed'}</p>
+      <div className="device-management__intro">
+        <span className="device-management__phone"><ThemeObjectPhoneIcon size={28} aria-hidden="true" /></span>
+        <div><h3>Connect your phone</h3><p className="settings-group-note">Keep both devices on the same Wi-Fi. Copy a connection link, then open it on your phone or scan its code.</p></div>
+      </div>
   
       <div className="settings-pane-toolbar">
         <button className="primary-button" disabled={busy} onClick={() => { void link() }}>{busy ? <ThemeStatusLoadingIcon size={16} animation="spin" /> : <ThemeActionCopyIcon size={16} />}{busy ? 'Working…' : 'Copy connection link'}</button>
@@ -77,7 +79,7 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
       {url && <><ConnectionLinkCode url={url} /><details className="device-management__link"><summary>View full connection link</summary><Textarea aria-label="Phone connection link" rows={3} readOnly value={url} onFocus={event => event.target.select()} /></details></>}
     </div>
     <div className="device-management__devices">
-      <div className="settings-pane-toolbar"><h3>Devices</h3><button className="small-button" disabled={refreshing} onClick={() => { void read() }}>{refreshing ? <ThemeStatusLoadingIcon size={16} animation="spin" /> : <ThemeActionRefreshIcon size={16} />}{refreshing ? 'Checking…' : 'Refresh'}</button></div>
+      <div className="settings-pane-toolbar"><div><h3>Devices</h3><p className="device-management__count">{list ? `${devices.filter(device => device.online === true).length} connected · ${devices.length} authorized` : 'Device status not yet confirmed'}</p></div><button className="small-button" disabled={refreshing} onClick={() => { void read() }}>{refreshing ? <ThemeStatusLoadingIcon size={16} animation="spin" /> : <ThemeActionRefreshIcon size={16} />}{refreshing ? 'Checking…' : 'Refresh'}</button></div>
       {observedAt && <p className="device-management__updated">Last checked {new Date(observedAt).toLocaleTimeString()}</p>}
       <details className="device-management__records" data-device-records>
         <summary>Device records{list ? ` · ${devices.length} authorized` : ''}</summary>
@@ -104,7 +106,10 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
         </details>)}
         {list && !devices.length && <p className="settings-group-note">No devices paired yet. Your phone will appear after opening the link.</p>}
       </details>
-      {readIssue && <p className="settings-group-note" role="status">{readIssue}</p>}
+      {readIssue && <div className="device-management__read-issue" role="status">
+        <strong>Device status unavailable</strong><p>Previous records are kept. Refresh to check again.</p>
+        <details><summary>Observation details</summary><p>{readIssue}</p></details>
+      </div>}
     </div>
   </section>
 }
