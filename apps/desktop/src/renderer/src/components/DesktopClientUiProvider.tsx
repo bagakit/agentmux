@@ -10,6 +10,7 @@ import { ProjectIcon } from './ProjectIcon'
 import { SemanticIcon } from './semantic-icons'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import { InlineObjectLink } from './InlineObjectLink'
+import { BrowserSelectionImage } from './BrowserSelectionImage'
 
 const DiagramFilePreview = lazy(() => import('./file-preview/DiagramFilePreview').then(module => ({ default: module.DiagramFilePreview })))
 const DotFilePreview = lazy(() => import('./file-preview/DotFilePreview').then(module => ({ default: module.DotFilePreview })))
@@ -58,6 +59,7 @@ const desktopPlatform: ClientUiPlatform = {
   renderProjectLabel: project => <SenderProject project={project} />,
   renderIcon: (name, size) => <SemanticIcon name={`status.${name}`} size={size} />,
   renderObjectLink: reference => <InlineObjectLink {...reference} />,
+  renderBrowserSelectionImage: input => <BrowserSelectionImage {...input} />,
   renderMarkdownDiagram: ({ code, language, visible }) => <Suspense fallback={<span role="status">Preparing diagram…</span>}>
     {language === 'dot' || language === 'gv' ? <DotFilePreview content={code} visible={visible} />
       : language === 'drawio' ? <DrawioFilePreview content={code} visible={visible} />

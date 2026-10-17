@@ -1,5 +1,8 @@
 import type { BrowserInputContext, BrowserInputContextSource } from '@agentmux/core/browser-input-context'
+import { useState } from 'react'
 import { SemanticIcon } from '../theme/icons.js'
+import { useBrowserSelectionImageRenderer } from '../platform.js'
+import { useVisibleWork } from '../lib/use-visible-work.js'
 
 function capturedTime(value: number): string {
   const date = new Date(value)
@@ -7,14 +10,23 @@ function capturedTime(value: number): string {
 }
 
 /** A historical observation, independent of the input author and current Browser control. */
-export function ConversationBrowserContext({ context, source, raw }: {
+export function ConversationBrowserContext({ context, source, raw, visible = true, readOnly = false, readOnlyImages = false }: {
   context: BrowserInputContext
   source?: BrowserInputContextSource | undefined
   raw?: string | undefined
+  visible?: boolean
+  readOnly?: boolean
+  readOnlyImages?: boolean
 }) {
   const activity = context.activity, selection = context.selection
+  const [expanded, setExpanded] = useState(false)
+  const renderImage = useBrowserSelectionImageRenderer()
+  const attachment = selection?.attachment
+  const imageWork = useVisibleWork<HTMLElement>(expanded && visible && (!readOnly || readOnlyImages) && Boolean(renderImage && attachment?.sha256))
   const sourceLabel = source === 'host-capture' ? 'Browser capture' : source === 'caller-declared' ? 'Declared context' : 'Source not recorded'
-  return <details className="conversation-browser-context" data-browser-context-source={source ?? 'unknown'}>
+  return <details className="conversation-browser-context" data-browser-context-source={source ?? 'unknown'} onToggle={event => {
+    if (event.target === event.currentTarget) setExpanded(event.currentTarget.open)
+  }}>
     <summary>
       <SemanticIcon name="object.browser" size={13} aria-hidden="true" />
       <span className="conversation-browser-context__kind">{sourceLabel}</span>
@@ -32,7 +44,7 @@ export function ConversationBrowserContext({ context, source, raw }: {
           <dt>Step at capture</dt><dd>{activity.stepSequence === null ? 'Not recorded' : activity.stepSequence} · {activity.phase}</dd>
         </> : null}
       </dl>
-      {selection ? <section className="conversation-browser-context__selection" aria-label="Captured selection">
+      {selection ? <section ref={imageWork.ref} className="conversation-browser-context__selection" aria-label="Captured selection">
         <h4>{selection.kind === 'region' ? 'Selected region' : 'Selected element'}</h4>
         {selection.element ? <p>{selection.element.accessibleName || selection.element.text || selection.element.tagName}</p> : null}
         <dl>
@@ -44,6 +56,9 @@ export function ConversationBrowserContext({ context, source, raw }: {
           {selection.region ? <><dt>Capture pixels</dt><dd>{selection.region.x}, {selection.region.y} · {selection.region.width} × {selection.region.height}</dd></> : null}
           {selection.attachment ? <><dt>Image reference</dt><dd><code>{selection.attachment.path}</code> · {selection.attachment.width} × {selection.attachment.height}</dd></> : null}
         </dl>
+        {attachment ? !attachment.sha256 ? <p className="conversation-browser-context__notice">The original image digest was not recorded. Its exact preview is unavailable.</p>
+          : !renderImage ? <p className="conversation-browser-context__notice">Image preview is unavailable in this client. The original reference is retained.</p>
+          : imageWork.visible ? renderImage({ reference: attachment, visible: true, interactive: !readOnly }) : null : null}
         {selection.observationEnd ? <p className="conversation-browser-context__notice">Capture crossed an observation boundary; both observations remain in context data.</p> : null}
       </section> : null}
       <details className="conversation-browser-context__data"><summary>Context data</summary><pre>{raw ?? JSON.stringify(context, null, 2)}</pre></details>
