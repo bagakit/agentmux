@@ -341,7 +341,7 @@ it('a target revision changed during the native read retains the original child 
   expect((await f.sdk.call('connection.inspect', { operationId: 'inspection-original-save' })).operation).toEqual(f.saved)
 }, 45_000)
 
-it('an allowed authentication bootstrap alias never qualifies an unsourced business-read origin or removes the confirmed account', async () => {
+it('the confirmed final Console origin supplies same-origin business reads without replacing the original account', async () => {
   const f = await fixture(), native = nativeRoute(), business: string[] = []
   const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const target = new URL(String(url))
@@ -355,8 +355,9 @@ it('an allowed authentication bootstrap alias never qualifies an unsourced busin
   expect(auth.continuation).toMatchObject({ stage: 'confirmed', account: { userId: accounts[0].user, tenantId: accounts[0].tenant } })
   expect(fetch.mock.calls.map(([url]) => String(url))).toContain('https://open.larkoffice.com/app')
   const observed = await f.sdk.call('connection.setup.advance', inputFor(await inspect(f), 'inspect-application'))
-  expect(business).toEqual([])
-  expect(observed.applicationInspection?.applicationInfoReadPermission).toBe('unknown')
+  expect(business).toEqual(['https://open.larkoffice.com/developers/v1/app_role/permission/' + f.config.application.appId])
+  expect(observed.applicationInspection?.applicationInfoReadPermission).toBe('confirmed')
+  expect(selected(observed)).toMatchObject({ request: 'confirmed', secureStorage: 'stored' })
   expect(observed.operation?.authentication).toEqual(auth.operation?.authentication)
   expect(observed.continuation).toMatchObject({ stage: 'confirmed', account: auth.continuation!.account })
   expect((await f.sdk.call('connection.inspect', { operationId: 'inspection-original-save' })).operation).toEqual(f.saved)
