@@ -1,3 +1,5 @@
+import { validateBroadcastIntent, parseBroadcastReceipt, type AgentMuxMessageBroadcastIntent, type AgentMuxMessageBroadcastReceipt, type AgentMuxBroadcastIssue, type AgentMuxBroadcastTargetResult } from './agent-message-broadcast.js'
+import { parseMessageEventsPage, type AgentMuxMessageEventsQuery, type AgentMuxMessageEventsPage } from './agent-message-events.js'
 import { validateAgentMuxMessageEnvelope, messageEnvelopeString as nonEmpty, messageEnvelopeTimestamp as finiteTimestamp, type AgentMuxMessageEnvelope } from './agent-message-envelope.js'
 export { validateAgentMuxMessageEnvelope } from './agent-message-envelope.js'
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
@@ -21,7 +23,7 @@ import { normalizeMessageChannel } from './message-origin.js'
 import { composeAgentPrompt } from './agent-outbound-message.js'
 import { browserInputContextFields } from './browser-input-context.js'
 import { normalizeOperationDevice } from './operation-device.js'
-import { configureMessageJournal, inputControlJournalSchema, messageRouteJournalSchema, messageObservationJournalSchema, messageObservationQuery, dispatchDiscoveryJournalSchema, dispatchReplyJournalSchema, openMessageJournal, openMessageJournalSnapshot, syncMessageJournal } from './agent-message-journal.js'
+import { configureMessageJournal, inputControlJournalSchema, messageRouteJournalSchema, messageObservationJournalSchema, messageObservationQuery, dispatchDiscoveryJournalSchema, dispatchReplyJournalSchema, initializeMessageEventIndex, messageBroadcastJournalSchema, openMessageJournal, openMessageJournalSnapshot, syncMessageJournal } from './agent-message-journal.js'
 import { assertAgentMessageRouteIntent, validateAgentMessageRoute, type AgentMessageRoute } from './agent-message-route.js'
 import { agentInputJournalKey, validateAgentInputControlId, validateAgentInputWaitRef,
   type AgentInputJournalIntent, type AgentInputJournalEntry, type AgentInputSelector, type AgentInputWaitControl,
@@ -119,6 +121,9 @@ type InputMailboxJournalItem = { sequence: number; recordedAt: number } & (
 
 export type AgentMuxMessageJournalRecord =
   | AgentInputWaitJournalRecord
+  | { readonly kind: 'broadcast'; readonly sequence: number; readonly intent: AgentMuxMessageBroadcastIntent }
+  | { readonly kind: 'broadcast-target'; readonly sequence: number; readonly operationId: string; readonly agentSessionId: string; readonly at: number }
+  | { readonly kind: 'broadcast-result'; readonly sequence: number; readonly operationId: string; readonly agentSessionId: string; readonly outcome: 'saved' | 'not-applied' | 'unconfirmed'; readonly issue?: AgentMuxBroadcastIssue; readonly at: number }
   | { readonly kind: 'message-route'; readonly sequence: number; readonly route: AgentMessageRoute }
   | { readonly kind: 'message'; readonly sequence: number; readonly envelope: AgentMuxMessageEnvelope; readonly deliveryMode?: 'reference'; readonly promptCondition?: null; readonly execution?: AgentPromptExecution; readonly admissionIntent?: AgentPromptAdmissionIntent; readonly sourceChannel?: AgentMessageChannel; readonly sourceDevice?: AgentOperationDevice }
   | { readonly kind: 'a2a-notification'; readonly sequence: number; readonly notification: AgentMuxMessageNotification }
@@ -263,6 +268,7 @@ export class DurableAgentMuxMessageQueue {
         this.db.exec('BEGIN IMMEDIATE')
         // Existing journals are validated before their owner adds internal projections.
         this.db.exec(inputControlJournalSchema)
+        this.db.exec(messageBroadcastJournalSchema)
         this.db.exec(messageRouteJournalSchema)
         this.db.exec(messageNotificationJournalSchema)
       }
@@ -779,6 +785,11 @@ export class DurableAgentMuxMessageQueue {
     if (!Number.isSafeInteger(record.sequence) || record.sequence < this.nextSequence) {
       throw new AgentMuxError('Message journal sequence is invalid or out of order.', 'MESSAGE_QUEUE_UNAVAILABLE')
     }
+    if (record.kind === 'broadcast' || record.kind === 'broadcast-target' || record.kind === 'broadcast-result') {
+      this.applyBroadcastRecord(record)
+      this.db.prepare('INSERT INTO records VALUES (?, ?)').run(record.sequence, JSON.stringify(record))
+      return
+    }
     if (record.kind === 'input-intent' || record.kind === 'input-submission' || record.kind === 'input-control' || record.kind === 'input-stop') {
       this.applyInputRecord(record)
       this.db.prepare('INSERT INTO records VALUES (?, ?)').run(record.sequence, JSON.stringify(record))
@@ -1103,6 +1114,186 @@ export class DurableAgentMuxMessageQueue {
       })
       return { participantSessionId, direction: input.direction, messages,
         nextBeforeSequence: rows.length > limit ? messages.at(-1)!.sequence : null }
+    })
+  }
+
+  private broadcastIntent(operationId: string): { sequence: number; intent: AgentMuxMessageBroadcastIntent } | null {
+    const row = this.db.prepare(`SELECT original.sequence, original.json FROM message_broadcasts b
+      JOIN records original ON original.sequence=b.original_sequence WHERE b.operation_id=?`).get(operationId)
+    if (!row) return null
+    const record = JSON.parse(String(row.json)) as Extract<JournalRecord, { kind: 'broadcast' }>
+    return { sequence: Number(row.sequence), intent: validateBroadcastIntent(record.intent) }
+  }
+
+  private applyBroadcastRecord(record: Extract<JournalRecord, { kind: 'broadcast' | 'broadcast-target' | 'broadcast-result' }>): void {
+    if (record.kind === 'broadcast') {
+      const intent = validateBroadcastIntent(record.intent)
+      this.db.prepare('INSERT INTO message_broadcasts VALUES (?, ?)').run(intent.operationId, record.sequence)
+      for (const target of intent.targets) this.db.prepare('INSERT INTO message_broadcast_targets VALUES (?, ?, ?, NULL, NULL)')
+        .run(intent.operationId, target.agentSessionId, target.messageId)
+      return
+    }
+    finiteTimestamp(record.at, 'Broadcast event time')
+    const target = this.db.prepare('SELECT claim_sequence FROM message_broadcast_targets WHERE operation_id=? AND session_id=?')
+      .get(record.operationId, record.agentSessionId)
+    if (!target) throw new AgentMuxError('The broadcast event names no original target.', 'BROADCAST_TARGET_MISMATCH')
+    if (record.kind === 'broadcast-target') {
+      if (target.claim_sequence !== null) throw new AgentMuxError('The original broadcast target was already claimed.', 'BROADCAST_INTENT_CONFLICT')
+      this.db.prepare('UPDATE message_broadcast_targets SET claim_sequence=? WHERE operation_id=? AND session_id=?')
+        .run(record.sequence, record.operationId, record.agentSessionId)
+    } else {
+      if (target.claim_sequence === null || !['saved', 'not-applied', 'unconfirmed'].includes(record.outcome) ||
+          record.issue && (typeof record.issue.code !== 'string' || !record.issue.code || typeof record.issue.message !== 'string')) throw new AgentMuxError(
+        'The broadcast result has no original claim or outcome.', 'BROADCAST_INTENT_CONFLICT')
+      this.db.prepare('UPDATE message_broadcast_targets SET result_sequence=? WHERE operation_id=? AND session_id=?')
+        .run(record.sequence, record.operationId, record.agentSessionId)
+    }
+  }
+
+  async readBroadcastIntent(operationId: string, reauthorize: () => Promise<void>): Promise<AgentMuxMessageBroadcastIntent | null> {
+    return this.withLock(async () => { await reauthorize(); return this.broadcastIntent(nonEmpty(operationId, 'Broadcast operation ID'))?.intent ?? null })
+  }
+
+  /** Freeze all target identities in one existing journal transaction before any single send. */
+  async claimBroadcast(value: AgentMuxMessageBroadcastIntent, reauthorize: () => Promise<void>): Promise<AgentMuxMessageBroadcastIntent> {
+    const candidate = validateBroadcastIntent(value)
+    return this.withLock(async () => {
+      await reauthorize()
+      const existing = this.broadcastIntent(candidate.operationId)
+      if (existing) {
+        // Resolution is not repeated on retries. A competing first resolver must agree with the
+        // same user intent, then consume the first winner's frozen routes and unavailable targets.
+        const same = (intent: AgentMuxMessageBroadcastIntent) => ({ author: intent.author, body: intent.body,
+          sourceChannel: intent.sourceChannel, sourceDevice: intent.sourceDevice, targets: intent.targets.map(target => target.agentSessionId) })
+        if (!isDeepStrictEqual(same(candidate), same(existing.intent))) throw new AgentMuxError('This broadcast operation has another original intent.', 'BROADCAST_INTENT_CONFLICT')
+        return existing.intent
+      }
+      for (const target of candidate.targets) {
+        if (this.operationMessageId(target.operationId) || this.db.prepare('SELECT 1 FROM messages WHERE message_id=?').get(target.messageId) ||
+            this.messageRoute(target.operationId, target.messageId)) throw new AgentMuxError(
+          'Another original message already owns this batch target identity. Keep both original operations; no target was sent.', 'BROADCAST_TARGET_ID_CONFLICT')
+      }
+      await this.appendRecord({ kind: 'broadcast', sequence: this.nextSequence, intent: candidate })
+      return candidate
+    }, true)
+  }
+
+  async claimBroadcastTarget(operationId: string, agentSessionId: string, reauthorize: () => Promise<void>): Promise<boolean> {
+    return this.withLock(async () => {
+      await reauthorize()
+      const row = this.db.prepare('SELECT claim_sequence FROM message_broadcast_targets WHERE operation_id=? AND session_id=?').get(operationId, agentSessionId)
+      if (!row) throw new AgentMuxError('The broadcast has no such original target.', 'BROADCAST_TARGET_MISMATCH')
+      if (row.claim_sequence !== null) return false
+      await this.appendRecord({ kind: 'broadcast-target', sequence: this.nextSequence, operationId, agentSessionId, at: Date.now() })
+      return true
+    }, true)
+  }
+
+  async recordBroadcastResult(operationId: string, agentSessionId: string, outcome: 'saved' | 'not-applied' | 'unconfirmed', issue?: AgentMuxBroadcastIssue): Promise<void> {
+    await this.withLock(async () => {
+      const original = this.broadcastIntent(operationId), target = original?.intent.targets.find(target => target.agentSessionId === agentSessionId)
+      if (!target) throw new AgentMuxError('The broadcast has no such original target.', 'BROADCAST_TARGET_MISMATCH')
+      const previous = this.db.prepare('SELECT result_sequence FROM message_broadcast_targets WHERE operation_id=? AND session_id=?').get(operationId, agentSessionId)!
+      // The first effect outcome remains the original fact. Inspect may discover the same MID
+      // after a lost ACK, without changing that historical outcome or issuing another send.
+      if (previous.result_sequence !== null) return
+      if (outcome === 'saved') {
+        const message = this.message(target.messageId)
+        if (!message || message.envelope.senderSessionId !== original!.intent.author.agentSessionId || message.envelope.senderRunId !== original!.intent.author.runId ||
+            message.envelope.recipientSessionId !== target.agentSessionId || message.envelope.recipientRunId !== target.runId ||
+            message.envelope.operationId !== target.operationId || message.envelope.body !== original!.intent.body) throw new AgentMuxError(
+          'The saved target message is not confirmed by its original journal.', 'BROADCAST_TARGET_UNCONFIRMED')
+      }
+      await this.appendRecord({ kind: 'broadcast-result', sequence: this.nextSequence, operationId, agentSessionId, outcome, ...(issue ? { issue } : {}), at: Date.now() })
+    }, true)
+  }
+
+  async inspectBroadcast(operationId: string, reauthorize: (authorSessionId?: string) => Promise<void>): Promise<AgentMuxMessageBroadcastReceipt | null> {
+    return this.withLock(async () => {
+      nonEmpty(operationId, 'Broadcast operation ID')
+      const owner = this.db.prepare(`SELECT json_extract(original.json, '$.intent.author.agentSessionId') AS author
+        FROM message_broadcasts batch JOIN records original ON original.sequence=batch.original_sequence WHERE batch.operation_id=?`).get(operationId)
+      // Authorize the exact batch before decoding its original body or target receipts.
+      await reauthorize(owner ? String(owner.author) : undefined)
+      const original = this.broadcastIntent(operationId)
+      if (!original) return null
+      const positions = new Map(this.db.prepare(`SELECT target.session_id, target.claim_sequence, target.result_sequence, result.json FROM message_broadcast_targets target
+        LEFT JOIN records result ON result.sequence=target.result_sequence WHERE target.operation_id=?`).all(operationId).map(position => [String(position.session_id), position]))
+      const targets = original.intent.targets.map(target => {
+        const position = positions.get(target.agentSessionId)!
+        const result = position.json === null ? null : JSON.parse(String(position.json)) as Extract<JournalRecord, { kind: 'broadcast-result' }>
+        const message = this.message(target.messageId)
+        const confirmed = message && message.envelope.senderSessionId === original.intent.author.agentSessionId && message.envelope.senderRunId === original.intent.author.runId &&
+          message.envelope.recipientSessionId === target.agentSessionId && message.envelope.recipientRunId === target.runId && message.envelope.operationId === target.operationId &&
+          message.envelope.body === original.intent.body
+        return { agentSessionId: target.agentSessionId, messageId: target.messageId, operationId: target.operationId, hostId: target.hostId, runId: target.runId,
+          claimSequence: position.claim_sequence === null ? null : Number(position.claim_sequence),
+          resultSequence: position.result_sequence === null ? null : Number(position.result_sequence),
+          outcome: confirmed ? 'saved' : result?.outcome ?? (position.claim_sequence === null ? 'pending' : 'unconfirmed'),
+          ...(result?.issue ? { issue: result.issue } : {}), ...(confirmed ? { message: { sequence: message.sequence, delivery: message.delivery,
+            ...(message.deliveryMode ? { deliveryMode: message.deliveryMode } : {}) } } : {}) } satisfies AgentMuxBroadcastTargetResult
+      })
+      return parseBroadcastReceipt({ operationId, sequence: original.sequence, author: original.intent.author,
+        bodySHA256: createHash('sha256').update(original.intent.body).digest('hex'), bodyBytes: Buffer.byteLength(original.intent.body), createdAt: original.intent.createdAt, targets }, operationId)
+    })
+  }
+
+  /** Read exact original event metadata from both sides without decoding any message body. */
+  async listMessageEvents(input: AgentMuxMessageEventsQuery, reauthorize: () => Promise<void>): Promise<AgentMuxMessageEventsPage> {
+    const participant = nonEmpty(input.participantSessionId, 'Message participant Session id')
+    const after = input.afterSequence ?? 0, limit = input.limit ?? 50
+    if (input.messageId !== undefined && input.broadcastOperationId !== undefined) throw new AgentMuxError('Select one original message or broadcast scope.', 'INVALID_CONTROL_REQUEST')
+    if (input.messageId !== undefined) nonEmpty(input.messageId, 'Original message ID')
+    if (input.broadcastOperationId !== undefined) nonEmpty(input.broadcastOperationId, 'Original broadcast operation ID')
+    if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100 ||
+        input.throughSequence !== undefined && (!Number.isSafeInteger(input.throughSequence) || input.throughSequence < after)) throw new AgentMuxError(
+      'Message events require a nonnegative original sequence boundary and limit 1–100.', 'INVALID_CONTROL_REQUEST')
+    return this.withLock(async () => {
+      await reauthorize()
+      initializeMessageEventIndex(this.db)
+      const incarnation = String(this.db.prepare('SELECT incarnation FROM metadata').get()!.incarnation)
+      if (input.incarnation !== undefined && input.incarnation !== incarnation || input.throughSequence !== undefined && input.incarnation === undefined) throw new AgentMuxError(
+        'Keep the original journal incarnation with its frozen message event boundary.', 'MESSAGE_EVENT_SOURCE_CHANGED')
+      const latest = this.nextSequence - 1, through = input.throughSequence ?? latest
+      if (through > latest) throw new AgentMuxError('The selected message journal boundary has not been recorded.', 'INVALID_CONTROL_REQUEST')
+      const scope = input.messageId !== undefined ? ' AND message_id=?' : input.broadcastOperationId !== undefined
+        ? ' AND message_id IN (SELECT message_id FROM message_broadcast_targets WHERE operation_id=?)' : ''
+      const referenceScope = scope.replaceAll('message_id', 'position.message_id')
+        .replace('SELECT position.message_id FROM', 'SELECT message_id FROM')
+      const scopeArgs = input.messageId !== undefined ? [input.messageId] : input.broadcastOperationId !== undefined ? [input.broadcastOperationId] : []
+      const index = scope ? ' INDEXED BY message_event_by_message' : ''
+      const rows = this.db.prepare(`WITH selected AS (
+        SELECT DISTINCT event_sequence FROM message_event_positions${index}
+          WHERE participant_id=? AND event_sequence>? AND event_sequence<=?${scope} ORDER BY event_sequence LIMIT ?)
+      SELECT event.sequence, json_extract(event.json, '$.kind') AS kind,
+        COALESCE(json_extract(event.json, '$.at'), json_extract(event.json, '$.envelope.createdAt')) AS at,
+        COALESCE(json_extract(event.json, '$.notificationId'), json_extract(event.json, '$.notification.notificationId')) AS notification_id,
+        COALESCE(json_extract(event.json, '$.state'), json_extract(event.json, '$.notification.state')) AS state,
+        json_extract(event.json, '$.reason') AS reason, json_extract(event.json, '$.replyMessageId') AS reply_id,
+        json_extract(event.json, '$.eventKind') AS event_kind,
+        (SELECT json_group_array(json_object('messageId', m.message_id,
+          'senderSessionId', json_extract(original.json, '$.envelope.senderSessionId'),
+          'recipientSessionId', json_extract(original.json, '$.envelope.recipientSessionId'),
+          'threadId', json_extract(original.json, '$.envelope.threadId'), 'replyTo', json_extract(original.json, '$.envelope.replyTo'),
+          'broadcast', CASE WHEN batch.original_sequence IS NULL THEN NULL ELSE json_object('operationId', batch.operation_id, 'sequence', batch.original_sequence) END))
+          FROM message_event_positions position JOIN messages m ON m.message_id=position.message_id
+          JOIN records original ON original.sequence=m.message_sequence
+          LEFT JOIN message_broadcast_targets target ON target.message_id=m.message_id
+          LEFT JOIN message_broadcasts batch ON batch.operation_id=target.operation_id
+          WHERE position.participant_id=? AND position.event_sequence=event.sequence${referenceScope}) AS references_json
+      FROM selected JOIN records event ON event.sequence=selected.event_sequence ORDER BY event.sequence`)
+        .all(participant, after, through, ...scopeArgs, limit + 1, participant, ...scopeArgs)
+      const events = rows.slice(0, limit).map(row => ({ sequence: Number(row.sequence), kind: row.kind, at: row.at === null ? null : Number(row.at),
+        messages: (JSON.parse(String(row.references_json)) as Array<import('./agent-message-events.js').AgentMuxMessageEventReference & { broadcast: unknown }>).map(ref => {
+          if (ref.broadcast !== null) return ref
+          const { broadcast: _absent, ...original } = ref
+          return original
+        }),
+        ...(row.notification_id === null ? {} : { notificationId: String(row.notification_id) }),
+        ...(row.state === null ? {} : { state: String(row.state) }), ...(row.reason === null ? {} : { reason: String(row.reason) }),
+        ...(row.reply_id === null ? {} : { replyMessageId: String(row.reply_id) }), ...(row.event_kind === null ? {} : { eventKind: String(row.event_kind) }) }))
+      return parseMessageEventsPage({ participantSessionId: participant, afterSequence: after, throughSequence: through, incarnation, messageId: input.messageId ?? null, broadcastOperationId: input.broadcastOperationId ?? null, events,
+        nextAfterSequence: rows.length > limit ? events.at(-1)!.sequence : null }, input)
     })
   }
 
