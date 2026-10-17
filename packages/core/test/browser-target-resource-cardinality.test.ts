@@ -12,7 +12,7 @@ function target(index = 0): AgentMuxBrowserTarget {
 }
 function wire(targets: readonly AgentMuxBrowserTarget[]) {
   return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'resource-discovery', ok: true,
-    operation: 'browser.targets', result: { targets } }
+    operation: 'browser.targets', result: { targets, coverage: 'complete' } }
 }
 function expectDecoded(input: ReturnType<typeof wire>) {
   let actual: unknown

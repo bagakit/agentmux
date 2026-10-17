@@ -24,9 +24,9 @@ describe('original Browser public creation and discovery mode', () => {
     const result = parseAgentMuxControlReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: request.requestId, ok: true, operation: request.operation, result: { region } })
     expect(result).toMatchObject({ result: { region } })
     const target = { id: region.browserId, workspaceId: 'workspace', source: 'embedded', status: 'ready', mode: 'private', url: request.url, title: 'Private', navigationId: 'original-nav', capabilities: [], partition: 'must-not-cross-wire' }
-    expect(parseBrowserTargetsResult({ targets: [target] }).targets).toEqual([expect.objectContaining({ mode: 'private' })])
-    expect(parseBrowserTargetsResult({ targets: [target] }).targets[0]).not.toHaveProperty('partition')
-    expect(() => parseBrowserTargetsResult({ targets: [{ ...target, mode: 'invented' }] })).toThrow('mode')
-    expect(parseBrowserTargetsResult({ targets: [{ ...target, source: 'external', mode: undefined }] }).targets[0]).not.toHaveProperty('mode')
+    expect(parseBrowserTargetsResult({ coverage: 'complete', targets: [target] }).targets).toEqual([expect.objectContaining({ mode: 'private' })])
+    expect(parseBrowserTargetsResult({ coverage: 'complete', targets: [target] }).targets[0]).not.toHaveProperty('partition')
+    expect(() => parseBrowserTargetsResult({ coverage: 'complete', targets: [{ ...target, mode: 'invented' }] })).toThrow('mode')
+    expect(parseBrowserTargetsResult({ coverage: 'complete', targets: [{ ...target, source: 'external', mode: undefined }] }).targets[0]).not.toHaveProperty('mode')
   })
 })
