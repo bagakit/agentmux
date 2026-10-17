@@ -5,15 +5,15 @@ import type { SettingsNavigationRequest } from '../SettingsNavigation'
 import type { SettingsPageId } from './settings-modules'
 
 export const SETTINGS_GROUPS = [
-  { id: 'preferences', title: 'Preferences', overviewColumn: 'left' },
-  { id: 'browser-use', title: 'Browser use', overviewColumn: 'left' },
-  { id: 'message-tool', title: 'Message Tool', overviewColumn: 'left' },
-  { id: 'remote', title: 'Remote', overviewColumn: 'left' },
-  { id: 'conversation-channels', title: 'Conversation Channels', overviewColumn: 'left' },
-  { id: 'toolkit', title: 'Mods', overviewColumn: 'left' },
-  { id: 'resources', title: 'Resources', overviewColumn: 'right' },
-  { id: 'work', title: 'Work', overviewColumn: 'right' },
-  { id: 'mote', title: 'Mote', overviewColumn: 'right' }
+  { id: 'preferences', title: 'Preferences', description: 'Your profile and everyday defaults.' },
+  { id: 'browser-use', title: 'Browser use', description: 'Browsing and Agent interaction.' },
+  { id: 'message-tool', title: 'Message Tool', description: 'Input, collaboration and reusable instructions.' },
+  { id: 'remote', title: 'Remote', description: 'Execution environments and device access.' },
+  { id: 'conversation-channels', title: 'Conversation Channels', description: 'Conversations in the app and beyond.' },
+  { id: 'toolkit', title: 'Mods', description: 'Tools that extend your workspace.' },
+  { id: 'resources', title: 'Resources', description: 'Reusable Agent configurations.' },
+  { id: 'work', title: 'Work', description: 'Spaces for doing, exploring and keeping.' },
+  { id: 'mote', title: 'Mote', description: 'Your personal collaborators.' }
 ] as const
 
 export type SettingsPaneProps = {
@@ -43,6 +43,8 @@ export type SettingsModule = {
   keywords: string
   searchTargets?: readonly SettingsSearchTarget[]
   icon: SemanticIconComponent
+  /** Optional ordered shortcut on Overview; the original editor remains the destination. */
+  overviewShortcut?: number
   savedSummary(config: AppConfig): string
   Pane: ComponentType<SettingsPaneProps>
 }

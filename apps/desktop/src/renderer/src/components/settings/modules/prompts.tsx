@@ -20,6 +20,7 @@ export const promptsSettingsModule = {
   id: 'prompts',
   group: 'message-tool',
   title: 'Prompts',
+  overviewShortcut: 3,
   description: 'Keep your everyday instructions close at hand.',
   icon: ThemeObjectPromptIcon,
   keywords: 'message tool composer prompt preset shortcut keyword slash command snippet template library review changes summarize progress eli5 custom',
