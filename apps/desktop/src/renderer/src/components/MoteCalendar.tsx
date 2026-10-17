@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { DateTime } from 'luxon'
-import { ChevronLeft, ChevronRight, Plus } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ContinuousProgressLoop, ContinuousProgressTarget } from '@agentmux/core/continuous-progress-scheduler'
 import { projectScheduleOccurrences } from '@agentmux/core/schedule-calendar'
 import { automationCalendarTimezone, resolveAutomationPreferences } from '../../../shared/automation-preferences'
@@ -18,6 +18,10 @@ import { SurfaceModeSwitch } from './SurfaceModeSwitch'
 import { ScheduleArrangementRow, scheduleStateLabel } from './ScheduleArrangementRow'
 import { ScheduleCreateForm } from './ScheduleCreateForm'
 import '../styles/mote-calendar.css'
+
+const ChevronLeft = semanticIconComponent('navigation.back')
+const ChevronRight = semanticIconComponent('navigation.forward')
+const Plus = semanticIconComponent('action.create')
 
 /** Exact directory facts only. A logical path or scratch container never grants scope. */
 export function moteScheduleQueries(scope: MoteWorkfaceScope): ScheduleQuery[] {
