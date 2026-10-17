@@ -368,7 +368,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
   }
   function renderPending() {
     const query = inputHistory?.history.query ?? ''
-    return <ComposerOutbox {...queueRecordProps()} queued={pending.filter(entry => !query || entry.text.includes(query))} hideHeading
+    return <ComposerOutbox {...queueRecordProps()} queued={pending} query={query} hideHeading
       onCancelPreparation={onCancelQueuedPreparation} {...(onMoveQueued ? { onMove: onMoveQueued } : {})} onMoveToDraft={onMoveQueuedToDraft}
       {...(onEditQueued ? { onEdit: onEditQueued } : {})} sendImmediately={sendImmediately} {...(onSendQueued ? { onSend: onSendQueued } : {})} />
   }
@@ -554,6 +554,8 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
               if (!original) return null
               return <ol className="composer-mailbox__messages"><ComposerOutbox {...queueRecordProps()} queued={[{...original,
                 ...(item.kind === 'controlled' && item.receipt ? { inputReceipt: item.receipt } : {})}]} selectedId={original.id} rowsOnly
+                // The containing journal detail already owns this selection. Local editing must not replace its key.
+                onSelect={() => {}}
                 onCancelPreparation={onCancelQueuedPreparation} onMoveToDraft={onMoveQueuedToDraft}
                 {...(onEditQueued ? { onEdit: onEditQueued } : {})} {...(onSendQueued ? { onSend: onSendQueued } : {})} /></ol>
             }} renderRecords={(journalRecords, journalDetail) => <>
@@ -564,7 +566,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
             {windowFrozen ? <SourceNotice title="The native source changed" message="This reading window is kept." action="Read latest records" onAction={() => void refresh()} /> : null}
             {inputHistory ? <InputHistoryList history={{ ...inputHistory.history, messages: inputHistory.history.messages.filter(message => message.author.kind !== 'agent') }}
               localEntries={inputHistory.localEntries} onCopy={inputHistory.copy} {...(inputHistory.canFill !== false ? { onFill: inputHistory.fill, onFillLocal: inputHistory.fillLocal } : {})}
-              onRefresh={() => { void inputMailbox.refresh(); inputHistory.history.search(inputHistory.history.query) }}
+              onRefresh={() => { void inputMailbox.refresh(); inputHistory.history.refresh() }}
               refreshing={inputMailbox.loading || inputHistory.history.loading}
               coverage={<>{inputMailbox.loading || inputHistory.history.loading ? 'Reading inputs…' : 'Loaded inputs'} · Earlier journal coverage unconfirmed
                 <details className="composer-mailbox__coverage-details"><summary>Sources</summary>
