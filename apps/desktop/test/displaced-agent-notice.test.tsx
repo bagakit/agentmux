@@ -1,3 +1,4 @@
+import { toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
 import { currentNotificationRows } from './helpers/notification-center'
 import { providerCatalogReader, historySourcesReader } from './helpers/startup-observation-api-fixture'
 import { composerConfig } from './helpers/composer-dom-fixture'
@@ -161,6 +162,7 @@ describe('T-005 第二半：真实错位 → 记账 + 可发现 + 持续告示 +
   it('clears placement intent only when the matching Run is authoritatively removed', async () => {
     const id = await driveDisplacementThroughStore()
     const element = await mount(<GlobalSystemNotices />)
+    await toggleNotificationCenter(element, 'open')
     const session = useAppStore.getState().sessions.find((item) => item.id === id)!
     const removal = (runId: string): RuntimeEvent => ({ type: 'core', hostId: 'local', event: {
       type: 'run-removed', agentSessionId: id, run: { runId }, evidence: { source: 'run-process', observedAt: 2 }
@@ -180,6 +182,7 @@ describe('T-005 第二半：真实错位 → 记账 + 可发现 + 持续告示 +
     expect(useAppStore.getState().displacedAgentSessionIds).toContain(id)
     expect(useAppStore.getState().error).toContain('Tab Group is no longer available')
     const element = await mount(<GlobalSystemNotices />)
+    await toggleNotificationCenter(element, 'open')
     expect(displacementRow(element, id)?.querySelector('.notification-item__action')).not.toBeNull()
   })
 
@@ -188,8 +191,10 @@ describe('T-005 第二半：真实错位 → 记账 + 可发现 + 持续告示 +
     const selectSession = vi.spyOn(useAppStore.getState(), 'selectSession')
 
     const element = await mount(<GlobalSystemNotices />)
+    await toggleNotificationCenter(element, 'open')
 
     // 告示在场，且说的是这个 Agent、进程还在跑（文案来自 displacedAgentStepOutcome，经选择器过滤）。
+    await toggleNotificationDetails(displacementRow(element, id)!)
     const notice = displacementRow(element, id)?.querySelector('.service-window')
     expect(notice, '错位告示没有渲染出来——选择器返回空或组件没接上').not.toBeNull()
     expect(notice?.textContent).toContain('Builder')
@@ -245,6 +250,10 @@ describe('T-005 第二半：告示真的挂在窗口上（不在会消失的 Reg
     const mainShell = element.querySelector('main.main-shell')
     expect(mainShell, '主壳没挂出来').not.toBeNull()
     // 告示挂在窗口底部统一系统入口，独立于任何可关闭的 Region/Tab。
+    expect(element.querySelector('footer.window-status-bar .global-system-notices__trigger')).not.toBeNull()
+    expect(element.querySelector('footer.window-status-bar .notification-item[data-notice-id]')).toBeNull()
+    await toggleNotificationCenter(element, 'open')
+    await toggleNotificationDetails(displacementRow(element, 'displaced-1')!)
     expect(element.querySelector('footer.window-status-bar .notification-item[data-notice-id]'), '错位告示没有挂在窗口锚点上').not.toBeNull()
     expect(element.querySelector('footer.window-status-bar')?.textContent).toContain('Runner')
   })

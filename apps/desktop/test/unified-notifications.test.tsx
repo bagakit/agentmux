@@ -14,7 +14,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { providerCatalogReader, historySourcesReader } from './helpers/startup-observation-api-fixture'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
 import { createClientUiRoot } from './helpers/client-ui-render'
-import { currentNotificationRows, notificationEventRows, notificationTrigger, toggleNotificationCenter } from './helpers/notification-center'
+import { currentNotificationRows, notificationEventRows, notificationTrigger, toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
 
 const initial = useAppStore.getState()
 let root: Root, container: HTMLDivElement
@@ -68,19 +68,22 @@ it('retains independent failures behind one window entry without recreating a bo
   expect(container.querySelector('.main-shell__notices')).toBeNull()
   expect(container.querySelector('.error-notice')).toBeNull()
   expect(container.querySelector('.remote-core-upgrade-notices')).toBeNull()
-  expect(notificationEventRows(container), JSON.stringify(useAppStore.getState().notificationEvents.map(event => event.message))).toHaveLength(2)
+  expect(useAppStore.getState().notificationEvents).toHaveLength(2)
+  expect(notificationEventRows(container)).toHaveLength(0)
   expect(notificationTrigger(container).getAttribute('aria-label')).toBe('System notifications: 2 unread, 0 current, 2 recent events')
   expect(notificationTrigger(container).getAttribute('aria-expanded')).toBe('false')
+  await toggleNotificationCenter(container, 'open')
+  for (const row of notificationEventRows(container)) await toggleNotificationDetails(row)
   expect(notificationEventRows(container).map(row => row.textContent).join('\n')).toContain(diagnostic)
 })
 
 it('keeps repeated observations read while distinct subjects and Runs remain independent', async () => {
   await act(async () => useAppStore.getState().reportError(diagnostic, { kind: 'process-degraded', subject: original.control }))
-  const firstId = notificationEventRows(container)[0]!.dataset.eventId!
+  const firstId = useAppStore.getState().notificationEvents[0]!.id
   await toggleNotificationCenter(container, 'open'); await toggleNotificationCenter(container, 'closed')
   const receipts = useAppStore.getState().noticeReadReceipts
   await act(async () => useAppStore.getState().reportError(diagnostic, { kind: 'process-degraded', subject: original.control }))
-  expect(notificationEventRows(container)).toHaveLength(1)
+  expect(useAppStore.getState().notificationEvents).toHaveLength(1)
   expect(useAppStore.getState().noticeReadReceipts).toEqual(receipts)
   expect(receipts['global:events']?.[firstId]).toBe('read')
   expect(notificationTrigger(container).getAttribute('aria-label')).toBe('System notifications: 0 unread, 0 current, 1 recent events')
@@ -88,8 +91,8 @@ it('keeps repeated observations read while distinct subjects and Runs remain ind
     useAppStore.getState().reportError(diagnostic, { kind: 'process-degraded', subject: healthy.control })
     useAppStore.getState().reportError(diagnostic, { kind: 'process-degraded', subject: { ...original.control, run: { runId: 'replacement-run' } } })
   })
-  expect(notificationEventRows(container)).toHaveLength(3)
-  expect(new Set(notificationEventRows(container).map(row => row.dataset.eventId)).size).toBe(3)
+  expect(useAppStore.getState().notificationEvents).toHaveLength(3)
+  expect(new Set(useAppStore.getState().notificationEvents.map(record => record.id)).size).toBe(3)
   expect(notificationTrigger(container).getAttribute('aria-label')).toBe('System notifications: 2 unread, 0 current, 3 recent events')
   expect(notificationTrigger(container).getAttribute('aria-expanded')).toBe('false')
 })
@@ -102,7 +105,7 @@ it('preserves acknowledged identities through a new window observation before th
   await act(async () => useAppStore.setState({ loading: false }))
   expect(useAppStore.getState().noticeReadReceipts['global:events']).toEqual(receipts['global:events'])
   await act(async () => useAppStore.getState().reportError(diagnostic, { kind: 'process-degraded', subject: original.control }))
-  expect(notificationEventRows(container)).toHaveLength(1)
+  expect(useAppStore.getState().notificationEvents).toHaveLength(1)
   expect(notificationTrigger(container).getAttribute('aria-label')).toBe('System notifications: 0 unread, 0 current, 1 recent events')
 })
 
@@ -140,14 +143,16 @@ it('hydrates an acknowledged native owner and keeps current failures through ord
   await act(async () => { useAppStore.setState(options.merge!({ noticeReadReceipts: legacy }, useAppStore.getState()), true) })
   await act(async () => useAppStore.getState().reportError(diagnostic, context))
   const owned = useAppStore.getState().notificationEvents[0]!
-  expect(currentNotificationRows(container).find(row => row.dataset.noticeId === owned.id)?.textContent).toContain(diagnostic)
   expect(notificationTrigger(container).getAttribute('aria-label')).toBe('System notifications: 0 unread, 1 current, 0 recent events')
   await act(async () => useAppStore.getState().reportError('Independent event after identity failure'))
   await toggleNotificationCenter(container, 'open'); await toggleNotificationCenter(container, 'closed')
   await act(async () => useAppStore.getState().clearReadNotificationEvents())
   expect(useAppStore.getState().notificationEvents).toEqual([owned])
   expect(notificationEventRows(container)).toHaveLength(0)
-  expect(currentNotificationRows(container).find(row => row.dataset.noticeId === owned.id)).toBeDefined()
+  await toggleNotificationCenter(container, 'open')
+  const row = currentNotificationRows(container).find(row => row.dataset.noticeId === owned.id)!
+  await toggleNotificationDetails(row)
+  expect(row.textContent).toContain(diagnostic)
 })
 
 it('acknowledges and clears only read events while current problems, healthy Sessions, drafts and focus remain', async () => {
@@ -159,10 +164,13 @@ it('acknowledges and clears only read events while current problems, healthy Ses
   const input = document.createElement('textarea'); container.append(input); input.value = 'Unsent local selection'; input.focus(); input.setSelectionRange(2, 7)
   await toggleNotificationCenter(container, 'open'); await toggleNotificationCenter(container, 'closed')
   await act(async () => useAppStore.getState().reportError('Unread independent event'))
-  const clear = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Clear read events')!
-  expect(clear, 'Read history must have an explicit clear action').toBeDefined()
-  await act(async () => clear.click())
-  expect(notificationEventRows(container)).toHaveLength(1)
+  // Clearing read records is independent of the hidden presentation. Opening acknowledges
+  // new events, so do not click an inaccessible hidden button to simulate this case.
+  await act(async () => useAppStore.getState().clearReadNotificationEvents())
+  await toggleNotificationCenter(container, 'open')
+  for (const row of [...notificationEventRows(container), ...currentNotificationRows(container)]) await toggleNotificationDetails(row)
+  expect([...container.querySelectorAll<HTMLButtonElement>('button')].some(button => button.textContent === 'Clear read events')).toBe(true)
+  expect(useAppStore.getState().notificationEvents).toHaveLength(1)
   expect(notificationEventRows(container)[0]!.textContent).toContain('Unread independent event')
   expect(currentNotificationRows(container)).toHaveLength(1)
   expect(currentNotificationRows(container)[0]!.textContent).toContain('Original shell observation is incomplete')
@@ -171,6 +179,13 @@ it('acknowledges and clears only read events while current problems, healthy Ses
   expect(after.sessions).toBe(before.sessions); expect(after.sessions.find(session => session.id === healthy.id)).toBe(healthy)
   expect(after.tabs).toBe(before.tabs); expect(after.layouts).toBe(before.layouts); expect(after.agentComposerDrafts).toBe(before.agentComposerDrafts)
   expect([document.activeElement === input, input.value, input.selectionStart, input.selectionEnd]).toEqual([true, 'Unsent local selection', 2, 7])
+  const clear = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Clear read events')!
+  await act(async () => clear.click())
+  expect(useAppStore.getState().notificationEvents).toEqual([])
+  expect(notificationEventRows(container)).toHaveLength(0)
+  expect(currentNotificationRows(container)).toHaveLength(1)
+  expect(useAppStore.getState().environmentWarning).toBe(before.environmentWarning)
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
 })
 
 it('keeps a current Provider observation distinct from an older same-text event on another subject', async () => {
@@ -178,11 +193,14 @@ it('keeps a current Provider observation distinct from an older same-text event 
     useAppStore.getState().reportError(diagnostic, { kind: 'indeterminate', subject: original.control })
     useAppStore.getState().reportError(diagnostic, { kind: 'indeterminate', startupProviderCatalog: { warningMessage: diagnostic } })
   })
+  await toggleNotificationCenter(container, 'open')
   expect(notificationEventRows(container)).toHaveLength(1)
   expect(currentNotificationRows(container)).toHaveLength(1)
+  await toggleNotificationDetails(currentNotificationRows(container)[0]!)
   expect(currentNotificationRows(container)[0]!.textContent).toContain(diagnostic)
   await toggleNotificationCenter(container, 'open'); await toggleNotificationCenter(container, 'closed')
   await act(async () => useAppStore.getState().clearReadNotificationEvents())
+  await toggleNotificationCenter(container, 'open')
   expect(notificationEventRows(container)).toHaveLength(0)
   expect(currentNotificationRows(container)).toHaveLength(1)
   expect(useAppStore.getState()).toMatchObject({ error: diagnostic, errorDismissed: false,
@@ -197,15 +215,18 @@ it('retains the active startup producer while ordinary events remain independent
   await act(async () => useAppStore.getState().reportError(diagnostic))
   expect(useAppStore.getState().errorNoticeContext).toBe(startupContext)
   expect(useAppStore.getState()).toMatchObject({ error: startupMessage, lastError: startupMessage, errorDismissed: true })
+  expect(currentNotificationRows(container)).toHaveLength(0)
+  expect(useAppStore.getState().notificationEvents).toHaveLength(1)
+  await toggleNotificationCenter(container, 'open')
   expect(currentNotificationRows(container)).toHaveLength(1)
-  expect(notificationEventRows(container)).toHaveLength(1)
+  await toggleNotificationDetails(notificationEventRows(container)[0]!)
   expect(notificationEventRows(container)[0]!.textContent).toContain(diagnostic)
   await toggleNotificationCenter(container, 'open'); await toggleNotificationCenter(container, 'closed')
   const receipts = useAppStore.getState().noticeReadReceipts
   await act(async () => useAppStore.getState().reportError(diagnostic))
   expect(useAppStore.getState().errorNoticeContext).toBe(startupContext)
   expect(useAppStore.getState()).toMatchObject({ error: startupMessage, lastError: startupMessage, errorDismissed: true })
-  expect(notificationEventRows(container)).toHaveLength(1)
+  expect(useAppStore.getState().notificationEvents).toHaveLength(1)
   expect(useAppStore.getState().noticeReadReceipts).toEqual(receipts)
   await act(async () => {
     useAppStore.getState().applyEvent({ type: 'core', hostId: 'local', event: {
@@ -215,20 +236,23 @@ it('retains the active startup producer while ordinary events remain independent
   })
   expect(useAppStore.getState()).toMatchObject({ error: null, lastError: null })
   expect(currentNotificationRows(container), currentNotificationRows(container).map(row => row.textContent).join('\n')).toHaveLength(0)
-  expect(notificationEventRows(container)).toHaveLength(1)
-  expect(notificationEventRows(container)[0]!.textContent).toContain(diagnostic)
+  expect(useAppStore.getState().notificationEvents).toHaveLength(1)
   expect(useAppStore.getState().noticeReadReceipts['global:events']).toEqual(receipts['global:events'])
+  await toggleNotificationCenter(container, 'open')
+  await toggleNotificationDetails(notificationEventRows(container)[0]!)
+  expect(notificationEventRows(container)[0]!.textContent).toContain(diagnostic)
 })
 
 it('reopens complete diagnostics, copies their original content and navigates the original Session', async () => {
   const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   await act(async () => useAppStore.getState().reportError(diagnostic, { kind: 'process-degraded', subject: original.control }))
+  await toggleNotificationCenter(container, 'open')
   const row = notificationEventRows(container)[0]!
   const details = row.querySelector<HTMLDetailsElement>('details')!
   expect(details.open).toBe(false)
   await toggleNotificationCenter(container, 'open')
   expect(notificationTrigger(container).getAttribute('aria-expanded')).toBe('true')
-  await act(async () => { details.open = true })
+  await toggleNotificationDetails(row)
   expect(row.querySelector('[aria-label^="Complete details:"]')?.textContent).toContain(diagnostic)
   const nestedToggle = new Event('toggle', { bubbles: true })
   Object.defineProperty(nestedToggle, 'newState', { value: 'closed' })
@@ -243,5 +267,5 @@ it('reopens complete diagnostics, copies their original content and navigates th
   expect(useAppStore.getState().sessions).toBe(before.sessions)
   expect(useAppStore.getState().tabs[originalTab.id]!.regions['original-region']).toEqual(before.tabs[originalTab.id]!.regions['original-region'])
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
-  expect(notificationEventRows(container)).toHaveLength(1)
+  expect(useAppStore.getState().notificationEvents).toHaveLength(1)
 })

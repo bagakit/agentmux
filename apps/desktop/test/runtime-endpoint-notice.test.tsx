@@ -1,4 +1,4 @@
-import { currentNotificationRows, notificationTrigger, toggleNotificationCenter } from './helpers/notification-center'
+import { currentNotificationRows, notificationTrigger, toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
 import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { beforeEach, expect, it, vi } from 'vitest'
@@ -24,6 +24,8 @@ const mount = () => dom.render(<SettingsNavigation.Provider value={{ open: vi.fn
 it('explains the exact Host on the first surface and uses real settings navigation without changing healthy inputs', async () => {
   const drafts = useAppStore.getState().agentComposerDrafts, tabs = useAppStore.getState().tabs
   await mount()
+  await toggleNotificationCenter(dom.container, 'open')
+  await toggleNotificationDetails(currentNotificationRows(dom.container)[0]!)
   const notice = dom.container.querySelector('.service-window')!
   expect(currentNotificationRows(dom.container)[0]!.querySelector('.notification-item__title')!.textContent).toBe('Build server: Remote service needs an update')
   expect(notice.querySelector('.service-window__mode')!.textContent).toContain('REMOTE_CORE_UPGRADE_REQUIRED: Original technical receipt problem')
@@ -37,6 +39,8 @@ it('keeps an unknown handshake distinct from a version update and retains its or
   useAppStore.setState({ runtimeEndpointWarnings: [{ hostId: 'remote-id', step: 'Connecting to Runtime',
     code: 'CONTROL_PROTOCOL_ERROR', message: 'Arbitrary malformed result', recovery: 'Retry observation' }] })
   await mount()
+  await toggleNotificationCenter(dom.container, 'open')
+  await toggleNotificationDetails(currentNotificationRows(dom.container)[0]!)
   const notice = dom.container.querySelector('.service-window')!
   expect(currentNotificationRows(dom.container)[0]!.querySelector('.notification-item__title')!.textContent).toBe('Build server: Connection could not be verified')
   expect(notice.querySelector('.service-window__mode')!.textContent).toContain('CONTROL_PROTOCOL_ERROR: Arbitrary malformed result')
@@ -54,6 +58,8 @@ it('consumes typed Native and semantic connection observations in the real globa
     sessions: [{ ...original, hostId: 'local', control: { ...original.control, hostId: 'local' },
       terminalCapability: { state: 'unknown', reason: 'handshake-timeout', run: original.control.run, observedAt: _reshape_fixtureEpoch(0, 0, 1), mode: 'degraded' } }] })
   await mount()
+  await toggleNotificationCenter(dom.container, 'open')
+  for (const row of currentNotificationRows(dom.container)) await toggleNotificationDetails(row)
   const rows = dom.container.querySelectorAll('.notification-item[data-notice-id]')
   expect(rows).toHaveLength(3)
   expect(dom.container.textContent).toContain('Original Native connection is lost')
@@ -68,6 +74,8 @@ it('keeps compatibility and unknown connection issues in one collapsed entry wit
   await mount()
   expect(dom.container.querySelector('.remote-core-upgrade-notices')).toBeNull()
   expect(notificationTrigger(dom.container).getAttribute('aria-expanded')).toBe('false')
+  expect(currentNotificationRows(dom.container)).toHaveLength(0)
+  await toggleNotificationCenter(dom.container, 'open')
   expect(currentNotificationRows(dom.container)).toHaveLength(1)
   expect(currentNotificationRows(dom.container)[0]!.querySelector<HTMLDetailsElement>('.notification-item__details')!.open).toBe(false)
   await dom.click('.notification-item__action')
@@ -76,6 +84,7 @@ it('keeps compatibility and unknown connection issues in one collapsed entry wit
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
   await act(async () => useAppStore.setState({ runtimeEndpointWarnings: [{ hostId: 'remote-id', step: 'Connecting', code: 'CONTROL_PROTOCOL_ERROR',
     message: 'Arbitrary malformed result', recovery: 'Retry observation' }] }))
+  await toggleNotificationDetails(currentNotificationRows(dom.container)[0]!)
   expect(dom.container.textContent).not.toContain('needs an update')
   expect(dom.container.textContent).toContain('Arbitrary malformed result')
 })
@@ -90,6 +99,8 @@ it('retains exact Host receipts through remount, unknown projection and changed 
   await act(async () => useAppStore.setState({ runtimeEndpointWarnings: [{ ...first, message: 'Later original diagnostic', recovery: 'Later recovery observation' }] }))
   expect(notificationTrigger(dom.container).getAttribute('aria-label')).toBe('System notifications: 0 unread, 1 current, 0 recent events')
   expect(useAppStore.getState().noticeReadReceipts).toEqual(receipts)
+  await toggleNotificationCenter(dom.container, 'open')
+  await toggleNotificationDetails(currentNotificationRows(dom.container)[0]!)
   expect(dom.container.textContent).toContain('Later original diagnostic')
   await dom.click('.notification-item__action')
   expect(openHost).toHaveBeenCalledExactlyOnceWith('remote-id')
@@ -99,7 +110,8 @@ it('acknowledges two exact Hosts together and admits only confirmed recurrence o
   const first = useAppStore.getState().runtimeEndpointWarnings![0]!
   await act(async () => useAppStore.setState({ runtimeEndpointWarnings: [first, { ...first, hostId: 'other-remote' }] }))
   await mount()
-  expect(currentNotificationRows(dom.container)).toHaveLength(2)
+  expect(currentNotificationRows(dom.container)).toHaveLength(0)
+  expect(useAppStore.getState().runtimeEndpointWarnings).toHaveLength(2)
   await toggleNotificationCenter(dom.container, 'open'); await toggleNotificationCenter(dom.container, 'closed')
   expect(Object.keys(useAppStore.getState().noticeReadReceipts['global:runtime-endpoints']!)).toEqual([
     JSON.stringify(['remote-id', first.step]), JSON.stringify(['other-remote', first.step])
@@ -113,6 +125,7 @@ it('acknowledges two exact Hosts together and admits only confirmed recurrence o
   await toggleNotificationCenter(dom.container, 'open'); await toggleNotificationCenter(dom.container, 'closed')
   await act(async () => useAppStore.setState({ runtimeEndpointWarnings: [{ ...first, step: 'Reading a new connection receipt' }, { ...first, hostId: 'unconfigured-host' }] }))
   expect(notificationTrigger(dom.container).getAttribute('aria-label')).toBe('System notifications: 2 unread, 2 current, 0 recent events')
+  await toggleNotificationCenter(dom.container, 'open')
   const unconfigured = currentNotificationRows(dom.container).find(row => row.textContent?.includes('unconfigured-host'))!
   await act(async () => unconfigured.querySelector<HTMLButtonElement>('.notification-item__action')!.click())
   expect(openHost).toHaveBeenCalledExactlyOnceWith('unconfigured-host')
@@ -128,6 +141,8 @@ it('acknowledges distinct current Session lanes without resolving their original
   await toggleNotificationCenter(dom.container, 'open'); await toggleNotificationCenter(dom.container, 'closed')
   expect(notificationTrigger(dom.container).getAttribute('aria-label')).toBe('System notifications: 0 unread, 4 current, 0 recent events')
   expect(useAppStore.getState().sessions).toEqual([request, disconnected])
+  expect(currentNotificationRows(dom.container)).toHaveLength(0)
+  await toggleNotificationCenter(dom.container, 'open')
   expect(dom.container.textContent).toContain('Build server')
 })
 
@@ -146,6 +161,7 @@ it('keeps two observation steps on one Host distinct without declaring its Runti
   const drafts = useAppStore.getState().agentComposerDrafts, tabs = useAppStore.getState().tabs
   await act(async () => useAppStore.setState({ runtimeEndpointWarnings: warnings }))
   await mount()
+  await toggleNotificationCenter(dom.container, 'open')
   expect(dom.container.querySelectorAll('.notification-item[data-notice-id]')).toHaveLength(2)
   expect(dom.container.textContent).toContain('Build server: Reading Provider catalog')
   expect(dom.container.textContent).toContain('Build server: Reading retained History sources')

@@ -82,7 +82,7 @@ vi.mock('../src/renderer/src/components/SurfaceToolDock', () => ({ SurfaceToolDo
 import { App } from '../src/renderer/src/App'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
-import { currentNotificationRows, notificationEventRows, notificationTrigger, toggleNotificationCenter } from './helpers/notification-center'
+import { currentNotificationRows, notificationEventRows, notificationTrigger, toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
 import { SESSION_EVENT_CHANNEL } from '../src/shared/contracts'
 import { registerIpc } from '../src/main/ipc'
 import { DEFAULT_CONFIG } from '../src/main/config-store'
@@ -181,6 +181,7 @@ it('delivers the actual current crash through preload/Store/App as assertive wit
   expect(before.sessions.map(s => s.id).sort()).toEqual(['healthy', 'terminal', 'waiting'])
   const focus = document.activeElement
   await emit(processEvent())
+  await toggleNotificationCenter(element, 'open')
   expect(notice(element)?.getAttribute('role')).toBe('alert')
   expect(notice(element)?.getAttribute('aria-live')).toBe('assertive')
   expect(notice(element)?.textContent).toContain('Agent "waiting" crashed (signal SIGSEGV, exit code 139)')
@@ -211,9 +212,11 @@ it('keeps healthy workflow errors polite and clears the previous crash classific
   expect(useAppStore.getState().sessions.find(s => s.id === healthy.id)).toBe(healthy)
   expect(useAppStore.getState().sessions.find(s => s.id === healthy.id)?.status.state).toBe('working')
   expect(useAppStore.getState().sessions.find(s => s.id === healthy.id)?.processState).toBe('running')
+  await toggleNotificationCenter(element, 'open')
   expect(notice(element)?.textContent).toContain('Private replay gap')
   expect(notice(element)?.getAttribute('aria-live')).toBe('polite')
   await emit(processEvent())
+  await toggleNotificationCenter(element, 'open')
   expect(notice(element)?.getAttribute('aria-live')).toBe('assertive')
   await emit({ type: 'core', hostId: 'local', event: { type: 'agent-error', code: 'AGENT_STORE_IO', message: 'Private storage observation failed',
     evidence: { source: 'run-process', observedAt: Date.now() + 200 } } })
@@ -226,6 +229,7 @@ it('keeps healthy workflow errors polite and clears the previous crash classific
 it.each([false, true])('resets retained crash metadata when startup completes or fails (failure=%s)', async fails => {
   const element = await mountApp()
   await emit(processEvent())
+  await toggleNotificationCenter(element, 'open')
   expect(notice(element)?.getAttribute('aria-live')).toBe('assertive')
   snapshot.mockResolvedValue(canonical(useAppStore.getState().sessions))
   const configuration = fixture.handlers.get('config:get')!
@@ -235,9 +239,11 @@ it.each([false, true])('resets retained crash metadata when startup completes or
   fixture.handlers.set('config:get', configuration)
   expect(useAppStore.getState().errorNoticeContext).toBeNull()
   if (fails) {
+    await toggleNotificationCenter(element, 'open')
+    await toggleNotificationDetails(currentNotificationRows(element)[0]!)
     expect(currentNotificationRows(element)[0]?.getAttribute('aria-live')).toBe('polite')
     expect(currentNotificationRows(element)[0]?.textContent).toContain('Private startup config read failed')
-    expect(notificationEventRows(element)).toHaveLength(1)
+    expect(useAppStore.getState().notificationEvents).toHaveLength(1)
   } else expect(notificationEventRows(element)).toHaveLength(1)
   await act(async () => { cleanup() })
 })
@@ -263,6 +269,7 @@ it('announces a buffered crash after a real membership snapshot through the same
   await emit(processEvent())
   expect(notice(element)).toBeNull()
   await act(async () => { release(baseline) }); await settle()
+  await toggleNotificationCenter(element, 'open')
   expect(notice(element)?.getAttribute('role')).toBe('alert')
   expect(notice(element)?.getAttribute('aria-live')).toBe('assertive')
   expect(useAppStore.getState().sessions.map(s => s.id).sort()).toEqual(['healthy', 'terminal', 'waiting'])
@@ -279,6 +286,7 @@ it('seeds historical startup crashes quietly but announces a crashed new steady-
   snapshot.mockResolvedValueOnce(canonical([...useAppStore.getState().sessions, admission]))
   await emit(processEvent('new-member'))
   expect(useAppStore.getState().sessions.map(s => s.id).sort()).toEqual(['healthy', 'new-member', 'terminal', 'waiting'])
+  await toggleNotificationCenter(element, 'open')
   expect(notice(element)?.getAttribute('aria-live')).toBe('assertive')
   expect(notice(element)?.textContent).toContain('Agent "new-member" crashed')
 })
@@ -287,12 +295,12 @@ it('keeps an acknowledged exact crash read and treats another current Run as a n
   const element = await mountApp()
   await emit(processEvent())
   const firstMessage = useAppStore.getState().error
-  const firstId = notice(element)!.dataset.eventId!
+  const firstId = useAppStore.getState().notificationEvents[0]!.id
   await toggleNotificationCenter(element, 'open')
   await toggleNotificationCenter(element, 'closed')
   const receipts = useAppStore.getState().noticeReadReceipts
   await emit(processEvent())
-  expect(notificationEventRows(element)).toHaveLength(1)
+  expect(useAppStore.getState().notificationEvents).toHaveLength(1)
   expect(notificationTrigger(element).getAttribute('aria-expanded')).toBe('false')
   expect(useAppStore.getState().noticeReadReceipts).toEqual(receipts)
   expect(receipts['global:events']?.[firstId]).toBe('read')
@@ -305,10 +313,12 @@ it('keeps an acknowledged exact crash read and treats another current Run as a n
   snapshot.mockResolvedValueOnce(canonical(useAppStore.getState().sessions.map(session => session.id === fresh.id ? fresh : session)))
   await emit(processEvent('membership-trigger'))
   expect(useAppStore.getState().sessions.find(session => session.id === 'waiting')?.control.run.runId).toBe('new-current-run')
-  expect(notificationEventRows(element)).toHaveLength(1)
+  expect(useAppStore.getState().notificationEvents).toHaveLength(1)
   await emit(processEvent())
   expect(useAppStore.getState().error).toBe(firstMessage)
-  expect(notificationEventRows(element)).toHaveLength(2)
+  expect(useAppStore.getState().notificationEvents).toHaveLength(2)
+  expect(notificationEventRows(element)).toHaveLength(0)
+  await toggleNotificationCenter(element, 'open')
   expect(notice(element)?.getAttribute('aria-live')).toBe('assertive')
   expect(notice(element)?.dataset.eventId).not.toBe(firstId)
   expect(useAppStore.getState().errorNoticeContext?.subject?.run.runId).toBe('new-current-run')

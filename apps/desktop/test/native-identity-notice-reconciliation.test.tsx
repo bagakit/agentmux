@@ -1,4 +1,4 @@
-import { currentNotificationRows, notificationEventRows, notificationTrigger, toggleNotificationCenter } from './helpers/notification-center'
+import { currentNotificationRows, notificationEventRows, notificationTrigger, toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices'
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 // @vitest-environment happy-dom
@@ -60,7 +60,11 @@ function identityNotice(subject = original.control) {
 }
 function expectRetained(record: NotificationEvent) {
   expect(useAppStore.getState().notificationEvents).toContain(record)
-  expect(currentNotificationRows(dom.container).some(row => row.dataset.noticeId === record.id)).toBe(true)
+  if (notificationTrigger(dom.container).getAttribute('aria-expanded') === 'true')
+    expect(currentNotificationRows(dom.container).some(row => row.dataset.noticeId === record.id)).toBe(true)
+  else {
+    expect(currentNotificationRows(dom.container)).toHaveLength(0)
+  }
 }
 function expectSettled(record: NotificationEvent) {
   expect(useAppStore.getState().notificationEvents).not.toContain(record)
@@ -135,6 +139,8 @@ it.each(['ordinary', 'save-failed', 'save-unconfirmed'] as const)('does not sett
   await act(async () => useAppStore.getState().applyEvent(sessionEvent({ nativeHandle: native, nativeHandlePersistence: 'confirmed' })))
   expectSettled(record)
   expect(useAppStore.getState().error).toBe(later)
+  await toggleNotificationCenter(dom.container, 'open')
+  await toggleNotificationDetails(notificationEventRows(dom.container)[0]!)
   expect(notificationEventRows(dom.container)).toHaveLength(1)
   expect(notificationEventRows(dom.container)[0]!.textContent).toContain(later)
 })
@@ -245,11 +251,13 @@ it('keeps two native subjects current through ordinary history, wrong facts and 
   const second = identityNotice(secondary.control)!
   expect(second).toBeDefined()
   expectRetained(first); expectRetained(second)
-  expect(currentNotificationRows(dom.container).filter(row => row.dataset.noticeId === first.id || row.dataset.noticeId === second.id)).toHaveLength(2)
+  expect(currentNotificationRows(dom.container)).toHaveLength(0)
   await act(async () => useAppStore.getState().reportError('Independent clipboard failure'))
-  expect(notificationEventRows(dom.container)).toHaveLength(1)
+  expect(notificationEventRows(dom.container)).toHaveLength(0)
   const ordinary = useAppStore.getState().notificationEvents.find(record => !record.context?.cause)!
   await toggleNotificationCenter(dom.container, 'open')
+  expect(currentNotificationRows(dom.container).filter(row => row.dataset.noticeId === first.id || row.dataset.noticeId === second.id)).toHaveLength(2)
+  expect(notificationEventRows(dom.container)).toHaveLength(1)
   await toggleNotificationCenter(dom.container, 'closed')
   await act(async () => useAppStore.getState().clearReadNotificationEvents())
   expect(notificationEventRows(dom.container)).toHaveLength(0)
@@ -277,7 +285,9 @@ it('keeps two native subjects current through ordinary history, wrong facts and 
   expect(useAppStore.getState().noticeReadReceipts['global:events']?.[second.id]).toBeUndefined()
   expect(useAppStore.getState().noticeReadReceipts['global:events']?.[first.id]).toBe('read')
   expect(useAppStore.getState().noticeReadReceipts['global:events']?.[ordinary.id]).toBe('read')
+  await toggleNotificationCenter(dom.container, 'open')
   expect(currentNotificationRows(dom.container).filter(row => row.dataset.noticeId === first.id || row.dataset.noticeId === second.id)).toHaveLength(1)
+  await toggleNotificationCenter(dom.container, 'closed')
   await act(async () => useAppStore.getState().applyEvent(sessionEvent({ nativeHandle: native,
     nativeHandlePersistence: 'confirmed', updatedAt: _reshape_fixtureEpoch(0, 0, 20) })))
   expectSettled(first)

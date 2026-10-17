@@ -10,6 +10,15 @@ export async function toggleNotificationCenter(container: ParentNode, newState: 
   await act(async () => { details!.dispatchEvent(event) })
 }
 
+export async function toggleNotificationDetails(row: ParentNode, open = true) {
+  const details = row.querySelector<HTMLDetailsElement>('.notification-item__details')
+  expect(details, 'The original notification Details must be mounted').not.toBeNull()
+  await act(async () => {
+    details!.open = open
+    details!.dispatchEvent(new Event('toggle'))
+  })
+}
+
 export function currentNotificationRows(container: ParentNode) {
   return [...container.querySelectorAll<HTMLElement>('.notification-item[data-notice-id]')]
 }
