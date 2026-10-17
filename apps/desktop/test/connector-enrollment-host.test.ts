@@ -43,7 +43,7 @@ let services: Awaited<ReturnType<typeof createDesktopConnections>>
 let server: AgentMuxControlServer
 let client: Awaited<ReturnType<typeof connectAgentMuxRpc>>
 let sdk: ReturnType<typeof defaultFeishuSdkTransport>
-let calls: Array<{ url: string; path: string; preclaimed: boolean }>
+let calls: Array<{ url: string; path: string; preclaimed: boolean; cookie: string; referer: string | null }>
 let pollReply: (() => Response) | undefined
 let authorize: boolean
 let clock: number
@@ -51,6 +51,7 @@ let secureAvailable: boolean
 let rejectedCookieStage: 'initialize' | 'console' | 'creation' | null
 let sentCookies: Array<{ path: string; cookie: string }>
 let consoleDocument: string
+let consoleResponses: Map<string, () => Response>
 
 function cookies(stage: 'initialize' | 'console' | 'creation', initial?: HeadersInit): Headers {
   const headers = new Headers(initial)
@@ -73,6 +74,7 @@ beforeEach(async () => {
   rejectedCookieStage = null
   sentCookies = []
   consoleDocument = `<script>${originalConsoleScript}</script>`
+  consoleResponses = new Map()
   clock = Date.now()
   vi.spyOn(Date, 'now').mockImplementation(() => clock)
   const key = randomBytes(32)
@@ -108,8 +110,12 @@ beforeEach(async () => {
       calls.push({
         url: target.href,
         path: target.pathname,
-        preclaimed: claim?.state === 'claimed' && claim.operation_id === input.operationId
+        preclaimed: claim?.state === 'claimed' && claim.operation_id === input.operationId,
+        cookie: new Headers(options?.headers).get('cookie') ?? '',
+        referer: new Headers(options?.headers).get('referer')
       })
+      const consoleResponse = consoleResponses.get(target.href)
+      if (consoleResponse) return consoleResponse()
       if (target.origin === 'https://accounts.feishu.cn' && target.pathname === '/accounts/qrlogin/init')
         return Response.json(
           { code: 0, data: { step_info: { token: privateToken } } },
@@ -491,6 +497,99 @@ it.each([
   expect(observed.actions.map(action => action.kind)).not.toContain('continue-authentication')
   expect(JSON.stringify(observed)).not.toContain('private-token')
   expect(observed.operation!.creation).toEqual({ upload: 'not-started', create: 'not-started' })
+})
+
+it('follows the original Console callback and issuer chain through SDK and compiled CLI before account confirmation', async () => {
+  const targets = [
+    'https://open.feishu.cn/app',
+    'https://open.feishu.cn/auth/callback?ticket=private-console-ticket',
+    'https://accounts.feishu.cn/console-login?ticket=private-account-ticket',
+    'https://ask.feishu.cn/console-handoff?ticket=private-landing-ticket',
+    'https://open.larkoffice.com/console-callback?ticket=private-alternate-ticket',
+    'https://open.feishu.cn/console/profile?ticket=private-final-ticket'
+  ]
+  const statuses = [302, 303, 307, 308, 301]
+  for (const [index, target] of targets.slice(0, -1).entries()) {
+    consoleResponses.set(target, () => new Response('', { status: statuses[index], headers: {
+      location: targets[index + 1] + (index === 0 || index === 4 ? '#private-client-fragment' : ''),
+      ...(index === 0 ? { 'set-cookie': 'console-host=private-host-cookie; Path=/; Secure; HttpOnly' } : {})
+    } }))
+  }
+  consoleResponses.set(targets.at(-1)!, () => new Response(consoleDocument, { headers: { 'content-type': 'text/html' } }))
+  const pending = await client.call('connection.enrollment.begin', input)
+  const attemptId = pending.operation!.authentication!.attemptId
+  clock = pending.challenge!.nextPollAt + 1
+  let view = pending
+  const expected = ['/accounts/qrlogin/polling', '/cross', '/', '/', ...targets.map(target => new URL(target).pathname)]
+  for (const [index, path] of expected.entries()) {
+    const advance = decision(view, 'continue-authentication'), before = calls.length
+    view = await cli(['advance', '--input', '-'], advance)
+    expect(calls).toHaveLength(before + 1)
+    expect(calls.at(-1)!.path).toBe(path)
+    expect(view.operation!.authentication!.attemptId).toBe(attemptId)
+    expect(view.operation!.creation).toEqual({ upload: 'not-started', create: 'not-started' })
+    expect(view.operation!.authentication!.stage).toBe(index === expected.length - 1 ? 'account' : 'handoff')
+    if (index < expected.length - 1) {
+      expect(view.account).toBeNull()
+      expect(view.actions.map(action => action.kind)).not.toContain('confirm-account')
+    }
+    expect(view.actions.map(action => action.kind)).not.toContain('create')
+    if (path === '/app') {
+      expect((await client.call('connection.enrollment.advance', advance)).operation).toEqual(view.operation)
+      expect(calls).toHaveLength(before + 1)
+    }
+  }
+  expect(calls.slice(-targets.length).map(call => call.url)).toEqual(targets)
+  expect(calls.slice(-targets.length).map(call => call.referer)).toEqual(['https://ask.feishu.cn/', ...targets.slice(0, -1)])
+  expect(calls.slice(-targets.length).every(call => !call.url.includes('#'))).toBe(true)
+  expect(calls.find(call => call.path === '/auth/callback')!.cookie).toContain('console-host=private-host-cookie')
+  expect(calls.find(call => call.path === '/console-login')!.cookie).not.toContain('console-host=')
+  expect(calls.find(call => call.path === '/console-callback')!.cookie).not.toContain('session=')
+  expect(calls.at(-1)!.cookie).toContain('console-host=private-host-cookie')
+  expect(view.account).toMatchObject({ userId: 'original-user', tenantId: 'original-tenant' })
+  const before = calls.length
+  expect((await client.call('connection.enrollment.inspect', { operationId: input.operationId })).operation).toEqual(view.operation)
+  expect((await cli(['inspect', '--operation-id', input.operationId])).operation).toEqual(view.operation)
+  const confirmed = await client.call('connection.enrollment.advance', decision(view, 'confirm-account'))
+  expect(calls).toHaveLength(before)
+  expect(confirmed.actions.map(action => action.kind)).toContain('create')
+  expect(confirmed.operation!.creation).toEqual({ upload: 'not-started', create: 'not-started' })
+  const wire = JSON.stringify({ view, confirmed })
+  for (const value of ['private-console-ticket', 'private-account-ticket', 'private-landing-ticket', 'private-alternate-ticket', 'private-final-ticket', 'private-client-fragment', 'private-host-cookie']) expect(wire).not.toContain(value)
+})
+
+it.each([
+  ['unexpected-host', 'https://unqualified.invalid/private-account?token=private-redirect-token#private-fragment'],
+  ['missing-location', null]
+] as const)('preserves the exact safe Console %s reason through SDK and compiled CLI without replay', async (redirectReason, location) => {
+  consoleResponses.set('https://open.feishu.cn/app', () => new Response('private-redirect-body', { status: 302, ...(location ? { headers: { location } } : {}) }))
+  const pending = await client.call('connection.enrollment.begin', input)
+  clock = pending.challenge!.nextPollAt + 1
+  let view = pending
+  for (const path of ['/accounts/qrlogin/polling', '/cross', '/', '/']) {
+    const before = calls.length
+    view = await cli(['advance', '--input', '-'], decision(view, 'continue-authentication'))
+    expect(calls).toHaveLength(before + 1)
+    expect(calls.at(-1)!.path).toBe(path)
+    expect(view.operation!.authentication!.stage).toBe('handoff')
+  }
+  const advance = decision(view, 'continue-authentication'), before = calls.length
+  const unknown = await client.call('connection.enrollment.advance', advance)
+  expect(calls).toHaveLength(before + 1)
+  expect(calls.at(-1)!.url).toBe('https://open.feishu.cn/app')
+  expect(unknown.operation!.diagnostic).toEqual({ stage: 'authentication', code: 'native-unconfirmed', step: 'console', failure: 'redirect-unconfirmed', boundary: 'handoff', httpStatus: 302, redirectReason })
+  expect(unknown.operation!.authentication).toMatchObject({ attemptId: pending.operation!.authentication!.attemptId, stage: 'unknown' })
+  expect(unknown.account).toBeNull()
+  expect(unknown.operation!.creation).toEqual({ upload: 'not-started', create: 'not-started' })
+  for (const kind of ['continue-authentication', 'confirm-account', 'create']) expect(unknown.actions.map(action => action.kind)).not.toContain(kind)
+  const observed = await cli(['inspect', '--operation-id', input.operationId])
+  expect(observed.operation).toEqual(unknown.operation)
+  expect((await client.call('connection.enrollment.inspect', { operationId: input.operationId })).operation).toEqual(unknown.operation)
+  expect((await client.call('connection.enrollment.advance', advance)).operation).toEqual(unknown.operation)
+  expect((await cli(['advance', '--input', '-'], advance)).operation).toEqual(unknown.operation)
+  expect(calls).toHaveLength(before + 1)
+  const wire = JSON.stringify({ unknown, observed })
+  for (const value of ['unqualified.invalid', 'private-account', 'private-redirect-token', 'private-fragment', 'private-redirect-body']) expect(wire).not.toContain(value)
 })
 
 it('continues native zero waiting through Host, SDK and compiled CLI to the original account', async () => {
