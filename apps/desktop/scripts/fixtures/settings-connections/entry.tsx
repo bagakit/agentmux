@@ -20,7 +20,7 @@ const before = await api.config.get(), seeded = connectionsConfig(before)
 const realSave = api.config.save.bind(api.config)
 const calls: { kind: string; input?: unknown }[] = []
 const realSelectSession = useAppStore.getState().selectSession
-useAppStore.setState({ selectSession: (id, group) => { calls.push({ kind: 'original-select-session', input: { id, group } }); realSelectSession(id, group) } })
+useAppStore.setState({ selectSession: (id, group) => { calls.push({ kind: 'original-select-session', input: { id, group } }); return realSelectSession(id, group) } })
 api.config.save = async (next, expected) => {
   calls.push({ kind: 'preview-config-save', input: { hosts: next.hosts.length } })
   return realSave(next, expected)
