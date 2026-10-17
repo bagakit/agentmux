@@ -205,6 +205,17 @@ Browser 设置承载统一页面资源目录及自动闲置回收偏好，复用
 
 Provider / Executor 的设置采用上述层级，保留本产品的准确关系：Provider 是协议适配声明，一个 Provider 可被多个 Executor 引用，每个 Executor 是绑定一个 Provider 的独立启动配置，已保存的 Provider 身份不能因导航或分组而改变。Provider 上下文、所属 Executor 列表与当前详情应组成同一配置任务，不把二者机械做成互斥的资源页。全局模板与准确接收 Host 的配置清单分别保留原 owner、身份和保存动作，Host 的 Provider 默认与显式注册来源保持可辨；Host 注册成功只能确认本次提交的快照，不能清空回执前的后续输入；原回执版本只用于同一准确 Host 连接配置与 Executor ID 的下一次明确提交，目标改变不得沿用，失败或结果未知仍保留草稿且不自动重试。Provider 分组不把不同范围合并，也不把本机声明当作远端事实。参考界面的同名对象不改变本产品身份、配置范围和原保存语义；目录读取、检查与编辑状态分别表达，沿本节既有草稿、检查与保存合同，不把视觉重组扩大成新的配置或运行时能力。
 
+### Browser use 与 Agent 操作呈现
+
+Settings 为 Browser 提供独立的 **Browser use** 组，收拢原基础设置与 Agent 操作呈现。原自动化、应用链接选择、页面资源和外部连接等能力保留准确对象、配置键与作用范围；导航、搜索、Overview 和窄窗分类消费同一模块目录。分组不新建 Browser、配置或权限 owner，也不把管理动作变成外观开关。
+
+- Agent 操作呈现可配置虚拟鼠标与讨论浮窗的显示、指针 tween、真实点击波纹，以及内发光的颜色、叠加、动画和宽度。合法值、默认与实际范围由同一字段源码和公开配置查询持有；修改这些偏好不取得或撤销控制权，不停止 Agent，不延长实际动作或改变任务结果。虚拟鼠标、波纹和执行反馈仍只消费原 Browser 的准确动作事实，位置未知不伪造。
+- 显示偏好不是能力门禁。隐藏鼠标或讨论浮窗仍保留操作者与控制状态、可发现的消息和显式接管入口；关闭浮窗不清草稿或在途输入，用户可以明确重新打开。tween 关闭时保留真实静态目标，减少动态效果下保留可读身份与状态，不由配置强行恢复运动。输入隔离与本人批准仍只沿[Browser 控制合同](browser-workface.md#agent-操作可见性与输入隔离)。
+- 编辑区内嵌实时模拟，用户调参即可比较当前草稿的效果。模拟与真实 Browser 消费同一配置解释和效果绘制原语，明确标为模拟；它不连接或创建 Browser／Agent／Run，不导航、发送消息、接管网页或读取实际网页内容。模拟自身的动作不作为真实操作回执，保存成功也不证明真实页面已经渲染该效果。
+- 预览只表达未提交草稿，持久配置仍沿原明确保存、expected 合并、冲突与未知回执合同。原字段、保存期间后续编辑、已访问分区草稿、IME 和焦点保持；GUI 与原 `settings inspect`／`settings set` 消费同一 Main ConfigOwner，不另建预览配置 Store 或任意 CSS／脚本 setter。设置隐藏、关闭或 document 不可见时，模拟停止自身动画和监听，不增加无关 Browser／Session 的热路径工作。
+
+本节定义用户已确认要求，不宣称当前源码或安装已支持；[呈现合同](../presentation/settings-and-observation.md#browser-use-与实时模拟)持有控件层级、预览密度与宽窄布局。
+
 ### 会话连续性设置
 
 Preferences 中的 Execution 模块编辑全局恢复偏好，侧栏、Overview、搜索和窄窗分类使用同一模块目录。恢复时机、等待、自动恢复活动时间窗、确证退出后原生 resume、同一操作的复查次数与间隔沿同一配置 owner 编辑；默认值与合法政策由 Core 的 [continuity policy](../../../packages/core/src/agent-session-continuity.ts) 持有，恢复资格与执行语义仍归[Session 恢复](session-recovery.md)，设置页不另判 Run 或 Provider 状态。
@@ -241,7 +252,7 @@ Prompt 的当前对象、未提交修改与只读使用示意应在同一编辑�
 
 远程管理的产品范围、拓扑、Host 连接配置与测试、来源核验和维护入口由 [Remote 管理 PRD](remote-management.md) 持有；本节只持有通用设置导航、草稿与保存，以及 Agent 配置和设备模块的相邻规则。
 
-- 设置结构优化必须落到真实页面。日常 Preferences 在前（Appearance、Notifications、Browser、General），Message Tool 独立归组（输入与 Mailbox、Prompts），资源配置随后（Agents、Workspaces），环境工作台归 Remote 独立分组，手机设备接入归 Connections；原能力全部保留，Copied paths 在 General 内与本地数据／诊断分层，原单字段草稿、expected 和保存范围不扩大。统一底栏入口进入 Overview，Workspaces 从资源导航进入；不新增第二齿轮，显式分区与 Executor ID 仍指向原精确对象；不保留独立 Copy Paths 页面或另造兼容路由。搜索仍能定位路径、`~`／absolute、字号、通知、日志、恢复、Provider 与设备接入。诊断或只读说明不进入偏好保存，不自动触发资源检测或更改健康 Run。
+- 设置结构优化必须落到真实页面。日常 Preferences 在前（Appearance、Notifications、General），Browser 基础设置与 Agent 操作呈现归独立的 [Browser use](#browser-use-与-agent-操作呈现) 组，Message Tool 独立归组（输入与 Mailbox、Prompts），资源配置随后（Agents、Workspaces），环境工作台归 Remote 独立分组，手机设备接入归 Connections；原能力全部保留，Copied paths 在 General 内与本地数据／诊断分层，原单字段草稿、expected 和保存范围不扩大。统一底栏入口进入 Overview，Workspaces 从资源导航进入；不新增第二齿轮，显式分区与 Executor ID 仍指向原精确对象；不保留独立 Copy Paths 页面或另造兼容路由。搜索仍能定位路径、`~`／absolute、字号、通知、日志、恢复、Provider 与设备接入。诊断或只读说明不进入偏好保存，不自动触发资源检测或更改健康 Run。
 
 - 用户要求「继续，直到设置界面质量彻底满意」。设置作为辅助界面，第一眼必须是当前对象和动作；Workspace 与 Executor 可按名字、路径或身份检索，大量资源不靠逐条扫读。Executor 常用身份与外观优先，高级启动配置按需进入；已有 Provider 与 Executor ID 保持不可修改，新 Executor 创建后直接进入编辑。改变分组或检查结果不能丢失展开、输入或焦点。
 - 设置保存仍经既有公开 API，启动配置的说明应明确针对后续启动，不能冒充已改变健康 Run。高级权限动作保持显式选择，不自动批准；所有分区保留原功能、草稿、错误反馈和 status bar。
