@@ -15,7 +15,9 @@ const original: DurableAgentMuxMessage = { sequence: 1, envelope: { schema: 'age
   delivery: { state: 'queued', at: _tailFixtureEpoch(0, 0, 1), reason: 'Original Input ACK missing' } }
 function metadata(record = original): AgentMuxMessageMetadata {
   const { body, ...envelope } = record.envelope
-  return { sequence: record.sequence, envelope, delivery: record.delivery, bodyPreview: body.slice(0, 240), bodyBytes: new TextEncoder().encode(body).byteLength }
+  return { sequence: record.sequence, envelope, delivery: record.delivery,
+    ...(record.deliveryMode ? { deliveryMode: record.deliveryMode } : {}), ...(record.notification ? { notification: record.notification } : {}),
+    bodyPreview: body.slice(0, 240), bodyBytes: new TextEncoder().encode(body).byteLength }
 }
 function props() {
   return { reference: { hostId: 'local', agentSessionId: 'subject' }, direction: 'incoming' as const, items: [metadata()], selectedKey: null as string | null,
@@ -23,6 +25,36 @@ function props() {
     refresh: vi.fn(), loadEarlier: vi.fn(), readMessage: vi.fn(async () => original), onOpen: vi.fn(),
     onCopy: vi.fn(async () => true), onFill: vi.fn(async () => 'Inserted as a draft') }
 }
+
+const notificationKey = { kind: 'prompt' as const, agentSessionId: 'subject', expectedRun: { runId: 'subject-run' }, submissionId: 'notice-input' }
+const notificationStates: { label: string; notification?: NonNullable<AgentMuxMessageMetadata['notification']> }[] = [
+  { label: 'Saved to inbox' },
+  { label: 'Saved to inbox · Awaiting idle notification', notification: { state: 'pending' } },
+  { label: 'Saved to inbox · Notification pending', notification: { state: 'pending', notificationId: 'notice-input', key: notificationKey } },
+  { label: 'Saved to inbox · Notification submitted', notification: { state: 'submitted', notificationId: 'notice-input', key: notificationKey } },
+  { label: 'Saved to inbox · Notification unconfirmed', notification: { state: 'unconfirmed', notificationId: 'notice-input', key: notificationKey, reason: 'Original notification input remains unknown' } }
+]
+it.each(notificationStates.flatMap(state => (['incoming', 'outgoing'] as const).map(direction => ({ ...state, direction }))))(
+  'shows $label for reference $direction without confusing notification and body delivery', async ({ label, notification, direction }) => {
+    const phase = notification?.key && direction === 'outgoing' ? { ...notification, key: { ...notification.key, agentSessionId: 'peer', expectedRun: { runId: 'run-peer' } } } : notification
+    const record: DurableAgentMuxMessage = { ...original, deliveryMode: 'reference', ...(phase ? { notification: phase } : {}),
+      envelope: direction === 'incoming' ? original.envelope : { ...original.envelope,
+        sender: { kind: 'agent-session', agentSessionId: 'subject' }, senderSessionId: 'subject', senderRunId: 'subject-run',
+        recipient: { kind: 'agent-session', agentSessionId: 'peer' }, recipientSessionId: 'peer', recipientRunId: 'run-peer' } }
+    const p = { ...props(), direction, items: [metadata(record)], readMessage: vi.fn(async () => record) }
+    await dom.render(<MailboxA2A {...p} />)
+    expect(dom.container.textContent).toContain(label)
+    expect(dom.container.textContent).not.toContain('delivery pending')
+    expect(p.readMessage).not.toHaveBeenCalled()
+    await dom.render(<MailboxA2A {...p} selectedKey={a2aMessageKey(metadata(record))} />)
+    expect(dom.container.querySelector('.composer-mailbox__source')?.textContent).toContain(label)
+    await dom.click('[aria-label="Message details"]')
+    expect(dom.container.querySelector('.composer-mailbox__record-facts')?.textContent).toContain('Last observed notification')
+    expect(dom.container.textContent).not.toContain('Original Input ACK missing')
+    if (notification?.reason) expect(dom.container.textContent).toContain(notification.reason)
+    if (notification?.notificationId) expect(dom.container.querySelector('.composer-mailbox__record-facts')?.textContent).toContain('Notification inputnotice-input')
+    expect(p.refresh).not.toHaveBeenCalled(); expect(p.loadEarlier).not.toHaveBeenCalled()
+  })
 
 it('browses the original bounded body without parsing it as a new envelope or reading full content', async () => {
   const p = props(), bodyPreview = '<amux>Authored sample</amux>\nLiteral peer body'
