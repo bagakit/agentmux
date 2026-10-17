@@ -44,6 +44,13 @@ export function SessionTakeoverSurface({ source, active, onClose, returnTrigger 
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
   activeRef.current = active && !closing
+  function restoreFocus(node: HTMLElement, target: HTMLElement | null | undefined) {
+    const document = node.ownerDocument
+    const focused = document.activeElement
+    if (visibleRef.current && target?.isConnected && target.ownerDocument === document &&
+      !target.closest('[hidden], [inert], [aria-hidden="true"]') && !target.matches(':disabled, [aria-disabled="true"]') &&
+      (focused === document.body || node.contains(focused))) target.focus({ preventScroll: true })
+  }
   function close(cancel = true) {
     cancelled.current = cancel
     activeRef.current = false
@@ -52,10 +59,11 @@ export function SessionTakeoverSurface({ source, active, onClose, returnTrigger 
   useEffect(() => {
     if (!closing) return
     const timer = setTimeout(() => {
+      const node = surface.current
       onCloseRef.current()
       // Removing an inert local stage may leave focus on BODY. Return explicit
       // cancellation to its exact original trigger after the exit completes.
-      if (cancelled.current && visibleRef.current && returnFocus.current?.isConnected) returnFocus.current.focus({ preventScroll: true })
+      if (cancelled.current && node) restoreFocus(node, returnFocus.current)
     }, matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 140)
     return () => clearTimeout(timer)
   }, [closing])
@@ -83,10 +91,8 @@ export function SessionTakeoverSurface({ source, active, onClose, returnTrigger 
     return () => {
       cancelAnimationFrame(frame)
       held.forEach(({ item, inert }) => { item.inert = inert })
-      if (node.contains(document.activeElement) || document.activeElement === document.body) {
-        const target = previous?.isConnected ? previous : parent?.querySelector<HTMLElement>('.agent-region-header__more')
-        target?.focus({ preventScroll: true })
-      }
+      const target = previous?.isConnected ? previous : parent?.querySelector<HTMLElement>('.agent-region-header__more')
+      restoreFocus(node, target)
     }
   }, [active, closing])
   async function accept(report: AgentMuxSpaceMutationReport) {
