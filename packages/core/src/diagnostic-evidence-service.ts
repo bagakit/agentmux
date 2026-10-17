@@ -19,6 +19,10 @@ export async function inspectDiagnosticEvidence(query: DiagnosticEvidenceQuery, 
     ...(ports.toolkit ? [{ domain: 'toolkit.performance-failure' as const, target: 'execution-id' as const, raw: true, read: 'supported' as const }] : []),
     ...(ports.metrics?.inspectScene ? [{ domain: 'performance.scene' as const, target: 'capture-id' as const, raw: false, read: 'supported' as const }] : []),
     ...(ports.moteContext ? [{ domain: 'mote.context.client' as const, target: 'mote-context' as const, raw: true, read: 'supported' as const }] : []),
+    ...(ports.clientIncidents ? [
+      { domain: 'client.incident' as const, target: 'log-id' as const, raw: false, read: 'supported' as const },
+      { domain: 'client.incident' as const, target: 'recent' as const, raw: false, read: 'supported' as const },
+    ] : []),
     { domain: 'native-recorder-failure', target: 'session-run', raw: false, read: 'not-exposed' },
   ]
   const complete = (report: Omit<AgentMuxDiagnosticEvidenceResult, 'capabilities'>): AgentMuxDiagnosticEvidenceResult => {
@@ -43,6 +47,12 @@ export async function inspectDiagnosticEvidence(query: DiagnosticEvidenceQuery, 
           const result = await client.findReadingDiagnostics({ ...request, hostId: 'local' })
           return { ...result, query: request, records: result.records.map(summary => ({ ...summary, reference: { ...summary.reference, routeHostId: request.hostId } })) }
         } }, bounds)
+    }
+    if (target.domain === 'client.incident') {
+      const port = ports.clientIncidents
+      if (!port) return missing('DIAGNOSTIC_EVIDENCE_SOURCE_UNSUPPORTED')
+      if (port.hostId !== target.hostId) return missing('DIAGNOSTIC_EVIDENCE_SOURCE_UNAVAILABLE')
+      return port.read(target, bounds)
     }
     if (target.domain === 'performance.scene') {
       if (!ports.metrics?.inspectScene) return missing('DIAGNOSTIC_EVIDENCE_SOURCE_UNSUPPORTED')

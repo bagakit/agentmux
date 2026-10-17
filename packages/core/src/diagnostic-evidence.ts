@@ -9,6 +9,8 @@ import type { DeliveryAttempt, DeliveryInputPhase } from './delivery-attempt.js'
 import type { ToolkitPerformanceFailure, ToolkitPerformanceDiagnostics, ToolkitPerformanceIssue } from './toolkit-performance-failure.js'
 import type { AgentMuxMoteContextEvidenceTarget, AgentMuxMoteContextEvidence } from './mote-context-observation.js'
 export type { AgentMuxMoteContextEvidenceTarget, AgentMuxMoteContextEvidence } from './mote-context-observation.js'
+import type { AgentMuxClientIncidentTarget, AgentMuxClientIncidentEvidence } from './client-incident.js'
+export * from './client-incident.js'
 
 export type AgentMuxDeliveryEvidenceTarget = {
   domain: 'delivery.client' | 'delivery.core'
@@ -24,7 +26,7 @@ export type AgentMuxNativeEvidenceTarget = {
   runId: string
 }
 export type AgentMuxToolkitFailureEvidenceTarget = { domain: 'toolkit.performance-failure'; hostId: string; executionId: string }
-export type AgentMuxDiagnosticEvidenceTarget = ReadingDiagnosticTarget | PerformanceSceneEvidenceTarget | AgentMuxDeliveryEvidenceTarget | AgentMuxNativeEvidenceTarget | AgentMuxToolkitFailureEvidenceTarget | AgentMuxMoteContextEvidenceTarget
+export type AgentMuxDiagnosticEvidenceTarget = ReadingDiagnosticTarget | PerformanceSceneEvidenceTarget | AgentMuxDeliveryEvidenceTarget | AgentMuxNativeEvidenceTarget | AgentMuxToolkitFailureEvidenceTarget | AgentMuxMoteContextEvidenceTarget | AgentMuxClientIncidentTarget
 export type AgentMuxDeliveryEvidence = {
   kind: 'delivery'
   source: 'client' | 'core'
@@ -60,7 +62,7 @@ export type AgentMuxToolkitFailureEvidence = {
   coverage: 'latest-only'
   omissions: Array<'raw-query-budget'>
 }
-export type AgentMuxDiagnosticEvidenceData = ReadingDiagnosticRecord | ReadingDiagnosticFindResult | PerformanceSceneEvidence | AgentMuxDeliveryEvidence | AgentMuxToolkitFailureEvidence | AgentMuxMoteContextEvidence
+export type AgentMuxDiagnosticEvidenceData = ReadingDiagnosticRecord | ReadingDiagnosticFindResult | PerformanceSceneEvidence | AgentMuxDeliveryEvidence | AgentMuxToolkitFailureEvidence | AgentMuxMoteContextEvidence | AgentMuxClientIncidentEvidence
 /** An existing client owner, injected by the host. Core owns no UI or source state. */
 export type AgentMuxMoteContextEvidencePort = {
   hostId: string
@@ -76,7 +78,7 @@ export type AgentMuxDiagnosticEvidenceInspectParams = {
   budget?: Partial<DiagnosticEvidenceBudget>
 }
 export type AgentMuxDiagnosticEvidenceResult = DiagnosticEvidenceReport<AgentMuxDiagnosticEvidenceTarget, AgentMuxDiagnosticEvidenceData> & {
-  capabilities: Array<{ domain: AgentMuxDiagnosticEvidenceTarget['domain']; target: 'log-id' | 'session-run' | 'execution-id' | 'mote-context' | 'capture-id' | 'reading-lifecycle'; raw: boolean; read: 'supported' | 'not-exposed' }>
+  capabilities: Array<{ domain: AgentMuxDiagnosticEvidenceTarget['domain']; target: 'log-id' | 'recent' | 'session-run' | 'execution-id' | 'mote-context' | 'capture-id' | 'reading-lifecycle'; raw: boolean; read: 'supported' | 'not-exposed' }>
 }
 export type AgentMuxDiagnosticAuthorityObservation = {
   authority: DiagnosticEvidenceAuthority | null
