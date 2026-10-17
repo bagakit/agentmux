@@ -32,7 +32,9 @@
 | PTY ordered bytes、屏幕续接与终端连续阅读 | [Terminal](terminal-reading.md) |
 | 文字密度、气泡／身份组、控件与浮层 | [对话呈现](../presentation/conversation-mode.md) |
 
-对话模式是同一 Session 的呈现与阅读方式，不是新的 Session、Runtime 或完整历史存储。要求、当前实现与验证结果分别读取：本文不因组件或 API 已存在就宣称端到端通过；已发现的接线缺口不删减本行为合同。
+InApp Conversation 指 AgentMux App 内的对话模式，是同一 Session 的呈现与阅读方式，不是新的 Session、Runtime 或完整历史存储。App 内的对话／Terminal 切换保留原 Session、输入与执行身份；Mobile 通过原设备接入复用共同对话组件和语义，不因接入设备另立一套会话语义。设备连接与授权仍沿[手机版 Relay 连接](public-control.md#手机版-relay-连接)，设置入口的分类沿[设置页的信息架构](settings-and-observation.md#设置页的信息架构)。
+
+要求、当前实现与验证结果分别读取：本文不因组件或 API 已存在就宣称端到端通过；已发现的接线缺口不删减本行为合同。
 
 ## 产品对象与辨识边界
 
