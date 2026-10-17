@@ -22,10 +22,13 @@ it('uses the single root pen leaf through actual current Workflow and native con
   act(() => root.render(<><WorkflowStatusGlyph status="running" /><WorkflowStatusGlyph status="running" recorded /><SemanticIcon name="status.working" /></>))
   const native = createSemanticIconElement('status.working', document, { animation: 'work', size: 12 }); host.append(native)
   expect(host.querySelectorAll('[data-icon-animation="work"]')).toHaveLength(2)
-  expect(host.querySelectorAll('svg')).toHaveLength(4)
+  expect(host.querySelectorAll('svg.semantic-icon')).toHaveLength(4)
   expect(host.querySelector('[data-semantic-icon="status.running"]')!.closest('[data-icon-animation]')).toBeNull()
-  for (const svg of host.querySelectorAll('[data-icon-animation="work"] svg')) {
-    expect(svg.querySelector('use')!.getAttribute('href')).toBe(semanticIconHref('status.working'))
+  const workingIcons = host.querySelectorAll('[data-icon-animation="work"] > svg.semantic-icon')
+  expect(workingIcons).toHaveLength(2)
+  for (const svg of workingIcons) {
+    expect(svg.querySelector('.semantic-icon-work-body use')!.getAttribute('href')).toBe(semanticIconHref('status.working'))
+    expect(svg.querySelector('.semantic-icon-work-pen use')!.getAttribute('href')).toBe('#agentmux-icon-status.working--work-pen')
     expect(svg.querySelector('path')).toBeNull() // Geometry is retained once in the root, never duplicated per instance.
   }
   const pen = symbol().querySelector('[data-semantic-icon-part="writing-pen"]')!
