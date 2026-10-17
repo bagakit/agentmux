@@ -19,6 +19,7 @@ import { projectNativeSourceFacts } from '../../../shared/agent-native-source'
 import { CONNECTION_UNRECOVERABLE_DETAIL } from '../lib/session-state'
 import { originalFrontendRecovery } from '../lib/session-original-recovery'
 import { sessionExitPresentation, sessionFrontendPresentation, sessionRecoveryClassName, sessionRecoveryState } from '../lib/session-recovery-banner'
+import { currentContinuitySupervision } from '../lib/continuity-supervision'
 import { workspaceRootForPath } from '../lib/workbench-tabs'
 import { createSessionProjectFileContextSelector } from '../lib/session-project-file-context'
 import { api } from '../lib/api'
@@ -64,7 +65,7 @@ import { useWorkbenchBrowserPresentation, workbenchSessionStageHostId, type Work
 import { agentDisplayName } from '../lib/workbench-tabs'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { moteConversationIdentity, useMoteConversationOwner } from '../lib/mote-conversation-identity'
-import { agentContinuityPresentation } from '../lib/continuity-presentation'
+import { agentContinuityPresentation, currentRunRecoveryOperation } from '../lib/continuity-presentation'
 import { type ConversationItemRef } from '@agentmux/core/conversation'
 import { sameWorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
@@ -1014,6 +1015,9 @@ export function SessionPane({
     ? session.continuityOperations?.[frontendRecoveryIntent.current?.operationId ?? ''] ?? session.continuity : undefined
   const frontendRecovery = frontendOperation?.agentSessionId === session.id &&
     (frontendOperation.newRun ?? frontendOperation.previousRun).runId === session.control.run.runId ? frontendOperation : undefined
+  const recoveryOperation = session.kind === 'agent' && exited ? currentRunRecoveryOperation(session) : frontendRecovery
+  const recoveryJoin = session.kind === 'agent' && recoveryOperation ? currentContinuitySupervision(session) : null
+  const recoverySupervision = recoveryJoin?.attempt.operationId === recoveryOperation?.operationId ? recoveryJoin?.root.supervision : undefined
   const restoreFailed = continuityNotice || session.status.state === 'error' && coreRestorePresentation?.kind !== 'unconfirmed'
   const restorePresentation = coreRestorePresentation?.kind === 'restoring' ? { ...coreRestorePresentation, phase: 'recovering' as const } : pendingAgentRestore ? {
     phase: recovering ? 'recovering' as const : restoreFailed ? 'failed' as const : 'parked' as const,
@@ -1095,9 +1099,11 @@ export function SessionPane({
                   {failedFrontend && session.kind === 'agent' ? <><dt>Terminal exit code</dt><dd>{session.terminalFrontend?.exitCode}</dd>
                     <dt>Backend state</dt><dd>{session.terminalFrontend?.backendState}</dd>
                     <dt>Native conversation</dt><dd>{session.nativeHandle?.kind === 'provider' ? session.nativeHandle.sessionId : 'Unconfirmed'}</dd></> : null}
-                  {frontendRecovery ? <><dt>Recovery operation</dt><dd>{frontendRecovery.operationId}</dd>
-                    <dt>Recovery status</dt><dd>{frontendRecovery.kind} · {frontendRecovery.reason}</dd>
-                    {frontendRecovery.error ? <><dt>Recovery details</dt><dd>{frontendRecovery.error}</dd></> : null}</> : null}
+                  {recoveryOperation ? <><dt>Recovery operation</dt><dd>{recoveryOperation.operationId}</dd>
+                    <dt>Recovery status</dt><dd>{recoveryOperation.kind} · {recoveryOperation.reason}</dd>
+                    {recoverySupervision ? <><dt>Recovery phase</dt><dd>{recoverySupervision.phase}</dd>
+                      <dt>Recovery attempts</dt><dd>{recoverySupervision.attemptCount} of {recoverySupervision.attemptLimit}</dd></> : null}
+                    <dt>Recovery details</dt><dd>{recoveryOperation.error?.trim() || 'The recovery attempt did not report a specific cause. Read the original output for details.'}</dd></> : null}
                 </dl> }} />
 
   return (
