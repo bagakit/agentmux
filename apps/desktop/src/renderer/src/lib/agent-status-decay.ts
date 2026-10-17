@@ -95,16 +95,25 @@ export function useAgentStatusDecay(): void {
   const decay = useAppStore((state) => state.decayStaleAgentStatuses)
   useEffect(() => {
     decay(Date.now())
-    const delay = nextAgentStatusDecayDelayMs(useAppStore.getState().sessions, Date.now())
+    const sampled = useAppStore.getState().sessions, now = Date.now()
+    const delay = nextAgentStatusDecayDelayMs(sampled, now)
     if (delay === null) return
-    const timer = window.setTimeout(() => {
-      const observed = useAppStore.getState().sessions
-      decay(Date.now())
-      // Native currentActivity can expire while display status is already running.
-      // Invalidate cached presentation once at its Core deadline; keep every fact
-      // and Session object intact. The next effect has no expired deadline to arm.
-      if (useAppStore.getState().sessions === observed) useAppStore.setState({ sessions: [...observed] })
-    }, delay)
+    const expiring = new Set(sampled.filter(session => {
+      if (session.kind !== 'agent') return false
+      const remaining = agentActivityRemainingMs(observeAgentSession(session, now), now)
+      return remaining > 0 && remaining <= delay
+    }))
+    const timer = window.setTimeout(() => useAppStore.setState(state => {
+      const decayed = decayStaleAgentStatuses(state.sessions, Date.now())
+      let refreshed = decayed
+      // A scoped shallow selector must see the expired subject, not only a new list.
+      // Keep its original facts/control and every unrelated Session reference intact.
+      for (let index = 0; index < decayed.length; index++) if (expiring.has(decayed[index]!)) {
+        if (refreshed === decayed) refreshed = [...decayed]
+        refreshed[index] = { ...decayed[index]! }
+      }
+      return refreshed === state.sessions ? state : { sessions: refreshed }
+    }), delay)
     return () => window.clearTimeout(timer)
   }, [sessions, decay])
 }
