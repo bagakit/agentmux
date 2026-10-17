@@ -13,6 +13,10 @@ const owned = await fs.mkdtemp(path.join(os.tmpdir(),'amux-settings-home-'))
 const env = {...process.env,TMPDIR:owned,TEMP:owned,TMP:owned}; delete env.ELECTRON_RUN_AS_NODE
 const inputs = new Map(), runs = []
 const navigationMutant = process.argv.includes('--navigation-mutation')
+const providerMutant = process.argv.includes('--provider-scroll-mutation')
+const takeoverMutant = process.argv.includes('--takeover-scroll-mutation')
+assert.ok([navigationMutant,providerMutant,takeoverMutant].filter(Boolean).length<=1,'One native source mutation per receipt')
+const nativeMutant = navigationMutant || providerMutant || takeoverMutant
 const pageArguments = process.argv.filter(argument => argument.startsWith('--pages='))
 assert.ok(pageArguments.length <= 1, 'One explicit page selection')
 const requestedPages = pageArguments.length ? pageArguments[0].slice('--pages='.length).split(',') : null
@@ -20,7 +24,7 @@ if (requestedPages) {
   assert.ok(requestedPages.every(Boolean), 'Page selection is nonempty')
   assert.equal(new Set(requestedPages).size, requestedPages.length, 'Page selection contains no duplicate')
 }
-let navigationMutationLoads = 0
+let navigationMutationLoads = 0, providerMutationLoads = 0, takeoverMutationLoads = 0
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 await fs.mkdir(evidence,{recursive:true})
 async function bind(file) {
@@ -35,7 +39,7 @@ async function bind(file) {
 try {
   for (const file of ['index.html','entry.mjs','main.cjs','vitest.config.mts','scenario.md']) await bind(path.join(fixture,file))
   for (const file of ['apps/desktop/scripts/verify-settings-home.mjs','apps/desktop/test/settings-home.test.tsx','apps/desktop/test/settings-overview.test.tsx']) await bind(path.join(root,file))
-  for (const mode of process.argv.includes('--visual-only') || navigationMutant ? [] : ['baseline','expanded','entry','drafts','exact','destination','restored']) {
+  for (const mode of process.argv.includes('--visual-only') || nativeMutant ? [] : ['baseline','expanded','disclosure','entry','drafts','exact','destination','restored']) {
     const directory = path.join(evidence,mode), temporary = path.join(owned,mode), output = []
     await fs.mkdir(directory)
     await fs.mkdir(temporary)
@@ -66,6 +70,14 @@ try {
     plugins:[{name:'bind-settings-home-product',enforce:'pre',async transform(code,id){
       const file=id.split('?')[0]
       if(file.startsWith(root+'/')&&!file.includes('/node_modules/'))await bind(file)
+      if(providerMutant&&file.endsWith('/components/settings/SettingsResourceLibrary.tsx')) {
+        const anchor='left: direction * list.current.clientWidth * .75'
+        assert.equal(code.split(anchor).length,2,'One actual provider scroll control')
+        providerMutationLoads++
+        const mutated=code.replace(anchor,'left: 0')
+        await fs.writeFile(path.join(evidence,'provider-mutant.tsx'),mutated)
+        return {code:mutated,map:null}
+      }
       if(navigationMutant&&file.endsWith('/components/settings/SettingsSidebarNavigation.tsx')) {
         const anchor="key={[...expanded].sort().join(' ')}"
         assert.equal(code.split(anchor).length,2,'One actual navigation geometry rebind')
@@ -75,18 +87,38 @@ try {
         return {code:mutated,map:null}
       }
     }}],
-    css:{postcss:{plugins:[{postcssPlugin:'bind-settings-home-css',async OnceExit(css){const files=new Set();css.walk(node=>{if(node.source?.input?.file)files.add(node.source.input.file)});for(const file of files)if(file.startsWith(root+'/')&&!file.includes('/node_modules/'))await bind(file)}}]}},
+    css:{postcss:{plugins:[{postcssPlugin:'bind-settings-home-css',async OnceExit(css){
+      const files=new Set();css.walk(node=>{if(node.source?.input?.file)files.add(node.source.input.file)})
+      for(const file of files)if(file.startsWith(root+'/')&&!file.includes('/node_modules/'))await bind(file)
+      const before=takeoverMutationLoads
+      if(takeoverMutant) css.walkDecls('position',declaration=>{
+        if(!declaration.source?.input?.file?.endsWith('/components/settings/agent-takeover-settings.css')||declaration.value!=='static'||declaration.parent?.parent?.name!=='container'||declaration.parent.parent.params!=='agent-control-settings (max-width: 639px)')return
+        assert.equal(declaration.parent.selector,'.browser-agent-control-settings .browser-agent-preview','Exact compact preview owner')
+        takeoverMutationLoads++;declaration.value='sticky'
+      })
+      if(takeoverMutationLoads>before) await fs.writeFile(path.join(evidence,'takeover-mutant.css'),css.toString())
+    }}]}},
     build:{target:'esnext',outDir:compiled,emptyOutDir:true,minify:false}})
   await fs.cp(compiled,path.join(evidence,'compiled'),{recursive:true})
   const visual = path.join(evidence,'visual'), stderr=[]
   await fs.mkdir(visual)
-  const capture = await runProbeProcess(require('electron'),[path.join(fixture,'main.cjs'),path.join(compiled,'index.html'),owned,visual,navigationMutant?'navigation':'full',requestedPages?.join(',')??''],{
-    cwd:root,env,timeoutMs:180000,onLine:line=>stderr.push(line)
+  if(takeoverMutant) assert.equal(takeoverMutationLoads,1,'One exact compact preview declaration is mutated')
+  const capture = await runProbeProcess(require('electron'),[path.join(fixture,'main.cjs'),path.join(compiled,'index.html'),owned,visual,navigationMutant?'navigation':providerMutant?'provider-scroll':takeoverMutant?'takeover-scroll':'full',requestedPages?.join(',')??''],{
+    cwd:root,env,timeoutMs:600000,onLine:line=>stderr.push(line)
   })
   await fs.writeFile(path.join(visual,'stderr.log'),stderr.join('\n'))
   const render = JSON.parse(await fs.readFile(path.join(visual,'render.json'),'utf8'))
   assert.equal(capture.timedOut,false)
-  if (navigationMutant) {
+  if (takeoverMutant) {
+    assert.equal(capture.exitCode,1)
+    assert.equal(render.failure?.name,'AssertionError')
+    assert.match(render.failure.message,/Compact takeover preview scrolls away from later controls/u)
+  } else if (providerMutant) {
+    assert.equal(providerMutationLoads,1)
+    assert.equal(capture.exitCode,1)
+    assert.equal(render.failure?.name,'AssertionError')
+    assert.match(render.failure.message,/Provider forward control reveals more entries/u)
+  } else if (navigationMutant) {
     assert.equal(navigationMutationLoads,1,'The actual navigation mutant was consumed once')
     assert.equal(capture.exitCode,1)
     assert.equal(render.failure?.name,'AssertionError')
@@ -98,6 +130,10 @@ try {
     assert.ok(render.scope.resolved.length > 0)
     for (const entry of render.catalog.filter(entry=>render.scope.resolved.includes(entry.id))) for (const theme of ['dark','light']) {
       assert.ok(render.frames.some(frame=>frame.page===entry.id&&frame.theme===theme&&frame.position==='top'),'Every actual page is captured in both themes: '+entry.id)
+    }
+    for(const id of render.scope.resolved.filter(id=>id!=='overview'&&id!=='lark')) {
+      assert.ok(render.interactions.some(event=>event.kind==='page-interactions-complete'&&event.page===id&&event.actions>0&&event.implicitSaves===0),'Every selected original page consumes input without an implicit save: '+id)
+      for(const theme of ['dark','light']) assert.ok(render.frames.some(frame=>frame.page===id&&frame.theme===theme&&frame.file===`page-${id}-compact-${theme}.png`),'Every selected page has both compact themes: '+id)
     }
   }
   const ts=require('typescript'), callers=[]
@@ -111,15 +147,15 @@ try {
   const relevant = [...inputs]
   assert.ok(relevant.length>0)
   for (const [file,digest] of relevant) assert.equal(sha(await fs.readFile(file)),digest,'Changed candidate source: '+path.relative(root,file))
-  const receipt={passed:true,captureOnly:!navigationMutant,aestheticReview:'not-performed',assertionRed:navigationMutant,testEvidence:runs.length?'passed-with-owning-mutations':navigationMutant?'native-navigation-assertion-red':'not-run',
+  const receipt={passed:true,captureOnly:!nativeMutant,aestheticReview:'not-performed',assertionRed:nativeMutant,testEvidence:runs.length?'passed-with-owning-mutations':nativeMutant?'native-control-assertion-red':'not-run',
     runs,capture,render,callers,inputs:Object.fromEntries(relevant.map(([file,digest])=>[path.relative(root,file),digest])),boundary:render.boundary}
   await fs.writeFile(path.join(evidence,'receipt.json'),JSON.stringify(receipt,null,2))
   await fs.writeFile(path.join(evidence,'review.md'),['# Settings Home visual review','',render.boundary,'',
-    navigationMutant ? 'The owning mutation failed the expected native geometry assertion. This does not establish aesthetic approval.' : 'Capture succeeded; independent aesthetic review is still required. Read every complete frame before ranking the pages.','',
+    nativeMutant ? 'The owning mutation failed the expected native geometry assertion. This does not establish aesthetic approval.' : 'Capture succeeded; independent aesthetic review is still required. Read every complete frame before ranking the pages.','',
     '| Page | Theme | Position | Screenshot |','| --- | --- | --- | --- |',
     ...render.frames.map(frame=>`| ${frame.page} | ${frame.theme} | ${frame.position} | [${frame.file}](visual/${frame.file}) |`),''].join('\n'))
-  if (!navigationMutant) await fs.writeFile(path.join(root,'.tmp/settings-home/latest.json'),JSON.stringify({evidence,receipt:path.join(evidence,'receipt.json')},null,2))
-  console.log(JSON.stringify({passed:true,assertionRed:navigationMutant,evidence,pages:render.scope?.resolved.length??render.catalog.length+1,frames:render.frames.length,aestheticReview:'not-performed'}))
+  if (!nativeMutant) await fs.writeFile(path.join(root,'.tmp/settings-home/latest.json'),JSON.stringify({evidence,receipt:path.join(evidence,'receipt.json')},null,2))
+  console.log(JSON.stringify({passed:true,assertionRed:nativeMutant,evidence,pages:render.scope?.resolved.length??render.catalog.length+1,frames:render.frames.length,aestheticReview:'not-performed'}))
 } finally {
   assert.deepEqual(await listProbeProcesses(-1,owned),[],'Owned private Renderer processes have exited')
   await fs.rm(owned,{recursive:true,force:true})
