@@ -460,7 +460,7 @@ it('shows ordered User Messages and wires retry, exact Copy and archive without 
   }
   await action('Send queued message')
   expect(send).toHaveBeenCalledExactlyOnceWith('agent-1', 'queued-1')
-  const copies = [...mailbox().querySelectorAll<HTMLButtonElement>('.composer-outbox__actions [aria-label="复制这条待发消息"]')]
+  const copies = [...mailbox().querySelectorAll<HTMLButtonElement>('.composer-outbox .composer-mailbox__record-actions [aria-label="复制这条待发消息"]')]
   expect(copies).toHaveLength(2)
   for (const button of copies) await act(async () => button.click())
   expect(copy.mock.calls).toEqual([['First exact words'], ['Second exact words']])

@@ -3,7 +3,7 @@ import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.
 import { act } from 'react'
 import { expect, it, vi } from 'vitest'
 import type { AgentMuxMessageMetadata, DurableAgentMuxMessage } from '@agentmux/core'
-import { MailboxA2A, a2aMessageKey } from '../src/renderer/src/components/MailboxA2A'
+import { MailboxA2A, a2aMessageKey, a2aMessageDeliveryLabel } from '../src/renderer/src/components/MailboxA2A'
 import { composerDOM } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM()
@@ -32,6 +32,7 @@ const notificationStates: { label: string; notification?: NonNullable<AgentMuxMe
   { label: 'Saved to inbox · Awaiting idle notification', notification: { state: 'pending' } },
   { label: 'Saved to inbox · Notification pending', notification: { state: 'pending', notificationId: 'notice-input', key: notificationKey } },
   { label: 'Saved to inbox · Notification submitted', notification: { state: 'submitted', notificationId: 'notice-input', key: notificationKey } },
+  { label: 'Saved to inbox · Notification unconfirmed', notification: { state: 'unconfirmed' } },
   { label: 'Saved to inbox · Notification unconfirmed', notification: { state: 'unconfirmed', notificationId: 'notice-input', key: notificationKey, reason: 'Original notification input remains unknown' } }
 ]
 it.each(notificationStates.flatMap(state => (['incoming', 'outgoing'] as const).map(direction => ({ ...state, direction }))))(
@@ -43,13 +44,18 @@ it.each(notificationStates.flatMap(state => (['incoming', 'outgoing'] as const).
         recipient: { kind: 'agent-session', agentSessionId: 'peer' }, recipientSessionId: 'peer', recipientRunId: 'run-peer' } }
     const p = { ...props(), direction, items: [metadata(record)], readMessage: vi.fn(async () => record) }
     await dom.render(<MailboxA2A {...p} />)
-    expect(dom.container.textContent).toContain(label)
+    expect(a2aMessageDeliveryLabel(metadata(record))).toBe(label)
+    expect(dom.container.querySelector('.composer-mailbox__row-head')?.textContent).not.toContain(label)
+    if (notification?.state === 'pending' || notification?.state === 'unconfirmed') {
+      expect(dom.container.querySelector('.composer-mailbox__record-status [title]')?.getAttribute('title')).toBe(label)
+    }
     expect(dom.container.textContent).not.toContain('delivery pending')
     expect(p.readMessage).not.toHaveBeenCalled()
     await dom.render(<MailboxA2A {...p} selectedKey={a2aMessageKey(metadata(record))} />)
-    expect(dom.container.querySelector('.composer-mailbox__source')?.textContent).toContain(label)
+    if (notification?.state === 'unconfirmed') expect(dom.container.querySelector('.composer-mailbox__record-status')?.textContent).toBe('Notification unconfirmed')
     await dom.click('[aria-label="Message details"]')
     expect(dom.container.querySelector('.composer-mailbox__record-facts')?.textContent).toContain('Last observed notification')
+    expect(dom.container.querySelector('.composer-mailbox__record-facts')?.textContent).toContain(label)
     expect(dom.container.textContent).not.toContain('Original Input ACK missing')
     if (notification?.reason) expect(dom.container.textContent).toContain(notification.reason)
     if (notification?.notificationId) expect(dom.container.querySelector('.composer-mailbox__record-facts')?.textContent).toContain('Notification inputnotice-input')
@@ -74,7 +80,7 @@ it('reads exactly one selected original and copies its unchanged body, independe
   await dom.render(<MailboxA2A {...p} selectedKey={a2aMessageKey(p.items[0]!)} />)
   expect(p.readMessage).toHaveBeenCalledExactlyOnceWith('message-one')
   expect(dom.container.textContent).toContain('Original line 80')
-  expect(dom.container.textContent).toContain('Reading does not acknowledge this message or accept its task')
+  expect(dom.container.querySelector('.log-turn')).not.toBeNull()
   const copy = dom.container.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')
   expect(copy).not.toBeNull()
   await act(async () => copy!.click())
@@ -164,11 +170,15 @@ it('retains a selected original while a new bounded page no longer contains its 
   expect(dom.container.textContent).toContain('Original line 80')
 })
 
-it.each([['timed-out', 'Delivery timed out'], ['cancelled', 'Delivery cancelled'], ['accepted', 'Agent acceptance recorded'], ['replied', 'Reply recorded']] as const)('shows original %s delivery in the actual message list', async (state, expected) => {
-  const p = props()
-  await dom.render(<MailboxA2A {...p} items={[{ ...metadata(), delivery: { state, at: _tailFixtureEpoch(0, 0, 1) } }]} />)
-  expect(dom.container.textContent).toContain(expected)
-  if (state !== 'replied') expect(dom.container.textContent).not.toContain('Reply recorded')
+it.each([['timed-out', 'Delivery timed out'], ['cancelled', 'Delivery cancelled'], ['accepted', 'Agent acceptance recorded'], ['replied', 'Reply recorded']] as const)('preserves original %s delivery in the record and keeps list risks visible', async (state, expected) => {
+  const p = props(), item = { ...metadata(), delivery: { state, at: _tailFixtureEpoch(0, 0, 1) } }
+  await dom.render(<MailboxA2A {...p} items={[item]} />)
+  if (state === 'timed-out' || state === 'cancelled') expect(dom.container.querySelector('.composer-mailbox__record-status')?.textContent).toContain(expected)
+  else expect(dom.container.querySelector('.composer-mailbox__record-status')).toBeNull()
+  expect(p.readMessage).not.toHaveBeenCalled()
+  await dom.render(<MailboxA2A {...p} items={[item]} selectedKey={a2aMessageKey(item)} />)
+  await dom.click('[aria-label="Message details"]')
+  expect(dom.container.querySelector('.composer-mailbox__record-facts')?.textContent).toContain(expected)
 })
 
 
