@@ -4,6 +4,7 @@ import { BotConfirmationCode } from '../BotConfirmationCode'
 import type { ConnectionManagementModel } from './useConnectionManagementSetup'
 import { ConnectionGuidedTask } from './ConnectionGuidedTask'
 import { ConnectionManagementConfiguration } from './ConnectionManagementConfiguration'
+import { ConnectionRequestTrace } from './ConnectionRequestTrace'
 import { BotSetupGuide, type BotSetupGuideStage } from './BotSetupGuide'
 
 const titles = { checking: 'Checking your sign-in', waiting: 'Scan to sign in', scanned: 'Confirm on your phone', handoff: 'Reading your account', account: 'Is this the right account?', confirmed: 'Account confirmed', expired: 'This sign-in code expired', unknown: 'Sign-in result not confirmed', revised: 'This application changed' } as const
@@ -64,6 +65,7 @@ export function ConnectionManagementSetup({ record, model, platformLabel, onBack
     </div>
     {guided && !managementOpen ? <ConnectionGuidedTask record={record} model={model} onLibrary={onLibrary} onConsole={onConsole} /> : null}
     {configuration || hasConfigurationActivity ? model.task.kind === 'publication' && configuration ? <ConnectionManagementConfiguration record={record} model={model} current onConsole={onConsole} onBack={onLibrary} /> : <details open={managementOpen} className="connector-optional" data-guided-management onToggle={event => { const open = event.currentTarget.open; setManagementOpen(open); if (!open && managementOpen && configuration) model.returnToGuided() }}><summary>Manage individual settings</summary><ConnectionManagementConfiguration record={record} model={model} current={!!configuration} onConsole={onConsole} onBack={onLibrary} /></details> : null}
+    <ConnectionRequestTrace source={reading ? { kind: 'setup', operationId: reading.id } : null} revision={view?.operation?.revision} />
     {initial && !model.fresh && choices.length ? <div className="connector-management__originals">{choices.map(({ input, operation }) => <button key={input.operationId} className="connector-enrollment__previous" data-management-original={input.operationId} onClick={() => model.choose(input)}>
       <strong>{operation?.authentication?.stage === 'confirmed' ? 'View confirmed sign-in' : 'Resume original sign-in'}</strong><span>{input.operationId}</span>
     </button>)}{model.catalog?.value?.next ? <button className="small-button" disabled={model.listing} onClick={() => void model.list(model.catalog!.value!.next!)}>More sign-ins</button> : null}</div> : null}

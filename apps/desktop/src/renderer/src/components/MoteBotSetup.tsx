@@ -7,6 +7,7 @@ import { generatedBotName } from '../lib/bot-creation-preset'
 import { SelectionField } from './SelectionField'
 import { BotConfirmationCode } from './BotConfirmationCode'
 import { ConnectionProfileResult } from './ConnectionProfileResult'
+import { ConnectionRequestTrace } from './settings/ConnectionRequestTrace'
 import { BotSetupGuide, type BotSetupGuideStage } from './settings/BotSetupGuide'
 import '../styles/connector-experience.css'
 
@@ -481,6 +482,7 @@ export function MoteBotSetup({
       )}
       </div>
       </div>
+      <ConnectionRequestTrace source={enrollment ? { kind: 'enrollment', operationId: enrollment.operationId } : null} revision={enrollment?.revision} />
       {resumeId || selected ? (
         <details className="mote-bot-history">
           <summary>Create another bot</summary>

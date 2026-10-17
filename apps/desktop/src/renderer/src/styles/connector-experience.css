@@ -102,3 +102,21 @@
 .mote-bot-name input { width: 100%; min-width: 0; }
 .mote-bot-name input[readonly] { color: var(--text-2); }
 .mote-bot-name small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
+.connector-request-trace { min-width: 0; margin-block: var(--sp-5); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
+.connector-request-trace > summary { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-4); cursor: pointer; font-size: var(--fs-body); }
+.connector-request-trace > summary strong { font-weight: 550; }
+.connector-request-trace > summary > span { color: var(--text-3); font-size: var(--fs-meta); }
+.connector-request-trace__body { display: grid; gap: var(--sp-3); min-width: 0; padding: 0 var(--sp-4) var(--sp-4); }
+.connector-request-trace__body p { margin: 0; font-size: var(--fs-meta); color: var(--text-3); line-height: 1.65; }
+.connector-request-trace__actions { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+.connector-request-trace__scroll { overflow: auto; max-height: 300px; overscroll-behavior: contain; }
+.connector-request-trace table { border-collapse: collapse; text-align: left; width: 100%; min-width: 650px; font-size: var(--fs-meta); }
+.connector-request-trace th, .connector-request-trace td { padding: var(--sp-3); border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+.connector-request-trace th { position: sticky; top: 0; background: var(--surface-1); color: var(--text-3); font-weight: 500; }
+.connector-request-trace td strong, .connector-request-trace td small { display: block; font-weight: 400; }
+.connector-request-trace td small { color: var(--text-3); }
+.connector-request-trace td[data-result='unknown'] { color: var(--amber-text); }
+.connector-request-trace td code { overflow-wrap: anywhere; font-size: var(--fs-micro); }
+.connector-request-trace__identity { display: flex; flex-wrap: wrap; gap: var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); }
+.connector-request-trace__identity code { overflow-wrap: anywhere; }
+.connector-request-trace__feedback:empty { display: none; }
