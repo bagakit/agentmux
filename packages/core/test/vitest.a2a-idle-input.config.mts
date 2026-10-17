@@ -7,13 +7,14 @@ const root = resolve(import.meta.dirname, '../../..')
 const mutations: Record<string, [string, string, string]> = {
   'native-queue-becomes-steer': ['providers/codex-native-input.ts', "if (frozen.operation === 'queue-idle') {", 'if (false) {'],
   'native-idle-target-is-omitted': ['prompt-submission.ts', '...(control?.idleOnly ? { idleOnly: true } : {})', '...{}'],
-  'completion-fence-is-omitted': ['prompt-submission.ts', '} else if (agentTurnCompletionIdentity(current) !== expectedCompletionId || current.promptCompletionAdmission?.completionId === expectedCompletionId) {', '} else if (false) {'],
+  'completion-fence-is-omitted': ['prompt-submission.ts', '} else if (agentTurnCompletionIdentity(current) !== expectedCompletionId || current.promptCompletionAdmission?.completionId === expectedCompletionId && !independentIdleNotification) {', '} else if (false) {'],
   'final-input-fence-is-omitted': ['prompt-submission.ts', 'if (control?.idleOnly && currentRun.acceptedInputBytes !== control.idleOnly.inputByte)', 'if (false)'],
   'notification-identity-is-omitted': ['prompt-submission.ts', 'message.questionReply, message.a2aNotificationId])', 'message.questionReply])'],
   'edited-notification-is-adopted': ['native-input-adoption.ts', "item.contentParts.length === 1 && item.contentParts[0]?.kind === 'text' && item.contentParts[0].text === intent.prompt", 'true'],
   'native-queue-receipt-is-unchecked': ['providers/codex-native-input.ts', "if (typeof queued?.id !== 'string' || !queued.id || queued.clientUserMessageId !== frozen.clientCorrelation ||\n                !isDeepStrictEqual(queued.input, input)) throw unavailable()", 'void queued'],
   'notification-identity-is-not-restored': ['prompt-submission-record.ts', "...(message.a2aNotificationId === undefined ? {} : { a2aNotificationId: string(message.a2aNotificationId, 'original A2A notification identity') }),", ''],
   'independent-idle-notification-is-blocked': ['prompt-submission.ts', ' && !independentIdleNotification)) {', ')) {'],
+  'independent-idle-completion-is-consumed': ['prompt-submission.ts', 'completionId === expectedCompletionId && !independentIdleNotification)', 'completionId === expectedCompletionId)'],
 }
 export default defineConfig({ root, plugins: [{ name: 'original-workspace-source', enforce: 'pre', resolveId(id) {
   const match = id.match(/^@agentmux\/([^/]+)(.*)$/u)
