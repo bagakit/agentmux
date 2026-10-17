@@ -110,6 +110,11 @@ it('the real Agent hover consumes one entity while both exact original records a
 
 it.each([true, false])('a frozen recap keeps exact coalescence=%s distinct from an independent in-flight native input', async linked => {
  const scene = await seed(), { host, root } = mount()
+ const observe = vi.mocked(api.conversation.observeConversation).getMockImplementation()!, parked = vi.fn()
+ vi.mocked(api.conversation.observeConversation).mockImplementation(async (...args) => {
+  const handle = await observe(...args)
+  return { ...handle, dispose() { parked(); handle.dispose() } }
+ })
  const request = { token: {}, id: 'private-input-preview', control: scene.session.control, anchor: document.createElement('button'), pinned: false, sourceKey: 'original-source' } as AgentInformationPreview
  const render = (pinned = false, enabled = true) => act(async () => root.render(<AgentInputRecap request={{ ...request, pinned }} enabled={enabled} available />))
  await render(); await wait(() => expect(rows(host)).toHaveLength(1))
@@ -131,8 +136,9 @@ it.each([true, false])('a frozen recap keeps exact coalescence=%s distinct from 
  const selected = window.getSelection()!.toString()
  const releasedBefore = vi.mocked(api.conversation.releaseConversationView).mock.calls.length
  await act(async () => release!())
- await wait(() => expect(vi.mocked(api.conversation.releaseConversationView).mock.calls.slice(releasedBefore)
-  .some(([input]) => input.agentSessionId === scene.session.id && input.view === page.window.view), 'Wait for this completed frame to be retained and then parked by the frozen recap').toBe(true))
+ await wait(() => expect(parked, 'The complete original frame is retained while its observer parks').toHaveBeenCalled())
+ expect(vi.mocked(api.conversation.releaseConversationView).mock.calls.slice(releasedBefore)
+  .some(([input]) => input.agentSessionId === scene.session.id && input.view === page.window.view)).toBe(false)
  expect(rows(host), 'Only an exact contributor is already represented; an independent input fills a spare slot').toHaveLength(linked ? 1 : 2)
  expect(rows(host)[0]).toBe(old); expect(window.getSelection()!.getRangeAt(0)).toBe(range); expect(window.getSelection()!.toString()).toBe(selected)
  const accepted = consumeConversationWindowPage(page); expect(accepted.kind).toBe('complete')

@@ -88,5 +88,5 @@ export async function agentCardConversationFixture(sourceFor: (control: AgentSes
     for (const { client } of hosts.values()) await client.dispose()
     await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
-  return { clientFor: (hostId: string) => host(hostId).client, sync: seed }
+  return { clientFor: (hostId: string) => host(hostId).client, storeFor: (hostId: string) => host(hostId).store, sync: seed }
 }
