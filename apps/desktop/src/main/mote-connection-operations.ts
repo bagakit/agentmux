@@ -248,7 +248,8 @@ export class MoteConnectionOperations implements MoteConnectionPort {
           throw failure('CONNECTION_OPERATION_CONFLICT')
         return old
       }
-      const enrollmentOperationId = action === 'create' ? randomUUID() : null,
+      const name = action === 'create' ? (input as MoteConnectionCreate).name ?? source.name : source.name,
+        enrollmentOperationId = action === 'create' ? randomUUID() : null,
         profileOperationId = randomUUID(),
         connectionId =
           action === 'create' ? randomUUID() : (input as MoteConnectionSync).connection.connectionId
@@ -256,7 +257,7 @@ export class MoteConnectionOperations implements MoteConnectionPort {
         operationId: input.operationId,
         action,
         source: input.source,
-        snapshot: { name: source.name, description: source.description, avatarSha256: source.avatarSha256 },
+        snapshot: { name, description: source.description, avatarSha256: source.avatarSha256 },
         connection: action === 'sync' ? (input as MoteConnectionSync).connection : null,
         enrollmentOperationId,
         profileOperationId,
@@ -273,9 +274,9 @@ export class MoteConnectionOperations implements MoteConnectionPort {
               connectionId,
               adapterId: (input as MoteConnectionCreate).adapterId,
               domain: (input as MoteConnectionCreate).domain,
-              label: source.name,
+              label: name,
               preset: {
-                name: source.name,
+                name,
                 ...(source.description === null ? {} : { description: source.description }),
                 avatar: { pngDataUrl: source.pngDataUrl! }
               }
