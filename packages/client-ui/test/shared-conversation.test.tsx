@@ -1,8 +1,9 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath } from '../../../test/fixture-values.mjs'
 import { act, useState, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { AgentMuxInteractionRequest, AgentMuxInteractionResponse } from '@agentmux/core'
+import type { AgentMuxInteractionRequest, AgentMuxInteractionResponse, AgentMuxInteractionOperationIntent } from '@agentmux/core'
 import { AgentComposer, AgentInteractionCard, ConversationMessage, ClientUiProvider, type ClientUiPlatform } from '../src'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
@@ -51,7 +52,7 @@ describe('one shared conversation composition with explicit client IO', () => {
     expect(element.querySelector('a, script, iframe')).toBeNull()
     await click(button(element, 'source'))
     await click(button(element, 'docs'))
-    expect(openFile).toHaveBeenCalledWith('src/main.ts', { line: 7 })
+    expect(openFile).toHaveBeenCalledExactlyOnceWith('src/main.ts', { line: 7 }, expect.objectContaining({ metaKey: false, ctrlKey: false }))
     expect(openHttp).toHaveBeenCalledWith('https://example.test/docs', expect.objectContaining({ metaKey: false, ctrlKey: false }))
     expect([...element.querySelectorAll('button')].some(candidate => candidate.textContent === 'unsafe')).toBe(false)
     await click(button(element, 'Message details'))
@@ -78,12 +79,15 @@ describe('one shared conversation composition with explicit client IO', () => {
     const request: AgentMuxInteractionRequest = {
       kind: 'permission', id: 'request-original', agentSessionId: 'session-original', title: 'Allow write?',
       options: [{ id: 'allow-write', label: 'Allow once', kind: 'allow-once' }, { id: 'deny', label: 'Deny', kind: 'reject-once' }],
-      evidence: { source: 'native-hook', observedAt: 1, run: { runId: 'run-original' } }
+      evidence: { source: 'native-hook', observedAt: _tailFixtureEpoch(0, 0, 1), run: { runId: 'run-original' } }
     }
-    const respond = vi.fn<(response: AgentMuxInteractionResponse) => Promise<void>>().mockResolvedValue()
+    const respond = vi.fn<(response: AgentMuxInteractionResponse, intent: AgentMuxInteractionOperationIntent) => Promise<void>>().mockResolvedValue()
     const element = await mount(<AgentInteractionCard request={request} onRespond={respond} />)
     await click(button(element, 'Allow once'))
-    expect(respond).toHaveBeenCalledExactlyOnceWith({ kind: 'permission', requestId: 'request-original', decision: { outcome: 'selected', optionId: 'allow-write' } })
+    expect(respond).toHaveBeenCalledExactlyOnceWith({ kind: 'permission', requestId: 'request-original', decision: { outcome: 'selected', optionId: 'allow-write' } }, {
+      operationId: expect.stringMatching(/\S/u), expectedRequest: request
+    })
+    expect(respond.mock.calls[0]![1].expectedRequest).not.toBe(request)
     expect(element.textContent).toContain('Waiting for confirmation')
     expect([...element.querySelectorAll('button')]).toHaveLength(3)
     expect([...element.querySelectorAll('button')].map(candidate => candidate.disabled)).toEqual([true, true, true])
