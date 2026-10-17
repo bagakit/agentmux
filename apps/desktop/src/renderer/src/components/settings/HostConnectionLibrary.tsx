@@ -55,9 +55,9 @@ export function HostConnectionLibrary({ items, selectedId, panel, onSelect, quer
 
   return <aside className="settings-resource-library settings-host-library">
     <label className="settings-resource-search"><ThemeActionSearchIcon size={14} aria-hidden="true" />
-      <TextInput ref={search} type="search" aria-label="Filter hosts" placeholder="Find an environment…" value={query} onChange={(event) => onQuery(event.target.value)} />
+      <TextInput ref={search} type="search" aria-label="Filter hosts" placeholder="Find a host…" value={query} onChange={(event) => onQuery(event.target.value)} />
     </label>
-    <div ref={list} className="settings-resource-library__list" aria-label="Environments">
+    <div ref={list} className="settings-resource-library__list" aria-label="Hosts">
       {items.map((item) => <details key={item.id} className="settings-host-branch" data-host-disclosure={item.id}
         data-current-host={selectedId === item.id} open={expanded[item.id] ?? false} onToggle={(event) => {
           const open = event.currentTarget.open
@@ -83,7 +83,7 @@ export function HostConnectionLibrary({ items, selectedId, panel, onSelect, quer
           })}
         </div>
       </details>)}
-      {items.length === 0 ? <p className="settings-resource-empty" role="status">{query.trim() ? `No environments match “${query}”.` : 'No environments yet.'}</p> : null}
+      {items.length === 0 ? <p className="settings-resource-empty" role="status">{query.trim() ? `No hosts match “${query}”.` : 'No hosts yet.'}</p> : null}
     </div>
   </aside>
 }

@@ -1,0 +1,22 @@
+.remote-management .remote-entry-node, .remote-management .remote-host-node { border-radius: var(--radius-lg); box-shadow: var(--hl); }
+.remote-management .remote-entry-node { background: var(--surface-1); gap: 9px; }
+.remote-management .remote-entry-node > svg { padding: 10px; border-radius: var(--radius); background: var(--surface-0); }
+.remote-management .remote-entry-node > strong { font-size: 20px; letter-spacing: -.025em; }
+.remote-management .remote-host-node { min-height: 210px; gap: 8px; background: var(--surface-0); }
+.remote-management .remote-host-node[data-current-host='true'] { border-color: var(--green); background: color-mix(in srgb, var(--green) 4%, var(--surface-0)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 12%, transparent); }
+.remote-management .remote-host-node__kind { border-radius: calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px) 0 0; background: var(--surface-1); }
+.remote-management .remote-host-node[data-current-host='true'] .remote-host-node__kind { background: color-mix(in srgb, var(--green) 8%, var(--surface-1)); }
+.remote-management .remote-host-node__network { border-radius: var(--radius); box-shadow: none; background: var(--surface-1); border-color: var(--line-soft); }
+.remote-management .remote-host-node__link { padding-inline: 0; border: 0; background: transparent; }
+.remote-management .remote-topology__scope { border-radius: var(--radius); }
+.remote-management .remote-topology__scope button { border-radius: var(--radius-sm); }
+.remote-management .remote-detail-tabs { gap: var(--sp-4); margin-bottom: var(--sp-5); }
+.remote-management .remote-overview { gap: var(--sp-5); }
+.remote-management .remote-overview__facts dd { font-size: 22px; }
+.remote-management .settings-resource-editor__header > div > small { overflow-wrap: anywhere; }
+.remote-management .host-runtime__issue { padding: var(--sp-3); border-radius: var(--radius); background: var(--surface-0); }
+.remote-management .host-runtime__issue > svg { flex: none; margin-top: 2px; }
+.remote-management .settings-host-branch__summary { padding-block: var(--sp-4); }
+.remote-management .settings-host-page { min-height: 34px; }
+.remote-management[data-remote-wide='false'] .settings-resource-editor { padding-bottom: var(--sp-5); }
+.remote-management[data-remote-wide='false'] .remote-overview__facts { padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
