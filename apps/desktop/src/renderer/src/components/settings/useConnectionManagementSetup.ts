@@ -14,7 +14,7 @@ const emptyPublicationForm: PublicationForm = { version: '1.0.0', notes: '', rea
 const scope = (record: ConnectionRecord | null) => record ? JSON.stringify([record.config.connectionId, record.config.adapterId, record.config.application, record.revision]) : ''
 const inputOf = (operation: ConnectionSetupOperation): ConnectionSetupBegin => {
   if (operation.goal.kind !== 'agent-conversation') throw new Error('This task belongs to the original profile update view.')
-  return { operationId: operation.operationId, connectionId: operation.connectionId, expectedConnectionRevision: operation.expectedConnectionRevision, goal: operation.goal, ...(operation.source ? { source: operation.source } : {}) }
+  return { operationId: operation.operationId, connectionId: operation.connectionId, expectedConnectionRevision: operation.expectedConnectionRevision, goal: operation.goal, ...(operation.source ? { source: operation.source } : {}), ...(operation.initialPublication ? { initialPublication: operation.initialPublication } : {}) }
 }
 
 /** The mounted Settings task retains safe submissions; private readings and timers are disposable. */
@@ -73,7 +73,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
   function sameApplication(operation: ConnectionSetupOperation) {
     return !!record && operation.connectionId === record.config.connectionId && operation.adapterId === record.config.adapterId &&
       operation.application.domain === record.config.application.domain && operation.application.appId === record.config.application.appId &&
-      operation.goal.kind === 'agent-conversation' && operation.goal.interaction === 'messages'
+      operation.goal.kind === 'agent-conversation'
   }
   function matches(operation: ConnectionSetupOperation) { return sameApplication(operation) && operation.expectedConnectionRevision === record?.revision }
   async function perform(id: string, work: () => Promise<ConnectionSetupView>, run: boolean, actionKind?: ConnectionSetupAction['kind'], requestedConfiguration?: ConnectionSetupConfigurationSelector) {
