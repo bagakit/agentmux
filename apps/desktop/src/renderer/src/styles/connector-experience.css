@@ -108,3 +108,4 @@
 .connector-request-trace__identity { display: flex; flex-wrap: wrap; gap: var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); }
 .connector-request-trace__identity code { overflow-wrap: anywhere; }
 .connector-request-trace__feedback:empty { display: none; }
+.connector-profile-trace table { min-width: 0; }
