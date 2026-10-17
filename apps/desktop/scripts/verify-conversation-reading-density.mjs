@@ -79,11 +79,9 @@ async function consumeQualifiedCandidate(candidateRoot) {
 const configText = await readFile(join(root, config), 'utf8')
 const mutations = [...configText.matchAll(/^\s*'([^']+)': \[/gmu)].map(match => match[1])
 assert.ok(mutations.length > 0 && new Set(mutations).size === mutations.length, 'Nonempty unique mutations from the actual owning config')
-const hookUrlPath = 'packages/core/bin/agentmux-hook.js'
-const hookUrlExport = 'export default "/packages/core/bin/agentmux-hook.js"'
-const hookUrlHash = hash(hookUrlExport)
-const isHookUrl = input => input.path === hookUrlPath && !input.mutation && input.originalSHA256 === hookUrlHash && input.sha256 === hookUrlHash
-const sourceInputs = inputs => Object.fromEntries(inputs.filter(input => !isHookUrl(input)).map(input => [input.path, input.originalSHA256]))
+const urlInputHash = input => hash('export default ' + JSON.stringify('/' + input.path))
+const isUrlInput = input => !input.mutation && input.originalSHA256 === urlInputHash(input) && input.sha256 === input.originalSHA256
+const sourceInputs = inputs => Object.fromEntries(inputs.filter(input => !isUrlInput(input)).map(input => [input.path, input.originalSHA256]))
 const sourceHash = (sources, virtualInputs = []) => hash(JSON.stringify({ sources: Object.fromEntries(Object.entries(sources).sort(([a], [b]) => a.localeCompare(b))), virtualInputs }))
 function mergeSources(target, inputs) {
   for (const [file, sha] of Object.entries(inputs)) {
@@ -157,14 +155,13 @@ async function testProof(receipt, includeTypes = true) {
     const inputs = (await readFile(join(root, run.loaded), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
     assert.ok(inputs.length > 0); assert.deepEqual(inputs, run.inputs)
     for (const input of inputs) {
-      if (isHookUrl(input)) {
-        assert.equal(run, receipt.adjacent, 'The retained exact URL representation belongs only to the original adjacent read')
+      if (isUrlInput(input)) {
         const baseHead = (await command('git', ['rev-parse', 'HEAD'], { cwd: root })).stdout.trim()
-        const blob = (await command('git', ['rev-parse', baseHead + ':' + hookUrlPath], { cwd: root })).stdout.trim()
-        const target = await readFile(join(root, hookUrlPath))
-        const original = await command('git', ['show', baseHead + ':' + hookUrlPath], { cwd: root, encoding: 'buffer' })
+        const blob = (await command('git', ['rev-parse', baseHead + ':' + input.path], { cwd: root })).stdout.trim()
+        const target = await readFile(join(root, input.path))
+        const original = await command('git', ['show', baseHead + ':' + input.path], { cwd: root, encoding: 'buffer' })
         assert.deepEqual(target, original.stdout, 'The original URL target must still equal the exact candidate base blob')
-        virtualInputs.push({ path: hookUrlPath, representation: 'vite-url-export', representedSHA256: hookUrlHash,
+        virtualInputs.push({ path: input.path, report: run.report, representation: 'vite-url-export', representedSHA256: urlInputHash(input),
           baseHead, targetBlob: blob, targetSHA256: hash(target) })
       } else assert.equal(hash(await readFile(join(root, input.path))), input.originalSHA256, 'Original tested candidate changed: ' + input.path)
     }
@@ -202,7 +199,7 @@ async function prepare(resumeCapture = false) {
       receipt.virtualInputs = await testProof(original.receipt, false)
       for (const [file, sha] of Object.entries(original.receipt.sources)) {
         if (file === own) continue
-        if (file === hookUrlPath && sha === hookUrlHash) { assert.ok(receipt.virtualInputs.length === 1); continue }
+        if (receipt.virtualInputs.some(input => input.path === file && input.representedSHA256 === sha)) continue
         assert.equal(hash(await readFile(join(root, file))), sha, 'An original test proof input changed: ' + file)
       }
       for (const field of ['baseline', 'mutants', 'adjacent', 'restored']) receipt[field] = original.receipt[field]
