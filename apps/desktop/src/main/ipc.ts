@@ -1,3 +1,5 @@
+import { ClientIncidentIpcOwner } from './client-incident-ipc.js'
+import type { ClientIncidentArchive } from './client-incident-archive.js'
 import { isAgentSchedule } from '@agentmux/core'
 import { NoteFileMutations } from './note-file-mutations.js'
 import { parseFileShareUndoParams, parseFileShareUndoResult } from '@agentmux/core/files'
@@ -284,6 +286,7 @@ export async function registerIpc(args: {
   webLinks?: WebUrlIngress
   spatialLinks?: SpatialLinkIngress
   performanceScene?: PerformanceSceneOwner
+  clientIncidents?: ClientIncidentArchive
   loadedPackage?: DesktopPackageIdentity | null
   loadedRenderer?: () => DesktopLoadedRenderer | null
 }): Promise<() => Promise<void>> {
@@ -667,6 +670,17 @@ export async function registerIpc(args: {
    */
   const requireTrustedSender = (channel: PrivilegedChannel, event: IpcMainInvokeEvent): void =>
     assertSenderTrusted(senderTrust(channel, event.sender, contents))
+  const incidentIpc = args.clientIncidents ? new ClientIncidentIpcOwner({ archive: args.clientIncidents, contents,
+    windowId: args.window.id, generation: () => args.runtime.rendererGeneration(contents),
+    buildId: () => args.loadedPackage?.sourceCommit ?? null, rendererBuildId: () => args.loadedRenderer?.()?.id ?? null }) : null
+  handleWithEvent('clientIncidents:open', event => {
+    requireTrustedSender('clientIncidents:open', event)
+    return incidentIpc?.open(event) ?? null
+  })
+  handleWithEvent('clientIncidents:report', (event, token: string, report: unknown) => {
+    requireTrustedSender('clientIncidents:report', event)
+    return incidentIpc?.report(event, token, report) ?? { accepted: false }
+  })
   registerLoadedIdentityIpc({ handleWithEvent, assertTrusted: requireTrustedSender, package: args.loadedPackage ?? null,
     renderer: () => contents.isLoadingMainFrame() ? null : args.loadedRenderer?.() ?? null })
   registerBrowserInputContextIpc({ handle: handleWithEvent, trust: requireTrustedSender, ...browserInputContextPorts })
@@ -2311,6 +2325,7 @@ export async function registerIpc(args: {
     connections: connectorServices.connections,
     moteConnections,
     deliveryAttempts,
+    ...(args.clientIncidents ? { clientIncidents: args.clientIncidents } : {}),
     moteContext: moteContextEvidencePort(deliveryAttempts.hostId, request => executeControl(request)),
     execute: executeControl,
     nameHistory: query => desktopNameHistory(spatialState, demands, query),
