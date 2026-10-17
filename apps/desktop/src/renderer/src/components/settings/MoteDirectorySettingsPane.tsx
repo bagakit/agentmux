@@ -49,13 +49,12 @@ export function MoteDirectorySettingsPane({ view, avatarSize, onSave, onOpen }: 
       <div className="settings-mote__size-controls">
       <fieldset className="mote-directory-sizes"><legend className="sr-only">Avatar size presets</legend>
         {[24, 32, 40, 48].map(size => <button type="button" key={size} aria-label={`${size}px avatar`} aria-pressed={draft.value.avatarSize === size}
-          onClick={() => draft.setField('avatarSize', size)}><span className="mote-directory-sizes__silhouette" style={{ width: size, height: size }} aria-hidden="true"><ThemeObjectUserIcon size={size * .7} strokeWidth={1.5} /></span><small>{size}</small></button>)}
+          onClick={() => draft.setField('avatarSize', size)}>{size}<small>px</small></button>)}
       </fieldset>
       <label className="mote-directory-size"><span>Size</span><input aria-label="Avatar size" type="range" min={MOTE_DIRECTORY_AVATAR_SIZE_MIN} max={MOTE_DIRECTORY_AVATAR_SIZE_MAX} step={1} value={draft.value.avatarSize}
         onChange={event => draft.setField('avatarSize', Number(event.target.value))} /><output>{draft.value.avatarSize}px</output></label>
       </div></div>
     </section>
-    <SettingsSaveBar save={save} dirty={draft.dirty} onSave={() => void commit()} />
     <section className="settings-group">
       <header><span>Your collaborators</span></header>
       <div className="settings-workflows__inline-action">
@@ -63,5 +62,6 @@ export function MoteDirectorySettingsPane({ view, avatarSize, onSave, onOpen }: 
         <button type="button" className="small-button" onClick={onOpen}>Open Mote Club<ThemeActionOpenExternalIcon size={14} aria-hidden="true" /></button>
       </div>
     </section>
+    <SettingsSaveBar save={save} dirty={draft.dirty} onSave={() => void commit()} />
   </div>
 }
