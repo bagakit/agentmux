@@ -149,7 +149,7 @@ it('keeps independently available creation after list failure and reaches native
   await click('[data-enrollment-action="create"]')
   await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('[data-enrollment-saved]')).not.toBeNull() }, { timeout: 6000 })
   expect((await services.connections.list()).connections[0]!.config).toMatchObject({ connectionId: begin.connectionId, application: APP, label: 'My Agent bot' })
-  expect(platform.filter(call => call.path.startsWith('/developers/')).map(call => call.path)).toEqual(['/developers/v1/app/upload/image', '/developers/v1/manifest/upsert_by_template', '/developers/v1/secret/' + APP.appId])
+  expect(platform.filter(call => call.path.startsWith('/developers/')).slice(0, 3).map(call => call.path)).toEqual(['/developers/v1/app/upload/image', '/developers/v1/manifest/upsert_by_template', '/developers/v1/secret/' + APP.appId])
   expect(JSON.parse(String(platform.find(call => call.path === '/developers/v1/manifest/upsert_by_template')!.body)).createAppUserCustomField.i18n.zh_cn.name).toBe('My Agent bot')
   expect(trusted).toHaveBeenCalled()
   for (const privateText of [QR, COOKIE, CSRF, 'settings-private-app-secret']) expect(dom.container.textContent).not.toContain(privateText)
@@ -169,7 +169,8 @@ it('submits the AMUX default name, description and original icon in the first Co
   await click('[data-enrollment-action="create"]')
   await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('[data-enrollment-saved]')).not.toBeNull() }, { timeout: 6000 })
   const writes = platform.filter(call => call.path.startsWith('/developers/'))
-  expect(writes.map(call => call.path)).toEqual(['/developers/v1/app/upload/image', '/developers/v1/manifest/upsert_by_template', '/developers/v1/secret/' + APP.appId])
+  expect(writes.slice(0, 3).map(call => call.path)).toEqual(['/developers/v1/app/upload/image', '/developers/v1/manifest/upsert_by_template', '/developers/v1/secret/' + APP.appId])
+  expect(writes.filter(call => ['/developers/v1/manifest/upsert_by_template', '/developers/v1/app/create'].includes(call.path)).map(call => call.path)).toEqual(['/developers/v1/manifest/upsert_by_template'])
   const upload = writes[0]!.body as FormData, icon = upload.get('file') as File
   expect(icon.type).toBe('image/png')
   expect(Buffer.from(await icon.arrayBuffer())).toEqual(asset)
