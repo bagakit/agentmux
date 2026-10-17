@@ -392,7 +392,7 @@ describe('actual BrowserViewManager consumer', () => {
 })
 
 describe('T024 actual Main display semantics', () => {
-  it('new operation and readonly snapshot clear UI with replace while wait/human clear invalidates history', async () => {
+  it('new operations replace cues while readonly snapshots preserve them and wait/human input invalidates history', async () => {
     const f = await managerFixture()
     const first = await f.manager.runScript('browser-one', 'actual first tool call')
     expect(first.outcome.kind).toBe('completed')
@@ -402,8 +402,8 @@ describe('T024 actual Main display semantics', () => {
     const payloads = actionPayloads(f.contents, before)
     expect(payloads.length).toBeGreaterThan(0)
     const clears = payloads.filter((p: any) => p.phase === 'clear')
-    expect(clears).toHaveLength(3) // Previous op, next snapshot, next actual action begin.
-    expect(clears.map((p: any) => p.clearReason)).toEqual(['replace', 'replace', 'replace'])
+    expect(clears).toHaveLength(2) // Previous operation and next actual action begin; initial readonly needs no cue work.
+    expect(clears.map((p: any) => p.clearReason)).toEqual(['replace', 'replace'])
     native.mode = 'wait'
     const start = f.contents.displays.length
     const waited = await f.manager.runScript('browser-one', 'actual wait call')
