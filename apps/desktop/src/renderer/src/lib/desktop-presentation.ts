@@ -103,8 +103,9 @@ export function readDesktopPresentation(selection: AgentMuxDesktopSelection, tab
   const blockers: AgentMuxDesktopPresentation['blockers'] = []
   if (overlays.settings) blockers.push('settings')
   if (overlays.quickSwitcher) blockers.push('quick-switcher')
-  const { tabId = null, regionId = null } = selection.surface === 'space' ? selection.space ?? {} : {}
-  const windowTarget = selection.surface === 'space' && regionId ? primaryRegion(selection.space, tabs) : null
+  const map = selection.surface === 'space' && selection.spaceView === 'map'
+  const { tabId = null, regionId = null } = selection.surface === 'space' && !map ? selection.space ?? {} : {}
+  const windowTarget = selection.surface === 'space' && !map && regionId ? primaryRegion(selection.space, tabs) : null
   const windowIdentity = windowTarget && windowTarget.ownerDocument !== document ? workbenchDocumentIdentity(windowTarget.ownerDocument) : null
   if (windowIdentity) blockers.length = 0
   const base = { tabId, regionId, blockers }
@@ -115,7 +116,9 @@ export function readDesktopPresentation(selection: AgentMuxDesktopSelection, tab
     else if (blockers.length) presentation = { ...base, provenance: 'observed', state: 'covered' }
     else {
       const main = document.querySelector<HTMLElement>(`[data-desktop-surface="${selection.surface}"]`)
-      const target = selection.surface !== 'space' ? main : regionId ? primaryRegion(selection.space, tabs)
+      const maps = map && main ? [...(main.matches('[data-desktop-space-view="map"]') ? [main] : []), ...main.querySelectorAll<HTMLElement>('[data-desktop-space-view="map"]')]
+        .filter(element => desktopElementVisible(element) && !element.closest('[data-pmo-teams-topic-floating]')) : []
+      const target = map ? maps.length === 1 ? maps[0]! : null : selection.surface !== 'space' ? main : regionId ? primaryRegion(selection.space, tabs)
         : selection.space?.zoneId ? queryIdentity('data-desktop-zone-id', selection.space.zoneId) : selection.space ? null : main
       const borrowed = selection.surface === 'space' && target?.closest('[data-pmo-teams-topic-floating]')
       const exactGoal = selection.surface !== 'goals' || !selection.goalId ||

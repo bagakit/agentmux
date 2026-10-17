@@ -21,9 +21,12 @@ const desktopInputObservationSchema = z.object({ provenance,
   ...windowIdentity, scope: z.enum(['main', 'floating', 'window', 'overlay', 'none', 'unknown']), ownerKind: z.enum(['terminal', 'composer', 'editor', 'dialog', 'other']).nullable(),
   tabId: nullableId, regionId: nullableId, sessionId: nullableId,
   connected: z.boolean().nullable(), visible: z.boolean().nullable(), inert: z.boolean().nullable() }).strict().superRefine(exactWindowPair).transform(omitMissingWindow)
+const desktopSelectionSchema = z.object({ surface: z.enum(['space', 'focus', 'goals', 'survey', 'recall']), mainSurface: z.enum(['workbench', 'agents', 'board', 'survey', 'recall']),
+  spaceView: z.enum(['workbench', 'map']).nullable(), space: desktopSpaceSelectionSchema.nullable(), goalId: nullableId }).strict().superRefine((value, context) => {
+  if ((value.surface === 'space') !== (value.spaceView !== null)) context.addIssue({ code: 'custom', message: 'Space view belongs only to the Space Surface.' })
+})
 export const desktopObservationSchema: z.ZodType<AgentMuxDesktopObservation> = z.object({
-  selection: z.object({ surface: z.enum(['space', 'focus', 'goals', 'survey', 'recall']), mainSurface: z.enum(['workbench', 'agents', 'board', 'survey', 'recall']),
-    space: desktopSpaceSelectionSchema.nullable(), goalId: nullableId }).strict(),
+  selection: desktopSelectionSchema,
   presentation: z.object({ provenance, ...windowIdentity, state: z.enum(['main-visible', 'floating', 'window', 'covered', 'pending', 'unknown']),
     tabId: nullableId, regionId: nullableId, blockers: z.array(z.enum(['settings', 'quick-switcher'])) }).strict().superRefine(exactWindowPair).transform(omitMissingWindow),
   input: desktopInputObservationSchema,
@@ -31,4 +34,9 @@ export const desktopObservationSchema: z.ZodType<AgentMuxDesktopObservation> = z
     tabId: nullableId, regionId: nullableId, sessionId: nullableId, presentation: z.enum(['visible', 'hidden', 'pending', 'unknown']) }).strict(),
   overlays: z.object({ provenance, settings: z.boolean().nullable(), quickSwitcher: z.boolean().nullable() }).strict(),
   focus: z.object({ executionSessionId: nullableId, pmoSessionId: nullableId }).strict()
-}).strict()
+}).strict().superRefine((value, context) => {
+  if (value.selection.spaceView === 'map' && (value.presentation.tabId !== null || value.presentation.regionId !== null ||
+    value.presentation.windowId !== undefined || value.presentation.documentGeneration !== undefined || value.presentation.state === 'floating' || value.presentation.state === 'window')) {
+    context.addIssue({ code: 'custom', message: 'A map presentation cannot identify a retained, borrowed or native Region.' })
+  }
+})
