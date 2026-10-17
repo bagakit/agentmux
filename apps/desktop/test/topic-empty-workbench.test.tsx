@@ -86,6 +86,9 @@ it('actual last-Tab close retains the Category/Topic Zone and shows a normal sco
   expect(current.agentComposerDrafts).toBe(before.agentComposerDrafts)
   expect(container.textContent).not.toMatch(/placement is still being confirmed|Original work surface retained/)
   expect(startButton()).not.toBeNull(); expect(container.querySelector('.launch-surface')).not.toBeNull()
+  const launcher = container.querySelector('.launch-surface.surface-state')!
+  expect(launcher).not.toBeNull()
+  expect(launcher.querySelector('[aria-label="Agent prompt"]')?.closest('[role="status"], [role="alert"], [aria-live]')).toBeNull()
   expect(container.textContent).not.toContain('Choose a Tab'); expect(Object.keys(current.tabs)).toEqual([neighbor.id])
   expect(api.sessions.launchTerminal).not.toHaveBeenCalled(); expect(api.sessions.launchAgent).not.toHaveBeenCalled()
 })
@@ -183,9 +186,12 @@ it('missing original Zone facts remain unknown and keep one notice within the co
   expect(chrome).not.toBeNull(); expect(notice).not.toBeNull()
   expect(chrome!.compareDocumentPosition(notice!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   expect(notice!.closest('.pane-body')).not.toBeNull()
+  expect(notice!.querySelector('.surface-state--surface')).not.toBeNull()
+  expect(notice!.querySelector('.surface-state__activity, [aria-busy="true"], [data-icon-animation]')).toBeNull()
   expect(container.querySelectorAll('.service-window')).toHaveLength(1)
   expect(startButton()).toBeNull(); expect(useAppStore.getState().tabs).toBe(before.tabs)
   expect(useAppStore.getState().sessions).toBe(before.sessions)
+  expect(api.sessions.launchTerminal).not.toHaveBeenCalled(); expect(api.sessions.launchAgent).not.toHaveBeenCalled()
 })
 it('ordinary project branch still uses the existing virtual Launcher without creating a persistent Tab', async () => {
   useAppStore.setState({ activeWorkspaceId: 'project', workbenchSpaceSelection: null })
@@ -219,6 +225,14 @@ it('unknown Zone resource or an explicit missing occurrence is never a confirmed
     selectionMode: 'occurrence', selection: [{ displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId, tabId: target.id, regionId: 'empty-target-region' }], onSelect: vi.fn() }
   const result = projectWorkbenchProjection(state.layouts[SCRATCH_WORKSPACE_ID], state.tabs, scope)
   expect(result.layout).toBeNull(); expect(result.issues.length).toBeGreaterThan(0)
+  await mount({ viewOwnership: 'projection', projection: scope })
+  const notice = container.querySelector('.service-window > .surface-state--surface')!
+  expect(notice).not.toBeNull()
+  expect(notice.textContent).toContain('Original work surface retained')
+  expect(notice.querySelector('.surface-state__activity, [aria-busy="true"], [data-icon-animation]')).toBeNull()
+  expect(startButton()).toBeNull()
+  expect(useAppStore.getState().tabs).toBe(state.tabs); expect(useAppStore.getState().sessions).toBe(state.sessions)
+  expect(api.sessions.launchAgent).not.toHaveBeenCalled(); expect(api.sessions.launchTerminal).not.toHaveBeenCalled()
 })
 
 it('a missing stored layout keeps the last confirmed empty workface as recovery, never a confirmed starting target', async () => {
@@ -291,6 +305,8 @@ it('the real retained-Tab branch keeps its durable disclosure inside the origina
   expect(trigger).not.toBeNull()
   const pane = trigger!.closest('.pane-body')!
   expect(pane).not.toBeNull()
+  expect(pane.querySelector('.service-window > .surface-state--inline')).not.toBeNull()
+  expect(pane.querySelector('.service-window > .surface-state--surface')).toBeNull()
   const chrome = pane.closest('.pane-group')!.querySelector('.pane-tabbar')!
   expect(chrome.compareDocumentPosition(trigger!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   expect(container.querySelectorAll('.service-disclosure')).toHaveLength(1)
