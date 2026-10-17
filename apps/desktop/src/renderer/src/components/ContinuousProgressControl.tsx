@@ -13,11 +13,13 @@ import { resolveAutomationPreferences } from '../../../shared/automation-prefere
 export type ContinuousProgressStatus = 'inactive' | 'active' | 'paused' | 'unconfirmed'
 
 /** Existing Main loop owner is observed only for this Session, even while its mailbox page is hidden. */
-export function ContinuousProgressControl({ session, onStatusChange, presented = true }: {
+export function ContinuousProgressControl({ session, onStatusChange, presented = true, visible = presented }: {
   session: Extract<SessionSnapshot, { kind: 'agent' }>
   onStatusChange?: (status: ContinuousProgressStatus) => void
   /** Only the detail DOM waits for first use; observation and action state stay mounted. */
   presented?: boolean
+  /** Visibility controls presentation work without discarding retained forms. */
+  visible?: boolean
 }) {
   const displayPath = usePathDisplay()
   const target = useMemo(() => ({ hostId: session.control.hostId, agentSessionId: session.control.agentSessionId,
@@ -87,7 +89,7 @@ export function ContinuousProgressControl({ session, onStatusChange, presented =
   useEffect(() => { onStatusChange?.(combinedStatus) }, [onStatusChange, combinedStatus])
   const action = (kind: 'pause' | 'resume' | 'stop' | 'check') => loop && void run(() => api.continuousProgress.action(target, loop.loopId, kind))
   return <div className="continuous-progress-control" data-progress-state={status}>
-    <CalendarScheduleControl target={target} onStatusChange={setCalendarStatus} presented={presented} />
+    <CalendarScheduleControl target={target} onStatusChange={setCalendarStatus} presented={visible} />
     {presented ? <>
     <details className="continuous-progress-control__details" data-progress-details="interval" onToggle={event => event.stopPropagation()}>
       <summary>Continuous progress <span>{status === 'unconfirmed' ? 'Unconfirmed' : displayed?.status === 'stopped' ? 'Stopped' : status === 'inactive' ? 'Not enabled' : status === 'active' ? 'Active' : 'Paused'}</span></summary>

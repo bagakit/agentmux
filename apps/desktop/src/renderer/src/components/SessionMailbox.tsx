@@ -624,7 +624,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
         </ol> : <MailboxEmpty title={system.available ? 'No current notices' : 'Waiting for Session status'} /> : null}
       </div>
       {progressSession ? <div id={`${id}-progress`} role="region" aria-label="Automation settings" hidden={folder !== 'progress'}>
-        <ContinuousProgressControl session={progressSession} onStatusChange={onProgressStatus} presented={progressVisible || progressPresented} />
+        <ContinuousProgressControl session={progressSession} onStatusChange={onProgressStatus} presented={progressVisible || progressPresented} visible={progressVisible} />
       </div> : null}
       </div>
       {progressSession && folder !== 'progress' ? <button ref={automationEntry} type="button" className="composer-mailbox__automation" aria-label="Automation"
