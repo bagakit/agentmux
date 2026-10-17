@@ -22,11 +22,12 @@ const ThemeActionCloseIcon = semanticIconComponent('action.close')
 
 
 type UtilityKind = 'terminal' | 'browser' | 'note'
-export function LauncherSecondarySurfaces({ workspace, tabGroupId, launcherRef, launcherId, sections, onSectionChange, warmPreview, terminalThemeId, terminalFontSize, visible, busy, onRun }: {
+export function LauncherSecondarySurfaces({ workspace, tabGroupId, launcherRef, launcherId, materializeLauncher, sections, onSectionChange, warmPreview, terminalThemeId, terminalFontSize, visible, busy, onRun }: {
   workspace: WorkspaceRecord | undefined
   tabGroupId: string
   launcherRef: { tabId: string; regionId: string } | undefined
   launcherId: string
+  materializeLauncher?: (() => { tabId: string; regionId: string } | undefined) | undefined
   sections: Record<LauncherSection, LauncherSectionMode>
   onSectionChange(section: LauncherSection, mode: LauncherSectionMode): void
   warmPreview: WarmTerminalPreview
@@ -107,16 +108,27 @@ export function LauncherSecondarySurfaces({ workspace, tabGroupId, launcherRef, 
   const [inputHistoryNotice, setInputHistoryNotice] = useState<string | null>(null)
   function setDraft(field: 'browser' | 'note', value: string) { writeDraft(launcherId, field, value) }
   const disabled = !workspace || busy !== null
-  function openTerminal() { void onRun('terminal', () => promoteWarmTerminal(tabGroupId, launcherRef)) }
+  function openTerminal() { void onRun('terminal', async () => {
+    const target = materializeLauncher ? materializeLauncher() : launcherRef
+    if (materializeLauncher && !target) return
+    return promoteWarmTerminal(tabGroupId, target)
+  }) }
   function checkWarmTerminal() {
     if (workspace) void onRun('terminal', () => retryWarmTerminal(workspace.id, launcherId))
   }
-  function openBrowser(submittedAddress: string) { void onRun('browser', () => createBrowser(tabGroupId, launcherRef, submittedAddress.trim() || 'about:blank')) }
+  function openBrowser(submittedAddress: string) { void onRun('browser', async () => {
+    const target = materializeLauncher ? materializeLauncher() : launcherRef
+    if (materializeLauncher && !target) return
+    return createBrowser(tabGroupId, target, submittedAddress.trim() || 'about:blank')
+  }) }
   function openNote(content?: string) {
     void onRun('note', async () => {
+      const target = materializeLauncher ? materializeLauncher() : launcherRef
+      if (materializeLauncher && !target) return
+      const noteProjection = materializeLauncher ? undefined : projection
       const references = projection?.selection.filter(reference => reference.displayWorkspaceId === projection.displayWorkspaceId && reference.tabId === launcherRef?.tabId && reference.regionId === launcherRef.regionId)
-      if (projection && references?.length !== 1) throw new Error('The exact Note display Group is unconfirmed. Its original draft is retained.')
-      const receipt = await createNote(projection ? references![0]!.groupId : tabGroupId, launcherRef, content, projection)
+      if (noteProjection && references?.length !== 1) throw new Error('The exact Note display Group is unconfirmed. Its original draft is retained.')
+      const receipt = await createNote(noteProjection ? references![0]!.groupId : tabGroupId, target, content, noteProjection)
       // A late result must not consume an edit the user made while the note was saving.
       if (receipt.status === 'written' && receipt.revealed && content !== undefined && useLauncherState.getState().drafts[launcherId]?.note === content) setDraft('note', '')
     })
