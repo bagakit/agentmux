@@ -94,7 +94,7 @@ export function reviewFeishuPublication(effect: ConnectionSetupPublicationEffect
         if (!draft.notes.trim() || draft.notes.length > 500) issues.push('Release notes must contain between 1 and 500 characters')
         if (draft.reason !== undefined && (!draft.reason.trim() || draft.reason.length > 1000)) issues.push('Provide a valid application review reason')
       }
-      return { review, requiredSubjects: ['publication-versions'], privateIntent: draft?.kind === 'create-version' && !issues.length ? JSON.stringify({ kind: 'create-version', body: { autoPublish: false, appVersion: draft.version, changeLog: draft.notes, pcDefaultAbility: 'bot', mobileDefaultAbility: 'bot', visibleSuggest: { departments: [], members: [creator.userId], groups: [], isAll: 0 }, blackVisibleSuggest: { departments: [], members: [], groups: [], isAll: 0 }, ...(draft.reason === undefined ? {} : { remark: draft.reason }) } }) : null }
+      return { review, requiredSubjects: ['publication-versions'], privateIntent: draft?.kind === 'create-version' && !issues.length ? JSON.stringify({ kind: 'create-initial-version', body: { appVersion: draft.version, changeLog: draft.notes, pcDefaultAbility: 'bot', mobileDefaultAbility: 'bot', visibleSuggest: { departments: [], members: [creator.userId], groups: [], isAll: 0 }, blackVisibleSuggest: { departments: [], members: [], groups: [], isAll: 0 }, ...(draft.reason === undefined ? {} : { remark: draft.reason }) } }) : null }
     }
   }
   // The Host supplies only its own confirmed, securely stored first-create receipt.
@@ -108,7 +108,7 @@ export function reviewFeishuPublication(effect: ConnectionSetupPublicationEffect
       if (![0, 3, 4].includes(detail.versionStatus as number)) issues.push('The selected version is not in a supported submittable state')
     }
     review.versions = []
-    return { review, requiredSubjects: ['publication-version'], privateIntent: !issues.length ? JSON.stringify({ kind: 'submit-version', versionId: draft.versionId, body: { is_full_release: draft.fullRelease } }) : null }
+    return { review, requiredSubjects: ['publication-version'], privateIntent: !issues.length ? JSON.stringify(draft.fullRelease ? { kind: 'submit-version', versionId: draft.versionId, body: { is_full_release: true } } : { kind: 'submit-initial-version', versionId: draft.versionId }) : null }
   }
   if (!versions) issues.push('The exact version list is unconfirmed')
   const featureReady = Array.isArray(features?.hitFeatureKeyList) && features.hitFeatureKeyList.every(label)

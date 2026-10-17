@@ -68,7 +68,7 @@ export async function feishuMessagingCapability(originalReadState: string): Prom
 
 /** One exact scalar command. Acceptance is neither enabled readback nor online readiness. */
 export async function enableFeishuMessaging(input: SetupAdapterInput & { privateState: string; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupConfigurationReceipt> {
-  const { payload: envelope, ...authentication } = await applicationEnvelope(input, '/developers/v1/robot/switch/', { enable: true }, signal)
+  const { payload: envelope, ...authentication } = await applicationEnvelope(input, '/developers/v1/robot/switch/', { clientId: input.application.appId, enable: true }, signal)
   return envelope ? { kind: 'accepted', privateState: JSON.stringify(envelope), ...authentication } : { kind: 'unknown', ...authentication }
 }
 
@@ -81,7 +81,7 @@ export async function feishuEventTransportCapability(originalReadState: string):
 }
 
 export async function useFeishuPersistentConnection(input: SetupAdapterInput & { privateState: string; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupConfigurationReceipt> {
-  const { payload: envelope, ...authentication } = await applicationEnvelope(input, '/developers/v1/event/switch/', { eventMode: 4 }, signal)
+  const { payload: envelope, ...authentication } = await applicationEnvelope(input, '/developers/v1/event/switch/', { clientId: input.application.appId, eventMode: 4 }, signal)
   return envelope ? { kind: 'accepted', privateState: JSON.stringify(envelope), ...authentication } : { kind: 'unknown', ...authentication }
 }
 
@@ -143,7 +143,7 @@ export async function readFeishuApplication(input: SetupAdapterInput & { private
 /** Preserve the exact original primitive IDs. An empty difference is never a platform ACK. */
 export async function addFeishuApplicationPermissions(input: SetupAdapterInput & { privateState: string; appScopeIDs: Array<string | number>; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupConfigurationReceipt> {
   if (!input.appScopeIDs.length || !input.appScopeIDs.every(supportedScopeId) || new Set(input.appScopeIDs).size !== input.appScopeIDs.length) return { kind: 'unknown' }
-  const { payload: envelope, ...authentication } = await applicationEnvelope(input, '/developers/v1/scope/update/', { appScopeIDs: input.appScopeIDs, userScopeIDs: [], scopeIds: [], operation: 'add', isDeveloperPanel: true }, signal)
+  const { payload: envelope, ...authentication } = await applicationEnvelope(input, '/developers/v1/scope/update/', { clientId: input.application.appId, appScopeIDs: input.appScopeIDs, userScopeIDs: [], scopeIds: [], operation: 'add', isDeveloperPanel: true }, signal)
   if (!envelope) return { kind: 'unknown', ...authentication }
   const data = record(envelope.data)
   return { kind: 'accepted', privateState: JSON.stringify(envelope), requiresDataRangeConfiguration: typeof data?.needConfigurePrivilege === 'boolean' ? data.needConfigurePrivilege : null, ...authentication }
@@ -152,7 +152,7 @@ export async function addFeishuApplicationPermissions(input: SetupAdapterInput &
 /** Add only the receiver's exact App event, explicitly carrying the checked native mode. */
 export async function addFeishuMessageReception(input: SetupAdapterInput & { privateState: string; privateIntent: string; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupConfigurationReceipt> {
   if (input.privateIntent !== feishuMessageReceptionIntent()) return { kind: 'unknown' }
-  const { payload: envelope, ...authentication } = await applicationEnvelope(input, '/developers/v1/event/update/', { events: [], appEvents: [FEISHU_MESSAGE_EVENT], userEvents: [], operation: 'add', eventMode: 4 }, signal)
+  const { payload: envelope, ...authentication } = await applicationEnvelope(input, '/developers/v1/event/update/', { clientId: input.application.appId, events: [], appEvents: [FEISHU_MESSAGE_EVENT], userEvents: [], operation: 'add', eventMode: 4 }, signal)
   return envelope ? { kind: 'accepted', privateState: JSON.stringify(envelope), ...authentication } : { kind: 'unknown', ...authentication }
 }
 
@@ -161,7 +161,7 @@ export async function createFeishuVersion(input: SetupAdapterInput & { privateSt
   let body: Record<string, unknown> | null
   try {
     const intent = record(JSON.parse(input.privateIntent)); body = record(intent?.body)
-    if (intent?.kind !== 'create-version' || !body || body.autoPublish !== false) return { kind: 'unknown' }
+    if (!body || (intent?.kind === 'create-initial-version' ? Object.hasOwn(body, 'autoPublish') : intent?.kind !== 'create-version' || body.autoPublish !== false)) return { kind: 'unknown' }
   } catch { return { kind: 'unknown' } }
   const { payload: envelope, ...authentication } = await applicationEnvelope(input, '/developers/v1/app_version/create/', body, signal), data = record(envelope?.data)
   return envelope && opaque(data?.versionId) ? { kind: 'accepted', privateState: JSON.stringify(envelope), versionId: data.versionId, submission: null, ...authentication } : { kind: 'unknown', ...authentication }
@@ -169,8 +169,13 @@ export async function createFeishuVersion(input: SetupAdapterInput & { privateSt
 export async function submitFeishuVersion(input: SetupAdapterInput & { privateState: string; privateIntent: string; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupPublicationReceipt> {
   let body: Record<string, unknown> | null, versionId: string
   try {
-    const intent = record(JSON.parse(input.privateIntent)); body = record(intent?.body)
-    if (intent?.kind !== 'submit-version' || !opaque(intent.versionId) || !body || typeof body.is_full_release !== 'boolean' || Object.keys(body).length !== 1) return { kind: 'unknown' }
+    const intent = record(JSON.parse(input.privateIntent))
+    if (!opaque(intent?.versionId)) return { kind: 'unknown' }
+    if (intent.kind === 'submit-initial-version') body = { clientId: input.application.appId }
+    else {
+      body = record(intent.body)
+      if (intent.kind !== 'submit-version' || !body || typeof body.is_full_release !== 'boolean' || Object.keys(body).length !== 1) return { kind: 'unknown' }
+    }
     versionId = intent.versionId
   } catch { return { kind: 'unknown' } }
   const { payload: envelope, ...authentication } = await applicationRequest(input, '/developers/v1/publish/commit/' + encodeURIComponent(input.application.appId) + '/' + encodeURIComponent(versionId), body, signal, true)
