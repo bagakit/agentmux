@@ -71,6 +71,10 @@ it('separates working, pending request and real error counts with their current 
     const slot = focus().querySelector(`[data-focus-count="${count}"]`)!; expect(slot.textContent).toBe('1'); expect(slot.querySelector(`[data-semantic-icon="${glyph}"]`)).not.toBeNull()
   }
   expect(focus().getAttribute('aria-label')).toContain('1 failed'); await hover(); expect(preview()?.textContent).toContain('Model request failed')
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === 'failure' ? { ...session, pendingInteraction: { kind: 'permission', id: 'failed-request', title: 'Allow the original operation?', operation: 'read' } as never } : session) })))
+  expect(focus().querySelector('[data-focus-count="requests"]')?.textContent).toBe('2')
+  expect(focus().querySelector('[data-focus-count="errors"]')?.textContent).toBe('1')
+  expect(preview()?.querySelector('[data-preview-count="attention"] b')?.textContent).toBe('2')
 })
 it('ignores unrelated bytes and detaches detailed projection when closed', async () => {
   await hover(); const before = commits.mock.calls.length
@@ -106,23 +110,25 @@ it('uses the original confirmed PMO membership and preserves truthful empty navi
 
 function OriginalStatusOwner() { useAgentStatusDecay(); return null }
 it('expires native activity through the original window owner without changing facts or polling after expiry', async () => {
-  const original = agent('native-current', 'running'), observedAt = Date.now()
+  const original = agent('native-current', 'running'), neighbor = agent('unchanged-neighbor', 'running'), observedAt = Date.now()
   const session = { ...original, currentActivity: { state: 'active' as const, source: 'native-hook' as const, run: original.control.run,
     nativeSessionId: 'native-current', nativeTurnId: 'turn-current', sourceId: 'source-current', sequence: 1, hookReceiptId: 'receipt-current', observedAt } }
-  await act(async () => useAppStore.setState({ sessions: [session], timelines: {} }))
+  await act(async () => useAppStore.setState({ sessions: [session, neighbor], timelines: {} }))
   await act(async () => root.render(<Profiler id="navigation" onRender={commits}><OriginalStatusOwner /><SurfaceSwitch /></Profiler>))
   await act(async () => focus().focus())
   expect(focus().querySelector('[data-focus-count="working"]')?.textContent).toBe('1')
   const delay = agentActivityRemainingMs(observeAgentSession(session, observedAt), observedAt); expect(delay).toBeGreaterThan(0)
   await act(async () => vi.advanceTimersByTime(delay - 1)); expect(focus().querySelector('[data-focus-count="working"]')).not.toBeNull()
   const newer = { ...session, currentActivity: { ...session.currentActivity, sequence: 2, observedAt: Date.now() } }
-  await act(async () => useAppStore.setState({ sessions: [newer] }))
+  await act(async () => useAppStore.setState({ sessions: [newer, neighbor] }))
   await act(async () => vi.advanceTimersByTime(2)); expect(focus().querySelector('[data-focus-count="working"]')).not.toBeNull()
   const remaining = agentActivityRemainingMs(observeAgentSession(newer, Date.now()), Date.now())
   await act(async () => vi.advanceTimersByTime(remaining))
   expect(focus().querySelector('[data-focus-count="working"]')).toBeNull()
   expect(preview()?.querySelector('[data-preview-session="native-current"] [data-semantic-icon="status.activity-unknown"]')).not.toBeNull()
-  expect(useAppStore.getState().sessions[0]).toBe(newer); expect(useAppStore.getState().sessions[0]!.status).toBe(newer.status)
+  expect(useAppStore.getState().sessions[0]).not.toBe(newer); expect(useAppStore.getState().sessions[0]!.status).toBe(newer.status)
+  expect(useAppStore.getState().sessions[0]!.currentActivity).toBe(newer.currentActivity); expect(useAppStore.getState().sessions[0]!.control).toBe(newer.control)
+  expect(useAppStore.getState().sessions[1]).toBe(neighbor)
   expect(nextAgentStatusDecayDelayMs(useAppStore.getState().sessions, Date.now())).toBeNull()
   const rendered = commits.mock.calls.length; await act(async () => vi.advanceTimersByTime(delay * 2)); expect(commits.mock.calls.length).toBe(rendered)
 })
