@@ -1,0 +1,20 @@
+.note-block-author { display: inline-block; max-width: min(160px, 100%); margin-inline-start: 7px; padding: 0 3px; border: 0; border-radius: 3px; background: transparent; color: var(--text-3); font: 10px/1.5 var(--font-sans, sans-serif); font-weight: 400; letter-spacing: 0; vertical-align: baseline; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; user-select: none; }
+.note-block-author:hover, .note-block-author[aria-expanded="true"] { color: var(--text); background: var(--wash-1); }
+.note-block-author:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.note-block-author[data-human-only] { opacity: 0; }
+[data-block-id]:hover > .note-block-author, .note-block-author[data-human-only]:focus-visible, .note-block-author[aria-expanded="true"] { opacity: 1; }
+.note-authorship { position: fixed; z-index: var(--layer-popover, 180); pointer-events: auto; box-sizing: border-box; width: 292px; padding: 12px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-1); color: var(--text); box-shadow: 0 8px 28px #0002; font: 12px/1.5 var(--font-sans, sans-serif); outline: none; }
+.note-authorship header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.note-authorship header strong { font-weight: 600; }
+.note-authorship header button { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--text-3); font: 18px/1 sans-serif; cursor: pointer; }
+.note-authorship header button:hover { background: var(--wash-1); color: var(--text); }
+.note-authorship :is(button, summary):focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.note-authorship > p { margin: 2px 0 12px; color: var(--text-3); font-size: 11px; }
+.note-authorship dl, .note-authorship dd { margin: 0; }
+.note-authorship dl > div + div { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+.note-authorship dt { margin-bottom: 3px; color: var(--text-3); font-size: 10px; }
+.note-authorship dd > span { display: block; overflow-wrap: anywhere; }
+.note-authorship time, .note-authorship small { display: block; color: var(--text-3); font-size: 10px; }
+.note-authorship details { margin-top: 5px; color: var(--text-3); font-size: 10px; }
+.note-authorship summary { width: fit-content; cursor: pointer; }
+.note-authorship code { display: block; margin-top: 4px; overflow-wrap: anywhere; white-space: normal; user-select: text; }

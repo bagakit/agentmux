@@ -16,6 +16,7 @@
 @import './conversation-resource-file.css';
 @import './markdown.css';
 @import './content-copy.css';
+@import './note-authorship.css';
 @import './conversation-image.css';
 @import './conversation-input-details.css';
 @import './conversation-tool-trace.css';

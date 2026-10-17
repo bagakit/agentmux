@@ -1,5 +1,6 @@
 @import '@agentmux/client-ui/styles/palette.css';
 @import '@agentmux/client-ui/styles/overlays.css';
+@import '@agentmux/client-ui/styles/note-authorship.css';
 @import '@agentmux/client-ui/styles/native-controls.css';
 
 /* Touch geometry is client-owned; color and state roles come from the shared palette. */
