@@ -120,6 +120,99 @@ function publicationStates() {
   return { pending: JSON.stringify(pending), versions: JSON.stringify({ versions: [{ versionId: 'online-original', appVersion: '1.0.9', versionStatus: 2 }, { versionId: 'old-draft', appVersion: '1.0.11', versionStatus: 0 }] }), visibility: JSON.stringify(audience), sharing: JSON.stringify({ onlineB2CShareEnable: false }), features: JSON.stringify({ hitFeatureKeyList: [] }) }
 }
 
+function profilePublicationStates() {
+  const states = publicationStates(), pending = JSON.parse(states.pending)
+  delete pending.pcDefaultAbilityList
+  delete pending.mobileDefaultAbilityList
+  delete pending.applyReasonConfig
+  delete pending.equalToVisible
+  return { ...states, pending: JSON.stringify(pending), versions: JSON.stringify({ versions: [{ appVersion: '1.0.9', versionStatus: 2 }, { appVersion: '1.0.11', versionStatus: 0 }] }) }
+}
+
+it('creates and submits the original profile version from reliable numbers and unchanged entries without manual form metadata', async () => {
+  const configuration = new FeishuAdapter().setup.applicationConfiguration!, states = profilePublicationStates(), p = configuration.applicationProfile!
+  const draft = await p.publicationDraft(states, 'Original profile update.')
+  expect(draft).toEqual({ kind: 'create-version', version: '1.0.12', notes: 'Original profile update.', visibility: 'current' })
+  const provenance = { creatorIsCurrent: false, initialVersion: null, profileUpdate: { readbackStepId: 'original-matched-readback', createdVersion: null } }
+  const plan = await configuration.publicationPlan('create-application-version', states, draft, null, provenance)
+  expect(plan.review.issues).toEqual([])
+  expect(plan.review.reasonRequired).toBeNull()
+  expect(plan.review.entries).toEqual({ desktop: { current: 'bot', choices: [] }, mobile: { current: 'bot', choices: [] } })
+  const calls = wire(path => Response.json({ code: 0, data: path.includes('/create/') ? { versionId: 'profile-created-version' } : {} })), input = scope()
+  expect(await configuration.createVersion({ ...input, privateIntent: plan.privateIntent! })).toMatchObject({ kind: 'accepted', versionId: 'profile-created-version' })
+  expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ appVersion: '1.0.12', changeLog: 'Original profile update.', pcDefaultAbility: 'bot', mobileDefaultAbility: 'bot', visibleSuggest: { departments: [7], members: ['original-member'], groups: ['original-group'], isAll: 0 }, blackVisibleSuggest: { departments: [], members: ['excluded-member'], groups: [], isAll: 0 }, b2cShareSuggest: false })
+  const detail = { appVersion: '1.0.12', versionStatus: 0, versionId: 'profile-created-version', visibleRange: audience }
+  const submit = await configuration.publicationPlan('submit-application-version', { ...states, version: JSON.stringify(detail) }, { kind: 'submit-version', versionId: detail.versionId, fullRelease: false }, null, { ...provenance, profileUpdate: { ...provenance.profileUpdate, createdVersion: { versionId: detail.versionId, draft: draft! } } })
+  expect(await configuration.submitVersion({ ...input, privateIntent: submit.privateIntent! })).toMatchObject({ kind: 'accepted', versionId: detail.versionId })
+  expect(JSON.parse(String(calls[1]!.init.body))).toEqual({ clientId: appId })
+  expect(calls.map(call => call.target.pathname)).toEqual(['/developers/v1/app_version/create/' + appId, '/developers/v1/publish/commit/' + appId + '/' + detail.versionId])
+})
+
+it('preserves actual current entries and the feature-selected split sharing settings in a profile release', async () => {
+  const states = profilePublicationStates(), pending = JSON.parse(states.pending)
+  pending.pcDefaultAbility = 'webapp'; pending.mobileDefaultAbility = ''
+  states.pending = JSON.stringify(pending)
+  states.features = JSON.stringify({ hitFeatureKeyList: ['openplatform.b2c.bot_b2c_share_switch_split'] })
+  const split = { b2cGroupChatShareEnable: true, b2cP2PChatShareEnable: false, b2cP2PChatNeedAudit: true }
+  states.sharing = JSON.stringify({ onlineB2CShareSplitConfig: split })
+  const configuration = new FeishuAdapter().setup.applicationConfiguration!, draft = await configuration.applicationProfile!.publicationDraft(states, 'Original profile update.')
+  expect(draft).not.toBeNull()
+  const plan = await configuration.publicationPlan('create-application-version', states, draft, null, { creatorIsCurrent: false, initialVersion: null, profileUpdate: { readbackStepId: 'original-readback', createdVersion: null } })
+  const body = JSON.parse(plan.privateIntent!).body
+  expect(body.pcDefaultAbility).toBe('webapp')
+  expect(body).not.toHaveProperty('mobileDefaultAbility')
+  expect(body.b2cShareSplitConfigSuggest).toEqual(split)
+  expect(body).not.toHaveProperty('b2cShareSuggest')
+  expect(body).not.toHaveProperty('applyReasonConfig')
+  const changedEntry = await configuration.publicationPlan('create-application-version', states, { ...draft!, desktopEntry: 'bot' }, null, { creatorIsCurrent: false, initialVersion: null, profileUpdate: { readbackStepId: 'original-readback', createdVersion: null } })
+  expect(changedEntry.privateIntent).toBeNull()
+})
+
+it.each(['versions', 'version-number', 'desktop-entry', 'mobile-entry', 'audience', 'sharing', 'split-sharing', 'features'] as const)('keeps an absent required %s source unconfirmed for profile publication', async missing => {
+  const states = profilePublicationStates(), pending = JSON.parse(states.pending)
+  if (missing === 'versions') states.versions = '{}'
+  if (missing === 'version-number') states.versions = JSON.stringify({ versions: [{}] })
+  if (missing === 'desktop-entry') { delete pending.pcDefaultAbility; states.pending = JSON.stringify(pending) }
+  if (missing === 'mobile-entry') { delete pending.mobileDefaultAbility; states.pending = JSON.stringify(pending) }
+  if (missing === 'audience') states.visibility = JSON.stringify({ whiteList: audience.whiteList })
+  if (missing === 'sharing') states.sharing = '{}'
+  if (missing === 'features') states.features = '{}'
+  if (missing === 'split-sharing') states.features = JSON.stringify({ hitFeatureKeyList: ['openplatform.b2c.bot_b2c_share_switch_split'] })
+  const calls = wire()
+  expect(await leaf().publicationDraft(states, 'Original profile update.')).toBeNull()
+  expect(calls).toHaveLength(0)
+})
+
+it.each(['api', 'contact', 'data'] as const)('retains known %s review-reason requirements and additional pending changes despite missing unrelated policy fields', async kind => {
+  const states = profilePublicationStates(), pending = JSON.parse(states.pending)
+  pending.ChangeScope.addScopesV2 = ['original-added-scope']
+  pending.applyReasonConfig = kind === 'api' ? { apiPrivilegeNeedReason: true } : kind === 'contact' ? { contactPrivilegeNeedReason: true, isContactExpand: true } : { dataPrivilegeNeedReason: true, isDataPrivilegeExpandMap: { original: true } }
+  states.pending = JSON.stringify(pending)
+  const configuration = new FeishuAdapter().setup.applicationConfiguration!, draft = { kind: 'create-version' as const, version: '1.0.12', notes: 'Original profile update.', visibility: 'current' as const }
+  const provenance = { creatorIsCurrent: false, initialVersion: null, profileUpdate: { readbackStepId: 'original-readback', createdVersion: null } }
+  const review = await configuration.publicationPlan('create-application-version', states, draft, null, provenance)
+  expect(review.privateIntent).toBeNull()
+  expect(review.review.reasonRequired).toBe(true)
+  expect(review.review.changes).toContainEqual({ category: 'permissions', details: ['Add permission: original-added-scope'] })
+  const accepted = await configuration.publicationPlan('create-application-version', states, { ...draft, reason: 'Original explicit review reason.' }, null, provenance)
+  expect(accepted.review.changes).toEqual(review.review.changes)
+  const body = JSON.parse(accepted.privateIntent!).body
+  expect(body.remark).toBe('Original explicit review reason.')
+  expect(body).not.toHaveProperty('applyReasonConfig')
+})
+
+it('keeps the full manual publication form and its source requirements unchanged', async () => {
+  const configuration = new FeishuAdapter().setup.applicationConfiguration!, states = publicationStates()
+  const draft = { kind: 'create-version' as const, version: '1.0.12', notes: 'Manual review.', visibility: 'current' as const }
+  const complete = await configuration.publicationPlan('create-application-version', states, draft, null)
+  expect(JSON.parse(complete.privateIntent!).body).toMatchObject({ autoPublish: false, applyReasonConfig: JSON.parse(states.pending).applyReasonConfig })
+  const incomplete = await configuration.publicationPlan('create-application-version', profilePublicationStates(), draft, null)
+  expect(incomplete.privateIntent).toBeNull()
+  expect(incomplete.review.issues).toContain('The exact version list is unconfirmed')
+  expect(incomplete.review.issues).toContain('Unconfirmed pc entry choices')
+  expect(incomplete.review.issues).toContain('The original application review policy is incomplete')
+})
+
 it('derives the next original profile version and preserves full published audience without the initial creator shortcut', async () => {
   const configuration = new FeishuAdapter().setup.applicationConfiguration!, p = configuration.applicationProfile!, states = publicationStates()
   const draft = await p.publicationDraft(states, 'Update original bot identity.')
