@@ -1186,6 +1186,7 @@ export function ActivityView({
         />
       ) : entry.record?.role !== 'process' && entry.record?.role !== 'interaction' && speaker ? (
         <CapturedConversationMessage
+          active={readingEnabled}
           item={entry.item}
           {...(submissionDisclosure ? { submissionDisclosure } : {})}
           {...(entry.record ? { record: entry.record } : {})}

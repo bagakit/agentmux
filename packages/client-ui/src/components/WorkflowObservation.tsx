@@ -16,6 +16,8 @@ type ObservationProps = {
     streaming?: boolean
   }
   compact?: boolean
+  /** Anchored originals stay mounted; their owner hides individual process entries. */
+  keepContentVisible?: boolean
   expanded: boolean
   onExpandedChange: (expanded: boolean) => void
   children: ReactNode
@@ -42,17 +44,19 @@ export function WorkflowStatusGlyph({ status, size = 12, recorded = false }: { s
     size={size} animation={status === 'running' && !recorded ? 'work' : 'none'} className={`wf-ico wf-ico--${status}`} />
 }
 
-export function RecordedStepsCard({ observation, compact = false, expanded, onExpandedChange, children }: ObservationProps) {
+export function RecordedStepsCard({ observation, compact = false, keepContentVisible = false, expanded, onExpandedChange, children }: ObservationProps) {
   const contentId = useId()
   const [readOnce, setReadOnce] = useState(expanded)
   useLayoutEffect(() => { if (expanded) setReadOnce(true) }, [expanded])
   if (observation.stepCount === 0) return null
   const { recordedTime, status } = observation
+  const description = [recordedTime ? `${recordedTime.from} – ${recordedTime.to} · ${recordedTime.offset}` : '',
+    status === undefined && !observation.metrics ? compact ? '状态未记录' : 'Status not recorded' : ''].filter(Boolean).join(' · ')
   return <article className="wf-card wf-card--observation" data-observation-id={observation.id} data-status={status}>
     <button type="button" className="log-fold wf-head" data-open={expanded ? '' : undefined}
       aria-expanded={expanded} aria-controls={contentId}
-      title={recordedTime ? `${recordedTime.from} – ${recordedTime.to} · ${recordedTime.offset}` : undefined}
-      aria-description={recordedTime ? `${recordedTime.from} – ${recordedTime.to} · ${recordedTime.offset}` : undefined}
+      title={description || undefined}
+      aria-description={description || undefined}
       onClick={() => onExpandedChange(!expanded)}>
       <span className="log-fold__node"><SemanticIcon name="navigation.disclosure" size={12} className="wf-chev log-fold__chevron" /></span>
       <span className="log-fold__label">
@@ -68,7 +72,7 @@ export function RecordedStepsCard({ observation, compact = false, expanded, onEx
         {status === 'failed' ? <span className="wf-chip log-row__chip--failed"><WorkflowStatusGlyph status="failed" />Failed</span> : null}
         {observation.streaming ? <span className="wf-chip"><SemanticIcon name="status.streaming" size={12} className="wf-ico" />Streaming</span> : null}
         {status === 'complete' ? <span className="wf-observation__recorded">Recorded</span> : null}
-        {status === undefined && !observation.metrics ? <span className="wf-observation__recorded">{compact ? '状态未记录' : 'Status not recorded'}</span> : null}
+        {status === undefined && !observation.metrics && !compact ? <span className="wf-observation__recorded">Status not recorded</span> : null}
       </span>
     </button>
     {observation.counts ? <div className="wf-observation__summary" aria-label="Recorded step states">
@@ -78,8 +82,8 @@ export function RecordedStepsCard({ observation, compact = false, expanded, onEx
       {observation.counts.failed > 0 ? <span className="wf-observation__stat" data-state="failed"><WorkflowStatusGlyph status="failed" />{observation.counts.failed} failed</span> : null}
       {observation.counts.unknown > 0 ? <span className="wf-observation__stat">{observation.counts.unknown} status not recorded</span> : null}
     </div> : null}
-    <div id={contentId} className="wf-body wf-observation__body" hidden={!expanded} inert={!expanded}>
-      {expanded || readOnce ? children : null}
+    <div id={contentId} className="wf-body wf-observation__body" hidden={!expanded && !keepContentVisible} inert={!expanded && !keepContentVisible}>
+      {expanded || readOnce || keepContentVisible ? children : null}
     </div>
   </article>
 }

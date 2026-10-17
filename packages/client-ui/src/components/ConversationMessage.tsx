@@ -41,6 +41,8 @@ export type ConversationMessageProps = {
   recordTitle?: string
   /** A compact record face, without changing ordinary conversation defaults. */
   compact?: boolean
+  /** Presentation continuity for an exact same-author progress group; not a record association. */
+  continuation?: boolean
   /** An already-open original disclosure owns the full body, including long human input. */
   expandedContent?: boolean
   /** Keep secondary identity/context facts in the existing Info disclosure. */
@@ -155,7 +157,7 @@ function partHasRenderableContent(part: AgentSessionHistoryContentPart): boolean
 /** A readable message, shared by Activity, native history and Gallery. The host owns identity
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
-  active = true, compact = false, expandedContent = false, detailsOnlyMetadata = false, recordTitle, messagePhase, recordedIdentity = false, messageDetails, renderSubmissionOriginal, messageActions, located = false, copyText, onCopy,
+  active = true, compact = false, continuation = false, expandedContent = false, detailsOnlyMetadata = false, recordTitle, messagePhase, recordedIdentity = false, messageDetails, renderSubmissionOriginal, messageActions, located = false, copyText, onCopy,
   speaker: recordedSpeaker, conversationEvent, sources, conversationSessionId, itemRef, inputSource, publicContent, inputContext, inputContextSource, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, contentBoundary = 'wire', a2aNotificationId, questionAnswers, questionDiagnostic, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
   openWorkspaceFile, readPastedImage, readHistoryResource, nativeResourceRecord, openHttpLink, onContinue, onSelectAnnotation, expandedTraces: controlledTraces, onToggleTrace: controlledToggle, traceDisclosure
 }: ConversationMessageProps) {
@@ -376,6 +378,7 @@ export function ConversationMessage({
       data-conversation-role={conversationEvent?.role}
       data-conversation-author={conversationEvent ? JSON.stringify(conversationEvent.author) : undefined}
       data-message-phase={messagePhase}
+      data-message-continuation={continuation || undefined}
       data-recorded-identity={recordedIdentity || undefined}
       data-message-id={messageId || undefined}
       data-a2a-notification-id={a2aNotificationId}
@@ -434,9 +437,9 @@ export function ConversationMessage({
           </button> : null}
         </span> : null}
         {isIncoming || speaker?.role === 'agent' || isSystemContext || messageDetails || recordedIdentity || detailsOnlyMetadata ? <ConversationInputDetails messageId={messageId} source={inputSource} publicContent={publicContent} executionHostId={executionHostId} speaker={recordedSpeaker}
-          declaredAgentSessionId={prefix?.declaredAgentSessionId} sourceDeclaration={isDeclaredSender ? prefix.sourceLabel : undefined} describeSpeaker={describeSpeaker} recordedIdentity={recordedIdentity}>{detailsOnlyMetadata ? <>{senderIdentity}{metadata}</> : null}{messageDetails}</ConversationInputDetails> : null}
+          declaredAgentSessionId={prefix?.declaredAgentSessionId} sourceDeclaration={isDeclaredSender ? prefix.sourceLabel : undefined} describeSpeaker={describeSpeaker} recordedIdentity={recordedIdentity}>{detailsOnlyMetadata ? <>{senderIdentity}{metadata}</> : continuation ? metadata : null}{messageDetails}</ConversationInputDetails> : null}
       </div>
-      {!detailsOnlyMetadata ? metadata : null}
+      {!detailsOnlyMetadata && !continuation ? metadata : null}
       {sources && detailsOnlyMetadata ? <div className="log-turn__meta"><ConversationSourceLabels sources={sources.main} observation={sources.collectedReply} /></div> : null}
       {hasContent && (!isSystemContext || systemContextOpen) ? discloseBody(
         <div ref={bodyRef} id={isSystemContext ? systemContentId : undefined} className="log-turn__body"
