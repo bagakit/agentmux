@@ -6,13 +6,15 @@ import { dirname, join, resolve, relative } from 'node:path'
 
 const root = resolve(import.meta.dirname, '../../..')
 const args = process.argv.slice(2)
-let receiptArgument, consumerProofArgument = process.env.AGENTMUX_BROWSER_RESOURCE_CONSUMER_PROOF, consumerOnly = false
+let receiptArgument, mutationArgument, consumerProofArgument = process.env.AGENTMUX_BROWSER_RESOURCE_CONSUMER_PROOF, consumerOnly = false
 for (let index = 0; index < args.length; index++) {
   if (args[index] === '--receipt' && !receiptArgument) receiptArgument = args[++index]
   else if (args[index] === '--consumer-proof' && !consumerProofArgument) consumerProofArgument = args[++index]
   else if (args[index] === '--consumer-only' && !consumerOnly) consumerOnly = true
-  else throw new Error('Use --receipt PATH, --consumer-proof PATH to consume qualified evidence, or --consumer-only for a bounded diagnostic')
+  else if (args[index] === '--mutation' && !mutationArgument) mutationArgument = args[++index]
+  else throw new Error('Use --receipt PATH, --consumer-proof PATH, or --consumer-only [--mutation NAME] for a bounded diagnostic')
 }
+assert.ok(!mutationArgument || consumerOnly, 'Selecting one mutation is only a scoped consumer diagnostic')
 const directory = join(root, '.tmp/browser-resource-presentation', 'attempt-' + randomUUID())
 const receiptPath = receiptArgument ? resolve(receiptArgument) : join(directory, 'receipt.json')
 await mkdir(join(directory, 'home'), { recursive: true }); await mkdir(dirname(receiptPath), { recursive: true })
@@ -40,13 +42,16 @@ function execute(env) {
   })
 }
 const mutants = [
+  { id: 'uploads', file: 'apps/desktop/src/renderer/src/components/settings/RetainedBrowserUploads.tsx',
+    expected: 'scopes the real retained Settings observer to active visibility and preserves catalog pairing and automation draft' },
   { id: 'shared', file: 'apps/desktop/src/renderer/src/components/settings/browser-resource-view.ts',
     expected: 'shares one all-Workspace directory and preserves partial positions while deduplicating exact process births' },
   { id: 'receipt', file: 'apps/desktop/src/renderer/src/components/settings/BrowserResources.tsx',
     expected: 'dispatches one finite release batch serially through preload and keeps each original mixed receipt without retry' },
   { id: 'selection', file: 'apps/desktop/src/renderer/src/components/settings/BrowserResources.tsx',
     expected: 'keeps the selected original document when refresh, filtering and new pages change the visible directory' }
-]
+].filter(mutation => !mutationArgument || mutation.id === mutationArgument)
+assert.ok(mutants.length > 0, 'A selected mutation must identify an actual production boundary')
 async function run(label, mutation) {
   const reportFile = join(directory, label + '.json'), inputFile = join(directory, label + '-inputs.jsonl')
   const env = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(AGENTMUX_|CTXMUX_)/u.test(key))), NODE_ENV: 'test', HOME: join(directory, 'home'), AGENTMUX_DIRECTORY_PRIVATE_HOME: join(directory, 'home'), AGENTMUX_RESOURCE_REPORT: reportFile, AGENTMUX_RESOURCE_INPUTS: inputFile, AGENTMUX_RESOURCE_CACHE: join(directory, 'cache') }
@@ -81,6 +86,7 @@ async function run(label, mutation) {
     'apps/desktop/src/renderer/src/components/settings/browser-resource-view.ts',
     'apps/desktop/src/renderer/src/components/SettingsPanel.tsx',
     'apps/desktop/src/renderer/src/components/settings/BrowserSettingsPane.tsx',
+    'apps/desktop/src/renderer/src/components/settings/RetainedBrowserUploads.tsx',
     'apps/desktop/src/renderer/src/lib/api.ts', 'apps/desktop/src/preload/index.ts',
     'apps/desktop/src/renderer/src/lib/use-performance-observation.ts'])
     assert.ok(inputs.some(input => input.path === file), 'The actual resource consumer must load candidate source: ' + file)
@@ -97,7 +103,7 @@ async function consumeProof(file) {
   assert.equal(hash(proofBytes), input.receipt.sha256)
   const proof = JSON.parse(proofBytes)
   assert.equal(proof.schema, receipt.schema); assert.equal(proof.consumersPassed, true)
-  assert.equal(proof.runs.length, 5); assert.ok(Object.keys(proof.sources).length > 0)
+  assert.equal(proof.runs.length, mutants.length + 2); assert.ok(Object.keys(proof.sources).length > 0)
   const reviewed = new Map(input.reviewedChanges.map(change => [change.file, change]))
   const changed = []
   for (const [name, before] of Object.entries(proof.sources)) {
@@ -111,7 +117,7 @@ async function consumeProof(file) {
   }
   assert.deepEqual([...reviewed.keys()].sort(), changed.sort(), 'Review binds exactly the changed inputs')
   for (const [index, run] of proof.runs.entries()) {
-    const mutation = index > 0 && index < 4 ? mutants[index - 1] : null
+    const mutation = index > 0 && index <= mutants.length ? mutants[index - 1] : null
     assert.equal(run.label, mutation ? 'mutant-' + mutation.id : index === 0 ? 'baseline' : 'restored')
     assert.equal(run.result, mutation ? 'owning-AssertionRED' : 'GREEN')
     const reportBytes = await readFile(run.report), inputBytes = await readFile(run.inputs)
@@ -137,7 +143,7 @@ try {
     for (const mutation of mutants) await run('mutant-' + mutation.id, mutation)
     await run('restored')
   }
-  assert.equal(receipt.runs.length, 5)
+  assert.equal(receipt.runs.length, mutants.length + 2)
   for (const [file, digest] of sources) assert.equal(hash(await readFile(join(root, file))), digest, 'The final source and tests must remain exact')
   receipt.endingCandidate = candidate()
   receipt.consumersPassed = true

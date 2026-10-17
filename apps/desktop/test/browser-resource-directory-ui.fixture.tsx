@@ -35,6 +35,7 @@ const deferred = <T,>() => { let resolve!: (value: T) => void, reject!: (error: 
   return { promise: new Promise<T>((yes, no) => { resolve = yes; reject = no }), resolve, reject } }
 let root: Root, container: HTMLDivElement, initial: ReturnType<typeof useAppStore.getState>
 let read: ReturnType<typeof vi.fn>, current: AgentMuxBrowserTargetsResult
+let uploadRead: ReturnType<typeof vi.fn>
 let release: ReturnType<typeof vi.fn>, restore: ReturnType<typeof vi.fn>
 let saveConfig: ReturnType<typeof vi.fn>
 let metricSnapshot = performanceAttributionSnapshots.fresh
@@ -65,6 +66,7 @@ beforeEach(async () => {
   container = document.createElement('div'); document.body.append(container); root = createClientUiRoot(container)
   initial = useAppStore.getState(); useAppStore.setState({ config: composerConfig, activeWorkspaceId: 'workspace' })
   current = result(['a', 'b']); read = vi.fn(async () => current); wire.listeners.clear(); metricIds.clear()
+  uploadRead = vi.fn(async () => ({ selections: [] }))
   metricSnapshot = structuredClone(performanceAttributionSnapshots.fresh)
   release = vi.fn(async (id: string, navigationId: string) => ({ browserId: id, navigationId, status: 'released', reasons: [] }))
   restore = vi.fn(async (id: string) => { const { resource: _resource, ...restored } = embedded(id); return restored })
@@ -79,7 +81,7 @@ beforeEach(async () => {
     if (channel === 'browser:release') return await release(...args)
     if (channel === 'browser:restoreResource') return await restore(...args)
     if (channel === 'config:save') return await saveConfig(...args)
-    if (channel === 'browser:listRetainedUploads') return { selections: [] }
+    if (channel === 'browser:listRetainedUploads') return await uploadRead()
     if (channel === 'browser:createExternalPairing') return { link: 'ws://private-pairing.invalid/#original', expiresAt: Date.now() + 600000 }
     throw new Error(`Unexpected fixture IPC ${channel}`)
   })
@@ -143,25 +145,31 @@ it('coalesces change bursts into one in-flight read and one fresh cut without bl
 
 it('scopes the real retained Settings observer to active visibility and preserves catalog pairing and automation draft', async () => {
   await render(false); expect(read).not.toHaveBeenCalled()
-  // Selected-file snapshots have their own existing observer. This test isolates the exact additional catalog listener.
-  const unrelatedUploadListeners = [...listenerSet()]; expect(unrelatedUploadListeners).toHaveLength(1)
-  await change(); expect(read).not.toHaveBeenCalled()
+  expect(listenerSet().size).toBe(0); expect(uploadRead).not.toHaveBeenCalled()
+  await change(); expect(read).not.toHaveBeenCalled(); expect(uploadRead).not.toHaveBeenCalled()
   await render(true); expect(read).toHaveBeenCalledTimes(1)
-  expect(metricIds.size).toBe(1)
-  const catalogListeners = [...listenerSet()].filter(listener => !unrelatedUploadListeners.includes(listener)); expect(catalogListeners).toHaveLength(1)
+  expect(metricIds.size).toBe(1); expect(uploadRead).toHaveBeenCalledTimes(1)
+  const activeListeners = [...listenerSet()]; expect(activeListeners).toHaveLength(2)
   await click('Connect extension');
   const automation = container.querySelector<HTMLInputElement>('[data-settings-field="agent-automation"] input')!
   await act(async () => automation.click()); expect(automation.checked).toBe(true)
   const pairing = () => container.querySelector<HTMLInputElement>('[aria-label="Private extension connection link"]')?.value
   expect(pairing()).toBe('ws://private-pairing.invalid/#original')
-  const pending = deferred<AgentMuxBrowserTargetsResult>(); read.mockReturnValueOnce(pending.promise); await change()
+  const pending = deferred<AgentMuxBrowserTargetsResult>(); read.mockReturnValueOnce(pending.promise)
+  const oldUpload = deferred<{ selections: [] }>(); uploadRead.mockReturnValueOnce(oldUpload.promise)
+  await change()
   const count = read.mock.calls.length
-  await render(false); expect(catalogListeners.every(listener => !listenerSet().has(listener))).toBe(true)
+  const uploadCount = uploadRead.mock.calls.length
+  await render(false); expect(activeListeners.every(listener => !listenerSet().has(listener))).toBe(true)
   expect(metricIds.size).toBe(0)
-  expect(listenerSet().size).toBe(unrelatedUploadListeners.length); await change(); expect(read).toHaveBeenCalledTimes(count)
+  expect(listenerSet().size).toBe(0); await change(); expect(read).toHaveBeenCalledTimes(count)
+  expect(uploadRead).toHaveBeenCalledTimes(uploadCount)
   await act(async () => pending.resolve(result([]))); await settle()
   expect(text()).toContain('Original b'); expect(pairing()).toBe('ws://private-pairing.invalid/#original'); expect(automation.checked).toBe(true)
   current = result(['c']); await render(true); expect(read).toHaveBeenCalledTimes(count + 1)
+  expect(uploadRead).toHaveBeenCalledTimes(uploadCount + 1); expect(listenerSet().size).toBe(2)
+  await act(async () => oldUpload.reject(new Error('Retired upload observation'))); await settle()
+  expect(text()).not.toContain('Retired upload observation')
   expect(text()).toContain('Original c'); expect(text()).not.toContain('Original b')
   expect(pairing()).toBe('ws://private-pairing.invalid/#original'); expect(automation.checked).toBe(true)
 })

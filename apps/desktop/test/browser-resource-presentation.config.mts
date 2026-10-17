@@ -5,6 +5,7 @@ import { relative, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '../../..')
 const mutations = {
+  uploads: ['apps/desktop/src/renderer/src/components/settings/RetainedBrowserUploads.tsx', 'if (!active) return', '/* visibility guard removed */'],
   shared: ['apps/desktop/src/renderer/src/components/settings/browser-resource-view.ts',
     'const measured = [...counts.keys()].map(key => samples.get(key))',
     'const measured = current.flatMap(row => (row.target.resource?.processes ?? []).map(process => samples.get(processKey(process))))'],
