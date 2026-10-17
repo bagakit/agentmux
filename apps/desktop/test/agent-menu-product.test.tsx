@@ -14,7 +14,7 @@ function item(root: ParentNode, label: string) {
 }
 async function mount(entries: RegionMenuEntry[]) {
   await dom.render(<Menu.Root open><Menu.Trigger>Actions</Menu.Trigger><Menu.Content data-product-menu="">
-    <AgentRegionMenuActions entries={entries} details={<Menu.Item>Session details</Menu.Item>} />
+    <AgentRegionMenuActions entries={entries} controls={<Menu.Item>Take over</Menu.Item>} conversation={<><Menu.Item>Conversation history</Menu.Item><Menu.Item>Session details</Menu.Item></>} />
   </Menu.Content></Menu.Root>)
   return document.querySelector<HTMLElement>('[data-product-menu]')!
 }
@@ -25,7 +25,7 @@ it('groups typed actions without implementation separators and exposes layout co
     { kind: 'separator' }, { kind: 'separator' }, { kind: 'promote', onSelect: promote },
     { kind: 'restart', onSelect: restart }
   ])
-  expect([...root.querySelectorAll('[role="menuitem"]')].map(node => (node.getAttribute('aria-label') ?? node.textContent)?.trim())).toEqual(['Split Right', 'Move to New Tab', 'Session details', 'Restart Session…'])
+  expect([...root.querySelectorAll('[role="menuitem"]')].map(node => (node.getAttribute('aria-label') ?? node.textContent)?.trim())).toEqual(['Take over', 'Restart Session…', 'Conversation history', 'Session details', 'Split Right', 'Move to New Tab'])
   expect(root.querySelectorAll('[role="separator"]')).toHaveLength(3)
   expect(item(root, 'Split Right').getAttribute('aria-haspopup')).toBeNull()
   await act(async () => item(root, 'Split Right').click())
