@@ -211,7 +211,16 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
     const result = await this.advanceOriginal(value, context)
     if (result.operation?.goal.kind === 'profile-update') {
       const projected = await this.profile.view(result.operation.operationId, context, true)
-      return { ...result, operation: projected.operation, challenge: projected.challenge, ...(projected.continuation ? { continuation: projected.continuation } : {}), ...(projected.profileUpdate ? { profileUpdate: projected.profileUpdate } : {}) }
+      const view = { ...result, operation: projected.operation, challenge: projected.challenge }
+      delete view.challengeSource
+      delete view.reason
+      delete view.continuation
+      delete view.profileUpdate
+      if (projected.challengeSource) view.challengeSource = projected.challengeSource
+      if (projected.reason) view.reason = projected.reason
+      if (projected.continuation) view.continuation = projected.continuation
+      if (projected.profileUpdate) view.profileUpdate = projected.profileUpdate
+      return view
     }
     if (!result.operation?.initialPublication) return result
     const projected = await this.initial.view(result.operation.operationId, context)
