@@ -160,7 +160,7 @@ function reviewPublication(effect: ConnectionSetupPublicationEffect, states: Rec
     if (profileMode) {
       if (typeof current !== 'string' || current !== '' && !label(current)) { issues.push('Unconfirmed current ' + platform + ' entry'); return null }
       if (desired !== undefined && desired !== current) issues.push('Retain the current ' + platform + ' entry for this profile update')
-      if (current) body[platform + 'DefaultAbility'] = current
+      body[platform + 'DefaultAbility'] = current
       return { current: current || null, choices: [] }
     }
     if (!Array.isArray(choices) || !choices.every(label) || new Set(choices).size !== choices.length) { issues.push('Unconfirmed ' + platform + ' entry choices'); return null }
@@ -218,9 +218,7 @@ function reviewPublication(effect: ConnectionSetupPublicationEffect, states: Rec
 /** The reference derives from parseable three-part versions, not every historical display label. */
 function nextProfileVersion(data: Record<string, unknown> | null): string | null {
   if (!Array.isArray(data?.versions)) return null
-  const entries = data.versions.map(record)
-  if (entries.some(entry => !label(entry?.appVersion))) return null
-  const versions = entries.map(entry => entry!.appVersion as string)
+  const versions = data.versions.map(value => record(value)?.appVersion).filter(label)
   const triples = versions.map(value => value.split('.').map(part => Number.parseInt(part, 10))).filter(parts => parts.length === 3 && parts.every(Number.isFinite))
   const max = triples.length ? triples.reduce((left, right) => { for (let i = 0; i < 3; i++) if (left[i] !== right[i]) return left[i]! > right[i]! ? left : right; return left }) : [0, 0, 0]
   const version = [max[0], max[1], max[2]! + 1].join('.')
