@@ -484,8 +484,8 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved, onContinue 
     </>}
     {!current && enrollment.issueDetail ? <details className="connector-diagnostics"><summary>Setup service details</summary><p className="connector-enrollment__technical">{enrollment.issueDetail}</p></details> : null}
     {history.length ? <details className="connector-enrollment__history"><summary>Previous bot setups</summary>{history.map(item => <button key={item.operationId} data-enrollment-history={item.operationId} className="connector-enrollment__previous" onClick={() => enrollment.select(item.operationId)}><strong>{item.label}</strong><span>{item.domain}</span></button>)}{enrollment.next ? <button className="small-button" onClick={() => void enrollment.read(enrollment.next!)}>More setups</button> : null}</details> : null}
-    <ConnectionRequestTrace source={selectedId ? { kind: 'enrollment', operationId: selectedId } : null} revision={operation?.revision} title={initialSetup ? "Sign-in & creation requests" : undefined} />
-    {saved && initialSetup ? <ConnectionRequestTrace source={{ kind: 'setup', operationId: initialSetup.operationId }} revision={JSON.stringify(initialProgress)} title="Configuration & publication requests" /> : null}
+    <ConnectionRequestTrace source={selectedId ? { kind: 'enrollment', operationId: selectedId } : null} revision={operation?.revision} enrollmentView={view} title={initialSetup ? "Sign-in & creation requests" : undefined} />
+    {saved && initialSetup ? <ConnectionRequestTrace source={{ kind: 'setup', operationId: initialSetup.operationId }} revision={JSON.stringify(initialProgress)} hideCopy title="Configuration & publication requests" /> : null}
     {current || unfinished ? <details className="connector-optional"><summary>Set up another bot</summary><p className="settings-group-note">Opens a separate setup. Every original request is kept; opening this form does not create a bot.</p><button data-enrollment-another className="small-button" onClick={enrollment.startAnother}>Open another setup</button></details> : null}
   </section>
 }

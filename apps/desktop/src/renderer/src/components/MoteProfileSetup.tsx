@@ -194,6 +194,6 @@ export function MoteProfileSetup({ operation, automatic, onOperation }: {
       <p className="mote-profile-scope">Updates this same bot using the saved Mote profile. Its current audience is kept. Other Motes and groups sharing the bot will see the published change.</p>
       <details className="bot-profile-details"><summary>Original update details</summary><dl className="connector-identity"><div><dt>Application</dt><dd><code>{operation.connection?.application.appId}</code></dd></div><div><dt>Management request</dt><dd><code>{id}</code></dd></div>{progress?.versionId ? <div><dt>Original version</dt><dd><code>{progress.versionId}</code></dd></div> : null}</dl></details>
     </div>
-    <ConnectionRequestTrace source={{ kind: 'setup', operationId: id }} revision={reading.view?.operation?.revision} setupView={reading.view} title="Profile update requests" />
+    <ConnectionRequestTrace source={{ kind: 'setup', operationId: id }} revision={reading.view?.operation?.revision} setupView={reading.view} diagnosisTarget={{ kind: 'mote', operationId: parentId, sourceTarget: operation.source.target, action: 'sync' }} title="Profile update requests" />
   </div>
 }
