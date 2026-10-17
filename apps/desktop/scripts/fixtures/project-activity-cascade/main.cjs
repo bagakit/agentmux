@@ -26,15 +26,15 @@ app.whenReady().then(async () => { try {
   const rect = selector => read(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)throw Error('Missing control '+${JSON.stringify(selector)});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height,hit:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}})()`)
   const move = (x, y) => win.webContents.sendInputEvent({ type: 'mouseMove', x: Math.round(x), y: Math.round(y) })
   const click = async selector => { const r = await rect(selector); assert.ok(r.hit, 'Input hits ' + selector); move(r.x, r.y); for (const type of ['mouseDown', 'mouseUp']) win.webContents.sendInputEvent({ type, x: Math.round(r.x), y: Math.round(r.y), button: 'left', clickCount: 1 }); result.operations.push({ type: 'click', selector }); await stable(); return r }
-  const key = async keyCode => { const nativeKey = { ArrowDown: 'Down', ArrowUp: 'Up', ArrowRight: 'Right', ArrowLeft: 'Left' }[keyCode] ?? keyCode; for (const type of ['keyDown', 'keyUp']) win.webContents.sendInputEvent({ type, keyCode: nativeKey }); result.operations.push({ type: 'key', keyCode, nativeKey }); await pause(80) }
+  const key = async keyCode => { const nativeKey = { ArrowDown: 'Down', ArrowUp: 'Up', ArrowRight: 'Right', ArrowLeft: 'Left', Enter: 'Return' }[keyCode] ?? keyCode; for (const type of ['keyDown', 'keyUp']) win.webContents.sendInputEvent({ type, keyCode: nativeKey }); result.operations.push({ type: 'key', keyCode, nativeKey }); await pause(80) }
   const hover = async selector => { const r = await rect(selector); assert.ok(r.hit, 'Hover hits ' + selector); move(r.x, r.y); await pause(350); await stable(); return r }
   const facts = () => read('window.activityCascadeScene.facts()')
   const closed = async () => { move(1250, 880); for (let index = 0; index < 4; index++) { if (await read('!document.querySelector(".project-activity-menu,.agent-information-reader")')) break; await key('Escape') } await until('All transient activity surfaces close', '!document.querySelector(".project-activity-menu,.agent-information-reader")') }
   const originalWorkface = async label => { const current = await facts(); assert.deepEqual(current.selection, result.before.selection, label + ' does not navigate'); assert.equal(current.selectedId, result.before.selectedId, label + ' keeps selected Session'); assert.deepEqual(current.controls, [], label + ' issues no Agent control'); assert.equal(current.sameDrafts, true, label + ' keeps original draft owner'); assert.equal(current.draft, result.before.draft) }
   const inputFocus = label => read('document.activeElement===document.querySelector(\'[aria-label="Original workface input"]\')').then(value => assert.equal(value, true, label + ' keeps original input focus'))
-  const openZone = async zoneId => { await hover('.project-activity'); await until('Activity menu', '!!document.querySelector(".project-activity-menu")'); await hover(`.project-activity-zone[data-zone-id=${JSON.stringify(zoneId)}]`); await until('Zone hover cascade', '!!document.querySelector(".project-activity-submenu")') }
-  const geometry = async () => { const value = await read(`({width:innerWidth,menus:[...document.querySelectorAll('.project-activity-menu,.project-activity-submenu')].map(e=>{const b=e.getBoundingClientRect();return{left:b.left,right:b.right,top:b.top,bottom:b.bottom,width:b.width,clientWidth:e.clientWidth,scrollWidth:e.scrollWidth}})})`); result.currentGeometry=value; assert.ok(value.menus.length >= 2); for (const menu of value.menus) { assert.ok(menu.left >= -1 && menu.right <= value.width + 1, 'Every cascade surface fits the actual viewport: '+JSON.stringify(value)); assert.ok(menu.width > 0 && menu.clientWidth > 0, 'Actual cascade surfaces are nonempty');assert.ok(menu.scrollWidth<=menu.clientWidth+1,'Menu text stays within its actual surface') } return value }
-  const shot = async (file, label) => { await stable(); const actual = await read(`({width:innerWidth,height:innerHeight,menus:[...document.querySelectorAll('[role=menu]')].map(e=>e.innerText),reader:document.querySelector('.agent-information-reader')?.innerText??null})`); await fs.writeFile(path.join(evidence, file), (await win.webContents.capturePage()).toPNG()); result.frames.push({ file, label, ...actual }) }
+  const openZone = async zoneId => { await hover('.project-activity'); await until('Activity menu', '!!document.querySelector(".project-activity-menu")'); const choice = `.project-activity-zone[data-zone-id=${JSON.stringify(zoneId)}]`; await hover(choice); if (await read('innerWidth<640')) await click(choice); await until('Zone members are directly readable', '!!document.querySelector(".project-activity-agent")') }
+  const geometry = async () => { const value = await read(`({width:innerWidth,singlePanel:document.querySelector('.project-activity-menu')?.dataset.singlePanel==='true',menus:[...document.querySelectorAll('.project-activity-menu,.project-activity-submenu')].map(e=>{const b=e.getBoundingClientRect();return{left:b.left,right:b.right,top:b.top,bottom:b.bottom,width:b.width,clientWidth:e.clientWidth,scrollWidth:e.scrollWidth}})})`); result.currentGeometry=value; assert.equal(value.menus.length, value.singlePanel ? 1 : 2); for (const menu of value.menus) { assert.ok(menu.left >= -1 && menu.right <= value.width + 1, 'Every activity surface fits the actual viewport: '+JSON.stringify(value)); if (value.singlePanel && value.width < 640) assert.ok(menu.left >= 8 && value.width - menu.right >= 8, 'Narrow activity keeps both outer gutters: '+JSON.stringify(value)); assert.ok(menu.width > 0 && menu.clientWidth > 0, 'Actual activity surfaces are nonempty');assert.ok(menu.scrollWidth<=menu.clientWidth+1,'Menu text stays within its actual surface') } return value }
+  const shot = async (file, label) => { await stable(); await read(`Promise.allSettled(document.getAnimations().filter(animation=>Number.isFinite(animation.effect?.getComputedTiming().endTime)).map(animation=>animation.finished))`); await stable(); const actual = await read(`({width:innerWidth,height:innerHeight,menus:[...document.querySelectorAll('[role=menu]')].map(e=>e.innerText),reader:document.querySelector('.agent-information-reader')?.innerText??null,finiteAnimations:document.getAnimations().filter(animation=>animation.playState==='running'&&Number.isFinite(animation.effect?.getComputedTiming().endTime)).length})`); assert.equal(actual.finiteAnimations, 0, 'Screenshot waits for finite surface animations to finish naturally'); await fs.writeFile(path.join(evidence, file), (await win.webContents.capturePage()).toPNG()); result.frames.push({ file, label, ...actual }) }
   await win.loadFile(html)
   win.webContents.debugger.attach('1.3'); await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
   await until('Core-backed actual activity scene', 'window.activityCascadeScene?.ready&&!!document.querySelector(".project-activity")')
@@ -112,6 +112,16 @@ app.whenReady().then(async () => { try {
   await originalWorkface('Keyboard inspection')
   result.keyboard = { rightToReader: true, detailsEscape: true, readerEscapeToExactOccurrence: true, retainedBeyondHoverGrace: true, pinnedReaderEscape: true, leftToZone: true, menuEscape: true }
 
+  await key('ArrowDown'); await key('ArrowRight'); await key('End')
+  await until('Keyboard selects the repeated occurrence before resize', 'document.activeElement?.dataset.regionId==="activity-a-second"')
+  for (const width of [360,1280]) {
+    win.setContentSize(width,900); await stable()
+    await until('Resize preserves the exact focused occurrence', 'document.activeElement?.dataset.regionId==="activity-a-second"&&!!document.querySelector("[data-activity-back]")&&!document.querySelector(".project-activity-submenu")')
+  }
+  await click('[data-activity-back]'); await until('Back restores wide group choices', '!!document.querySelector(".project-activity-zone")&&!document.querySelector(".project-activity-menu[data-single-panel=true]")')
+  await originalWorkface('Keyboard occurrence across viewport changes'); await closed()
+  result.keyboard.occurrenceAcrossResize = true
+
   for (const scope of ['zone', 'unplaced']) {
     await read(`window.activityCascadeScene.showScope(${JSON.stringify(scope)})`); await stable()
     await click('[aria-label="Original workface input"]'); await hover('.project-activity')
@@ -124,11 +134,81 @@ app.whenReady().then(async () => { try {
   }
   await read('window.activityCascadeScene.showScope("all")'); await stable()
 
-  for(const width of [640,360]){
-    win.setContentSize(width,900);await stable();move(width-4,880)
-    await openZone(zoneId);result['geometry'+width]=await geometry()
-    await shot(`narrow-cascade-${width}.png`,'Readable activity cascade at '+width+' CSS pixels');await closed()
+  await click('[aria-label="Original workface input"]'); await openZone(zoneId)
+  await read('window.__activityTypingRoot=document.querySelector(".project-activity-menu")')
+  win.webContents.sendInputEvent({ type: 'char', keyCode: 'a' }); await stable()
+  const typed = await read('document.querySelector(\'[aria-label="Original workface input"]\').value')
+  assert.ok(typed.includes('a'), 'Native character input remains available while inspecting activity')
+  for (const width of [360,1280,360]) {
+    win.setContentSize(width,900); await stable()
+    assert.equal(await read('document.querySelector(".project-activity-menu")===window.__activityTypingRoot'), true, 'Resize retains the original disclosure owner')
+    assert.equal(await read('!!document.querySelector("[data-activity-back]")&&!document.querySelector(".project-activity-submenu")'), true, 'Resize retains the entered single reading panel until Back')
+    await inputFocus('Resized group reading')
+    assert.equal(await read('document.querySelector(\'[aria-label="Original workface input"]\').value'), typed)
   }
+  result.typingAcrossResize = true
+  await closed()
+
+  for(const width of [640,639,360]){
+    win.setContentSize(width,900);await stable();move(width-4,880)
+    await click('[aria-label="Original workface input"]')
+    if (width < 640) {
+      await hover('.project-activity'); await until('Narrow group choices', 'document.querySelectorAll(".project-activity-zone").length===4')
+      await hover(`.project-activity-zone[data-zone-id=${JSON.stringify(zoneId)}]`)
+      assert.equal(await read('document.querySelectorAll(".project-activity-zone").length'), 4, 'Narrow group hover keeps the original list in place')
+      assert.equal(await read('document.querySelectorAll(".project-activity-agent").length'), 0, 'Narrow group hover does not replace the target under the pointer')
+      await inputFocus('Narrow group hover')
+      await shot(`narrow-groups-${width}.png`, 'Readable group choices in one narrow panel')
+    }
+    await openZone(zoneId);result['geometry'+width]=await geometry()
+    if (width >= 640) await inputFocus('Wide group hover')
+    else {
+      await pause(350); await stable()
+      assert.equal(await read('document.activeElement?.hasAttribute("data-activity-back")'), true, 'Pointer group selection starts at Back without entering a Reader')
+      assert.equal(await read('!!document.querySelector(".agent-information-reader")'), false, 'Pointer group selection does not start a delayed Reader under the stationary pointer')
+    }
+    await originalWorkface('Group disclosure')
+    await shot(`narrow-${width < 640 ? 'agents' : 'cascade'}-${width}.png`,'Readable activity at '+width+' CSS pixels')
+    if (width < 640) {
+      await read('window.__activityNarrowRoot=document.querySelector(".project-activity-menu")')
+      assert.deepEqual(await read('[...document.querySelectorAll(".project-activity-agent")].map(e=>e.dataset.regionId)'), ['activity-a-left','activity-b-right','activity-a-mirror','activity-a-second'])
+      await hover('.project-activity-agent[data-region-id="activity-a-left"]')
+      await until('Deliberate narrow Agent hover opens the shared Reader', '!!document.querySelector(".agent-information-reader")')
+      await originalWorkface('Narrow Agent hover')
+      if (await read('document.activeElement?.hasAttribute("data-activity-back")')) await key('ArrowDown')
+      assert.equal(await read('document.activeElement?.dataset.regionId'), 'activity-a-left', 'Native keyboard continues from the original hovered Agent')
+      await key('ArrowRight'); await until('Narrow hovered Agent enters its Reader', 'document.querySelector(".agent-information-reader")?.contains(document.activeElement)')
+      await key('Escape'); await stable()
+      result.narrowHoverReaderReturn = await read('({reader:!!document.querySelector(".agent-information-reader"),regionId:document.activeElement?.dataset.regionId??null})')
+      assert.equal(result.narrowHoverReaderReturn.reader, false, 'Narrow hovered Reader Escape closes only reading')
+      assert.equal(result.narrowHoverReaderReturn.regionId, 'activity-a-left', 'Narrow hovered Reader Escape returns to its exact source')
+      await click('[data-activity-back]'); await pause(300)
+      assert.equal(await read('document.querySelector(".project-activity-menu")===window.__activityNarrowRoot'), true)
+      assert.equal(await read('document.querySelectorAll(".project-activity-zone").length'), 4, 'Back keeps the group choices open under the stationary pointer')
+      const reviewZone = await read('window.activityCascadeScene.reviewZone')
+      await openZone(reviewZone)
+      await until('Non-first group entered', '!!document.querySelector(".project-activity-agent[data-region-id=activity-review-region]")')
+      await key('ArrowDown')
+      await until('Keyboard reaches original narrow Agent', 'document.activeElement?.dataset.regionId==="activity-review-region"')
+      await key('ArrowRight'); await until('Narrow shared Reader entered', 'document.querySelector(".agent-information-reader")?.contains(document.activeElement)')
+      if (width === 360) await shot('narrow-reader-360.png', 'Shared Reader reached from the original narrow Agent row')
+      await key('Escape'); await stable()
+      result.narrowReaderReturn = await read('({reader:!!document.querySelector(".agent-information-reader"),regionId:document.activeElement?.dataset.regionId??null,groupId:document.activeElement?.dataset.activityGroup??null})')
+      assert.equal(result.narrowReaderReturn.reader, false, 'Narrow Reader Escape closes only the reading surface')
+      assert.equal(result.narrowReaderReturn.regionId, 'activity-review-region', 'Narrow Reader Escape returns to exact source')
+      await key('Escape'); await until('Second Escape returns to original narrow group', 'document.activeElement?.dataset.zoneId===window.activityCascadeScene.reviewZone&&!document.querySelector("[data-activity-back]")')
+      await key('ArrowRight'); await until('Original narrow group reopens by keyboard', 'document.activeElement?.dataset.regionId==="activity-review-region"')
+      await key('ArrowLeft'); await until('ArrowLeft returns to original narrow group', 'document.activeElement?.dataset.zoneId===window.activityCascadeScene.reviewZone&&!document.querySelector("[data-activity-back]")')
+      await key('Enter'); await until('Enter opens the original narrow group', 'document.activeElement?.dataset.regionId==="activity-review-region"')
+      await key('ArrowLeft'); await until('Enter disclosure returns to original group', 'document.activeElement?.dataset.zoneId===window.activityCascadeScene.reviewZone&&!document.querySelector("[data-activity-back]")')
+      assert.equal(await read('document.querySelector(".project-activity-menu")===window.__activityNarrowRoot'), true)
+      await originalWorkface('Narrow keyboard inspection')
+    }
+    await closed()
+  }
+  await openZone(zoneId); await click('.project-activity-agent[data-region-id="activity-a-second"]')
+  await until('Narrow exact repeated occurrence navigation', 'window.activityCascadeScene.facts().selection?.tabId==="activity-second-tab"&&window.activityCascadeScene.facts().selection?.regionId==="activity-a-second"')
+  result.narrowNavigation = await facts()
   win.setContentSize(1280,900);await stable();await openZone(zoneId)
   await click('.project-activity-agent[data-region-id="activity-a-mirror"]')
   await until('Same-Tab repeated Agent occurrence navigation', 'window.activityCascadeScene.facts().selection?.tabId==="activity-main-tab"&&window.activityCascadeScene.facts().selection?.regionId==="activity-a-mirror"')
