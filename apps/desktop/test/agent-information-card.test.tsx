@@ -10,6 +10,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { agentContextForSession } from '../src/renderer/src/lib/focus-context'
 import { agentCardConversationFixture, waitForAgentCardReading } from './helpers/agent-card-conversation-fixture'
+import { FocusContextCardBody } from '../src/renderer/src/components/FocusContextCardBody'
 import { WorkspaceAgentRow } from '../src/renderer/src/components/WorkspaceAgentRow'
 import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
 vi.mock('../src/renderer/src/components/AgentAvatar', async importOriginal => ({ ...await importOriginal<typeof import('../src/renderer/src/components/AgentAvatar')>(), AgentAvatar: () => createElement('span') }))
@@ -176,4 +177,18 @@ it('themes the original reader return control independently while preserving its
     expect(api.sessions.historyPage).toHaveBeenCalledTimes(historyReads); expect(api.ui.openObjectLink).not.toHaveBeenCalled()
     expect(useAppStore.getState().agentComposerDrafts[sid]).toBe('Original draft'); expect(useAppStore.getState().agentFocus.execution.sessionId).toBeNull()
   } finally { release() }
+})
+
+it('shared production card separates graph selection from the Reader original workface action', async () => {
+  const select = vi.fn(), openWorkface = vi.fn()
+  const context = agentContextForSession(agent, useAppStore.getState().timelines[sid], 'Original task', workspace, null)
+  await dom.render(<FocusContextCardBody context={context} selected={false} onSelect={select} onOpenWorkface={openWorkface} />)
+  const button = dom.container.querySelector<HTMLButtonElement>('.focus-context')!
+  await act(async () => button.click())
+  expect(select).toHaveBeenCalledExactlyOnceWith(sid); expect(openWorkface).not.toHaveBeenCalled()
+  await act(async () => button.focus())
+  await waitForAgentCardReading(() => expect(panel()?.querySelector('.agent-information-reader__open')).not.toBeNull())
+  await act(async () => panel().querySelector<HTMLButtonElement>('.agent-information-reader__open')!.click())
+  expect(openWorkface).toHaveBeenCalledExactlyOnceWith(sid); expect(select).toHaveBeenCalledTimes(1)
+  expect(useAppStore.getState().agentComposerDrafts[sid]).toBe('Original draft')
 })
