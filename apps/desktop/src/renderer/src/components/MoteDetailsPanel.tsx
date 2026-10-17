@@ -29,6 +29,7 @@ import { MoteFirstCooperation } from './MoteFirstCooperation'
 import { MoteCurrentWork } from './MoteCurrentWork'
 import { MoteMemory } from './MoteMemory'
 import { SurfaceModeSwitch } from './SurfaceModeSwitch'
+import { MoteCalendar } from './MoteCalendar'
 
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
 const ThemeNavigationForwardIcon = semanticIconComponent('navigation.forward')
@@ -38,7 +39,7 @@ const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 
 
 const NO_EXPANDED_PATHS: ReadonlySet<string> = new Set()
-type MoteSection = 'profile' | 'ideas'
+type MoteSection = 'profile' | 'ideas' | 'calendar'
 
 /** Object content in the shared tools frame. Files and conversations keep their original owners. */
 export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote, active = true }: {
@@ -46,6 +47,8 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote, a
   onOpenPath(path: string): Promise<unknown>; onCreateNote?: (() => void) | undefined
 }) {
   const [section, setSection] = useState<MoteSection>('profile')
+  const contentSection = useRef<Exclude<MoteSection, 'calendar'>>('profile')
+  if (section !== 'calendar') contentSection.current = section
   const [rename, setRename] = useState<Pick<MoteWorkfaceScope, 'topic' | 'workspace'> | null>(null)
   const [avatar, setAvatar] = useState<SpaceIconTarget | null>(null)
   const renameInvoker = useRef<{ node: HTMLButtonElement; key: string } | null>(null)
@@ -100,16 +103,21 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote, a
   </>
   return <section className="mote-details" data-mote-details={scope.topic.id}>
     <SurfaceModeSwitch value={section} active={active} ariaLabel="Mote details"
-      options={[{ value: 'profile', label: 'Profile' }, { value: 'ideas', label: 'Ideas' }]} onChange={setSection} />
+      options={[{ value: 'profile', label: 'Profile' }, { value: 'ideas', label: 'Ideas' }, { value: 'calendar', label: 'Calendar' }]} onChange={setSection} />
+    <div className="mote-details__mode" hidden={section === 'calendar'}>
     <MoteContent key={JSON.stringify([scope.workspace.id, scope.workspace.hostId, scope.workspace.path, scope.topic.id, scope.topic.directoryPath, scope.rootPath])}
-      scope={scope} reference={reference} active={active} section={section} profile={identity} onShowIdeas={() => setSection('ideas')} onOpenPath={onOpenPath} onCreateNote={onCreateNote} />
+      scope={scope} reference={reference} active={active && section !== 'calendar'} section={contentSection.current} profile={identity} onShowIdeas={() => setSection('ideas')} onOpenPath={onOpenPath} onCreateNote={onCreateNote} />
+    </div>
+    <div className="mote-details__mode" hidden={section !== 'calendar'}>
+      <MoteCalendar key={JSON.stringify([scope.workspace.id, scope.workspace.hostId, scope.workspace.path, scope.topic.id])} scope={scope} reference={reference} active={active && section === 'calendar'} />
+    </div>
     <MoteRenameDialog target={rename} onClose={() => setRename(null)} returnFocus={() => renameInvoker.current?.key === scope.topic.id && renameInvoker.current.node.isConnected ? renameInvoker.current.node : null} />
     <SpaceIconPicker target={avatar} onClose={() => setAvatar(null)} returnFocus={() => returnFocus(avatarInvoker.current)} />
   </section>
 }
 
 function MoteContent({ scope, reference, section, profile, onShowIdeas, onOpenPath, onCreateNote, active }: {
-  scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined; section: MoteSection; profile: ReactNode; active: boolean; onShowIdeas(): void
+  scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined; section: Exclude<MoteSection, 'calendar'>; profile: ReactNode; active: boolean; onShowIdeas(): void
   onOpenPath(path: string): Promise<unknown>; onCreateNote?: (() => void) | undefined
 }) {
   const content = useRef<HTMLDivElement>(null)
@@ -178,7 +186,7 @@ function MoteContent({ scope, reference, section, profile, onShowIdeas, onOpenPa
       </div>
       <MoteFirstCooperation scope={scope} reference={reference} />
     </> : <>
-      <MoteIdeaControls scope={scope} reference={reference} material={note?.path === selected && !issue && !loading ? note : null} onOpenPath={onOpenPath} />
+      <MoteIdeaControls scope={scope} reference={reference} material={note?.path === selected && !issue && !loading ? note : null} onOpenPath={onOpenPath} active={active} />
       <div className="mote-details__section-actions"><span>Notes in this folder</span>{onCreateNote ? <button type="button" className="small-button" onClick={onCreateNote}><ThemeActionCreateNoteIcon size={12} /> New note</button> : null}</div>
       {notesIssue}
       {!tree.rootCache?.loading && !notes.length && !tree.rootError ? <p className="mote-details__hint">No notes here yet. Capture a thought in a file, then continue the discussion.</p> : null}

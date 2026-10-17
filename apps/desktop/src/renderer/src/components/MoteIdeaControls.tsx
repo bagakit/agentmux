@@ -19,15 +19,16 @@ const ThemeActionEditIcon = semanticIconComponent('action.edit')
 
 const EMPTY_IDEA_DRAFT: MoteIdeaDraft = { direction: '', includeDiscussion: false, feedback: {} }
 /** Unsent view inputs use the original Launcher presentation owner, never a suggestion feed. */
-export function MoteIdeaControls({ scope, reference, material, onOpenPath }: {
+export function MoteIdeaControls({ scope, reference, material, onOpenPath, active = true }: {
   scope: MoteWorkfaceScope; reference: WorkbenchProjectionSelection | null | undefined; material: FileDocument | null
   onOpenPath(path: string): Promise<unknown>
+  active?: boolean
 }) {
   const key = 'mote-idea:' + JSON.stringify([scope.workspace.hostId, scope.workspace.id, scope.workspace.path, scope.topic.id, scope.topic.directoryPath, scope.rootPath])
   const input = useLauncherState(state => state.drafts[key]?.moteIdea ?? EMPTY_IDEA_DRAFT)
   const persistenceIssue = useLauncherState(state => state.persistenceIssue)
   const [pending, setPending] = useState(false), [issue, setIssue] = useState<string | null>(null), [status, setStatus] = useState<string | null>(null)
-  const [arrangement, setArrangement] = useState<Awaited<ReturnType<typeof prepareMoteIdeaSchedule>> | null>(null)
+  const arrangement = input.arrangement
   const arranged = useRef<HTMLDivElement>(null)
   const request = useRef<HTMLDetailsElement>(null)
   const alive = useRef(true), current = useRef({ input, material, reference }); current.current = { input, material, reference }
@@ -51,7 +52,7 @@ export function MoteIdeaControls({ scope, reference, material, onOpenPath }: {
     try {
       const prepared = await prepareMoteIdeaSchedule(scope, capturedReference, capturedInput, capturedMaterial, stillCurrent)
       if (!stillCurrent()) throw new Error('Your later direction or selected source changed. Your inputs are kept; prepare the current request again.')
-      setArrangement(prepared)
+      update({ ...current.current.input, arrangement: prepared })
       if (request.current) request.current.open = false
     } catch (error) { if (alive.current) setIssue(presentError(error)) }
     finally { if (alive.current) setPending(false) }
@@ -76,7 +77,7 @@ export function MoteIdeaControls({ scope, reference, material, onOpenPath }: {
     {arrangement ? <div ref={arranged} className="mote-idea-controls__arrangement">
       <p className="mote-details__hint">Prepared sources · {arrangement.sources.length ? arrangement.sources.map(source => source.path.split('/').at(-1)).join(' · ') : 'No saved source confirmed'}</p>
       <CalendarScheduleControl target={arrangement.target} initialMessage={arrangement.message} initialMessageContext={arrangement.frozenContext}
-        onMessageChange={direction => update({ ...current.current.input, direction })} />
+        onMessageChange={direction => update({ ...current.current.input, direction })} presented={active} />
     </div> : null}
     {material ? <details className="mote-details__idea-feedback"><summary>Tell Mote what helps</summary>
       <div className="mote-details__cooperation">
