@@ -37,7 +37,9 @@ describe('Profile inspection consumes the original public File domain', () => {
     await app.mount()
     await moteClick(details().querySelector<HTMLButtonElement>('[aria-label="View ideas and saved materials"]')!)
     expect([...details().querySelectorAll('.mote-details__note')].map(node => node.textContent)).toHaveLength(1)
-    expect(details().querySelector('.mote-details__note')?.textContent).toContain('my-original-material.md')
+    expect(details().querySelector('.mote-details__note')?.textContent).toContain('my-original-material')
+    await moteClick(details().querySelector<HTMLButtonElement>('.mote-details__note')!)
+    expect(details().querySelector('.mote-ideas__source')?.textContent).toContain(path)
     expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
   })
   it('reads only a selected file through the typed seam, keeps its revision and opens correction through original Editor', async () => {

@@ -39,8 +39,15 @@ async function click(name: string, within: ParentNode = container) {
   const button = [...within.querySelectorAll<HTMLButtonElement>('button')].find(item => (item.getAttribute('aria-label') || item.textContent) === name)
   expect(button, name).toBeTruthy(); await act(async () => button!.click())
 }
+async function revealPreferences(within: ParentNode = container) {
+  const preferences = within.querySelector<HTMLDetailsElement>('.mote-profile__preferences')
+  if (preferences && !preferences.open) {
+    await act(async () => { preferences.open = true; preferences.dispatchEvent(new Event('toggle')) })
+  }
+}
 async function expand(open = true) {
   expect(memory()).toBeTruthy()
+  if (open) await revealPreferences()
   await act(async () => { memory().open = open; memory().dispatchEvent(new Event('toggle')) })
 }
 async function render(active = true, id = PMO_TEAMS_TOPIC_ID) {
@@ -110,6 +117,7 @@ describe('original Memory in the shared Mote Profile', () => {
     const panel = document.querySelector<HTMLElement>('.mote-profile-popover')!
     const disclosure = panel.querySelector<HTMLDetailsElement>('.mote-memory')!
     expect(disclosure).toBeTruthy(); expect(memoryReads()).toHaveLength(0)
+    await revealPreferences(panel)
     await act(async () => { disclosure.open = true; disclosure.dispatchEvent(new Event('toggle')) })
     const before = useAppStore.getState()
     await click('Correct or remove a memory detail in editor', panel)
@@ -189,7 +197,7 @@ describe('original Memory in the shared Mote Profile', () => {
     expect(document.querySelector('.mote-behavior-dialog')).not.toBeNull()
     panel.scrollTop = 100
     await click('Ideas'); expect(panel.scrollTop).toBe(0)
-    expect(memory()).toBe(disclosure); expect(memory().parentElement?.hidden).toBe(true)
+    expect(memory()).toBe(disclosure); expect(memory().closest<HTMLElement>('.mote-profile')?.hidden).toBe(true)
     expect(memory().querySelector('.mote-memory__prose')).toBeNull()
     const reads = memoryReads().length
     await invalidate(); expect(memoryReads()).toHaveLength(reads)
