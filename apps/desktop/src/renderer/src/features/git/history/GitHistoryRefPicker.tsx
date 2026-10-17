@@ -51,15 +51,22 @@ export const GitHistoryRefPicker = memo(function GitHistoryRefPicker({ refs, ref
   useLayoutEffect(() => {
     const anchor = trigger.current, floating = panel.current
     if (!open || !anchor || !floating) return
-    input.current?.focus({ preventScroll: true })
     let disposed = false
+    let focused = false
+    const openingFocus = ownerDocument.activeElement
     const position = async () => {
       const result = await computePosition(anchor, floating, { strategy: 'fixed', placement: 'bottom-start', middleware: [
         offset(4), flip({ padding: 8 }), shift({ padding: 8 }), size({ padding: 8, apply({ availableWidth, availableHeight }) {
           Object.assign(floating.style, { width: `${Math.min(Math.max(anchor.getBoundingClientRect().width, 300), availableWidth)}px`, maxHeight: `${Math.min(400, availableHeight)}px` })
         } })
       ] })
-      if (!disposed) Object.assign(floating.style, { left: `${result.x}px`, top: `${result.y}px`, visibility: 'visible' })
+      if (!disposed) {
+        Object.assign(floating.style, { left: `${result.x}px`, top: `${result.y}px`, visibility: 'visible' })
+        if (!focused && (ownerDocument.activeElement === openingFocus || floating.contains(ownerDocument.activeElement))) {
+          focused = true
+          input.current?.focus({ preventScroll: true })
+        }
+      }
     }
     const stop = autoUpdate(anchor, floating, () => { void position() })
     const outside = (event: Event) => {
