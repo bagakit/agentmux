@@ -152,7 +152,8 @@ async function run() {
   await waitFor(async () => (await observe()).events.some((event: any) => event.type === 'gotpointercapture'), 'real pre-existing pointer capture')
   let dispatchGateRelease: (() => void) | undefined
   const stopOriginal = (id: string) => { const stopped = manager.stopOperationById(id); dispatchGateRelease?.(); return stopped }
-  const api = { browser: { listTargets: async () => ({ targets: manager.targets() }), runScript: (...args: any[]) => manager.runScript(args[0], args[1], args[2], undefined, args[3]),
+  const resourceTargets = () => manager.resourceTargets(new Map(app.getAppMetrics().map(process => [process.pid, process.creationTime])))
+  const api = { browser: { listTargets: async () => ({ targets: resourceTargets(), coverage: 'complete' }), runScript: (...args: any[]) => manager.runScript(args[0], args[1], args[2], undefined, args[3]),
     stopOperationById: stopOriginal, getOperation: (id: string) => manager.getOperation(id) } }
   const store = await readFile(join(source, 'apps/desktop/src/renderer/src/store.ts'), 'utf8')
   const from = store.indexOf("    if (request.operation === 'browser.targets')"), until = store.indexOf("    if (request.operation === 'browser.task.assets'", from)
@@ -169,6 +170,9 @@ async function run() {
   await waitFor(() => contents.executeJavaScript('typeof releaseProgram === "function"'), 'real CLI program entered Chromium')
   const claimedIsolation = manager.targets()[0]!.control!.inputIsolation
   const shield = (manager.nativeOwner('page')?.inputShield ?? page) as WebContentsView
+  const retainedRun = await manager.release('page', manager.targets()[0]!.navigationId!)
+  assert.equal(retainedRun.status, 'retained', 'A resource budget release cannot tear down an active Agent program')
+  assert.equal(manager.nativeOwner('page')?.inputShield, shield)
   // Child layering remains correct through actual production native Chrome rearrangement.
   chrome = new NativeOverlaySurfaces(win, manager, () => {}, () => {})
   await chrome.update([{ id: 'chrome-1', bounds: { x: 8, y: 208, width: 870, height: 534 }, radius: 0, browserStages: [{ browserId: 'page', bounds: page.getBounds() }] }])
@@ -387,10 +391,93 @@ async function run() {
   assert.equal(stop.code, 0); assert.equal(JSON.parse(stop.stdout).result.runOperation.phase, 'stopped')
   assert.equal((await client.call('browser.inspect', { operationId: 'unobserved-id' }) as any).runOperation, null)
   assert.equal(manager.targets()[0]!.control!.inputIsolation, 'inactive', 'Unknown operation cannot invent a lock')
-  await client.dispose()
   await win.webContents.executeJavaScript('proofStream.getTracks().forEach(track=>track.stop())')
   manager.removePresentation(win.webContents, win.webContents.mainFrame, lease.leaseId)
   receipt.cases.push({ name: 'actual-gui-takeover-return-and-stop-fence', passed: true })
+  chrome.dispose()
+  manager.setBounds('page', null)
+  await manager.create('retired-page', url, 'workspace')
+  manager.setBounds('retired-page', originalBounds)
+  const retiredPage = manager.nativeOwner('retired-page')!.view, retiredPageContents = retiredPage.webContents
+  await waitFor(() => retiredPageContents.executeJavaScript('!!globalThis.proof'), 'second original page')
+  const borrowed = new BrowserWindow({ width: 900, height: 780, show: false })
+  manager.setPresentationWindowOwner(() => borrowed)
+  const borrowedLease = manager.registerPresentation(win.webContents, win.webContents.mainFrame, {
+    browserId: 'retired-page', occurrence: { presentationId: 'borrowed-page', location: {
+      displayWorkspaceId: 'workspace', groupId: 'group', tabId: 'tab', regionId: 'borrowed-region' } },
+    geometry: { visible: true, bounds: originalBounds }
+  })
+  await manager.activatePresentation(win.webContents, win.webContents.mainFrame, borrowedLease.leaseId, { kind: 'select', focus: 'preserve' })
+  const moving = cli(['browser', 'run', '--browser', 'retired-page', '--operation-id', 'native-host-return'], 'await js("new Promise(resolve => globalThis.finishMoving = resolve)"); return "healthy"')
+  await waitFor(() => retiredPageContents.executeJavaScript('typeof finishMoving === "function"'), 'program on borrowed native host')
+  const movingShield = manager.nativeOwner('retired-page')!.inputShield!
+  assert.ok(borrowed.contentView.children.includes(movingShield))
+  await manager.returnWindow(borrowed)
+  assert.equal(manager.windowForView(retiredPage), win)
+  assert.equal(win.contentView.children.indexOf(movingShield), win.contentView.children.indexOf(retiredPage) + 1)
+  assert.equal(movingShield.getVisible(), false, 'Returning a borrowed shell hides its original page and exact input shield together')
+  assert.equal(retiredPage.getVisible(), false)
+  borrowed.destroy()
+  await retiredPageContents.executeJavaScript('finishMoving()'); assert.equal((await moving).code, 0)
+  manager.setPresentationWindowOwner(() => win)
+  manager.setBounds('retired-page', originalBounds)
+  receipt.cases.push({ name: 'active-native-page-and-shield-return-from-borrowed-shell', passed: true })
+
+  const destroyedRun = cli(['browser', 'run', '--browser', 'retired-page', '--operation-id', 'native-source-destroyed'], 'await js("new Promise(resolve => globalThis.holdRetiredPage = resolve)")')
+  await waitFor(() => retiredPageContents.executeJavaScript('typeof holdRetiredPage === "function"'), 'program before source destruction')
+  const orphanCandidate = manager.nativeOwner('retired-page')!.inputShield!, orphanContents = orphanCandidate.webContents
+  const orphanPid = orphanContents.getOSProcessId()
+  const removeRetired = win.contentView.removeChildView.bind(win.contentView), closeRetired = orphanContents.close.bind(orphanContents)
+  win.contentView.removeChildView = view => { if (view === orphanCandidate) throw new Error('Private retired native removal fault'); removeRetired(view) }
+  orphanContents.close = () => { throw new Error('Private retired native close fault') }
+  retiredPageContents.close()
+  await waitFor(() => retiredPageContents.isDestroyed(), 'original page destroyed independently of its sibling')
+  await destroyedRun
+  const releasedResources = resourceTargets().find(target => target.id === 'retired-page')
+  await manager.restore('retired-page')
+  manager.setBounds('retired-page', originalBounds)
+  const restoredPage = manager.nativeOwner('retired-page')!.view, restoredContents = restoredPage.webContents
+  await waitFor(() => restoredContents.executeJavaScript('!!globalThis.proof'), 'healthy same-id restored page')
+  const transferredSurface = manager.nativeOwner('retired-page')?.inputShield === orphanCandidate
+  const restoredRun = await cli(['browser', 'run', '--browser', 'retired-page', '--operation-id', 'native-restored-healthy'], 'return await js("++proof.next")')
+  assert.equal(restoredRun.code, 0, 'Cleanup observation failure cannot close a healthy restored Browser')
+  win.contentView.removeChildView = removeRetired; orphanContents.close = closeRetired
+  manager.returnControl('retired-page')
+  const restoredPoint = await restoredContents.executeJavaScript('(()=>{const r=document.querySelector("#action").getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()')
+  const restoredBounds = restoredPage.getBounds()
+  await focusPrivateWindow()
+  for (const kind of [0, 1, 2]) {
+    nativeSource(() => nativeWindowInput.send(win.getNativeWindowHandle(), kind, restoredBounds.x + restoredPoint.x * restoredContents.getZoomFactor(), restoredBounds.y + restoredPoint.y * restoredContents.getZoomFactor()))
+    await pause(80)
+  }
+  await waitFor(() => restoredContents.executeJavaScript('proof.clicks === 1'), 'Destroyed page must not orphan its native input surface and intercept restored page input')
+  assert.equal(transferredSurface, true, 'Destroyed page must retain its native cleanup owner through restoration')
+  assert.equal(releasedResources?.resource?.state, 'unknown', 'Page destruction cannot sign off a retained sibling resource')
+  assert.equal(releasedResources?.resource?.retention?.status, 'unknown')
+  assert.ok(releasedResources?.resource?.processes?.some(process => process.pid === orphanPid) ?? false)
+  const publicResources = await client.call('browser.targets', {}) as any
+  assert.equal(publicResources.coverage, 'complete')
+  assert.equal(publicResources.targets.find((target: any) => target.id === 'retired-page').control.inputIsolation, 'inactive')
+  receipt.destroyedCleanupReference = { releasedResources, transferredSurface, restoredPageId: restoredContents.id,
+    orphanStillAttached: win.contentView.children.includes(orphanCandidate), orphanDestroyed: orphanContents.isDestroyed() }
+  receipt.cases.push({ name: 'destroyed-source-retains-native-cleanup-owner-through-healthy-restore', passed: true })
+
+  const closingRun = cli(['browser', 'run', '--browser', 'retired-page', '--operation-id', 'native-explicit-close'], 'await js("new Promise(resolve => globalThis.holdClosedPage = resolve)")')
+  await waitFor(() => restoredContents.executeJavaScript('typeof holdClosedPage === "function"'), 'program before explicit Close')
+  const closedSurface = manager.nativeOwner('retired-page')!.inputShield!, closedContents = closedSurface.webContents
+  const removeClosed = win.contentView.removeChildView.bind(win.contentView), closeClosed = closedContents.close.bind(closedContents)
+  win.contentView.removeChildView = view => { if (view === closedSurface) throw new Error('Private closed native removal fault'); removeClosed(view) }
+  closedContents.close = () => { throw new Error('Private closed native close fault') }
+  await manager.close('retired-page'); await closingRun
+  await assert.rejects(manager.restore('retired-page'), /closed explicitly/, 'Only explicit Close retires restoration of this original page')
+  assert.equal(resourceTargets().find(target => target.id === 'retired-page')?.resource?.state, 'unknown')
+  win.contentView.removeChildView = removeClosed; closedContents.close = closeClosed
+  await manager.close('retired-page')
+  assert.equal(resourceTargets().some(target => target.id === 'retired-page'), false)
+  assert.equal(contents.isDestroyed(), false, 'Another original healthy Browser remains available')
+  assert.ok(manager.targets().some(target => target.id === 'page'))
+  receipt.cases.push({ name: 'explicit-close-retains-cleanup-only-without-reviving-page', passed: true })
+  await client.dispose()
   receipt.passed = true
 }
 void run().catch(async error => { receipt.failure = { message: error.message, stack: error.stack }; console.error('native-proof:failure', error); await saveReceipt() }).finally(async () => {

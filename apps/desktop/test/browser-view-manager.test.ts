@@ -552,6 +552,52 @@ describe('BrowserViewManager', () => {
     manager.close(current.id)
   })
 
+  it('retains a destroyed page native input cleanup owner and its process through same-id recovery', async () => {
+    const f = fakeWindow(), manager = browserManager(f.window)
+    await manager.create('native-cleanup', 'https://original.example/page', 'workspace-a')
+    const source = f.children[0]!, shieldContents = new fakeElectron.FakeWebContentsView().webContents
+    shieldContents.mainFrame.framesInSubtree = [{ osProcessId: 20, detached: false }]
+    const dispose = vi.fn(() => { throw new Error('Native cleanup unavailable') })
+    const shield = { contents: shieldContents, dispose, synchronize: vi.fn() }
+    const entry = Reflect.get(manager, 'entries').get('native-cleanup')
+    entry.inputShield = shield; entry.inputIsolation = 'isolated'
+    source.webContents.close()
+    const processes = new Map([[10, 1], [20, 2]])
+    expect(manager.resourceTargets(processes)).toMatchObject([{ id: 'native-cleanup', resource: {
+      state: 'unknown', processes: [{ pid: 20, creationTime: 2 }], retention: { status: 'unknown', reasons: ['close-unconfirmed'] }
+    } }])
+    expect(manager.resourceProcessIds()).toContain(20)
+    await expect(manager.restore('native-cleanup', { workspaceId: 'workspace-a' })).resolves.toMatchObject({ id: 'native-cleanup' })
+    expect(Reflect.get(manager, 'entries').get('native-cleanup').inputShield).toBe(shield)
+    expect(manager.resourceTargets(processes)[0]?.resource?.retention).toMatchObject({ status: 'unknown', reasons: expect.arrayContaining(['close-unconfirmed']) })
+    expect(manager.returnControl('native-cleanup').activity?.warning).toContain('could not be fully released')
+    dispose.mockImplementation(() => { shieldContents.close() })
+    expect(manager.returnControl('native-cleanup').control?.inputIsolation).toBe('inactive')
+    expect(manager.resourceProcessIds()).not.toContain(20)
+    manager.close('native-cleanup')
+  })
+
+  it('keeps explicit Close cleanup-only without restoring the retired page or blocking a healthy sibling', async () => {
+    const f = fakeWindow(), manager = browserManager(f.window)
+    await manager.create('native-closed', 'https://original.example/closed', 'workspace-a')
+    await manager.create('native-kept', 'https://original.example/kept', 'workspace-a')
+    const kept = f.children[1]!, shieldContents = new fakeElectron.FakeWebContentsView().webContents
+    const dispose = vi.fn(() => { throw new Error('Native cleanup unavailable') })
+    const entry = Reflect.get(manager, 'entries').get('native-closed')
+    entry.inputShield = { contents: shieldContents, dispose }; entry.inputIsolation = 'isolated'
+    manager.close('native-closed')
+    await expect(manager.restore('native-closed', { workspaceId: 'workspace-a' })).rejects.toThrow('closed explicitly')
+    expect(manager.resourceTargets(new Map([[10, 1]])).find(target => target.id === 'native-closed')).toMatchObject({
+      url: '', resource: { state: 'unknown' }, warning: expect.stringContaining('closed explicitly')
+    })
+    expect(kept.webContents.isDestroyed()).toBe(false)
+    expect(manager.targets().map(target => target.id)).toEqual(['native-kept'])
+    dispose.mockImplementation(() => { shieldContents.close() })
+    manager.close('native-closed')
+    expect(manager.resourceTargets(new Map([[10, 1]])).some(target => target.id === 'native-closed')).toBe(false)
+    manager.close('native-kept')
+  })
+
   it('T049 failed candidate loading keeps its failed-close reference for the next explicit operation', async () => {
     const fixture = fakeWindow(), manager = browserManager(fixture.window)
     const current = await manager.create('cleanup-load-failure', 'https://original.example/')
