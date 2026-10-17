@@ -4,11 +4,13 @@ const [url, privateRoot, evidence] = process.argv.slice(2)
 for (const name of ['home', 'appData', 'userData', 'sessionData']) app.setPath(name, path.join(privateRoot, name))
 const result = { schema: 'agentmux.collaboration-graph-actual.v1', passed: false, captureOnly: true, aestheticReview: 'not-performed',
   frames: [], checks: [], failures: [], rendererErrors: [], rendererMessages: [],
-  boundary: 'Actual current source Renderer App/Focus/Graph/card/Reader/Store. Platform API uses only private typed synthetic facts. PTY and unused Monaco paint isolated. No Provider/Run/real message/restart/install proof.' }
+  boundary: 'Actual current source Renderer App/Focus/Space/area owners/Graph/card/Reader/Store. Platform API uses only private typed synthetic facts. PTY and unused Monaco paint isolated. No Provider/Run/real message/restart/install proof.' }
 let win, currentPhase = 'initialize'
-const checkpoint = async () => { const next = path.join(evidence, 'actual.next.json'); await fs.writeFile(next, JSON.stringify(result, null, 2) + '\n'); await fs.rename(next, path.join(evidence, 'actual.json')) }
+const checkpoint = async () => { result.phase = currentPhase; const next = path.join(evidence, 'actual.next.json'); await fs.writeFile(next, JSON.stringify(result, null, 2) + '\n'); await fs.rename(next, path.join(evidence, 'actual.json')) }
+const started = checkpoint()
 app.whenReady().then(async () => {
   try {
+    await started
     for (const name of ['home', 'appData', 'userData', 'sessionData']) assert.equal(app.getPath(name), path.join(privateRoot, name))
     win = new BrowserWindow({ width: 1440, height: 900, x: -10000, y: -10000, useContentSize: true, show: false,
       webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } })
@@ -39,6 +41,7 @@ app.whenReady().then(async () => {
       await until('connection result or visible recovery', () => read('Boolean(document.querySelector(".collaboration-canvas .react-flow__edge-path,.collaboration-canvas__issue"))'))
     }
     const closeReader = async () => { if (await read(`Boolean(document.querySelector('[aria-label="Close Agent reading"]'))`)) await click('[aria-label="Close Agent reading"]'); await until('Reader closed', () => read('!document.querySelector(".agent-information-reader")')) }
+    currentPhase = 'load-original-app'; await checkpoint()
     await win.loadURL(url); win.webContents.debugger.attach('1.3'); await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     await until('actual App initialize', () => read('window.graphCapture?.ready&&!window.graphCapture.facts().loading&&window.graphCapture.facts().ids.includes("fixture-ui")'))
     await read('window.graphCapture.prepare()'); await until('original mounted workface', () => read(`Boolean(document.querySelector('[data-fixture-session="fixture-ui"] textarea'))`))
@@ -138,6 +141,78 @@ app.whenReady().then(async () => {
       await closeReader(); await move('.collaboration-dialog [data-session-id="fixture-core"]'); await until('original Reader for open action', () => read('Boolean(document.querySelector(".agent-information-reader"))'))
       await click('[aria-label="Open Agent"]'); await until('explicit workface opened', () => read(`!document.querySelector('.collaboration-dialog')&&document.querySelector('[data-fixture-session="fixture-core"]')`))
       assert.equal((await facts()).selectedSession, 'fixture-core'); assert.equal(await read('window.graphCapture.facts().draft'), 'Original unsent reply · retain this exact draft.'); await frame('opened-original-workface')
+    })
+    const areaGraph = async () => {
+      await until('original Space collaboration entry', () => read(`Boolean(document.querySelector('[aria-label="Open area collaboration graph"]'))`))
+      await click('[aria-label="Open area collaboration graph"]')
+      await until('original area sources settled', () => read('Boolean(document.querySelector(".collaboration-dialog__footer"))&&!document.querySelector(".collaboration-dialog__footer").textContent.includes("Reading…")'))
+      await until('nonempty area graph cards', () => read('document.querySelectorAll(".collaboration-dialog .focus-context[data-session-id]").length>0'))
+    }
+    const sourceReads = state => state.reads.filter(item => item.kind === 'events')
+    const sameScope = state => { for (const field of ['sameTabs', 'sameLayouts', 'sameDrafts', 'sameFocus', 'sameSelection']) assert.equal(state[field], true, field); assert.deepEqual(state.controls, result.before.controls) }
+    await check('space-project-original-membership', async () => {
+      result.projectSelection = await read('window.graphCapture.area("project")')
+      await read('window.graphCapture.remember()'); const before = sourceReads(await facts()).length
+      await areaGraph(); const state = await facts(), calls = sourceReads(state).slice(before)
+      assert.deepEqual(calls.map(item => item.participant).sort(), ['fixture-core', 'fixture-ui'])
+      assert.ok(await read('[...document.querySelectorAll(".collaboration-area__heading")].some(e=>e.textContent.includes("Agent protocol"))'))
+      assert.equal(await read('Boolean(document.querySelector(".collaboration-area-issues"))'), false)
+      sameScope(state); await frame('space-project')
+    })
+    await check('overlapping-area-observation-once', async () => {
+      await click('[aria-label="Close collaboration graph"]'); const before = sourceReads(await facts()).length
+      await areaGraph(); await click('.collaboration-toolbar__scope button:last-child')
+      await until('all exact area participants', () => read('document.querySelector(".collaboration-dialog__footer")?.textContent.includes("4 of 4 participants observed")'))
+      const calls = sourceReads(await facts()).slice(before)
+      assert.deepEqual(calls.map(item => item.participant).sort(), ['fixture-core', 'fixture-design', 'fixture-review', 'fixture-ui'])
+      await click('[aria-label="Fit graph"]'); await settle()
+      await until('same original Agent in two accurate areas', () => read(`document.querySelectorAll('.collaboration-dialog [data-session-id="fixture-core"]').length===2`))
+      result.multiArea = await read(`({headings:[...document.querySelectorAll('.collaboration-area__heading')].map(e=>e.textContent),coreAppearances:document.querySelectorAll('.collaboration-dialog [data-session-id="fixture-core"]').length,connections:document.querySelectorAll('.collaboration-inspector .collaboration-relation').length})`)
+      sameScope(await facts()); await frame('space-all-areas')
+    })
+    await check('fold-internal-original-relations', async () => {
+      const before = sourceReads(await facts()).length
+      await click('.collaboration-area__heading')
+      await until('internal original relation badge', () => read('Boolean(document.querySelector(".collaboration-area__internal"))'))
+      await click('.collaboration-area__internal')
+      await until('original grouped relations selected', () => read(`document.querySelectorAll('[aria-label="Grouped connections"] .collaboration-relation').length===4`))
+      await until('folded cross-area connections routed', () => read('document.querySelectorAll(".collaboration-canvas .react-flow__edge-path").length>0'))
+      assert.equal(sourceReads(await facts()).length, before, 'Folding never rereads message sources')
+      result.folded = await read(`({badge:document.querySelector('.collaboration-area__internal').textContent,groups:[...document.querySelectorAll('[aria-label="Grouped connections"] .collaboration-relation')].map(e=>({kind:e.dataset.kind,text:e.textContent})),selfPaths:[...document.querySelectorAll('.react-flow__edge')].filter(e=>{const id=JSON.parse(e.dataset.id);return id[1]===id[2]}).length})`)
+      assert.equal(result.folded.selfPaths, 0); sameScope(await facts()); await frame('space-folded-internal')
+      await click('[aria-label="Close collaboration graph"]')
+    })
+    await check('topic-current-choice-snapshot', async () => {
+      result.topicSelection = await read('window.graphCapture.area("topic")'); await read('window.graphCapture.remember()')
+      const before = sourceReads(await facts()).length; await areaGraph()
+      assert.deepEqual(sourceReads(await facts()).slice(before).map(item => item.participant), ['fixture-review'])
+      assert.ok(await read('document.querySelector(".collaboration-dialog__header").textContent.includes("Read model notes")'))
+      sameScope(await facts()); await frame('space-topic')
+      const calls = sourceReads(await facts()).length
+      result.laterSelection = await read('window.graphCapture.area("mote")')
+      await settle(); await pause(100)
+      assert.equal(sourceReads(await facts()).length, calls, 'A later selection does not retarget the open graph')
+      assert.ok(await read('document.querySelector(".collaboration-dialog__header").textContent.includes("Read model notes")'))
+      await frame('space-snapshot-retained'); await click('[aria-label="Close collaboration graph"]')
+    })
+    await check('mote-original-linked-zone', async () => {
+      await read('window.graphCapture.remember()'); const before = sourceReads(await facts()).length
+      await areaGraph(); assert.deepEqual(sourceReads(await facts()).slice(before).map(item => item.participant).sort(), ['fixture-core', 'fixture-design'])
+      assert.ok(await read('document.querySelector(".collaboration-dialog__header").textContent.includes("Interaction design")'))
+      sameScope(await facts()); await frame('space-mote'); await click('[aria-label="Close collaboration graph"]')
+      result.linkedMoteSelection = await read('window.graphCapture.area("linked-mote")'); await read('window.graphCapture.remember()')
+      const linkedBefore = sourceReads(await facts()).length; await areaGraph()
+      assert.deepEqual(sourceReads(await facts()).slice(linkedBefore).map(item => item.participant).sort(), ['fixture-core', 'fixture-design'])
+      assert.equal(result.linkedMoteSelection.space.workspaceId, 'fixture-worktree')
+      assert.ok(await read('document.querySelector(".collaboration-dialog__header").textContent.includes("Interaction design")'))
+      sameScope(await facts()); await frame('space-mote-linked-workface'); await click('[aria-label="Close collaboration graph"]')
+    })
+    await check('category-original-topic-membership', async () => {
+      result.categorySelection = await read('window.graphCapture.area("category")'); await read('window.graphCapture.remember()')
+      const before = sourceReads(await facts()).length; await areaGraph()
+      assert.deepEqual(sourceReads(await facts()).slice(before).map(item => item.participant), ['fixture-review'])
+      assert.ok(await read('document.querySelector(".collaboration-dialog__header").textContent.includes("Product quality")'))
+      sameScope(await facts()); await frame('space-category'); await click('[aria-label="Close collaboration graph"]')
     })
     result.after = await facts(); assert.ok(result.frames.length >= 8, 'Nonempty actual product scenes'); assert.equal(result.rendererErrors.length, 0, 'Renderer errors remain visible')
     result.passed = result.failures.length === 0
