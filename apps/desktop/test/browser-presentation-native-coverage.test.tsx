@@ -24,11 +24,13 @@ const presentation = (id: string): WorkbenchBrowserPresentation => ({
   target: { hostId: id, surface: 'space', active: true }
 })
 const presentations = [presentation('stage-a'), presentation('stage-b')]
-function Workfaces() {
+type WorkfaceOptions = { secondVisible?: boolean; secondBlocked?: boolean }
+function Workfaces({ secondVisible = true, secondBlocked = false }: WorkfaceOptions) {
   const media = useBrowserPresentationCapture(browserId)
   return createElement('div', null, ...presentations.map((item, index) => createElement(BrowserPresentationStage, {
-    key: item.occurrence.presentationId, browserId, navigationId: 'original-navigation', presentation: item,
-    inputSelected: index === 0, blocked: false, media
+    key: item.occurrence.presentationId, browserId, navigationId: 'original-navigation',
+    presentation: index === 1 ? { ...item, visible: secondVisible } : item,
+    inputSelected: index === 0, blocked: index === 1 && secondBlocked, media
   }, createElement('span', { 'data-original-page': item.occurrence.presentationId }, 'Original page and draft'))))
 }
 function deferred<T>() {
@@ -83,8 +85,8 @@ const coverage = (leaseId: string, captured = captureId, browser = browserId): B
   type: 'native-coverage-changed', browserId: browser, coverage: { leaseId, captureId: captured }
 })
 const uncover = (): BrowserPresentationEvent => ({ type: 'native-coverage-changed', browserId, coverage: null })
-async function mount() {
-  await act(async () => root.render(createElement(Workfaces)))
+async function mount(options: WorkfaceOptions = {}) {
+  await act(async () => root.render(createElement(Workfaces, options)))
   await act(async () => { await vi.advanceTimersByTimeAsync(0) })
 }
 async function frame(id: string) {
@@ -105,6 +107,10 @@ function controlCounts() {
     acknowledge: bridge.ackPresentationCapture.mock.calls.length, acquire: display.mock.calls.length,
     geometry: vi.mocked(HTMLElement.prototype.getBoundingClientRect).mock.calls.length
   }
+}
+function sourceCounts() {
+  const { update, geometry, ...counts } = controlCounts()
+  return counts
 }
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
@@ -212,6 +218,108 @@ it('releases only the covered receiver and resumes its same video, retained fram
   expect(canvas.hidden).toBe(true)
   expect(controlCounts()).toEqual(counts); expect(stopTrack).not.toHaveBeenCalled()
   expect(surface('stage-a').querySelector('[role="status"]')).toBeNull()
+})
+
+const inactiveWorkfaces = [
+  ['hidden', { secondVisible: false }], ['blocked', { secondBlocked: true }]
+] as const
+
+it.each(inactiveWorkfaces)('releases only the %s receiver and restores the same page and live source after a new frame', async (_reason, options) => {
+  await mount(); await frame('stage-a'); await frame('stage-b')
+  const a = video('stage-a'), b = video('stage-b'), originalStage = stage('stage-b')
+  const originalPage = originalStage.querySelector('[data-original-page]'), counts = sourceCounts()
+  const timers = vi.getTimerCount()
+  await act(async () => root.render(createElement(Workfaces, options)))
+  expect(bridge.updatePresentation).toHaveBeenLastCalledWith('lease-stage-b', { visible: false })
+  expect(b.srcObject).toBeNull(); expect(b.paused).toBe(true)
+  expect(a.srcObject).toBe(stream); expect(a.paused).toBe(false)
+  expect(track.readyState).toBe('live'); expect(stopTrack).not.toHaveBeenCalled()
+  const canvas = originalStage.querySelector('canvas')!
+  expect([canvas.width, canvas.height, canvas.hidden]).toEqual([640, 320, false])
+  expect(drawFrame).toHaveBeenCalledExactlyOnceWith(b, 0, 0)
+  expect(sourceCounts()).toEqual(counts); expect(vi.getTimerCount()).toBe(timers)
+  await act(async () => root.render(createElement(Workfaces)))
+  expect(video('stage-b')).toBe(b); expect(stage('stage-b')).toBe(originalStage)
+  expect(originalStage.querySelector('[data-original-page]')).toBe(originalPage)
+  expect(b.srcObject).toBe(stream); expect(b.paused).toBe(false)
+  expect(canvas.hidden).toBe(false); expect(frameCallbacks.size).toBe(1)
+  await frame('stage-b')
+  expect(canvas.hidden).toBe(true); expect(frameCallbacks.size).toBe(0)
+  expect(surface('stage-b').querySelector('[role="status"]')).toBeNull()
+  expect(sourceCounts()).toEqual(counts); expect(vi.getTimerCount()).toBe(timers)
+  expect(stopTrack).not.toHaveBeenCalled()
+})
+
+it.each(inactiveWorkfaces)('does not attach an initially %s receiver to its visible sibling source', async (_reason, options) => {
+  await mount(options); await frame('stage-a')
+  const a = video('stage-a'), b = video('stage-b'), counts = sourceCounts()
+  expect(a.srcObject).toBe(stream); expect(a.paused).toBe(false)
+  expect(b.srcObject).toBeNull(); expect(b.paused).toBe(true)
+  expect(drawFrame).not.toHaveBeenCalled(); expect(stopTrack).not.toHaveBeenCalled()
+  expect(bridge.registerPresentation).toHaveBeenCalledWith(expect.objectContaining({
+    occurrence: presentations[1]!.occurrence, geometry: { visible: false }
+  }))
+  await act(async () => root.render(createElement(Workfaces)))
+  expect(video('stage-b')).toBe(b); expect(b.srcObject).toBe(stream); expect(b.paused).toBe(false)
+  await frame('stage-b')
+  expect(surface('stage-b').querySelector('[role="status"]')).toBeNull()
+  expect(sourceCounts()).toEqual(counts); expect(stopTrack).not.toHaveBeenCalled()
+})
+
+it('keeps hidden and Native-covered receivers detached until each original condition clears', async () => {
+  await mount(); await frame('stage-a'); await frame('stage-b')
+  const a = video('stage-a'), b = video('stage-b'), counts = sourceCounts()
+  await emit(coverage('lease-stage-a'))
+  await act(async () => root.render(createElement(Workfaces, { secondVisible: false })))
+  expect(a.srcObject).toBeNull(); expect(b.srcObject).toBeNull()
+  expect(track.readyState).toBe('live'); expect(stopTrack).not.toHaveBeenCalled()
+  await emit(coverage('lease-stage-b'))
+  expect(a.srcObject).toBe(stream); expect(b.srcObject).toBeNull()
+  await act(async () => root.render(createElement(Workfaces)))
+  expect(b.srcObject).toBeNull(); expect(b.paused).toBe(true)
+  await emit(uncover())
+  expect(video('stage-a')).toBe(a); expect(video('stage-b')).toBe(b)
+  expect(a.srcObject).toBe(stream); expect(b.srcObject).toBe(stream)
+  await frame('stage-a'); await frame('stage-b')
+  expect(sourceCounts()).toEqual(counts); expect(stopTrack).not.toHaveBeenCalled()
+})
+
+it.each(inactiveWorkfaces)('ignores late play and frame callbacks after the same receiver becomes %s', async (_reason, options) => {
+  await mount(); await frame('stage-a'); await frame('stage-b')
+  await emit(coverage('lease-stage-b'))
+  const playing = deferred<void>()
+  pendingPlay = { presentationId: 'stage-b', promise: playing.promise }
+  await emit(uncover())
+  const b = video('stage-b'), canvas = stage('stage-b').querySelector('canvas')!
+  expect(frameCallbacks.size).toBe(1)
+  const old = [...frameCallbacks.values()][0]!
+  const counts = sourceCounts()
+  await act(async () => root.render(createElement(Workfaces, options)))
+  expect(frameCallbacks.size).toBe(0)
+  await act(async () => { playing.resolve(); old.callback(0, {} as VideoFrameCallbackMetadata) })
+  expect(b.srcObject).toBeNull(); expect(b.paused).toBe(true); expect(canvas.hidden).toBe(false)
+  expect(surface('stage-b').textContent).not.toContain('Starting preview playback')
+  expect(video('stage-a').srcObject).toBe(stream); expect(video('stage-a').paused).toBe(false)
+  await act(async () => root.render(createElement(Workfaces)))
+  expect(video('stage-b')).toBe(b); expect(b.srcObject).toBe(stream)
+  await frame('stage-b')
+  expect(canvas.hidden).toBe(true)
+  expect(sourceCounts()).toEqual(counts); expect(stopTrack).not.toHaveBeenCalled()
+})
+
+it.each(inactiveWorkfaces)('keeps the original receiver and recovery notice if retaining the %s preview fails', async (_reason, options) => {
+  await mount(); await frame('stage-a'); await frame('stage-b')
+  drawFrame.mockImplementationOnce(() => { throw new Error('Frame retention failed') })
+  const b = video('stage-b'), counts = sourceCounts()
+  await act(async () => root.render(createElement(Workfaces, options)))
+  expect(b.srcObject).toBe(stream); expect(b.paused).toBe(false)
+  expect(surface('stage-b').textContent).toContain('Frame retention failed')
+  expect(surface('stage-b').querySelector<HTMLButtonElement>('button')!.disabled).toBe(true)
+  await act(async () => root.render(createElement(Workfaces)))
+  await frame('stage-b')
+  expect(video('stage-b')).toBe(b); expect(b.srcObject).toBe(stream)
+  expect(surface('stage-b').querySelector('[role="status"]')).toBeNull()
+  expect(sourceCounts()).toEqual(counts); expect(stopTrack).not.toHaveBeenCalled()
 })
 
 it.each([
