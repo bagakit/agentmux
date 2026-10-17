@@ -1,7 +1,9 @@
 import type { AgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
+import { browserInputContextJson, type BrowserInputContext, type BrowserInputContextSource } from '@agentmux/core/browser-input-context'
 import { memo, type ComponentProps } from 'react'
 import { SemanticIcon } from '../theme/icons.js'
 import { AgentMarkdown } from './AgentMarkdown.js'
+import { ConversationBrowserContext } from './ConversationBrowserContext.js'
 
 const Markdown = memo(AgentMarkdown)
 type MarkdownProps = Omit<ComponentProps<typeof AgentMarkdown>, 'content' | 'className'>
@@ -10,14 +12,23 @@ type MarkdownProps = Omit<ComponentProps<typeof AgentMarkdown>, 'content' | 'cla
  * Core owns parsing; these spans are declarations and never establish authorship.
  * Full Copy continues to use the original content, independently of this face.
  */
-export function ConversationInputText({ text, prefix, ...markdown }: MarkdownProps & {
+export function ConversationInputText({ text, prefix, inputContext, inputContextSource, ...markdown }: MarkdownProps & {
   text: string
   prefix?: AgentMuxMessagePrefix | null
+  inputContext?: BrowserInputContext | undefined
+  inputContextSource?: BrowserInputContextSource | undefined
 }) {
   const body = prefix ? prefix.declaredContexts && !prefix.sourceLabel
     ? prefix.body.replace(/^(?:\r?\n){1,2}/u, '') : prefix.body : text
+  // Only the same original structured context can qualify the declaration's producer.
+  // A different wire declaration stays declared and does not borrow another observation's source.
+  const recorded = inputContext ? browserInputContextJson(inputContext) : null
+  const matching = prefix?.declaredContexts?.findIndex(context => context.inputContext && browserInputContextJson(context.inputContext) === recorded) ?? -1
   return <>
-    {prefix?.declaredContexts?.map((context, index) => <details key={index} className="log-turn__declared-context">
+    {inputContext && matching < 0 ? <ConversationBrowserContext context={inputContext} source={inputContextSource} /> : null}
+    {prefix?.declaredContexts?.map((context, index) => context.inputContext
+      ? <ConversationBrowserContext key={index} context={context.inputContext} source={index === matching ? inputContextSource ?? 'caller-declared' : 'caller-declared'} raw={context.raw} />
+      : <details key={index} className="log-turn__declared-context">
       <summary><SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />Declared context{prefix.declaredContexts!.length > 1 ? ` ${index + 1}` : ''}</summary>
       <pre>{context.raw}</pre>
     </details>)}
