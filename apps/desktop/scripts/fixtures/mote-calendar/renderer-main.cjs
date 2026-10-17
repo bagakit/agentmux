@@ -3,7 +3,7 @@ const fs = require('node:fs/promises')
 const path = require('node:path')
 const assert = require('node:assert/strict')
 const [html, evidence] = process.argv.slice(2)
-const result = { passed: false, captureOnly: true, aestheticReview: 'not-performed', engine: { electron: process.versions.electron, chromium: process.versions.chrome }, images: [], operations: [], errors: [] }
+const result = { passed: false, captureOnly: true, aestheticReview: 'not-performed', engine: { electron: process.versions.electron, chromium: process.versions.chrome }, images: [], operations: [], geometry: [], mutations: [], errors: [] }
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
 assert.ok(evidence && evidence.includes('/capture-'))
 for (const key of Object.keys(process.env)) if (key.startsWith('CTXMUX_') || key === 'ELECTRON_RUN_AS_NODE') delete process.env[key]
@@ -33,7 +33,77 @@ app.whenReady().then(async () => {
     }
     const panel = `([...document.querySelectorAll('.mote-profile-popover [data-mote-details]'),...document.querySelectorAll('[data-mote-details]')].find(n=>n.getBoundingClientRect().width>0&&n.getBoundingClientRect().height>0&&getComputedStyle(n).visibility!=='hidden'))`
     const inPanel = selector => `(${panel})?.querySelector(${JSON.stringify(selector)})`
-    const button = (text, root = panel) => `[...(${root}).querySelectorAll('button,[role="tab"],summary')].find(n=>n.textContent.trim()===${JSON.stringify(text)})`
+    const button = (text, root = panel) => `[...(${root}).querySelectorAll('button,[role="tab"],summary')].find(n=>n.getAttribute('aria-label')===${JSON.stringify(text)}||n.textContent.trim()===${JSON.stringify(text)})`
+    const geometry = () => read(`(()=>{
+      const n=${panel};if(!n)return null;
+      const rect=e=>{if(!e)return null;const r=e.getBoundingClientRect();return {x:r.x,y:r.y,top:r.top,right:r.right,bottom:r.bottom,left:r.left,width:r.width,height:r.height}};
+      const visible=e=>!!e&&e.getBoundingClientRect().width>0&&e.getBoundingClientRect().height>0&&getComputedStyle(e).visibility!=='hidden';
+      const control=e=>{const r=rect(e),hit=r&&document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {label:e.getAttribute('aria-label')||e.textContent.trim(),rect:r,hit:!!hit&&(hit===e||e.contains(hit))}};
+      const mode=[...n.querySelectorAll(':scope > .mote-details__mode')].find(e=>!e.hidden),content=mode?.querySelector('.mote-details__content');
+      const calendar=n.querySelector('.mote-calendar'),first=visible(calendar)?calendar.querySelector('[data-mote-date]'):null;
+      const close=n.closest('.mote-profile-popover')?.querySelector('[aria-label="Close Mote profile"]');
+      const bounds=rect(n),tabs=n.querySelector('[role="tablist"][aria-label="Mote details"]'),fonts=[...n.querySelectorAll('.mote-details__content,.mote-details__prose')].filter(visible);
+      return {panel:bounds,name:n.querySelector('.mote-details__name strong')?.textContent.trim(),header:rect(n.querySelector('.mote-details__profile')),
+        content:rect(content),contentOffset:content?rect(content).top-bounds.top:null,calendarOffset:first?rect(first).top+calendar.scrollTop-bounds.top:null,
+        calendarScroll:visible(calendar)?calendar.scrollTop:null,calendar:visible(calendar)?rect(calendar):null,
+        calendarToolbar:visible(calendar)?rect(calendar.querySelector('.mote-calendar__toolbar')):null,
+        calendarControls:visible(calendar)?[...calendar.querySelectorAll('.mote-calendar__toolbar button')].map(control):[],
+        canvas:visible(calendar)?rect(calendar.querySelector('.mote-calendar__canvas')):null,agenda:visible(calendar)?rect(calendar.querySelector('.mote-calendar__day')):null,
+        nameRect:rect(n.querySelector('.mote-details__name')),close:visible(close)?control(close):null,coarse:matchMedia('(pointer: coarse)').matches,
+        densityPolicy:matchMedia('(pointer: coarse)').matches?'coarse: 44px targets and unobstructed readable content':'fine: header 72/112px and first Calendar date 180/250px',
+        tabs:[...tabs?.querySelectorAll('[role="tab"]')??[]].map(control),
+        identity:[...n.querySelectorAll('[aria-label="Change Mote avatar"],[aria-label="Rename Mote"]')].map(control),
+        fonts:fonts.map(e=>({prose:e.classList.contains('mote-details__prose'),size:parseFloat(getComputedStyle(e).fontSize),lineHeight:getComputedStyle(e).lineHeight})),
+        overflow:[n,content,visible(calendar)?calendar.querySelector('.mote-calendar__toolbar'):null].filter(visible).map(e=>({className:e.className,clientWidth:e.clientWidth,scrollWidth:e.scrollWidth})),
+        scenario:window.moteCalendarScene.facts().mode};
+    })()`)
+    const headerBudget = facts => {
+      assert.equal(facts.coarse, false, 'The compact height budget is defined for the default fine pointer')
+      assert.ok(facts.panel.width > 0 && facts.contentOffset > 0, 'A nonempty actual Mote content position is required')
+      const budget = facts.panel.width >= 560 ? 72 : 112
+      assert.ok(facts.contentOffset <= budget, 'Mote header density budget exceeded: ' + facts.contentOffset + ' > ' + budget)
+    }
+    const calendarBudget = facts => {
+      assert.equal(facts.coarse, false, 'The compact Calendar height budget is defined for the default fine pointer')
+      assert.ok(facts.calendar && facts.calendarOffset > 0, 'A nonempty actual Calendar first date is required')
+      const budget = facts.calendarToolbar.width > 600 ? 180 : 250
+      assert.ok(facts.calendarOffset <= budget, 'Calendar first-date density budget exceeded: ' + facts.calendarOffset + ' > ' + budget)
+    }
+    const checkGeometry = facts => {
+      assert.equal(facts.tabs.length, 3, 'All original Mote tabs must be present before measuring')
+      assert.deepEqual(facts.tabs.map(tab => tab.label), ['Profile', 'Ideas', 'Calendar'])
+      assert.equal(facts.identity.length, 2, 'Original avatar and rename controls must remain present')
+      if (!facts.coarse && facts.name === 'Mote') headerBudget(facts)
+      if (!facts.coarse && facts.name === 'Mote' && facts.calendarOffset !== null && facts.scenario === 'populated') calendarBudget(facts)
+      assert.ok(facts.fonts.length > 0, 'Visible original body text must be measured')
+      for (const font of facts.fonts) assert.ok(font.size >= (font.prose ? 13 : 12), 'Density cannot reduce the original body/prose text size')
+      for (const item of facts.overflow) assert.ok(item.scrollWidth <= item.clientWidth + 1, 'A visible content region overflowed: ' + item.className)
+      if (facts.coarse && facts.calendar) {
+        assert.ok(facts.calendarControls.length >= 4, 'Original Calendar controls must be present on a coarse pointer')
+        for (const control of facts.calendarControls) assert.ok(control.rect.width >= 44 && control.rect.height >= 44 && control.hit, 'A coarse Calendar control needs an unobstructed 44px target: ' + control.label)
+      }
+      for (const item of [...facts.tabs, ...facts.identity, ...(facts.close ? [facts.close] : [])]) {
+        assert.ok(item.rect.width > 0 && item.rect.height > 0, 'An original header control became empty: ' + item.label)
+        assert.equal(item.hit, true, 'An original header control is covered or clipped: ' + item.label)
+      }
+      if (facts.close) {
+        const a = facts.nameRect, b = facts.close.rect
+        assert.ok(a && (a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top), 'A long Mote name overlaps the original close control')
+      }
+    }
+    const densityMutation = async (name, css, check) => {
+      const before = await geometry(); check(before)
+      let mutant, failure, key
+      try {
+        key = await win.webContents.insertCSS(css); await pause(60)
+        mutant = await geometry()
+        try { check(mutant) } catch (error) { failure = error }
+      } finally { if (key) await win.webContents.removeInsertedCSS(key) }
+      await pause(60)
+      const restored = await geometry(); check(restored)
+      assert.ok(failure instanceof assert.AssertionError && failure.message.includes('density budget exceeded'), 'A real CSS mutation must fail its own geometry budget: ' + name)
+      result.mutations.push({ name, css, red: { message: failure.message, geometry: mutant }, restored: { passed: true, geometry: restored }, baseline: before })
+    }
     const click = async (script, name) => {
       const rect = await read(`(()=>{const n=${script};if(!n)throw Error('Missing observed control: '+${JSON.stringify(name ?? script)});n.scrollIntoView({block:'center'});const r=n.getBoundingClientRect();if(!r.width||!r.height)throw Error('Hidden control');return {x:r.x+r.width/2,y:r.y+r.height/2,label:n.getAttribute('aria-label')||n.textContent.trim()}})()`)
       win.webContents.sendInputEvent({ type: 'mouseDown', x: Math.round(rect.x), y: Math.round(rect.y), button: 'left', clickCount: 1 })
@@ -60,14 +130,25 @@ app.whenReady().then(async () => {
       assert.equal(await read(`(${script}).value ?? (${script}).textContent`), value)
       result.operations.push({ action: 'native-type', value })
     }
-    const capture = async name => {
+    const capture = async (name, originalDiscussion = false) => {
       await pause(180)
+      const measured = await geometry()
+      result.geometry.push({ capture: name, ...measured })
+      if (measured) checkGeometry(measured)
+      else assert.equal(originalDiscussion, true, 'An expected visible Mote surface is missing')
       const facts = await read(`(()=>{const n=${panel};const r=n?.getBoundingClientRect();return {fixture:window.moteCalendarScene.facts(),appearance:document.documentElement.dataset.appearance,viewport:{width:innerWidth,height:innerHeight},panel:r?{width:r.width,height:r.height}:null,bodyOverflow:document.documentElement.scrollWidth>innerWidth,panelOverflow:!!n&&n.scrollWidth>n.clientWidth,heading:n?.textContent,activeElement:document.activeElement?.getAttribute('aria-label'),iconSprite:!!document.querySelector('svg symbol'),controls:[...(n?.querySelectorAll('button,input,textarea,select')??[])].map(c=>({tag:c.tagName,label:c.getAttribute('aria-label'),text:c.textContent.trim().slice(0,100),value:c.value}))}})()`)
       assert.equal(facts.bodyOverflow, false, 'The complete viewport overflowed')
       assert.equal(facts.panelOverflow, false, 'The original product panel overflowed')
       for (const [id, expected] of Object.entries(facts.fixture.initialDrafts)) assert.equal(facts.fixture.drafts[id], expected, 'An arrangement operation changed the original manual draft')
       assert.equal(facts.fixture.tabIds.length, 2); assert.equal(facts.fixture.sessions.length, 2)
       assert.equal(facts.iconSprite, true, 'The original theme icon runtime must be mounted')
+      if (originalDiscussion) {
+        assert.equal(facts.fixture.selection.tabId, 'calendar-tab-1', 'Returning to the original discussion must keep its exact Tab')
+        const original = facts.fixture.initialDrafts['calendar-renderer-session-1']
+        assert.ok(original?.trim(), 'The original manual draft must not be an empty fixture')
+        const composer = await read(`(()=>{const e=document.querySelector('.calendar-fixture__composer [aria-label="Message Agent"]');return e&&(e.value??e.textContent)})()`)
+        assert.equal(composer, original, 'The visible original Composer must retain the exact manual draft')
+      }
       await fs.writeFile(path.join(evidence, name + '.png'), (await win.webContents.capturePage()).toPNG())
       result.images.push(name + '.png'); result.operations.push({ action: 'capture', name, ...facts })
     }
@@ -81,7 +162,33 @@ app.whenReady().then(async () => {
     await until(`(${panel}).textContent.includes('What shall we work on?')`, 'Companion profile')
     await until(`!(${panel}).textContent.includes('Reading original goals')`, 'Original Goal data ready')
     await capture('profile-wide-dark')
+    await densityMutation('header-excess-height', '.mote-details__profile { padding-block: 90px !important; }', headerBudget)
     win.setContentSize(332, 900); await capture('profile-narrow-dark')
+    win.webContents.debugger.attach('1.3')
+    try {
+      await win.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 })
+      await until(`matchMedia('(pointer: coarse)').matches`, 'Actual coarse pointer emulation')
+      const touch = await geometry(); checkGeometry(touch)
+      for (const tab of touch.tabs) assert.ok(tab.rect.width >= 44 && tab.rect.height >= 44 && tab.hit, 'A coarse Mote tab needs an unobstructed 44px target: ' + tab.label)
+      await capture('profile-coarse-narrow-dark')
+      await click(button('Ideas'), 'Coarse Ideas tab')
+      const noteControl = inPanel('.mote-details__ideas .mote-details__note')
+      await click(noteControl, 'Coarse original note')
+      await until(`(${inPanel('.mote-details__preview')})?.textContent.includes('Read from the saved file')`, 'Coarse selected note body')
+      const back = await read(`(()=>{const e=${inPanel('[aria-label="Back to notes"]')};const r=e.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {width:r.width,height:r.height,hit:hit===e||e.contains(hit)}})()`)
+      assert.ok(back.width >= 44 && back.height >= 44 && back.hit, 'Coarse Back to notes needs an unobstructed 44px target')
+      await click(inPanel('[aria-label="Back to notes"]'), 'Coarse return to notes')
+      const note = await read(`(()=>{const e=${noteControl};const r=e.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {width:r.width,height:r.height,hit:hit===e||e.contains(hit)}})()`)
+      assert.ok(note.width >= 44 && note.height >= 44 && note.hit, 'A coarse saved note needs an unobstructed 44px target')
+      result.operations.push({ action: 'coarse-targets', tabs: touch.tabs, note, back })
+      await capture('ideas-coarse-narrow-dark')
+      await showCalendar(); await capture('calendar-coarse-narrow-dark')
+      await click(button('Profile'), 'Return from coarse notes')
+    } finally {
+      await win.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: false })
+      win.webContents.debugger.detach()
+    }
+    await until(`!matchMedia('(pointer: coarse)').matches`, 'Restore original fine pointer')
     await click(button('Preferences & memory'), 'Original preferences disclosure')
     await capture('profile-preferences-narrow-dark')
     await click(button('Ideas'), 'Ideas workspace')
@@ -113,6 +220,19 @@ app.whenReady().then(async () => {
     await read(`window.moteCalendarScene.theme('dark')`)
     await showCalendar()
     await capture('01-space-month-dark')
+    await densityMutation('calendar-toolbar-excess-spacing', '.mote-calendar__toolbar { padding-block: 90px !important; }', calendarBudget)
+    await read(`document.querySelector('.calendar-fixture').dataset.mediumProof=''`)
+    await capture('calendar-medium-month-dark')
+    const medium = await geometry()
+    assert.ok(medium.calendarToolbar.width <= 600 && medium.panel.width >= 560, 'The intermediate pane must exercise the separate header and Calendar breakpoints')
+    await read(`delete document.querySelector('.calendar-fixture').dataset.mediumProof`)
+    await read(`document.querySelector('.calendar-fixture').dataset.wideProof=''`)
+    win.setContentSize(1600, 900); await capture('calendar-expanded-month-dark')
+    const expanded = await geometry()
+    assert.ok(expanded.calendar.width > 1000, 'The actual product Calendar must cross its wide-container breakpoint')
+    assert.ok(expanded.canvas.width > 0 && expanded.agenda.width > 0 && expanded.agenda.left >= expanded.canvas.right, 'A wide Calendar must show its original canvas and agenda side by side')
+    await read(`delete document.querySelector('.calendar-fixture').dataset.wideProof`)
+    win.setContentSize(1240, 900)
     await click(button('Week'), 'Week point-time view')
     await capture('calendar-week-wide-dark')
     await click(button('Upcoming'), 'Upcoming original arrangements')
@@ -181,7 +301,7 @@ app.whenReady().then(async () => {
     await until(`window.moteCalendarScene.facts().records.find(r=>r.loopId==='research-timer').status==='active'`, 'Original timer resumed')
     await click(button('Open original discussion', timerRow), 'Return to countdown original discussion')
     await until(`window.moteCalendarScene.facts().selection.tabId==='calendar-tab-1'`, 'Original research discussion selected')
-    win.setContentSize(1240, 900); await capture('13-space-original-discussion-light')
+    win.setContentSize(1240, 900); await capture('13-space-original-discussion-light', true)
     await read(`window.moteCalendarScene.scenario('empty')`); await showCalendar()
     await capture('14-space-empty-light')
     win.setContentSize(332, 900); await capture('15-narrow-empty-light')
@@ -205,7 +325,7 @@ app.whenReady().then(async () => {
     await click(`document.querySelector('[aria-label="Close Mote profile"]')`, 'Close Mote profile')
     await click(`document.querySelector('[data-fixture-session="1"]')`, 'Return to research discussion')
     assert.equal(await read('window.moteCalendarScene.facts().selection.tabId'), 'calendar-tab-1')
-    await capture('19-narrow-original-discussion-dark')
+    await capture('19-narrow-original-discussion-dark', true)
     assert.deepEqual(result.errors, []); result.passed = true
   } catch (error) {
     result.error = { message: error.message, stack: error.stack }
