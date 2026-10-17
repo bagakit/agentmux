@@ -1,9 +1,10 @@
-import { useRef } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useGitHistory } from '../features/git/history/useGitHistory'
 import { useGitHistoryReader, useSharedGitHistory } from '../features/git/history/GitHistoryContext'
 import type { GitHistoryViewportState } from '../features/git/history/GitHistoryPanel'
 import { useAppStore } from '../store'
+import { findWorkbenchRegion } from '../lib/workbench-tabs'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { useGitStatus } from '../hooks/useGitStatus'
 import type { WorkspaceGitView } from '../lib/workspace-git-view'
@@ -34,11 +35,24 @@ function SourceControl({ workspace, visible, history, shared, viewportState }: {
   const view = useAppStore(state => state.workspaceGitView)
   const setView = useAppStore(state => state.setWorkspaceGitView)
   const displayPath = usePathDisplay()
-  const openCommit = useAppStore(state => state.openGitWorkbench), openHistory = useAppStore(state => state.openGitHistory)
-  const showDetails = useAppStore(state => state.showGitCommitDetails)
+  const openHistory = useAppStore(state => state.openGitHistory)
+  const selectCommit = useAppStore(state => state.selectGitCommit)
+  const selectReference = useAppStore(state => state.selectGitHistoryReference)
+  const tabs = useAppStore(state => state.tabs)
+  const region = useMemo(() => shared?.repositoryRegionId ? findWorkbenchRegion(tabs, shared.repositoryRegionId)?.surface : undefined,
+    [tabs, shared?.repositoryRegionId])
+  const review = region?.kind === 'git' ? region : null
   const reading = visible && view === 'history'
   useGitHistoryReader(shared, 'sidebar:' + workspace.id, workspace, 'sidebar', reading)
   const ready = history.result?.kind === 'ready' ? history.result : null
+  const sameRepository = Boolean(history.repository && review && history.repository.hostId === review.scope.hostId && history.repository.repoPath === review.scope.repoPath)
+  const focusOid = sameRepository ? review?.history?.focusOid : undefined
+  const found = Boolean(focusOid && ready?.commits.some(commit => commit.oid === focusOid))
+  const chooseReference = useCallback((reference: string | null) => {
+    history.selectReference(reference)
+    if (review && (!history.repository || sameRepository)) selectReference(review.regionId, reference)
+  }, [history.selectReference, history.repository, review, sameRepository, selectReference])
+  const navigation = useMemo(() => ({ ...history, selectReference: chooseReference }), [history, chooseReference])
   return <section className="workspace-git-tool content-slot-source-control" aria-label="Git tools" data-git-workspace={workspace.id}>
     <div className="workspace-tool-context workspace-git-context" title={displayPath(workspace.path, workspace.hostId)}>
       <ThemeObjectRepositoryIcon size={13} aria-hidden="true" />
@@ -54,13 +68,17 @@ function SourceControl({ workspace, visible, history, shared, viewportState }: {
       <ChangesPanel workspace={workspace} active={visible && view === 'changes'} />
     </div>
     <div className="source-control-history" hidden={view !== 'history'}>
-      {shared?.repositoryRegionId ? <div className="git-history-expanded" role="status">
-        <span>History is open in the main area.</span>
-        {ready && <button className="small-button" onClick={() => openHistory(workspace.id, ready.snapshot, history.reference)}>Go to history</button>}
-        <button className="small-button" onClick={() => showDetails(shared.repositoryRegionId!)}>Show history here</button>
-      </div> : <GitHistoryPanel workspace={workspace} history={history} viewportState={viewportState}
-        onSelectCommit={snapshot => openCommit(workspace.id, snapshot)}
-        {...(ready ? { onOpenRepository: () => openHistory(workspace.id, ready.snapshot, history.reference) } : {})} />}
+      {focusOid && !found && <div className="git-workbench__locating" role="status">
+        <span>{history.error ? 'Locating paused. Retry history to continue.' : ready && !ready.nextCursor ? 'This commit is outside the current history range.' : 'This commit has not been loaded in the current range.'}</span>
+        {ready?.nextCursor && <button className="small-button" disabled={history.loading} onClick={() => void history.loadMore()}>Read next history page</button>}
+      </div>}
+      <GitHistoryPanel workspace={workspace} history={navigation} viewportState={viewportState}
+        onSelectCommit={snapshot => {
+          const opened = openHistory(workspace.id, snapshot, history.reference)
+          selectCommit(opened.regionId, snapshot)
+        }}
+        {...(sameRepository && review?.selection ? { selectedOid: review.selection.commitOid } : {})}
+        {...(found && focusOid ? { revealOid: focusOid } : {})} />
     </div>
   </section>
 }

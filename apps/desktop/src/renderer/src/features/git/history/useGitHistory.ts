@@ -10,10 +10,8 @@ type HistoryState = {
   refs: GitHistoryRef[]
   loading: boolean
   error: string | null
+  repository: { hostId: string; repoPath: string } | null
 }
-
-/** An explicit handoff of completed facts; pending requests never move between owners. */
-export type GitHistoryWindow = Readonly<Pick<HistoryState, 'key' | 'reference' | 'result' | 'refs' | 'error'>>
 
 /** Component-owned read window. Hidden tabs keep completed pages and reject pending reads. */
 export function useGitHistory(workspace: Pick<WorkspaceRecord, 'id' | 'hostId' | 'path'>, visible: boolean) {
@@ -26,6 +24,7 @@ export function useGitHistory(workspace: Pick<WorkspaceRecord, 'id' | 'hostId' |
   const latest = useRef(state)
   const generation = useRef(0)
   const busy = useRef(false)
+  const selectionIntent = useRef<string | null>(null)
   const enabled = visible && documentVisible
   const scope = useRef({ key, reference, enabled })
   scope.current = { key, reference, enabled }
@@ -50,7 +49,8 @@ export function useGitHistory(workspace: Pick<WorkspaceRecord, 'id' | 'hostId' |
     const lookup = gitBridge()
     // Available ranges belong to this exact Workspace, independently of the selected commit page.
     const base: HistoryState = { key, reference, result: previous?.result ?? null,
-      refs: latest.current?.key === key ? latest.current.refs : [], loading: false, error: null }
+      refs: latest.current?.key === key ? latest.current.refs : [],
+      repository: latest.current?.key === key ? latest.current.repository : null, loading: false, error: null }
     if (!lookup.available) { publish({ ...base, error: lookup.reason }); return false }
     busy.current = true
     publish({ ...base, loading: true })
@@ -67,7 +67,8 @@ export function useGitHistory(workspace: Pick<WorkspaceRecord, 'id' | 'hostId' |
         result = { ...next, commits }
       }
       busy.current = false
-      publish({ ...base, result, refs: next.kind === 'ready' ? next.snapshot.refs : [], loading: false })
+      publish({ ...base, result, refs: next.kind === 'ready' ? next.snapshot.refs : [],
+        repository: next.kind === 'ready' ? { hostId: next.snapshot.hostId, repoPath: next.snapshot.repoPath } : null, loading: false })
       return true
     } catch (error) {
       if (!current()) return false
@@ -90,36 +91,28 @@ export function useGitHistory(workspace: Pick<WorkspaceRecord, 'id' | 'hostId' |
     return () => { generation.current += 1; busy.current = false }
   }, [key, reference, enabled, read, publish])
 
-  const captureWindow = useCallback((): GitHistoryWindow | null => {
-    const value = latest.current
-    if (scope.current.key !== key || value?.key !== key || value.reference !== scope.current.reference ||
-      (!value.result && !value.error)) return null
-    return { key, reference: value.reference, result: value.result, refs: value.refs, error: value.error }
-  }, [key])
-  const adoptWindow = useCallback((window: GitHistoryWindow): void => {
-    if (scope.current.key !== key || window.key !== key) return
-    generation.current += 1
-    busy.current = false
-    // Layout handoff precedes enabled effects. An old read closure must not issue its old ref.
-    scope.current = { ...scope.current, reference: window.reference }
-    setSelection({ key, reference: window.reference })
-    publish({ ...window, loading: false })
-  }, [key, publish])
   const selectReference = useCallback((value: string | null) => {
-    if (scope.current.key !== key || scope.current.reference === value) return
+    if (scope.current.key !== key) return
+    selectionIntent.current = key
+    if (scope.current.reference === value) return
     generation.current += 1
     busy.current = false
     // A durable range can be selected during layout, before the old enabled effect runs.
     scope.current = { ...scope.current, reference: value }
     setSelection({ key, reference: value })
   }, [key])
+  const restoreReference = useCallback((value: string | null) => {
+    if (scope.current.key !== key || selectionIntent.current === key || latest.current?.key === key) return
+    selectReference(value)
+  }, [key, selectReference])
   const refresh = useCallback(() => read(false), [read])
   const loadMore = useCallback(() => read(true), [read])
   const owned = state?.key === key && state.reference === reference ? state : null
   return useMemo(() => ({
     result: owned?.result ?? null, loading: owned?.loading ?? enabled, error: owned?.error ?? null,
     refs: state?.key === key ? state.refs : [],
+    repository: state?.key === key ? state.repository : null,
     reference, enabled,
-    selectReference, refresh, loadMore, captureWindow, adoptWindow
-  }), [owned, state, key, reference, enabled, selectReference, refresh, loadMore, captureWindow, adoptWindow])
+    selectReference, restoreReference, refresh, loadMore
+  }), [owned, state, key, reference, enabled, selectReference, restoreReference, refresh, loadMore])
 }

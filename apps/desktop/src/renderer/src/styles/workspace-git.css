@@ -7,6 +7,10 @@
 .workspace-git-tool { flex: 1; min-height: 0; }
 .workspace-git-panel { display: flex; flex: 1; min-height: 0; overflow: hidden; }
 .workspace-git-panel[hidden] { display: none; }
+.workspace-git-tool > .source-control-history { display: flex; flex-direction: column; overflow: hidden; }
+.workspace-git-tool > .source-control-history[hidden] { display: none; }
+.source-control-history > .git-history-panel { flex: 1; height: auto; min-height: 0; }
+.source-control-history > .git-workbench__locating { flex: none; flex-wrap: wrap; }
 .workspace-git-context { flex-shrink: 0; min-height: 34px; grid-template-columns: auto minmax(0, 1fr) auto; }
 .workspace-git-context > em { color: var(--text-3); }
 .workspace-git-context > svg { flex: 0 0 auto; color: var(--text-3); }
