@@ -20,7 +20,10 @@ async function consumeQualifiedCandidate(candidateRoot) {
   const dirty = new Set(((await git(candidate, 'diff', '--name-only', 'HEAD')) + '\n' + (await git(candidate, 'diff', '--cached', '--name-only'))).split('\n').filter(Boolean))
   assert.equal(await git(candidate, 'diff', '--name-only', '--diff-filter=U'), '', 'An unresolved merge is not a qualified candidate')
   for (const file of dirty) assert.ok(allowedTooling.has(file), 'Only the two reviewed main tooling overlays are allowed: ' + file)
-  const mainHead = await git(root, 'rev-parse', 'refs/heads/main'), candidateHead = await git(candidate, 'rev-parse', 'HEAD')
+  const delivery = await read(join(area, 'delivery-main.json'))
+  assert.equal(typeof delivery.head, 'string', 'The accepted delivery main snapshot is explicit')
+  const mainHead = await git(root, 'rev-parse', delivery.head), observedMainHead = await git(root, 'rev-parse', 'refs/heads/main'), candidateHead = await git(candidate, 'rev-parse', 'HEAD')
+  await git(root, 'merge-base', '--is-ancestor', mainHead, observedMainHead)
   await git(root, 'merge-base', '--is-ancestor', candidateHead, mainHead)
   const pointer = await read(join(candidate, '.local/conversation-duplication/reading-current.json'))
   const candidateDirectory = resolve(candidate, pointer.directory)
@@ -32,12 +35,12 @@ async function consumeQualifiedCandidate(candidateRoot) {
   const tree = async (cwd, head) => new Map((await git(cwd, 'ls-tree', '-rz', '--full-tree', head)).split('\0').filter(Boolean).map(entry => {
     const tab = entry.indexOf('\t'); return [entry.slice(tab + 1), entry.slice(0, tab).split(' ')[2]]
   }))
-  const candidateTree = await tree(candidate, candidateHead), mainTree = await tree(root, mainHead)
+  const candidateTree = await tree(candidate, candidateHead), mainTree = await tree(root, mainHead), observedMainTree = await tree(root, observedMainHead)
   const toolingOverlaySha = []
   const effectiveTree = new Map(candidateTree)
   for (const file of dirty) {
     const blob = await git(candidate, 'hash-object', '--', file)
-    assert.equal(blob, mainTree.get(file), 'A tooling overlay must exactly match its committed main blob: ' + file)
+    assert.equal(blob, observedMainTree.get(file), 'A tooling overlay must exactly match its committed main blob: ' + file)
     effectiveTree.set(file, blob)
     toolingOverlaySha.push({ path: file, blob, sha256: hash(await readFile(join(candidate, file))) })
   }
@@ -54,14 +57,14 @@ async function consumeQualifiedCandidate(candidateRoot) {
   const ownerPaths = new Set(featureOwners)
   for (const file of ownerPaths) {
     assert.ok(candidateTree.has(file), 'The accepted contribution must exist in the qualified candidate: ' + file)
-    assert.equal(effectiveTree.get(file), mainTree.get(file), 'An accepted contribution differs from current main: ' + file)
+    assert.equal(effectiveTree.get(file), (allowedTooling.has(file) ? observedMainTree : mainTree).get(file), 'An accepted contribution differs from its explicit delivery/tooling main snapshot: ' + file)
   }
   let trackedInputs = 0
   const laterMainDrift = []
   for (const file of Object.keys(receipt.sources)) {
     if (!candidateTree.has(file)) continue // Generated dist remains bound by the original candidate's source hashes.
     trackedInputs++
-    if (!ownerPaths.has(file) && candidateTree.get(file) !== mainTree.get(file)) laterMainDrift.push({ path: file, candidateBlob: candidateTree.get(file), mainBlob: mainTree.get(file) ?? null })
+    if (effectiveTree.get(file) !== observedMainTree.get(file)) laterMainDrift.push({ path: file, candidateBlob: effectiveTree.get(file), mainBlob: observedMainTree.get(file) ?? null })
   }
   assert.ok(trackedInputs > 0, 'Nonempty exact main/candidate source comparison')
   const action = process.argv.includes('--verify') ? '--verify' : '--check-prepared'
@@ -69,14 +72,19 @@ async function consumeQualifiedCandidate(candidateRoot) {
   const env = { ...process.env }; delete env.AGENTMUX_READING_DENSITY_CANDIDATE_ROOT
   const result = await command(process.execPath, [join(candidate, own), action], { cwd: candidate, env, maxBuffer: 8 * 1024 * 1024 })
   process.stdout.write(result.stdout)
-  console.log(JSON.stringify({ consumedOriginalCandidate: true, rootMainHead: mainHead, candidateHead, candidateRoot: candidate, trackedInputs,
+  console.log(JSON.stringify({ consumedOriginalCandidate: true, deliveryMainHead: mainHead, observedMainHead, candidateHead, candidateRoot: candidate, trackedInputs,
     baseHead: candidateHead, toolingOverlaySha, ownerInputs: ownerPaths.size, laterMainDrift, action,
-    boundary: 'Qualifies this contribution in the exact main ancestor with only the listed reviewed main tooling overlays. Accepted product/test owners and actual consumers match current main; later parallel changes are listed, not claimed tested. All candidate source/build/artifact identities stay exact. No workspace adoption, expensive rerun, Tracker mutation or claim about root worktree edits.' }))
+    boundary: 'Qualifies this contribution at the explicit delivery main ancestor with only the listed reviewed main tooling overlays. Product/test owners and actual consumers match that delivery snapshot; later observed main changes are listed, not claimed tested. All candidate source/build/artifact identities stay exact. No workspace adoption, expensive rerun, Tracker mutation or claim about root worktree edits.' }))
 }
 const configText = await readFile(join(root, config), 'utf8')
 const mutations = [...configText.matchAll(/^\s*'([^']+)': \[/gmu)].map(match => match[1])
 assert.ok(mutations.length > 0 && new Set(mutations).size === mutations.length, 'Nonempty unique mutations from the actual owning config')
-const sourceHash = sources => hash(JSON.stringify(Object.fromEntries(Object.entries(sources).sort(([a], [b]) => a.localeCompare(b)))))
+const hookUrlPath = 'packages/core/bin/agentmux-hook.js'
+const hookUrlExport = 'export default "/packages/core/bin/agentmux-hook.js"'
+const hookUrlHash = hash(hookUrlExport)
+const isHookUrl = input => input.path === hookUrlPath && !input.mutation && input.originalSHA256 === hookUrlHash && input.sha256 === hookUrlHash
+const sourceInputs = inputs => Object.fromEntries(inputs.filter(input => !isHookUrl(input)).map(input => [input.path, input.originalSHA256]))
+const sourceHash = (sources, virtualInputs = []) => hash(JSON.stringify({ sources: Object.fromEntries(Object.entries(sources).sort(([a], [b]) => a.localeCompare(b))), virtualInputs }))
 function mergeSources(target, inputs) {
   for (const [file, sha] of Object.entries(inputs)) {
     if (target[file]) assert.equal(target[file], sha, 'Candidate source changed between proofs: ' + file)
@@ -141,13 +149,25 @@ async function testProof(receipt, includeTypes = true) {
   assert.ok(receipt.baseline && receipt.adjacent && receipt.restored, 'Every original test stage must have completed')
   assert.deepEqual(receipt.mutants.map(mutant => mutant.name), mutations, 'Every current implementation mutation was proved')
   const runs = [receipt.baseline, ...receipt.mutants, receipt.adjacent, receipt.restored]
+  const virtualInputs = []
   for (const run of runs) {
     const report = await read(join(root, run.report)), cases = report.testResults.flatMap(item => item.assertionResults)
     assert.ok(cases.length > 0 && report.numTotalTests === cases.length)
     assert.deepEqual(cases.map(item => ({ name: item.fullName, status: item.status })), run.cases)
     const inputs = (await readFile(join(root, run.loaded), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
     assert.ok(inputs.length > 0); assert.deepEqual(inputs, run.inputs)
-    for (const input of inputs) assert.equal(hash(await readFile(join(root, input.path))), input.originalSHA256, 'Original tested candidate changed: ' + input.path)
+    for (const input of inputs) {
+      if (isHookUrl(input)) {
+        assert.equal(run, receipt.adjacent, 'The retained exact URL representation belongs only to the original adjacent read')
+        const baseHead = (await command('git', ['rev-parse', 'HEAD'], { cwd: root })).stdout.trim()
+        const blob = (await command('git', ['rev-parse', baseHead + ':' + hookUrlPath], { cwd: root })).stdout.trim()
+        const target = await readFile(join(root, hookUrlPath))
+        const original = await command('git', ['show', baseHead + ':' + hookUrlPath], { cwd: root, encoding: 'buffer' })
+        assert.deepEqual(target, original.stdout, 'The original URL target must still equal the exact candidate base blob')
+        virtualInputs.push({ path: hookUrlPath, representation: 'vite-url-export', representedSHA256: hookUrlHash,
+          baseHead, targetBlob: blob, targetSHA256: hash(target) })
+      } else assert.equal(hash(await readFile(join(root, input.path))), input.originalSHA256, 'Original tested candidate changed: ' + input.path)
+    }
     assert.equal(run.signal, null)
     if (receipt.mutants.includes(run)) {
       assert.deepEqual(run.cases.map(item => item.name), receipt.baseline.cases.map(item => item.name), 'Every mutation uses the original complete collection')
@@ -159,6 +179,8 @@ async function testProof(receipt, includeTypes = true) {
   }
   assert.deepEqual(receipt.restored.cases, receipt.baseline.cases)
   if (includeTypes) await typeProof(receipt.types)
+  if (receipt.virtualInputs) assert.deepEqual(virtualInputs, receipt.virtualInputs, 'Original URL representation and exact target remain bound')
+  return virtualInputs
 }
 async function currentReceipt(requirePassed = true) {
   const pointer = await read(join(area, 'reading-current.json')), directory = resolve(root, pointer.directory)
@@ -177,17 +199,21 @@ async function prepare(resumeCapture = false) {
     if (resumeCapture) {
       const original = await currentReceipt(false)
       assert.equal(original.receipt.sources[config], receipt.sources[config], 'The original owning test contract is unchanged')
-      await testProof(original.receipt, false)
-      for (const [file, sha] of Object.entries(original.receipt.sources)) if (file !== own) assert.equal(hash(await readFile(join(root, file))), sha, 'An original test proof input changed: ' + file)
+      receipt.virtualInputs = await testProof(original.receipt, false)
+      for (const [file, sha] of Object.entries(original.receipt.sources)) {
+        if (file === own) continue
+        if (file === hookUrlPath && sha === hookUrlHash) { assert.ok(receipt.virtualInputs.length === 1); continue }
+        assert.equal(hash(await readFile(join(root, file))), sha, 'An original test proof input changed: ' + file)
+      }
       for (const field of ['baseline', 'mutants', 'adjacent', 'restored']) receipt[field] = original.receipt[field]
-      mergeSources(receipt.sources, Object.fromEntries([receipt.baseline, ...receipt.mutants, receipt.adjacent, receipt.restored].flatMap(run => run.inputs.map(input => [input.path, input.originalSHA256]))))
+      mergeSources(receipt.sources, sourceInputs([receipt.baseline, ...receipt.mutants, receipt.adjacent, receipt.restored].flatMap(run => run.inputs)))
       receipt.reusedTests = { receipt: relative(root, join(original.directory, 'receipt.json')), sha256: original.pointer.receiptSha256,
         boundary: 'Only the complete unchanged original tests and actual implementation mutations are reused. Exact candidate types and capture always run again; no earlier type or capture failure is treated as passing.' }
       console.log('Original test/config/loaded-source proof verified; exact types and capture remain unqualified.')
     } else {
     receipt.baseline = await tests(directory, 'baseline')
     assert.equal(receipt.baseline.exit, 0, 'Owning baseline: ' + receipt.baseline.log)
-    mergeSources(receipt.sources, Object.fromEntries(receipt.baseline.inputs.map(input => [input.path, input.originalSHA256])))
+    mergeSources(receipt.sources, sourceInputs(receipt.baseline.inputs))
     for (const mutation of mutations) {
       const mutant = await tests(directory, mutation, mutation)
       assert.ok(mutant.exit > 0 && mutant.assertionFailures > 0, 'The actual implementation mutation must fail a behavioral assertion: ' + mutation)
@@ -200,18 +226,19 @@ async function prepare(resumeCapture = false) {
     }
     receipt.adjacent = await tests(directory, 'adjacent', undefined, true)
     assert.equal(receipt.adjacent.exit, 0, 'Owning adjacent reading checks: ' + receipt.adjacent.log)
-    mergeSources(receipt.sources, Object.fromEntries(receipt.adjacent.inputs.map(input => [input.path, input.originalSHA256])))
+    mergeSources(receipt.sources, sourceInputs(receipt.adjacent.inputs))
     receipt.restored = await tests(directory, 'restored')
     assert.equal(receipt.restored.exit, 0, 'Restored actual implementation')
     assert.deepEqual(receipt.restored.cases.map(item => item.name), receipt.baseline.cases.map(item => item.name))
-    mergeSources(receipt.sources, Object.fromEntries(receipt.restored.inputs.map(input => [input.path, input.originalSHA256])))
+    mergeSources(receipt.sources, sourceInputs(receipt.restored.inputs))
+    receipt.virtualInputs = await testProof(receipt, false)
     }
     receipt.types = await typecheck(directory)
     mergeSources(receipt.sources, Object.fromEntries(receipt.types.inputs.map(input => [input.path, input.sha256])))
     receipt.capture = await captureReadingDensity(join(directory, 'visual'))
     mergeSources(receipt.sources, receipt.capture.sources)
     for (const [file, sha] of Object.entries(receipt.sources)) assert.equal(hash(await readFile(join(root, file))), sha, 'Source changed during qualification: ' + file)
-    receipt.sourceSha256 = sourceHash(receipt.sources)
+    receipt.sourceSha256 = sourceHash(receipt.sources, receipt.virtualInputs)
     receipt.captureSha256 = hash(await readFile(join(directory, 'visual/capture.json')))
     receipt.artifacts = {}
     const runs = [receipt.baseline, ...receipt.mutants, receipt.adjacent, receipt.restored]
@@ -232,7 +259,7 @@ async function prepare(resumeCapture = false) {
 }
 async function verify(preparedOnly = false) {
   const { pointer, directory, receipt } = await currentReceipt()
-  assert.equal(sourceHash(receipt.sources), pointer.sourceSha256)
+  assert.equal(sourceHash(receipt.sources, receipt.virtualInputs), pointer.sourceSha256)
   for (const [file, sha] of Object.entries(receipt.sources)) assert.equal(hash(await readFile(join(root, file))), sha, 'Qualified source changed: ' + file)
   assert.ok(Object.keys(receipt.artifacts).length > 0, 'Nonempty exact proof artifacts')
   for (const [file, sha] of Object.entries(receipt.artifacts)) assert.equal(hash(await readFile(join(root, file))), sha, 'Qualified proof changed: ' + file)
