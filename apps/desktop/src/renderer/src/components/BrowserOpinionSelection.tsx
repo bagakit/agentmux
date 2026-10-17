@@ -97,11 +97,12 @@ export function useBrowserOpinionSelection({ source, visible, locked, document, 
     controls: <div className="browser-opinion-selection">
       {attachment ? <div className="browser-opinion-selection__attachment">
         <ConversationImage key={imageKey} path={attachment.path} text="Processed Browser image" label="Processed Browser image" readImage={readImage} active={visible} />
-        <span>Processed image · {attachment.width} × {attachment.height}<small>Captured at step {source?.selection?.scene.inputContext.selection?.source.stepSequence ?? 'unknown'} · observed page</small></span>
+        <span>Processed image · {attachment.width} × {attachment.height}<small>Captured at step {source?.selection?.scene.inputContext.selection?.source.stepSequence ?? 'unknown'} · {source?.selection?.scene.inputContext.selection?.source.association === 'unknown' ? 'Source association unknown' : 'Observed during'}</small></span>
         <button className="small-button" type="button" disabled={locked || busy} onClick={() => {
           if (current.current) { const { selection: _selection, ...retained } = current.current; change(retained) }
         }}>Remove image</button>
       </div> : null}
+      {source?.selection?.scene.diskDurability === 'unconfirmed' ? <p className="browser-contextual-composer__notice" role="status">Image saved. Its capture details are not yet confirmed on disk. Your text is kept.</p> : null}
       <div className="browser-opinion-selection__actions">
         <button className="small-button" type="button" disabled={!source?.scene || locked || busy} onClick={() => void capture()}>{busy && !frame ? 'Reading image…' : attachment ? 'Replace image…' : 'Mark captured image…'}</button>
         {source?.selectionPreparation ? <button className="small-button" type="button" disabled={locked || busy} onClick={() => void inspect()}>Check original image</button> : null}
@@ -116,7 +117,7 @@ export function useBrowserOpinionSelection({ source, visible, locked, document, 
         {failure ? <div className="browser-opinion-selection__recovery" role="status"><span>{failure}</span>{prepared.current ? <button className="small-button" disabled={busy} onClick={() => void save()}>Retry original image</button> : null}<button className="small-button" disabled={busy} onClick={() => void inspect()}>Check original image</button></div> : null}
         <ImageAnnotationEditor image={frame.capture.image} active={visible} busy={busy || prepared.current !== null} ownerDocument={document}
           title="Captured image" completeLabel="Attach processed image" busyLabel={busy ? 'Preparing image…' : 'Original image unconfirmed'}
-          documentStatus="Only the processed PNG is attached. Crop to attach a region."
+          documentStatus={frame.scene.diskDurability === 'unconfirmed' ? 'Capture details are not yet confirmed on disk. Text remains available.' : 'Only the processed PNG is attached. Crop to attach a region.'}
           onCancel={cancel} onComplete={input => void save(input)} onError={error => setFailure(presentError(error))} />
       </section>
     </WindowOverlayPortal> : null
