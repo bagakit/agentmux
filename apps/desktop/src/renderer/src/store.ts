@@ -113,6 +113,8 @@ import { clampProjectRailWidth, PROJECT_RAIL_DEFAULT_WIDTH } from './lib/project
 import { clampSurveySidebarWidth, SURVEY_SIDEBAR_DEFAULT_WIDTH } from './lib/survey-sidebar-width'
 import { requireSpaceIconSelection, restoreSpaceIconOverrides, type SpaceIconChoice, type SpaceIconOverrides } from './lib/space-object-appearance'
 import { create } from 'zustand'
+import { createA2AMessageNotifier } from './lib/a2a-message-notifier'
+import { createVisibleSessionIdsSelector } from './lib/session-visibility'
 
 import { currentExecutorDetection, executorDetectionMatches, executorDetectionKey } from './lib/executor-detection'
 export { executorDetectionKey } from './lib/executor-detection'
@@ -4888,6 +4890,18 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const pendingBrowserEvents: BrowserEvent[] = []
     let booting = true
     let observing = true
+    let a2aUnsupportedReported = false, a2aDowngradeReported = false
+    const a2aNotifications = createA2AMessageNotifier(async input => {
+      const delivery = await api.ui.notifyAgentAttention(input)
+      if (delivery.status === 'unsupported' && !a2aUnsupportedReported) {
+        a2aUnsupportedReported = true
+        get().reportError(new Error(`Agent message notifications are unavailable: ${delivery.reason}`))
+      } else if (delivery.status === 'shown' && delivery.presentation === 'downgraded' && !a2aDowngradeReported) {
+        a2aDowngradeReported = true
+        get().reportError(new Error('This platform cannot keep an Agent message notification open until dismissed; it was shown as a normal banner.'))
+      }
+    })
+    const visibleA2ARecipients = createVisibleSessionIdsSelector()
     const availabilityEpoch = ++startupAvailabilityEpoch
     let disposeStartupProgress = () => {}
     let pendingNotesStorage: NotesStorageSnapshot | null = null
@@ -4898,6 +4912,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       })
     })
     const disposeSessions = api.sessions.onEvent((event) => {
+      if (event.event.type === 'agent-message-changed') {
+        const state = get()
+        void a2aNotifications.observe({ event, config: state.config, sessions: state.sessions, ready: !booting && observing,
+          windowFocused: document.hasFocus(), visibleSessionIds: visibleA2ARecipients(state) }).catch(error => get().reportError(error))
+      }
       if (booting) {
         enqueueSessionMembershipEvent(pendingSessionEvents, event)
         return

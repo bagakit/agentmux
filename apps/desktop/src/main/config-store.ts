@@ -5,6 +5,7 @@ import { constants, mkdir, open, readFile } from 'node:fs/promises'
 import { dirname, join, normalize as normalizeLocalPath } from 'node:path'
 import { app } from 'electron'
 import { z } from 'zod'
+import { A2A_NOTIFICATION_IDS } from '../shared/a2a-preferences.js'
 import { validateThemeConfigEdit } from './theme-config.js'
 import { BUILT_IN_AGENT_PROVIDERS, defaultLocalHostLabel, durableWriteFile, normalizeAgentContinuityPolicy } from '@agentmux/core'
 import { parseToolkitToolConfiguration, TOOLKIT_MAX_USER_TOOLS } from '@agentmux/core/control'
@@ -330,6 +331,7 @@ const configSchema = z
     // explicit default. The mode is validated against the one tier table so an unknown id is rejected
     // rather than silently meaning "off".
     notifications: notificationsSchema.optional(),
+    a2a: z.object({ notifications: z.enum(A2A_NOTIFICATION_IDS).optional() }).strict().optional(),
     // 缺席读成默认那两条，**显式 `[]` 读成空**。这两件事必须分开，而它们只差一个键的有无：
     //   - 缺席 = 这份配置写于本字段存在之前（本机那份 v9 就是：一个 composerShortcuts 键都没有）。
     //     此时给空列表，用户永远看不到任何 prompt，也不会有识别词——功能像根本没做。
