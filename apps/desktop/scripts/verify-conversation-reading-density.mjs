@@ -16,7 +16,10 @@ async function consumeQualifiedCandidate(candidateRoot) {
   const candidate = resolve(candidateRoot)
   assert.notEqual(candidate, root, 'The explicit candidate must name its own checkout')
   const git = async (cwd, ...args) => (await command('git', args, { cwd, maxBuffer: 8 * 1024 * 1024 })).stdout.trim()
-  assert.equal(await git(candidate, 'status', '--porcelain', '--untracked-files=no'), '', 'The exact qualified candidate must have no tracked edits')
+  const allowedTooling = new Set([own, 'apps/desktop/scripts/fixtures/conversation-reading-density/main.cjs'])
+  const dirty = new Set(((await git(candidate, 'diff', '--name-only', 'HEAD')) + '\n' + (await git(candidate, 'diff', '--cached', '--name-only'))).split('\n').filter(Boolean))
+  assert.equal(await git(candidate, 'diff', '--name-only', '--diff-filter=U'), '', 'An unresolved merge is not a qualified candidate')
+  for (const file of dirty) assert.ok(allowedTooling.has(file), 'Only the two reviewed main tooling overlays are allowed: ' + file)
   const mainHead = await git(root, 'rev-parse', 'refs/heads/main'), candidateHead = await git(candidate, 'rev-parse', 'HEAD')
   await git(root, 'merge-base', '--is-ancestor', candidateHead, mainHead)
   const pointer = await read(join(candidate, '.local/conversation-duplication/reading-current.json'))
@@ -30,6 +33,14 @@ async function consumeQualifiedCandidate(candidateRoot) {
     const tab = entry.indexOf('\t'); return [entry.slice(tab + 1), entry.slice(0, tab).split(' ')[2]]
   }))
   const candidateTree = await tree(candidate, candidateHead), mainTree = await tree(root, mainHead)
+  const toolingOverlaySha = []
+  const effectiveTree = new Map(candidateTree)
+  for (const file of dirty) {
+    const blob = await git(candidate, 'hash-object', '--', file)
+    assert.equal(blob, mainTree.get(file), 'A tooling overlay must exactly match its committed main blob: ' + file)
+    effectiveTree.set(file, blob)
+    toolingOverlaySha.push({ path: file, blob, sha256: hash(await readFile(join(candidate, file))) })
+  }
   const featureOwners = [own, config,
     'packages/core/src/providers/codex-saved-history.ts', 'packages/core/src/session-history.ts', 'packages/core/src/types.ts', 'packages/core/src/conversation-timeline.ts',
     'packages/core/test/codex-native-collaboration.test.ts', 'packages/core/test/vitest.native-collaboration.config.mts',
@@ -43,7 +54,7 @@ async function consumeQualifiedCandidate(candidateRoot) {
   const ownerPaths = new Set(featureOwners)
   for (const file of ownerPaths) {
     assert.ok(candidateTree.has(file), 'The accepted contribution must exist in the qualified candidate: ' + file)
-    assert.equal(candidateTree.get(file), mainTree.get(file), 'An accepted contribution differs from current main: ' + file)
+    assert.equal(effectiveTree.get(file), mainTree.get(file), 'An accepted contribution differs from current main: ' + file)
   }
   let trackedInputs = 0
   const laterMainDrift = []
@@ -59,8 +70,8 @@ async function consumeQualifiedCandidate(candidateRoot) {
   const result = await command(process.execPath, [join(candidate, own), action], { cwd: candidate, env, maxBuffer: 8 * 1024 * 1024 })
   process.stdout.write(result.stdout)
   console.log(JSON.stringify({ consumedOriginalCandidate: true, rootMainHead: mainHead, candidateHead, candidateRoot: candidate, trackedInputs,
-    ownerInputs: ownerPaths.size, laterMainDrift, action,
-    boundary: 'Qualifies this contribution in the exact main ancestor. Its accepted owners and actual product consumers match current main; later parallel main changes are listed, not claimed tested. Candidate source/build/artifact identities remain exact. No workspace adoption, expensive rerun, Tracker mutation or claim about root worktree edits.' }))
+    baseHead: candidateHead, toolingOverlaySha, ownerInputs: ownerPaths.size, laterMainDrift, action,
+    boundary: 'Qualifies this contribution in the exact main ancestor with only the listed reviewed main tooling overlays. Accepted product/test owners and actual consumers match current main; later parallel changes are listed, not claimed tested. All candidate source/build/artifact identities stay exact. No workspace adoption, expensive rerun, Tracker mutation or claim about root worktree edits.' }))
 }
 const configText = await readFile(join(root, config), 'utf8')
 const mutations = [...configText.matchAll(/^\s*'([^']+)': \[/gmu)].map(match => match[1])
