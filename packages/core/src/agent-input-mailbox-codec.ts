@@ -1,3 +1,4 @@
+import { agentInputContextCaptureProofFields } from './agent-input-context-capture.js'
 import { AgentMuxError } from './errors.js'
 import { browserInputContextFields } from './browser-input-context.js'
 import { dequal } from 'dequal'
@@ -37,9 +38,10 @@ export function parseAgentInputMailboxItem(value: unknown, agentSessionId: strin
       const receipt = entry.receipt === null ? null : parseAgentInputSubmissionReceipt(entry.receipt)
       if (receipt && !dequal(receipt.key, key) || !receipt && entry.failure === undefined || receipt && entry.failure !== undefined) fail()
       if (receipt?.admission?.admission && !dequal(receipt.admission.admission.intent?.admissionIntent, admission)) fail()
-      const source = object(intent.source, ['kind', 'prompt', 'agentMuxNote', 'authorHuman', 'sourceChannel', 'sourceDevice', 'messageId', 'originalControlOperationId', 'inputContext', 'inputContextSource', 'promptWire'])
+      const source = object(intent.source, ['kind', 'prompt', 'agentMuxNote', 'authorHuman', 'sourceChannel', 'sourceDevice', 'messageId', 'originalControlOperationId', 'inputContext', 'inputContextSource', 'inputContextCaptureProof', 'promptWire'])
       if (source.kind === 'prompt') {
         browserInputContextFields(source)
+        agentInputContextCaptureProofFields(source)
         if (source.promptWire !== undefined && (typeof source.promptWire !== 'string' || !source.promptWire.trim())) fail()
         if (key.kind !== 'prompt' || typeof source.prompt !== 'string' || source.agentMuxNote !== undefined && typeof source.agentMuxNote !== 'string' ||
           source.authorHuman !== undefined && typeof source.authorHuman !== 'boolean' || source.messageId !== undefined || source.originalControlOperationId !== undefined || entry.message !== undefined || entry.sourceChannel !== undefined || entry.sourceDevice !== undefined) fail()
@@ -47,7 +49,7 @@ export function parseAgentInputMailboxItem(value: unknown, agentSessionId: strin
         if (source.sourceDevice !== undefined) normalizeOperationDevice(source.sourceDevice)
       } else {
         if (source.kind !== 'message' || key.kind !== 'message' || source.messageId !== key.messageId ||
-          source.prompt !== undefined || source.agentMuxNote !== undefined || source.authorHuman !== undefined || source.sourceChannel !== undefined || source.sourceDevice !== undefined || source.inputContext !== undefined || source.inputContextSource !== undefined || source.promptWire !== undefined) fail()
+          source.prompt !== undefined || source.agentMuxNote !== undefined || source.authorHuman !== undefined || source.sourceChannel !== undefined || source.sourceDevice !== undefined || source.inputContext !== undefined || source.inputContextSource !== undefined || source.inputContextCaptureProof !== undefined || source.promptWire !== undefined) fail()
         string(source.originalControlOperationId)
         const message = object(entry.message, ['schema', 'messageId', 'operationId', 'createdAt', 'sender', 'recipient', 'threadId', 'correlationId', 'replyTo', 'workspaceId', 'senderSessionId', 'senderRunId', 'recipientSessionId', 'recipientRunId', 'body'])
         const envelope = validateAgentMuxMessageEnvelope(message as unknown as Parameters<typeof validateAgentMuxMessageEnvelope>[0])

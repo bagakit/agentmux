@@ -1,3 +1,4 @@
+import { agentInputContextCaptureProofFields, parseAgentInputContextCaptureReference } from './agent-input-context-capture.js'
 import type {
   AgentCapabilitySnapshot,
   AgentCatalogEntry,
@@ -125,6 +126,8 @@ export type AgentMuxContinuityInputDelivery = {
 }
 /** New authored input which has not yet acquired its resumed Run binding. */
 export type AgentMuxContinuityInputRequest = {
+  /** Original Host capture reference; mutually exclusive with a direct context declaration. */
+  inputContextCapture?: import('./agent-input-context-capture.js').AgentInputContextCaptureReference
   inputContext?: import('./browser-input-context.js').BrowserInputContext
   submissionId: string
   prompt: string
@@ -239,8 +242,8 @@ export function normalizeAgentContinuityLaunchInput(value: unknown): AgentMuxCon
     const key = validateAgentPromptInputKey(input.key)
     if (key.kind !== 'prompt' || key.submissionId !== input.input.submissionId) throw new TypeError('Conflicting continuity launch input key.')
   }
-  return { ...structuredClone(input), input: { ...structuredClone(input.input), ...(input.input.inputContext === undefined ? {} : { inputContext: parseBrowserInputContext(input.input.inputContext) }) },
-    message: { ...structuredClone(input.message), ...browserInputContextFields(input.message) } }
+  return { ...structuredClone(input), input: { ...structuredClone(input.input), ...(input.input.inputContextCapture === undefined ? {} : { inputContextCapture: parseAgentInputContextCaptureReference(input.input.inputContextCapture) }), ...(input.input.inputContext === undefined ? {} : { inputContext: parseBrowserInputContext(input.input.inputContext) }) },
+    message: { ...structuredClone(input.message), ...browserInputContextFields(input.message), ...agentInputContextCaptureProofFields(input.message) } }
 }
 
 export function normalizeAgentContinuityOperation(value: unknown): AgentMuxContinuityOperation {

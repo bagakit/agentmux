@@ -6,6 +6,7 @@ import type { AgentNativeBinding, AgentNativeSessionHandle, AgentOperationDevice
 export type AgentInputCallContext = Readonly<{
   /** Trusted Host capture attribution, never accepted from public business arguments. */
   inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource
+  captureReader?: import('./agent-input-context-capture.js').AgentInputContextCaptureReader
   /** Ends only intake observation until the original Core accepts its waiting owner. */
   requestSignal?: AbortSignal
   /** Trusted Host author owner; identity is attribution, while this callback checks current authority. */
@@ -42,6 +43,7 @@ export type AgentInputJournalIntent = {
   source:
     | { kind: 'prompt'; prompt: string; agentMuxNote?: string; authorHuman?: boolean; sourceChannel?: AgentMessageChannel; sourceDevice?: AgentOperationDevice;
         inputContext?: import('./browser-input-context.js').BrowserInputContext; inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource;
+        inputContextCaptureProof?: import('./agent-input-context-capture.js').AgentInputContextCaptureProof;
         /** Wire frozen at first intake, before waiting or Provider preparation. */
         promptWire?: string }
     | { kind: 'message'; messageId: string; originalControlOperationId: string }

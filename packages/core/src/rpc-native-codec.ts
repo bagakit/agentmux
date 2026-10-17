@@ -1,5 +1,6 @@
 import { parseBroadcastReceipt, normalizeBroadcastInput } from './agent-message-broadcast.js'
 import { parseMessageEventsPage } from './agent-message-events.js'
+import { parseAgentInputContextCaptureReference, parseAgentInputContextCaptureRead } from './agent-input-context-capture.js'
 import { isMessageNotificationInput, validateMessageNotification } from './agent-message-notification.js'
 import { agentDiscoveryActivity } from './agent-discovery.js'
 import { parseTerminalFrontend } from './agent-terminal-frontend.js'
@@ -326,6 +327,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     const p = record(value), input = record(params)
     if (['schemaVersion', 'requestId', 'operation'].some(key => Object.hasOwn(p, key))) fail()
     switch (method) {
+      case 'browser.input.inspect': return parseAgentInputContextCaptureRead(value, parseAgentInputContextCaptureReference(input)) as unknown as Record<string, unknown>
       case 'system.diagnostics.inspect': return parseDiagnosticEvidenceResult(value, input) as unknown as Record<string, unknown>
       case 'message.delivery.inspect': return parseDeliveryAttemptLookup(value, input.logId as string) as unknown as Record<string, unknown>
       case 'message.delivery.report': return parseDeliveryAttemptLookup(value, (input.record as import('./delivery-attempt.js').DeliveryAttempt).logId) as unknown as Record<string, unknown>

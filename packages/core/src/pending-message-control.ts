@@ -1,3 +1,4 @@
+import { agentInputContextCaptureProofFields } from './agent-input-context-capture.js'
 import type { AgentPromptPreparationRetryProgress } from './prompt-preparation.js'
 import { validateDeliveryLogId } from './delivery-attempt.js'
 import { AgentMuxError } from './errors.js'
@@ -50,8 +51,9 @@ export function isPendingMessageOperation(value: unknown): value is PendingMessa
 
 /** Validate the business result before a transport carries it to any client. */
 export function parsePendingMessage(value: unknown): AgentMuxPendingMessage {
-  const source = rpcRecord(value, ['pendingId', 'text', 'runId', 'enqueuedAt', 'status', 'phase', 'editable', 'delivery', 'errorCode', 'error', 'logId', 'preparationWait', 'inputWait', 'archived', 'inputContext', 'inputContextSource'])
+  const source = rpcRecord(value, ['pendingId', 'text', 'runId', 'enqueuedAt', 'status', 'phase', 'editable', 'delivery', 'errorCode', 'error', 'logId', 'preparationWait', 'inputWait', 'archived', 'inputContext', 'inputContextSource', 'inputContextCaptureProof'])
   browserInputContextFields(source)
+  agentInputContextCaptureProofFields(source)
   const identifier = (input: unknown): input is string => typeof input === 'string' && Boolean(input.trim()) && !/[\0\r\n]/u.test(input)
   if (!identifier(source.pendingId) || typeof source.text !== 'string' || source.text.includes('\0') ||
       source.runId !== null && !identifier(source.runId) ||

@@ -239,6 +239,7 @@ type NativeParams = ApplicationAccessParameterMap & MoteConnectionParamsMap & Go
   'agent.role.resolve': { role: string; workspacePath?: string }
   'agent.input.ls': import('./agent-input-mailbox.js').AgentInputMailboxRead & { hostId: string }
   'agent.input.submit': import('./agent-input-submit.js').AgentInputSubmit
+  'browser.input.inspect': import('./agent-input-context-capture.js').AgentInputContextCaptureReference
   'agent.input.inspect': import('./agent-input-wait.js').AgentInputSelector
   'agent.input.stop': { ref: import('./agent-input-wait.js').AgentInputWaitRef; cancelOperationId: string }
   'agent.input.rejoin': { ref: import('./agent-input-wait.js').AgentInputWaitRef }
@@ -319,6 +320,7 @@ type NativeResult = ApplicationAccessResultMap & MoteConnectionResultMap & GoalD
   'agent.role.resolve': { binding: AgentRoleBinding }
   'agent.input.ls': import('./agent-input-mailbox.js').AgentInputMailboxPage & { hostId: string }
   'agent.input.submit': import('./agent-input-submit.js').AgentInputSubmitResult
+  'browser.input.inspect': import('./agent-input-context-capture.js').AgentInputContextCaptureRead
   'agent.input.inspect': { record: Awaited<ReturnType<AgentMuxClient['inspectAgentPromptSubmission']>>; input?: import('./agent-input-wait.js').AgentInputSubmissionReceipt | null }
   'agent.input.stop': import('./agent-input-wait.js').AgentInputWaitStopReceipt
   'agent.input.rejoin': import('./agent-input-wait.js').AgentInputSubmissionReceipt
@@ -389,6 +391,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   whoami: 'short', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.restart': 'long', 'agent.restart.inspect': 'short', 'agent.refresh': 'short', 'agent.continuity.control': 'short', 'agent.native.confirm': 'long', 'agent.native.ls': 'long', 'agent.native.history': 'long', 'agent.native.history.resource': 'long', 'agent.context': 'long', 'agent.history': 'long', 'agent.conversation.release': 'short', 'agent.conversation.inspect': 'long', 'agent.conversation.checkpoint': 'long', 'agent.conversation.changes': 'long', 'agent.conversation.watch': 'long', 'agent.history.resource': 'long', 'agent.interaction.respond': 'long', 'agent.interaction.inspect': 'short', 'agent.question.reply': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
   'agent.role.ls': 'short', 'agent.role.register': 'long', 'agent.role.resolve': 'short', 'agent.spawn.ls': 'short',
   'agent.input.ls': 'short', 'agent.input.submit': 'long', 'agent.input.inspect': 'short', 'agent.input.stop': 'short', 'agent.input.rejoin': 'long', 'agent.send': 'long', 'agent.broadcast': 'long', 'agent.broadcast.inspect': 'short', 'agent.discuss': 'long', 'agent.handoff': 'short',
+  'browser.input.inspect': 'long',
   'system.diagnostics.inspect': 'short',
   'message.delivery.inspect': 'short', 'message.delivery.report': 'long',
   'agent.output': 'long', 'message.inbox.check': 'long', 'message.inbox.ack': 'long',

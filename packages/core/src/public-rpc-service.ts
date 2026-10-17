@@ -1,4 +1,5 @@
 import { runAgentMessageBroadcast, normalizeBroadcastInput } from './agent-message-broadcast.js'
+import { parseAgentInputContextCaptureReference, parseAgentInputContextCaptureRead, type AgentInputContextCaptureReader } from './agent-input-context-capture.js'
 import { parseFileShareParams, parseFileShareResult, parseFileShareInspectParams, parseFileShareInspectResult, parseFileShareUndoParams, parseFileShareUndoResult } from './public-rpc-file-share.js'
 import { assertAgentConnectionAccess } from './connection-agent-access.js'
 import { parseRendererAllocationsResult } from './renderer-allocations.js'
@@ -116,6 +117,7 @@ export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
 export type AgentMuxRpcCoreClient = { hostId: string; client: AgentMuxRpcCorePort }
 type BorrowedHostedRuntime = Pick<AgentMuxHostedRuntimeService, 'call' | 'subscribe' | 'assertFence'> & Partial<Pick<AgentMuxHostedRuntimeService, 'client'>>
 export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
+  inputContextCaptures?: AgentInputContextCaptureReader
   applicationAccess?: ApplicationAccessPort
   windows?: AgentMuxRpcWindowsOwner
   moteConnections?: MoteConnectionPort
@@ -271,6 +273,7 @@ const NATIVE_FIELDS = {
   'agent.role.register': ['role', 'providerId'], 'agent.role.resolve': ['role', 'workspacePath'],
   'agent.input.ls': ['hostId', 'agentSessionId', 'limit', 'cursor', 'maxBytes'],
   'agent.input.submit': AGENT_INPUT_SUBMIT_FIELDS,
+  'browser.input.inspect': ['hostId', 'operationId'],
   'agent.input.inspect': ['key', 'kind', 'originalControlOperationId'],
   'agent.input.stop': ['ref', 'cancelOperationId'], 'agent.input.rejoin': ['ref'],
   'agent.send': ['target', 'text', 'messageId', 'threadId', 'correlationId', 'replyTo', 'operationId', 'execution', 'expectedRun', 'sourceChannel', 'admissionIntent'],
@@ -1304,6 +1307,26 @@ export class AgentMuxRpcService {
       return parseRpcNativeResult(method, await this.ports.forwardControl(method, p as AgentMuxRpcParams<M>, context), p, context.caller) as AgentMuxRpcResult<M>
     }
     switch (method) {
+      case 'browser.input.inspect': {
+        const reference = parseAgentInputContextCaptureReference(p)
+        if (!caller && (!context.principal || !['user', 'device'].includes(context.principal.kind) || !context.principal.id.trim())) {
+          throw new AgentMuxError('Reading an original input capture requires its authenticated user, device or recipient Agent.', 'CONTROL_PERMISSION_DENIED')
+        }
+        context.signal?.throwIfAborted(); await context.assertCurrent?.()
+        if (!this.ports.inputContextCaptures) {
+          if (this.ports.forwardControl) return parseAgentInputContextCaptureRead(await this.ports.forwardControl(method, reference as AgentMuxRpcParams<M>, context), reference) as AgentMuxRpcResult<M>
+          throw new AgentMuxError('The original input capture owner is unavailable. Retain its reference; ordinary input remains available.', 'AGENT_INPUT_CONTEXT_CAPTURE_UNCONFIRMED')
+        }
+        const read = parseAgentInputContextCaptureRead(await this.ports.inputContextCaptures.read(reference, context.signal ? { signal: context.signal } : undefined), reference)
+        context.signal?.throwIfAborted(); await context.assertCurrent?.()
+        if (caller) {
+          await this.authenticated(context)
+          if (read.record && (read.record.binding.executionHostId !== caller.hostId || read.record.binding.agentSessionId !== caller.agentSessionId)) {
+            throw new AgentMuxError('An Agent may read only its own original input capture on its exact execution Host.', 'CONTROL_PERMISSION_DENIED')
+          }
+        }
+        result = read; break
+      }
       case 'agent.conversation.landmark.ls': result = await this.landmarks.list(parseConversationLandmarkQuery(p)); break
       case 'agent.conversation.landmark.apply': {
         const actor = caller ? { kind: 'agent' as const, id: caller.agentSessionId } : context.principal
