@@ -803,6 +803,13 @@ export type AgentSessionHistoryMessagePhase = 'progress' | 'final'
 /** Native collaboration references are read-only locators, never AgentMux Session or Run IDs. */
 export type AgentSessionHistoryCollaboration =
   | {
+      kind: 'message'
+      /** The native conversation scopes these actor names; they are not AgentMux Session IDs. */
+      source: AgentSessionHistorySource
+      sender?: string
+      recipient?: string
+    }
+  | {
       kind: 'operation'
       operation?: 'spawn' | 'send-input' | 'send-message' | 'followup' | 'wait' | 'resume' | 'interrupt' | 'close' | 'list'
       status?: 'running' | 'completed' | 'failed' | 'interrupted'

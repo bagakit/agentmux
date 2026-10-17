@@ -112,6 +112,7 @@ function item(record: Record<string, unknown>, start: number, nativeSessionId: s
     }
   }
   let kind: NativeHistoryItem['kind'] = 'activity', parts: NativeHistoryContentPart[], title: string | undefined
+  let collaboration: NativeHistoryItem['collaboration'], conversationDiagnostic: NativeHistoryItem['conversationDiagnostic']
   let contentEligibility: AgentSessionHistoryItem['contentParts'][number]['contentEligibility'] = 'unconfirmed'
   if (asyncQuestion) {
     contentEligibility = 'public'
@@ -127,6 +128,22 @@ function item(record: Record<string, unknown>, start: number, nativeSessionId: s
   } else if (mcpParts) {
     // Only the typed tool result's file purpose is known; metadata stays unconfirmed.
     parts = mcpParts
+  } else if (record.type === 'response_item' && type === 'agent_message') {
+    // The native actor paths belong to this source, not to AgentMux's Session registry.
+    parts = contentParts(payload.content)
+    contentEligibility = 'public'
+    const validActor = (value: unknown): value is string => typeof value === 'string' && value.length > 0 &&
+      value.length <= 16_384 && !/[\u0000-\u001f\u007f]/u.test(value)
+    collaboration = { kind: 'message', source: { providerId: 'codex', nativeSessionId },
+      ...(validActor(payload.author) ? { sender: payload.author } : {}),
+      ...(validActor(payload.recipient) ? { recipient: payload.recipient } : {}) }
+    if (payload.author !== undefined && !validActor(payload.author) || payload.recipient !== undefined && !validActor(payload.recipient)) {
+      conversationDiagnostic = { code: 'NATIVE_COLLABORATION_ATTRIBUTION_UNCONFIRMED',
+        message: 'Optional native collaboration attribution is unknown. The original message and reported attribution remain readable.' }
+      // Native values may be lazy source text. Preserve them through the existing
+      // bounded content/resource materializer rather than serializing metadata eagerly.
+      parts.push({ kind: 'text', text: nativeJsonStringify({ author: payload.author, recipient: payload.recipient }), contentEligibility: 'unconfirmed' })
+    }
   } else if (record.type === 'response_item' && type === 'message') {
     const system = systemMessage(payload)
     contentEligibility = system || payload.role === 'user' && paginated ? 'private'
@@ -162,7 +179,7 @@ function item(record: Record<string, unknown>, start: number, nativeSessionId: s
   const timestamp = typeof record.timestamp === 'string' ? Date.parse(record.timestamp) : NaN
   const id = typeof payload.id === 'string' && payload.id ? payload.id : `codex-record:${start}`
   const directTurnId = typeof payload.turn_id === 'string' && payload.turn_id.length > 0 ? payload.turn_id : undefined
-  const metadata = record.type === 'response_item' && type === 'message' ? object(payload.internal_chat_message_metadata_passthrough) : {}
+  const metadata = record.type === 'response_item' && (type === 'message' || type === 'agent_message') ? object(payload.internal_chat_message_metadata_passthrough) : {}
   const messageTurnId = typeof metadata.turn_id === 'string' && metadata.turn_id.length > 0 ? metadata.turn_id : undefined
   // Conflicting native facts cannot assign this original record to either turn.
   const turnId = directTurnId && messageTurnId && directTurnId !== messageTurnId ? undefined : directTurnId ?? messageTurnId
@@ -173,6 +190,8 @@ function item(record: Record<string, unknown>, start: number, nativeSessionId: s
   return { id, kind, contentParts: parts.map(part => ({ ...part, contentEligibility: mcpParts ? part.contentEligibility ?? 'unconfirmed'
       : contentEligibility === 'public' ? part.contentEligibility ?? 'public' : contentEligibility })),
     ...(conversation ? { conversation } : {}),
+    ...(collaboration === undefined ? {} : { collaboration }),
+    ...(conversationDiagnostic === undefined ? {} : { conversationDiagnostic }),
     ...metrics(record, payload, nativeSessionId),
     ...(kind === 'assistant-message' && (asyncQuestion ? nativeItem.phase : payload.phase) === 'final_answer' ? { messagePhase: 'final' as const }
       : kind === 'assistant-message' && (asyncQuestion ? nativeItem.phase : payload.phase) === 'commentary' ? { messagePhase: 'progress' as const } : {}),
