@@ -12,8 +12,8 @@ const fixture = resolve(root, 'apps/desktop/scripts/fixtures/settings-connection
 const packet = resolve(root, ".bagakit/design/settings-connections-fixture")
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const argv = process.argv.slice(2), operation = argv[0]
-const section = operation === '--capture' ? argv[1] : 'connections'
-assert.ok(['--owning', '--callers', '--capture', '--visual', '--preflight', '--remote-owning', '--topology-owning', '--applications-owning'].includes(operation), 'Explicit finite operation')
+const section = operation === '--network-capture' ? 'hosts' : operation === '--capture' ? argv[1] : 'connections'
+assert.ok(['--owning', '--callers', '--capture', '--visual', '--preflight', '--remote-owning', '--topology-owning', '--applications-owning', '--network-owning', '--network-capture'].includes(operation), 'Explicit finite operation')
 if (operation === '--capture') assert.ok(section === 'hosts' || section === 'amux-conversation')
 const evidence = resolve(packet, ("" + (operation.slice(2)) + "-" + (section) + "-" + (globalThis.crypto.randomUUID()) + ""))
 await mkdir(evidence, { recursive: true })
@@ -31,9 +31,9 @@ async function bind(file) {
 }
 async function bindBase() {
   for (const file of [fileURLToPath(import.meta.url), resolve(root, 'apps/desktop/scripts/probe-process.mjs'),
-    ...['settings-connections', 'host-settings-navigation', 'remote-management', 'remote-application-access'].map(name => resolve(root, `apps/desktop/test/${name}.test.tsx`)), resolve(root, 'vitest.setup.ts'), resolve(root, 'pnpm-lock.yaml'),
+    ...['settings-connections', 'host-settings-navigation', 'remote-management', 'remote-application-access', 'host-network-settings-consumer'].map(name => resolve(root, `apps/desktop/test/${name}.test.tsx`)), resolve(root, 'apps/desktop/test/host-runtime-observation-ipc.test.ts'), resolve(root, 'vitest.setup.ts'), resolve(root, 'pnpm-lock.yaml'),
     resolve(root, 'apps/desktop/package.json'), resolve(root, 'packages/core/package.json'), resolve(root, 'packages/client-ui/package.json'),
-    resolve(root, 'apps/desktop/scripts/fixtures/settings-resource-library/environment.mjs'), ...['environment.mjs', 'vitest.config.mts', 'entry.tsx', 'data.ts', 'main.cjs', 'hosts-main.cjs', 'native-input.cjs', 'remote-management.md', 'index.html'].map(name => resolve(fixture, name))]) await bind(file)
+    resolve(root, 'apps/desktop/scripts/fixtures/settings-resource-library/environment.mjs'), ...['environment.mjs', 'vitest.config.mts', 'entry.tsx', 'data.ts', 'main.cjs', 'hosts-main.cjs', 'network-main.cjs', 'native-input.cjs', 'remote-management.md', 'index.html'].map(name => resolve(fixture, name))]) await bind(file)
 }
 async function finalizeInputs() {
   for (const input of inputs.values()) assert.equal(sha(await readFile(resolve(root, input.path))), input.sha256, 'Exact Source readback: ' + input.path)
@@ -43,10 +43,10 @@ async function finalizeInputs() {
   receipt.sourceUnchanged = true
 }
 async function owning() {
-  const variants = operation === '--applications-owning' ? ['application-save-baseline', 'application-source', 'application-target', 'application-original'] : operation === '--topology-owning' ? ['route', 'graph'] : operation === '--remote-owning' ? ['remote', 'access', 'graph', 'single', 'drafts'] : ['catalog', 'single', 'drafts']
-  const messages = { 'application-save-baseline': 'Later draft uses the confirmed save revision', 'application-source': 'Source context retains the actual registered target', 'application-target': 'Application panel consumes the exact selected Host', 'application-original': 'Original operation ID is preserved', route: 'Configured SSH user stays on its exact Host node', remote: 'Remote group owns exactly environments', access: 'Source trust belongs to the Apps & access facet', graph: 'Topology activation selects its exact Host detail', catalog: 'Conversation Channels owns the original native and external consumers', single: 'Only the selected Host has an editable connection subtree', drafts: 'Submenu selection preserves the original authored Host draft' }
+  const variants = operation === '--network-owning' ? ['network-target', 'network-late'] : operation === '--applications-owning' ? ['application-save-baseline', 'application-source', 'application-target', 'application-original'] : operation === '--topology-owning' ? ['route', 'graph'] : operation === '--remote-owning' ? ['remote', 'access', 'graph', 'single', 'drafts'] : ['catalog', 'single', 'drafts']
+  const messages = { 'network-target': 'Network target', 'network-late': 'to be null', 'application-save-baseline': 'Later draft uses the confirmed save revision', 'application-source': 'Source context retains the actual registered target', 'application-target': 'Application panel consumes the exact selected Host', 'application-original': 'Original operation ID is preserved', route: 'Configured SSH user stays on its exact Host node', remote: 'Remote group owns exactly environments', access: 'Source trust belongs to the Apps & access facet', graph: 'Topology activation selects its exact Host detail', catalog: 'Conversation Channels owns the original native and external consumers', single: 'Only the selected Host has an editable connection subtree', drafts: 'Submenu selection preserves the original authored Host draft' }
   const vitest = desktopRequire.resolve('vitest/vitest.mjs'), config = resolve(fixture, 'vitest.config.mts')
-  const modes = [{ label: 'baseline', mutant: 'baseline', ...(operation === '--applications-owning' ? { test: 'application-' } : operation === '--topology-owning' ? { test: 'graph:|route:|provenance:' } : {}) }, ...variants.flatMap(kind => [
+  const modes = [{ label: 'baseline', mutant: 'baseline', ...(operation === '--network-owning' ? { test: 'network' } : {}), ...(operation === '--applications-owning' ? { test: 'application-' } : operation === '--topology-owning' ? { test: 'graph:|route:|provenance:' } : {}) }, ...variants.flatMap(kind => [
     { label: kind + '-mutant', mutant: kind, test: (kind === 'remote' ? 'catalog' : kind) + ':' }, { label: kind + '-restored', mutant: 'baseline', test: (kind === 'remote' ? 'catalog' : kind) + ':' }
   ])]
   for (const mode of modes) {
@@ -72,7 +72,7 @@ async function owning() {
     } else {
       assert.equal(execution.exitCode, 0, JSON.stringify(failures.map(test => test.failureMessages)))
       assert.equal(result.success, true); assert.equal(result.numFailedTests, 0)
-      assert.ok(result.numPassedTests >= (mode.label === 'baseline' ? operation === '--applications-owning' ? 4 : operation === '--topology-owning' ? 3 : 10 : 1), 'Nonempty complete bounded cases')
+      assert.ok(result.numPassedTests >= (mode.label === 'baseline' ? operation === '--network-owning' ? 8 : operation === '--applications-owning' ? 4 : operation === '--topology-owning' ? 3 : 10 : 1), 'Nonempty complete bounded cases')
       assert.equal(applied.length, 0); assert.ok(loaded.every(input => input.originalSHA256 === input.consumedSHA256))
     }
     receipt.runs.push({ ...mode, execution, passed: mode.mutant === 'baseline', specificAssertionRED: mode.mutant !== 'baseline',
@@ -172,7 +172,7 @@ async function capture() {
     await walk(output); assert.ok(compiled.length > 0); assert.ok(compiled.some(file => file.path.endsWith('.css')))
     const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
     const log = []
-    receipt.execution = await runProbeProcess(desktopRequire('electron'), [resolve(fixture, section === 'hosts' ? 'hosts-main.cjs' : 'main.cjs'), resolve(output, 'index.html'), privateRoot, evidence, section], {
+    receipt.execution = await runProbeProcess(desktopRequire('electron'), [resolve(fixture, operation === '--network-capture' ? 'network-main.cjs' : section === 'hosts' ? 'hosts-main.cjs' : 'main.cjs'), resolve(output, 'index.html'), privateRoot, evidence, section], {
       temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 120_000, onLine: line => { log.push(line) } })
     await writeFile(resolve(evidence, 'process.log'), log.join('\n') + '\n')
     receipt.render = JSON.parse(await readFile(resolve(evidence, 'render.json'), 'utf8'))
@@ -189,7 +189,7 @@ async function capture() {
       assert.equal(bytes.readUInt32BE(16), frame.pngPixels.width); assert.equal(bytes.readUInt32BE(20), frame.pngPixels.height)
       receipt.supplementalImages.push({ path: frame.image, bytes: bytes.length, sha256: sha(bytes), width: frame.width, theme: frame.theme, scenario: frame.scenario })
     }
-    if (section === 'hosts') assert.equal(receipt.supplementalImages.length, 31, 'Nonempty original management plus application editor, plan, unknown, verified and Retro scenes')
+    if (section === 'hosts') assert.equal(receipt.supplementalImages.length, operation === '--network-capture' ? 5 : 31, 'Nonempty original management plus application editor, plan, unknown, verified and Retro scenes')
     receipt.cssInputs = [...cssInputs].map(file => relative(root, file)).sort(); receipt.compiled = compiled
     receipt.aestheticReview = 'pending independent actual PNG review'
   } finally {
@@ -224,9 +224,9 @@ async function visual() {
 
 try {
   await bindBase()
-  if (operation === '--owning' || operation === '--preflight' || operation === '--remote-owning' || operation === '--topology-owning' || operation === '--applications-owning') await owning()
+  if (operation === '--owning' || operation === '--preflight' || operation === '--remote-owning' || operation === '--topology-owning' || operation === '--applications-owning' || operation === '--network-owning') await owning()
   else if (operation === '--callers') await callers()
-  else if (operation === '--capture') await capture()
+  else if (operation === '--capture' || operation === '--network-capture') await capture()
   else await visual()
   await finalizeInputs(); receipt.passed = true
 } catch (error) {

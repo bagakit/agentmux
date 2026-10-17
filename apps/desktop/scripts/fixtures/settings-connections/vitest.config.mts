@@ -10,6 +10,8 @@ assert.ok(evidence, 'Explicit owned evidence directory')
 const mutant = process.env.AGENTMUX_CONNECTIONS_MUTANT ?? 'baseline'
 const base = 'apps/desktop/src/renderer/src/components/settings/'
 const edits: Record<string, { file: string; before: string; after: string }> = {
+  'network-target': { file: base + 'HostSettingsPane.tsx', before: '<HostNetworkPanel host={host}', after: '<HostNetworkPanel host={hosts[0]!}' },
+  'network-late': { file: base + 'use-host-network-observation.ts', before: '      current.signal.throwIfAborted()', after: '      /* Causal mutation: admit a cancelled late observation. */' },
   'application-save-baseline': { file: base + 'HostApplicationAccessPanel.tsx', before: '{ ...current, revision: result.revision }', after: 'current' },
   'application-source': { file: base + 'HostApplicationAccessPanel.tsx', before: 'value={draft[side]} hosts={hosts}', after: "value={draft[side]} hosts={side === 'target' ? hosts.filter(item => item.id === host.id) : hosts}" },
   'application-target': { file: base + 'HostSettingsPane.tsx', before: '<HostApplicationAccessPanel host={draft}', after: '<HostApplicationAccessPanel host={hosts[0]!}' },
@@ -45,6 +47,6 @@ export default defineConfig({ root, cacheDir: resolve(evidence, 'cache'),
       appendFileSync(resolve(evidence, 'loaded-source.jsonl'), JSON.stringify({ path, originalSHA256: sha(original), consumedSHA256: sha(code), mutant, applied }) + '\n')
       return code === input ? undefined : { code, map: null }
     } }],
-  test: { include: ['apps/desktop/test/settings-connections.test.tsx', 'apps/desktop/test/host-settings-navigation.test.tsx', 'apps/desktop/test/remote-management.test.tsx', 'apps/desktop/test/remote-application-access.test.tsx'], setupFiles: [resolve(root, 'vitest.setup.ts')],
+  test: { include: ['apps/desktop/test/settings-connections.test.tsx', 'apps/desktop/test/host-settings-navigation.test.tsx', 'apps/desktop/test/remote-management.test.tsx', 'apps/desktop/test/remote-application-access.test.tsx', 'apps/desktop/test/host-network-settings-consumer.test.tsx', 'apps/desktop/test/host-runtime-observation-ipc.test.ts'], setupFiles: [resolve(root, 'vitest.setup.ts')],
     maxWorkers: 1, passWithNoTests: false, testTimeout: 15_000 }
 })

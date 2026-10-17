@@ -1,6 +1,6 @@
 import { fixturePath as _historyFixturePath } from "../../../../../test/fixture-values.mjs"
 import { useState } from 'react'
-import type { HostRuntimeObservation, RemoteCoreUpgradeCheck } from '@agentmux/core'
+import type { HostRuntimeObservation, HostNetworkObservation, RemoteCoreUpgradeCheck } from '@agentmux/core'
 import type { ApplicationAccessConfiguration, ApplicationAccessOperation, ApplicationAccessPlan, ApplicationAccessProfile } from '@agentmux/core'
 import { createRoot } from 'react-dom/client'
 import { createWorkspaceLayout } from '@agentmux/layout'
@@ -33,6 +33,23 @@ api.hosts.check = async (host: HostConfig) => {
 }
 // Controlled public DTOs only; these are not observations of a real Host or Native process.
 const runtimeCapture = { phase: 'healthy' as 'healthy' | 'partial' | 'recovered', producerAt: Date.now() - 45_000 }
+const networkCapture = { phase: 'healthy' as 'healthy' | 'partial' }
+api.hosts.network = async host => {
+  const now = Date.now(), available = <T,>(value: T) => ({ state: 'available' as const, value, readAt: now })
+  const missing = { state: 'unavailable' as const, code: 'CONTROLLED_NETWORK_UNCONFIRMED', message: 'The original owner response is temporarily unconfirmed. Existing connections and work remain available.', readAt: now }
+  const owner = { runtimeId: host.kind === 'ssh' ? host.runtimeId ?? 'controlled-network-runtime' : 'controlled-local-runtime', ownerInstanceId: 'controlled-network-owner', processId: 42000, protocolVersion: 2 as const, ctxmux: null, availability: 'connected' as const }
+  const interfaces = [
+    { name: 'eth0', address: '192.0.2.24', family: 'IPv4' as const, cidr: '192.0.2.24/24', internal: false, scopeid: null },
+    { name: 'eth0', address: '2001:db8:1234:5678:abcd:ef01:2345:6789', family: 'IPv6' as const, cidr: '2001:db8:1234:5678:abcd:ef01:2345:6789/64', internal: false, scopeid: 0 },
+    { name: 'lo', address: '127.0.0.1', family: 'IPv4' as const, cidr: '127.0.0.1/8', internal: true, scopeid: null }
+  ]
+  calls.push({ kind: 'controlled-network-read', input: { host: structuredClone(host), phase: networkCapture.phase } })
+  return { routeHostId: host.id, configuration: structuredClone(host), requestedAt: now - 34, completedAt: now,
+    observer: available({ processId: 41000, observedAt: now, interfaces: [{ name: 'en0', address: '198.51.100.12', family: 'IPv4', cidr: '198.51.100.12/24', internal: false, scopeid: null }] }),
+    target: networkCapture.phase === 'partial' ? missing : available({ requestDurationMs: 34, sample: { owner, observedAt: now - 4, interfaces } }),
+    ssh: host.kind === 'local' ? null : networkCapture.phase === 'partial' ? missing : available({ hostname: host.hostname, user: host.user ?? 'builder', port: host.port ?? 22,
+      serverAliveInterval: 30, serverAliveCountMax: 3, tcpKeepAlive: 'yes', proxy: 'jump', jumps: [{ host: 'entry.internal', user: 'ops', port: 2222 }, { host: '2001:db8::7', user: null, port: null }] }) } satisfies HostNetworkObservation
+}
 api.hosts.inspect = async (host: HostConfig) => {
   const now = Date.now(), recovered = runtimeCapture.phase === 'recovered'
   const available = <T,>(value: T) => ({ state: 'available' as const, value, readAt: now })
@@ -135,6 +152,7 @@ const probe = { ready: false, calls, errors: [] as string[], closeCount: 0,
   select: (_section: SettingsPageId) => {}, reopen: (_section: SettingsPageId) => {}, theme: (_theme: 'light' | 'dark', _themeId: string = 'graphite') => {},
   current: () => api.config.get(),
   runtimeScenario: (phase: typeof runtimeCapture.phase) => { runtimeCapture.phase = phase },
+  networkScenario: (phase: typeof networkCapture.phase) => { networkCapture.phase = phase },
   selection: () => useAppStore.getState().workbenchSpaceSelection,
   seedRemote: async () => {
     const current = await api.config.get()
