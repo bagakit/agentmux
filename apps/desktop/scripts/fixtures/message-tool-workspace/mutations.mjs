@@ -1,4 +1,6 @@
 export const mutations = [
+  { name: 'automation-object-replaced', file: 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
+    before: "const ThemeObjectAutomationIcon = semanticIconComponent('object.automation')", after: "const ThemeObjectAutomationIcon = semanticIconComponent('action.repeat')" },
   { name: 'journal-query-disconnected', file: 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
     before: "query={inputHistory?.history.query ?? ''} selection=", after: "query={''} selection=" },
   { name: 'history-refresh-disconnected', file: 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',

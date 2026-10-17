@@ -159,6 +159,11 @@ async function emptyStates(width, theme, original, before, geometry) {
   await choose('Notices')
   await waitFor(`${visiblePanel}.querySelector('.composer-mailbox__empty strong')?.textContent==='No current notices'`)
   const notices = await emptyOracle(false)
+  const automation = await evaluate(`(()=>{const n=${buttons('Automation')},icon=n.querySelector('svg'),r=icon.getBoundingClientRect(),href=icon.querySelector('use').getAttribute('href'),symbol=document.getElementById(href.slice(1)),box=icon.getBBox();return{semantic:icon.dataset.semanticIcon,width:r.width,height:r.height,entryHeight:n.getBoundingClientRect().height,hidden:icon.getAttribute('aria-hidden'),status:document.getElementById(n.getAttribute('aria-describedby')).textContent,shapes:symbol?.querySelectorAll('path,rect').length??0,drawing:{width:box.width,height:box.height},animation:getComputedStyle(icon).animationName,motion:Boolean(n.querySelector('[data-icon-animation]'))}})()`)
+  assert.equal(automation.semantic, 'object.automation'); assert.equal(automation.width, 14); assert.equal(automation.height, 14)
+  assert.equal(automation.entryHeight, 28); assert.equal(automation.hidden, 'true'); assert.ok(automation.status)
+  assert.ok(automation.shapes > 0 && automation.drawing.width > 0 && automation.drawing.height > 0, 'The original theme sprite supplies actual Automation geometry')
+  assert.equal(automation.animation, 'none'); assert.equal(automation.motion, false)
   await frame(width, theme, 'empty-notices')
   result.stage.action = 'empty-collaboration'
   await choose('Agent messages'); await choose('Collaboration')
@@ -178,7 +183,7 @@ async function emptyStates(width, theme, original, before, geometry) {
   await waitFor(`!${panel}.matches(':popover-open')`)
   assert.equal(await evaluate(`document.activeElement===${surface}.querySelector('.composer__mailbox')`), true)
   await originalSurfacePreserved(original, before)
-  result.scenes.push({ width, theme, geometry, notices, collaboration, automationReturn: true, keyboardClose: true, originalSurfacePreserved: true })
+  result.scenes.push({ width, theme, geometry, notices, collaboration, automation, automationReturn: true, keyboardClose: true, originalSurfacePreserved: true })
 }
 async function interactionStates(width, theme, original, before, geometry) {
   result.stage.action = 'ordinary-record-hover'
