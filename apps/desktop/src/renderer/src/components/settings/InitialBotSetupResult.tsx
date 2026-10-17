@@ -14,7 +14,7 @@ export function InitialBotSetupResult({ progress }: { progress: ConnectionSetupI
       : progress?.state === 'approval-required' ? 'Waiting for platform approval'
       : progress?.state === 'attention' ? 'This setup needs attention'
       : 'Configuring and publishing this bot'}</strong>
-    <p>{progress ? initialSetupStageLabels[progress.stage] + (progress.state === 'attention' ? ' is not confirmed. Your original application and earlier results are kept.' : progress.state === 'approval-required' ? ' is still required. The original version is kept.' : progress.state === 'complete' ? '. Message delivery is checked separately.' : ' is the current step.') : 'The original setup is kept while its progress is read.'}</p>
+    <p>{progress?.state === 'complete' ? 'The original version is approved. Message delivery is checked separately.' : progress ? initialSetupStageLabels[progress.stage] + (progress.state === 'attention' ? ' is not confirmed. Your original application and earlier results are kept.' : progress.state === 'approval-required' ? ' is still required. The original version is kept.' : ' is the current step.') : 'The original setup is kept while its progress is read.'}</p>
     {progress?.versionId ? <details className="bot-profile-details"><summary>Original version</summary><code>{progress.versionId}</code></details> : null}
   </section>
 }
