@@ -12,7 +12,7 @@ const AgentMuxRpcService = process.env.AGENTMUX_TEST_RPC_CORE_ENTRY
   ? (await import('../dist/public-rpc-service.js')).AgentMuxRpcService : SourceRpcService
 import { cloneSession } from '../src/agent-session-identity.js'
 import { parseRpcAgentSession } from '../src/rpc-native-codec.js'
-import { validateAgentPromptAdmissionIntent, validateAgentPromptInputBinding } from '../src/agent-prompt-condition.js'
+import { validateAgentPromptAdmissionIntent, validateAgentPromptInputBinding, type AgentPromptInputKey } from '../src/agent-prompt-condition.js'
 import { parseAgentInputMailboxPage } from '../src/agent-input-mailbox-codec.js'
 import { AgentMuxError } from '../src/errors.js'
 
@@ -51,6 +51,21 @@ async function owner(outcome: 'admitted' | 'unknown' | 'not-applied' = 'admitted
   return { ...h, send, prepare }
 }
 
+async function settledNative(h: Awaited<ReturnType<typeof owner>>, inputKey: AgentPromptInputKey, outcome: 'admitted' | 'unknown' | 'not-applied') {
+  await expect.poll(async () => {
+    const claim = (await h.client.inspectAgentPromptSubmission(inputKey))?.admission
+    return claim?.transport === 'native' ? claim.native.outcome : undefined
+  }).toBe(outcome)
+  return await h.client.inspectAgentPromptSubmission(inputKey)
+}
+
+async function unavailableInput(h: Awaited<ReturnType<typeof owner>>, submissionId: string) {
+  await expect.poll(async () => (await h.client.inspectAgentInput({ key: key(submissionId) }))?.control.waiting).toMatchObject({
+    phase: 'input-environment', wake: 'explicit-rejoin', failure: { code: 'AGENT_NATIVE_INPUT_UNAVAILABLE' }
+  })
+  expect(await h.client.inspectAgentPromptSubmission(key(submissionId))).toBeNull()
+}
+
 it('freezes exact native input key and correlation in the original durable claim before dispatch; receipt-only retries never send', async () => {
   const h = await owner()
   await h.client.submitAgentPrompt(input('first-native'))
@@ -69,14 +84,14 @@ it('freezes exact native input key and correlation in the original durable claim
 
 it('keeps unknown native outcome, original token and source after reopen and never upgrades or automatically replays it', async () => {
   const h = await owner('unknown')
-  await h.client.submitAgentPrompt(input('unknown-native')); await expect.poll(async () => (await h.client.inspectAgentInput({ key: key('unknown-native') }))?.status).toBe('unknown')
-  const first = await h.client.inspectAgentPromptSubmission(key('unknown-native'))
+  await h.client.submitAgentPrompt(input('unknown-native'))
+  const first = await settledNative(h, key('unknown-native'), 'unknown')
   expect(first?.admission).toMatchObject({ transport: 'native', acknowledged: false, native: { outcome: 'unknown' } })
   expect(await h.client.submitAgentPrompt(input('unknown-native'))).toMatchObject({ status: 'unknown' })
   expect(h.send).toHaveBeenCalledTimes(1)
   const reopened = new AgentMuxFileAgentSessionStore(h.store.path)
   expect(await reopened.readPromptAdmission('recipient', key('unknown-native').expectedRun, 'unknown-native')).toEqual(first)
-  await h.client.submitAgentPrompt(input('independent-native')); await expect.poll(async () => h.send.mock.calls.length).toBe(2); expect(h.send).toHaveBeenCalledTimes(2)
+  await h.client.submitAgentPrompt(input('independent-native')); await settledNative(h, key('independent-native'), 'unknown'); expect(h.send).toHaveBeenCalledTimes(2)
   expect(await h.client.inspectAgentPromptSubmission(key('unknown-native'))).toEqual(first)
   expect(h.inner.kernel.input).not.toHaveBeenCalled()
 })
@@ -95,7 +110,8 @@ it('rejects an unavailable selected native source without claiming input or taki
   const h = await owner()
   const wrong = { ...input('wrong-source'), admissionIntent: { kind: 'native-conversation' as const, source: { ...target, nativeSessionId: 'foreign-thread' } } }
   expect(await h.client.submitAgentPrompt(wrong)).toMatchObject({ status: 'waiting' })
-  expect(await h.client.inspectAgentPromptSubmission(key('wrong-source'))).toBeNull(); expect(h.send).not.toHaveBeenCalled()
+  await unavailableInput(h, 'wrong-source')
+  expect(h.prepare).toHaveBeenCalledTimes(1); expect(h.send).not.toHaveBeenCalled()
   const ordinary = { ...input('ordinary-terminal'), admissionIntent: { kind: 'manual-actor' as const } }
   await h.client.submitAgentPrompt(ordinary); await expect.poll(async () => (await h.client.inspectAgentInput({ key: key('ordinary-terminal') }))?.status).toBe('terminal-confirmed')
   expect(h.inner.kernel.input).toHaveBeenCalledTimes(1); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
@@ -107,9 +123,12 @@ it('keeps original old Runs without a native port usable and never exposes priva
   expect(cloneSession(stored)).not.toHaveProperty('nativeActor'); expect(() => parseRpcAgentSession(stored)).toThrow()
   const { nativeActor: _actor, ...oldRun } = stored
   await h.store.compareAndSwap(stored, oldRun); await h.inner.registry.load('local')
+  h.prepare.mockRejectedValue(new AgentMuxError('Provider found no original native channel', 'AGENT_NATIVE_INPUT_UNAVAILABLE'))
   expect(await h.client.submitAgentPrompt(input('old-no-port'))).toMatchObject({ status: 'waiting' })
-  expect(h.prepare).not.toHaveBeenCalled(); expect(h.send).not.toHaveBeenCalled()
+  await unavailableInput(h, 'old-no-port')
+  expect(h.prepare).toHaveBeenCalledTimes(1); expect(h.send).not.toHaveBeenCalled()
   await h.client.submitAgentPrompt({ ...input('old-terminal'), admissionIntent: { kind: 'manual-actor' as const } }); await expect.poll(async () => (await h.client.inspectAgentInput({ key: key('old-terminal') }))?.status).toBe('terminal-confirmed')
+  expect(h.prepare).toHaveBeenCalledTimes(1); expect(h.inner.kernel.input).toHaveBeenCalledTimes(1); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
 })
 
 it('public RPC uses the exact explicit native intent and original message journal; source changes cannot borrow an existing receipt', async () => {
@@ -134,32 +153,57 @@ it('strict original intent codecs retain opaque targets and reject mixed caller 
 })
 
 
-it('default authenticated A2A freezes its original condition and chooses the confirmed durable native conversation', async () => {
-  const h = await owner('admitted', ['caller', 'recipient'])
+it('default user message freezes its original condition and chooses the confirmed durable native conversation', async () => {
+  const h = await owner()
   const before = (await h.store.readMetadata('recipient'))!
   await h.store.compareAndSwap(before, { ...before, nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: target.nativeSessionId } })
   await h.inner.registry.load('local')
   const rpc = new AgentMuxRpcService({ coreClients: h.coreClients })
+  const context = { principal: { kind: 'user' as const, id: 'local' } }
   const packet = { operationId: 'default-semantic-message', target: { kind: 'agent-session' as const, agentSessionId: 'recipient' }, text: 'Default semantic message' }
-  const result: any = await rpc.call('agent.send', packet, { caller: h.credentials })
+  const result: any = await rpc.call('agent.send', packet, context)
   const messageKey = { kind: 'message' as const, agentSessionId: 'recipient', expectedRun: key('unused').expectedRun, messageId: result.messageId }
-  const claim = await h.client.inspectAgentPromptSubmission(messageKey)
+  const claim = await settledNative(h, messageKey, 'admitted')
   expect(claim?.admission).toMatchObject({ inputKey: messageKey, transport: 'native', intent: {
     execution: 'default', admissionIntent: { kind: 'exact-condition', condition: { expectedRun: messageKey.expectedRun, afterSubmissionId: null } },
-    message: { authorAgentSessionId: 'caller', userContent: expect.stringContaining('Default semantic message') }
+    message: { userContent: expect.stringContaining('Default semantic message') }
+  } })
+  expect(claim?.admission?.intent?.message).not.toHaveProperty('authorAgentSessionId')
+  expect(await (Reflect.get(h.client, 'messageQueue') as DurableAgentMuxMessageQueue).readByOperationId(packet.operationId)).toMatchObject({ envelope: {
+    sender: { kind: 'human' }, senderSessionId: null, senderRunId: null, body: packet.text
   } })
   expect(h.prepare).toHaveBeenCalledWith(expect.anything(), target)
   expect(h.send).toHaveBeenCalledTimes(1); expect(h.inner.kernel.input).not.toHaveBeenCalled()
-  await rpc.call('agent.send', packet, { caller: h.credentials }); expect(h.send).toHaveBeenCalledTimes(1)
-  await rpc.call('agent.send', { ...packet, operationId: 'explicit-terminal-message', execution: 'immediate' }, { caller: h.credentials })
+  await rpc.call('agent.send', packet, context); expect(h.send).toHaveBeenCalledTimes(1)
+  const manual: any = await rpc.call('agent.send', { ...packet, operationId: 'explicit-terminal-message', execution: 'immediate' }, context)
+  await expect.poll(async () => (await h.client.inspectAgentInput({ key: manual.inputReceipt.key }))?.status).toBe('terminal-confirmed')
   expect(h.send).toHaveBeenCalledTimes(1); expect(h.prepare).toHaveBeenCalledTimes(1)
   expect((await (Reflect.get(h.client, 'messageQueue') as DurableAgentMuxMessageQueue).readByOperationId('explicit-terminal-message'))?.admissionIntent?.kind).toBe('manual-actor')
 })
 
-it.each(['no-actor', 'no-source', 'source-unknown', 'source-ambiguous', 'changed-source', 'observed-other-source'] as const)('keeps default A2A terminal capability when its native target is unqualified: %s', async missing => {
+it('default authenticated A2A saves the original Inbox body by reference without claiming or disclosing it as native input', async () => {
+  const h = await owner('admitted', ['caller', 'recipient']), before = (await h.store.readMetadata('recipient'))!
+  await h.store.compareAndSwap(before, { ...before, nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: target.nativeSessionId } })
+  await h.inner.registry.load('local')
+  const rpc = new AgentMuxRpcService({ coreClients: h.coreClients })
+  const packet = { operationId: 'default-peer-reference', target: { kind: 'agent-session' as const, agentSessionId: 'recipient' }, text: 'Original peer body stays in Inbox' }
+  const receipt: any = await rpc.call('agent.send', packet, { caller: h.credentials })
+  expect(receipt).toMatchObject({ deliveryMode: 'reference', delivery: { state: 'queued' }, notification: { state: 'pending' } })
+  const queue = Reflect.get(h.client, 'messageQueue') as DurableAgentMuxMessageQueue
+  expect(await queue.readByOperationId(packet.operationId)).toMatchObject({ deliveryMode: 'reference', envelope: {
+    messageId: receipt.messageId, senderSessionId: 'caller', recipientSessionId: 'recipient', body: packet.text
+  } })
+  expect(await h.client.inspectAgentPromptSubmission({ kind: 'message', agentSessionId: 'recipient', expectedRun: before.run, messageId: receipt.messageId })).toBeNull()
+  const repeated: any = await rpc.call('agent.send', packet, { caller: h.credentials })
+  expect(repeated.messageId).toBe(receipt.messageId); expect(repeated.notification.state).toBe('pending')
+  expect(h.prepare).not.toHaveBeenCalled(); expect(h.send).not.toHaveBeenCalled(); expect(h.inner.kernel.input).not.toHaveBeenCalled()
+  await expect(rpc.call('agent.send', { ...packet, operationId: 'peer-cannot-authorize-steer', execution: 'immediate' }, { caller: h.credentials })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  expect(await queue.readByOperationId('peer-cannot-authorize-steer')).toBeNull()
+})
+
+it.each(['no-source', 'source-unknown', 'source-ambiguous', 'changed-source', 'observed-other-source'] as const)('keeps default user terminal capability when its native target is unqualified: %s', async missing => {
   const h = await owner(), before = (await h.store.readMetadata('recipient'))!
   const next: AgentMuxStoredAgentSession = { ...before, nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: target.nativeSessionId } }
-  if (missing === 'no-actor') delete next.nativeActor
   if (missing === 'no-source') delete next.nativeHandle
   if (missing === 'source-unknown' || missing === 'source-ambiguous') next.nativeSourceObservation = { state: missing === 'source-unknown' ? 'unknown' : 'ambiguous', run: next.run, observedAt: fixtureEpoch(0, 0, 1), reason: 'original-source-unconfirmed' }
   if (missing === 'observed-other-source') next.observedNativeHandle = { kind: 'provider', providerId: 'codex', sessionId: 'observed-other' }
@@ -170,7 +214,7 @@ it.each(['no-actor', 'no-source', 'source-unknown', 'source-ambiguous', 'changed
   expect(h.send).not.toHaveBeenCalled(); expect(h.prepare).not.toHaveBeenCalled(); expect(h.inner.kernel.input).toHaveBeenCalledTimes(1)
 })
 
-it.each(['source', 'actor', 'predecessor'] as const)('rechecks the original default A2A %s after native preparation and sends nothing on a changed target', async changed => {
+it.each(['source', 'actor', 'predecessor'] as const)('rechecks the original default user message %s after native preparation and sends nothing on a changed target', async changed => {
   const h = await owner(), before = (await h.store.readMetadata('recipient'))!
   await h.store.compareAndSwap(before, { ...before, nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: target.nativeSessionId } })
   await h.inner.registry.load('local')
@@ -214,7 +258,7 @@ it('rejoins the original default PTY claim when a native source appears later in
   originalInput.mockRejectedValueOnce(new Error('Original Runtime input receipt unavailable'))
   const packet = { operationId: 'original-byte-operation', messageId: 'original-byte-message', target: { kind: 'agent-session' as const, agentSessionId: 'recipient' }, text: 'Original byte claim' }
   const context = { principal: { kind: 'user' as const, id: 'local' } }
-  const failure = await rpc.call('agent.send', packet, context).then(() => null, error => error)
+  const failure = await rpc.call('agent.send', packet, context).then(() => null, (error: unknown) => error)
   expect(failure).toMatchObject({ message: 'Original Runtime input receipt unavailable' })
   expect(originalInput).toHaveBeenCalledTimes(1)
   const before = (await h.store.readMetadata('recipient'))!
@@ -251,7 +295,7 @@ it('compiled default agent send uses the same original native claim and retries 
   await h.store.compareAndSwap(before, { ...before, nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: target.nativeSessionId } })
   await h.inner.registry.load('local')
   const rpc = new AgentMuxRpcService({ coreClients: h.coreClients })
-  const server = new ObjectCliProbe(request => rpc.call(request.method as 'agent.send', request.params as never, { caller: h.credentials }))
+  const server = new ObjectCliProbe(request => rpc.call(request.method as 'agent.send', request.params as never, { principal: { kind: 'user', id: 'local' } }))
   await server.start(); closes.push(() => server.stop())
   const args = ['--endpoint', 'unix://' + server.socketPath, 'agent', 'send', '--to-session', 'recipient', '--operation-id', 'compiled-default-operation', '--message-id', 'compiled-default-message', '--text', 'Original compiled default message']
   const env = objectCliEnvironment(server.root)
@@ -267,5 +311,27 @@ it('compiled default agent send uses the same original native claim and retries 
   expect(claim?.admission).toMatchObject({ transport: 'native', native: { outcome: 'admitted' }, intent: { admissionIntent: { kind: 'exact-condition', condition: { afterSubmissionId: null } } } })
   expect(h.send).toHaveBeenCalledTimes(1); expect(h.inner.kernel.input).not.toHaveBeenCalled()
   const help = await runCompiledObjectCli(['agent', 'send', '--help'], env)
-  expect(help.code).toBe(0); expect(help.stdout).toContain('Default semantic delivery uses the confirmed original Core conversation')
+  expect(help.code).toBe(0); expect(help.stdout).toContain('Core notifies by reference at idle'); expect(help.stdout).toContain('Trusted user current-terminal immediate input')
+})
+
+
+it('keeps an unavailable default semantic request unapplied while explicit manual input on the same healthy Run stays usable', async () => {
+  const h = await owner(), original = (await h.store.readMetadata('recipient'))!
+  const { nativeActor: _actor, ...withoutActor } = original
+  await h.store.compareAndSwap(original, { ...withoutActor, nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: target.nativeSessionId } })
+  await h.inner.registry.load('local')
+  h.prepare.mockRejectedValue(new AgentMuxError('Original Provider channel does not support this operation', 'AGENT_NATIVE_INPUT_UNAVAILABLE'))
+  const rpc = new AgentMuxRpcService({ coreClients: h.coreClients })
+  const packet = { operationId: 'unavailable-semantic', messageId: 'unavailable-semantic-message', target: { kind: 'agent-session' as const, agentSessionId: 'recipient' }, text: 'Original semantic input' }
+  await expect(rpc.call('agent.send', packet, { principal: { kind: 'user', id: 'local' } })).rejects.toMatchObject({ code: 'AGENT_NATIVE_INPUT_UNAVAILABLE' })
+  expect(await h.client.inspectAgentPromptSubmission({ kind: 'message', agentSessionId: 'recipient', expectedRun: original.run, messageId: packet.messageId })).toBeNull()
+  expect(await (Reflect.get(h.client, 'messageQueue') as DurableAgentMuxMessageQueue).readByOperationId(packet.operationId)).toMatchObject({
+    envelope: { messageId: packet.messageId, body: packet.text }, delivery: { state: 'queued' }
+  })
+  expect(h.prepare).toHaveBeenCalledWith(expect.not.objectContaining({ nativeActor: expect.anything() }), target)
+  expect(h.send).not.toHaveBeenCalled(); expect(h.inner.kernel.input).not.toHaveBeenCalled()
+  await h.client.submitAgentPrompt({ ...input('same-run-manual'), admissionIntent: { kind: 'manual-actor' as const } })
+  await expect.poll(async () => (await h.client.inspectAgentInput({ key: key('same-run-manual') }))?.status).toBe('terminal-confirmed')
+  expect(h.prepare).toHaveBeenCalledTimes(1)
+  expect(h.inner.kernel.input).toHaveBeenCalledTimes(1); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
 })

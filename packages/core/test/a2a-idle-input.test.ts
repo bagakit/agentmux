@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
+import type { AgentMuxClientEventPublisher } from '../src/client-event-publisher.js'
 import { AgentProviderRegistry, type AgentProvider } from '../src/agent-provider.js'
 import { AgentPromptSubmissionCoordinator as SourceCoordinator, type AgentPromptInputControl } from '../src/prompt-submission.js'
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
@@ -25,12 +26,12 @@ const id = 'original-notification', wire = '<amux:a2a from="peer" msg-id="origin
 const source = { providerId: 'codex', nativeSessionId: 'original-native-thread' }
 const actor = { protocolId: 'original-protocol', actorId: 'original-actor', lifecycleOperationId: 'original-lifecycle', token: 'a'.repeat(64), launch: { command: 'codex', args: [] } }
 
-async function fixture(outcome: 'admitted' | 'unknown' = 'admitted') {
+async function fixture(outcome: 'admitted' | 'unknown' = 'admitted', withActor = true) {
   const h = await rpcOwnerFixture(); closes.push(h.close)
   const inner = h.client as unknown as { promptSubmission: SourceCoordinator; messageQueue: DurableAgentMuxMessageQueue }
   const deps = Reflect.get(inner.promptSubmission, 'deps') as ConstructorParameters<typeof AgentPromptSubmissionCoordinator>[0]
   const original = (await h.store.readMetadata('recipient'))!
-  await h.store.compareAndSwapMetadata(original, { ...original, nativeActor: actor, updatedAt: fixtureEpoch(0, 1),
+  await h.store.compareAndSwapMetadata(original, { ...original, ...(withActor ? { nativeActor: actor } : {}), updatedAt: fixtureEpoch(0, 1),
     nativeHandle: { kind: 'provider', providerId: source.providerId, sessionId: source.nativeSessionId },
     semanticStatus: { state: 'done', source: 'native-hook', observedAt: fixtureEpoch(0, 1) } })
   await deps.registry.refresh('recipient', original.run)
@@ -50,11 +51,12 @@ async function fixture(outcome: 'admitted' | 'unknown' = 'admitted') {
     if (outcome === 'unknown' && sentKey.submissionId === id) throw new Error('Original queue ACK was lost after acceptance')
     return { outcome: 'admitted' as const, queuedSubmissionId: 'original-native-queue-item' }
   })
+  const assertCurrent = vi.fn(async () => {}), dispose = vi.fn(async () => {})
   let beforePrepare: (() => Promise<void>) | undefined
   const prepare = vi.fn<NonNullable<AgentProvider['prepareNativeInput']>>(async (_context, selected) => {
     await beforePrepare?.()
     return { plan: { kind: 'native-rpc', protocolId: actor.protocolId, sourceId: JSON.stringify([selected.providerId, selected.nativeSessionId]),
-      actorId: actor.actorId, threadId: selected.nativeSessionId, operation: selected.idleOnly ? 'queue-idle' : 'start-or-steer' }, assertCurrent: vi.fn(async () => {}), send, dispose: vi.fn() }
+      actorId: actor.actorId, threadId: selected.nativeSessionId, operation: selected.idleOnly ? 'queue-idle' : 'start-or-steer' }, assertCurrent, send, dispose }
   })
   const provider = { ...new AgentProviderRegistry().get('codex'), prepareNativeInput: prepare }
   const coordinator = new AgentPromptSubmissionCoordinator({ ...deps, providers: new AgentProviderRegistry([provider]) })
@@ -92,7 +94,7 @@ async function fixture(outcome: 'admitted' | 'unknown' = 'admitted') {
         { kind: 'manual-actor', expectedRun: current.run }, undefined, undefined, false, undefined, undefined,
         { userContent: prompt, authorHuman: true }, 'immediate')
   }
-  return { ...h, key, message, prepare, send, submit, beforePrepare: (callback: () => Promise<void>) => { beforePrepare = callback },
+  return { ...h, key, message, prepare, send, submit, assertCurrent, dispose, beforePrepare: (callback: () => Promise<void>) => { beforePrepare = callback },
     changeByte: () => { inputByte++ }, submitIndependent, submitOrdinary, queue: inner.messageQueue,
     read: () => h.store.readPromptAdmission('recipient', original.run, id) }
 }
@@ -215,7 +217,7 @@ it.each(['completion', 'input-byte'] as const)('rechecks the original %s before 
       await f.store.compareAndSwapMetadata(current, { ...current, updatedAt: Math.max(current.updatedAt, fixtureEpoch(0, 2)), semanticStatus: { state: 'working', source: 'native-hook', observedAt: fixtureEpoch(0, 2) } })
     }
   })
-  await expect(f.submit()).rejects.toMatchObject({ code: changed === 'input-byte' ? 'AGENT_PROMPT_INPUT_UNCONFIRMED' : 'AGENT_COMPLETION_CHANGED' })
+  await expect(f.submit()).rejects.toMatchObject({ code: changed === 'input-byte' ? 'AGENT_PROMPT_INPUT_NOT_APPLIED' : 'AGENT_COMPLETION_CHANGED' })
   expect(f.send).not.toHaveBeenCalled(); expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 })
 
@@ -245,4 +247,73 @@ it.each(['admitted', 'unknown'] as const)('joins exact original notification wir
   admission.intent = { ...admission.intent, plan: manualPlan, execution: 'immediate',
     admissionIntent: { kind: 'native-conversation', source, expectedRun: f.key.expectedRun }, message: { userContent: wire, authorHuman: true } }
   expect((await adopt(item, manual)).conversation?.adoptedInput).toEqual({ key: f.key })
+})
+
+
+it('uses Provider-confirmed idle input without a managed actor and binds the original native handle', async () => {
+  const f = await fixture('admitted', false)
+  await expect(f.submit()).resolves.toEqual(f.message)
+  const context = f.prepare.mock.calls[0]![0]
+  expect(context).not.toHaveProperty('nativeActor')
+  expect(context.nativeHandle).toEqual({ kind: 'provider', providerId: source.providerId, sessionId: source.nativeSessionId })
+  expect(context.processId).toBe(1234)
+  expect(f.assertCurrent).toHaveBeenCalledTimes(2)
+  expect(f.send).toHaveBeenCalledTimes(1)
+  expect((await f.read())?.admission).toMatchObject({ inputKey: f.key, acknowledged: true, native: { outcome: 'admitted', plan: { operation: 'queue-idle' } } })
+  expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('lets the Provider witness its input channel independently of an existing frontend actor credential', async () => {
+  const f = await fixture(), prepare = f.prepare.getMockImplementation()!
+  f.prepare.mockImplementation(async (...args) => {
+    const prepared = await prepare(...args)
+    return { ...prepared, plan: { ...prepared.plan, actorId: 'provider-confirmed-original-queue', protocolId: 'fixture-durable-queue' } }
+  })
+  await expect(f.submit()).resolves.toEqual(f.message)
+  expect(f.assertCurrent).toHaveBeenCalledTimes(2)
+  expect((await f.read())?.admission?.intent?.plan).toMatchObject({ actorId: 'provider-confirmed-original-queue', protocolId: 'fixture-durable-queue' })
+  expect(f.send).toHaveBeenCalledTimes(1); expect(f.inner.kernel.input).not.toHaveBeenCalled()
+})
+
+it.each(['before-claim', 'before-dispatch'] as const)('keeps exact source recheck failure %s distinct from an unknown native effect', async phase => {
+  const f = await fixture('admitted', false), error = new Error('The prepared source object changed')
+  if (phase === 'before-claim') f.assertCurrent.mockRejectedValueOnce(error)
+  else f.assertCurrent.mockResolvedValueOnce(undefined).mockRejectedValueOnce(error)
+  if (phase === 'before-claim') {
+    await expect(f.submit()).rejects.toBe(error)
+    expect(await f.read()).toBeNull()
+  } else {
+    await expect(f.submit()).rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_NOT_APPLIED', cause: error })
+    const original = await f.read()
+    expect(original?.admission).toMatchObject({ inputKey: f.key, notApplied: true, acknowledged: false, native: { outcome: 'not-applied' } })
+    expect(original?.admission?.transport === 'native' && original.admission.native).not.toHaveProperty('errorCode')
+    await expect(f.submit()).rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_NOT_APPLIED' })
+    expect(await f.read()).toEqual(original)
+  }
+  expect(f.send).not.toHaveBeenCalled(); expect(f.dispose).toHaveBeenCalledTimes(1)
+  expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('awaits the Provider helper release before returning the native input receipt', async () => {
+  const f = await fixture('admitted', false)
+  let released = false
+  f.dispose.mockImplementation(async () => { await new Promise(resolve => setTimeout(resolve, 5)); released = true })
+  await f.submit()
+  expect(released).toBe(true)
+  expect(f.dispose).toHaveBeenCalledTimes(1)
+})
+
+
+it.each(['admitted', 'unknown'] as const)('keeps the original %s result when private helper cleanup fails and publishes a separate diagnostic', async outcome => {
+  const f = await fixture(outcome, false)
+  const publisher = Reflect.get(Reflect.get(f.client, 'promptSubmission'), 'deps').publisher as AgentMuxClientEventPublisher
+  const publish = vi.spyOn(publisher, 'publish')
+  f.dispose.mockRejectedValue(new Error('Private helper release failed'))
+  if (outcome === 'admitted') await expect(f.submit()).resolves.toEqual(f.message)
+  else await expect(f.submit()).rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
+  expect((await f.read())?.admission).toMatchObject({ native: { outcome }, acknowledged: outcome === 'admitted' })
+  const diagnostic = publish.mock.calls.map(([event]) => event).find(event => event.type === 'agent-error' && event.code === 'AGENT_NATIVE_INPUT_CLEANUP_FAILED')
+  expect(diagnostic).toMatchObject({ type: 'agent-error', code: 'AGENT_NATIVE_INPUT_CLEANUP_FAILED', evidence: { run: f.key.expectedRun } })
+  expect(diagnostic).not.toHaveProperty('agentSessionId')
+  expect(f.send).toHaveBeenCalledTimes(1); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 })
