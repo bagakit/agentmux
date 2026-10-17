@@ -300,7 +300,12 @@ it.each(['release', 'profile-replacement', 'dispose', 'source-destroyed', 'host-
     const f = await fixture(), lease = f.register('A')
     const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, lease.leaseId)
     const shell = native.shells.at(-1)!
-    if (action === 'release') await f.manager.release('browser')
+    if (action === 'release') {
+      expect(await f.manager.release('browser', f.browser.navigationId)).toMatchObject({ reasons: expect.arrayContaining(['presentation']) })
+      expect(shell.isDestroyed()).toBe(false)
+      expect(f.events()).toEqual([])
+      f.source.webContents.close()
+    }
     else if (action === 'profile-replacement') await f.manager.switchProfile('browser', 'another')
     else if (action === 'dispose') f.manager.dispose()
     else if (action === 'source-destroyed') f.source.webContents.close()
@@ -463,10 +468,13 @@ it('retires only the ended requester capture token while keeping its Browser ava
   expect(() => f.manager.ackPresentationCapture(f.app as never, f.frame as never, capture.captureId, { outcome: 'stopped', trackIds: ['original-track'] })).toThrow('Unknown')
   expect(entry.captureId).toBe(next.captureId)
 })
-it('releases the resource rather than closing the projection and rejects stale leases after restore', async () => {
+it('retains an active presentation on resource release and rejects its stale lease after actual source destruction', async () => {
   const f = await fixture(), a = f.register('A')
   const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, a.leaseId)
-  await f.manager.release('browser')
+  expect(await f.manager.release('browser', f.browser.navigationId)).toMatchObject({ reasons: expect.arrayContaining(['presentation']) })
+  expect(f.events()).toEqual([])
+  expect(f.source.webContents.dead).toBe(false)
+  f.source.webContents.close()
   expect(f.events()).toEqual([{ type: 'capture-revoked', browserId: 'browser', captureId: capture.captureId, reason: 'source-released' }])
   expect(f.manager.resourceOwnerCounts()).toEqual({ browserViews: 0, releasedBrowserViews: 1 })
   await f.manager.restore('browser')
