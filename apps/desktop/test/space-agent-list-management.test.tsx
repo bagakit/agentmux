@@ -65,7 +65,7 @@ describe('Space Agent list management through the production Dock and shared Foc
     expect(header.querySelector('strong')?.textContent).toBe(workspace.name)
     expect(header.querySelector('[aria-label="3 Agents · Startup order"]')?.textContent).toBe('3')
     const actions = header.querySelector('[role="group"][aria-label="Agent list actions"]')!
-    expect([...actions.querySelectorAll('button')].map(node => node.getAttribute('aria-label'))).toEqual(['去 Focus 中查看', 'Select Agents'])
+    expect([...actions.querySelectorAll('button')].map(node => node.getAttribute('aria-label'))).toEqual(['Open area collaboration graph', '去 Focus 中查看', 'Select Agents'])
     expect(button('去 Focus 中查看', header).title).toBe('View in Focus')
     expect(button('Select Agents', header).title).toBe('Select Agents')
     expect(dom.container.querySelectorAll('.workspace-agents-tool__header')).toHaveLength(1)
