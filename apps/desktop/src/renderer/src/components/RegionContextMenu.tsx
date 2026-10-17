@@ -1,6 +1,6 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { createContext, useContext, useId, useRef, useState, type ReactNode } from 'react'
+import { createContext, useContext, useRef, useState, type ReactNode } from 'react'
 import { useSessionRestart } from './SessionRestart'
 import { agentRegionExecution, useAppStore } from '../store'
 import { agentSessionPresentationIndex } from '../lib/session-presentation'
@@ -10,6 +10,7 @@ import type { RegionSwapMenuEntry, WorkbenchSplitMenuEntry } from '../lib/workbe
 import { WorkbenchLayoutMenuRows } from './WorkbenchLayoutMenuRows'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { WorkbenchMenuSubmenu } from './WorkbenchMenuSubmenu'
+import { WorkbenchCopyLinkRow } from './WorkbenchCopyLinkRow'
 
 const ThemeActionCopyIcon = semanticIconComponent('action.copy')
 const ThemeActionCopyAddressIcon = semanticIconComponent('action.copy-address')
@@ -18,6 +19,9 @@ const ThemeActionRestartIcon = semanticIconComponent('action.restart-session')
 const ThemeActionStopIcon = semanticIconComponent('action.stop')
 const ThemeObjectConversationsIcon = semanticIconComponent('object.conversations')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const AgentIcon = semanticIconComponent('object.agent')
+const RegionIcon = semanticIconComponent('object.region')
+const InformationIcon = semanticIconComponent('status.info')
 
 
 type RegionCopyAction = {
@@ -122,6 +126,17 @@ export function useRegionMenuEntries(): readonly RegionMenuEntry[] {
 }
 export const useRegionMenuObservation = () => useContext(RegionMenuContext)
 
+export function RegionCopyLinkRow({ entries, ...primitives }: {
+  entries: readonly RegionMenuEntry[]
+  Item: typeof ContextMenu.Item
+  Group?: typeof ContextMenu.Group
+  Label?: typeof ContextMenu.Label
+}) {
+  return <WorkbenchCopyLinkRow {...primitives} actions={entries.flatMap(entry => entry.kind === 'action'
+    ? [{ ...entry.action, icon: entry.action.label === 'Copy Agent Link' ? <AgentIcon size={16} /> : <RegionIcon size={16} /> }]
+    : [])} />
+}
+
 export function RegionMenuEntryView({ entry, index, Item, Separator, Group = ContextMenu.Group, Label = ContextMenu.Label,
   Sub = ContextMenu.Sub, SubTrigger = ContextMenu.SubTrigger, SubContent = ContextMenu.SubContent, Portal = ContextMenu.Portal }: {
   entry: RegionMenuEntry
@@ -135,12 +150,14 @@ export function RegionMenuEntryView({ entry, index, Item, Separator, Group = Con
   SubContent?: typeof ContextMenu.SubContent
   Portal?: typeof ContextMenu.Portal
 }) {
-  const labelId = useId()
-  if (entry.kind === 'connector-group') return <Group aria-labelledby={labelId} data-connector-menu-group="">
+  if (entry.kind === 'connector-group') return <Group aria-label={entry.group.label} data-connector-menu-group="">
     <Separator className="tab-context-menu__separator" data-connector-menu-separator="" />
-    <Label id={labelId} className="agent-connector-menu__label">{entry.group.label}</Label>
+    {entry.group.entries.length > 0 ? <Label className="agent-connector-menu__label">{entry.group.label}</Label> : null}
     {entry.group.entries.map(action => <Item key={action.label} className="tab-context-menu__item" onSelect={action.onSelect}><ThemeObjectConversationsIcon size={14} /><span>{action.label}</span></Item>)}
-    {entry.group.issue ? <Label className="agent-region-menu__context" role="status">{entry.group.issue}</Label> : null}
+    {entry.group.issue ? <WorkbenchMenuSubmenu label={`${entry.group.label} service notice`} icon={<InformationIcon size={14} />}
+      Sub={Sub} SubTrigger={SubTrigger} SubContent={SubContent} Portal={Portal}>
+      <Label className="agent-region-menu__context" role="status">{entry.group.issue}</Label>
+    </WorkbenchMenuSubmenu> : null}
   </Group>
   if (entry.kind === 'separator') {
     return (
@@ -243,7 +260,8 @@ export function RegionContextMenu({
         <ContextMenu.Trigger asChild onContextMenu={event => { origin.current = event.currentTarget }}>{children}</ContextMenu.Trigger>
         {!agentMenuAvailable ? <DocumentOverlayPortal component={ContextMenu.Portal}>
           <ContextMenu.Content className="tab-context-menu region-context-menu" collisionPadding={8} onCloseAutoFocus={event => { if (connector.dialogOpen) event.preventDefault() }}>
-            {model.entries.map((entry, index) => <RegionMenuEntryView
+            <RegionCopyLinkRow entries={model.entries} Item={ContextMenu.Item} />
+            {model.entries.filter(entry => entry.kind !== 'action').map((entry, index) => <RegionMenuEntryView
               key={index} entry={entry} index={index}
               Item={ContextMenu.Item} Separator={ContextMenu.Separator}
             />)}
