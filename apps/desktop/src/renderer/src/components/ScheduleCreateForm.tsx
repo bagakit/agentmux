@@ -30,8 +30,11 @@ export function ScheduleCreateForm({ draftKey, target, onReceipt, initialMessage
     ...(target ? { target } : {}), ...(initialMessageContext ? { context: initialMessageContext } : {}) }))
   const saved = useLauncherState(state => state.drafts[draftKey]?.schedule?.form)
   const form = saved ?? fallback
-  const untouched = useRef(fallback)
-  const isUntouched = (value: ScheduleFormDraft) => inputFields.every(key => value[key] === untouched.current[key]) && targetFields.every(key => value.target?.[key] === untouched.current.target?.[key])
+  const untouched = useRef<ScheduleFormDraft | undefined>(saved ? undefined : fallback)
+  const isUntouched = (value: ScheduleFormDraft) => {
+    const baseline = untouched.current
+    return baseline !== undefined && inputFields.every(key => value[key] === baseline[key]) && targetFields.every(key => value.target?.[key] === baseline.target?.[key])
+  }
   const [notice, setNotice] = useState<string>()
   const [savedArrangement, setSavedArrangement] = useState<{ key: string; record: ContinuousProgressLoop }>()
   const update = (patch: Partial<ScheduleFormDraft>) => {
