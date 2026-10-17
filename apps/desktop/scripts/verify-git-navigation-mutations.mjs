@@ -92,6 +92,12 @@ const slices = {
         "file": "apps/desktop/src/renderer/src/features/git/history/GitHistoryRefPicker.tsx",
         "before": "useEffect(() => { dismiss() }, [enabled, scope, dismiss])",
         "after": "useEffect(() => {}, [enabled, scope, dismiss])"
+      },
+      {
+        "label": "search-focus-follows-visible-placement",
+        "file": "apps/desktop/src/renderer/src/features/git/history/GitHistoryRefPicker.tsx",
+        "before": "focused = true\n          input.current?.focus({ preventScroll: true })",
+        "after": "focused = true"
       }
     ]
   },

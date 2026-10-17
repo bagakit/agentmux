@@ -35,7 +35,9 @@ const search = () => document.querySelector<HTMLInputElement>('[aria-label="Sear
 const popup = () => document.querySelector<HTMLElement>('[aria-label="History references"]')
 const choices = () => [...document.querySelectorAll<HTMLButtonElement>('[role="option"][data-value]')]
 async function key(key: string, extra: KeyboardEventInit = {}) {
-  await act(async () => search().dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...extra })))
+  const input = search()
+  expect(input, 'The reference search must remain open until an explicit unmodified confirmation').not.toBeNull()
+  await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...extra })))
 }
 async function query(value: string) {
   await act(async () => {
@@ -152,6 +154,19 @@ it('does not let IME, modified keys or modified clicks choose a reference', asyn
   expect(changed).not.toHaveBeenCalled(); expect(submitted).not.toHaveBeenCalled()
   await key('Enter')
   expect(changed).toHaveBeenCalledExactlyOnceWith('refs/heads/topic-499')
+})
+
+it('focuses search after its floating surface becomes visible rather than focusing a hidden input', async () => {
+  const nativeFocus = HTMLElement.prototype.focus
+  vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation(function (options) {
+    if (this.closest<HTMLElement>('.git-history-ref-picker__popover')?.style.visibility === 'hidden') return
+    nativeFocus.call(this, options)
+  })
+  await mount()
+  await act(async () => trigger().focus())
+  await open()
+  await vi.waitFor(() => expect(document.activeElement).toBe(search()))
+  expect(popup()?.style.visibility).toBe('visible')
 })
 
 it('keeps a missing saved reference without silently selecting another ref and closes when its scope is hidden or rebound', async () => {
