@@ -16,7 +16,7 @@ export const AGENTMUX_HOSTED_METHODS = [
   'readAgentSession', 'readAgentSessions', 'readAgentFuturePromptIntent', 'listAgentFuturePromptIntents', 'sessionTimeline', 'readAgentSessionHistory', 'readAgentConversation', 'releaseConversationView', 'sessionHistoryCheckpoint', 'readSessionHistoryChanges', 'conversationCheckpoint', 'readConversationChanges', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
   'createTerminal', 'attachTerminal', 'refreshRunAttachment', 'readRunReplay',
   'removeTerminal', 'releaseRunAttachment', 'writeTerminal', 'resizeTerminal', 'signalTerminal', 'stopTerminal',
-  'createAgent', 'createAgentWithDelivery', 'resolveAgentCreationSessionId', 'inspectAgentCreation', 'reattachAgent', 'ensureAgentContinuity', 'controlAgentContinuity',
+  'createAgent', 'createAgentWithDelivery', 'resolveAgentCreationSessionId', 'inspectAgentCreation', 'listAgentSpawns', 'reattachAgent', 'ensureAgentContinuity', 'controlAgentContinuity',
   'restartAgent', 'inspectAgentRestart', 'resumeAgent', 'reopenAgent', 'reconcileAgentReopen', 'respawnAgent', 'writeAgent', 'pasteAgent', 'submitAgentPrompt', 'submitAgentMessage', 'notifyMessages', 'saveAgentFuturePromptIntent', 'replySessionQuestion',
   'respondAgentInteraction', 'inspectAgentInteractionOperation', 'setAgentPosture', 'resizeAgent', 'signalAgent', 'stopAgent',
   'authorizeAgentCaller', 'authorizeRetainedAgentCaller', 'authorizeAgentMessage', 'checkDeliveries', 'ackDeliveryBatch',

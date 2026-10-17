@@ -906,6 +906,8 @@ export type AgentLaunchInput = {
   agentMuxNote?: string
   /** Core-authenticated author of the original creation prompt. */
   initialMessage?: AgentMuxAgentCreateInput['initialMessage']
+  /** Original authenticated creation caller, including a creation without a first body. */
+  creationCaller?: AgentMuxAgentCreateInput['creationCaller']
   /**
    * The choice ids the launcher picked for this Provider's declared launch options (DESCRIBE half in
    * {@link AgentCatalogEntry.launchOptions}). Core resolves each choice's argv at spawn; a choice the
