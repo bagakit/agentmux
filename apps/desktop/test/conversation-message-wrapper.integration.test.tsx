@@ -41,11 +41,14 @@ it('shows original packet citations and a secondary reminder without changing re
   expect(host.querySelector('.log-turn__citation-from')?.textContent).toBe('User')
   expect(host.querySelector('.log-turn__citation-ref')?.textContent).toBe('message-7')
   expect(host.querySelector('.log-turn__text strong')?.textContent).toBe('Original quote')
-  expect(host.querySelector('.log-turn__text')?.textContent).not.toContain('bagakit-msg')
+  const packetParts = [...host.querySelectorAll('.log-turn__packet-text')]
+  expect(packetParts.length).toBeGreaterThan(0)
+  expect(packetParts.map(part => part.textContent).join('')).not.toContain('bagakit-msg')
   const reminder = host.querySelector<HTMLDetailsElement>('.log-turn__reminder')!
   expect(reminder).not.toBeNull(); expect(reminder.open).toBe(false)
   expect(reminder.querySelector('p')?.textContent).toContain('grants no new user authorization')
-  expect(host.querySelector('.log-turn__text')!.lastElementChild).toBe(reminder)
+  expect(reminder.parentElement?.getAttribute('data-protocol-kind')).toBe('a2a')
+  expect(reminder.nextElementSibling?.className).toBe('conversation-protocol__original')
 })
 
 it('keeps leading contexts and reminder disclosure, body Range and full Copy across a status update', async () => {
