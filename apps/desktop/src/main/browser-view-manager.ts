@@ -440,7 +440,6 @@ export class BrowserViewManager {
   updatePresentation(sender: WebContents, frame: WebFrameMain | null,
     leaseId: string, value: BrowserPresentationGeometry): void {
     const lease = this.requirePresentationLease(sender, frame, leaseId)
-    this.assertConsumable(lease.entry)
     lease.geometry = this.presentationGeometry(value)
     if (lease.entry.inputLeaseId === leaseId) {
       if (lease.geometry.visible) this.setBounds(lease.entry.id, lease.geometry.bounds)
@@ -457,7 +456,6 @@ export class BrowserViewManager {
   armPresentationCapture(sender: WebContents, frame: WebFrameMain | null,
     leaseId: string): BrowserPresentationCapture {
     const lease = this.requirePresentationLease(sender, frame, leaseId)
-    this.assertConsumable(lease.entry)
     if (!lease.geometry.visible) throw new Error('Browser presentation is hidden')
     const existing = lease.entry.captureId ? this.presentationCaptures.get(lease.entry.captureId) : undefined
     if (existing && !existing.revoked) {
@@ -539,7 +537,6 @@ export class BrowserViewManager {
   async activatePresentation(sender: WebContents, frame: WebFrameMain | null,
     leaseId: string, activation: BrowserPresentationActivation): Promise<BrowserPresentationActivationReceipt> {
     const lease = this.requirePresentationLease(sender, frame, leaseId)
-    this.assertConsumable(lease.entry)
     const entry = lease.entry
     const unconfirmed = (reason: Extract<BrowserPresentationActivationReceipt, { outcome: 'input-unconfirmed' }>['reason'],
       message: string): BrowserPresentationActivationReceipt => ({ outcome: 'input-unconfirmed', reason, message })
@@ -959,31 +956,34 @@ export class BrowserViewManager {
     if (!entry) return result('unknown', ['owner-unavailable'])
     if (!navigationId || entry.navigationId !== navigationId) return result('retained', ['source-changed'])
     // Re-observing an unknown close is safe; issuing another close is not.
-    if (entry.releaseAttempt) return entry.releaseAttempt.receipt ?? entry.releaseAttempt.promise
+    const previous = entry.releaseAttempt
+    if (previous?.view === entry.view) {
+      const receipt = previous.receipt ?? await previous.promise
+      return receipt.navigationId === navigationId ? receipt : result(receipt.status, receipt.reasons)
+    }
     const retention = this.retention(entry)
     if (retention.status !== 'eligible') return result(retention.status, retention.reasons)
-    const contents = entry.view.webContents
+    const view = entry.view, contents = view.webContents
     let resolve!: (receipt: AgentMuxBrowserReleaseReceipt) => void
     const promise = new Promise<AgentMuxBrowserReleaseReceipt>(yes => { resolve = yes })
     let settled = false
     const veto = () => {
-      entry.releaseAttempt?.settle('retained', ['beforeunload'])
-      this.markResourceRisk(entry, entry.view, 'beforeunload')
+      attempt.settle('retained', ['beforeunload'])
+      this.markResourceRisk(entry, view, 'beforeunload')
     }
     // Only the observation ends at this boundary. The physical close remains owned by Main;
     // late destruction still publishes its exact source and no caller automatically resends it.
     const timer = setTimeout(() => {
-      entry.releaseAttempt?.settle('unknown', ['close-unconfirmed'])
-      this.emit(entry)
+      attempt.settle('unknown', ['close-unconfirmed'])
+      if (this.owns(entry, view)) this.emit(entry)
     }, 1_000)
-    entry.releaseAttempt = {
-      navigationId, view: entry.view, pending: true, receipt: null, promise,
+    const attempt: NonNullable<BrowserEntry['releaseAttempt']> = {
+      navigationId, view, pending: true, receipt: null, promise,
       settle: (status, reasons) => {
+        if (attempt.receipt?.status === 'released' || (status === 'unknown' && attempt.receipt?.status === 'retained')) return
         const receipt = result(status, reasons)
-        if (entry.releaseAttempt) {
-          entry.releaseAttempt.receipt = receipt
-          if (status !== 'unknown') entry.releaseAttempt.pending = false
-        }
+        attempt.receipt = receipt
+        if (status !== 'unknown') attempt.pending = false
         if (status !== 'unknown') contents.removeListener('will-prevent-unload', veto)
         if (settled) return
         settled = true
@@ -991,33 +991,26 @@ export class BrowserViewManager {
         resolve(receipt)
       }
     }
+    entry.releaseAttempt = attempt
     contents.once('will-prevent-unload', veto)
     this.emit(entry)
     try { contents.close({ waitForBeforeUnload: true }) }
     catch {
-      entry.releaseAttempt.settle('unknown', ['close-unconfirmed'])
-      this.emit(entry)
+      attempt.settle('unknown', ['close-unconfirmed'])
+      if (this.owns(entry, view)) this.emit(entry)
     }
     return promise
   }
 
-  /** Only this native owner is closing. A new consumer observes that handoff, never its old WC. */
+  /** Observe the original close once; confirmed destruction alone requires a same-ID handoff. */
   async prepareForConsumption(id: string): Promise<void> {
     const entry = this.entries.get(id), attempt = entry?.releaseAttempt
-    if (!entry || !attempt?.pending) return
+    if (!entry || !attempt?.pending || attempt.view !== entry.view) return
     const receipt = await attempt.promise
     if (receipt.status === 'retained' && !attempt.pending) return
     if (this.entries.get(id) !== entry && !this.entries.has(id) && this.releasedEntries.has(id)) {
       await this.restore(id)
-      return
     }
-    if (this.entries.get(id) !== entry) return
-    this.assertConsumable(entry)
-  }
-
-  private assertConsumable(entry: BrowserEntry): void {
-    if (!entry.releaseAttempt?.pending || entry.releaseAttempt.view !== entry.view) return
-    throw new Error('The original Browser native page is closing; its result is not confirmed yet. The page identity and request are kept. Observe or retry its connection after native close or beforeunload resolves; do not resend the release.')
   }
 
   private markResourceRisk(entry: BrowserEntry, view: WebContentsView, reason: AgentMuxBrowserRetentionReason): void {
@@ -1042,7 +1035,7 @@ export class BrowserViewManager {
     if (this.uploads?.hasRetained(entry.id)) reasons.add('upload')
     if (contents.debugger?.isAttached?.() || contents.isDevToolsOpened?.()) reasons.add('debugger')
     if (!entry.resourceDocumentConfirmed || typeof contents.isBeingCaptured !== 'function' || typeof contents.isCurrentlyAudible !== 'function') reasons.add('document-unconfirmed')
-    if (entry.releaseAttempt?.pending) reasons.add('close-unconfirmed')
+    if (entry.releaseAttempt?.pending && entry.releaseAttempt.view === entry.view) reasons.add('close-unconfirmed')
     return { status: reasons.has('document-unconfirmed') || reasons.has('close-unconfirmed') ? 'unknown' : reasons.size ? 'retained' : 'eligible', reasons: [...reasons] }
   }
 
@@ -2791,7 +2784,6 @@ export class BrowserViewManager {
   setBounds(id: string, bounds: BrowserBounds | null): void {
     const entry = this.entries.get(id)
     if (!entry) return
-    if (bounds !== null) this.assertConsumable(entry)
     try {
       if (bounds === null) {
         const wasVisible = entry.visible
@@ -3153,6 +3145,8 @@ export class BrowserViewManager {
       this.emit(entry)
     })
     contents.once('destroyed', () => {
+      const attempt = entry.releaseAttempt
+      if (attempt?.view === view) attempt.settle('released', [])
       if (this.owns(entry, view)) this.clearFavicon(entry)
 
       if (entry.pendingSwitch?.view === view) {
@@ -3194,8 +3188,7 @@ export class BrowserViewManager {
           cleanupErrors.push(error)
         }
       }
-      if (entry.releaseAttempt) {
-        entry.releaseAttempt.settle('released', [])
+      if (entry.releaseAttempt?.view === view) {
         this.send({ type: 'released', id: entry.id, navigationId: entry.navigationId })
         return
       }
@@ -3207,7 +3200,6 @@ export class BrowserViewManager {
   private require(id: string): BrowserEntry {
     const entry = this.entries.get(id)
     if (!entry) throw new Error(`Unknown browser: ${id}`)
-    this.assertConsumable(entry)
     return entry
   }
 
