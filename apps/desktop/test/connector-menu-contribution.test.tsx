@@ -108,7 +108,7 @@ it('uses the mounted App and Settings master to withdraw and restore one complet
     expect(menu.textContent).not.toMatch(/Lark|group chat|Shared group details|Chat application settings|Enable a chat application/)
     expect(menu.querySelector('[data-connector-menu-separator]')).toBeNull()
     expect(menu.lastElementChild?.getAttribute('role')).not.toBe('separator')
-    expect(menu.textContent).toContain('Copy Agent Link')
+    expect(menu.textContent).toContain('Copy Region Link')
   }
   expect((await f.services.connections.list()).connections.map(record => record.config)).toEqual(bots)
   expect(useAppStore.getState().sessions).toBe(before.sessions)
