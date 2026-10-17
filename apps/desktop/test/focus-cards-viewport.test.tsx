@@ -17,10 +17,11 @@ let root: Root, container: HTMLDivElement, contexts: readonly FocusContext[]
 let columns = 3, start = 0, viewport = 240
 const tall = new Set<string>()
 const slotGeometryReads: HTMLElement[] = []
+const groupGeometryReads: HTMLElement[] = []
 const observers: { callback: IntersectionObserverCallback; targets: Set<Element>; options: IntersectionObserverInit }[] = []
 const select = vi.fn(), noLinks = new Map(), noIdentities = new Map()
 beforeEach(() => {
-  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); columns = 3; start = 0; viewport = 240; select.mockClear(); observers.length = 0; tall.clear(); slotGeometryReads.length = 0
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); columns = 3; start = 0; viewport = 240; select.mockClear(); observers.length = 0; tall.clear(); slotGeometryReads.length = 0; groupGeometryReads.length = 0
   vi.stubGlobal('IntersectionObserver', class {
     record: typeof observers[number]
     constructor(callback: IntersectionObserverCallback, options: IntersectionObserverInit) { this.record = { callback, targets: new Set(), options }; observers.push(this.record) }
@@ -34,7 +35,7 @@ beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(600)
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     const top = start - (this.closest<HTMLElement>('.test-scroll')?.scrollTop ?? 0)
-    if (this.classList.contains('focus-context-group__cards')) return new DOMRect(0, top, 600, Math.ceil(contexts.length / columns) * 54)
+    if (this.classList.contains('focus-context-group__cards')) { groupGeometryReads.push(this); return new DOMRect(0, top, 600, Math.ceil(contexts.length / columns) * 54) }
     if (this.dataset.focusCardBody) {
       slotGeometryReads.push(this)
       const siblings = [...this.parentElement!.children] as HTMLElement[], index = siblings.indexOf(this), row = Math.floor(index / columns)
@@ -117,6 +118,50 @@ it('does not instantiate a distant one-row group until its actual scrollport int
   const original = button(contexts[0]!.id)
   await scrollTo(0); expect(button(contexts[0]!.id)).toBe(original)
   expect(full()).toHaveLength(1)
+})
+
+it('keeps the original geometry observer for new live facts in the same projected card slots', async () => {
+  await render()
+  const target = contexts[0]!, original = button(target.id)
+  const reads = { group: groupGeometryReads.length, slot: slotGeometryReads.length }, count = observers.length
+  expect(reads.group).toBeGreaterThan(0); expect(reads.slot).toBeGreaterThan(0); expect(count).toBeGreaterThan(0)
+  for (const name of ['First current name', 'Second current name']) {
+    await act(async () => useAppStore.setState(state => ({ agentNames: { ...state.agentNames, [target.id]: name } })))
+    const next = createFocusProjectionSelector()(useAppStore.getState()).contexts
+    expect(next.map(context => [context.hostId, context.id])).toEqual(contexts.map(context => [context.hostId, context.id]))
+    expect(next).not.toBe(contexts)
+    await render({ order: next })
+    expect(button(target.id)).toBe(original); expect(original.textContent).toContain(name)
+  }
+  expect(groupGeometryReads.length, 'Changed facts need no synchronous grid measurement').toBe(reads.group)
+  expect(slotGeometryReads.length, 'Changed facts need no synchronous slot measurement').toBe(reads.slot)
+  expect(observers.length, 'The original observer still owns future intersections').toBe(count)
+})
+
+it('lets the original intersection owner reveal slots after a visited card changes height', async () => {
+  const target = contexts[1]!
+  tall.add(target.id); await render()
+  const original = button(target.id), count = observers.length
+  const before = full().length
+  tall.delete(target.id)
+  await render({ order: contexts.map(context => ({ ...context })) })
+  await act(async () => intersect())
+  const visible = slots().filter(slot => { const rect = slot.getBoundingClientRect(); return rect.bottom > 0 && rect.top < viewport })
+  expect(visible.length).toBeGreaterThan(0)
+  expect(visible.every(slot => slot.dataset.focusCardBody === 'mounted')).toBe(true)
+  expect(full().length).toBeGreaterThan(before)
+  expect(button(target.id)).toBe(original)
+  expect(observers.length).toBe(count)
+})
+
+it('synchronously reveals newly inserted visible slots without waiting for an intersection delivery', async () => {
+  await render({ order: contexts.slice(0, 3) })
+  expect(full()).toHaveLength(3)
+  const original = button(contexts[0]!.id)
+  await render()
+  expect(slots()).toHaveLength(279)
+  expect(slots().slice(0, 12).every(slot => slot.dataset.focusCardBody === 'mounted')).toBe(true)
+  expect(button(contexts[0]!.id)).toBe(original)
 })
 
 it('consumes real viewport intersection after resize without an idle preload', async () => {
