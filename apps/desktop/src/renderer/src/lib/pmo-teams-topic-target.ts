@@ -10,6 +10,7 @@ import { workbenchTabDisplayName } from './workbench-tab-presentation'
 import { assertUnreachableSurface } from './workbench-surface-kinds'
 import type { WorkbenchSurface } from './workbench-tabs'
 import type { WorkbenchTab } from './workbench-tabs'
+import type { WorkbenchProjectionSelection } from './workbench-projection'
 import type { SessionSnapshot } from '../../../shared/contracts'
 
 function nonAgentStatus(region: WorkbenchSurface | undefined): string {
@@ -33,10 +34,11 @@ export function moteTargetStatus(tab: WorkbenchTab | undefined, session: Session
 }
 
 /** The shortcut and workface consume one exact target, never PMO-wide status. */
-export function usePmoTeamsTopicTarget(floating: PmoTeamsTopicFloatingState) {
+export function usePmoTeamsTopicTarget(floating: PmoTeamsTopicFloatingState, resolvedReference?: WorkbenchProjectionSelection) {
   const topicId = useAppStore(state => pmoTeamsTopicFloatingTargetTopicId(floating, state.tabs))
   const selectTab = useMemo(() => createPmoTeamsTopicTargetSelector(floating), [floating.targetTopicId, floating.targetTabId, floating.agentTarget])
-  const tabId = useAppStore(selectTab)
+  const retainedTabId = useAppStore(selectTab)
+  const tabId = resolvedReference?.tabId ?? retainedTabId
   const unresolvedTabs = useAppStore(state => !tabId && floating.targetTabId !== null ? state.tabs : null)
   const selectionUnconfirmed = useMemo(() => Boolean(unresolvedTabs && Object.values(unresolvedTabs).some(tab =>
     tab.workspaceId === SCRATCH_WORKSPACE_ID && tab.topicId === topicId)), [unresolvedTabs, topicId])
@@ -49,7 +51,7 @@ export function usePmoTeamsTopicTarget(floating: PmoTeamsTopicFloatingState) {
   const timelines = useWorkbenchTabRecord('timelines', tab)
   // Unlike activeWorkbenchSurface, a missing active Region must stay unknown;
   // it cannot borrow the title Region's Agent status.
-  const reference = floating.reference
+  const reference = resolvedReference ?? floating.reference
   const regionId = reference ? reference.tabId === tabId ? reference.regionId : undefined
     : reference === null ? undefined : tab?.layout.activeRegionId
   const rawRegion = regionId ? tab?.regions[regionId] : undefined

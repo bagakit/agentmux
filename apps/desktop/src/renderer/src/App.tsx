@@ -215,17 +215,23 @@ function DesktopApp() {
     if (current && (current.open !== moteFloating.open || current.targetTabId !== moteFloating.targetTabId ||
       current.targetTopicId !== moteFloating.targetTopicId || JSON.stringify(current.reference) !== JSON.stringify(moteFloating.reference))) return
     const topicId = pmoTeamsTopicFloatingTargetTopicId(current ?? moteFloating, state.tabs)
-    if (!tab?.regions[reference.regionId] || !current?.agentTarget && tab.topicId !== topicId ||
-      !workbenchDisplayReferenceMatches(state.layouts[reference.displayWorkspaceId], reference)) {
+    const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) ?? []
+    const scope = moteWorkbenchProjection(spatialCatalog(state, topics), state.tabs, current ?? moteFloating, () => {}, state.layouts).projection
+    const composition = scope?.composition ?? state.layouts[reference.displayWorkspaceId]
+    const zoneId = scope?.entity.kind === 'zone' ? scope.entity.zoneId : undefined
+    const member = zoneId && scope?.selectionMode === undefined &&
+      composition?.groups.some(group => group.id === reference.groupId && group.tabOrder.includes(reference.tabId)) &&
+      scope?.catalog.tabs.some(item => item.tabId === reference.tabId && item.zoneId === zoneId)
+    const placed = workbenchDisplayReferenceMatches(state.layouts[reference.displayWorkspaceId], reference)
+    if (!tab?.regions[reference.regionId] || !current?.agentTarget && tab.topicId !== topicId || !placed && !member) {
       state.reportError(new Error('This exact discussion location is no longer confirmed. Its original content is kept; choose its current location.'))
       return
     }
-    state.focusRegion(reference.displayWorkspaceId, reference.tabId, reference.regionId, 'floating-pointer', reference.groupId)
-    setMoteFloating({ targetTabId: reference.tabId, reference, ...(current?.agentTarget ? { agentTarget: current.agentTarget, targetAgent: current.targetAgent } : {}) })
+    if (placed) state.focusRegion(reference.displayWorkspaceId, reference.tabId, reference.regionId, 'floating-pointer', reference.groupId)
+    setMoteFloating({ targetTabId: reference.tabId, reference: placed ? reference : undefined, ...(current?.agentTarget ? { agentTarget: current.agentTarget, targetAgent: current.targetAgent } : {}) })
   }, [setMoteFloating, moteFloating])
   const moteProjection = useMemo(() => {
-    const id = pmoTeamsTopicFloatingTargetTabId(moteFloating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId)
-    return moteWorkbenchProjection(surveyCatalog, id ? tabs[id] : undefined, moteFloating, selectMoteReference, layouts)
+    return moteWorkbenchProjection(surveyCatalog, tabs, moteFloating, selectMoteReference, layouts)
   }, [surveyCatalog, moteFloating.targetTabId, moteFloating.targetTopicId, moteFloating.reference, moteFloating.targetAgent, tabs, layouts, agentFocus.pmo.sessionId, selectMoteReference])
   const moteViewTargets = useMemo(() => {
     const targets = pmoTeamsTopicFloatingViewTargets(
