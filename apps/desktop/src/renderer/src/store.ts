@@ -10345,17 +10345,37 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     } finally { unsubscribe(); unsubscribeLocal() }
   },
   applyBrowserEvent(event, expectedNavigationId) {
-    set((state) => ({
-      ...reduceBrowserEvent(state, event, expectedNavigationId),
-      ...(event.type === 'closed'
-        ? {
-            browserAnnotationsByBrowserId: Object.fromEntries(
-              Object.entries(state.browserAnnotationsByBrowserId)
-                .filter(([browserId]) => browserId !== event.id)
-            )
+    set((state) => {
+      const topology = reduceBrowserEvent(state, event, expectedNavigationId)
+      let choice = state.workbenchSpaceSelection
+      if (event.type === 'closed' && topology !== state) {
+        // Native close can be confirmed before the close request returns. Reconcile
+        // against the final topology in this transaction, including every occurrence.
+        for (const tab of Object.values(state.tabs)) {
+          for (const surface of workbenchSurfaces(tab)) {
+            if (surface.kind !== 'browser' || surface.browserId !== event.id ||
+              topology.tabs[tab.id]?.regions[surface.regionId]) continue
+            coreSpatialPersistence?.removeEntity(surface.regionId)
+            if (!topology.tabs[tab.id]) coreSpatialPersistence?.removeEntity(tab.id)
+            choice = desktopSpaceSelectionAfterClose(choice, topology, {
+              workspaceId: tab.workspaceId, tabId: tab.id, regionId: surface.regionId
+            })
           }
-        : {})
-    }))
+        }
+      }
+      return {
+        ...topology,
+        workbenchSpaceSelection: choice,
+        ...(event.type === 'closed'
+          ? {
+              browserAnnotationsByBrowserId: Object.fromEntries(
+                Object.entries(state.browserAnnotationsByBrowserId)
+                  .filter(([browserId]) => browserId !== event.id)
+              )
+            }
+          : {})
+      }
+    })
   },
   addBrowserAnnotation(annotation) {
     if (
