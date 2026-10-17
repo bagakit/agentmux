@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useShallow } from 'zustand/react/shallow'
 import type { AgentMuxSpaceLocation } from '@agentmux/core'
@@ -21,6 +21,8 @@ import { useAgentInformationPreview } from './AgentInformationPreview'
 
 const Disclosure = semanticIconComponent('navigation.disclosure')
 const NO_ITEMS = [] as const
+type ActivityGroup = { key: string; label: string; title: string; sessions: AgentSession[]; zone: ActivityZone | null }
+type ReadingFocus = { source: Element | null; position?: string; group?: string; first?: boolean; back?: boolean; scrollTop: number }
 
 /** This is an explicit existing occurrence, never the first location of a Session. */
 function openActivityAgent(session: AgentSession, location?: AgentMuxSpaceLocation) {
@@ -70,6 +72,8 @@ function ActivityAgent({ session, context: base, identity, location, positionHin
     ...(base.originAddress ? { originAddress: base.originAddress } : {}) }), [session, timeline, name, base, now])
   const age = projectActivityRow(session, timeline?.items ?? NO_ITEMS, now).meta
   const branch = Menu.useHoverMenuBranch()
+  // A new menu level can place this row beneath a stationary pointer; wait for actual movement.
+  const hoverStarted = useRef(false)
   const selected = useAppStore(state => location ? state.workbenchSpaceSelection?.tabId === location.tabId &&
     state.workbenchSpaceSelection?.regionId === location.regionId && state.workbenchSpaceSelection?.workspaceId === location.displayWorkspaceId &&
     state.workbenchSpaceSelection?.groupId === location.groupId : state.agentFocus.execution.sessionId === session.id)
@@ -77,10 +81,16 @@ function ActivityAgent({ session, context: base, identity, location, positionHin
   const hover = useAgentInformationPreview(context, true, identity, undefined, open, { readingKey: 'ArrowRight', readingBranch: branch })
   return <Menu.Item asChild onSelect={event => { event.preventDefault(); open() }}>
     <button ref={hover.anchor} type="button" className={`focus-context focus-context--card project-activity-agent${selected ? ' is-selected' : ''}`}
-      data-session-id={session.id} data-region-id={location?.regionId} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic}
+      data-session-id={session.id} data-region-id={location?.regionId}
+      data-activity-position={location ? JSON.stringify([location.displayWorkspaceId, location.groupId, location.tabId, location.regionId]) : focusContextIdentityKey(session.hostId, session.id)} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic}
       aria-label={`${context.name} · ${context.stateLabel} · ${context.detail}${age ? ` · ${age}` : ''}`}
       aria-description={[context.originAddress ?? 'No confirmed display position. Open the original Agent.', identity && identity.occurrenceCount > 1 ? `Same Agent · ${identity.occurrenceCount} positions` : null].filter(Boolean).join(' · ')}
       aria-describedby={hover.describedBy} title={age ?? undefined} {...hover.triggerEvents}
+      onPointerEnter={() => { hoverStarted.current = false }}
+      onPointerMove={event => {
+        if (!hoverStarted.current && event.buttons === 0) { hoverStarted.current = true; hover.triggerEvents.onPointerEnter() }
+      }}
+      onPointerLeave={() => { hoverStarted.current = false; hover.triggerEvents.onPointerLeave() }}
       onKeyDown={event => {
         hover.triggerEvents.onKeyDown(event)
         if (event.key === 'ArrowRight' && event.defaultPrevented) branch.enterKeyboard()
@@ -93,6 +103,48 @@ function ActivityAgent({ session, context: base, identity, location, positionHin
 
 /** Mounted only for the open activity menu. Content and spatial observations stay scoped. */
 export function ProjectActivityMenu({ sessions, onNavigate }: { sessions: AgentSession[]; onNavigate(): void }) {
+  const document = useWorkbenchDocument(), ownerWindow = document.defaultView!
+  const [narrow, setNarrow] = useState(() => ownerWindow.innerWidth < 640)
+  const [wideGroup, setWideGroup] = useState<string | null>(null)
+  const [drilldownGroup, setDrilldownGroup] = useState<string | null>(null)
+  const wideGroupRef = useRef(wideGroup), narrowRef = useRef(narrow)
+  wideGroupRef.current = wideGroup
+  const content = useRef<HTMLDivElement | null>(null), submenu = useRef<HTMLDivElement | null>(null)
+  const pendingFocus = useRef<ReadingFocus | null>(null)
+  const listScroll = useRef(0)
+  const branch = Menu.useHoverMenuBranch()
+  useEffect(() => {
+    function resize() {
+      const next = ownerWindow.innerWidth < 640
+      if (next === narrowRef.current) return
+      narrowRef.current = next
+      if (next && wideGroupRef.current) {
+        listScroll.current = content.current?.scrollTop ?? 0
+        const focused = document.activeElement as HTMLElement | null
+        const position = focused && submenu.current?.contains(focused) ? focused.dataset.activityPosition : undefined
+        pendingFocus.current = { source: position ? focused : null, ...(position ? { position } : {}), scrollTop: submenu.current?.scrollTop ?? 0 }
+        // Keep the reading scope separate from Radix Sub's unmount/close lifecycle.
+        setDrilldownGroup(wideGroupRef.current)
+      }
+      setNarrow(next)
+    }
+    ownerWindow.addEventListener('resize', resize)
+    return () => ownerWindow.removeEventListener('resize', resize)
+  }, [document, ownerWindow])
+  useLayoutEffect(() => {
+    const pending = pendingFocus.current
+    pendingFocus.current = null
+    if (!pending || !content.current) return
+    content.current.scrollTop = pending.scrollTop
+    // A later deliberate focus wins over the menu's own restoration.
+    if (!pending.first && !pending.back && !pending.position && !pending.group) return
+    if (document.activeElement !== pending.source && document.activeElement !== document.body) return
+    const target = pending.back ? content.current.querySelector<HTMLElement>('[data-activity-back]')
+      : pending.first ? content.current.querySelector<HTMLElement>('.project-activity-agent')
+      : [...content.current.querySelectorAll<HTMLElement>('[data-activity-position], [data-activity-group]')].find(row =>
+        pending.position ? row.dataset.activityPosition === pending.position : row.dataset.activityGroup === pending.group)
+    target?.focus({ preventScroll: true })
+  }, [drilldownGroup, narrow, document])
   const displayPath = usePathDisplay()
   const catalog = useAppStore(workbenchSelectionCatalog)
   const config = useAppStore(state => state.config)
@@ -132,43 +184,70 @@ export function ProjectActivityMenu({ sessions, onNavigate }: { sessions: AgentS
       {tab.agents.map(agent => row(agent.session, agent.location, tab.agents.filter(candidate => candidate.session.id === agent.session.id && candidate.session.hostId === agent.session.hostId).length > 1))}
     </Menu.Group>)
   }
-  function zoneMenu(zone: ActivityZone) {
-    const label = activityMetrics(zone.sessions).map(metric => `${metric.count} ${metric.label}`).join(' · ')
-    return <Menu.Sub key={zone.key}>
-      <Menu.SubTrigger className="project-activity-zone" data-zone-id={zone.zoneId ?? undefined} aria-label={`${zone.label} · ${label}`} title={zoneTitle(zone)}>
-        <span className="project-activity-zone__identity"><strong>{zone.label}</strong><small title={label}>{label}</small></span>
-        <Disclosure size={13} aria-hidden="true" />
-      </Menu.SubTrigger>
-      <Menu.Portal><Menu.SubContent className="tab-context-menu project-activity-submenu" sideOffset={4} collisionPadding={8}>
-        <Menu.Label className="project-activity-submenu__heading" title={zoneTitle(zone)}>{zone.label}</Menu.Label>
-        {zoneContents(zone)}
+  const groups: ActivityGroup[] = spaces.zones.map(zone => ({ key: zone.key, label: zone.label, title: zoneTitle(zone), sessions: zone.sessions, zone }))
+  if (spaces.unplaced.length) groups.push({ key: 'unplaced', label: 'No confirmed position', title: 'Original Agents remain available', sessions: spaces.unplaced, zone: null })
+  const direct = spaces.zones.length + (spaces.unplaced.length ? 1 : 0) === 1
+  const activeGroup = !direct ? groups.find(group => group.key === drilldownGroup) : undefined
+  // Widening keeps an entered reading page; Back returns to the wider cascade choices.
+  const singlePanel = narrow || Boolean(activeGroup)
+  function groupContents(group: ActivityGroup) {
+    return group.zone ? zoneContents(group.zone) : group.sessions.map(session => row(session))
+  }
+  function enterGroup(key: string, keyboard: boolean) {
+    listScroll.current = content.current?.scrollTop ?? 0
+    pendingFocus.current = { source: document.activeElement, ...(keyboard ? { first: true } : { back: true }), scrollTop: 0 }
+    branch.enterKeyboard()
+    setDrilldownGroup(key)
+  }
+  function back() {
+    const focused = document.activeElement
+    pendingFocus.current = { source: content.current?.contains(focused) ? focused : null,
+      ...(content.current?.contains(focused) && drilldownGroup ? { group: drilldownGroup } : {}), scrollTop: listScroll.current }
+    setDrilldownGroup(null)
+  }
+  function groupChoice(group: ActivityGroup) {
+    const label = activityMetrics(group.sessions).map(metric => `${metric.count} ${metric.label}`).join(' · ')
+    const props = { className: 'project-activity-zone', 'data-activity-group': group.key,
+      'data-zone-id': group.zone?.zoneId ?? undefined, 'data-unplaced': group.zone ? undefined : true,
+      'aria-label': `${group.label} · ${label}`, title: group.title }
+    const identity = <><span className="project-activity-zone__identity"><strong>{group.label}</strong><small title={label}>{label}</small></span><Disclosure size={13} aria-hidden="true" /></>
+    if (singlePanel) return <Menu.Item key={group.key} asChild onSelect={event => event.preventDefault()}>
+      <button type="button" {...props} aria-haspopup="menu" onClick={event => enterGroup(group.key, event.detail === 0)}
+        onKeyDown={event => { if (event.key === 'ArrowRight') { event.preventDefault(); enterGroup(group.key, true) } }}>{identity}</button>
+    </Menu.Item>
+    return <Menu.Sub key={group.key} open={wideGroup === group.key} onOpenChange={open => setWideGroup(current => open ? group.key : current === group.key ? null : current)}>
+      <Menu.SubTrigger {...props}>{identity}</Menu.SubTrigger>
+      <Menu.Portal><Menu.SubContent ref={submenu} className="tab-context-menu project-activity-submenu" sideOffset={4} collisionPadding={8}>
+        <Menu.Label className="project-activity-submenu__heading" title={group.title}>{group.label}</Menu.Label>
+        {groupContents(group)}
         <Menu.Label className="project-activity-menu__hint">{readingHint}</Menu.Label>
       </Menu.SubContent></Menu.Portal>
     </Menu.Sub>
   }
-  const unplacedLabel = activityMetrics(spaces.unplaced).map(metric => `${metric.count} ${metric.label}`).join(' · ')
-  const direct = spaces.zones.length + (spaces.unplaced.length ? 1 : 0) === 1
-  return <Menu.Portal><Menu.Content className="tab-context-menu project-activity-menu" data-direct={direct || undefined} side="bottom" align="end" sideOffset={4} collisionPadding={8}>
-    <Menu.Label className="project-activity-menu__heading"><strong>Agent activity</strong><span>{sessions.length} {sessions.length === 1 ? 'Agent' : 'Agents'}</span></Menu.Label>
-    <Menu.Label className="project-activity-menu__summary">{metricLabel}</Menu.Label>
-    {direct ? <>
-      {spaces.zones.map(zone => <Menu.Group key={zone.key}>
-        <Menu.Label className="project-activity-submenu__heading" title={zoneTitle(zone)}>{zone.label}</Menu.Label>{zoneContents(zone)}
-      </Menu.Group>)}
-      {spaces.unplaced.length ? <Menu.Group><Menu.Label className="project-activity-tab">No confirmed position</Menu.Label>{spaces.unplaced.map(session => row(session))}</Menu.Group> : null}
+  return <Menu.Portal><Menu.Content ref={content} className="tab-context-menu project-activity-menu"
+    data-direct={direct || undefined} data-drilldown={Boolean(activeGroup) || undefined} data-single-panel={singlePanel || undefined}
+    side="bottom" align="end" sideOffset={4} collisionPadding={8}
+    onEscapeKeyDown={event => {
+      if (event.defaultPrevented || !activeGroup) return
+      event.preventDefault(); back()
+    }}
+    onKeyDown={event => {
+      if (!event.defaultPrevented && activeGroup && event.key === 'ArrowLeft') { event.preventDefault(); back() }
+    }}>
+    {activeGroup ? <>
+      <div className="project-activity-drilldown-heading">
+        <Menu.Item className="project-activity-back" data-activity-back aria-label="Back to Agent activity"
+          onSelect={event => { event.preventDefault(); back() }}><Disclosure size={13} aria-hidden="true" /><span>Back</span></Menu.Item>
+        <Menu.Label title={activeGroup.title}>{activeGroup.label}</Menu.Label>
+      </div>
+      {groupContents(activeGroup)}
     </> : <>
-      {spaces.zones.map(zoneMenu)}
-      {spaces.unplaced.length ? <Menu.Sub>
-        <Menu.SubTrigger className="project-activity-zone" data-unplaced>
-          <span className="project-activity-zone__identity"><strong>No confirmed position</strong><small title={unplacedLabel}>{unplacedLabel}</small></span>
-          <Disclosure size={13} aria-hidden="true" />
-        </Menu.SubTrigger>
-        <Menu.Portal><Menu.SubContent className="tab-context-menu project-activity-submenu" sideOffset={4} collisionPadding={8}>
-          <Menu.Label className="project-activity-submenu__heading">No confirmed position</Menu.Label>{spaces.unplaced.map(session => row(session))}
-          <Menu.Label className="project-activity-menu__hint">{readingHint}</Menu.Label>
-        </Menu.SubContent></Menu.Portal>
-      </Menu.Sub> : null}
+      <Menu.Label className="project-activity-menu__heading"><strong>Agent activity</strong><span>{sessions.length} {sessions.length === 1 ? 'Agent' : 'Agents'}</span></Menu.Label>
+      <Menu.Label className="project-activity-menu__summary">{metricLabel}</Menu.Label>
+      {direct ? groups.map(group => <Menu.Group key={group.key}>
+        <Menu.Label className="project-activity-submenu__heading" title={group.title}>{group.label}</Menu.Label>{groupContents(group)}
+      </Menu.Group>) : groups.map(groupChoice)}
     </>}
-    <Menu.Label className="project-activity-menu__hint">{direct ? readingHint : 'Hover a group to see its Agents'}</Menu.Label>
+    <Menu.Label className="project-activity-menu__hint">{direct || activeGroup ? readingHint : singlePanel ? 'Select a group to see its Agents' : 'Hover a group to see its Agents'}</Menu.Label>
   </Menu.Content></Menu.Portal>
 }
