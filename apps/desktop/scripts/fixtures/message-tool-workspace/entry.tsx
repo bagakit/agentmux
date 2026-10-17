@@ -9,8 +9,15 @@ import { historyPage, visualInputPage, journalWire } from './data'
 const base = (window as any).identityMenu
 const calls: Array<{ action: string; reference?: unknown; query?: unknown }> = []
 const observers = new Set<(event: AgentSessionHistoryObservation) => void>()
+const readDispatches = api.sessions.dispatches
+let emptyViews = false
 let original = useAppStore.getState().sessions.find(session => session.kind === 'agent')!
 if (original.kind !== 'agent') throw new Error('The private production scene has an original Agent')
+api.sessions.dispatches = async (reference, query) => {
+  if (!emptyViews) return readDispatches(reference, query)
+  calls.push({ action: 'collaboration-page', reference, query })
+  return { hostId: reference.hostId, participantSessionId: reference.agentSessionId, dispatches: [], nextSourceMessageId: null }
+}
 api.sessions.inputMailbox = async (reference, query) => {
   calls.push({ action: 'journal', reference, query })
   return visualInputPage(reference.agentSessionId, original.control.run)
@@ -29,11 +36,18 @@ api.sessions.submitPrompt = async () => { calls.push({ action: 'dispatch' }); th
 api.continuousProgress.create = async () => { calls.push({ action: 'automation-create' }); throw new Error('Reading cannot create automation') }
 api.continuousProgress.action = async () => { calls.push({ action: 'automation-action' }); throw new Error('Reading cannot operate automation') }
 Object.assign(window, { messageWorkspace: {
-  seed(theme: 'dark' | 'light', tag: string) {
+  seed(theme: 'dark' | 'light', tag: string, empty = false) {
+    emptyViews = empty
     base.appearance(theme)
     const generation = base.mode('terminal')
     const a2a = base.mailboxLayout(tag)
     original = useAppStore.getState().sessions.find(session => session.id === a2a.agentSessionId)!
+    if (empty && original.kind === 'agent') {
+      // This private scene supplies an available Session without a capability diagnostic.
+      const { terminalCapability: _diagnostic, ...available } = original
+      original = available
+      flushSync(() => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === original.id ? available : session) })))
+    }
     base.progress('inactive')
     flushSync(() => useAppStore.setState({ timelines: {}, agentComposerDrafts: { [original.id]: '保留这份尚未发送的草稿。' },
       agentSteerQueues: { [original.id]: [{ operationId: 'workspace-pending', runId: original.control.run.runId,

@@ -17,11 +17,12 @@ const require = createRequire(import.meta.url), exec = promisify(execFile)
 const hash = value => createHash('sha256').update(value).digest('hex')
 const densityMutation = process.argv.includes('--density-mutation')
 const interactionStates = process.argv.includes('--interaction-states')
-assert.ok([densityMutation, interactionStates, process.argv.includes('--mutations')].filter(Boolean).length <= 1, 'Renderer and mutation modes are separate')
+const emptyStates = process.argv.includes('--empty-states'), emptyMutation = process.argv.includes('--empty-mutation')
+assert.ok([densityMutation, interactionStates, emptyStates, emptyMutation, process.argv.includes('--mutations')].filter(Boolean).length <= 1, 'Renderer and mutation modes are separate')
 const selectedMutation = process.argv.includes('--mutation') ? process.argv[process.argv.indexOf('--mutation') + 1] : undefined
 assert.ok(!selectedMutation || mutations.some(item => item.name === selectedMutation), 'The named mutation exists')
 const result = { schema: 'agentmux.message-workspace-proof.v1', passed: false, userRunTouched: false, productionWritten: false,
-  mode: densityMutation ? 'density-mutation' : interactionStates ? 'interaction-states' : process.argv.includes('--mutations') ? 'mutations' : 'renderer', aestheticReview: 'not-performed', cleanup: {} }
+  mode: emptyMutation ? 'empty-mutation' : emptyStates ? 'empty-states' : densityMutation ? 'density-mutation' : interactionStates ? 'interaction-states' : process.argv.includes('--mutations') ? 'mutations' : 'renderer', aestheticReview: 'not-performed', cleanup: {} }
 await mkdir(evidence, { recursive: true })
 
 async function mounted(label, mutation) {
@@ -50,9 +51,9 @@ async function mounted(label, mutation) {
   return { label, code, tests: tests.numTotalTests, failed: tests.numFailedTests, applied: discovery.applied }
 }
 
-async function renderer({ label = 'full', density = false, mutate = false, interactions = false } = {}) {
+async function renderer({ label = 'full', density = false, mutate = false, interactions = false, empty = false } = {}) {
   const { build } = await import('vite'), outDir = join(privateRoot, label, 'renderer')
-  const directory = density ? join(evidence, label) : evidence
+  const directory = density || empty ? join(evidence, label) : evidence
   await mkdir(directory, { recursive: true })
   const xterm = require.resolve('@xterm/xterm'), wrapper = join(privateRoot, 'record-xterm.mjs')
   await writeFile(wrapper, `import xterm from ${JSON.stringify(xterm)};
@@ -61,16 +62,19 @@ async function renderer({ label = 'full', density = false, mutate = false, inter
   `)
   const loaded = {}, styles = {}, applied = []
   const owner = 'packages/client-ui/src/styles/composer.css'
+  const selector = empty ? '.composer-mailbox__empty' : '.composer-mailbox__folders > button'
+  const property = empty ? 'padding' : 'min-height', mutatedValue = empty ? '32px 6px' : '48px'
   const mutatedDeclarations = new WeakSet()
   const cssMutation = { postcssPlugin: 'message-workspace-owning-css-mutation', Declaration(declaration) {
-    if (!mutate || mutatedDeclarations.has(declaration) || declaration.prop !== 'min-height' ||
-      declaration.parent.selector !== '.composer-mailbox__folders > button' || declaration.source?.input.file !== join(root, owner)) return
-    assert.equal(applied.length, 0, 'The original primary navigation height declaration is uniquely consumed')
-    assert.notEqual(declaration.value, '48px', 'The density mutation changes the actual owner')
+    if (!mutate || mutatedDeclarations.has(declaration) || declaration.prop !== property ||
+      declaration.parent.selector !== selector || declaration.source?.input.file !== join(root, owner)) return
+    assert.equal(applied.length, 0, 'The original density declaration is uniquely consumed')
+    assert.notEqual(declaration.value, mutatedValue, 'The density mutation changes the actual owner')
     applied.push({ file: owner, original: hash(declaration.source.input.css), phase: 'postcss-imported-declaration',
-      selector: declaration.parent.selector, property: declaration.prop, originalMinHeight: declaration.value, mutatedMinHeight: '48px' })
+      selector: declaration.parent.selector, property: declaration.prop,
+      ...(empty ? { originalPadding: declaration.value, mutatedPadding: mutatedValue } : { originalMinHeight: declaration.value, mutatedMinHeight: mutatedValue }) })
     mutatedDeclarations.add(declaration)
-    declaration.value = '48px'
+    declaration.value = mutatedValue
   } }
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error', worker: { format: 'es' },
     resolve: { dedupe: ['react', 'react-dom'], alias: [{ find: /^@xterm\/xterm$/, replacement: wrapper }] },
@@ -85,6 +89,7 @@ async function renderer({ label = 'full', density = false, mutate = false, inter
     'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx', 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
     'packages/client-ui/src/components/InputMailboxRecords.tsx', 'packages/client-ui/src/components/InputHistoryList.tsx']) assert.ok(loaded[file], 'The actual production source is compiled: ' + file)
   assert.ok(styles[owner], 'The actual owner stylesheet is compiled')
+  if (empty) assert.ok(loaded['apps/desktop/src/renderer/src/components/MailboxReading.tsx'], 'The original empty-state component is compiled')
   assert.equal(applied.length, mutate ? 1 : 0, 'Only the requested source consumer is mutated')
   if (mutate) assert.equal(applied[0].original, styles[owner], 'The imported declaration binds the unchanged original owner source')
   const outputs = {}
@@ -97,7 +102,7 @@ async function renderer({ label = 'full', density = false, mutate = false, inter
   await writeFile(join(directory, 'compilation.json'), JSON.stringify(proof.compilation, null, 2) + '\n')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const log = []
-  result.process = proof.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(outDir, 'index.html'), privateRoot, directory, density ? 'density' : interactions ? 'interaction-states' : 'full'],
+  result.process = proof.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(outDir, 'index.html'), privateRoot, directory, empty ? mutate ? 'empty-mutation' : 'empty-states' : density ? 'density' : interactions ? 'interaction-states' : 'full'],
     { cwd: root, env, timeoutMs: 180000, onLine: line => log.push(line) })
   await writeFile(join(directory, 'process.log'), log.join('\n'))
   proof.render = JSON.parse(await readFile(join(directory, 'render.json'), 'utf8'))
@@ -106,9 +111,10 @@ async function renderer({ label = 'full', density = false, mutate = false, inter
     assert.equal(proof.process.exitCode, 1, 'The mutant must reach the Renderer and fail its assertion')
     assert.equal(proof.render.passed, false)
     assert.equal(proof.render.failure?.name, 'AssertionError')
-    assert.equal(proof.render.failure?.density?.code, 'PRIMARY_NAV_HEIGHT', 'Only the intended measured density regression kills this mutation')
-    assert.deepEqual(proof.render.failure.density.actual, [48, 48, 48], 'The original three navigation controls consume the mutated height')
-    proof.expectedFailure = { kind: 'measured-density-assertion', code: 'PRIMARY_NAV_HEIGHT', actual: proof.render.failure.density.actual }
+    const code = empty ? 'EMPTY_STATE_HEIGHT' : 'PRIMARY_NAV_HEIGHT'
+    assert.equal(proof.render.failure?.density?.code, code, 'Only the intended measured density regression kills this mutation')
+    assert.deepEqual(proof.render.failure.density.actual, empty ? 82 : [48, 48, 48], 'The original consumer uses the mutated spacing')
+    proof.expectedFailure = { kind: 'measured-density-assertion', code, actual: proof.render.failure.density.actual }
     return proof
   }
   assert.equal(proof.process.exitCode, 0, JSON.stringify(proof.render.failure))
@@ -117,7 +123,11 @@ async function renderer({ label = 'full', density = false, mutate = false, inter
   if (density) return proof
   result.render = proof.render
   assert.ok(result.render.frames.length > 0)
-  if (interactions) {
+  if (empty) {
+    assert.deepEqual(result.render.frames.map(frame => [frame.width, frame.theme, frame.state]),
+      ['dark', 'light'].flatMap(theme => [320, 380, 440].flatMap(width => ['empty-notices', 'empty-collaboration'].map(state => [width, theme, state]))))
+    assert.ok(result.render.scenes.every(scene => scene.originalSurfacePreserved && scene.automationReturn && scene.keyboardClose))
+  } else if (interactions) {
     assert.deepEqual(result.render.frames.map(frame => [frame.width, frame.theme, frame.state]), [[380, 'dark', 'record-hover'], [380, 'dark', 'search-focus']])
     assert.equal(result.render.scenes[0].originalSurfacePreserved, true)
   } else {
@@ -138,12 +148,17 @@ try {
     result.mutations = []
     for (const item of mutations.filter(item => !selectedMutation || item.name === selectedMutation)) result.mutations.push(await mounted(item.name, item.name))
     result.restored = await mounted('restored')
+  } else if (result.mode === 'empty-mutation') {
+    result.emptyMutation = { mutant: await renderer({ label: 'mutant', empty: true, mutate: true }) }
+    result.emptyMutation.restored = await renderer({ label: 'restored', empty: true })
+    const original = result.emptyMutation.mutant.compilation.applied[0]
+    assert.equal(result.emptyMutation.restored.compilation.styles[original.file], original.original, 'The restored empty views consume the unchanged original owner source')
   } else if (result.mode === 'density-mutation') {
     result.densityMutation = { mutant: await renderer({ label: 'mutant', density: true, mutate: true }) }
     result.densityMutation.restored = await renderer({ label: 'restored', density: true })
     const original = result.densityMutation.mutant.compilation.applied[0]
     assert.equal(result.densityMutation.restored.compilation.styles[original.file], original.original, 'The restored probe consumes the unchanged original owner source')
-  } else await renderer({ interactions: interactionStates })
+  } else await renderer({ interactions: interactionStates, empty: emptyStates })
   result.passed = true
 } catch (error) {
   result.failure = { name: error.name, message: error.message, stack: error.stack }
