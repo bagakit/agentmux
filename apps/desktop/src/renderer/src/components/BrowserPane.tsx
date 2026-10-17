@@ -1144,7 +1144,7 @@ function BrowserPaneContent({
           onOpenTimeline={() => openOperationTimeline(key)}
           onOpenChange={setMenuOpen}
         />
-        <button type="button" className="browser-toolbar__secondary" ref={visible ? discussion.buttonRef : undefined} aria-label="Message Browser operator"
+        <button type="button" ref={visible ? discussion.buttonRef : undefined} aria-label="Message Browser operator"
           title="Send an opinion to the original Agent" onClick={event => discussion.open(event.currentTarget)}>{discussion.button}</button>
         {toolbar?.selectElement ? (
           <button
