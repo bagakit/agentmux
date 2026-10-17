@@ -6,7 +6,7 @@ import { buildOwnedFeedbackClearScript } from '../browser-extension/protocol.js'
 const key = '__agentMuxBrowserOperationFeedback'
 const globals = globalThis as any
 const base = { revision: 1, operationId: 'one', navigationId: 'document-one', token: 'private-one', phase: 'running' as const,
-  kind: 'target' as const, label: 'Agent · Click', method: 'click', keyLabel: '', deadline: Number.MAX_SAFE_INTEGER, completedMs: 900, moveMs: 180, preferences: DEFAULT_BROWSER_AGENT_CONTROL, css: browserAgentEffectsCss(DEFAULT_BROWSER_AGENT_CONTROL), clearReason: 'invalidate' as const }
+  kind: 'target' as const, label: 'Agent · Click', operatorName: 'Agent', actionLabel: 'Click', method: 'click', keyLabel: '', deadline: Number.MAX_SAFE_INTEGER, completedMs: 900, moveMs: 180, preferences: DEFAULT_BROWSER_AGENT_CONTROL, css: browserAgentEffectsCss(DEFAULT_BROWSER_AGENT_CONTROL), clearReason: 'invalidate' as const }
 const apply = (payload: any, target?: Element) => target
   ? new Function(`return (${buildBrowserOperationTargetFeedbackDeclaration()})`)().call(target, payload)
   : new Function('return ' + buildBrowserOperationFeedbackScript(payload))()
@@ -82,7 +82,7 @@ describe('actual isolated feedback document script', () => {
     expect(value.point).toEqual({ x: 226.75, y: 106 })
     expect(value.shadow.querySelector('.pointer').style.transform).toBe('translate(226.75px,106px)')
     expect(label.style.transform).toBe('translate(138.5px,76px)')
-    expect(label.style.maxWidth).toBe('144px')
+    expect(label.style.maxWidth).toBe('200px')
   })
   it('omits unknown/offscreen/nonfinite targets instead of guessing a center', () => {
     apply(base, target(-200, -100)); expect(state()).toBeUndefined()
@@ -311,6 +311,15 @@ describe('saved native pointer preferences and acknowledged click decoration', (
     const value = { ...DEFAULT_BROWSER_AGENT_CONTROL, ...preferences }
     return { preferences: value, css: browserAgentEffectsCss(value) }
   }
+  it('keeps the original identity and action in separate bounded label layers', () => {
+    apply({ ...base, operatorName: 'An original long operator identity', actionLabel: 'Hover' }, target())
+    const label = state().shadow.querySelector('.label')
+    expect(label.querySelector('.amux-browser-agent-label-name').textContent).toBe('An original long operator identity')
+    expect(label.querySelector('small').textContent).toBe('Hover')
+    apply({ ...base, revision: 2, phase: 'completed', actionLabel: 'Hover complete' })
+    expect(label.querySelector('.amux-browser-agent-label-name').textContent).toBe('An original long operator identity')
+    expect(label.querySelector('small').textContent).toBe('Hover complete')
+  })
   it('moves the label on the same clock as the pointer, with the saved duration and no action wait', () => {
     apply(base, target())
     apply({ ...base, revision: 2, token: 'second', moveMs: 640, ...customized({ pointerDurationMs: 640 }) }, target(140, 90))
@@ -393,7 +402,7 @@ describe('saved native pointer preferences and acknowledged click decoration', (
       if (tag === 'img') images.push(element as HTMLImageElement)
       return element
     }) as typeof document.createElement)
-    apply(base, target()); apply({ ...base, revision: 2, phase: 'completed', label: 'Agent · Click complete' })
+    apply(base, target()); apply({ ...base, revision: 2, phase: 'completed', label: 'Agent · Click complete', actionLabel: 'Click complete' })
     const host = state().host, expiresAt = state().expiresAt
     apply({ ...base, revision: 3, phase: 'appearance', avatarPng: 'data:image/png;base64,cHJpdmF0ZQ==' })
     images[0]!.dispatchEvent(new Event('load'))
