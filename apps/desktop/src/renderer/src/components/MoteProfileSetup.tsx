@@ -59,8 +59,7 @@ export function MoteProfileSetup({ operation, automatic, onOperation }: {
   async function inspect() {
     const request = ++sequence.current
     try {
-      let value = await api.connections.call('connection.setup.inspect', { operationId: id })
-      if (value.profileUpdate?.stage === 'publication-create') value = await api.connections.call('connection.setup.inspect', { operationId: id, applicationConfiguration: { effect: 'create-application-version', ...(value.profileUpdate.publicationDraft ? { draft: value.profileUpdate.publicationDraft } : {}) } })
+      const value = await api.connections.call('connection.setup.inspect', { operationId: id })
       if (active.current && request === sequence.current) accept(value)
     } catch (error) { if (active.current && request === sequence.current) setReading(previous => ({ ...previous, issue: presentError(error) })) }
   }
@@ -106,10 +105,15 @@ export function MoteProfileSetup({ operation, automatic, onOperation }: {
   const authentication = summary?.authentication
   const authActions = view?.continuation?.stage !== 'confirmed' ? view?.continuation?.actions ?? [] : []
   const publication = view?.applicationConfiguration?.effect === 'create-application-version' ? view.applicationConfiguration : null
-  const actions: Action[] = [...authActions, ...(view?.profileUpdate?.actions ?? []), ...(publication?.actions.filter(action => action.kind === 'create-application-version') ?? [])]
+  const publicationIssue = publication?.review ? null
+    : publication?.reason === 'adapter-unavailable' ? 'The platform’s publication capability is unavailable. The original profile update is kept.'
+    : publication?.reason === 'source-unconfirmed' ? 'The current saved checks do not yet provide a confirmed publication review. Refresh publication checks to read the current result.'
+    : publication?.reason === 'original-effect-unconfirmed' ? 'The original publication result is unconfirmed. Check its original request before continuing.' : null
+  const actions: Action[] = [...authActions, ...(view?.profileUpdate?.actions ?? []), ...(progress?.publicationDraft ? publication?.actions.filter(action => action.kind === 'create-application-version') ?? [] : [])]
   const label = (action: Action) => action.kind === 'confirm-account' ? 'Use this account & update bot'
     : action.kind === 'renew' ? 'Get a new sign-in code'
     : action.kind === 'continue' ? 'Continue sign-in'
+    : action.kind === 'refresh-publication-checks' ? 'Refresh publication checks'
     : action.kind === 'recover-configuration-effect' ? 'Finish saving the original result'
     : action.kind === 'create-application-version' ? 'Publish this reviewed version'
     : progress?.stage === 'publication-status' ? 'Check the original version' : 'Continue this update'
@@ -125,9 +129,10 @@ export function MoteProfileSetup({ operation, automatic, onOperation }: {
         <p>{publication.review.audience ? 'The complete current audience is kept.' : 'The current audience is not confirmed yet.'} Version: {publication.draft?.kind === 'create-version' ? publication.draft.version : 'Not confirmed'}.</p>
         {publication.review.issues.map(issue => <p key={issue} role="status">{issue}</p>)}
       </div></section> : null}
+      {publicationIssue ? <p role="status" className="mote-details__hint" data-publication-unavailable>{publicationIssue}</p> : null}
       <div className="mote-bot-actions" aria-busy={busy}>
         {!reading.view?.operation && !operation.setup ? <button type="button" className="primary-button" disabled={busy} onClick={() => void perform(undefined, true)}>Continue original request</button> : null}
-        {actions.filter(action => action.kind !== 'continue' || !driving).map(action => <button type="button" key={action.actionId} className={action.kind === 'renew' ? 'small-button' : 'primary-button'} data-mote-profile-action={action.kind} disabled={busy} onClick={() => void advance(action)}>{label(action)}</button>)}
+        {actions.filter(action => action.kind !== 'continue' || !driving).map(action => <button type="button" key={action.actionId} className={action.kind === 'renew' || action.kind === 'refresh-publication-checks' ? 'small-button' : 'primary-button'} data-mote-profile-action={action.kind} disabled={busy} onClick={() => void advance(action)}>{label(action)}</button>)}
         <button type="button" className="small-button" onClick={() => void inspect()}>View saved progress</button>
       </div>
       {busy ? <p role="status" className="mote-details__hint">{progress ? stages[progress.stage].label : 'Continuing the original request…'}</p> : driving && authActions.some(action => action.kind === 'continue') ? <p role="status" className="mote-details__hint">Waiting for your phone confirmation…</p> : null}
