@@ -1,12 +1,9 @@
 import { useId } from 'react'
-import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { DEFAULT_GOALS_COMMON_ACTIONS, GOALS_VIEW_IDS, resolveGoalsPreferences, type GoalsPreferences } from '../../../../shared/goals-preferences'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraft } from './use-setting-draft'
 import '../../styles/settings-workflows.css'
-
-const ThemeObjectListIcon = semanticIconComponent('object.list')
-const ThemeLayoutColumns3Icon = semanticIconComponent('layout.columns-3')
+import '../../styles/settings-workview-layout.css'
 
 
 export function GoalsSettingsPane({ collapsed, preferences, onSave, onOpenGoals }: {
@@ -29,14 +26,14 @@ export function GoalsSettingsPane({ collapsed, preferences, onSave, onOpenGoals 
       { defaultView: submittedView.expected, showFinished: submittedFinished.expected, requesterAsSupervisor: submittedSupervisor.expected }))
     submitted.finish(committed); submittedView.finish(committed); submittedFinished.finish(committed); submittedSupervisor.finish(committed)
   }
-  return <div className="settings-pane-stack">
+  return <div className="settings-pane-stack settings-goals">
     <section className="settings-group" data-settings-field="starting-view">
       <header><span>Starting view</span><small>Saved: {savedView.defaultView === 'board' ? 'Board' : 'List'}</small></header>
       <p className="settings-workflows__note">Used when you open a new Goals view. You can still switch views while working.</p>
       <fieldset className="settings-goals-view"><legend>Default Goals view</legend>
         {GOALS_VIEW_IDS.map(choice => <label key={choice} data-selected={view.value === choice}>
           <input type="radio" name={viewGroup} checked={view.value === choice} onChange={() => view.setValue(choice)} />
-          <span className="settings-goals-view__preview" aria-hidden="true" data-view={choice}>{choice === 'list' ? <ThemeObjectListIcon size={22} /> : <ThemeLayoutColumns3Icon size={22} />}</span>
+          <span className="settings-goals-view__preview" aria-hidden="true" data-view={choice}>{[0, 1, 2].map(item => <span key={item}><i /><i /><i /></span>)}</span>
           <span>{choice === 'list' ? 'List' : 'Board'}</span>
         </label>)}
       </fieldset>
@@ -47,7 +44,7 @@ export function GoalsSettingsPane({ collapsed, preferences, onSave, onOpenGoals 
     <section className="settings-group" data-settings-field="goal-supervisor">
       <header><span>Supervisor for new goals</span><small>Saved: {savedView.requesterAsSupervisor ? 'Requester' : 'Choose manually'}</small></header>
       <label className="browser-automation-toggle"><input type="checkbox" checked={supervisor.value} onChange={event => supervisor.setValue(event.target.checked)} aria-label="Use the requesting Agent as Supervisor" />
-        <span><strong>Use the requesting Agent as Supervisor</strong><small>Assign the original requesting Agent or PMO when a new goal is created. It also becomes an assignee and a related session. Continue starts separately.</small></span>
+        <span><strong>Use the requesting Agent as Supervisor</strong><small>The original Agent or PMO becomes Supervisor, assignee and related Session for a new goal. Continue starts separately.</small></span>
       </label>
       <p className="settings-workflows__note">Existing goals and your manual choices stay as saved. Without a confirmed source, choose a Supervisor in the goal.</p>
     </section>
@@ -56,10 +53,10 @@ export function GoalsSettingsPane({ collapsed, preferences, onSave, onOpenGoals 
       <label className="browser-automation-toggle"><input type="checkbox" checked={draft.value} onChange={event => draft.setValue(event.target.checked)} aria-label="Collapse common actions" />
         <span><strong>Start with common actions collapsed</strong><small>Keep Goals focused on your work. Expand common actions whenever you need them.</small></span>
       </label>
-    </section>
-    <div className="settings-workflows__inline-action"><p className="settings-workflows__note">Choose, reorder and edit common actions directly in Goals. They use the same Prompts library.</p>
+      <div className="settings-workflows__inline-action"><p className="settings-workflows__note">Choose, reorder and edit common actions in Goals, using the same Prompts library.</p>
       <button type="button" className="small-button" onClick={onOpenGoals}>Open Goals</button>
-    </div>
+      </div>
+    </section>
     <SettingsSaveBar save={saveState} dirty={draft.dirty || view.dirty || finished.dirty || supervisor.dirty} onSave={() => void save()} />
   </div>
 }

@@ -3,6 +3,7 @@ import { PROJECT_RAIL_DENSITY_DEFAULT, PROJECT_RAIL_DENSITY_IDS, type ProjectRai
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraftRecord } from './use-setting-draft'
 import '../../styles/settings-workflows.css'
+import '../../styles/settings-workview-layout.css'
 
 const ThemeObjectTopicIcon = semanticIconComponent('object.topic')
 const ThemeObjectFolderOpenIcon = semanticIconComponent('object.folder-open')
@@ -28,15 +29,15 @@ export function SpaceSettingsPane({ density, showHistoryTime, onSave, onTopics, 
   }
   const destinations = [
     { id: 'topics', label: 'Topics in Space', description: 'Open your workspace to manage topics and their content.', icon: ThemeObjectTopicIcon, open: onTopics },
-    { id: 'projects', label: 'Projects in Environments', description: 'Manage registered folders and worktrees on each Host.', icon: ThemeObjectFolderOpenIcon, open: onProjects },
+    { id: 'projects', label: 'Projects in Hosts', description: 'Manage registered folders and worktrees on each Host.', icon: ThemeObjectFolderOpenIcon, open: onProjects },
   ]
-  return <div className="settings-pane-stack">
+  return <div className="settings-pane-stack settings-space">
     <section className="settings-group" data-settings-field="project-rail">
       <header><span>Project rail</span><small>Saved: {projectRailDensityLabel(saved)}</small></header>
       <fieldset className="settings-workflows__density"><legend>Project rail density</legend>
         {PROJECT_RAIL_DENSITY_IDS.map(value => <label key={value} data-selected={draft.value.projectRailDensity === value}>
           <span className="settings-workflows__rail-preview" data-density={value} aria-hidden="true">
-            {[0, 1, 2].map(row => <span key={row}><i /><b /></span>)}
+            {['Workspace', 'Research', 'Tools'].map(name => <span key={name}><ThemeObjectFolderOpenIcon size={11} /><span>{name}</span></span>)}
           </span>
           <span className="settings-workflows__choice"><input type="radio" name="space-rail-density" value={value} checked={draft.value.projectRailDensity === value} onChange={() => draft.setField('projectRailDensity', value)} />{projectRailDensityLabel(value)}</span>
         </label>)}
@@ -49,6 +50,7 @@ export function SpaceSettingsPane({ density, showHistoryTime, onSave, onTopics, 
         <input type="checkbox" aria-label="Show commit time" checked={draft.value.gitHistoryShowTime} onChange={event => draft.setField('gitHistoryShowTime', event.target.checked)} />
         <span><strong>Show commit time</strong><small>Show recorded author time beside each commit in the history tree.</small></span>
       </label>
+      <div className="settings-space__commit" aria-label="Git History display preview"><span>Example commit</span><div><code>a1b2c3d</code><strong>Refine project navigation</strong>{draft.value.gitHistoryShowTime && <time>{[10, 42].map(value => String(value).padStart(2, '0')).join(':')}</time>}</div></div>
     </section>
     <section className="settings-group">
       <header><span>Manage your work</span><small>Object settings</small></header>
