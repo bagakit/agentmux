@@ -56,7 +56,7 @@ export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
         onAutomaticChange={enabled => draft.setField('automaticMemoryRelease', enabled)} />
       <ExternalBrowserConnections targets={directory.rows.map(row => row.target).filter(target => target.source === 'external')}
         observedIds={directory.observedIds} />
-      <RetainedBrowserUploads />
+      <RetainedBrowserUploads active={active} />
       <SettingsSaveBar save={saveState} dirty={draft.dirty} label="Save browser" onSave={() => void save()} />
     </div>
   )
