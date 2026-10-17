@@ -34,7 +34,7 @@ export default defineConfig({ ...base, resolve: { ...base.resolve, alias: [...sh
     if (log) { mkdirSync(dirname(log), { recursive: true }); appendFileSync(log, JSON.stringify({ path: relative(process.cwd(), file), originalSHA256: createHash('sha256').update(source).digest('hex'), sha256: createHash('sha256').update(code).digest('hex'), ...(source === code ? {} : { mutation }) }) + '\n') }
     return source === code ? undefined : { code, map: null }
   } }, ...(base.plugins ?? [])],
-  test: { ...base.test, include: process.env.AGENTMUX_READING_DENSITY_ADJACENT === '1' ? [
+  test: { ...base.test, css: true, include: process.env.AGENTMUX_READING_DENSITY_ADJACENT === '1' ? [
     'apps/desktop/test/conversation-source-roles.test.tsx', 'apps/desktop/test/conversation-collected-reply.test.tsx',
     'apps/desktop/test/conversation-chronological-reading.test.tsx', 'apps/desktop/test/conversation-submission-presentation.test.tsx',
     'apps/desktop/test/conversation-process-collapse.test.tsx', 'apps/desktop/test/conversation-landmarks.test.tsx'
