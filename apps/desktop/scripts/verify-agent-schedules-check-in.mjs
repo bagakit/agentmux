@@ -56,7 +56,7 @@ export async function verifyScheduleCheckIn() {
     { definition: paths[9], caller: paths[10], anchor: 'decideCheckIn(this.require(claim.loop.loopId), human, checkAt)' },
     { definition: paths[13], caller: paths[14], anchor: 'runtime.observeCheckIn(target, now, signal, await configStore.get())' },
     { definition: paths[1], caller: paths[13], anchor: 'requireCurrentSource: true, signal' },
-    { definition: paths[6], caller: paths[10], anchor: 'this.scheduler.createCalendar(' },
+    { definition: paths[6], caller: paths[10], anchor: 'this.scheduler.createSchedule(' },
     { definition: paths[7], caller: 'packages/core/src/rpc-native-codec.ts', anchor: 'validateScheduleRpcResult' },
     { definition: paths[18], caller: paths[19], anchor: 'api.schedule.create(request.params)' },
     { definition: paths[10], caller: paths[15], anchor: 'await client.call(method, input)' }

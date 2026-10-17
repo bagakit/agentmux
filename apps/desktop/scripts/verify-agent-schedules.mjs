@@ -1,24 +1,34 @@
 import { fixtureCivil as _hygiene_fixtureCivil, fixtureClock as _hygiene_fixtureClock, fixtureIso as _hygiene_fixtureIso, fixturePath as _hygiene_fixturePath } from "./lib/fixture-values.mjs"
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { createRequire } from 'node:module'
+import { createRequire, isBuiltin } from 'node:module'
 import { spawn, execFile } from 'node:child_process'
 import { once } from 'node:events'
-import { readFile, writeFile, mkdtemp, mkdir, rm, realpath, symlink, rename } from 'node:fs/promises'
-import { resolve, join } from 'node:path'
+import { readFile, writeFile, mkdtemp, mkdir, rm, realpath, symlink, rename, readdir } from 'node:fs/promises'
+import { resolve, join, relative, dirname } from 'node:path'
 import { promisify } from 'node:util'
+import { tmpdir } from 'node:os'
 const run = promisify(execFile), require = createRequire(import.meta.url), viteRequire = createRequire(require.resolve('vite')), { build } = viteRequire('esbuild')
 const root = resolve(import.meta.dirname, '../../..'), fixture = join(root, 'apps/desktop/scripts/fixtures/agent-schedules')
 const taskIndex = process.argv.indexOf('--task'), task = taskIndex < 0 ? 'calendar' : process.argv[taskIndex + 1]
 if (task === 'presentation' || task === 'ui') { await (await import('./verify-agent-schedules-ui.mjs')).verifyScheduleUi(); process.exit(process.exitCode ?? 0) }
 if (task === 'checkin') { await (await import('./verify-agent-schedules-check-in.mjs')).verifyScheduleCheckIn(); process.exit(process.exitCode ?? 0) }
-assert.equal(task, 'calendar', 'This lane currently qualifies the calendar task only.')
-const evidence = join(root, '.tmp/agent-schedules/calendar'); await mkdir(evidence, { recursive: true })
+assert(['calendar', 'timers'].includes(task), 'Choose calendar or timers.')
+const timerTask = task === 'timers'
+const evidence = join(root, '.tmp/agent-schedules', task); await mkdir(evidence, { recursive: true })
 const sha = text => createHash('sha256').update(text).digest('hex')
 const vitest = join(require.resolve('vitest/package.json'), '..', 'vitest.mjs'), config = join(fixture, 'vitest.config.mjs')
 async function tests(label, filter, mutationEnv = {}) {
-  const args = [vitest, 'run', '--config', config, '--reporter=json', '--outputFile', join(evidence, label + '.json'), ...(filter ? ['-t', filter] : [])]
-  let result; try { result = { ...(await run(process.execPath, args, { cwd: root, env: { ...process.env, ...mutationEnv }, maxBuffer: 4 * 1024 * 1024, timeout: 120000 })), exitCode: 0 } } catch (error) { result = { stdout: error.stdout ?? '', stderr: error.stderr ?? '', exitCode: error.code } }
+  const args = [vitest, 'run', '--config', config, ...(timerTask ? ['apps/desktop/test/agent-schedules.test.ts', 'apps/desktop/test/continuous-progress-loop-manager.test.ts', 'apps/desktop/test/continuous-progress-loop-store.test.ts', 'packages/core/test/continuous-progress.test.ts', 'packages/core/test/continuous-progress-scheduler.test.ts', 'packages/core/test/schedule-cli-discovery.test.ts'] : []), '--reporter=json', '--outputFile', join(evidence, label + '.json'), ...(filter ? ['-t', filter] : [])]
+  // Isolate at process start, before Vitest/config/setup or Core modules can import.
+  const suite = await mkdtemp(join(tmpdir(), 'amux-schedule-suite-'))
+  const env = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(AGENTMUX_|CTXMUX_)/.test(key))),
+    AGENTMUX_RUNTIME_DIRECTORY: join(suite, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(suite, 'state'),
+    AGENTMUX_AGENT_SESSION_STORE: join(suite, 'sessions.json'), AGENTMUX_MESSAGE_QUEUE_PATH: join(suite, 'messages.ndjson'), ...mutationEnv }
+  let result
+  try { result = { ...(await run(process.execPath, args, { cwd: root, env, maxBuffer: 4 * 1024 * 1024, timeout: 120000 })), exitCode: 0 } }
+  catch (error) { result = { stdout: error.stdout ?? '', stderr: error.stderr ?? '', exitCode: error.code } }
+  finally { await rm(suite, { recursive: true, force: true }) }
   await writeFile(join(evidence, label + '.log'), result.stdout + result.stderr)
   const report = JSON.parse(await readFile(join(evidence, label + '.json'), 'utf8'))
   assert(report.numTotalTests > 0, 'Source proof cannot be empty')
@@ -26,7 +36,7 @@ async function tests(label, filter, mutationEnv = {}) {
 }
 const sourceFiles = ['packages/core/src/types.ts','packages/core/src/client.ts','packages/core/src/prompt-submission.ts','packages/core/src/agent-session-store.ts','packages/core/src/hosted-client-contract.ts','packages/core/src/hosted-client.ts','packages/core/src/hosted-runtime-service.ts','packages/core/src/headless-runtime.ts','packages/core/src/public-rpc-client.ts','packages/core/src/public-rpc-server.ts','packages/core/src/continuous-progress.ts','packages/core/src/continuous-progress-scheduler.ts','packages/core/src/agent-schedule.ts','packages/core/src/public-rpc-schedules.ts','packages/core/src/schedule-cli.ts','packages/core/src/public-rpc.ts','packages/core/src/public-rpc-service.ts','packages/core/src/rpc-native-codec.ts','packages/core/src/agentmux-cli-commands.ts','packages/core/src/index.ts','apps/desktop/src/main/agent-schedule-calendar.ts','apps/desktop/src/main/continuous-progress-loop-manager.ts','apps/desktop/src/main/continuous-progress-loop-store.ts','apps/desktop/src/main/continuous-progress-delivery.ts','apps/desktop/src/main/runtime-controller.ts','apps/desktop/src/main/desktop-host.ts','apps/desktop/src/main/index.ts','apps/desktop/src/main/ipc.ts','apps/desktop/src/main/ipc-sender-trust.ts','apps/desktop/src/renderer/src/components/ContinuousProgressControl.tsx','apps/desktop/src/renderer/src/lib/api.ts','apps/desktop/src/preload/index.ts','apps/desktop/src/shared/contracts.ts']
 const sourceBindings = await Promise.all(sourceFiles.map(async path => ({ path, sha256: sha(await readFile(join(root,path))) })))
-const testFiles = ['apps/desktop/test/agent-schedules.test.ts','apps/desktop/test/continuous-progress-loop-manager.test.ts','apps/desktop/test/continuous-progress-loop-store.test.ts','packages/core/test/client-submit-prompt-run-binding.test.ts','packages/core/test/continuous-progress.test.ts','packages/core/test/continuous-progress-scheduler.test.ts','apps/desktop/scripts/fixtures/agent-schedules/vitest.config.mjs','apps/desktop/scripts/fixtures/agent-schedules/owner.ts','apps/desktop/scripts/fixtures/agent-schedules/native-agent.mjs','apps/desktop/scripts/fixtures/agent-schedules/electron.ts','apps/desktop/scripts/fixtures/agent-schedules/cli.ts','tsconfig.base.json','apps/desktop/tsconfig.json','packages/core/package.json']
+const testFiles = ['apps/desktop/test/agent-schedules.test.ts','apps/desktop/test/continuous-progress-loop-manager.test.ts','apps/desktop/test/continuous-progress-loop-store.test.ts','packages/core/test/client-submit-prompt-run-binding.test.ts','packages/core/test/continuous-progress.test.ts','packages/core/test/continuous-progress-scheduler.test.ts','packages/core/test/schedule-cli-discovery.test.ts','packages/core/test/helpers/object-cli-rpc.ts','apps/desktop/scripts/fixtures/agent-schedules/vitest.config.mjs','apps/desktop/scripts/fixtures/agent-schedules/isolate-core.mjs','apps/desktop/scripts/fixtures/agent-schedules/owner.ts','apps/desktop/scripts/fixtures/agent-schedules/native-agent.mjs','apps/desktop/scripts/fixtures/agent-schedules/electron.ts','apps/desktop/scripts/fixtures/agent-schedules/cli.ts','tsconfig.base.json','apps/desktop/tsconfig.json','packages/core/package.json']
 const testBindings = await Promise.all(testFiles.map(async path => ({ path, sha256: sha(await readFile(join(root,path))) })))
 const verificationBinding = { path: 'apps/desktop/scripts/verify-agent-schedules.mjs', sha256: sha(await readFile(import.meta.filename)) }
 const privateOnly = process.env.AGENT_SCHEDULE_PROBE_ONLY === '1'
@@ -42,6 +52,8 @@ if (!privateOnly) {
 }
 const baseline = privateOnly ? null : await tests('source-green'); if (baseline) { assert.equal(baseline.exitCode, 0); assert(baseline.passed > 0) }
 const mutations = [
+  { file: 'packages/core/src/continuous-progress-scheduler.ts', from: 'isAgentSchedule(loop) ? loop.nextCheckAt : this.now() + loop.intervalMs', to: 'loop.calendar ? loop.nextCheckAt : this.now() + loop.intervalMs', filter: 'freezes the original.*deadline|keeps the absolute relative deadline', name: 'relative-resume-deadline-reset' },
+  { file: 'apps/desktop/src/main/continuous-progress-loop-manager.ts', from: 'if (nextDue === null) settled.status = \'stopped\'', to: "if (nextDue === null && current.afterMs === undefined) settled.status = 'stopped'", filter: 'freezes the original.*deadline|retains the original relative occurrence', name: 'relative-single-send-keeps-running' },
   { file: 'apps/desktop/src/main/agent-schedule-calendar.ts', from: "civil.hour !== hour || civil.minute !== minute", to: 'false', filter: 'skips DST gaps', name: 'gap-normalization' },
   { file: 'packages/core/src/prompt-submission.ts', from: 'saved.lastOccurrenceAt >= expectedFutureIntent.occurrenceAt', to: 'false', filter: 'admits each occurrence once', name: 'repeat-occurrence' },
   { file: 'packages/core/src/prompt-submission.ts', from: 'promptMessageIdentity(saved.message) !== promptMessageIdentity(message) ||', to: '', filter: 'refuses changed future content fields', name: 'future-message-fields' },
@@ -52,13 +64,14 @@ const mutations = [
   { file: 'apps/desktop/src/main/continuous-progress-loop-manager.ts', from: "futureIntent ? decideFutureProgress(observation, futureIntent)", to: 'false ? decideFutureProgress(observation, futureIntent)', filter: 'keeps the occurrence due', name: 'future-owner-disconnect' }
 ]
 const reds = []
-for (const mutation of privateOnly ? [] : mutations) {
+for (const mutation of privateOnly ? [] : timerTask ? mutations.filter(mutation => mutation.name.startsWith('relative-')) : mutations) {
   const path = join(root, mutation.file), source = await readFile(path, 'utf8')
   assert.equal(source.split(mutation.from).length, 2, 'Exact production mutation must be unique: ' + mutation.name)
   const copy = join(evidence, mutation.name + '.mutant.ts'), mutant = source.replace(mutation.from, mutation.to)
   await writeFile(copy, mutant)
   const red = await tests('red-' + mutation.name, mutation.filter, { AGENT_SCHEDULE_MUTANT_OWNER: path, AGENT_SCHEDULE_MUTANT_COPY: copy })
   assert.notEqual(red.exitCode, 0); assert(red.failed > 0 && red.assertions.some(item => item.failureMessages.some(message => /AssertionError|expected /u.test(message))), 'Mutation must fail a meaningful assertion')
+  assert(!red.assertions.some(item => item.failureMessages.some(message => /Cannot find module|Failed to resolve import|Transform failed|SyntaxError:|ReferenceError:/u.test(message))), 'Setup failures cannot qualify a behavioral RED')
   assert.equal(await readFile(path, 'utf8'), source, 'Shared production source remains byte-identical')
   reds.push({ ...mutation, sourceSha256: sha(source), mutantSha256: sha(mutant), copy, result: red })
 }
@@ -66,7 +79,7 @@ const restored = privateOnly ? null : await tests('source-restored'); if (restor
 const callerPairs = [
   ['saveAgentFuturePromptIntent(', 'packages/core/src/client.ts', 'apps/desktop/src/main/runtime-controller.ts'],
   ['decideFutureProgress(', 'packages/core/src/continuous-progress.ts', 'apps/desktop/src/main/continuous-progress-loop-manager.ts'],
-  ['createCalendar(', 'packages/core/src/continuous-progress-scheduler.ts', 'apps/desktop/src/main/continuous-progress-loop-manager.ts'],
+  ['createSchedule(', 'packages/core/src/continuous-progress-scheduler.ts', 'apps/desktop/src/main/continuous-progress-loop-manager.ts'],
   ['deliverContinuousProgress(', 'apps/desktop/src/main/continuous-progress-delivery.ts', 'apps/desktop/src/main/index.ts'],
   ['validateScheduleRpcResult', 'packages/core/src/public-rpc-schedules.ts', 'packages/core/src/rpc-native-codec.ts'],
   ['schedules: args.progressLoops', 'apps/desktop/src/main/continuous-progress-loop-manager.ts', 'apps/desktop/src/main/ipc.ts'],
@@ -76,22 +89,36 @@ const callers = []
 for (const [symbol, definition, caller] of callerPairs) { const source = await readFile(join(root, caller), 'utf8'); assert(source.includes(symbol), 'Actual external production caller: ' + symbol); assert.notEqual(definition, caller); callers.push({ symbol, definition, caller, sha256: sha(source) }) }
 const ipcSource=await readFile(join(root,'apps/desktop/src/main/ipc.ts'),'utf8'), controlSource=await readFile(join(root,'apps/desktop/src/renderer/src/components/ContinuousProgressControl.tsx'),'utf8')
 const intervalIsolation=[
-  {owner:'apps/desktop/src/main/ipc.ts',fact:'Original interval list excludes calendar',pattern:'list().filter(loop => !loop.calendar && progressTargetMatches(loop, target))'},
-  {owner:'apps/desktop/src/main/ipc.ts',fact:'Original interval action excludes calendar',pattern:'list().find(loop => !loop.calendar && loop.loopId === loopId && progressTargetMatches(loop, target))'},
-  {owner:'apps/desktop/src/main/ipc.ts',fact:'One original owner routes calendar and interval events to their typed consumers',pattern:'send(loop.calendar ? SCHEDULE_CHANGED : CONTINUOUS_PROGRESS_CHANGED, loop)'}
+  {owner:'apps/desktop/src/main/ipc.ts',fact:'Original interval list excludes calendar',pattern:'list().filter(loop => !isAgentSchedule(loop) && progressTargetMatches(loop, target))'},
+  {owner:'apps/desktop/src/main/ipc.ts',fact:'Original interval action excludes calendar',pattern:'list().find(loop => !isAgentSchedule(loop) && loop.loopId === loopId && progressTargetMatches(loop, target))'},
+  {owner:'apps/desktop/src/main/ipc.ts',fact:'One original owner routes calendar and interval events to their typed consumers',pattern:'send(isAgentSchedule(loop) ? SCHEDULE_CHANGED : CONTINUOUS_PROGRESS_CHANGED, loop)'}
 ]
 for(const item of intervalIsolation)assert(ipcSource.includes(item.pattern),item.fact)
-assert(controlSource.includes('loop.calendar') && controlSource.includes('!loop.calendar'),'Original interval UI excludes mixed-version calendar records')
-const buildOptions = { bundle: true, platform: 'node', format: 'esm', external: ['@ctxmux/sdk','fs-native-extensions'], banner: { js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);" }, alias: { electron: join(fixture, 'electron.ts'), '@agentmux/core': join(root, 'packages/core/src/index.ts'), '@agentmux/core/run-status': join(root, 'packages/core/src/agent-run-status.ts'), '@agentmux/core/agent-status': join(root, 'packages/core/src/agent-status-freshness.ts') }, logLevel: 'silent' }
-for (const [source, target] of [[join(root, 'packages/core/node_modules'), join(evidence, 'node_modules')], [join(root, 'packages/core/vendor'), join(evidence, '../vendor')], [join(root, 'packages/core/bin'), join(evidence, '../bin')]]) { try { await symlink(source, target) } catch (error) { if (error.code !== 'EEXIST') throw error } }
-await build({ ...buildOptions, entryPoints: [join(fixture, 'owner.ts')], outfile: join(evidence, 'owner.mjs') })
-await build({ ...buildOptions, entryPoints: [join(fixture, 'cli.ts')], outfile: join(evidence, 'cli.mjs') })
+assert(controlSource.includes('isAgentSchedule(loop)') && controlSource.includes('!isAgentSchedule(loop)'),'Original interval UI excludes mixed-version calendar records')
+const coreManifest = JSON.parse(await readFile(join(root, 'packages/core/package.json'), 'utf8'))
+const coreOutputs = Object.fromEntries(Object.entries(coreManifest.exports).filter(([key, value]) => !key.includes('*') && value.import).map(([key, value]) => [key === '.' ? '@agentmux/core' : '@agentmux/core/' + key.slice(2), join(root, 'packages/core', value.import)]))
+const shippingCli = join(root, 'packages/core/bin/amux')
+// Preserve the shipping Core ESM graph (including its async/cyclic modules), rather than rebundling it.
+const buildOptions = { bundle: true, platform: 'node', format: 'esm', metafile: true,
+  alias: { electron: join(fixture, 'electron.ts') }, logLevel: 'silent', plugins: [{ name: 'original-shipping-core', setup(builder) {
+    builder.onResolve({ filter: /^@agentmux\/core(?:\/|$)/ }, args => ({ path: coreOutputs[args.path], external: true }))
+    builder.onResolve({ filter: /packages\/core\/dist\// }, args => ({ path: resolve(dirname(args.importer), args.path), external: true }))
+    builder.onResolve({ filter: /^[^./]/ }, async args => {
+      if (isBuiltin(args.path) || args.pluginData === 'original-resolution') return undefined
+      const original = await builder.resolve(args.path, { resolveDir: dirname(args.importer), kind: args.kind, pluginData: 'original-resolution' })
+      return original.errors.length ? { errors: original.errors } : { path: original.path, external: true }
+    })
+  } }] }
+const built = await build({ ...buildOptions, entryPoints: [join(fixture, 'owner.ts')], outfile: join(evidence, 'owner.mjs') })
+const compilationInputs = Object.keys(built.metafile.inputs).map(path => resolve(root, path))
+const compiledCoreInputs = (await readdir(join(root, 'packages/core/dist'))).filter(name => /\.(?:js|json)$/.test(name)).map(name => join(root, 'packages/core/dist', name))
+const compiledBindings = await Promise.all([...compiledCoreInputs, shippingCli, ...compilationInputs, join(evidence, 'owner.mjs')].map(async path => ({ path: relative(root, path), sha256: sha(await readFile(path)) })))
 const privateRoot = await mkdtemp(_hygiene_fixturePath("tmp/amsch-")), state = join(privateRoot, 's'), runtime = join(privateRoot, 'r'), workspace = join(privateRoot, 'w')
 await Promise.all([mkdir(state, { mode: 0o700 }), mkdir(runtime, { mode: 0o700 }), mkdir(workspace)])
 await mkdir(join(state, 'ctxmux'), { mode: 0o700 })
 await mkdir(join(state, 'actions'), { mode: 0o700 })
 const baseEnv = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_'))), AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: state,
-  AGENTMUX_AGENT_SESSION_STORE: join(state, 'sessions.json'), AGENTMUX_MESSAGE_QUEUE_PATH: join(state, 'messages.ndjson'), SCHEDULE_PROBE_WORKSPACE: workspace, SCHEDULE_PROBE_AGENT: join(fixture, 'native-agent.mjs'), SCHEDULE_PROBE_CLI: join(evidence,'cli.mjs'), SCHEDULE_PROBE_NOW: String(Date.parse(_hygiene_fixtureIso(24134400000, "minute"))) }
+  AGENTMUX_AGENT_SESSION_STORE: join(state, 'sessions.json'), AGENTMUX_MESSAGE_QUEUE_PATH: join(state, 'messages.ndjson'), SCHEDULE_PROBE_WORKSPACE: workspace, SCHEDULE_PROBE_AGENT: join(fixture, 'native-agent.mjs'), SCHEDULE_PROBE_CLI: shippingCli, SCHEDULE_PROBE_NOW: String(Date.parse(_hygiene_fixtureIso(24134400000, "minute"))) }
 const artifact = join(root, 'packages/core/vendor/ctxmux', `${process.platform}-${process.arch}`, 'bin/ctxmuxd')
 const daemon = spawn(artifact, ['--socket', join(runtime, 'ctxmux.sock'), '--state-dir', join(state, 'ctxmux'), '--readiness-fd', '3'], { env: baseEnv, stdio: ['ignore','ignore','pipe','pipe'] })
 let owner, nativeErrors = ''; daemon.stderr.on('data', part => { nativeErrors += String(part) })
@@ -104,7 +131,7 @@ const boot = async env => { owner = spawn(process.execPath, [join(evidence, 'own
 const cliJournal = []
 const cli = async (env, action, data, fail = false) => {
   const input = join(privateRoot, 'request-' + globalThis.crypto.randomUUID() + '-' + action + '.json'); await writeFile(input, JSON.stringify(data))
-  let result; try { result = { ...(await run(process.execPath, [join(evidence, 'cli.mjs'), 'schedule', action, '--data', input], { env: { ...env, AGENTMUX_RPC_ENDPOINT: 'unix:' + join(runtime, 'schedule.sock') }, timeout: 20000 })), code: 0 } } catch (error) { result = { stdout: error.stdout ?? '', stderr: error.stderr ?? '', code: error.code } }
+  let result; try { result = { ...(await run(process.execPath, [shippingCli, 'schedule', action, '--data', input], { env: { ...env, AGENTMUX_RPC_ENDPOINT: 'unix:' + join(runtime, 'schedule.sock') }, timeout: 20000 })), code: 0 } } catch (error) { result = { stdout: error.stdout ?? '', stderr: error.stderr ?? '', code: error.code } }
   const body = JSON.parse((result.stdout || result.stderr).trim().split('\n').at(-1))
   cliJournal.push({ action, request: data, result: body, exitCode: result.code }); assert.equal(result.code === 0, !fail, 'Actual CLI result: ' + JSON.stringify(body)); return body
 }
@@ -122,12 +149,20 @@ try {
   await new Promise((yes, no) => { daemon.stdio[3].once('data', yes); daemon.once('error', no); daemon.once('exit', code => no(new Error(`Private ctxmux ${code}: ${nativeErrors}`))) })
   const a = await boot(baseEnv), calendar = { kind: 'daily', timezone: 'UTC', time: _hygiene_fixtureClock(9, 30), policies: { gap: 'skip', fold: 'earlier', monthEnd: 'clamp', overdue: 'latest' } }
   assert.equal(a.borrowed, true); assert.equal(a.hostedOwner.processId, a.pid)
-  const created = await cli(baseEnv, 'create', { target: a.target, calendar, prompt: 'one future question', operationId: 'private-schedule-create' })
+  const originalRequest = { target: a.target, ...(timerTask ? { afterMs: 90000 } : { calendar }), prompt: 'one future question', operationId: 'private-schedule-create' }
+  const created = await cli(baseEnv, 'create', originalRequest)
   const schedule = created.result.schedule; assert(schedule.loopId && schedule.revision === 1)
-  const agentCreated = await managedCli('create',{ target:a.target,calendar:{...calendar,kind:'once',date:_hygiene_fixtureCivil(12, 1)},prompt:'original authenticated agent future message',operationId:'private-agent-schedule-create' })
+  if (timerTask) {
+    assert.equal(schedule.afterMs, 90000); assert.equal(schedule.nextCheckAt, Number(baseEnv.SCHEDULE_PROBE_NOW) + 90000)
+    const civil = await cli(baseEnv, 'create', { target: a.target, calendar, prompt: 'saved calendar remains separate', operationId: 'private-calendar-create' })
+    await cli(baseEnv, 'cancel', { scheduleId: civil.result.schedule.loopId, expectedRevision: 1, operationId: 'private-calendar-cancel' })
+  }
+  const agentCreated = await managedCli('create',{ target:a.target,...(timerTask ? {afterMs:300000} : {calendar:{...calendar,kind:'once',date:_hygiene_fixtureCivil(12, 1)}}),prompt:'original authenticated agent future message',operationId:'private-agent-schedule-create' })
   const agentSchedule=agentCreated.result.schedule
   await managedCli('cancel',{scheduleId:agentSchedule.loopId,expectedRevision:1,operationId:'private-agent-schedule-cancel'})
-  const savedDocument = JSON.parse(await readFile(join(state, 'sessions.json'), 'utf8')), savedSession = savedDocument.sessions.find(item => item.agentSessionId === a.target.agentSessionId)
+  const { AgentMuxFileAgentSessionStore } = await import(new URL('../../../packages/core/dist/index.js', import.meta.url).href)
+  const privateStore = new AgentMuxFileAgentSessionStore(join(state, 'sessions.json'))
+  const savedSession = (await privateStore.load()).find(item => item.agentSessionId === a.target.agentSessionId)
   assert.equal(savedSession.futurePromptIntents[schedule.futureIntentId].active, true)
   assert(savedSession.futurePromptIntents[schedule.futureIntentId].prompt.includes('one future question'))
   assert.equal(savedSession.futurePromptIntents[agentSchedule.futureIntentId].message.authorAgentSessionId,a.target.agentSessionId)
@@ -137,27 +172,35 @@ try {
   const b = await boot(overdue); assert.notEqual(a.pid, b.pid); assert.deepEqual(a.target, b.target)
   assert.equal(b.borrowed, true); assert.equal(a.hostedOwner.runtimeId, b.hostedOwner.runtimeId); assert.notEqual(a.hostedOwner.ownerInstanceId, b.hostedOwner.ownerInstanceId)
   const before = await cli(overdue, 'inspect', { scheduleId: schedule.loopId }); assert.equal(before.result.schedule.nextCheckAt, schedule.nextCheckAt)
+  const duplicate = await cli(overdue, 'create', originalRequest); assert.equal(duplicate.result.schedule.nextCheckAt, schedule.nextCheckAt); assert.equal(duplicate.result.schedule.loopId, schedule.loopId)
   await check()
   const unknown = await cli(overdue, 'inspect', { scheduleId: schedule.loopId }); assert.equal(unknown.result.schedule.lastOutcome, 'unknown')
   const originalOperation = unknown.result.schedule.pendingCompletion.operationId
   const nativeBefore = await readFile(join(state, 'native-input.ndjson'), 'utf8')
   assert(nativeBefore.includes('one future question'), 'Real private native provider received the original input'); await writeFile(join(evidence,'native-input.ndjson'),nativeBefore)
   await stop(owner)
-  const c = await boot(overdue); assert.notEqual(b.pid, c.pid)
+  const c = await boot({ ...overdue, SCHEDULE_PROBE_DROP_RECEIPT: '' }); assert.notEqual(b.pid, c.pid)
   assert.equal(c.borrowed, true); assert.equal(b.hostedOwner.runtimeId, c.hostedOwner.runtimeId); assert.notEqual(b.hostedOwner.ownerInstanceId, c.hostedOwner.ownerInstanceId)
   const recovered = await cli(overdue, 'inspect', { operationId: originalOperation }); assert.equal(recovered.result.schedule.pendingCompletion.operationId, originalOperation); assert.equal(recovered.result.schedule.status, 'paused')
   await check(); assert.equal(await readFile(join(state, 'native-input.ndjson'), 'utf8'), nativeBefore, 'Unknown receipt restart never blindly resends')
   await cli(overdue, 'resume', { scheduleId: schedule.loopId, expectedRevision: 1, operationId: 'private-resume' }); await check()
   assert.equal(await readFile(join(state, 'native-input.ndjson'), 'utf8'), nativeBefore, 'Explicit original-operation reconciliation does not duplicate native input')
-  await cli(overdue, 'pause', { scheduleId: schedule.loopId, expectedRevision: 2, operationId: 'private-pause' })
-  await cli(overdue, 'cancel', { scheduleId: schedule.loopId, expectedRevision: 3, operationId: 'private-cancel' })
-  await cli(overdue, 'resume', { scheduleId: schedule.loopId, expectedRevision: 4, operationId: 'private-rejected' }, true)
+  if (timerTask) {
+    const ended = await cli(overdue, 'inspect', { scheduleId: schedule.loopId }); assert.equal(ended.result.schedule.status, 'stopped'); assert.equal(ended.result.schedule.nextCheckAt, schedule.nextCheckAt)
+    await check(); assert.equal(await readFile(join(state, 'native-input.ndjson'), 'utf8'), nativeBefore, 'A sent one-shot never starts another occurrence')
+    await cli(overdue, 'cancel', { scheduleId: schedule.loopId, expectedRevision: 2, operationId: 'private-cancel' })
+    await cli(overdue, 'resume', { scheduleId: schedule.loopId, expectedRevision: 3, operationId: 'private-rejected' }, true)
+  } else {
+    await cli(overdue, 'pause', { scheduleId: schedule.loopId, expectedRevision: 2, operationId: 'private-pause' })
+    await cli(overdue, 'cancel', { scheduleId: schedule.loopId, expectedRevision: 3, operationId: 'private-cancel' })
+    await cli(overdue, 'resume', { scheduleId: schedule.loopId, expectedRevision: 4, operationId: 'private-rejected' }, true)
+  }
   const hostedWire = await readFile(join(state, 'hosted-invocations.ndjson'), 'utf8'), invocations = hostedWire.trim().split('\n').map(line => JSON.parse(line))
   assert(invocations.some(item => item.method === 'saveAgentFuturePromptIntent' && item.args[0].intentId === schedule.futureIntentId && item.args[0].active === true), 'Actual Main borrowed client delegates the saved intent')
   assert(invocations.some(item => item.method === 'submitAgentPrompt' && item.args[0].expectedFutureIntent?.intentId === schedule.futureIntentId), 'Actual Main borrowed client delegates the same future occurrence')
   assert(invocations.some(item => item.method === 'saveAgentFuturePromptIntent' && item.args[0].intentId === schedule.futureIntentId && item.args[0].active === false), 'Cancel converges the original Host admission')
   await writeFile(join(evidence,'hosted-invocations.ndjson'),hostedWire)
-  const finalDocument = JSON.parse(await readFile(join(state, 'sessions.json'), 'utf8')), finalSession = finalDocument.sessions.find(item => item.agentSessionId === a.target.agentSessionId)
+  const finalSession = (await privateStore.load()).find(item => item.agentSessionId === a.target.agentSessionId)
   assert.deepEqual(finalSession.run, savedSession.run); assert.equal(finalSession.futurePromptIntents[schedule.futureIntentId].active, false)
   assert.equal(finalSession.futurePromptIntents[schedule.futureIntentId].lastOperationId, originalOperation)
   await writeFile(join(evidence,'future-admission.json'),JSON.stringify({ saved: savedSession, recovered: finalSession },null,2)+'\n')
@@ -165,6 +208,6 @@ try {
 } finally { await stop(owner); await stop(daemon); await rm(privateRoot, { recursive: true, force: true }) }
 await writeFile(join(evidence,'actual-cli.ndjson'),cliJournal.map(item=>JSON.stringify(item)).join('\n')+'\n')
 await writeFile(join(evidence,'actual-managed-cli.ndjson'),managedCliJournal.map(item=>JSON.stringify(item)).join('\n')+'\n')
-for (const binding of [...sourceBindings,...testBindings,verificationBinding]) assert.equal(sha(await readFile(join(root,binding.path))),binding.sha256,'Qualified candidate remained unchanged: '+binding.path)
-await writeFile(join(evidence, privateOnly ? 'private-probe.json' : 'receipt.json'), JSON.stringify({ schema: 'agentmux.agent-schedules.v1', passed: !privateOnly, task, sourceBindings, testBindings, verificationBinding, qualification: { host: 'private original semantic Host + Main/Runtime methods using finite borrowed SDK over real Unix RPC', provider: 'private native hook fixture with real ctxmux Input', electron: 'unrelated Electron surface APIs are unavailable', userAppOrModel: 'not operated', intervalIsolation:'Finite original IPC/UI Source wiring inspection; not a claim of operating the Electron app' }, typecheck, baseline, mutations: reds, restored, callers, intervalIsolation, restart }, null, 2) + '\n')
+for (const binding of [...sourceBindings,...testBindings,...compiledBindings,verificationBinding]) assert.equal(sha(await readFile(join(root,binding.path))),binding.sha256,'Qualified candidate remained unchanged: '+binding.path)
+await writeFile(join(evidence, privateOnly ? 'private-probe.json' : 'receipt.json'), JSON.stringify({ schema: 'agentmux.agent-schedules.v1', passed: !privateOnly, task, sourceBindings, testBindings, compiledBindings, verificationBinding, qualification: { host: 'private original semantic Host + Main/Runtime methods using finite borrowed SDK over real Unix RPC', provider: 'private native hook fixture with real ctxmux Input', electron: 'unrelated Electron surface APIs are unavailable', userAppOrModel: 'not operated', intervalIsolation:'Finite original IPC/UI Source wiring inspection; not a claim of operating the Electron app' }, typecheck, baseline, mutations: reds, restored, callers, intervalIsolation, restart }, null, 2) + '\n')
 process.stdout.write(JSON.stringify({ passed: !privateOnly, task, tests: restored?.passed ?? 0, mutations: reds.length, restartPids: restart.pids, receipt: join(evidence, privateOnly ? 'private-probe.json' : 'receipt.json') }) + '\n')

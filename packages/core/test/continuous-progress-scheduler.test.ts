@@ -1,6 +1,6 @@
 import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it, vi } from 'vitest'
-import { ContinuousProgressScheduler } from '../src/continuous-progress-scheduler.js'
+import { ContinuousProgressScheduler, isAgentSchedule } from '../src/continuous-progress-scheduler.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
 
@@ -37,6 +37,31 @@ describe('ContinuousProgressScheduler', () => {
     expect(s.recover()).toHaveLength(0)
     now = 1010
     expect(s.recover()).toHaveLength(1)
+  })
+
+  it('keeps the absolute relative deadline on claim, restore and resume while interval time advances', () => {
+    let now = 1000
+    const a = new ContinuousProgressScheduler({ now: () => now, id: () => 'timer' })
+    const timer = a.createSchedule({ hostId: 'local', agentSessionId: 'a', providerId: 'codex', workspacePath: fixturePath('w'), afterMs: 90000, nextDue: 91000, prompt: 'once', operationId: 'create' })
+    expect(isAgentSchedule(timer)).toBe(true); a.pause(timer.loopId); now = 300000
+    const b = new ContinuousProgressScheduler({ now: () => now, id: () => 'tick' }); b.restore(a.list())
+    expect(b.resume(timer.loopId).nextCheckAt).toBe(91000)
+    expect(b.claimTick(timer.loopId)?.loop.nextCheckAt).toBe(91000)
+    const interval = b.create({ ...timer, intervalMs: 10 })
+    expect(isAgentSchedule(interval)).toBe(false)
+    expect(interval.nextCheckAt).toBe(now + 10)
+  })
+
+  it('refuses invalid direct Core timing without creating a schedule or disturbing the original loop', () => {
+    const s = new ContinuousProgressScheduler({ now: () => 1000, id: () => 'original' })
+    const input = { hostId: 'local', agentSessionId: 'a', providerId: 'codex', workspacePath: fixturePath('w'), prompt: 'once', operationId: 'create', nextDue: 91000 }
+    const original = s.createSchedule({ ...input, afterMs: 90000 })
+    for (const timing of [{}, { afterMs: 0 }, { afterMs: -1 }, { afterMs: 1.5 }, { afterMs: Infinity }, { afterMs: Number.MAX_SAFE_INTEGER + 1 }, { afterMs: 90000, calendar: {} }, { afterMs: 90000, checkIn: {} }]) {
+      expect(() => s.createSchedule({ ...input, ...timing } as Parameters<typeof s.createSchedule>[0])).toThrow()
+      expect(s.list()).toEqual([original])
+    }
+    expect(() => s.createSchedule({ ...input, afterMs: 90000, nextDue: Number.MAX_SAFE_INTEGER + 1 })).toThrow()
+    expect(s.list()).toEqual([original])
   })
 
   it.each([1, 100, 1000])('does not copy %i unrelated loop bodies while checking the clock', (count) => {
