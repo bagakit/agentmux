@@ -7,6 +7,7 @@ export type ClientIncidentTransport = {
 }
 export const CLIENT_INCIDENT_DISPATCH_LIMITS = Object.freeze({ reports: 32, bytes: 512 * 1024,
   progressReports: 16, progressBytes: 256 * 1024 })
+const PROGRESS_PUBLICATION_INTERVAL_MS = 1000
 export type ClientIncidentDispatchStatus = {
   pending: number; pendingBytes: number; inFlight: boolean
   dropped: number; rejected: number; unavailable: number; coalesced: number
@@ -43,7 +44,7 @@ function accepted(value: unknown, originalLogId?: string): boolean {
   return item.accepted
 }
 function progressKey(report: AgentMuxClientIncidentReport): string | null {
-  if (report.kind !== 'conversation-reading-progress' || !report.reading) return null
+  if (report.kind !== 'conversation-reading-progress' || !report.reading || report.reading.trigger === 'release') return null
   const scope = report.reading.scope
   return JSON.stringify([scope.ownerInstanceId, scope.consumerId, scope.hostId, scope.agentSessionId, scope.runId])
 }
@@ -52,6 +53,7 @@ function progressKey(report: AgentMuxClientIncidentReport): string | null {
 export function createClientIncidentDispatcher(readTransport: () => ClientIncidentTransport | undefined): ClientIncidentDispatcher {
   const queue: Pending[] = []
   let pendingBytes = 0, sending = false, token: string | null = null, owner: ClientIncidentTransport | undefined
+  let nextProgressAt: number | null = null, wake: ReturnType<typeof setTimeout> | undefined
   let dropped = 0, rejected = 0, unavailable = 0, coalesced = 0
   const lose = (count: number, reason: 'rejected' | 'unavailable' | 'coalesced' | 'budget') => {
     dropped = increment(dropped, count)
@@ -59,8 +61,31 @@ export function createClientIncidentDispatcher(readTransport: () => ClientIncide
     if (reason === 'unavailable') unavailable = increment(unavailable, count)
     if (reason === 'coalesced') coalesced = increment(coalesced, count)
   }
-  const discard = () => { lose(queue.length, 'unavailable'); queue.length = 0; pendingBytes = 0 }
-  const drain = async () => {
+  const clearWake = () => { clearTimeout(wake); wake = undefined }
+  const discard = () => { clearWake(); lose(queue.length, 'unavailable'); queue.length = 0; pendingBytes = 0 }
+  const clock = () => {
+    const now = performance.now()
+    if (!Number.isFinite(now) || now < 0) throw Error('Diagnostic publication clock is unavailable.')
+    return now
+  }
+  const delayProgress = () => {
+    if (nextProgressAt === null) return 0
+    const delay = Math.max(0, nextProgressAt - clock())
+    if (delay > PROGRESS_PUBLICATION_INTERVAL_MS) throw Error('Diagnostic publication clock moved before its original observation.')
+    return delay
+  }
+  const schedule = (): void => {
+    if (sending) return
+    try {
+      if (!queue.length) { clearWake(); return }
+      const delay = queue.some(item => item.progressKey === null) ? 0 : delayProgress()
+      if (delay > 0) {
+        // One wake for the transport Realm, only while a normal tail is queued.
+        if (wake === undefined) wake = setTimeout(() => { wake = undefined; void drain() }, delay)
+      } else { clearWake(); void drain() }
+    } catch { discard() }
+  }
+  const drain = async (): Promise<void> => {
     if (sending) return
     sending = true
     try {
@@ -69,8 +94,23 @@ export function createClientIncidentDispatcher(readTransport: () => ClientIncide
       if (transport !== owner) { owner = transport; token = null }
       if (!token) token = opened(await transport.open())
       if (!token) { discard(); return }
+      let progressBatch: Set<Pending> | null = null
       while (queue.length) {
-        const pending = queue.shift()!
+        const urgent = queue.findIndex(item => item.progressKey === null)
+        let next = urgent
+        if (next < 0) {
+          next = progressBatch === null ? -1 : queue.findIndex(item => progressBatch!.has(item))
+          if (next < 0) {
+            if (delayProgress() > 0) break
+            // Freeze this window's finite membership. Arrivals while an actual
+            // report is pending belong to the next window, even on a fast bridge.
+            progressBatch = new Set(queue.filter(item => item.progressKey !== null))
+            nextProgressAt = clock() + PROGRESS_PUBLICATION_INTERVAL_MS
+            next = queue.findIndex(item => progressBatch!.has(item))
+          }
+        }
+        const pending = queue.splice(next, 1)[0]!
+        progressBatch?.delete(pending)
         pendingBytes -= pending.bytes
         try { if (!accepted(await transport.report(token, pending.report), pending.report.reading?.logId)) lose(1, 'rejected') }
         catch {
@@ -79,7 +119,7 @@ export function createClientIncidentDispatcher(readTransport: () => ClientIncide
         }
       }
     } catch { token = null; discard() }
-    finally { sending = false }
+    finally { sending = false; schedule() }
   }
   return {
     send(input) {
@@ -110,7 +150,7 @@ export function createClientIncidentDispatcher(readTransport: () => ClientIncide
         if (previous) { queue[replace] = pending; pendingBytes += pending.bytes - previous.bytes; lose(1, 'coalesced') }
         else { queue.push(pending); pendingBytes += pending.bytes }
         // The async owner retains its actual open/report slot until the Promise truly settles.
-        void drain()
+        schedule()
       } catch { lose(1, 'rejected') }
     },
     dropped: () => dropped,
