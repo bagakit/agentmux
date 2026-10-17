@@ -83,7 +83,7 @@ it('discovers optional explicit naming and unchanged sync behavior through actua
   expect(f.counts.begin).toBe(0)
 })
 
-it.each([undefined, 'AMUX-Orion'])('creates from original Main saved files and PNG through default Host, official SDK and compiled CLI using name %s with separate receipts', async name => {
+it.each([undefined, 'AMUX-Orion'])('creates from original saved files and PNG through Console and compiled CLI using name %s without duplicate profile effects', async name => {
   const http: Array<{ method?: string; url?: string; data?: Record<string, unknown> }> = [],
     effects: Array<{ kind: string; preclaimed: boolean }> = []
   let f!: Awaited<ReturnType<typeof fixture>>
@@ -167,22 +167,18 @@ it.each([undefined, 'AMUX-Orion'])('creates from original Main saved files and P
     i18n: { zh_cn: { name: expectedName, description: 'Saved public summary.' } },
     avatar: 'https://images.example.invalid/mote-1.png', primaryLang: 'zh_cn'
   } })
-  expect(Buffer.from(http.find((r) => r.url?.endsWith('/app_avatar/upload'))!.data!.avatar as Buffer)).toEqual(imagePng())
+  expect(http).toEqual([])
   expect(complete).toMatchObject({
     snapshot: { name: expectedName },
     operationId: input.operationId,
     defaultLink: { state: 'saved' },
     defaultSave: { observedReceipt: { status: 'saved' } },
     enrollment: { configuration: 'configured' },
-    profile: { desired: { name: expectedName }, upload: { state: 'confirmed' }, patch: { state: 'confirmed' }, publication: 'platform-review-required' }
+    profileOperationId: null,
+    profile: null,
+    issue: null
   })
-  expect(effects).toEqual(['begin', 'authentication', 'authentication', 'authentication', 'authentication', 'authentication', 'upload', 'create', 'credential', 'upload', 'patch'].map((kind) => ({ kind, preclaimed: true })))
-  expect(http.find((r) => r.method === 'PATCH')!.data).toMatchObject({
-    i18ns: [
-      { i18n_key: 'en_us', name: 'Keep English' },
-      { i18n_key: 'zh_cn', name: expectedName, description: 'Saved public summary.' }
-    ]
-  })
+  expect(effects).toEqual(['begin', 'authentication', 'authentication', 'authentication', 'authentication', 'authentication', 'upload', 'create', 'credential'].map((kind) => ({ kind, preclaimed: true })))
   expect((await f.client.call('connection.inspect', { connectionId: complete.connection.connectionId })).connection?.config.label).toBe(expectedName)
   expect(await readFile(join(f.motes[0]!.directory, 'topic.md'), 'utf8')).toBe('# Saved public name\n\nSaved public summary.\n')
   await expect(f.client.call('space.mote.connection.create', { ...input, name: 'Changed manual name' })).rejects.toMatchObject({ code: 'CONNECTION_OPERATION_CONFLICT' })
@@ -215,7 +211,8 @@ it('freezes an explicit manual name across source edits and owner reopening whil
   expect((await resumed.client.call('space.mote.connection.inspect', { operationId: input.operationId })).operation).toEqual(pending)
   const complete = await confirmAndCreateMote(resumed, input.operationId)
   expect(complete.snapshot).toEqual(pending.snapshot)
-  expect(complete.profile?.desired.name).toBe(input.name)
+  expect(complete.profile).toBeNull()
+  expect(complete.enrollment?.preset?.name).toBe(input.name)
   expect((await resumed.client.call('connection.inspect', { connectionId: complete.connection!.connectionId })).connection?.config.label).toBe(input.name)
   const changed = { ...input, name: 'AMUX-New' }
   await expect(resumed.client.call('space.mote.connection.create', changed)).rejects.toMatchObject({ code: 'CONNECTION_OPERATION_CONFLICT' })
@@ -228,7 +225,7 @@ it('freezes an explicit manual name across source edits and owner reopening whil
   expect(synced.profile.desired.name).toBe('Later saved Mote name')
   expect(synced.enrollmentOperationId).toBeNull()
   expect(synced.defaultLink.state).toBe('not-requested')
-  expect(resumed.counts).toEqual({ begin: 0, authentication: 1, creationUpload: 1, create: 1, credential: 1, upload: 2, patch: 2 })
+  expect(resumed.counts).toEqual({ begin: 0, authentication: 1, creationUpload: 1, create: 1, credential: 1, upload: 1, patch: 1 })
   expect(await readFile(join(f.motes[0]!.directory, 'topic.md'), 'utf8')).toBe('# Later saved Mote name\n\nLater saved summary.\n')
 }, 30_000)
 
@@ -271,8 +268,9 @@ it('retains immutable child identity and snapshot when the original saved topic 
   expect(done.snapshot).toEqual(pending.snapshot)
   expect(done.enrollmentOperationId).toBe(pending.enrollmentOperationId)
   expect(done.profileOperationId).toBe(pending.profileOperationId)
-  expect(done.profile!.desired.name).toBe('Saved public name')
-  expect(f.counts).toEqual({ begin: 1, authentication: 1, creationUpload: 1, create: 1, credential: 1, upload: 1, patch: 1 })
+  expect(done.profile).toBeNull()
+  expect(done.enrollment!.preset!.name).toBe('Saved public name')
+  expect(f.counts).toEqual({ begin: 1, authentication: 1, creationUpload: 1, create: 1, credential: 1, upload: 0, patch: 0 })
   await expect(f.client.call('space.mote.connection.create', { ...input, avatar: 'omit' })).rejects.toMatchObject({
     code: 'CONNECTION_OPERATION_CONFLICT'
   })
@@ -313,7 +311,7 @@ it('keeps structural original identities independent of JSON property order', as
   await confirmAndCreateMote(f, input.operationId)
   const done = await f.parent.advance({ operationId: input.operationId }, { actor: { id: actor.id, kind: actor.kind } })
   expect(done.defaultLink.state).toBe('saved')
-  expect(done.profile!.patch.state).toBe('confirmed')
+  expect(done.profile).toBeNull()
   expect(f.counts.begin).toBe(1)
 }, 30_000)
 
@@ -466,7 +464,7 @@ it('keeps later default B when original A completes, while still configuring and
   expect(result.enrollmentOperationId).toBe(first.enrollmentOperationId)
   expect(result.defaultLink).toMatchObject({ state: 'conflict', current: { connection } })
   expect(result.defaultSave!.observedReceipt!.status).toBe('refused-before-write')
-  expect(result.profile!.patch.state).toBe('confirmed')
+  expect(result.profile).toBeNull()
   expect((await f.preferences.read({ kind: 'connection', target: f.target() })).values).toEqual({ connection })
 }, 30_000)
 
@@ -492,7 +490,7 @@ it('keeps default association available when the same healthy app has a later co
   expect(done.defaultLink.state).toBe('saved')
   expect(done.defaultSave!.observedReceipt!.status).toBe('saved')
   expect(done.profile).toBeNull()
-  expect(done.issue).toBe('connection-revised')
+  expect(done.issue).toBeNull()
   expect(f.counts).toEqual({ begin: 1, authentication: 1, creationUpload: 1, create: 1, credential: 1, upload: 0, patch: 0 })
   expect((await f.preferences.read({ kind: 'connection', target: f.target() })).values!.connection).toEqual(done.connection)
 }, 30_000)
@@ -503,8 +501,10 @@ it('keeps a saved default independent of an unknown profile PATCH and never repl
   await f.client.call('space.mote.connection.create', input)
   const done = await confirmAndCreateMote(f, input.operationId)
   expect(done.defaultLink.state).toBe('saved')
-  expect(done.profile!.patch.state).toBe('unknown')
-  expect((await f.client.call('space.mote.connection.advance', { operationId: input.operationId })).profile!.patch.state).toBe('unknown')
+  expect(done.profile).toBeNull()
+  const synced = await f.client.call('space.mote.connection.sync', { operationId: 'explicit-profile-sync', source: input.source, connection: done.connection!, expectedConnectionRevision: 1, avatar: input.avatar })
+  expect(synced.profile!.patch.state).toBe('unknown')
+  expect((await f.client.call('space.mote.connection.advance', { operationId: synced.operationId })).profile!.patch.state).toBe('unknown')
   expect(f.counts).toEqual({ begin: 1, authentication: 1, creationUpload: 1, create: 1, credential: 1, upload: 1, patch: 1 })
   expect((await f.preferences.read({ kind: 'connection', target: f.target() })).values!.connection).toEqual(done.connection)
 }, 30_000)
@@ -519,7 +519,7 @@ it('keeps an original lost File acknowledgement unknown and allows explicit reas
   const writes = f.writes
   await f.client.call('space.mote.connection.advance', { operationId: input.operationId })
   expect(f.writes).toBe(writes)
-  expect(f.counts).toEqual({ begin: 1, authentication: 1, creationUpload: 1, create: 1, credential: 1, upload: 1, patch: 1 })
+  expect(f.counts).toEqual({ begin: 1, authentication: 1, creationUpload: 1, create: 1, credential: 1, upload: 0, patch: 0 })
   const current = await f.preferences.read({ kind: 'connection', target: f.target() })
   expect(
     (
@@ -569,7 +569,7 @@ it('syncs the same exact saved app without another enrollment or default write',
   expect(synced.defaultLink.state).toBe('not-requested')
   expect(synced.defaultSave).toBeNull()
   expect(synced.profile.patch.state).toBe('confirmed')
-  expect(f.counts).toEqual({ begin: 1, authentication: 1, creationUpload: 1, create: 1, credential: 1, upload: 2, patch: 2 })
+  expect(f.counts).toEqual({ begin: 1, authentication: 1, creationUpload: 1, create: 1, credential: 1, upload: 1, patch: 1 })
   expect(f.writes).toBe(writes)
   await expect(
     f.client.call('space.mote.connection.sync', {
@@ -578,7 +578,7 @@ it('syncs the same exact saved app without another enrollment or default write',
       connection: { ...sync.connection, application: { ...sync.connection.application, appId: 'different-app' } }
     })
   ).rejects.toMatchObject({ code: 'CONNECTION_REVISION_CONFLICT' })
-  expect(f.counts.patch).toBe(2)
+  expect(f.counts.patch).toBe(1)
 }, 30_000)
 
 it('requires transport authority and correlates original child receipts without accepting payload-authored privilege', async () => {
@@ -601,7 +601,7 @@ it('requires transport authority and correlates original child receipts without 
       { operationId: input.operationId }
     )
   ).toThrow()
-  expect(f.counts).toEqual({ begin: 1, authentication: 1, creationUpload: 1, create: 1, credential: 1, upload: 1, patch: 1 })
+  expect(f.counts).toEqual({ begin: 1, authentication: 1, creationUpload: 1, create: 1, credential: 1, upload: 0, patch: 0 })
 }, 30_000)
 
 it('preserves original connections when optional parent schema fails, and refuses after its owner closes', async () => {
@@ -759,8 +759,8 @@ it('recovers the same parent after a real child is killed after Files commit and
   const recovered = body(await call('advance', { operationId: request.operationId }))
   expect(recovered.defaultLink).toMatchObject({ state: 'unknown', current: { connection: recovered.connection } })
   expect(recovered.defaultSave.observedReceipt).toBeNull()
-  expect(recovered.profile.patch.state).toBe('confirmed')
+  expect(recovered.profile).toBeNull()
   expect(body(await call('ls', { target: request.source.target })).operations).toEqual([recovered])
   expect(await readFile(join(root, 'file-effects'), 'utf8')).toBe(before)
-  expect((await readFile(join(root, 'platform-effects'), 'utf8')).trim().split('\n')).toEqual(['begin', 'authentication', 'creationUpload', 'create', 'credential', 'upload', 'patch'])
+  expect((await readFile(join(root, 'platform-effects'), 'utf8')).trim().split('\n')).toEqual(['begin', 'authentication', 'creationUpload', 'create', 'credential'])
 }, 60_000)
