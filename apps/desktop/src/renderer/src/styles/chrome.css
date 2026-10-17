@@ -233,6 +233,7 @@
 .tab-context-menu[data-state='open'] {
   animation: menu-in var(--dur-enter) var(--ease-enter);
 }
+.workbench-menu-submenu { max-width: min(44ch, calc(100vw - 2 * var(--sp-4)), var(--radix-popper-available-width, 100vw)); max-height: min(calc(100vh - 2 * var(--sp-4)), var(--radix-popper-available-height, 100vh)); overflow-y: auto; }
 .tab-context-menu__item {
   display: flex;
   align-items: center;
