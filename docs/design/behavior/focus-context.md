@@ -256,7 +256,7 @@ Focus 当前输入来源的自动观察不可用或阅读窗已冻结时，原�
 
 用户进一步希望「如果那个 Agent 自己还执行了的话，在 timeline 上也可以去关联起来」。消息与发送者执行的关联只消费公开 Core 已核的原 message/source、Session 与发送 Run 引用；Run 改变或引用缺席时不把旧消息关联到新执行。可展示同一 Run 的真实在线／working 观察，不用正文、近邻时间或关注事件猜因果，不把投递回执当执行、回复或完成。只有作者身份时仍可查看发送者当前 Context，但不能把当前工作说成本条消息的执行结果。不创建第二份历史或关系注册表。
 
-Focus、Space、Goals 的共享导航只引用[Work 导航上下文](spaces-and-layout.md#worksurveyrecall-与-mote-的导航上下文)。切换表面、选择泳道条目、调整比例、收起音轨时，原 Tab、Region、Session、Run 与健康工作面保持；Focus 与 Space 之间不能因 portal 目的地变化重挂载已存在的终端、Browser 或编辑器。分割树与原组地址仍归 durable Workbench，Focus 只改变投影。明确关闭一格后，原准确 Tab／Group 中仍确认存在的 Region 继续呈现；同一准确展示地址仍存在时，原 Space／Zone 归属不再匹配只产生持续、非阻塞的服务说明，不把健康工作面替换成整面位置错误。原空间选择保持，沿原导航 owner 显式确认当前位置后才更新归属；准确地址本身缺失时仍保原引用并给出位置选择，不能从其它 Group／Session 或首候选猜落点。目标暂未出现或恢复事实未就绪时保留原内容与可见说明，自动尝试接管，不以空白或删除身份代替恢复；每条正常分割分组及其非选中 Tab 都必须保持可恢复。
+Focus、Space、Goals 的共享导航只引用[Work 导航上下文](spaces-and-layout.md#worksurveyrecall-与-mote-的导航上下文)。切换表面、选择泳道条目、调整比例、收起音轨时，原 Tab、Region、Session、Run 与健康工作面保持；Focus 与 Space 之间不能因 portal 目的地变化重挂载已存在的终端、Browser 或编辑器。分割树与原组地址仍归 durable Workbench，Focus 只改变投影。同一准确呈现位置在 Terminal／对话模式交接的可见帧中只显示一份原分割树，不能将保留的新旧工作面叠成额外格。明确关闭一格后，原准确 Tab／Group 中仍确认存在的 Region 继续呈现；同一准确展示地址仍存在时，原 Space／Zone 归属不再匹配只产生持续、非阻塞的服务说明，不把健康工作面替换成整面位置错误。原空间选择保持，沿原导航 owner 显式确认当前位置后才更新归属；准确地址本身缺失时仍保原引用并给出位置选择，不能从其它 Group／Session 或首候选猜落点。目标暂未出现或恢复事实未就绪时保留原内容与可见说明，自动尝试接管，不以空白或删除身份代替恢复；每条正常分割分组及其非选中 Tab 都必须保持可恢复。
 
 执行 Agent 在任一合法呈现中的显式语义聚焦，包括在 Space、Survey 中点击或键盘进入 Region、从 Focus/Goals/Quick Switcher/Topic 定位时，复用本节同一 execution focus 写入入口；该语义记录不覆盖各导航上下文的空间选择，一般空间选择继续由前述导航 owner 负责。最近上下文入口对同一 Session 只显示一个最近位置；同一 Session 内切 Activity/Terminal 不重复记录切换、不创建第二份历史。重启先恢复历史、当前 Session 和原 Tab/Region，再尝试续接。
 
