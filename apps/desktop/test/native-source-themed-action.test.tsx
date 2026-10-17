@@ -24,6 +24,7 @@ it('the original Region menu themes Review independently and keeps cancellation 
   const confirm = vi.spyOn(api.sessions, 'confirmNativeSession').mockResolvedValue({ session: {} as never, persisted: true, current: true } as never)
   await dom.render(<AgentRegionHeader name="Private Agent" executorLabel="Private" sessionId={session.id} sessionKind="agent" executionHost={{ label: 'This Mac', id: 'local', cwd: session.workspacePath, configured: true }} regionId="original-region" readOnly={false} onHistory={undefined} nativeSession={session}/>)
   await act(async () => dom.container.querySelector('.agent-region-header__more')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+  await act(async () => { const details = action('Session details'); details.focus(); details.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })) })
   const review = action('Review source change…')
   expect(review.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('action.review-source'))
   const custom = structuredClone(GRAPHITE_THEME); custom.id = 'custom.native-review'; custom.name = 'Native review'; custom.icons = { 'action.review-source': { kind: 'paths', paths: [{ d: 'M4 4H20V20H4Z' }] } }
