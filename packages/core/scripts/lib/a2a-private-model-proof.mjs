@@ -89,6 +89,7 @@ export async function launchPrivateA2aProof({ repository, sourceInputs,
     const receipt = JSON.parse(await readFile(join(evidence, 'receipt.json'), 'utf8'))
     assert.equal(coordinator.exitCode, 0, receipt.failure?.message || 'Private coordinator failed')
     assert.equal(receipt.passed, true)
+    launcher.completeFeatureCoverage = receipt.completeFeatureCoverage === true
     launcher.passed = true
   } catch (error) { launcher.failure = { message: error.message, stack: error.stack } }
   finally {
@@ -148,7 +149,7 @@ export async function launchPrivateA2aProof({ repository, sourceInputs,
     }
     await writeFile(join(evidence, 'launcher.json'), redact(JSON.stringify(launcher, null, 2) + '\n'), { mode: 0o600 })
   }
-  process.stdout.write(JSON.stringify({ passed: launcher.passed, provisional: minimumOnly, completeFeatureCoverage: launcher.passed && !minimumOnly, receipt: join(evidence, 'receipt.json'), launcher: join(evidence, 'launcher.json') }) + '\n')
+  process.stdout.write(JSON.stringify({ passed: launcher.passed, provisional: minimumOnly, completeFeatureCoverage: launcher.passed && launcher.completeFeatureCoverage === true, receipt: join(evidence, 'receipt.json'), launcher: join(evidence, 'launcher.json') }) + '\n')
   if (!launcher.passed) process.exitCode = 1
 
 }

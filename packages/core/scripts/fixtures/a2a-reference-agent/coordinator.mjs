@@ -17,7 +17,7 @@ const ownership = { daemonPid: null, runPids: [], modelReceipts: ['model-server-
   peerReceipts: ['peer-process.json'], credentialReceipts: ['peer-private-auth.json', 'model-private-auth.json'] }
 const recordOwnership = () => writeFile(join(privateRoot, 'owned-processes.json'), JSON.stringify(ownership), { mode: 0o600 })
 const secrets = new Set([config.httpToken]), sessions = [], receipt = { schema: 'agentmux.a2a-reference-agent-proof.v1', passed: false,
-  modelRequested: model, finiteSample: true, userRuntimeTouched: false, scenarios: [] }
+  modelRequested: model, finiteSample: true, completeFeatureCoverage: false, userRuntimeTouched: false, scenarios: [] }
 const redact = value => [...secrets].reduce((text, secret) => text.replaceAll(secret, '[redacted-private-credential]'), value)
 const save = (name, value) => writeFile(join(evidence, name), redact(typeof value === 'string' ? value : JSON.stringify(value, null, 2) + '\n'), { mode: 0o600 })
 let client, server, daemon, interrupted = false
