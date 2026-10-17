@@ -430,6 +430,14 @@ async function run() {
   assert.deepEqual(message.inputContext, context, 'GUI queue reference must reach the original Host capture reader')
   if (selectionOnly) {
     assert.deepEqual(context.selection, preparedSelection.scene.inputContext.selection, 'The sent input must retain the exact prepared frame and resource')
+    const inspected = await captureReader.read(freeze.result.reference)
+    assert.deepEqual(inspected.reference, freeze.result.reference)
+    assert.deepEqual(inspected.record?.inputContext, context, 'The original public Browser input read retains the same frozen selection')
+    assert.equal(inspected.record?.binding.agentSessionId, session.agentSessionId)
+    assert.equal(inspected.record?.binding.originRun.runId, session.run.runId)
+    assert.equal(Object.hasOwn(inspected.record!, 'prompt'), false, 'Public capture inspection cannot disclose the authored body')
+    receipt.selection.publicInspect = { passed: true, reference: inspected.reference, record: inspected.record,
+      boundary: 'Original Host adapter makes the readonly browser.input.inspect RPC to the actual Main capture owner; no capture, image write or input dispatch is introduced.' }
   }
   assert.equal(message.inputContextSource, 'host-capture')
   assert.equal(message.authorHuman, true, 'The real trusted user GUI remains human-authored')
