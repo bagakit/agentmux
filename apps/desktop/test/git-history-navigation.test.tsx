@@ -179,6 +179,24 @@ it('does not cancel an exact public target for unrelated Session observations', 
   expect(Object.keys(useAppStore.getState().tabs)).toHaveLength(1)
 })
 
+it('does not treat an equivalent descriptor clone or a display title update as a new Git reading target', async () => {
+  const opened = useAppStore.getState().openGitHistory(workspace.id, scope, null, fixed)
+  let finish!: (result: GitCommitDetailsResult) => void
+  commitDetails.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+  const pending = useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+    requestId: 'same-reading-target-new-projection', operation: 'open.git', workspaceId: workspace.id, oid: firstOid, parentOid: nextOid,
+    expectedResource: { hostId: workspace.hostId, workspacePath: workspace.path } })
+  useAppStore.setState(state => {
+    const tab = state.tabs[opened.tabId]!, surface = tab.regions[opened.regionId]!
+    if (surface.kind !== 'git') throw new Error('Expected the original Git reading target')
+    return { tabs: { ...state.tabs, [tab.id]: { ...tab, title: 'Updated display title', regions: { ...tab.regions,
+      [surface.regionId]: { ...surface, scope: { ...surface.scope }, selection: surface.selection ? { ...surface.selection } : null,
+        history: surface.history ? { ...surface.history } : undefined } } } } }
+  })
+  finish(commitResult({ oid: firstOid, parentOid: nextOid }))
+  await expect(pending).resolves.toMatchObject({ operation: 'open.git', read: { kind: 'ready' } })
+})
+
 it('keeps a newer range through pending, failure and review visibility changes, including All', async () => {
   const firstRef = 'refs/heads/first', otherRef = 'refs/remotes/origin/other'
   const refs = [{ name: firstRef, kind: 'local' as const, oid: firstOid }, { name: otherRef, kind: 'remote' as const, oid: nextOid }]
