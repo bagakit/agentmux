@@ -70,6 +70,9 @@ export type ConversationMessageProps = {
   itemRef?: ConversationItemRef
   inputSource?: AgentSessionUserMessageSource
   publicContent?: AgentSessionUserMessage['publicContent']
+  /** Original Core observation and producer, independent of the recorded message author. */
+  inputContext?: AgentSessionUserMessage['inputContext']
+  inputContextSource?: AgentSessionUserMessage['inputContextSource']
   /** Current receiving session Host, independent of this message's sender. */
   executionHostId?: string
   describeSpeaker?: DescribeSpeaker
@@ -153,7 +156,7 @@ function partHasRenderableContent(part: AgentSessionHistoryContentPart): boolean
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
   active = true, compact = false, expandedContent = false, detailsOnlyMetadata = false, recordTitle, messagePhase, recordedIdentity = false, messageDetails, renderSubmissionOriginal, messageActions, located = false, copyText, onCopy,
-  speaker: recordedSpeaker, conversationEvent, sources, conversationSessionId, itemRef, inputSource, publicContent, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, contentBoundary = 'wire', a2aNotificationId, questionAnswers, questionDiagnostic, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
+  speaker: recordedSpeaker, conversationEvent, sources, conversationSessionId, itemRef, inputSource, publicContent, inputContext, inputContextSource, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, contentBoundary = 'wire', a2aNotificationId, questionAnswers, questionDiagnostic, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
   openWorkspaceFile, readPastedImage, readHistoryResource, nativeResourceRecord, openHttpLink, onContinue, onSelectAnnotation, expandedTraces: controlledTraces, onToggleTrace: controlledToggle, traceDisclosure
 }: ConversationMessageProps) {
   const platform = useClientUiPlatform()
@@ -175,6 +178,7 @@ export function ConversationMessage({
     : body
   const hasQuestionAnswers = Boolean(questionAnswers?.length)
   const firstTextIndex = parts.findIndex(part => part.kind === 'text')
+  const contextPartIndex = parts.findIndex(part => part.kind === 'text' || part.kind === 'resource' && part.resourceType === 'text')
   const hasContent = hasQuestionAnswers || parts.some(partHasRenderableContent)
   const hasCopyContent = copyText === undefined ? parts.some((part) => partText(part).length > 0) : copyText.length > 0
   const isTraceOnly = !hasQuestionAnswers && parts.length > 0 && parts.every((part) =>
@@ -445,6 +449,7 @@ export function ConversationMessage({
               {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
             : part.kind === 'text' ? <div key={key} className="log-turn__text" tabIndex={-1}>
               <ConversationInputText visible={active} text={sessionHistoryTextForReading(part)} prefix={index === 0 ? prefix : null}
+                inputContext={index === contextPartIndex ? inputContext : undefined} inputContextSource={inputContextSource}
                 inputMode={inputMarkdown} workspaceRoot={workspaceRoot} homeDir={homeDir}
                 {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
                 {...(readPastedImage ? { readPastedImage } : {})}
@@ -473,6 +478,7 @@ export function ConversationMessage({
               />
             ) : part.resourceType === 'text' && readHistoryResource && nativeResourceRecord ? (
               <ConversationResourceText sources={sources?.parts[index]} active={active} key={key} part={part} partIndex={index} record={nativeResourceRecord} readResource={readHistoryResource} workspaceRoot={workspaceRoot} homeDir={homeDir} inputMode={inputMarkdown} contentBoundary={contentBoundary} {...(a2aNotificationId ? { a2aNotificationId } : {})}
+                inputContext={index === contextPartIndex ? inputContext : undefined} inputContextSource={inputContextSource}
                 {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
             ) : part.resourceType === 'image' && readHistoryResource && nativeResourceRecord ? (
               <ConversationResourceImage active={active} key={key} part={part} partIndex={index} record={nativeResourceRecord} readResource={readHistoryResource} />

@@ -1,0 +1,21 @@
+.conversation-browser-context { min-width: 0; margin-block: var(--sp-1) var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
+.conversation-browser-context > summary { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; padding-block: var(--sp-1); list-style: none; cursor: pointer; }
+.conversation-browser-context > summary::-webkit-details-marker { display: none; }
+.conversation-browser-context > summary > svg { flex: none; }
+.conversation-browser-context > summary:focus-visible, .conversation-browser-context__data > summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; border-radius: var(--radius-sm); }
+.conversation-browser-context[open] > summary > svg:last-child { transform: rotate(90deg); }
+.conversation-browser-context__kind { flex: none; font-size: var(--fs-micro); }
+.conversation-browser-context__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+.conversation-browser-context__body { min-width: 0; padding: var(--sp-2) 0 var(--sp-2) var(--sp-3); border-inline-start: 1px solid var(--line-soft); color: var(--text-2); overflow-wrap: anywhere; }
+.conversation-browser-context__url { margin: 0 0 var(--sp-2); font-size: var(--fs-meta); }
+.conversation-browser-context dl { display: grid; grid-template-columns: minmax(0, 100px) minmax(0, 1fr); gap: var(--sp-1) var(--sp-3); margin: 0; font-size: var(--fs-micro); }
+.conversation-browser-context dt { color: var(--text-3); }
+.conversation-browser-context dd { min-width: 0; margin: 0; }
+.conversation-browser-context code { font-size: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+.conversation-browser-context__selection { margin-top: var(--sp-3); }
+.conversation-browser-context__selection h4 { margin: 0 0 var(--sp-2); font-size: var(--fs-meta); font-weight: 500; }
+.conversation-browser-context__selection p { margin: 0 0 var(--sp-2); }
+.conversation-browser-context__notice { color: var(--text-3); font-size: var(--fs-micro); }
+.conversation-browser-context__data { margin-top: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
+.conversation-browser-context__data > summary { width: fit-content; padding-block: var(--sp-1); cursor: pointer; }
+.conversation-browser-context__data pre { max-height: 240px; overflow: auto; margin: var(--sp-2) 0 0; padding: var(--sp-2); background: var(--surface-0); color: var(--text-2); font-size: inherit; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }

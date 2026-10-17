@@ -1,5 +1,5 @@
 import type { ConversationSourceDisplay } from '../lib/conversation-sources.js'
-import type { AgentSessionHistoryContentPart } from '@agentmux/core'
+import type { AgentSessionHistoryContentPart, AgentSessionUserMessage } from '@agentmux/core'
 import { readSessionHistoryTextResource } from '@agentmux/core/session-history-content'
 import { sessionHistoryTextForReading } from '@agentmux/core/session-user-messages'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
@@ -16,7 +16,7 @@ import { ConversationInputText } from './ConversationInputText.js'
 import type { ConversationContentBoundary } from './ConversationMessage.js'
 
 export function ConversationResourceText({ sources, active = true, part, partIndex, record, readResource, workspaceRoot = '', homeDir = '', inputMode = false,
-  contentBoundary = 'wire', a2aNotificationId, openWorkspaceFile, readPastedImage, openHttpLink }: {
+  contentBoundary = 'wire', a2aNotificationId, inputContext, inputContextSource, openWorkspaceFile, readPastedImage, openHttpLink }: {
   sources?: ConversationSourceDisplay | undefined
   active?: boolean
   part: Extract<AgentSessionHistoryContentPart, { kind: 'resource' }>; partIndex: number
@@ -24,6 +24,8 @@ export function ConversationResourceText({ sources, active = true, part, partInd
   workspaceRoot?: string; homeDir?: string; inputMode?: boolean
   contentBoundary?: ConversationContentBoundary
   a2aNotificationId?: string
+  inputContext?: AgentSessionUserMessage['inputContext']
+  inputContextSource?: AgentSessionUserMessage['inputContextSource']
   openWorkspaceFile?: OpenWorkspaceFile; readPastedImage?: ReadPastedImage; openHttpLink?: (url: string, event: LinkClickModifiers) => void
 }) {
   const pending = useRef<AbortController | null>(null), mounted = useRef(true)
@@ -71,6 +73,7 @@ export function ConversationResourceText({ sources, active = true, part, partInd
     {content?.kind === 'text' ? <div className="log-turn__text">
       {prefix?.sourceLabel ? <span className="log-turn__declared-source">Message header: {prefix.sourceLabel}</span> : null}
       <ConversationInputText visible={active} text={text} prefix={prefix} inputMode={inputMode} workspaceRoot={workspaceRoot} homeDir={homeDir}
+        inputContext={inputContext} inputContextSource={inputContextSource}
         {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
     </div> :
       content?.kind === 'tool-call' || content?.kind === 'tool-result' ? <ConversationToolTrace sources={sources} copyIdentity={owner} part={content} workspaceRoot={workspaceRoot} /> :
