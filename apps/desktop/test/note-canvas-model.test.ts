@@ -96,3 +96,21 @@ it('requires one confirmed shared file observation without manufacturing a catal
   expect(canvasSharedObservation(snapshot, 'shared')).toBeUndefined()
   expect(projectNoteCanvas(snapshot, { kind: 'note', noteId: 'shared' }, []).notes[0]!.observation).toBeUndefined()
 })
+
+it('shows directly embedded shared originals even in a restored collapsed graph without expanding ordinary or nested neighbors', () => {
+  const snapshot = fixture(), resource = snapshot.catalog.pages.root!.resource
+  delete snapshot.catalog.pages.shared
+  snapshot.graph.observations.push({ noteId: 'shared', resource: { ...resource, path: 'block-shared.note.md' }, status: 'read', actualNoteId: 'shared', kind: 'shared-block', fileIdentity: 'confirmed', revision: 'shared-revision', blockIds: ['shared-body'] })
+  snapshot.graph.observations.push({ noteId: 'nested', resource: { ...resource, path: 'block-nested.note.md' }, status: 'read', actualNoteId: 'nested', kind: 'shared-block', fileIdentity: 'confirmed', revision: 'nested-revision', blockIds: ['nested-body'] })
+  const embed = (from: string, to: string) => ({ source: { noteId: from, blockId: from + '-include' }, sourceResource: resource, target: { kind: 'page' as const, noteId: to }, occurrence: { kind: 'stored' as const, referenceId: from + '-' + to }, mode: 'embed' as const, resolution: 'resolved' as const })
+  snapshot.graph.references.push(embed('root', 'shared'), embed('shared', 'nested'))
+  const scope = { kind: 'note' as const, noteId: 'root' }
+  const collapsed = projectNoteCanvas(snapshot, scope, [])
+  expect(collapsed.notes.map(note => note.id)).toEqual(['root', 'shared'])
+  expect(collapsed.notes.find(note => note.id === 'shared')).toMatchObject({ kind: 'shared-block' })
+  expect(collapsed.notes.find(note => note.id === 'shared')!.page).toBeUndefined()
+  expect(collapsed.relationships.filter(edge => edge.kind === 'embed')).toHaveLength(1)
+  snapshot.graph.observations[0]!.fileIdentity = 'unknown'
+  expect(projectNoteCanvas(snapshot, scope, []).notes.map(note => note.id)).toEqual(['root'])
+  expect(projectNoteCanvas(snapshot, { kind: 'notebook', notebookId: 'default' }, [], []).notes).toEqual([])
+})
