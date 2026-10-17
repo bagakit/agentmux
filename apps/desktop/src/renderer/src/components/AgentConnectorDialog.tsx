@@ -19,7 +19,7 @@ import { ConnectorRoomPeople, ConnectorRoomSelection, roomName, useConnectorRoom
 import { ConnectorRoomJoinLink, ConnectorRoomJoinReceipt } from './ConnectorRoomJoinLink'
 import { ConnectorDeliveryDetails } from './ConnectorDeliveryDetails'
 import { parseMotePreferencesReadResult, type MoteConnectionRef } from '@agentmux/core/mote-preferences'
-import { moteConnectionChoice, type AgentMoteConnectionSource } from '../lib/mote-connection-default'
+import { connectionIdentityObservation, connectionNeedsInitialSetup, moteConnectionChoice, type AgentMoteConnectionSource } from '../lib/mote-connection-default'
 
 const CloseIcon = semanticIconComponent('action.close')
 const AgentIcon = semanticIconComponent('object.agent')
@@ -174,10 +174,10 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
       if (moteDefault.status !== 'ready') return
       if (moteDefault.ref) {
         const choice = moteConnectionChoice(moteDefault.ref, connections)
-        if (choice.issue) return
+        if (choice.issue || connectionNeedsInitialSetup(choice.record!)) return
         selected = choice.record!.config.connectionId
       } else {
-        const enabled = connections.filter(item => item.config.enabled)
+        const enabled = connections.filter(item => item.config.enabled && !connectionNeedsInitialSetup(item))
         selected = enabled.length === 1 ? enabled[0]!.config.connectionId : undefined
       }
     }
@@ -297,17 +297,27 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
   </section>
   const applicationChoice = <SelectionField id={fieldId + '-application'} label="Group application" value={connectionId} disabled={busy}
     triggerLabel={connection ? 'Change' : 'Choose'} className="agent-connector-source__change"
-    onValueChange={value => { initialized.current = true; explicitlySelected.current = true; setConnectionId(value); setGroup(''); setConfirmed(false) }} options={[{ value: '', label: 'Choose an application…' }, ...connections.map(item => ({ value: item.config.connectionId, label: item.config.label, disabled: !item.config.enabled, description: item.config.application.domain + ' · ' + item.config.application.appId }))]} />
-  const application = <div className="agent-connector-source">
-    <span className="agent-connector-source__label">Using</span><strong title={connection?.config.label ?? connectionId}>{connection?.config.label ?? (connectionId ? 'Saved application' : 'Choose an application')}</strong>{applicationChoice}
+    onValueChange={value => { initialized.current = true; explicitlySelected.current = true; setConnectionId(value); setGroup(''); setConfirmed(false) }} options={[{ value: '', label: 'Choose an application…' }, ...connections.filter(item => !connectionNeedsInitialSetup(item) || item.config.connectionId === connectionId && (!!binding || !!roomIntent || !!bindingIntent)).map(item => ({ value: item.config.connectionId, label: item.config.label, disabled: !item.config.enabled, description: connectionIdentityObservation(item).label + ' · ' + item.config.application.domain + ' · ' + item.config.application.appId }))]} />
+  const identityObservation = connection ? connectionIdentityObservation(connection) : null
+  const defaultChoice = moteDefault.ref ? moteConnectionChoice(moteDefault.ref, connections) : null
+  const setupPending = connections.filter(connectionNeedsInitialSetup)
+  const currentSetupPending = connection && connectionNeedsInitialSetup(connection) ? connection
+    : defaultChoice?.record && connectionNeedsInitialSetup(defaultChoice.record) ? defaultChoice.record : null
+  const otherSetupPending = setupPending.filter(item => item.config.connectionId !== currentSetupPending?.config.connectionId)
+  const setupRecovery = (item: ConnectionRecord) => <p className="agent-connector-note" key={item.config.connectionId} data-incomplete-application>{item.config.label} · {connectionIdentityObservation(item).label}. {settings ? <button type="button" className="agent-connector-text-action" onClick={() => { settings.openLark({ sessionId: session.id, hostId: target.executionHostId, agentSessionId: target.agentSessionId, connectionId: item.config.connectionId }); onClose() }}>Continue setup</button> : 'Continue its original setup in application settings.'}</p>
+  const application = <div className="agent-connector-application">
+    <div className="agent-connector-source"><span className="agent-connector-source__label">Using</span><strong title={connection?.config.label ?? connectionId}>{connection?.config.label ?? (connectionId ? 'Saved application' : 'Choose an application')}</strong>{applicationChoice}</div>
+    {identityObservation ? <details className="agent-connector-disclosure" data-connection-observation><summary>{identityObservation.label}</summary><p className="agent-connector-note">{identityObservation.detail}</p></details> : null}
+    {currentSetupPending ? setupRecovery(currentSetupPending) : null}
+    {otherSetupPending.length ? <details className="agent-connector-disclosure"><summary>{otherSetupPending.length} {otherSetupPending.length === 1 ? 'bot needs' : 'bots need'} setup</summary>{otherSetupPending.map(setupRecovery)}</details> : null}
   </div>
   const canCreate = mode === 'create' && !binding && !roomIntent
   const canConnect = !bindingPending && (binding ? changingGroup : mode !== 'create' || !!created)
   const previousActivity = !!original.connectionId || bindings.length > 0 || Object.values(intents).some(intent => sameConnectorTarget(intent.target, target))
-  const defaultChoice = moteDefault.ref ? moteConnectionChoice(moteDefault.ref, connections) : null
   const defaultNote = !explicitlySelected.current && !previousActivity && mode !== 'details'
     ? moteDefault.status === 'loading' ? 'Checking this Mote’s default bot. You can choose a bot now.'
       : moteDefault.issue ?? (defaultChoice?.issue ? `Saved default ${moteDefault.ref!.application.appId}: ${defaultChoice.issue}`
+        : defaultChoice?.record && connectionNeedsInitialSetup(defaultChoice.record) ? 'This Mote’s saved bot needs its original setup continued. Its preference is kept.'
         : moteDefault.ref && original.mote && 'name' in original.mote ? `Default bot for ${original.mote.name}` : null)
     : null
 

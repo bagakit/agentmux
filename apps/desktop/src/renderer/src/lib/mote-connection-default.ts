@@ -52,3 +52,21 @@ export function agentMoteConnectionSource(state: ReturnType<typeof useAppStore.g
   return { name: mote.name, target: { spaceId: mote.spaceId, zoneId,
     expectedResource: { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path } } }
 }
+
+/** Saved configuration and exact Host observations are different facts from setup or group delivery. */
+export function connectionIdentityObservation(record: ConnectionRecord): { label: string; detail: string } {
+  if (connectionNeedsInitialSetup(record)) return { label: record.initialSetup?.state === 'incomplete' ? 'Setup incomplete' : 'Setup not confirmed',
+    detail: 'Saved application. Continue its original setup in application settings before a new group chat.' }
+  if (!record.config.enabled) return { label: 'Paused', detail: 'Saved application. Enable it in application settings before a new platform action.' }
+  const authentication = record.observation.authentication
+  const label = authentication.state === 'ready' ? 'Authentication checked'
+    : authentication.state === 'unavailable' ? authentication.reason === 'credential-missing' ? 'Credential unavailable' : 'Authentication unavailable'
+      : authentication.state === 'disabled' ? 'Authentication paused' : 'Authentication not confirmed'
+  const stage = (value: ConnectionRecord['observation']['transport']) => value.state === 'ready' ? 'observed' : value.state === 'disabled' ? 'paused' : value.state === 'unavailable' ? 'unavailable' : 'not confirmed'
+  return { label, detail: `${record.initialSetup?.state === 'complete' ? 'Initial setup was completed' : 'Initial setup is not recorded'} · Live connection ${stage(record.observation.transport)} · Incoming ${stage(record.observation.intake)} · Outgoing ${stage(record.observation.delivery)}. Group message delivery is confirmed separately.` }
+}
+
+/** Only a matching managed flow supplies this fact; absent history is not a failed manual application. */
+export function connectionNeedsInitialSetup(record: ConnectionRecord): boolean {
+  return record.initialSetup !== undefined && record.initialSetup.state !== 'complete'
+}
