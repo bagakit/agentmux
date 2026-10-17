@@ -328,9 +328,20 @@ dispatch threads. Use message ls --direction incoming|outgoing for bounded origi
 and body previews; message read --message-id ID retrieves one original body, without
 creating a delivery batch or advancing ack. Keep nextBeforeSequence with the same Host,
 participant and direction. message read --operation-id retains original intake lookup.
+message events reads the same original message/delivery/notification changes from either side,
+without opening bodies or consuming. Narrow by an original MID or broadcast operation when needed.
+Preserve that exact scope, journal incarnation and throughSequence when paging
+with nextAfterSequence; another journal cannot inherit the old cursor. These observations are not
+model adoption, task acceptance or business completion.
 Use message inbox check only for explicit batch consumption, and read the exact original message or
 dispatch before replying. Keep operationId, messageId, source message, thread and reply
 identities. Pending drafts, queued input, delivery and business reports are different states.
+
+Discover exact Session IDs before agent broadcast; one frozen explicit recipient set is sent
+once per target through the same Inbox owner. Duplicates do not repeat sends; each target has its
+own stable MID/operation and independent saved, not-applied or unconfirmed outcome. After unknown,
+use agent broadcast inspect with the original operation instead of rerunning discovery or changing
+IDs. Broadcast does not grant steer, cross-owner authority or task ownership.
 
 Use agent send for a new authorized cross-Session Inbox message; message read/delivery inspect and
 dispatch inspect/read reconcile the original exchange. Pending edit/send/stop/archive/restore

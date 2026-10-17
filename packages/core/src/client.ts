@@ -1,3 +1,4 @@
+import { runAgentMessageBroadcast, type AgentMuxMessageBroadcastInput, type AgentMuxMessageBroadcastReceipt } from './agent-message-broadcast.js'
 import { AgentMuxMessageNotifications } from './agent-message-notifications.js'
 import type { AgentMuxMessageNotification } from './agent-message-notification.js'
 import { isMessageNotificationInput } from './agent-message-notification.js'
@@ -4104,6 +4105,51 @@ export class AgentMuxClient {
     this.messageReadUsed = true
     void this.observeMessageReads()?.refresh()
     return this.messageQueue.listMessages(input, async () => {
+      if (caller) await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
+    })
+  }
+
+  /** Batch coordination freezes once; every target consumes the existing single-message Inbox owner. */
+  async broadcastMessages(input: AgentMuxMessageBroadcastInput & { capability: string; callerAgentSessionId: string;
+    sourceDevice?: import('./types.js').AgentOperationDevice }, context?: AgentInputCallContext): Promise<AgentMuxMessageBroadcastReceipt> {
+    return runAgentMessageBroadcast(input, { queue: this.messageQueue,
+      ...(input.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(input.sourceDevice) }),
+      authorize: async () => {
+        context?.requestSignal?.throwIfAborted()
+        await context?.assertCurrent?.()
+        const author = await this.authorizeRetainedAgentCaller(input.capability, input.callerAgentSessionId)
+        return { hostId: author.hostId, agentSessionId: author.agentSessionId, runId: author.run.runId }
+      },
+      resolve: async agentSessionId => {
+        const target = await this.currentStoredAgentSession(agentSessionId)
+        return { hostId: target.hostId, agentSessionId: target.agentSessionId, runId: target.run.runId }
+      },
+      send: async (intent, target) => this.submitAgentMessage({ agentSessionId: target.agentSessionId,
+        envelope: { schema: 'agentmux.a2a.v1', messageId: target.messageId, operationId: target.operationId, createdAt: intent.createdAt,
+          sender: { kind: 'agent-session', agentSessionId: intent.author.agentSessionId }, recipient: { kind: 'agent-session', agentSessionId: target.agentSessionId },
+          senderSessionId: intent.author.agentSessionId, senderRunId: intent.author.runId, recipientSessionId: target.agentSessionId, recipientRunId: target.runId,
+          threadId: target.messageId, correlationId: target.messageId, replyTo: null, workspaceId: null, body: intent.body },
+        execution: 'default', sourceChannel: intent.sourceChannel, ...(intent.sourceDevice ? { sourceDevice: intent.sourceDevice } : {}),
+        caller: { agentSessionId: input.callerAgentSessionId, capability: input.capability } }, context)
+    })
+  }
+
+  /** Read the original author's frozen batch and current original-message receipts, never resend. */
+  async inspectMessageBroadcast(input: { operationId: string; caller?: { agentSessionId: string; capability: string } }): Promise<AgentMuxMessageBroadcastReceipt | null> {
+    return this.messageQueue.inspectBroadcast(input.operationId, async authorSessionId => {
+      if (!input.caller) return
+      await this.authorizeRetainedAgentCaller(input.caller.capability, input.caller.agentSessionId)
+      if (authorSessionId !== undefined && authorSessionId !== input.caller.agentSessionId) throw new AgentMuxError(
+        'An Agent can only inspect its own original broadcast.', 'MESSAGE_PARTICIPANT_MISMATCH')
+    })
+  }
+
+  /** Original journal events from either side; no Runtime connection or consumer mutation. */
+  async listMessageEvents(input: import('./agent-message-events.js').AgentMuxMessageEventsQuery & { caller?: { agentSessionId: string; capability: string } }): Promise<import('./agent-message-events.js').AgentMuxMessageEventsPage> {
+    const caller = input.caller
+    if (caller && caller.agentSessionId !== input.participantSessionId) throw new AgentMuxError(
+      'An Agent can only browse its own original events.', 'MESSAGE_PARTICIPANT_MISMATCH')
+    return this.messageQueue.listMessageEvents(input, async () => {
       if (caller) await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
     })
   }
