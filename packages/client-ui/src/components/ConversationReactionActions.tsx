@@ -11,7 +11,7 @@ const glyphs = { check: 'action.confirm', play: 'action.start', 'message-circle'
 /** The same bounded SVG vocabulary in replies and the Prompt editor. */
 export function PromptReactionIconView({ icon, size = 15 }: { icon: PromptReactionIcon; size?: number }) {
   const semantic = glyphs[icon]
-  return <SemanticIcon name={semantic} size={size} strokeWidth={1.8} aria-hidden="true" />
+  return <SemanticIcon name={semantic} size={size} aria-hidden="true" />
 }
 
 export type ConversationReactionSend = (

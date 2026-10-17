@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { SemanticIcon } from '@agentmux/client-ui/icons'
 import type { AgentSessionUserMessage } from '@agentmux/core'
 import { retainConversationInputs } from '@agentmux/core/conversation'
 import { resolveFocusRecentInputs } from '../../../shared/focus-preferences'
@@ -101,7 +102,7 @@ function OriginalInput({ inspected, request, active, onClose }: { inspected: Ins
   }, [inspected])
   const meta = inputPresentation(inspected.message)
   return <div className="agent-input-recall__original" role="region" aria-label="Complete original input">
-    <header><button type="button" onClick={onClose} aria-label="Back to recent inputs">←</button>
+    <header><button type="button" onClick={onClose} aria-label="Back to recent inputs"><SemanticIcon name="navigation.back" size={13} /></button>
       <div><strong>{meta.author}</strong><time dateTime={meta.date?.toISOString()} title={meta.provenance}>{meta.time}</time></div>
       <small>Original input</small></header>
     <div ref={body} data-agent-input-reading className="agent-input-recall__original-body" tabIndex={0} aria-label="Original input text and images">
