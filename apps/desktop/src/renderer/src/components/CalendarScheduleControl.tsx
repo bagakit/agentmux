@@ -21,9 +21,11 @@ function dueLabel(schedule: ContinuousProgressLoop): string {
 }
 
 /** Observes the original Main owner; opening another display never creates a timer or arrangement. */
-export function CalendarScheduleControl({ target: requestedTarget, onStatusChange, initialMessage, initialMessageContext, onMessageChange }: {
+export function CalendarScheduleControl({ target: requestedTarget, onStatusChange, initialMessage, initialMessageContext, onMessageChange, presented = true }: {
   target: ContinuousProgressTarget; onStatusChange?: (status: CalendarScheduleStatus) => void
   initialMessage?: string; initialMessageContext?: string; onMessageChange?: (message: string) => void
+  /** The controller continues observing its original target before its details are presented. */
+  presented?: boolean
 }) {
   const occurrence = useRef({ target: requestedTarget, initialMessage, initialMessageContext, alive: true })
   if (!sameTarget(occurrence.current.target, requestedTarget)) occurrence.current = { target: requestedTarget, initialMessage, initialMessageContext, alive: true }
@@ -139,7 +141,7 @@ export function CalendarScheduleControl({ target: requestedTarget, onStatusChang
     if (schedule.revision === undefined || pending) return
     void perform({ action, params: { scheduleId: schedule.loopId, expectedRevision: schedule.revision, operationId: 'schedule-' + crypto.randomUUID() } })
   }
-  return <section className="calendar-schedules" aria-label="Calendar arrangements" data-schedule-state={status}>
+  return presented ? <section className="calendar-schedules" aria-label="Calendar arrangements" data-schedule-state={status}>
     <header className="calendar-schedules__heading"><h3>Arrangements</h3><span>{status === 'unconfirmed' ? 'Unconfirmed' : visible.length + ' saved'}</span></header>
     <p className="continuous-progress-control__help">Runs while Desktop and this Host are connected. Closing Desktop keeps saved arrangements and may delay them.</p>
     {error ? <div className="calendar-schedules__notice" role="status"><p>{error}</p><p>Manual messages remain available.</p>{pending ? <div className="calendar-schedules__actions"><button type="button" className="small-button" disabled={busy} onClick={() => void inspectOriginal()}>Check original operation</button><button type="button" className="small-button" disabled={busy} onClick={() => void perform(pending)}>Retry original operation</button></div> : null}</div> : null}
@@ -172,5 +174,5 @@ export function CalendarScheduleControl({ target: requestedTarget, onStatusChang
         <button type="submit" className="small-button" disabled={busy || !!pending || !prompt.trim()}>Save arrangement</button>
       </form> : null}
     </details>
-  </section>
+  </section> : null
 }
