@@ -17,7 +17,7 @@ import { ConversationAnnotationNote, type ConversationAnnotationNoteHandle } fro
 
 /** A reading/input presentation, not a Session, Reader, Terminal or lifecycle owner. */
 export function SessionActivityPresentation({ target, regionId, sourceKey, sessionId, name, executorLabel, executionHost,
-  activity, eligible, recovery, readOnly, resourceOrigin, composer, onAnnotate, renderFrame, selectRegion }: {
+  activity, eligible, recovery, readOnly, resourceOrigin, composer, onAnnotate, renderFrame, selectRegion, header, takeoverSurface, historyOpen = false, onCloseHistory, historyReturnTrigger, historyReturnLabel }: {
   target: WorkbenchViewTarget
   regionId: string
   sourceKey: string
@@ -25,6 +25,13 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
   name: string
   executorLabel: string
   executionHost: RegionExecutionHost
+  /** SessionPane supplies its original controls, bound to this exact display. */
+  header?: ReactNode
+  takeoverSurface?: ReactNode
+  historyOpen?: boolean
+  onCloseHistory?: () => void
+  historyReturnTrigger?: HTMLButtonElement | null | undefined
+  historyReturnLabel?: string
   activity?: ComponentProps<typeof ActivityView>
   eligible: boolean
   recovery?: ReactNode
@@ -51,6 +58,18 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
   const openProseLink = fileOpening.activateHttp
   const surfaceRef = useRef<HTMLElement>(null)
   const noteRef = useRef<ConversationAnnotationNoteHandle>(null)
+  const closeHistory = useCallback(() => {
+    const document = surfaceRef.current?.ownerDocument
+    const closingFocus = document?.activeElement
+    onCloseHistory?.()
+    selectRegion()
+    document?.defaultView?.requestAnimationFrame(() => {
+      const active = document.activeElement
+      if (visible && historyReturnTrigger?.isConnected && !historyReturnTrigger.disabled &&
+        !historyReturnTrigger.closest('[hidden], [inert], [aria-hidden="true"]') &&
+        (!active || active === document.body || active === closingFocus)) historyReturnTrigger.focus()
+    })
+  }, [onCloseHistory, selectRegion, visible, historyReturnTrigger])
   const selectAnnotation = useCallback((selection: ConversationAnnotationSelection) => {
     selectRegion()
     noteRef.current?.select(selection, sessionId)
@@ -65,14 +84,14 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
       {...(fileContext.kind !== 'unconfirmed' && fileContext.kind !== 'unassigned' ? { openWorkspaceFile: openProjectFile } : {})}
       openHttpLink={openProseLink}
       {...(onAnnotate ? { onSelectAnnotation: selectAnnotation } : {})}
-      {...(activity.conversationReading ? { conversationReading: { ...activity.conversationReading, enabled: visible && eligible, opened: false, onClose: undefined,
+      {...(activity.conversationReading ? { conversationReading: { ...activity.conversationReading, enabled: visible && eligible, opened: historyOpen, onClose: historyOpen ? closeHistory : undefined, ...(historyReturnLabel ? { returnLabel: historyReturnLabel } : {}),
         consumer: { ...activity.conversationReading.consumer, regionId, presentationId: workbenchSessionStageHostId(target, regionId),
           visible, activityShown: eligible, viewMode: 'activity' } } } : {})} />
   }
   const reading = activity?.conversationReading ?? presented.current.content?.props.conversationReading
   if (presented.current.content) presented.current.content = retainActivityControls(presented.current.content, {
     activitySemantic: activity?.activitySemantic ?? 'unknown',
-    ...(reading ? { conversationReading: { ...reading, enabled: visible && eligible, opened: false, onClose: undefined,
+    ...(reading ? { conversationReading: { ...reading, enabled: visible && eligible, opened: historyOpen, onClose: historyOpen ? closeHistory : undefined, ...(historyReturnLabel ? { returnLabel: historyReturnLabel } : {}),
       consumer: { ...reading.consumer, regionId, presentationId: workbenchSessionStageHostId(target, regionId),
         visible, activityShown: eligible, viewMode: 'activity' } } } : {})
   })
@@ -84,8 +103,9 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
     {renderFrame(<SessionRegionHost arrangement="columns" className="workbench-session-region-host">
       <section ref={surfaceRef} className="agent-surface" data-agent-surface-mode="activity"
         data-session-presentation={hostId} aria-hidden={!visible} inert={!visible}>
-        <AgentRegionHeader name={name} executorLabel={executorLabel} sessionId={sessionId} sessionKind="agent" executionHost={executionHost}
-          regionId={regionId} readOnly={readOnly} onHistory={undefined} {...(target.headerPortalTargetId ? { portalTargetId: target.headerPortalTargetId } : {})} />
+        {header ?? <AgentRegionHeader name={name} executorLabel={executorLabel} sessionId={sessionId} sessionKind="agent" executionHost={executionHost}
+          regionId={regionId} readOnly={readOnly} onHistory={undefined} {...(target.headerPortalTargetId ? { portalTargetId: target.headerPortalTargetId } : {})} />}
+        {takeoverSurface}
         <div className="agent-body" data-observation-surface="workflow">
           {!eligible ? recovery ?? <div role="status" className="workbench-restore-notice">Activity is retained here. Live Terminal and recovery remain in the original Session work surface.</div> : null}
           {service && eligible ? <div role="status" className="activity-feed__read-notice">{service}</div> : null}

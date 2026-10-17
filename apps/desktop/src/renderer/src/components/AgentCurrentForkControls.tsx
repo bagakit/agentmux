@@ -24,7 +24,7 @@ type Controls = { reason: string | null; readOnly: boolean; state: ForkState; be
 /** Lives with SessionPane, outside the dismissible menu, so an unknown operation is retained. */
 export function useAgentCurrentForkControls({ session, linkOrigin, readOnly }: {
   session: CurrentForkSession | null; linkOrigin: OpenHttpLinkOrigin; readOnly: boolean
-}): ReactNode {
+}): (origin?: OpenHttpLinkOrigin) => ReactNode {
   function restoredState(): ForkState {
     const current = useAppStore.getState()
     const operationId = retainedCurrentForkOperation(session, current.spatialRequests ?? {})
@@ -41,7 +41,6 @@ export function useAgentCurrentForkControls({ session, linkOrigin, readOnly }: {
   useEffect(() => {
     if (owner.current !== session?.id) { owner.current = session?.id; update(restoredState()) }
   }, [session?.id])
-  const reason = currentForkUnavailableReason(session, linkOrigin, readOnly)
   function currentSession(review: CurrentForkReview) {
     const current = useAppStore.getState().sessions.find(value => value.id === review.source.agentSessionId)
     return current?.kind === 'agent' ? current : null
@@ -109,13 +108,16 @@ export function useAgentCurrentForkControls({ session, linkOrigin, readOnly }: {
     } catch (cause) { publish(operationId, { notice: presentError(cause) }) }
     finally { publish(operationId, { busy: false }) }
   }
-  if (!session) return null
-  return <AgentCurrentForkControls reason={reason} readOnly={readOnly} state={state} begin={() => {
-    if (reason || stateRef.current.busy || stateRef.current.dispatching || stateRef.current.operationId && stateRef.current.report?.outcome !== 'opened') return
-    const review = reviewCurrentFork(session, linkOrigin, crypto.randomUUID())
-    update({ ...emptyState(), operationId: review.operationId, review })
-  }} cancel={() => { if (!stateRef.current.busy && stateRef.current.review) update(emptyState()) }}
-    select={destination => { void select(destination) }} inspect={() => { void inspect() }} />
+  return (origin = linkOrigin) => {
+    if (!session) return null
+    const reason = currentForkUnavailableReason(session, origin, readOnly)
+    return <AgentCurrentForkControls reason={reason} readOnly={readOnly} state={state} begin={() => {
+      if (reason || stateRef.current.busy || stateRef.current.dispatching || stateRef.current.operationId && stateRef.current.report?.outcome !== 'opened') return
+      const review = reviewCurrentFork(session, origin, crypto.randomUUID())
+      update({ ...emptyState(), operationId: review.operationId, review })
+    }} cancel={() => { if (!stateRef.current.busy && stateRef.current.review) update(emptyState()) }}
+      select={destination => { void select(destination) }} inspect={() => { void inspect() }} />
+  }
 }
 
 /** Menu presentation only. Closing/Escape unmounts this view, not its operation controller. */

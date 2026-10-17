@@ -78,7 +78,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
       stop.requestStop(nativeSession ? { id: nativeSession.id, hostId: nativeSession.control.hostId, control: nativeSession.control } : null, name, moreTrigger.current)
     } }] : entries}
     onTakeOver={onTakeOver ? () => { handoffFocus.current = true; onTakeOver(moreTrigger.current ?? undefined) } : undefined}
-    onHistory={onHistory ? () => onHistory(moreTrigger.current ?? undefined) : undefined} onRefreshObservation={onRefreshObservation} refreshing={refreshing}
+    onHistory={onHistory ? () => { handoffFocus.current = true; onHistory(moreTrigger.current ?? undefined) } : undefined} onRefreshObservation={onRefreshObservation} refreshing={refreshing}
     nativeSourceActions={nativeSourceActions} currentConversationActions={currentConversationActions} />
   function closeMenuFocus(event: Event) {
     if (handoffFocus.current || menuObservation.dialogOpen || stop.dialog !== null) event.preventDefault()

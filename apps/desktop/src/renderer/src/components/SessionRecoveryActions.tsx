@@ -17,7 +17,7 @@ const ThemeActionSearchIcon = semanticIconComponent('action.search')
 
 /** Explicit choices share the existing spatial/queue correlation across dialog and Renderer mounts. */
 export function SessionRecoveryActions({ source, restoring, restoreDisabled = false, restoreLabel = 'Restore original', restoreIcon = 'action.resume-session', workingLabel = 'Restoring…', onRestore, onTakeOver }: {
-  source: RecoverySource; restoring: boolean; restoreDisabled?: boolean; restoreLabel?: string; restoreIcon?: 'action.resume-session' | 'action.refresh' | 'status.waiting'; workingLabel?: string; onRestore: () => void; onTakeOver?: (() => void) | undefined
+  source: RecoverySource; restoring: boolean; restoreDisabled?: boolean; restoreLabel?: string; restoreIcon?: 'action.resume-session' | 'action.refresh' | 'status.waiting'; workingLabel?: string; onRestore: () => void; onTakeOver?: ((trigger: HTMLButtonElement) => void) | undefined
 }) {
   const ownerDocument = useWorkbenchDocument()
   const [mode, setMode] = useState<RecoveryMode | null>(null), [destination, setDestination] = useState<'agent' | 'mote'>('agent')
@@ -84,7 +84,7 @@ export function SessionRecoveryActions({ source, restoring, restoreDisabled = fa
     <button type="button" className="small-button" disabled={restoreDisabled || restoring} title={source.diagnostic} onClick={onRestore}>
       <SemanticIcon name={restoreIcon} size={12} /> {restoring ? workingLabel : restoreLabel}
     </button>
-    {onTakeOver ? <button type="button" className="small-button" data-takeover-session-id={source.agentSessionId} data-takeover-region-id={source.regionId} onClick={onTakeOver}><ThemeNavigationForwardIcon size={12} /> Take over</button> : null}
+    {onTakeOver ? <button type="button" className="small-button" data-takeover-session-id={source.agentSessionId} data-takeover-region-id={source.regionId} onClick={event => onTakeOver(event.currentTarget)}><ThemeNavigationForwardIcon size={12} /> Take over</button> : null}
     <button type="button" className="small-button" onClick={() => { setDestination('agent'); setExecutorId(''); setMoteKey(''); setMode('analyze') }}><ThemeActionSearchIcon size={12} /> Analyze…</button>
     <Dialog.Root recoveryCloseDisabled={busy} open={mode !== null} onOpenChange={next => { if (!next) close() }}>
       <DocumentOverlayPortal component={Dialog.Portal}>
