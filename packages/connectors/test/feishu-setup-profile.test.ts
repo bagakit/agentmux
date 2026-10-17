@@ -160,18 +160,20 @@ it('preserves actual current entries and the feature-selected split sharing sett
   const plan = await configuration.publicationPlan('create-application-version', states, draft, null, { creatorIsCurrent: false, initialVersion: null, profileUpdate: { readbackStepId: 'original-readback', createdVersion: null } })
   const body = JSON.parse(plan.privateIntent!).body
   expect(body.pcDefaultAbility).toBe('webapp')
-  expect(body).not.toHaveProperty('mobileDefaultAbility')
+  expect(body.mobileDefaultAbility).toBe('')
   expect(body.b2cShareSplitConfigSuggest).toEqual(split)
   expect(body).not.toHaveProperty('b2cShareSuggest')
   expect(body).not.toHaveProperty('applyReasonConfig')
+  const calls = wire()
+  await configuration.createVersion({ ...scope(), privateIntent: plan.privateIntent! })
+  expect(JSON.parse(String(calls[0]!.init.body))).toMatchObject({ pcDefaultAbility: 'webapp', mobileDefaultAbility: '', b2cShareSplitConfigSuggest: split })
   const changedEntry = await configuration.publicationPlan('create-application-version', states, { ...draft!, desktopEntry: 'bot' }, null, { creatorIsCurrent: false, initialVersion: null, profileUpdate: { readbackStepId: 'original-readback', createdVersion: null } })
   expect(changedEntry.privateIntent).toBeNull()
 })
 
-it.each(['versions', 'version-number', 'desktop-entry', 'mobile-entry', 'audience', 'sharing', 'split-sharing', 'features'] as const)('keeps an absent required %s source unconfirmed for profile publication', async missing => {
+it.each(['versions', 'desktop-entry', 'mobile-entry', 'audience', 'sharing', 'split-sharing', 'features'] as const)('keeps an absent required %s source unconfirmed for profile publication', async missing => {
   const states = profilePublicationStates(), pending = JSON.parse(states.pending)
   if (missing === 'versions') states.versions = '{}'
-  if (missing === 'version-number') states.versions = JSON.stringify({ versions: [{}] })
   if (missing === 'desktop-entry') { delete pending.pcDefaultAbility; states.pending = JSON.stringify(pending) }
   if (missing === 'mobile-entry') { delete pending.mobileDefaultAbility; states.pending = JSON.stringify(pending) }
   if (missing === 'audience') states.visibility = JSON.stringify({ whiteList: audience.whiteList })
@@ -235,7 +237,9 @@ it('derives the next original profile version and preserves full published audie
 it.each([
   { versions: [{ versionId: 'old-label', appVersion: 'old-release', versionStatus: 2 }, { versionId: 'numeric', appVersion: '1.0.11', versionStatus: 0 }], expected: '1.0.12' },
   { versions: [{ versionId: 'old-label', appVersion: 'old-release', versionStatus: 2 }], expected: '0.0.1' },
-  { versions: [], expected: '0.0.1' }
+  { versions: [], expected: '0.0.1' },
+  { versions: [{}, null, { appVersion: '1.0.11' }], expected: '1.0.12' },
+  { versions: [{}, null], expected: '0.0.1' }
 ])('derives an unoccupied reference version without gating on unrelated historical labels: $expected', async ({ versions, expected }) => {
   const p = leaf(), states = { ...publicationStates(), versions: JSON.stringify({ versions }) }
   expect(await p.publicationDraft(states, 'Original update')).toMatchObject({ version: expected, visibility: 'current' })
