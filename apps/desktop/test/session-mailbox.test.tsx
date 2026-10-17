@@ -253,7 +253,6 @@ it.each(['entry', 'content'] as const)('pins the hover preview through %s intera
   const list = vi.spyOn(api.continuousProgress, 'list').mockResolvedValue([])
   const observe = vi.spyOn(api.continuousProgress, 'onChanged')
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
-  const form = mailbox().querySelector('.continuous-progress-control form')!
   const methods = popoverMethods()
   vi.useFakeTimers()
   await pointer(trigger(), 'pointerover')
@@ -263,7 +262,11 @@ it.each(['entry', 'content'] as const)('pins the hover preview through %s intera
     expect(click.defaultPrevented).toBe(true)
   } else {
     await pointer(mailbox().querySelector('[id$="-progress-tab"]')!, 'pointerdown')
-    await folder('progress')
+  }
+  await folder('progress')
+  const form = mailbox().querySelector('.continuous-progress-control form')!
+  expect(form).not.toBeNull()
+  if (surface === 'content') {
     const input = form.querySelector<HTMLInputElement>('input[type="number"]')!
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '17')
@@ -708,7 +711,8 @@ it('projects loop status without adding unread or pending mail, switching pages,
   expect(trigger().getAttribute('aria-label')).toContain('User Messages 1 pending')
   await act(async () => resolveList([]))
   expect(trigger().getAttribute('data-progress-state')).toBe('inactive')
-  expect(mailbox().querySelector('[id$="-progress"] .continuous-progress-control__heading')?.textContent).toContain('Not enabled')
+  expect(trigger().title).toContain('Continuous progress: inactive (not enabled)')
+  expect(trigger().getAttribute('aria-label')).toBe(trigger().title)
   await toggle('open')
   expect(mailbox().querySelector('[aria-selected="true"]')?.getAttribute('aria-label')).toBe('User Messages: 1 pending')
   for (const loop of [progressLoop(), progressLoop('paused'), { ...progressLoop('paused'), lastOutcome: 'unknown' as const }]) {
