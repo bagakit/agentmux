@@ -2,6 +2,7 @@
 import { act } from 'react'
 import { createHash } from 'node:crypto'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { diagnosisText } from './helpers/connection-diagnosis-text'
 import { moteBotUi } from './fixtures/mote-bot-ui'
 import { confirmAndCreateMote } from './fixtures/mote-connection-owner'
 import { moteProfileWeb } from './fixtures/mote-profile-web'
@@ -76,22 +77,22 @@ it('updates the original profile before an incomplete publication audience stops
   const before = f.registration.mock.calls.length
   await f.click('Copy diagnosis')
   await vi.waitFor(() => expect(copy).toHaveBeenCalledTimes(1))
-  const diagnosis = JSON.parse(copy.mock.calls[0]![0])
+  const diagnosis = diagnosisText(copy.mock.calls[0]![0])
   const setupId = document.querySelector('[data-console-profile-task]')!.getAttribute('data-console-profile-task')!
   const original = await f.client.call('connection.setup.inspect', { operationId: setupId })
-  expect(diagnosis.setupObservation).toMatchObject({
+  expect(diagnosis.observations['setup:' + setupId].setupObservation).toMatchObject({
     scope: 'single-view-observation', operationId: setupId, revision: original.operation!.revision,
     profileUpdate: { stage: 'publication-create', state: 'attention', actionKinds: ['refresh-publication-checks'] },
     publication: { capability: original.applicationConfiguration!.capability, reason: original.applicationConfiguration!.reason ?? null, review: { issues: ['Both complete current visibility ranges are required'] } }
   })
-  expect(diagnosis.setupObservation.publication.sources).toHaveLength(5)
-  expect(diagnosis.setupObservation.publication.sources).toEqual(expect.arrayContaining([
+  expect(diagnosis.observations['setup:' + setupId].setupObservation.publication.sources).toHaveLength(5)
+  expect(diagnosis.observations['setup:' + setupId].setupObservation.publication.sources).toEqual(expect.arrayContaining([
     { subject: 'publication-visibility', request: 'confirmed', secureStorage: 'stored' },
     { subject: 'publication-versions', request: 'confirmed', secureStorage: 'stored' }
   ]))
-  expect(diagnosis.next).toBeNull()
-  expect(diagnosis.entries.some((entry: any) => entry.effect === 'update-application-profile' && entry.request === 'confirmed' && entry.secureStorage === 'stored')).toBe(true)
-  expect(JSON.stringify(diagnosis.setupObservation)).not.toMatch(/Saved public name|Saved public summary|original-member|account|qrPayload|pngDataUrl|base64|csrf|cookie|https?:\/\//iu)
+  expect(diagnosis.traces.every(trace => trace.status === 'complete')).toBe(true)
+  expect(diagnosis.traces.flatMap(trace => trace.entries).some((entry: any) => entry.effect === 'update-application-profile' && entry.request === 'confirmed' && entry.secureStorage === 'stored')).toBe(true)
+  expect(JSON.stringify(diagnosis.observations['setup:' + setupId].setupObservation)).not.toMatch(/Saved public name|Saved public summary|original-member|account|qrPayload|pngDataUrl|base64|csrf|cookie|https?:\/\//iu)
   expect(f.registration.mock.calls).toHaveLength(before)
 }, 30_000)
 
@@ -471,9 +472,9 @@ it.each(['/app/upload/image', '/base_info/'])('keeps an unknown Console %s at it
   await vi.waitFor(() => expect(document.querySelector('.connector-request-trace')?.textContent).toContain('HTTP 502'))
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   await f.click('Copy diagnosis')
-  const diagnosis = JSON.parse(copy.mock.calls[0]![0])
-  expect(diagnosis.entries.some((entry: any) => entry.request === 'unknown' && entry.diagnostic?.httpStatus === 502)).toBe(true)
-  expect(diagnosis.entries.every((entry: any) => entry.network === null)).toBe(true)
+  const diagnosis = diagnosisText(copy.mock.calls[0]![0])
+  expect(diagnosis.traces.flatMap(trace => trace.entries).some((entry: any) => entry.request === 'unknown' && entry.diagnostic?.httpStatus === 502)).toBe(true)
+  expect(diagnosis.traces.flatMap(trace => trace.entries).every((entry: any) => entry.network === null)).toBe(true)
   expect(JSON.stringify(diagnosis)).not.toMatch(/pngDataUrl|base64|csrf|cookie|controlled-tenant-access|private-mote|https?:\/\//iu)
   const before = native.requests.length
   await f.click('View saved progress')
