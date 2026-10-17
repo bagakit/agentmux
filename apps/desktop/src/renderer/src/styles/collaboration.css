@@ -117,7 +117,7 @@
 .collaboration-agent--active .collaboration-agent__point { background: var(--green); }
 .collaboration-agent__mark[data-tier=closed] { justify-content: center; padding: 0; border: 0; border-radius: 50%; background: transparent; }
 .collaboration-agent--unknown .collaboration-agent__point { background: transparent; border: 1px solid var(--text-2); }
-.collaboration-agent--overview .collaboration-agent__mark strong { font-size: 17px; }
+.collaboration-agent--overview .collaboration-agent__mark strong { font-size: var(--fs-body); }
 .collaboration-canvas__progress { position: absolute; bottom: 18px; right: 18px; color: var(--text-2); font-size: var(--fs-micro); pointer-events: none; }
 
 @media (max-width: 850px) {
@@ -136,3 +136,28 @@
   .collaboration-inspector { flex: 0 1 42%; width: 100%; min-height: 0; border-left: 0; border-top: 1px solid var(--line); padding: 14px 16px; }
   .focus-view-switch button { padding-inline: 7px; }
 }
+
+/* Overview is a region map; labels keep their reading size while geometry remains in world space. */
+.collaboration-area[data-empty=true] { border-color: transparent; background: transparent; }
+.collaboration-area[data-empty=true] .collaboration-area__heading { color: var(--text-3); padding-inline: 8px; }
+.collaboration-area[data-empty=true] .collaboration-area__heading span { color: var(--text-2); font-weight: 400; }
+.collaboration-area__summary { position: absolute; top: 0; left: 0; display: flex; align-items: baseline; gap: 7px; width: var(--collaboration-label-width); height: var(--collaboration-label-height); min-height: 0; padding: 2px 5px; overflow: hidden; transform: scale(var(--collaboration-label-scale)); transform-origin: top left; border: 0; border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font-size: var(--fs-meta); text-align: left; cursor: pointer; pointer-events: auto; }
+.collaboration-area__summary > span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; }
+.collaboration-area__summary small { flex: 0 0 auto; color: var(--text-2); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+.collaboration-area__summary:hover { background: var(--surface-3); }
+.collaboration-area[data-empty=true] .collaboration-area__summary { padding: 0 3px; background: transparent; }
+.collaboration-area[data-empty=true] .collaboration-area__summary span { font-size: var(--fs-micro); font-weight: 400; color: var(--text-2); }
+.collaboration-area[data-empty=true] .collaboration-area__summary small { display: none; }
+.collaboration-area[data-overview=true]:not([data-empty=true]) { background: color-mix(in srgb, var(--surface-2) 60%, transparent); border-color: var(--line); }
+.collaboration-agent[data-overview=true] { display: flex; align-items: center; justify-content: center; }
+.collaboration-agent__dot { display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
+.collaboration-agent__dot .collaboration-agent__point { width: 12px; height: 12px; }
+.collaboration-agent__dot[aria-pressed=true] { outline: 3px solid var(--green); outline-offset: 2px; }
+.collaboration-connections .react-flow__edge[data-emphasis=related] .collaboration-edge { stroke-width: 2; opacity: .95; }
+.collaboration-connections .react-flow__edge[data-emphasis=muted] .collaboration-edge { opacity: .12; }
+.collaboration-connections .react-flow__edge:focus-visible .collaboration-edge, .collaboration-connections .react-flow__edge:hover .collaboration-edge { opacity: 1; stroke-width: 2; }
+.collaboration-edge { vector-effect: non-scaling-stroke; }
+.collaboration-area__summary[data-compact=true] { justify-content: center; align-items: center; padding: 0; background: transparent; }
+.collaboration-area__symbol { flex: 0 0 auto; width: 7px; height: 7px; border: 1px solid var(--text-2); border-radius: 2px; }
+.collaboration-area[data-empty=true] .collaboration-area__symbol { width: 4px; height: 4px; border-color: var(--text-3); }
+.collaboration-area__summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; overflow: visible; }
