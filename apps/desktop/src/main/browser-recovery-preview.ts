@@ -69,11 +69,8 @@ export class BrowserRecoveryPreviewStore {
           await mkdir(this.profileDirectory(actual.profileId), { recursive: true })
           if (signal?.aborted || !isCurrent()) return { status: 'skipped' }
           await durableWriteFile(this.path(actual), document, { ...(signal ? { signal } : {}), requireDirectorySync: true })
-          // No read can see this result before its source has been rechecked in this queue.
-          if (signal?.aborted || !isCurrent()) {
-            await rm(this.path(actual), { force: true })
-            return { status: 'skipped' }
-          }
+          // The replaced record is qualified history. Navigation after commit cannot retire it;
+          // explicit Close and Profile removal remain ordered behind publication in this queue.
         }
         this.setWarning(actual)
         return { status: 'recorded' }
