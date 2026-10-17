@@ -984,60 +984,37 @@ remain available independently of Enrollment observations or automatic traffic.
 
 ## Application profile operations
 
-The original Connection owner provides `connection profile get/sync/advance/inspect/ls`.
-`get` performs explicit platform reads. `inspect` and bounded `ls` read only the
-original local journal. A trusted user/device uses `sync --input FILE|-` with
-`operationId`, `connectionId`, `expectedConnectionRevision` and a nonempty
-`desired` object containing `name`, `description` or `avatar: {pngDataUrl}`.
-The PNG follows the original saved avatar contract: a bounded 256-pixel square.
-Image bytes, native prepared requests and credentials never appear in receipts.
+Bot profile writes use the original `connection setup` management owner. Begin
+with an explicit `profile-update` goal containing at least one desired name,
+description or saved PNG, plus publication notes. The original account must sign
+in and be confirmed for the exact application. No application is created and no
+bot credential is substituted for management authorization.
 
-The Host freezes the exact application, configuration revision, requested fields,
-PNG bytes/hash and each serialized request before claiming its effect in the
-original connection database. Upload and profile PATCH have independent facts.
-A duplicate original request joins its receipt; changed input or actor cannot
-replace it. After uncertain delivery or a process loss, inspect the same operation.
-`advance` may continue known not-dispatched steps or refresh observations, but
-never replays an unknown upload or PATCH. A live Host can save its matching
-verified response after transient journal failure without repeating the effect.
-Different application identities remain independently usable.
+The original Setup journal freezes private input and publishes only safe desired
+text and image hash. Its finite flow reads the current complete application and
+published audience, uploads the original image when requested, writes complete
+base information, reads back the result, and creates/submits its original version.
+Name updates apply to configured locales; a single description changes only the
+reliable primary locale, preserving other translations and unrelated fields.
+The PNG upload uses its real dimensions. Publishing keeps the complete current
+included and excluded audience. Other pending changes require explicit review;
+profile intent alone cannot publish unrelated application changes.
 
-Failed upload/PATCH slots may include an optional `diagnostic` with the original
-`stage`, an observed numeric `nativeCode`, an available real `httpStatus`, and a
-finite allowlisted `transportCode`. These fields do not change effect or replay
-eligibility. Stage-only means numeric/transport details were not recorded;
-historical absent diagnostics remain absent. `inspect` and the public CLI read
-the same saved facts without platform calls. Diagnostics include no raw exception,
-URL, request body, headers or credentials. The native avatar-upload leaf retains its
-nonzero code before SDK data unwrapping while preserving an unknown upload.
+`profileUpdate` exposes the current finite stage and original offered actions.
+Use the same `connection setup inspect/advance` and exact operation identity;
+inspection and request-trace reads are local. Unknown effects are not sent again,
+including through a new account or alias. Secure receipt recovery does not
+repeat a platform request. No alternate write route or compatibility executor
+remains.
 
-The official leaf uses the application's own credentials, without user OAuth.
-Name and description target the leaf's recorded language (`zh_cn` for Feishu,
-`en_us` for Lark), not every language or an inferred primary language. Because
-per-entry array merging is not established, preparing these fields requires an
-exact original application i18n baseline, preserves other languages and known
-fields, and checks that baseline again before PATCH. This is not a platform CAS;
-concurrent edits can still happen between the read and write. Missing baseline
-or observed drift prevents that name/description write. Avatar-only PATCH does
-not acquire this read-permission prerequisite.
-
-A confirmed PATCH means the configuration was written and requires platform
-review/publication. No profile operation calls publish: the official publish
-endpoint submits the application's whole pending version and cannot isolate
-profile changes. An optional adapter-provided `managementUrl` is a continuation
-into platform management, not a publication receipt or a version review link.
-The current native bot name/avatar are separate observations. Online description
-requires `online_version_id` and an exact matching application/version response;
-application-level description remains metadata. A returned language does not
-infer the language of native bot fields, and an avatar URL does not certify
-original PNG equality.
-
-Management permission, review state and application creation-source restrictions
-affect only this original profile action. Missing source metadata, existing IM
-permissions or successful enrollment do not establish management eligibility.
-In particular, PersonalAgent management eligibility remains unqualified until
-an actual platform response supplies that fact. Existing messaging, Binding,
-Agent work and explicit creation of another identity remain available.
+The Connection owner retains `connection profile get/inspect/ls`. `get` uses the
+official SDK only for explicit current online observations. The native bot name
+and avatar, application metadata, exact online-version description and version
+status remain separate facts; an image URL does not certify PNG equality.
+`inspect` and bounded `ls` read historical profile receipts without platform
+requests. Historical missing diagnostics remain absent, and old unknown writes
+never become Console requests. Retired `sync` and `advance` write methods are
+not advertised or executed. Existing messaging and Agent work remain available.
 
 
 ### Saved Mote profile operations
@@ -1066,9 +1043,12 @@ finishes before creating and submitting that first version; genuine platform
 approval remains a separate result. The offered `continue-setup` action continues
 that same Setup, while inspect/list/recover-local remain local reads.
 Parents without that intent retain their original creation-only scope and saved
-child facts. The resulting exact application may separately use the original
-profile owner; upload, PATCH, publication requirements and online observations
-retain their separate meanings. Explicit profile sync does not publish.
+child facts. An explicit Mote profile sync freezes a separate `profile-update` Setup child.
+Its confirmed management account drives the Console update and intended
+publication; additional pending changes require review. The parent exposes the
+fixed `setupOperationId` and safe Setup summary. An explicit offered Setup
+decision is carried in the parent `advance` input’s `setup` field. Historical
+Profile children remain read-only and are not reinterpreted as new Setup tasks.
 
 Default preference saving remains an original Files CAS. The parent records the
 full save input and dispatch claim before calling it. A lost File acknowledgement
@@ -1078,7 +1058,7 @@ original preference-save intent with the same already-created application.
 `sync` changes neither the Mote default nor any existing group Binding.
 `inspect/ls` read only the original parent journal; explicit `advance` can inspect
 or explicitly advance the fixed children, without replaying unknown creation, upload,
-PATCH or File writes. Independent Motes and original connections remain usable.
+profile or File writes. Independent Motes and original connections remain usable.
 
 The original Mote Profile exposes these parent operations from its bot row.
 The preview reads `topic.md` and the saved avatar through their original public
