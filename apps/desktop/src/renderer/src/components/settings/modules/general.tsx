@@ -32,7 +32,7 @@ export const generalSettingsModule = {
     { id: 'crash-log', title: 'Show crash log', keywords: 'crash log diagnostics local file', kind: 'action' },
   ],
   savedSummary: (config) => config.copyPathsAsAbsolute === true ? 'Absolute paths' : 'Home paths (~)',
-  Pane({ config }) {
-    return <GeneralSettingsPane copyPathsAsAbsolute={config.copyPathsAsAbsolute} onSave={saveGeneralSettings} />
+  Pane({ config, onNavigate }) {
+    return <GeneralSettingsPane copyPathsAsAbsolute={config.copyPathsAsAbsolute} onSave={saveGeneralSettings} onOpenRecovery={() => onNavigate('continuity')} onOpenHosts={() => onNavigate('hosts')} />
   }
 } as const satisfies SettingsModule

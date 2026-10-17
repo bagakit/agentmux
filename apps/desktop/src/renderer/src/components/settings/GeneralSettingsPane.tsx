@@ -4,10 +4,13 @@ import { crashLogRevealNotice } from '../../lib/crash-log-reveal'
 import type { CrashLogRevealResult } from '../../../../shared/contracts'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraftRecord } from './use-setting-draft'
+import './general-settings.css'
 
 export type GeneralSettingsValues = { copyPathsAsAbsolute: boolean }
 
-export function GeneralSettingsPane({ copyPathsAsAbsolute, onSave }: {
+export function GeneralSettingsPane({ copyPathsAsAbsolute, onSave, onOpenRecovery, onOpenHosts }: {
+  onOpenRecovery?: () => void
+  onOpenHosts?: () => void
   copyPathsAsAbsolute: boolean | undefined
   onSave: (value: GeneralSettingsValues, expected: GeneralSettingsValues) => Promise<void>
 }) {
@@ -37,7 +40,7 @@ export function GeneralSettingsPane({ copyPathsAsAbsolute, onSave }: {
   }
 
   return (
-    <div className="settings-pane-stack">
+    <div className="settings-pane-stack general-settings">
       <section className="settings-group" data-settings-field="copy-paths">
         <header><span>Project path display and copying</span><small>Saved: {saved ? 'Absolute' : 'Abbreviated'}</small></header>
         <label className="browser-automation-toggle">
@@ -48,19 +51,24 @@ export function GeneralSettingsPane({ copyPathsAsAbsolute, onSave }: {
           </span>
         </label>
       </section>
-      <section className="settings-card">
-        <dl className="settings-footnote">
+      <section className="settings-group general-settings__data">
+        <header><span>Data & recovery</span><small>Stored on this machine</small></header>
+        <dl>
           <div>
             <dt data-settings-field="local-data">Local data</dt>
             <dd>AgentMux keeps your workspace configuration on this machine.</dd>
           </div>
           <div>
             <dt data-settings-field="session-recovery">Session recovery</dt>
-            <dd>Your tabs and layouts are restored when you return. Running agents stay available when the desktop window closes.</dd>
+            <dd>Your tabs and layouts are restored when you return. Running agents stay available when the desktop window closes.
+              {onOpenRecovery && <button type="button" className="small-button" onClick={onOpenRecovery}>Open Execution</button>}
+            </dd>
           </div>
           <div>
             <dt data-settings-field="system-ssh">System SSH</dt>
-            <dd>Remote AgentMux Runs are not supported yet. Connection metadata and key file paths stay on this machine; private key contents are never stored.</dd>
+            <dd>Connection metadata and key file paths stay on this machine; private key contents are never stored.
+              {onOpenHosts && <button type="button" className="small-button" onClick={onOpenHosts}>Open Hosts</button>}
+            </dd>
           </div>
         </dl>
       </section>
@@ -68,6 +76,7 @@ export function GeneralSettingsPane({ copyPathsAsAbsolute, onSave }: {
         {/* 「不上传」这句要和按钮同框。用户第一次意识到崩溃证据存在，就是点这个按钮的时候——
             那一刻他会想「这些东西被发到哪去了」，而答案（哪也没发）必须当场在场，不能在别的页面。 */}
         <span>
+          <strong className="general-settings__diagnostics-title">Crash diagnostics</strong>
           Crashes are recorded to a local file and never uploaded.
           {reveal && <span role="status" className="settings-crash-log-status">
             {crashLogRevealNotice(reveal)}
@@ -78,7 +87,7 @@ export function GeneralSettingsPane({ copyPathsAsAbsolute, onSave }: {
           {pending ? 'Requesting…' : 'Show crash log'}
         </button>
       </div>
-      <SettingsSaveBar save={saveState} dirty={draft.dirty} label="Save" onSave={() => void save()} />
+      <SettingsSaveBar save={saveState} dirty={draft.dirty} label="Save path preference" onSave={() => void save()} />
     </div>
   )
 }
