@@ -12,6 +12,7 @@ import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { PerformanceOverview } from '../src/renderer/src/components/performance/PerformanceOverview'
 import { performanceAttributionSnapshots as samples } from '../scripts/fixtures/performance-panel/data'
+import { createRendererPerformance } from '../src/renderer/src/lib/renderer-performance'
 import type { ToolkitMetricsSnapshot } from '../src/shared/toolkit'
 let root: Root, container: HTMLDivElement
 beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); container = document.createElement('div'); document.body.append(container); root = createRoot(container) })
@@ -142,4 +143,30 @@ it('expanded Work and wait consumes only the selected epoch peak and its exact c
   expect(node('.performance-body').scrollTop).toBe(90)
   expect(node('[data-performance-peak="terminal-write"]').textContent).toBe(peak.textContent)
   expect(node('[data-timing-kind="terminal-write"]').getAttribute('style') ?? '').not.toContain('--heat-intensity')
+})
+
+it('renders cleanup wall duration and original resource owner without write payload or release acknowledgement', async () => {
+  let mono = 0
+  const recorder = createRendererPerformance(() => mono)
+  const owner = { hostId: 'local', sessionId: 'cleanup-session', runId: 'retiring-run', regionId: null, instanceId: 9 }
+  mono = 100
+  recorder.terminalCleanup(25, { ...owner, operation: 'webgl-dispose', outcome: 'returned' })
+  mono = 300
+  recorder.terminalCleanup(115, { ...owner, operation: 'xterm-dispose', outcome: 'threw' })
+  const snapshot = structuredClone(samples.fresh)
+  snapshot.observation!.renderer.data!.performance = recorder.snapshot()
+  await render(snapshot); await openRenderer()
+  await act(async () => { node<HTMLDetailsElement>('[data-performance-work]').open = true })
+  expect(document.querySelectorAll('[data-timing-kind]')).toHaveLength(6)
+  const row = node('[data-timing-kind="terminal-cleanup"]'), peak = node('[data-performance-peak="terminal-cleanup"]')
+  expect(row.textContent).toContain('Synchronous dispose calls')
+  expect(row.textContent).toContain('260 ms')
+  expect(peak.textContent).toContain('185.0 ms')
+  expect(peak.textContent).toContain('xterm-dispose')
+  expect(peak.textContent).toContain('Threw')
+  expect(peak.textContent).toContain('not a resource release ACK')
+  expect(peak.textContent).toContain('Session cleanup-session')
+  expect(peak.textContent).toContain('Run retiring-run · Region unknown · instance 9')
+  expect(peak.textContent).not.toContain('bytes')
+  expect(peak.textContent).not.toContain('history')
 })

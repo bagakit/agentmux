@@ -267,7 +267,7 @@ it('executes the actual Store metrics.renderer callback and strict result parser
   const result = parseMetricsRendererResult(response)
   expect(result.performance.timingEpochs.current.timings['session-event'].count).toBeGreaterThan(0)
   expect(result.performance.timingEpochs.basis).toBe('monotonic-occurrence-start')
-  expect(Object.keys(result.performance.slowEventsOmitted)).toHaveLength(5)
+  expect(Object.keys(result.performance.slowEventsOmitted)).toHaveLength(6)
   expect(result.performance.slowEvents.some(event => event.terminal?.runId === 'fixture-run' && event.terminal.cause === 'history')).toBe(true)
   expect(JSON.stringify(result.performance)).not.toContain('must-not-leak')
 })
@@ -311,4 +311,75 @@ it('passes original natural-event and request starts through the actual Terminal
   expect(snapshot.timingEpochs.unknown['terminal-interaction']).toBe(0)
   expect(interaction.snapshot().writeRequests).toMatchObject({ completed: 1, pending: 0 })
   interaction.dispose(); expect(listeners.size).toBe(0)
+})
+
+it('keeps disposal context detached, records fast calls and rejects write metadata on cleanup', () => {
+  let mono = 0
+  const costs = createRendererPerformance(() => mono, () => 1000 + mono)
+  const context = { hostId: 'local', sessionId: 'cleanup-session', runId: 'cleanup-run', regionId: 'cleanup-region', instanceId: 2,
+    operation: 'webgl-dispose' as const, outcome: 'returned' as const }
+  mono = 100
+  costs.terminalCleanup(25, context)
+  const original = parseRendererPerformanceSnapshot(costs.snapshot())
+  expect(original.slowEvents).toHaveLength(1)
+  const event = original.slowEvents[0]!
+  expect(event).toMatchObject({ kind: 'terminal-cleanup', detail: 'webgl-dispose', durationMs: 75,
+    occurredAtMonoMs: 25, deliveredAtMonoMs: 100, terminal: null, cleanup: context })
+  context.runId = 'later-run'
+  event.cleanup!.runId = 'edited-snapshot'
+  expect(costs.snapshot().slowEvents[0]!.cleanup!.runId).toBe('cleanup-run')
+  mono = 108
+  costs.terminalCleanup(100, { ...context, operation: 'xterm-dispose', outcome: 'threw' })
+  const fast = costs.snapshot()
+  expect(fast.slowEvents).toHaveLength(1)
+  expect(fast.timingEpochs.current.timings['terminal-cleanup']).toEqual({ count: 2, totalMs: 83, maxMs: 75 })
+  const valid = costs.snapshot(), cleanup = valid.slowEvents[0]!
+  for (const malformed of [
+    { ...cleanup, cleanup: null },
+    { ...cleanup, kind: 'long-task' },
+    { ...cleanup, cleanup: { ...cleanup.cleanup, operation: 'detach-ack' } },
+    { ...cleanup, cleanup: { ...cleanup.cleanup, outcome: 'released' } },
+    { ...cleanup, cleanup: { ...cleanup.cleanup, payload: { unit: 'bytes', length: 1 } } },
+    { ...cleanup, terminal: { ...terminalWriteContextFixture(), payload: { unit: 'bytes', length: 1 } } }
+  ]) expect(() => parseRendererPerformanceSnapshot({ ...valid, slowEvents: [malformed] })).toThrow()
+})
+
+it('retains six categories fairly within thirty-six records and classifies late cleanup without a timer', () => {
+  let mono = 0
+  const interval = vi.spyOn(globalThis, 'setInterval'), timeout = vi.spyOn(globalThis, 'setTimeout')
+  const costs = createRendererPerformance(() => mono), observer = observed(costs)
+  const context = { hostId: 'local', sessionId: 'cleanup-session', runId: 'cleanup-run', regionId: null, instanceId: 3,
+    operation: 'xterm-dispose' as const, outcome: 'returned' as const }
+  for (const start of [1, 10_001]) {
+    mono = start + 100
+    for (let i = 0; i < 12; i++) {
+      costs.sessionEvent('status', start)
+      costs.terminalWrite(false, new Uint8Array(1), start, terminalWriteContextFixture())
+      observer.emit('longtask', [{ startTime: start, duration: 80 }])
+      observer.emit('event', [{ startTime: start, processingStart: start + 81, duration: 90 }])
+      costs.terminalInteraction('wheel-dispatch', 80, start)
+      costs.terminalCleanup(start, context)
+    }
+  }
+  const snap = parseRendererPerformanceSnapshot(costs.snapshot())
+  expect(snap.slowEvents).toHaveLength(36)
+  expect(new Set(snap.slowEvents.map(event => event.id)).size).toBe(36)
+  for (const kind of ['session-event', 'terminal-write', 'long-task', 'input-delay', 'terminal-interaction', 'terminal-cleanup'] as const) {
+    const records = snap.slowEvents.filter(event => event.kind === kind)
+    expect(records).toHaveLength(6)
+    expect(records.filter(event => event.retainedAs.includes('latest'))).toHaveLength(4)
+    expect(records.filter(event => event.retainedAs.includes('current-peak'))).toHaveLength(1)
+    expect(records.filter(event => event.retainedAs.includes('previous-peak'))).toHaveLength(1)
+    expect(snap.slowEventsOmitted[kind]).toBe(18)
+  }
+  mono = 25_000
+  costs.terminalCleanup(12_000, context)
+  costs.terminalCleanup(1000, context)
+  costs.terminalCleanup(26_000, context)
+  const delayed = parseRendererPerformanceSnapshot(costs.snapshot())
+  expect(delayed.timingEpochs.previous!.timings['terminal-cleanup'].count).toBe(13)
+  expect(delayed.timingEpochs.late['terminal-cleanup']).toBe(1)
+  expect(delayed.timingEpochs.unknown['terminal-cleanup']).toBe(1)
+  expect(interval).not.toHaveBeenCalled(); expect(timeout).not.toHaveBeenCalled()
+  observer.off()
 })

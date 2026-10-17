@@ -1,6 +1,7 @@
 import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { rendererPerformance } from '../src/renderer/src/lib/renderer-performance'
+import { appendFileSync } from 'node:fs'
 import { tabSwitchObservation } from '../src/renderer/src/lib/tab-switch-observation'
 import { WorkbenchDocumentContext } from '../src/renderer/src/lib/workbench-document'
 import { WorkbenchPresentationContext } from '../src/renderer/src/lib/workbench-presentation'
@@ -288,6 +289,144 @@ it('releases only the GPU when hidden, parses ordered hidden bytes, and refreshe
   expect(fixture.detach).toHaveBeenCalledExactlyOnceWith('attachment-retained')
   expect(fixture.unsubscribe).toHaveBeenCalledOnce()
   expect(terminalResourceOwnerCounts()).toEqual({ terminalViews: 0, terminalAddons: 0, terminalListeners: 0 })
+})
+
+// The actual mounted consumer owns these operations. Only native-leaf work advances
+// the controlled clock; these measurements are not Electron or GPU timings.
+function cleanupSample(phase: string, value: unknown): void {
+  const destination = process.env.AGENTMUX_TERMINAL_CLEANUP_SAMPLES
+  if (destination) appendFileSync(destination, JSON.stringify({ phase, value }) + '\n')
+}
+function cleanupEventsAfter(id: number) {
+  return rendererPerformance.snapshot().slowEvents.filter(event => event.kind === 'terminal-cleanup' && event.id > id)
+}
+function lastSlowEventId(): number {
+  return rendererPerformance.snapshot().slowEvents.at(-1)?.id ?? 0
+}
+
+it('records cleanup spans while hide and reveal preserve the same Terminal, Run, ordered bytes and healthy input', async () => {
+  let mono = performance.now()
+  const clock = vi.spyOn(performance, 'now').mockImplementation(() => mono)
+  const observation = vi.spyOn(rendererPerformance, 'terminalCleanup')
+  try {
+    await render(true)
+    const terminal = fixture.terminals[0]!, firstGpu = fixture.webgl[0]!, firstId = lastSlowEventId(), start = mono
+    firstGpu.disposed.mockImplementation(() => { mono += 75 })
+    await render(false)
+    const slow = cleanupEventsAfter(firstId)
+    cleanupSample('slow-webgl-hide', { slow, calls: observation.mock.calls, disposerCalls: firstGpu.disposed.mock.calls.length, terminalDisposeCalls: terminal.dispose.mock.calls.length, detachCalls: fixture.detach.mock.calls.length, owners: terminalResourceOwnerCounts(), terminals: rendererPerformance.snapshot().terminals })
+    expect(slow).toHaveLength(1)
+    expect(slow[0]).toMatchObject({ durationMs: 75, occurredAtMonoMs: start, deliveredAtMonoMs: start + 75, terminal: null,
+      cleanup: { hostId: 'local', sessionId: session.id, runId: session.control.run.runId, regionId: linkOrigin.regionId,
+        instanceId: expect.any(Number), operation: 'webgl-dispose', outcome: 'returned' } })
+    expect(firstGpu.disposed).toHaveBeenCalledOnce()
+    expect(firstGpu.contextLossDisposed).toHaveBeenCalledOnce()
+    expect(observation).toHaveBeenCalledTimes(1)
+    await hiddenOutput('still ordered', 7)
+    expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toBe('before still ordered')
+    expect(rendererPerformance.snapshot().terminals[0]).toMatchObject({ runId: session.control.run.runId, liveReady: true, acceptsInput: true, visible: false })
+    terminal.input('HEALTHY_AFTER_GPU_RELEASE', true)
+    expect(fixture.write).toHaveBeenCalledWith(session.control, 'HEALTHY_AFTER_GPU_RELEASE', 'terminal-protocol', expect.anything())
+    expect(fixture.terminals).toEqual([terminal]); expect(terminal.dispose).not.toHaveBeenCalled()
+    expect(fixture.attach).toHaveBeenCalledTimes(1); expect(fixture.detach).not.toHaveBeenCalled()
+    await render(true)
+    const secondGpu = fixture.webgl[1]!
+    secondGpu.disposed.mockImplementation(() => { mono += 3 })
+    await act(async () => secondGpu.loseContext())
+    const fastEnd = rendererPerformance.snapshot(), callsAfterFast = observation.mock.calls.length
+    cleanupSample('fast-webgl-context-loss', { slow: cleanupEventsAfter(firstId), calls: observation.mock.calls, snapshot: fastEnd })
+    expect(observation).toHaveBeenCalledTimes(2)
+    expect(cleanupEventsAfter(firstId)).toHaveLength(1)
+    expect(observation.mock.calls[1]![1]).toMatchObject({ operation: 'webgl-dispose', outcome: 'returned', instanceId: slow[0]!.cleanup!.instanceId })
+    await render(false)
+    expect(observation).toHaveBeenCalledTimes(callsAfterFast) // No addon means no dispose observation.
+    await render(true)
+    expect(fixture.terminals).toEqual([terminal]); expect(fixture.attach).toHaveBeenCalledTimes(1)
+    expect(rendererPerformance.snapshot().terminals[0]).toMatchObject({ runId: session.control.run.runId, liveReady: true, acceptsInput: true, visible: true })
+    expect(slow[0]!.cleanup!.instanceId).toBeGreaterThan(0)
+  } finally {
+    await act(async () => root?.unmount()); root = null
+    observation.mockRestore(); clock.mockRestore()
+  }
+})
+
+it('keeps retiring xterm cleanup on the original Run and instance while its Region accepts the replacement Run', async () => {
+  let mono = performance.now()
+  const clock = vi.spyOn(performance, 'now').mockImplementation(() => mono)
+  try {
+    await render(true)
+    const first = fixture.terminals[0]!, firstId = lastSlowEventId(), disposeFirst = first.dispose.getMockImplementation()!
+    first.dispose.mockImplementation(() => { mono += 90; disposeFirst() })
+    const next: SessionSnapshot = { ...session, control: { kind: 'terminal', hostId: 'local', runId: 'replacement-run', run: { runId: 'replacement-run' } } }
+    fixture.attach.mockResolvedValueOnce({ attachmentId: 'attachment-replacement', currentSize: { cols: 80, rows: 24 },
+      session: { ...next, latestOutputBytes: 6 }, terminal: { type: 'unavailable', reason: 'source_gap' }, resizeRevision: 0, gap: null,
+      replay: [{ runId: next.control.run.runId, data: 'after ', dataBytes: new TextEncoder().encode('after '), startByte: 0, endByte: 6 }] })
+    const retiredStart = mono
+    await act(async () => root!.render(<WorkbenchPresentationContext.Provider value={{ active: true, retainedRegionId: null, reference, surface: 'space' }}>
+      <TerminalView session={next} themeId="graphite" interactiveResize={false} visible autoFocus={false} linkOrigin={linkOrigin} />
+    </WorkbenchPresentationContext.Provider>))
+    await act(async () => { await vi.waitFor(() => expect(fixture.terminals[1]?.completed).toContain('after ')) })
+    const retired = cleanupEventsAfter(firstId), second = fixture.terminals[1]!
+    cleanupSample('retiring-xterm-run', { retired, terminals: rendererPerformance.snapshot().terminals, owners: terminalResourceOwnerCounts() })
+    expect(retired).toHaveLength(1)
+    expect(retired[0]).toMatchObject({ durationMs: 90, occurredAtMonoMs: retiredStart, deliveredAtMonoMs: retiredStart + 90, terminal: null,
+      cleanup: { hostId: 'local', sessionId: session.id, runId: session.control.run.runId, regionId: linkOrigin.regionId,
+        instanceId: expect.any(Number), operation: 'xterm-dispose', outcome: 'returned' } })
+    expect(first.dispose).toHaveBeenCalledOnce(); expect(second).not.toBe(first)
+    expect(fixture.detach).toHaveBeenCalledExactlyOnceWith('attachment-retained')
+    expect(fixture.attach).toHaveBeenLastCalledWith(next.control, 0)
+    expect(rendererPerformance.snapshot().terminals).toMatchObject([{ sessionId: next.id, runId: next.control.run.runId, liveReady: true, acceptsInput: true }])
+    second.input('HEALTHY_REPLACEMENT_RUN', true)
+    expect(fixture.write).toHaveBeenLastCalledWith(next.control, 'HEALTHY_REPLACEMENT_RUN', 'terminal-protocol', expect.anything())
+    const disposeSecond = second.dispose.getMockImplementation()!
+    second.dispose.mockImplementation(() => { mono += 80; disposeSecond() })
+    await act(async () => root!.unmount()); root = null
+    const final = rendererPerformance.snapshot(), events = cleanupEventsAfter(firstId)
+    cleanupSample('replacement-xterm-unregistered', { events, final, owners: terminalResourceOwnerCounts() })
+    expect(events).toHaveLength(2)
+    expect(events[1]).toMatchObject({ durationMs: 80, cleanup: { hostId: 'local', sessionId: next.id, runId: next.control.run.runId,
+      regionId: linkOrigin.regionId, operation: 'xterm-dispose', outcome: 'returned' } })
+    expect(events[1]!.cleanup!.instanceId).toBeGreaterThan(events[0]!.cleanup!.instanceId)
+    expect(final.terminals).toEqual([])
+    expect(second.dispose).toHaveBeenCalledOnce()
+    expect(fixture.detach.mock.calls).toEqual([['attachment-retained'], ['attachment-replacement']])
+    expect(terminalResourceOwnerCounts()).toEqual({ terminalViews: 0, terminalAddons: 0, terminalListeners: 0 })
+  } finally {
+    await act(async () => root?.unmount()); root = null
+    clock.mockRestore()
+  }
+})
+
+it('records a throwing WebGL dispose without swallowing its original error or revoking the retained Terminal', async () => {
+  let mono = performance.now()
+  const clock = vi.spyOn(performance, 'now').mockImplementation(() => mono)
+  try {
+    await render(true)
+    const terminal = fixture.terminals[0]!, gpu = fixture.webgl[0]!, firstId = lastSlowEventId(), started = mono
+    const failure = new Error('Original controlled WebGL disposal failure')
+    gpu.disposed.mockImplementationOnce(() => { mono += 70; throw failure })
+    let caught: unknown
+    try { gpu.loseContext() } catch (error) { caught = error }
+    const events = cleanupEventsAfter(firstId)
+    cleanupSample('throwing-webgl', { caughtOriginal: caught === failure, events, terminals: rendererPerformance.snapshot().terminals,
+      disposeCalls: gpu.disposed.mock.calls.length, terminalDisposeCalls: terminal.dispose.mock.calls.length, detachCalls: fixture.detach.mock.calls.length })
+    expect(caught).toBe(failure)
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ durationMs: 70, occurredAtMonoMs: started, deliveredAtMonoMs: started + 70, terminal: null,
+      cleanup: { hostId: 'local', sessionId: session.id, runId: session.control.run.runId, regionId: linkOrigin.regionId,
+        operation: 'webgl-dispose', outcome: 'threw' } })
+    expect(gpu.disposed).toHaveBeenCalledOnce(); expect(gpu.contextLossDisposed).toHaveBeenCalledOnce()
+    expect(terminal.dispose).not.toHaveBeenCalled(); expect(fixture.detach).not.toHaveBeenCalled()
+    terminal.input('HEALTHY_AFTER_DISPOSE_ERROR', true)
+    expect(fixture.write).toHaveBeenCalledWith(session.control, 'HEALTHY_AFTER_DISPOSE_ERROR', 'terminal-protocol', expect.anything())
+    await render(false); await render(true)
+    expect(fixture.terminals).toEqual([terminal]); expect(fixture.attach).toHaveBeenCalledTimes(1)
+    expect(rendererPerformance.snapshot().terminals[0]).toMatchObject({ runId: session.control.run.runId, liveReady: true, acceptsInput: true, visible: true })
+    expect(events[0]!.cleanup!.instanceId).toBeGreaterThan(0)
+  } finally {
+    await act(async () => root?.unmount()); root = null
+    clock.mockRestore()
+  }
 })
 
 it('mounts an initially hidden terminal without allocating a GPU context', async () => {
