@@ -176,7 +176,7 @@ function useBrowserOwnerConnection({ tab, visible, presentations = [], released 
       // A later native updated event is authoritative. Never repaint it with this older receipt.
       const current = recoveryInputs.current.tab
       if (current.navigationId !== tab.navigationId) return
-      applyBrowserEvent({ type: 'updated', browser })
+      applyBrowserEvent({ type: 'updated', browser }, tab.navigationId)
       nativeLifecycleRef.current = 'present'
       setNativeReleased(false)
       setRestoring(false)

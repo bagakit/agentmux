@@ -16,7 +16,8 @@ export type BrowserProjectionState = {
 
 export function reduceBrowserEvent(
   state: BrowserProjectionState,
-  event: BrowserEvent
+  event: BrowserEvent,
+  expectedNavigationId?: string
 ): BrowserProjectionState {
   if (event.type === 'released') {
     let tabs = state.tabs
@@ -47,6 +48,7 @@ export function reduceBrowserEvent(
       let regions = tab.regions
       for (const surface of Object.values(tab.regions)) {
         if (surface.kind !== 'browser' || surface.browserId !== event.browser.id) continue
+        if (expectedNavigationId !== undefined && surface.navigationId !== expectedNavigationId) continue
         if (!surface.nativeOwnerUnavailable && !surface.nativeOwnerDeferred && !surface.nativeOwnerReleased && Object.entries(event.browser).every(([key, value]) => key === 'viewport'
           ? browserViewportsEqual(surface.viewport, event.browser.viewport)
           : Object.is(surface[key as keyof BrowserWorkbenchSurface], value))) continue
