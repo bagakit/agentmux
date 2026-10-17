@@ -377,6 +377,7 @@ async function mockHistorySources(options?: { observation: true }): Promise<Agen
 }
 
 const mockApi: AgentMuxDesktopApi = {
+  clientIncidents: { open: async () => null, report: async () => ({ accepted: false }) },
   conversation: {
     readAgentConversation: async () => { throw new Error('Open Desktop to read the original conversation.') },
     readConversationChanges: async () => { throw new Error('Open Desktop to read original conversation changes.') },

@@ -1,6 +1,7 @@
 import { observeResolvedTheme } from '@agentmux/client-ui/theme'
 import { TextInput } from '@agentmux/client-ui/input'
 import { rendererPerformance } from '../lib/renderer-performance'
+import { clientIncidentDispatcher, createClientIncidentRecorder } from '../lib/client-incident-recorder'
 import { createTerminalInteractionObservation } from '../lib/terminal-interaction-observation'
 import { tabSwitchObservation } from '../lib/tab-switch-observation'
 import { useWorkbenchBrowserPresentation, type WorkbenchPresentation } from '../lib/workbench-presentation'
@@ -315,6 +316,8 @@ export function TerminalView({
   }, [switchTarget, visible, hydrating, liveOutputReady, readOnly, canControlRun])
   const [attachFailed, setAttachFailed] = useState(false)
   const [attachmentFailure, setAttachmentFailure] = useState<{ step: string; message: string } | null>(null)
+  const processStateRef = useRef(session.processState)
+  processStateRef.current = session.processState
   const [refreshingObservation, setRefreshingObservation] = useState(false)
   const refreshSession = useAppStore((state) => state.refreshSession)
   const recoverVanishedRunRef = useRef<string | null>(null)
@@ -621,6 +624,8 @@ export function TerminalView({
     setViewportSyncFailed(false)
     setPathActions(null)
     rememberedSelectionRef.current = ''
+    let incidents: ReturnType<typeof createClientIncidentRecorder> | undefined
+    let renderCallbacks = 0, writeCompletions = 0
     const terminal = new Terminal({
       ...terminalOptions(themeId, fontSizeRef.current),
       scrollback: 5_000
@@ -722,6 +727,7 @@ export function TerminalView({
       clearLinkPreview()
       try {
         await terminalWrite(terminal, data)
+        writeCompletions++
       } finally {
         rendererPerformance.terminalWrite(observationVisible, data, observationStarted, observationContext)
         linkPreviewWrites--
@@ -860,6 +866,7 @@ export function TerminalView({
     // Visibility owns only the GPU addon. The retained parser and Run attachment keep their
     // existing lifetime, including ordered output while this Region is hidden.
     const synchronizeWebglVisibility = (shown: boolean): void => {
+      incidents?.mark('visibility')
       if (!shown) {
         releaseWebgl()
         return
@@ -868,7 +875,10 @@ export function TerminalView({
       try {
         webgl = new WebglAddon()
         terminal.loadAddon(webgl)
-        webglContextLoss = webgl.onContextLoss(releaseWebgl)
+        webglContextLoss = webgl.onContextLoss(() => {
+          incidents?.capture('terminal-context-lost', 'context-lost')
+          releaseWebgl()
+        })
         resourceOwners.setAddons(4)
       } catch (error) {
         releaseWebgl()
@@ -965,6 +975,31 @@ export function TerminalView({
     let liveDrain: Promise<void> | null = null
     const pending: RuntimeEvent[] = []
     let pendingBytes = 0
+    let latestObservedOutputBytes = session.latestOutputBytes
+    const incidentDispatcher = clientIncidentDispatcher(root.ownerDocument)
+    incidents = createClientIncidentRecorder({
+      hostId: session.control.hostId, agentSessionId: session.kind === 'agent' ? session.id : null,
+      runId: session.control.run.runId, regionId: () => linkOriginRef.current.regionId ?? null,
+      send: report => incidentDispatcher.send(report), dropped: incidentDispatcher.dropped,
+      read: includeGeometry => {
+        const buffer = terminal.buffer.active
+        return {
+          attachmentId, latestOutputBytes: latestObservedOutputBytes, cursorBytes: cursor,
+          pendingBytes: pending.length ? pendingBytes : 0, pendingBatches: pending.length,
+          liveQueueBytes: liveOutputQueue.byteLength, liveQueueItems: liveOutputQueue.length,
+          cols: terminal.cols, rows: terminal.rows, baseY: buffer.baseY, viewportY: buffer.viewportY,
+          bufferLength: buffer.length, bufferType: buffer.type, resizeRevision, renderCallbacks, writeCompletions,
+          visible: visibleRef.current, revealed, liveReady: readyForLiveOutput, replaying: replayingContinuation,
+          readOnly: readOnlyRef.current, canControl: canControlRunRef.current, disposed,
+          attachmentState: attachmentId ? 'attached' : 'attaching',
+          processState: processStateRef.current === 'running' || processStateRef.current === 'exited' ? processStateRef.current : 'unknown',
+          renderer: webgl ? 'webgl' : 'dom',
+          ...(includeGeometry ? { clientWidth: root.clientWidth, clientHeight: root.clientHeight } : {})
+        }
+      }
+    })
+    // Count callbacks only; no buffer, geometry or archive work is scheduled per frame.
+    const incidentRender = terminal.onRender(() => { renderCallbacks++ })
     const releasePerformance = rendererPerformance.registerTerminal(() => ({
       sessionId: session.id, runId: session.control.run.runId, regionId: linkOriginRef.current.regionId ?? null,
       visible: visibleRef.current, visibleSinceAt: visibleSinceRef.current, readySinceAt,
@@ -1227,6 +1262,8 @@ export function TerminalView({
     // Initial attach and reconnect consume the same authoritative ordering. Synthetic bytes
     // bypass original-output inspectors, while input readiness keeps its existing live owner.
     const applyContinuation = async (snapshot: Pick<AgentMuxRunAttachment, 'terminal' | 'replay' | 'resizeRevision'> & { run: Pick<AgentMuxRunAttachment['run'], 'runId' | 'latestOutputBytes'> }, preserve = false): Promise<void> => {
+      latestObservedOutputBytes = snapshot.run.latestOutputBytes
+      incidents?.mark('replay-started')
       // Exhaust the same ordering iterator before changing the canvas. Steps hold byte views,
       // not copied payload; an invalid tail or revision cannot leave a partially restored seed.
       const steps = [...terminalContinuationSteps(snapshot)]
@@ -1305,6 +1342,7 @@ export function TerminalView({
       } finally {
         replayingContinuation = !readyForLiveOutput
       }
+      incidents?.mark('replay-applied')
     }
 
     const acceptUncontinuedSnapshot = (snapshot: { run: Pick<AgentMuxRunAttachment['run'], 'latestOutputBytes'> & Partial<Pick<AgentMuxRunAttachment['run'], 'cols' | 'rows'>>; resizeRevision: number }, absence: TerminalContinuationAbsence): void => {
@@ -1334,6 +1372,7 @@ export function TerminalView({
             try {
               await applyContinuation(snapshot)
               if (disposed) return
+              incidents?.capture('terminal-recovered', 'observation-restored')
               setContinuationAbsence(null)
               setReplaySizeUnknown(false)
               setReplayGap(false)
@@ -1441,6 +1480,9 @@ export function TerminalView({
       const core = event.event
       if (event.hostId === session.hostId && core.type === 'attachment-state' &&
         core.run.runId === session.control.run.runId) {
+        incidents?.capture(core.state === 'restored' ? 'terminal-recovered' : 'terminal-attach-failed',
+          core.state === 'restored' ? 'observation-restored' : 'observation-unavailable',
+          core.state === 'restored' ? undefined : { code: core.diagnostic.code })
         setAttachmentFailure(core.state === 'restored' ? null : {
           step: 'Observing this Region’s output',
           message: `${core.diagnostic.code}: ${core.diagnostic.message} Last confirmed output byte: ${core.afterByte}.`
@@ -1456,6 +1498,8 @@ export function TerminalView({
           resizeRevision: core.resizeRevision
         } : null
       if (!output && !resize && !snapshot) return
+      if (output) latestObservedOutputBytes = Math.max(latestObservedOutputBytes, output.endByte)
+      if (resize) incidents?.mark('resize')
       if (output && output.dataBytes.byteLength > 0) observeOutput()
       if (!readyForLiveOutput) {
         if (snapshot) {
@@ -1627,6 +1671,7 @@ export function TerminalView({
       if (disposed) return
       if (!revealed) {
         revealed = true
+        incidents?.mark('revealed')
         setHydrating(false)
       }
       // A late successful attach/replay supersedes the deadline notice. The local `revealed` guard
@@ -1643,11 +1688,15 @@ export function TerminalView({
         deadlineMs: TERMINAL_REVEAL_DEADLINE_MS
       })
       if (!decision.reveal) return
+      incidents?.capture('terminal-reveal-deadline', 'reveal-deadline')
       // 强制揭示绝不静默：先记账，再揭示。
       reveal(decision.overdue)
     }, TERMINAL_REVEAL_DEADLINE_MS)
 
     const attach = async (refresh = false): Promise<void> => {
+      incidents?.begin(refresh ? 'refresh-requested' : 'attach-requested')
+      // Freeze the old state before refreshSession or any output connection replacement runs.
+      const refreshOccurrence = refresh ? incidents?.capture('terminal-refresh', 'refresh-requested') : undefined
       const preserve = refresh && readyForLiveOutput
       let readingMarker: ReturnType<Terminal['registerMarker']> | undefined
       try {
@@ -1675,6 +1724,8 @@ export function TerminalView({
           return
         }
         attachmentId = result.attachmentId
+        latestObservedOutputBytes = result.session.latestOutputBytes
+        incidents?.mark('attach-received')
         if (result.terminal.type === 'not-requested') throw new Error('The Runtime did not provide the requested terminal representation.')
         const restored = result.terminal.type === 'basic-vt'
         const hasReplay = restored || result.replay.some((chunk) => chunk.dataBytes.byteLength > 0)
@@ -1701,6 +1752,7 @@ export function TerminalView({
           if (position.kind === 'latest') terminal.scrollToBottom()
           else terminal.scrollToLine(position.line)
           reveal()
+          if (refresh) incidents?.capture('terminal-refresh', 'refresh-completed', undefined, refreshOccurrence ?? null)
           return
         }
         setHistoryBoundary(terminalHistoryBoundary(terminal.buffer.active, terminal.rows, terminal.options.scrollback!))
@@ -1719,6 +1771,7 @@ export function TerminalView({
           finishReplay: () => viewport.endReplay(hasReplay),
           releaseLiveOutput: async () => {
             readyForLiveOutput = true
+            incidents?.mark('live-ready')
             readySinceAt = Date.now()
             replayingContinuation = false
             if (!disposed) setLiveOutputReady(true)
@@ -1734,12 +1787,18 @@ export function TerminalView({
             return redrawn
           },
           onRedrawError: (error) => console.warn('[terminal] failed to redraw after replay gap', error),
-          onRecoveryError: (error) => console.warn('[terminal] live viewport recovery degraded', error)
+          onRecoveryError: (error) => {
+            incidents?.capture('terminal-replay-failed', 'attach-failed', error)
+            console.warn('[terminal] live viewport recovery degraded', error)
+          }
         })
+        if (!disposed && refresh) incidents?.capture('terminal-refresh', 'refresh-completed', undefined, refreshOccurrence ?? null)
       } catch (error) {
         if (!disposed) {
           const detail = (error instanceof Error ? error.message : String(error))
             .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+          incidents?.capture('terminal-attach-failed', refresh ? 'refresh-failed' : 'attach-failed', error,
+            refreshOccurrence ?? null)
           const vanishedAgentRun = session.kind === 'agent' && isVanishedAgentRunError(error)
           if (!refresh && vanishedAgentRun && recoverVanishedRunRef.current !== session.control.run.runId) {
             // The durable Agent Session is still the owner. Ask the store to perform the
@@ -1789,7 +1848,9 @@ export function TerminalView({
         !terminal.element.closest('[inert]')) terminal.focus()
     })
     return () => {
+      incidents?.mark('observation-unavailable')
       disposed = true
+      incidentRender.dispose()
       interaction.dispose()
       if (refreshObservationRef.current === refreshObservation) {
         refreshObservationRef.current = null
