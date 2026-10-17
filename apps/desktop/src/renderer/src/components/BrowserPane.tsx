@@ -33,6 +33,7 @@ import { BrowserOperationHistory, BrowserOperatorPresence, BrowserOperationWarni
 import { BrowserStartPage } from './BrowserStartPage'
 import { BrowserRecoverySurface } from './BrowserRecoverySurface'
 import type { BrowserStartPageConfig } from '../../../shared/browser-start-page'
+import type { BrowserRecoveryPreviewReadResult } from '../../../shared/browser-recovery-preview'
 import { BrowserAddressInput, type BrowserAddressInputHandle } from './BrowserAddressInput'
 import { BrowserViewportOptions, BrowserViewportSizeDialog } from './BrowserViewportControls'
 import { selectedBrowserPresentationId } from '../lib/browser-presentation-selection'
@@ -397,6 +398,28 @@ function BrowserPaneContent({
   // 一出现就预先勾着——用户扫一眼点 Open，等于替他记住了一件他没答应的事。
   useEffect(() => setRememberAppLink(false), [tab.appLinkPrompt?.scheme])
   const { restoring, restoreError, retryConnection, nativeLifecycleRef } = connection
+  const recoveryVisible = (visible || presentations.some(presentation => presentation.visible)) && Boolean(
+    tab.error || released || restoring || tab.nativeOwnerDeferred || tab.nativeOwnerUnavailable || restoreError !== null)
+  const previewKey = JSON.stringify([tab.browserId, tab.profileId, tab.mode, tab.workspaceId, tab.navigationId])
+  const [recoveryPreview, setRecoveryPreview] = useState<{ key: string; result: BrowserRecoveryPreviewReadResult } | null>(null)
+  useEffect(() => {
+    if (!recoveryVisible) return
+    let current = true
+    void api.browser.getRecoveryPreview(tab.browserId).then(result => {
+      if (!current) return
+      if (result.status === 'available' && (result.preview.scope.browserId !== tab.browserId ||
+        result.preview.scope.profileId !== tab.profileId || result.preview.scope.mode !== tab.mode ||
+        result.preview.scope.workspaceId !== tab.workspaceId)) {
+        setRecoveryPreview({ key: previewKey, result: { status: 'unavailable',
+          warning: 'The previous preview belongs to a different page context. Retry and address editing remain available.' } })
+      } else setRecoveryPreview({ key: previewKey, result })
+    }, () => {
+      if (current) setRecoveryPreview({ key: previewKey, result: { status: 'unavailable',
+        warning: 'The previous preview could not be read. Retry and address editing remain available.' } })
+    })
+    return () => { current = false }
+  }, [recoveryVisible, previewKey, tab.browserId])
+  const currentRecoveryPreview = recoveryPreview?.key === previewKey ? recoveryPreview.result : undefined
   const [annotationNote, setAnnotationNote] = useState('')
   const [replayPlan, setReplayPlan] = useState<BrowserReplayPlan | null>(null)
   const [replayBusy, setReplayBusy] = useState(false)
@@ -1011,6 +1034,7 @@ function BrowserPaneContent({
             onError={reportError}
           /> ) : connectionUnavailable ? <BrowserRecoverySurface
           url={tab.url} title={tab.title} faviconDataUrl={tab.faviconDataUrl}
+          preview={currentRecoveryPreview}
           heading={restoring ? 'Restoring browser' : restoreError ? 'Browser connection needs attention' : 'Browser parked'}
           description={restoring ? 'Reconnecting the original page. Your tab, address and other work are kept.'
             : restoreError ? 'Your tab and address are kept. Retry the connection or edit the address.'
@@ -1075,6 +1099,7 @@ function BrowserPaneContent({
           </div>
         ) : tab.error ? (
           <BrowserRecoverySurface url={tab.url} title={tab.title} faviconDataUrl={tab.faviconDataUrl}
+            preview={currentRecoveryPreview}
             heading="Page needs attention"
             description="Your tab and address are kept. Retry, or check the address to continue."
             error={tab.error} busy={busy}

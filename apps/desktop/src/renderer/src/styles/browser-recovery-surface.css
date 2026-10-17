@@ -31,6 +31,13 @@
 .browser-recovery__address code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font: var(--fs-micro)/1.5 var(--font-mono); user-select: text; }
 .browser-recovery__address button { flex: none; width: 26px; height: 26px; }
 .browser-recovery__copy-result { margin: var(--sp-2) 0 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
+.browser-recovery__preview { display: flex; align-items: center; gap: var(--sp-4); min-width: 0; margin: var(--sp-6) 0 0; padding: var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
+.browser-recovery__preview > img { flex: none; width: 38%; height: auto; max-height: 100px; object-fit: cover; object-position: top; border-radius: var(--radius-sm); border: 1px solid var(--line-soft); }
+.browser-recovery__preview figcaption { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.browser-recovery__preview figcaption span, .browser-recovery__preview-notice { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
+.browser-recovery__preview figcaption strong { color: var(--text-2); font-size: var(--fs-meta); font-weight: 500; line-height: 1.45; overflow-wrap: anywhere; }
+.browser-recovery__preview figcaption code { color: var(--text-3); font: var(--fs-micro)/1.5 var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browser-recovery__preview-notice { margin: var(--sp-4) 0 0 28px; }
 .browser-recovery__message { display: flex; align-items: flex-start; gap: var(--sp-3); margin-top: 28px; }
 .browser-recovery__state-icon { flex: none; display: flex; color: var(--amber-text); margin-top: 2px; }
 .browser-recovery__message > div { min-width: 0; }
