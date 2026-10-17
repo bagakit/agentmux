@@ -33,6 +33,7 @@ import { WorkbenchTabGlyph } from './WorkbenchTopology'
 import { getWindowOverlayHost, markWindowOverlayDismissal, wasWindowOverlayDismissed } from './WindowOverlayHost'
 import { getModalOverlayContainer, ModalAttachmentDismissal, MODAL_OVERLAY_SLOT_REMOVED } from '@agentmux/client-ui/components/Modal'
 
+const BackIcon = semanticIconComponent('navigation.back')
 const DetailsIcon = semanticIconComponent('action.more')
 const CloseIcon = semanticIconComponent('action.close')
 const DragIcon = semanticIconComponent('action.drag')
@@ -440,7 +441,7 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
         <HeldReading key={JSON.stringify([currentReading.context.runId, currentReading.sourceKey])} request={displayedReading} enabled={visible && readingSameSource && tab === null} available={visible && (Boolean(request.bookmark) || readingSameSource)} follow={Boolean(request.bookmark) && !readingProtected && !changedReading} />
       </div>
       {tab ? <div className="agent-information-reader__metadata">
-        <div className="agent-information-reader__metadata-heading"><button ref={back} type="button" onClick={showReading} aria-label="Back to original content">←</button><h3>Agent information</h3></div>
+        <div className="agent-information-reader__metadata-heading"><button ref={back} type="button" onClick={showReading} aria-label="Back to original content"><BackIcon size={13} aria-hidden="true" /></button><h3>Agent information</h3></div>
         <AgentInformationDetails context={context} goalLinks={request.goalLinks} usage={usage} control={visible && sameSource ? request.control : undefined} tab={tab} onTab={setTab} source={source} />
       </div> : null}
     </div>

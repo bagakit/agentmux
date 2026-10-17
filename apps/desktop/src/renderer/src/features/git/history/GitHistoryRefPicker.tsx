@@ -10,6 +10,7 @@ import { useWorkbenchDocument } from '../../../lib/workbench-document'
 
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 const ROW_HEIGHT = 44
 const kindLabel = { local: 'Local', remote: 'Remote', head: 'HEAD', tag: 'Tag' }
 const refLabel = (name: string) => name.replace(/^refs\/(heads|remotes)\//u, '')
@@ -143,7 +144,7 @@ export const GitHistoryRefPicker = memo(function GitHistoryRefPicker({ refs, ref
               }}>
               <span className="git-history-ref-picker__kind">{option.kind}</span>
               <span className="git-history-ref-picker__name"><strong>{option.label}</strong><small>{option.description}</small></span>
-              {option.value === reference && <span aria-hidden="true">✓</span>}
+              {option.value === reference && <span aria-hidden="true"><ThemeStatusSelectedIcon size={12} /></span>}
             </button>
           })}
         </div>
