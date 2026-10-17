@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { readFile, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { runA2aProof } from './lib/a2a-proof.mjs'
+import { sealReferenceDeliveryProof } from './lib/a2a-reference-proof.mjs'
 
 const journal = ['packages/core/test/a2a-reference-delivery.test.ts']
 const native = ['packages/core/test/a2a-reference-native.test.ts']
@@ -13,13 +14,13 @@ const native = ['packages/core/test/a2a-reference-native.test.ts']
 const compiled = await runA2aProof({
   name: 'a2a-reference-delivery', freezeTests: true,
   frozenSupport: ['packages/core/test/helpers/object-cli-rpc.ts', 'packages/core/test/helpers/fixture-values.ts', 'packages/core/test/fixtures/a2a-reference/native-actor.mjs'], tests: [...journal, ...native],
-  environment: ({ dist, url }) => ({ AGENTMUX_TEST_REFERENCE_CORE: url('index.js'), AGENTMUX_TEST_REFERENCE_CLI: join(dist, 'agentmux.js') }),
+  environment: ({ label, evidence, dist, url }) => ({ AGENTMUX_TEST_REFERENCE_FACTS: join(evidence, label + '-native-facts.jsonl'), AGENTMUX_TEST_REFERENCE_CORE: url('index.js'), AGENTMUX_TEST_REFERENCE_CLI: join(dist, 'agentmux.js') }),
   sourceInputs: ['packages/core/src/index.ts', 'packages/core/src/client.ts', 'packages/core/src/ctxmux-run-adapter.ts', 'packages/core/src/agent-global-message-queue.ts',
     'packages/core/src/agent-message-journal.ts', 'packages/core/src/agent-message-query.ts', 'packages/core/src/agent-message-notification.ts',
     'packages/core/src/agent-message-notifications.ts', 'packages/core/src/agent-provider.ts', 'packages/core/src/providers/codex-native-input.ts', 'packages/core/src/native-input-adoption.ts', 'packages/core/src/prompt-submission.ts', 'packages/core/src/prompt-submission-record.ts',
     'packages/core/src/agent-messaging-guidance.ts', 'packages/core/src/agentmux-cli-module-skills.ts', 'packages/core/src/agentmux-cli-help.ts', 'packages/core/src/agent-message-render.ts', 'packages/core/src/agentmux-cli-commands.ts',
     'packages/core/src/public-rpc-service.ts', 'packages/core/src/public-rpc.ts', 'packages/core/src/rpc-native-codec.ts', 'packages/core/src/types.ts',
-    'packages/core/scripts/verify-a2a-reference-delivery.mjs', 'packages/core/scripts/lib/a2a-proof.mjs',
+    'packages/core/scripts/verify-a2a-reference-delivery.mjs', 'packages/core/scripts/lib/a2a-proof.mjs', 'packages/core/scripts/lib/a2a-reference-proof.mjs',
     'packages/core/test/helpers/object-cli-rpc.ts', 'packages/core/test/fixtures/a2a-reference/native-actor.mjs'],
   callers: [
     { path: 'packages/core/src/agentmux-cli-commands.ts', symbol: "command('agent.send'" },
@@ -60,4 +61,5 @@ const receipt = join(dirname(compiled.receipt), 'delivery-gate.json')
 await writeFile(receipt, JSON.stringify({ schema: 'agentmux.a2a-reference-delivery-gate.v1', passed: true,
   compiled: compiled.receipt, nativeSource: nativeGate.receipt, sharedInputs: shared,
   boundary: 'Actual CLI and private Runtime consumer chain, compiled behavior mutants, and separately loaded native adapter source mutants; model adoption is a separate proof.' }, null, 2) + '\n')
+await sealReferenceDeliveryProof({ root: resolve(import.meta.dirname, '../../..'), receipt })
 process.stdout.write(JSON.stringify({ passed: true, receipt }) + '\n')
