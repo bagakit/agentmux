@@ -2,7 +2,7 @@ import { AGENTMUX_PROTOCOL_CATALOG, type AgentMuxProtocolCatalogEntry } from '@a
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
 import { ClientUiProvider, useClientUiPlatform } from '@agentmux/client-ui/platform'
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState, type RefObject } from 'react'
 import type { SettingsModule } from '../settings-catalog'
 import '../../../styles/settings-amux-protocols.css'
 
@@ -16,21 +16,22 @@ function ProtocolExamples({ entry }: { entry: AgentMuxProtocolCatalogEntry }) {
   return <ClientUiProvider platform={platform}>
     {entry.examples.map((example, index) => <section key={index} className="amux-protocols__example" aria-label={example.label}>
       <h4>{example.label}</h4>
-      <details className="amux-protocols__wire">
-        <summary>Original wire</summary>
-        <pre>{example.wire}</pre>
-      </details>
+      <span className="amux-protocols__preview-label">Rendered message</span>
       <div className="amux-protocols__preview" data-protocol-example={entry.id}>
         <ConversationMessage content={example.wire} speaker={{ role: 'human', id: 'protocol-example' }} name="Example input"
           messageId={`protocol-example:${entry.id}:${index}`} compact expandedContent />
       </div>
+      <details className="amux-protocols__wire">
+        <summary>Original wire</summary>
+        <pre>{example.wire}</pre>
+      </details>
     </section>)}
   </ClientUiProvider>
 }
 
-function ProtocolRow({ entry, active }: { entry: AgentMuxProtocolCatalogEntry; active: boolean }) {
+function ProtocolRow({ entry, active, rowRef }: { entry: AgentMuxProtocolCatalogEntry; active: boolean; rowRef?: RefObject<HTMLDetailsElement | null> | undefined }) {
   const [open, setOpen] = useState(false)
-  return <details className="amux-protocols__row" data-settings-field={entry.id}
+  return <details ref={rowRef} className="amux-protocols__row" data-settings-field={entry.id}
     onToggle={event => setOpen(event.currentTarget.open)}>
     <summary>
       <SemanticIcon name="navigation.disclosure" size={13} aria-hidden="true" />
@@ -44,9 +45,15 @@ function ProtocolRow({ entry, active }: { entry: AgentMuxProtocolCatalogEntry; a
 }
 
 function AmuxProtocolsPane({ active }: { active: boolean }) {
+  const firstExample = useRef<HTMLDetailsElement>(null)
+  function openFirstExample() {
+    if (!firstExample.current) return
+    firstExample.current.open = true
+    firstExample.current.querySelector('summary')?.focus()
+  }
   return <div className="settings-pane-stack amux-protocols" aria-label="amux protocol reference">
-    <p className="settings-group-note">Readable formats included in this app version. Examples use the shared message reader; they do not contact Agents, open links or execute protocol hints.</p>
-    <div className="amux-protocols__list">{AGENTMUX_PROTOCOL_CATALOG.map(entry => <ProtocolRow key={entry.id} entry={entry} active={active} />)}</div>
+    <div className="amux-protocols__intro"><p className="settings-group-note">Explore supported message formats and compare each rendered card with its original text. Examples are read-only and do not contact Agents, open links or execute protocol hints.</p><button type="button" className="small-button" onClick={openFirstExample}>View first example</button></div>
+    <div className="amux-protocols__list">{AGENTMUX_PROTOCOL_CATALOG.map((entry, index) => <ProtocolRow key={entry.id} entry={entry} active={active} rowRef={index === 0 ? firstExample : undefined} />)}</div>
   </div>
 }
 
