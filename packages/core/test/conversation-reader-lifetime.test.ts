@@ -3,7 +3,6 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { nativeHistoryFixture, jsonl } from './fixtures/native-history-session.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
-import { AgentMuxError } from '../src/errors.js'
 import { consumeConversationWindowPage, type AgentConversationReadPage, type ConversationWindowAssembly } from '../src/conversation.js'
 import { conversationReaderCli } from './helpers/conversation-reader-cli.js'
 
@@ -93,8 +92,9 @@ it('cancelled and failed original reads return their qualification and explicit 
   expect(await f.client.readAgentConversation({ ...f.ref, view: page.window.view! }).then(() => null, error => error.code)).toBe('AGENT_CONVERSATION_VIEW_EXPIRED')
 
   const failed = await f.client.readAgentConversation(f.ref)
-  vi.spyOn(f.client, 'readSessionHistoryChanges').mockRejectedValueOnce(new AgentMuxError('Original cut rejected', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED'))
-  await expect(f.client.readConversationChanges({ ...f.ref, checkpoint: failed.window.checkpoint, view: failed.window.view! })).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' })
+  // A source refusal is isolated coverage; an actual wire-budget failure still
+  // exits the complete reader operation after its lifetime has been acquired.
+  await expect(f.client.readAgentConversation({ ...f.ref, view: failed.window.view!, maxBytes: 4096 })).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_BUDGET' })
   for (let i = 0; i < 17; i++) await f.client.readAgentConversation(f.ref)
   await expect(f.client.readAgentConversation({ ...f.ref, view: failed.window.view! })).rejects.toMatchObject({ code: 'AGENT_CONVERSATION_VIEW_EXPIRED' })
 
