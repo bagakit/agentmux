@@ -187,6 +187,8 @@ import { ExternalBrowserBridge } from './browser-external-bridge.js'
 import { ExternalBrowserOwner } from './browser-external-owner.js'
 import { BrowserViewManager } from './browser-view-manager.js'
 import { browserColdDescriptor, coldBrowserTargets } from './browser-cold-descriptor.js'
+import { BrowserRecoveryPreviewStore } from './browser-recovery-preview.js'
+import type { BrowserRecoveryPreviewReadResult } from '../shared/browser-recovery-preview.js'
 import { browserResourceLocations } from './browser-resource-directory.js'
 import type { NativeOverlayRegion } from '../shared/native-overlay.js'
 import { BrowserOperationFileStore, BrowserOperationJournal, BROWSER_OPERATION_JOURNAL_FILE, browserOperationAlreadyExistsError } from './browser-operation-journal.js'
@@ -398,6 +400,7 @@ export async function registerIpc(args: {
     process.stderr.write(`browser_profile_initialization_failed=${JSON.stringify(error instanceof Error ? error.message : String(error))}\n`)
   })
   const browserInputHistory = new BrowserInputHistoryStore(join(app.getPath('userData'), 'browser-input-history'))
+  const browserRecoveryPreviews = new BrowserRecoveryPreviewStore(join(app.getPath('userData'), 'browser-recovery-previews'))
   const browserOperationJournal = new BrowserOperationJournal(
     new BrowserOperationFileStore(join(app.getPath('userData'), BROWSER_OPERATION_JOURNAL_FILE))
   )
@@ -439,7 +442,7 @@ export async function registerIpc(args: {
   }, browserOperationJournal, browserEvidence, browserResults, browserDemonstrations,
   new BrowserTaskAssets(new BrowserTaskAssetFileStore(join(app.getPath('userData'), BROWSER_TASK_ASSETS_FILE)), { nameAudit }),
   new BrowserDownloads(join(app.getPath('userData'), 'browser-downloads'), files, id => workspace(config, id)),
-  browserUploads, () => resolveBrowserAgentControl(configOwner.current.browser.agentControl))
+  browserUploads, () => resolveBrowserAgentControl(configOwner.current.browser.agentControl), browserRecoveryPreviews)
   const disposeBrowserFeedbackPreferences = configOwner.subscribe((saved, previous) => {
     if (JSON.stringify(saved.browser.agentControl) !== JSON.stringify(previous.browser.agentControl)) browsers.refreshAgentFeedback()
   })
@@ -1920,6 +1923,29 @@ export async function registerIpc(args: {
   handle('browser:back', async (id: string) => { await ensureBrowser(id); return await browsers.back(id) })
   handle('browser:forward', async (id: string) => { await ensureBrowser(id); return await browsers.forward(id) })
   handle('browser:reload', async (id: string) => { await ensureBrowser(id); return await browsers.reload(id) })
+  handleWithEvent('browser:getRecoveryPreview', async (event, id: string): Promise<BrowserRecoveryPreviewReadResult> => {
+    requireTrustedSender('browser:getRecoveryPreview', event)
+    try {
+      let scope = browsers.recoveryPreviewScope(id)
+      if (!scope) {
+        const savedState = await spatialState.read()
+        // A live/released owner created during the disk read remains the identity authority.
+        scope = browsers.recoveryPreviewScope(id)
+        if (!scope) {
+          const saved = browserColdDescriptor(savedState?.graph ?? null, id)
+          if (saved.mode === 'normal' && !saved.profileId) return {
+            status: 'unavailable', warning: 'The original Browser Profile for this preview is unconfirmed. The page and Retry remain available.'
+          }
+          scope = saved.mode === 'private'
+            ? { browserId: id, workspaceId: saved.workspaceId, mode: 'private', profileId: null }
+            : { browserId: id, workspaceId: saved.workspaceId, mode: 'normal', profileId: saved.profileId! }
+        }
+      }
+      return await browserRecoveryPreviews.read(scope)
+    } catch {
+      return { status: 'unavailable', warning: 'The original Browser preview could not be read. The page and Retry remain available.' }
+    }
+  })
   handleWithEvent('browser:switchProfile', async (event, id: string, profileId: string) => {
     requireTrustedSender('browser:switchProfile', event)
     await ensureBrowser(id)
@@ -1940,6 +1966,8 @@ export async function registerIpc(args: {
       throw new Error('Browser Profile is still used by an open Browser')
     }
     await browserProfiles.deleteProfile(profileId, approval)
+    const cleared = await browserRecoveryPreviews.clearProfile(profileId)
+    if (cleared.status === 'unavailable') console.warn('Browser Profile was deleted; its historical preview cleanup is unconfirmed:', cleared.warning)
   })
   handleWithEvent('browser:detectProfileImportSources', async (event) => {
     requireTrustedSender('browser:detectProfileImportSources', event)
