@@ -70,8 +70,10 @@ export function focusNavigationSummary(input: Pick<Inputs, 'sessions' | 'config'
     const { workspace, topicId } = focusScopeForSession(input, session)
     if (focusLaneForSession(topicId, scratchTopicsForWorkspace(input.scratchTopicSnapshots, workspace)) === 'pmo') continue
     if (bucket === 'working') working++
-    else if (session.status.state === 'error') errors++
-    else requests++
+    else {
+      if (session.pendingInteraction || isNeedsYouState(session.status.state)) requests++
+      if (session.status.state === 'error') errors++
+    }
   }
   return { working, requests, errors }
 }
