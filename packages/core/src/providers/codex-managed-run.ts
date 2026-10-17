@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { createHash, randomUUID } from 'node:crypto'
+import { stripVTControlCharacters } from 'node:util'
 import { CODEX_ACTOR_ID_ENV, CODEX_ACTOR_LIFECYCLE_ENV, openCodexFrontendControl } from './codex-managed-frontend.js'
 import type { AgentTerminalFrontendObservation } from '../agent-terminal-frontend.js'
 import { resolve } from 'node:path'
@@ -46,13 +47,31 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
     const frontendId = randomUUID()
     publish({ frontendId, state: 'starting', backendState: 'running', source: 'managed-process', observedAt: Date.now() })
     const child = spawn(plan.command, ['--remote', endpoint, '--remote-auth-token-env', CODEX_NATIVE_TOKEN_ENV, ...args],
-      { cwd: process.cwd(), env: process.env, detached: false, stdio: 'inherit' })
+      { cwd: process.cwd(), env: process.env, detached: false, stdio: ['inherit', 'inherit', 'pipe'] })
+    // Diagnostics explain this exact child generation; exit facts alone control its lifecycle.
+    // Keep the complete original bytes in the Run's PTY, with stream backpressure, while
+    // retaining only a small tail for the existing public frontend message contract.
+    let diagnosticBytes = Buffer.alloc(0)
+    child.stderr?.on('data', (bytes: Buffer) => {
+      diagnosticBytes = Buffer.concat([diagnosticBytes, bytes]).subarray(-16_384)
+    })
+    child.stderr?.pipe(process.stderr, { end: false })
+    const diagnostic = (): { message?: string } => {
+      const message = stripVTControlCharacters(diagnosticBytes.toString('utf8')).trim().slice(-4096)
+      return message ? { message } : {}
+    }
     tui = child
     child.once('exit', (code, signal) => {
       if (tui !== child) return
       tui = undefined
       publish({ frontendId, state: 'detached', backendState: stopping ? 'stopping' : 'running', source: 'managed-process', observedAt: Date.now(),
-        ...(code === null ? {} : { exitCode: code }), ...(signal ? { exitSignal: signal } : {}) })
+        ...(code === null ? {} : { exitCode: code }), ...(signal ? { exitSignal: signal } : {}), ...diagnostic() })
+    })
+    child.once('close', () => {
+      // exit may precede the last pipe bytes. Never amend a newer frontend with this tail.
+      if (frontend.frontendId === frontendId && frontend.state === 'detached' && diagnosticBytes.length > 0) {
+        publish({ ...frontend, ...diagnostic(), observedAt: Date.now() })
+      }
     })
     await new Promise<void>((resolve, reject) => { child.once('spawn', resolve); child.once('error', error => {
       if (tui === child) { tui = undefined; publish({ frontendId, state: 'detached', backendState: 'running', source: 'managed-process', observedAt: Date.now(), message: error.message }) }
