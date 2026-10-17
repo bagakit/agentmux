@@ -10,15 +10,23 @@ afterEach(async () => { await f?.close() })
 async function text(value: string) { await vi.waitFor(async () => { await f.settle(); expect(document.body.textContent).toContain(value) }, { timeout: 4000 }) }
 async function seed(id = 'settings-original') {
   const pending = await f.client.call('space.mote.connection.create', await f.input(id))
-  const saved = await confirmAndCreateMote(f, pending.operationId)
+  const created = await confirmAndCreateMote(f, pending.operationId)
+  expect(created.profileOperationId).toBeNull(); expect(created.profile).toBeNull()
+  const saved = await sync(id + '-profile', created)
   expect(saved.profile?.patch.state).toBe('confirmed')
   return saved
+}
+async function sync(id: string, created: Awaited<ReturnType<typeof confirmAndCreateMote>>) {
+  const { source, avatar } = await f.input(id)
+  return f.client.call('space.mote.connection.sync', { operationId: id, source, avatar,
+    connection: created.connection!, expectedConnectionRevision: created.enrollment!.configured!.connection.revision })
 }
 async function details(id: string) {
   await f.render(0, true)
   await vi.waitFor(async () => { await f.settle(); expect(document.querySelector('[data-connection="' + id + '"] button')).not.toBeNull() })
   await act(async () => (document.querySelector('[data-connection="' + id + '"] button') as HTMLElement).click())
-  await f.click('Public bot profile')
+  await act(async () => { const panel = document.querySelector<HTMLDetailsElement>('[data-connection-profile="' + id + '"]')!; panel.open = true; panel.dispatchEvent(new Event('toggle')) })
+  await f.settle()
 }
 
 it('reads the original selected application and exact online version through Settings IPC/public/default Host/official SDK', async () => {
@@ -34,7 +42,7 @@ it('reads the original selected application and exact online version through Set
 })
 
 it('recovers the exact original profile update while preserving written, pending publication and separate online observations', async () => {
-  const original = await seed()
+  const original = await seed(), nativeRequests = f.registration.mock.calls.length
   await details(original.connection!.connectionId)
   await text('Saved public name · Written, publication separate')
   await f.click('Saved public name · Written, publication separate'); await text('Profile written. Check and publish it on the platform.')
@@ -42,21 +50,26 @@ it('recovers the exact original profile update while preserving written, pending
   await text('The original update is shown. Unconfirmed platform effects are not sent again.')
   expect(document.querySelector('[data-profile-operation]')?.getAttribute('data-profile-operation')).toBe(original.profileOperationId)
   expect(f.calls.filter(r => r.method === 'PATCH')).toHaveLength(1)
-  expect(f.registration.mock.calls).toHaveLength(8)
+  expect(f.registration.mock.calls).toHaveLength(nativeRequests)
+  expect(f.registration.mock.calls.filter(([url]) => new URL(String(url)).pathname === '/developers/v1/manifest/upsert_by_template')).toHaveLength(1)
 })
 
 it('keeps unknown effects inspectable and does not upload, patch or register again from Settings recovery', async () => {
   f.setUnknownPatch()
   const input = await f.input('settings-unknown')
   await f.client.call('space.mote.connection.create', input)
-  const saved = await confirmAndCreateMote(f, input.operationId)
+  const created = await confirmAndCreateMote(f, input.operationId)
+  expect(created.profile).toBeNull()
+  const saved = await sync('settings-unknown-profile', created)
   expect(saved.profile?.patch.state).toBe('unknown')
+  const nativeRequests = f.registration.mock.calls.length
   await details(saved.connection!.connectionId); await text('Saved public name · Result not confirmed')
   await f.click('Saved public name · Result not confirmed'); await text('The profile write is not confirmed')
   await f.click('Check update progress'); await text('The original update is shown')
   expect(f.calls.filter(r => r.method === 'PATCH')).toHaveLength(1)
   expect(f.calls.filter(r => r.url?.endsWith('/app_avatar/upload'))).toHaveLength(1)
-  expect(f.registration.mock.calls).toHaveLength(8)
+  expect(f.registration.mock.calls).toHaveLength(nativeRequests)
+  expect(f.registration.mock.calls.filter(([url]) => new URL(String(url)).pathname === '/developers/v1/manifest/upsert_by_template')).toHaveLength(1)
 })
 
 it('rejects forged IPC methods and untrusted senders without creating a setup', async () => {
