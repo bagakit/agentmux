@@ -11,18 +11,20 @@ export function noteGraphReferenceSelectionKey(reference: NoteGraphReference): s
   return JSON.stringify([noteGraphReferenceKey(reference), reference.mode, reference.target])
 }
 export function noteGraphReferenceLabel(reference: NoteGraphReference): string {
-  return reference.mode === 'embed' ? 'Embed' : reference.mode === 'reference' ? 'Block reference'
+  return reference.mode === 'embed' ? reference.target.kind === 'page' ? 'Shared content use' : 'Block embed' : reference.mode === 'reference' ? 'Block reference'
     : reference.target.kind === 'page' ? 'Page link' : reference.target.kind === 'block' ? 'Block link' : 'Unbound link'
 }
 /** Exact saved forward occurrences projected in either direction, never name matching or a second index. */
 export function projectNoteLinks(snapshot: NotebookGraphSnapshot, noteId: string, blockId?: string) {
   const incoming: NoteGraphReference[] = [], outgoing: NoteGraphReference[] = []
+  const sharedIncoming: NoteGraphReference[] = [], sharedOutgoing: NoteGraphReference[] = []
   let unboundElsewhere = 0
   for (const reference of snapshot.graph.references) {
-    if (reference.source.noteId === noteId && (!blockId || reference.source.blockId === blockId)) outgoing.push(reference)
+    const shared = reference.mode === 'embed' && reference.target.kind === 'page' && reference.occurrence.kind === 'stored'
+    if (reference.source.noteId === noteId && (!blockId || reference.source.blockId === blockId)) (shared ? sharedOutgoing : outgoing).push(reference)
     if (reference.target.kind !== 'unbound' && reference.target.noteId === noteId &&
-      (!blockId || reference.target.kind === 'block' && reference.target.blockId === blockId)) incoming.push(reference)
+      (!blockId || reference.target.kind === 'block' && reference.target.blockId === blockId)) (shared ? sharedIncoming : incoming).push(reference)
     if (reference.target.kind === 'unbound' && reference.source.noteId !== noteId) unboundElsewhere++
   }
-  return { incoming, outgoing, unboundElsewhere }
+  return { incoming, outgoing, sharedIncoming, sharedOutgoing, unboundElsewhere }
 }

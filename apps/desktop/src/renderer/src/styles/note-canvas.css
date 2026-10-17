@@ -59,7 +59,6 @@
 .note-canvas-reader .mobile-note-body blockquote { margin-inline: 0; border-left: 2px solid var(--line); padding-left: 10px; color: var(--text-3); }
 .note-canvas-reader .mobile-note-body a { color: var(--blue); }
 .note-canvas-reader [data-block-id]:hover { background: var(--wash-1); border-radius: 2px; }
-.note-canvas-reader [data-note-agent-author]::after { content: attr(data-note-agent-author); display: inline-block; max-width: 100%; margin-inline-start: 6px; vertical-align: baseline; color: var(--text-3); font: 9px/1.5 var(--font-sans); overflow-wrap: anywhere; user-select: none; }
 .note-canvas-reader .mobile-note-reference { margin-block: 10px; border-left: 2px solid var(--blue); padding: 7px 10px; background: var(--wash-1); font-size: 11px; }
 .note-canvas-reader .mobile-note-reference details { font-size: 9px; color: var(--text-3); }
 .note-canvas-reader .mobile-note-reference code { overflow-wrap: anywhere; white-space: normal; }

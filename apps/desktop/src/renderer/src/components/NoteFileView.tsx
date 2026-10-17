@@ -20,6 +20,7 @@ import { useNoteLinkNavigation } from '../lib/use-note-link-navigation'
 import { NoteLinksPanel } from './NoteLinksPanel'
 import { SurfaceModeSwitch } from './SurfaceModeSwitch'
 import { NoteFileIdentity } from './NoteFileIdentity'
+import type { NoteFileTarget } from '../lib/file-document-consumers'
 
 /** Only an in-flight explicit reveal observes its original editor and ancestor visibility. */
 function observeRevealDOM(handle: NoteEditorHandle, attempt: () => boolean): () => void {
@@ -33,12 +34,13 @@ function observeRevealDOM(handle: NoteEditorHandle, attempt: () => boolean): () 
 }
 
 /** Presentation of the original FileDocument. Invalid source remains available through Source. */
-export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, revealBlock, onRevealed, focusRequest, canFocus, onFocused, restoredBlock, onSelectedBlock, resource, onOpenPage, dirty, onCheckOriginal, onCompositionChange, onSnapshotIssue, onKeepDisplayedDraft, sourceCoverage }: {
+export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, revealBlock, onRevealed, focusRequest, canFocus, onFocused, restoredBlock, onSelectedBlock, resource, onOpenPage, onOpenOriginal, dirty, onCheckOriginal, onCompositionChange, onSnapshotIssue, onKeepDisplayedDraft, sourceCoverage }: {
   resource?: NoteResource; document: FileDocument; knowledge: NoteKnowledge; onChange: (raw: string, editorBefore?: string) => void; onSave: () => void
   onOpen: (source: NoteSource, blockId: string) => void; revealBlock?: NoteBlockTarget; onRevealed?: () => void
   focusRequest?: number; canFocus?: () => boolean; onFocused?: (nonce: number) => void
   restoredBlock?: NoteBlockTarget; onSelectedBlock?: (target: NoteBlockTarget) => void
-  onOpenPage?: (page: NotebookPage, blockId?: string) => Promise<void> | void
+  onOpenPage?: (page: NotebookPage, blockId?: string, signal?: AbortSignal) => Promise<void> | void
+  onOpenOriginal?: (target: NoteFileTarget, blockId?: string, signal?: AbortSignal) => Promise<void>
   dirty?: boolean; onCheckOriginal?: () => void; sourceCoverage?: ReactNode
   onCompositionChange?: (composing: boolean) => void
   onSnapshotIssue?: (displayedRaw: string, incomingRaw: string, reason: string) => void
@@ -124,7 +126,7 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
     if (attempt()) return
     return observeRevealDOM(handle, attempt)
   }, [canvasOpen, canvasBlock, handle, presentation.active, read, sourceIdentity, revealBlock])
-  async function openCanvasPage(page: NotebookPage, blockId?: string) {
+  async function openCanvasPage(page: NotebookPage, blockId?: string, signal?: AbortSignal) {
     setCanvasBlock(null)
     if (read.status === 'valid' && page.noteId === read.note.noteId && resource && sameNoteResource(page.resource, resource)) {
       setCanvasOpen(false)
@@ -133,30 +135,33 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
       return
     }
     try {
+      if (onOpenPage) { await onOpenPage(page, blockId, signal); return }
       const state = useAppStore.getState()
       state.setRecallNotebook(page.notebookId, page.noteId)
       state.setMainSurface('recall')
       await openNotebookPage(page, presentation.projection?.onSelect, presentation.reference,
-        blockId ? { noteId: page.noteId, blockId } : undefined)
+        blockId ? { noteId: page.noteId, blockId } : undefined, undefined, signal)
     } catch (error) { setIssue(presentError(error)); useAppStore.getState().reportError(error) }
   }
   const openCanvasFile = async (file: CanvasFileTarget, blockId: string | undefined, signal: AbortSignal) => {
+    if (onOpenOriginal) { await onOpenOriginal({ ...file.resource, noteId: file.noteId }, blockId, signal); return true }
     const reference = presentation.reference
     const space = reference && useAppStore.getState().tabs[reference.tabId]?.space
     if (!reference || !space) throw new Error('The original file display position is unconfirmed. Your graph and source are kept; reopen from its Notebook.')
     return openNotebookFile(file, presentation.projection?.onSelect, reference, blockId ? { noteId: file.noteId, blockId } : undefined,
       { reference, space, ...(presentation.projection ? { projection: presentation.projection } : {}) }, signal)
   }
-  const openLinkedPage = async (page: NotebookPage, blockId?: string) => {
-    if (read.status === 'valid' && page.noteId === read.note.noteId && resource && sameNoteResource(page.resource, resource)) { await openCanvasPage(page, blockId); return }
-    if (onOpenPage) await onOpenPage(page, blockId)
-    else await openCanvasPage(page, blockId)
+  const openLinkedPage = async (page: NotebookPage, blockId?: string, signal?: AbortSignal) => {
+    if (read.status === 'valid' && page.noteId === read.note.noteId && resource && sameNoteResource(page.resource, resource)) { await openCanvasPage(page, blockId, signal); return }
+    if (onOpenPage) await onOpenPage(page, blockId, signal)
+    else await openCanvasPage(page, blockId, signal)
   }
   const links = useNoteLinkNavigation(openLinkedPage, catalog, presentation.active && !canvasOpen,
     (link, target) => link.referenceId ? handle?.bindLink(link, target) ?? false : true,
-    sourceIdentity)
-  const footer = registered || sourceCoverage ? <footer className="note-reading-footer" aria-label="Note references and sources">
-    {read.status === 'valid' && registered ? <NoteLinksPanel noteId={read.note.noteId} active={presentation.active && !canvasOpen} onOpen={openLinkedPage} selectedBlockId={restoredBlock?.blockId} /> : null}
+    sourceIdentity, onOpenOriginal)
+  const hasLinkedReferences = registered || read.status === 'valid' && read.note.kind === 'shared-block' && Boolean(resource)
+  const footer = hasLinkedReferences || sourceCoverage ? <footer className="note-reading-footer" aria-label="Note references and sources">
+    {read.status === 'valid' && hasLinkedReferences ? <NoteLinksPanel noteId={read.note.noteId} active={presentation.active && !canvasOpen} onOpen={openLinkedPage} onOpenFile={onOpenOriginal} selectedBlockId={restoredBlock?.blockId} /> : null}
     {sourceCoverage}
   </footer> : null
   if (read.status === 'invalid') return <div className="note-file-view"><div className="note-invalid" role="status"><strong>Note source needs attention</strong>
@@ -173,11 +178,11 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
       <SurfaceModeSwitch value={canvasOpen ? 'graph' : 'note'} onChange={view => setCanvasOpen(view === 'graph')} active={presentation.active} ariaLabel="Note presentation"
         options={[{ value: 'note', label: 'Note', ariaLabel: 'Note view' }, { value: 'graph', label: 'Graph', ariaLabel: 'Graph view' }]} />
     </>, toolbar.element) : null}
-    {canvasOpen ? <span className="note-view-snapshot" role="status">Saved relationships{dirty ? <span>Save your note to update this graph.</span> : null}</span> : null}
+    {canvasOpen ? <span className="note-view-snapshot" role="status">Saved relationships for this Note{dirty ? <span>Save your note to update this graph.</span> : null}</span> : null}
     {canvasOpen ? <div className="note-association-canvas"><NoteCanvas scope={{ kind: 'note', noteId: read.note.noteId }} active={presentation.active} onOpen={openCanvasPage} onOpenFile={openCanvasFile} /></div> : null}
     <div hidden={canvasOpen} inert={canvasOpen} className="note-original-editor">
     <WorkbenchPresentationContext.Provider value={canvasOpen ? { ...presentation, active: false } : presentation}>
-    <NoteBlockEditor note={read.note} knowledge={knowledge} onChange={onChange} onSave={onSave} onOpen={onOpen} onIssue={setIssue} handleRef={attachHandle} onOpenLink={links.openLink} active={presentation.active && !canvasOpen} showBacklinks={!registered} sourceIdentity={sourceIdentity} {...(onSelectedBlock ? { onSelectedBlock } : {})} {...(onCompositionChange ? { onCompositionChange } : {})}
+    <NoteBlockEditor note={read.note} knowledge={knowledge} onChange={onChange} onSave={onSave} onOpen={onOpen} onIssue={setIssue} handleRef={attachHandle} onOpenLink={links.openLink} active={presentation.active && !canvasOpen} showBacklinks={!hasLinkedReferences} sourceIdentity={sourceIdentity} {...(onSelectedBlock ? { onSelectedBlock } : {})} {...(onCompositionChange ? { onCompositionChange } : {})}
       {...(onSnapshotIssue ? { onSnapshotIssue: (displayedRaw: string, incomingRaw: string, reason: string) => {
         // The PM snapshot is canonical, while a file edited outside the app may
         // use different Markdown whitespace. Fence the canonical target, then

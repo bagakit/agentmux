@@ -11,7 +11,8 @@ import type { WorkbenchProjection, WorkbenchProjectionSelection } from './workbe
 import { sameWorkbenchProjectionSelection } from './workbench-projection'
 import type { WorkbenchTab } from './workbench-tabs'
 
-export type NotePageOpenOrigin = { reference: WorkbenchProjectionSelection; space: NonNullable<WorkbenchTab['space']>; projection?: WorkbenchProjection }
+export type NotePageOpenOrigin = { reference: WorkbenchProjectionSelection; space: NonNullable<WorkbenchTab['space']>; projection?: WorkbenchProjection;
+  onResult?: import('./file-workbench-state').FileOpenPlacement['onResult']; onPlaced?(reference: WorkbenchProjectionSelection): void }
 
 function catalogNow() {
   const state = useAppStore.getState()
@@ -27,8 +28,8 @@ export async function prepareNotebookWorkface(notebook: Notebook, workspaceId: s
   return workface
 }
 /** Closing a page never loses this resource. Reopening uses the same file and original workbench. */
-export async function openNotebookPage(page: NotebookPage, onSelectReference?: (reference: WorkbenchProjectionSelection) => void, selectedReference?: WorkbenchProjectionSelection | null, target?: NoteBlockTarget, origin?: NotePageOpenOrigin): Promise<boolean> {
-  return openNotebookFile(page, onSelectReference, selectedReference, target, origin)
+export async function openNotebookPage(page: NotebookPage, onSelectReference?: (reference: WorkbenchProjectionSelection) => void, selectedReference?: WorkbenchProjectionSelection | null, target?: NoteBlockTarget, origin?: NotePageOpenOrigin, signal?: AbortSignal): Promise<boolean> {
+  return openNotebookFile(page, onSelectReference, selectedReference, target, origin, signal)
 }
 
 /** Shared Markdown uses the same original file and workface navigation as a catalog page. */
@@ -71,7 +72,21 @@ export async function openNotebookFile(page: Pick<NotebookPage, 'noteId' | 'reso
       if (now.mainSurface === 'recall' && now.recallNotebookId === heldBook && now.recallNoteId === heldNote && now.recallZoneSelection === heldSelection)
         { now.setRecallZoneSelection(surveySelectReference(initial, reference)); onSelectReference?.(reference) }
     } }
+  // Presentation may be scoped to the source Region. An existing destination must
+  // carry its own exact scope while retaining the original navigation owner.
+  const targetProjection: WorkbenchProjection | undefined = origin?.projection && reference ? {
+    ...origin.projection, displayWorkspaceId, selection: [reference],
+    entity: origin.projection.entity.kind === 'zone' ? origin.projection.entity
+      : origin.projection.entity.kind === 'tab' ? { kind: 'tab', tabId: reference.tabId }
+        : { kind: 'region', regionId: reference.regionId }
+  } : origin?.projection
   return current.openFile(page.resource.path, groupId, target ? { line: 1, noteBlock: target } : undefined, page.resource.workspaceId, true,
     { displayWorkspaceId, ...(reference ? { reference } : {}), space: { zoneId: zone.zoneId, spaceId: zoneContext(current, scratchTopicsForWorkspace(current.scratchTopicSnapshots, current.config?.workspaces.find(w => w.id === SCRATCH_WORKSPACE_ID)) ?? [], zone) },
-      resource: { hostId: page.resource.hostId, path: page.resource.workspacePath }, ...(origin ? { ...(origin.projection ? { projection: origin.projection } : {}) } : { projection }) }, signal)
+      resource: { hostId: page.resource.hostId, path: page.resource.workspacePath }, ...(origin ? { ...(targetProjection ? { projection: targetProjection } : {}),
+        ...(origin.onResult || origin.onPlaced ? { onResult(result) {
+          const placed = result.placement
+          if ((placed.status === 'created' || placed.status === 'reused') && placed.tabId && placed.regionId)
+            origin.onPlaced?.({ displayWorkspaceId, groupId, tabId: placed.tabId, regionId: placed.regionId })
+          origin.onResult?.(result)
+        } } : {}) } : { projection }) }, signal)
 }
