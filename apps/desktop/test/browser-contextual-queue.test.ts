@@ -120,6 +120,20 @@ it('carries the reference through the exact conditional queue path without attac
   expect(useAppStore.getState().agentComposerDrafts[session().id]).toBe('Independent current draft')
 })
 
+it('keeps a malformed persisted capture instead of submitting its body as plain input', async () => {
+  const id = 'capture-damaged', original = enqueue(id, 'default'), damaged = structuredClone(original)
+  damaged.browserInput!.capture.record.intentDigest = 'not-an-original-digest'
+  const retained = structuredClone(damaged)
+  // Corruption happens after admission, as it can in a restored workbench projection.
+  useAppStore.setState({ agentSteerQueues: { [session().id]: [damaged] } })
+  const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue(undefined)
+  await expect(send(id)).rejects.toThrow()
+  expect(submit).not.toHaveBeenCalled()
+  expect(useAppStore.getState().agentSteerQueues[session().id]![0]).toMatchObject({
+    operationId: id, text: body, browserInput: retained.browserInput, awaitingExplicitSend: true
+  })
+})
+
 it.each(['host', 'run'] as const)('does not rebind a queued captured opinion when its %s changes before Send', async dimension => {
   const id = 'capture-route-' + dimension, original = enqueue(id, 'default'), changed = session()
   if (dimension === 'host') { changed.hostId = 'another-host'; changed.control.hostId = 'another-host' }
@@ -168,7 +182,12 @@ it.each([false, true])('reconciles continuity from typed original capture fields
   })
   const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue(undefined)
   if (wrongProof) await expect(send(id)).rejects.toThrow('unconfirmed')
-  else await expect(send(id)).resolves.toBe('submitted')
+  else {
+    let error: unknown
+    const result = await send(id).catch(reason => { error = reason })
+    expect(error, 'Typed original capture and receipt must settle without rebuilding their wire').toBeUndefined()
+    expect(result).toBe('submitted')
+  }
   expect(recover).toHaveBeenCalledOnce(); expect(submit).not.toHaveBeenCalled()
   const entry = useAppStore.getState().agentSteerQueues[current.id]![0]!
   expect(entry.operationId).toBe(id)
