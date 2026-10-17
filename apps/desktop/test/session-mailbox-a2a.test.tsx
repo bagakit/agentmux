@@ -45,15 +45,18 @@ const toggle = async () => {
   const event = new Event('toggle'); Object.defineProperty(event, 'newState', { value: 'open' })
   await act(async () => dom.container.querySelector('.composer-mailbox')!.dispatchEvent(event))
 }
-const folder = async (name: string) => dom.click(`[role="tab"][id$="-${name}-tab"]`)
+const folder = async (name: string) => {
+  if (['inbox', 'outbox', 'collaboration'].includes(name)) await dom.click('[id$="-agents-tab"]')
+  await dom.click(`[role="tab"][id$="-${name}-tab"]`)
+}
 const timeline = (items: AgentTimelineItem[]): AgentTimelineSnapshot => ({ agentSessionId: session.id, revision: 1, items })
 
-it('reads typed original A2A pages instead of inferring them from Conversation, and keeps human input on User Messages', async () => {
+it('reads typed original A2A pages instead of inferring them from Conversation, and keeps human input on Inputs', async () => {
   await dom.render(<SessionMailbox system={system()} queued={[{ id: 'pending-human', text: 'My unsent draft', status: 'queued', deliverable: true }]} control={session.control}
     timeline={timeline([captured('old-peer-input', 'Captured Agent input with no journal message', 'old-peer'), captured('human-input', 'Original human input')])} />)
   await toggle()
   const labels = [...dom.container.querySelectorAll('[role="tab"]')].map(button => button.textContent)
-  expect(labels.slice(0, 4)).toEqual(['A2A Inbox', 'A2A Outbox', 'User Messages1', 'Notices'])
+  expect(labels).toEqual(['Inputs1', 'Agent messages', 'Notices', 'Received', 'Sent', 'Collaboration'])
   expect(api.sessions.listMessages).toHaveBeenCalledExactlyOnceWith({ hostId: 'local', agentSessionId: session.id }, { direction: 'incoming', limit: 25 })
   expect(dom.container.querySelector('[data-record-key="a2a:received"]')).not.toBeNull()
   expect(dom.container.querySelector('[data-record-key="a2a:self"]')).toBeNull()

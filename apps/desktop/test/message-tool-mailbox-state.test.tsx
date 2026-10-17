@@ -48,7 +48,10 @@ async function fixture(props: Partial<ComponentProps<typeof SessionMailbox>> = {
   const panel = dom.container.querySelector<HTMLElement>('.composer-mailbox')!
   const native = nativePopover(panel)
   const open = async () => { await act(async () => native.show()); await native.flush() }
-  const folder = async (name: string) => dom.click(`[role="tab"][id$="-${name}-tab"]`)
+  const folder = async (name: string) => {
+    if (['inbox', 'outbox', 'collaboration'].includes(name)) await dom.click('[id$="-agents-tab"]')
+    await dom.click(`[role="tab"][id$="-${name}-tab"]`)
+  }
   return { panel, native, render, open, folder }
 }
 
@@ -107,12 +110,12 @@ it('keeps the original pending count when the same controlled input is read from
     deliverable: true, inputOrigin: { hostId: session.control.hostId, key } }]
   const h = await fixture({ queued })
   const label = () => dom.container.querySelector('.composer__mailbox')!.getAttribute('aria-label')
-  expect(label()).toContain('User Messages 1 pending')
+  expect(label()).toContain('Inputs 1 pending')
   await h.open(); await h.folder('user')
   expect(h.panel.querySelectorAll('[data-input-mailbox-key]')).toHaveLength(1)
   expect(h.panel.querySelector('[data-operation-id="waiting-input"]')).toBeNull()
-  expect(label()).toContain('User Messages 1 pending')
-  expect(h.panel.querySelector('[id$="-user-tab"]')!.getAttribute('aria-label')).toBe('User Messages: 1 pending')
+  expect(label()).toContain('Inputs 1 pending')
+  expect(h.panel.querySelector('[id$="-user-tab"]')!.getAttribute('aria-label')).toBe('Inputs: 1 pending')
   expect(queued[0]!.status).toBe('deferred')
 })
 
@@ -137,7 +140,7 @@ it('leaves native top layer while hidden and restores the same body, Range, scro
     expect(h.native.isOpen()).toBe(true); expect(h.native.show).toHaveBeenCalledTimes(2)
     expect(h.panel.querySelector('.log-turn__body')).toBe(body)
     expect(selection.getRangeAt(0)).toBe(range); expect(viewport.scrollTop).toBe(31)
-    expect(h.panel.querySelector('[role="tab"][aria-selected="true"]')!.id).toMatch(/-inbox-tab$/u)
+    expect(h.panel.querySelector('[role="tablist"][aria-label="Agent message folders"] [aria-selected="true"]')!.id).toMatch(/-inbox-tab$/u)
     expect(document.activeElement).toBe(outside)
   } finally { outside.remove() }
 })
@@ -153,7 +156,7 @@ it('preserves reading when native hide and return coalesce before the close togg
   expect(h.native.isOpen()).toBe(true)
   await h.native.flush()
   expect(h.panel.querySelector('.log-turn__body')).toBe(body); expect(viewport.scrollTop).toBe(19)
-  expect(h.panel.querySelector('[aria-label="Back to A2A Inbox"]')).not.toBeNull()
+  expect(h.panel.querySelector('[aria-label="Back to Received"]')).not.toBeNull()
 })
 
 it('suspends an already native-open mailbox before its first toggle is delivered and acknowledges only after return', async () => {

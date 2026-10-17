@@ -22,7 +22,10 @@ const item = (id: string, content: string, createdAt = _tailFixtureEpoch(0, 0, 1
 function outgoingItem(id:string,text:string,createdAt=_tailFixtureEpoch(0, 0, 1)):AgentTimelineItem { return item(id,text,createdAt) }
 beforeEach(() => useAppStore.setState({ sessions: [composerSession()], noticeReadReceipts: {} }))
 async function open() { const e = new Event('toggle'); Object.defineProperty(e, 'newState', { value: 'open' }); await act(async () => panel().dispatchEvent(e)) }
-async function choose(folder: string) { await dom.click(`[role="tab"][id$="-${folder}-tab"]`) }
+async function choose(folder: string) {
+  if (['inbox', 'outbox', 'collaboration'].includes(folder)) await dom.click('[id$="-agents-tab"]')
+  await dom.click(`[role="tab"][id$="-${folder}-tab"]`)
+}
 async function read(key: string) {
   const rows = [...panel().querySelectorAll<HTMLButtonElement>('button[data-record-key]')]
   expect(rows.length).toBeGreaterThan(0)
@@ -149,7 +152,7 @@ it('bounds the open native surface again when the original editor and Region res
   expect(panel().querySelectorAll('.composer-mailbox__row')).toHaveLength(1)
 })
 
-it('renders A2A Inbox, native/captured User Messages and Pending with shared compact reading and honest identities', async () => {
+it('renders A2A Inbox, native/captured Inputs and Pending with shared compact reading and honest identities', async () => {
   journal.set([journalMessage({ id: 'incoming', sender: 'reviewer', body: 'Inbox **original** words' })])
   const copy=vi.fn(async()=>true), unconfirmed={...outgoingItem('unconfirmed','Original **unconfirmed** record'),status:'failed' as const}
   await dom.render(<SessionMailbox control={composerSession().control} system={system} queued={[{id:'pending',text:'Pending **original** words',status:'deferred',deliverable:true}]}
@@ -192,7 +195,7 @@ it('navigation action counts never combine the loaded History window with Pendin
     timeline={{agentSessionId:'agent-1',revision:1,items:[outgoingItem('sent','history')]}} />)
   await open();await choose('user')
   const tab=panel().querySelector<HTMLButtonElement>('[id$="-user-tab"]')!
-  expect(tab.getAttribute('aria-label')).toBe('User Messages: 1 pending');expect(tab.querySelector('.composer-mailbox__count')!.textContent).toBe('1')
+  expect(tab.getAttribute('aria-label')).toBe('Inputs: 1 pending');expect(tab.querySelector('.composer-mailbox__count')!.textContent).toBe('1')
   expect(panel().querySelector('[id$="-system-tab"] .composer-mailbox__count')).toBeNull()
   expect(panel().textContent).not.toContain('Read full message')
   expect(panel().textContent).not.toContain('Captured input')
@@ -286,7 +289,7 @@ it('keeps Archived beside active Pending, preserves unknown cause and locates on
     {id:'confirmed',text:'Original already input',status:'queued' as const,deliverable:true,archived:true as const}]
   await dom.render(<SessionMailbox control={composerSession().control} system={system} queued={queued} onArchiveQueued={archive} onSendQueued={send}
     timeline={{agentSessionId:'agent-1',revision:1,items:[outgoingItem('prompt:confirmed','Original confirmed History')]}} />)
-  await open();await choose('user');expect(panel().querySelector('[id$="-user-tab"]')!.getAttribute('aria-label')).toBe('User Messages: 1 pending')
+  await open();await choose('user');expect(panel().querySelector('[id$="-user-tab"]')!.getAttribute('aria-label')).toBe('Inputs: 1 pending')
   expect([...panel().querySelectorAll<HTMLElement>('li[data-operation-id]')].map(row => row.dataset.operationId)).toEqual(['active','unknown','confirmed'])
   await read('queue:unknown');expect(panel().querySelector('.composer-mailbox__back')).toBeNull()
   expect(panel().querySelectorAll('.composer-mailbox__row')).toHaveLength(4)

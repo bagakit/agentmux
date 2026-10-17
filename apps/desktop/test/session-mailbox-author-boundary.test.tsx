@@ -46,7 +46,7 @@ const notification = (id: string, sequence: number, typed: boolean): AgentInputM
           message: typed ? { a2aNotificationId: id, systemContext: noticeWire } : { userContent: noticeWire } } } } }
 }
 
-it('excludes typed Agent and platform inputs from User Messages while retaining human and unknown authored lookalikes', async () => {
+it('excludes typed Agent and platform inputs from Inputs while retaining human and unknown authored lookalikes', async () => {
   const sourceItems = [notification('platform-notice', 6, true), notification('authored-lookalike', 5, false),
     controlled('controlled-agent', 4, 'agent'), submitted(), controlled('human-input', 2, 'human'), controlled('unknown-input', 1, 'unknown')]
   const read = vi.spyOn(api.sessions, 'inputMailbox').mockImplementation(async (_target, options) => {
@@ -68,7 +68,7 @@ it('excludes typed Agent and platform inputs from User Messages while retaining 
   for (const id of ['controlled-agent', 'submitted-agent']) {
     await dom.click(`[data-record-key="a2a:${id}"]`)
     expect(dom.container.textContent).toContain('ORIGINAL-' + id)
-    await dom.click('[aria-label="Back to A2A Inbox"]')
+    await dom.click('[aria-label="Back to Received"]')
   }
   await dom.click('[role="tab"][id$="-user-tab"]')
   await vi.waitFor(() => {
@@ -111,7 +111,7 @@ it('retains platform notices in the shared inventory with typed reference readin
 })
 
 it.each(['missing-producer-key', 'mismatched-marker', 'mismatched-context', 'authored-content'] as const)(
-  'keeps %s unknown rather than removing an authored input from User Messages', variant => {
+  'keeps %s unknown rather than removing an authored input from Inputs', variant => {
     const item = notification('unknown-input', 1, true)
     if (item.kind !== 'submission' || !item.record?.admission?.intent?.message) throw new Error('The original submission fixture exists')
     const admission = item.record.admission, message = admission.intent!.message!

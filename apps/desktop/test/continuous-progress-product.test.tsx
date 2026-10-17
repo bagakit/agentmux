@@ -164,7 +164,7 @@ beforeEach(async () => {
   await act(async () => root.render(<AgentSessionComposer sessionId={session.agentSessionId} />))
   const mailbox = container.querySelector<HTMLElement>('.composer-mailbox')!, opened = new Event('toggle')
   Object.defineProperty(opened, 'newState', { value: 'open' })
-  await act(async () => { mailbox.dispatchEvent(opened); mailbox.querySelector<HTMLButtonElement>('[role="tab"][id$="-progress-tab"]')!.click() })
+  await act(async () => { mailbox.dispatchEvent(opened); mailbox.querySelector<HTMLButtonElement>('[aria-label="Automation"]')!.click() })
 })
 afterEach(async () => {
   await act(async () => root?.unmount()); container?.remove(); disposeStore?.(); disposeStore = undefined
@@ -190,9 +190,9 @@ it('mounts the existing Composer leaf and real create/pause/resume/check/stop ro
   // Happy DOM lacks native popover toggling; only its browser state event is supplied here.
   const opened = new Event('toggle'); Object.defineProperty(opened, 'newState', { value: 'open' })
   await act(async () => mailbox.dispatchEvent(opened))
-  const progress = mailbox.querySelector<HTMLButtonElement>('[role="tab"][id$="-progress-tab"]')!; expect(progress).not.toBeNull()
+  const progress = mailbox.querySelector<HTMLButtonElement>('[aria-label="Automation"]')!; expect(progress).not.toBeNull()
   await act(async () => progress.click())
-  const page = mailbox.querySelector<HTMLElement>('[role="tabpanel"][id$="-progress"]')!; expect(page.hidden).toBe(false)
+  const page = mailbox.querySelector<HTMLElement>('[role="region"][aria-label="Automation settings"]')!; expect(page.hidden).toBe(false)
   const form = page.querySelector('form'); expect(form).not.toBeNull()
   const textarea = form!.querySelector<HTMLTextAreaElement>('textarea')!
   await act(async () => {
@@ -235,7 +235,7 @@ it('saved defaults reach both original Composer creation routes and durable task
   root = createRoot(container); await act(async () => root.render(<AgentSessionComposer sessionId={session.agentSessionId} />))
   const mailbox = container.querySelector<HTMLElement>('.composer-mailbox')!, opened = new Event('toggle')
   Object.defineProperty(opened, 'newState', { value: 'open' }); await act(async () => mailbox.dispatchEvent(opened))
-  await act(async () => mailbox.querySelector<HTMLButtonElement>('[role="tab"][id$="-progress-tab"]')!.click())
+  await act(async () => mailbox.querySelector<HTMLButtonElement>('[aria-label="Automation"]')!.click())
   const progress = container.querySelector<HTMLElement>('[data-progress-details="interval"]')!, form = progress.querySelector<HTMLFormElement>('form')!
   expect(form.querySelector<HTMLInputElement>('input[type="number"]')!.value).toBe('7')
   expect(form.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('Continue the precise saved task')

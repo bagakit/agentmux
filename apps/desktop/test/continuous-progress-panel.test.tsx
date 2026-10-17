@@ -66,7 +66,7 @@ describe('continuous progress panel', () => {
     vi.spyOn(api.continuousProgress, 'list').mockResolvedValue([loop])
     await dom.render(<ContinuousProgressControl session={composerSession()} />)
     await vi.waitFor(() => expect(dom.container.querySelector('[data-progress-details="configuration"]')).not.toBeNull())
-    expect(dom.container.querySelector('.continuous-progress-control__heading')!.textContent).toBe('Continuous progressUnconfirmed')
+    expect(dom.container.querySelector('[data-progress-details="interval"] > summary')!.textContent).toBe('Continuous progress Unconfirmed')
     expect(dom.container.querySelector('[role="status"]')!.textContent).toContain('Manual input follows terminal readiness.')
     expect([...dom.container.querySelectorAll('.continuous-progress-panel__summary dt')].map(el => el.textContent)).toEqual(['Last known loop status', 'Agent execution', 'Last check'])
     expect(dom.container.querySelector('.continuous-progress-panel__summary')!.textContent).toContain('active')
