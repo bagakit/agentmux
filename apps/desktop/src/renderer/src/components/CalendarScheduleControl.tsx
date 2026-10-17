@@ -30,7 +30,7 @@ export function CalendarScheduleControl({ target, onStatusChange, initialMessage
       {source.error ? <div className="calendar-schedules__notice" role="status"><p>{source.error} Last confirmed arrangements and manual input remain available.</p><button type="button" className="small-button" onClick={source.refresh}>Retry arrangements</button></div> : null}
       {source.records.length ? <ol className="calendar-schedules__list">{source.records.map(record =>
         <ScheduleArrangementRow key={record.loopId} schedule={record} timezone={timezone} now={now} onReceipt={source.accept} />)}</ol>
-        : source.observed ? <p className="continuous-progress-control__help">No saved arrangements for this Agent.</p> : <p className="continuous-progress-control__help">Reading arrangements…</p>}
+        : source.observed ? <p className="continuous-progress-control__help">No saved arrangements for this Agent.</p> : !source.error ? <p className="continuous-progress-control__help">Reading arrangements…</p> : null}
     </> : null}
     <ScheduleCreateForm key={draftKey} draftKey={draftKey} target={target} onReceipt={source.accept} records={source.records}
       initialMessage={initialMessage} initialMessageContext={initialMessageContext} onMessageChange={onMessageChange} />
