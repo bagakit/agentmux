@@ -27,7 +27,11 @@ const mutations = [
   { name: 'avatar-load-cancels-original-motion', file: action,
     before: 'avatar.appendChild(image); label.prepend(avatar); placeLabel()',
     after: 'avatar.appendChild(image); label.prepend(avatar); stopMotion(); placeLabel()',
-    oracle: 'keeps the original pointer and label clocks' }
+    oracle: 'keeps the original pointer and label clocks' },
+  { name: 'pending-clock-pauses-label', file: action,
+    before: 'if (arrowMove.startTime !== null) synchronizeClock()',
+    after: 'labelMove.startTime = arrowMove.startTime; if (arrowMove.startTime !== null) synchronizeClock()',
+    oracle: 'pending Chromium clocks never pause a label' }
 ]
 const inputs = [action, owner, 'apps/desktop/src/main/browser-control-feedback.ts', 'apps/desktop/src/main/browser-page-dispatch.ts',
   'apps/desktop/src/main/browser-operator-avatar.ts', 'apps/desktop/src/shared/browser-agent-control.ts', configuration,
@@ -73,7 +77,7 @@ async function run(name, mutation) {
   const results = JSON.parse(await readFile(resultPath, 'utf8'))
   const assertions = results.testResults.flatMap(result => result.assertionResults)
   const failed = assertions.filter(result => result.status === 'failed')
-  assert.ok(assertions.length >= 69, 'The actual owning test set is nonempty and complete')
+  assert.ok(assertions.length >= 71, 'The actual owning test set is nonempty and complete')
   const row = { name, exitCode: code, total: assertions.length, failed: failed.map(result => ({ title: result.fullName, messages: result.failureMessages })), resultPath }
   receipt.runs.push(row)
   if (mutation) {

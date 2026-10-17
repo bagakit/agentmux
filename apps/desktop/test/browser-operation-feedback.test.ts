@@ -16,7 +16,7 @@ function target(x = 20, y = 30) {
   element.getBoundingClientRect = () => ({ left: x, top: y, right: x + 80, bottom: y + 20, width: 80, height: 20, x, y, toJSON() {} })
   return element
 }
-const moves: { element: HTMLElement; frames: Keyframe[]; options: KeyframeAnimationOptions; cancel: ReturnType<typeof vi.fn>; animation: { cancel: ReturnType<typeof vi.fn>; startTime: number; currentTime: number; effect: { setKeyframes: ReturnType<typeof vi.fn> } } }[] = []
+const moves: { element: HTMLElement; frames: Keyframe[]; options: KeyframeAnimationOptions; cancel: ReturnType<typeof vi.fn>; animation: { cancel: ReturnType<typeof vi.fn>; startTime: number | null; currentTime: number; ready: Promise<unknown>; effect: { setKeyframes: ReturnType<typeof vi.fn> } } }[] = []
 const labelMoves: typeof moves = []
 const presented = new WeakMap<HTMLElement, { x: number; y: number }>()
 beforeEach(() => {
@@ -28,7 +28,7 @@ beforeEach(() => {
   })
   Object.defineProperty(HTMLElement.prototype, 'animate', { configurable: true, writable: true,
     value: vi.fn(function (this: HTMLElement, frames: Keyframe[], options: KeyframeAnimationOptions) {
-      const cancel = vi.fn(), animation = { cancel, startTime: 17, currentTime: 0, effect: { setKeyframes: vi.fn() },
+      const cancel = vi.fn(), animation = { cancel, startTime: 17 as number | null, currentTime: 0, ready: Promise.resolve(), effect: { setKeyframes: vi.fn() },
         get finished() { throw new Error('The page action must never await animation completion') } }
       ;(this.classList.contains('pointer') ? moves : labelMoves).push({ element: this, frames, options, cancel, animation })
       return animation
@@ -318,6 +318,29 @@ describe('saved native pointer preferences and acknowledged click decoration', (
     expect(moves[0]!.options.duration).toBe(640)
     expect(labelMoves[0]!.options).toEqual(moves[0]!.options)
     expect(state().shadow.querySelector('.label').style.transform).toBe('translate(195px,121px)')
+  })
+  it.each(['ready', 'replaced'])('pending Chromium clocks never pause a label and only synchronize the original move when %s', async condition => {
+    let ready!: () => void
+    const promise = new Promise<void>(resolve => { ready = resolve })
+    const assignments: Array<number | null> = []
+    const animate = HTMLElement.prototype.animate
+    vi.spyOn(HTMLElement.prototype, 'animate').mockImplementation(function (this: HTMLElement, frames, options) {
+      const move = animate.call(this, frames, options)
+      let start: number | null = null
+      Object.defineProperty(move, 'startTime', { configurable: true, get: () => start, set: value => {
+        if (this.classList.contains('label')) assignments.push(value)
+        start = value
+      } })
+      Object.defineProperty(move, 'ready', { value: promise })
+      return move
+    })
+    apply(base, target()); apply({ ...base, revision: 2, token: 'pending' }, target(140, 90))
+    expect(moves).toHaveLength(1); expect(labelMoves).toHaveLength(1)
+    expect(assignments).toEqual([]) // null is a pause command, never a shared clock.
+    moves[0]!.animation.startTime = 84
+    if (condition === 'replaced') apply({ ...base, revision: 3, token: 'pending', phase: 'clear' })
+    ready(); await promise; await Promise.resolve()
+    expect(assignments).toEqual(condition === 'ready' ? [84] : [])
   })
   it('turns tween off without losing the actual point, and never uses an invisible pointer as later motion history', () => {
     apply(base, target())
