@@ -21,7 +21,7 @@ import type { MoteAvatarImage } from '../../src/shared/mote-avatars.js'
 import { directoryIdentity, homeZoneId } from '../../src/shared/space-addresses.js'
 import { SCRATCH_WORKSPACE_ID } from '../../src/shared/scratch-topics.js'
 import { controlledNativeImage, imageInput } from './mote-identity-image.js'
-import type { ConnectionAdapter } from '@agentmux/connectors'
+import { createBuiltinConnectionAdapters, type ConnectionAdapter } from '@agentmux/connectors'
 import type { ConnectionEnrollmentActionKind } from '@agentmux/core/connections'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../../test/fixture-values.mjs'
 
@@ -220,10 +220,11 @@ export async function moteConnectionOwner(
         return Buffer.concat([c.update(v.subarray(12, -16)), c.final()]).toString()
       }
     }
+  const adapters = options.generic ? [adapter] : createBuiltinConnectionAdapters()
   const connections = await createDesktopConnections({
     directory: join(root, 'connections'),
     encryption,
-    ...(options.generic ? { adapters: [adapter] } : {})
+    adapters
   })
   const preferences = new MoteConnectionPreferences({
     files: publicFiles,
@@ -295,6 +296,7 @@ export async function moteConnectionOwner(
     parent,
     preferences,
     connections,
+    adapters,
     server,
     client,
     target,
