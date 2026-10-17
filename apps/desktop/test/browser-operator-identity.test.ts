@@ -11,7 +11,7 @@ import { browserOperatorForSession } from '../src/renderer/src/lib/browser-opera
  */
 
 function session(fields: Record<string, unknown>): SessionSnapshot {
-  return fields as unknown as SessionSnapshot
+  return { ...(fields.kind === 'agent' ? { hostId: 'local', control: { kind: 'agent', hostId: 'local', agentSessionId: fields.id } } : {}), ...fields } as unknown as SessionSnapshot
 }
 
 describe('browserOperatorForSession：操作者身份取自真实 Session', () => {

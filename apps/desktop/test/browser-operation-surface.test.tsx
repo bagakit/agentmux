@@ -44,6 +44,8 @@ const operation: BrowserOperation = {
 }
 
 const activity: BrowserActivityState = { operation, control: 'agent' }
+const agentControl = { owner: 'agent', activeOperationId: operation.id, revision: 1, inputIsolation: 'isolated' } as const
+const humanControl = { owner: 'human', activeOperationId: null, revision: 2, inputIsolation: 'inactive' } as const
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
 
 const plan: BrowserReplayPlan = {
@@ -60,6 +62,7 @@ describe('BrowserOperationStatus', () => {
   it('leaves an idle human-owned Browser page unobscured', () => {
     const markup = renderToStaticMarkup(createElement(BrowserOperationStatus, {
       activity: { operation: null, control: 'human' },
+      control: humanControl,
       onOpenTimeline: vi.fn()
     }))
     expect(markup).toContain('data-phase="idle"')
@@ -71,6 +74,7 @@ describe('BrowserOperationStatus', () => {
   it('does not claim the Browser is idle while Agent control is active but activity is loading', () => {
     const markup = renderToStaticMarkup(createElement(BrowserOperationStatus, {
       activity: { operation: null, control: 'agent' },
+      control: agentControl,
       onOpenTimeline: vi.fn()
     }))
     expect(markup).toContain('Agent control active')
@@ -82,6 +86,7 @@ describe('BrowserOperationStatus', () => {
   it('keeps operator identity, phase and semantic target in the compact disclosure name', () => {
     const markup = renderToStaticMarkup(createElement(BrowserOperationStatus, {
       activity,
+      control: agentControl,
       onTakeControl: vi.fn(),
       onStop: vi.fn(),
       onOpenTimeline: vi.fn()
@@ -97,6 +102,7 @@ describe('BrowserOperationStatus', () => {
   it('states human control without mounting a second action row', () => {
     const markup = renderToStaticMarkup(createElement(BrowserOperationStatus, {
       activity: { operation: { ...operation, phase: 'human' }, control: 'human' },
+      control: humanControl,
       onReturnControl: vi.fn()
     }))
     expect(markup).toContain('Human has control')
@@ -232,7 +238,7 @@ describe('Browser protocol wait motion in the original surfaces', () => {
     const original = structuredClone(waiting)
     document.body.append(host)
     const render = (value: BrowserActivityState) => act(async () => root.render(createElement(BrowserOperationStatus, {
-      activity: value, onStop: stop, onTakeControl: take
+      activity: value, control: value.control === 'human' ? humanControl : agentControl, onStop: stop, onTakeControl: take
     })))
     try {
       await render(waiting)
