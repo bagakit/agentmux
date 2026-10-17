@@ -9,7 +9,7 @@ const [privateRoot] = process.argv.slice(2)
 assert.ok(privateRoot && process.send, 'Only the private capture parent owns this host')
 const send = value => { if (process.connected) process.send(value) }
 const pending = new Map(), loader = new URL('../desktop-map/source-loader.mjs', import.meta.url)
-const commands = { map: ['app', 'focus', '--surface', 'space', '--view', 'map'], workbench: ['app', 'focus', '--surface', 'space', '--view', 'workbench'], inspect: ['app', 'inspect'] }
+const commands = { map: ['app', 'focus', '--surface', 'focus', '--view', 'map'], list: ['app', 'focus', '--surface', 'focus', '--view', 'list'], space: ['app', 'focus', '--surface', 'space'], inspect: ['app', 'inspect'] }
 const environment = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: privateRoot, AGENTMUX_STATE_DIRECTORY: join(privateRoot, 'control-state'), AGENTMUX_AGENT_SESSION_STORE: join(privateRoot, 'control-sessions.json'), AGENTMUX_MESSAGE_QUEUE_PATH: join(privateRoot, 'control-messages.ndjson') }
 const server = new AgentMuxControlServer({ socketPath: join(privateRoot, 'c.sock'), coreClients: () => [], execute: request => {
   if (request.operation !== 'focus' && request.operation !== 'inspect.client') throw Error('Only original navigation and inspection belong to this finite capture')

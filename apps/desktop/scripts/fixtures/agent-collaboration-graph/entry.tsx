@@ -17,7 +17,7 @@ import type { CollaborationLayoutRequest, CollaborationLayoutResponse } from '..
 import '../../../src/renderer/src/styles/index.css'
 
 // Transparent instrumentation: actual browser Workers and original context code execute.
-const nativeWorkers: Array<{ input?: { nodes: number; connections: number; ids: string[]; sizes: Record<string, number> }; boxes?: { agents: number; ids: string[] }; complete?: boolean; terminated?: boolean; observerMS: number }> = []
+const nativeWorkers: Array<{ input?: { nodes: number; connections: number; ids: string[]; sizes: Record<string, number>; areas: Array<{ id: string; members: number }> }; boxes?: { agents: number; ids: string[]; areas: Array<{ id: string; width: number; height: number }> }; complete?: boolean; terminated?: boolean; observerMS: number }> = []
 const OriginalWorker = window.Worker
 class ObservedWorker extends OriginalWorker {
   private readonly sample: typeof nativeWorkers[number] = { observerMS: 0 }
@@ -25,7 +25,7 @@ class ObservedWorker extends OriginalWorker {
     super(...args); nativeWorkers.push(this.sample)
     this.addEventListener('message', (event: MessageEvent<CollaborationLayoutResponse>) => {
       const start = performance.now()
-      if (event.data?.type === 'boxes' && Array.isArray(event.data.boxes)) this.sample.boxes = { agents: event.data.boxes.filter(box => box.kind === 'agent').length, ids: event.data.boxes.filter(box => box.kind === 'agent').map(box => box.id) }
+      if (event.data?.type === 'boxes' && Array.isArray(event.data.boxes)) this.sample.boxes = { agents: event.data.boxes.filter(box => box.kind === 'agent').length, ids: event.data.boxes.filter(box => box.kind === 'agent').map(box => box.id), areas: event.data.boxes.filter(box => box.kind === 'area').map(({ id, width, height }) => ({ id, width, height })) }
       if (event.data?.type === 'complete') this.sample.complete = true
       this.sample.observerMS += performance.now() - start
     })
@@ -37,7 +37,7 @@ class ObservedWorker extends OriginalWorker {
     if (request?.type === 'arrange' && Array.isArray(request.input?.nodes) && Array.isArray(request.input?.connections)) {
       const sizes: Record<string, number> = {}
       for (const node of request.input.nodes) { const size = `${node.width}x${node.height}`; sizes[size] = (sizes[size] ?? 0) + 1 }
-      this.sample.input = { nodes: request.input.nodes.length, connections: request.input.connections.length, ids: request.input.nodes.map(node => node.id), sizes }
+      this.sample.input = { nodes: request.input.nodes.length, connections: request.input.connections.length, ids: request.input.nodes.map(node => node.id), sizes, areas: request.input.areas.map(area => ({ id: area.id, members: area.members.length })) }
     }
     this.sample.observerMS += performance.now() - start
     if (Array.isArray(options)) super.postMessage(message, options); else super.postMessage(message, options)
@@ -248,7 +248,7 @@ api.sessions.readMessage = async (subject, mid) => {
       senderRunId: 'fixture-run-' + ref.senderSessionId, recipientRunId: null, workspaceId: null, correlationId: mid }, delivery: { state: 'delivered', at: now - 6000 } } }
 }
 createClientUiRoot(document.getElementById('root')!).render(createElement(App))
-let originalState: ReturnType<typeof useAppStore.getState> | undefined, originalDraft: HTMLTextAreaElement | null = null, originalMap: Element | null = null
+let originalState: ReturnType<typeof useAppStore.getState> | undefined, originalDraft: HTMLTextAreaElement | null = null, originalMap: Element | null = null, originalBody: HTMLElement | null = null
 const structuralValue = (value: unknown) => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item)
 Object.assign(window, { graphCapture: {
   ready: true, reads, controls, census, beginMeasurement, endMeasurement,
@@ -261,6 +261,14 @@ Object.assign(window, { graphCapture: {
   cancelPublicControl(requestId: string) { publicSignals.get(requestId)?.abort() },
 
   rememberMap() { originalMap = document.querySelector('.collaboration-map') },
+  rememberBody() {
+    originalBody = document.querySelector('.collaboration-evidence .composer-mailbox__detail .log-turn__body')
+    if (!originalBody) throw Error('Original message body must exist before measuring its preservation')
+    const range = document.createRange(); range.selectNodeContents(originalBody)
+    const selection = getSelection(); selection?.removeAllRanges(); selection?.addRange(range)
+    return { text: originalBody.textContent, selection: selection?.toString(), messageId: originalBody.closest<HTMLElement>('[data-message-id]')?.dataset.messageId }
+  },
+  bodyState() { return { connected: originalBody?.isConnected, sameBody: originalBody === document.querySelector('.collaboration-evidence .composer-mailbox__detail .log-turn__body'), text: originalBody?.textContent, selection: getSelection()?.toString(), messageId: originalBody?.closest<HTMLElement>('[data-message-id]')?.dataset.messageId } },
   workerSamples() { return structuredClone(nativeWorkers) },
   grow(total: 240 | 480) {
     const start = performance.now()
@@ -308,5 +316,5 @@ Object.assign(window, { graphCapture: {
     sameMap: originalMap === document.querySelector('.collaboration-map'), census: census(),
     activeWorkspaceId: state.activeWorkspaceId, choice: structuredClone(state.workbenchSpaceSelection),
     documentHidden: document.hidden, visibilityState: document.visibilityState,
-    publicAdmissionReady: Boolean(admittedControl), publicRequests: [...publicRequests], spaceView: state.spaceView, mapTarget: state.collaborationMapTarget, graph: Boolean(document.querySelector('.collaboration-map:not([hidden])')), instrumentation: structuredClone(instrumentation()), readers: document.querySelectorAll('[data-agent-reading-host]').length } }
+    publicAdmissionReady: Boolean(admittedControl), publicRequests: [...publicRequests], mainSurface: state.mainSurface, focusView: state.focusView, mapTarget: state.collaborationMapTarget, graph: Boolean(document.querySelector('.collaboration-map[data-desktop-focus-view="map"]:not([hidden])')), instrumentation: structuredClone(instrumentation()), readers: document.querySelectorAll('[data-agent-reading-host]').length } }
 } })
