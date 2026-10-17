@@ -4,7 +4,7 @@ import { stat } from 'node:fs/promises'
 import { AgentMuxError } from '../errors.js'
 import { NativeJsonlHistoryReader, readNativeConversationChanges, NATIVE_CONVERSATION_CHANGES_PAGE_RESERVE_BYTES } from '../native-jsonl-history-reader.js'
 import { normalizeSessionHistoryMetrics, SESSION_HISTORY_MAX_PAGE_BYTES } from '../session-history.js'
-import { isNativeText, nativeJsonStringify, nativeTextConcat, type NativeHistoryContentPart, type NativeHistoryItem } from '../native-history-value.js'
+import { isNativeText, nativeJsonStringify, nativeTextConcat, nativeTextStartsWith, type NativeHistoryContentPart, type NativeHistoryItem } from '../native-history-value.js'
 import { codexQuestionAnswers, codexQuestionRequest } from './codex-question.js'
 import type { AgentProviderSessionHistoryContext, AgentProviderSessionHistoryPage,
   AgentProviderSessionHistoryRecordContext, AgentSessionHistoryItem } from '../types.js'
@@ -62,6 +62,27 @@ function contentParts(content: unknown, userInput = false): NativeHistoryContent
         ...(typeof part.name === 'string' ? { label: part.name } : {}) }
     }
     return { kind: 'text', text: nativeJsonStringify(value), contentEligibility: 'unconfirmed' }
+  })
+}
+
+/** Reading presentation only: original text and native actor facts remain independent. */
+function collaborationContentParts(content: unknown, sender?: string, recipient?: string): NativeHistoryContentPart[] {
+  return contentParts(content).map((part, index) => {
+    if (part.kind !== 'text') return part
+    const original = Array.isArray(content) ? object(content[index]) : {}
+    if (original.type === 'encrypted_content' && isNativeText(original.encrypted_content) &&
+      Object.keys(original).every(key => key === 'type' || key === 'encrypted_content')) {
+      return { ...part, readingRange: { start: 0, end: 0 } }
+    }
+    // Only the leading native envelope with both exact native participants is
+    // redundant for reading. Unknown wrappers and later body text stay intact.
+    if (index === 0 && sender !== undefined && recipient !== undefined) {
+      for (const type of ['MESSAGE', 'NEW_TASK', 'FINAL_ANSWER']) {
+        const prefix = `Message Type: ${type}\nTask name: ${recipient}\nSender: ${sender}\nPayload:\n`
+        if (nativeTextStartsWith(part.text, prefix)) return { ...part, readingRange: { start: prefix.length, end: part.text.length } }
+      }
+    }
+    return part
   })
 }
 
@@ -130,13 +151,13 @@ function item(record: Record<string, unknown>, start: number, nativeSessionId: s
     parts = mcpParts
   } else if (record.type === 'response_item' && type === 'agent_message') {
     // The native actor paths belong to this source, not to AgentMux's Session registry.
-    parts = contentParts(payload.content)
     contentEligibility = 'public'
     const validActor = (value: unknown): value is string => typeof value === 'string' && value.length > 0 &&
       value.length <= 16_384 && !/[\u0000-\u001f\u007f]/u.test(value)
     collaboration = { kind: 'message', source: { providerId: 'codex', nativeSessionId },
       ...(validActor(payload.author) ? { sender: payload.author } : {}),
       ...(validActor(payload.recipient) ? { recipient: payload.recipient } : {}) }
+    parts = collaborationContentParts(payload.content, collaboration.sender, collaboration.recipient)
     if (payload.author !== undefined && !validActor(payload.author) || payload.recipient !== undefined && !validActor(payload.recipient)) {
       conversationDiagnostic = { code: 'NATIVE_COLLABORATION_ATTRIBUTION_UNCONFIRMED',
         message: 'Optional native collaboration attribution is unknown. The original message and reported attribution remain readable.' }
