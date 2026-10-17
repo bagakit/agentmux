@@ -2,6 +2,7 @@ import { parseRendererAllocationsResult } from './renderer-allocations.js'
 import { parseRendererSceneCaptureResult, parseRendererSceneInspection } from './renderer-performance-scene.js'
 import { parseRendererV8ProfileResult } from './renderer-v8-profile.js'
 import { parseRendererMemoryResult } from './renderer-memory.js'
+import { parseRendererAnimationsResult } from './renderer-animations.js'
 import { parseRendererTraceResult } from './renderer-trace.js'
 import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
@@ -327,6 +328,9 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
       break
     case 'metrics.scene.inspect':
       parseRendererSceneInspection(actual.inspection, request)
+      break
+    case 'metrics.animations.inspect':
+      parseRendererAnimationsResult(actual.observation, request)
       break
     case 'metrics.memory.inspect':
       parseRendererMemoryResult(actual.observation, request)

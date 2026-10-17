@@ -6,6 +6,8 @@ import { parseRuntimeResources } from './runtime-observation-codec.js'
 export * from './renderer-v8-profile.js'
 export * from './renderer-trace.js'
 export * from './renderer-memory.js'
+export * from './renderer-animations.js'
+import type { RendererAnimationsInput, RendererAnimationsResult } from './renderer-animations.js'
 import type { RendererMemoryInput, RendererMemoryResult } from './renderer-memory.js'
 import type { RendererTraceInput, RendererTraceResult } from './renderer-trace.js'
 import type { RendererV8ProfileInput, RendererV8ProfileResult } from './renderer-v8-profile.js'
@@ -89,6 +91,7 @@ export type PerformanceDiagnostics = {
 export type MetricsSubscription = { dispose(): void }
 /** The host owns observation. Core only frames, validates and releases consumption. */
 export interface AgentMuxMetricsPort {
+  inspectAnimations?(input: RendererAnimationsInput, signal?: AbortSignal): Promise<RendererAnimationsResult>
   captureAllocations?(input: RendererAllocationsInput, signal?: AbortSignal): Promise<RendererAllocationsResult>
   captureScene?(input: RendererSceneCaptureInput, signal?: AbortSignal): Promise<RendererSceneCaptureResult>
   inspectScene?(input: RendererSceneInspectInput, signal?: AbortSignal): Promise<RendererSceneInspection>

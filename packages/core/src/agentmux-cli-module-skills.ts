@@ -527,6 +527,9 @@ system doctor/storage/crash-log/metrics keep source identity, observation time a
 coverage. Use current help to discover exact reader contracts and authorization.
 
 Metrics watch owns a reader; cancellation detaches that reader and never stops an Agent.
+For a bounded explicit Web Animation instance read in one exact Renderer document, use
+system metrics animations inspect --help. It does not attach a debugger or alter animations;
+labels and play state are observations, not CPU ownership or Agent control facts.
 For explicit Renderer heap/backing counters, use system metrics memory inspect --help;
 that original command defines exact target, unknown coverage and debugger ownership boundaries.
 Crash-log reveal is a separate presentation action, not a recovery. Missing diagnostics
