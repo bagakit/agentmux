@@ -32,7 +32,7 @@ export type MoteConnectionOperation = {
   snapshot: { name: string; description: string | null; avatarSha256: string | null }
   connection: MoteConnectionRef | null
   enrollmentOperationId: string | null
-  profileOperationId: string
+  profileOperationId: string | null
   defaultSave: { params: MoteConnectionPreferencesSaveParams; observedReceipt: MoteConnectionPreferencesSaveResult | null } | null
   enrollment: ConnectionEnrollmentOperation | null
   profile: ConnectionProfileOperation | null

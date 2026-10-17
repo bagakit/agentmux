@@ -250,7 +250,7 @@ export class MoteConnectionOperations implements MoteConnectionPort {
       }
       const name = action === 'create' ? (input as MoteConnectionCreate).name ?? source.name : source.name,
         enrollmentOperationId = action === 'create' ? randomUUID() : null,
-        profileOperationId = randomUUID(),
+        profileOperationId = action === 'sync' ? randomUUID() : null,
         connectionId =
           action === 'create' ? randomUUID() : (input as MoteConnectionSync).connection.connectionId
       const operation: MoteConnectionOperation = {
@@ -378,16 +378,13 @@ export class MoteConnectionOperations implements MoteConnectionPort {
       }
       if (!row.operation.connection) return this.project(row)
     }
-    if (!row.profileInput) {
+    if (row.operation.action === 'sync' && !row.profileInput) {
       const connection = row.operation.connection!
-      const expected =
-        row.operation.action === 'sync'
-          ? (row.input as MoteConnectionSync).expectedConnectionRevision
-          : row.operation.enrollment!.configured!.connection.revision
+      const expected = (row.input as MoteConnectionSync).expectedConnectionRevision
       row = this.update(id, (r) => {
         if (r.profileInput) return
         r.profileInput = {
-          operationId: r.operation.profileOperationId,
+          operationId: r.operation.profileOperationId!,
           connectionId: connection.connectionId,
           expectedConnectionRevision: expected,
           desired: {
@@ -398,14 +395,17 @@ export class MoteConnectionOperations implements MoteConnectionPort {
             ...(r.pngDataUrl ? { avatar: { pngDataUrl: r.pngDataUrl } } : {})
           }
         }
-        if (r.baseline)
-          r.operation.defaultSave = {
+      })
+    }
+    if (row.baseline && !row.operation.defaultSave) {
+      row = this.update(id, (r) => {
+        if (!r.operation.defaultSave) r.operation.defaultSave = {
             params: parseMotePreferencesSaveParams({
               kind: 'connection',
               target: r.input.source.target,
               operationId: r.defaultOperationId,
-              baseline: r.baseline,
-              values: { connection }
+              baseline: r.baseline!,
+              values: { connection: r.operation.connection! }
             }) as MoteConnectionPreferencesSaveParams,
             observedReceipt: null
           }
@@ -467,6 +467,7 @@ export class MoteConnectionOperations implements MoteConnectionPort {
         /* Keep the original File save and child receipts. */
       }
     }
+    if (row.operation.action === 'create') return this.project(row)
     try {
       const port = this.ports.connections.connections.profile!,
         input = row.profileInput!
