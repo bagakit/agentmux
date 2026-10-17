@@ -5,6 +5,9 @@ import { defineConfig } from 'vitest/config'
 import original from '../../../vitest.config.ts'
 const root = resolve(import.meta.dirname, '../../..')
 const mutations: Record<string, [string, string, string]> = {
+  'restore-unit-record-cap': ['conversation-changes.ts', 'p.records.length > CONVERSATION_MAX_WINDOW_RECORDS', 'p.records.length > 200'],
+  'drop-retained-contributions': ['conversation-reader.ts', 'const accepted = loaded.rows, records = new Map(view.rows.map(record => [record.id, record]))', 'view.rows = []; const accepted = loaded.rows, records = new Map(view.rows.map(record => [record.id, record]))'],
+  'ignore-window-record-cap': ['conversation-changes.ts', 'recordIds.size > CONVERSATION_MAX_WINDOW_RECORDS || ', ''],
   'park-active-read': ['conversation-reader.ts', 'view.observers === 0 && view.readers === 0', 'view.observers === 0'],
   'retain-finished-read': ['conversation-reader.ts', 'view.readers--', 'void view.readers'],
   'forget-completion-recency': ['conversation-reader.ts', 'this.views.delete(view.id); this.views.set(view.id, view)', 'void view.id'],
