@@ -71,6 +71,7 @@ import { normalizeOperationDevice } from './operation-device.js'
 import { composeAgentLaunchPrompt, composeAgentPrompt, composeAgentResumePrompt } from './agent-outbound-message.js'
 import { hashAgentCapability, issueAgentCapability, resolveCapabilityAuthor, type AgentCapabilityBinding } from './agent-capability.js'
 import { planDiscussion } from './agent-discussion.js'
+import { agentSpawnContext, type AgentMuxSpawnCreator } from './agent-spawn.js'
 import {
   DurableAgentMuxMessageQueue,
   validateAgentMuxMessageEnvelope,
@@ -294,6 +295,8 @@ export type AgentMuxAgentCreateInput = {
   prompt?: string
   /** Authenticated author of this creation's original prompt; Core owns its durable message. */
   initialMessage?: { callerAgentSessionId: string; capability: string; threadId?: string }
+  /** Authenticated creation caller, independent of whether an initial message is requested. */
+  creationCaller?: { agentSessionId: string; capability: string }
   /**
    * AgentMux 自己要对 Agent 说的额外上下文（如 Scratch Topic 说明），署名进出站信封而非混进用户段。
    * 与 `prompt`（用户/发起者的原话，逐字节透传）分层：调用方分开传，信封组装由 Core 的出口负责。
@@ -317,6 +320,7 @@ export type AgentMuxHostAgentCreateInput = Pick<AgentMuxAgentCreateInput,
   'agentSessionId' | 'createOperationId' | 'executorId' | 'workspacePath' | 'prompt' | 'agentMuxNote' |
   'launchOptions' | 'cols' | 'rows' | 'nativeResumeSource'> & {
   executorRevision: string
+  /** Existing signed creation intent admission; an initial body is optional. */
   initialMessageAdmission?: AgentMuxCreationAdmission
   threadId?: string
 }
@@ -327,9 +331,11 @@ export function hostAgentCreationIntent(input: AgentMuxHostAgentCreateInput): st
 }
 
 function creationIntentDigest(input: AgentMuxAgentCreateInput, agentSessionId: string, executorId: string, createOperationId: string,
-  author?: AgentMuxStoredAgentSession): string {
-  const { initialMessage, ...intent } = input
+  author?: AgentMuxStoredAgentSession, creator?: AgentMuxStoredAgentSession): string {
+  const { initialMessage, creationCaller, ...intent } = input
   return agentCreationIntentDigest({ ...intent, agentSessionId, executorId, createOperationId,
+    ...(creationCaller && (!author || creator!.agentSessionId !== author.agentSessionId || creator!.run.runId !== author.run.runId)
+      ? { creationCaller: { agentSessionId: creator!.agentSessionId, run: creator!.run } } : {}),
     ...(initialMessage ? { initialMessage: { callerAgentSessionId: author!.agentSessionId, run: author!.run, threadId: initialMessage.threadId } } : {}) })
 }
 
@@ -4214,7 +4220,7 @@ export class AgentMuxClient {
     session: AgentMuxAgentSession; promptConfirmed: boolean;
     creation: NonNullable<AgentMuxAgentSession['creation']>
   }> {
-    if ('initialMessageAdmission' in input || 'verifiedAuthor' in input || 'initialMessageOrigin' in input) {
+    if ('initialMessageAdmission' in input || 'verifiedAuthor' in input || 'initialMessageOrigin' in input || 'createdBy' in input) {
       throw new AgentMuxError('Cross-Host initial messages require the target-owned creation contract.', 'MESSAGE_ENVELOPE_REQUIRED')
     }
     return await this.createAgentWithDeliveryAuthorized(input)
@@ -4241,8 +4247,18 @@ export class AgentMuxClient {
       initialAuthor = await this.currentStoredAgentSession(input.initialMessage.callerAgentSessionId)
       this.resolveMessageAuthor(input.initialMessage.capability, input.initialMessage.callerAgentSessionId, initialAuthor)
     }
-    const intentDigest = admitted?.intentDigest ?? creationIntentDigest(input, agentSessionId, executorId, createOperationId, initialAuthor)
-    const contextRequested = Boolean(forkSource || input.injectAgentMuxGuide || input.agentMuxNote?.trim())
+    let creator = initialAuthor
+    if (input.creationCaller) {
+      creator = await this.currentStoredAgentSession(input.creationCaller.agentSessionId)
+      this.resolveMessageAuthor(input.creationCaller.capability, input.creationCaller.agentSessionId, creator)
+    }
+    const createdBy: AgentMuxSpawnCreator | undefined = creator
+      ? { agentSessionId: creator.agentSessionId, run: { ...creator.run }, owner: { kind: 'local' } }
+      : admitted?.origin ? { agentSessionId: admitted.origin.source.agentSessionId,
+        run: { runId: admitted.origin.source.runId }, owner: { kind: 'runtime', runtimeId: admitted.origin.source.runtimeId } } : undefined
+    const intentDigest = admitted?.intentDigest ?? creationIntentDigest(input, agentSessionId, executorId, createOperationId, initialAuthor, creator)
+    const contextRequested = !(nativeResumeSource && !input.prompt?.trim()) &&
+      Boolean(createdBy || forkSource || input.injectAgentMuxGuide || input.agentMuxNote?.trim())
     const lifecycleOperationId = agentLifecycleOperationIdentity('create', agentSessionId, createOperationId)
     // A replay reads the original created identity and receipt before checking a now-changed parent.
     const existing = await this.readCreationSession(agentSessionId)
@@ -4272,7 +4288,7 @@ export class AgentMuxClient {
         managed.length > 1 ? 'AGENT_NATIVE_SESSION_AMBIGUOUS' : 'AGENT_NATIVE_SESSION_ALREADY_MANAGED', JSON.stringify({ managed }))
     }
     let initialEnvelope: AgentMuxMessageEnvelope | undefined
-    if (input.initialMessage || admitted?.origin) {
+    if (input.initialMessage || admitted?.origin && input.prompt?.trim()) {
       if (!input.prompt?.trim()) throw new AgentMuxError('An initial Agent message needs a body.', 'INVALID_AGENT_PROMPT')
       const author = initialAuthor ? { agentSessionId: initialAuthor.agentSessionId, runId: initialAuthor.run.runId } : admitted!.origin!.source
       const threadId = input.initialMessage?.threadId ?? admitted?.threadId
@@ -4321,7 +4337,8 @@ export class AgentMuxClient {
       // Provider 根本起不来。分流由 splitLaunchPromptByDelivery 唯一决定，两条生命周期路径共用；
       // 它同时交出 deferred 的那一半，下面必须真的送出去（见 deliverPostLaunchPrompt）。
       const composed = nativeResumeSource && !originalPrompt?.trim() ? { text: '', systemContext: undefined } : composeAgentLaunchPrompt(originalPrompt, forkSource ? true : input.injectAgentMuxGuide,
-        [forkSource ? agentForkIdentityReminder(agentSessionId, forkSource) : undefined, input.agentMuxNote].filter(Boolean).join('\n\n') || undefined)
+        [forkSource ? agentForkIdentityReminder(agentSessionId, forkSource) : undefined,
+          createdBy ? agentSpawnContext(createdBy) : undefined, input.agentMuxNote].filter(Boolean).join('\n\n') || undefined)
       assertAgentPromptSize(composed.text)
       const { atLaunch: launchPrompt, deferred: deferredPrompt } = splitLaunchPromptByDelivery(
         provider.catalog, composed.text
@@ -4391,7 +4408,9 @@ export class AgentMuxClient {
           workspacePath: input.workspacePath, hookBindingId: hookBinding.bindingId, hookToken: hookBinding.endpoint.token,
           ...(managedLaunch?.nativeActor ? { nativeActor: managedLaunch.nativeActor } : {}),
           capabilityHash: hashAgentCapability(invocationCapability), createdAt: preparedAt, updatedAt: preparedAt,
-          creation: { createOperationId, intentDigest, initialPrompt: input.prompt?.trim() ? 'unknown' : 'not-requested', agentMuxContext: 'unknown', ...(admitted?.origin ? { initialMessageOrigin: admitted.origin } : {}), ...(admitted?.executorRevision ? { executorRevision: admitted.executorRevision } : {}) },
+          creation: { createOperationId, intentDigest, ...(createdBy ? { createdBy } : {}),
+            ...(initialEnvelope ? { initialMessageId: initialEnvelope.messageId } : {}),
+            initialPrompt: input.prompt?.trim() ? 'unknown' : 'not-requested', agentMuxContext: 'unknown', ...(admitted?.origin ? { initialMessageOrigin: admitted.origin } : {}), ...(admitted?.executorRevision ? { executorRevision: admitted.executorRevision } : {}) },
           ...(forkSource ? { forkedFrom: structuredClone(forkSource) } : {}),
           ...(nativeResumeSource ? { nativeHandle: structuredClone(nativeResumeSource.nativeHandle) } : {}), ...(launchOptions ? { launchOptions } : {}) }
         reservation = await this.registry.prepareCreate(reservation, preparedCreation!)
@@ -4446,7 +4465,8 @@ export class AgentMuxClient {
         createdAt: preparedCreation?.createdAt ?? now,
         updatedAt: preparedCreation?.updatedAt ?? now,
         creation: { createOperationId, initialPrompt: input.prompt?.trim() ? 'unknown' : 'not-requested',
-          intentDigest, agentMuxContext: 'unknown',
+          intentDigest, ...(createdBy ? { createdBy, createdRun: runRef(run.runId) } : {}),
+          ...(initialEnvelope ? { initialMessageId: initialEnvelope.messageId } : {}), agentMuxContext: 'unknown',
           ...(admitted?.origin ? { initialMessageOrigin: admitted.origin } : {}), ...(admitted?.executorRevision ? { executorRevision: admitted.executorRevision } : {}) },
         ...(forkSource ? { forkedFrom: structuredClone(forkSource) } : {}),
         ...(nativeResumeSource ? { nativeHandle: structuredClone(nativeResumeSource.nativeHandle) } : {}),
@@ -4576,6 +4596,8 @@ export class AgentMuxClient {
       const creation: NonNullable<AgentMuxAgentSession['creation']> = {
         createOperationId,
         intentDigest,
+        ...(createdBy ? { createdBy, createdRun: runRef(run.runId) } : {}),
+        ...(initialEnvelope ? { initialMessageId: initialEnvelope.messageId } : {}),
         ...(admitted?.origin ? { initialMessageOrigin: admitted.origin } : {}), ...(admitted?.executorRevision ? { executorRevision: admitted.executorRevision } : {}),
         initialPrompt: input.prompt?.trim() ? (promptConfirmed ? 'confirmed' : 'unconfirmed') : 'not-requested',
         ...(contextRequested || composed.systemContext ? { agentMuxContext: composed.systemContext && inputConfirmed ? 'confirmed' as const : 'unconfirmed' as const } : {})
@@ -4645,7 +4667,8 @@ export class AgentMuxClient {
     if (!seed || candidates.length !== 1 || candidates[0]!.workspacePath !== seed.workspacePath) throw new AgentMuxError(
       'The original creation has no single confirmed matching Run. Its prepared identity is retained; inspect the same operation without resending.',
       'AGENT_CREATION_UNCONFIRMED', undefined, { disposition: 'unknown', confirmedInputBytes: null })
-    const run = candidates[0]!, session: AgentMuxStoredAgentSession = { ...structuredClone(seed), run: runRef(run.runId), retiredRuns: [] }
+    const run = candidates[0]!, session: AgentMuxStoredAgentSession = { ...structuredClone(seed), run: runRef(run.runId), retiredRuns: [],
+      creation: { ...seed.creation!, ...(seed.creation?.createdBy ? { createdRun: runRef(run.runId) } : {}) } }
     let committed: AgentMuxStoredAgentSession | null = null
     try { committed = await this.registry.commitLifecycle(reservation, session) }
     catch (error) {
