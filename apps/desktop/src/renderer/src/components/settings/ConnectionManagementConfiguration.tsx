@@ -31,7 +31,7 @@ export function ConnectionManagementConfiguration({ record, model, current, onCo
   ]} onChange={effect => model.inspectOriginal({ applicationInspection: {}, applicationConfiguration: effect === 'add-application-permissions' ? { effect, purpose: 'agent-conversation' } : { effect } })} /> : null
   if (configuration?.effect === 'add-application-permissions') return <div className="connector-configuration" data-management-configuration>{modeSwitch}<ConnectionManagementPermissions record={record} model={model} current={current} configuration={configuration} onConsole={onConsole} onBack={onBack} /></div>
   if (configuration?.effect === 'add-message-reception') return <div className="connector-configuration" data-management-configuration>{modeSwitch}<ConnectionManagementReception record={record} model={model} current={current} configuration={configuration} onConsole={onConsole} onBack={onBack} /></div>
-  const scalarConfiguration = configuration && 'source' in configuration ? configuration : null
+  const scalarConfiguration = configuration && (configuration.effect === 'enable-messaging' || configuration.effect === 'use-persistent-connection' || configuration.effect === 'use-persistent-callback' || configuration.effect === 'add-card-actions') ? configuration : null
   const transport = configuration?.effect === 'use-persistent-connection'
   const effect = scalarConfiguration?.effect ?? 'enable-messaging'
   const callbacks = effect === 'use-persistent-callback' || effect === 'add-card-actions'
