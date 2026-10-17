@@ -13,7 +13,7 @@ import type { AgentExecutorId, AgentProviderId, AgentExecutableObservation } fro
 import type { WorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import type { AgentPromptCondition } from './agent-prompt-condition.js'
 import type { AgentMuxBrowserCompletion } from './browser-completion-facts.js'
-import type { AgentMuxBrowserMode, AgentMuxBrowserTarget, AgentMuxBrowserTargetsResult } from './browser-targets.js'
+import type { AgentMuxBrowserMode, AgentMuxBrowserTarget, AgentMuxBrowserTargetsResult, AgentMuxBrowserReleaseReceipt } from './browser-targets.js'
 import type { BrowserDefaultPayload, BrowserDefaultResult } from './browser-default.js'
 export * from './browser-default.js'
 import type { AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult } from './space-control.js'
@@ -516,6 +516,7 @@ export type AgentMuxControlDemandActivityReadRequest = RequestBase & { operation
  * 这也是它不叫 `open.*` 的原因。
  */
 export type AgentMuxControlBrowserRestoreRequest = RequestBase & { operation: 'browser.restore'; browserId: string }
+export type AgentMuxControlBrowserReleaseRequest = RequestBase & { operation: 'browser.release'; browserId: string; navigationId: string }
 export type AgentMuxControlBrowserTargetsRequest = RequestBase & { operation: 'browser.targets'; workspaceId?: string }
 export type AgentMuxControlBrowserRunRequest = RequestBase & {
   operation: 'browser.run'
@@ -685,6 +686,7 @@ export type AgentMuxControlRequest =
   | AgentMuxControlDemandDecisionLogRequest
   | AgentMuxControlBrowserRunRequest
   | AgentMuxControlBrowserRestoreRequest
+  | AgentMuxControlBrowserReleaseRequest
   | AgentMuxControlBrowserTargetsRequest
   | AgentMuxControlBrowserHistoryRequest
   | AgentMuxControlBrowserReplayRequest
@@ -814,6 +816,7 @@ export type AgentMuxControlResult =
       runOperation: AgentMuxControlBrowserOperation
     }
   | { operation: 'browser.restore'; target: AgentMuxBrowserTarget }
+  | { operation: 'browser.release'; receipt: AgentMuxBrowserReleaseReceipt }
   | ({ operation: 'browser.targets' } & AgentMuxBrowserTargetsResult)
   | { operation: 'browser.history'; operations: AgentMuxControlBrowserOperation[] }
   | {
@@ -1080,6 +1083,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   // 的 timeoutMs），所以这里给长预算不等于没有上限。
   'browser.run': 'long',
   'browser.restore': 'long',
+  'browser.release': 'long',
   'browser.targets': 'short',
   'browser.history': 'short',
   'browser.task.assets': 'short',

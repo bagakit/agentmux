@@ -70,7 +70,7 @@ import { parseMetricsObservation, type MetricsObservation, type MetricsSubscript
 import { assertToolkitResultTarget, isToolkitOperation, parseToolkitRequest, parseToolkitResult } from './toolkit.js'
 import { parseDesktopFocusRequest, parseDesktopFocusSuccessReceipt } from './desktop-focus-parser.js'
 import { isBrowserTaskControlOperation, parseBrowserTaskControlPayload, parseBrowserTaskControlResult } from './browser-task-control.js'
-import { parseBrowserTarget, parseBrowserTargetsResult } from './control-browser-targets.js'
+import { parseBrowserTarget, parseBrowserTargetsResult, parseBrowserReleaseReceipt } from './control-browser-targets.js'
 import { isSpaceControlOperation, parseSpaceControlRequest, parseSpaceControlSuccessReceipt, spaceControlId } from './space-control-parser.js'
 import { parseGitOpenParams, parseGitOpenResult } from './public-rpc-git.js'
 import { settingsResourceBudget, settingsResourceEnvelope, settingsResourceRecord, settingsResourceValue } from './settings-resource-json.js'
@@ -620,6 +620,9 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
   if (source.operation === 'focus') return parseDesktopFocusRequest(source)
   if (source.operation === 'browser.restore') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId,
     operation: source.operation, browserId: id(source.browserId, 'Browser identity is invalid.', 'INVALID_CONTROL_REQUEST') }
+  if (source.operation === 'browser.release') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId,
+    operation: source.operation, browserId: id(source.browserId, 'Browser identity is invalid.', 'INVALID_CONTROL_REQUEST'),
+    navigationId: id(source.navigationId, 'Browser navigation identity is invalid.', 'INVALID_CONTROL_REQUEST') }
   if (source.operation === 'browser.targets') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId,
     operation: source.operation, ...(source.workspaceId === undefined ? {} : { workspaceId: id(source.workspaceId, 'Browser Workspace is invalid.', 'INVALID_CONTROL_REQUEST') }) }
   if (isBrowserTaskControlOperation(source.operation)) return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ...parseBrowserTaskControlPayload(source) }
@@ -1436,6 +1439,8 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
       demandId: id(result.demandId, 'Goal ID is invalid.', 'CONTROL_PROTOCOL_ERROR'), activities: result.activities.map(parseControlDemandActivity), diskDurability: 'confirmed' } }
   }
   if (operation === 'demand.decision-log') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demandId: id(result.demandId, 'Control demand id is invalid.', 'CONTROL_PROTOCOL_ERROR'), decisions: parseDemandDecisions(result.decisions) } }
+  if (operation === 'browser.release') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId,
+    ok: true, operation, result: { receipt: parseBrowserReleaseReceipt(result.receipt) } }
   if (operation === 'browser.restore') {
     const target = parseBrowserTarget(result.target)
     if (target.source !== 'embedded' || target.status !== 'ready' || !target.navigationId ||
