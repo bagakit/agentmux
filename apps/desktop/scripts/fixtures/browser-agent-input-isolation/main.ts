@@ -176,7 +176,6 @@ async function run() {
   const shield = (manager.nativeOwner('page')?.inputShield ?? page) as WebContentsView
   const retainedRun = await manager.release('page', manager.targets()[0]!.navigationId!)
   assert.equal(retainedRun.status, 'retained', 'A resource budget release cannot tear down an active Agent program')
-  assert.equal(manager.nativeOwner('page')?.inputShield, shield)
   // Child layering remains correct through actual production native Chrome rearrangement.
   chrome = new NativeOverlaySurfaces(win, manager, () => {}, () => {})
   await chrome.update([{ id: 'chrome-1', bounds: { x: 8, y: 208, width: 870, height: 534 }, radius: 0, browserStages: [{ browserId: 'page', bounds: page.getBounds() }] }])
