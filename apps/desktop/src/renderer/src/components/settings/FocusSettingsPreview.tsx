@@ -93,7 +93,7 @@ export function FocusSettingsPreview({ values, active, scene, onScene }: { value
           <div hidden={inspected !== null} inert={inspected !== null}><p>{exampleReply}</p><section className="agent-input-recall"><h4>Recent inputs <small>{Math.min(values.recentInputs, inputs.length)} shown</small></h4><ol>{inputs.slice(-values.recentInputs).map((text, index) => {
             const presentation: InputPresentation = { reading: { text, truncated: false }, date: null, author: 'You', time: 'Example input', provenance: 'Example only · No Session is read' }
             return <li key={text}><AgentInputEntry presentation={presentation} expanded={false} controls={id + '-input'} onOpen={anchor => { entryRef.current = anchor; setInspected(inputs.length - values.recentInputs + index) }} /></li>
-          })}</ol></section></div>{inspected !== null ? <section ref={inspectionRef} tabIndex={-1} id={id + '-input'} aria-label="Example original input"><button type="button" className="small-button" onClick={() => setInspected(null)}>← Recent inputs</button><p>{inputs[inspected]}</p></section> : null}
+          })}</ol></section></div>{inspected !== null ? <section ref={inspectionRef} tabIndex={-1} id={id + '-input'} aria-label="Example original input"><button type="button" className="small-button" onClick={() => setInspected(null)}><SemanticIcon name="navigation.back" size={12} /> Recent inputs</button><p>{inputs[inspected]}</p></section> : null}
           <footer><AgentInformationSummary usage={usage} descriptionId={id + '-metrics'} /><small>Example</small></footer>
         </section> : <div className="focus-settings-preview__idle"><SemanticIcon name="object.conversation" size={28} /><span>Read without leaving the board.</span></div>}
       </div> : null}
