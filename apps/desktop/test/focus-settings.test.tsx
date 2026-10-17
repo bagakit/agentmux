@@ -16,7 +16,7 @@ import type { AppConfig } from '../src/shared/contracts'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
 
 // Native PTY painting and an unrelated Avatar disclosure do not participate in lane ordering.
-vi.mock('../src/renderer/src/components/AgentAvatar', () => ({ AgentAvatar: () => null }))
+vi.mock('../src/renderer/src/components/AgentAvatar', async importOriginal => ({ ...await importOriginal<typeof import('../src/renderer/src/components/AgentAvatar')>(), AgentAvatar: () => null }))
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () => null }))
 
 const dom = composerDOM()
@@ -80,7 +80,7 @@ it('keeps a same-field conflicting draft and original baseline on a real config 
 it('retains later choice during a pending save and only advances the submitted baseline', async () => {
   let finish!: () => void
   const onSave = vi.fn(() => new Promise<void>(resolve => { finish = resolve }))
-  await dom.render(<FocusSettingsPane recentActivityHours={24} onSave={onSave} />)
+  await dom.render(<FocusSettingsPane preferences={{ recentActivityHours: 24 }} onSave={onSave} />)
   await choose(12)
   await dom.click('[data-settings-save-bar] button')
   expect(saveButton().disabled).toBe(true)
@@ -89,7 +89,7 @@ it('retains later choice during a pending save and only advances the submitted b
   expect(checked(168)).toBe(true)
   expect(saveButton().disabled).toBe(false)
   await dom.click('[data-settings-save-bar] button')
-  expect(onSave.mock.calls).toEqual([[12, 24], [168, 12]])
+  expect(onSave.mock.calls.map(([value, expected]) => [value.recentActivityHours, expected.recentActivityHours])).toEqual([[12, 24], [168, 12]])
   await act(async () => finish())
 })
 

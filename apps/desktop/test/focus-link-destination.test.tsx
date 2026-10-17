@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -39,7 +40,7 @@ beforeEach(async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   fixture = await startWorkfaceFileFixture()
   useAppStore.setState({ mainSurface: 'agents', agentFocus: { execution: { sessionId: targetSid, reference,
-    history: [{ sessionId: targetSid, focusedAt: 1 }] }, pmo: { sessionId: null } } })
+    history: [{ sessionId: targetSid, focusedAt: _tailFixtureEpoch(0, 0, 1) }] }, pmo: { sessionId: null } } })
   expect(context().kind).toBe('session')
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
@@ -132,7 +133,7 @@ describe('Focus original File and link destinations', () => {
   it('SessionPane actual Conversation file consumer reveals the File while keeping its original Agent', async () => {
     useAppStore.setState({ viewModes: { [targetSid]: 'activity' }, timelines: { [targetSid]: { agentSessionId: targetSid, revision: 1,
       items: [{ id: 'findings', agentSessionId: targetSid, kind: 'assistant_message', title: 'Findings', content: 'Read `review.md:8`.',
-        source: 'native-hook', status: 'complete', createdAt: 100, updatedAt: 100 }] } } })
+        source: 'native-hook', status: 'complete', createdAt: _tailFixtureEpoch(0, 0, 100), updatedAt: _tailFixtureEpoch(0, 0, 100) }] } } })
     await act(async () => root.render(<SessionPane sessionId={targetSid} surfaceKind="agent" visible interactiveResize={false} linkOrigin={origin} />)); await flush()
     const link = container.querySelector<HTMLButtonElement>('.md-link--file')!; expect(link).not.toBeNull()
     await act(async () => link.click()); await flush()
@@ -162,7 +163,7 @@ describe('Focus original File and link destinations', () => {
     const before = useAppStore.getState(), project = before.config!.workspaces.find(workspace => workspace.id === 'display')!
     useAppStore.setState({ demandPmoTabIds: { 'actual-goal': tabId }, demands: { 'actual-goal': { id: 'actual-goal', title: 'Foreign project',
       description: '', status: 'backlog', priority: 'normal', projectId: directoryIdentity(project.hostId, project.path), projectName: project.name,
-      sessionIds: [], createdAt: 1, updatedAt: 1, source: 'session' } } })
+      sessionIds: [], createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1), source: 'session' } } })
     expect(context().kind).toBe('goal'); expect(context().project?.workspaceId).toBe('display')
     await act(async () => root.render(<Links />))
     await act(async () => container.querySelector<HTMLButtonElement>('.md-link--file')!.click())
@@ -186,12 +187,12 @@ describe('Focus original File and link destinations', () => {
   })
   it('Settings renders Region/Tab defaults and saves a selected link destination with its expected value', async () => {
     const save = vi.fn().mockResolvedValue(undefined)
-    await act(async () => root.render(<FocusSettingsPane recentActivityHours={48} onSave={save} />))
+    await act(async () => root.render(<FocusSettingsPane preferences={{ recentActivityHours: 48 }} onSave={save} />))
     const radios = container.querySelectorAll<HTMLInputElement>('input[name="focus-link-destination"]')
     expect(radios).toHaveLength(2); expect(radios[0]!.checked).toBe(true)
     await act(async () => radios[1]!.click())
     const button = [...container.querySelectorAll('button')].find(button => button.textContent === 'Save changes')!; expect(button).not.toBeNull()
-    await act(async () => button.click()); expect(save).toHaveBeenCalledExactlyOnceWith(48, 48, 'tab', 'region')
+    await act(async () => button.click()); expect(save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ recentActivityHours: 48, linkDestination: 'tab' }), expect.objectContaining({ recentActivityHours: 48, linkDestination: 'region' }))
   })
   it('a Browser link selects the actual new Region in region-only Focus without replacing the Agent', async () => {
     const before = useAppStore.getState(), agent = before.tabs[tabId]!.regions[regionIdA]
@@ -217,7 +218,7 @@ describe('Focus original File and link destinations', () => {
   })
   it('the independent Activity presentation consumes the same ordinary File destination and preserves its draft', async () => {
     const item = { id: 'independent-findings', agentSessionId: targetSid, kind: 'assistant_message' as const, title: 'Findings',
-      content: 'Read `review.md:8`.', source: 'native-hook' as const, status: 'complete' as const, createdAt: 100, updatedAt: 100 }
+      content: 'Read `review.md:8`.', source: 'native-hook' as const, status: 'complete' as const, createdAt: _tailFixtureEpoch(0, 0, 100), updatedAt: _tailFixtureEpoch(0, 0, 100) }
     const target = { hostId: 'independent-activity', active: true, visible: true, surface: 'focus' as const, reference }
     await act(async () => root.render(<SessionActivityPresentation target={target} regionId={regionIdA} sourceKey="same-original-session"
       sessionId={targetSid} name="Original Agent" executorLabel="Original CLI" executionHost={executionHostProjection('local', _hygiene_fixturePath("private/workface-execution"))}
