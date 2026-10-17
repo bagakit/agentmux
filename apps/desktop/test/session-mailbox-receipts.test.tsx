@@ -20,7 +20,7 @@ const receiptKey = (id: string, hostId = 'local') => JSON.stringify([hostId, id]
 async function toggle(state: 'open' | 'closed') {
   const event = new Event('toggle'); Object.defineProperty(event, 'newState', { value: state })
   await act(async () => dom.container.querySelector('.composer-mailbox')!.dispatchEvent(event))
-  if (state === 'open') await dom.click('[id$="-inbox-tab"]')
+  if (state === 'open') { await dom.click('[id$="-agents-tab"]'); await dom.click('[id$="-inbox-tab"]') }
 }
 async function show(sessionId = 'agent-1', hostId = 'local') {
   const session = composerSession(sessionId)
@@ -39,7 +39,7 @@ it('persists only immutable MID/sequence receipts for 200 large original message
   journal.set(records); await show()
   expect(unread()).toBe('true')
   expect(trigger().querySelector('.composer-mailbox__unread')!.textContent).toBe('25')
-  expect(trigger().getAttribute('aria-label')).toContain('A2A Inbox 25 unread in loaded messages')
+  expect(trigger().getAttribute('aria-label')).toContain('Agent messages 25 unread in loaded messages')
   expect(journal.list.mock.calls.every(([, query]) => query.limit === 25)).toBe(true)
   expect(journal.read).not.toHaveBeenCalled(); expect(digest).not.toHaveBeenCalled()
   await toggle('open')

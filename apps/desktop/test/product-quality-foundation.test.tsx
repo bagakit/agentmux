@@ -44,7 +44,7 @@ async function mailboxToggle(newState: 'open' | 'closed') {
 }
 async function openProgress() {
   await mailboxToggle('open')
-  await act(async () => container.querySelector<HTMLButtonElement>('[id$="-progress-tab"]')!.click())
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Automation"]')!.click())
 }
 
 it('mounts persistent truthful three-fact summary and explicit complete details without taking existing input focus', async () => {
@@ -76,7 +76,10 @@ it('a rejected mounted progress list remains unconfirmed on the closed mailbox, 
   vi.spyOn(api.continuousProgress, 'onChanged').mockImplementation(() => dispose)
   vi.spyOn(api.continuousProgress, 'list').mockRejectedValue(new Error('Original list cause FINAL CAUSE'))
   await renderProgress()
+  await vi.waitFor(() => expect(progressTrigger().getAttribute('data-progress-state')).toBe('unconfirmed'))
+  await openProgress()
   await vi.waitFor(() => expect(container.textContent).toContain('FINAL CAUSE'))
+  await mailboxToggle('closed')
   expect(container.querySelector('.composer-mailbox')!.getAttribute('data-state')).toBe('closed')
   expect(progressTrigger().getAttribute('data-progress-state')).toBe('unconfirmed')
   expect(progressTrigger().title).toContain('unconfirmed')
@@ -118,7 +121,7 @@ it('keeps the real Progress form mounted through page switching and mailbox clos
   const list = vi.spyOn(api.continuousProgress, 'list').mockResolvedValue([])
   const action = vi.spyOn(api.continuousProgress, 'action')
   await renderProgress()
-  expect(container.querySelectorAll('[id$="-progress-tab"]')).toHaveLength(1)
+  expect(container.querySelectorAll('[aria-label="Automation"]')).toHaveLength(1)
   expect(container.querySelectorAll('.composer__mailbox')).toHaveLength(1)
   expect(container.querySelector('.composer > .continuous-progress-control')).toBeNull()
   await openProgress()
@@ -128,7 +131,7 @@ it('keeps the real Progress form mounted through page switching and mailbox clos
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, 'Kept continuation draft')
     textarea.dispatchEvent(new Event('input', { bubbles: true }))
-    container.querySelector<HTMLButtonElement>('[id$="-inbox-tab"]')!.click()
+    container.querySelector<HTMLButtonElement>('[aria-label="Back to messages"]')!.click()
   })
   await mailboxToggle('closed'); await openProgress()
   expect(container.querySelector('.continuous-progress-control form')).toBe(form)
@@ -177,8 +180,8 @@ it('a rejected mounted progress action remains visible on closing, preserves com
   vi.spyOn(api.continuousProgress, 'list').mockResolvedValue([loop])
   const action = vi.spyOn(api.continuousProgress, 'action').mockRejectedValue(new Error('Original action cause FINAL ACTION CAUSE'))
   await renderProgress()
-  await vi.waitFor(() => expect(container.querySelector('[aria-label="Pause continuous progress"]')).not.toBeNull())
   await openProgress()
+  await vi.waitFor(() => expect(container.querySelector('[aria-label="Pause continuous progress"]')).not.toBeNull())
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Pause continuous progress"]')!.click())
   await mailboxToggle('closed')
   expect(progressTrigger().getAttribute('data-progress-state')).toBe('unconfirmed')
@@ -207,6 +210,7 @@ it.each(['interrupted', 'attachment-pending'] as const)('the actual Session Comp
   vi.spyOn(api.continuousProgress, 'onChanged').mockImplementation(() => vi.fn())
   vi.spyOn(api.continuousProgress, 'list').mockRejectedValue(new Error('Readiness unknown FINAL HOST CAUSE'))
   await act(async () => root.render(<AgentSessionComposer sessionId="agent-1" disabled={state === 'attachment-pending'} />))
+  await openProgress()
   await vi.waitFor(() => expect(container.textContent).toContain('FINAL HOST CAUSE'))
   // Interrupted hosts deliberately keep a writable restore draft; that is not proof of a ready Run.
   expect(container.querySelector('.tiptap')!.getAttribute('contenteditable')).toBe(state === 'attachment-pending' ? 'false' : 'true')
