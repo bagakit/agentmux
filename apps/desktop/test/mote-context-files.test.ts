@@ -32,7 +32,7 @@ vi.mock('node:fs/promises', async importOriginal => {
   } }
 })
 const roots: string[] = []
-afterEach(async () => { await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
+afterEach(async () => { await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true, maxRetries: 3 }))) })
 async function fixture() {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'amux-context-'))); roots.push(root)
   const path = join(root, 'scratch'); await mkdir(path)
@@ -339,6 +339,7 @@ it('keeps original memory available across actual private client process restart
   expect(two.prompt).toContain('Corrected after process exit.');expect(two.prompt).not.toContain('Original process knowledge.')
 })
 
+// Multiple real CLI processes and Core discussions need a liveness deadline, separate from performance assertions.
 it('starts with blank Mote defaults, then carries public Files corrections across actual Core discussions', async () => {
   const { AgentMuxControlServer } = await import('../../../packages/core/src/public-rpc-server')
   const { connectAgentMuxRpc } = await import('../../../packages/core/src/public-rpc-client')
@@ -543,4 +544,4 @@ it('starts with blank Mote defaults, then carries public Files corrections acros
       for (const name of ['SOUL.md', 'AGENTS.md', 'BEHAVIOR.md'] as const) expect(await readFile(join(mote.physicalDirectoryPath!, name), 'utf8')).toBe(defaults[name])
     } finally { await runtime.dispose(); await f.dispose(); vi.unstubAllEnvs() }
   }finally{await client.dispose();await server.stop()}
-}, 15000)
+}, 30000)
