@@ -1,129 +1,110 @@
-import { beforeEach, expect, it, vi } from 'vitest'
-import type { CollaborationBox, CollaborationConnection } from '../src/renderer/src/lib/collaboration-routing'
-
-// Observe actual WASM work without replacing its input, output, or geometry.
-const engine = vi.hoisted(() => ({ instances: 0, renders: 0, failures: 0, wait: undefined as Promise<void> | undefined }))
-vi.mock('@viz-js/viz', async importOriginal => {
-  const actual = await importOriginal<typeof import('@viz-js/viz')>()
-  return { ...actual, instance: async () => {
-    engine.instances++
-    await engine.wait
-    if (engine.failures > 0) { engine.failures--; throw Error('Routing engine unavailable') }
-    const original = await actual.instance(), renderJSON = original.renderJSON.bind(original)
-    return { ...original, renderJSON: (...args: Parameters<typeof original.renderJSON>) => { engine.renders++; return renderJSON(...args) } }
-  } }
-})
-beforeEach(() => { vi.resetModules(); engine.instances = 0; engine.renders = 0; engine.failures = 0; engine.wait = undefined })
-const load = () => import('../src/renderer/src/lib/collaboration-routing')
-
-type Point = readonly [number, number]
-const boxes: CollaborationBox[] = [
-  { id: 'heading', x: 8, y: 5, width: 870, height: 28, heading: true },
-  { id: 'first', x: 18, y: 44, width: 250, height: 94 },
-  { id: 'middle', x: 318, y: 44, width: 250, height: 94 },
-  { id: 'last', x: 618, y: 44, width: 250, height: 94 }
+import { expect, it } from 'vitest'
+import { collaborationGeometry, createCollaborationGeometrySelector, type CollaborationBox, type CollaborationPoint } from '../src/renderer/src/lib/collaboration-geometry'
+import { routeCollaboration } from '../src/renderer/src/lib/collaboration-routing'
+import type { CollaborationArea } from '../src/renderer/src/lib/agent-collaboration'
+import { collaborationAgentNode, collaborationAreaNode } from '../src/renderer/src/lib/collaboration-presentation'
+const areas: CollaborationArea[] = [
+  { id: 'first', name: 'Project', kind: 'project', members: Array.from({ length: 8 }, (_, i) => `a-${i}`) },
+  { id: 'second', name: 'Topic', kind: 'topic', members: Array.from({ length: 5 }, (_, i) => `b-${i}`) },
+  { id: 'third', name: 'Mote', kind: 'mote', members: ['c-0', 'c-1', 'c-2'] },
+  { id: 'last', name: 'References', kind: 'unplaced', members: ['d-0'] }
 ]
 const kinds = ['communication', 'creation', 'supervision'] as const
-const connections: CollaborationConnection[] = kinds.flatMap(kind => [
-  { id: `${kind}:across`, source: 'first', target: 'last', kind },
-  { id: `${kind}:reverse`, source: 'last', target: 'first', kind },
-  { id: `${kind}:adjacent`, source: 'first', target: 'middle', kind }
-])
-
-/** Read the actual SVG curve; this checker does not choose or reconstruct a route. */
-function curve(path: string): { points: Point[]; samples: Point[] } {
-  const tokens = path.match(/[MC]|-?(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?/gi) ?? []
-  expect(tokens.shift()).toBe('M')
-  const points: Point[] = [[Number(tokens.shift()), Number(tokens.shift())]], samples: Point[] = []
-  while (tokens.length) {
-    expect(tokens.shift()).toBe('C')
-    const start = points.at(-1)!, controls = Array.from({ length: 3 }, () => [Number(tokens.shift()), Number(tokens.shift())] as const)
-    points.push(...controls)
-    for (let step = 0; step <= 200; step++) {
-      const t = step / 200, u = 1 - t
-      samples.push([0, 1].map(axis => u ** 3 * start[axis]! + 3 * u ** 2 * t * controls[0]![axis]! + 3 * u * t ** 2 * controls[1]![axis]! + t ** 3 * controls[2]![axis]!) as unknown as Point)
+function sample(path: string) {
+  const tokens = path.match(/[MLQ]|-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/gi)!, result: CollaborationPoint[] = []
+  let at = { x: 0, y: 0 }, index = 0
+  const number = () => Number(tokens[index++])
+  while (index < tokens.length) {
+    const op = tokens[index++]!
+    if (op === 'M') { at = { x: number(), y: number() }; result.push(at); continue }
+    const start = at, control = { x: number(), y: number() }, end = op === 'Q' ? { x: number(), y: number() } : control
+    const steps = Math.max(8, Math.ceil(Math.hypot(end.x - start.x, end.y - start.y) / 2))
+    for (let step = 1; step <= steps; step++) {
+      const t = step / steps
+      result.push(op === 'Q' ? { x: (1-t)**2*start.x+2*(1-t)*t*control.x+t*t*end.x, y: (1-t)**2*start.y+2*(1-t)*t*control.y+t*t*end.y } : { x: start.x+t*(end.x-start.x), y: start.y+t*(end.y-start.y) })
     }
+    at = end
   }
-  expect(points.every(point => point.every(Number.isFinite))).toBe(true)
-  return { points, samples }
+  return result
+}
+function obstacles(boxes: ReadonlyMap<string, CollaborationBox>) {
+  return [...boxes.values()].map(box => box.kind === 'area' && !box.folded ? { ...box, height: 40 } : box)
+}
+function collisions(points: readonly CollaborationPoint[], boxes: ReturnType<typeof obstacles>) {
+  return boxes.filter(box => points.some(point => point.x > box.x + .1 && point.x < box.x + box.width - .1 && point.y > box.y + .1 && point.y < box.y + box.height - .1)).map(box => box.id)
 }
 
-it('routes actual WASM curves around every same-row card and heading in both directions, preserving role ports', async () => {
-  const { routeCollaboration } = await load()
-  const snapshot = structuredClone({ boxes, connections })
-  const paths = await routeCollaboration(boxes, connections)
-  expect(Object.keys(paths).sort()).toEqual(connections.map(connection => connection.id).sort())
-  expect({ boxes, connections }).toEqual(snapshot)
-  const endpoints = new Map<string, { start: Point; end: Point }>()
-  for (const connection of connections) {
-    const routed = paths[connection.id]!, { points, samples } = curve(routed.path)
-    const source = boxes.find(box => box.id === connection.source)!, target = boxes.find(box => box.id === connection.target)!, forward = source.x < target.x
-    const start = points[0]!, end = points.at(-1)!
-    endpoints.set(connection.id, { start, end })
-    expect(start[0], connection.id + ' original source edge').toBeCloseTo(source.x + (forward ? source.width : 0), 0)
-    expect(end[0], connection.id + ' original target edge').toBeCloseTo(target.x + (forward ? 0 : target.width), 0)
-    expect(start[1]).toBeGreaterThan(source.y)
-    expect(start[1]).toBeLessThan(source.y + source.height)
-    expect(end[1]).toBeGreaterThan(target.y)
-    expect(end[1]).toBeLessThan(target.y + target.height)
-    expect(Number.isFinite(routed.labelX) && Number.isFinite(routed.labelY)).toBe(true)
-    for (const box of boxes) {
-      const interior = samples.find(([x, y]) => x > box.x + .5 && x < box.x + box.width - .5 && y > box.y + .5 && y < box.y + box.height - .5)
-      expect(interior, `${connection.id} crosses ${box.id} interior at ${interior?.join(',')}`).toBeUndefined()
-    }
+it('routes actual SVG around every card and heading for same-column, reciprocal, cross-area and uneven districts', () => {
+  const boxes = collaborationGeometry(areas, new Set()), cards = [...boxes.values()].filter(box => box.kind === 'agent'), blocked = obstacles(boxes)
+  let inspected = 0
+  for (const from of cards) for (const to of cards) if (from.id !== to.id) for (const kind of kinds) {
+    const route = routeCollaboration(boxes, { id: `${kind}:${from.id}:${to.id}`, source: from.id, target: to.id, kind })
+    expect(collisions(sample(route.path), blocked), `${kind}: ${from.id} → ${to.id}`).toEqual([])
+    expect(route.points.length).toBeLessThanOrEqual(9); inspected++
   }
-  expect(new Set(Object.values(paths).map(path => path.path)).size).toBe(connections.length)
-  for (const suffix of ['across', 'reverse', 'adjacent']) {
-    const rows = kinds.map(kind => endpoints.get(`${kind}:${suffix}`)!)
-    expect(rows[0]!.start[1]).toBeLessThan(rows[0]!.end[1])
-    expect(rows[0]!.end[1]).toBeLessThan(rows[1]!.start[1])
-    expect(rows[1]!.start[1]).toBeLessThan(rows[1]!.end[1])
-    expect(rows[1]!.end[1]).toBeLessThan(rows[2]!.start[1])
-    expect(rows[2]!.start[1]).toBeLessThan(rows[2]!.end[1])
+  expect(inspected).toBeGreaterThan(600)
+})
+
+it('keeps original role ports, arrow direction and reciprocal lanes at exact fixed card boundaries', () => {
+  const boxes = collaborationGeometry(areas, new Set()), source = collaborationAgentNode('first', 'a-0'), target = collaborationAgentNode('first', 'a-2')
+  const paths = new Set<string>(), verticalLanes = new Set<number>()
+  for (const [index, kind] of kinds.entries()) for (const [from, to] of [[source, target], [target, source]]) {
+    const route = routeCollaboration(boxes, { id: kind+from, source: from!, target: to!, kind })
+    expect(route.sourceHandle).toBe(`${kind}-out-right`); expect(route.targetHandle).toBe(`${kind}-in-right`)
+    // Independently specified original role fractions; a shared wrong port helper cannot satisfy this oracle.
+    const sourceBox = boxes.get(from!)!, targetBox = boxes.get(to!)!
+    expect(route.points[0]!.x).toBe(sourceBox.x + 250)
+    expect(route.points[0]!.y).toBeCloseTo(sourceBox.y + (index * 2 + .5) / 6 * 94)
+    expect(route.points.at(-1)!.x).toBe(targetBox.x + 250)
+    expect(route.points.at(-1)!.y).toBeCloseTo(targetBox.y + (index * 2 + 1.5) / 6 * 94)
+    expect(route.points[1]!.x).toBeGreaterThan(route.points[0]!.x)
+    expect(route.points.at(-2)!.x).toBeGreaterThan(route.points.at(-1)!.x)
+    const vertical = route.points.find((point, at) => at > 0 && point.x === route.points[at - 1]!.x && point.y !== route.points[at - 1]!.y)
+    expect(vertical).toBeDefined(); verticalLanes.add(vertical!.x)
+    paths.add(route.path)
   }
-  expect(engine.instances).toBe(1)
-  expect(engine.renders).toBe(1)
+  expect(paths.size).toBe(6)
+  expect(verticalLanes.size).toBe(6)
 })
 
-it('does not initialize the engine or invent edges for an empty graph', async () => {
-  const { routeCollaboration } = await load()
-  expect(await routeCollaboration(boxes, [])).toEqual({})
-  expect(engine.instances).toBe(0)
-  expect(engine.renders).toBe(0)
+it('preserves safe original endpoints and paths when either district is folded', () => {
+  const boxes = collaborationGeometry(areas, new Set(['first', 'last'])), blocked = obstacles(boxes)
+  const endpoints = [...boxes.values()].filter(box => box.kind === 'agent' || box.folded)
+  let inspected = 0
+  for (const from of endpoints) for (const to of endpoints) if (from.id !== to.id) for (const kind of kinds) {
+    const route = routeCollaboration(boxes, { id: kind+from.id+to.id, source: from.id, target: to.id, kind })
+    expect(collisions(sample(route.path), blocked), `${from.id} → ${to.id}`).toEqual([]); inspected++
+  }
+  expect(inspected).toBeGreaterThan(100)
+  expect(boxes.get(collaborationAreaNode('first'))!.height).toBe(48)
 })
 
-it('does not initialize the engine for a request already cancelled before it starts', async () => {
-  const { routeCollaboration } = await load(), cancellation = new AbortController()
-  cancellation.abort()
-  await expect(routeCollaboration(boxes, connections, cancellation.signal)).rejects.toMatchObject({ name: 'AbortError' })
-  expect(engine.instances).toBe(0)
-  expect(engine.renders).toBe(0)
+it('reads exactly the two endpoints regardless of unrelated world size', () => {
+  const large = [{ ...areas[0]!, members: Array.from({ length: 2000 }, (_, i) => `a-${i}`) }, ...areas.slice(1)]
+  const boxes = collaborationGeometry(large, new Set()), source = collaborationAgentNode('first', 'a-0'), target = collaborationAgentNode('second', 'b-1')
+  let lookups = 0, scanned = 0
+  const watched = new Proxy(boxes, { get(map, key) {
+    if (key === 'get') return (id: string) => { lookups++; return map.get(id) }
+    if (key === 'values') return () => { scanned++; return map.values() }
+    const value = Reflect.get(map, key, map); return typeof value === 'function' ? value.bind(map) : value
+  } })
+  const route = routeCollaboration(watched, { id: 'original', source, target, kind: 'communication' })
+  expect(route.path).toContain('Q'); expect(lookups).toBe(2); expect(scanned).toBe(0)
 })
 
-it('does not render an obsolete request cancelled while the shared engine is loading', async () => {
-  const { routeCollaboration } = await load()
-  let release!: () => void
-  engine.wait = new Promise<void>(resolve => { release = resolve })
-  const cancellation = new AbortController()
-  const pending = routeCollaboration(boxes, connections, cancellation.signal)
-  await vi.waitFor(() => expect(engine.instances).toBe(1))
-  cancellation.abort()
-  release()
-  await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
-  expect(engine.renders).toBe(0)
-  const paths = await routeCollaboration(boxes, connections)
-  expect(Object.keys(paths)).toHaveLength(connections.length)
-  expect(engine.instances).toBe(1)
-  expect(engine.renders).toBe(1)
+it('bounds include a corridor detour even when both endpoint cards lie outside that viewport', () => {
+  const boxes = collaborationGeometry(areas, new Set()), source = collaborationAgentNode('first', 'a-0'), target = collaborationAgentNode('third', 'c-0')
+  const route = routeCollaboration(boxes, { id: 'detour', source, target, kind: 'communication' })
+  expect(Math.max(boxes.get(source)!.x + 250, boxes.get(target)!.x + 250)).toBeLessThan(580)
+  expect(route.bounds.x + route.bounds.width).toBeGreaterThan(600)
+  expect(sample(route.path).every(point => point.x >= route.bounds.x && point.x <= route.bounds.x+route.bounds.width && point.y >= route.bounds.y && point.y <= route.bounds.y+route.bounds.height)).toBe(true)
 })
 
-it('allows a failed lazy engine initialization to be retried and then reuses the recovered engine', async () => {
-  const { routeCollaboration } = await load()
-  engine.failures = 1
-  await expect(routeCollaboration(boxes, connections)).rejects.toThrow('Routing engine unavailable')
-  expect(engine.renders).toBe(0)
-  const first = await routeCollaboration(boxes, connections), second = await routeCollaboration(boxes, connections)
-  expect(second).toEqual(first)
-  expect(engine.instances).toBe(2)
-  expect(engine.renders).toBe(2)
+it('reuses exact world geometry through metadata clones and only recalculates for actual membership or folding', () => {
+  const select = createCollaborationGeometrySelector(), initial = select(areas, new Set())
+  expect(initial.size).toBeGreaterThan(10)
+  expect(select(areas.map(area => ({ ...area, name: area.name+' updated', members: [...area.members] })), new Set())).toBe(initial)
+  const changed = select([{ ...areas[0]!, members: [...areas[0]!.members, 'new-agent'] }, ...areas.slice(1)], new Set())
+  expect(changed).not.toBe(initial); expect(changed.has(collaborationAgentNode('first', 'new-agent'))).toBe(true)
+  expect(select(areas, new Set(['first']))).not.toBe(changed)
 })
