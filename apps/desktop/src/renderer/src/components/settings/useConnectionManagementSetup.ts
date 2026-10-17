@@ -30,7 +30,8 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
   const currentSource = () => mounted.current && context.current.active && context.current.key === key && context.current.source === source && api.connections.call === source
   const visibleCatalog = catalog?.key === key && catalog.source === source ? catalog : null
   const visible = active && opened && reading?.key === key && reading.source === source && reading.id === selection.current && api.connections.call === source ? reading : null
-  const view = visible?.value ?? null, operation = view?.operation ?? null
+  const observedView = visible?.value ?? null
+  const view = visible?.issue ? null : observedView, operation = view?.operation ?? null
   const configurationEffect = view?.applicationConfiguration?.effect ?? 'enable-messaging'
   const configuration = view?.applicationConfiguration
   const configurationSelector: ConnectionSetupConfigurationSelector = !configuration && visible?.intent ? visible.intent : configuration?.effect === 'add-application-permissions' ? { effect: 'add-application-permissions', purpose: configuration.purpose }
@@ -109,7 +110,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
       if (!value.operation || value.reason || !value.continuation || !['waiting', 'scanned', 'handoff'].includes(value.continuation.stage)) setDriving(false)
       return value
     } catch (error) {
-      if (accepts()) { setReading({ key, source, id, value: null, issue: presentError(error), absent: false, pending: false, intent }); setDriving(false) }
+      if (accepts()) { setReading(previous => ({ key, source, id, value: previous?.key === key && previous.source === source && previous.id === id ? previous.value : null, issue: presentError(error), absent: false, pending: false, intent })); setDriving(false) }
     }
   }
   function start() {
@@ -300,7 +301,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
     return () => { cancelled = true; clearTimeout(timer) }
   }, [active, opened, driving, busy, key, source, view])
 
-  return { task: connectionManagementTask(view), guidedCheck, checkGuidedSettings, checkPublicationStatus, returnToGuided, inspectOriginalConfiguration, publicationForm, editPublicationForm, supported, catalog: visibleCatalog, listing, choices, reading: visible, view, busy, driving, fresh, revised, list, start, handoff, choose, inspect, inspectOriginal, advance, reviewPermissions, reviewMessageReception, reviewPublication, continueOriginal, another }
+  return { task: connectionManagementTask(view), guidedCheck, checkGuidedSettings, checkPublicationStatus, returnToGuided, inspectOriginalConfiguration, publicationForm, editPublicationForm, supported, catalog: visibleCatalog, listing, choices, reading: visible, view, observedView, busy, driving, fresh, revised, list, start, handoff, choose, inspect, inspectOriginal, advance, reviewPermissions, reviewMessageReception, reviewPublication, continueOriginal, another }
 }
 
 export type ConnectionManagementModel = ReturnType<typeof useConnectionManagementSetup>

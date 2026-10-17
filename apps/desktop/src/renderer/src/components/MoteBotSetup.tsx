@@ -189,7 +189,7 @@ export function MoteBotSetup({
   return (
     <section className="mote-bot-setup" aria-label="Mote bot profile" data-bot-journey-stage={guideStage}>
       <div className="mote-bot-task">
-      <BotSetupGuide stage={guideStage} />
+      <BotSetupGuide stage={guideStage} currentStatus={enrollment?.application && !savedConnection ? 'Created · saving' : undefined} confirmedSteps={[...(setup.profile || operation?.snapshot ? [1] : []), ...(enrollment?.authentication?.stage === 'confirmed' ? [2] : []), ...(enrollment?.application ? [3] : [])]} currentStep={!selected ? 1 : savedConnection ? 4 : enrollment?.application || primaryEnrollmentAction?.kind === 'create' ? 3 : 2} />
       <div className="mote-bot-task__content">
       {!selected ? (
         <>
