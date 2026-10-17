@@ -37,6 +37,7 @@ import { inspectDiagnosticEvidence } from './diagnostic-evidence-service.js'
 import { DeliveryAttemptStore } from './delivery-attempt-store.js'
 import { parseDeliveryAttempt, validateDeliveryLogId, type DeliveryAttemptLookup } from './delivery-attempt.js'
 import { parseAgentContextParams, readAgentContext, forwardAgentContextParams, forwardAgentContextPage } from './agent-context.js'
+import { parseAgentDiscoveryFilters, readAgentDiscovery } from './agent-discovery.js'
 
 import { parseNoteCorpusParams, parseNoteCorpusResult } from './note-corpus.js'
 import { parseNotebookObservationParams, type NotebookObservationPort } from './notebook-observation.js'
@@ -76,7 +77,6 @@ import { AGENT_INPUT_SUBMIT_FIELDS, parseAgentInputSubmit } from './agent-input-
 import { parseAgentInputMailboxRead } from './agent-input-mailbox.js'
 import { validateAgentInputControlId, validateAgentInputWaitRef, type AgentInputSubmissionReceipt, type AgentInputCallContext } from './agent-input-wait.js'
 import { diagnoseAgentMux } from './doctor.js'
-import { agentSessionMatches } from './rpc-agent-filter.js'
 import { OrderedSessionOutputFollow, type FollowOutput } from './session-output-follow.js'
 import { defaultAgentMuxControlSocketPath } from './runtime-paths.js'
 import { AGENTMUX_HOSTED_RPC_METHODS, AGENTMUX_HOSTED_RPC_FIELDS, type AgentMuxHostedRuntimeMethod, type AgentMuxRuntimeFence } from './hosted-client-contract.js'
@@ -100,7 +100,7 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMu
 
 /** A structural slice of the original public SDK; hosted clients need no private fields. */
 export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
-  'restartAgent' | 'inspectAgentRestart' | 'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentSessions' | 'readAgentSessionHistory' | 'readAgentConversation' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
+  'restartAgent' | 'inspectAgentRestart' | 'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentSession' | 'readAgentSessions' | 'readAgentSessionHistory' | 'readAgentConversation' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
   'ensureAgentContinuity' | 'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
   'inspectAgentInteractionOperation' | 'respondAgentInteraction' | 'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'notifyMessages' | 'inspectAgentPromptSubmission' | 'startDiscussion' | 'checkDeliveries' |
   'submitAgentPrompt' | 'readAgentInputMailbox' | 'inspectAgentInput' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' |
@@ -243,7 +243,7 @@ const NATIVE_FIELDS = {
   'space.resolve': ['tabId','regionId','direction'],
   'name.history': ['target','afterId','limit'],
   'name.confirm': ['operationId'],
-  whoami: [], 'agent.ls': ['agentSessionId', 'executorId', 'status', 'since', 'limit'],
+  whoami: [], 'agent.ls': ['agentSessionId', 'executorId', 'providerId', 'status', 'semantic', 'readiness', 'since', 'activitySince', 'cursor', 'limit'],
   'agent.inspect': ['target'],
   'agent.continuity.control': ['agentSessionId', 'intentOperationId', 'expectedRun', 'operationId', 'action', 'additionalAttempts'],
   'agent.restart': ['agentSessionId', 'expectedRun', 'operationId'],
@@ -1469,7 +1469,7 @@ export class AgentMuxRpcService {
         result = await diagnoseAgentMux({ client, ...(workspacePath === undefined ? {} : { workspacePath }) }); break
       }
       case 'agent.ls': {
-        validateFilters(p)
+        parseAgentDiscoveryFilters(p)
         let aggregationIssue: ReturnType<typeof cause> | undefined
         if (this.ports.forwardControl) {
           try { return await this.ports.forwardControl(method, params, context) }
@@ -1925,26 +1925,7 @@ export class AgentMuxRpcService {
     }
   }
   private async sessions(filters: Record<string, unknown>) {
-    rpcRecord(filters, NATIVE_FIELDS['agent.ls'])
-    validateFilters(filters)
-    const clients = await this.clients()
-    const scopes = await Promise.allSettled(clients.map(async scope => await Promise.all((await this.ownedSessions(scope)).map(async session => {
-      try {
-        const observed = await scope.client.statusAgent(session.agentSessionId)
-        if (observed.session.run.runId !== session.run.runId) throw new AgentMuxError('Session changed during inspection.', 'STALE_AGENT_SESSION')
-        return { session: { ...observed, routeHostId: scope.hostId } }
-      }
-      catch (error) { return { error: { agentSessionId: session.agentSessionId as string | null, hostId: scope.hostId, ...cause(error, 'LIST_SESSION_FAILED') } } }
-    }))))
-    const results = scopes.flatMap((scope, index) => scope.status === 'fulfilled' ? scope.value
-      : [{ error: { agentSessionId: null, hostId: clients[index]!.hostId, ...cause(scope.reason, 'AGENT_SESSION_STORE_READ_UNCONFIRMED') } }])
-    const sessions = results.flatMap(item => item.session ? [item.session] : []).filter(item =>
-      agentSessionMatches(item, { sessionId: filters.agentSessionId as string | undefined, status: filters.status as string | undefined,
-        since: filters.since === undefined ? undefined : rpcCount(filters.since, 0) }) &&
-      (!filters.executorId || item.session.executorId === filters.executorId) &&
-      true)
-      .slice(0, rpcCount(filters.limit, 100, 1000))
-    return { sessions, errors: results.flatMap(item => item.error ? [item.error] : []) }
+    return readAgentDiscovery(await this.clients(), parseAgentDiscoveryFilters(filters))
   }
   private async goals(filters: Record<string, unknown>): Promise<AgentMuxDemand[]> {
     rpcRecord(filters, NATIVE_FIELDS['goal.activity'])
@@ -2218,6 +2199,10 @@ export class AgentMuxRpcService {
       try { const sessions = await this.sessions({ agentSessionId: p.agentSessionId, executorId: p.executorId,
         status: p.status, since: p.since, limit: p.limit })
         observation.sessions = sessions.sessions
+        if (sessions.nextCursor !== null || sessions.retired.length > 0) observation.unavailable.push({
+          source: 'sessions', code: 'AGENT_DISCOVERY_PARTIAL',
+          message: 'This snapshot contains bounded current observations. Additional candidates or retired identities are available through agent.ls.',
+          recovery: 'Read agent.ls with the same filters and follow nextCursor until null; retain retired and unavailableSessions separately.' })
         observation.unavailable.push(...sessions.errors.map(error => ({ source: 'sessions', ...unavailable(new AgentMuxError(`Host ${JSON.stringify(error.hostId)}${error.agentSessionId === null ? '' : ` Session ${JSON.stringify(error.agentSessionId)}`}: ${error.message}`, error.code)) })))
       } catch (error) { observation.unavailable.push({ source: 'sessions', ...unavailable(error) }) }
     }

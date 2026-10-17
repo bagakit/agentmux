@@ -1,4 +1,5 @@
 import { parseRendererAllocationsInput } from './renderer-allocations.js'
+import { parseAgentDiscoveryFilters } from './agent-discovery.js'
 import { parseRendererSceneCaptureInput, parseRendererSceneInspectInput } from './renderer-performance-scene.js'
 import { parseAgentContinuityControlInput } from './agent-session-continuity-control.js'
 import { parseRendererV8ProfileInput } from './renderer-v8-profile.js'
@@ -255,7 +256,11 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     { '--name': 'data' }, f => ({ name: value(f, '--name', true)! } satisfies AgentMuxRpcParams<'device.hello'>)),
   command('device.revoke', '--device ID', 'Revoke the exact device from the local Host.',
     { '--device': 'data' }, f => ({ deviceId: id(f, '--device') } satisfies AgentMuxRpcParams<'device.revoke'>)),
-  command('agent.ls', '[--session ID] [--executor ID] [--status VALUE] [--since N] [--limit N]', 'List actual Core Agent Sessions with native turn failures and unavailable item facts.', { '--session': 'data', '--executor': 'data', '--status': 'value', '--since': 'value', '--limit': 'value' }, filters),
+  command('agent.ls', '[--session ID] [--executor ID] [--provider ID] [--status VALUE] [--semantic VALUE] [--readiness VALUE] [--activity-since N] [--since N] [--cursor CURSOR] [--limit N]', 'Discover all original states with bounded status reads, retained unavailable identities and explicit continuation.',
+    { '--session': 'data', '--executor': 'data', '--provider': 'data', '--status': 'value', '--semantic': 'value', '--readiness': 'value', '--activity-since': 'value', '--since': 'value', '--cursor': 'data', '--limit': 'value' },
+    f => parseAgentDiscoveryFilters({ ...fields(f, { '--session': 'agentSessionId', '--executor': 'executorId', '--provider': 'providerId', '--status': 'status', '--semantic': 'semantic', '--readiness': 'readiness', '--cursor': 'cursor' }),
+      ...numbers(f, { '--activity-since': 'activitySince', '--since': 'since', '--limit': 'limit' }) }) as Record<string, unknown>,
+    'status is process state; semantic and readiness are separate authoritative axes. activity-since uses a recorded typed activity event, while since uses metadata updatedAt. lastActivity preserves event kind/source/time and never proves current work. Default includes retired descriptors and unavailable Session facts. limit bounds candidate observations (default 100, maximum 1000); a filtered empty page may still have nextCursor. Follow that original cursor with the same filters to finish discovery. New identities before the cursor position are seen by refreshing the first page. Reading neither starts nor restores Agents.'),
   command('agent.reopen', '--session ID --retired-at MS [--launch-json JSON] [--operation-id ID]',
     'Explicitly continue the same retired native conversation without sending a prompt.',
     { '--session': 'data', '--retired-at': 'value', '--launch-json': 'data', ...OP }, f => {

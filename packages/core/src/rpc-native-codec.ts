@@ -1,4 +1,5 @@
 import { isMessageNotificationInput, validateMessageNotification } from './agent-message-notification.js'
+import { agentDiscoveryActivity } from './agent-discovery.js'
 import { parseTerminalFrontend } from './agent-terminal-frontend.js'
 import { noteContentInCatalogScope } from './notebook-observation.js'
 import { parseFileShareParams, parseFileShareResult, parseFileShareInspectParams, parseFileShareInspectResult, parseFileShareUndoParams, parseFileShareUndoResult } from './public-rpc-file-share.js'
@@ -161,7 +162,8 @@ export function parseRpcHostedBootstrap(value: unknown): Record<string, unknown>
   return p
 }
 function status(value: unknown, expected?: ReturnType<typeof normalizeAgentSession>, routed = false): void {
-  const p = record(value, [...(routed ? ['routeHostId'] : []), 'session', 'run', 'capabilities', 'observation', 'interactionResponseUnavailableReason']), session = parseRpcAgentSession(p.session)
+  const p = record(value, [...(routed ? ['routeHostId', 'lastActivity'] : []), 'session', 'run', 'capabilities', 'observation', 'interactionResponseUnavailableReason']), session = parseRpcAgentSession(p.session)
+  if (routed && !isDeepStrictEqual(p.lastActivity, agentDiscoveryActivity(session))) fail()
   const responseReason = session.pendingInteraction && agentInteractionResponseUnavailableReason(session.pendingInteraction)
   if (p.interactionResponseUnavailableReason !== (responseReason || undefined)) fail()
   const run = record(p.run)
@@ -532,7 +534,58 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
           session.run.runId === session.reopenedFrom.run.runId) fail()
         break
       }
-      case 'agent.ls': record(p, ['sessions', 'errors']); array(p.sessions, item => { string(record(item).routeHostId); status(item, undefined, true) }); array(p.errors, item => { const error = record(item, ['agentSessionId', 'hostId', 'code', 'message']); string(error.agentSessionId, true); string(error.hostId); string(error.code); text(error.message) }); break
+      case 'agent.ls': {
+        record(p, ['sessions', 'unavailableSessions', 'retired', 'errors', 'nextCursor'])
+        const identities = new Set<string>()
+        const identity = (route: unknown, sid: unknown) => {
+          const key = JSON.stringify([route, sid])
+          if (identities.has(key)) fail()
+          identities.add(key)
+          if (input.agentSessionId !== undefined && sid !== input.agentSessionId) fail()
+        }
+        const metadata = (session: ReturnType<typeof normalizeAgentSession>, lastActivity: unknown) => {
+          if (input.executorId !== undefined && session.executorId !== input.executorId || input.providerId !== undefined && session.providerId !== input.providerId ||
+              input.since !== undefined && session.updatedAt < Number(input.since) || input.activitySince !== undefined &&
+              (!lastActivity || Number((lastActivity as { observedAt: number }).observedAt) < Number(input.activitySince))) fail()
+        }
+        array(p.sessions, item => {
+          const entry = record(item); string(entry.routeHostId); status(item, undefined, true)
+          const session = parseRpcAgentSession(entry.session), observation = record(entry.observation)
+          identity(entry.routeHostId, session.agentSessionId); metadata(session, entry.lastActivity)
+          for (const [filter, field] of [['status', 'process'], ['semantic', 'semantic'], ['readiness', 'readiness']] as const)
+            if (input[filter] !== undefined && observation[field] !== input[filter]) fail()
+        })
+        array(p.unavailableSessions, item => {
+          const entry = record(item, ['routeHostId', 'session', 'code', 'message', 'lastActivity'])
+          const session = parseRpcAgentSession(entry.session)
+          string(entry.routeHostId); string(entry.code); text(entry.message)
+          if (!isDeepStrictEqual(entry.lastActivity, agentDiscoveryActivity(session))) fail()
+          identity(entry.routeHostId, session.agentSessionId); metadata(session, entry.lastActivity)
+        })
+        array(p.retired, item => {
+          const retired = record(item, ['agentSessionId', 'hostId', 'routeHostId', 'state', 'retiredAt', 'history', 'pendingReopen'])
+          string(retired.agentSessionId); string(retired.hostId); string(retired.routeHostId)
+          if (retired.state !== 'retired') fail()
+          identity(retired.routeHostId, retired.agentSessionId)
+          if (['status', 'semantic', 'readiness', 'since', 'activitySince'].some(key => input[key] !== undefined)) fail()
+          count(retired.retiredAt)
+          if (retired.pendingReopen !== undefined) {
+            const pending = record(retired.pendingReopen, ['operationId'])
+            if (pending.operationId !== undefined) string(pending.operationId)
+          }
+          if (retired.history !== undefined) {
+            const history = record(retired.history)
+            for (const key of ['providerId', 'executorId', 'workspacePath']) string(history[key])
+            count(history.createdAt)
+          }
+          const history = retired.history as Record<string, unknown> | undefined
+          if (input.executorId !== undefined && history?.executorId !== input.executorId || input.providerId !== undefined && history?.providerId !== input.providerId) fail()
+        })
+        array(p.errors, item => { const error = record(item, ['agentSessionId', 'hostId', 'code', 'message']); string(error.agentSessionId, true); string(error.hostId); string(error.code); text(error.message) })
+        if (p.nextCursor !== null) string(p.nextCursor)
+        if (identities.size > Number(input.limit ?? 100)) fail()
+        break
+      }
       case 'agent.role.ls': record(p, ['bindings']); array(p.bindings, item => role(item)); break
       case 'agent.role.register': case 'agent.role.resolve': { record(p, ['binding']); const binding = role(p.binding)
         if (binding.role !== input.role || input.workspacePath !== undefined && binding.workspacePath !== input.workspacePath ||

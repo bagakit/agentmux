@@ -32,6 +32,22 @@ owns Run/process/bytes. Executor, durable Session, current Run and display Regio
 Begin with agent ls/inspect for the exact Session and routeHostId; preserve original identities
 and unknown receipts. A failed observation never authorizes stopping a healthy Run.
 
+For a complete participant set, page agent ls to nextCursor=null. Narrow by the actual
+Executor/Provider before reading status. Use semantic=active for current work; running alone
+does not mean active. status, semantic, readiness and unavailable facts remain distinct.
+lastActivity is the original typed event: waiting, completion and idle times do not mean a
+recent working time. since is metadata updatedAt; activity-since selects original activity.
+No task category is inferred from names, and one registered role is not a multi-Agent group.
+
+Read only the needed history: agent conversation inspect --limit 3 for a small recent
+window, then its original cursor; agent history --source captured or native reads full
+retained sources. Use history --kind user-message for input records, retaining human,
+Agent, external, platform and unknown authorship. For replies, inspect original assistant
+records and continue a nonterminal cursor when a bounded page has no matching reply;
+reasoning, tools and platform notices are not answers. message ls/read cover original A2A
+participation. Read leaf help for the exact Host, source, cursor and authorization contract.
+Discovery never grants access to another Agent's private messages or working surface.
+
 Load only the journey needed now:
 - Independent Session communication: amux message --skill for the full shared contract.
 - Create an Agent: amux agent open --help for configured Executor discovery and opening workflow.
