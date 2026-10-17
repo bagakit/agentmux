@@ -65,11 +65,11 @@ function SharedFrame({ children, source = false, status, attention = false, acti
   const label = source ? 'Shared source' : 'Shared reference'
   return <section className="note-shared-content" data-shared-role={source ? 'source' : 'reference'} aria-label={label}>
     <button type="button" className="note-shared-block__marker" aria-label={`${label} · edits update all uses`} title={`${label} · edits update all uses`}>{source ? <SquareDot size={13} /> : <Link2 size={13} />}</button>
-    <div className="note-shared-block__header" data-attention={attention || undefined}><span>{label}</span><span role={attention ? 'status' : undefined}>{status ?? 'Edits update all uses'}</span>{actions}</div>
+    <div className="note-shared-block__header" data-attention={attention || undefined}><span className="note-shared-block__label">{label}</span><span role={attention ? 'status' : undefined}>{status ?? 'Edits update all uses'}</span>{actions}</div>
     {children}<div className="note-shared-block__end">End of {source ? 'shared source' : 'shared reference'}</div>
   </section>
 }
-function PendingSharedFile({ include, scope, remove }: { include: NoteInclude; scope: Scope; remove: () => void }) {
+function PendingSharedFile({ include, scope, remove, graph, trail, owner }: { include: NoteInclude; scope: Scope; remove: () => void; graph: Observation; trail: readonly string[]; owner: EditorOwner }) {
   const ticket = pendingNoteShares(documentKey(scope.target.workspaceId, scope.target.path)).get(include.referenceId)
   const target = useMemo(() => ticket?.copy.source, [ticket?.copy.source.workspaceId, ticket?.copy.source.path, ticket?.copy.source.hostId, ticket?.copy.source.workspacePath, ticket?.copy.source.noteId])
   const occurrence = `${scope.occurrence}/${include.referenceId}/pending-source`
@@ -97,12 +97,13 @@ function PendingSharedFile({ include, scope, remove }: { include: NoteInclude; s
     if (!unconfirmed && node?.type === 'noteInclude' && node.attrs?.noteId === include.noteId && !original?.noteEditing?.shares?.[node.attrs?.referenceId]) clearPendingNoteShares(documentKey(scope.target.workspaceId, scope.target.path), [include.referenceId])
   }, [unconfirmed, node, include.noteId, include.referenceId, scope.target.workspaceId, scope.target.path, original?.noteEditing?.shares])
   return <SharedFrame attention status={unconfirmed ? 'Sharing needs confirmation' : 'Pending · save to share'} actions={!unconfirmed && <button type="button" className="note-text-button" onClick={remove}>Cancel this use</button>}>
-    {node ? <ReadOnlyBlock content={node} /> : <p className="note-knowledge-notice" role="status">Reading the original source. Save will check its exact identity and content before sharing.</p>}
+    {node && target ? <SharedScope {...scope} target={target} read={ticket?.copy.read} occurrence={occurrence} graph={graph} trail={trail} owner={owner}><ReadOnlyBlock content={node} /></SharedScope> : <p className="note-knowledge-notice" role="status">Reading the original source. Save will check its exact identity and content before sharing.</p>}
     {unconfirmed || issue && 'message' in issue ? <p className="note-knowledge-notice" role="status">{issue && 'message' in issue ? issue.message : 'The original sharing operation is retained. Its complete result has not been confirmed.'}{unconfirmed && <><button type="button" className="note-text-button" onClick={() => void useAppStore.getState().inspectNoteShare(scope.target.workspaceId, scope.target.path)}>Check this sharing operation</button><button type="button" className="note-text-button" onClick={() => void useAppStore.getState().continueNoteShare(scope.target.workspaceId, scope.target.path)}>Continue this sharing</button></>}</p> : null}
     </SharedFrame>
 }
 function SharedFile({ include, scope, graph, trail, owner, remove, readOnly }: { readOnly: boolean; include: NoteInclude; remove: () => void; scope: Scope; graph: Observation; trail: readonly string[]; owner: EditorOwner }) {
-  const pending = pendingNoteShares(documentKey(scope.target.workspaceId, scope.target.path)).has(include.referenceId)
+  const ticket = pendingNoteShares(documentKey(scope.target.workspaceId, scope.target.path)).get(include.referenceId)
+  const pending = ticket && ticket.include.noteId === include.noteId && ticket.include.path === include.path && (ticket.include.workspaceId ?? scope.target.workspaceId) === (include.workspaceId ?? scope.target.workspaceId)
   const observations = useMemo(() => graph.snapshot?.graph.observations.filter(value => value.noteId === include.noteId && value.status === 'read' && value.kind === 'shared-block' && value.fileIdentity === 'confirmed') ?? [], [graph.snapshot, include.noteId])
   const found = !graph.snapshot?.graph.duplicateNoteIds.includes(include.noteId) && observations.length === 1 ? observations[0] : undefined
   const target = useMemo<NoteFileTarget | null>(() => found ? { ...found.resource, noteId: include.noteId } : null,
@@ -123,11 +124,11 @@ function SharedFile({ include, scope, graph, trail, owner, remove, readOnly }: {
   const composition = useCallback((active: boolean) => setNoteComposition(key, occurrence, active), [key, occurrence])
   useEffect(() => () => setNoteComposition(key, occurrence, false), [key, occurrence])
   const nextTrail = useMemo(() => [...trail, include.noteId], [trail, include.noteId])
-  if (pending) return <PendingSharedFile include={include} scope={scope} remove={remove} />
-  if (trail.includes(include.noteId)) return <><div className="note-shared-block__header">Shared content</div><p className="note-knowledge-notice" role="status">This include is circular. The original reference is preserved.</p></>
-  if (!target || !original || read?.status !== 'valid' || read.note.noteId !== include.noteId || read.note.kind !== 'shared-block') return <><div className="note-shared-block__header">Shared content</div><p className="note-knowledge-notice" role="status">{graph.issue ?? (graph.snapshot?.graph.duplicateNoteIds.includes(include.noteId) ? 'Multiple files have this shared identity. The original reference is kept.' : graph.busy ? 'Reading shared sources…' : fileIssue && 'message' in fileIssue ? fileIssue.message : 'The original shared content is not confirmed. Its reference is kept.')} <button type="button" className="note-text-button" onClick={graph.refresh}>Check shared sources</button></p></>
+  if (trail.includes(include.noteId)) return <p className="note-shared-notice" role="status">Circular reference · this use is kept without expanding itself.</p>
+  if (pending) return <PendingSharedFile include={include} scope={scope} remove={remove} graph={graph} trail={nextTrail} owner={owner} />
+  if (!target || !original || read?.status !== 'valid' || read.note.noteId !== include.noteId || read.note.kind !== 'shared-block') return <p className="note-shared-notice" role="status">{graph.issue ?? (graph.snapshot?.graph.duplicateNoteIds.includes(include.noteId) ? 'Multiple files have this shared identity. The original reference is kept.' : graph.busy ? 'Reading shared sources…' : fileIssue && 'message' in fileIssue ? fileIssue.message : 'The original shared content is not confirmed. Its reference is kept.')} <button type="button" className="note-text-button" onClick={graph.refresh}>Check shared sources</button></p>
   const origin = read.note.origin
-  const source = origin?.sourceNoteId === scope.target.noteId && 'blockId' in include && origin.sourceBlockId === include.blockId && include.referenceId === `${origin.operationId}:source`
+  const source = Boolean(origin && 'blockId' in include && origin.sourceBlockId === include.blockId && include.referenceId === `${origin.operationId}:source`)
   return <SharedFrame source={source} attention={saving || dirty} status={saving ? 'Saving…' : dirty ? 'Unsaved changes' : undefined}
     actions={!readOnly && dirty && <button type="button" className="note-text-button" onClick={() => void useAppStore.getState().saveNoteFile(target)} disabled={saving}>Save</button>}>
     {original.noteEditing?.shareUndo ? <p className="note-knowledge-notice" role="status">{saving ? 'Saving this shared-reference removal…' : fileIssue && 'message' in fileIssue ? fileIssue.message : noteShareUndoRecoveryMessage(original.noteEditing)}

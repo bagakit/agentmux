@@ -1,10 +1,12 @@
-import type { Editor, JSONContent } from '@tiptap/core'
+import { Decoration, type Editor, type JSONContent } from '@tiptap/core'
+import { noteShareSiblingRange } from '../../../shared/note-share-range'
 import { parseFileReadParams, type FileReadParams } from '@agentmux/core/files'
 import { validateNoteDocument } from '@agentmux/client-ui/note/note-document-validation'
 import { noteHistoryRevision } from '@agentmux/core/note-history'
 import { isNoteWorkspaceRelativePath } from '@agentmux/core/note-format'
 import { NOTE_SCHEMA, readNoteDocument, serializeNoteDocument, type NoteDocument, type NoteInclude } from '../../../shared/note-document'
 import type { NoteFileTarget } from './file-document-consumers'
+type ProseMirrorNode = Editor['state']['doc']
 const MIME = 'application/x-agentmux-note-share'
 export type { NoteShareCopy, PendingNoteShare } from '../../../shared/note-file-editing'
 import type { NoteShareCopy, PendingNoteShare } from '../../../shared/note-file-editing'
@@ -27,6 +29,8 @@ export function copyNoteBlock(editor: Editor, position: number, source: NoteFile
   const node = editor.state.doc.nodeAt(position)
   if (!node || !node.isBlock) throw Error('Choose the current content block again.')
   const path = Array.from({ length: at.depth + 1 }, (_, depth) => at.index(depth))
+  const pending = node.type.name === 'noteInclude' ? pendingNoteShares(`${source.workspaceId}\0${source.path}`).get(node.attrs.referenceId) : undefined
+  if (pending && node.attrs.noteId === pending.include.noteId && node.attrs.path === pending.include.path && (node.attrs.workspaceId ?? source.workspaceId) === (pending.include.workspaceId ?? source.workspaceId)) return pending.copy
   const copy: NoteShareCopy = { version: 1, source, read, block: { path, fingerprint: noteBlockFingerprint(node.toJSON()), ...(typeof node.attrs.blockId === 'string' ? { blockId: node.attrs.blockId } : {}) }, ...(node.type.name === 'noteInclude' ? { include: node.attrs as NoteInclude } : {}) }
   if (!copy.include) copy.proposalId = matchingPendingCopy(copy)?.include.noteId ?? crypto.randomUUID()
   return copy
@@ -80,7 +84,26 @@ export function stageNoteShare(key: string, copy: NoteShareCopy): NoteInclude {
   const include = { referenceId, noteId, path: same?.include.path ?? `${parent}block-${noteId}.note.md`, ...(copy.source.workspaceId === key.slice(0, key.indexOf('\0')) ? {} : { workspaceId: copy.source.workspaceId }) }
   held.set(referenceId, { copy, operationId: same?.operationId ?? crypto.randomUUID(), include })
   useAppStore.setState(state => state.documents[key] ? { documents: { ...state.documents, [key]: { ...state.documents[key]!, noteEditing: { ...state.documents[key]!.noteEditing, shares: Object.fromEntries(held) } } } } : state)
+  rememberPendingSourceTarget(key)
   return include
+}
+/** A source receipt may promote a proposal while another use has no mounted preview. */
+export function promotedPendingNoteShares(key: string): string[] {
+  const state = useAppStore.getState(), settled: string[] = []
+  for (const [reference, ticket] of pendingNoteShares(key)) {
+    const source = ticket.copy.source, workspace = state.config?.workspaces.find(value => value.id === source.workspaceId)
+    if (workspace?.hostId !== source.hostId || workspace.path !== source.workspacePath) continue
+    const original = state.documents[`${source.workspaceId}\0${source.path}`], parsed = original ? readNoteDocument(original.content) : null
+    if (parsed?.status !== 'valid' || parsed.note.noteId !== source.noteId) continue
+    let declarations = 0
+    const visit = (node: JSONContent) => {
+      if (node.type === 'noteInclude' && node.attrs?.noteId === ticket.include.noteId && node.attrs?.referenceId === `${ticket.operationId}:source` && node.attrs.path === ticket.include.path && !original?.noteEditing?.shares?.[node.attrs.referenceId] && (!ticket.copy.block.blockId || node.attrs.blockId === ticket.copy.block.blockId)) declarations++
+      node.content?.forEach(visit)
+    }
+    visit(parsed.note.content)
+    if (declarations === 1) settled.push(reference)
+  }
+  return settled
 }
 export function pendingNoteShares(key: string): ReadonlyMap<string, PendingNoteShare> { return new Map(Object.entries(useAppStore.getState().documents[key]?.noteEditing?.shares ?? {})) }
 export function clearPendingNoteShares(key: string, references: readonly string[]): void {
@@ -101,7 +124,8 @@ export function noteNodeAtPath(content: JSONContent, path: readonly number[]): J
 const editors = new Map<string, Set<Editor>>()
 export function retainNoteDraftEditor(key: string, editor: Editor): () => void {
   const values = editors.get(key) ?? new Set<Editor>(); values.add(editor); editors.set(key, values)
-  return () => { values.delete(editor); if (!values.size && editors.get(key) === values) editors.delete(key) }
+  if (pendingSourceTargets.has(key) || Object.keys(useAppStore.getState().documents[key]?.noteEditing?.shares ?? {}).length) rememberPendingSourceTarget(key)
+  return () => { values.delete(editor); if (!values.size && editors.get(key) === values) editors.delete(key); const current = pendingSourceTargets.get(key); current?.editors.get(editor)?.(); current?.editors.delete(editor); if (current) rememberPendingSourceTarget(key) }
 }
 export function bindNoteDraftBlockIdentity(key: string, path: readonly number[], fingerprint: string, blockId: string): void {
   for (const editor of editors.get(key) ?? []) {
@@ -166,4 +190,121 @@ const navigationReady = new Map<string, Set<() => void>>()
 export function observeNoteDraftNavigation(occurrence: string, listener: () => void): () => void {
   const values = navigationReady.get(occurrence) ?? new Set<() => void>(); values.add(listener); navigationReady.set(occurrence, values)
   return () => { values.delete(listener); if (!values.size && navigationReady.get(occurrence) === values) navigationReady.delete(occurrence) }
+}
+
+
+/** Pending source boundaries are a projection of the original tickets, never another draft. */
+type PendingSourceTarget = {
+  shares: Readonly<Record<string, PendingNoteShare>>
+  present: ReadonlySet<string>
+  editors: Map<Editor, () => void>
+}
+const pendingSourceTargets = new Map<string, PendingSourceTarget>()
+const pendingSourceObservers = new Map<string, Set<() => void>>()
+const pendingSourceCopies = new Map<string, NoteShareCopy[]>()
+let stopPendingSourceObservation: (() => void) | undefined
+function pendingSourceKey(copy: NoteShareCopy): string { return `${copy.source.workspaceId}\0${copy.source.path}\0${copy.source.noteId}` }
+function pendingSourceKeys(target: PendingSourceTarget): Set<string> {
+  return new Set(Object.entries(target.shares).flatMap(([reference, ticket]) => target.present.has(reference) ? [pendingSourceKey(ticket.copy)] : []))
+}
+function presentPendingReferences(key: string, shares: Readonly<Record<string, PendingNoteShare>>): Set<string> {
+  const declarations = new Map<string, string[]>()
+  const add = (reference: unknown, noteId: unknown) => { if (typeof reference === 'string' && typeof noteId === 'string') declarations.set(reference, [...(declarations.get(reference) ?? []), noteId]) }
+  const live = [...(editors.get(key) ?? [])].filter(editor => !editor.isDestroyed)
+  // The live editor owns a local Undo before its serialized File echo arrives.
+  // Multiple projections of one draft count an identical declaration only once.
+  if (live.length) for (const editor of live) {
+    const current = new Map<string, string[]>()
+    editor.state.doc.descendants(node => { if (node.type.name === 'noteInclude') { const reference = node.attrs.referenceId; if (typeof reference === 'string') current.set(reference, [...(current.get(reference) ?? []), node.attrs.noteId]) } })
+    for (const [reference, values] of current) if (values.length === 1 && !declarations.has(reference)) add(reference, values[0])
+  }
+  else {
+    const document = useAppStore.getState().documents[key], parsed = document ? readNoteDocument(document.content) : null
+    const visit = (node: JSONContent) => { if (node.type === 'noteInclude') add(node.attrs?.referenceId, node.attrs?.noteId); node.content?.forEach(visit) }
+    if (parsed?.status === 'valid') visit(parsed.note.content)
+  }
+  return new Set(Object.entries(shares).flatMap(([reference, ticket]) => declarations.get(reference)?.length === 1 && declarations.get(reference)![0] === ticket.include.noteId ? [reference] : []))
+}
+function attachPendingTargetEditor(key: string, target: PendingSourceTarget, editor: Editor): void {
+  if (target.editors.has(editor) || editor.isDestroyed) return
+  const changed = ({ transaction }: { transaction: { docChanged: boolean } }) => { if (transaction.docChanged) rememberPendingSourceTarget(key) }
+  editor.on('transaction', changed)
+  target.editors.set(editor, () => { editor.off('transaction', changed) })
+}
+function rememberPendingSourceTarget(key: string): void {
+  if (!pendingSourceObservers.size) return
+  const held = pendingSourceTargets.get(key), before = held ? pendingSourceKeys(held) : new Set<string>()
+  const shares = useAppStore.getState().documents[key]?.noteEditing?.shares ?? {}
+  if (!Object.keys(shares).length) {
+    held?.editors.forEach(stop => stop()); pendingSourceTargets.delete(key)
+  } else {
+    const next = { shares, present: presentPendingReferences(key, shares), editors: held?.editors ?? new Map<Editor, () => void>() }
+    pendingSourceTargets.set(key, next)
+    for (const editor of editors.get(key) ?? []) attachPendingTargetEditor(key, next, editor)
+  }
+  const next = pendingSourceTargets.get(key), after = next ? pendingSourceKeys(next) : new Set<string>()
+  if (held?.shares === next?.shares && held?.present.size === next?.present.size && [...(held?.present ?? [])].every(value => next?.present.has(value))) return
+  for (const source of new Set([...before, ...after])) {
+    const copies = [...pendingSourceTargets.values()].flatMap(target => Object.entries(target.shares).flatMap(([reference, ticket]) => target.present.has(reference) && pendingSourceKey(ticket.copy) === source ? [ticket.copy] : []))
+    if (copies.length) pendingSourceCopies.set(source, copies); else pendingSourceCopies.delete(source)
+    pendingSourceObservers.get(source)?.forEach(changed => changed())
+  }
+}
+/** Observe only known ticket destinations after one mount-time recovery scan. */
+export function observeNotePendingSource(sourceKey: string, sourceNoteId: string, editor: Editor, changed: () => void): () => void {
+  const key = `${sourceKey}\0${sourceNoteId}`, observers = pendingSourceObservers.get(key) ?? new Set<() => void>()
+  observers.add(changed); pendingSourceObservers.set(key, observers)
+  if (!stopPendingSourceObservation) {
+    stopPendingSourceObservation = useAppStore.subscribe((state, previous) => {
+      if (state.config?.workspaces !== previous.config?.workspaces) pendingSourceObservers.forEach(observers => observers.forEach(changed => changed()))
+      if (state.documents === previous.documents) return
+      for (const [target, held] of pendingSourceTargets) {
+        const document = state.documents[target], before = previous.documents[target]
+        if (document?.noteEditing?.shares !== held.shares || document?.content !== before?.content && !editors.get(target)?.size) rememberPendingSourceTarget(target)
+      }
+    })
+    for (const [target, document] of Object.entries(useAppStore.getState().documents)) if (Object.keys(document.noteEditing?.shares ?? {}).length) rememberPendingSourceTarget(target)
+  }
+  const onDestroy = () => cleanup()
+  const cleanup = () => {
+    editor.off('destroy', onDestroy)
+    observers.delete(changed); if (!observers.size && pendingSourceObservers.get(key) === observers) pendingSourceObservers.delete(key)
+    if (!pendingSourceObservers.size) {
+      stopPendingSourceObservation?.(); stopPendingSourceObservation = undefined
+      pendingSourceTargets.forEach(target => target.editors.forEach(stop => stop())); pendingSourceTargets.clear(); pendingSourceCopies.clear()
+    }
+  }
+  editor.on('destroy', onDestroy)
+  changed()
+  return cleanup
+}
+/** Original sibling decorations preserve ordinary Markdown structure and the heading's full extent. */
+export function notePendingSourceDecorations(sourceKey: string, sourceNoteId: string, doc: ProseMirrorNode): Decoration[] {
+  const copies = pendingSourceCopies.get(`${sourceKey}\0${sourceNoteId}`) ?? []
+  const ranges = new Map<string, { from: number; to: number; edge: string }>()
+  for (const copy of copies) {
+    const workspace = useAppStore.getState().config?.workspaces.find(value => value.id === copy.source.workspaceId)
+    if (workspace?.hostId !== copy.source.hostId || workspace.path !== copy.source.workspacePath) continue
+    const found: Array<{ node: ProseMirrorNode; parent: ProseMirrorNode; index: number; position: number }> = []
+    if (copy.block.blockId) doc.descendants((node, position, parent, index) => { if (node.attrs.blockId === copy.block.blockId && parent) found.push({ node, parent, index, position }) })
+    else {
+      let parent = doc, position = 0
+      for (let depth = 0; depth < copy.block.path.length; depth++) {
+        const index = copy.block.path[depth]!
+        if (index >= parent.childCount) break
+        for (let before = 0; before < index; before++) position += parent.child(before).nodeSize
+        const node = parent.child(index)
+        if (depth === copy.block.path.length - 1) { if (noteBlockFingerprint(node.toJSON()) === copy.block.fingerprint) found.push({ node, parent, index, position }) }
+        else { parent = node; position++ }
+      }
+    }
+    if (found.length !== 1 || found[0]!.node.type.name === 'noteInclude') continue
+    const target = found[0]!, length = target.node.type.name === 'heading' ? noteShareSiblingRange(target.parent.toJSON(), target.index).length : 1
+    let from = target.position
+    for (let offset = 0; offset < length; offset++) {
+      const to = from + target.parent.child(target.index + offset).nodeSize
+      ranges.set(`${from}:${to}`, { from, to, edge: length === 1 ? 'single' : offset === 0 ? 'first' : offset === length - 1 ? 'last' : 'inside' }); from = to
+    }
+  }
+  return [...ranges.values()].map(range => Decoration.Node(range.from, range.to, { class: 'note-pending-shared-source', 'data-note-shared-source': 'pending', 'data-note-shared-edge': range.edge, ...(['first', 'single'].includes(range.edge) ? { title: 'Pending shared source · save its use to share' } : {}) }))
 }
