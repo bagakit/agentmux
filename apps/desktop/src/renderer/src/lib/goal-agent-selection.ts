@@ -2,7 +2,7 @@ import type { AgentMuxControlRequest } from '@agentmux/core/control'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import type { useAppStore } from '../store'
-import type { DemandProjection } from './global-demand-board'
+import type { DemandRecord } from './global-demand-board'
 import { agentDisplayName, firstPromptFromTimeline, topicIdForSession, workspaceForSession } from './workbench-tabs'
 import { projectWorkspaces, workspaceProjectId } from './workspace-projects'
 import { scratchTopicsForConfig, scratchTopicKind } from './scratch-topic-snapshots'
@@ -56,7 +56,7 @@ export type GoalAgentRow = {
   participated: boolean; session?: Extract<SessionSnapshot, { kind: 'agent' }>; related: boolean; project: boolean; mote: boolean
 }
 /** Business selection uses canonical Core identities; original presentation IDs remain navigation facts. */
-export function goalAgentRows(state: Inputs, goal: DemandProjection, retainedIds: readonly string[] = []): GoalAgentRow[] {
+export function goalAgentRows(state: Inputs, goal: DemandRecord, retainedIds: readonly string[] = []): GoalAgentRow[] {
   const topics = scratchTopicsForConfig(state.config, state.scratchTopicSnapshots)
   const projects = projectWorkspaces(state.config?.workspaces.filter(workspace => workspace.id !== '__scratch__') ?? [])
   const hasProject = projects.some(project => project.id === goal.projectId)
