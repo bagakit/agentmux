@@ -10,12 +10,14 @@ import { fixturePath } from './lib/fixture-values.mjs'
 const root = resolve(import.meta.dirname, '../../..'), require = createRequire(join(root, 'apps/desktop/package.json'))
 const { build, transform } = createRequire(join(root, 'packages/core/package.json'))('esbuild'), { build: viteBuild } = require('vite')
 const captureOnly = process.argv.includes('--capture-only')
-const baselineOnly = captureOnly || process.argv.includes('--baseline')
+const mutationId = process.argv.find(arg => arg.startsWith('--mutation='))?.slice('--mutation='.length)
+const baselineOnly = Boolean(mutationId) || captureOnly || process.argv.includes('--baseline')
 const foreground = process.argv.includes('--foreground')
 const captureHandoff = process.argv.includes('--capture-handoff')
 const nativeOpinion = process.argv.includes('--native-opinion')
-const output = join(root, '.tmp/browser-agent-collaboration', captureOnly ? 'contextual-composer-capture-proof' : foreground ? 'contextual-composer-foreground-proof' : captureHandoff ? 'contextual-composer-capture-proof' : 'contextual-composer-proof')
-assert.ok(process.argv.slice(2).every(arg => ['--baseline', '--foreground', '--capture-handoff', '--native-opinion', '--capture-only'].includes(arg)), 'Unsupported contextual proof argument')
+const output = join(root, '.tmp/browser-agent-collaboration', mutationId ? 'contextual-composer-mutant-proof' : captureOnly ? 'contextual-composer-capture-proof' : foreground ? 'contextual-composer-foreground-proof' : captureHandoff ? 'contextual-composer-capture-proof' : 'contextual-composer-proof')
+assert.ok(process.argv.slice(2).every(arg => arg.startsWith('--mutation=') || ['--baseline', '--foreground', '--capture-handoff', '--native-opinion', '--capture-only'].includes(arg)), 'Unsupported contextual proof argument')
+assert.ok(!mutationId || !foreground && !captureHandoff && !captureOnly && !nativeOpinion, 'A scoped mutation is a background diagnostic only')
 assert.ok(!captureOnly || captureHandoff && !nativeOpinion, 'Capture-only requires a capture handoff and cannot send an opinion')
 assert.ok(!nativeOpinion || captureHandoff, 'The actual OS opinion uses the external native handoff')
 assert.ok(!nativeOpinion || foreground, 'Actual OS opinion input needs the explicit foreground mode')
@@ -54,8 +56,11 @@ const mutations = [
   { id: 'current-step-before-history', file: 'apps/desktop/src/renderer/src/styles/browser-contextual-composer.css',
     from: '.browser-trace-rail .browser-rsi-history__list { max-height: min(160px, 24vh); overflow-y: auto; }',
     to: '.browser-trace-rail .browser-rsi-history__list { max-height: none; overflow-y: auto; }',
+    css: { selector: '.browser-trace-rail .browser-rsi-history__list', property: 'max-height', before: 'min(160px, 24vh)', after: 'none' },
     expected: 'Opening the live trace must show the current step before scrolling through older operations' }
 ]
+const selectedMutation = mutationId ? mutations.find(mutation => mutation.id === mutationId) : undefined
+assert.ok(!mutationId || selectedMutation, 'A scoped mutation must name an existing owning mutant')
 for (const mutation of mutations) {
   const file = join(root, mutation.file); await bind(file)
   const original = await readFile(file, 'utf8')
@@ -155,9 +160,27 @@ async function native(label, mutation) {
     await viteBuild({ configFile: false, logLevel: 'error', root: join(root, 'apps/desktop/scripts/fixtures/browser-contextual-composer'), base: './',
       define: { __AGENTMUX_WEB_PREVIEW__: 'false' },
       worker: { format: 'es' },
-      css: { postcss: { plugins: [{ postcssPlugin: 'actual-contextual-css-inputs', async OnceExit(_stylesheet, { result }) {
+      css: { postcss: { plugins: [{ postcssPlugin: 'actual-contextual-css-inputs', async OnceExit(stylesheet, { result }) {
         for (const message of result.messages) if (message.type === 'dependency' && typeof message.file === 'string' &&
           message.file.startsWith(root + '/') && !message.file.includes('/node_modules/')) await bind(message.file)
+        // PostCSS resolves @imports itself, so Vite's module load hook never sees
+        // these leaves. Mutate the exact imported owning AST, not an unused copy.
+        if (mutation?.css) {
+          let matches = 0
+          stylesheet.walkRules(mutation.css.selector, rule => {
+            if (rule.source?.input.file !== join(root, mutation.file)) return
+            rule.walkDecls(mutation.css.property, declaration => {
+              assert.equal(declaration.value, mutation.css.before)
+              declaration.value = mutation.css.after; matches++
+            })
+          })
+          if (matches > 0) {
+            assert.equal(matches, 1, 'The exact imported production CSS declaration must consume its mutation')
+            assert.equal(applied, false, 'The imported CSS mutation is applied only once')
+            const original = await readFile(join(root, mutation.file), 'utf8')
+            applied = true; consumed = { file: mutation.file, original: hash(original), mutated: hash(original.replace(mutation.from, mutation.to)) }
+          }
+        }
       } }] } },
       resolve: { dedupe: ['react', 'react-dom'], alias: [...Object.entries(aliases).map(([name, path]) => ({ find: new RegExp('^' + name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&') + '$'), replacement: path })), ...browserSourceAliases] },
       plugins: [{ name: 'actual-renderer-inputs', enforce: 'pre', async resolveId(id) { return await workspaceSource(id) },
@@ -227,7 +250,8 @@ async function native(label, mutation) {
   }
 }
 try {
-  await native('native-baseline')
+  if (selectedMutation) await native('targeted-' + selectedMutation.id, selectedMutation)
+  else await native('native-baseline')
   if (!baselineOnly) {
     const queueReceipt = join(output, 'queue.json')
     // Vite build sets NODE_ENV=production in this process; mounted React needs its test runtime.
