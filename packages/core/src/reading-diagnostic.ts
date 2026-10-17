@@ -159,7 +159,12 @@ export function parseReadingDiagnosticEvent(value: unknown): ReadingDiagnosticEv
 export function parseReadingDiagnosticRecord(value: unknown): ReadingDiagnosticRecord {
   const p = object(value, ['version', 'logId', 'previousLogId', 'scope', 'trigger', 'startedAt', 'endedAt', 'events', 'coverage'])
   if (p.version !== 'reading-diagnostic.v1' || !Array.isArray(p.events) || p.events.length > READING_DIAGNOSTIC_MAX_EVENTS) return invalid()
-  const events = p.events.map(parseReadingDiagnosticEvent)
+  const events: ReadingDiagnosticEvent[] = []
+  for (let index = 0; index < p.events.length; index++) {
+    const entry = Object.getOwnPropertyDescriptor(p.events, index)
+    if (!entry || !Object.hasOwn(entry, 'value')) return invalid()
+    events.push(parseReadingDiagnosticEvent(entry.value))
+  }
   if (events.some((event, index) => index > 0 && (event.sequence <= events[index - 1]!.sequence || event.monoMs < events[index - 1]!.monoMs))) return invalid()
   const c = object(p.coverage, ['firstSequence', 'lastSequence', 'overwritten', 'rejected', 'publicationFailures'])
   const coverage = { firstSequence: c.firstSequence === null ? null : integer(c.firstSequence, 1),
