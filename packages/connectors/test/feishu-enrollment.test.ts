@@ -166,7 +166,7 @@ function html(user: object = { id: 'original-user', tenantId: 'original-tenant',
   // Synthetic native literals; unrelated metadata is not account authority.
   return '<script>(function(){window.nonce="synthetic";window.user=' + JSON.stringify(user) + ';window.features=[];window.csrfToken="private-csrf";window.unit="cn";window.unitType=0;window.isOversea=false;window.env="test";window.outDomain={};window.resource={};window.domainBrand="feishu";window.seoType=0;})();</script>'
 }
-async function signedIn(origin = 'https://open.feishu.cn', document = html()) {
+async function signedIn(origin = 'https://open.feishu.cn', document = html(), documentPath = '/app') {
   const initialHeaders = new Headers({ 'x-flow-key': 'private-flow' })
   initialHeaders.append('set-cookie', 'shared=private-shared; Domain=.feishu.cn; Path=/; Secure')
   initialHeaders.append('set-cookie', 'accounts-only=private-accounts; Path=/accounts; Secure')
@@ -178,7 +178,7 @@ async function signedIn(origin = 'https://open.feishu.cn', document = html()) {
     new Response(null, { status: 302, headers: { location: 'https://ask.feishu.cn/cross-finish' } }),
     new Response('Cross-login complete, not the fixed landing'),
     new Response('landing', { headers: { 'content-type': 'text/html' } }),
-    ...(origin === 'https://open.feishu.cn' ? [] : [new Response(null, { status: 302, headers: { location: origin + '/app' } })]),
+    ...(origin === 'https://open.feishu.cn' && documentPath === '/app' ? [] : [new Response(null, { status: 302, headers: { location: origin + documentPath } })]),
     new Response(document, { headers: consoleHeaders })
   ]
   const network = remote(...responses), original = input(), adapter = createFeishuEnrollment()
@@ -193,7 +193,7 @@ async function signedIn(origin = 'https://open.feishu.cn', document = html()) {
   expect(network.calls.map(call => { const u = new URL(call.url); return u.origin + u.pathname })).toEqual([
     'https://accounts.feishu.cn/accounts/qrlogin/init', 'https://accounts.feishu.cn/accounts/qrlogin/polling',
     'https://accounts.feishu.cn/cross', 'https://ask.feishu.cn/cross-finish', 'https://ask.feishu.cn/', 'https://open.feishu.cn/app',
-    ...(origin === 'https://open.feishu.cn' ? [] : [origin + '/app'])
+    ...(origin === 'https://open.feishu.cn' && documentPath === '/app' ? [] : [origin + new URL(documentPath, origin).pathname])
   ])
   return { original, adapter, network, privateState: view.privateState, view }
 }
@@ -353,11 +353,41 @@ it('keeps absent requested description empty rather than inventing metadata or c
   expect(JSON.parse(f.network.calls.at(-1)!.options.body as string)).toEqual({ appSceneType: 0, name: preset.name, desc: '', avatar: icon, i18n: { zh_cn: { name: preset.name, description: '' } }, primaryLang: 'zh_cn' })
 })
 
-it('does not turn a qualified authentication alias into Feishu creation authority', async () => {
+it('uses the exact final Console origin and document through upload, template creation and credential', async () => {
+  const origin = 'https://open.larkoffice.com', document = origin + '/region/app?lang=en'
+  const f = await signedIn(origin, html(), '/region/app?lang=en'), before = f.network.calls.length
+  f.network.queue.push(Response.json({ code: 0, data: { url: icon } }, { headers: { 'set-cookie': 'upload=private-upload; Path=/developers/v1; Secure' } }))
+  const image = uploaded(await f.adapter.upload({ ...f.original, privateState: f.privateState, pngDataUrl }))
+  f.network.queue.push(Response.json({ code: 0, data: { ClientID: application.appId } }))
+  const app = created(await f.adapter.create({ ...f.original, protocolId: FEISHU_ENROLLMENT_PROTOCOL, privateState: image.privateState, preset }))
+  expect(app.application).toEqual(application)
+  f.network.queue.push(Response.json({ code: 0, data: { secret: 'private-alternate-secret' } }))
+  const secret = credential(await f.adapter.credential({ ...f.original, privateState: app.privateState, application }))
+  expect(secret.secret).toBe('private-alternate-secret')
+  const calls = f.network.calls.slice(before), headers = calls.map(call => new Headers(call.options.headers))
+  expect(calls.map(call => [call.url, call.options.method, call.options.redirect])).toEqual([
+    [origin + '/developers/v1/app/upload/image', 'POST', 'manual'],
+    [origin + '/developers/v1/manifest/upsert_by_template', 'POST', 'manual'],
+    [origin + '/developers/v1/secret/' + application.appId, 'POST', 'manual']
+  ])
+  expect(headers.map(value => [value.get('origin'), value.get('referer'), value.get('x-csrf-token')])).toEqual(Array.from({ length: 3 }, () => [origin, document, 'private-csrf']))
+  expect(headers.map(value => value.get('cookie')?.split('; ').sort())).toEqual([['console=private-console'], ['console=private-console', 'upload=private-upload'], ['console=private-console', 'upload=private-upload']])
+  expect(JSON.parse(secret.privateState).authentication).toMatchObject({ consoleOrigin: origin, url: document, account: { userId: 'original-user', tenantId: 'original-tenant' } })
+  expect(f.network.calls).toHaveLength(before + 3)
+})
+
+it('rejects unqualified final Console origins and foreign document referers before a POST', async () => {
   const f = await signedIn('https://open.larkoffice.com'), before = f.network.calls.length
-  expect(await f.adapter.upload({ ...f.original, privateState: f.privateState, pngDataUrl })).toEqual({ kind: 'unknown', diagnostic: { stage: 'preparation', code: 'invalid-state' } })
+  const saved = JSON.parse(f.privateState)
+  for (const consoleOrigin of ['https://foreign.example', 'https://open.feishu.cn.evil.example', 'http://open.larkoffice.com', 'https://open.larkoffice.com:8443', 'https://user@open.larkoffice.com', 'https://open.larkoffice.com/app', 'https://open.larkoffice.com/', 'https://open.larkoffice.com?lang=en']) {
+    const privateState = JSON.stringify({ ...saved, authentication: { ...saved.authentication, consoleOrigin } })
+    expect(await f.adapter.upload({ ...f.original, privateState, pngDataUrl })).toEqual({ kind: 'unknown', diagnostic: { stage: 'preparation', code: 'invalid-state' } })
+  }
+  for (const url of ['https://foreign.example/app', 'https://open.feishu.cn/app']) {
+    const privateState = JSON.stringify({ ...saved, authentication: { ...saved.authentication, url } })
+    expect(await f.adapter.upload({ ...f.original, privateState, pngDataUrl })).toEqual({ kind: 'unknown', diagnostic: { stage: 'preparation', code: 'invalid-state' } })
+  }
   expect(f.network.calls).toHaveLength(before)
-  expect(f.view.account).toMatchObject({ userId: 'original-user', tenantId: 'original-tenant' })
 })
 
 it('rejects unsupported issuers and malformed native state without dispatch or borrowed business bindings', async () => {
