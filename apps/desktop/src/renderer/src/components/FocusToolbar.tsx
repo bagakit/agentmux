@@ -21,12 +21,10 @@ import { workbenchTabDisplayName } from '../lib/workbench-tab-presentation'
 import { currentDisplayNameRevision, useAppStore } from '../store'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
-import { useFocusStopAgent } from './FocusStopAgent'
-import { useSessionRestart } from './SessionRestart'
 
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
-const ThemeActionStopIcon = semanticIconComponent('action.stop')
-const ThemeActionRestartIcon = semanticIconComponent('action.restart-session')
+const ThemeLayoutRegionIcon = semanticIconComponent('layout.grid-4')
+const ThemeObjectTabIcon = semanticIconComponent('object.tab')
 const ThemeObjectInboxIcon = semanticIconComponent('object.inbox')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 const ThemeObjectCollaborationIcon = semanticIconComponent('object.collaboration')
@@ -34,8 +32,19 @@ const ThemeObjectConversationIcon = semanticIconComponent('object.conversation')
 const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
-const ThemeActionMoreIcon = semanticIconComponent('action.more')
 const ThemeLayoutCloseRightIcon = semanticIconComponent('layout.close-right')
+
+type FocusTabAction = { key: string; label: string; icon: typeof ThemeActionEditIcon; run(): void }
+
+/** Both title and explicit entry present the same Tab scope and bound actions. */
+function FocusTabMenuContent({ name, actions, Label, Item }: {
+  name: string; actions: readonly FocusTabAction[]; Label: typeof ContextMenu.Label; Item: typeof ContextMenu.Item
+}) {
+  return <>
+    <Label className="tab-context-menu__hint" data-focus-tab-menu-context="">Tab actions · {name}</Label>
+    {actions.map(action => <Item key={action.key} className="tab-context-menu__item" onSelect={action.run}><action.icon size={14} /><span>{action.label}</span></Item>)}
+  </>
+}
 
 
 export function FocusToolbar({ active = true, children, selectedId, selected, tab, reference, onReview, onCloseWorkspace, regionOnly, onToggleRegion, onOpenCollaboration }: {
@@ -51,8 +60,6 @@ function FocusToolbarContext({ active, selectedId, selected, tab, reference, onR
   active: boolean; selectedId: string | null; selected: FocusContext | undefined; tab: WorkbenchTab | null; reference?: WorkbenchProjectionSelection | undefined; onReview(): void; onCloseWorkspace(): void; regionOnly?: boolean | undefined; onToggleRegion?: (() => void) | undefined
 }) {
   const renameTab = useAppStore(state => state.renameTab)
-  const stop = useFocusStopAgent(active)
-  const restart = useSessionRestart(active)
   const sessions = useWorkbenchTabSessions(tab ?? undefined)
   const sessionNameMetadata = useWorkbenchTabNameMetadata(tab ?? undefined)
   const agentNames = useWorkbenchTabRecord('agentNames', tab ?? undefined)
@@ -83,6 +90,8 @@ function FocusToolbarContext({ active, selectedId, selected, tab, reference, onR
   const identityRef = useRef<HTMLButtonElement>(null)
   const menuOriginRef = useRef<HTMLButtonElement | null>(null)
   const menuEscapeReturnRef = useRef<HTMLButtonElement | null>(null)
+  const tabMenuRef = useRef<HTMLDivElement>(null)
+  const focusTitleMenuRef = useRef(false)
   const renameCancelledRef = useRef(false)
   const originalTerminal = tab && Object.values(tab.regions).some(surface => surface.kind === 'terminal' && surface.sessionId === selectedId)
   const name = tab ? workbenchTabDisplayName(tab, sessions, agentNames, timelines, sessionNameMetadata) : selected?.name || 'Session awaiting recovery'
@@ -165,14 +174,12 @@ function FocusToolbarContext({ active, selectedId, selected, tab, reference, onR
   }
   const actions = [
     ...(tab ? [{ key: 'rename', label: 'Rename Tab', icon: ThemeActionEditIcon, run: () => { ++editGeneration.current; expectedNameRevision.current = { revision: currentDisplayNameRevision('tab', tab.id) }; setDraft(name) } }] : []),
-    ...(tab && onToggleRegion ? [{ key: 'level', label: regionOnly ? 'Show entire Tab' : 'Show only this Region', icon: ThemeActionStopIcon, run: onToggleRegion }] : []),
-    ...(selected?.actionable ? [{ key: 'review', label: 'Review request', icon: ThemeObjectInboxIcon, run: onReview }] : []),
-    ...(selectedId && activeSurface?.kind === 'agent' ? [{ key: 'restart', label: 'Restart Session…', icon: ThemeActionRestartIcon, run: () => restart.requestRestart(selected, selected?.name ?? name, menuOriginRef.current) }, { key: 'stop', label: 'Stop Agent', icon: ThemeActionStopIcon, run: () => stop.requestStop(selected, selected?.name ?? name, menuOriginRef.current) }] : []),
+    ...(tab && onToggleRegion ? [{ key: 'level', label: regionOnly ? 'Show entire Tab' : 'Show only this Region', icon: ThemeLayoutRegionIcon, run: onToggleRegion }] : []),
   ]
   return <div className="focus-toolbar__context">
-    {draft !== null ? <TextInput ref={renameRef} className="focus-toolbar__rename" aria-label="Rename Tab" value={draft} onChange={event => { ++editGeneration.current; setDraft(event.target.value) }} onBlur={() => { if (active) void commitRename() }} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Enter') { event.preventDefault(); commitRename() } if (event.key === 'Escape') { event.preventDefault(); renameCancelledRef.current = true; ++editGeneration.current; setDraft(null) } }} /> : <ContextMenu.Root modal={false} open={active && contextOpen} onOpenChange={setContextOpen}>
-      <ContextMenu.Trigger asChild onContextMenu={() => { menuOriginRef.current = identityRef.current }}><button ref={identityRef} type="button" className="focus-toolbar__identity" aria-label={`Focus context: ${name}`} title={`${name} · ${statusLabel} · Right-click for Focus actions`} onKeyDown={event => { if ((event.shiftKey && event.key === 'F10') || event.key === 'ContextMenu') { event.preventDefault(); menuOriginRef.current = event.currentTarget; setMenuOpen(true) } }}><strong>{name}</strong><small>{statusLabel}</small></button></ContextMenu.Trigger>
-      <DocumentOverlayPortal component={ContextMenu.Portal}><ContextMenu.Content className="tab-context-menu" collisionPadding={8} onEscapeKeyDown={() => { menuEscapeReturnRef.current = identityRef.current }} onCloseAutoFocus={closeMenuFocus}>{actions.map(action => <ContextMenu.Item key={action.key} className="tab-context-menu__item" onSelect={action.run}><action.icon size={14} /><span>{action.label}</span></ContextMenu.Item>)}</ContextMenu.Content></DocumentOverlayPortal>
+    {draft !== null ? <TextInput ref={renameRef} className="focus-toolbar__rename" aria-label="Rename Tab" value={draft} onChange={event => { ++editGeneration.current; setDraft(event.target.value) }} onBlur={() => { if (active) void commitRename() }} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Enter') { event.preventDefault(); commitRename() } if (event.key === 'Escape') { event.preventDefault(); renameCancelledRef.current = true; ++editGeneration.current; setDraft(null) } }} /> : <ContextMenu.Root modal={false} open={active && Boolean(tab) && contextOpen} onOpenChange={setContextOpen}>
+      <ContextMenu.Trigger asChild onContextMenu={() => { menuOriginRef.current = identityRef.current }}><button ref={identityRef} type="button" className="focus-toolbar__identity" aria-label={`${tab ? 'Tab' : 'Focus context'}: ${name}`} title={`${name} · ${statusLabel}${tab ? ' · Right-click for Tab actions' : ''}`} onKeyDown={event => { if (tab && ((event.shiftKey && event.key === 'F10') || event.key === 'ContextMenu')) { event.preventDefault(); menuOriginRef.current = event.currentTarget; focusTitleMenuRef.current = true; setMenuOpen(true); tabMenuRef.current?.focus() } }}><strong>{name}</strong><small>{statusLabel}</small></button></ContextMenu.Trigger>
+      <DocumentOverlayPortal component={ContextMenu.Portal}><ContextMenu.Content className="tab-context-menu" collisionPadding={8} onEscapeKeyDown={() => { menuEscapeReturnRef.current = identityRef.current }} onCloseAutoFocus={closeMenuFocus}><FocusTabMenuContent name={name} actions={actions} Label={ContextMenu.Label} Item={ContextMenu.Item} /></ContextMenu.Content></DocumentOverlayPortal>
     </ContextMenu.Root>}
     <button type="button" className="focus-toolbar__action" aria-label="View in Space" title={`View in Space · ${name}`} onClick={viewInSpace}><ThemeActionOpenExternalIcon size={14} aria-hidden="true" /><span>Space</span></button>
     <div className="focus-toolbar__chat">
@@ -203,12 +210,18 @@ function FocusToolbarContext({ active, selectedId, selected, tab, reference, onR
         </DropdownMenu.Content></DropdownMenu.Portal>
       </DropdownMenu.Root>
     </div>
-    {selected?.actionable ? <button type="button" className="focus-toolbar__review" aria-label="Review request" title="Review request" onClick={onReview}><ThemeObjectInboxIcon size={12} /><span>Review</span></button> : null}
-    <DropdownMenu.Root modal={false} open={active && menuOpen} onOpenChange={setMenuOpen}>
-      <DropdownMenu.Trigger asChild><button type="button" className="icon-button focus-toolbar__view-menu" aria-label="Focus context actions" title={`Focus view actions · ${name}`} onPointerEnter={event => { if (!menuOpen && event.pointerType === 'mouse' && event.buttons === 0) menuOriginRef.current = null }} onPointerDown={event => { menuOriginRef.current = event.currentTarget }} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') menuOriginRef.current = event.currentTarget }}><ThemeActionMoreIcon size={14} /></button></DropdownMenu.Trigger>
-      <DocumentOverlayPortal component={DropdownMenu.Portal}><DropdownMenu.Content className="tab-context-menu" align="end" collisionPadding={8} onEscapeKeyDown={() => { menuEscapeReturnRef.current = menuOriginRef.current }} onCloseAutoFocus={closeMenuFocus}>{actions.map(action => <DropdownMenu.Item key={action.key} className="tab-context-menu__item" onSelect={action.run}><action.icon size={14} /><span>{action.label}</span></DropdownMenu.Item>)}</DropdownMenu.Content></DocumentOverlayPortal>
-    </DropdownMenu.Root>
+    {selected?.actionable ? <button type="button" className="focus-toolbar__review" aria-label={`Review request for Agent ${selected.name}`} title={`Review request for Agent ${selected.name}`} onClick={onReview}><ThemeObjectInboxIcon size={12} /><span>Review Agent</span></button> : null}
+    {tab ? <DropdownMenu.Root modal={false} open={active && menuOpen} onOpenChange={setMenuOpen}>
+      <DropdownMenu.Trigger asChild><button type="button" className="focus-toolbar__action focus-toolbar__view-menu" aria-label="Tab actions" title={`Tab actions · ${name}`} onPointerEnter={event => { if (!menuOpen && event.pointerType === 'mouse' && event.buttons === 0) menuOriginRef.current = null }} onPointerDown={event => { menuOriginRef.current = event.currentTarget }} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') menuOriginRef.current = event.currentTarget }}><ThemeObjectTabIcon size={14} aria-hidden="true" /><span>Tab</span></button></DropdownMenu.Trigger>
+      <DocumentOverlayPortal component={DropdownMenu.Portal}><DropdownMenu.Content ref={node => {
+        tabMenuRef.current = node
+        // This explicit title entry bypasses Trigger; later deliberate input still wins.
+        if (node && focusTitleMenuRef.current) {
+          focusTitleMenuRef.current = false
+          if (identityRef.current?.ownerDocument.activeElement === identityRef.current) node.focus()
+        }
+      }} className="tab-context-menu" align="end" collisionPadding={8} onEscapeKeyDown={() => { menuEscapeReturnRef.current = menuOriginRef.current }} onCloseAutoFocus={closeMenuFocus}><FocusTabMenuContent name={name} actions={actions} Label={DropdownMenu.Label} Item={DropdownMenu.Item} /></DropdownMenu.Content></DocumentOverlayPortal>
+    </DropdownMenu.Root> : null}
     <button type="button" className="icon-button" aria-label="Close Focus workspace" title="Collapse Focus workspace" onClick={onCloseWorkspace}><ThemeLayoutCloseRightIcon size={14} /></button>
-    {active ? <>{restart.dialog}{stop.dialog}</> : null}
   </div>
 }
