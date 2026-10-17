@@ -928,7 +928,7 @@ export class BrowserViewManager {
     if (existing) {
       this.assertWorkspaceBinding(existing.workspaceId, workspaceId)
       if (existing.releaseAttempt?.pending) await this.prepareForConsumption(id)
-      if (this.entries.get(id) !== existing) return await this.create(id, rawUrl, workspaceId, rememberedProfileId, mode)
+      if (this.entries.get(id) !== existing) return await this.create(id, rawUrl, workspaceId, rememberedProfileId, mode, viewport)
       if (mode !== undefined && existing.storage.mode !== mode) throw new Error('An existing Browser cannot change mode. Open a new Browser instead.')
       return this.snapshot(existing)
     }
