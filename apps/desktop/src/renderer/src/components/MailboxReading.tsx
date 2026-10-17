@@ -40,7 +40,7 @@ export function MailboxRecordRow({ text, bodyPreview, ...props }: Omit<MailboxRe
 }
 
 export function MailboxEmpty({ title, hint }: { title: string; hint?: string }) {
-  return <div className="composer-mailbox__empty"><ThemeObjectInboxIcon size={22} aria-hidden="true" /><strong>{title}</strong>{hint ? <p>{hint}</p> : null}</div>
+  return <div className="composer-mailbox__empty"><ThemeObjectInboxIcon size={16} aria-hidden="true" /><strong>{title}</strong>{hint ? <p>{hint}</p> : null}</div>
 }
 
 /** Feedback belongs to this mounted record, never to another selection or target. */
