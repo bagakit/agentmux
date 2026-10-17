@@ -2040,6 +2040,8 @@ export type AgentMuxDesktopApi = {
      * 不在这个契约上，所以改它们不动这里。
      */
     runScript(id: string, code: string, operator?: BrowserOperator, operationId?: string): Promise<BrowserScriptRunReport>
+    /** Private cosmetic update for an already accepted operation; never an execution or identity grant. */
+    setOperatorAvatar(input: { browserId: string; operationId: string; operatorId: string; png: string }): Promise<boolean>
     checkOutcomeFields(id: string, input: BrowserOutcomeFieldRunInput): Promise<BrowserOutcomeEvaluation>
     verifyOutcome(id: string, operationId: string): Promise<BrowserOutcomeEvaluation>
     listOperationHistory(): Promise<BrowserOperation[]>

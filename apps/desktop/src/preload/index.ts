@@ -696,6 +696,7 @@ const api: AgentMuxPreloadApi = {
     runTaskAsset: (input: BrowserTaskAssetRunInput) => ipcRenderer.invoke('browser:runTaskAsset', input),
     stopTaskAsset: (id: string, runId: string) => ipcRenderer.invoke('browser:stopTaskAsset', id, runId),
     runScript: (id: string, code: string, operator?: BrowserOperator, operationId?: string) => ipcRenderer.invoke('browser:runScript', id, code, operator, operationId),
+    setOperatorAvatar: input => ipcRenderer.invoke('browser:setOperatorAvatar', input),
     checkOutcomeFields: (id, input) => ipcRenderer.invoke('browser:checkOutcomeFields', id, input),
     verifyOutcome: (id, operationId) => ipcRenderer.invoke('browser:verifyOutcome', id, operationId),
     listOperationHistory: () => ipcRenderer.invoke('browser:listOperationHistory') as Promise<BrowserOperation[]>,
