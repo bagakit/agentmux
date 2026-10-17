@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ConnectionRequestTrace as RequestTracePage } from '@agentmux/core/connections'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import type { ConnectionRequestTrace as RequestTracePage, ConnectionSetupView } from '@agentmux/core/connections'
 import { api } from '../../lib/api'
 
 export type ConnectionTraceSource = { kind: 'enrollment' | 'setup'; operationId: string }
+const LoadingIcon = semanticIconComponent('status.loading')
+const RefreshIcon = semanticIconComponent('action.refresh')
+const CopyIcon = semanticIconComponent('action.copy')
 const labels: Record<string, string> = {
   initialize: 'Start sign-in', 'enrollment-handoff': 'Continue saved sign-in', authentication: 'Sign-in check',
   upload: 'Upload bot image', create: 'Create application', credential: 'Read original credential',
@@ -21,8 +25,23 @@ const labels: Record<string, string> = {
 const requestLabels: Record<string, string> = { 'not-dispatched': 'Not sent', claimed: 'Claimed', settled: 'Step recorded', dispatching: 'In progress', confirmed: 'Confirmed', unknown: 'Unconfirmed', refused: 'Refused' }
 const storageLabels: Record<string, string> = { 'not-started': 'Not started', storing: 'Saving', stored: 'Saved', unknown: 'Unconfirmed' }
 
+function setupObservation(source: ConnectionTraceSource | null, view?: ConnectionSetupView | null) {
+  if (source?.kind !== 'setup' || !view?.operation || view.operation.operationId !== source.operationId) return null
+  const progress = view.profileUpdate, configuration = view.applicationConfiguration
+  const publication = configuration?.effect === 'create-application-version' || configuration?.effect === 'submit-application-version' ? configuration : null
+  return {
+    scope: 'single-view-observation', operationId: view.operation.operationId, revision: view.operation.revision,
+    profileUpdate: progress ? { stage: progress.stage, state: progress.state, ...(progress.versionId === undefined ? {} : { versionId: progress.versionId }), actionKinds: progress.actions.map(action => action.kind) } : null,
+    publication: publication ? {
+      capability: publication.capability, reason: publication.reason ?? null,
+      review: publication.review ? { issues: [...publication.review.issues] } : null,
+      sources: Object.values(publication.sources).flatMap(receipt => receipt ? [{ subject: receipt.subject, request: receipt.request, secureStorage: receipt.secureStorage }] : [])
+    } : null
+  }
+}
+
 /** A disposable reader of the exact public journal. Opening never advances the original operation. */
-export function ConnectionRequestTrace({ source, revision, title = 'Request trace' }: { source: ConnectionTraceSource | null; revision?: number | string | undefined; title?: string | undefined }) {
+export function ConnectionRequestTrace({ source, revision, title = 'Request trace', setupView }: { source: ConnectionTraceSource | null; revision?: number | string | undefined; title?: string | undefined; setupView?: ConnectionSetupView | null | undefined }) {
   const key = source ? JSON.stringify([source.kind, source.operationId]) : ''
   const [open, setOpen] = useState(false), [reading, setReading] = useState<{ key: string; page: RequestTracePage | null; issue: string; busy: boolean }>({ key, page: null, issue: '', busy: false })
   const [copied, setCopied] = useState(''), [copying, setCopying] = useState(false), epoch = useRef(0), exportRead = useRef(0)
@@ -54,7 +73,7 @@ export function ConnectionRequestTrace({ source, revision, title = 'Request trac
   const page = visible?.page
   async function copyDiagnosis() {
     if (!page || copying) return
-    const token = ++exportRead.current, entries: RequestTracePage['entries'] = []
+    const token = ++exportRead.current, entries: RequestTracePage['entries'] = [], observation = setupObservation(source, setupView)
     let cursor: string | null | undefined
     setCopying(true); setCopied('Reading the complete original trace…')
     try {
@@ -64,17 +83,17 @@ export function ConnectionRequestTrace({ source, revision, title = 'Request trac
         entries.push(...next.entries); cursor = next.next
       } while (cursor)
       if (token !== exportRead.current) return
-      await api.ui.writeClipboardText(JSON.stringify({ operationId: page.operationId, entries, next: null }, null, 2))
+      await api.ui.writeClipboardText(JSON.stringify({ operationId: page.operationId, entries, next: null, ...(observation ? { setupObservation: observation } : {}) }, null, 2))
       if (token === exportRead.current) setCopied('Complete sanitized trace copied.')
     } catch {
       if (token === exportRead.current) setCopied('Could not copy the complete diagnosis. The original trace remains available here.')
     } finally { if (token === exportRead.current) setCopying(false) }
   }
   return <details className="connector-request-trace" data-request-trace open={open} onToggle={event => setOpen(event.currentTarget.open)}>
-    <summary><strong>{title}</strong><span>{visible?.busy ? 'Reading…' : page ? page.entries.length + (page.next ? '+' : '') + ' steps' : source ? 'Original request' : 'No request yet'}</span></summary>
+    <summary aria-busy={visible?.busy ?? false}><strong>{title}</strong><span>{page ? page.entries.length + (page.next ? '+' : '') + ' steps' : visible?.busy ? 'Reading…' : source ? 'Original request' : 'No request yet'}{visible?.busy ? <LoadingIcon size={13} animation="spin" /> : null}</span></summary>
     <div className="connector-request-trace__body">
-      <p>Original operation-step receipts, with recorded error codes where available. No request URLs, bodies, cookies, secrets, sign-in codes or account details are included.</p>
-      {source ? <><div className="connector-request-trace__actions"><button className="small-button" disabled={visible?.busy} onClick={() => void load()}>Refresh trace</button><button className="small-button" disabled={!page || copying} onClick={() => void copyDiagnosis()}>{copying ? 'Copying…' : 'Copy diagnosis'}</button></div><p className="connector-request-trace__feedback" role="status">{copied || visible?.issue}</p>
+      <p>Original operation-step receipts, with recorded error codes where available. No request URLs, bodies, cookies, secrets, sign-in codes or account details are included.{source?.kind === 'setup' && setupView?.operation?.operationId === source.operationId ? ' The copied context is one observed setup snapshot, separate from the paginated history.' : ''}</p>
+      {source ? <><div className="connector-request-trace__actions"><button className="small-button" aria-busy={visible?.busy ?? false} disabled={visible?.busy} onClick={() => void load()}>{visible?.busy ? <LoadingIcon size={13} animation="spin" /> : <RefreshIcon size={13} />}Refresh trace</button><button className="small-button" aria-busy={copying} disabled={!page || copying} onClick={() => void copyDiagnosis()}>{copying ? <LoadingIcon size={13} animation="spin" /> : <CopyIcon size={13} />}Copy diagnosis</button></div><p className="connector-request-trace__feedback" role="status">{copying ? 'Reading the complete original trace…' : copied || visible?.issue}</p>
       {page?.entries.length ? <div className="connector-request-trace__scroll" tabIndex={0} aria-label="Original request steps"><table><thead><tr><th>#</th><th>Request step</th><th>Result</th><th>Local record</th><th>Original step</th></tr></thead><tbody>{page.entries.map(entry => <tr key={entry.stepId}><td>{entry.sequence}</td><td><strong>{labels[entry.action] ?? entry.action}</strong>{entry.subject || entry.effect ? <small>{labels[entry.subject ?? entry.effect!] ?? entry.subject ?? entry.effect}</small> : null}</td><td data-result={entry.request}>{requestLabels[entry.request]}{entry.diagnostic ? <small>{entry.diagnostic.httpStatus === undefined ? null : `HTTP ${entry.diagnostic.httpStatus}`}{entry.diagnostic.nativeCode === undefined ? null : ` · Platform code ${entry.diagnostic.nativeCode}`}{entry.diagnostic.code ? ` · ${entry.diagnostic.code}` : null}</small> : null}</td><td>{entry.secureStorage ? storageLabels[entry.secureStorage] : 'Not recorded'}</td><td><code>{entry.stepId}</code></td></tr>)}</tbody></table></div> : page ? <p>No request steps are recorded for this original operation.</p> : null}
       {page?.next ? <button className="small-button" disabled={visible?.busy} onClick={() => void load(page.next!)}>More original steps</button> : null}<div className="connector-request-trace__identity"><span>Original request</span><code>{source.operationId}</code></div></> : <p>Requests will appear here when this setup starts.</p>}
     </div>
