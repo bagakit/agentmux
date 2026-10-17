@@ -2166,8 +2166,10 @@ export async function registerIpc(args: {
     browserId: string; occurrence: BrowserPresentationOccurrence; geometry: BrowserPresentationGeometry; window?: import('../shared/workbench-windows.js').WorkbenchWindowDocument
   }) => {
     requireTrustedSender('browser:registerPresentation', event)
+    const sender = event.sender, frame = event.senderFrame
+    const originalDocument = frame ? { processId: frame.processId, frameToken: frame.frameToken } : null
     await browsers.prepareForConsumption(input.browserId)
-    return browsers.registerPresentation(event.sender, event.senderFrame, input)
+    return browsers.registerPresentation(sender, frame, input, originalDocument)
   })
   handleWithEvent('browser:updatePresentation', (event, leaseId: string, geometry: BrowserPresentationGeometry) => {
     requireTrustedSender('browser:updatePresentation', event)
