@@ -24,7 +24,7 @@ const observation: DesktopClientObservation = {
   workbench: { loading: false, startupProgress: { step: 'layout' }, startupAgentAvailability: null, activeWorkspaceId: 'workspace', mainSurface: 'workbench',
     focus: { executionSessionId: null, pmoSessionId: null },
     desktop: {
-      selection: { surface: 'space', mainSurface: 'workbench', space: { spaceId: 'space', zoneId: 'zone', workspaceId: 'workspace',
+      selection: { surface: 'space', mainSurface: 'workbench', spaceView: 'workbench', space: { spaceId: 'space', zoneId: 'zone', workspaceId: 'workspace',
         tabId: 'tab', groupId: 'group', regionId: 'file', topicId: null }, goalId: null },
       presentation: { provenance: 'observed', state: 'main-visible', tabId: 'tab', regionId: 'file', blockers: [] },
       input: { provenance: 'observed', scope: 'none', ownerKind: null, tabId: null, regionId: null, sessionId: null,
