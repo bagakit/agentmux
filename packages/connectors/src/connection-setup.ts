@@ -1,3 +1,4 @@
+import { InitialConnectionSetup } from './connection-setup-initial.js'
 import { readConnectionRequestTrace } from './connection-request-trace.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { AgentMuxError } from '@agentmux/core'
@@ -17,7 +18,7 @@ type AuthEnvelope = PrivateEnvelope & { stepId: string; stage: Authentication['s
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 const sameActor = (a: ConnectionEnrollmentCallContext['actor'], b: ConnectionEnrollmentCallContext['actor']) => a.kind === b.kind && a.id === b.id
 const failure = (message: string, code = 'CONNECTION_SETUP_UNCONFIRMED') => new AgentMuxError(message, code)
-const admitted = (o: ConnectionSetupOperation): ConnectionSetupBegin => ({ operationId: o.operationId, connectionId: o.connectionId, expectedConnectionRevision: o.expectedConnectionRevision, goal: o.goal, ...(o.source ? { source: o.source } : {}) })
+const admitted = (o: ConnectionSetupOperation): ConnectionSetupBegin => ({ operationId: o.operationId, connectionId: o.connectionId, expectedConnectionRevision: o.expectedConnectionRevision, goal: o.goal, ...(o.initialPublication ? { initialPublication: o.initialPublication } : {}), ...(o.source ? { source: o.source } : {}) })
 
 /** Finite authentication intent in the original Connection DB. Never owns current bot configuration. */
 export class ConnectionSetupHost implements ConnectionSetupPort {
@@ -26,6 +27,7 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
   private readonly nativeRequests = new Set<string>()
   private readonly unsettled = new Map<string, PrivateEnvelope>()
   private readonly unsettledAuthentication = new Map<string, AuthEnvelope>()
+  private readonly initial: InitialConnectionSetup
   private readonly inspection: SetupApplicationInspection
   private readonly configuration: SetupApplicationConfiguration
   constructor(private readonly connections: ConnectionHost, private readonly secrets?: EnrollmentSecrets, private readonly enrollmentSource?: (source: NonNullable<ConnectionSetupBegin['source']>, target: Pick<ConnectionSetupOperation, 'connectionId' | 'adapterId' | 'application'>, context: ConnectionEnrollmentCallContext) => Promise<EnrollmentSetupSnapshot>) {
@@ -36,6 +38,11 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
     connections.database.exec('CREATE INDEX IF NOT EXISTS connection_setup_auth_by_operation ON connection_setup_auth_step(operation_id,ordinal)')
     this.inspection = new SetupApplicationInspection({ connections, secrets, read: id => this.read(id), authority: (context, row) => this.authority(context, row), current: row => this.current(row), snapshot: row => this.authenticationSource(row), acceptAuthentication: (row, field, childStepId, authStepId, ref) => this.acceptAuthentication(row, field, childStepId, authStepId, ref), touch: row => this.touch(row), view: (row, context) => this.view(row, context) })
     this.configuration = new SetupApplicationConfiguration({ connections, secrets, inspection: this.inspection, creator: row => this.creator(row), acceptAuthentication: (row, field, childStepId, authStepId, ref) => this.acceptAuthentication(row, field, childStepId, authStepId, ref), read: id => this.read(id), authority: (context, row) => this.authority(context, row), current: row => this.current(row), touch: row => this.touch(row), view: (row, context) => this.view(row, context) })
+    this.initial = new InitialConnectionSetup({ inspect: (input, context) => this.inspectOriginal(input, context), advance: (input, context) => this.advanceOriginal(input, context) }, async view => {
+      const operation = view.operation
+      const adapter = operation && this.connections.registeredAdapter(operation.adapterId)?.setup?.applicationConfiguration
+      return operation?.initialPublication && adapter?.domains.includes(operation.application.domain) ? adapter.initialPublicationDraft?.(operation.initialPublication) ?? null : null
+    })
   }
   close(): void { this.closed = true; this.nativeRequests.clear(); this.unsettled.clear(); this.unsettledAuthentication.clear(); this.inspection.close(); this.configuration.close() }
   private safe<T>(run: () => T): T {
@@ -177,6 +184,12 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
     return { ...await this.view(row, context), receipt: { actionId: step.input.decision.actionId, stepId: step.authentication.stepId, state } }
   }
   async advance(value: ConnectionSetupAdvance, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView> {
+    const result = await this.advanceOriginal(value, context)
+    if (!result.operation?.initialPublication) return result
+    const projected = await this.initial.view(result.operation.operationId, context)
+    return { ...result, ...(projected.initialSetup ? { initialSetup: projected.initialSetup } : {}) }
+  }
+  private async advanceOriginal(value: ConnectionSetupAdvance, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView> {
     const input = parseConnectionSetupParams('connection.setup.advance', value)
     let row = this.read(input.operationId)
     if (!row) throw failure('The exact original management request is unknown.', 'UNKNOWN_CONNECTION_OPERATION')
@@ -382,8 +395,11 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
       } catch (error) { db.exec('ROLLBACK'); throw error }
     })
     const running = this.pending.get(input.operationId)
-    if (running) { await running; return this.view(this.read(input.operationId), context) }
-    const work = this.run(row, context)
+    if (running) { await running; return row.operation.initialPublication ? this.initial.view(input.operationId, context) : this.view(this.read(input.operationId), context) }
+    const work = (async () => {
+      const result = await this.run(row, context)
+      return result.operation?.initialPublication ? this.initial.view(input.operationId, context, true) : result
+    })()
     this.pending.set(input.operationId, work)
     try { return await work } finally { this.pending.delete(input.operationId) }
   }
@@ -450,6 +466,12 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
     return this.view(await this.secure(row, { context, source }), context)
   }
   async inspect(value: ConnectionSetupInspect, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView> {
+    const result = await this.inspectOriginal(value, context)
+    if (!result.operation?.initialPublication || value.requestTrace !== undefined) return result
+    const initial = await this.initial.view(result.operation.operationId, context)
+    return { ...result, ...(initial.initialSetup ? { initialSetup: initial.initialSetup } : {}) }
+  }
+  private async inspectOriginal(value: ConnectionSetupInspect, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView> {
     const input = parseConnectionSetupParams('connection.setup.inspect', value), row = this.read(input.operationId)
     await this.authority(context, row)
     if (input.requestTrace !== undefined) return { operation: row ? this.summary(row) : null, challenge: null, requestTrace: this.safe(() => readConnectionRequestTrace(this.connections.database, 'setup', input.operationId, context.actor, input.requestTrace!, row !== null)) }
@@ -480,7 +502,7 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
       const setup = current && this.connections.registeredAdapter(current.config.adapterId)?.setup
       const support: ConnectionSetupListing['support'] = current ? {
         connectionRevision: current.revision,
-        capabilities: [...(setup?.domains.includes(current.config.application.domain) ? ['management-authentication' as const] : []), ...(setup?.applicationInspection?.domains.includes(current.config.application.domain) ? ['application-inspection' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.messagingCapability === 'function' && typeof setup.applicationConfiguration.enableMessaging === 'function' ? ['messaging-capability' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.eventTransportCapability === 'function' && typeof setup.applicationConfiguration.usePersistentConnection === 'function' ? ['persistent-event-transport' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.permissionPlan === 'function' && typeof setup.applicationConfiguration.addApplicationPermissions === 'function' ? ['application-permissions' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.messageReceptionPlan === 'function' && typeof setup.applicationConfiguration.addMessageReception === 'function' ? ['message-reception' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.callbackTransportCapability === 'function' && typeof setup.applicationConfiguration.usePersistentCallback === 'function' && typeof setup.applicationConfiguration.cardActionsCapability === 'function' && typeof setup.applicationConfiguration.addCardActions === 'function' ? ['card-actions' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.publicationPlan === 'function' && typeof setup.applicationConfiguration.createVersion === 'function' && typeof setup.applicationConfiguration.submitVersion === 'function' ? ['application-publication' as const] : []), ...(setup?.enrollmentContinuation?.domains.includes(current.config.application.domain) && typeof setup.enrollmentContinuation.resume === 'function' ? ['enrollment-continuation' as const] : [])]
+        capabilities: [...(setup?.domains.includes(current.config.application.domain) ? ['management-authentication' as const] : []), ...(setup?.applicationInspection?.domains.includes(current.config.application.domain) ? ['application-inspection' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.messagingCapability === 'function' && typeof setup.applicationConfiguration.enableMessaging === 'function' ? ['messaging-capability' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.eventTransportCapability === 'function' && typeof setup.applicationConfiguration.usePersistentConnection === 'function' ? ['persistent-event-transport' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.permissionPlan === 'function' && typeof setup.applicationConfiguration.addApplicationPermissions === 'function' ? ['application-permissions' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.messageReceptionPlan === 'function' && typeof setup.applicationConfiguration.addMessageReception === 'function' ? ['message-reception' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.callbackTransportCapability === 'function' && typeof setup.applicationConfiguration.usePersistentCallback === 'function' && typeof setup.applicationConfiguration.cardActionsCapability === 'function' && typeof setup.applicationConfiguration.addCardActions === 'function' ? ['card-actions' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.publicationPlan === 'function' && typeof setup.applicationConfiguration.createVersion === 'function' && typeof setup.applicationConfiguration.submitVersion === 'function' ? ['application-publication' as const] : []), ...(setup?.enrollmentContinuation?.domains.includes(current.config.application.domain) && typeof setup.enrollmentContinuation.resume === 'function' ? ['enrollment-continuation' as const] : []), ...(setup?.enrollmentContinuation?.domains.includes(current.config.application.domain) && setup.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.initialPublicationDraft === 'function' ? ['initial-setup' as const] : [])]
       } : null
       const actor = context?.actor.kind === 'agent' ? context.actor : undefined
       const rows = this.connections.database.prepare(actor ? "SELECT operation_id,ordinal FROM connection_setup_operation WHERE connection_id=? AND ordinal<? AND json_extract(actor_json,'$.kind')=? AND json_extract(actor_json,'$.id')=? ORDER BY ordinal DESC LIMIT ?" : 'SELECT operation_id,ordinal FROM connection_setup_operation WHERE connection_id=? AND ordinal<? ORDER BY ordinal DESC LIMIT ?').all(...(actor ? [input.connectionId, before, actor.kind, actor.id, limit + 1] : [input.connectionId, before, limit + 1]))
