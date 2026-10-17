@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { MailboxRecordRow as RecordRow, type MailboxRecordRowProps } from '@agentmux/client-ui/components/MailboxRecordRow'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 
@@ -29,19 +30,13 @@ export function MailboxTime({ value, complete = false }: { value: number | undef
     : <span>Time not recorded</span>
 }
 
-export function MailboxRecordRow({ recordKey, label, text, bodyPreview, metadata, avatar, source, onOpen }: {
-  recordKey: string; label: string; text: string | undefined; metadata: ReactNode; avatar?: ReactNode; source?: ReactNode
+export function MailboxRecordRow({ text, bodyPreview, ...props }: Omit<MailboxRecordRowProps, 'preview'> & {
+  text: string | undefined
   /** Already bounded by the original message owner; never reinterpret authored body as an outer envelope. */
   bodyPreview?: string
-  onOpen: (key: string, event: MouseEvent<HTMLButtonElement>) => void
 }) {
   const preview = bodyPreview === undefined ? mailboxPreview(text) : bodyPreview || 'No text recorded.'
-  return <button type="button" className="composer-mailbox__row" data-record-key={recordKey}
-    aria-label={`Read ${label}: ${preview}`} onClick={event => onOpen(recordKey, event)}>
-    <span className="composer-mailbox__row-head">{avatar}<strong title={label}>{label}</strong><span className="composer-mailbox__metadata">{metadata}</span></span>
-    <span className="composer-mailbox__preview">{preview}</span>
-    {source ? <span className="composer-mailbox__source">{source}</span> : null}
-  </button>
+  return <RecordRow {...props} preview={preview} />
 }
 
 export function MailboxEmpty({ title, hint }: { title: string; hint?: string }) {

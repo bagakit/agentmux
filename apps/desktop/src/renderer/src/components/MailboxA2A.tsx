@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent,
 import type { AgentMuxMessageDirection, AgentMuxMessageMetadata, DurableAgentMuxMessage } from '@agentmux/core'
 import { ConversationMessage, type ConversationReadingProps } from '@agentmux/client-ui/components/ConversationMessage'
 import type { SessionHistoryReference } from '../../../shared/contracts'
+import { ConversationMessageAvatar } from './ConversationMessageAvatar'
 import { MailboxCopyAction, MailboxDraftAction, MailboxEmpty, MailboxRecordRow, MailboxSourceNotice, MailboxTime } from './MailboxReading'
 
 /** Delivery is an original transport fact; reading never accepts a task. */
@@ -26,6 +27,19 @@ export function a2aMessageDeliveryLabel(message: MessageDelivery): string {
   return state === 'submitted' ? 'Saved to inbox · Notification submitted'
     : state === 'unconfirmed' ? 'Saved to inbox · Notification unconfirmed'
     : state === 'pending' ? message.notification?.notificationId ? 'Saved to inbox · Notification pending' : 'Saved to inbox · Awaiting idle notification' : 'Saved to inbox'
+}
+
+/** A short list projection of the original typed fact; complete facts remain in Info. */
+function a2aMessageStatus(message: MessageDelivery): string | undefined {
+  if (message.deliveryMode === 'reference') {
+    const state = message.notification?.state
+    return state === 'unconfirmed' ? 'Notification unconfirmed'
+      : state === 'pending' ? message.notification?.notificationId ? 'Notification pending' : 'Awaiting notification' : undefined
+  }
+  const state = message.delivery.state
+  return state === 'queued' ? message.delivery.reason ? 'Delivery unconfirmed' : 'Delivery pending'
+    : state === 'failed' ? 'Delivery failed' : state === 'timed-out' ? 'Delivery timed out'
+    : state === 'cancelled' ? 'Delivery cancelled' : undefined
 }
 
 function a2aMessageDeliveryReason(message: MessageDelivery): string | undefined {
@@ -104,6 +118,7 @@ export function MailboxA2A(props: Props) {
   const record = current?.record
   const deliveryMessage = selected ?? record
   const deliveryReason = deliveryMessage ? a2aMessageDeliveryReason(deliveryMessage) : undefined
+  const deliveryStatus = deliveryMessage ? a2aMessageStatus(deliveryMessage) : undefined
   const issues = <>
     {props.error ? <MailboxSourceNotice title="Message reading is unconfirmed" message={props.error} action="Refresh messages" onAction={() => void props.refresh()} /> : null}
     {props.observationError ? <MailboxSourceNotice title="Automatic message updates are unavailable" message={props.observationError} action="Refresh messages" onAction={() => void props.refresh()} /> : null}
@@ -131,23 +146,29 @@ export function MailboxA2A(props: Props) {
           <dt>{deliveryMessage?.deliveryMode === 'reference' ? 'Last observed notification' : 'Last observed delivery'}</dt><dd>{a2aMessageDeliveryLabel(deliveryMessage!)}{deliveryReason ? ` · ${deliveryReason}` : ''}</dd>
           {deliveryMessage?.notification?.notificationId ? <><dt>Notification input</dt><dd><code>{deliveryMessage.notification.notificationId}</code></dd></> : null}
         </dl>} />
-      <p className="composer-mailbox__source">{a2aMessageDeliveryLabel(deliveryMessage!)}. Reading does not acknowledge this message or accept its task.</p>
+      {deliveryStatus ? <p className="composer-mailbox__record-status" title={a2aMessageDeliveryLabel(deliveryMessage!)}>{deliveryStatus}</p> : null}
       {deliveryReason ? <p className="composer-mailbox__risk">{deliveryReason}</p> : null}
     </>}
   </article>
   return <>{issues}<div className="composer-mailbox__reading-tools"><span>{direction === 'incoming' ? 'Other Agents → this Agent' : 'This Agent → other Agents'} · {items.length} loaded</span>
     <button type="button" className="composer-tool" disabled={props.loading} onClick={() => void props.refresh()}>Refresh</button></div>
     {items.length ? <ol className="composer-mailbox__messages" aria-label={direction === 'incoming' ? 'Original A2A incoming messages' : 'Original A2A outgoing messages'}>
-      {recent.map(item => <li key={item.envelope.messageId}><MailboxRecordRow recordKey={a2aMessageKey(item)}
-        label={`${direction === 'incoming' ? 'From' : 'To'} ${name(peerId(item))}`} text={undefined} bodyPreview={item.bodyPreview}
-        source={<>{peerId(item)} · {item.envelope.messageId}</>}
-        metadata={<><MailboxTime value={item.envelope.createdAt} /><span>{a2aMessageDeliveryLabel(item)}</span></>}
-        onOpen={props.onOpen} />
-        <div className="composer-mailbox__record-actions">
-          {onCopy ? <MailboxCopyAction value={item.envelope.messageId} onCopy={async () => onCopy((await readForAction(item.envelope.messageId)).envelope.body)} /> : null}
-          {onFill ? <MailboxDraftAction value={item.envelope.messageId} onFill={async () => onFill((await readForAction(item.envelope.messageId)).envelope.body)} /> : null}
-          {props.renderNavigation?.(item.envelope.messageId)}
-        </div></li>)}
+      {recent.map(item => {
+        const speaker = { role: 'agent' as const, id: peerId(item) }
+        const identity = reading?.describeSpeaker?.(speaker, 18)
+        const peerName = identity?.name || speaker.id
+        const status = a2aMessageStatus(item)
+        return <li key={item.envelope.messageId}><MailboxRecordRow recordKey={a2aMessageKey(item)}
+          label={`${direction === 'incoming' ? 'From' : 'To'} ${peerName}`} text={undefined} bodyPreview={item.bodyPreview}
+          avatar={identity?.avatar ?? <ConversationMessageAvatar speaker={speaker} name={peerName} size={18} providerId={identity?.providerId} project={identity?.project} />}
+          metadata={<MailboxTime value={item.envelope.createdAt} />}
+          status={status ? <span title={a2aMessageDeliveryLabel(item)}>{status}</span> : null}
+          onOpen={props.onOpen} actions={<>
+            {onCopy ? <MailboxCopyAction value={item.envelope.messageId} onCopy={async () => onCopy((await readForAction(item.envelope.messageId)).envelope.body)} /> : null}
+            {onFill ? <MailboxDraftAction value={item.envelope.messageId} onFill={async () => onFill((await readForAction(item.envelope.messageId)).envelope.body)} /> : null}
+            {props.renderNavigation?.(item.envelope.messageId)}
+          </>} /></li>
+      })}
     </ol> : props.loading ? <MailboxEmpty title="Reading original messages…" /> : !props.error ? <MailboxEmpty title={direction === 'incoming' ? 'No A2A messages received' : 'No A2A messages sent'} /> : null}
     {props.nextCursor !== null ? <button type="button" className="composer-tool" disabled={props.loading} onClick={() => void props.loadEarlier()}>Read earlier messages</button> : null}
   </>
