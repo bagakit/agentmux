@@ -109,7 +109,7 @@ export function AppearanceSettingsPane({ appearance, onSave, active = true }: {
           const selected = catalog.items.find(item => item.id === theme.value)
           if (selected) setEditingTheme(selected)
         }} />
-        <p className="settings-hint">Each theme includes dark and light surfaces. Application appearance below chooses the brightness; your terminal palette stays independent.</p>
+        <p className="settings-hint">Customize selected theme to edit colors, typography, and semantic icons. Enable “Preview in this window” in the editor to try changes on actual controls before saving. Each theme includes dark and light surfaces; application appearance chooses the brightness, and your terminal palette stays independent.</p>
       </section>
       {editingTheme ? <ThemeEditor key={editingTheme.id} item={editingTheme} appearance={appearance} active={active} onSave={onSave} onClose={() => setEditingTheme(null)} /> : null}
       <section className="settings-group" data-settings-field="app-appearance">
