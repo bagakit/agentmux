@@ -1,7 +1,7 @@
 /* Prompt authoring scopes filter one library; the selected instruction keeps its own editor. */
 .settings-content__scroll[data-settings-pane='prompts'] { padding-inline: max(var(--sp-7), calc((100% - 960px) / 2)); overflow: hidden; }
 [data-settings-page='prompts'] .settings-content__header { width: min(100%, calc(960px + var(--sp-7) * 2)); }
-.prompt-workbench { height: 100%; min-height: 0; padding-bottom: 0; gap: var(--sp-5); container: prompt-settings / inline-size; }
+.prompt-workbench { height: 100%; min-height: 0; padding-bottom: 0; gap: var(--sp-4); container: prompt-settings / inline-size; }
 .prompt-scope { flex: none; display: flex; align-items: center; gap: var(--sp-2); overflow: auto; padding: var(--sp-1) 0 var(--sp-3); border-bottom: 1px solid var(--line-soft); }
 .prompt-scope button { flex: none; display: inline-flex; align-items: center; gap: var(--sp-3); min-height: 28px; padding: var(--sp-2) var(--sp-4); border: 0; border-radius: var(--radius-sm); color: var(--text-2); background: transparent; font: var(--fs-body)/1.5 var(--font-sans); cursor: pointer; }
 .prompt-scope button:hover { color: var(--text); background: var(--surface-1); }
@@ -31,7 +31,7 @@
 .prompt-library__scope { display: flex; min-width: 0; align-items: center; gap: var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); }
 .prompt-library__scope code { flex: none; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; font-family: var(--font-mono); }
 .prompt-library__scope > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.prompt-editor { overflow: auto; padding-right: var(--sp-2); scrollbar-gutter: stable; }
+.prompt-editor { overflow: auto; padding-right: var(--sp-5); scrollbar-gutter: stable; }
 .prompt-editor__heading { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); }
 .prompt-editor__back { display: none; }
 .prompt-editor__status { display: inline-flex; align-items: center; gap: var(--sp-2); margin-left: auto; color: var(--text-3); font-size: var(--fs-meta); }
@@ -89,7 +89,6 @@
   .prompt-workbench[data-view='editor'] .prompt-library { display: none; }
   .prompt-workbench[data-view='library'] .prompt-editor, .prompt-workbench[data-view='library'] .prompt-editor__empty { display: none; }
   .prompt-editor__back { display: inline-flex; }
-  .prompt-editor { padding-right: 0; }
 }
 @container prompt-settings (max-width: 360px) {
   .prompt-editor__reach { grid-template-columns: minmax(0, 1fr); }
