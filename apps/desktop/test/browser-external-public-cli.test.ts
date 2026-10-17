@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { spawn } from 'node:child_process'
 import { mkdtemp, rm, symlink } from 'node:fs/promises'
 import { createRequire } from 'node:module'
@@ -28,9 +29,9 @@ beforeAll(async () => {
     outfile: cli, bundle: true, platform: 'node', format: 'esm', packages: 'external', logLevel: 'silent' })
   server = new AgentMuxControlServer({ socketPath: join(directory, 'control.sock'), coreClients: () => [], async execute(request) {
     seen.push(request)
-    if (request.operation === 'browser.targets') return { operation: request.operation,
+    if (request.operation === 'browser.targets') return { operation: request.operation, coverage: 'complete',
       targets: wrongWorkspace ? [{ ...external, workspaceId: 'another-workspace' }] : invalidSource ? [{ ...external, source: 'invented-active-tab' } as any] : !request.workspaceId || request.workspaceId === external.workspaceId ? [external] : [] }
-    if (request.operation === 'browser.run') return { operation: request.operation, result: { target: request.browserId, code: request.code }, logs: [], outcome: { kind: 'completed' }, runOperation: { id: request.operationId ?? 'source-operation', browserId: request.browserId, operator: { id: 'protocol-fixture', name: 'Protocol fixture' }, startedAt: 1, finishedAt: 2, phase: 'completed', summary: 'Source protocol receipt', url: external.url, steps: [] } }
+    if (request.operation === 'browser.run') return { operation: request.operation, result: { target: request.browserId, code: request.code }, logs: [], outcome: { kind: 'completed' }, runOperation: { id: request.operationId ?? 'source-operation', browserId: request.browserId, operator: { id: 'protocol-fixture', name: 'Protocol fixture' }, startedAt: _tailFixtureEpoch(0, 0, 1), finishedAt: _tailFixtureEpoch(0, 0, 2), phase: 'completed', summary: 'Source protocol receipt', url: external.url, steps: [] } }
     throw new Error(`Unexpected control operation ${request.operation}`)
   } })
   await server.start()
@@ -59,7 +60,7 @@ describe('actual Source public Browser targets CLI', () => {
   it('routes typed SDK discovery through the same JSON-RPC owner and rejects another Workspace result or extra fields', async () => {
     const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
     try {
-      expect(await client.call('browser.targets', { workspaceId: 'workspace-one' })).toEqual({ targets: [external] })
+      expect(await client.call('browser.targets', { workspaceId: 'workspace-one' })).toEqual({ coverage: 'complete', targets: [external] })
       wrongWorkspace = true
       await expect(client.call('browser.targets', { workspaceId: 'workspace-one' })).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
       wrongWorkspace = false
@@ -75,7 +76,7 @@ describe('actual Source public Browser targets CLI', () => {
     const start = seen.length
     const listed = receipt(await run(['browser', 'targets', '--workspace', 'workspace-one']))
     expect(listed.operation).toBe('browser.targets')
-    expect(listed.result).toEqual({ targets: [external] })
+    expect(listed.result).toEqual({ coverage: 'complete', targets: [external] })
     const program = 'return await snapshot();\n// literal $data and `syntax`'
     const result = receipt(await run(['browser', 'run', '--browser', external.id, '--operation-id', 'source-operation'], program))
     expect(result.result).toEqual(expect.objectContaining({ result: { target: external.id, code: program }, logs: [], outcome: { kind: 'completed' }, runOperation: expect.objectContaining({ id: 'source-operation', browserId: external.id }) }))
@@ -86,17 +87,17 @@ describe('actual Source public Browser targets CLI', () => {
   })
   it('retains honest source/status/navigation and an embedded null Workspace, while refusing duplicate or invented facts', () => {
     const embedded = { ...external, id: 'embedded-page', source: 'embedded', workspaceId: null, status: 'unavailable', warning: 'Original page unavailable' }
-    expect(parseBrowserTargetsResult({ targets: [external, embedded] })).toEqual({ targets: [external, embedded] })
+    expect(parseBrowserTargetsResult({ coverage: 'complete', targets: [external, embedded] })).toEqual({ coverage: 'complete', targets: [external, embedded] })
     for (const targets of [[external, external], [{ ...external, workspaceId: null }], [{ ...external, source: 'active-tab' }], [{ ...external, status: 'guessed-ready' }], [{ ...external, capabilities: ['invented'] }]]) {
-      expect(() => parseBrowserTargetsResult({ targets })).toThrow()
+      expect(() => parseBrowserTargetsResult({ coverage: 'complete', targets })).toThrow()
     }
     const offline = { ...external, status: 'disconnected', warning: 'Reconnect the original shared tab' }
-    expect(parseBrowserTargetsResult({ targets: [offline] })).toEqual({ targets: [offline] })
+    expect(parseBrowserTargetsResult({ coverage: 'complete', targets: [offline] })).toEqual({ coverage: 'complete', targets: [offline] })
   })
   it('supports bounded read-only discovery without selecting, sharing or focusing a tab', async () => {
     const start = seen.length
-    expect(receipt(await run(['browser', 'targets', '--workspace', 'absent-workspace'])).result).toEqual({ targets: [] })
-    expect(receipt(await run(['browser', 'targets'])).result).toEqual({ targets: [external] })
+    expect(receipt(await run(['browser', 'targets', '--workspace', 'absent-workspace'])).result).toEqual({ coverage: 'complete', targets: [] })
+    expect(receipt(await run(['browser', 'targets'])).result).toEqual({ coverage: 'complete', targets: [external] })
     expect(seen.slice(start).map(row => row.operation)).toEqual(['browser.targets', 'browser.targets'])
     expect(() => parseAgentMuxControlRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'bad-target-read', operation: 'browser.targets', workspaceId: '' })).toThrow()
   })
