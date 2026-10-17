@@ -87,8 +87,8 @@ describe('WorktreeService', () => {
       ("worktree " + _hygiene_fixturePath("srv/repo") + " with space\u0000HEAD abc\u0000branch refs/heads/main\u0000\u0000") +
       ("worktree " + _hygiene_fixturePath("srv/worktrees/free\u0000HEAD") + " def\u0000detached\u0000\u0000")
     )).toEqual([
-      { path: (_hygiene_fixturePath("srv/repo") + " with space"), branch: 'main' },
-      { path: _hygiene_fixturePath("srv/worktrees/free"), branch: null }
+      { path: (_hygiene_fixturePath("srv/repo") + " with space"), branch: 'main', kind: 'main', detached: false, aliases: [] },
+      { path: _hygiene_fixturePath("srv/worktrees/free"), branch: null, kind: 'linked', detached: true, aliases: [] }
     ])
   })
 
