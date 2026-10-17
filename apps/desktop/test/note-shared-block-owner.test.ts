@@ -558,3 +558,61 @@ it('extracts and restores a nested heading section without crossing its quote co
   expect((await f.port.undoShare(await removal(f), { actor: person })).status).toBe('committed')
   expect(await readFile(join(f.directory, f.source.path), 'utf8')).toBe(content)
 })
+
+it.each([false, true])('preserves chained forwarding and original ambiguity when sharing an already shared subtree: duplicate=%s', async duplicate => {
+  const f = await fixture(), source = readNoteDocument(f.source.content)
+  if (source.status !== 'valid') throw Error('fixture')
+  source.note.content.content = [
+    { type: 'heading', attrs: { blockId: 'chapter', level: 2 }, content: [{ type: 'text', text: 'Chapter' }] },
+    { type: 'bulletList', content: [{ type: 'listItem', attrs: { blockId: 'nested-item' }, content: [{ type: 'paragraph', attrs: { blockId: 'nested-child' }, content: [{ type: 'text', text: 'Original child' }] }] }] },
+    { type: 'heading', attrs: { blockId: 'next', level: 2 }, content: [{ type: 'text', text: 'Next' }] }
+  ]
+  const saved = await f.writer.write(f.workspace, { path: f.source.path, content: serializeNoteDocument(source.note), expectedRevision: f.source.expectedRevision }, { actor: author })
+  if (saved.status !== 'written') throw Error('source')
+  const content = await readFile(join(f.directory, f.source.path), 'utf8')
+  f.params.promotions[0]!.source = { ...f.source, content, baseContent: content, expectedRevision: saved.revision }
+  f.params.promotions[0]!.sourceBlockId = 'nested-item'
+  expect((await f.port.share(f.params, { actor: person })).status).toBe('committed')
+  if (duplicate) {
+    const current = readNoteDocument(await readFile(join(f.directory, f.source.path), 'utf8'))
+    if (current.status !== 'valid') throw Error('Current source must parse')
+    const included = current.note.content.content!.find(node => node.type === 'noteInclude')!
+    included.attrs!.forwardedBlockIds = ['nested-child', 'nested-child']
+    const updated = await f.writer.write(f.workspace, { path: f.source.path, content: serializeNoteDocument(current.note), expectedRevision: noteHistoryRevision(await readFile(join(f.directory, f.source.path), 'utf8')) }, { actor: person })
+    if (updated.status !== 'written') throw Error('Duplicate declaration must remain readable')
+  }
+  const observedSource = await f.writer.read(f.workspace, f.source.path), nested = await f.writer.read(f.workspace, 'block-shared.note.md'), dest = await f.writer.read(f.workspace, f.destination.path)
+  if (observedSource.status !== 'read' || nested.status !== 'read' || dest.status !== 'read') throw Error('read')
+  const docs = [{ location: { workspaceId: f.workspace.id, path: f.source.path }, document: observedSource.document }, { location: { workspaceId: f.workspace.id, path: 'block-shared.note.md' }, document: nested.document }]
+  expect(resolveNoteBlock(noteKnowledge(docs, 'complete'), { noteId: 'source-note', blockId: 'nested-child' }).status).toBe(duplicate ? 'ambiguous' : 'resolved')
+  const destination = readNoteDocument(dest.document.content)
+  if (destination.status !== 'valid') throw Error('dest')
+  destination.note.content.content!.push({ type: 'noteInclude', attrs: { blockId: 'outer-use', referenceId: 'outer-use-ref', noteId: 'outer-shared', path: 'outer-shared.note.md' } })
+  const params: FileShareParams = { operationId: 'outer-save', destination: { ...f.destination, content: serializeNoteDocument(destination.note), baseContent: dest.document.content, expectedRevision: dest.document.revision, operationId: 'outer-destination-save' }, promotions: [{ operationId: 'outer-promotion', sourceNoteId: 'source-note', sourceBlockId: 'chapter', source: { ...f.source, content: observedSource.document.content, baseContent: observedSource.document.content, expectedRevision: observedSource.document.revision, operationId: 'outer-source-save' }, referenceId: 'outer-use-ref', shared: { ...f.params.promotions[0]!.shared, path: 'outer-shared.note.md', noteId: 'outer-shared', expectedResource: { ...f.source.expectedResource, path: 'outer-shared.note.md' } } }] }
+  expect((await f.port.share(params, { actor: person })).status).toBe('committed')
+  const after = await f.writer.read(f.workspace, f.source.path), outer = await f.writer.read(f.workspace, 'outer-shared.note.md')
+  if (after.status !== 'read' || outer.status !== 'read') throw Error('after')
+  const knowledge = noteKnowledge([{ ...docs[0]!, document: after.document }, docs[1]!, { location: { workspaceId: f.workspace.id, path: 'outer-shared.note.md' }, document: outer.document }], 'complete')
+  const parsedAfter = readNoteDocument(after.document.content), parsedOuter = readNoteDocument(outer.document.content)
+  if (parsedAfter.status !== 'valid' || parsedOuter.status !== 'valid') throw Error('Moved source and section must parse')
+  const forwarded = parsedAfter.note.content.content![0]!.attrs!.forwardedBlockIds as string[]
+  expect(forwarded.filter(id => id === 'nested-child')).toHaveLength(1)
+  const originalInclude = parsedOuter.note.content.content!.find(node => node.type === 'noteInclude')!
+  expect(originalInclude.attrs!.forwardedBlockIds).toEqual(duplicate ? ['nested-child', 'nested-child'] : ['nested-child'])
+  const resolution = resolveNoteBlock(knowledge, { noteId: 'source-note', blockId: 'nested-child' })
+  if (duplicate) expect(resolution.status).toBe('ambiguous')
+  else expect(resolution).toMatchObject({ status: 'resolved', source: { note: { noteId: 'shared-note' } }, block: { text: 'Original child' } })
+})
+
+it('keeps a section root with a conflicting nested forwarding declaration ambiguous instead of extracting a false unique address', async () => {
+  const f = await sectionFixture(), source = readNoteDocument(f.source.content)
+  if (source.status !== 'valid') throw Error('Source must parse')
+  source.note.content.content!.splice(3, 0, { type: 'noteInclude', attrs: { blockId: 'earlier-include', referenceId: 'earlier-use', noteId: 'earlier-shared', path: 'earlier-shared.note.md', forwardedBlockIds: ['section-root'] } })
+  const content = serializeNoteDocument(source.note)
+  f.params.promotions[0]!.source = { ...f.source, content }
+  const knowledge = noteKnowledge([{ location: { workspaceId: f.workspace.id, path: f.source.path }, document: { path: f.source.path, content, revision: noteHistoryRevision(content) } }], 'complete')
+  expect(resolveNoteBlock(knowledge, { noteId: 'source-note', blockId: 'section-root' }).status).toBe('ambiguous')
+  expect(await f.port.share(f.params, { actor: person })).toMatchObject({ status: 'error', code: 'NOTE_SHARE_SOURCE_CHANGED' })
+  expect(await readdir(f.directory)).not.toContain('block-shared.note.md')
+  expect(await readFile(join(f.directory, f.source.path), 'utf8')).toBe(f.source.content)
+})
