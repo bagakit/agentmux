@@ -68,7 +68,8 @@ function begin(value: unknown): ConnectionSetupBegin { return admission(value, f
 export function parseConnectionSetupProfileProgress(value: unknown): ConnectionSetupProfileProgress {
   const p = object(value, ['stage', 'state', 'versionId', 'actions', 'publicationDraft', 'blockedBy'])
   if (!Array.isArray(p.actions) || p.actions.length > 1) fail()
-  const result: ConnectionSetupProfileProgress = { stage: choice(p.stage, ['authentication', 'profile-preflight', 'avatar-upload', 'profile-write', 'profile-readback', 'publication-create', 'publication-submit', 'publication-status']), state: choice(p.state, ['pending', 'running', 'attention', 'approval-required', 'complete']), ...(p.versionId === undefined ? {} : { versionId: id(p.versionId) }), actions: (p.actions as unknown[]).map(value => { const a = object(value, ['kind', 'actionId', 'expectedRevision']); return { kind: choice(a.kind, ['continue-profile-update', 'recover-configuration-effect']), actionId: id(a.actionId), expectedRevision: integer(a.expectedRevision) } }) }
+  const result: ConnectionSetupProfileProgress = { stage: choice(p.stage, ['authentication', 'profile-preflight', 'avatar-upload', 'profile-write', 'profile-readback', 'publication-create', 'publication-submit', 'publication-status']), state: choice(p.state, ['pending', 'running', 'attention', 'approval-required', 'complete']), ...(p.versionId === undefined ? {} : { versionId: id(p.versionId) }), actions: (p.actions as unknown[]).map(value => { const a = object(value, ['kind', 'actionId', 'expectedRevision']); return { kind: choice(a.kind, ['continue-profile-update', 'refresh-publication-checks', 'recover-configuration-effect']), actionId: id(a.actionId), expectedRevision: integer(a.expectedRevision) } }) }
+  if (result.actions.some(a => a.kind === 'refresh-publication-checks') && (result.stage !== 'publication-create' || result.state !== 'attention')) fail()
   if (['complete', 'approval-required'].includes(result.state) && (result.stage !== 'publication-status' || !result.versionId)) fail()
   if (p.blockedBy !== undefined) {
     const b = object(p.blockedBy, ['kind', 'operationId', 'connectionId'])
@@ -77,7 +78,7 @@ export function parseConnectionSetupProfileProgress(value: unknown): ConnectionS
   }
   if (p.publicationDraft !== undefined) {
     const draft = parseConnectionSetupPublicationDraft(p.publicationDraft)
-    if (draft.kind !== 'create-version' || result.stage !== 'publication-create' || result.state !== 'attention' || result.actions.length) fail()
+    if (draft.kind !== 'create-version' || result.stage !== 'publication-create' || result.state !== 'attention' || result.actions.some(a => a.kind !== 'refresh-publication-checks')) fail()
     result.publicationDraft = draft as Extract<ConnectionSetupPublicationDraft, { kind: 'create-version' }>
   }
   return result
@@ -304,7 +305,7 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
   if (p.profileUpdate !== undefined) {
     if (operation?.goal.kind !== 'profile-update') fail()
     result.profileUpdate = parseConnectionSetupProfileProgress(p.profileUpdate)
-    if (result.profileUpdate.actions.some(a => a.kind === 'continue-profile-update' && a.expectedRevision !== operation!.revision)) fail()
+    if (result.profileUpdate.actions.some(a => a.kind !== 'recover-configuration-effect' && a.expectedRevision !== operation!.revision)) fail()
   }
   if (p.initialSetup !== undefined) {
     if (!operation?.initialPublication) fail()
@@ -384,7 +385,8 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
     }
   }
   if (p.applicationConfiguration !== undefined) {
-    if (!operation || method === 'connection.setup.begin' || method === 'connection.setup.inspect' && !(input as ConnectionSetupParamsMap['connection.setup.inspect']).applicationConfiguration) fail()
+    const profilePublication = method === 'connection.setup.inspect' && operation?.goal.kind === 'profile-update' && result.profileUpdate?.stage === 'publication-create' && rpcRecord(p.applicationConfiguration).effect === 'create-application-version'
+    if (!operation || method === 'connection.setup.begin' || method === 'connection.setup.inspect' && !(input as ConnectionSetupParamsMap['connection.setup.inspect']).applicationConfiguration && !profilePublication) fail()
     const raw = rpcRecord(p.applicationConfiguration), effect = configurationEffect(raw.effect)
     const c = object(raw, ['effect', 'subject', 'effects', 'next', 'selected', 'capability', 'actions', 'reason', 'unresolved', 'unresolvedProfile', ...(effect === 'add-application-permissions' ? ['purpose', 'sources', 'review'] : effect === 'add-message-reception' ? ['sources', 'review'] : effect === 'create-application-version' || effect === 'submit-application-version' ? ['sources', 'requiredSubjects', 'draft', 'review'] : ['source'])])
     const selector = method === 'connection.setup.inspect' ? (input as ConnectionSetupParamsMap['connection.setup.inspect']).applicationConfiguration : undefined

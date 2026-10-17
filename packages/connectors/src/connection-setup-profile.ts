@@ -28,6 +28,7 @@ type Row = {
 type Port = Pick<ConnectionSetupPort, 'inspect' | 'advance'>
 type Stage = ConnectionSetupProfileProgress['stage']
 type State = ConnectionSetupProfileProgress['state']
+type ProgressAction = 'continue-profile-update' | 'refresh-publication-checks'
 type Draft = Extract<
   ConnectionSetupPublicationDraft,
   {
@@ -112,12 +113,12 @@ export class ProfileConnectionSetup {
       return null
     }
   }
-  private action(row: Row, revision = row.operation.revision) {
+  private action(row: Row, revision = row.operation.revision, kind: ProgressAction = 'continue-profile-update') {
     return {
-      kind: 'continue-profile-update' as const,
+      kind,
       expectedRevision: revision,
       actionId:
-        'setup-profile-continue:' +
+        (kind === 'refresh-publication-checks' ? 'setup-profile-refresh:' : 'setup-profile-continue:') +
         hash({
           operationId: row.operation.operationId,
           goal: row.operation.goal,
@@ -130,8 +131,8 @@ export class ProfileConnectionSetup {
     input: ConnectionSetupAdvance,
     context: ConnectionEnrollmentCallContext
   ): Promise<ConnectionSetupView | null> {
-    if (!input.decision.actionId.startsWith('setup-profile-continue:'))
-      return null
+    const kind: ProgressAction | null = input.decision.actionId.startsWith('setup-profile-refresh:') ? 'refresh-publication-checks' : input.decision.actionId.startsWith('setup-profile-continue:') ? 'continue-profile-update' : null
+    if (!kind) return null
     const row = this.row(input.operationId)
     if (
       !row ||
@@ -139,7 +140,7 @@ export class ProfileConnectionSetup {
       input.decision.value !== 'continue' ||
       input.publicationDraft !== undefined ||
       input.versionId !== undefined ||
-      this.action(row, input.expectedRevision).actionId !==
+      this.action(row, input.expectedRevision, kind).actionId !==
         input.decision.actionId ||
       input.expectedRevision > row.operation.revision
     )
@@ -158,7 +159,7 @@ export class ProfileConnectionSetup {
     if (
       !current.profileUpdate?.actions.some(
         (a) =>
-          a.kind === 'continue-profile-update' &&
+          a.kind === kind &&
           a.actionId === input.decision.actionId
       )
     )
@@ -166,13 +167,23 @@ export class ProfileConnectionSetup {
         'This original profile step has no offered continuation.',
         'CONNECTION_SETUP_ACTION_STALE'
       )
-    const work = this.view(input.operationId, context, true)
+    const work = kind === 'refresh-publication-checks' ? this.refresh(input.operationId, context) : this.view(input.operationId, context, true)
     this.running.set(input.decision.actionId, work)
     try {
       return await work
     } finally {
       this.running.delete(input.decision.actionId)
     }
+  }
+  private async refresh(id: string, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView> {
+    let failed = false
+    for (const subject of connectionSetupPublicationSubjects('create-application-version')) {
+      if (!(await this.read(id, subject, context))) { failed = true; break }
+    }
+    const view = await this.view(id, context)
+    return failed && view.profileUpdate?.stage === 'publication-create'
+      ? { ...view, profileUpdate: { ...view.profileUpdate, state: 'attention' } }
+      : view
   }
   private config(
     id: string,
@@ -263,7 +274,8 @@ export class ProfileConnectionSetup {
   async view(
     id: string,
     context: ConnectionEnrollmentCallContext,
-    run = false
+    run = false,
+    includePublication = false
   ): Promise<ConnectionSetupView> {
     const base = await this.port.inspect({ operationId: id }, context),
       row = this.row(id)
@@ -273,11 +285,15 @@ export class ProfileConnectionSetup {
       state: State,
       versionId?: string,
       child?: ConnectionSetupView,
-      draft?: Draft
+      draft?: Draft,
+      action: ProgressAction = 'continue-profile-update'
     ): Promise<ConnectionSetupView> => {
-      const fresh = await this.port.inspect({ operationId: id }, context),
-        current = this.row(id)!,
-        configuration = child?.applicationConfiguration
+      const configuration = child?.applicationConfiguration,
+        fresh = configuration ? { ...child! } : await this.port.inspect({ operationId: id }, context),
+        current = { ...this.row(id)!, operation: fresh.operation! }
+      // Keep the checked configuration and its envelope in the same observed revision.
+      delete fresh.applicationConfiguration
+      delete fresh.receipt
       const actions: ConnectionSetupProfileProgress['actions'] = []
       if (configuration) {
         const recover = configuration.actions.find(
@@ -296,11 +312,12 @@ export class ProfileConnectionSetup {
         (!configuration?.selected ||
           (configuration.selected.request === 'confirmed' &&
             configuration.selected.secureStorage === 'stored')) &&
-        !draft
+        (action === 'refresh-publication-checks' || !draft)
       )
-        actions.push(this.action(current))
+        actions.push(this.action(current, current.operation.revision, action))
       return {
         ...fresh,
+        ...(includePublication && stage === 'publication-create' && configuration ? { applicationConfiguration: configuration } : {}),
         profileUpdate: {
           stage,
           state,
@@ -427,8 +444,16 @@ export class ProfileConnectionSetup {
       { effect: 'create-application-version', ...(draft ? { draft } : {}) },
       context
     )
+    if (stopped(create))
+      return finish('publication-create', stopped(create)!, undefined, create)
+    const missingSources = () => {
+      const configuration = create.applicationConfiguration
+      return configuration?.effect === 'create-application-version'
+        ? configuration.requiredSubjects.filter(subject => !Object.values(configuration.sources).some(source => source?.subject === subject))
+        : [...connectionSetupPublicationSubjects('create-application-version')]
+    }
     if (!create.applicationConfiguration?.selected && run) {
-      for (const subject of connectionSetupPublicationSubjects('create-application-version'))
+      for (const subject of missingSources())
         if (!(await this.read(id, subject, context)))
           return finish('publication-create', 'attention')
       draft = await this.draft(id)
@@ -438,10 +463,12 @@ export class ProfileConnectionSetup {
         context
       )
     }
-    if (!draft || !create.applicationConfiguration)
-      return finish('publication-create', 'attention', undefined, create)
     if (stopped(create))
       return finish('publication-create', stopped(create)!, undefined, create)
+    if (!create.applicationConfiguration?.selected && missingSources().length)
+      return finish('publication-create', 'pending', undefined, create)
+    if (!draft || !create.applicationConfiguration)
+      return finish('publication-create', 'attention', undefined, create, undefined, 'refresh-publication-checks')
     if (!create.applicationConfiguration.selected) {
       // The profile goal alone cannot authorize unrelated pending application changes.
       if (
@@ -453,9 +480,15 @@ export class ProfileConnectionSetup {
           'publication-create',
           'attention',
           undefined,
-          undefined,
-          draft
+          create,
+          draft,
+          'refresh-publication-checks'
         )
+      const action = create.applicationConfiguration.actions.find(
+        (a) => a.kind === 'create-application-version'
+      )
+      if (!action)
+        return finish('publication-create', 'attention', undefined, create, draft, 'refresh-publication-checks')
       if (!run)
         return finish(
           'publication-create',
@@ -464,11 +497,6 @@ export class ProfileConnectionSetup {
           undefined,
           create
         )
-      const action = create.applicationConfiguration.actions.find(
-        (a) => a.kind === 'create-application-version'
-      )
-      if (!action)
-        return finish('publication-create', 'attention', undefined, create)
       create = await this.perform(id, action, context, draft)
     }
     const created = create.applicationConfiguration?.selected
