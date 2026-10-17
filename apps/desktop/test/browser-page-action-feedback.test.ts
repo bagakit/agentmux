@@ -97,6 +97,7 @@ vi.mock('electron', async () => {
       if (native.displayThrows && running) throw new Error('Synchronous native display failure')
       return Promise.resolve(!(native.displayFails && running))
     }
+    executeJavaScript = vi.fn(async (_code: string) => true)
     async loadURL(url: string) { this.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false, url }); this.url = url; this.emit('did-navigate', {}, url); this.emit('dom-ready'); this.emit('did-finish-load'); this.emit('did-stop-loading') }
     close() { if (this.id !== native.deferredCloseId) this.finishClose() }
     finishClose() { if (this.destroyed) return; this.destroyed = true; this.focused = false; this.emit('destroyed') }
@@ -109,6 +110,7 @@ vi.mock('electron', async () => {
     constructor() { super(); native.views.push(this) }
     setVisible(value: boolean) { this.visible = value }
     getVisible() { return this.visible }
+    setBorderRadius(_radius: number) {}
     setBackgroundColor(value: string) { this.backgroundColor = value }
     setBounds(value: typeof this.bounds) { const changed = Object.keys(value).some(key => value[key as keyof typeof value] !== this.bounds[key as keyof typeof value]); this.bounds = { ...value }; if (changed) this.emit('bounds-changed') }
     getBounds() { return { ...this.bounds } }
@@ -117,6 +119,7 @@ vi.mock('electron', async () => {
 })
 import { BrowserViewManager } from '../src/main/browser-view-manager.js'
 import { BrowserRefLedgerStore } from '../src/main/browser-ref-ledger-store.js'
+import { NativeOverlaySurfaces } from '../src/main/native-overlay-surfaces.js'
 const roots: string[] = [], managers: BrowserViewManager[] = []
 afterEach(async () => {
   for (const manager of managers.splice(0)) manager.dispose()
@@ -133,13 +136,15 @@ const controlPayloads = (contents: any): any[] => contents.displays.filter((call
 async function managerFixture(preferences?: () => BrowserAgentControlPreferences) {
   const root = await mkdtemp(_hygiene_fixturePath("tmp/amx-action-feedback-source-")); roots.push(root)
   const children: any[] = [], events: any[] = []
-  const window = { getContentBounds: () => ({ x: 0, y: 0, width: 1000, height: 700 }), isFocused: () => true,
+  const window = Object.assign(new EventEmitter(), { isVisible: () => true, isMinimized: () => false, getContentBounds: () => ({ x: 0, y: 0, width: 1000, height: 700 }), isFocused: () => true,
     contentView: { get children() { return [...children] }, addChildView: (view: any, index?: number) => {
       const previous = children.indexOf(view)
       if (previous >= 0) children.splice(previous, 1)
       children.splice(index ?? children.length, 0, view)
     }, removeChildView: (view: any) => { const index = children.indexOf(view); if (index >= 0) children.splice(index, 1) } },
-    isDestroyed: () => false, webContents: Object.assign(new EventEmitter(), { isDestroyed: () => false, send: (_name: string, e: any) => events.push(structuredClone(e)) }) }
+    isDestroyed: () => false, webContents: Object.assign(new EventEmitter(), { isDestroyed: () => false, getZoomFactor: () => 1, beginFrameSubscription: vi.fn(), endFrameSubscription: vi.fn(),
+      capturePage: vi.fn(async () => ({ isEmpty: () => false, toPNG: () => Buffer.from('original Renderer chrome') })),
+      send: (_name: string, e: any) => events.push(structuredClone(e)) }) })
   const manager = new BrowserViewManager(window as never, { defaultProfileId: () => 'default', resolvePartition: () => 'persist:feedback' },
     new BrowserRefLedgerStore(join(root, 'refs.json')), { rememberedSchemes: async () => ({}), rememberScheme: async () => {}, openExternal() {} },
     undefined, undefined, undefined, undefined, undefined, undefined, undefined, preferences)
@@ -150,7 +155,7 @@ async function managerFixture(preferences?: () => BrowserAgentControlPreferences
   const sibling = children.find(view => view.webContents.getURL() === 'https://generic.invalid/two')
   manager.setBounds('browser-one', { x: 0, y: 0, width: 500, height: 400 })
   const siblingBefore = { scripts: [...sibling.webContents.scripts], commands: [...sibling.webContents.commands] }
-  return { manager, contents: source.webContents, sibling: sibling.webContents, siblingBefore, children, events }
+  return { window, manager, contents: source.webContents, sibling: sibling.webContents, siblingBefore, children, events }
 }
 describe('actual dispatcher action feedback consumer', () => {
   it('passes the resolved node/sender after the original scroll and rechecks control after asynchronous display', async () => {
@@ -436,5 +441,98 @@ describe('T024 actual Main display semantics', () => {
     expect(running).toHaveLength(1); expect(running[0].method).toBe(method); expect(running[0].kind).toBe('page')
     expect(f.contents.scripts.join('')).not.toContain('private-invocation-value')
     expect(f.contents.attached).toBe(false); expect(f.sibling.commands).toEqual(f.siblingBefore.commands); expect(f.sibling.scripts).toEqual(f.siblingBefore.scripts)
+  })
+})
+
+
+describe('native shield presentation ownership through the real manager', () => {
+  const floatingStage = {
+    id: 'chrome-1', bounds: { x: 0, y: 0, width: 600, height: 450 }, radius: 8,
+    browserStages: [{ browserId: 'browser-one', bounds: { x: 0, y: 0, width: 500, height: 400 } }]
+  }
+
+  it('never reattaches a disposed cleanup shield above the restored same-id page', async () => {
+    const f = await managerFixture(); native.mode = 'held-wait'
+    let retired: any
+    native.onWaiting = async () => {
+      retired = f.manager.nativeOwner('browser-one')!.inputShield
+      retired.webContents.mainFrame.framesInSubtree = [{ osProcessId: 902, detached: false }]
+      native.deferredCloseId = retired.webContents.id
+    }
+    const operation = await f.manager.runScript('browser-one', 'original delayed-close operation', undefined, undefined, 'cleanup-before-restore')
+    expect(operation.outcome.kind).toBe('completed')
+    expect(retired.webContents.isDestroyed()).toBe(false)
+    expect(retired.getVisible()).toBe(true)
+    expect(f.children).not.toContain(retired)
+    const original = f.manager.nativeOwner('browser-one')!.view
+    original.webContents.close()
+    expect(original.webContents.isDestroyed()).toBe(true)
+    const restored = await f.manager.restore('browser-one', { workspaceId: 'workspace' })
+    f.manager.setBounds('browser-one', { x: 0, y: 0, width: 500, height: 400 })
+    const current = f.manager.nativeOwner('browser-one')!
+    expect(restored).toMatchObject({ id: 'browser-one', url: 'https://generic.invalid/one', profileId: 'default' })
+    expect(current.view).not.toBe(original)
+    const cleanup = Reflect.get(f.manager, 'entries').get('browser-one').inputShield
+    expect(cleanup.view).toBe(retired)
+    expect(f.manager.resourceProcessIds()).toContain(902)
+    const warning = vi.fn(), chrome = new NativeOverlaySurfaces(f.window as never, f.manager, warning, vi.fn())
+    try {
+      expect(await chrome.update([floatingStage])).toMatchObject({ projected: 1 })
+      // The actual consumer must not reinstall a live-but-retired native surface.
+      expect(f.children).not.toContain(retired)
+      expect(f.manager.nativeOwner('browser-one')?.inputShield).toBeUndefined()
+      expect(f.manager.nativeOwner('browser-one')?.view).toBe(current.view)
+      expect(current.view.webContents.isDestroyed()).toBe(false)
+      expect(cleanup.contents.isDestroyed()).toBe(false)
+      expect(Reflect.get(f.manager, 'entries').get('browser-one').inputShield).toBe(cleanup)
+      expect(f.manager.target('browser-one')?.control?.inputIsolation).toBe('unconfirmed')
+      expect(f.manager.resourceProcessIds()).toContain(902)
+      expect(f.manager.resourceTargets(new Map([[902, 1]])).find(target => target.id === 'browser-one')?.resource?.retention).toMatchObject({ status: 'unknown', reasons: expect.arrayContaining(['close-unconfirmed']) })
+      expect(warning).not.toHaveBeenCalled()
+      retired.webContents.finishClose()
+      await Promise.resolve(); await Promise.resolve()
+      expect(f.manager.resourceProcessIds()).not.toContain(902)
+      expect(Reflect.get(f.manager, 'entries').get('browser-one').inputShield).toBeUndefined()
+      expect(f.manager.nativeOwner('browser-one')?.view).toBe(current.view)
+    } finally { chrome.dispose(); retired.webContents.finishClose() }
+  })
+
+  it('keeps a live exact shield in the floating pair while its adjacency needs arranging', async () => {
+    const f = await managerFixture(); native.mode = 'held-wait'
+    const warning = vi.fn(), chrome = new NativeOverlaySurfaces(f.window as never, f.manager, warning, vi.fn())
+    let checked = false, checkError: unknown
+    native.onWaiting = async () => {
+      try {
+        const owner = f.manager.nativeOwner('browser-one')!, shield = owner.inputShield!
+        const originalCleanup = Reflect.get(f.manager, 'entries').get('browser-one').inputShield
+        expect(originalCleanup.isolated).toBe(true)
+        expect(originalCleanup.isCurrentFor(owner.view)).toBe(true)
+        expect(originalCleanup.isCurrentFor(f.children.find(view => view.webContents === f.sibling))).toBe(false)
+        // Native ordering can temporarily separate the pair. Current ownership is
+        // the input fact used to repair that order, not a consequence of adjacency.
+        const sibling = f.children.find(view => view.webContents === f.sibling)
+        f.window.contentView.removeChildView(sibling)
+        f.window.contentView.addChildView(sibling, f.children.indexOf(owner.view) + 1)
+        expect(originalCleanup.isolated).toBe(false)
+        expect(f.manager.nativeOwner('browser-one')?.inputShield).toBe(shield)
+        expect(await chrome.update([floatingStage])).toMatchObject({ projected: 1 })
+        expect(f.children.indexOf(shield)).toBe(f.children.indexOf(owner.view) + 1)
+        expect(originalCleanup.isolated).toBe(true)
+        expect(f.manager.nativeOwner('browser-one')?.inputShield).toBe(shield)
+        expect(owner.view.webContents.isDestroyed()).toBe(false)
+        expect(shield.webContents.isDestroyed()).toBe(false)
+        expect(warning).not.toHaveBeenCalled()
+        checked = true
+      } catch (error) {
+        checkError = error
+        throw error
+      }
+    }
+    try {
+      const report = await f.manager.runScript('browser-one', 'original live operation', undefined, undefined, 'live-shield-pair')
+      if (checkError) throw checkError
+      expect(report).toMatchObject({ outcome: { kind: 'completed' } })
+      expect(checked).toBe(true)
+    } finally { chrome.dispose() }
   })
 })
