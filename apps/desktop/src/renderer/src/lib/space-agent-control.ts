@@ -50,7 +50,7 @@ export type SpatialControlPorts = {
   recordRemovedTab?(tabId: string): void
 }
 /** Local UI context, separate from the public spatial request and user prompt. */
-export type SpatialControlOptions = { agentMuxNote?: string; recovery?: SpatialRequestBinding['recovery']; authorize?: () => boolean; fileOpenIntent?: 'default' | 'source'; fileInputPolicy?: 'preserve' | 'target' }
+export type SpatialControlOptions = { agentMuxNote?: string; purpose?: SpatialRequestBinding['purpose']; recovery?: SpatialRequestBinding['recovery']; authorize?: () => boolean; fileOpenIntent?: 'default' | 'source'; fileInputPolicy?: 'preserve' | 'target' }
 
 class SpatialFailure extends Error {
   constructor(readonly issue: AgentMuxSpatialIssue) { super(issue.message) }
@@ -521,7 +521,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
   }
   try {
     const inputDigest = await digest({ operation, destination: request.destination, focus: request.focus,
-      ...(operation === 'agent.open' ? { content: request.content, caller: request.caller, agentMuxNote: options?.agentMuxNote, recovery: options?.recovery } : { fromRegionId: request.fromRegionId, expectedAgentSessionId: request.expectedAgentSessionId, fromLocation: request.fromLocation }) })
+      ...(operation === 'agent.open' ? { content: request.content, caller: request.caller, agentMuxNote: options?.agentMuxNote, purpose: options?.purpose, recovery: options?.recovery } : { fromRegionId: request.fromRegionId, expectedAgentSessionId: request.expectedAgentSessionId, fromLocation: request.fromLocation }) })
     const existing = ports.get().spatialRequests[request.requestId]
     if (existing) {
       if (existing.inputDigest !== inputDigest) failure('SPACE_REQUEST_CONFLICT', 'This request ID is already bound to different input.')
@@ -634,7 +634,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
         failure('AGENT_NATIVE_WORKSPACE_MISMATCH', 'Choose the original conversation execution Workspace. Its saved history and current workface are retained.')
       }
     }
-    const binding: SpatialRequestBinding = { requestId: request.requestId, inputDigest, operation,
+    const binding: SpatialRequestBinding = { requestId: request.requestId, inputDigest, operation, ...(options?.purpose ? { purpose: options.purpose } : {}),
       tabId: destination?.address.tabId ?? mint.tabId, regionId: destination?.address.regionId ?? mint.regionId,
       agentSessionId: sessionId, createAgent: operation === 'agent.open' && request.content.kind !== 'agent-session',
       ...(executionHostId ? { executionHostId } : {}),

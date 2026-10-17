@@ -1,10 +1,8 @@
 import type { AgentMuxZoneFact } from '@agentmux/core/control'
-import type { useAppStore } from '../store'
+import type { AppState } from '../store'
 
 import type { WorkbenchProjectionSelection } from './workbench-projection'
 import type { WorkbenchSurface } from './workbench-tabs'
-
-type AppState = ReturnType<typeof useAppStore.getState>
 
 /** A caller retains the exact unfinished creation, never a second entity registry. */
 export type SurveyBrowserPreparation = {

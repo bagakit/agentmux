@@ -26,3 +26,5 @@
 .goal-patrol__source dl { margin: var(--sp-2) 0; }
 .goal-patrol__source dt { color: var(--text-3); }
 .goal-patrol__source dd { margin: 0 0 var(--sp-2); overflow-wrap: anywhere; }
+.goals-global-patrol { min-width: 0; }
+.goals-global-patrol__feedback { display: grid; gap: var(--sp-1); max-width: 48ch; color: var(--text-2); font-size: var(--fs-meta); overflow-wrap: anywhere; }

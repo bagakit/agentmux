@@ -460,6 +460,7 @@ export type AgentMuxControlDemandUpdateRequest = RequestBase & {
   decision?: AgentMuxDemandDecision
 }
 export type AgentMuxControlGoalDiscussRequest = RequestBase & { operation: 'demand.discuss'; demandId: string; mode: 'open' | 'grill' | 'grounding' }
+export type AgentMuxControlGoalPatrolAllRequest = RequestBase & { operation: 'demand.patrol-all'; caller?: { agentSessionId: string; capability?: string } }
 export type AgentMuxControlGoalConfirmRequest = RequestBase & { operation: 'demand.confirm'; demandId: string; expectedRevision: number }
 export type AgentMuxControlGoalAcceptRequest = RequestBase & { operation: 'demand.accept'; demandId: string; expectedAlignmentRevision: number; expectedSubmissionId: string; acceptGaps: boolean }
 export type AgentMuxControlDemandAssignRequest = RequestBase & {
@@ -673,6 +674,7 @@ export type AgentMuxControlRequest =
   | AgentMuxControlDemandCreateRequest
   | AgentMuxControlDemandUpdateRequest
   | AgentMuxControlGoalDiscussRequest
+  | AgentMuxControlGoalPatrolAllRequest
   | AgentMuxControlGoalConfirmRequest
   | AgentMuxControlGoalAcceptRequest
   | AgentMuxControlDemandActivityAppendRequest
@@ -790,6 +792,7 @@ export type AgentMuxControlResult =
   | { operation: 'resume'; agentSessionId: string; runId: string }
   | { operation: 'stop'; agentSessionId: string }
   | { operation: 'demand.list'; demands: AgentMuxDemand[] }
+  | ({ operation: 'demand.patrol-all' } & import('./space-control.js').AgentMuxSpaceMutationReport)
   | { operation: 'demand.show'; demand: AgentMuxDemand | null; goalContinuations: ContinuousProgressLoop[] }
   | { operation: 'demand.create'; demand: AgentMuxDemand; receipt: { demandId: string; createdAt: number } }
   | { operation: 'demand.update'; demand: AgentMuxDemand; receipt: { demandId: string; updatedAt: number } }
@@ -1118,6 +1121,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   , 'demand.create': 'short'
   , 'demand.update': 'short'
   , 'demand.discuss': 'long'
+  , 'demand.patrol-all': 'long'
   , 'demand.confirm': 'short'
   , 'demand.accept': 'short'
   , 'demand.assign': 'short'

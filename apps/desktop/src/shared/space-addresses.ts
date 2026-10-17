@@ -77,6 +77,8 @@ export type SpatialRequestBinding = {
   requestId: string
   inputDigest: string
   operation: 'agent.open' | 'space.mv' | 'agent.message'
+  /** Original business intent on this same creation record, never a second operation ledger. */
+  purpose?: 'goal-global-patrol'
   tabId: string
   regionId: string
   agentSessionId: string

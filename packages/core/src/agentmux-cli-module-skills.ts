@@ -2,6 +2,7 @@ import { AGENTMUX_CLI_COMMANDS } from './agentmux-cli-commands.js'
 import { AGENTMUX_AGENT_MESSAGING_GUIDANCE } from './agent-messaging-guidance.js'
 import { DIAGNOSTIC_GUIDE, GOAL_ACTIVITY_GUIDE, SPATIAL_GUIDE } from './agentmux-cli-shared-guides.js'
 import { goalRoleGuidanceContract } from './goal-role-guidance.js'
+import { GLOBAL_GOAL_PATROL_GUIDANCE } from './goal-patrol.js'
 import { AGENTMUX_PROTOCOL_CATALOG } from './agent-message-render.js'
 
 interface ModuleDefinition {
@@ -319,6 +320,15 @@ Start, source-bound delegation and actual execution are different facts.
 ${goalRoleGuidanceContract()}
 
 ${GOAL_ACTIVITY_GUIDE}
+
+## Global inspection
+
+goal patrol all --operation-id ID opens one new discussion in the original primary PMO
+Mote. Keep its exact original agent.open operation and inspect it with space inspect
+--operation-id ID after an unknown reply; never create another discussion to recover it.
+Creation, input, actual work and inspection completion remain separate facts.
+
+${GLOBAL_GOAL_PATROL_GUIDANCE}
 
 Read amux goal create --help only when creating or promoting a Goal; that leaf owns the
 exact scope, confirmation and source contract.`
