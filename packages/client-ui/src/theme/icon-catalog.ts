@@ -365,7 +365,7 @@ export const SEMANTIC_ICON_CATALOG = {
   'object.keyboard': { label: 'Keyboard', glyph: 'keyboard' },
   'action.reveal': { label: 'Reveal', glyph: 'eye' },
   'object.marker': { label: 'Marker', glyph: 'flag' },
-  'object.mote': { label: 'Mote', glyph: 'mote-identity' },
+  'object.mote': { label: 'Mote', glyph: 'mote-companion' },
   'avatar.badge-spark': { label: 'Spark decoration badge', glyph: 'badge-token' },
   'avatar.badge-bolt': { label: 'Bolt badge', glyph: 'bolt' },
   'avatar.badge-shield': { label: 'Shield badge', glyph: 'shield' },
