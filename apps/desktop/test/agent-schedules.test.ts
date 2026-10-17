@@ -1,5 +1,5 @@
 import { fixtureCivil as _hygiene_fixtureCivil, fixtureClock as _hygiene_fixtureClock, fixtureIso as _hygiene_fixtureIso, fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { nextCalendarOccurrence, latestCalendarOccurrence } from '../src/main/agent-schedule-calendar.js'
@@ -173,6 +173,119 @@ it.each(['pause','resume','cancel'] as const)('retries the original %s action af
   expect(retried.schedule.revision).toBe(revision + 1)
 })
 
+
+describe('ended schedule boundary', () => {
+  it.each(['calendar', 'relative'] as const)('keeps cancelled %s terminal through public and direct controls', async kind => {
+    const saves: boolean[] = []
+    const h = await owner(undefined, async (_loop, active) => { saves.push(active) })
+    const timing = kind === 'calendar' ? { calendar: rules('daily') } : { afterMs: 90000 }
+    const created = await h.manager.call('schedule.create', { target, ...timing, prompt: 'original', operationId: 'create' })
+    const cancel = { scheduleId: created.schedule.loopId, expectedRevision: 1, operationId: 'cancel' }
+    const ended = await h.manager.call('schedule.cancel', cancel)
+    expect(validateScheduleRpcResult('schedule.cancel', ended, cancel)).toEqual(ended)
+    for (const action of ['pause', 'resume'] as const) {
+      await expect(h.manager.call(`schedule.${action}`, { scheduleId: created.schedule.loopId, expectedRevision: 2, operationId: action })).rejects.toMatchObject({ code: 'SCHEDULE_CANCELLED' })
+      await expect(h.manager[action](created.schedule.loopId)).rejects.toMatchObject({ code: 'SCHEDULE_CANCELLED' })
+      expect(h.manager.list()).toEqual([ended.schedule])
+      expect(await h.reload()).toEqual([ended.schedule])
+    }
+    expect(saves).toEqual([true, false])
+    await expect(h.manager.call('schedule.pause', { scheduleId: created.schedule.loopId, expectedRevision: 1, operationId: 'stale' })).rejects.toMatchObject({ code: 'SCHEDULE_REVISION_CONFLICT' })
+    await expect(h.manager.call('schedule.resume', cancel)).rejects.toMatchObject({ code: 'SCHEDULE_OPERATION_CONFLICT' })
+    const retried = await h.manager.call('schedule.cancel', cancel)
+    expect(retried).toEqual(ended); expect(saves).toEqual([true, false, false])
+  })
+
+  it.each(['pause', 'resume'] as const)('does not reapply an old %s operation after the exact schedule ended', async action => {
+    const saves: boolean[] = []
+    const h = await owner(undefined, async (_loop, active) => { saves.push(active) })
+    const created = await h.manager.call('schedule.create', { target, calendar: rules('daily'), prompt: 'original', operationId: 'create' })
+    const id = created.schedule.loopId
+    if (action === 'resume') await h.manager.call('schedule.pause', { scheduleId: id, expectedRevision: 1, operationId: 'setup' })
+    const request = { scheduleId: id, expectedRevision: action === 'resume' ? 2 : 1, operationId: 'original-' + action }
+    await h.manager.call(`schedule.${action}`, request)
+    await h.manager.stopLoop(id)
+    const stopped = h.manager.list(), before = saves.slice()
+    await expect(h.manager.call(`schedule.${action}`, request)).rejects.toMatchObject({ code: 'SCHEDULE_CANCELLED' })
+    expect(h.manager.list()).toEqual(stopped); expect(await h.reload()).toEqual(stopped); expect(saves).toEqual(before)
+  })
+
+  it.each(['calendar', 'relative'] as const)('rejects the original resume after a %s one-shot completes', async kind => {
+    const saves: boolean[] = []; let inputs = 0
+    const h = await owner(async () => { inputs++; return 'sent' }, async (_loop, active) => { saves.push(active) })
+    const timing = kind === 'calendar' ? { calendar: rules('once', { date: _hygiene_fixtureCivil(12, 31) }) } : { afterMs: 90000 }
+    const created = await h.manager.call('schedule.create', { target, ...timing, prompt: 'one input', operationId: 'create' })
+    const id = created.schedule.loopId
+    await h.manager.call('schedule.pause', { scheduleId: id, expectedRevision: 1, operationId: 'pause' })
+    const request = { scheduleId: id, expectedRevision: 2, operationId: 'original-resume' }
+    await h.manager.call('schedule.resume', request)
+    h.set({ now: created.schedule.nextCheckAt }); await h.manager.check()
+    const ended = h.manager.list(), before = saves.slice()
+    expect(ended[0]).toMatchObject({ status: 'stopped', revision: 3, lastOutcome: 'sent', lastMutation: { operationId: 'original-resume' } })
+    await expect(h.manager.call('schedule.resume', request)).rejects.toMatchObject({ code: 'SCHEDULE_CANCELLED' })
+    expect(h.manager.list()).toEqual(ended); expect(saves).toEqual(before)
+    await h.manager.check(); expect(inputs).toBe(1)
+  })
+
+  it('keeps stopped when cancellation persistence fails, then converges the original cancel', async () => {
+    const saves: boolean[] = []
+    const h = await owner(undefined, async (_loop, active) => { saves.push(active) })
+    const created = await h.manager.call('schedule.create', { target, calendar: rules('daily'), prompt: 'original', operationId: 'create' })
+    const request = { scheduleId: created.schedule.loopId, expectedRevision: 1, operationId: 'original-cancel' }
+    const save = vi.spyOn(h.store, 'save').mockRejectedValueOnce(new Error('private schedule persistence unavailable'))
+    try {
+      await expect(h.manager.call('schedule.cancel', request)).rejects.toThrow('persistence unavailable')
+      expect(h.manager.list()[0]).toMatchObject({ status: 'stopped', revision: 2, lastMutation: { operationId: request.operationId } })
+      await expect(h.manager.pause(created.schedule.loopId)).rejects.toMatchObject({ code: 'SCHEDULE_CANCELLED' })
+      const retried = await h.manager.call('schedule.cancel', request)
+      expect(validateScheduleRpcResult('schedule.cancel', retried, request)).toEqual(retried)
+      expect(retried.schedule).toMatchObject({ status: 'stopped', revision: 2 })
+      expect(await h.reload()).toEqual([retried.schedule]); expect(saves).toEqual([true, false])
+    } finally { save.mockRestore() }
+  })
+
+  it('keeps cancellation terminal when an earlier claim persistence later rejects', async () => {
+    let inputs = 0
+    const h = await owner(async () => { inputs++; return 'sent' })
+    const created = await h.manager.call('schedule.create', { target, calendar: rules('daily'), prompt: 'original', operationId: 'create' })
+    const entered = deferred(), release = deferred(), originalSave = h.store.save.bind(h.store)
+    let first = true
+    const save = vi.spyOn(h.store, 'save').mockImplementation(async records => {
+      if (first) { first = false; entered.resolve(); await release.promise; throw new Error('original claim save unavailable') }
+      await originalSave(records)
+    })
+    try {
+      h.set({ now: created.schedule.nextCheckAt })
+      const checking = h.manager.check().then(() => undefined, error => error)
+      await entered.promise
+      await h.manager.call('schedule.cancel', { scheduleId: created.schedule.loopId, expectedRevision: 1, operationId: 'cancel-during-save' })
+      release.resolve(); expect(await checking).toMatchObject({ message: 'original claim save unavailable' })
+      expect(h.manager.list()[0]).toMatchObject({ status: 'stopped', revision: 2 })
+      expect((await h.reload())[0]).toMatchObject({ status: 'stopped', revision: 2 })
+      await h.manager.check(); expect(inputs).toBe(0)
+    } finally { release.resolve(); save.mockRestore() }
+  })
+
+  it.each([false, true])('keeps stopped through a late creation save (retry=%s)', async retry => {
+    const entered = deferred(), release = deferred(), saves: boolean[] = []
+    let attempts = 0, inactive = false
+    const h = await owner(undefined, async (_loop, active) => {
+      if (active && ++attempts === 1 && retry) throw new Error('first admission unknown')
+      if (active) { entered.resolve(); await release.promise }
+      saves.push(active); inactive = !active
+    })
+    const request = { target, calendar: rules('daily'), prompt: 'original', operationId: 'original-create' }
+    if (retry) await expect(h.manager.call('schedule.create', request)).rejects.toThrow('first admission unknown')
+    const creating = h.manager.call('schedule.create', request)
+    await entered.promise
+    const original = h.manager.list()[0]!
+    await h.manager.call('schedule.cancel', { scheduleId: original.loopId, expectedRevision: 1, operationId: 'cancel' })
+    release.resolve()
+    expect((await creating).schedule).toMatchObject({ loopId: original.loopId, status: 'stopped', revision: 2, lastMutation: { operationId: 'cancel' } })
+    expect((await h.reload())[0]).toMatchObject({ status: 'stopped', revision: 2 })
+    expect(saves).toEqual([false, true, false]); expect(inactive).toBe(true)
+  })
+})
 
 describe('one-shot relative schedule', () => {
   it.each([90000, 300000])('freezes the original %ims deadline across duplicate creation, pause and overdue resume', async afterMs => {

@@ -58,4 +58,9 @@ await server.start()
 process.stdout.write(JSON.stringify({ pid: process.pid, target, socketPath: server.path, hostedOwner: client.runtimeOwnerIdentity(), borrowed: (client as object) !== host.client }) + '\n')
 const shutdown = async () => { await loops.stop(); await server.stop(); await client.dispose(); await rpc.dispose(); await host.stop(); process.exit(0) }
 process.once('SIGTERM', () => { void shutdown() }); process.once('SIGINT', () => { void shutdown() })
-process.on('message', async message => { if (message === 'check') { await loops.check(Number(process.env.SCHEDULE_PROBE_NOW)); process.send?.({ checked: true, schedules: loops.list() }) } })
+process.on('message', async message => {
+  if (message === 'check' || message && typeof message === 'object' && 'checkAt' in message && Number.isSafeInteger(message.checkAt)) {
+    if (typeof message === 'object') process.env.SCHEDULE_PROBE_NOW = String(message.checkAt)
+    await loops.check(Number(process.env.SCHEDULE_PROBE_NOW)); process.send?.({ checked: true, schedules: loops.list() })
+  }
+})
