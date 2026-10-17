@@ -79,7 +79,7 @@ afterEach(async () => { await server?.stop(); services?.close(); await original?
 function MountedSettings() {
   const [visible, setVisible] = useState(true)
   reopen = () => setVisible(true)
-  return <SettingsPanel visible={visible} initialSection="chat-connections" onClose={() => setVisible(false)} />
+  return <SettingsPanel visible={visible} initialSection="lark" onClose={() => setVisible(false)} />
 }
 async function mount() {
   await dom.render(<MountedSettings />)

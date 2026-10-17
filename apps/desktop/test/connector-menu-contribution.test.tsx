@@ -18,8 +18,8 @@ const evidence = (scenario: string, facts: unknown) => { runtimeEvidence.push({ 
 afterAll(async () => { if (process.env.AGENTMUX_CONNECTOR_MENU_RECEIPT) await writeFile(process.env.AGENTMUX_CONNECTOR_MENU_RECEIPT, JSON.stringify({ schema: 'agentmux.connector-menu-consumer.v1', scope: 'Mounted App, Settings and both original menus through trusted IPC, public Core, default ConnectionHost and compiled CLI; controlled I/O only', scenarios: runtimeEvidence }, null, 2) + '\n') })
 beforeEach(async () => { f = await moteConnectionJourney(); useAppStore.setState({ connectorServiceIntents: {}, connectorServiceObservation: null }) })
 afterEach(async () => { await f?.dispose() })
-const groupLabel = 'Agent Conversation Connector'
-const master = () => document.querySelector<HTMLInputElement>('[aria-label="Enable Agent Conversation Connector"]')!
+const groupLabel = 'Lark'
+const master = () => document.querySelector<HTMLInputElement>('[aria-label="Enable external chat sync"]')!
 const policy = () => document.querySelector<HTMLElement>('[data-connector-service-state]')!
 const original = (id: string) => document.querySelector<HTMLElement>(`[data-service-operation="${id}"]`)!
 const writes = () => f.connections.mock.calls.filter(([method]) => method === 'connection.service.configure').map(([, input]) => input as ConnectionServiceConfigure)
@@ -62,7 +62,7 @@ async function settingsFromApp() {
   await closeMenu()
   const settings = document.querySelector<HTMLElement>('[aria-label="Settings"]')!
   expect(settings).not.toBeNull(); await moteClick(settings)
-  const nav = document.querySelector<HTMLElement>('nav [data-settings-target="chat-connections"]')!
+  const nav = document.querySelector<HTMLElement>('nav [data-settings-target="lark"]')!
   expect(nav).not.toBeNull(); await moteClick(nav)
   await waitFor(() => expect(document.querySelector('[data-connector-service]')).not.toBeNull())
 }
@@ -105,7 +105,7 @@ it('uses the mounted App and Settings master to withdraw and restore one complet
   for (const kind of ['header', 'region'] as const) {
     const menu = await openMenu(kind)
     expect(groups()).toHaveLength(0)
-    expect(menu.textContent).not.toMatch(/Agent Conversation Connector|group chat|Shared group details|Chat application settings|Enable a chat application/)
+    expect(menu.textContent).not.toMatch(/Lark|group chat|Shared group details|Chat application settings|Enable a chat application/)
     expect(menu.querySelector('[data-connector-menu-separator]')).toBeNull()
     expect(menu.lastElementChild?.getAttribute('role')).not.toBe('separator')
     expect(menu.textContent).toContain('Copy Agent Link')
@@ -148,7 +148,7 @@ it('keeps an unknown save as its exact original request across remount and curre
   await f.app.remount()
   const settings = document.querySelector<HTMLElement>('[aria-label="Settings"]')
   expect(settings).not.toBeNull(); await moteClick(settings!)
-  const nav = document.querySelector<HTMLElement>('nav [data-settings-target="chat-connections"]')!
+  const nav = document.querySelector<HTMLElement>('nav [data-settings-target="lark"]')!
   expect(nav).not.toBeNull(); await moteClick(nav)
   await waitFor(() => expect(original(input.operationId)).not.toBeNull())
   expect(writes()).toHaveLength(1)
@@ -233,7 +233,7 @@ it('does not publish a late service read from a menu opening that has already cl
     return await forward(method, input)
   })
   await f.mount(); await openMenu('header'); expect(held).toBe(true)
-  expect(groups()[0]!.textContent).toContain('Connector settings')
+  expect(groups()[0]!.textContent).toContain('Lark settings')
   expect(groups()[0]!.textContent).not.toContain('Create group chat')
   await closeMenu()
   await act(async () => release({ enabled: true, revision: 0 })); await settleMoteApp()

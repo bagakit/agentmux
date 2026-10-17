@@ -70,7 +70,7 @@ export async function moteBotUi(options: Parameters<typeof moteConnectionOwner>[
   vi.spyOn(api.files, 'unobserve').mockResolvedValue(undefined)
   const container = document.createElement('div'); document.body.append(container)
   let view = createClientUiRoot(container), mounted = false
-  const navigation = { open: vi.fn(), openToolkit: vi.fn(), openHost: vi.fn(), openConnector: vi.fn(), openMoteConnector: vi.fn(), chooseAgent: vi.fn() }
+  const navigation = { open: vi.fn(), openToolkit: vi.fn(), openHost: vi.fn(), openLark: vi.fn(), openMoteLark: vi.fn(), chooseAgent: vi.fn() }
   const scopes = await Promise.all(owner.motes.map(async m => {
     const topic = (await owner.topics.read(owner.workspace, m.id))!
     return { topic: { ...topic, title: 'Display title is not the public source', summary: 'DO-NOT-PUBLISH-DISPLAY' }, workspace: owner.workspace, rootPath: topic.directoryPath } satisfies MoteWorkfaceScope

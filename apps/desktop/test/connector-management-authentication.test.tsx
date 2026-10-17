@@ -85,7 +85,7 @@ function nativeRoute(options: { scanned?: boolean; poll?: () => Response | Promi
 function MountedSettings() {
   const [visible, setVisible] = useState(true)
   reopen = () => setVisible(true)
-  return <SettingsPanel visible={visible} initialSection="chat-connections" onClose={() => setVisible(false)} />
+  return <SettingsPanel visible={visible} initialSection="lark" onClose={() => setVisible(false)} />
 }
 async function ready(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check() }, { timeout: 12_000 }) }
 async function mount() { await dom.render(<MountedSettings />); await ready(() => expect(dom.container.querySelector('[data-connector-settings]')).not.toBeNull()) }

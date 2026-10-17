@@ -103,7 +103,7 @@ function firstLayerPrimaries() { return [...document.querySelectorAll('[data-man
 function current() { return calls.filter(call => (call.result as ConnectionSetupView)?.applicationConfiguration).at(-1)?.result as ConnectionSetupView }
 async function open() {
   await app.mount()
-  await click('[aria-label="Settings"]'); await click('nav [data-settings-target="chat-connections"]')
+  await click('[aria-label="Settings"]'); await click('nav [data-settings-target="lark"]')
   await click('[data-connection="settings-publication-bot"] button'); await click('[data-management-open]'); await click('[data-management-start]')
   await ready(() => expect(dom.container.querySelector('[data-management-confirm]')).not.toBeNull())
   expect(dom.container.querySelector('[data-bot-setup-guide]')?.getAttribute('data-bot-setup-guide')).toBe('account')
@@ -434,7 +434,7 @@ it.each([false, true])('the original Agent route from menu or dialog (%s) surviv
 }, 30_000)
 
 it('Settings with no original Agent opens the existing QuickSwitcher and activates the explicitly chosen existing Agent', async () => {
-  await app.mount(); await click('[aria-label="Settings"]'); await click('nav [data-settings-target="chat-connections"]'); await click('[data-connection="settings-publication-bot"] button')
+  await app.mount(); await click('[aria-label="Settings"]'); await click('nav [data-settings-target="lark"]'); await click('[data-connection="settings-publication-bot"] button')
   await click('[data-connector-return-agent]')
   await ready(() => expect(document.querySelector('.quick-switch')).not.toBeNull())
   const option = [...document.querySelectorAll<HTMLButtonElement>('.quick-switch [role="option"]')].find(node => node.querySelector('.quick-switch__row-title')?.textContent === ordinaryAgent.label)!
@@ -451,7 +451,7 @@ it('a missing original Agent presentation keeps the independent settings route u
     useAppStore.setState(state => ({ sessions: state.sessions.filter(session => session.id !== defaultAgent.id) }))
     item.click()
   })
-  expect(document.querySelector('[data-settings-page="chat-connections"]')?.hasAttribute('hidden')).toBe(false)
+  expect(document.querySelector('[data-settings-page="lark"]')?.hasAttribute('hidden')).toBe(false)
   await click('[data-connection="settings-publication-bot"] button')
   expect(document.querySelector('[data-connector-return-agent]')?.textContent).toBe('Choose an Agent')
   expect(app.launch).not.toHaveBeenCalled(); expect(writes()).toEqual([])

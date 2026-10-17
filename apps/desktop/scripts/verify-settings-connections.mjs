@@ -14,7 +14,7 @@ const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const argv = process.argv.slice(2), operation = argv[0]
 const section = operation === '--capture' ? argv[1] : 'connections'
 assert.ok(['--owning', '--callers', '--capture', '--visual', '--preflight', '--remote-owning', '--topology-owning', '--applications-owning'].includes(operation), 'Explicit finite operation')
-if (operation === '--capture') assert.ok(section === 'hosts' || section === 'devices')
+if (operation === '--capture') assert.ok(section === 'hosts' || section === 'amux-conversation')
 const evidence = resolve(packet, ("" + (operation.slice(2)) + "-" + (section) + "-" + (globalThis.crypto.randomUUID()) + ""))
 await mkdir(evidence, { recursive: true })
 const inputs = new Map(), compiled = []
@@ -44,7 +44,7 @@ async function finalizeInputs() {
 }
 async function owning() {
   const variants = operation === '--applications-owning' ? ['application-save-baseline', 'application-source', 'application-target', 'application-original'] : operation === '--topology-owning' ? ['route', 'graph'] : operation === '--remote-owning' ? ['remote', 'access', 'graph', 'single', 'drafts'] : ['catalog', 'single', 'drafts']
-  const messages = { 'application-save-baseline': 'Later draft uses the confirmed save revision', 'application-source': 'Source context retains the actual registered target', 'application-target': 'Application panel consumes the exact selected Host', 'application-original': 'Original operation ID is preserved', route: 'Configured SSH user stays on its exact Host node', remote: 'Remote group owns exactly environments', access: 'Source trust belongs to the Apps & access facet', graph: 'Topology activation selects its exact Host detail', catalog: 'Connections group owns devices', single: 'Only the selected Host has an editable connection subtree', drafts: 'Submenu selection preserves the original authored Host draft' }
+  const messages = { 'application-save-baseline': 'Later draft uses the confirmed save revision', 'application-source': 'Source context retains the actual registered target', 'application-target': 'Application panel consumes the exact selected Host', 'application-original': 'Original operation ID is preserved', route: 'Configured SSH user stays on its exact Host node', remote: 'Remote group owns exactly environments', access: 'Source trust belongs to the Apps & access facet', graph: 'Topology activation selects its exact Host detail', catalog: 'Conversation Channels owns the original native and external consumers', single: 'Only the selected Host has an editable connection subtree', drafts: 'Submenu selection preserves the original authored Host draft' }
   const vitest = desktopRequire.resolve('vitest/vitest.mjs'), config = resolve(fixture, 'vitest.config.mts')
   const modes = [{ label: 'baseline', mutant: 'baseline', ...(operation === '--applications-owning' ? { test: 'application-' } : operation === '--topology-owning' ? { test: 'graph:|route:|provenance:' } : {}) }, ...variants.flatMap(kind => [
     { label: kind + '-mutant', mutant: kind, test: (kind === 'remote' ? 'catalog' : kind) + ':' }, { label: kind + '-restored', mutant: 'baseline', test: (kind === 'remote' ? 'catalog' : kind) + ':' }
@@ -82,7 +82,7 @@ async function owning() {
   assert.equal(receipt.runs.length, 1 + 2 * variants.length); assert.equal(receipt.runs.filter(run => run.specificAssertionRED).length, variants.length)
   if (operation === '--owning') {
     receipt.renderer = []
-    for (const target of ['hosts', 'devices']) {
+    for (const target of ['hosts', 'amux-conversation']) {
       const pointer = JSON.parse(await readFile(resolve(packet, `qualification/${target}.current.json`), 'utf8'))
       const file = resolve(root, pointer.captureRef), bytes = await readFile(file)
       assert.equal(sha(bytes), pointer.captureSHA256)
@@ -105,7 +105,7 @@ async function owning() {
 }
 async function callers() {
   const ts = desktopRequire('typescript'), base = 'apps/desktop/src/renderer/src/', c = base + 'components/'
-  const files = ['settings/modules/hosts.tsx', 'settings/modules/devices.tsx', 'settings/settings-modules.ts', 'settings/HostSettingsPane.tsx',
+  const files = ['settings/modules/hosts.tsx', 'settings/modules/amux-conversation.tsx', 'settings/settings-modules.ts', 'settings/HostSettingsPane.tsx',
     'settings/HostConnectionLibrary.tsx', 'settings/HostProjectsPane.tsx', 'settings/HostTopology.tsx', 'settings/HostWorkSummary.tsx', 'settings/DeviceManagementSettings.tsx', 'SettingsPanel.tsx', 'settings/SettingsOverviewPane.tsx'].map(path => c + path)
   files.push(base + 'App.tsx', base + 'store.ts')
   const occurrences = []
@@ -124,8 +124,8 @@ async function callers() {
     }; visit(tree)
   }
   const requirements = [['HostSettingsPane', c + 'settings/modules/hosts.tsx'], ['api.config.save', c + 'settings/modules/hosts.tsx'],
-    ['devicesSettingsModule', c + 'settings/settings-modules.ts'], ['createSettingsCatalog', c + 'settings/settings-modules.ts'],
-    ['DeviceManagementSettings', c + 'settings/modules/devices.tsx'], ['HostConnectionLibrary', c + 'settings/HostSettingsPane.tsx'],
+    ['amuxConversationSettingsModule', c + 'settings/settings-modules.ts'], ['createSettingsCatalog', c + 'settings/settings-modules.ts'],
+    ['DeviceManagementSettings', c + 'settings/modules/amux-conversation.tsx'], ['HostConnectionLibrary', c + 'settings/HostSettingsPane.tsx'],
     ['HostProjectsPane', c + 'settings/HostSettingsPane.tsx'], ['HostTopology', c + 'settings/HostSettingsPane.tsx'], ['HostSessionSummary', c + 'settings/HostSettingsPane.tsx'], ['HostExecutorsSummary', c + 'settings/HostSettingsPane.tsx'], ['useAppStore.getState().selectSession', c + 'settings/HostSettingsPane.tsx'], ['refresh', c + 'settings/HostWorkSummary.tsx'], ['api.executors.detect', base + 'store.ts'], ['api.executors.discover', base + 'store.ts'], ['useResourceDrafts', c + 'settings/HostSettingsPane.tsx'],
     ['settingsNavGroups', c + 'SettingsPanel.tsx'], ['visibleSettingsSections', c + 'SettingsPanel.tsx'],
     ['SettingsOverviewPane', c + 'SettingsPanel.tsx'], ['item.savedSummary', c + 'settings/SettingsOverviewPane.tsx'], ['SettingsPanel', base + 'App.tsx'],
@@ -135,9 +135,9 @@ async function callers() {
     assert.ok(matches.length > 0, 'Nonempty production consumer outside definitions/imports/fixture: ' + symbol + ' in ' + path)
     return { symbol, path, matches }
   })
-  const device = await readFile(resolve(root, c + 'settings/modules/devices.tsx'), 'utf8')
+  const device = await readFile(resolve(root, c + 'settings/modules/amux-conversation.tsx'), 'utf8')
   assert.ok(device.includes('active={active}'), 'Actual module passes original active contract')
-  assert.equal(occurrences.filter(item => item.path === c + 'settings/modules/devices.tsx' && item.symbol.startsWith('api.')).length, 0, 'Neutral module and saved summary do not read device diagnostics')
+  assert.equal(occurrences.filter(item => item.path === c + 'settings/modules/amux-conversation.tsx' && item.symbol.startsWith('api.')).length, 0, 'Neutral module and saved summary do not read device diagnostics')
   const index = resolve(root, base + 'styles/index.css'), css = resolve(root, base + 'styles/settings-connections.css')
   await bind(index); await bind(css)
   assert.equal((await readFile(index, 'utf8')).split("@import './settings-connections.css';").length, 2, 'Exactly one actual CSS composition import')
@@ -201,7 +201,7 @@ async function capture() {
 
 async function visual() {
   receipt.seals = []
-  for (const section of ['hosts', 'devices']) {
+  for (const section of ['hosts', 'amux-conversation']) {
   const currentFile = resolve(packet, `qualification/${section}.current.json`), pointer = JSON.parse(await readFile(currentFile, 'utf8'))
   assert.ok(pointer.captureRef && pointer.visualPeerRef, 'Explicit fixed capture and independent peer seal')
   const captureFile = resolve(root, pointer.captureRef), peerFile = resolve(root, pointer.visualPeerRef)

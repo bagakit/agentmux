@@ -80,7 +80,7 @@ function deferred<T>() { let resolve!: (value: T) => void, reject!: (reason: Err
   return { promise: new Promise<T>((yes, no) => { resolve = yes; reject = no }), resolve, reject } }
 function Fixture() {
   const [selectedToolId, onSelectTool] = useState<string | symbol | null>(null)
-  return <SettingsNavigation.Provider value={{ open() {}, openToolkit() {}, openHost() {}, openConnector() {}, openMoteConnector() {}, chooseAgent() {} }}><PerformancePanel selectedToolId={selectedToolId} onSelectTool={onSelectTool} /></SettingsNavigation.Provider>
+  return <SettingsNavigation.Provider value={{ open() {}, openToolkit() {}, openHost() {}, openLark() {}, openMoteLark() {}, chooseAgent() {} }}><PerformancePanel selectedToolId={selectedToolId} onSelectTool={onSelectTool} /></SettingsNavigation.Provider>
 }
 let root: Root, container: HTMLDivElement, initial: ReturnType<typeof useAppStore.getState>
 let capturePort: ReturnType<typeof vi.fn>, inspectPort: ReturnType<typeof vi.fn>, latest: RendererSceneCaptureResult | null

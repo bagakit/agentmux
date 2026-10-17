@@ -69,7 +69,7 @@ afterEach(async () => { for (const close of clean.splice(0).reverse()) await clo
 function MountedSettings() {
   const [visible, setVisible] = useState(true)
   reopen = () => setVisible(true)
-  return <SettingsPanel visible={visible} initialSection="chat-connections" onClose={() => setVisible(false)} />
+  return <SettingsPanel visible={visible} initialSection="lark" onClose={() => setVisible(false)} />
 }
 async function mount() {
   await dom.render(<MountedSettings />)
