@@ -129,8 +129,9 @@ it('reads native collaboration participants without interpreting text declaratio
   await render([native('before', 1), report, native('after', 5)], [])
   const row = host.querySelector('[data-native-record-id="report"]')!
   expect(host.querySelectorAll('.conversation-record-process')).toHaveLength(2)
-  expect(row.querySelector('.log-turn__who')?.textContent).toBe('native-reviewer')
-  expect(row.querySelector('.log-turn__sender-kind')?.textContent).toBe('协作回报 → native-coordinator')
+  expect(row.querySelector('.log-turn__collaboration-path')?.textContent).toBe('native-reviewer')
+  expect(row.querySelector('.log-turn__collaboration-toggle')?.getAttribute('aria-expanded')).toBe('false')
+  await click('[data-native-record-id="report"] .log-turn__collaboration-toggle')
   expect(row.querySelector('.log-turn__body')?.textContent).toContain('misleading-body-name')
   expect(row.querySelector('.log-turn')?.getAttribute('data-conversation-author')).toBe('{"kind":"unknown"}')
   expect(row.querySelector('[aria-label="Copy Agent ID"]')).toBeNull()

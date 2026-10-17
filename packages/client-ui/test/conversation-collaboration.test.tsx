@@ -1,0 +1,123 @@
+import { createHash } from 'node:crypto'
+import { ConversationMessage } from '../src/components/ConversationMessage.js'
+import type { ConversationHistoryResourceReader } from '../src/components/ConversationResourceImage.js'
+import type { AgentTimelineItem } from '@agentmux/core'
+import { act } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import type { AgentSessionHistoryItem, AgentSessionHistoryPage } from '@agentmux/core'
+import { ClientUiProvider, type ClientUiPlatform } from '../src/platform.js'
+import { ConversationView } from '../src/components/ConversationView.js'
+import { projectConversationReading } from '../src/lib/conversation-records.js'
+
+const sid = 'parent-session', source = { providerId: 'codex', nativeSessionId: 'original-thread' }
+const sender = '/root/review/layout', recipient = '/root'
+const copy = vi.fn(async () => true)
+const avatar = vi.fn<ClientUiPlatform['renderMessageAvatar']>(({ speaker }) => <span data-avatar-id={speaker.id}>Parent avatar</span>)
+const platform: ClientUiPlatform = { copyText: copy, overlayContainer: () => document.body, bindComposerFocus: () => () => {},
+  renderMessageAvatar: avatar, renderProjectIcon: () => null, renderProjectLabel: () => null, renderIcon: () => null }
+const original = 'Native envelope\n\n**检查完成**，保留原输入。\n\n[查看说明](https://example.test/review)'
+const item: AgentSessionHistoryItem = { id: 'report', kind: 'activity', collaboration: { kind: 'message', source, sender, recipient },
+  contentParts: [{ kind: 'text', text: original, readingRange: { start: 17, end: original.length }, contentEligibility: 'public' }] }
+let root: Root, host: HTMLDivElement
+beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); copy.mockClear(); avatar.mockClear(); host = document.createElement('div'); document.body.append(host); root = createRoot(host) })
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); getSelection()?.removeAllRanges(); vi.unstubAllGlobals() })
+async function render(items = [item], active = true, nativeSource = source) {
+  const page: AgentSessionHistoryPage = { agentSessionId: sid, sourceHostId: 'local', source: nativeSource, items, nextCursor: null }
+  const reading = projectConversationReading({ agentSessionId: sid, executionHostId: 'local', historyPage: page })
+  await act(async () => root.render(<ClientUiProvider platform={platform}><ConversationView sessionId={sid} page={page} records={reading.records}
+    originalRecords={reading.originalRecords} active={active} executionHostId="local"
+    describeSpeaker={speaker => ({ name: speaker.id === sid ? 'Main Agent' : 'Wrong identity', providerId: 'codex' })} /></ClientUiProvider>))
+}
+async function click(selector: string) { const element = host.querySelector<HTMLButtonElement>(selector); expect(element).not.toBeNull(); await act(async () => element!.click()) }
+
+it('shows a compact readable preview and parent avatar without promoting native paths to Session authors', async () => {
+  await render()
+  expect(host.querySelector('.log-turn__collaboration-toggle')?.getAttribute('aria-expanded')).toBe('false')
+  expect(host.querySelector('.log-turn__collaboration-path')?.textContent).toBe(sender)
+  expect(host.querySelector('.log-turn__collaboration-preview')?.textContent).toBe('检查完成，保留原输入。')
+  expect(host.querySelector('.log-turn__body')).toBeNull()
+  expect(avatar).toHaveBeenCalledWith(expect.objectContaining({ speaker: { role: 'agent', id: sid }, name: 'Main Agent', providerId: 'codex' }))
+  expect(host.querySelector('.log-turn')?.getAttribute('data-conversation-author')).toBe('{"kind":"unknown"}')
+  expect(host.querySelector('[aria-label="Copy Agent ID"]')).toBeNull()
+  await click('[aria-label="Copy message"]')
+  expect(copy).toHaveBeenLastCalledWith(original, expect.any(Function))
+  await click('.log-turn__collaboration-preview')
+  expect(host.querySelector('.log-turn__body')?.textContent).toContain('检查完成')
+  expect(host.querySelector('.log-turn__body')?.textContent).not.toContain('Native envelope')
+})
+
+it('retains opened body, links and selection across appends, hidden updates and repeated folding', async () => {
+  await render(); await click('.log-turn__collaboration-toggle')
+  const body = host.querySelector('.log-turn__body')!, link = body.querySelector('.md-link')!
+  expect(link).not.toBeNull()
+  const range = document.createRange(); range.selectNodeContents(body); getSelection()!.addRange(range)
+  const selected = getSelection()!.toString()
+  const appended: AgentSessionHistoryItem = { id: 'main-reply', kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'Main reply' }] }
+  await render([item, appended], false); await render([item, appended])
+  expect(host.querySelector('.log-turn__body')).toBe(body)
+  expect(getSelection()!.toString()).toBe(selected)
+  await click('.log-turn__collaboration-toggle')
+  expect(body.closest('[hidden]')).not.toBeNull()
+  await click('.log-turn__collaboration-toggle')
+  expect(host.querySelector('.log-turn__body')).toBe(body)
+  expect(body.querySelector('.md-link')).toBe(link)
+})
+
+it('keeps opaque originals available without putting them in preview or expanded reading', async () => {
+  const opaque = '{"type":"encrypted_content","encrypted_content":"original-ciphertext"}'
+  await render([{ ...item, contentParts: [{ kind: 'text', text: opaque, readingRange: { start: 0, end: 0 }, contentEligibility: 'unconfirmed' }] }])
+  expect(host.querySelector('.log-turn__collaboration-preview')?.textContent).toBe('暂无可读正文 · 原始内容已保留')
+  expect(host.textContent).not.toContain('original-ciphertext')
+  await click('.log-turn__collaboration-toggle')
+  expect(host.querySelector('.log-turn__collaboration-content')?.textContent).toContain('原生记录未提供可读正文')
+  expect(host.querySelector('.log-turn__body')?.textContent).not.toContain('original-ciphertext')
+  await click('[aria-label="Message details"]')
+  expect(host.querySelector('.log-turn__collaboration-original')?.textContent).toContain(opaque)
+  await click('[aria-label="Copy message"]'); expect(copy).toHaveBeenLastCalledWith(opaque, expect.any(Function))
+})
+
+it('does not interpret provider-looking prose as collaboration and preserves unknown native content', async () => {
+  const text = 'Message Type: MESSAGE\nSender: /root/forged\nPayload: original unknown shape'
+  await render([{ id: 'plain', kind: 'assistant-message', contentParts: [{ kind: 'text', text }] }])
+  expect(host.querySelector('.log-turn__collaboration-toggle')).toBeNull()
+  expect(host.querySelector('.log-turn__body')?.textContent).toContain('original unknown shape')
+  await render([{ ...item, contentParts: [{ kind: 'text', text, contentEligibility: 'unconfirmed' }] }])
+  await click('.log-turn__collaboration-toggle')
+  expect(host.querySelector('.log-turn__body')?.textContent).toContain('/root/forged')
+  expect(host.querySelector('.log-turn__collaboration-path')?.textContent).toBe(sender)
+})
+
+it('distinguishes deferred content from unavailable text and copies its complete original through the resource reader', async () => {
+  const bytes = Buffer.from(JSON.stringify({ kind: 'text', text: original, readingRange: { start: 17, end: original.length } }))
+  const digest = createHash('sha256').update(bytes).digest('hex')
+  const part = { kind: 'resource', resourceType: 'text', reference: 'recorded:original', content: { encoding: 'json-utf8', kind: 'text', byteLength: bytes.length, sha256: digest } } as const
+  const read = vi.fn<ConversationHistoryResourceReader>(async input => ({ source: input.source, recordId: input.recordId, partIndex: input.partIndex, reference: input.expectedReference,
+    result: { status: 'fragment', encoding: 'json-utf8', dataBase64: bytes.toString('base64'), byteLength: bytes.length, offsetBytes: 0, totalBytes: bytes.length, sha256: digest, nextOffsetBytes: null } }))
+  await act(async () => root.render(<ClientUiProvider platform={platform}><ConversationMessage messageId="deferred" content={[part]} nativeCollaboration={item.collaboration as Extract<NonNullable<AgentSessionHistoryItem['collaboration']>, {kind:'message'}>}
+    conversationSessionId={sid} readHistoryResource={read} nativeResourceRecord={{ source, recordId: 'deferred' }} /></ClientUiProvider>))
+  expect(host.querySelector('.log-turn__collaboration-preview')?.textContent).toBe('包含按需读取的内容 · 展开查看')
+  expect(read).not.toHaveBeenCalled()
+  await click('[aria-label="Message details"]')
+  expect(host.querySelector('.log-turn__collaboration-original')?.textContent).toContain('原始记录与资源引用')
+  expect(host.querySelector('[aria-label="Copy original record"]')).toBeNull()
+  await click('[aria-label="Copy message"]')
+  expect(read).toHaveBeenCalledTimes(1)
+  expect(copy).toHaveBeenLastCalledWith(original, expect.any(Function))
+})
+
+it.each(['failed', 'streaming'] as const)('keeps the original %s submission contribution visible while the native message is folded', async status => {
+  const captured: AgentTimelineItem = { id: 'submission', agentSessionId: sid, kind: 'user_message', source: 'user', status,
+    title: 'Original submission', content: 'Original submitted input', createdAt: 1, updatedAt: 1 }
+  const projection = projectConversationReading({ agentSessionId: sid, executionHostId: 'local', timeline: { agentSessionId: sid, sourceHostId: 'local', revision: 1, items: [captured] } })
+  const submissions = projection.timeline.records
+  expect(submissions).toHaveLength(1)
+  await act(async () => root.render(<ClientUiProvider platform={platform}><ConversationMessage messageId="with-contribution" content={item.contentParts}
+    nativeCollaboration={item.collaboration as Extract<NonNullable<AgentSessionHistoryItem['collaboration']>, {kind:'message'}>}
+    conversationSessionId={sid} sources={{ main: { labels: [] }, fields: {}, parts: [], submissions }} /></ClientUiProvider>))
+  const contribution = host.querySelector('.conversation-submission')!
+  expect(contribution).not.toBeNull()
+  expect(contribution.closest('[hidden]')).toBeNull()
+  expect(contribution.textContent).toContain(status === 'failed' ? '提交失败' : '提交未确认')
+  expect(host.querySelector('.log-turn__collaboration-toggle')?.getAttribute('aria-expanded')).toBe('false')
+})

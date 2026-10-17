@@ -73,9 +73,11 @@ app.whenReady().then(async () => {
     await read(() => {
       document.querySelectorAll('.conversation-record-process .wf-head').forEach(button => { if (button.getAttribute('aria-expanded') !== 'true') button.click() })
     }); await settle()
+    await until(() => document.querySelector('[data-native-record-id="collaboration-report"] .log-turn__collaboration-toggle'))
+    assert.equal(await read(() => document.querySelector('[data-native-record-id="collaboration-report"] .log-turn__collaboration-path').textContent), '/root/reviewer')
+    assert.equal(await read(() => document.querySelector('[data-native-record-id="collaboration-report"] .log-turn__collaboration-recipient').textContent), '→ /root')
+    await keyboardActivate('[data-native-record-id="collaboration-report"] .log-turn__collaboration-toggle')
     await until(() => document.querySelector('[data-native-record-id="collaboration-report"] .log-turn__body'))
-    assert.equal(await read(() => document.querySelector('[data-native-record-id="collaboration-report"] .log-turn__who').textContent), '/root/reviewer')
-    assert.equal(await read(() => document.querySelector('[data-native-record-id="collaboration-report"] .log-turn__sender-kind').textContent), '协作回报 → /root')
     assert.equal(await read(() => document.querySelector('[data-native-record-id="collaboration-report"] .log-turn__sender-id')), null, 'Native actors are not AgentMux Session identities')
     assert.equal(await read(() => document.querySelector('[data-native-record-id="collaboration-report"] .log-turn__body').textContent.includes('独立评审')), true, 'Recorded collaboration body is directly readable')
     await keyboardActivate('[data-native-record-id="collaboration-report"] [aria-label="Message details"]')
