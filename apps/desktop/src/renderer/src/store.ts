@@ -194,6 +194,8 @@ import type { NotesStorageSnapshot } from '@agentmux/core/notebook-store'
 import { api } from './lib/api'
 import { sessionLaunchFailure } from '../../shared/session-launch-result'
 import { composeAgentPrompt } from '@agentmux/core/agent-outbound-message'
+import type { BrowserOpinionDraft } from './lib/browser-opinion-draft'
+import { frozenBrowserInput, matchesBrowserInputMessage, type BrowserCapturedInput } from './lib/browser-contextual-input'
 import { errorIdentity, presentError } from '@agentmux/client-ui/error-presentation'
 import type { ServiceNoticeKind } from './lib/service-window-notice'
 import { steerEntryTargetsRun, steerQueueCanDrainNow } from './lib/agent-steer-queue-drain'
@@ -584,7 +586,16 @@ const manualSteerAttempts = new Map<string, SteerDeliveryAttempt>()
 
 
 export type AgentSteerReaction = { code: string; replySource: ConversationReplySource }
-export type AgentSteerOptions = { goalDispatch?: import('../../shared/goal-dispatch').GoalDispatchReference; goalPmo?: GoalPmoIntent; execution?: AgentPromptExecution; reaction?: AgentSteerReaction; sourceChannel?: import('@agentmux/core').AgentMessageChannel; goalContinuation?: { goalId: string; loopId: string; condition: AgentPromptCondition } }
+export type AgentSteerOptions = {
+  browserRecipient?: AgentSessionControl
+  browserInput?: BrowserCapturedInput
+  goalDispatch?: import('../../shared/goal-dispatch').GoalDispatchReference
+  goalPmo?: GoalPmoIntent
+  execution?: AgentPromptExecution
+  reaction?: AgentSteerReaction
+  sourceChannel?: import('@agentmux/core').AgentMessageChannel
+  goalContinuation?: { goalId: string; loopId: string; condition: AgentPromptCondition }
+}
 
 export type AgentSteerQueueEntry = {
   operationId: string
@@ -594,6 +605,9 @@ export type AgentSteerQueueEntry = {
   /** null is a new, never-dispatched intent; absence is an unknown historical intent. */
   promptCondition?: AgentPromptCondition | null
   text: string
+  /** Original Main receipt; display cannot certify Core provenance or rebind this intent. */
+  browserInput?: BrowserCapturedInput
+  browserRecipient?: AgentSessionControl
   /** Explicit producer context, frozen with the original user body. */
   agentMuxNote?: string
   /** Original reply reference, frozen in the existing durable intent, never inferred from text. */
@@ -640,17 +654,20 @@ export type AgentSteerQueueEntry = {
 
 /** A missing or frozen condition is not evidence that this message was never submitted. */
 export function agentSteerCanEdit(entry: AgentSteerQueueEntry, inFlightId?: string): boolean {
-  return !entry.archived && !entry.inputIntakeStarted && !entry.inputReceipt && entry.promptCondition === null && entry.operationId !== inFlightId
+  return !entry.browserInput && !entry.archived && !entry.inputIntakeStarted && !entry.inputReceipt && entry.promptCondition === null && entry.operationId !== inFlightId
 }
 
 function manualComposerBinding(sessionId: string, origin?: 'manual', options?: AgentSteerOptions): AgentSteerQueueEntry['directInputBinding'] {
   const session = useAppStore.getState().sessions.find(item => item.id === sessionId)
   // This is the direct user's new producer contract, not a recovered queue tag
   // or an inference from authorHuman, current predecessor or the message body.
+  const recipient = options?.browserRecipient ?? options?.browserInput?.control
   return origin === 'manual' && session?.kind === 'agent' && session.processState === 'running' &&
+    (!recipient || recipient.hostId === session.control.hostId &&
+      recipient.agentSessionId === session.control.agentSessionId && recipient.run.runId === session.control.run.runId) &&
     !options?.goalContinuation && !options?.goalPmo && !options?.goalDispatch &&
     (options?.execution === undefined || options.execution === 'immediate')
-    ? { expectedRun: { ...session.control.run }, admissionIntent: { kind: 'manual-actor' } } : undefined
+    ? { expectedRun: { ...(recipient ?? session.control).run }, admissionIntent: { kind: 'manual-actor' } } : undefined
 }
 
 /** Associate a Core receipt with its original client intent; never infer carriage from a current Run. */
@@ -659,7 +676,10 @@ function originalResumeInputReceipt(session: SessionSnapshot, entry: AgentSteerQ
   if (!original || session.kind !== 'agent' || session.hostId !== original.control.hostId ||
       session.control.agentSessionId !== original.control.agentSessionId) return
   const operation = session.continuityOperations?.[entry.operationId], receipt = operation?.launchInput
-  if (!receipt || receipt.prompt !== composeAgentPrompt(entry.text, entry.agentMuxNote).text ||
+  if (!receipt || operation?.agentSessionId !== original.control.agentSessionId || operation.operationId !== entry.operationId ||
+      receipt.input.inputContextCapture?.hostId !== original.input.inputContextCapture?.hostId ||
+      receipt.input.inputContextCapture?.operationId !== original.input.inputContextCapture?.operationId ||
+      !matchesBrowserInputMessage(entry.browserInput, receipt.message) || receipt.message.userContent !== (entry.text.trim() ? entry.text : undefined) ||
       receipt.input.submissionId !== entry.operationId || receipt.input.prompt !== entry.text ||
       receipt.input.agentMuxNote !== entry.agentMuxNote || receipt.input.authorHuman !== original.input.authorHuman ||
       receipt.input.sourceChannel !== original.input.sourceChannel || operation?.previousRun.runId !== original.control.run.runId) return
@@ -861,6 +881,7 @@ type AppState = {
   moteBotRequests: Record<string, MoteBotRequest>
   moteConnectionSaveIntents: Record<string, MoteConnectionSaveIntent>
   agentComposerDrafts: Record<string, string>
+  browserOpinionDrafts: Record<string, BrowserOpinionDraft>
   agentComposerHistory: Record<string, readonly string[]>
   agentComposerHistoryNavigation: Record<string, Omit<HistoryState, 'entries'> & { entries?: readonly string[] }>
   /** Launcher producer context shares the draft's durable Region owner; editing only changes body. */
@@ -1374,6 +1395,7 @@ type AppState = {
   setLauncherNameDraft(regionId: string, field: LauncherNameField, value: string): void
   setLauncherOptionDraft(regionId: string, providerId: string, optionId: string, choiceId: string | null): void
   appendAgentComposerDraft(sessionId: string, text: string): void
+  saveBrowserOpinionDraft(browserId: string, draft: BrowserOpinionDraft, flush?: boolean): Promise<void>
   clearAgentComposerDraftIfUnchanged(sessionId: string, expectedText: string): void
   /** Queue a steer. `false` means it was refused (empty, not an Agent, or over the size budget) and the caller must keep the draft. */
   enqueueAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void, operationId?: string, origin?: 'manual', agentMuxNote?: string, options?: AgentSteerOptions): boolean
@@ -3465,6 +3487,7 @@ type PersistedAppState = {
   moteBotRequests?: Record<string, MoteBotRequest>
   moteConnectionSaveIntents?: Record<string, MoteConnectionSaveIntent>
   agentComposerDrafts?: Record<string, string>
+  browserOpinionDrafts?: Record<string, BrowserOpinionDraft>
   agentComposerHistory?: Record<string, readonly string[]>
   launcherNameDrafts?: Record<string, LauncherNames>
   launcherOptionDrafts?: LauncherOptionDrafts
@@ -3725,6 +3748,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     moteBotRequests: state.moteBotRequests,
     moteConnectionSaveIntents: state.moteConnectionSaveIntents,
     agentComposerDrafts: state.agentComposerDrafts,
+    browserOpinionDrafts: state.browserOpinionDrafts,
     agentComposerHistory: state.agentComposerHistory,
     launcherNameDrafts: state.launcherNameDrafts,
     launcherOptionDrafts: state.launcherOptionDrafts,
@@ -4248,9 +4272,25 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
   if (!text.trim() && !agentMuxNote?.trim()) return false
   const session = useAppStore.getState().sessions.find((item) => item.id === sessionId)
   if (!session || session.kind !== 'agent') return false
+  const browserRecipient = options?.browserRecipient ?? options?.browserInput?.control
+  if (browserRecipient && (origin !== 'manual' || browserRecipient.hostId !== session.control.hostId ||
+      browserRecipient.agentSessionId !== session.control.agentSessionId || browserRecipient.run.runId !== session.control.run.runId)) {
+    (onRejected ?? useAppStore.getState().reportError)(new Error('The original Browser recipient changed. Your draft is kept; no current recipient was substituted.'))
+    return false
+  }
+  let browserInput: BrowserCapturedInput | undefined
+  if (options?.browserInput) {
+    try {
+      browserInput = frozenBrowserInput(options.browserInput, sessionId, operationId, text, agentMuxNote)
+      if (origin !== 'manual' || browserInput.control.hostId !== session.control.hostId ||
+          browserInput.control.agentSessionId !== session.control.agentSessionId || browserInput.control.run.runId !== session.control.run.runId) {
+        throw new Error('The original recipient Run changed. Your draft and captured page are kept; choose a new recipient explicitly before sending another message.')
+      }
+    } catch (error) { (onRejected ?? useAppStore.getState().reportError)(error); return false }
+  }
   const existing = useAppStore.getState().agentSteerQueues[sessionId]?.find(entry => entry.operationId === operationId)
   if (existing) {
-    if (existing.text === text && existing.agentMuxNote === agentMuxNote && reactionIntentKey(existing.reaction) === reactionIntentKey(options?.reaction) && existing.sourceChannel === options?.sourceChannel && JSON.stringify(existing.goalContinuation) === JSON.stringify(options?.goalContinuation) && JSON.stringify(existing.goalPmo) === JSON.stringify(options?.goalPmo) && JSON.stringify(existing.goalDispatch) === JSON.stringify(options?.goalDispatch) && (options?.execution === undefined || existing.execution === options.execution)) return operationId
+    if (existing.text === text && existing.agentMuxNote === agentMuxNote && JSON.stringify(existing.browserInput) === JSON.stringify(browserInput) && JSON.stringify(existing.browserRecipient) === JSON.stringify(browserRecipient) && reactionIntentKey(existing.reaction) === reactionIntentKey(options?.reaction) && existing.sourceChannel === options?.sourceChannel && JSON.stringify(existing.goalContinuation) === JSON.stringify(options?.goalContinuation) && JSON.stringify(existing.goalPmo) === JSON.stringify(options?.goalPmo) && JSON.stringify(existing.goalDispatch) === JSON.stringify(options?.goalDispatch) && (options?.execution === undefined || existing.execution === options.execution)) return operationId
     ;(onRejected ?? useAppStore.getState().reportError)(new Error('This message identity already belongs to different content or an earlier execution choice. Your original message and draft are kept.'))
     return false
   }
@@ -4259,7 +4299,7 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
     return false
   }
   // The shared Core formatter owns byte accounting; transport still keeps body and note separate.
-  if (agentPromptExceedsBudget(composeAgentPrompt(text, agentMuxNote).text)) {
+  if (agentPromptExceedsBudget(composeAgentPrompt(text, agentMuxNote, browserInput?.capture.record.inputContext).text)) {
     (onRejected ?? useAppStore.getState().reportError)(new Error(
       `This message is too large to send (limit ${Math.floor(MAX_AGENT_PROMPT_BYTES / 1024)}KB). Shorten it, or put the content in a file and reference the path.`
     ))
@@ -4268,7 +4308,7 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
   const entry: AgentSteerQueueEntry = {
     operationId,
     promptCondition: options?.goalContinuation ? validateAgentPromptCondition(options.goalContinuation.condition) : null,
-    ...(directInputBinding ? { directInputBinding, directInputControl: structuredClone(session.control), runId: directInputBinding.expectedRun.runId } : {}),
+    ...(directInputBinding ? { directInputBinding, directInputControl: structuredClone(browserRecipient ?? session.control), runId: directInputBinding.expectedRun.runId } : {}),
     ...(options?.execution === undefined ? {} : { execution: options.execution }),
     ...(options?.goalContinuation ? { goalContinuation: structuredClone(options.goalContinuation) } : {}),
     ...(options?.goalPmo ? { goalPmo: structuredClone(options.goalPmo) } : {}),
@@ -4277,6 +4317,8 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
     ...(session.processState === 'running' && (session.status.state !== 'disconnected' || options?.reaction !== undefined)
       ? { runId: session.control.run.runId } : {}),
     text,
+    ...(browserInput ? { browserInput } : {}),
+    ...(browserRecipient ? { browserRecipient: structuredClone(browserRecipient) } : {}),
     ...(agentMuxNote === undefined ? {} : { agentMuxNote }),
     ...(options?.reaction ? { reaction: structuredClone(options.reaction) } : {}),
     ...(options?.sourceChannel ? { sourceChannel: options.sourceChannel } : {}),
@@ -4671,6 +4713,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   hostChecks: {},
   browserAnnotationsByBrowserId: {},
   agentComposerDrafts: {},
+  browserOpinionDrafts: {},
   agentComposerHistory: {},
   agentComposerHistoryNavigation: {},
   agentComposerNotes: {},
@@ -10396,6 +10439,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { launcherOptionDrafts: drafts }
     })
   },
+  async saveBrowserOpinionDraft(browserId, draft, flush = false) {
+    set(state => ({ browserOpinionDrafts: { ...state.browserOpinionDrafts, [browserId]: structuredClone(draft) } }))
+    // Reuse the original workbench writer. Saving observations never grants an input retry.
+    if (flush) await flushMessageWorkbench(true)
+  },
   appendAgentComposerDraft(sessionId, text) {
     if (!text.trim()) return
     const current = get().agentComposerDrafts[sessionId] ?? ''
@@ -10552,6 +10600,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!whollyRefused) return get().sendQueuedAgentSteer(sessionId, operationId)
     // Goal business input identities belong to their original owner. A queue resend
     // cannot bypass that contract by copying its metadata onto a new operation.
+    if (entry.browserInput) throw controlFailure('AGENT_PROMPT_CONDITION_CHANGED',
+      'The original captured message was not applied. Its text and scene are kept. Move its words to a new draft instead of attaching the old capture to a new input identity.')
     if (entry.goalContinuation || entry.goalPmo || entry.goalDispatch) {
       return get().sendQueuedAgentSteer(sessionId, operationId).catch(error => {
         error.message += '\n原 Goal 业务输入已保留。请在原 Goal 查看并明确建立新的业务输入，或另写一条普通消息。'
@@ -10583,9 +10633,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const session = get().sessions.find(item => item.id === sessionId)
     if (entry?.freshComposerIntent && !entry.resumeInputIntent && !entry.directInputBinding && !entry.inputIntakeStarted && entry.promptCondition === null &&
         get().agentSteerInFlight[sessionId] !== operationId && !entry.goalContinuation && !entry.goalPmo && !entry.goalDispatch) {
-      const binding = manualComposerBinding(sessionId, 'manual', entry.execution === undefined ? undefined : { execution: entry.execution })
+      const binding = manualComposerBinding(sessionId, 'manual', { ...(entry.execution === undefined ? {} : { execution: entry.execution }), ...(entry.browserInput ? { browserInput: entry.browserInput } : {}), ...(entry.browserRecipient ? { browserRecipient: entry.browserRecipient } : {}) })
       if (binding && session?.kind === 'agent') {
-        entry = { ...entry, directInputBinding: binding, directInputControl: structuredClone(session.control), runId: binding.expectedRun.runId, execution: 'immediate' }
+        entry = { ...entry, directInputBinding: binding, directInputControl: structuredClone(entry.browserRecipient ?? entry.browserInput?.control ?? session.control), runId: binding.expectedRun.runId, execution: 'immediate' }
         const selected = entry
         set(current => ({ agentSteerQueues: { ...current.agentSteerQueues, [sessionId]: (current.agentSteerQueues[sessionId] ?? []).map(item =>
           item.operationId === operationId ? selected : item) } }))
@@ -10610,6 +10660,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (get().agentSteerInFlight[sessionId] === operationId) throw controlFailure('AGENT_PROMPT_SUBMISSION_BUSY', 'This original message already has an active send attempt. Its original input is kept.')
       if (!entry.directInputBinding && session?.kind !== 'agent') throw controlFailure('UNKNOWN_AGENT_SESSION', 'The original Agent Session is unavailable. No replacement or input was created.')
       const currentRunId = session?.kind === 'agent' ? session.control.run.runId : undefined
+      if (entry.browserRecipient && !entry.directInputBinding && !entry.resumeInputIntent && session?.kind === 'agent' &&
+          (session.control.hostId !== entry.browserRecipient.hostId || session.control.run.runId !== entry.browserRecipient.run.runId)) {
+        throw controlFailure('STALE_AGENT_SESSION', 'The original captured recipient changed. This message is kept for inspection; no new Run was selected.')
+      }
       const changedRun = currentRunId !== undefined && entry.runId !== undefined && !steerEntryTargetsRun(entry, currentRunId)
       if (!entry.directInputBinding && changedRun && (entry.promptCondition !== null || entry.goalContinuation !== undefined)) {
         throw controlFailure('STALE_AGENT_SESSION', `The original delivery belongs to Run ${entry.runId}; the Session now points to Run ${currentRunId}. Inspect the original delivery before sending it to another Run.`, {
@@ -10618,6 +10672,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         })
       }
       manualSteerAttempts.set(attemptKey, attempt)
+      if (changedRun && entry.browserRecipient) throw controlFailure('STALE_AGENT_SESSION',
+        'This opinion belongs to the original captured Run. Its message and capture are retained; inspect that delivery before composing a new opinion.')
       const rebindRun = changedRun && !entry.directInputBinding
       set(state => ({ agentSteerQueues: { ...state.agentSteerQueues,
         [sessionId]: state.agentSteerQueues[sessionId]!.map(item => {
@@ -10652,7 +10708,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const queue = state.agentSteerQueues[sessionId]
         if (!queue) return state
         return { agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: queue.map(item =>
-          !item.archived && item.operationId === operationId && item.text === entry?.text && item.agentMuxNote === entry?.agentMuxNote && item.sourceChannel === entry?.sourceChannel
+          !item.archived && item.operationId === operationId && item.text === entry?.text && item.agentMuxNote === entry?.agentMuxNote && item.sourceChannel === entry?.sourceChannel &&
+            JSON.stringify(item.browserInput) === JSON.stringify(entry?.browserInput) && JSON.stringify(item.browserRecipient) === JSON.stringify(entry?.browserRecipient)
             ? { ...item, awaitingExplicitSend: true as const, error: reason, logId: diagnostic.logId,
                 ...(failure.code ? { errorCode: failure.code } : {}), status: 'deferred' as const } : item) } }
       })
@@ -10827,7 +10884,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           const matchesAttempt = (item: AgentSteerQueueEntry) =>
             !item.archived && item.operationId === entry.operationId && item.runId === attemptRunId &&
             item.text === entry.text && item.agentMuxNote === entry.agentMuxNote &&
-            item.sourceChannel === entry.sourceChannel && reactionIntentKey(item.reaction) === reactionIntentKey(entry.reaction) && JSON.stringify(item.goalContinuation) === JSON.stringify(entry.goalContinuation) && JSON.stringify(item.goalPmo) === JSON.stringify(entry.goalPmo) && JSON.stringify(item.goalDispatch) === JSON.stringify(entry.goalDispatch) &&
+            item.sourceChannel === entry.sourceChannel && JSON.stringify(item.browserInput) === JSON.stringify(entry.browserInput) && JSON.stringify(item.browserRecipient) === JSON.stringify(entry.browserRecipient) && reactionIntentKey(item.reaction) === reactionIntentKey(entry.reaction) && JSON.stringify(item.goalContinuation) === JSON.stringify(entry.goalContinuation) && JSON.stringify(item.goalPmo) === JSON.stringify(entry.goalPmo) && JSON.stringify(item.goalDispatch) === JSON.stringify(entry.goalDispatch) &&
             (!dispatchStarted || item.execution === attemptExecution) &&
             (item.promptCondition === null) === (attemptCondition === null) &&
             item.promptCondition?.expectedRun.runId === attemptCondition?.expectedRun.runId &&
@@ -10837,6 +10894,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             agentSteerInFlightPhase: { ...current.agentSteerInFlightPhase, [sessionId]: 'preparing' }
           }))
           try {
+            // Persisted projection failures keep this original message; never strip its context and send plain text.
+            if (entry.browserInput) frozenBrowserInput(entry.browserInput, attemptSessionId, entry.operationId, entry.text, entry.agentMuxNote)
             if (entry.directInputBinding) {
               const control = entry.directInputControl
               if (!control || control.agentSessionId !== sessionId || control.run.runId !== entry.directInputBinding.expectedRun.runId) throw controlFailure(
@@ -10854,7 +10913,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                 ? observed.status === 'stopped' || observed.status === 'waiting' && (observed.observation === 'rejoin-needed' || observed.control.waiting?.wake === 'explicit-rejoin')
                   ? await api.sessions.rejoinInputWaiting(control, observed.ref) : observed
                 : await api.sessions.submitPrompt(control, entry.text, entry.operationId, entry.directInputBinding,
-                    { execution: 'immediate' }, entry.origin === 'manual', entry.agentMuxNote, entry.sourceChannel)
+                    { execution: 'immediate' }, entry.origin === 'manual', entry.agentMuxNote, entry.sourceChannel, undefined, undefined, undefined, entry.browserInput?.capture.reference)
               if (!receipt) throw controlFailure('AGENT_PROMPT_INPUT_UNCONFIRMED', 'The original manual input has no typed receipt. Its text and identity are retained.')
               consumeInputReceipt(sessionId, receipt)
               if (receipt.status === 'admitted' || receipt.status === 'terminal-confirmed') drain.submitted.add(entry.operationId)
@@ -10870,7 +10929,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                 }) } }))
               deliveryAttempt.stage = 'session-recovery'
               const resumeInputIntent = entry.resumeInputIntent ?? (entry.freshComposerIntent && entry.promptCondition === null
-                ? { control: structuredClone(session.control), input: { submissionId: entry.operationId, prompt: entry.text,
+                ? { control: structuredClone(entry.browserRecipient ?? entry.browserInput?.control ?? session.control), input: { submissionId: entry.operationId, prompt: entry.text,
+                    ...(entry.browserInput ? { inputContextCapture: entry.browserInput.capture.reference } : {}),
                     ...(entry.agentMuxNote === undefined ? {} : { agentMuxNote: entry.agentMuxNote }),
                     ...(entry.origin === 'manual' ? { authorHuman: true } : {}), sourceChannel: entry.sourceChannel ?? 'message-tool' } } : undefined)
               if (resumeInputIntent) set(current => ({ agentSteerQueues: { ...current.agentSteerQueues,
@@ -11009,7 +11069,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                     ...(retryMessage.execution === 'immediate' ? { execution: 'immediate' as const } : {}), ...(preparationRetry ? { preparationRetry } : {}) }
                     : retryMessage.execution === 'immediate' ? { execution: 'immediate' } : undefined,
                   retryMessage.origin === 'manual', retryMessage.agentMuxNote, retryMessage.sourceChannel,
-                  retryMessage.goalContinuation ? { goalId: retryMessage.goalContinuation.goalId, loopId: retryMessage.goalContinuation.loopId } : undefined, retryMessage.goalPmo, retryMessage.goalDispatch)
+                  retryMessage.goalContinuation ? { goalId: retryMessage.goalContinuation.goalId, loopId: retryMessage.goalContinuation.loopId } : undefined, retryMessage.goalPmo, retryMessage.goalDispatch, retryMessage.browserInput?.capture.reference)
                   if (receipt) throw new Error('The original exact queue input returned a different controlled admission contract.') }
               })
             } finally { if (preparationRetryCalls.get(retryKey) === retryCall) preparationRetryCalls.delete(retryKey) }
