@@ -40,6 +40,62 @@ async function trace() {
   await vi.waitFor(() => expect(document.querySelector('.connector-request-trace table')).not.toBeNull())
 }
 
+it.each([1, 2])('keeps the original QR mounted while a status %s poll is pending across local progress inspections', async status => {
+  await ready()
+  const transport = f.registration.getMockImplementation()!
+  let polling = 0, arrive!: () => void, release!: () => void
+  const arrived = new Promise<void>(resolve => { arrive = resolve }), held = new Promise<void>(resolve => { release = resolve })
+  f.registration.mockImplementation(async (url, input) => {
+    const target = new URL(url instanceof Request ? url.url : String(url))
+    if (target.pathname === '/accounts/qrlogin/polling') {
+      polling++
+      if (polling === 1) return Response.json({ code: 0, data: { next_step: 'qr_login_polling', step_info: { status } } })
+      if (polling === 2) { arrive(); await held }
+    }
+    return transport(url, input)
+  })
+  await f.click('Sync Mote profile')
+  await vi.waitFor(() => expect(document.querySelector('[data-mote-profile-code] svg')).not.toBeNull())
+  const qr = document.querySelector('[data-mote-profile-code] svg')
+  try {
+    await arrived
+    const reads = f.connectionCalls.mock.calls.filter(([method]) => method === 'connection.setup.inspect').length
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 2200)) })
+    expect(f.connectionCalls.mock.calls.filter(([method]) => method === 'connection.setup.inspect').length).toBeGreaterThan(reads + 1)
+    expect(document.querySelector('[data-mote-profile-code] svg'), 'A pending poll cannot unmount the original scannable QR').toBe(qr)
+    expect(native.requests).toEqual([])
+    expect(f.creationCount).toBe(1)
+  } finally { await act(async () => release()) }
+  await vi.waitFor(() => expect(document.querySelector('[data-mote-profile-action="confirm-account"]')).not.toBeNull(), { timeout: 10_000 })
+  expect(document.querySelector('[data-mote-profile-code]')).toBeNull()
+}, 30_000)
+
+it('withdraws a known expired QR even while the following local progress read is pending', async () => {
+  await ready()
+  const transport = f.registration.getMockImplementation()!, read = f.connectionCalls.getMockImplementation()!
+  let expired = false, arrive!: () => void, release!: () => void
+  const arrived = new Promise<void>(resolve => { arrive = resolve }), held = new Promise<void>(resolve => { release = resolve })
+  f.registration.mockImplementation(async (url, input) => new URL(url instanceof Request ? url.url : String(url)).pathname === '/accounts/qrlogin/polling'
+    ? Response.json({ code: 0, data: { next_step: 'qr_login_polling', step_info: { status: 5 } } }) : transport(url, input))
+  f.parentCalls.mockImplementation(async (method, input) => {
+    const result = await f.forward(method, input)
+    if (result.setup?.authentication?.stage === 'expired') expired = true
+    return result
+  })
+  f.connectionCalls.mockImplementation(async (method, input) => {
+    if (method === 'connection.setup.inspect' && expired) { arrive(); await held }
+    return read(method, input)
+  })
+  await f.click('Sync Mote profile')
+  await vi.waitFor(() => expect(document.querySelector('[data-mote-profile-code] svg')).not.toBeNull())
+  try {
+    await arrived
+    await vi.waitFor(() => expect(document.querySelector('[data-mote-profile-code]')).toBeNull())
+    expect(native.requests).toEqual([])
+  } finally { await act(async () => release()) }
+  await vi.waitFor(() => expect(document.querySelector('[data-mote-profile-action="renew"]')).not.toBeNull())
+}, 30_000)
+
 it('updates and publishes the exact saved bot through Settings IPC, Console and the public owner without another bot or SDK write', async () => {
   await ready()
   expect(currentStep()).toBe('1')
