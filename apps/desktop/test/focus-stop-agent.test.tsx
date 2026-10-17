@@ -8,7 +8,7 @@ import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
-import { createFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
+import { agentContextForSession, createFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 vi.mock('../src/renderer/src/components/AgentAvatar', () => ({ AgentAvatar: () => <span /> }))
 import { FocusContextRow } from '../src/renderer/src/components/FocusContextRow'
@@ -153,4 +153,78 @@ it.each(['card', 'toolbar', 'title'] as const)('offers explicit Restart from the
   expect(restart).not.toHaveBeenCalled(); expect(api.sessions.stop).not.toHaveBeenCalled()
   await act(async () => document.querySelector<HTMLButtonElement>('.confirmation-dialog__cancel')!.click()); await settle()
   retained(before)
+})
+
+function ExactTargetScene({ session, withControl = true }: { session: typeof target; withControl?: boolean }) {
+  const { control, ...presentation } = agentContextForSession(session, undefined, 'Same Agent', composerConfig.workspaces[0], null)
+  const context = { ...presentation, ...(withControl && control ? { control } : {}) }
+  return <><FocusContextRow context={context} selected={false} onSelect={select} />
+    <FocusToolbar selectedId={session.id} selected={context} tab={tab} reference={{ displayWorkspaceId: 'workspace', groupId: 'stop-group', tabId: tab.id, regionId: 'stop-region' }} onReview={() => {}} onCloseWorkspace={collapse}>Filters</FocusToolbar></>
+}
+async function exactTarget(session: typeof target, neighbors: typeof target[] = [first], withControl = true) {
+  await act(async () => {
+    useAppStore.setState({ sessions: [...neighbors, session] })
+    root.render(<ExactTargetScene session={session} withControl={withControl} />)
+  })
+}
+it.each(['card', 'toolbar', 'title'] as const)('the original %s target keeps a same-SID remote Host, even with a local match first', async entry => {
+  const remote = { ...target, hostId: 'remote', control: { ...target.control, hostId: 'remote', run: { runId: 'remote-original-run' } } }
+  await exactTarget(remote, [target])
+  const before = useAppStore.getState()
+  await open(entry); await act(async () => confirm().click()); await settle()
+  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(remote.control)
+  expect(useAppStore.getState().sessions).toBe(before.sessions); retained(before)
+})
+it.each(['card', 'toolbar', 'title'] as const)('the original %s target uses its canonical control while retaining a presentation alias', async entry => {
+  const alias = { ...target, control: { ...target.control, agentSessionId: 'canonical-original-agent' } }
+  const unrelated = composerSession(alias.control.agentSessionId)
+  await exactTarget(alias, [unrelated])
+  const before = useAppStore.getState()
+  await open(entry); await act(async () => confirm().click()); await settle()
+  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(alias.control); retained(before)
+})
+it('copies the canonical Agent link from the original alias card', async () => {
+  const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  const alias = { ...target, control: { ...target.control, agentSessionId: 'canonical-original-agent' } }
+  await exactTarget(alias)
+  await act(async () => card().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }))); await settle()
+  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Copy Agent Link')
+  expect(item).toBeDefined()
+  await act(async () => item!.click()); await settle()
+  expect(copy).toHaveBeenCalledExactlyOnceWith('amux://agent/canonical-original-agent')
+})
+it.each(['missing-control', 'stale-run', 'unobserved-run'] as const)('refuses only the card operation with %s and keeps the healthy original workface', async reason => {
+  await exactTarget(target, [first], reason !== 'missing-control')
+  if (reason !== 'missing-control') await act(async () => useAppStore.setState({ sessions: [first,
+    reason === 'stale-run' ? { ...target, control: { ...target.control, run: { runId: 'changed-before-menu' } } }
+      : { ...target, runUnobserved: true }] }))
+  const before = useAppStore.getState()
+  await act(async () => card().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }))); await settle()
+  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Stop Agent')
+  expect(item).toBeDefined(); await act(async () => item!.click()); await settle()
+  expect(document.querySelector('[role="dialog"]')).toBeNull(); expect(api.sessions.stop).not.toHaveBeenCalled()
+  expect(useAppStore.getState().errorNoticeContext?.summary).toContain('original work surface is kept')
+  expect(useAppStore.getState().sessions).toBe(before.sessions); retained(before)
+})
+it('rechecks the original presentation Host, canonical identity and observed Run at confirmation', async () => {
+  const remote = { ...target, hostId: 'remote', control: { ...target.control, hostId: 'remote' } }
+  await exactTarget(remote, [target]); await open()
+  await act(async () => useAppStore.setState({ sessions: [target, { ...remote, runUnobserved: true }] }))
+  const before = useAppStore.getState()
+  await act(async () => confirm().click()); await settle()
+  expect(api.sessions.stop).not.toHaveBeenCalled(); retained(before)
+  expect(useAppStore.getState().errorNoticeContext?.subject).toEqual(remote.control)
+})
+
+it('keeps Copy available for an unobserved canonical identity and reports without writing the clipboard', async () => {
+  const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  await exactTarget(target, [first], false)
+  const before = useAppStore.getState()
+  await act(async () => card().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }))); await settle()
+  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Copy Agent Link')
+  expect(item).toBeDefined(); await act(async () => item!.click()); await settle()
+  expect(copy).not.toHaveBeenCalled()
+  expect(useAppStore.getState().error).toContain('canonical Agent identity is not confirmed')
+  expect(useAppStore.getState().errorNoticeContext?.summary).toContain('Refresh this Agent’s identity')
+  expect(useAppStore.getState().sessions).toBe(before.sessions); retained(before)
 })

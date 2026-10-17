@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act, createElement, memo, Profiler } from 'react'
@@ -27,8 +28,8 @@ const initial = useAppStore.getState(), firstId = 'recap-exact-a', secondId = 'r
 const requestText = '核对滚动锚点与窄窗口正文', responseText = '已修复锚点，正在核对窄窗口的正文和关闭按钮。'
 let root: Root, container: HTMLDivElement, agent: Extract<SessionSnapshot, { kind: 'agent' }>
 const message = (kind: 'user_message' | 'assistant_message', content: string, time: number): AgentTimelineItem => ({ id: `${kind}-${time}`, agentSessionId: firstId, kind, status: 'complete', source: 'native-hook', title: kind, content, createdAt: time, updatedAt: time })
-const tool: AgentTimelineItem = { id: 'tool-3', agentSessionId: firstId, kind: 'tool_call', status: 'complete', source: 'native-hook', title: 'Bash', toolName: 'Bash', toolInput: JSON.stringify({ command: 'pnpm test --filter scroll-anchor' }), createdAt: 3, updatedAt: 3 }
-const items = [message('user_message', requestText, 1), message('assistant_message', responseText, 2), tool]
+const tool: AgentTimelineItem = { id: 'tool-3', agentSessionId: firstId, kind: 'tool_call', status: 'complete', source: 'native-hook', title: 'Bash', toolName: 'Bash', toolInput: JSON.stringify({ command: 'pnpm test --filter scroll-anchor' }), createdAt: _tailFixtureEpoch(0, 0, 3), updatedAt: _tailFixtureEpoch(0, 0, 3) }
+const items = [message('user_message', requestText, _tailFixtureEpoch(0, 0, 1)), message('assistant_message', responseText, _tailFixtureEpoch(0, 0, 2)), tool]
 const timeline = (recorded: AgentTimelineItem[] = items): AgentTimelineSnapshot => ({ agentSessionId: firstId, revision: recorded.length, items: recorded })
 const row = (id = firstId) => { const node = container.querySelector<HTMLButtonElement>(`.focus-context[data-session-id="${id}"]`); expect(node).not.toBeNull(); return node! }
 const recapLine = () => { const node = row().querySelector<HTMLElement>('.focus-context__recap'); expect(node).not.toBeNull(); return node! }
@@ -75,7 +76,7 @@ it('shows the existing labelled recap together with a newer concrete tool withou
   expect(row().dataset.bucket).toBe('working'); expect(native.mock.calls).toEqual([]); expect(reread.mock.calls).toEqual([])
 })
 it('falls back to the recorded request while empty facts keep the existing honest work detail', async () => {
-  await act(async () => useAppStore.setState({ timelines: { [firstId]: timeline([message('user_message', requestText, 1), tool]) } }))
+  await act(async () => useAppStore.setState({ timelines: { [firstId]: timeline([message('user_message', requestText, _tailFixtureEpoch(0, 0, 1)), tool]) } }))
   await mount(); expect(recapLine().textContent).toBe(requestText)
   expect(row().getAttribute('aria-label')).toContain('Last prompt (timeline)')
   expect(row(secondId).querySelector('.focus-context__recap')).toBeNull()
@@ -83,7 +84,7 @@ it('falls back to the recorded request while empty facts keep the existing hones
 })
 it('labels an old reply as an excerpt without making the next request a current result', async () => {
   await update({ status: { ...agent.status, state: 'done' } })
-  await act(async () => useAppStore.setState({ timelines: { [firstId]: timeline([message('assistant_message', responseText, 2), message('user_message', '继续检查加载', 4)]) } }))
+  await act(async () => useAppStore.setState({ timelines: { [firstId]: timeline([message('assistant_message', responseText, _tailFixtureEpoch(0, 0, 2)), message('user_message', '继续检查加载', _tailFixtureEpoch(0, 0, 4))]) } }))
   await mount(); expect(row().dataset.bucket).toBe('idle'); expect(row().getAttribute('aria-label')).toContain('Last reply observation (timeline)')
   expect(row().querySelector('.focus-context__activity')).toBeNull()
   expect(row().getAttribute('aria-label')).toContain('Prompt · 继续检查加载')
@@ -101,7 +102,7 @@ it('retains the unconfirmed directory service explanation beside a previously ob
   await act(async () => useAppStore.setState(state => ({
     config: { ...state.config!, workspaces: [{ id: '__scratch__', name: 'Topics', hostId: 'local', kind: 'folder', path: _hygiene_fixturePath("unconfirmed-mote") }] },
     sessions: [{ ...agent, workspacePath: _hygiene_fixturePath("unconfirmed-mote/topic--launcher--unconfirmed"), status: { ...agent.status, state: 'running' } }],
-    scratchTopicSnapshots: {}, timelines: { [firstId]: timeline([message('assistant_message', responseText, 2)]) }
+    scratchTopicSnapshots: {}, timelines: { [firstId]: timeline([message('assistant_message', responseText, _tailFixtureEpoch(0, 0, 2))]) }
   })))
   await mount(); expect(recapLine().textContent).toBe(responseText)
   const service = row().querySelector('.focus-context__activity'); expect(service).not.toBeNull()
@@ -111,8 +112,8 @@ it('retains the unconfirmed directory service explanation beside a previously ob
 it.each([
   ['permission', { pendingInteraction: { id: 'p', kind: 'permission', title: 'Allow editing src/scroll.ts?', operation: 'edit' } }, 'Allow editing src/scroll.ts?'],
   ['question', { pendingInteraction: { id: 'q', kind: 'question', questions: [{ id: 'choice', title: 'Release', prompt: 'Ship stable or canary?', options: [] }] } }, 'Ship stable or canary?'],
-  ['failure', { status: { state: 'error', source: 'native-hook', observedAt: 2, detail: 'History reader unavailable; original Run retained' } }, 'History reader unavailable; original Run retained'],
-  ['connection', { status: { state: 'disconnected', source: 'native-hook', observedAt: 2, detail: 'Connection lost; current execution unconfirmed' } }, 'Connection lost; current execution unconfirmed']
+  ['failure', { status: { state: 'error', source: 'native-hook', observedAt: _tailFixtureEpoch(0, 0, 2), detail: 'History reader unavailable; original Run retained' } }, 'History reader unavailable; original Run retained'],
+  ['connection', { status: { state: 'disconnected', source: 'native-hook', observedAt: _tailFixtureEpoch(0, 0, 2), detail: 'Connection lost; current execution unconfirmed' } }, 'Connection lost; current execution unconfirmed']
 ] as const)('keeps the actual %s directly readable above an old recap', async (_kind, patch, expected) => {
   await update(patch as unknown as Partial<typeof agent>); await mount()
   expect(row().querySelector('.focus-context__recap')).toBeNull()
@@ -122,7 +123,7 @@ it.each([
 it('copies the exact second same-name Session with no guessed Region or lifecycle action', async () => {
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined), source = useAppStore.getState()
   await mount(); await open()
-  expect([...menu().querySelectorAll('[role="menuitem"]')].map(node => node.textContent?.trim())).toEqual(['Rename Agent', 'Copy Agent Link', 'Stop Agent'])
+  expect([...menu().querySelectorAll('[role="menuitem"]')].map(node => node.textContent?.trim())).toEqual(['Rename Agent', 'Copy Agent Link', 'Restart Session…', 'Stop Agent'])
   await choose('Copy Agent Link'); expect(copy).toHaveBeenCalledExactlyOnceWith(formatSessionAddress(secondId))
   expect(copy.mock.calls[0]![0]).not.toContain('region:'); expect(useAppStore.getState().agentFocus).toBe(source.agentFocus)
   expect(useAppStore.getState().sessions).toBe(source.sessions); expect(useAppStore.getState().agentComposerDrafts).toBe(source.agentComposerDrafts)
