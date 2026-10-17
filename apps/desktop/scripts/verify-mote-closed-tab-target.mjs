@@ -9,6 +9,8 @@ import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
 
 const desktop = resolve(import.meta.dirname, '..'), repository = resolve(desktop, '../..')
 const fixture = join(desktop, 'scripts/fixtures/mote-closed-tab-target'), require = createRequire(join(desktop, 'package.json'))
+const zoneSelection = process.argv.includes('--zone-selection')
+const phaseRunner = zoneSelection ? join(desktop, 'scripts/fixtures/mote-zone-selection/main.cjs') : join(fixture, 'main.cjs')
 const affectedEmptyOnly = process.argv.includes('--affected-empty-only')
 const overlayActions = process.argv.includes('--overlay-actions')
 const retainedSurface = process.argv.includes('--retained-surface')
@@ -39,7 +41,7 @@ const binding = { name: 'bind-closed-tab-current-source', enforce: 'pre', async 
 } }
 let controlledApiTransforms = 0
 const result = { schema: 'agentmux.mote-closed-tab-proof.v1', passed: false, aestheticReview: 'not-performed', userRunTouched: false,
-  phases: [], affectedEmptyOnly, retainedSurface, privateProfile: join(privateRoot, 'user-data'), cleanup: null,
+  phases: [], zoneSelection, affectedEmptyOnly, retainedSurface, privateProfile: join(privateRoot, 'user-data'), cleanup: null,
   limitations: ['Only controlled public Session/API facts. Real ordinary initialize consumes durable workbench and requests exact retained Session/Run recovery in the second process; no Core/ctxmux/CLI survival claim.',
     'Complete production desktop App branch; no Browser Region is seeded and no Native Browser input/composition claim is made. CDP exercises real Chromium controls, not hardware or OS IME.',
     'Lightweight isolated Renderer compilation, not a formal build/package/install. Screenshot success does not constitute independent aesthetic approval.'] }
@@ -67,7 +69,7 @@ try {
   }
   const outDir = join(privateRoot, 'renderer')
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error', esbuild: { jsx: 'automatic' },
-    resolve: { alias: aliases }, define: { __AGENTMUX_WEB_PREVIEW__: 'false', 'process.env.NODE_ENV': '"production"' },
+    worker: { format: 'es' }, resolve: { alias: aliases }, define: { __AGENTMUX_WEB_PREVIEW__: 'false', 'process.env.NODE_ENV': '"production"' },
     css: { postcss: { plugins: [stylesheetBinding] } }, plugins: [binding, {
       name: 'private-closed-tab-public-api-boundary', enforce: 'pre', transform(code, id) {
         if (id.split('?')[0] !== join(desktop, 'src/renderer/src/lib/api.ts')) return null
@@ -91,10 +93,11 @@ try {
   result.stylesheets = Object.fromEntries([...styles].sort().map(file => [relative(repository, file), inputs.get(file)]))
   result.compiled = compiled; result.controlledApiTransforms = controlledApiTransforms
   const env = { ...process.env, MOTE_CLOSED_TAB_AFFECTED_EMPTY_ONLY: affectedEmptyOnly ? '1' : '0', MOTE_CLOSED_TAB_OVERLAY_ACTIONS: overlayActions ? '1' : '0', MOTE_CLOSED_TAB_RETAINED_SURFACE: retainedSurface ? '1' : '0' }; delete env.ELECTRON_RUN_AS_NODE
+  inputs.set(phaseRunner, hash(await readFile(phaseRunner)))
   for (const phase of ['seed', 'restore']) {
     for (const [file, digest] of Object.entries(compiled)) assert.equal(hash(await readFile(join(outDir, file))), digest, 'Both processes consume immutable compile: '+file)
     const logs = []
-    const exit = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(outDir, 'index.html'), privateRoot, phase, evidence],
+    const exit = await runProbeProcess(require('electron'), [phaseRunner, join(outDir, 'index.html'), privateRoot, phase, evidence],
       { temporaryRoot: privateRoot, cwd: repository, env, timeoutMs: 60000, onLine: line => logs.push(line) })
     await writeFile(join(evidence, phase + '.log'), logs.join('\n'))
     const phaseResult = { phase, exit }; result.phases.push(phaseResult)
@@ -104,6 +107,13 @@ try {
     assert.equal(phaseResult.app.passed, true)
   }
   assert.equal(new Set(result.phases.map(one => one.app.pid)).size, 2, 'Two independent real Electron processes')
+  if (zoneSelection) {
+    const seeded = result.phases[0].app.final, restored = result.phases[1].app.initial
+    for (const field of ['tabs', 'layouts', 'drafts']) assert.deepEqual(restored[field], seeded[field], 'Original ' + field + ' survive an actual process restart')
+    const runsByIdentity = runs => [...runs].sort((a, b) => a.agentSessionId.localeCompare(b.agentSessionId))
+    assert.deepEqual(runsByIdentity(restored.runs), runsByIdentity(seeded.runs), 'Original Run identities survive restart independently of snapshot order')
+    assert.deepEqual(restored.focus.execution, seeded.focus.execution)
+  }
   for (const [file, digest] of inputs) assert.equal(hash(await readFile(file)), digest, 'Source unchanged during proof: '+relative(repository,file))
   result.passed = true
   await writeFile(join(evidence, 'review.md'), ['# Mote closed Tab screenshots — independent review pending', '',

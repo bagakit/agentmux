@@ -5,6 +5,7 @@ import { App } from '../../../src/renderer/src/App'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
+import { desktopWorkbenchFromSpatial } from '../../../src/renderer/src/lib/desktop-spatial-state'
 import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
 import { requestPmoTeamsTopicFloatingOpen } from '../../../src/renderer/src/lib/pmo-teams-topic-floating'
 import { createWorkspaceLayout, splitWorkbenchRegion } from '@agentmux/layout'
@@ -12,6 +13,7 @@ import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } f
 import '../../../src/renderer/src/styles/index.css'
 
 const phase = new URLSearchParams(location.search).get('phase')
+const zoneSelection = new URLSearchParams(location.search).get('zoneSelection') === '1'
 const retainedSurface = new URLSearchParams(location.search).get('retained') === '1'
 window.closedTabSetup.phase = 'controlled-public-data'
 const publicConfig = await api.config.get()
@@ -23,6 +25,22 @@ const customId = 'launcher:reviewer', targetId = 'mote-primary-tab', neighborId 
 const floatingKey = 'agentmux.leader-topic-floating.v1', durableKey = 'agentmux-workbench-v1'
 const calls = [], recovered = new Set(), initialDurable = JSON.parse(localStorage.getItem(durableKey) ?? 'null')
 const initialFloating = JSON.parse(localStorage.getItem(floatingKey) ?? 'null')
+const spatialKey = 'agentmux.private-closed-tab-spatial-port.v1'
+const initialSpatial = JSON.parse(localStorage.getItem(spatialKey) ?? 'null')
+let spatialState = initialSpatial
+const spatialListeners = new Set()
+// The public port persists its original replies; production DesktopSpatialPersistence
+// still owns graph conversion, conflict handling and durable acknowledgement.
+api.spatial.read = async () => structuredClone(spatialState)
+api.spatial.commit = async input => {
+  if (input.expectedRevision !== (spatialState?.revision ?? 0)) throw new Error('Private spatial revision changed')
+  spatialState = { schemaVersion: 1, revision: input.expectedRevision + 1, graph: structuredClone(input.graph) }
+  localStorage.setItem(spatialKey, JSON.stringify(spatialState))
+  for (const listener of spatialListeners) listener(structuredClone(spatialState))
+  return structuredClone(spatialState)
+}
+api.spatial.onChange = listener => { spatialListeners.add(listener); return () => spatialListeners.delete(listener) }
+
 const sessions = [ ['project-worker', null], ['project-reader', null], ['mote-primary', PMO_TEAMS_TOPIC_ID],
   ['mote-neighbor', PMO_TEAMS_TOPIC_ID], ['custom-mote', customId] ].map(([id, topicId]) => ({
   ...prototype, id, hostId: 'local', label: topicId ? 'Agent · Mote' : 'Agent · Project',
@@ -110,7 +128,7 @@ if (phase === 'seed') {
     agentFocus: { execution: { sessionId: 'project-worker', history: [{ sessionId: 'project-worker', focusedAt: 1000 }] }, pmo: { sessionId: 'mote-primary' } },
     viewModes: Object.fromEntries(sessions.map(session => [session.id, retainedSurface && session.id.startsWith('mote-') ? 'activity' : 'terminal'])) })
   for (const session of sessions) useAppStore.getState().setAgentComposerDraft(session.id, 'Original unsent draft · ' + session.id)
-  localStorage.setItem(floatingKey, JSON.stringify({ open: true, targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: targetId }))
+  localStorage.setItem(floatingKey, JSON.stringify({ open: true, targetTopicId: PMO_TEAMS_TOPIC_ID, ...(zoneSelection ? { targetTabId: null, reference: null } : { targetTabId: targetId }) }))
 }
 // App owns its ordinary tree. Its second mount hook uses the existing initialized owner.
 useAppStore.setState({ initialize: async () => () => {} })
@@ -128,11 +146,12 @@ const facts = () => {
     ui: { target: panel?.dataset.moteTargetTab ?? null, topic: panel?.dataset.moteTargetTopic,
       visible: panel?.matches(':popover-open'), text: panel?.textContent,
       newTab: !!panel?.querySelector('[aria-label="New discussion"]') },
-    initialization: { initializeCalls, seedApplied: phase === 'seed', initialDurable, initialFloating, afterOrdinaryInitialize } }
+    initialization: { initializeCalls, seedApplied: phase === 'seed', initialDurable, initialFloating, initialWorkbench: initialSpatial ? desktopWorkbenchFromSpatial(initialSpatial.graph) : null, afterOrdinaryInitialize } }
 }
 let retainedLayout
 const root = createRoot(document.getElementById('root'))
-window.closedTabProof = { ready: false, facts, ids: { targetId, neighborId, customId, customTabId },
+window.closedTabProof = { ready: false, facts,
+  persistence: () => ({ spatial: spatialState, workbench: spatialState ? desktopWorkbenchFromSpatial(spatialState.graph) : null }), ids: { targetId, neighborId, customId, customTabId },
   showGoals: () => useAppStore.getState().setMainSurface('board'),
   suspendOriginalPlacement: () => {
     const state = useAppStore.getState(); retainedLayout = state.layouts[scratch.id]
