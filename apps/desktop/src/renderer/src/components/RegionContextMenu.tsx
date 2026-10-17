@@ -9,6 +9,7 @@ import { formatRegionAddress, formatSessionAddress } from '../lib/agent-address'
 import type { RegionSwapMenuEntry, WorkbenchSplitMenuEntry } from '../lib/workbench-tab-actions'
 import { WorkbenchLayoutMenuRows } from './WorkbenchLayoutMenuRows'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
+import { WorkbenchMenuSubmenu } from './WorkbenchMenuSubmenu'
 
 const ThemeActionCopyIcon = semanticIconComponent('action.copy')
 const ThemeActionCopyAddressIcon = semanticIconComponent('action.copy-address')
@@ -16,7 +17,6 @@ const ThemeActionReplaceIcon = semanticIconComponent('action.replace')
 const ThemeActionRestartIcon = semanticIconComponent('action.restart-session')
 const ThemeObjectConversationsIcon = semanticIconComponent('object.conversations')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
-const ThemeNavigationSubmenuIcon = semanticIconComponent('navigation.submenu')
 
 
 type RegionCopyAction = {
@@ -149,20 +149,13 @@ export function RegionMenuEntryView({ entry, index, Item, Separator, Group = Con
     )
   }
   if (entry.kind === 'layout') return <WorkbenchLayoutMenuRows entries={entry.entries} Item={Item} Group={Group} Label={Label} />
-  if (entry.kind === 'swaps') return <Sub>
-    <SubTrigger className="tab-context-menu__item">
-      <ThemeActionReplaceIcon size={14} /><span>Swap Region…</span>
-      <span className="tab-context-menu__chevron"><ThemeNavigationSubmenuIcon size={12} /></span>
-    </SubTrigger>
-    <DocumentOverlayPortal component={Portal}>
-      <SubContent className="tab-context-menu region-swap-menu" collisionPadding={8} sideOffset={4}>
+  if (entry.kind === 'swaps') return <WorkbenchMenuSubmenu label="Swap Region…" icon={<ThemeActionReplaceIcon size={14} />}
+    Sub={Sub} SubTrigger={SubTrigger} SubContent={SubContent} Portal={Portal} className="region-swap-menu">
         {entry.entries.map(target => <Item key={target.targetRegionId} className="tab-context-menu__item"
           textValue={target.label} title={target.label} onSelect={target.onSelect}>
           <span>{target.label}</span>
         </Item>)}
-      </SubContent>
-    </DocumentOverlayPortal>
-  </Sub>
+  </WorkbenchMenuSubmenu>
   if (entry.kind === 'restart') return <Item className="tab-context-menu__item" onSelect={entry.onSelect}><ThemeActionRestartIcon size={14} /><span>Restart Session…</span></Item>
   if (entry.kind === 'window') return <Item className="tab-context-menu__item" onSelect={entry.onSelect}><ThemeActionOpenExternalIcon size={14} /><span>Open original Region in window</span></Item>
   if (entry.kind === 'promote') {
