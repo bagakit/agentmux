@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentMuxSpaceMutationReport } from '@agentmux/core/control'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -7,7 +7,7 @@ import { type OpenDestination, type OpenHttpLinkOrigin } from '../lib/open-desti
 import { CURRENT_FORK_DESTINATIONS, currentForkRequest, currentForkSourceMatches, currentForkUnavailableReason,
   retainedCurrentForkOperation, reviewCurrentFork, type CurrentForkReview, type CurrentForkSession } from '../lib/agent-current-fork'
 import { OpenDestinationBar } from './OpenDestinationBar'
-import * as DropdownMenu from './HoverDropdownMenu'
+import { WorkbenchMenuScope } from './WorkbenchMenuScope'
 import '../styles/agent-current-fork.css'
 
 const ConversationForkIcon = semanticIconComponent('action.fork-conversation')
@@ -120,6 +120,7 @@ export function useAgentCurrentForkControls({ session, linkOrigin, readOnly }: {
 
 /** Menu presentation only. Closing/Escape unmounts this view, not its operation controller. */
 export function AgentCurrentForkControls({ reason, readOnly, state, begin, cancel, select, inspect }: Controls) {
+  const DropdownMenu = useContext(WorkbenchMenuScope)
   const reviewRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     // Radix owns menu focus; enter the existing toolbar when it becomes the reviewed action.
@@ -168,6 +169,5 @@ export function AgentCurrentForkControls({ reason, readOnly, state, begin, cance
     {state.notice ? <DropdownMenu.Label className="agent-region-menu__context agent-current-fork"><span role="status">{state.notice}</span></DropdownMenu.Label> : null}
     {state.operationId && !state.review ? <DropdownMenu.Item className="tab-context-menu__item" disabled={state.busy || readOnly}
       onSelect={event => { event.preventDefault(); inspect() }}><ThemeActionSearchIcon size={14} /><span>Check fork operation</span></DropdownMenu.Item> : null}
-    <DropdownMenu.Separator className="tab-context-menu__separator" />
   </>
 }
