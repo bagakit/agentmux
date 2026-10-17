@@ -130,7 +130,7 @@ it('keeps the same cold description and human draft through failure, then exact 
   const retry = [...host.querySelectorAll('button')].find(button => button.textContent === 'Retry connection')!
   expect(retry).toBeDefined(); await act(async () => retry.click())
   expect(restore).toHaveBeenCalledTimes(2); expect(restore.mock.calls[1]).toEqual(restore.mock.calls[0])
-  expect(apply).toHaveBeenCalledWith({ type: 'updated', browser: page }); expect(close).not.toHaveBeenCalled()
+  expect(apply).toHaveBeenCalledWith({ type: 'updated', browser: page }, ''); expect(close).not.toHaveBeenCalled()
   expect(address().value).toBe('Preserved search draft')
 })
 
@@ -201,4 +201,73 @@ it('round-trips custom viewport dimensions through the original cold persistence
   expect(cold.viewport).not.toBe(descriptor.viewport)
   expect(Object.isFrozen(cold.viewport)).toBe(true)
   expect(reducePersistedTab(restored).regions['region-page']).toMatchObject({ viewport: cold.viewport })
+})
+
+function recoveryButton(name: string) {
+  const button = [...host.querySelectorAll<HTMLButtonElement>('[aria-label="Browser recovery"] button')]
+    .find(button => button.getAttribute('aria-label') === name || button.textContent === name)
+  expect(button).toBeDefined()
+  return button!
+}
+
+it('identifies the original failed page and edits its existing draft without navigation or submission', async () => {
+  const tab = { ...savedTab().regions['region-page'] as BrowserWorkbenchSurface, error: 'ERR_CONNECTION_REFUSED (-102)' }
+  const create = vi.spyOn(api.browser, 'create'), navigate = vi.spyOn(api.browser, 'navigate'), reload = vi.spyOn(api.browser, 'reload')
+  await act(async () => root.render(<BrowserPane tab={tab} visible />))
+  expect(host.querySelector('.browser-recovery__identity h2')?.textContent).toBe(page.title)
+  expect(host.querySelector('.browser-recovery__address code')?.textContent).toBe(page.url)
+  const details = host.querySelector<HTMLDetailsElement>('details.browser-recovery__details')!
+  expect(details.open).toBe(false)
+  expect(details.querySelector('pre')?.textContent).toBe(tab.error)
+  expect(host.querySelector('[aria-label="Browser recovery"] img')).toBeNull()
+  await fill('Unsent address draft')
+  const input = address()
+  await act(async () => recoveryButton('Edit address').click())
+  expect(document.activeElement).toBe(input)
+  expect(input.value).toBe('Unsent address draft')
+  expect([input.selectionStart, input.selectionEnd]).toEqual([0, input.value.length])
+  expect(create).not.toHaveBeenCalled(); expect(navigate).not.toHaveBeenCalled(); expect(reload).not.toHaveBeenCalled()
+})
+
+it('copies the exact failed page address only after clipboard confirmation, independently of its unsent draft', async () => {
+  const tab = { ...savedTab().regions['region-page'] as BrowserWorkbenchSurface, error: 'Original page is unavailable' }
+  let copied!: () => void
+  const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockImplementation(() => new Promise(resolve => { copied = resolve }))
+  await act(async () => root.render(<BrowserPane tab={tab} visible />)); await fill('Different unsent search')
+  await act(async () => recoveryButton('Copy page address').click())
+  expect(clipboard).toHaveBeenCalledExactlyOnceWith(page.url)
+  expect(host.textContent).not.toContain('Address copied')
+  await act(async () => copied())
+  expect(host.querySelector('.browser-recovery__copy-result')?.textContent).toBe('Address copied')
+  expect(address().value).toBe('Different unsent search')
+})
+
+it('keeps Retry and editing available when copying fails without reporting a copied address', async () => {
+  const tab = { ...savedTab().regions['region-page'] as BrowserWorkbenchSurface, error: 'Original page is unavailable' }
+  const report = vi.spyOn(useAppStore.getState(), 'reportError')
+  vi.spyOn(api.ui, 'writeClipboardText').mockRejectedValue(new Error('Clipboard unavailable'))
+  await act(async () => root.render(<BrowserPane tab={tab} visible />))
+  await act(async () => recoveryButton('Copy page address').click())
+  expect(report).toHaveBeenCalled()
+  expect(host.textContent).toContain('Address could not be copied')
+  expect(host.textContent).not.toContain('Address copied')
+  expect(recoveryButton('Retry').disabled).toBe(false)
+  expect(recoveryButton('Edit address').disabled).toBe(false)
+})
+
+it('Retry retains the exact failed Browser and reloads only after the original owner still reports an error', async () => {
+  const tab = { ...savedTab().regions['region-page'] as BrowserWorkbenchSurface, error: 'Original page is unavailable' }
+  let acquired!: (snapshot: BrowserSnapshot) => void
+  const create = vi.spyOn(api.browser, 'create').mockImplementation(() => new Promise(resolve => { acquired = resolve }))
+  const reload = vi.spyOn(api.browser, 'reload').mockResolvedValue(page)
+  const apply = vi.spyOn(useAppStore.getState(), 'applyBrowserEvent')
+  await act(async () => root.render(<BrowserPane tab={tab} visible />))
+  await act(async () => recoveryButton('Retry').click())
+  expect(create).toHaveBeenCalledExactlyOnceWith(page.id, page.url, 'workspace', page.profileId, page.mode)
+  expect(reload).not.toHaveBeenCalled()
+  expect(recoveryButton('Retry').disabled).toBe(true)
+  expect(recoveryButton('Edit address').disabled).toBe(false)
+  await act(async () => acquired({ ...page, error: tab.error }))
+  expect(reload).toHaveBeenCalledExactlyOnceWith(page.id)
+  expect(apply).toHaveBeenCalledWith({ type: 'updated', browser: page })
 })
