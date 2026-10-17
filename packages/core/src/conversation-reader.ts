@@ -130,7 +130,6 @@ function unavailable(source: ConversationSourceRef, error: unknown, from?: strin
   return { ...initialCoverage(source), current: code.includes('UNSUPPORTED') ? 'unsupported' : 'unavailable',
     readExtent: { ...(from ? { from } : {}), through: from ?? 'unread' }, gaps: [{ code, message }] }
 }
-const rejectedCut = (error: unknown) => error instanceof AgentMuxError && ['AGENT_SESSION_HISTORY_SOURCE_CHANGED', 'AGENT_SESSION_HISTORY_INVALID_CURSOR', 'CONTROL_PROTOCOL_ERROR'].includes(error.code)
 async function discover(ref: ConversationRef, port: ConversationReaderPort): Promise<{ scope: ConversationFrontier['scope']; coverage: ConversationSourceCoverage[]; position: Position }> {
   const native = nativeSource(port), coverage = [native.kind === 'native' ? initialCoverage(native) : unavailable(native, new AgentMuxError('The original native Session ID is not accepted. Captured reading remains available.', 'AGENT_CONVERSATION_NATIVE_UNAVAILABLE'))]
   try {
@@ -245,7 +244,7 @@ async function inspectBatch(ref: ConversationRef, port: ConversationReaderPort, 
   return { rows, ...(nativePage ? { nativePage } : {}), batch: { records: [], index: 0, offset: 0, digests: [], after, coverage, end: checkpoint,
     more: native !== undefined && after.native !== null || !!state.position.capturedCut && after.capturedBefore !== null } }
 }
-async function changesBatch(ref: ConversationRef, port: ConversationReaderPort, state: Cursor, limit: number): Promise<{ rows: ConversationSourceRecord[]; batch: Batch }> {
+async function changesBatch(ref: ConversationRef, port: ConversationReaderPort, state: Cursor, limit: number, originals: ReadonlyMap<string, ConversationSourceRecord>): Promise<{ rows: ConversationSourceRecord[]; batch: Batch }> {
   const checkpoint = state.checkpoint!, rows: ConversationSourceRecord[] = [], coverage = state.scope.sources.map(initialCoverage), cuts = [...checkpoint.cuts]
   let more = false
   for (const source of state.scope.sources) {
@@ -255,26 +254,45 @@ async function changesBatch(ref: ConversationRef, port: ConversationReaderPort, 
       if (!cut || cut.kind !== 'native') { coverage[at] = unavailable(source, new AgentMuxError('This frontier has no accepted native changes cut; an explicit new checkpoint is required.', 'AGENT_CONVERSATION_CHANGES_UNSUPPORTED')); continue }
       try {
         const page = await port.nativeChanges(cut.checkpoint, limit)
-        rows.push(...page.items.map((item, indexInPage) => row(ref, { kind: 'native', item }, { kind: 'native-page', source, indexInPage,
-          pageWitness: hash(JSON.stringify([cut.checkpoint.cursor, page.checkpoint.cursor])) })))
-        cuts[cuts.indexOf(cut)] = { kind: 'native', checkpoint: page.checkpoint }; more ||= page.more
-        coverage[at] = { ...initialCoverage(source), current: page.more ? 'partial' : 'complete-through-cut', readExtent: { from: cut.checkpoint.cursor, through: page.checkpoint.cursor } }
-      } catch (error) { port.signal?.throwIfAborted(); if (rejectedCut(error)) throw error; coverage[at] = unavailable(source, error, cut.checkpoint.cursor) }
+        if (page.agentSessionId !== ref.agentSessionId || page.hostId !== ref.hostId ||
+          page.source.providerId !== source.providerId || page.source.nativeSessionId !== source.nativeSessionId ||
+          page.checkpoint.agentSessionId !== ref.agentSessionId || page.checkpoint.source.providerId !== source.providerId || page.checkpoint.source.nativeSessionId !== source.nativeSessionId)
+          return fail('The native primitive returned another original source. Its prior cut is retained.')
+        const sourceRows = page.items.map((item, indexInPage) => row(ref, { kind: 'native', item }, { kind: 'native-page' as const, source, indexInPage,
+          pageWitness: hash(JSON.stringify([cut.checkpoint.cursor, page.checkpoint.cursor])) }))
+        const nextCoverage: ConversationSourceCoverage = { ...initialCoverage(source), current: page.more ? 'partial' : 'complete-through-cut', readExtent: { from: cut.checkpoint.cursor, through: page.checkpoint.cursor } }
+        rows.push(...sourceRows); cuts[cuts.indexOf(cut)] = { kind: 'native', checkpoint: page.checkpoint }
+        more ||= page.more; coverage[at] = nextCoverage
+      } catch (error) { port.signal?.throwIfAborted(); coverage[at] = unavailable(source, error, cut.checkpoint.cursor) }
     } else if (source.kind === 'captured' && source.epoch) {
       const cut = cuts.find(c => c.kind === 'captured' && c.epoch === source.epoch)
       if (!cut || cut.kind !== 'captured') { coverage[at] = unavailable(source, new AgentMuxError('This frontier has no committed captured cut; retain it and establish a new explicit scope.', 'AGENT_CONVERSATION_SOURCE_UNAVAILABLE')); continue }
       try {
         const current = await port.captured({ limit: 1 })
         // afterSequence is a query lower bound, not proof the caller's old cut exists.
-        if (current.stream.epoch !== cut.epoch || cut.sequence > current.stream.sequence) return fail('Captured checkpoint is from another epoch or the future. The original frontier is retained.')
+        if (current.agentSessionId !== ref.agentSessionId || current.stream.epoch !== cut.epoch || !Number.isSafeInteger(current.stream.sequence) || cut.sequence > current.stream.sequence) return fail('Captured checkpoint is from another epoch or the future. The original frontier is retained.')
         const page = await port.captured({ epoch: cut.epoch, afterSequence: cut.sequence, throughSequence: current.stream.sequence, limit })
         const record = page.records.at(-1)
         if (!record && current.stream.sequence !== cut.sequence) return fail('The captured committed range is unavailable; an empty query cannot advance it.', 'AGENT_CONVERSATION_CAPTURED_GAP')
-        rows.push(...page.records.map(record => row(ref, { kind: 'captured', item: record.item }, { kind: 'captured-stream', epoch: cut.epoch, firstSequence: record.firstSequence }, record.revision)))
+        if (page.agentSessionId !== ref.agentSessionId || page.stream.epoch !== cut.epoch ||
+          page.records.some((record, index) => record.item.agentSessionId !== ref.agentSessionId || !Number.isSafeInteger(record.sequence) ||
+            record.sequence <= cut.sequence || record.sequence > current.stream.sequence || !Number.isSafeInteger(record.firstSequence) || record.firstSequence < 1 || record.firstSequence > record.sequence ||
+            index > 0 && record.sequence <= page.records[index - 1]!.sequence))
+          return fail('The captured primitive returned records outside its accepted original ordered range. Its prior cut is retained.')
+        const sourceRows = page.records.map(record => row(ref, { kind: 'captured', item: record.item }, { kind: 'captured-stream' as const, epoch: cut.epoch, firstSequence: record.firstSequence }, record.revision))
+        const positions = new Map<string, ConversationSourceRecord['order']>()
+        for (const record of sourceRows) {
+          const prior = positions.get(record.id) ?? originals.get(record.id)?.order
+          if (prior?.kind === 'captured-stream' && record.order.kind === 'captured-stream' &&
+            (prior.epoch !== record.order.epoch || prior.firstSequence !== record.order.firstSequence))
+            return fail('The captured primitive changed an accepted original record position. Its prior cut is retained.')
+          positions.set(record.id, record.order)
+        }
         const sequence = record?.sequence ?? cut.sequence
-        cuts[cuts.indexOf(cut)] = { kind: 'captured', epoch: cut.epoch, sequence }; more ||= sequence < current.stream.sequence
-        coverage[at] = { source, origin: page.stream.origin, readExtent: { from: String(cut.sequence), through: String(sequence) }, earlier: page.stream.origin === 'beginning' ? 'complete' : 'unknown-before', current: sequence < current.stream.sequence ? 'partial' : 'complete-through-cut', gaps: page.stream.gaps }
-      } catch (error) { port.signal?.throwIfAborted(); if (rejectedCut(error)) throw error; coverage[at] = unavailable(source, error, String(cut.sequence)) }
+        const nextCoverage: ConversationSourceCoverage = { source, origin: page.stream.origin, readExtent: { from: String(cut.sequence), through: String(sequence) }, earlier: page.stream.origin === 'beginning' ? 'complete' : 'unknown-before', current: sequence < current.stream.sequence ? 'partial' : 'complete-through-cut', gaps: page.stream.gaps }
+        rows.push(...sourceRows); cuts[cuts.indexOf(cut)] = { kind: 'captured', epoch: cut.epoch, sequence }
+        more ||= sequence < current.stream.sequence; coverage[at] = nextCoverage
+      } catch (error) { port.signal?.throwIfAborted(); coverage[at] = unavailable(source, error, String(cut.sequence)) }
     } else coverage[at] = unavailable(source, new AgentMuxError('The original frontier has no resolved source identity. Later discovery requires a new explicit checkpoint.', 'AGENT_CONVERSATION_SOURCE_UNAVAILABLE'))
   }
   return { rows, batch: { records: rows.map(r => ({ id: r.id, reference: r.reference!, revision: r.revision, order: r.order, source: r.original.kind })), index: 0, offset: 0, digests: [], after: state.position, coverage, end: { ...ref, scope: state.scope, cuts }, more } }
@@ -388,7 +406,8 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
       if (state.viewRevision !== undefined && state.viewRevision !== view.revision || mode === 'changes' && view.revision > 0 && !same(view.checkpoint, state.checkpoint)) return fail('This operation does not continue the accepted window revision and original source cut.')
       const history = [...view.history], pageIndex = state.pageIndex ?? history.length, previousPosition = history[pageIndex]
       const originalPort = previousPosition?.head ? { ...port, nativePage: async () => previousPosition.head!.page } : port
-      const loaded: { rows: ConversationSourceRecord[]; batch: Batch; nativePage?: AgentSessionHistoryPage } = mode === 'changes' ? await changesBatch(ref, port, state, input.limit ?? 30)
+      const records = new Map(view.rows.map(record => [record.id, record]))
+      const loaded: { rows: ConversationSourceRecord[]; batch: Batch; nativePage?: AgentSessionHistoryPage } = mode === 'changes' ? await changesBatch(ref, port, state, input.limit ?? 30, records)
         : ('anchor' in input && input.anchor || 'record' in input && input.record) ? await anchorBatch(input, port, state) : await inspectBatch(ref, originalPort, state, previousPosition?.limit ?? input.limit ?? 30)
       if (mode === 'inspect' && !state.anchor) {
         if (pageIndex > history.length) return fail('The original page position is not adjacent to this window.')
@@ -404,7 +423,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
         if (previousPosition && (!same(previousPosition.native, position.native) || !same(previousPosition.captured, position.captured) || !same(previousPosition.after, position.after))) return fail('The original page no longer has its accepted record boundaries. Its displayed originals remain available.')
         history[pageIndex] = position
       }
-      const accepted = loaded.rows, records = new Map(view.rows.map(record => [record.id, record]))
+      const accepted = loaded.rows
       const native = view.rows.filter(record => record.original.kind === 'native').map(record => record.id)
       const additions: string[] = []
       for (const record of accepted) {
