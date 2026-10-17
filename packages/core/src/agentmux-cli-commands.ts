@@ -184,6 +184,8 @@ function goal(method: string, usage: string, summary: string, specs: FlagSpec, b
 /** Actual executable registration. Help, skill and playbooks enumerate this same source. */
 export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   ...Object.values(AGENTMUX_SCHEDULE_CLI_COMMANDS),
+  command('runtime.network.inspect', '--runtime ID --owner ID', 'Read the exact semantic Runtime owner process network interfaces without connecting Native or recovering Sessions. Interface addresses are not connected peers or public egress.',
+    { '--runtime': 'data', '--owner': 'data' }, f => ({ fence: { runtimeId: id(f, '--runtime', true), ownerInstanceId: id(f, '--owner', true) } })),
   command('notebook.scan', '--workspace ID --path DIR [--max-files N] [--max-directories N] [--max-bytes N] [--query TEXT [--limit N]]', 'Rebuild a read-only outline/reference/fulltext projection from exact original Markdown files, without an App index. Never writes source, catalog, authors or history; partial scope is explicit.',
     { '--workspace':'data','--path':'data','--max-files':'value','--max-directories':'value','--max-bytes':'value','--query':'data','--limit':'value' }, f => parseNoteCorpusParams({ workspaceId:id(f,'--workspace'),path:value(f,'--path',true),
       ...Object.fromEntries([['--max-files','maxFiles'],['--max-directories','maxDirectories'],['--max-bytes','maxBytes'],['--limit','limit']].filter(([flag])=>f.values.has(flag!)).map(([flag,key])=>[key,Number(value(f,flag!))])),...(f.values.has('--query')?{query:value(f,'--query',true)}:{}) })),
