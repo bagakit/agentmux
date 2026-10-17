@@ -1,5 +1,5 @@
-import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { WorkspaceCollaboration } from './WorkspaceCollaboration'
+import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { WorkspaceAgentRow } from './WorkspaceAgentRow'
 import { createFocusContextIdentitySelector, focusContextIdentityKey } from '../lib/focus-context-identity'
 import { createFocusGoalLinksSelector, focusGoalCardKey } from '../lib/focus-goal-links'

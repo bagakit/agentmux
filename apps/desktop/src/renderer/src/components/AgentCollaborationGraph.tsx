@@ -49,10 +49,11 @@ function AgentMark({ data, label, tier, recency }: { data: AgentData; label: str
   </button>
 }
 const AreaNodeView = memo(function AreaNodeView({ data }: NodeProps<AreaNode>) {
-  return <div className="collaboration-area" data-kind={data.area.kind} data-folded={data.folded}>
-    <button type="button" className="collaboration-area__heading nodrag nopan" aria-expanded={!data.folded} onClick={data.onToggle} title={data.area.issue ?? undefined}>
+  const empty = data.area.members.length === 0
+  return <div className="collaboration-area" data-kind={data.area.kind} data-folded={data.folded} data-empty={empty || undefined}>
+    {empty ? <div className="collaboration-area__heading" title={data.area.issue ?? undefined}><span>{data.area.name}</span><small>0</small></div> : <button type="button" className="collaboration-area__heading nodrag nopan" aria-expanded={!data.folded} onClick={data.onToggle} title={data.area.issue ?? undefined}>
       <SemanticIcon name={data.folded ? 'navigation.next' : 'navigation.down'} size={12} /><span>{data.area.name}</span><small>{data.area.members.length}</small>
-    </button>
+    </button>}
     {data.folded && data.internal.length ? <button type="button" className="collaboration-area__internal nodrag nopan" aria-label={`${data.area.name}: ${data.internal.length} internal connections`} onClick={data.onInspect}>{data.internal.length} internal</button> : null}
   </div>
 })

@@ -17,8 +17,6 @@ import { usePathDisplay } from '../hooks/usePathDisplay'
 const ThemeLayoutSidebarProjectsIcon = semanticIconComponent('layout.sidebar-projects')
 const ThemeObjectLauncherIcon = semanticIconComponent('object.launcher')
 const ThemeObjectSettingsIcon = semanticIconComponent('object.settings')
-const ThemeMapIcon = semanticIconComponent('object.map')
-const ThemeSpaceIcon = semanticIconComponent('navigation.space')
 
 
 // 顶行 chrome 的单一实现：Board/欢迎页 topbar 与 workbench 顶行（root tabbar / chromeline）
@@ -55,10 +53,9 @@ export function TopRowLeadingChrome() {
   const projectRailOpen = sidebars?.projectRailOpen ?? preferredProjects
   const toolsOpen = sidebars?.toolsOpen ?? preferredTools
   const { mainSurface, workspace } = useSurfaceIdentity()
-  const spaceView = useAppStore(state => state.spaceView)
   const toolDockOwnsChrome = !projectRailOpen
     && toolsOpen
-    && mainSurface === 'workbench' && spaceView === 'workbench' && Boolean(workspace)
+    && mainSurface === 'workbench' && Boolean(workspace)
   const chromeOwnedOutsideMain = projectRailOpen || toolDockOwnsChrome
   const globalSurfaceNeedsTrafficLightInset = (mainSurface === 'agents' || mainSurface === 'board' || mainSurface === 'survey' || mainSurface === 'recall') && chromeOwnedOutsideMain
   return (
@@ -67,19 +64,8 @@ export function TopRowLeadingChrome() {
     >
       {chromeOwnedOutsideMain ? null : <SidebarToggleChrome />}
       <TopBreadcrumb />
-      <SpaceViewSwitch />
     </div>
   )
-}
-
-function SpaceViewSwitch() {
-  const surface = useAppStore(state => state.mainSurface), view = useAppStore(state => state.spaceView)
-  const setView = useAppStore(state => state.setSpaceView)
-  if (surface !== 'workbench') return null
-  return <div className="space-view-switch" role="group" aria-label="Space view">
-    <button type="button" aria-label="Workbench" aria-pressed={view === 'workbench'} onClick={() => setView('workbench')}><ThemeSpaceIcon size={14} /><span>Workbench</span></button>
-    <button type="button" aria-label="Map" aria-pressed={view === 'map'} onClick={() => setView('map')}><ThemeMapIcon size={14} /><span>Map</span></button>
-  </div>
 }
 
 export function SidebarToggleChrome() {
@@ -114,7 +100,6 @@ function ProjectRailToggle() {
 
 export function ToolsToggle() {
   const mainSurface = useAppStore((state) => state.mainSurface)
-  const spaceView = useAppStore(state => state.spaceView)
   const preferredTools = useAppStore((state) => state.toolsOpen)
   const originalToggle = useAppStore((state) => state.toggleTools)
   const sidebars = useContext(WindowSidebarLayoutContext)
@@ -122,10 +107,10 @@ export function ToolsToggle() {
   const toggleTools = sidebars?.toggleTools ?? originalToggle
   const config = useAppStore((state) => state.config)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
-  // The map has no Workbench dock. Keep its original preference for the return to Workbench.
-  if (mainSurface === 'board' || mainSurface === 'workbench' && spaceView === 'map') return null
+  // Only Workbench owns this dock; other surfaces keep its preference for the return.
+  if (mainSurface !== 'workbench') return null
   const toolsAvailable = mainSurface === 'workbench' && Boolean(config?.workspaces.find((item) => item.id === activeWorkspaceId))
-  const scope = mainSurface === 'agents' ? 'Focus' : 'Space'
+  const scope = 'Space'
   return (
     <button
       className={`icon-button sidebar-toggle-button ${toolsOpen ? 'sidebar-toggle-button--active' : ''}`}
@@ -151,7 +136,7 @@ export function TopBreadcrumb() {
   const displayPath = usePathDisplay()
   const hostId = workspace?.hostId
   if (mainSurface === 'agents') {
-    return <div className="breadcrumbs"><strong>Focus</strong><span className="breadcrumbs__sep" aria-hidden>/</span><span>Recent execution contexts</span></div>
+    return <div className="breadcrumbs"><strong>Focus</strong></div>
   }
   if (mainSurface === 'recall') return <div className="breadcrumbs"><strong>Recall</strong></div>
   if (mainSurface === 'survey') {

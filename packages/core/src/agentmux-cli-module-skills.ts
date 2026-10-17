@@ -87,10 +87,10 @@ not an empty window catalog or loss of healthy Agents.
 Use app search with the appropriate metadata/content mode, retaining each result's source
 identity and availability. Inspect an exact returned object through its module before an
 operation. app focus selects a surface; it does not accept a task or certify input eligibility.
-Use app focus --surface space --view map to open the same collaboration map, or --view
-workbench to return to the original workface. Omitting --view preserves the existing Space
-view; other surfaces cannot use --view. Compose exact area selection with space focus.
-app inspect reports selection.spaceView separately from actual presentation and input.
+Use app focus --surface focus --view map to open the same collaboration map, or --view
+list for execution contexts. Omitting --view preserves the existing Focus view; other
+surfaces cannot use --view. Space always presents the original workbench.
+app inspect reports selection.focusView separately from actual presentation and input.
 Retained Tab/Region selection does not certify that content is visible behind the map.
 Selection, focus and native input receipts are separate. Preserve current drafts and caret
 unless navigation/input change was explicitly requested. Partial or unavailable discovery

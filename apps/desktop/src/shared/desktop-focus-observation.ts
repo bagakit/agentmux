@@ -22,8 +22,8 @@ const desktopInputObservationSchema = z.object({ provenance,
   tabId: nullableId, regionId: nullableId, sessionId: nullableId,
   connected: z.boolean().nullable(), visible: z.boolean().nullable(), inert: z.boolean().nullable() }).strict().superRefine(exactWindowPair).transform(omitMissingWindow)
 const desktopSelectionSchema = z.object({ surface: z.enum(['space', 'focus', 'goals', 'survey', 'recall']), mainSurface: z.enum(['workbench', 'agents', 'board', 'survey', 'recall']),
-  spaceView: z.enum(['workbench', 'map']).nullable(), space: desktopSpaceSelectionSchema.nullable(), goalId: nullableId }).strict().superRefine((value, context) => {
-  if ((value.surface === 'space') !== (value.spaceView !== null)) context.addIssue({ code: 'custom', message: 'Space view belongs only to the Space Surface.' })
+  focusView: z.enum(['list', 'map']).nullable(), space: desktopSpaceSelectionSchema.nullable(), goalId: nullableId }).strict().superRefine((value, context) => {
+  if ((value.surface === 'focus') !== (value.focusView !== null)) context.addIssue({ code: 'custom', message: 'Focus view belongs only to the Focus Surface.' })
 })
 export const desktopObservationSchema: z.ZodType<AgentMuxDesktopObservation> = z.object({
   selection: desktopSelectionSchema,
@@ -35,7 +35,7 @@ export const desktopObservationSchema: z.ZodType<AgentMuxDesktopObservation> = z
   overlays: z.object({ provenance, settings: z.boolean().nullable(), quickSwitcher: z.boolean().nullable() }).strict(),
   focus: z.object({ executionSessionId: nullableId, pmoSessionId: nullableId }).strict()
 }).strict().superRefine((value, context) => {
-  if (value.selection.spaceView === 'map' && (value.presentation.tabId !== null || value.presentation.regionId !== null ||
+  if (value.selection.focusView === 'map' && (value.presentation.tabId !== null || value.presentation.regionId !== null ||
     value.presentation.windowId !== undefined || value.presentation.documentGeneration !== undefined || value.presentation.state === 'floating' || value.presentation.state === 'window')) {
     context.addIssue({ code: 'custom', message: 'A map presentation cannot identify a retained, borrowed or native Region.' })
   }

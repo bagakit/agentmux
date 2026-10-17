@@ -1,3 +1,5 @@
+import { FocusViewSwitch } from './FocusViewSwitch'
+import { TopRowLeadingChrome } from './TopRowChrome'
 import { TextInput } from '@agentmux/client-ui/input'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import * as ContextMenu from '@radix-ui/react-context-menu'
@@ -51,6 +53,7 @@ export function FocusToolbar({ active = true, children, selectedId, selected, ta
   active?: boolean; children: ReactNode; selectedId: string | null; selected: FocusContext | undefined; tab: WorkbenchTab | null; reference?: WorkbenchProjectionSelection | undefined; onReview(): void; onCloseWorkspace(): void; regionOnly?: boolean | undefined; onToggleRegion?: (() => void) | undefined; onOpenCollaboration?: (() => void) | undefined
 }) {
   return <header className="focus-toolbar">
+    <TopRowLeadingChrome /><FocusViewSwitch />
     <div className="focus-toolbar__filters">{children}</div>
     {onOpenCollaboration ? <button type="button" className="icon-button" aria-label="Locate Agent in map" title="Locate in map" onClick={onOpenCollaboration}><ThemeObjectCollaborationIcon size={15} /></button> : null}
     {(tab || selectedId) ? <FocusToolbarContext active={active} key={JSON.stringify([selectedId, tab?.id])} selectedId={selectedId} selected={selected} tab={tab} reference={reference} onReview={onReview} onCloseWorkspace={onCloseWorkspace} regionOnly={regionOnly} onToggleRegion={onToggleRegion} /> : null}
