@@ -1,12 +1,11 @@
 import type { ConnectionEnrollmentDiagnostic } from '@agentmux/core/connections'
 import type { ConnectionEnrollmentAdapter, EnrollmentAdapterInput, EnrollmentUnknownReceipt } from '../../connection-enrollment-adapter.js'
-import { beginFeishuNativeAccount, advanceFeishuNativeAccount, readNativeAccountState } from './native-account.js'
+import { beginFeishuNativeAccount, advanceFeishuNativeAccount, isFeishuConsoleOrigin, readNativeAccountState } from './native-account.js'
 import { requestFeishuConsole } from './console-request.js'
 import { FEISHU_ENROLLMENT_PROTOCOL } from './enrollment-protocol.js'
 export { FEISHU_ENROLLMENT_PROTOCOL } from './enrollment-protocol.js'
 
 const DOMAIN = 'open.feishu.cn'
-const ORIGIN = 'https://open.feishu.cn'
 type State = { version: 1; authentication: unknown; avatar?: { url: string; width: number; height: number }; appId?: string }
 type Session = { value: State; native: ReturnType<typeof readNativeAccountState>['state']; cookies: ReturnType<typeof readNativeAccountState>['cookies'] }
 type Reply = { kind: 'response'; payload: Record<string, unknown>; httpStatus: number } | EnrollmentUnknownReceipt
@@ -35,13 +34,13 @@ function snapshot(value: string): Session | null {
 function authenticated(input: EnrollmentAdapterInput & { privateState: string }): Session | EnrollmentUnknownReceipt {
   if (input.domain !== DOMAIN) return preparation('unsupported-domain')
   const saved = snapshot(input.privateState), native = saved?.native
-  if (!saved || !native || native.phase !== 'account' || !native.account || !opaque(native.account.userId) || !opaque(native.account.tenantId) || !opaque(native.csrf) || native.consoleOrigin !== ORIGIN) return preparation('invalid-state')
+  if (!saved || !native || native.phase !== 'account' || !native.account || !opaque(native.account.userId) || !opaque(native.account.tenantId) || !opaque(native.csrf) || !isFeishuConsoleOrigin(native.consoleOrigin)) return preparation('invalid-state')
   return saved
 }
 /** Only this owner interprets its Enrollment wrapper; no foreign Setup binding is stripped. */
 export function enrollmentAccountSession(privateState: string, application: { domain: string; appId: string }): Session['native'] | null {
   const saved = snapshot(privateState), native = saved?.native
-  return application.domain === DOMAIN && saved?.value.appId === application.appId && native?.phase === 'account' && native.account && opaque(native.account.userId) && opaque(native.account.tenantId) && opaque(native.csrf) && native.consoleOrigin === ORIGIN ? native : null
+  return application.domain === DOMAIN && saved?.value.appId === application.appId && native?.phase === 'account' && native.account && opaque(native.account.userId) && opaque(native.account.tenantId) && opaque(native.csrf) && isFeishuConsoleOrigin(native.consoleOrigin) ? native : null
 }
 function png(value: string): { bytes: Buffer; width: number; height: number } | null {
   // Reuse the original profile PNG boundary; scale follows the actual IHDR, not a fixed icon size.
@@ -52,9 +51,9 @@ function png(value: string): { bytes: Buffer; width: number; height: number } | 
   return width && height ? { bytes, width, height } : null
 }
 
-/** One fixed console request. The Host owns consent, durable claims and original result recovery. */
+/** One original console request. The Host owns consent, durable claims and original result recovery. */
 async function request(input: EnrollmentAdapterInput, saved: Session, path: string, body: Record<string, unknown> | FormData, signal?: AbortSignal): Promise<Reply> {
-  const { authentication, ...response } = await requestFeishuConsole({ state: saved.native, cookies: saved.cookies, path, referer: ORIGIN + '/app', body, assertCurrent: input.assertCurrent }, signal)
+  const { authentication, ...response } = await requestFeishuConsole({ state: saved.native, cookies: saved.cookies, path, body, assertCurrent: input.assertCurrent }, signal)
   if (authentication) saved.value.authentication = authentication
   return response
 }

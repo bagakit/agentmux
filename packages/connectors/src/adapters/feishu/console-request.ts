@@ -1,8 +1,8 @@
 import type { ConnectionEnrollmentDiagnostic } from '@agentmux/core/connections'
-import { FEISHU_BROWSER_USER_AGENT, readNativeAccountResponse, type NativeAccountState } from './native-account.js'
+import { FEISHU_BROWSER_USER_AGENT, isFeishuConsoleOrigin, readNativeAccountResponse, type NativeAccountState } from './native-account.js'
 import type { CookieJar } from 'tough-cookie'
 
-type Input = { state: NativeAccountState; cookies: CookieJar; path: string; referer: string; body: Record<string, unknown> | FormData; assertCurrent?: () => void; developerPanel?: boolean }
+type Input = { state: NativeAccountState; cookies: CookieJar; path: string; referer?: string; body: Record<string, unknown> | FormData; assertCurrent?: () => void; developerPanel?: boolean }
 export type ConsoleReply = ({ kind: 'response'; payload: Record<string, unknown>; httpStatus: number } | { kind: 'unknown'; diagnostic: ConnectionEnrollmentDiagnostic }) & { authentication?: NativeAccountState }
 const record = (value: unknown): Record<string, unknown> | null => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
 
@@ -10,10 +10,21 @@ const record = (value: unknown): Record<string, unknown> | null => value !== nul
 export async function requestFeishuConsole(input: Input, signal?: AbortSignal): Promise<ConsoleReply> {
   const unknown = (diagnostic: ConnectionEnrollmentDiagnostic, authentication?: NativeAccountState): ConsoleReply => ({ kind: 'unknown', diagnostic, ...(authentication ? { authentication } : {}) })
   if (signal?.aborted) return unknown({ stage: 'request', code: 'cancelled' })
-  const origin = 'https://open.feishu.cn', target = new URL(input.path, origin), { state, cookies } = input
-  if (target.origin !== origin || state.consoleOrigin !== origin || state.phase !== 'account' || !state.csrf || !state.account) return unknown({ stage: 'preparation', code: 'invalid-state' })
+  const { state, cookies } = input, origin = state.consoleOrigin
+  const invalidState = () => unknown({ stage: 'preparation', code: 'invalid-state' })
+  if (!isFeishuConsoleOrigin(origin) || state.phase !== 'account' || !state.csrf || !state.account) return invalidState()
+  let target: URL, referer: URL
+  try {
+    target = new URL(input.path, origin)
+    const source = input.referer ?? state.url
+    if (!source) return invalidState()
+    referer = new URL(source, origin)
+  } catch { return invalidState() }
+  if (target.origin !== origin || target.username || target.password || referer.origin !== origin || referer.username || referer.password) return invalidState()
+  target.hash = ''
+  referer.hash = ''
   const multipart = input.body instanceof FormData
-  const headers: Record<string, string> = { accept: 'application/json, text/plain, */*', 'user-agent': FEISHU_BROWSER_USER_AGENT, origin, referer: input.referer, 'x-csrf-token': state.csrf, 'X-Timezone-Offset': String(new Date().getTimezoneOffset()) }
+  const headers: Record<string, string> = { accept: 'application/json, text/plain, */*', 'user-agent': FEISHU_BROWSER_USER_AGENT, origin, referer: referer.href, 'x-csrf-token': state.csrf, 'X-Timezone-Offset': String(new Date().getTimezoneOffset()) }
   if (!multipart) headers['content-type'] = 'application/json'
   if (input.developerPanel) headers['X-AppPlatform-RequestFrom'] = 'develop_panel'
   const cookie = cookies.getCookieStringSync(target.href); if (cookie) headers.cookie = cookie
