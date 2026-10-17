@@ -17,23 +17,32 @@ export function AgentEnamelFilter({ id, tint, children, className, filterClassNa
   return <>
     <svg className={filterClass} aria-hidden="true" width="0" height="0">
       <defs>
-        <filter id={id} x="-50%" y="-50%" width="200%" height="200%" colorInterpolationFilters="sRGB">
-          <feMorphology in="SourceAlpha" operator="dilate" radius="4" result="solidDilated" />
-          <feMorphology in="solidDilated" operator="erode" radius="4" result="solidAlpha" />
-          <feMorphology in="solidAlpha" operator="dilate" radius="2" result="backingAlpha" />
-          <feMorphology in="solidAlpha" operator="dilate" radius="3" result="rimOuterAlpha" />
-          <feComposite in="rimOuterAlpha" in2="backingAlpha" operator="out" result="rimAlpha" />
-          <feFlood floodColor={'var(--surface-0)'} floodOpacity="1" result="backingColor" />
-          <feComposite in="backingColor" in2="backingAlpha" operator="in" result="enamelBacking" />
-          <feFlood floodColor={tint} floodOpacity="1" result="rimColor" />
-          <feComposite in="rimColor" in2="rimAlpha" operator="in" result="enamelRim" />
-          <feComposite in="enamelRim" in2="enamelBacking" operator="over" result="enamelSurface" />
-          <feComposite in="SourceGraphic" in2="enamelSurface" operator="over" />
-        </filter>
+        <AgentEnamelFilterDefinition id={id} tint={tint} />
       </defs>
     </svg>
     <span className={className} style={{ filter: `url(#${id})` }} aria-hidden="true">
       {children}
     </span>
   </>
+}
+
+/** One filter definition for the live face and its standalone SVG projection. */
+export function AgentEnamelFilterDefinition({ id, tint, backingColor = 'var(--surface-0)' }: {
+  id: string; tint: string; backingColor?: string
+}) {
+  return (
+    <filter id={id} x="-50%" y="-50%" width="200%" height="200%" colorInterpolationFilters="sRGB">
+      <feMorphology in="SourceAlpha" operator="dilate" radius="4" result="solidDilated" />
+      <feMorphology in="solidDilated" operator="erode" radius="4" result="solidAlpha" />
+      <feMorphology in="solidAlpha" operator="dilate" radius="2" result="backingAlpha" />
+      <feMorphology in="solidAlpha" operator="dilate" radius="3" result="rimOuterAlpha" />
+      <feComposite in="rimOuterAlpha" in2="backingAlpha" operator="out" result="rimAlpha" />
+      <feFlood floodColor={backingColor} floodOpacity="1" result="backingColor" />
+      <feComposite in="backingColor" in2="backingAlpha" operator="in" result="enamelBacking" />
+      <feFlood floodColor={tint} floodOpacity="1" result="rimColor" />
+      <feComposite in="rimColor" in2="rimAlpha" operator="in" result="enamelRim" />
+      <feComposite in="enamelRim" in2="enamelBacking" operator="over" result="enamelSurface" />
+      <feComposite in="SourceGraphic" in2="enamelSurface" operator="over" />
+    </filter>
+  )
 }

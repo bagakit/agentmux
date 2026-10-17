@@ -107,24 +107,35 @@ function DroidIcon({ size }: { size: number }) {
  * `providerId ? <Icon/> : null`（于是缺失时整枚标记消失，留一个无法解释的空位），要么传 `''`
  * 之类的假值把「不存在」编码成一个合法值。两种都是把同一个判断复制到调用处。
  */
-export function AgentProviderIcon({ providerId, size = 14 }: { providerId?: AgentProviderId; size?: number }) {
+export function AgentProviderArtwork({ providerId, size = 14, renderRaster }: {
+  providerId?: AgentProviderId; size?: number
+  /** Static SVG projections inline the same bundled raster; callers cannot supply a source URL. */
+  renderRaster?: (source: string, size: number) => ReactNode
+}) {
+  const raster = (source: string) => renderRaster ? renderRaster(source, size)
+    : <img src={source} width={size} height={size} alt="" draggable={false} />
   let icon: ReactNode
   switch (providerId) {
     case 'codex': icon = <CodexIcon size={size} />; break
     case 'claude': icon = <ClaudeIcon size={size} />; break
-    case 'traex': icon = <img src={traexIconUrl} width={size} height={size} alt="" draggable={false} />; break
-    case 'hermes': icon = <img src={hermesIconUrl} width={size} height={size} alt="" draggable={false} />; break
+    case 'traex': icon = raster(traexIconUrl); break
+    case 'hermes': icon = raster(hermesIconUrl); break
     case 'pi': icon = <PiIcon size={size} />; break
-    case 'grok': icon = <img src={grokIconUrl} width={size} height={size} alt="" draggable={false} />; break
-    case 'gemini': icon = <img src={geminiIconUrl} width={size} height={size} alt="" draggable={false} />; break
-    case 'antigravity': icon = <img src={antigravityIconUrl} width={size} height={size} alt="" draggable={false} />; break
-    case 'cursor': icon = <img src={cursorIconUrl} width={size} height={size} alt="" draggable={false} />; break
+    case 'grok': icon = raster(grokIconUrl); break
+    case 'gemini': icon = raster(geminiIconUrl); break
+    case 'antigravity': icon = raster(antigravityIconUrl); break
+    case 'cursor': icon = raster(cursorIconUrl); break
     case 'kimi': icon = <KimiIcon size={size} />; break
     case 'droid': icon = <DroidIcon size={size} />; break
     case 'copilot': icon = <CopilotIcon size={size} />; break
     case 'opencode': icon = <OpenCodeIcon size={size} />; break
     default: icon = <SemanticIcon name="object.agent" size={size} strokeWidth={1.8} />
   }
+  return icon
+}
+
+/** The ordinary UI and bounded static projections share one Provider artwork selection. */
+export function AgentProviderIcon({ providerId, size = 14 }: { providerId?: AgentProviderId; size?: number }) {
   return (
     <span
       className="agent-provider-icon"
@@ -137,7 +148,7 @@ export function AgentProviderIcon({ providerId, size = 14 }: { providerId?: Agen
       style={{ width: size, height: size }}
       aria-hidden="true"
     >
-      {icon}
+      <AgentProviderArtwork {...(providerId === undefined ? {} : { providerId })} size={size} />
     </span>
   )
 }
