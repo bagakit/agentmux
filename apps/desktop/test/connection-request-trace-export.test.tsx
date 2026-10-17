@@ -3,6 +3,7 @@ import { act } from 'react'
 import type { Root } from 'react-dom/client'
 import type { ConnectionSetupView } from '@agentmux/core/connections'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { diagnosisText } from './helpers/connection-diagnosis-text'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { moteBotUi } from './fixtures/mote-bot-ui'
 import { confirmAndCreateMote } from './fixtures/mote-connection-owner'
@@ -72,12 +73,12 @@ it.each(['setup', 'enrollment'] as const)('copies the complete original %s trace
   const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   await copy()
   await vi.waitFor(() => expect(clipboard).toHaveBeenCalledOnce())
-  const diagnosis = JSON.parse(clipboard.mock.calls[0]![0])
-  expect(diagnosis).toEqual(result.requestTrace)
-  expect(diagnosis.entries.at(-1).stepId).toBe(result.requestTrace!.entries.at(-1)!.stepId)
+  const diagnosis = diagnosisText(clipboard.mock.calls[0]![0])
+  expect(diagnosis.traces[0]).toEqual({ kind, operationId: source.operationId, status: 'complete', entries: result.requestTrace!.entries })
+  expect(diagnosis.traces[0]!.entries.at(-1).stepId).toBe(result.requestTrace!.entries.at(-1)!.stepId)
   expect(f.registration.mock.calls).toHaveLength(nativeCalls)
   expect(container.querySelectorAll('tbody tr')).toHaveLength(visibleEntries)
-  expect(container.textContent).toContain('Complete sanitized trace copied.')
+  expect(container.textContent).toContain('Diagnosis copied with unavailable sections')
   expect(clipboard.mock.calls[0]![0]).not.toMatch(/private-mote|mote-session|csrf|https?:\/\/|pngDataUrl/iu)
 }, 30_000)
 
@@ -92,11 +93,11 @@ it('copies original steps recorded after the visible page was read', async () =>
   const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   await copy()
   await vi.waitFor(() => expect(clipboard).toHaveBeenCalledOnce())
-  expect(JSON.parse(clipboard.mock.calls[0]![0])).toEqual(result.requestTrace)
+  expect(diagnosisText(clipboard.mock.calls[0]![0]).traces[0]!.entries).toEqual(result.requestTrace!.entries)
   expect(container.querySelectorAll('tbody tr')).toHaveLength(1)
 }, 30_000)
 
-it.each(['unmount', 'switch', 'close', 'failure'] as const)('does not copy a held partial diagnosis after %s', async action => {
+it.each(['unmount', 'switch', 'close'] as const)('does not copy a held partial diagnosis after %s', async action => {
   const source = await originalTrace('setup')
   await open(source)
   const forward = f.connectionCalls.getMockImplementation()!
@@ -107,7 +108,6 @@ it.each(['unmount', 'switch', 'close', 'failure'] as const)('does not copy a hel
       arrive()
       try {
         await held
-        if (action === 'failure') throw new Error('Fixture page unavailable')
         return await forward(method, input)
       } finally { finish() }
     }
@@ -128,8 +128,7 @@ it.each(['unmount', 'switch', 'close', 'failure'] as const)('does not copy a hel
     })
   }
   await vi.waitFor(() => {
-    if (action === 'failure') expect(container.textContent).toContain('Could not copy the complete diagnosis')
-    else expect(container.textContent).not.toContain('Copying…')
+    expect(container.textContent).not.toContain('Reading the complete original task')
   })
   expect(clipboard).not.toHaveBeenCalled()
 }, 30_000)
@@ -162,11 +161,11 @@ it('copies only the matching setup observation whitelist beside the complete ori
   const nativeCalls = f.registration.mock.calls.length, clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   await copy()
   await vi.waitFor(() => expect(clipboard).toHaveBeenCalledOnce())
-  const diagnosis = JSON.parse(clipboard.mock.calls[0]![0])
-  expect(diagnosis.setupObservation).toEqual(expectedObservation(view))
-  expect(diagnosis.entries).toHaveLength(1)
-  expect(diagnosis.next).toBeNull()
-  expect(clipboard.mock.calls[0]![0]).not.toMatch(/private-|qrCode|account|rawNativeBody|cookie|credential|draft|notes|actionId|stepId.*private/iu)
+  const diagnosis = diagnosisText(clipboard.mock.calls[0]![0])
+  expect(diagnosis.observations['setup:' + source.operationId].setupObservation).toEqual(expectedObservation(view))
+  expect(diagnosis.traces[0]!.entries).toHaveLength(1)
+  expect(diagnosis.traces[0]!.status).toBe('complete')
+  expect(clipboard.mock.calls[0]![0]).not.toMatch(/private-|qrCode|rawNativeBody|cookie|draft|notes|actionId|stepId.*private/iu)
   expect(f.registration.mock.calls).toHaveLength(nativeCalls)
   expect(container.textContent).toContain('one observed setup snapshot')
 }, 30_000)
@@ -180,8 +179,8 @@ it.each(['foreign', 'missing', 'enrollment'] as const)('keeps the original expor
   const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   await copy()
   await vi.waitFor(() => expect(clipboard).toHaveBeenCalledOnce())
-  const diagnosis = JSON.parse(clipboard.mock.calls[0]![0])
-  expect(Object.keys(diagnosis)).toEqual(['operationId', 'entries', 'next'])
+  const diagnosis = diagnosisText(clipboard.mock.calls[0]![0])
+  expect(diagnosis.observations[kind === 'enrollment' ? 'enrollment:' + source.operationId : 'setup:' + source.operationId].status).toBe('recorded')
   expect(clipboard.mock.calls[0]![0]).not.toContain('private-')
 }, 30_000)
 
@@ -207,7 +206,7 @@ it('freezes one setup observation at click while later pages and new progress ar
     expect(button).toBeDefined()
     expect(button.getAttribute('aria-busy')).toBe('true')
     expect(button.disabled).toBe(true)
-    expect(container.textContent).toContain('Reading the complete original trace')
+    expect(container.textContent).toContain('Reading the complete original task')
     const newer = structuredClone(view)
     newer.operation!.revision++
     newer.profileUpdate!.stage = 'publication-status'
@@ -219,10 +218,10 @@ it('freezes one setup observation at click while later pages and new progress ar
     if (view.applicationConfiguration?.effect === 'create-application-version') view.applicationConfiguration.review!.issues.push('A later observation issue')
   } finally { await act(async () => { release(); await returned }) }
   await vi.waitFor(() => expect(clipboard).toHaveBeenCalledOnce())
-  const copied = JSON.parse(clipboard.mock.calls[0]![0])
-  expect(copied.entries.length).toBeGreaterThan(25)
-  expect(copied.setupObservation).toEqual(observation)
-  expect(copied.setupObservation.publication.review.issues).toEqual(['The original audience is unconfirmed'])
+  const copied = diagnosisText(clipboard.mock.calls[0]![0])
+  expect(copied.traces[0]!.entries.length).toBeGreaterThan(25)
+  expect(copied.observations['setup:' + source.operationId].setupObservation).toEqual(observation)
+  expect(copied.observations['setup:' + source.operationId].setupObservation.publication.review.issues).toEqual(['The original audience is unconfirmed'])
 }, 30_000)
 
 
@@ -252,4 +251,40 @@ it('keeps the recorded trace count and table nodes through a held revision refre
   } finally { await act(async () => { release(); await returned }) }
   await vi.waitFor(() => expect(container.querySelector('summary')!.getAttribute('aria-busy')).toBe('false'))
   expect(container.querySelector('tbody tr')).toBe(row)
+}, 30_000)
+
+it('marks a failed later page unavailable while retaining the exact observed setup and no partial history', async () => {
+  const source = await originalTrace('setup'), forward = f.connectionCalls.getMockImplementation()!
+  await render(source)
+  f.connectionCalls.mockImplementation(async (method, input) => {
+    if ('requestTrace' in input && input.requestTrace?.cursor) throw new Error('private later page failure')
+    return forward(method, input)
+  })
+  const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  await copy(); await vi.waitFor(() => expect(clipboard).toHaveBeenCalledOnce())
+  const report = diagnosisText(clipboard.mock.calls[0]![0])
+  expect(report.complete).toBe(false)
+  expect(report.observations['setup:' + source.operationId].status).toBe('recorded')
+  expect(report.traces).toEqual([{ kind: 'setup', operationId: source.operationId, status: 'unavailable', entries: [] }])
+  expect(clipboard.mock.calls[0]![0]).not.toContain('private later page')
+  expect(container.textContent).toContain('report is incomplete')
+}, 30_000)
+
+it('cancels a collapsed copy while a later original page is held', async () => {
+  const source = await originalTrace('setup'), forward = f.connectionCalls.getMockImplementation()!
+  await render(source)
+  let arrive!: () => void, release!: () => void, finish!: () => void
+  const arrived = new Promise<void>(resolve => { arrive = resolve }), held = new Promise<void>(resolve => { release = resolve }), returned = new Promise<void>(resolve => { finish = resolve })
+  f.connectionCalls.mockImplementation(async (method, input) => {
+    if ('requestTrace' in input && input.requestTrace?.cursor) { arrive(); try { await held; return await forward(method, input) } finally { finish() } }
+    return forward(method, input)
+  })
+  const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  await copy()
+  try {
+    await arrived
+    expect(container.querySelector<HTMLDetailsElement>('details')!.open).toBe(false)
+    await act(async () => [...container.querySelectorAll('button')].find(b => b.textContent === 'Cancel copy')!.click())
+  } finally { await act(async () => { release(); await returned }) }
+  expect(clipboard).not.toHaveBeenCalled(); expect(container.textContent).toContain('Diagnosis copy canceled.')
 }, 30_000)
