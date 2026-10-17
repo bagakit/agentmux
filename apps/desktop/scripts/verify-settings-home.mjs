@@ -112,7 +112,7 @@ try {
   if (takeoverMutant) {
     assert.equal(capture.exitCode,1)
     assert.equal(render.failure?.name,'AssertionError')
-    assert.match(render.failure.message,/Compact takeover preview scrolls away from later controls/u)
+    assert.match(render.failure.message,/Compact takeover preview (does not cover|leaves) the original fine tuning control/u)
   } else if (providerMutant) {
     assert.equal(providerMutationLoads,1)
     assert.equal(capture.exitCode,1)

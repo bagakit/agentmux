@@ -38,9 +38,10 @@ app.whenReady().then(async () => {
     await settle()
   }
   const key = async keyCode => {
-    win.webContents.sendInputEvent({type:'keyDown',keyCode})
+    const nativeCode = {ArrowLeft:'Left',ArrowRight:'Right',ArrowUp:'Up',ArrowDown:'Down'}[keyCode] ?? keyCode
+    win.webContents.sendInputEvent({type:'keyDown',keyCode:nativeCode})
     if (keyCode==='Enter') win.webContents.sendInputEvent({type:'char',keyCode:'\r'})
-    win.webContents.sendInputEvent({type:'keyUp',keyCode})
+    win.webContents.sendInputEvent({type:'keyUp',keyCode:nativeCode})
     await settle()
   }
   const fill = async (selector, value) => {
@@ -52,16 +53,27 @@ app.whenReady().then(async () => {
   const selectValue = async (selector, value) => {
     const index = await read(`Array.from(${node(selector)}.options).findIndex(option=>option.value===${JSON.stringify(value)})`)
     assert.ok(index >= 0, 'The requested option belongs to the original control')
-    await click(node(selector)); await key('Home')
-    for (let step=0;step<index;step++) await key('ArrowDown')
-    await key('Enter')
+    // Native popup menus are not part of a hidden Renderer. Reach the original
+    // select through trusted Tab input, then change its closed selection.
+    for (let step=0;step<160&&!await read(`document.activeElement===${node(selector)}`);step++) await key('Tab')
+    assert.equal(await read(`document.activeElement===${node(selector)}`),true,'The original select receives keyboard focus')
+    const label = await read(`${node(selector)}.options[${index}].text`)
+    // Chromium's native select supports trusted type-ahead without a system menu.
+    // Let a prior option's search buffer expire before entering the next label.
+    await new Promise(resolve=>setTimeout(resolve,1100))
+    for (const character of label) {
+      win.webContents.sendInputEvent({type:'keyDown',keyCode:character})
+      win.webContents.sendInputEvent({type:'char',keyCode:character})
+      win.webContents.sendInputEvent({type:'keyUp',keyCode:character})
+    }
+    result.interactions.push({kind:'native-select-typeahead',selector,value,label})
     await until(`${node(selector)}.value===${JSON.stringify(value)}`)
   }
   const title = () => read('document.querySelector(".settings-content__header h2")?.textContent')
   const resize = async (width, height) => { win.setContentSize(width,height); await until(`innerWidth===${width}&&innerHeight===${height}`); await settle() }
   const capture = async (name, page, theme, position = 'top') => {
     await settle()
-    const checks = await read(`(() => { const pane=document.querySelector('[data-settings-overview]')||document.querySelector('[data-settings-pane]:not([hidden])')||document.querySelector('.settings-search-results'); return {viewport:[innerWidth,innerHeight],horizontalOverflow:document.documentElement.scrollWidth>innerWidth,scroll: pane?{top:pane.scrollTop,height:pane.scrollHeight,viewport:pane.clientHeight}:null}; })()`)
+    const checks = await read(`(() => { const pane=document.querySelector('[data-settings-overview]')||document.querySelector('[data-settings-pane]:not([hidden])')||document.querySelector('.settings-search-results'); return {viewport:[innerWidth,innerHeight],horizontalOverflow:document.documentElement.scrollWidth>innerWidth,scroll: pane?{top:pane.scrollTop,height:pane.scrollHeight,viewport:pane.clientHeight}:null,innerScrolls:pane?[...pane.querySelectorAll('[data-settings-review-scroll]')].filter(n=>n.checkVisibility()).map(n=>({id:n.dataset.settingsReviewScroll,classes:n.className,top:n.scrollTop,height:n.scrollHeight,viewport:n.clientHeight})):[]}; })()`)
     assert.equal(checks.horizontalOverflow,false,'Settings has no document horizontal overflow')
     const file = name + '.png'
     fs.writeFileSync(path.join(evidence,file),(await bounded(win.webContents.capturePage(undefined,{stayHidden:true}),'capture '+file)).toPNG())
@@ -69,6 +81,9 @@ app.whenReady().then(async () => {
   }
   const captureSegments = async (prefix, id, color) => {
     const pane = node(`[data-settings-pane="${id}"]`)
+    // A retained focused input can scroll its owner back into view after layout.
+    // These are passive review frames; authored values and control identity stay intact.
+    await read('document.activeElement?.blur()')
     await read(`${pane}.scrollTop=0`)
     const readers = await read(`(() => {let index=0;return [...${pane}.querySelectorAll('*')].filter(n=>n.checkVisibility()&&n.clientHeight>80&&n.scrollHeight>n.clientHeight+24&&['auto','scroll'].includes(getComputedStyle(n).overflowY)).map(n=>{n.dataset.settingsReviewScroll=String(index++);n.scrollTop=0;return {id:n.dataset.settingsReviewScroll,height:n.scrollHeight,viewport:n.clientHeight}})})()`)
     await capture(prefix,id,color)
@@ -87,8 +102,12 @@ app.whenReady().then(async () => {
       const scroll = `${pane}.querySelector('[data-settings-review-scroll="${reader.id}"]')`
       await read(`${scroll}.scrollIntoView({behavior:'instant',block:'nearest'})`)
       for (let offset=reader.viewport*.85,part=1;offset<reader.height;offset+=reader.viewport*.85,part++) {
-        await read(`${scroll}.scrollTop=${Math.round(offset)}`)
+        await read(`${scroll}.scrollTo({top:${Math.round(offset)},behavior:'instant'})`)
+        await settle()
+        const actual = await read(`({top:${scroll}.scrollTop,max:${scroll}.scrollHeight-${scroll}.clientHeight})`)
+        assert.ok(Math.abs(actual.top-Math.min(Math.round(offset),actual.max))<=1,'The original inner reader reaches the requested review segment')
         await capture(`${prefix}-inner-${reader.id}-${part}`,id,color,'inner continuation')
+        assert.ok(Math.abs(result.frames.at(-1).checks.innerScrolls.find(value=>value.id===reader.id).top-actual.top)<=1,'The captured inner reader has not reset its scroll position')
         if (offset>=reader.height-reader.viewport) break
       }
       await read(`${scroll}.scrollTop=0`)
@@ -134,11 +153,12 @@ app.whenReady().then(async () => {
       await resize(width,height)
       const target = await hit(node(range))
       const geometry = await read(`(() => {const control=${node(range)},preview=${node('.browser-agent-preview')};return {control:control.getBoundingClientRect().toJSON(),preview:preview.getBoundingClientRect().toJSON(),position:getComputedStyle(preview).position}})()`)
-      assert.equal(geometry.position,'static','Compact takeover preview scrolls away from later controls')
-      assert.ok(target.hit,'Fine tuning remains unobstructed after scrolling')
+      const overlap = Math.min(geometry.control.right,geometry.preview.right)>Math.max(geometry.control.left,geometry.preview.left)&&Math.min(geometry.control.bottom,geometry.preview.bottom)>Math.max(geometry.control.top,geometry.preview.top)
+      result.interactions.push({kind:'takeover-control-reachability',label,geometry,overlap,hit:target.hit})
+      assert.equal(overlap,false,'Compact takeover preview does not cover the original fine tuning control')
+      assert.ok(target.hit,'Compact takeover preview leaves the original fine tuning control unobstructed')
       await click(node(range)); await key('ArrowRight')
       assert.equal(await read(`document.activeElement===${node(range)}`),true,'The original fine tuning range owns keyboard focus')
-      result.interactions.push({kind:'takeover-control-reachability',label,geometry})
       await capture('takeover-'+label+'-fine-tuning','browser-agent-control','dark','focused lower control')
     }
     await resize(1440,940)
@@ -154,6 +174,20 @@ app.whenReady().then(async () => {
     const reset = `${node(editor)}.querySelector('button[aria-label^="Reset "]')`
     assert.ok((await hit(reset)).hit,'The visible original avatar Reset button has an unobstructed hit')
     result.interactions.push({kind:'executor-detail-inset',label,geometry})
+  }
+  const agentEditorBottom = async color => {
+    const editor = node('[data-settings-pane="agents"] .settings-agent-templates .settings-resource-editor')
+    await read(`document.activeElement?.blur();${editor}.scrollTo({top:${editor}.scrollHeight,behavior:'instant'})`)
+    await settle()
+    const last = `${editor}.querySelector('.settings-executor-remove button')`
+    const geometry = await read(`(() => {const e=${editor},b=${last};return {top:e.scrollTop,max:e.scrollHeight-e.clientHeight,editor:e.getBoundingClientRect().toJSON(),last:b.getBoundingClientRect().toJSON()}})()`)
+    assert.ok(geometry.max>0&&geometry.top>0,'Compact Executor detail actually scrolls beyond its first segment')
+    assert.ok(Math.abs(geometry.top-geometry.max)<=1,'Compact Executor detail reaches its actual bottom')
+    assert.ok(geometry.last.top>=geometry.editor.top&&geometry.last.bottom<=geometry.editor.bottom+1,'The lower Executor action is fully inside its original reader')
+    assert.ok((await hit(last,false)).hit,'The lower Executor action is visible at the actual bottom')
+    result.interactions.push({kind:'executor-detail-bottom',theme:color,geometry})
+    await capture('page-agents-compact-detail-bottom-'+color,'agents',color,'verified original editor bottom')
+    assert.ok(await read(`${editor}.scrollTop`)>0,'Bottom capture retains the measured editor scroll')
   }
   const pageInteractions = async id => {
     const pane = `[data-settings-pane="${id}"]`
@@ -186,6 +220,20 @@ app.whenReady().then(async () => {
       await until(`${node('[aria-label="Notification preview"]')}.dataset.notificationMode!=='off'`)
       await capture('notifications-brief',id,'dark','unsaved dwell preview')
     } else if (id==='continuity') {
+      const windowInput = '[aria-label="Automatic recovery window"]', unit = '[aria-label="Automatic recovery window unit"]'
+      const save = pane+' [data-settings-save-bar] button'
+      assert.equal(await read(`${node(windowInput)}.value`),'24')
+      assert.equal(await read(`${node(unit)}.value`),'hours')
+      assert.equal(await read(`${node(save)}.disabled`),true,'The initial recovery preference is saved')
+      const choices=[]
+      for (const [choice,expected] of [['minutes','1440'],['seconds','86400'],['hours','24']]) {
+        await selectValue(unit,choice)
+        assert.equal(await read(`${node(windowInput)}.value`),expected,'Changing duration units preserves the exact recovery window')
+        assert.equal(await read(`${node(save)}.disabled`),true,'Unit presentation alone does not dirty the recovery draft')
+        choices.push({unit:choice,value:expected,dirty:false})
+      }
+      result.interactions.push({kind:'recovery-window-units',choices})
+      await capture('continuity-window-units',id,'dark','exact recovery window without a dirty draft')
       await fill('[aria-label="Search settings"]','Additional retries')
       await click(node('[data-settings-search-result="continuity:retryMaxAttempts"]'))
       assert.equal(await read(`${node('[data-continuity-retry-settings]')}.open`),true,'Exact search opens the original advanced group')
@@ -253,12 +301,12 @@ app.whenReady().then(async () => {
       await nav(id); assert.equal(await read(`${node(radio)}.checked`),true)
       await capture('a2a-notify-draft',id,'dark','retained notification policy draft')
     } else if (id==='automation') {
-      for (const [query,field,disclosure] of [['activeInterruptionFallback','[aria-label="Use active state when interruption detection is unsupported"]','.continuation-detection'],['checkInSilenceMs','[aria-label="Minimum silence before follow-up"]','[data-automation-quiet-defaults]']]) {
+      for (const [fieldId,query,field,disclosure] of [['activeInterruptionFallback','Use active state when interruption detection is unsupported','[aria-label="Use active state when interruption detection is unsupported"]','.continuation-detection'],['checkInSilenceMs','Minimum silence before follow-up','[aria-label="Minimum silence before follow-up"]','[data-automation-quiet-defaults]']]) {
         await fill('[aria-label="Search settings"]',query)
-        await click(node(`[data-settings-search-result="automation:${query}"]`))
+        await click(node(`[data-settings-search-result="automation:${fieldId}"]`))
         assert.equal(await read(`${node(disclosure)}.open`),true,'Search reveals the original policy disclosure')
         await click(node('[aria-label="Clear settings search"]'))
-        if (query==='activeInterruptionFallback') await choose(pane+' '+field)
+        if (fieldId==='activeInterruptionFallback') await choose(pane+' '+field)
         else {
           await fill(pane+' '+field,'21')
           await click(node(disclosure+' > summary')); await click(node(disclosure+' > summary'))
@@ -365,6 +413,9 @@ app.whenReady().then(async () => {
       await click(node('[data-tool-id="performance"]'))
       await capture('toolkit-performance',id,'dark','built-in detail')
       await click(node('.toolkit-workbench__toolbar .toolkit-workbench__create'))
+      await until(`!!${node(pane+' .toolkit-editor__script .monaco-editor :is(textarea.inputarea,.native-edit-context)')}&&${node(pane+' .toolkit-editor__script .monaco-editor .view-lines')}?.textContent.trim().length>0`,'The original Monaco model and rendered script are ready')
+      assert.ok((await hit(node(pane+' .toolkit-editor__script .monaco-editor'))).hit,'The original script editor is visible and unobstructed')
+      result.interactions.push({kind:'toolkit-editor-ready',renderedLines:await read(`${node(pane+' .toolkit-editor__script .monaco-editor .view-lines')}.textContent`)})
       await capture('toolkit-new-draft',id,'dark','new custom draft')
     }
     assert.equal(await read('window.settingsHomeProbe.saves.length'),saves,'Page interaction does not implicitly save configuration')
@@ -513,6 +564,7 @@ app.whenReady().then(async () => {
           await until('document.querySelector("[data-resource-editor=codex]")?.checkVisibility()')
           await agentEditorGeometry('compact-'+color)
           await captureSegments('page-agents-compact-detail-'+color,id,color)
+          await agentEditorBottom(color)
         } else if (id==='hosts') {
           const leaf = `Array.from(${node('[data-settings-pane="hosts"]')}.querySelectorAll('.settings-host-library [data-host-panel="connection"]')).find(n=>n.checkVisibility())`
           if (await read(`!!(${leaf})`)) await click(leaf)
