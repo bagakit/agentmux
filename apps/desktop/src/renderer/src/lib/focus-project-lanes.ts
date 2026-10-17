@@ -14,23 +14,24 @@ export type FocusHierarchyFacts = {
   worktrees: readonly FocusWorktreeFact[]
 }
 export const EMPTY_FOCUS_HIERARCHY: FocusHierarchyFacts = { topics: {}, worktrees: [] }
-let indexedConfig: AppConfig | null | undefined
-let roots: ReadonlyMap<string, AppConfig['workspaces'][number]> = new Map()
-let workspacesById: ReadonlyMap<string, AppConfig['workspaces'][number]> = new Map()
-/** Cached read-only references to the immutable Config, never an independent ownership registry. */
-export function focusProjectRoots(config: AppConfig | null) {
-  if (indexedConfig !== config) {
-    const next = new Map<string, AppConfig['workspaces'][number]>()
-    const ids = new Map<string, AppConfig['workspaces'][number]>()
-    for (const workspace of config?.workspaces ?? []) {
-      ids.set(workspace.id, workspace)
-      const key = JSON.stringify([workspace.hostId, workspace.path])
-      if (!next.has(key)) next.set(key, workspace)
-    }
-    indexedConfig = config; roots = next; workspacesById = ids
+type ProjectIndex = { roots: ReadonlyMap<string, AppConfig['workspaces'][number]>; workspaces: ReadonlyMap<string, AppConfig['workspaces'][number]> }
+const projectIndexes = new WeakMap<Pick<AppConfig, 'workspaces'>, ProjectIndex>()
+const emptyIndex: ProjectIndex = { roots: new Map(), workspaces: new Map() }
+/** Read-only references belong to each immutable Config, not to the last visible consumer. */
+function focusProjectIndex(config: Pick<AppConfig, 'workspaces'> | null): ProjectIndex {
+  if (!config) return emptyIndex
+  const cached = projectIndexes.get(config)
+  if (cached) return cached
+  const roots = new Map<string, AppConfig['workspaces'][number]>(), workspaces = new Map<string, AppConfig['workspaces'][number]>()
+  for (const workspace of config.workspaces) {
+    workspaces.set(workspace.id, workspace)
+    const key = JSON.stringify([workspace.hostId, workspace.path])
+    if (!roots.has(key)) roots.set(key, workspace)
   }
-  return roots
+  const index = { roots, workspaces }; projectIndexes.set(config, index)
+  return index
 }
+export function focusProjectRoots(config: Pick<AppConfig, 'workspaces'> | null) { return focusProjectIndex(config).roots }
 export type FocusProjectLane = {
   id: string; workspaceId: string; projectId: string; name: string; path: string; hostId: string
   labels: string[]; topicId: string | null; recovery: 'removed' | 'unknown' | null
@@ -49,13 +50,13 @@ export function retainedWorktreeFacts(previous: readonly FocusWorktreeFact[], sn
   return [...other, ...known.filter(fact => !current.some(item => item.path === fact.path)).map(fact => ({ ...fact, removed: true })), ...current]
 }
 /** Project/checkout/Topic are held ownership facts, never a guess from Agent liveness. */
-export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: AppConfig | null = null, facts: FocusHierarchyFacts = EMPTY_FOCUS_HIERARCHY, tabs: Readonly<Record<string, WorkbenchTab>> = {}, now = Date.now(), topicSnapshots?: Readonly<Record<string, ScratchTopicsSnapshot>>): FocusProjectLane[] {
+export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: Pick<AppConfig, 'workspaces' | 'focus'> | null = null, facts: FocusHierarchyFacts = EMPTY_FOCUS_HIERARCHY, tabs: Readonly<Record<string, WorkbenchTab>> = {}, now = Date.now(), topicSnapshots?: Readonly<Record<string, ScratchTopicsSnapshot>>): FocusProjectLane[] {
   const tabWorkspace = new Map<string, string>()
   for (const tab of Object.values(tabs)) for (const region of Object.values(tab.regions)) if ('sessionId' in region) tabWorkspace.set(region.sessionId, tab.workspaceId)
   const lanes = new Map<string, FocusProjectLane>()
   const priorities = new Map<string, number>()
   const groupRanks = new Map<string, number>()
-  const projectRoots = focusProjectRoots(config)
+  const { roots: projectRoots, workspaces: workspacesById } = focusProjectIndex(config)
   const activity = new Map<string, number>()
   const recentActivityMs = resolveFocusRecentActivityHours(config?.focus?.recentActivityHours) * 3_600_000
   for (const row of rows) {
