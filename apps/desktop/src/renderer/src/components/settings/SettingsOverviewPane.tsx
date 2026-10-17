@@ -14,6 +14,9 @@ export function SettingsOverviewPane<Module extends SettingsModule>({ config, gr
   onOpen: (section: Module['id']) => void
   active?: boolean
 }) {
+  const shortcuts = groups.flatMap(group => group.items)
+    .filter(item => item.overviewShortcut !== undefined)
+    .sort((left, right) => left.overviewShortcut! - right.overviewShortcut!)
   const [documentVisible, setDocumentVisible] = useState(() => document.visibilityState !== 'hidden')
   useEffect(() => {
     if (!active) return
@@ -28,13 +31,23 @@ export function SettingsOverviewPane<Module extends SettingsModule>({ config, gr
       <div className="settings-overview__hero">
         <img className="settings-overview__art" src={bannerUrl} alt="" aria-hidden="true" onError={(event) => { event.currentTarget.hidden = true }} />
         <span className="settings-overview__sweep" aria-hidden="true" />
-        <div className="settings-overview__identity"><strong>AgentMux</strong><p>Your agent workspace.</p></div>
+        <div className="settings-overview__identity"><strong>AgentMux</strong><p>Configure your agents, tools<br />and workspace.</p></div>
       </div>
-      <div className="settings-overview__groups">
-        {(['left', 'right'] as const).map((column) => <div key={column} className="settings-overview__column" data-overview-column={column}>
-          {groups.filter((group) => group.overviewColumn === column).map((group) => <section key={group.id} data-settings-group={group.id} className="settings-overview__group" aria-labelledby={`settings-overview-${group.id}`}>
+      <section className="settings-overview__shortcuts" aria-label="Quick access">
+        {shortcuts.map(item => {
+          const Icon = item.icon
+          return <button key={item.id} type="button" className="settings-overview__shortcut" data-settings-shortcut={item.id} data-settings-target={item.id} onClick={() => onOpen(item.id)}>
+            <Icon size={20} aria-hidden="true" />
+            <span><strong>{item.title}</strong><small>{item.description}</small></span>
+            <ThemeNavigationDisclosureIcon size={14} aria-hidden="true" />
+          </button>
+        })}
+      </section>
+      <div className="settings-overview__directory-heading"><h3>All settings</h3></div>
+      <div className="settings-overview__groups" data-settings-directory>
+          {groups.map((group) => <section key={group.id} data-settings-group={group.id} className="settings-overview__group" aria-labelledby={`settings-overview-${group.id}`}>
             <header>
-              <h3 id={`settings-overview-${group.id}`}>{group.title}</h3><small>Saved configuration</small>
+              <h3 id={`settings-overview-${group.id}`}>{group.title}</h3><p>{group.description}</p>
             </header>
             <div className="settings-overview__entries">
               {group.items.map((item) => {
@@ -48,7 +61,6 @@ export function SettingsOverviewPane<Module extends SettingsModule>({ config, gr
               })}
             </div>
           </section>)}
-        </div>)}
       </div>
     </div>
   )

@@ -22,6 +22,7 @@ export const agentsSettingsModule = {
   id: 'agents',
   group: 'resources',
   title: 'Agents',
+  overviewShortcut: 2,
   description: 'Reusable executors for your next agent session.',
   icon: ThemeObjectAgentIcon,
   keywords: `${AGENT_PROVIDER_KEYWORDS} executor command args env installed provider`,

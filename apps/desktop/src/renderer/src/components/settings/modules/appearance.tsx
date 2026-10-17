@@ -23,6 +23,7 @@ export const appearanceSettingsModule = {
   id: 'appearance',
   group: 'preferences',
   title: 'Appearance',
+  overviewShortcut: 1,
   description: 'Theme, typography, and terminal colors.',
   icon: ThemeAppearanceThemeIcon,
   keywords: 'theme color palette terminal tui composer input background editor source diff font size typography icon icons semantic icons 图标',
