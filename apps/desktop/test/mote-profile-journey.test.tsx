@@ -560,6 +560,7 @@ it('keeps a completed Console update out of the creation shortcut’s resume cho
   await vi.waitFor(() => expect(document.body.textContent).toContain('Create a bot for this Mote'))
   expect(document.querySelector('[data-console-profile-task]')).toBeNull()
   expect(document.body.textContent).not.toContain('Resume original setup')
+  expect(f.parentCalls.mock.calls.filter(([method]) => method === 'space.mote.connection.sync')).toHaveLength(1)
   expect(f.creationCount).toBe(1)
 }, 30_000)
 
@@ -577,8 +578,10 @@ it('keeps recorded sign-in visible when the original management progress cannot 
   expect(result().textContent).toContain('Showing the last checked result. The latest check could not be completed.')
   expect(progress().textContent).not.toContain('Result unavailable')
   const before = native.requests.length
+  const childId = document.querySelector('[data-console-profile-task]')!.getAttribute('data-console-profile-task')
+  const mutations = f.parentCalls.mock.calls.filter(([method]) => method === 'space.mote.connection.sync' || method === 'space.mote.connection.advance').length
   await f.remount()
-  await f.click('Saved public name · Profile update')
+  await vi.waitFor(() => expect(document.querySelector('[data-console-profile-task]')?.getAttribute('data-console-profile-task')).toBe(childId))
   await vi.waitFor(() => expect(document.body.textContent).toContain('Controlled progress read failure'))
   expect(progress().querySelector('[data-step="2"]')?.getAttribute('data-state')).toBe('recorded')
   expect(currentStep()).toBeUndefined()
@@ -586,4 +589,5 @@ it('keeps recorded sign-in visible when the original management progress cannot 
   expect(progress().querySelector('[data-step="3"]')?.textContent).toContain('Result unavailable')
   expect(progress().querySelector('[data-step="4"]')?.textContent).toContain('Result unavailable')
   expect(native.requests).toHaveLength(before)
+  expect(f.parentCalls.mock.calls.filter(([method]) => method === 'space.mote.connection.sync' || method === 'space.mote.connection.advance')).toHaveLength(mutations)
 }, 30_000)

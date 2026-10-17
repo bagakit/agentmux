@@ -70,6 +70,9 @@ it('restores the exact failed creation after real Settings navigation and presen
   expect(effects()).toEqual(before)
   expect(Object.values(useAppStore.getState().botTaskSelections)).toEqual([parent.operationId])
   expect(JSON.stringify(useAppStore.getState().botTaskSelections)).not.toMatch(/qrPayload|account|pngDataUrl|cookie|private-mote/iu)
+  await f.renderCreateShortcut(); await original(parent.operationId)
+  expect(useAppStore.getState().botTaskSelections[moteKey()]).toBe(parent.operationId)
+  expect(effects()).toEqual(before)
 }, 30_000)
 
 it('restores the original profile update and unknown write after navigation and remount without another management action', async () => {
@@ -92,6 +95,10 @@ it('restores the original profile update and unknown write after navigation and 
   expect(effects()).toEqual(before)
   expect(native.requests.filter(request => request.path.includes('/base_info/'))).toHaveLength(1)
   expect(native.submitted).toBe(false)
+  await f.renderCreateShortcut()
+  await ready(() => expect(document.querySelector('[data-console-profile-task]')?.getAttribute('data-console-profile-task')).toBe(childId))
+  expect(useAppStore.getState().botTaskSelections[moteKey()]).toBe(parentId)
+  expect(effects()).toEqual(before)
 }, 30_000)
 
 it('directly restores the selected older ID outside the history page despite unavailable current source and capabilities', async () => {
