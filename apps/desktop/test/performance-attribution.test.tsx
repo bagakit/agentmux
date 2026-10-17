@@ -23,6 +23,39 @@ const node = <T extends Element = HTMLElement>(selector: string) => {
 const render = async (snapshot: ToolkitMetricsSnapshot, paused = false) => act(async () => root.render(<PerformanceOverview snapshot={snapshot} close={() => {}} onConfigure={() => {}} onViewScript={() => {}} paused={paused} />))
 const openRenderer = async () => act(async () => { const details = node<HTMLDetailsElement>('[data-performance-role="renderer"]'); details.open = true; details.querySelector<HTMLElement>('summary')!.focus() })
 
+it('lazily discloses exact lifetime event types and preserves them as previous readings when paused or stale', async () => {
+  let mono = 0
+  const recorder = createRendererPerformance(() => mono)
+  mono = 12; recorder.sessionEvent('agent-status', 0)
+  mono = 42; recorder.sessionEvent('agent-session', 12)
+  const sample = structuredClone(samples.fresh)
+  sample.observation!.renderer.data!.performance = recorder.snapshot()
+  await render(sample); await openRenderer()
+  const disclosure = node<HTMLDetailsElement>('[data-performance-session-events]')
+  expect(disclosure.textContent).toContain('2 calls · lifetime')
+  expect(disclosure.querySelector('[data-session-event-type]')).toBeNull()
+  await act(async () => { disclosure.open = true; disclosure.dispatchEvent(new Event('toggle')) })
+  expect(disclosure.querySelectorAll('[data-session-event-type]')).toHaveLength(2)
+  expect(disclosure.querySelector('[data-session-event-type]')?.getAttribute('data-session-event-type')).toBe('agent-session')
+  expect(node('[data-session-event-type="agent-status"]').textContent).toContain('12.0 ms')
+  expect(node('[data-session-event-type="agent-session"]').textContent).toContain('max 30.0 ms')
+  expect(disclosure.textContent).toContain('subscribers and any layout they force')
+  expect(disclosure.textContent).toContain('Later scheduled React, layout and paint are excluded')
+  expect(disclosure.textContent).toContain('not CPU')
+  disclosure.querySelector<HTMLElement>('summary')!.focus(); node('.performance-body').scrollTop = 90
+  await render(sample, true)
+  expect(node('[data-performance-session-events]')).toBe(disclosure)
+  expect(document.activeElement).toBe(disclosure.querySelector('summary'))
+  expect(node('.performance-body').scrollTop).toBe(90)
+  expect(node('[data-session-event-type="agent-session"]').textContent).toContain('30.0 ms')
+  sample.observation!.renderer.state = 'stale'; sample.observation!.renderer.reason = 'Observer is unavailable'
+  await render(sample)
+  expect(node('[data-renderer-memory]').textContent).toContain('Previous window reading')
+  expect(node('[data-session-event-type="agent-status"]').textContent).toContain('12.0 ms')
+  await act(async () => { disclosure.open = false; disclosure.dispatchEvent(new Event('toggle')) })
+  expect(disclosure.querySelector('[data-session-event-type]')).toBeNull()
+})
+
 it('actual Overview consumes two-level process facts with independent CPU windows, cores, RSS and isolate heap', async () => {
   await render(samples.fresh); await openRenderer()
   const map = node('[aria-label="Process heatmap"]')

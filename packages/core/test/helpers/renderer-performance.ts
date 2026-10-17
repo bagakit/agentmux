@@ -1,7 +1,7 @@
 import { fixtureEpoch as _batchFixtureEpoch } from "../../../../test/fixture-values.mjs"
 import { createInputPerformanceRecorder } from '../../src/performance-diagnostics.js'
 import type { RendererPerformanceSnapshot, RendererTerminalWriteContext } from '../../src/metrics.js'
-import { RENDERER_TIMING_KINDS, type RendererTerminalCost } from '../../src/renderer-performance.js'
+import { RENDERER_SESSION_EVENT_TYPES, RENDERER_TIMING_KINDS, type RendererTerminalCost } from '../../src/renderer-performance.js'
 export function performanceFixture(): RendererPerformanceSnapshot {
   const timing = () => ({ count: 0, totalMs: 0, maxMs: 0 })
   const kinds = RENDERER_TIMING_KINDS
@@ -10,7 +10,8 @@ export function performanceFixture(): RendererPerformanceSnapshot {
   const consumer = () => ({ checks: 0, changes: 0, commits: 0 })
   const visibility = () => ({ visible: consumer(), hidden: consumer() })
   return { startedAt: _batchFixtureEpoch(0, 0, 1), observedAt: _batchFixtureEpoch(0, 0, 2), recording: 'bounded-lifetime', selectorTiming: 'counts-only', writeTiming: 'parser-callback-wall',
-    consumers: { composer: visibility(), sessionPane: visibility() }, sessionEvents: timing(),
+    consumers: { composer: visibility(), sessionPane: visibility() }, sessionEvents: { ...timing(),
+      byType: Object.fromEntries(Object.keys(RENDERER_SESSION_EVENT_TYPES).map(kind => [kind, timing()])) as RendererPerformanceSnapshot['sessionEvents']['byType'] },
     inputRequestDetails: createInputPerformanceRecorder().snapshot(),
     inputRequests: { user: { started: 0, completed: 0, failed: 0, pending: 0, wall: timing() }, protocol: { started: 0, completed: 0, failed: 0, pending: 0, wall: timing() }, paste: { started: 0, completed: 0, failed: 0, pending: 0, wall: timing() } },
     overlay: { triggers: { initial: 0, demand: 0, mutation: 0, resize: 0, scroll: 0, toggle: 0, font: 0, collect: 0 }, scheduled: 0, coalesced: 0, candidates: 0, geometryReads: 0, nativeDemandCount: null, latestCandidates: null, latestGeometryReads: null, collect: timing() },
