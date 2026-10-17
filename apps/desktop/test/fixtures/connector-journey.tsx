@@ -15,17 +15,19 @@ import { SettingsNavigation } from '../../src/renderer/src/components/SettingsNa
 import { composerConfig, composerDOM, composerSession } from '../helpers/composer-dom-fixture'
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap } from '@agentmux/core/connections'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../../packages/core/test/helpers/object-cli-rpc.js'
-import { feishuConfig } from '../../../../packages/connectors/test/fixtures/feishu.js'
+import { rpcOwnerFixture } from '../../../../packages/core/test/helpers/public-rpc-owner.js'
+import { feishuConfig, feishuSdkTransport, botOpenId } from '../../../../packages/connectors/test/fixtures/feishu.js'
 import { createPublicationConversationPort } from '../../../../packages/connectors/src/core-conversation-port.js'
 import { defaultHttpInstance, type RoomReadWire } from '../../../../packages/connectors/test/fixtures/room-discovery.js'
 
 /** Production Renderer, IPC, public Core and Desktop Host; only encryption/adapter/terminal leaves are controlled. */
-export function connectorJourneyFixture(options: { platform?: (request: RoomReadWire) => Promise<unknown>; publication?: boolean } = {}) {
+export function connectorJourneyFixture(options: { platform?: (request: RoomReadWire) => Promise<unknown>; publication?: boolean; ingress?: boolean } = {}) {
   const dom = composerDOM(), settings = vi.fn()
   let original: Awaited<ReturnType<typeof roomProvisioningFixture>>, services: Awaited<ReturnType<typeof createDesktopConnections>>
   let server: InstanceType<typeof core.AgentMuxControlServer>, calls: { method: ConnectionMethod; input: unknown; result?: unknown }[]
   let forward: <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M]) => Promise<ConnectionResultMap[M]>
   let platformCalls: RoomReadWire[], connectionConfig = config
+  let ingressTransport: ReturnType<typeof feishuSdkTransport> | null = null
   beforeEach(async () => {
     vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
     // Use the original startup/hydration owner to admit real UI intent persistence.
@@ -34,9 +36,22 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
     vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [] })
     await useAppStore.persist.rehydrate()
     const stopStartup = await useAppStore.getState().initialize(); stopStartup()
+    const artifactDirectory = process.env['AGENTMUX_TEST_CONNECTOR_ARTIFACTS']
     original = await roomProvisioningFixture()
+    if (options.ingress) {
+      // The ordinary journey uses a retired history reader. Live ingress needs an original Core input owner.
+      const history = original, owner = await rpcOwnerFixture(['original-agent'], core, () => ({ providerId: 'claude', executorId: 'claude', nativeHandle: history.session.nativeHandle! }))
+      const provider = (owner.client as unknown as { providers: { get(id: string): { planPromptInput(text: string): unknown } } }).providers.get('claude')
+      vi.spyOn(provider, 'planPromptInput').mockImplementation(text => ({ kind: 'single-phase', data: text + '\r' }))
+      original = { ...history, client: owner.client, session: (await owner.store.readMetadata('original-agent'))!, checkpoint: ref => owner.client.conversationCheckpoint(ref),
+        async close() { await owner.close(); await history.close() } }
+    }
+    if (artifactDirectory) vi.stubEnv('AGENTMUX_TEST_CONNECTOR_ARTIFACTS', artifactDirectory)
     platformCalls = []; connectionConfig = options.platform ? feishuConfig : config
+    ingressTransport = options.ingress ? feishuSdkTransport() : null
     if (options.platform) vi.spyOn(defaultHttpInstance, 'request').mockImplementation(async input => {
+      if (ingressTransport && input.url?.endsWith('/callback/ws/endpoint')) return await ingressTransport.request(input)
+      if (ingressTransport && input.url?.endsWith('/bot/v3/info')) return { code: 0, bot: { open_id: botOpenId } }
       if (input.url?.includes('/auth/v3/')) return { code: 0, tenant_access_token: 'fixture-tenant-token', app_access_token: 'fixture-app-token', expire: 3600 }
       platformCalls.push({ url: input.url, method: input.method, params: input.params, data: input.data } as RoomReadWire)
       return await options.platform!(input as RoomReadWire)
@@ -44,6 +59,7 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
     vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
     services = await createDesktopConnections({ directory: join(original.root, 'ui-connections'), ...(options.platform ? {} : { adapters: [original.adapter] }), bindings: { spatial: original.spatial, checkpoint: original.checkpoint },
       encryption: { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value), decryptString: value => value.toString() },
+      ...(options.ingress ? { ingress: { core: hostId => hostId === 'local' ? original.client : undefined } } : {}),
       ...(options.publication ? { publication: createPublicationConversationPort(() => [{ hostId: 'local', client: original.client }]) } : {}) })
     const secret = await services.secrets.store({ operationId: 'ui-credential', secret: 'controlled-host-credential' })
     await services.connections.configure({ operationId: 'ui-configure', expectedRevision: null, connection: { ...connectionConfig, credentialRef: secret.credentialRef } })
@@ -115,5 +131,5 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
     expect(output.code, output.stdout + output.stderr).toBe(0)
     return JSON.parse(output.stdout).result
   }
-  return { dom, mount, menu, fill, button, cli, settings, get config() { return connectionConfig }, get platformCalls() { return platformCalls }, get original() { return original }, get services() { return services }, get calls() { return calls }, get forward() { return forward }, get session() { return useAppStore.getState().sessions[0]! } }
+  return { dom, mount, menu, fill, button, cli, settings, get config() { return connectionConfig }, get platformCalls() { return platformCalls }, get ingressTransport() { return ingressTransport }, get original() { return original }, get services() { return services }, get calls() { return calls }, get forward() { return forward }, get session() { return useAppStore.getState().sessions[0]! } }
 }
