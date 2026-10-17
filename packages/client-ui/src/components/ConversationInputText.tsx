@@ -21,7 +21,14 @@ export function ConversationInputText({ text, prefix, ...markdown }: MarkdownPro
       <summary><SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />Declared context{prefix.declaredContexts!.length > 1 ? ` ${index + 1}` : ''}</summary>
       <pre>{context.raw}</pre>
     </details>)}
-    {prefix?.packet ? prefix.packet.parts.map((part, index) => part.kind === 'text'
+    {prefix?.kind === 'references' ? <section className="log-turn__references" aria-label="A2A message references">
+      <p>A2A Inbox references</p>
+      <ul>{prefix.references.map((reference, index) => <li key={index}>
+        <span>Declared source <code>{reference.declaredAgentSessionId}</code></span>
+        <span>Message <code>{reference.declaredMessageId}</code></span>
+      </li>)}</ul>
+      <p className="log-turn__references-hint">Read originals via <code>{`"$AGENTMUX_CLI" ${prefix.references[0]!.readVia}`}</code></p>
+    </section> : prefix?.packet ? prefix.packet.parts.map((part, index) => part.kind === 'text'
       ? <Markdown {...markdown} key={index} className="log-turn__packet-text" content={part.text} />
       : <blockquote key={index} className="log-turn__citation"><span className="log-turn__citation-from">{part.from}</span>
         {part.reference ? <code className="log-turn__citation-ref">{part.reference}</code> : null}

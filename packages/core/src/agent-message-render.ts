@@ -178,7 +178,7 @@ export function parseAgentMuxMessagePrefix(text: string): AgentMuxMessagePrefix 
   if (contexts.kind === 'references' || contexts.declaredMessageId !== undefined) return contexts
   // Only newline separators join a following declaration; indentation remains authored text.
   const sender = parseSenderPrefix(contexts.body.replace(/^(?:\r?\n)*/u, ''))
-  return sender ? { ...contexts, ...sender } : contexts
+  return sender ? { ...sender, ...(contexts.declaredContexts ? { declaredContexts: contexts.declaredContexts } : {}) } : contexts
 }
 
 function parseA2aMetadata(sender: string, messageId: string): { sender: string; messageId: string } | null {
