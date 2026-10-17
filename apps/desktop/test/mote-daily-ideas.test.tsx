@@ -1,3 +1,4 @@
+import { fixtureEpoch as _batchFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixtureIso as _hygiene_fixtureIso, fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
@@ -62,6 +63,7 @@ function scheduleReceipt(params: ScheduleParamsMap['schedule.create'], overrides
 
 describe('actual Mote idea controls and original Calendar consumer', () => {
   it('is off for an empty direction and prepares sources only on the actual user action before original human Save', async () => {
+    useAppStore.setState({ config: { ...useAppStore.getState().config!, automation: { calendarTimezone: 'Europe/Berlin', progressPrompt: 'Periodic text must not replace a sourced idea.' } } })
     const create = vi.spyOn(api.schedule, 'create').mockImplementation(async params => scheduleReceipt(params)), goal = vi.spyOn(api.demands, 'create')
     await ideaUI(); vi.mocked(api.files.readPublic).mockClear()
     expect(ideaButton('Arrange sourced ideas').disabled).toBe(true); expect(create).not.toHaveBeenCalled(); expect(api.files.readPublic).not.toHaveBeenCalled()
@@ -78,6 +80,7 @@ describe('actual Mote idea controls and original Calendar consumer', () => {
     await moteClick([...calendar.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Save arrangement')!)
     expect(create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ prompt: 'My edited direction to this Agent.\n\n' + context, operationId: expect.stringMatching(/^schedule-/) }))
     expect(create.mock.calls[0]![0].checkIn).toBeUndefined(); expect(useAppStore.getState().tabs).toBe(before.tabs); expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled()
+    expect(create.mock.calls[0]![0].calendar.timezone).toBe('Europe/Berlin')
   })
   it('keeps later direction and rejects the real prepare-button read before a Calendar or Launcher appears', async () => {
     await ideaUI(null); const pending = deferredRead(), create = vi.spyOn(api.schedule, 'create')
@@ -198,7 +201,7 @@ describe('original sourced idea intent preparation', () => {
     const launch = vi.spyOn(api.sessions, 'launchAgent').mockRejectedValue(new Error('Private launch observation is unavailable.'))
     useAppStore.setState({ launchAgent: originalLaunchAgent })
     await expect(useAppStore.getState().launchAgent('fixture', input.direction, prepared.groupId, prepared)).rejects.toThrow('observation is unavailable')
-    expect(launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ prompt: input.direction, agentMuxNote: context }))
+    expect(launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ prompt: input.direction, agentMuxNote: context }), undefined)
     expect(context).toContain(path); expect(context).toContain(revision); expect(context).toContain('A saved, scoped decision.')
     expect(useAppStore.getState().agentComposerDrafts[prepared.regionId]).toBe(input.direction); expect(note(prepared.regionId)).toBe(context)
   })
@@ -215,7 +218,7 @@ describe('original sourced idea intent preparation', () => {
     const page: AgentSessionHistoryPage = { agentSessionId: 'core-history-exact', source: { providerId: session.providerId, nativeSessionId: 'original-native' }, nextCursor: null,
       items: [{ id: 'original-entry', kind: 'user-message', contentParts: [{ kind: 'text', text: 'My original scoped decision.' }] }] }
     const history = vi.spyOn(api.sessions, 'historyPage').mockResolvedValue(page)
-    const goal = (id: string, sessionIds: string[]): Demand => ({ id, title: id, description: 'Original confirmed goal.', sessionIds, status: 'in_progress', priority: 'normal', projectId: null, projectName: null, executorId: null, tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, phaseIndex: null, activities: [], decisions: [], createdAt: 10, updatedAt: 20 })
+    const goal = (id: string, sessionIds: string[]): Demand => ({ id, title: id, description: 'Original confirmed goal.', sessionIds, status: 'in_progress', priority: 'normal', projectId: null, projectName: null, executorId: null, tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, phaseIndex: null, activities: [], decisions: [], createdAt: _batchFixtureEpoch(0, 0, 10), updatedAt: _batchFixtureEpoch(0, 0, 20) })
     const goals = vi.spyOn(api.demands, 'list').mockResolvedValue([goal('renderer-linked', [session.id]), goal('wrong-core-linked', [session.control.agentSessionId]), goal('neighbor-linked', ['neighbor-agent'])])
     const plain = await prepareMoteIdeaSchedule(scope(), reference(), input, null, () => true)
     expect(history).not.toHaveBeenCalled(); expect(goals).not.toHaveBeenCalled(); expect(plain.frozenContext).toContain('not included')

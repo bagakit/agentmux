@@ -20,8 +20,9 @@ export async function scalarSettingsSchemaKeys(sourceFile: string | URL = new UR
     }
     if (!ts.isCallExpression(expression) || !ts.isPropertyAccessExpression(expression.expression)) return []
     const target = expression.expression.expression, method = expression.expression.name.text
-    // Historical recovery input remains readable on disk, outside editable settings.
-    if (method === 'describe' && expression.arguments.some(argument => ts.isStringLiteral(argument) && argument.text === 'Retained historical recovery input; not an editable setting')) return []
+    // Retired preferences remain readable on disk, outside the live editable catalog.
+    if (method === 'describe' && expression.arguments.some(argument => ts.isStringLiteral(argument) &&
+      ['Retained historical recovery input; not an editable setting', 'Retained historical preference; not an editable setting'].includes(argument.text))) return []
     if (!ts.isIdentifier(target) || target.text !== 'z') return leaves(target, prefix)
     if (method === 'boolean' || method === 'number' || method === 'enum' || method === 'string') return [prefix]
     if (method !== 'object') return [] // Resource arrays/records and readonly version are separate capabilities.

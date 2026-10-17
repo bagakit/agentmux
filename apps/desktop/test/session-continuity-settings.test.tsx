@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
-import { DEFAULT_AGENT_CONTINUITY_CONTINUATION, type AgentMuxContinuityPolicy } from '@agentmux/core'
+import { DEFAULT_AGENT_CONTINUITY_CONTINUATION } from '@agentmux/core'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
+import type { ExecutionSettings } from '../src/renderer/src/components/settings/continuity-settings-fields'
 import { ContinuitySettingsPane } from '../src/renderer/src/components/settings/ContinuitySettingsPane'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
@@ -23,13 +24,13 @@ async function input(label: string, value: string) {
     node.dispatchEvent(new Event('input', { bubbles: true })); node.dispatchEvent(new Event('change', { bubbles: true }))
   })
 }
-const save = () => dom.click('[data-settings-save-bar] button')
+const save = () => dom.click('[data-settings-pane]:not([hidden]) [data-settings-save-bar] button, :scope > .continuity-settings [data-settings-save-bar] button')
 beforeEach(() => useAppStore.setState({ config: structuredClone(composerConfig), loading: false, mainSurface: 'workbench', detectExecutors: vi.fn(async () => {}), checkHost: vi.fn(async () => {}) }))
 
 it('the registered continuity module reaches Overview, search, narrow navigation and the real writable editor', async () => {
   await dom.render(<SettingsPanel onClose={() => {}} />)
   const row = dom.container.querySelector<HTMLElement>('[data-settings-section="continuity"]')!
-  expect(row?.textContent).toContain('Execution'); expect(row?.textContent).toContain('Active fallback off')
+  expect(row?.textContent).toContain('Execution'); expect(row?.textContent).toContain('3 retries')
   const search = dom.container.querySelector<HTMLInputElement>('input[placeholder="Search settings"]')!
   expect(search).not.toBeNull()
   await act(async () => {
@@ -39,17 +40,8 @@ it('the registered continuity module reaches Overview, search, narrow navigation
   expect(dom.container.querySelector('[data-settings-target="continuity"]')).not.toBeNull()
   await dom.click('[data-settings-target="continuity"]')
   expect(field('Recovery wait').value).toBe('0'); expect(field('Automatic recovery window').value).toBe('86400')
-  expect((field('Use active state when interruption detection is unsupported') as HTMLInputElement).checked).toBe(false)
-  expect((field('Continue interrupted work after recovery') as HTMLInputElement).checked).toBe(true)
-  expect(dom.container.querySelector('[data-continuity-continuation-preview]')?.textContent).toBe(DEFAULT_AGENT_CONTINUITY_CONTINUATION)
+  expect(dom.container.querySelector('[data-settings-pane=continuity] [data-continuity-interruption-settings]')).toBeNull()
   expect(dom.container.textContent).toContain('confirmed activity or idle start')
-  const delivery = dom.container.querySelector('[aria-label="Recovery delivery preview"]')!.textContent
-  expect(delivery).toContain('after native recovery succeeds')
-  expect(delivery).toContain('may open one new model turn')
-  expect(delivery).toContain('Unknown earlier input is never replayed')
-  for (const label of ['Recovery reminder', 'Append to recovery reminder', 'Continuation prompt']) {
-    expect(dom.container.querySelector(`[aria-label="${label}"]`)).toBeNull()
-  }
   const saveSpy = vi.spyOn(api.config, 'save').mockImplementation(async (next, expected) => {
     const saved = applyConfigEdit(useAppStore.getState().config!, expected, next)
     useAppStore.setState({ config: saved }); return saved
@@ -97,7 +89,7 @@ it('unsupported-only active fallback is opt in and preserves retained input whil
     const saved = applyConfigEdit(useAppStore.getState().config!, expected, next)
     useAppStore.setState({ config: saved }); return saved
   })
-  await dom.render(<SettingsPanel onClose={() => {}} initialSection="continuity" />)
+  await dom.render(<SettingsPanel onClose={() => {}} initialSection="automation" />)
   const fallback = () => field('Use active state when interruption detection is unsupported') as HTMLInputElement
   expect(fallback().checked).toBe(false)
   expect(dom.container.querySelector('[data-settings-field="activeInterruptionFallback"]')?.textContent).toContain('Default: Off')
@@ -141,7 +133,7 @@ it('first concurrent fields merge through the real module adapter while pending 
 })
 
 it('a same-field conflict preserves the draft and original expectation without taking any session action', async () => {
-  const onSave = vi.fn(async (value: AgentMuxContinuityPolicy, expected: AgentMuxContinuityPolicy) => {
+  const onSave = vi.fn(async (value: ExecutionSettings, expected: ExecutionSettings) => {
     applyConfigEdit({ ...composerConfig, continuity: { activeRecoveryDelayMs: 5000 } },
       { ...composerConfig, continuity: expected }, { ...composerConfig, continuity: value })
   })
@@ -153,7 +145,7 @@ it('a same-field conflict preserves the draft and original expectation without t
 })
 
 it('validates only the authored numeric operation and round trips full safe millisecond precision', async () => {
-  const onSave = vi.fn(async (_value: AgentMuxContinuityPolicy, _expected: AgentMuxContinuityPolicy) => {})
+  const onSave = vi.fn(async (_value: ExecutionSettings, _expected: ExecutionSettings) => {})
   await dom.render(<ContinuitySettingsPane preferences={{ activeRecoveryDelayMs: Number.MAX_SAFE_INTEGER }} onSave={onSave} />)
   expect(field('Recovery wait').value).toBe('9007199254740.991')
   await input('Recheck count', '4'); await save()
@@ -164,4 +156,42 @@ it('validates only the authored numeric operation and round trips full safe mill
   expect(field('Recovery wait').value).toBe('-1')
   await input('Recovery wait', '1.001'); await save()
   expect(onSave.mock.calls.at(-1)?.[0]).toMatchObject({ activeRecoveryDelayMs: 1001, recheckMaxAttempts: 4 })
+})
+
+it('Execution and Automation keep independent dirty fields and save only their own captured baseline', async () => {
+  const saveSpy = vi.spyOn(api.config, 'save').mockImplementation(async (next, expected) => {
+    const saved = applyConfigEdit(useAppStore.getState().config!, expected, next)
+    useAppStore.setState({ config: saved }); return saved
+  })
+  await dom.render(<SettingsPanel onClose={() => {}} initialSection="continuity" />)
+  await input('Recovery wait', '2.125')
+  const recovery = field('Recovery wait')
+  await dom.click('[data-settings-target="automation"]')
+  expect(dom.container.querySelector('[data-settings-pane="automation"] [aria-label="Recovery wait"]')).toBeNull()
+  await dom.click('[aria-label="Continue interrupted work after recovery"]')
+  await save()
+  expect(useAppStore.getState().config?.continuity).toEqual({ continuationEnabled: false })
+  expect(saveSpy.mock.calls[0]?.[1].continuity).toEqual({ continuationEnabled: true, activeInterruptionFallback: false })
+  await dom.click('[data-settings-target="continuity"]')
+  expect(field('Recovery wait')).toBe(recovery)
+  expect(recovery.value).toBe('2.125')
+  await save()
+  expect(useAppStore.getState().config?.continuity).toEqual({ continuationEnabled: false, activeRecoveryDelayMs: 2125 })
+  expect(saveSpy.mock.calls[1]?.[1].continuity?.continuationEnabled).toBe(false)
+  await dom.click('[data-settings-target="automation"]')
+  expect((field('Continue interrupted work after recovery') as HTMLInputElement).checked).toBe(false)
+  expect(dom.container.querySelector('[data-continuity-continuation-preview]')).toBeNull()
+})
+
+it('the Automation search and InApp links reach their separate actual pages', async () => {
+  await dom.render(<SettingsPanel onClose={() => {}} initialSection="inapp-conversation" />)
+  expect(dom.container.textContent).toContain('Open User Input')
+  await dom.click('[data-settings-field="input-preferences"] button')
+  expect(dom.container.querySelector('.settings-content__header h2')?.textContent).toBe('User Input')
+  await input('Search settings', 'active fallback')
+  expect(dom.container.querySelector('[data-settings-search-result="automation:activeInterruptionFallback"]')).not.toBeNull()
+  expect(dom.container.querySelector('[data-settings-search-result="continuity:activeInterruptionFallback"]')).toBeNull()
+  await dom.click('[data-settings-search-result="automation:activeInterruptionFallback"]')
+  expect(dom.container.querySelector('.settings-content__header h2')?.textContent).toBe('Automation')
+  expect(field('Use active state when interruption detection is unsupported').isConnected).toBe(true)
 })

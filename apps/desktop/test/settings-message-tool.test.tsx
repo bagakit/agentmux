@@ -38,23 +38,26 @@ it('the mounted local and global manuals expose the same actual Message Tool ges
   expect(save).not.toHaveBeenCalled()
 })
 
-it('groups Input & Mailbox and the original Prompts once across the real catalog, Overview, navigation and search', async () => {
+it('groups the five independent Message Tool modules across the real catalog, Overview, navigation and search', async () => {
   const groups = settingsNavGroups('')
   const messageTool = groups.find(group => group.id === 'message-tool')!
   expect(messageTool.title).toBe('Message Tool')
-  expect(messageTool.items.map(item => item.id)).toEqual(['message-tool', 'prompts'])
+  expect(messageTool.items.map(item => item.title)).toEqual(['User Input', 'A2A', 'Automation', 'Prompts', 'amux Protocols'])
+  expect(messageTool.items.map(item => item.id)).toEqual(['message-tool', 'a2a', 'automation', 'prompts', 'amux-protocols'])
   expect(groups.filter(group => group.id !== 'message-tool').flatMap(group => group.items).some(item => item.id === 'prompts')).toBe(false)
   expect(groups.find(group => group.id === 'preferences')!.items.some(item => item.id === 'notifications')).toBe(true)
   const save = vi.spyOn(api.config, 'save')
   await dom.render(<SettingsPanel onClose={() => {}} />)
   expect(dom.container.querySelectorAll('[data-settings-section="message-tool"]')).toHaveLength(1)
   await dom.click('[data-settings-section="message-tool"]')
-  expect(dom.container.querySelector('.settings-content__header h2')?.textContent).toBe('Input & Mailbox')
+  expect(dom.container.querySelector('.settings-content__header h2')?.textContent).toBe('User Input')
   expect(dom.container.querySelectorAll('[data-message-tool-settings]')).toHaveLength(1)
-  for (const query of ['mailbox', '立即发送', 'initial layout']) {
+  for (const query of ['user input', '立即发送', 'initial layout']) {
     await fill('[aria-label="Search settings"]', query)
-    expect(dom.container.querySelector('.settings-content__header h2')?.textContent).toBe('Input & Mailbox')
-    expect(dom.container.querySelector('[data-message-tool-settings] [aria-label="Mailbox"]')?.textContent).toContain('Each Agent keeps its own records')
+    expect(dom.container.querySelector('[data-settings-target="message-tool"]')).not.toBeNull()
+    await dom.click('[data-settings-target="message-tool"]')
+    expect(dom.container.querySelector('.settings-content__header h2')?.textContent).toBe('User Input')
+    expect(dom.container.querySelector('[data-message-tool-settings] [aria-label="Mailbox"]')).toBeNull()
   }
   expect(save).not.toHaveBeenCalled()
 })

@@ -1,3 +1,4 @@
+const { fixtureEpoch: _batchFixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
@@ -14,7 +15,6 @@ import { AGENTMUX_AGENT_MESSAGING_ENTRY, AgentMuxClient, AgentMuxMemoryAgentSess
 import { composeAgentPrompt } from '@agentmux/core/agent-outbound-message'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxPreloadApi, AppConfig, SessionSnapshot } from '../src/shared/contracts'
-import type { ConfigStore } from '../src/main/config-store'
 import type { WorkspaceFiles } from '../src/main/workspace-files'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false))
 const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, invoke: vi.fn(),
@@ -32,26 +32,25 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
   ipcMain: { handle: (channel: string, handler: (...args: any[]) => any) => bridge.handlers.set(channel, handler),
     removeHandler: (channel: string) => bridge.handlers.delete(channel),
     on: (channel: string, fn: (...args: any[]) => any) => { const set = bridge.main.get(channel) ?? new Set(); set.add(fn); bridge.main.set(channel, set) },
+    off: (channel: string, fn: (...args: any[]) => any) => bridge.main.get(channel)?.delete(fn),
     removeListener: (channel: string, fn: (...args: any[]) => any) => bridge.main.get(channel)?.delete(fn) },
-  webFrame: { getZoomFactor: () => 1 }, app: { getPath: () => bridge.storagePath, getAppPath: () => bridge.storagePath, isPackaged: false },
-  clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
+  webFrame: { getZoomFactor: () => 1 }, app: { getPath: () => bridge.storagePath, getAppPath: () => join(process.cwd(), 'apps/desktop'), isPackaged: false },
+  clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, safeStorage: {}
 }))
-vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/core')>(),
-  AgentMuxControlServer: class { async start() {} async stop() {} }
-}))
-vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({ list: async () => [] }) }))
+vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({ list: async () => [], subscribe: () => () => {} }) }))
 vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
 vi.mock('../src/main/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private.json', BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('../src/main/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
-vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class { dispose() {} } }))
+vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class { setPresentationWindowOwner() {} async release() {} dispose() {} } }))
 vi.mock('../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
+vi.mock('../src/main/connector-host', () => ({ createDesktopConnections: async () => ({ connections: { list: async () => [] }, secrets: {}, close: async () => {} }) }))
 // Install the actual mocked Electron bridge before transitive renderer consumers load api.
 await vi.hoisted(async () => { await import('../src/preload/index') })
 import '../src/preload/index'
 import { RuntimeController } from '../src/main/runtime-controller'
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { registerIpc } from '../src/main/ipc'
-import { DEFAULT_CONFIG } from '../src/main/config-store'
+import { ConfigStore, DEFAULT_CONFIG } from '../src/main/config-store'
 import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager'
 import { ContinuousProgressLoopStore } from '../src/main/continuous-progress-loop-store'
 import { deliverContinuousProgress } from '../src/main/continuous-progress-delivery'
@@ -61,6 +60,7 @@ import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessio
 import { privateTracker } from './helpers/continuous-progress-tracker'
 import { CONTINUOUS_PROGRESS_CHANGED } from '../src/shared/contracts'
 import { CONTROL_REQUEST_CHANNEL } from '../src/shared/contracts'
+import { NotesStorageOwner } from '../src/main/notes-storage-owner'
 
 // Target product owners run: Composer → leaf → preload → registered IPC → Main loop → public
 // Core ingress; Store initialize installs its actual request handler. Electron transport, startup
@@ -72,9 +72,17 @@ let root: Root, container: HTMLDivElement, config: AppConfig, session: AgentMuxS
 let writes: string[], cursor: number | null, requests: any[], observations: string[], now: number
 let afterInputObservation: (() => Promise<void>) | undefined, corruptReply: boolean, dropReply: boolean
 let snapshot: Extract<SessionSnapshot, { kind: 'agent' }>, ended: boolean
+let notesReady: Promise<unknown>[]
+const initializeNotes = NotesStorageOwner.prototype.initialize
 beforeEach(async () => {
+  notesReady = []
+  vi.spyOn(NotesStorageOwner.prototype, 'initialize').mockImplementation(function (this: NotesStorageOwner) {
+    const pending = initializeNotes.call(this); notesReady.push(pending); return pending
+  })
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  directory = await mkdtemp(join(tmpdir(), 'amx-progress-product-'))
+  // The actual calendar route uses Main's Unix socket; Darwin's sockaddr_un
+  // cannot represent the long system tmpdir plus /runtime/control.sock.desktop.
+  directory = await mkdtemp(join(process.platform === 'darwin' ? '/private/tmp' : tmpdir(), 'amx-progress-product-'))
   bridge.storagePath = join(directory, 'chromium')
   await mkdir(join(bridge.storagePath, 'Local Storage', 'leveldb'), { recursive: true })
   await mkdir(join(directory, 'home'))
@@ -90,6 +98,10 @@ beforeEach(async () => {
   await store.compareAndSwap(null, session)
   client = new AgentMuxClient({ store }); const inner = client as any
   inner.connected = true; await inner.registry.load('local')
+  // The private Native substrate below is already connected; future-intent admission
+  // must use this same Core rather than discover a physical Runtime process.
+  vi.spyOn(client, 'connect').mockResolvedValue()
+  vi.spyOn(client, 'connectRuntime').mockResolvedValue()
   const projection = () => ({ runId: session.run.runId, lifecycleOperationId: null, program: _hygiene_fixturePath("private/generic-input"), args: [],
     workspacePath: directory, pid: 2345, state: ended ? { type: 'exited', code: 0, signal: null } : { type: 'running' },
     cols: 80, rows: 24, latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: cursor })
@@ -107,10 +119,12 @@ beforeEach(async () => {
   runtime.commit({ hosts: [{ id: 'local', config: { id: 'local', name: 'Private local', kind: 'local' }, client, executionHost: { kind: 'local', dispose: vi.fn() } as never }],
     removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
-  config = { ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: '__scratch__', name: 'Owned topics', hostId: 'local', path: directory, kind: 'folder' }] }
+  config = { ...structuredClone(DEFAULT_CONFIG), toolkit: { tools: [] }, workspaces: [{ id: '__scratch__', name: 'Owned topics', hostId: 'local', path: directory, kind: 'folder' }] }
   manager = new ContinuousProgressLoopManager(new ContinuousProgressLoopStore(join(directory, 'loops.json')),
     (loop, operationId, isCurrent, signal) => deliverContinuousProgress(runtime, loop, operationId, isCurrent, signal),
-    () => now, (loop, tickId, time, signal) => runtime.observeContinuousProgress(loop, tickId, time, signal))
+    () => now, (loop, tickId, time, signal) => runtime.observeContinuousProgress(loop, tickId, time, signal),
+    { saveFutureIntent: (loop, active, context) => runtime.saveFutureIntent(loop, active, context),
+      authorizeFutureIntent: (target, context) => runtime.authorizeFutureIntent(target, context) })
   bridge.sender = Object.assign(new EventEmitter(), { id: 7891, isDestroyed: () => false,
     send: (channel: string, ...args: any[]) => bridge.deliver(channel, ...args), session: { flushStorageData: vi.fn(), getStoragePath: () => bridge.storagePath } })
   bridge.deliver = (channel, ...args) => {
@@ -129,9 +143,12 @@ beforeEach(async () => {
       const once = afterInputObservation; afterInputObservation = undefined; void once().then(send)
     } else send()
   }
+  const configStore = new ConfigStore(join(directory, 'config.json')); config = await configStore.save(config)
   disposeIpc = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: bridge.sender, isDestroyed: () => false } as unknown as BrowserWindow,
-    runtime, progressLoops: manager, configStore: { get: async () => config } as unknown as ConfigStore,
-    scratchTopics: new ScratchTopics(), workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
+    runtime, progressLoops: manager, configStore,
+    workbenchWindows: { setNativeOwner: () => () => {} } as Parameters<typeof registerIpc>[0]['workbenchWindows'],
+    applicationAccess: {} as Parameters<typeof registerIpc>[0]['applicationAccess'],
+    scratchTopics: new ScratchTopics(), workspaceFiles: { listFiles: async () => [], dispose: async () => {} } as unknown as WorkspaceFiles })
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
     const handler = bridge.handlers.get(channel); expect(handler).toBeTypeOf('function')
     return handler!({ sender: bridge.sender } as IpcMainInvokeEvent, ...values)
@@ -145,9 +162,13 @@ beforeEach(async () => {
   expect(useAppStore.getState().loading).toBe(false)
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   await act(async () => root.render(<AgentSessionComposer sessionId={session.agentSessionId} />))
+  const mailbox = container.querySelector<HTMLElement>('.composer-mailbox')!, opened = new Event('toggle')
+  Object.defineProperty(opened, 'newState', { value: 'open' })
+  await act(async () => { mailbox.dispatchEvent(opened); mailbox.querySelector<HTMLButtonElement>('[role="tab"][id$="-progress-tab"]')!.click() })
 })
 afterEach(async () => {
   await act(async () => root?.unmount()); container?.remove(); disposeStore?.(); disposeStore = undefined
+  await Promise.allSettled(notesReady)
   useAppStore.setState(initial, true)
   window.dispatchEvent(new Event('pagehide'))
   await api.ui.requestStorageFlush()
@@ -200,6 +221,54 @@ it('mounts the existing Composer leaf and real create/pause/resume/check/stop ro
   expect(observations.length).toBeGreaterThan(0); expect(new Set(observations)).toEqual(new Set([session.agentSessionId]))
   await click('Stop continuous progress'); expect(manager.list()[0]!.status).toBe('stopped')
   await vi.waitFor(() => expect(container.querySelector('[aria-label="Check continuous progress now"]')).toBeNull())
+})
+it('saved defaults reach both original Composer creation routes and durable tasks without automatic input', async () => {
+  await act(async () => root.unmount())
+  await act(async () => {
+    const before = useAppStore.getState().config!
+    await api.config.save({ ...before, automation: { progressIntervalMs: 420000, progressPrompt: 'Continue the precise saved task',
+      calendarTimezone: 'Europe/Berlin', checkInSilenceMs: 7200000, checkInMinIntervalMs: 10800000, checkInDailyBudget: 2, checkInQuietStart: new Date(_batchFixtureEpoch(0, 23 * 60 * 60 + 15 * 60)).toISOString().slice(11, 16), checkInQuietEnd: new Date(_batchFixtureEpoch(0, 7 * 60 * 60 + 45 * 60)).toISOString().slice(11, 16) } }, before)
+  })
+  expect((await new ConfigStore(join(directory, 'config.json')).get()).automation?.progressIntervalMs).toBe(420000)
+  // This fixture mounts Composer directly; App normally installs the config-change reader.
+  useAppStore.setState({ config: await api.config.get() })
+  root = createRoot(container); await act(async () => root.render(<AgentSessionComposer sessionId={session.agentSessionId} />))
+  const mailbox = container.querySelector<HTMLElement>('.composer-mailbox')!, opened = new Event('toggle')
+  Object.defineProperty(opened, 'newState', { value: 'open' }); await act(async () => mailbox.dispatchEvent(opened))
+  await act(async () => mailbox.querySelector<HTMLButtonElement>('[role="tab"][id$="-progress-tab"]')!.click())
+  const progress = container.querySelector<HTMLElement>('[data-progress-details="interval"]')!, form = progress.querySelector<HTMLFormElement>('form')!
+  expect(form.querySelector<HTMLInputElement>('input[type="number"]')!.value).toBe('7')
+  expect(form.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('Continue the precise saved task')
+  expect(manager.list()).toEqual([]); expect(writes).toEqual([])
+  await act(async () => form.querySelector<HTMLButtonElement>('button[type="submit"]')!.click())
+  await vi.waitFor(() => expect(manager.list().find(loop => !loop.calendar)).toMatchObject({ ...target(), intervalMs: 420000, prompt: 'Continue the precise saved task' }))
+  const calendar = container.querySelector<HTMLElement>('.calendar-schedules')!, details = calendar.querySelector<HTMLDetailsElement>('details')!
+  await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) })
+  const topic = calendar.querySelector<HTMLTextAreaElement>('textarea')!
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(topic, 'One explicit calendar question'); topic.dispatchEvent(new Event('input', { bubbles: true })); calendar.querySelector<HTMLInputElement>('[aria-label="Enable quiet follow-up"]')!.click() })
+  expect(calendar.textContent).toContain('2h silence')
+  const calendarCreate = vi.spyOn(api.schedule, 'create')
+  await act(async () => {
+    calendar.querySelector<HTMLButtonElement>('button[type="submit"]')!.click()
+    await calendarCreate.mock.results[0]!.value
+  })
+  await vi.waitFor(() => expect(manager.list().find(loop => loop.calendar)).toMatchObject({ ...target(), calendar: { timezone: 'Europe/Berlin' }, prompt: 'One explicit calendar question',
+    checkIn: { silenceMs: 7200000, minIntervalMs: 10800000, dailyBudget: 2, quiet: { start: new Date(_batchFixtureEpoch(0, 23 * 60 * 60 + 15 * 60)).toISOString().slice(11, 16), end: new Date(_batchFixtureEpoch(0, 7 * 60 * 60 + 45 * 60)).toISOString().slice(11, 16) } } }))
+  const disk = await new ContinuousProgressLoopStore(join(directory, 'loops.json')).load()
+  expect(disk).toHaveLength(2); expect(disk.find(loop => loop.calendar)?.checkIn?.dailyBudget).toBe(2)
+  expect(writes).toEqual([])
+  const original = manager.list().find(loop => !loop.calendar)!
+  await act(async () => {
+    const before = await api.config.get()
+    await api.config.save({ ...before, automation: { ...before.automation, progressIntervalMs: 660000, progressPrompt: 'A later new task default', checkInDailyBudget: 3 } }, before)
+    useAppStore.setState({ config: await api.config.get() })
+    await api.continuousProgress.action(target(), original.loopId, 'stop')
+  })
+  await vi.waitFor(() => expect(progress.querySelector<HTMLTextAreaElement>('form textarea')?.value).toBe('A later new task default'))
+  expect(progress.querySelector<HTMLInputElement>('form input[type="number"]')!.value).toBe('11')
+  expect(manager.list().find(loop => loop.loopId === original.loopId)).toMatchObject({ status: 'stopped', intervalMs: 420000, prompt: 'Continue the precise saved task' })
+  expect(manager.list().find(loop => loop.calendar)?.checkIn?.dailyBudget).toBe(2)
+  expect(manager.list()).toHaveLength(2); expect(writes).toEqual([])
 })
 it('keeps an unconfirmed continuation composition through an independent loop notification and submits only the final text', async () => {
   const existing = await create()
