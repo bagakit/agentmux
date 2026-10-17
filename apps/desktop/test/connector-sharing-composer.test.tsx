@@ -19,7 +19,7 @@ async function bindExisting() {
   await f.menu('Bind existing group chat'); await f.fill('Existing group ID', 'existing-exact-group')
   const box = document.querySelector<HTMLInputElement>('.agent-connector-check input')!
   await act(async () => box.click()); await f.button('Connect group')
-  await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Sharing on'))
+  await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Group saved'))
   await f.button('Close')
   await wait(() => expect(document.querySelector('.connector-sharing')?.textContent).toContain('Shared group · existing-exact-group'))
   return (await f.services.connections.bindings!.list({})).bindings[0]!
@@ -124,7 +124,7 @@ it('a known Composer audience selects its exact application when the Session has
   expect(selected.getAttribute('aria-label')).toContain('another-app')
   await act(async () => selected.click())
   await wait(() => expect(document.querySelector<HTMLElement>('[aria-label="Group application"]')?.dataset.value).toBe('another-connection'))
-  await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Sharing on'))
+  await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Group saved'))
   const inspected = f.calls.filter(call => call.method === 'connection.binding.inspect').at(-1)!
   expect(inspected.input).toEqual({ bindingId: 'another-binding', revision: 1 })
   expect(f.original.create).not.toHaveBeenCalled(); await f.original.unchanged()
