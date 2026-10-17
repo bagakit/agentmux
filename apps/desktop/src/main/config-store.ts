@@ -344,6 +344,7 @@ const configSchema = z
     // 没有它，写成必需会让整块判失败）——且同样**不回填**：缺席即默认档，读处一律 `?? 'default'`，
     // 不补盘。成员来自 import 进来的元组（schema-enum-ssot.test.ts），未知字符串一律判失败。
     projectRailDensity: z.enum(PROJECT_RAIL_DENSITY_IDS).optional(),
+    gitHistoryShowTime: z.boolean().optional(),
     moteDirectoryView: z.enum(MOTE_DIRECTORY_VIEW_IDS).optional(),
     moteDirectoryAvatarSize: z.number().int().min(MOTE_DIRECTORY_AVATAR_SIZE_MIN).max(MOTE_DIRECTORY_AVATAR_SIZE_MAX).optional(),
     // 复制路径给绝对地址还是缩写 `~`。`.optional()` 同 `appLinkSchemes`（后加字段，既有磁盘 config

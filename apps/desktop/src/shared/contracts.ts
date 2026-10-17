@@ -591,6 +591,8 @@ export type AppConfig = {
    * 真的切了档时发生。密度是看法不是数据，补一次盘只是白写。
    */
   projectRailDensity?: ProjectRailDensity
+  /** Show recorded author time in Git History rows. Absence means true without backfilling disk. */
+  gitHistoryShowTime?: boolean
   moteDirectoryView?: MoteDirectoryView
   moteDirectoryAvatarSize?: number
   /**

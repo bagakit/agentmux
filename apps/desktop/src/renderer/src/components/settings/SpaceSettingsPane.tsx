@@ -1,7 +1,7 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { PROJECT_RAIL_DENSITY_DEFAULT, PROJECT_RAIL_DENSITY_IDS, type ProjectRailDensity } from '../../../../shared/contracts'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
-import { useSettingDraft } from './use-setting-draft'
+import { useSettingDraftRecord } from './use-setting-draft'
 import '../../styles/settings-workflows.css'
 
 const ThemeObjectTopicIcon = semanticIconComponent('object.topic')
@@ -12,13 +12,16 @@ const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external'
 const DENSITY_LABELS = { default: 'Comfortable', compact: 'Compact', dense: 'Dense' } as const
 export const projectRailDensityLabel = (value: ProjectRailDensity | undefined): string => DENSITY_LABELS[value ?? PROJECT_RAIL_DENSITY_DEFAULT]
 
-export function SpaceSettingsPane({ density, onSave, onTopics, onProjects }: {
+export type SpacePreferences = { projectRailDensity: ProjectRailDensity; gitHistoryShowTime: boolean }
+
+export function SpaceSettingsPane({ density, showHistoryTime, onSave, onTopics, onProjects }: {
   density: ProjectRailDensity | undefined
-  onSave(value: ProjectRailDensity, expected: ProjectRailDensity): Promise<void>
+  showHistoryTime: boolean | undefined
+  onSave(value: SpacePreferences, expected: SpacePreferences): Promise<void>
   onTopics(): void; onProjects(): void
 }) {
   const saved = density ?? PROJECT_RAIL_DENSITY_DEFAULT
-  const draft = useSettingDraft(saved), saveState = useSettingsSave()
+  const draft = useSettingDraftRecord({ projectRailDensity: saved, gitHistoryShowTime: showHistoryTime !== false }), saveState = useSettingsSave()
   async function save(): Promise<void> {
     const submitted = draft.beginSave()
     submitted.finish(await saveState.run(() => onSave(submitted.value, submitted.expected)))
@@ -31,14 +34,21 @@ export function SpaceSettingsPane({ density, onSave, onTopics, onProjects }: {
     <section className="settings-group" data-settings-field="project-rail">
       <header><span>Project rail</span><small>Saved: {projectRailDensityLabel(saved)}</small></header>
       <fieldset className="settings-workflows__density"><legend>Project rail density</legend>
-        {PROJECT_RAIL_DENSITY_IDS.map(value => <label key={value} data-selected={draft.value === value}>
+        {PROJECT_RAIL_DENSITY_IDS.map(value => <label key={value} data-selected={draft.value.projectRailDensity === value}>
           <span className="settings-workflows__rail-preview" data-density={value} aria-hidden="true">
             {[0, 1, 2].map(row => <span key={row}><i /><b /></span>)}
           </span>
-          <span className="settings-workflows__choice"><input type="radio" name="space-rail-density" value={value} checked={draft.value === value} onChange={() => draft.setValue(value)} />{projectRailDensityLabel(value)}</span>
+          <span className="settings-workflows__choice"><input type="radio" name="space-rail-density" value={value} checked={draft.value.projectRailDensity === value} onChange={() => draft.setField('projectRailDensity', value)} />{projectRailDensityLabel(value)}</span>
         </label>)}
       </fieldset>
       <p className="settings-workflows__note">Fits more projects into the sidebar. Your projects, topics and layouts stay in place.</p>
+    </section>
+    <section className="settings-group" data-settings-field="git-history-time">
+      <header><span>Git History</span><small>Saved: {showHistoryTime !== false ? 'Time shown' : 'Time hidden'}</small></header>
+      <label className="browser-automation-toggle">
+        <input type="checkbox" aria-label="Show commit time" checked={draft.value.gitHistoryShowTime} onChange={event => draft.setField('gitHistoryShowTime', event.target.checked)} />
+        <span><strong>Show commit time</strong><small>Show recorded author time beside each commit in the history tree.</small></span>
+      </label>
     </section>
     <section className="settings-group">
       <header><span>Manage your work</span><small>Object settings</small></header>
