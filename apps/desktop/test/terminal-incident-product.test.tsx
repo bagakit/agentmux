@@ -25,14 +25,23 @@ import { TerminalView } from '../src/renderer/src/components/TerminalView'
 import { readTerminalViewObservation, registerTerminalViewObservation } from '../src/renderer/src/lib/terminal-view-observation'
 
 // Browser xterm open/parser/buffers/selection and owner-size adoption are real; layout, addons and Run boundary are not.
-const fixture = vi.hoisted(() => ({ terminals: [] as BrowserTerminal[], receive: null as ((event: RuntimeEvent) => void) | null, refresh: null as (() => Promise<void>) | null }))
+const fixture = vi.hoisted(() => ({ terminals: [] as BrowserTerminal[], receive: null as ((event: RuntimeEvent) => void) | null, refresh: null as (() => Promise<void>) | null, diagnosticRegionFailure: false }))
+vi.mock('../src/renderer/src/lib/client-incident-recorder', async () => {
+  const actual = await vi.importActual<typeof import('../src/renderer/src/lib/client-incident-recorder')>('../src/renderer/src/lib/client-incident-recorder')
+  return { ...actual, createClientIncidentRecorder(input: Parameters<typeof actual.createClientIncidentRecorder>[0]) {
+    return actual.createClientIncidentRecorder({ ...input, regionId: () => {
+      if (fixture.diagnosticRegionFailure) throw Error('private diagnostic location unavailable')
+      return input.regionId()
+    } })
+  } }
+})
 vi.mock('@xterm/xterm', async () => {
   const { Terminal } = await vi.importActual<typeof import('@xterm/xterm')>('@xterm/xterm')
   return { Terminal: class extends Terminal {
     constructor(options: ConstructorParameters<typeof Terminal>[0]) { super(options); fixture.terminals.push(this) }
     refresh() {}
     focus() {}
-    get onRender() { return () => ({ dispose() {} }) }
+    onRender = () => ({ dispose() {} })
     registerLinkProvider() { return { dispose() {} } }
     attachCustomKeyEventHandler() {}
   } }
@@ -53,7 +62,7 @@ vi.mock('../src/renderer/src/components/TerminalContextMenu', () => ({ TerminalC
 const originalState = useAppStore.getState()
 const session: Extract<SessionSnapshot, { kind: 'agent' }> = {
   id: 'observed-agent', hostId: 'local', workspacePath: _hygiene_fixturePath("synthetic"), label: 'Observed', createdAt: 1, updatedAt: 1,
-  kind: 'agent', providerId: 'codex', executorId: 'codex', processState: 'running',
+  kind: 'agent', providerId: 'codex', executorId: 'codex', agentSessionUpdatedAt: 1, processState: 'running',
   status: { state: 'running', source: 'run-process', observedAt: 1 }, latestOutputBytes: 0,
   capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
   control: { kind: 'agent', hostId: 'local', agentSessionId: 'observed-agent', run: { runId: 'observed-run' } }
@@ -110,7 +119,8 @@ beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('xterm-char-measure-element') ? 256 : 640 })
   vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(16)
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, top: 0, left: 0, width: 640, height: 384, right: 640, bottom: 384, toJSON() {} })
-  fixture.terminals.length = 0; fixture.receive = null; releases = []
+  fixture.terminals.length = 0; fixture.receive = null; fixture.diagnosticRegionFailure = false; releases = []
+  vi.stubGlobal('agentmux', { clientIncidents: api.clientIncidents })
   attach = vi.spyOn(api.sessions, 'attach').mockResolvedValue(replay(lines))
   vi.spyOn(api.sessions, 'detach').mockResolvedValue(undefined)
   vi.spyOn(api.sessions, 'onEvent').mockImplementation(receive => { fixture.receive = receive; return () => { fixture.receive = null } })
@@ -146,7 +156,7 @@ function deferred<T>() {
 }
 
 it('archives the real Terminal failure and frozen refresh before default-Host CLI discovery and original read', async () => {
-  vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', join(process.cwd(), 'packages/core/bin/amux'))
+  vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', process.env.AGENTMUX_TEST_OBJECT_CLI ?? join(process.cwd(), 'packages/core/bin/amux'))
   const directory = await mkdtemp(join(tmpdir(), 'amx-terminal-incident-'))
   const archive = new ClientIncidentArchive(join(directory, 'archive'))
   await archive.flush()
@@ -223,3 +233,47 @@ it('archives the real Terminal failure and frozen refresh before default-Host CL
     await rm(directory, { recursive: true, force: true })
   }
 }, 30_000)
+
+
+it('keeps the original Terminal error, reveal and refresh usable when diagnostic code or location observations fail', async () => {
+  const current: SessionSnapshot = { ...session, kind: 'terminal', providerId: null,
+    control: { kind: 'terminal', hostId: 'local', runId: session.control.run.runId, run: session.control.run } }
+  surfaceState(current)
+  let getters = 0
+  const error = Object.defineProperty(new Error('original output observation unavailable'), 'code', {
+    get() { getters++; throw Error('private diagnostic code accessor') }
+  })
+  vi.spyOn(api.clientIncidents, 'open').mockResolvedValue({ token: 'original-producer' })
+  const delivery = vi.spyOn(api.clientIncidents, 'report').mockResolvedValue({ accepted: true })
+  attach.mockRejectedValueOnce(error)
+  useAppStore.setState({ agentComposerDrafts: { [session.id]: 'original unsent draft' } })
+  const before = frozenState()
+  await render(current)
+  await act(async () => await vi.waitFor(() => expect(container.textContent).toContain('original output observation unavailable')))
+  expect(getters).toBe(0)
+  expect(container.querySelector('.terminal-view__xterm--hydrating')).toBeNull()
+  await vi.waitFor(() => expect(delivery).toHaveBeenCalledOnce())
+  expect(delivery.mock.calls[0]![1]).toMatchObject({ code: null, metadata: { recorderReadFailures: 1 } })
+  const terminal = fixture.terminals[0]!
+  const metadata = vi.spyOn(api.sessions, 'refresh').mockResolvedValue(current)
+  const refresh = vi.spyOn(api.sessions, 'refreshAttachment').mockResolvedValue({ ...replay('ORIGINAL RECOVERED OUTPUT'), session: current })
+  fixture.diagnosticRegionFailure = true
+  await act(async () => {
+    const completion = await fixture.refresh!().then(() => 'completed', () => 'rejected')
+    expect(completion).toBe('completed')
+  })
+  expect(metadata).toHaveBeenCalledExactlyOnceWith(current.control)
+  expect(refresh).toHaveBeenCalledExactlyOnceWith(current.control, null, 0)
+  expect(readTerminalViewObservation({ regionId: origin.regionId, sessionId: session.id, runId: session.control.run.runId })?.liveReady).toBe(true)
+  expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toContain('ORIGINAL RECOVERED OUTPUT')
+  expect(container.textContent).not.toContain('original output observation unavailable')
+  expect(delivery).toHaveBeenCalledOnce()
+  fixture.diagnosticRegionFailure = false
+  await act(async () => await fixture.refresh!())
+  await vi.waitFor(() => expect(delivery.mock.calls.some(([, report]) => (report.metadata.reporterDropped ?? 0) >= 2)).toBe(true))
+  expect(frozenState()).toEqual(before)
+  expect(fixture.terminals).toEqual([terminal])
+  expect(attach).toHaveBeenCalledOnce(); expect(write).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled()
+  expect(getters).toBe(0)
+  expect(JSON.stringify(delivery.mock.calls)).not.toContain('private diagnostic')
+})
