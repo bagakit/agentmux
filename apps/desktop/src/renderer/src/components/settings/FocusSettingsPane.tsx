@@ -37,12 +37,12 @@ export function FocusSettingsPane({ preferences, active = true, onSave }: {
     <div className="focus-settings__workspace">
       <div className="focus-settings__controls">
         <section className="settings-group"><header><span>Project scanning</span></header>
-          <Choices id="recent-activity" legend="Recent activity window" value={draft.value.recentActivityHours} options={FOCUS_RECENT_ACTIVITY_HOURS.map(value => ({ value, label: value === 168 ? '1 week' : `${value} hours` }))} onChange={value => change('recentActivityHours', value, 'board')} />
+          <Choices id="recent-activity" legend="Recent activity window" value={draft.value.recentActivityHours} options={FOCUS_RECENT_ACTIVITY_HOURS.map(value => ({ value, label: value === 168 ? '1 week' : `${value}h` }))} onChange={value => change('recentActivityHours', value, 'board')} />
           <p className="focus-settings-description">Recent work moves forward. Attention and Working stay first; older projects remain available.</p>
           <Choices id="reply-lines" legend="Reply excerpt" value={draft.value.replyLines} options={FOCUS_REPLY_LINES.map(value => ({ value, label: `${value} ${value === 1 ? 'line' : 'lines'}`, hint: value === 1 ? 'Scan faster' : value === 2 ? 'Balanced' : 'More context' }))} onChange={value => change('replyLines', value, 'board')} />
         </section>
         <section className="settings-group"><header><span>Agent reading</span></header>
-          <Choices id="preview-trigger" legend="Automatic preview" value={draft.value.previewTrigger} options={[{ value: 'quick', label: 'Quick', hint: 'A short pause' }, { value: 'deliberate', label: 'Deliberate', hint: 'Fewer accidental opens' }, { value: 'keyboard', label: 'Keyboard only', hint: 'Use the reading key' }]} onChange={value => change('previewTrigger', value, 'reading')} />
+          <Choices id="preview-trigger" legend="Automatic preview" value={draft.value.previewTrigger} options={[{ value: 'quick', label: 'Quick', hint: 'A short pause' }, { value: 'deliberate', label: 'Deliberate', hint: 'A longer pause' }, { value: 'keyboard', label: 'Keyboard only', hint: 'Use the reading key' }]} onChange={value => change('previewTrigger', value, 'reading')} />
           <p className="focus-settings-description">Shared by Focus and other Agent cards. Clicking still opens the Agent.</p>
           <Choices id="recent-inputs" legend="Recent inputs in a new preview" value={draft.value.recentInputs} options={FOCUS_RECENT_INPUTS.map(value => ({ value, label: `${value} inputs` }))} onChange={value => change('recentInputs', value, 'reading')} />
           <p className="focus-settings-description">Uses the existing reading window. Open bookmarks keep the text you are reading.</p>
