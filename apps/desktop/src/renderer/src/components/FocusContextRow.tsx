@@ -14,7 +14,7 @@ import type { FocusGoalLinks as GoalLinks } from '../lib/focus-goal-links'
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
 
 
-export const FocusContextRow = memo(function FocusContextRow({ context, identity, goalLinks, selected, compact = false, onSelect }: { context: FocusContext; identity?: FocusContextIdentity | undefined; goalLinks?: GoalLinks | undefined; selected: boolean; compact?: boolean; onSelect(id: string): void }) {
+export const FocusContextRow = memo(function FocusContextRow({ context, identity, goalLinks, selected, compact = false, onSelect, onOpenWorkface }: { context: FocusContext; identity?: FocusContextIdentity | undefined; goalLinks?: GoalLinks | undefined; selected: boolean; compact?: boolean; onSelect(id: string): void; onOpenWorkface?: ((id: string) => void) | undefined }) {
   const [menuOpen, setMenuOpen] = useState(false), [draft, setDraft] = useState<string | null>(null)
   const [goalOpen, setGoalOpen] = useState(false)
   const active = useWorkbenchPresentationActive()
@@ -22,7 +22,7 @@ export const FocusContextRow = memo(function FocusContextRow({ context, identity
   const input = useRef<HTMLInputElement>(null), cancelled = useRef(false)
   const expectedNameRevision = useRef({ revision: 0 }), saving = useRef(false), editGeneration = useRef(0)
   useEffect(() => () => { ++editGeneration.current; expectedNameRevision.current = { revision: 0 } }, [context.id])
-  const hover = useAgentInformationPreview(context, !menuOpen && !goalOpen && draft === null, identity, goalLinks, () => onSelect(context.id))
+  const hover = useAgentInformationPreview(context, !menuOpen && !goalOpen && draft === null, identity, goalLinks, () => (onOpenWorkface ?? onSelect)(context.id))
   const goalDisclosure = useCallback((open: boolean) => { hover.close(); setGoalOpen(open) }, [hover.close])
   useEffect(() => {
     if (!active) return
