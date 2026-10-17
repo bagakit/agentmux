@@ -4,7 +4,7 @@ import type { MoteConnectionOperation } from '@agentmux/core/mote-connections'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { api } from '../lib/api'
-import { BotConfirmationCode } from './BotConfirmationCode'
+import { BotSignInPrompt } from './BotConfirmationCode'
 import { ConnectionRequestTrace } from './settings/ConnectionRequestTrace'
 import '../styles/bot-setup-guide.css'
 import '../styles/mote-profile-task.css'
@@ -58,7 +58,7 @@ export function ConsoleProfileProgress({ progress, started, sourceConfirmed, unc
         <span><strong>{label}</strong><small>{status}</small></span>
       </li>
     })}</ol>
-    <p>{unconfirmed === 'progress' ? 'The original management progress is not available yet. View saved progress to check its result.' : unconfirmed === 'request' ? 'The original management request is not available yet. Continue that same request to check its result.' : complete ? 'The original profile version is approved. The current online profile can be checked separately.' : progress ? stages[progress.stage].label : 'Review this Mote’s saved details before updating its bot.'}</p>
+
   </nav>
 }
 
@@ -142,20 +142,23 @@ export function MoteProfileSetup({ operation, automatic, onOperation }: {
     : publication?.reason === 'source-unconfirmed' ? 'The current saved checks do not yet provide a confirmed publication review. Refresh publication checks to read the current result.'
     : null
   const actions: Action[] = [...authActions, ...(view?.profileUpdate?.actions ?? []), ...(view?.profileUpdate?.publicationDraft && view.applicationConfiguration ? view.applicationConfiguration.actions.filter(action => action.kind === 'create-application-version') : [])]
-  const result = !progress && !checking
+  const result = view?.continuation?.stage === 'account'
+    ? { title: 'Confirm your account', detail: 'Check the account and enterprise below, then confirm to update this bot.' }
+    : !progress && !checking
     ? reading.issue
       ? { title: 'Saved progress unavailable', detail: 'The latest check could not be completed. View saved progress to check this original update.' }
       : { title: 'Update progress not confirmed', detail: 'Continue the original request to check its saved result.' }
     : profileResult(progress, publication)
   const retained = !!reading.view && (!currentReading || !!reading.issue)
-  const working = busy || checking || manualPending > 0 || progress?.state === 'running'
+  const waitingForPhone = driving && authActions.some(action => action.kind === 'continue')
+  const working = busy || checking || manualPending > 0 || progress?.state === 'running' || waitingForPhone
   const activity = busyAction === 'refresh-publication-checks' ? 'Refreshing publication checks…'
+    : waitingForPhone ? 'Waiting for your phone confirmation…'
     : busy ? progress?.stage === 'authentication' ? 'Checking sign-in confirmation…' : progress ? stages[progress.stage].label + '…' : 'Continuing the original request…'
     : checking || manualPending > 0 ? 'Checking saved progress…'
     : progress?.state === 'running' ? stages[progress.stage].label + '…'
     : retained ? 'Showing the last checked result'
-    : driving && authActions.some(action => action.kind === 'continue') ? 'Waiting for your phone confirmation…'
-    : checked ? 'Saved progress checked.' : 'Saved progress not checked yet'
+    : checked ? 'Showing the latest saved result' : 'Reading saved progress…'
   const label = (action: Action) => action.kind === 'confirm-account' ? 'Use this account & update bot'
     : action.kind === 'renew' ? 'Get a new sign-in code'
     : action.kind === 'continue' ? 'Continue sign-in'
@@ -168,7 +171,7 @@ export function MoteProfileSetup({ operation, automatic, onOperation }: {
   return <div className="mote-bot-task mote-profile-task" data-console-profile-task={id}>
     <ConsoleProfileProgress progress={progress} started sourceConfirmed unconfirmed={progress ? undefined : reading.view?.operation || operation.setup ? 'progress' : 'request'} authenticationConfirmed={authentication?.stage === 'confirmed' && authentication.request === 'confirmed' && authentication.secureStorage === 'stored'} />
     <div className="mote-bot-task__content">
-      <div className="mote-bot-request-heading"><strong>{operation.snapshot.name}</strong><span className="mote-details__hint">Update this bot’s public profile</span></div>
+      <div className="bot-task-eyebrow">{operation.snapshot.name} · Profile update</div>
       <section className="mote-profile-result" data-profile-result data-state={progress?.state ?? 'unknown'} aria-label="Current profile update result">
         <span className="mote-profile-result__icon" aria-hidden="true">{progress?.state === 'complete' ? <CompletedIcon size={18} /> : progress?.state === 'attention' ? <WarningIcon size={18} /> : <RefreshIcon size={18} />}</span>
         <div><h4>{result.title}</h4><p>{result.detail}</p>{retained ? <p className="mote-profile-result__retained">Showing the last checked result. {reading.issue ? 'The latest check could not be completed.' : 'Refreshing the updated progress.'}</p> : null}</div>
@@ -176,7 +179,7 @@ export function MoteProfileSetup({ operation, automatic, onOperation }: {
       <div className="mote-profile-activity" role="status" aria-live="polite" data-profile-activity data-working={working}>
         <span className="mote-profile-activity__icon" aria-hidden="true">{working ? <LoadingIcon size={14} animation="spin" /> : checked && !retained ? <CompletedIcon size={14} /> : <RefreshIcon size={14} />}</span><span>{activity}</span>
       </div>
-      {view?.challenge ? <div className="mote-bot-confirmation" data-mote-profile-code><BotConfirmationCode url={view.challenge.qrPayload} title="Sign in to manage this bot" /><p>Scan with Feishu, then confirm the account and enterprise here.</p></div> : null}
+      {view?.challenge ? <div className="mote-bot-confirmation" data-mote-profile-code><BotSignInPrompt url={view.challenge.qrPayload} title="Sign in to manage this bot" platform={operation.connection?.application.domain === 'open.larksuite.com' ? 'Lark' : 'Feishu'} scanned={authentication?.stage === 'scanned'} /></div> : null}
       {account ? <dl className="connector-management__account" aria-label="Account and enterprise to confirm"><div><dt>Account</dt><dd>{account.userName ?? account.userId}</dd></div><div><dt>Enterprise</dt><dd>{account.tenantName ?? account.tenantId}</dd></div></dl> : null}
       {publication?.review && (publication.review.changes.length || publication.review.issues.length) ? <section className="mote-profile-checks" aria-label="Publication checks"><div><strong>{publication.review.changes.length ? 'Review the other pending changes' : 'Publication checks'}</strong>{publication.review.changes.length ? <p>Publishing includes these application changes along with this profile update. Confirm the complete version before continuing.</p> : null}
         {publication.review.changes.map(change => <div key={change.category}><strong>{change.category}</strong><ul>{change.details.map(detail => <li key={detail}>{detail}</li>)}</ul></div>)}

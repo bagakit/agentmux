@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ConnectionRecord } from '@agentmux/core/connections'
-import { BotConfirmationCode } from '../BotConfirmationCode'
+import { BotSignInPrompt } from '../BotConfirmationCode'
 import type { ConnectionManagementModel } from './useConnectionManagementSetup'
 import { ConnectionGuidedTask } from './ConnectionGuidedTask'
 import { ConnectionConfigurationProgress } from './ConnectionConfigurationProgress'
@@ -40,18 +40,18 @@ export function ConnectionManagementSetup({ record, model, platformLabel, onBack
   const hasConfigurationActivity = !!view?.applicationInspection?.selected || !!view?.applicationConfiguration?.selected || !!view?.applicationInspection?.observations.length || !!view?.applicationConfiguration?.effects.length || !!view?.applicationConfiguration?.unresolved
   return <section className="connector-setup connector-management" data-management-setup={record.config.connectionId} data-management-stage={stage}>
     <button type="button" className="connector-back small-button" data-management-back onClick={onBack}>Back to connection</button>
-    <BotSetupGuide stage={guideStage} confirmedSteps={[1, ...((view ?? observedView)?.continuation?.stage === 'confirmed' ? [2] : [])]} existingApplication currentStep={stage === 'checking' && !view ? null : configuration || hasConfigurationActivity || observedView?.continuation?.stage === 'confirmed' ? 4 : 2} description={initial ? 'Sign in with the account that manages this saved bot.' : stage === 'scanned' ? 'Confirm the sign-in on your phone, then return to this bot.' : stage === 'handoff' || stage === 'checking' ? 'Your original sign-in is being checked. Keep this setup to continue.' : undefined} />
-    <header className="connector-enrollment__heading">
+    <BotSetupGuide stage={guideStage} confirmedSteps={[1, ...((view ?? observedView)?.continuation?.stage === 'confirmed' ? [2] : [])]} existingApplication currentStep={stage === 'checking' && !view ? null : configuration || hasConfigurationActivity || observedView?.continuation?.stage === 'confirmed' ? 4 : 2} />
+    <header className="connector-enrollment__heading bot-task-heading">
       <p className="connector-management__context">{record.config.label} · {platformLabel}</p>
       <h3 className="connector-editor-title">{configuration ? 'Prepare your bot for conversations' : setupReadFailed ? 'Setup check interrupted' : (initial ? showStart ? 'Confirm your account' : 'Continue your sign-in' : titles[stage])}</h3>
       <p className="connector-enrollment__summary">{configuration ? 'Your sign-in is confirmed. Continue this application through configuration and publishing.' : setupReadFailed ? 'Your bot and unfinished work are kept. Retry this same setup check to continue.' : (initial ? showStart ? 'Sign in with the account you use to manage this bot.' : 'Choose an original request. Checking it does not start another sign-in.' : stage === 'waiting' ? `Scan this code with ${platformLabel} to sign in for this bot’s setup.` : summaries[stage])}</p>
     </header>
     {view?.challenge && !reading?.issue && !revised ? <div className="connector-management__scan" data-management-code>
-      <BotConfirmationCode url={view.challenge.qrPayload} title={`${platformLabel} account sign-in code`} failureMessage="This sign-in code could not be displayed. Return to the connection and use the developer console." />
+      <BotSignInPrompt url={view.challenge.qrPayload} title={`${platformLabel} account sign-in code`} platform={platformLabel} scanned={stage === 'scanned'} />
     </div> : null}
     {account ? <dl className={`connector-management__account${configuration ? ' connector-management__account--confirmed' : ''}`} aria-label={configuration || observedView?.continuation?.stage === 'confirmed' ? 'Confirmed account and enterprise' : 'Account and enterprise to confirm'}>
-      <div><dt>{reading?.issue ? observedView?.continuation?.stage === 'confirmed' ? 'Last confirmed account' : 'Last observed account' : configuration ? 'Account confirmed' : 'Account'}</dt><dd>{account.userName ?? account.userId}{account.userName && !configuration ? <small>{account.userId}</small> : null}</dd></div>
-      <div><dt>Enterprise</dt><dd>{account.tenantName ?? account.tenantId}{account.tenantName && !configuration ? <small>{account.tenantId}</small> : null}</dd></div>
+      <div><dt>{reading?.issue ? observedView?.continuation?.stage === 'confirmed' ? 'Last confirmed account' : 'Last observed account' : configuration ? 'Account confirmed' : 'Account'}</dt><dd>{account.userName ?? account.userId}</dd></div>
+      <div><dt>Enterprise</dt><dd>{account.tenantName ?? account.tenantId}</dd></div>
     </dl> : null}
     <div className="connector-enrollment__action" aria-busy={busy}>
       {showStart ? <button className="primary-button" data-management-start disabled={!model.supported || busy} onClick={model.start}>Show sign-in code</button> : null}

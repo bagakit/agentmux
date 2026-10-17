@@ -1,8 +1,8 @@
-.mote-profile-result { display: flex; align-items: flex-start; gap: var(--sp-3); min-width: 0; padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-2); }
+.mote-profile-result { display: flex; align-items: flex-start; gap: var(--sp-3); min-width: 0; }
 .mote-profile-result > div { min-width: 0; }
-.mote-profile-result h4 { margin: 0; color: var(--text); font-size: var(--fs-title); font-weight: 550; line-height: 1.4; letter-spacing: -.015em; }
+.mote-profile-result h4 { margin: 0; color: var(--text); font-size: clamp(20px, 3cqi, 26px); font-weight: 600; line-height: 1.25; letter-spacing: -.025em; }
 .mote-profile-result p { margin: var(--sp-2) 0 0; color: var(--text-2); font-size: var(--fs-body); line-height: 1.65; overflow-wrap: anywhere; }
-.mote-profile-result__icon { flex: none; display: flex; padding-top: 3px; color: var(--text-3); }
+.mote-profile-result__icon { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--surface-3); color: var(--text-3); }
 .mote-profile-result[data-state='attention'] .mote-profile-result__icon { color: var(--amber-text); }
 .mote-profile-result[data-state='complete'] .mote-profile-result__icon { color: var(--green); }
 .mote-profile-result .mote-profile-result__retained { color: var(--text-3); font-size: var(--fs-meta); }
@@ -27,7 +27,7 @@
 .mote-profile-task .connector-request-trace__actions .small-button { min-height: 30px; padding: 5px 10px; border: 1px solid var(--line); background: transparent; box-shadow: none; font-size: var(--fs-meta); font-weight: 450; }
 .mote-profile-task .connector-request-trace__actions .small-button:hover:not(:disabled) { background: var(--surface-3); }
 @container connector (width < 440px) {
-  .mote-profile-result { padding: var(--sp-3); }
+  .mote-profile-result { gap: var(--sp-2); }
   .mote-profile-task .mote-profile-actions .mote-profile-actions__inspect { margin-left: 0; }
 }
 @media (pointer: coarse) { .mote-profile-task .mote-profile-actions button, .mote-profile-task .connector-request-trace__actions button { min-height: 44px; } }
