@@ -726,7 +726,9 @@ export class AgentMuxRpcService {
         const result = method === 'settings.hosts.inspect'
           ? await observeHostRuntime(input.hostId, client, readOwner, context.signal, configuration)
           : await observeHostNetwork(input.hostId, configuration!, readOwner, async (fence, signal) => {
-            const originalContext = { ...context, signal, runtimeFence: fence }
+            // The aggregate authenticated its caller above. Only this fixed read
+            // borrows the Host transport; source Agent credentials are not a target identity.
+            const originalContext = { signal, runtimeFence: fence }
             if (client.forwardRpc) return await client.forwardRpc('runtime.network.inspect', { fence }, originalContext)
             const owner = await this.ports.hostedRuntime?.()
             if (owner?.client !== client) throw new AgentMuxError('The original network owner is unavailable. No other Runtime was queried.', 'RUNTIME_OWNER_UNCONFIRMED')
