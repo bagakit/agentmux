@@ -17,7 +17,13 @@ export type ConnectionObservation = {
   intake: ConnectionStage
   delivery: ConnectionStage
 }
-export type ConnectionRecord = { config: ConnectionConfig; revision: number; observation: ConnectionObservation }
+export type ConnectionRecord = {
+  config: ConnectionConfig
+  revision: number
+  observation: ConnectionObservation
+  /** The matching managed initial flow's recorded outcome, distinct from current platform readiness. */
+  initialSetup?: { state: 'incomplete' | 'complete' | 'unconfirmed' }
+}
 export type ConnectionConfigureInput = { operationId: string; expectedRevision: number | null; connection: ConnectionConfig }
 /** A saved operation and its original configuration remain inspectable after credential rotation. */
 export type ConnectionOperation = { operationId: string; status: 'configured'; connection: ConnectionRecord }

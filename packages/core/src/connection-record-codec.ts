@@ -27,6 +27,9 @@ export function parseConnectionObservation(value: unknown): ConnectionObservatio
   return { authentication: stage(p.authentication), transport: stage(p.transport), intake: stage(p.intake), delivery: stage(p.delivery) }
 }
 export function parseConnectionRecord(value: unknown): ConnectionRecord {
-  const p = object(value, ['config', 'revision', 'observation'])
-  return { config: parseConnectionConfig(p.config), revision: revision(p.revision), observation: parseConnectionObservation(p.observation) }
+  const p = object(value, ['config', 'revision', 'observation', 'initialSetup'])
+  const initial = p.initialSetup === undefined ? undefined : object(p.initialSetup, ['state'])
+  if (initial && !['incomplete', 'complete', 'unconfirmed'].includes(initial.state as string)) fail()
+  return { config: parseConnectionConfig(p.config), revision: revision(p.revision), observation: parseConnectionObservation(p.observation),
+    ...(initial ? { initialSetup: { state: initial.state as NonNullable<ConnectionRecord['initialSetup']>['state'] } } : {}) }
 }

@@ -81,16 +81,19 @@ export class ConnectionHost implements ConnectionPort {
       catch { throw new AgentMuxError('Profile storage is unavailable. Existing connections remain available; retry this original profile operation.', 'CONNECTION_PROFILE_UNAVAILABLE') }
     }
     this.profile = { get: async (input, context) => profile().get(input, context), inspect: async (input, context) => profile().inspect(input, context), list: async (input, context) => profile().list(input, context) }
-    const setup = (): ConnectionSetupHost => {
-      if (this.closed) throw new AgentMuxError('The original management owner is closed. Inspect the same request on its Host.', 'CONNECTION_SETUP_UNCONFIRMED')
-      if (this.setupHost) return this.setupHost
-      const secrets = options.secrets as Partial<import('./connection-enrollment-adapter.js').EnrollmentSecrets>
-      try {
-        return this.setupHost = new ConnectionSetupHost(this, typeof secrets.store === 'function' && typeof secrets.inspect === 'function' && typeof secrets.assertAvailable === 'function' ? secrets as import('./connection-enrollment-adapter.js').EnrollmentSecrets : undefined, (source, target, context) => this.enrollmentOwner().setupSource(source, target, context))
-      } catch { throw new AgentMuxError('Original management request storage is unavailable. Existing bots and Agents remain available; restore storage and inspect the same request.', 'CONNECTION_SETUP_UNCONFIRMED') }
-    }
-    this.setup = { begin: (input, context) => setup().begin(input, context), advance: (input, context) => setup().advance(input, context), inspect: (input, context) => setup().inspect(input, context), list: (input, context) => setup().list(input, context) }
+    this.setup = { begin: (input, context) => this.setupOwner().begin(input, context), advance: (input, context) => this.setupOwner().advance(input, context), inspect: (input, context) => this.setupOwner().inspect(input, context), list: (input, context) => this.setupOwner().list(input, context) }
     this.enrollment = { begin: async (input, context) => this.enrollmentOwner().begin(input, context), advance: async (input, context) => this.enrollmentOwner().advance(input, context), inspect: async (input, context) => this.enrollmentOwner().inspect(input, context), list: async (input, context) => this.enrollmentOwner().list(input, context) }
+  }
+  private setupOwner(): ConnectionSetupHost {
+    if (this.closed) throw new AgentMuxError('The original management owner is closed. Inspect the same request on its Host.', 'CONNECTION_SETUP_UNCONFIRMED')
+    if (this.setupHost) return this.setupHost
+    const secrets = this.options.secrets as Partial<import('./connection-enrollment-adapter.js').EnrollmentSecrets>
+    try {
+      return this.setupHost = new ConnectionSetupHost(this, typeof secrets.store === 'function' && typeof secrets.inspect === 'function' && typeof secrets.assertAvailable === 'function' ? secrets as import('./connection-enrollment-adapter.js').EnrollmentSecrets : undefined, (source, target, context) => this.enrollmentOwner().setupSource(source, target, context))
+    } catch { throw new AgentMuxError('Original management request storage is unavailable. Existing bots and Agents remain available; restore storage and inspect the same request.', 'CONNECTION_SETUP_UNCONFIRMED') }
+  }
+  initialSetupObservation(input: import('@agentmux/core/connections').ConnectionSetupBegin, target: Pick<ConnectionConfig, 'adapterId' | 'application'>): NonNullable<ConnectionRecord['initialSetup']> {
+    return this.setupOwner().initialSetupObservation(input, target)
   }
   private enrollmentOwner(): ConnectionEnrollmentHost {
     if (this.closed) throw new AgentMuxError('The original enrollment owner is closed. Inspect the original operation on its Host.', 'CONNECTION_ENROLLMENT_UNAVAILABLE')
@@ -112,7 +115,12 @@ export class ConnectionHost implements ConnectionPort {
       try { if (!this.readService().enabled) observation = { ...observation, transport: { state: 'disabled' }, intake: { state: 'disabled' }, delivery: { state: 'disabled' } } }
       catch { observation = { ...observation, transport: { state: 'unknown', reason: 'check-failed' }, intake: { state: 'unknown', reason: 'check-failed' }, delivery: { state: 'unknown', reason: 'check-failed' } } }
     }
-    return parseConnectionRecord({ config, revision, observation })
+    let initialSetup: ConnectionRecord['initialSetup']
+    if (includeReceiver) {
+      try { initialSetup = this.enrollmentOwner().initialSetupObservation(config) }
+      catch { /* Association is unconfirmed; do not manufacture a managed requirement for a manual bot. */ }
+    }
+    return parseConnectionRecord({ config, revision, observation, ...(initialSetup ? { initialSetup } : {}) })
   }
   /** Synchronous exact configuration read for owners joining this same database transaction. */
   readConfiguration(connectionId: string): ConnectionRecord | null { return this.safe(() => this.read(connectionId, false)) }
