@@ -6,6 +6,7 @@ const capabilityExamples = () => (['observe', 'act', 'wait'] as const)
 export const AGENTMUX_BROWSER_TARGET_GUIDE = `First inspect the exact Tab/Region and read its typed Browser id with
 \`amux space inspect --tab TAB\` or \`amux space inspect --region REGION\`.
 Use \`amux browser targets\` to discover original available Browser targets.
+Discovery reports coverage=complete or coverage=partial. A partial result cannot confirm that an unreturned page was removed.
 A cold embedded description is unavailable without navigationId or native capabilities.
 An admitted \`amux browser run --browser ID\` restores that same original page on first use;
 discovery alone does not create a page.
