@@ -13,7 +13,8 @@ import { amuxProtocolsSettingsModule } from './modules/amux-protocols'
 import { profileSettingsModule } from './modules/profile'
 import { focusSettingsModule } from './modules/focus'
 import { hostsSettingsModule } from './modules/hosts'
-import { amuxConversationSettingsModule } from './modules/amux-conversation'
+import { mobileSettingsModule } from './modules/mobile'
+import { inappConversationSettingsModule } from './modules/inapp-conversation'
 import { toolkitSettingsModule } from './modules/toolkit'
 import { spaceSettingsModule } from './modules/space'
 import { goalsSettingsModule } from './modules/goals'
@@ -44,7 +45,8 @@ export const settingsModules = [
   toolkitSettingsModule,
   agentsSettingsModule,
   hostsSettingsModule,
-  amuxConversationSettingsModule,
+  mobileSettingsModule,
+  inappConversationSettingsModule,
   larkSettingsModule
 ] as const
 
