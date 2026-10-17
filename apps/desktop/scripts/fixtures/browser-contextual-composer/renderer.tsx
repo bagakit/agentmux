@@ -12,6 +12,7 @@ import { useNativeOverlayChrome } from '../../../src/renderer/src/hooks/useNativ
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
+import { prepareBrowserOperatorAvatar } from '../../../src/renderer/src/lib/browser-operator-avatar'
 import '../../../src/renderer/src/styles/index.css'
 import './fixture.css'
 
@@ -71,6 +72,12 @@ Object.assign(window, { contextualProof: {
   reader(message: AgentSessionUserMessage, item?: any) { setMessage({ message, item }) },
   wire(wire: string, message: AgentSessionUserMessage) { setMessage({ message, wire }) },
   appearance(mode: 'dark' | 'light') { updateThemeSelection({ ...useAppStore.getState().config!.appearance, appAppearance: mode }) },
+  async rasterPresenceAsset() {
+    const style = getComputedStyle(document.documentElement)
+    return await prepareBrowserOperatorAvatar({ document, providerId: 'gemini', appearance: { badge: 'shield', tint: '#469b78' },
+      colors: { mark: style.getPropertyValue('--text-2').trim(), enamel: style.getPropertyValue('--surface-0').trim(),
+        badge: style.getPropertyValue('--text').trim(), badgeBackground: style.getPropertyValue('--surface-1').trim() } })
+  },
   async flush(id: string) { return await useAppStore.getState().flushAgentSteerQueue(id) },
   dispose() { root.unmount(); startup?.(); theme?.dispose?.() }
 } })
