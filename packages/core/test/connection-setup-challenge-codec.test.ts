@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { parseConnectionEnrollmentDiagnostic, parseConnectionSetupResult as decodePublicResult, type ConnectionSetupOperation, type ConnectionSetupView } from '@agentmux/core/connections'
+import { connectionSetupDecisionForAction, parseConnectionEnrollmentDiagnostic, parseConnectionSetupParams, parseConnectionSetupResult as decodePublicResult, type ConnectionSetupOperation, type ConnectionSetupView } from '@agentmux/core/connections'
 import { parseConnectionSetupConfigurationReceipt, parseConnectionSetupResult } from '../src/connection-setup-codec.js'
 import { parseConnectionEnrollmentDiagnostic as parseSourceDiagnostic } from '../src/connection-enrollment-codec.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
@@ -155,4 +155,38 @@ it('complete publication receipts retain their canonical source binding order', 
   const receipt = { effect: 'create-application-version', stepId: 'original-create', input: { ...input, expectedRevision: 11, decision: { actionId: 'setup-publish-create:original', value: 'confirm' }, publicationDraft: { kind: 'create-version', version: '1.0.0', notes: 'Original release', visibility: 'current' } }, request: 'confirmed', secureStorage: 'stored', sourceStepIds: { features: 'features-read', sharing: 'sharing-read', visibility: 'visibility-read', versions: 'versions-read', pending: 'pending-read' }, versionId: 'created-version', submission: null }
   const parsed = parseConnectionSetupConfigurationReceipt(receipt)
   expect('sourceStepIds' in parsed && Object.keys(parsed.sourceStepIds)).toEqual(['pending', 'versions', 'visibility', 'sharing', 'features'])
+})
+
+it('source and public codecs allow only the finite read-only refresh alongside a publication candidate', () => {
+  const value: ConnectionSetupView = { ...reply({ ...authentication, stage: 'confirmed' }), challenge: null }
+  value.operation!.goal = { kind: 'profile-update', desired: { name: 'Saved identity' }, publication: { notes: 'Original profile update' } }
+  const action = { kind: 'refresh-publication-checks' as const, actionId: 'setup-profile-refresh:original', expectedRevision: 11 }
+  value.profileUpdate = { stage: 'publication-create', state: 'attention', actions: [action], publicationDraft: { kind: 'create-version', version: '1.0.1', notes: 'Original profile update', visibility: 'current' } }
+  expect(connectionSetupDecisionForAction(action)).toBe('continue')
+  const advance = { ...input, expectedRevision: 11, decision: { actionId: action.actionId, value: 'continue' } }
+  expect(parseConnectionSetupParams('connection.setup.advance', advance)).toEqual(advance)
+  expect(() => parseConnectionSetupParams('connection.setup.advance', { ...advance, publicationDraft: value.profileUpdate.publicationDraft })).toThrow()
+  for (const decode of decoders) {
+    expect(decode('connection.setup.inspect', value, input)).toEqual(value)
+    for (const progress of [
+      { ...value.profileUpdate, actions: [{ ...action, kind: 'continue-profile-update' }] },
+      { ...value.profileUpdate, actions: [{ ...action, kind: 'recover-configuration-effect' }] },
+      { ...value.profileUpdate, actions: [{ ...action, expectedRevision: 10 }] },
+      { ...value.profileUpdate, state: 'pending' },
+      { ...value.profileUpdate, stage: 'profile-write', publicationDraft: undefined }
+    ]) expect(() => decode('connection.setup.inspect', { ...value, profileUpdate: progress }, input)).toThrow()
+  }
+})
+
+it('plain profile inspect may carry only its original publication-create projection at that exact phase', () => {
+  const value: ConnectionSetupView = { ...reply({ ...authentication, stage: 'confirmed' }), challenge: null }
+  value.operation!.goal = { kind: 'profile-update', desired: { name: 'Saved identity' }, publication: { notes: 'Original profile update' } }
+  value.profileUpdate = { stage: 'publication-create', state: 'pending', actions: [{ kind: 'continue-profile-update', actionId: 'setup-profile-continue:original', expectedRevision: 11 }] }
+  value.applicationConfiguration = { effect: 'create-application-version', subject: 'publication-pending', effects: [], next: null, selected: null, capability: 'unknown', actions: [], sources: {}, requiredSubjects: ['publication-pending', 'publication-versions', 'publication-visibility', 'publication-sharing', 'publication-features'], draft: { kind: 'create-version', version: '1.0.1', notes: 'Original profile update', visibility: 'current' }, review: null }
+  for (const decode of decoders) {
+    expect(decode('connection.setup.inspect', value, input)).toEqual(value)
+    expect(() => decode('connection.setup.inspect', { ...value, profileUpdate: { ...value.profileUpdate!, stage: 'profile-readback' } }, input)).toThrow()
+    expect(() => decode('connection.setup.inspect', { ...value, operation: { ...value.operation!, goal: { kind: 'agent-conversation', interaction: 'messages' } }, profileUpdate: undefined }, input)).toThrow()
+    expect(() => decode('connection.setup.inspect', value, { ...input, applicationConfiguration: { effect: 'update-application-profile' } })).toThrow()
+  }
 })

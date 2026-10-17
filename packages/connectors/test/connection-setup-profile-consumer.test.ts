@@ -14,6 +14,7 @@ import {
   type ConnectionSetupPublicationReview
 } from '@agentmux/core/connections'
 import type { ConnectionAdapter } from '@agentmux/connectors'
+import { ProfileConnectionSetup } from '../dist/connection-setup-profile.js'
 import { DesktopConnectorSecrets } from '../../../apps/desktop/src/main/connector-secrets.js'
 import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
 import {
@@ -31,13 +32,16 @@ afterEach(async () => {
 })
 async function fixture(
   options: {
-    unknown?: 'upload' | 'write'
+    unknown?: 'upload' | 'write' | 'create'
     hold?: 'upload' | 'write' | 'readback'
     pending?: boolean
     reviewing?: boolean
     readFailure?: boolean
     incompleteProfile?: boolean
     draftUnavailable?: boolean
+    publicationIssue?: boolean
+    planUnavailable?: boolean
+    publicationReadFailure?: string
   } = {}
 ) {
   const root = await mkdtemp(join(tmpdir(), 'console-profile-')),
@@ -64,7 +68,10 @@ async function fixture(
     }
   let created = false,
     submitted = false,
-    blocked = Boolean(options.readFailure)
+    blocked = Boolean(options.readFailure),
+    publicationBlocked = Boolean(options.publicationIssue),
+    unavailablePlan = Boolean(options.planUnavailable),
+    publicationReadBlocked = Boolean(options.publicationReadFailure)
   const held = async (kind: string) => {
     if (options.hold === kind)
       await new Promise<void>((r) => {
@@ -73,7 +80,8 @@ async function fixture(
   }
   const review = (
     effect: string,
-    draft: any
+    draft: any,
+    issue = false
   ): ConnectionSetupPublicationReview => ({
     versions: [
       { versionId: 'old-version', version: '1.0.0', status: 'approved' }
@@ -117,7 +125,7 @@ async function fixture(
     sharing: null,
     reasonRequired: null,
     creatorAudienceAvailable: false,
-    issues: options.draftUnavailable ? ['Current publication version is unconfirmed'] : []
+    issues: options.draftUnavailable || issue ? ['Current publication version is unconfirmed'] : []
   })
   const effect = async (kind: string, operationId: string) => {
     const rows = services
@@ -140,8 +148,10 @@ async function fixture(
       draft: any,
       creator: any,
       provenance: any
-    ) => ({
-      review: review(effect, draft),
+    ) => {
+      const pending = states.pending ? JSON.parse(states.pending) : null
+      return pending?.planUnavailable ? null : ({
+      review: review(effect, draft, Boolean(pending?.publicationBlocked)),
       requiredSubjects:
         effect === 'create-application-version'
           ? [
@@ -156,10 +166,11 @@ async function fixture(
               'publication-versions',
               'publication-features'
             ],
-      privateIntent: draft && !options.draftUnavailable ? JSON.stringify({ effect, draft }) : null
-    }),
+      privateIntent: draft && !options.draftUnavailable && !pending?.publicationBlocked ? JSON.stringify({ effect, draft }) : null
+    }) },
     createVersion: async (input: any) => {
       await effect('create', input.operationId)
+      if (options.unknown === 'create') return { kind: 'unknown' }
       created = true
       return {
         kind: 'accepted',
@@ -307,6 +318,8 @@ async function fixture(
           requests.push({ kind: input.subject })
           if (blocked && input.subject === 'application-details')
             return { kind: 'unknown' }
+          if (publicationReadBlocked && input.subject === options.publicationReadFailure)
+            return { kind: 'unknown' }
           if (
             input.subject === 'application-details' &&
             state.name !== 'Original'
@@ -339,7 +352,9 @@ async function fixture(
                   ? { versions: created ? [{ versionId: 'new-version' }] : [] }
                   : input.subject === 'publication-version'
                     ? { versionId: input.versionId }
-                    : { complete: true }
+                    : input.subject === 'publication-pending'
+                      ? { complete: true, publicationBlocked, planUnavailable: unavailablePlan }
+                      : { complete: true }
             )
           }
         }
@@ -415,7 +430,7 @@ async function fixture(
         actionId: offered.actionId,
         value: connectionSetupDecisionForAction(offered)
       },
-      ...(view.applicationConfiguration &&
+      ...(['create-application-version', 'submit-application-version', 'recover-configuration-effect'].includes(offered.kind) && view.applicationConfiguration &&
       'draft' in view.applicationConfiguration &&
       view.applicationConfiguration.draft
         ? { publicationDraft: view.applicationConfiguration.draft }
@@ -450,6 +465,11 @@ async function fixture(
     },
     unblock() {
       blocked = false
+    },
+    readyPublication() {
+      publicationBlocked = false
+      unavailablePlan = false
+      publicationReadBlocked = false
     },
     release() {
       release()
@@ -537,7 +557,8 @@ it('updates and reads back the original profile before publication facts can blo
   const originalEffect = (await f.sdk.call('connection.setup.inspect', profileSelector)).applicationConfiguration!.selected
   let current = view
   for (let retry = 0; retry < 2; retry++) {
-    current = await f.advance(current, 'continue-profile-update')
+    expect(current.profileUpdate!.actions.map(a => a.kind)).toEqual(['refresh-publication-checks'])
+    current = await f.advance(current, 'refresh-publication-checks')
     expect(current.profileUpdate).toMatchObject({ stage: 'publication-create', state: 'attention' })
     expect(current.operation?.operationId).toBe(f.input.operationId)
   }
@@ -555,6 +576,115 @@ it('keeps a confirmed but incomplete application baseline in profile preflight w
   const source = await f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId, applicationConfiguration: { effect: 'upload-profile-avatar' } })
   expect(source.applicationConfiguration).toMatchObject({ capability: 'unknown', reason: 'source-unconfirmed', actions: [], source: { request: 'confirmed', secureStorage: 'stored' } })
   expect(f.requests.filter(r => r.preclaimed)).toEqual([])
+}, 30000)
+
+it('refreshes blocked publication checks through public SDK and compiled CLI without writing the newly available version', async () => {
+  const f = await fixture({ publicationIssue: true }), blocked = await f.begin()
+  expect(blocked.profileUpdate).toMatchObject({ stage: 'publication-create', state: 'attention', actions: [{ kind: 'refresh-publication-checks' }], publicationDraft: { version: '1.0.1' } })
+  const observed = await f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId })
+  expect(observed.applicationConfiguration).toMatchObject({ draft: { version: '1.0.1' }, actions: [], review: { issues: ['Current publication version is unconfirmed'] } })
+  const before = f.requests.length
+  await f.reopen()
+  const cli = await f.cli(['setup', 'inspect', '--operation-id', f.input.operationId])
+  expect(cli.profileUpdate).toEqual(observed.profileUpdate)
+  expect(cli.applicationConfiguration).toEqual(observed.applicationConfiguration)
+  expect(f.requests).toHaveLength(before)
+  const refresh = cli.profileUpdate.actions[0]
+  f.readyPublication()
+  const input = { operationId: f.input.operationId, expectedRevision: refresh.expectedRevision, decision: { actionId: refresh.actionId, value: connectionSetupDecisionForAction(refresh) } }
+  const refreshed = await f.cli(['setup', 'advance', '--input', '-'], input)
+  expect(f.requests.slice(before).map(r => r.kind)).toEqual(['publication-pending', 'publication-versions', 'publication-visibility', 'publication-sharing', 'publication-features'])
+  expect(f.requests.filter(r => r.preclaimed).map(r => r.kind)).toEqual(['upload', 'write'])
+  expect(refreshed.profileUpdate).toMatchObject({ stage: 'publication-create', state: 'pending', actions: [{ kind: 'continue-profile-update' }] })
+  const ready = await f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId })
+  expect(ready.applicationConfiguration).toMatchObject({ draft: { version: '1.0.1' }, review: { issues: [] }, actions: [{ kind: 'create-application-version' }] })
+  const explicit = await f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId, applicationConfiguration: { effect: 'update-application-profile' } })
+  expect(explicit.applicationConfiguration?.effect).toBe('update-application-profile')
+  const count = f.requests.length
+  await f.sdk.call('connection.setup.advance', input)
+  expect(f.requests).toHaveLength(count)
+  const done = await f.advance(refreshed, 'continue-profile-update')
+  expect(done.profileUpdate?.state).toBe('complete')
+  const create = f.requests.findIndex(r => r.kind === 'create')
+  expect(f.requests.slice(count, create)).toEqual([])
+  expect(f.requests.filter(r => r.kind === 'create')).toHaveLength(1)
+}, 30000)
+
+it('fills only missing current publication sources on normal continuation', async () => {
+  const f = await fixture({ publicationReadFailure: 'publication-visibility' }), view = await f.begin()
+  expect(view.profileUpdate).toMatchObject({ stage: 'publication-create', state: 'attention', actions: [{ kind: 'continue-profile-update' }] })
+  expect(f.requests.filter(r => r.kind.startsWith('publication-')).map(r => r.kind)).toEqual(['publication-pending', 'publication-versions', 'publication-visibility'])
+  const before = f.requests.length
+  f.readyPublication()
+  const result = await f.advance(view, 'continue-profile-update')
+  expect(result.profileUpdate?.state).toBe('complete')
+  const create = f.requests.findIndex(r => r.kind === 'create')
+  expect(f.requests.slice(before, create).map(r => r.kind)).toEqual(['publication-visibility', 'publication-sharing', 'publication-features'])
+}, 30000)
+
+it('keeps qualified publication sources visible when the Provider cannot produce a plan', async () => {
+  const f = await fixture({ planUnavailable: true }), view = await f.begin()
+  expect(view.profileUpdate).toMatchObject({ stage: 'publication-create', state: 'attention', actions: [{ kind: 'refresh-publication-checks' }] })
+  const result = await f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId })
+  expect(result.applicationConfiguration).toMatchObject({ capability: 'unknown', reason: 'source-unconfirmed', review: null, actions: [] })
+  expect(Object.keys((result.applicationConfiguration as any).sources)).toEqual(['pending', 'versions', 'visibility', 'sharing', 'features'])
+  const before = f.requests.length
+  await f.advance(result, 'refresh-publication-checks')
+  expect(f.requests.slice(before).map(r => r.kind)).toEqual(['publication-pending', 'publication-versions', 'publication-visibility', 'publication-sharing', 'publication-features'])
+  expect(f.requests.filter(r => r.kind === 'create')).toEqual([])
+}, 30000)
+
+it('does not refresh or replay an unknown original publication write, or refresh a changed target', async () => {
+  const unknown = await fixture({ unknown: 'create' }), view = await unknown.begin()
+  expect(view.profileUpdate).toMatchObject({ stage: 'publication-create', state: 'attention', actions: [] })
+  const before = unknown.requests.length
+  await unknown.reopen()
+  await unknown.sdk.call('connection.setup.begin', unknown.input)
+  expect(unknown.requests).toHaveLength(before)
+  expect(unknown.requests.filter(r => r.kind === 'create')).toHaveLength(1)
+  const f = await fixture({ publicationIssue: true }), blocked = await f.begin()
+  const record = (await f.sdk.call('connection.inspect', { connectionId: f.input.connectionId })).connection!
+  await f.sdk.call('connection.configure', { operationId: 'change-profile-target', expectedRevision: record.revision, connection: { ...record.config, label: 'Revised saved bot' } })
+  const count = f.requests.length
+  await expect(f.advance(blocked, 'refresh-publication-checks')).rejects.toMatchObject({ code: 'CONNECTION_SETUP_ACTION_STALE' })
+  expect(f.requests).toHaveLength(count)
+}, 30000)
+
+it.each(['outer', 'configuration', 'explicit'] as const)('keeps the original %s publication projection in one observed revision during a concurrent read', async boundary => {
+  const f = await fixture({ publicationIssue: true })
+  await f.begin()
+  const before = await f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId })
+  const inspected = await f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId, applicationInspection: {} })
+  const action = inspected.applicationInspection!.actions.find(a => a.kind === 'read-publication-features')!
+  let entered!: () => void, release!: () => void, held = false
+  const entering = new Promise<void>(r => { entered = r }), gate = new Promise<void>(r => { release = r })
+  const prototype = ProfileConnectionSetup.prototype as any, key = boundary === 'configuration' ? 'config' : 'view', original = prototype[key]
+  vi.spyOn(prototype, key).mockImplementation(async function(this: unknown, ...args: any[]) {
+    if (!held && (boundary === 'configuration' ? args[1]?.effect === 'create-application-version' : args[3])) {
+      held = true
+      const result = boundary === 'configuration' ? await original.apply(this, args) : undefined
+      entered(); await gate
+      return boundary === 'configuration' ? result : original.apply(this, args)
+    }
+    return original.apply(this, args)
+  })
+  const request = f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId, ...(boundary === 'explicit' ? { applicationConfiguration: { effect: 'update-application-profile' as const } } : {}) })
+  try {
+    await entering
+    const changed = await f.sdk.call('connection.setup.advance', { operationId: f.input.operationId, expectedRevision: action.expectedRevision, decision: { actionId: action.actionId, value: 'continue' } })
+    release()
+    await expect(request).resolves.toMatchObject({ operation: { revision: boundary === 'outer' ? changed.operation!.revision : before.operation!.revision } })
+    const result = await request
+    expect(result.operation?.revision).toBe(boundary === 'outer' ? changed.operation!.revision : before.operation!.revision)
+    if (boundary === 'explicit') {
+      expect(result.applicationConfiguration?.effect).toBe('update-application-profile')
+      expect(result.profileUpdate).toBeUndefined()
+    } else {
+      expect(result.profileUpdate?.actions).toEqual([{ kind: 'refresh-publication-checks', actionId: expect.any(String), expectedRevision: result.operation!.revision }])
+      expect(result.applicationConfiguration?.effect).toBe('create-application-version')
+      expect((result.applicationConfiguration as any).sources.features.stepId).toBe(boundary === 'outer' ? changed.receipt!.stepId : (before.applicationConfiguration as any).sources.features.stepId)
+    }
+  } finally { release(); await Promise.allSettled([request]) }
 }, 30000)
 
 it.each(['upload', 'write'] as const)(
@@ -664,7 +794,7 @@ it('requires the existing publication review and original confirm action before 
   expect(view.profileUpdate).toMatchObject({
     stage: 'publication-create',
     state: 'attention',
-    actions: [],
+    actions: [{ kind: 'refresh-publication-checks' }],
     publicationDraft: { kind: 'create-version', visibility: 'current' }
   })
   expect(f.requests.filter((r) => r.kind === 'create')).toHaveLength(0)
