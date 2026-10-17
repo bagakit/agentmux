@@ -36,7 +36,7 @@ it('keeps prepare and exact unknown image upload in the profile task through Set
   await ready()
   expect(guide().textContent).not.toMatch(/Sign in|Create bot/)
   expect(guide().querySelector('[aria-current="step"]')?.getAttribute('data-step')).toBe('1')
-  f.adapter.profile!.upload = async () => { f.counts.upload++; return { state: 'unknown', reason: 'effect-unconfirmed' } }
+  f.adapter.profile!.upload = async () => { f.counts.upload++; return { state: 'unknown', reason: 'effect-unconfirmed', diagnostic: { stage: 'upload', transportCode: 'ECONNRESET' } } }
   const parent = await synced()
   expect(parent.profile?.upload.state).toBe('unknown')
   expect(parent.profile?.patch.state).toBe('not-dispatched')
@@ -47,6 +47,10 @@ it('keeps prepare and exact unknown image upload in the profile task through Set
   expect(document.querySelector('[data-profile-trace]')?.textContent).not.toContain('No request yet')
   expect(f.connectionCalls.mock.calls.find(([m]) => m === 'connection.profile.inspect')?.[1]).toEqual({ operationId: parent.profileOperationId })
   expect(document.querySelector('[data-profile-trace] table')?.textContent).toContain('Upload bot imageUnconfirmed')
+  expect(document.querySelector('[data-profile-trace] table')?.textContent).toContain('ECONNRESET')
+  const copied = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue()
+  await f.click('Copy diagnosis')
+  expect(JSON.parse(copied.mock.calls[0]![0]).upload.diagnostic).toEqual({ stage: 'upload', transportCode: 'ECONNRESET' })
   const counts = { ...f.counts }
   await f.click('Refresh trace'); await f.click('Check saved progress')
   expect(f.counts).toEqual(counts)
