@@ -10,6 +10,7 @@
 | --- | --- | --- |
 | `<amux>…</amux>` | 平台说明或本页定义的 A2A 子项容器，可独立或随原请求投递 | [注入上下文](../design/behavior/agent-capabilities-and-messaging.md#agentmux-注入上下文)与[A2A 通知](../design/behavior/a2a-collaboration.md#a2a-引用通知与主动取信) |
 | `<amux:a2a …>` | 容器中唯一一个 `a2a` 子项的简写；成对标签携带原信，自闭合标签引用原信 | [A2A 原信与队列](../design/behavior/a2a-collaboration.md#a2a-身份信封与持久化全局消息队列) |
+| `<amux><context …>…</context></amux>` | 原输入携带的 Browser 场景数据，正文仍在容器外 | [场景化用户输入](../design/behavior/conversation-input.md) |
 | `<amux:continue />` | 原恢复流程选择的默认接续文本 | [Session 恢复](../design/behavior/session-recovery.md) |
 | `<amux:reaction CODE />` | 用户选定快捷回复的含义标记 | [reaction 快捷回复](../design/behavior/conversation-input.md#回复卡片的-reaction-快捷回复) |
 | `--- amux : File/Browser ---` … `-----` | 原文件或 Browser 上下文的内容分享 | [对象地址与分享](../design/behavior/public-control.md#对象地址分享与方向) |
@@ -39,6 +40,26 @@
 共享 reader 只从输入开头读取完整平台声明。多个完整前导声明按原顺序保留，声明之间可以有换行；缩进和真实尾文不被吞掉。纯说明节点不接受属性或子元素；本页明确的 `a2a` 子项按后文合同读取，不能把它们误作普通平台说明文字。未知子项、DOCTYPE、processing instruction、不完整边界或含糊的前导序列不升级为平台说明，原输入保持可读。reader 保留每个原声明 span，不能通过正文中的另一个标签猜来源。
 
 平台说明可以承载简短发现入口，不要求常驻整段操作手册。启动引导、当前身份、模块 Skill 与消息提醒各自披露什么，归[启动握手](../design/behavior/agent-capabilities-and-messaging.md#启动握手与自命名)和[同源指引](../design/behavior/a2a-collaboration.md#a2a-指引与通信礼节)；按需读取不需要增加包装属性或新的执行标签。
+
+## 场景数据
+
+```text
+<amux>
+<context kind="browser" version="1">
+{"kind":"browser","version":1,"capturedAt":100,"browser":{"hostId":"local","browserId":"B1","navigationId":"N4"},"page":{"url":"https://example.org/","title":"Page"},"activity":{"operationId":"O8","stepSequence":4,"phase":"running","observedAt":99}}
+</context>
+</amux>
+
+原用户正文
+```
+
+容器只持有一个 `context` 子项，属性顺序与拼写固定为 `kind="browser" version="1"`；不与 A2A、reminder 或平台说明混装。开头、JSON、结束标签分别由单个 LF 分隔，外部正文由两个 LF 接上，正文逐字节保留。平台说明确有需要时使用其原独立前导容器。场景 JSON 由 [BrowserInputContext](../../packages/core/src/browser-input-context.ts) 严格解码后按该类型字段顺序编码；对象未知字段、未知版本或不完整格式保持原文可读。字符串中的 `<`、`>`、`&` 分别编码为 `\u003c`、`\u003e`、`\u0026`，控制字符使用 JSON escaping，不能用页面数据闭合标签。
+
+场景只携数据，不携指令、作者、授权或投递回执，不进入 `systemContext`。Browser operation 与输入 operation 是不同身份；step 缺失用 `null`，不合成 0。selection 自持捕获来源和关联强度，外层较新场景不能覆盖它；图片只持宿主无关的持久资源引用，Core 不取图、不内联像素、不把像素矩形升级成 DOM ref。捕获跨边界时保留 observationEnd，无法证明准确步骤时不声明 exact-step。
+
+`inputContextSource` 不在此 wire 或公共提交参数中：可信 Host 可在原输入调用上下文注入 `host-capture`，公共调用只产生 `caller-declared`。这些结构化 producer 事实随原 prompt intent/claim 保留；文本声明不认证来源。用户手写完整示例仍是其正文，已取得 body 的 reader 不再次解析。完整 Copy 保留原 wire/parts；读取声明不提交、接管或批准。
+
+原 prompt 的公开入口为 `agent.input.submit`／`amux agent input submit --session SID --operation-id ID --input FILE|-`，沿原 `submitAgentPrompt`、原输入 key 与查询回执，不建立 A2A 原信。managed Agent caller 必须使用 `agent.send`；普通本机 CLI 的操作主体不证明人工发送，不自动取得 Human 作者。未知提交使用原 key 查询，重启不按当前页面或新版 formatter 重组、改投或自动补发。
 
 ## A2A 容器与简写
 
