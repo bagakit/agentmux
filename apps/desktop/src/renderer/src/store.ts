@@ -1359,7 +1359,7 @@ type AppState = {
    * 时抛，由调用方（BrowserPane 的 run）报到错误面。
    */
   saveBrowserBookmark(workspaceId: string, url: string, title: string): Promise<string>
-  applyBrowserEvent(event: BrowserEvent): void
+  applyBrowserEvent(event: BrowserEvent, expectedNavigationId?: string): void
   addBrowserAnnotation(annotation: BrowserAnnotation): void
   deleteBrowserAnnotation(browserId: string, annotationId: string): void
   clearBrowserAnnotations(browserId: string): void
@@ -5740,7 +5740,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               }
               case 'browser': return { ...base, kind: surface.kind, browserId: surface.browserId,
                 url: surface.url, title: surface.title, profileId: surface.profileId, mode: surface.mode,
-                ...(!surface.nativeOwnerDeferred && !surface.nativeOwnerUnavailable && surface.navigationId
+                ...(!surface.nativeOwnerReleased && !surface.nativeOwnerDeferred && !surface.nativeOwnerUnavailable && surface.navigationId
                   ? { navigationId: surface.navigationId } : { navigationId: null, nativeOwner: 'unconfirmed' as const }),
                 error: surface.error, loading: surface.loading }
               case 'file': return { ...base, kind: surface.kind, path: surface.path }
@@ -10241,9 +10241,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       throw error
     } finally { unsubscribe(); unsubscribeLocal() }
   },
-  applyBrowserEvent(event) {
+  applyBrowserEvent(event, expectedNavigationId) {
     set((state) => ({
-      ...reduceBrowserEvent(state, event),
+      ...reduceBrowserEvent(state, event, expectedNavigationId),
       ...(event.type === 'closed'
         ? {
             browserAnnotationsByBrowserId: Object.fromEntries(
