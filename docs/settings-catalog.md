@@ -58,13 +58,12 @@ Goals 的常用操作引用、顺序与显隐在原 Goals 面管理，正文复�
 
 | 页面或 Toolkit Library 内的对象 | 可修改内容 | CLI 范围 | 字段与执行 owner |
 | --- | --- | --- | --- |
-| Agent Conversation Connector | 整个服务的自动双向收发开关、每个机器人应用的配置与原请求查询；原 Region 与 Agent 更多菜单消费同一 service policy。 | `connection service get / configure --input FILE\|- / inspect --operation-id ID`；原应用与接入管理沿 `connection`、`connection enrollment`。 | [设置模块](../apps/desktop/src/renderer/src/components/settings/modules/connections.tsx)、[总开关](../apps/desktop/src/renderer/src/components/settings/ConnectorServiceControl.tsx)、[原 ConnectionHost](../packages/connectors/src/connection-host.ts)、[服务合同](../packages/core/src/connection-service-contract.ts) |
 | 官方 Performance | 状态栏显示开关与显示样式；资源结果为只读观测，官方脚本不可编辑。 | inspect / set：`toolkit.performance.enabled`、`toolkit.performance.statusBar`；`system metrics get / watch` 提供原观测事实，`toolkit` 提供工具读取与操作。 | [UI](../apps/desktop/src/renderer/src/components/settings/BuiltinPerformanceSettings.tsx)、[偏好字段](../apps/desktop/src/shared/toolkit-preferences.ts)、[Main scalar](../apps/desktop/src/main/settings/modules/toolkit.ts)、[执行 owner](../apps/desktop/src/main/toolkit-owner.ts) |
-| 官方 Phone connection | 状态栏显示开关与显示样式；隐藏工具不撤销设备接入。官方脚本只读，设备管理转到 Connections。 | inspect / set：`toolkit.mobileConnection.enabled`、`toolkit.mobileConnection.statusBar`；设备操作见下表。 | [UI](../apps/desktop/src/renderer/src/components/settings/BuiltinMobileConnectionSettings.tsx)、[偏好字段](../apps/desktop/src/shared/toolkit-preferences.ts)、[Main scalar](../apps/desktop/src/main/settings/modules/toolkit.ts) |
+| 官方 Phone connection | 状态栏显示开关与显示样式；隐藏工具不撤销设备接入。官方脚本只读，设备管理转到 Amux Conversation。 | inspect / set：`toolkit.mobileConnection.enabled`、`toolkit.mobileConnection.statusBar`；设备操作见下表。 | [UI](../apps/desktop/src/renderer/src/components/settings/BuiltinMobileConnectionSettings.tsx)、[偏好字段](../apps/desktop/src/shared/toolkit-preferences.ts)、[Main scalar](../apps/desktop/src/main/settings/modules/toolkit.ts) |
 | 自定义 inline 工具 | 名称、图标、显示开关和样式、固定执行目录、主脚本及参数、动作按钮名称/脚本/参数；工具结果不作为偏好保存。 | `toolkit ls / inspect / create / update / delete / script / run / stop / action / watch`；资源写入支持各自的 expected 合同，不能用 scalar 任意路径修改。 | [工具编辑器](../apps/desktop/src/renderer/src/components/settings/ToolkitToolEditor.tsx)、[公共 Toolkit 类型](../packages/core/src/toolkit.ts)、[自定义执行 owner](../apps/desktop/src/main/toolkit-custom-owner.ts) |
 | 自定义本地扩展包 | 安装本地包目录，配置启用、显示样式、固定执行目录与参数；名称、图标、脚本和动作由可编辑的包文件提供。 | `toolkit install <id> --path <directory>`，以及原 Toolkit 查询、更新和执行命令；不是一次性复制脚本。 | [包编辑器](../apps/desktop/src/renderer/src/components/settings/ToolkitPackageEditor.tsx)、[包读取](../apps/desktop/src/main/toolkit-package.ts)、[本地扩展包合同](design/behavior/settings-and-observation.md#toolkit-本地扩展包) |
 
-Toolkit Library 的唯一[设置模块](../apps/desktop/src/renderer/src/components/settings/modules/toolkit.tsx)组合表中的工具入口；Agent Conversation Connector 保持 Mods 下的独立设置页，稳定导航 ID 为 `chat-connections`。Auth 用量工具属于可编辑的本地用户包，业务逻辑在包文件中；AgentMux 提供通用加载、配置、执行与结果能力，不把特定账户业务实现为固定设置。官方工具与自定义工具的边界见[Toolkit 行为合同](design/behavior/settings-and-observation.md#toolkit-与官方-performance-工具)。
+Toolkit Library 的唯一[设置模块](../apps/desktop/src/renderer/src/components/settings/modules/toolkit.tsx)组合表中的工具入口。Auth 用量工具属于可编辑的本地用户包，业务逻辑在包文件中；AgentMux 提供通用加载、配置、执行与结果能力，不把特定账户业务实现为固定设置。官方工具与自定义工具的边界见[Toolkit 行为合同](design/behavior/settings-and-observation.md#toolkit-与官方-performance-工具)。
 
 ## Resources
 
@@ -91,11 +90,14 @@ Prompt 仍是同一可复用资源库；Goals、快捷回复及状态动作保�
 | --- | --- | --- | --- |
 | Environments | SSH 环境名称、hostname/alias、用户、端口、密钥路径、服务命令和 socket 路径；Runtime ID 为可信连接所得的只读身份。拓扑 / 列表按准确 Host 管理已有 Project、原 Session、执行器、连接与维护；运行观察不新增配置字段。 | `settings hosts ls / inspect / test / upgrade-check / upgrade / upgrade-inspect`；`settings workspaces register` 登记已有目录。当前没有 Host 配置的 create/update/delete CLI。登记不自动运行 Git、聚焦或启动 Agent。 | [UI](../apps/desktop/src/renderer/src/components/settings/modules/hosts.tsx)、[Host/Workspace 字段](../apps/desktop/src/shared/contracts.ts)、[测试与读取](../apps/desktop/src/main/settings-hosts-control.ts)、[分源运行观察](../packages/core/src/host-runtime-observation.ts)、[目录登记](../apps/desktop/src/main/settings-workspace-add-control.ts)、[升级事务](../apps/desktop/src/main/settings-hosts-upgrade.ts) |
 
-## Connections
+## Conversation Channels
 
-| 页面 | 可修改内容与管理动作 | CLI 范围 | 原 owner |
+| 页面 | 可修改的内容与管理入口 | CLI 范围 | 原 owner |
 | --- | --- | --- | --- |
-| Phone & Devices | 获取连接链接、查看设备与近期活动、撤销准确设备的访问；在线状态为观测，不是保存的偏好。 | `device ls / link / hello / revoke`；状态栏样式在 Toolkit Library 的官方 Phone connection 中配置。 | [UI](../apps/desktop/src/renderer/src/components/settings/modules/devices.tsx)、[设备界面](../apps/desktop/src/renderer/src/components/settings/DeviceManagementSettings.tsx)、[公共设备合同](../packages/core/src/public-rpc-device.ts)、[Desktop 接线](../apps/desktop/src/main/device-management-ipc.ts) |
+| Amux Conversation | 第一方手机／浏览器连接链接、设备身份与撤销；可进入原 Input & Mailbox。连接观察不决定本地会话健康，设备撤销仍作用于原设备访问权限。 | `device ls / link / revoke`；已认证设备沿 `device hello` 命名自身，输入偏好仍沿原 settings scalar。 | [设置模块](../apps/desktop/src/renderer/src/components/settings/modules/amux-conversation.tsx)、[原设备页](../apps/desktop/src/renderer/src/components/settings/DeviceManagementSettings.tsx)、[公共设备合同](../packages/core/src/public-rpc-device.ts)、[Desktop 接线](../apps/desktop/src/main/device-management-ipc.ts)、[原 Host Authority](design/behavior/public-control.md#手机版-relay-连接) |
+| Lark | 整个服务的自动双向收发开关、每个机器人应用的配置与原请求查询；原 Region 与 Agent 更多菜单消费同一 service policy。 | `connection service get / configure --input FILE\|- / inspect --operation-id ID`；原应用与接入管理沿 `connection`、`connection enrollment`。 | [设置模块](../apps/desktop/src/renderer/src/components/settings/modules/lark.tsx)、[总开关](../apps/desktop/src/renderer/src/components/settings/ConnectorServiceControl.tsx)、[原 ConnectionHost](../packages/connectors/src/connection-host.ts)、[服务合同](../packages/core/src/connection-service-contract.ts) |
+
+两页导航 ID 为 `amux-conversation`、`lark`，目录与全部真实入口使用同一命名，不提供旧 UI 路由 aliases。产品分组不合并设备与应用的身份、权限或持久化；公共 `device.*`、`connection.*`、原操作与配置键保持各自合同。Lark 页的外部自动收发开关不关闭本地或手机对话，页内继续准确辨认 Feishu／Lark 平台。
 
 ## 维护与新增
 
