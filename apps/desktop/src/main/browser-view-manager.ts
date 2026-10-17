@@ -1017,7 +1017,7 @@ export class BrowserViewManager {
     const entry = this.entries.get(browserId)
     if (!entry || window && this.windowForView(entry.view) !== window || !entry.visible || !entry.bounds || !this.owns(entry, entry.view) || entry.view.webContents.isDestroyed() || !entry.view.getVisible()) return
     return { browserId, bounds: entry.view.getBounds(), view: entry.view,
-      ...(entry.inputShield && !entry.inputShield.contents.isDestroyed() ? { inputShield: entry.inputShield.view } : {}) }
+      ...(entry.inputShield?.isCurrentFor(entry.view) ? { inputShield: entry.inputShield.view } : {}) }
   }
 
   /** Resolve an actual attachment without interpreting its geometry, title or page DOM. */

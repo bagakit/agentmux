@@ -52,6 +52,13 @@ export class BrowserNativeInputShield {
     })
   }
 
+  /** Presentation may repair pair ordering; ownership must not depend on adjacency.
+   * A disposed shield remains a cleanup identity until destruction is confirmed.
+   */
+  isCurrentFor(page: WebContentsView): boolean {
+    return this.page === page && this.current() && !this.contents.isDestroyed()
+  }
+
   get isolated(): boolean {
     if (!this.current() || this.contents.isDestroyed() || !this.host || this.host !== this.window() || this.host.isDestroyed()) return false
     const children = this.host.contentView.children, pageIndex = children.indexOf(this.page)
