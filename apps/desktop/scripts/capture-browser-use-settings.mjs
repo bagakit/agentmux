@@ -27,7 +27,8 @@ await build({ configFile: false, root: fixture, base: './', logLevel: 'error', w
 const require = createRequire(join(desktop, 'package.json')), electron = require('electron')
 const logs = [], exit = await new Promise((resolve, reject) => {
   const child = spawn(electron, [join(fixture, 'main.cjs')], { cwd: root,
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined, BROWSER_USE_VISUAL_ROOT: directory, BROWSER_USE_VISUAL_HTML: join(output, 'index.html') }, stdio: ['ignore', 'pipe', 'pipe'] })
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined, BROWSER_USE_VISUAL_ROOT: directory, BROWSER_USE_VISUAL_HTML: join(output, 'index.html'),
+      BROWSER_USE_VISUAL_HANDOFF_ONLY: process.argv.includes('--handoff-only') ? '1' : undefined }, stdio: ['ignore', 'pipe', 'pipe'] })
   const timeout = setTimeout(() => child.kill('SIGTERM'), 60000)
   child.once('close', () => clearTimeout(timeout))
   child.stdout.on('data', data => logs.push(data)); child.stderr.on('data', data => logs.push(data)); child.on('error', reject); child.on('close', resolve)

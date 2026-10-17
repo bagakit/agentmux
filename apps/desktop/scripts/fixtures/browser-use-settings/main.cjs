@@ -45,6 +45,7 @@ app.whenReady().then(async () => {
     const rect = await evaluate(`(()=>{const r=document.querySelector('.browser-agent-preview__stage').getBoundingClientRect();return{x:Math.round(r.x+r.width/2),y:Math.round(r.y+32),width:1,height:1}})()`)
     return [...(await win.webContents.capturePage(rect)).getBitmap().subarray(0,4)]
   }
+  if (!process.env.BROWSER_USE_VISUAL_HANDOFF_ONLY) {
   await capture('wide-default', 1250, 900)
   const normal = await edgePixel()
   await select('Glow blend', 'screen'); const screen = await edgePixel()
@@ -69,6 +70,21 @@ app.whenReady().then(async () => {
   await capture('short-draft', 950, 580)
   await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
   await capture('reduced-motion', 1250, 900)
+  }
+  const phases = process.env.BROWSER_USE_VISUAL_HANDOFF_ONLY ? ['completed', 'human'] : ['observing', 'script', 'navigating', 'waiting', 'completed', 'human']
+  for (const phase of phases) {
+    await select('Simulation state', phase)
+    const state = await evaluate(`(()=>{const root=document.querySelector('.browser-agent-preview__effects').shadowRoot;return{
+      cue:document.querySelector('.browser-agent-preview .browser-operation-status__cue')?.textContent,
+      boundary:!!document.querySelector('.browser-agent-preview [data-browser-control-boundary]'),
+      pointer:!!root.querySelector('.amux-browser-agent-pointer'),ripple:!!root.querySelector('.amux-browser-agent-ripple')}})()`)
+    assert.equal(state.boundary, !['completed', 'human'].includes(phase), 'The simulation projects the exact control state')
+    assert.equal(state.pointer, false, 'No invented target while reading, navigating, waiting or after handoff')
+    assert.equal(state.ripple, false, 'No invented click while reading, navigating, waiting or after handoff')
+    receipt.states ??= []
+    receipt.states.push({ scenario: phase, state })
+    await capture('state-' + phase, phase === 'waiting' ? 560 : 1250, phase === 'waiting' ? 850 : 900)
+  }
   receipt.pid = process.pid; receipt.windowId = win.id; receipt.complete = true
 }).catch(error => { receipt.failure = { message: error.message, stack: error.stack }; process.exitCode = 1 }).finally(async () => {
   await mkdir(directory, { recursive: true }); await writeFile(join(directory, 'capture.json'), JSON.stringify(receipt, null, 2)); if (win && !win.isDestroyed()) win.destroy(); app.quit()
