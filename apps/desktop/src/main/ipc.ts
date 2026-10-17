@@ -1,3 +1,4 @@
+import { isAgentSchedule } from '@agentmux/core'
 import { NoteFileMutations } from './note-file-mutations.js'
 import { parseFileShareUndoParams, parseFileShareUndoResult } from '@agentmux/core/files'
 import { NoteSharedUndoOwner } from './note-shared-undo-owner.js'
@@ -557,7 +558,7 @@ export async function registerIpc(args: {
   })
   const disposeProgressChanges = args.progressLoops.subscribe((loop) => {
     if (!args.window.isDestroyed() && !contents.isDestroyed()) {
-      contents.send(loop.calendar ? SCHEDULE_CHANGED : CONTINUOUS_PROGRESS_CHANGED, loop)
+      contents.send(isAgentSchedule(loop) ? SCHEDULE_CHANGED : CONTINUOUS_PROGRESS_CHANGED, loop)
     }
   })
   const acceptControl = (event: IpcMainEvent, response: DesktopControlResponse): void => {
@@ -1675,7 +1676,7 @@ export async function registerIpc(args: {
   handleWithEvent('continuousProgress:list', async (event, target: ContinuousProgressTarget) => {
     requireTrustedSender('continuousProgress:list', event)
     await args.progressLoops.start()
-    return args.progressLoops.list().filter(loop => !loop.calendar && progressTargetMatches(loop, target))
+    return args.progressLoops.list().filter(loop => !isAgentSchedule(loop) && progressTargetMatches(loop, target))
   })
   handleWithEvent('continuousProgress:goals', async (event, goalId: string) => {
     requireTrustedSender('continuousProgress:goals', event)
@@ -1709,7 +1710,7 @@ export async function registerIpc(args: {
   handleWithEvent('continuousProgress:action', async (event, target: ContinuousProgressTarget, loopId: string, action: 'pause' | 'resume' | 'stop' | 'check') => {
     requireTrustedSender('continuousProgress:action', event)
     await args.progressLoops.start()
-    const loop = args.progressLoops.list().find(loop => !loop.calendar && loop.loopId === loopId && progressTargetMatches(loop, target))
+    const loop = args.progressLoops.list().find(loop => !isAgentSchedule(loop) && loop.loopId === loopId && progressTargetMatches(loop, target))
     if (!loop) throw new Error('This loop does not belong to the requested target.')
     if (action === 'pause') return await args.progressLoops.pause(loopId)
     if (action === 'stop') return await args.progressLoops.stopLoop(loopId)

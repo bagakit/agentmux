@@ -1,6 +1,6 @@
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ContinuousProgressLoop } from '@agentmux/core'
+import { isAgentSchedule, type ContinuousProgressLoop } from '@agentmux/core/continuous-progress-scheduler'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { ContinuousProgressPanel } from './ContinuousProgressPanel'
@@ -46,14 +46,14 @@ export function ContinuousProgressControl({ session, onStatusChange, presented =
     setLoops([]); setError(undefined); setBusy(false); setPrompt(form.current.defaults.progressPrompt); setInterval(String(form.current.defaults.progressIntervalMs / 60_000)); setBindSource(false); setSourceRoot(''); setSourceId(''); setReaderPath('')
     const before = updates.current
     const dispose = api.continuousProgress.onChanged(loop => {
-      if (!alive || loop.calendar || loop.hostId !== target.hostId || loop.agentSessionId !== target.agentSessionId ||
+      if (!alive || isAgentSchedule(loop) || loop.hostId !== target.hostId || loop.agentSessionId !== target.agentSessionId ||
           loop.providerId !== target.providerId || loop.workspacePath !== target.workspacePath) return
       updates.current++
       setLoops(previous => [...previous.filter(value => value.loopId !== loop.loopId), loop])
       setObservedTarget(target)
     })
     void api.continuousProgress.list(target).then(result => {
-      if (alive && updates.current === before) { setLoops(result.filter(loop => !loop.calendar)); setObservedTarget(target) }
+      if (alive && updates.current === before) { setLoops(result.filter(loop => !isAgentSchedule(loop))); setObservedTarget(target) }
     }, failure => { if (alive) setError(failure instanceof Error ? failure.message : String(failure)) })
     return () => { alive = false; dispose() }
   }, [target])
