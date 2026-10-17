@@ -27,6 +27,7 @@ export function GitHistoryProvider({ workspace, children }: { workspace: Workspa
   const focusedRegionId = useAppStore(state => state.mainSurface === 'workbench' ? mainRegionReference(state.workbenchSpaceSelection)?.regionId ?? null : null)
   const visibleRepositories = repositoryReaders.filter(([, reader]) => reader.visible)
   const restoringReader = visibleRepositories.find(([regionId]) => regionId === focusedRegionId) ?? visibleRepositories.at(-1)
+    ?? (repositoryReaders.length === 1 ? repositoryReaders[0] : undefined)
   const repositoryRegionId = restoringReader?.[0] ?? repositoryReaders.at(-1)?.[0] ?? null
   const enabled = Boolean(workspace && currentReaders.some(([, reader]) => reader.kind === 'sidebar'))
   const history = useGitHistory(workspace ?? EMPTY_WORKSPACE, enabled)
