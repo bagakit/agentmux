@@ -85,7 +85,7 @@ type ConversationEventFacts = Omit<ConversationEvent, 'revision'>
 type AdaptedConversationRecord<Event> = Omit<AgentConversationRecord, 'event'> & { event?: Event }
 type AdaptedConversationInput<Event> = Omit<ConversationInputEntity, 'event'> & { event: Event }
 
-function adaptConversationTimeline<Event extends ConversationEventFacts>(input: ConversationProjectionInput & { routeHostId?: string },
+function createConversationRecordAdapter<Event extends ConversationEventFacts>(input: ConversationProjectionInput & { routeHostId?: string },
   timeline: Omit<ConversationTimeline, 'events'> & { events: readonly Event[] }) {
   const users = projectSessionUserMessages(input)
   const inputs = new Map(users.map(value => [JSON.stringify([value.source.kind, value.rawId]), value]))
@@ -116,12 +116,7 @@ function adaptConversationTimeline<Event extends ConversationEventFacts>(input: 
       return []
     })
   }
-  const sourceSlots = new Map<string, ConversationEvent['content'][number][]>()
-  for (const event of timeline.events) for (const slot of event.content) {
-    const list = sourceSlots.get(slot.recordId) ?? []; list.push(slot); sourceSlots.set(slot.recordId, list)
-  }
-  const originalRecords = timeline.records.map(record => adapt(record, record.original.kind === 'native' ? record.original.item.contentParts : parts(sourceSlots.get(record.id) ?? [])))
-  const projected = timeline.events.map(event => {
+  function adaptEvent(event: Event): AdaptedConversationRecord<Event> {
     // A canonical anchor may be unread. The complete accepted contribution is still readable.
     const record = records.get(event.anchorId) ?? records.get(event.content[0]?.recordId ?? '') ?? records.get(event.recordIds[0]!)!
     const projectedParts = parts(event.content.filter(slot => slot.placement === 'body'))
@@ -129,7 +124,19 @@ function adaptConversationTimeline<Event extends ConversationEventFacts>(input: 
     const contentParts = original.kind === 'native' && projectedParts.length === original.item.contentParts.length
       && projectedParts.every((part, index) => part === original.item.contentParts[index]) ? original.item.contentParts : projectedParts
     return adapt(record, contentParts, event)
-  })
+  }
+  return { adapt, parts, adaptEvent }
+}
+
+function adaptConversationTimeline<Event extends ConversationEventFacts>(input: ConversationProjectionInput & { routeHostId?: string },
+  timeline: Omit<ConversationTimeline, 'events'> & { events: readonly Event[] }) {
+  const { adapt, parts, adaptEvent } = createConversationRecordAdapter(input, timeline)
+  const sourceSlots = new Map<string, ConversationEvent['content'][number][]>()
+  for (const event of timeline.events) for (const slot of event.content) {
+    const list = sourceSlots.get(slot.recordId) ?? []; list.push(slot); sourceSlots.set(slot.recordId, list)
+  }
+  const originalRecords = timeline.records.map(record => adapt(record, record.original.kind === 'native' ? record.original.item.contentParts : parts(sourceSlots.get(record.id) ?? [])))
+  const projected = timeline.events.map(adaptEvent)
   const inputEntities: AdaptedConversationInput<Event>[] = projected.flatMap(record => {
     const primary = record.input, event = record.event
     if (!primary || !event) return []
@@ -147,7 +154,9 @@ export function projectConversationRecords(input: ConversationProjectionInput & 
 
 /** Same original content/author adapter as full reading; event versions are not computed or exposed. */
 export function projectConversationSummary(input: ConversationProjectionInput & { routeHostId?: string }): AgentConversationSummary[] {
-  return adaptConversationTimeline(input, projectConversationEventFacts(input)).records
+  const timeline = projectConversationEventFacts(input)
+  const adapter = createConversationRecordAdapter(input, timeline)
+  return timeline.events.map(adapter.adaptEvent)
     .map(({ event: _event, records: _records, input: _input, ...summary }) => summary)
 }
 
