@@ -46,7 +46,7 @@ if (args.includes('app-server')) {
         if (existsSync(controlPath) && JSON.parse(readFileSync(controlPath, 'utf8')).effect === 'unavailable') return reply({ thread: { id: nativeId, sessionId: nativeId, canAcceptDirectInput: false } })
         return reply({ thread: { id: nativeId, sessionId: nativeId, canAcceptDirectInput: true } })
       }
-      if (!['turn/start', 'turn/steer'].includes(request.method)) return reject(-32601, 'This private native protocol method is unsupported')
+      if (!['turn/start', 'turn/steer', 'thread/queue/add'].includes(request.method)) return reject(-32601, 'This private native protocol method is unsupported')
       let fault
       if (existsSync(controlPath)) { fault = JSON.parse(readFileSync(controlPath, 'utf8')); if (fault.effect !== 'unavailable') unlinkSync(controlPath) }
       if (fault?.effect === 'reject') return reject(-32602, 'Explicit private native input rejection')
@@ -59,7 +59,11 @@ if (args.includes('app-server')) {
       } })
       append({ type: 'task_complete', thread_id: nativeId, turn_id: turnId })
       if (fault?.effect === 'lose-receipt') { socket.terminate(); return }
-      reply(request.method === 'turn/start' ? { turn: { id: turnId } } : { turnId })
+      // This actor-shaped fixture is idle throughout its accepted queue calls.
+      // Provider queue races and vendor acceptance belong to the Core proofs.
+      reply(request.method === 'thread/queue/add' ? { queuedSubmission: { id: 'queued-' + randomUUID(),
+        clientUserMessageId: request.params.clientUserMessageId, input: request.params.input } }
+        : request.method === 'turn/start' ? { turn: { id: turnId } } : { turnId })
     })
   })
   process.once('exit', () => closeSync(fd))
