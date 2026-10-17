@@ -39,7 +39,7 @@ async function render(subjects: readonly SessionHistoryReference[] = [reader], e
   await act(async () => root!.render(<Probe subjects={subjects} enabled={enabled} />))
 }
 async function emit(event: RuntimeEvent['event'], hostId = reader.hostId) {
-  await act(async () => { for (const listener of [...listeners]) listener({ hostId, event }) })
+  await act(async () => { for (const listener of [...listeners]) listener({ type: 'core', hostId, event }) })
 }
 const change = (sequence: number, live = true, sender = 'reader', recipient = 'peer'): RuntimeEvent['event'] => ({ type: 'agent-message-changed',
   sequence, messageSequence: sequence, live, recordKind: 'message', messageId: 'message-' + sequence, senderSessionId: sender, recipientSessionId: recipient })
@@ -97,7 +97,10 @@ it('allows completed slots to read later participants while one Host stays slow'
   await render(subjects, false)
   const count = vi.mocked(api.sessions.messageEvents).mock.calls.length
   await act(async () => slow.resolve(page(subjects[0]!)))
-  expect(api.sessions.messageEvents).toHaveBeenCalledTimes(count); expect(reading.sources).toEqual([]); expect(listeners.size).toBe(0)
+  expect(api.sessions.messageEvents).toHaveBeenCalledTimes(count)
+  expect(reading.sources.map(source => source.subject)).toEqual(subjects)
+  expect(reading.sources.find(source => source.subject.hostId === 'fast-e')!.events).toHaveLength(1)
+  expect(listeners.size).toBe(0)
 })
 
 it('never starts queued participants or follows observer hints after hiding', async () => {
@@ -106,7 +109,7 @@ it('never starts queued participants or follows observer hints after hiding', as
   await render(subjects); expect(api.sessions.messageEvents).toHaveBeenCalledTimes(4)
   const oldListener = [...listeners][0]!
   await render(subjects, false)
-  await act(async () => { oldListener({ hostId: subjects[0]!.hostId, event: change(100) }); blocked.resolve(page(subjects[0]!)) })
+  await act(async () => { oldListener({ type: 'core', hostId: subjects[0]!.hostId, event: change(100) }); blocked.resolve(page(subjects[0]!)) })
   expect(api.sessions.messageEvents).toHaveBeenCalledTimes(4); expect(api.sessions.spawns).toHaveBeenCalledTimes(8)
   expect(api.sessions.dispatches).not.toHaveBeenCalled(); expect(reading.pulses).toEqual([])
 })
