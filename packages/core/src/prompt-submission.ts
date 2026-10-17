@@ -653,6 +653,10 @@ export class AgentPromptSubmissionCoordinator {
       if (expectedInputByte === undefined) throw new AgentMuxError('Automatic prompt admission is missing its input fence.', 'INVALID_AGENT_PROMPT')
       if (run.acceptedInputBytes === null) throw new AgentMuxError('Automatic input fence is unconfirmed; the terminal remains available.', 'CTXMUX_INPUT_CURSOR_MISSING')
       if (run.acceptedInputBytes !== expectedInputByte) throw new AgentMuxError('Human input changed before automatic delivery.', 'AGENT_COMPLETION_CHANGED')
+      // Each new platform notice has its own native idle-queue claim. A prior
+      // native admission cannot consume that producer's still-current boundary.
+      const independentIdleNotification = control?.idleOnly !== undefined && current.promptCompletionAdmission?.transport === 'native' &&
+        current.promptCompletionAdmission.submissionId !== submissionId
       if (expectedFutureIntent !== undefined) {
         const saved = current.futurePromptIntents?.[expectedFutureIntent.intentId]
         if (!saved?.active || saved.prompt !== prompt || promptMessageIdentity(saved.message) !== promptMessageIdentity(message) ||
@@ -666,7 +670,7 @@ export class AgentPromptSubmissionCoordinator {
         if (current.promptCompletionAdmission?.completionId === agentTurnCompletionIdentity(current) && !confirmedFutureIdle) {
           throw new AgentMuxError('The previous admission consumed this idle boundary; a current native idle frame is unconfirmed. The future message remains due and manual input remains available.', 'AGENT_TURN_END_UNCONFIRMED')
         }
-      } else if (agentTurnCompletionIdentity(current) !== expectedCompletionId || current.promptCompletionAdmission?.completionId === expectedCompletionId) {
+      } else if (agentTurnCompletionIdentity(current) !== expectedCompletionId || current.promptCompletionAdmission?.completionId === expectedCompletionId && !independentIdleNotification) {
         throw new AgentMuxError('The completed turn changed before automatic delivery.', 'AGENT_COMPLETION_CHANGED')
       }
     }
