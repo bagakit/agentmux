@@ -3,6 +3,9 @@ import { act, createElement, Profiler } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentTimelineSnapshot } from '@agentmux/core'
+import { agentActivityRemainingMs } from '@agentmux/core/agent-status'
+import { observeAgentSession } from '../src/renderer/src/lib/agent-observation'
+import { useAgentStatusDecay, nextAgentStatusDecayDelayMs } from '../src/renderer/src/lib/agent-status-decay'
 import type { SessionSnapshot } from '../src/shared/contracts'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
@@ -24,7 +27,7 @@ function timeline(id: string, kind: 'user_message' | 'assistant_message', conten
   return { agentSessionId: id, sourceHostId: 'local', revision: 1, items: [{ id: `${id}-item`, agentSessionId: id, source: 'native-hook', kind, status: 'complete', title: 'Record', content, createdAt: Date.now(), updatedAt: Date.now() }] }
 }
 beforeEach(async () => {
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] }); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   useAppStore.setState({ config: composerConfig, mainSurface: 'workbench', agentNames: { working: 'Build the parser', attention: 'Review the change', result: 'Ready for review', unknown: 'Previous Agent' },
     sessions: [agent('working', 'working'), { ...agent('attention', 'waiting'), pendingInteraction: { kind: 'permission', id: 'request', title: 'Allow access to the selected project?', operation: 'read' } as never }, agent('result', 'done'), agent('unknown', 'running'), { ...agent('interrupted', 'working'), processState: 'interrupted' }],
@@ -99,4 +102,27 @@ it('uses the original confirmed PMO membership and preserves truthful empty navi
   await act(async () => useAppStore.setState({ sessions: [], timelines: {} }))
   expect(preview()?.textContent).toContain('0 contexts'); expect(preview()?.textContent).toContain('No execution contexts yet')
   await act(async () => focus().click()); expect(useAppStore.getState().mainSurface).toBe('agents'); expect(preview()).toBeNull()
+})
+
+function OriginalStatusOwner() { useAgentStatusDecay(); return null }
+it('expires native activity through the original window owner without changing facts or polling after expiry', async () => {
+  const original = agent('native-current', 'running'), observedAt = Date.now()
+  const session = { ...original, currentActivity: { state: 'active' as const, source: 'native-hook' as const, run: original.control.run,
+    nativeSessionId: 'native-current', nativeTurnId: 'turn-current', sourceId: 'source-current', sequence: 1, hookReceiptId: 'receipt-current', observedAt } }
+  await act(async () => useAppStore.setState({ sessions: [session], timelines: {} }))
+  await act(async () => root.render(<Profiler id="navigation" onRender={commits}><OriginalStatusOwner /><SurfaceSwitch /></Profiler>))
+  await act(async () => focus().focus())
+  expect(focus().querySelector('[data-focus-count="working"]')?.textContent).toBe('1')
+  const delay = agentActivityRemainingMs(observeAgentSession(session, observedAt), observedAt); expect(delay).toBeGreaterThan(0)
+  await act(async () => vi.advanceTimersByTime(delay - 1)); expect(focus().querySelector('[data-focus-count="working"]')).not.toBeNull()
+  const newer = { ...session, currentActivity: { ...session.currentActivity, sequence: 2, observedAt: Date.now() } }
+  await act(async () => useAppStore.setState({ sessions: [newer] }))
+  await act(async () => vi.advanceTimersByTime(2)); expect(focus().querySelector('[data-focus-count="working"]')).not.toBeNull()
+  const remaining = agentActivityRemainingMs(observeAgentSession(newer, Date.now()), Date.now())
+  await act(async () => vi.advanceTimersByTime(remaining))
+  expect(focus().querySelector('[data-focus-count="working"]')).toBeNull()
+  expect(preview()?.querySelector('[data-preview-session="native-current"] [data-semantic-icon="status.activity-unknown"]')).not.toBeNull()
+  expect(useAppStore.getState().sessions[0]).toBe(newer); expect(useAppStore.getState().sessions[0]!.status).toBe(newer.status)
+  expect(nextAgentStatusDecayDelayMs(useAppStore.getState().sessions, Date.now())).toBeNull()
+  const rendered = commits.mock.calls.length; await act(async () => vi.advanceTimersByTime(delay * 2)); expect(commits.mock.calls.length).toBe(rendered)
 })
