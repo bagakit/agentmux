@@ -1,4 +1,6 @@
 import type { NoteCreationReceipt } from './note-creation'
+import type { ScheduleDraft } from './schedule-draft'
+import type { MoteIdeaSchedulePreparation } from './mote-idea-request'
 import { EMPTY_LAUNCHER_NAMES, type LauncherNames, type LauncherNameField } from './launcher-name-draft'
 import { EMPTY_LAUNCHER_OPTIONS, updateLauncherOption, type LauncherProviderOptions } from './launcher-option-draft'
 import { create } from 'zustand'
@@ -9,8 +11,8 @@ export type LauncherSectionMode = 'expanded' | 'collapsed' | 'hidden'
 export const DEFAULT_LAUNCHER_SECTIONS: Record<LauncherSection, LauncherSectionMode> = {
   agents: 'expanded', terminal: 'expanded', browser: 'collapsed', note: 'collapsed'
 }
-export type MoteIdeaDraft = { direction: string; includeDiscussion: boolean; feedback: Record<string, { vote: '' | 'useful' | 'less-useful'; comment: string }> }
-export type LauncherDraft = { browser: string; note: string; noteCreation?: NoteCreationReceipt; moteIdea?: MoteIdeaDraft;
+export type MoteIdeaDraft = { direction: string; includeDiscussion: boolean; feedback: Record<string, { vote: '' | 'useful' | 'less-useful'; comment: string }>; arrangement?: MoteIdeaSchedulePreparation }
+export type LauncherDraft = { browser: string; note: string; noteCreation?: NoteCreationReceipt; moteIdea?: MoteIdeaDraft; schedule?: ScheduleDraft;
   prompt?: string; names?: LauncherNames; optionsByProvider?: LauncherProviderOptions }
 export const EMPTY_LAUNCHER_DRAFT: LauncherDraft = { browser: '', note: '' }
 
@@ -23,6 +25,7 @@ type LauncherState = {
   setSection(workspaceId: string, section: LauncherSection, mode: LauncherSectionMode): boolean
   setDraft(launcherId: string, field: 'browser' | 'note' | 'prompt', value: string): boolean
   setMoteIdeaDraft(launcherId: string, value: MoteIdeaDraft): boolean
+  setScheduleDraft(launcherId: string, patch: Partial<ScheduleDraft>): boolean
   setAgentName(launcherId: string, field: LauncherNameField, value: string): boolean
   setAgentOption(launcherId: string, providerId: string, optionId: string, choiceId: string | null): boolean
   copyUtilityDraft(fromLauncherId: string, toLauncherId: string): boolean
@@ -40,6 +43,11 @@ export const useLauncherState = create<LauncherState>()(persist((set) => {
   reportStorageIssue = message => { try { set({ persistenceIssue: storageReadConfirmed ? message : 'Saved Launcher preferences could not be read. Current input remains available; existing storage was not cleared.' }) } catch { /* The in-memory warning is already retained. */ } }
   return {
   persistenceIssue: null, sections: {}, drafts: {}, executors: {}, moteTopicId: null,
+  setScheduleDraft(launcherId, patch) {
+    try { set(state => ({ persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...(state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT),
+      schedule: { ...state.drafts[launcherId]?.schedule, ...patch } } } })); return true }
+    catch { reportStorageIssue('Arrangement input could not be saved. Current input and original request remain available.'); return false }
+  },
   setSection(workspaceId, section, mode) {
     try { set(state => ({ persistenceIssue: null, sections: { ...state.sections, [workspaceId]: { ...state.sections[workspaceId], [section]: mode } } })); return true }
     catch { reportStorageIssue('Launcher changes could not be saved. Current input remains available.'); return false }
