@@ -123,7 +123,8 @@ it.each(['admitted', 'unknown'] as const)('joins exact original notification wir
   }
   const manual = structuredClone(record), admission = manual.admission
   if (admission?.transport !== 'native' || !admission.intent) throw new Error('The original native claim is missing')
-  const manualPlan = { ...admission.native.plan, operation: 'start-or-steer' as const }
+  const { expectedTurnId: _originalTurn, ...originalPlan } = admission.native.plan
+  const manualPlan: AgentNativePromptInputPlan = { ...originalPlan, operation: 'start-or-steer' }
   admission.acknowledged = true
   admission.native = { plan: manualPlan, outcome: 'admitted', turnId: item.turnId! }
   admission.intent = { ...admission.intent, plan: manualPlan, execution: 'immediate',
