@@ -1,6 +1,6 @@
 import { connectionSetupPublicationSubjects } from '@agentmux/core/connections'
 import type { ConnectionSetupAccount, ConnectionSetupPublicationAudience, ConnectionSetupPublicationDraft, ConnectionSetupPublicationEffect, ConnectionSetupPublicationReview, ConnectionSetupSubmissionResponse, ConnectionSetupVersionStatus } from '@agentmux/core/connections'
-import type { SetupInitialPublication, SetupPublicationPlan } from '../../connection-setup-adapter.js'
+import type { SetupPublicationPlan, SetupPublicationProvenance } from '../../connection-setup-adapter.js'
 
 const record = (v: unknown): Record<string, unknown> | null => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null
 const nativeId = (v: unknown): v is string | number => typeof v === 'string' && !!v.trim() || typeof v === 'number' && Number.isSafeInteger(v)
@@ -75,14 +75,16 @@ const validVersion = (v: string) => v.length <= 64 && /^(0|[1-9][0-9]*)\.(0|[1-9
 const compare = (a: string, b: string) => { const aa = a.split('.').map(BigInt), bb = b.split('.').map(BigInt); for (let i = 0; i < 3; i++) if (aa[i] !== bb[i]) return aa[i]! > bb[i]! ? 1 : -1; return 0 }
 
 /** The finite sourced form is interpreted here; the Host never fills native defaults. */
-export function reviewFeishuPublication(effect: ConnectionSetupPublicationEffect, states: Record<string, string>, draft: ConnectionSetupPublicationDraft | null, creator: ConnectionSetupAccount | null, provenance: { creatorIsCurrent: boolean; initialVersion: SetupInitialPublication | null } = { creatorIsCurrent: false, initialVersion: null }): SetupPublicationPlan {
+function reviewPublication(effect: ConnectionSetupPublicationEffect, states: Record<string, string>, draft: ConnectionSetupPublicationDraft | null, creator: ConnectionSetupAccount | null, provenance: SetupPublicationProvenance, profilePlanning = false): SetupPublicationPlan {
   const pending = read(states.pending), detail = read(states.version), features = read(states.features), versions = versionList(read(states.versions)), issues: string[] = []
   const review: ConnectionSetupPublicationReview = { versions: versions ?? [], selectedVersion: null, changes: [], audience: null, proposedAudience: null, entries: null, sharing: null, reasonRequired: null, creatorAudienceAvailable: creator !== null, issues }
-  const { initialVersion, creatorIsCurrent } = provenance
+  const { initialVersion, creatorIsCurrent, profileUpdate } = provenance
+  const profileMode = Boolean(profileUpdate) || profilePlanning
+  if (profileUpdate && !label(profileUpdate.readbackStepId)) issues.push('The original profile readback is unconfirmed')
   const requiredSubjects = [...connectionSetupPublicationSubjects(effect)]
   const initialDraft = (value: ConnectionSetupPublicationDraft | null) => value?.kind === 'create-version' && value.visibility === 'creator-only' && value.desktopEntry === 'bot' && value.mobileEntry === 'bot'
   // Only the original creator and a reliable empty list offer this finite first-version form.
-  if (effect === 'create-application-version' && creator && creatorIsCurrent && (!states.versions || versions?.length === 0)) {
+  if (!profileMode && effect === 'create-application-version' && creator && creatorIsCurrent && (!states.versions || versions?.length === 0)) {
     if (!versions) { issues.push('The exact version list is unconfirmed'); return { review, privateIntent: null, requiredSubjects: ['publication-versions'] } }
     const empty = { all: false, departments: [], people: [], groups: [] }
     if (!draft || draft.kind === 'create-version' && draft.visibility === 'creator-only') {
@@ -98,7 +100,7 @@ export function reviewFeishuPublication(effect: ConnectionSetupPublicationEffect
     }
   }
   // The Host supplies only its own confirmed, securely stored first-create receipt.
-  if (effect === 'submit-application-version' && creator && creatorIsCurrent && initialVersion && initialDraft(initialVersion.draft) && draft?.kind === 'submit-version' && draft.versionId === initialVersion.versionId) {
+  if (!profileMode && effect === 'submit-application-version' && creator && creatorIsCurrent && initialVersion && initialDraft(initialVersion.draft) && draft?.kind === 'submit-version' && draft.versionId === initialVersion.versionId) {
     if (!detail || detail.versionId !== undefined && detail.versionId !== draft.versionId || !label(detail.appVersion)) issues.push('The exact selected version is unconfirmed')
     else {
       review.selectedVersion = { versionId: draft.versionId, version: detail.appVersion, status: feishuVersionStatus(detail.versionStatus), notes: typeof detail.changeLog === 'string' ? detail.changeLog : null }
@@ -134,7 +136,8 @@ export function reviewFeishuPublication(effect: ConnectionSetupPublicationEffect
       else review.audience = review.proposedAudience = { include: include.public, exclude: exclude.public }
       if (![0, 3, 4].includes(detail.versionStatus as number)) issues.push('The selected version is not in a supported submittable state')
     }
-    return { review, requiredSubjects, privateIntent: !issues.length ? JSON.stringify({ kind: 'submit-version', versionId: draft.versionId, body: { is_full_release: draft.fullRelease } }) : null }
+    if (profileUpdate && (!profileUpdate.createdVersion || profileUpdate.createdVersion.versionId !== draft.versionId || draft.fullRelease)) issues.push('Submit only this original profile version without changing its release scope')
+    return { review, requiredSubjects, privateIntent: !issues.length ? JSON.stringify(profileUpdate ? { kind: 'submit-profile-version', versionId: draft.versionId } : { kind: 'submit-version', versionId: draft.versionId, body: { is_full_release: draft.fullRelease } }) : null }
   }
   if (!pending) issues.push('Pending application changes are unconfirmed')
   else review.changes = changes(pending, 'ChangeScope')
@@ -186,15 +189,39 @@ export function reviewFeishuPublication(effect: ConnectionSetupPublicationEffect
   }
   if (!draft) issues.push('Confirm a version and release notes')
   else if (draft.kind === 'create-version') {
+    if (profileMode && draft.visibility !== 'current') issues.push('Retain the original published application audience')
     const originalVersions = read(states.versions)?.versions
     const reference = Array.isArray(originalVersions) ? originalVersions.map(record).find(version => version && ![0, 3, 10].includes(version.versionStatus as number)) : undefined
-    if (!validVersion(draft.version) || reference && (!label(reference.appVersion) || !validVersion(reference.appVersion) || compare(draft.version, reference.appVersion) <= 0)) issues.push('Use a new three-part version greater than the platform reference version')
+    if (profileMode ? draft.version !== nextProfileVersion(read(states.versions)) : !validVersion(draft.version) || reference && (!label(reference.appVersion) || !validVersion(reference.appVersion) || compare(draft.version, reference.appVersion) <= 0)) issues.push('Use a new three-part version greater than the platform reference version')
     if (!draft.notes.trim() || draft.notes.length > 500) issues.push('Release notes must contain between 1 and 500 characters')
     if (draft.reason !== undefined && (!draft.reason.trim() || draft.reason.length > 1000) || review.reasonRequired && !draft.reason) issues.push('Provide the required application review reason')
     body.appVersion = draft.version; body.changeLog = draft.notes
     if (draft.reason !== undefined) body.remark = draft.reason
   }
-  return { review, requiredSubjects, privateIntent: draft && !issues.length ? JSON.stringify({ kind: 'create-version', body }) : null }
+  if (profileMode) delete body.autoPublish
+  return { review, requiredSubjects, privateIntent: draft && !issues.length ? JSON.stringify({ kind: profileMode ? 'create-profile-version' : 'create-version', body }) : null }
+}
+
+/** The reference derives from parseable three-part versions, not every historical display label. */
+function nextProfileVersion(data: Record<string, unknown> | null): string | null {
+  if (!Array.isArray(data?.versions)) return null
+  const versions = data.versions.map(value => record(value)?.appVersion).filter(label)
+  const triples = versions.map(value => value.split('.').map(part => Number.parseInt(part, 10))).filter(parts => parts.length === 3 && parts.every(Number.isFinite))
+  const max = triples.length ? triples.reduce((left, right) => { for (let i = 0; i < 3; i++) if (left[i] !== right[i]) return left[i]! > right[i]! ? left : right; return left }) : [0, 0, 0]
+  const version = [max[0], max[1], max[2]! + 1].join('.')
+  return validVersion(version) && !versions.includes(version) ? version : null
+}
+
+/** Pure preflight only. It returns no write intent or invented readback identity. */
+export function feishuProfilePublicationDraft(states: Record<string, string>, notes: string): Extract<ConnectionSetupPublicationDraft, { kind: 'create-version' }> | null {
+  const version = nextProfileVersion(read(states.versions))
+  if (!version) return null
+  const draft = { kind: 'create-version' as const, version, notes, visibility: 'current' as const }
+  return reviewPublication('create-application-version', states, draft, null, { creatorIsCurrent: false, initialVersion: null }, true).privateIntent ? draft : null
+}
+
+export function reviewFeishuPublication(effect: ConnectionSetupPublicationEffect, states: Record<string, string>, draft: ConnectionSetupPublicationDraft | null, creator: ConnectionSetupAccount | null, provenance: SetupPublicationProvenance = { creatorIsCurrent: false, initialVersion: null }): SetupPublicationPlan {
+  return reviewPublication(effect, states, draft, creator, provenance)
 }
 
 /** The original caller-dependent isOk branch is not a universal success/failure oracle. */

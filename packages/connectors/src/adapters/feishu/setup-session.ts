@@ -1,4 +1,4 @@
-import type { ConnectionSetupReadSubject, ConnectionSetupReadSummary } from '@agentmux/core/connections'
+import type { ConnectionSetupReadSubject, ConnectionSetupReadSummary, ConnectionSetupRequestDiagnostic } from '@agentmux/core/connections'
 import type { SetupAdapterInput, SetupChallengeReceipt, SetupAuthenticationReceipt, SetupInspectionReceipt, SetupReadReceipt, SetupConfigurationReceipt, SetupPublicationReceipt } from '../../connection-setup-adapter.js'
 import { beginFeishuNativeAccount, advanceFeishuNativeAccount, readNativeAccountState, type NativeAccountInitialState, type NativeAccountState } from './native-account.js'
 import { supportedScopeId } from './setup-permissions.js'
@@ -44,13 +44,17 @@ export async function advanceFeishuSession(input: SetupAdapterInput & { privateS
 async function applicationEnvelope(input: SetupAdapterInput & { privateState: string; assertCurrent?: () => void }, path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<ApplicationReply> {
   return applicationRequest(input, path + encodeURIComponent(input.application.appId), body, signal, path === '/developers/v1/scope/update/')
 }
-type ApplicationReply = { payload: Record<string, unknown> | null; authentication?: string }
-async function applicationRequest(input: SetupAdapterInput & { privateState: string; assertCurrent?: () => void }, path: string, body: Record<string, unknown>, signal?: AbortSignal, developerPanel = false): Promise<ApplicationReply> {
+type ApplicationReply = { payload: Record<string, unknown> | null; authentication?: string; diagnostic?: ConnectionSetupRequestDiagnostic }
+export async function applicationRequest(input: SetupAdapterInput & { privateState: string; assertCurrent?: () => void }, path: string, body: Record<string, unknown> | FormData, signal?: AbortSignal, developerPanel = false): Promise<ApplicationReply> {
   if (input.application.domain !== 'open.feishu.cn') return { payload: null }
   let native: ReturnType<typeof readNativeAccountState>
   try { native = readNativeAccountState(snapshot(input)) } catch { return { payload: null } }
   const receipt = await requestFeishuConsole({ state: native.state, cookies: native.cookies, path, body, referer: '/app/' + encodeURIComponent(input.application.appId), developerPanel, ...(input.assertCurrent ? { assertCurrent: input.assertCurrent } : {}) }, signal)
-  return { payload: receipt.kind === 'response' ? receipt.payload : null, ...(receipt.authentication ? { authentication: serializeSnapshot(input, receipt.authentication) } : {}) }
+  const diagnostic = receipt.kind === 'unknown' && (receipt.diagnostic.stage === 'request' || receipt.diagnostic.stage === 'response') ? {
+    code: receipt.diagnostic.code,
+    ...('httpStatus' in receipt.diagnostic && receipt.diagnostic.httpStatus !== undefined ? { httpStatus: receipt.diagnostic.httpStatus } : {})
+  } : undefined
+  return { payload: receipt.kind === 'response' ? receipt.payload : null, ...(diagnostic ? { diagnostic } : {}), ...(receipt.authentication ? { authentication: serializeSnapshot(input, receipt.authentication) } : {}) }
 }
 
 async function applicationData(input: SetupAdapterInput & { privateState: string }, path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<{ data: Record<string, unknown> | null; authentication?: string }> {
@@ -161,7 +165,7 @@ export async function createFeishuVersion(input: SetupAdapterInput & { privateSt
   let body: Record<string, unknown> | null
   try {
     const intent = record(JSON.parse(input.privateIntent)); body = record(intent?.body)
-    if (!body || (intent?.kind === 'create-initial-version' ? Object.hasOwn(body, 'autoPublish') : intent?.kind !== 'create-version' || body.autoPublish !== false)) return { kind: 'unknown' }
+    if (!body || (intent?.kind === 'create-initial-version' || intent?.kind === 'create-profile-version' ? Object.hasOwn(body, 'autoPublish') : intent?.kind !== 'create-version' || body.autoPublish !== false)) return { kind: 'unknown' }
   } catch { return { kind: 'unknown' } }
   const { payload: envelope, ...authentication } = await applicationEnvelope(input, '/developers/v1/app_version/create/', body, signal), data = record(envelope?.data)
   return envelope && opaque(data?.versionId) ? { kind: 'accepted', privateState: JSON.stringify(envelope), versionId: data.versionId, submission: null, ...authentication } : { kind: 'unknown', ...authentication }
@@ -171,7 +175,7 @@ export async function submitFeishuVersion(input: SetupAdapterInput & { privateSt
   try {
     const intent = record(JSON.parse(input.privateIntent))
     if (!opaque(intent?.versionId)) return { kind: 'unknown' }
-    if (intent.kind === 'submit-initial-version') body = { clientId: input.application.appId }
+    if (intent.kind === 'submit-initial-version' || intent.kind === 'submit-profile-version') body = { clientId: input.application.appId }
     else {
       body = record(intent.body)
       if (intent.kind !== 'submit-version' || !body || typeof body.is_full_release !== 'boolean' || Object.keys(body).length !== 1) return { kind: 'unknown' }
