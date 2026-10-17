@@ -5,7 +5,7 @@ html, body, #root { height: 100%; margin: 0; }
 .calendar-fixture__space-name { color: var(--text-2); }
 .calendar-fixture__private { margin-left: auto; color: var(--text-3); font-size: var(--fs-meta); }
 .calendar-fixture__body { flex: 1; min-height: 0; display: flex; }
-.calendar-fixture__details { flex: 0 0 480px; min-width: 0; min-height: 0; border-right: 1px solid var(--line-soft); }
+.calendar-fixture__details { flex: 0 0 min(66%, 820px); min-width: 0; min-height: 0; border-right: 1px solid var(--line-soft); }
 .calendar-fixture__details[hidden] { display: none; }
 .calendar-fixture__discussion { min-width: 0; flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .calendar-fixture__tabs { display: flex; gap: 4px; padding: 8px 12px; align-items: center; border-bottom: 1px solid var(--line-soft); }

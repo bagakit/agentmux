@@ -19,7 +19,7 @@ import { DEFAULT_MOTE_BEHAVIOR } from '../../../src/renderer/src/lib/mote-behavi
 import { DEFAULT_MOTE_SOUL, PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../../../src/shared/scratch-topics'
 import { DEFAULT_MOTE_MEMORY } from '../../../src/shared/topic-agent-instructions'
 import { directoryIdentity, homeZoneId } from '../../../src/shared/space-addresses'
-import type { ScratchTopicSnapshot, SessionSnapshot, WorkspaceRecord } from '../../../src/shared/contracts'
+import type { Demand, ScratchTopicSnapshot, SessionSnapshot, WorkspaceRecord } from '../../../src/shared/contracts'
 import '../../../src/renderer/src/styles/index.css'
 import './scene.css'
 
@@ -50,9 +50,14 @@ const tabs = sessions.map((session, index) => ({ ...createWorkbenchTab('calendar
 const targets: ContinuousProgressTarget[] = sessions.map(session => ({ hostId: session.hostId, agentSessionId: session.control.agentSessionId,
   providerId: session.providerId, workspacePath: session.workspacePath }))
 const initialDrafts = { [sessions[0]!.id]: '先保留这个手动草稿：等我确认方案再继续。', [sessions[1]!.id]: '这段研究追问还没发送。' }
+const goal: Demand = { id: 'mote-workspace-experiment', title: '把第一个小实验做好', description: '比较两份有来源的调研，留下可以检查的选择。',
+  sessionIds: [sessions[0]!.id], assigneeSessionIds: [], supervisorSessionId: null, participations: [],
+  status: 'in_progress', priority: 'normal', projectId: null, projectName: null, executorId: null,
+  tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, phaseIndex: null, activities: [], decisions: [], createdAt: now, updatedAt: now,
+  alignment: { revision: 1, confirmedAt: now, summary: '先做一个可验证的结果，再决定下一步。', criteria: [{ id: 'sources', text: '保留原始证据和仍需确认的问题。' }], openQuestions: [] } }
 const calls: { method: string; params: unknown }[] = [], opened: string[] = []
 const listeners = new Set<(schedule: ContinuousProgressLoop) => void>()
-let mode = 'populated', lostCreate = false, listUnknown = false, generation = 0
+let mode = 'populated', lostCreate = false, listUnknown = false, noteUnknown = false, generation = 0
 const policies = { gap: 'skip' as const, fold: 'earlier' as const, monthEnd: 'clamp' as const, overdue: 'latest' as const }
 const calendar = { kind: 'daily' as const, time: (new Date(_batchFixtureEpoch(0, 32400)).toISOString().slice(11, 16)), timezone: 'Asia/Shanghai', policies }
 const make = (id: string, index: number, prompt: string, due: number, rest: Partial<ContinuousProgressLoop> = {}): ContinuousProgressLoop => ({ ...targets[index]!,
@@ -112,22 +117,25 @@ const mutate = (action: 'pause' | 'resume' | 'cancel') => async (params: Schedul
 }
 api.schedule.pause = mutate('pause'); api.schedule.resume = mutate('resume'); api.schedule.cancel = mutate('cancel')
 const files: Record<string, string> = { [rootPath + '/SOUL.md']: DEFAULT_MOTE_SOUL, [rootPath + '/BEHAVIOR.md']: DEFAULT_MOTE_BEHAVIOR,
-  [rootPath + '/MEMORY.md']: DEFAULT_MOTE_MEMORY, [rootPath + '/experiment-notes.md']: '# 比较一个小实验\n\n来源：项目讨论。范围：本 Mote。\n\n先比较一个原型，再决定是否扩大。\n' }
+  [rootPath + '/MEMORY.md']: DEFAULT_MOTE_MEMORY, [rootPath + '/experiment-notes.md']: '# 比较一个小实验\n\n来源：项目讨论。范围：本 Mote。\n\n先比较一个原型，再决定是否扩大。\n\n## 下一步值得弄清楚的事\n\n- 哪个选择能让日常协作更自然？\n- 哪些操作必须保留原来的身份与草稿？\n- 一个小实验能否给出足够清楚的证据？\n\n> 先把问题问清楚，再一起决定投入多少。\n',
+  [rootPath + '/next-steps.md']: '# 下一步的几个方向\n\n保留可以直接比较的小选择。\n\n从真实工作中收集反馈，再决定是否扩大范围。\n',
+  [rootPath + '/a-long-question-about-how-we-build-and-learn-together.md']: '# 关于怎样一起工作与学习的一个长问题\n\n长标题和长内容仍然属于同一个原文件，不应该挤掉编辑与返回动作。\n' }
 const revision = async (content: string) => 'sha256:' + [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content)))].map(byte => byte.toString(16).padStart(2, '0')).join('')
 api.files.readDirectory = async (_workspace, directory) => Object.keys(files).filter(file => file.startsWith(directory + '/')).map(file => ({ path: file, name: file.split('/').at(-1)!, isDirectory: false, isSymlink: false, ignored: false, mtimeMs: now }))
 api.files.read = async (_workspace, file) => ({ status: 'read', document: { path: file, content: files[file] ?? '', revision: await revision(files[file] ?? '') } })
 api.files.readPublic = async params => {
   const file = rootPath + '/' + params.path
   const resource = { ...params.expectedResource, zoneId: params.zoneId, zonePath: topic.directoryPath, path: file }
+  if (noteUnknown && file === rootPath + '/experiment-notes.md') return { resource, result: { status: 'unknown', code: 'PRIVATE_NOTE_READ_UNCONFIRMED', message: 'The original saved note could not be confirmed. Last confirmed content is kept; retry the same file.' } } as FileReadResult
   return { resource, result: files[file] === undefined ? { status: 'deleted' } : { status: 'read', document: { path: file, content: files[file], revision: await revision(files[file]) } } } as FileReadResult
 }
 api.files.observe = async () => {}; api.files.unobserve = async () => {}; api.files.onInvalidated = () => () => {}
 api.scratch.listTopics = async () => [topic]; api.scratch.readTopic = async () => topic
-api.demands.list = async () => []
+api.demands.list = async () => [goal]
 api.sessions.historyPage = async control => ({ agentSessionId: control.agentSessionId, source: { providerId: 'fixture', nativeSessionId: 'private-' + control.agentSessionId }, nextCursor: null, items: [] })
 useAppStore.setState({ config: { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }], executors: {}, workspaces: [workspace], appearance: { terminalTheme: 'graphite' } },
   tabs: Object.fromEntries(tabs.map(tab => [tab.id, tab])), layouts: { [workspace.id]: createWorkspaceLayout(groupId, tabs.map(tab => tab.id)) }, sessions,
-  activeWorkspaceId: workspace.id, mainSurface: 'workbench', agentComposerDrafts: { ...initialDrafts }, documents: {}, dirtyDocuments: {}, documentIssues: {},
+  activeWorkspaceId: workspace.id, mainSurface: 'workbench', agentComposerDrafts: { ...initialDrafts }, documents: {}, dirtyDocuments: {}, documentIssues: {}, demands: { [goal.id]: goal },
   scratchTopicSnapshots: { [workspace.id]: { scope: scratchTopicsScope(workspace), topics: [topic], revision: 0, reading: false, error: null } },
   spaceZoneBindings: { [zoneId]: { workspaceId: workspace.id, spaceId, topicId: topic.id, contentKind: 'mote', directoryPath: topic.directoryPath } },
   workbenchSpaceSelection: { workspaceId: workspace.id, groupId, tabId: tabs[0]!.id, regionId: tabs[0]!.layout.activeRegionId, topicId: topic.id, spaceId, zoneId },
@@ -149,6 +157,9 @@ function Scene() {
     theme: (appearance: 'light' | 'dark') => updateThemeSelection({ appAppearance: appearance }),
     scenario: (next: 'populated' | 'empty' | 'unavailable') => { mode = next; records = next === 'empty' ? [] : sceneRecords(); listUnknown = next === 'unavailable'; setEpoch(value => value + 1) },
     loseCreateReceipt: () => { lostCreate = true },
+    noteReadFailure: (failed: boolean) => { noteUnknown = failed; useAppStore.setState(state => ({ workspaceFileRevisions: { ...state.workspaceFileRevisions, [workspace.id]: (state.workspaceFileRevisions[workspace.id] ?? 0) + 1 } })) },
+    name: (title: string) => { topic.title = title; useAppStore.setState(state => ({ scratchTopicSnapshots: { ...state.scratchTopicSnapshots,
+      [workspace.id]: { ...state.scratchTopicSnapshots[workspace.id]!, topics: [{ ...topic }] } } })) },
     presentation: (next: 'space' | 'card') => setCard(next === 'card'),
     facts: () => ({ mode, now, workspacePath, moteDirectory: topic.directoryPath, targets, initialDrafts, drafts: useAppStore.getState().agentComposerDrafts,
       selection: useAppStore.getState().workbenchSpaceSelection, tabIds: Object.keys(useAppStore.getState().tabs), sessions: useAppStore.getState().sessions.map(session => session.id), records, calls, opened })
