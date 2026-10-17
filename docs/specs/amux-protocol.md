@@ -57,9 +57,19 @@
 
 场景只携数据，不携指令、作者、授权或投递回执，不进入 `systemContext`。Browser operation 与输入 operation 是不同身份；step 缺失用 `null`，不合成 0。selection 自持捕获来源和关联强度，外层较新场景不能覆盖它；图片只持宿主无关的持久资源引用，Core 不取图、不内联像素、不把像素矩形升级成 DOM ref。捕获跨边界时保留 observationEnd，无法证明准确步骤时不声明 exact-step。
 
-`inputContextSource` 不在此 wire 或公共提交参数中：可信 Host 可在原输入调用上下文注入 `host-capture`，公共调用只产生 `caller-declared`。这些结构化 producer 事实随原 prompt intent/claim 保留；文本声明不认证来源。用户手写完整示例仍是其正文，已取得 body 的 reader 不再次解析。完整 Copy 保留原 wire/parts；读取声明不提交、接管或批准。
+`inputContextSource` 与 `inputContextCaptureProof` 不进入此 wire，也不接受为公共提交参数。公共调用附带的 context 是 `caller-declared`；可信捕获路径的 `host-capture` 来自原 Host 安装的非 wire reader 与 Core 保存的结构化 producer 事实，不能从标签、引用或摘要认证。用户手写完整示例仍是其正文，已取得 body 的 reader 不再次解析。完整 Copy 保留原 wire/parts；读取声明不提交、接管或批准。
 
 原 prompt 的公开入口为 `agent.input.submit`／`amux agent input submit --session SID --operation-id ID --input FILE|-`，沿原 `submitAgentPrompt`、原输入 key 与查询回执，不建立 A2A 原信。managed Agent caller 必须使用 `agent.send`；普通本机 CLI 的操作主体不证明人工发送，不自动取得 Human 作者。未知提交使用原 key 查询，重启不按当前页面或新版 formatter 重组、改投或自动补发。
+
+### 场景捕获来源与原输入
+
+可信宿主输入通过 `inputContextCapture: {hostId, operationId}` 引用原捕获，与直接 `inputContext` 互斥；公共 `agent.input.submit` 不接受该引用。`hostId` 寻址捕获 owner，独立于目标 Agent 的执行 Host；`operationId` 是原输入 ID，独立于 Browser operation 和 Main 场景 captureId。普通 prompt 使用原提交 ID，continuity 使用原 `input.submissionId`；两者都保留恢复前的 `originRun`，不能以恢复后的 Run 或外层 continuity operation 替换。
+
+[共享 record／proof 类型与摘要函数](../../packages/core/src/agent-input-context-capture.ts)持有准确合同。稳定摘要绑定引用、`binding` 中的执行 Host／AgentSession／`originRun`、原正文、原 note 和 typed context；不绑定 prompt／continuity carrier、外层恢复 operation、condition、execution／choice、preparationRetry 或作者／设备／渠道声明。精确输入选择、准备 fence、作者与权限继续由原输入／continuity owner 校验。Main 按原输入 ID 不可变保存场景；Core 将已核的 `inputContextCaptureProof: {reference, binding, intentDigest}`、context、source 和原 wire 随同原 journal／claim／launch input 冻结。proof 只证明历史场景 producer，不认证 Human 作者、不授输入或 Browser 控制权限，也不证明投递或采用。
+
+Core 在首次冻结前通过原 Host 的非 wire reader 有界读取准确 Main owner；读取期间不占输入派发事务，回到原 owner 后核对同 ID 并发冻结。Main 仅有内存确认时如实返回磁盘未确认，不能冒称 durable，也不因此撤销真实 live 捕获。Core 已冻结后，同输入重试、stop／rejoin 和 continuity 恢复使用原 source／proof／context／wire，不再依赖 Main 在线或重新观察网页。合法 known-not-applied 后的显式 Resume & send 复用原输入 ID 与场景；unknown 或 launch-carried 不因此得到重新派发资格。
+
+只读 `browser.input.inspect`／`amux browser input inspect --host-id HOST --operation-id ID` 返回原 reference、typed record 或缺失事实及 `diskDurability`，不返回正文、note、作者声明或投递结论。managed caller 仍经原 Core 鉴权，只能读准确执行 Host 上发给自身 Session 的捕获；知道引用不取得 participant 资格。当前 Host adapter 仅路由明确的 local capture owner 到 local 执行 Host，无准确远端来源时只报告本次引用未确认；普通无引用输入保持可用。定义与接线从[公共能力来源导航](public-capabilities.md#按能力找到定义与消费者)进入；这些合同不代签 Browser 浮窗、框选或安装交付。
 
 ## A2A 容器与简写
 
