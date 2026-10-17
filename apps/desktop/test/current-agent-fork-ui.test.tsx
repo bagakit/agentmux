@@ -25,13 +25,13 @@ function Surface({ value=session(),readOnly=false }: {value?:CurrentForkSession;
   const actions=useAgentCurrentForkControls({session:value,linkOrigin:origin,readOnly})
   const [open,setOpen]=useState(true)
   setMenuOpen=setOpen
-  return createElement(DropdownMenu.Root,{open,onOpenChange:setOpen},createElement(DropdownMenu.Trigger,null,'Information'),createElement(DropdownMenu.Content,null,actions))
+  return createElement(DropdownMenu.Root,{open,onOpenChange:setOpen},createElement(DropdownMenu.Trigger,null,'Information'),createElement(DropdownMenu.Content,null,actions()))
 }
 async function render(value=session(),readOnly=false){await act(async()=>root.render(createElement(Surface,{value,readOnly}))) }
 async function click(text:string){const button=[...document.querySelectorAll<HTMLElement>('[role=menuitem],button')].find(one=>one.textContent?.trim()===text);expect(button,'Missing '+text).toBeTruthy();await act(async()=>button!.click()) }
 async function choose(destination:string){const button=document.querySelector<HTMLButtonElement>(`button[data-destination="${destination}"]`);expect(button,'Missing '+destination).toBeTruthy();await act(async()=>button!.click()) }
 it('reuses five destination buttons, browser defaults remain six, and cancel/Escape creates nothing',async()=>{
-  const baseline=OpenDestinationBar({canSplit:true,onSelect:()=>{}});expect((baseline.props.children as any[]).length).toBe(6)
+  await act(async()=>root.render(<OpenDestinationBar canSplit onSelect={()=>{}}/>));expect(host.querySelectorAll('[data-destination]')).toHaveLength(6)
   await render();await click('Fork current conversation…');expect(document.querySelectorAll('[data-destination]')).toHaveLength(5);expect(document.querySelector('[data-destination=system]')).toBeNull();expect(document.querySelector('[role=toolbar]')?.getAttribute('aria-label')).toContain('fork');await click('Cancel fork');expect(execute).not.toHaveBeenCalled();await click('Fork current conversation…');await act(async()=>document.querySelector('[data-current-fork-review]')!.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true})));expect(document.querySelector('[data-current-fork-review]')).toBeNull();expect(execute).not.toHaveBeenCalled()
 })
 it('exact source review fences changed native identity, Run and Region before any launch',async()=>{

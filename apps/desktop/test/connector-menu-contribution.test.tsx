@@ -26,8 +26,7 @@ const writes = () => f.connections.mock.calls.filter(([method]) => method === 'c
 const groups = () => [...document.querySelectorAll<HTMLElement>('[data-connector-menu-group]')]
 async function waitFor(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check() }) }
 async function closeMenu() {
-  const menu = document.querySelector<HTMLElement>('[role="menu"]')
-  if (menu) await act(async () => menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+  for (const menu of [...document.querySelectorAll<HTMLElement>('[role="menu"]')].reverse()) if (menu.isConnected) await act(async () => menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
   await settleMoteApp()
 }
 async function openMenu(kind: 'header' | 'region') {
@@ -43,7 +42,14 @@ async function openMenu(kind: 'header' | 'region') {
   })
   await waitFor(() => expect(document.querySelector('[role="menu"]')).not.toBeNull())
   await settleMoteApp()
-  return document.querySelector<HTMLElement>(kind === 'header' ? '.agent-region-menu' : '.region-context-menu')!
+  const root = document.querySelector<HTMLElement>('.agent-region-menu')!
+  expect(root).not.toBeNull()
+  const group = [...root.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent?.trim() === groupLabel)
+  if (group) {
+    await act(async () => { group.focus(); group.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })) })
+    await waitFor(() => expect(document.getElementById(group.getAttribute('aria-controls')!)?.querySelector('[data-connector-menu-group]')).not.toBeNull())
+  }
+  return root
 }
 async function menuAction(label: string) {
   const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent?.trim() === label)
@@ -82,8 +88,8 @@ it('uses the mounted App and Settings master to withdraw and restore one complet
     const menu = await openMenu(kind)
     expect(groups()).toHaveLength(1)
     expect(groups()[0]!.getAttribute('role')).toBe('group')
-    expect(groups()[0]!.textContent).toContain(groupLabel)
-    expect(menu.querySelectorAll('[data-connector-menu-separator]')).toHaveLength(1)
+    expect(groups()[0]!.getAttribute('aria-label')).toBe(groupLabel)
+    expect(menu.querySelectorAll('[data-connector-menu-separator]')).toHaveLength(0)
     expect(groups()[0]!.querySelectorAll('[role="menuitem"]')).toHaveLength(4)
   }
   const before = useAppStore.getState(), bots = (await f.services.connections.list()).connections.map(record => record.config)
@@ -108,7 +114,7 @@ it('uses the mounted App and Settings master to withdraw and restore one complet
     expect(menu.textContent).not.toMatch(/Lark|group chat|Shared group details|Chat application settings|Enable a chat application/)
     expect(menu.querySelector('[data-connector-menu-separator]')).toBeNull()
     expect(menu.lastElementChild?.getAttribute('role')).not.toBe('separator')
-    expect(menu.textContent).toContain('Copy Region Link')
+    expect(menu.textContent).toContain('Copy link')
   }
   expect((await f.services.connections.list()).connections.map(record => record.config)).toEqual(bots)
   expect(useAppStore.getState().sessions).toBe(before.sessions)
@@ -379,7 +385,7 @@ it('contributes the settings path while On without an enabled bot and hides that
   for (const kind of ['header', 'region'] as const) {
     await openMenu(kind)
     expect(groups()).toHaveLength(1)
-    expect(groups()[0]!.textContent).toContain(groupLabel)
+    expect(groups()[0]!.getAttribute('aria-label')).toBe(groupLabel)
     expect([...groups()[0]!.querySelectorAll('[role="menuitem"]')].map(item => item.textContent?.trim())).toEqual(['Enable a chat application'])
   }
   await menuAction('Enable a chat application'); await waitFor(() => expect(master()).not.toBeNull())
