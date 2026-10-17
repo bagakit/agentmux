@@ -20,6 +20,7 @@ import { isScratchWorkspaceId } from '../../../shared/contracts'
 import {
   contentSlotPresentation,
   resolveWorkspaceTools,
+  createWorkspaceAgentSessionsSelector,
   workspaceAgentSessions,
   type WorkspaceTool
 } from '../lib/surface-tool-dock'
@@ -84,7 +85,7 @@ export const WorkspaceAgentsTool = memo(function WorkspaceAgentsTool({
   }, [projected, orderedSessions])
   const active = useWorkbenchPresentationActive()
   const goalSelector = useMemo(createFocusGoalLinksSelector, [])
-  const goalLinks = useAppStore(state => goalSelector(state, active))
+  const goalLinks = useAppStore(state => goalSelector({ demands: state.demands, sessions: scoped }, active))
   const config = useAppStore(state => state.config), tabs = useAppStore(state => state.tabs), layouts = useAppStore(state => state.layouts)
   const catalog = useAppStore(workbenchSelectionCatalog), identitySelector = useMemo(createFocusContextIdentitySelector, [])
   const identityTabs = workbenchNavigationTabs(tabs)
@@ -198,7 +199,8 @@ function ConnectedWorkspaceAgentsTool({ workspace, onOpen }: {
   workspace: WorkspaceRecord
   onOpen(sessionId: string): void
 }) {
-  const sessions = useAppStore(useShallow(state => workspaceAgentSessions(state.sessions, workspace, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots))))
+  const selectMembers = useMemo(createWorkspaceAgentSessionsSelector, [])
+  const sessions = useAppStore(state => selectMembers(state.sessions, workspace, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots)))
   return <WorkspaceAgentsTool workspace={workspace} sessions={sessions} onOpen={onOpen} />
 }
 

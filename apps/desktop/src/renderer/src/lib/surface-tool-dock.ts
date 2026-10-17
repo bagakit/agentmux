@@ -4,9 +4,12 @@ import { attentionAccentFor, type AttentionCategory } from './attention-event'
 import type { AgentDisplayState } from '@agentmux/core'
 import {
   scratchTopicIdFromWorkspacePath,
+  scratchTopicStorageRoots,
+  SCRATCH_WORKSPACE_ID,
   workspaceOwnsSessionPath,
   type ScratchTopicSnapshot
 } from '../../../shared/scratch-topics'
+import { sessionPresentationChildPaths, sessionPresentationsAtPath } from './session-presentation'
 
 export const TOOL_DOCK_DEFAULT_WIDTH = 300
 export const TOOL_DOCK_MIN_WIDTH = 236
@@ -104,6 +107,33 @@ export function workspaceAgentSessions(
   topics?: readonly ScratchTopicSnapshot[] | null
 ): AgentSessionSnapshot[] {
   return sessions.filter((session): session is AgentSessionSnapshot => session.kind === 'agent' && workspaceOwnsSessionPath(workspace, session, topics))
+}
+
+/** Disposable local projection over the shared immutable directory index, never another membership store. */
+export function createWorkspaceAgentSessionsSelector() {
+  let inputs: readonly unknown[] = []
+  let selected: readonly AgentSessionSnapshot[] = []
+  return (sessions: readonly SessionSnapshot[], workspace: Pick<WorkspaceRecord, 'id' | 'hostId' | 'path'>,
+    topics?: readonly ScratchTopicSnapshot[] | null): readonly AgentSessionSnapshot[] => {
+    const nextInputs = [sessions, workspace.id, workspace.hostId, workspace.path, topics]
+    if (nextInputs.every((value, index) => value === inputs[index])) return selected
+    const directories = new Set([workspace.path])
+    if (workspace.id === SCRATCH_WORKSPACE_ID) {
+      for (const root of Object.values(scratchTopicStorageRoots(workspace.path))) {
+        for (const path of sessionPresentationChildPaths(sessions, workspace.hostId, root)) directories.add(path)
+      }
+      for (const topic of topics ?? []) {
+        if (topic.identityDirectoryPath) directories.add(topic.identityDirectoryPath)
+        if (topic.physicalDirectoryPath) directories.add(topic.physicalDirectoryPath)
+        for (const path of topic.confirmedDirectoryPaths ?? []) directories.add(path)
+      }
+    }
+    const candidates = [...directories].flatMap(path => sessionPresentationsAtPath(sessions, workspace.hostId, path))
+    const next = workspaceAgentSessions(candidates, workspace, topics)
+    if (next.length !== selected.length || next.some((session, index) => session !== selected[index])) selected = next
+    inputs = nextInputs
+    return selected
+  }
 }
 
 // One Agent as it appears under a Topic. `sessionId` is the stable identity used to dedupe the
