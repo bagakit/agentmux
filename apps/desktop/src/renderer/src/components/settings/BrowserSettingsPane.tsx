@@ -5,6 +5,7 @@ import { useSettingDraftRecord } from './use-setting-draft'
 import { RetainedBrowserUploads } from './RetainedBrowserUploads'
 import { ExternalBrowserConnections } from './ExternalBrowserConnections'
 import { BrowserResources, useBrowserDirectory } from './BrowserResources'
+import './browser-settings.css'
 
 export type BrowserPreferences = { agentAutomation: boolean; automaticMemoryRelease: boolean }
 
@@ -36,7 +37,7 @@ export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
   }
 
   return (
-    <div className="settings-pane-stack">
+    <div className="settings-pane-stack settings-browser">
       <section className="settings-group" data-settings-field="agent-automation">
         <header><span>Agent automation</span><small>Saved: {saved.agentAutomation ? 'On' : 'Off'}</small></header>
         <label className="browser-automation-toggle">
