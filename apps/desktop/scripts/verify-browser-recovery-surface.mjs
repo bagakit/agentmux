@@ -10,7 +10,10 @@ import { runProbeProcess, stopProbeProcesses, listProbeProcesses } from './probe
 
 const root = resolve(import.meta.dirname, '../../..'), args = process.argv.slice(2)
 const take = flag => args.includes(flag) ? args[args.indexOf(flag) + 1] : undefined
-assert.ok(args.every((arg, index) => ['--receipt', '--reuse-renderer', '--baseline-only'].includes(arg) || ['--receipt', '--reuse-renderer'].includes(args[index - 1])), 'Unsupported recovery proof option')
+assert.ok(args.every((arg, index) => ['--receipt', '--reuse-renderer', '--baseline-only', '--preview-restart'].includes(arg) || ['--receipt', '--reuse-renderer'].includes(args[index - 1])), 'Unsupported recovery proof option')
+const previewRestart = args.includes('--preview-restart')
+assert.ok(!previewRestart || !args.includes('--baseline-only'), 'Preview restart is one bounded two-process proof')
+const mode = previewRestart ? 'preview-restart' : 'recovery'
 const reuseFile = take('--reuse-renderer') ? resolve(take('--reuse-renderer')) : undefined
 const reuseBytes = reuseFile ? await readFile(reuseFile) : undefined
 const reuse = reuseBytes ? JSON.parse(reuseBytes) : undefined
@@ -32,11 +35,23 @@ const ownerFiles = [
   'apps/desktop/src/renderer/src/styles/browser.css',
   'apps/desktop/src/renderer/src/styles/browser-recovery-surface.css'
 ]
+if (previewRestart) ownerFiles.push(
+  'apps/desktop/src/main/browser-view-manager.ts',
+  'apps/desktop/src/main/browser-recovery-preview.ts',
+  'apps/desktop/src/main/ipc.ts',
+  'apps/desktop/src/main/ipc-sender-trust.ts',
+  'apps/desktop/src/preload/index.ts',
+  'apps/desktop/src/shared/browser-recovery-preview.ts',
+  'apps/desktop/src/shared/contracts.ts',
+  'apps/desktop/src/renderer/src/lib/api.ts'
+)
+const mainOnlyOwners = previewRestart ? ['apps/desktop/src/main/browser-view-manager.ts'] : []
 const observedHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root }).toString().trim()
 const candidate = reuse?.candidate ?? observedHead
 if (reuse) {
   assert.equal(reuse.schema, 'agentmux.browser-recovery-surface.proof.v1')
-  for (const file of ownerFiles) assert.equal(sha(await readFile(join(root, file))), reuse.overlays[file], 'Explicit reused Renderer retains the actual current recovery owner: ' + file)
+  assert.equal(reuse.mode ?? 'recovery', mode, 'Renderer reuse never crosses recovery proof modes')
+  for (const file of ownerFiles.filter(file => !mainOnlyOwners.includes(file))) assert.equal(sha(await readFile(join(root, file))), reuse.overlays[file], 'Explicit reused Renderer retains the actual current recovery owner: ' + file)
 }
 const paths = ['package.json', 'apps/desktop/package.json', 'apps/desktop/src', 'apps/desktop/browser-extension', 'apps/desktop/resources']
 for (const name of await readdir(join(root, 'packages'))) for (const leaf of ['src', 'package.json']) {
@@ -71,9 +86,9 @@ for (const folder of ['', 'apps/desktop', ...paths.filter(file => file.startsWit
 }
 aliases.sort((a, b) => Number(a.wildcard) - Number(b.wildcard) || b.name.length - a.name.length)
 const receipt = { schema: 'agentmux.browser-recovery-surface.proof.v1', passed: false, actualPassed: false,
-  candidate, observedHead, out, source, overlays, sources: {}, externalInputs: {}, bundles: {}, runs: [],
+  candidate, observedHead, mode, out, source, overlays, sources: {}, externalInputs: {}, bundles: {}, runs: [],
   driverSha256: sha(await readFile(import.meta.filename)), images: [], independentVisualReview: 'required',
-  boundary: 'Private source projection with explicit current recovery-owner overlays. Exact actual Renderer/full IPC/BVM proof. PNGs are uncomposed Renderer capturePage surfaces; no OS/installed/cache/ordinary-restart or clipboard-write claim.' }
+  boundary: 'Private source projection with explicit current recovery-owner overlays. Actual Renderer/full IPC/BVM proof; PNGs are Renderer capturePage surfaces, not OS/native child composition. No installed App, ordinary full-App recovery or clipboard-write claim.' }
 const bind = async path => {
   const file = path.split('?')[0]
   try {
@@ -132,7 +147,7 @@ try {
   } else {
     assert.ok(Object.keys(reuse.sources ?? {}).length > 0, 'Explicit compiled inputs are nonempty')
     for (const [file, digest] of Object.entries(reuse.sources)) {
-      if (file === fixture + '/main.ts') continue
+      if (file === fixture + '/main.ts' || mainOnlyOwners.includes(file)) continue
       assert.equal(sha(await readFile(join(source, file))), digest, 'Reused Renderer/preload retains its original source bytes: ' + file)
       receipt.sources[file] = digest
     }
@@ -144,6 +159,8 @@ try {
     receipt.bundles.preload = reuse.bundles.preload
     receipt.reuse = { prepared: reuseFile, sha256: sha(reuseBytes), candidate: reuse.candidate,
       scope: 'Original compiled Renderer/preload with identical frozen sources and current recovery owners. Only this attempt Main fixture is recompiled. No original native outcome is reused.' }
+    receipt.mainRecompiled = mainOnlyOwners.map(file => ({ file, before: reuse.sources[file], after: overlays[file],
+      boundary: 'Electron Main owner only, recompiled by the actual SSR consumer; no Renderer/preload or shared protocol source equivalence is inferred.' }))
     receipt.mutation = reuse.mutation
   }
   await viteBuild({ configFile: false, root: source, logLevel: 'error', ssr: { noExternal: true }, resolve: { alias: aliases }, plugins: [sourcePlugin(false)],
@@ -152,7 +169,8 @@ try {
         banner: "import{createRequire as __proofRequire}from'node:module';const require=__proofRequire(import.meta.url);" } } } })
   const main = join(compiled, 'main/main.mjs')
   receipt.bundles.main = { file: main, sha256: sha(await readFile(main)) }
-  for (const mutation of args.includes('--baseline-only') ? [false] : [false, true]) {
+  for (const owner of receipt.mainRecompiled ?? []) assert.equal(receipt.sources[owner.file], owner.after, 'Actual Main consumer rebuilt the explicit current owner: ' + owner.file)
+  for (const mutation of previewRestart || args.includes('--baseline-only') ? [false] : [false, true]) {
     const label = mutation ? 'omit-retry' : 'source', directory = join(compiled, label)
     if (reuse) {
       const original = reuse.bundles[label]
@@ -180,24 +198,33 @@ try {
   await writeFile(join(out, 'prepared.json'), JSON.stringify(receipt, null, 2) + '\n')
   const executable = require('electron')
   receipt.engine = { executable, sha256: sha(await readFile(executable)), version: require('electron/package.json').version }
-  for (const label of args.includes('--baseline-only') ? ['baseline'] : ['baseline', 'omit-retry', 'restored']) {
+  const previewData = previewRestart ? await mkdtemp(join(process.platform === 'darwin' ? '/private/tmp' : tmpdir(), 'amx-recovery-')) : undefined
+  const handoff = previewRestart ? join(out, 'preview-handoff.json') : undefined
+  const labels = previewRestart ? ['preview-capture', 'preview-read'] : args.includes('--baseline-only') ? ['baseline'] : ['baseline', 'omit-retry', 'restored']
+  for (const label of labels) {
     const variant = label === 'omit-retry' ? 'omit-retry' : 'source', assets = receipt.bundles[variant].directory
     const directory = join(out, label); await mkdir(directory)
-    const privateRoot = await mkdtemp(join(process.platform === 'darwin' ? '/private/tmp' : tmpdir(), 'amx-recovery-'))
+    const privateRoot = previewData ?? await mkdtemp(join(process.platform === 'darwin' ? '/private/tmp' : tmpdir(), 'amx-recovery-'))
     const bootstrap = join(directory, 'bootstrap.cjs')
     await writeFile(bootstrap, `const{app}=require('electron'),fs=require('node:fs'),path=require('node:path');const root=${JSON.stringify(privateRoot)};for(const key of ['home','appData','userData','sessionData']){const value=path.join(root,key);fs.mkdirSync(value,{recursive:true});app.setPath(key,value)}app.commandLine.appendSwitch('no-proxy-server');app.whenReady().then(()=>import(${JSON.stringify(pathToFileURL(main).href)})).catch(e=>{console.error(e);app.exit(1)});`)
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(AGENTMUX_|CTXMUX_)/u.test(key) && key !== 'ELECTRON_RUN_AS_NODE'))
     Object.assign(env, { HOME: join(privateRoot, 'home'), XDG_CACHE_HOME: join(privateRoot, 'cache'), XDG_CONFIG_HOME: join(privateRoot, 'config'), XDG_DATA_HOME: join(privateRoot, 'data'),
       AGENTMUX_RUNTIME_DIRECTORY: join(privateRoot, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(privateRoot, 'state'), AGENTMUX_RECOVERY_HOME: privateRoot,
-      AGENTMUX_RECOVERY_OUT: directory, AGENTMUX_RECOVERY_ASSETS: assets, AGENTMUX_RECOVERY_IMAGES: label === 'baseline' ? '1' : '0' })
+      AGENTMUX_RECOVERY_OUT: directory, AGENTMUX_RECOVERY_ASSETS: assets, AGENTMUX_RECOVERY_IMAGES: label === 'baseline' || label === 'preview-read' ? '1' : '0',
+      ...(previewRestart ? { AGENTMUX_RECOVERY_PHASE: label, AGENTMUX_RECOVERY_HANDOFF: handoff } : {}) })
     const logs = []
     const processResult = await runProbeProcess(executable, [bootstrap], { cwd: privateRoot, env, timeoutMs: 60000, onLine: line => logs.push(line) })
     await writeFile(join(directory, 'process.log'), logs.join('\n'))
+    const row = { label, privateRoot, process: processResult, native: null, actual: null, remaining: null }
+    receipt.runs.push(row)
+    await writeFile(join(directory, 'process.json'), JSON.stringify({ process: processResult, privateRoot }, null, 2) + '\n')
+    await writeFile(receiptFile, JSON.stringify(receipt, null, 2) + '\n')
     await stopProbeProcesses(processResult.originalPid, privateRoot)
     const remaining = await listProbeProcesses(processResult.originalPid, privateRoot)
+    row.remaining = remaining
+    await writeFile(join(directory, 'process.json'), JSON.stringify({ process: processResult, privateRoot, remaining }, null, 2) + '\n')
     const bytes = await readFile(join(directory, 'native.json')), actual = JSON.parse(bytes)
-    const row = { label, privateRoot, process: processResult, native: { file: join(directory, 'native.json'), sha256: sha(bytes) }, actual, remaining }
-    receipt.runs.push(row)
+    row.actual = actual; row.native = { file: join(directory, 'native.json'), sha256: sha(bytes) }
     await writeFile(receiptFile, JSON.stringify(receipt, null, 2) + '\n')
     assert.equal(processResult.timedOut, false, 'A setup/timeout is not semantic evidence')
     assert.equal(processResult.exitSignal, null); assert.deepEqual(remaining, [])
@@ -208,8 +235,8 @@ try {
       row.owningAssertion = 'AssertionRED'
     } else {
       assert.equal(processResult.exitCode, 0, JSON.stringify(actual.failure)); assert.equal(actual.passed, true)
-      assert.equal(actual.cases.length, 4, 'Nonempty actual cases all ran')
-      if (label === 'baseline') {
+      assert.equal(actual.cases.length, label === 'preview-capture' ? 2 : label === 'preview-read' ? 3 : 4, 'Nonempty actual cases all ran')
+      if (label === 'baseline' || label === 'preview-read') {
         assert.equal(actual.images.length, 4, 'Actual normal/narrow/short and light/dark Renderer images are nonempty')
         for (const image of actual.images) {
           const file = join(directory, image.file); assert.equal(sha(await readFile(file)), image.sha256)
@@ -217,6 +244,16 @@ try {
         }
       }
     }
+  }
+  if (previewRestart) {
+    const [capture, read] = receipt.runs
+    assert.equal(capture.privateRoot, read.privateRoot, 'Sequential native processes share the original test data')
+    assert.notEqual(capture.process.originalPid, read.process.originalPid)
+    assert.equal(capture.actual.preview.jpegSha256, read.actual.preview.jpegSha256, 'The original native JPEG survives the actual process boundary')
+    assert.deepEqual(capture.actual.preview.preview, read.actual.preview.cold.preview)
+    const handoffBytes = await readFile(handoff)
+    receipt.handoff = { file: handoff, sha256: sha(handoffBytes) }
+    assert.ok(receipt.sources['apps/desktop/src/main/browser-recovery-preview.ts'], 'Actual original preview owner was consumed')
   }
   for (const [file, digest] of Object.entries(receipt.sources)) assert.equal(sha(await readFile(join(source, file))), digest, 'Fixed candidate source: ' + file)
   for (const [file, digest] of Object.entries(overlays)) assert.equal(sha(await readFile(join(root, file))), digest, 'Original recovery owner/fixture remained fixed: ' + file)

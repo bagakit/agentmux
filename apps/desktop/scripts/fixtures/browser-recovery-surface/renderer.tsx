@@ -6,6 +6,7 @@ import { DesktopClientUiProvider } from '../../../src/renderer/src/components/De
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
+import { desktopSpatialGraph } from '../../../src/renderer/src/lib/desktop-spatial-state'
 import '../../../src/renderer/src/styles/index.css'
 import './fixture.css'
 
@@ -47,6 +48,24 @@ Object.assign(window, { recoveryProof: {
     root.render(<Fixture />)
     return { original, sibling }
   },
+  async setupPreview(config: any, url: string, profileId?: string) {
+    originalId = 'recovery-original'; appearance = config.appearance
+    const original = await api.browser.create(originalId, url, 'recovery-workspace', profileId, 'normal')
+    const surface = { ...original, kind: 'browser' as const, browserId: original.id,
+      regionId: 'region-' + original.id, workspaceId: 'recovery-workspace' }
+    const tab = createWorkbenchTab('recovery-' + original.id, surface)
+    useAppStore.setState({ config, tabs: { [tab.id]: tab }, layouts: {}, loading: false, toolsOpen: false,
+      reportError: error => { errors.push(String(error)) } })
+    stopTheme = mountThemeRuntime(window, { ...appearance, appAppearance: 'light' })
+    root.render(<Fixture />)
+    return original
+  },
+  readPreview() { return api.browser.getRecoveryPreview('recovery-original') },
+  async persistDescriptor() {
+    const current = await api.spatial.read()
+    return api.spatial.commit({ expectedRevision: current?.revision ?? 0,
+      graph: desktopSpatialGraph(useAppStore.getState(), [], current?.graph ?? null) })
+  },
   async firstFailure(url: string) {
     const browser = await api.browser.create('recovery-first-failure', url, 'recovery-workspace')
     const surface = { ...browser, kind: 'browser' as const, browserId: browser.id,
@@ -65,6 +84,9 @@ Object.assign(window, { recoveryProof: {
     const sibling = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Sibling draft"]')
     const state = useAppStore.getState()
     return { recovery: Boolean(surface), identity: surface?.querySelector('h2')?.textContent,
+      previewImages: [...(surface?.querySelectorAll<HTMLImageElement>('.browser-recovery__preview img') ?? [])].map(image => ({
+        src: image.currentSrc || image.src, complete: image.complete, width: image.naturalWidth, height: image.naturalHeight })),
+      displayedUrl: surface?.querySelector('code')?.textContent,
       description: surface?.textContent, address: address?.value, focused: document.activeElement === address,
       selection: address ? [address.selectionStart, address.selectionEnd] : null,
       busy: Boolean(surface?.querySelector('button[aria-busy="true"]')),
