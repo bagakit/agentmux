@@ -20,6 +20,8 @@ const terminalLoadingOwning=process.argv.includes('--terminal-loading-owning')
 const messageFeedbackOwning=process.argv.includes('--message-feedback-owning')
 const mailboxMotionOwning=process.argv.includes('--mailbox-motion-owning')
 const mailboxHoverMutation=process.argv.includes('--mailbox-hover-mutation')
+const composerToolbarOwning=process.argv.includes('--composer-toolbar-owning')
+assert.ok(!composerToolbarOwning||visualOnly,'Composer toolbar uses only the private visual fixture')
 assert.ok(!mailboxHoverMutation||visualOnly,'Mailbox hover mutation stays in the private visual compilation')
 assert.ok(!progressLayoutOwning||visualOnly,'Progress layout owning uses only the private visual fixture')
 assert.ok(!terminalLoadingOwning||visualOnly,'Terminal loading owning uses only the private visual fixture')
@@ -36,18 +38,25 @@ async function compiled(directory){
   for(const entry of entries){if(!entry.isFile())continue;const path=join(entry.parentPath,entry.name);files[path.slice(directory.length+1)]=hash(await readFile(path))}
   assert.ok(Object.keys(files).length>0,'The actual private renderer outputs are nonempty');return files
 }
-async function renderer(label,probe='complete',unreadableProgressActions=false){
+async function renderer(label,probe='complete',unreadableProgressActions=false,focusMutation=false){
   const directory=join(evidence,label), outDir=join(privateRoot,label);await mkdir(directory,{recursive:true})
   const xtermFile=require.resolve('@xterm/xterm'), wrapper=join(privateRoot,'record-xterm.mjs')
   await writeFile(wrapper,`import xterm from ${JSON.stringify(xtermFile)};
     export class Terminal extends xterm.Terminal { constructor(...args){super(...args);const entries=globalThis.identityTerminals??=[];this.probeIdentity={id:entries.length,terminal:this,disposed:false};entries.push(this.probeIdentity)}
       dispose(){this.probeIdentity.disposed=true;return super.dispose()} }
   `)
-  const cssPath=join(desktop,'src/renderer/src/styles',terminalLoadingOwning?'terminal.css':'agent.css'),cssBefore=await readFile(cssPath)
-  const loadedSourceInputs={},importedStyleInputs={},progressCssMutations=[]
+  const cssPath=composerToolbarOwning?join(repository,'packages/client-ui/src/styles/composer.css'):join(desktop,'src/renderer/src/styles',terminalLoadingOwning?'terminal.css':'agent.css'),cssBefore=await readFile(cssPath)
+  const loadedSourceInputs={},importedStyleInputs={},progressCssMutations=[],sourceMutations=[]
   await build({configFile:false,root:fixture,base:'./',logLevel:'error',worker:{format:'es'},resolve:{alias:[{find:/^@xterm\/xterm$/,replacement:wrapper}]},
     plugins:[{name:'record-private-renderer-inputs',enforce:'pre',async transform(source,id){
       if((id.startsWith(join(desktop,'src')+'/')||id.startsWith(join(repository,'packages/client-ui/src')+'/')||id.startsWith(fixture+'/'))&&!id.includes('?'))loadedSourceInputs[id.slice(repository.length+1)]=hash(source)
+      if(focusMutation&&id===join(repository,'packages/client-ui/src/components/AgentComposer.tsx')){
+        const anchor='onFocusCapture={(event) => {'
+        assert.equal(source.split(anchor).length,2,'The actual Composer scroll handler is unique')
+        const altered=source.replace(anchor,anchor+' return; // private mutation: remove focus scrolling\n')
+        sourceMutations.push({path:id.slice(repository.length+1),original:hash(source),mutated:hash(altered),productionWritten:false})
+        return altered
+      }
       if(mailboxHoverMutation&&id===join(desktop,'src/renderer/src/components/SessionMailbox.tsx')){
         const anchor=';(popover.current!.showPopover as (options: { source: HTMLButtonElement }) => void)\n      .call(popover.current, { source: trigger.current! })'
         assert.equal(source.split(anchor).length,2,'The private mutation cuts exactly the actual hover-open call')
@@ -61,6 +70,16 @@ async function renderer(label,probe='complete',unreadableProgressActions=false){
     }}],
     css:{postcss:{plugins:[{postcssPlugin:'private-progress-controls',async Once(sheet){
       if(!unreadableProgressActions)return
+      if(composerToolbarOwning){
+        const queries=[]
+        sheet.walkAtRules('container',rule=>{if(rule.source?.input.file===cssPath&&rule.params==='composer (max-width: 400px)')queries.push(rule)})
+        if(!queries.length)return
+        assert.equal(queries.length,1,'The actual imported narrow Composer query is unique')
+        const originalRules=".composer:not(:has(.composer-tools[data-mode='collapsed'])) .composer__toolbar { flex-wrap: wrap; gap: var(--sp-1); }\n.composer:not(:has(.composer-tools[data-mode='collapsed'])) .composer__toolbar > div:first-child { flex-basis: 100%; }\n.composer:not(:has(.composer-tools[data-mode='collapsed'])) .composer__toolbar > div:last-child { margin-inline-start: auto; }"
+        queries[0].append(originalRules)
+        progressCssMutations.push({path:cssPath.slice(repository.length+1),restoredOriginalRules:originalRules,productionWritten:false})
+        return
+      }
       const declarations=[]
       sheet.walkDecls('font',declaration=>{if(declaration.source?.input.file===cssPath&&declaration.parent.selector==='.continuous-progress-panel__actions button')declarations.push(declaration)})
       if(!declarations.length)return
@@ -77,7 +96,8 @@ async function renderer(label,probe='complete',unreadableProgressActions=false){
   assert.equal(importedStyleInputs[cssKey],hash(cssBefore),'The compiled renderer watches the exact owner CSS')
   assert.equal(hash(cssAfter),hash(cssBefore),'The owner CSS stays unchanged through compilation')
   assert.equal(progressCssMutations.length,unreadableProgressActions?1:0,'Requested actual Progress CSS mutation is applied exactly once')
-  await writeFile(join(directory,'compiled.json'),JSON.stringify({compiledFiles,terminalWrapperSha256,loadedSourceInputs,importedStyleInputs,progressCssMutations,ownerCss:{path:cssKey,before:hash(cssBefore),after:hash(cssAfter)}},null,2))
+  assert.equal(sourceMutations.length,focusMutation?1:0)
+  await writeFile(join(directory,'compiled.json'),JSON.stringify({compiledFiles,terminalWrapperSha256,loadedSourceInputs,importedStyleInputs,progressCssMutations,sourceMutations,ownerCss:{path:cssKey,before:hash(cssBefore),after:hash(cssAfter)}},null,2))
   const env={...process.env};delete env.ELECTRON_RUN_AS_NODE
   const log=[]
   const outcome=await runProbeProcess(require('electron'),[join(fixture,'main.cjs'),join(outDir,'index.html'),privateRoot,directory,probe],{
@@ -146,8 +166,16 @@ try{
   await mkdir(evidence,{recursive:true});result.sourceCommit=(await exec('git',['rev-parse','HEAD'],{cwd:repository})).stdout.trim()
   if(!visualOnly)result.sourceBefore=await sources()
   const swapOnly=process.argv.includes('--swap-render-only')
-  result.render=await renderer('fixed',visualOnly?(mailboxMotionOwning?'mailbox-motion-owning':messageFeedbackOwning?'message-feedback-owning':terminalLoadingOwning?'terminal-loading-owning':progressLayoutOwning?'composer-layout-owning':'composer-visual'):swapOnly?'swap-full':'complete');assert.equal(result.render.outcome.exitCode,0,JSON.stringify(result.render.rendered.failure));assert.equal(result.render.rendered.passed,true)
+  result.render=await renderer('fixed',visualOnly?(composerToolbarOwning?'composer-toolbar-owning':mailboxMotionOwning?'mailbox-motion-owning':messageFeedbackOwning?'message-feedback-owning':terminalLoadingOwning?'terminal-loading-owning':progressLayoutOwning?'composer-layout-owning':'composer-visual'):swapOnly?'swap-full':'complete');assert.equal(result.render.outcome.exitCode,0,JSON.stringify(result.render.rendered.failure));assert.equal(result.render.rendered.passed,true)
   if(visualOnly){
+    if(composerToolbarOwning){
+      const red=await renderer('toolbar-wrap-red','composer-toolbar-owning',true)
+      assert.equal(red.outcome.exitCode,1);assert.equal(red.rendered.failure.name,'AssertionError');assert.match(red.rendered.failure.message,/Left tools and Session controls share one toolbar row/)
+      result.mutations.push({label:'original-narrow-toolbar-wrap',red,productionWritten:false})
+      const focusRed=await renderer('toolbar-focus-red','composer-toolbar-owning',false,true)
+      assert.equal(focusRed.outcome.exitCode,1);assert.equal(focusRed.rendered.failure.name,'AssertionError');assert.match(focusRed.rendered.failure.message,/Keyboard-reached tool has a real visible hit target/)
+      result.mutations.push({label:'toolbar-focus-scroll-removed',red:focusRed,productionWritten:false})
+    }
     if(progressLayoutOwning){
       const red=await renderer('progress-controls-red','composer-layout-owning',true)
       assert.equal(red.outcome.exitCode,1);assert.equal(red.rendered.failure.name,'AssertionError');assert.match(red.rendered.failure.message,/Progress action text is readable/)

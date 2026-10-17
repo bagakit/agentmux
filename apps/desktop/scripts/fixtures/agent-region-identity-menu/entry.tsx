@@ -123,6 +123,13 @@ const probe = {
   },
   feedbackWaitCancelCalls() { return [...waitCancelCalls] },
   appearance(mode: 'dark' | 'light') { return updateThemeSelection({ ...useAppStore.getState().config?.appearance, appAppearance: mode }) },
+  toolbarFacts() {
+    flushSync(() => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === first.id ? {
+      ...session, turnUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, observedAt: Date.now(), context: { usedTokens: 58_000, capacityTokens: 100_000 } }
+    } : session), providerCatalog: state.providerCatalog.map(provider => provider.id === first.providerId ? {
+      ...provider, composer: { ...provider.composer, commands: [{ text: '/review', description: 'Review the preview workspace' }] }
+    } : provider) })))
+  },
   progress(state: 'inactive' | 'active' | 'paused' | 'unconfirmed' | 'stopped', full = false) {
     const loop: ContinuousProgressLoop = { loopId: 'visual-progress', hostId: first.hostId, agentSessionId: first.id,
       providerId: first.providerId, workspacePath: first.workspacePath, intervalMs: 1_800_000,
