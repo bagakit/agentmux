@@ -21,7 +21,7 @@ async function input(selector: string, value: string) {
 it('shows pending, saving, failure and successful retry without clearing the browser draft', async () => {
   let reject!: (error: Error) => void
   const onSave = vi.fn(() => new Promise<void>((_, fail) => { reject = fail }))
-  await dom.render(<BrowserSettingsPane browser={composerConfig.browser} onSave={onSave} onForget={async () => {}} />)
+  await dom.render(<BrowserSettingsPane active={false} browser={composerConfig.browser} onSave={onSave} onForget={async () => {}} />)
   expect(dom.container.querySelector<HTMLButtonElement>('.primary-button')!.disabled).toBe(true)
   await dom.click('input[type="checkbox"]')
   expect(dom.container.querySelector('[role="status"]')!.textContent).toBe('Unsaved changes')
@@ -33,7 +33,7 @@ it('shows pending, saving, failure and successful retry without clearing the bro
   expect(dom.container.querySelector<HTMLInputElement>('input')!.checked).toBe(true)
   onSave.mockImplementation(async () => {})
   await dom.click('.primary-button')
-  await dom.render(<BrowserSettingsPane browser={{ ...composerConfig.browser, agentAutomation: true }} onSave={onSave} onForget={async () => {}} />)
+  await dom.render(<BrowserSettingsPane active={false} browser={{ ...composerConfig.browser, agentAutomation: true }} onSave={onSave} onForget={async () => {}} />)
   expect(dom.container.querySelector('[role="alert"]')).toBeNull()
   expect(dom.container.querySelector('[role="status"]')!.textContent).toContain('Changes saved')
   expect(dom.container.querySelector<HTMLButtonElement>('.primary-button')!.disabled).toBe(true)
