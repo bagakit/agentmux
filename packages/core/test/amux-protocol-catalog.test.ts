@@ -31,11 +31,11 @@ describe('source-owned amux reading catalog', () => {
 
   it('checks nonempty real source literals for unregistered named formats', () => {
     const dir = fileURLToPath(new URL('../src/', import.meta.url))
-    const found = readdirSync(dir).filter(name => name.endsWith('.ts')).flatMap(name =>
+    const found = readdirSync(dir, { recursive: true, encoding: 'utf8' }).filter(name => name.endsWith('.ts')).flatMap(name =>
       [...readFileSync(dir + name, 'utf8').matchAll(/<amux:([a-z][a-z0-9-]*)/gu)].map(match => ({ name, tag: `amux:${match[1]}` })))
     expect(found.length).toBeGreaterThan(0)
-    const declared = new Set(Object.values(AMUX_PROTOCOL_DEFINITIONS).map(entry => entry.tag))
-    expect(found.filter(item => !declared.has(item.tag as never))).toEqual([])
+    const declared = new Set<string>(Object.values(AMUX_PROTOCOL_DEFINITIONS).map(entry => entry.tag))
+    expect(found.filter(item => !declared.has(item.tag))).toEqual([])
   })
 
   it.each([

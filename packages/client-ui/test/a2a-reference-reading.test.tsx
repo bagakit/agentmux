@@ -137,8 +137,10 @@ it.each([
   await render(captured(item))
   expect(host.querySelector('[data-a2a-notification-id]')).toBeNull()
   await click('.log-turn__system-toggle')
-  expect(host.querySelector('.log-turn__references')).toBeNull()
-  expect(host.querySelector('.log-turn__body')?.textContent).toContain(batch)
+  expect(host.querySelectorAll('.log-turn__references li')).toHaveLength(2)
+  expect(host.querySelector('.conversation-protocol__original pre')?.textContent).toBe(batch)
+  expect(host.querySelector('.log-turn')?.getAttribute('data-speaker-role')).toBe('system')
+  expect(openHttp).not.toHaveBeenCalled(); expect(openFile).not.toHaveBeenCalled()
 })
 
 it.each([batch, renderAgentMuxMessageEnvelope({ sender: { kind: 'agent-session', agentSessionId: 'inner' }, senderSessionId: 'inner', messageId: 'inner-message', body: 'AUTHORED INNER BODY' })])(
