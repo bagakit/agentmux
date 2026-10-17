@@ -3,7 +3,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import * as DropdownMenu from './HoverDropdownMenu'
-import { useRegionMenuEntries, useRegionMenuObservation } from './RegionContextMenu'
+import { useRegionMenuEntries, useRegionMenuObservation, type RegionContextContribution } from './RegionContextMenu'
 import { AgentRegionMenuContent } from './AgentRegionMenuContent'
 import { useSessionStop } from './SessionStop'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
@@ -72,14 +72,15 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
     return () => observer.disconnect()
   }, [host, targetId])
   useLayoutEffect(() => () => host?.remove(), [host])
-  const content = <AgentRegionMenuContent name={name} executorLabel={executorLabel} sessionId={sessionId}
+  const content = (contextual?: RegionContextContribution | null) => <AgentRegionMenuContent name={name} executorLabel={executorLabel} sessionId={sessionId}
     sessionKind={sessionKind} executionHost={executionHost} readOnly={readOnly}
-    entries={sessionKind === 'agent' && !readOnly ? [...entries, { kind: 'stop', onSelect: () => {
+    entries={[...(contextual?.agentLink ? [{ kind: 'action' as const, action: contextual.agentLink }] : []),
+      ...(sessionKind === 'agent' && !readOnly ? [...entries, { kind: 'stop' as const, onSelect: () => {
       stop.requestStop(nativeSession ? { id: nativeSession.id, hostId: nativeSession.control.hostId, control: nativeSession.control } : null, name, moreTrigger.current)
-    } }] : entries}
+    } }] : entries)]}
     onTakeOver={onTakeOver ? () => { handoffFocus.current = true; onTakeOver(moreTrigger.current ?? undefined) } : undefined}
     onHistory={onHistory ? () => { handoffFocus.current = true; onHistory(moreTrigger.current ?? undefined) } : undefined} onRefreshObservation={onRefreshObservation} refreshing={refreshing}
-    nativeSourceActions={nativeSourceActions} currentConversationActions={currentConversationActions} />
+    nativeSourceActions={nativeSourceActions} currentConversationActions={currentConversationActions} contextualActions={contextual?.tools} />
   function closeMenuFocus(event: Event) {
     if (handoffFocus.current || menuObservation.dialogOpen || stop.dialog !== null) event.preventDefault()
     handoffFocus.current = false
@@ -104,14 +105,17 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
         data-menu-entry="more" data-owner-region-id={regionId} data-agent-session-id={sessionKind === 'agent' ? sessionId : undefined} side="bottom" align="end" sideOffset={0} collisionPadding={8}
         onPointerDown={(event) => event.stopPropagation()}
         onCloseAutoFocus={closeMenuFocus}>
-        <WorkbenchMenuScope.Provider value={DropdownMenu}>{content}</WorkbenchMenuScope.Provider>
+        <WorkbenchMenuScope.Provider value={DropdownMenu}>{content()}</WorkbenchMenuScope.Provider>
       </DropdownMenu.Content></DropdownMenu.Portal>
     </DropdownMenu.Root>
     {sessionKind === 'agent' && menuObservation.setAgentMenuAvailable ? <DocumentOverlayPortal component={ContextMenu.Portal}>
       <ContextMenu.Content className="tab-context-menu agent-region-menu" data-menu-entry="context"
         data-owner-region-id={regionId} data-agent-session-id={sessionId} collisionPadding={8}
-        onPointerDown={event => event.stopPropagation()} onCloseAutoFocus={closeMenuFocus}>
-        <WorkbenchMenuScope.Provider value={ContextMenu}>{content}</WorkbenchMenuScope.Provider>
+        onPointerDown={event => event.stopPropagation()} onCloseAutoFocus={event => {
+          closeMenuFocus(event)
+          menuObservation.onContextCloseAutoFocus?.(event)
+        }}>
+        <WorkbenchMenuScope.Provider value={ContextMenu}>{content(menuObservation.contextualMenu)}</WorkbenchMenuScope.Provider>
       </ContextMenu.Content>
     </DocumentOverlayPortal> : null}
   </header>

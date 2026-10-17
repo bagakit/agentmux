@@ -1,6 +1,6 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { createContext, useContext, useRef, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from 'react'
 import { useSessionRestart } from './SessionRestart'
 import { agentRegionExecution, useAppStore } from '../store'
 import { agentSessionPresentationIndex } from '../lib/session-presentation'
@@ -119,7 +119,24 @@ const REGION_MENU_ICONS: Record<RegionCopyAction['label'], typeof ThemeActionCop
   'Copy Agent Link': ThemeActionCopyIcon
 }
 
-const RegionMenuContext = createContext<{ entries: readonly RegionMenuEntry[]; onOpen(open: boolean): void; dialogOpen: boolean; moreOpen?: boolean; setAgentMenuAvailable?: (available: boolean) => void }>({ entries: [], onOpen: () => {}, dialogOpen: false })
+export type RegionContextContribution = {
+  tools: ReactNode
+  /** An existing exact Agent-link callback, independent of spatial observation. */
+  agentLink: RegionCopyAction | null
+  onCloseAutoFocus?(event: Event): void
+}
+export type RegionContextSource = { read(): RegionContextContribution }
+type ContextualMenu = { source: RegionContextSource; contribution: RegionContextContribution }
+
+const RegionMenuContext = createContext<{
+  entries: readonly RegionMenuEntry[]; onOpen(open: boolean): void; dialogOpen: boolean
+  moreOpen?: boolean; setAgentMenuAvailable?: (available: boolean) => void
+  contextualMenu?: RegionContextContribution | null; contextSource?: RegionContextSource | null
+  setContextSource?(source: RegionContextSource | null): void
+  refreshContextSource?(source: RegionContextSource): void
+  clearContextSource?(source: RegionContextSource): void
+  onContextCloseAutoFocus?(event: Event): void
+}>({ entries: [], onOpen: () => {}, dialogOpen: false })
 
 export function useRegionMenuEntries(): readonly RegionMenuEntry[] {
   return useContext(RegionMenuContext).entries
@@ -229,8 +246,55 @@ export function RegionContextMenu({
   const active = useWorkbenchPresentationActive()
   const [agentMenuAvailable, setAgentMenuAvailable] = useState(false)
   const [contextOpen, setContextOpen] = useState(false), [moreOpen, setMoreOpen] = useState(false)
-  function openMore(open: boolean) { setMoreOpen(open); if (open) setContextOpen(false); connector.onOpen(open || contextOpen) }
-  function openContext(open: boolean) { setContextOpen(open); if (open) setMoreOpen(false); connector.onOpen(open || moreOpen) }
+  const [contextualMenu, setContextualMenu] = useState<ContextualMenu | null>(null)
+  const contextSource = useRef<RegionContextSource | null>(null), closingContext = useRef<ContextualMenu | null>(null)
+  const contextOpenRef = useRef(false)
+  // Keep cancellation ownership until Content unmounts, even if its source disappears.
+  const contextOwnsAutoFocus = useRef(false)
+  const setContextSource = useCallback((source: RegionContextSource | null) => { contextSource.current = source }, [])
+  const refreshContextSource = useCallback((source: RegionContextSource) => {
+    if (!contextOpenRef.current || contextSource.current !== source) return
+    const contribution = source.read()
+    setContextualMenu(current => current?.source === source ? { source, contribution } : current)
+  }, [])
+  const clearContextSource = useCallback((source: RegionContextSource) => {
+    if (closingContext.current?.source === source) closingContext.current = null
+    if (contextSource.current !== source) return
+    contextSource.current = null
+    if (contextOpenRef.current) setContextualMenu(null)
+  }, [])
+  const onContextCloseAutoFocus = useCallback((event: Event) => {
+    const closing = closingContext.current
+    const alreadyPrevented = event.defaultPrevented
+    closingContext.current = null
+    if (contextOwnsAutoFocus.current) event.preventDefault()
+    contextOwnsAutoFocus.current = false
+    if (!alreadyPrevented) closing?.contribution.onCloseAutoFocus?.(event)
+  }, [])
+  function openMore(open: boolean) {
+    setMoreOpen(open)
+    if (open) {
+      contextOpenRef.current = false; contextSource.current = null; closingContext.current = null
+      setContextOpen(false); setContextualMenu(null)
+    }
+    connector.onOpen(open || contextOpen)
+  }
+  function openContext(open: boolean) {
+    contextOpenRef.current = open
+    setContextOpen(open)
+    if (open) {
+      const source = contextSource.current
+      contextOwnsAutoFocus.current ||= source !== null
+      closingContext.current = null
+      setContextualMenu(source ? { source, contribution: source.read() } : null)
+      setMoreOpen(false)
+    } else {
+      closingContext.current = contextualMenu
+      contextSource.current = null
+      setContextualMenu(null)
+    }
+    connector.onOpen(open || moreOpen)
+  }
   const restart = useSessionRestart(active)
   const origin = useRef<HTMLElement | null>(null)
   const target = useAppStore(state => {
@@ -251,17 +315,32 @@ export function RegionContextMenu({
     promote
   })
   const model = { ...base, entries: [...base.entries, ...(agentSessionId ? [{ kind: 'separator' as const }, { kind: 'restart' as const, onSelect: () => restart.requestRestart(target, name ?? agentSessionId, origin.current) }] : []), ...(onOpenWindow ? [{ kind: 'window' as const, onSelect: onOpenWindow }] : []), ...(connector.group ? [{ kind: 'connector-group' as const, group: connector.group }] : [])] }
+  const contribution = contextualMenu ? { ...contextualMenu.contribution,
+    agentLink: base.sessionAddress ? null : contextualMenu.contribution.agentLink } : null
+  const contextEntries: readonly RegionMenuEntry[] = contribution?.agentLink
+    ? [{ kind: 'action', action: contribution.agentLink }, ...model.entries] : model.entries
   // 让位不在这里接线：原生视图的让位由 App 的那一个 MutationObserver 按 Radix 的 DOM 协议
   // （portal 到 React 根之外 + data-state=open）统一观察，见 lib/native-overlay-regions.ts。
   // 这个菜单——#544 那个被浏览器盖住的——正是"逐个接线会漏"的证据本身。
   return (
-    <RegionMenuContext.Provider value={{ entries: model.entries, onOpen: openMore, moreOpen, setAgentMenuAvailable, dialogOpen: connector.dialogOpen || restart.dialog !== null }}>
+    <RegionMenuContext.Provider value={{ entries: model.entries, onOpen: openMore, moreOpen, setAgentMenuAvailable,
+      contextualMenu: contribution, contextSource: contextualMenu?.source ?? null, setContextSource, refreshContextSource,
+      clearContextSource, onContextCloseAutoFocus, dialogOpen: connector.dialogOpen || restart.dialog !== null }}>
       <ContextMenu.Root open={contextOpen} onOpenChange={openContext}>
-        <ContextMenu.Trigger asChild onContextMenu={event => { origin.current = event.currentTarget }}>{children}</ContextMenu.Trigger>
+        <ContextMenu.Trigger asChild onPointerDownCapture={event => {
+          if (event.currentTarget.contains(event.target as Node)) contextSource.current = null
+        }} onContextMenuCapture={event => {
+          if (event.currentTarget.contains(event.target as Node)) contextSource.current = null
+        }} onContextMenu={event => { origin.current = event.currentTarget }}>{children}</ContextMenu.Trigger>
         {!agentMenuAvailable ? <DocumentOverlayPortal component={ContextMenu.Portal}>
-          <ContextMenu.Content className="tab-context-menu region-context-menu" collisionPadding={8} onCloseAutoFocus={event => { if (connector.dialogOpen) event.preventDefault() }}>
-            <RegionCopyLinkRow entries={model.entries} Item={ContextMenu.Item} />
-            {model.entries.filter(entry => entry.kind !== 'action').map((entry, index) => <RegionMenuEntryView
+          <ContextMenu.Content className="tab-context-menu region-context-menu" collisionPadding={8} onCloseAutoFocus={event => {
+            if (connector.dialogOpen || restart.dialog !== null) event.preventDefault()
+            onContextCloseAutoFocus(event)
+          }}>
+            {contribution?.tools}
+            {contribution?.tools ? <ContextMenu.Separator className="tab-context-menu__separator" /> : null}
+            <RegionCopyLinkRow entries={contextEntries} Item={ContextMenu.Item} />
+            {contextEntries.filter(entry => entry.kind !== 'action').map((entry, index) => <RegionMenuEntryView
               key={index} entry={entry} index={index}
               Item={ContextMenu.Item} Separator={ContextMenu.Separator}
             />)}
