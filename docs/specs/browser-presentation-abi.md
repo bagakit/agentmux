@@ -2,7 +2,7 @@
 
 本文说明当前 Desktop Browser 呈现接口的来源、接线与调用边界。精确字段、参数 union、回执及事件只由 [shared/contracts.ts](../../apps/desktop/src/shared/contracts.ts) 的 `BrowserPresentation*` 类型、`BROWSER_PRESENTATION_EVENT_CHANNEL` 和 `AgentMuxDesktopApi.browser` 定义；本文不另存候选类型或第二套 API。
 
-资源寿命见[资源合同](browser-presentation-resource-contract.md)。产品行为引用[《Zone→Tabs→Regions 的实体与展示绑定》](../design/behavior/spaces-and-layout.md#zonetabsregions-的实体与展示绑定)，视觉引用[Browser 呈现约束](../design/presentation/browser-workface.md)。当前源码接线不代表已安装 App、物理输入、媒体停轨或完整工作面恢复通过验收。
+资源寿命见[资源合同](browser-presentation-resource-contract.md)。产品行为引用[《多位置呈现、局部遮挡与输入交接》](../design/behavior/browser-workface.md#多位置呈现局部遮挡与输入交接)，视觉引用[Browser 呈现约束](../design/presentation/browser-workface.md)。当前源码接线不代表已安装 App、物理输入、媒体停轨或完整工作面恢复通过验收。
 
 ## 唯一来源与调用链
 
@@ -10,7 +10,7 @@
 | --- | --- |
 | [shared/contracts.ts](../../apps/desktop/src/shared/contracts.ts) | 可序列化 occurrence、geometry、lease、capture、ACK、activation、receipt、presentation event，以及原 Browser API 类型 |
 | [preload/index.ts](../../apps/desktop/src/preload/index.ts) 的 `browser` | 六项 invoke 与 `onPresentationEvent` 的参数转发、监听及自身退订 |
-| [main/ipc.ts](../../apps/desktop/src/main/ipc.ts) 的 `registerIpc` | 原 `handleWithEvent` 接线；以真实 `event.sender`／`event.senderFrame` 调 BVM，并交回实际结果 |
+| [main/ipc.ts](../../apps/desktop/src/main/ipc.ts) 的 `registerIpc` | 原 `handleWithEvent` 接线；登记时在首次异步准备前，从真实 `event.sender`／`event.senderFrame` 捕获原文档的原生身份快照，交 BVM 校验并返回实际结果 |
 | [ipc-sender-trust.ts](../../apps/desktop/src/main/ipc-sender-trust.ts) 的 `requireTrustedSender` | 原受信 IPC 入口检查；不替代 BVM 的当前 requester 文档与 lease 校验 |
 | [BrowserViewManager](../../apps/desktop/src/main/browser-view-manager.ts) | 运行期校验、lease／capture／input occurrence，以及原 Native 页面资源；不向 Renderer 导出 Electron 对象 |
 | [BrowserPresentationStage](../../apps/desktop/src/renderer/src/components/BrowserPresentationStage.tsx) | 原媒体 holder 与 stage 的实际消费者；报告 geometry、媒体 ACK 和输入意图，消费原事件 |
@@ -38,8 +38,8 @@
 - occurrence 使用原 `presentationId` 和 Core 位置字段，与 `browserId` 分别输入；展示位置不改 Browser 资源 Workspace。Main 从真实 IPC sender 取得 Electron identity，payload 不提供 WebContents／Session／frame／origin／Profile 权限或任意 source URL。
 - lease／capture 是 Main 颁发的 opaque handle。空、过期、另一 requester 或已失效资源不得借句柄继续取得权限；类型存在不证明当前授权。
 - geometry 明确为不可见或可见加正面积有限 bounds。临时测量零不冒原页面关闭；原 viewport 与 Native 几何仍归原 owner。
-- 捕获流由 Renderer 的真实 `getDisplayMedia` 取得。BVM 的原 App Session display handler 只准当前 requester 主 frame／完整文档的准确 pending capture，video-only 且不走 system picker；不放行共享 Session 的所有 frame，也不改原 Source Profile 权限。
-- 一个 requester 同时仅一项未 settled arm，原 Browser 同一 capture 可供多个合法可见 stage。source 正常导航更新 Browser 事实；requester 完整文档与资源寿命是授权边界，不能把第一次 arm 的位置变成 capture 的唯一 home。
+- 捕获流由 Renderer 的真实 `getDisplayMedia` 取得。BVM 的原 App Session display handler 只准当前 requester 主 frame／准确当前文档的 pending capture，video-only 且不走 system picker；不放行共享 Session 的所有 frame，也不改原 Source Profile 权限。
+- 一个 requester 同时仅一项未 settled arm，原 Browser 同一 capture 可供多个合法可见 stage。source 正常导航更新 Browser 事实；requester 文档身份与资源寿命是授权边界，不能把第一次 arm 的位置变成 capture 的唯一 home。
 - ready／stopped ACK 的实际 track IDs 非空且不重复，已 ready 后核同一集合；failed 独立。迟到流若已停止，可直接报告 stopped，不制造 ready。stopped 不重新激活撤销的 scope；旧文档或 scope 无法对账时保持 unconfirmed／unknown，不能据无异常返回证明物理 ended。
 
 ## 事件与失效
