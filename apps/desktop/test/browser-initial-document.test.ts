@@ -13,6 +13,9 @@ const native = vi.hoisted(() => {
     setPermissionCheckHandler = vi.fn()
     setPermissionRequestHandler = vi.fn()
     setDevicePermissionHandler = vi.fn()
+    clearStorageData = vi.fn(async () => {})
+    clearCache = vi.fn(async () => {})
+    closeAllConnections = vi.fn(async () => {})
     readonly listeners = new Map<string, Set<(...args: any[]) => void>>()
     on = vi.fn((event: string, fn: (...args: any[]) => void) => { const set=this.listeners.get(event)??new Set(); set.add(fn); this.listeners.set(event,set) })
     removeListener = vi.fn((event: string, fn: (...args: any[]) => void) => this.listeners.get(event)?.delete(fn))
@@ -101,7 +104,7 @@ const native = vi.hoisted(() => {
   }
   return { Session, Contents, View, BaseWindow, shells }
 })
-vi.mock('electron', () => ({ BaseWindow: native.BaseWindow, WebContentsView: native.View, app: { getPath: () => _hygiene_fixturePath("unused-private-ledger") } }))
+vi.mock('electron', () => ({ BaseWindow: native.BaseWindow, WebContentsView: native.View, session: { fromPartition: () => new native.Session() }, app: { getPath: () => _hygiene_fixturePath("unused-private-ledger") } }))
 import { BrowserViewManager } from '../src/main/browser-view-manager.js'
 import { BrowserRefLedgerStore } from '../src/main/browser-ref-ledger-store.js'
 import { BrowserCdpSession } from '../src/main/browser-cdp-session.js'
@@ -692,4 +695,114 @@ it('observes late native veto after a close reader expired, without a second clo
   expect(await f.manager.release('original-browser',f.entry().navigationId)).toMatchObject({status:'retained',reasons:['beforeunload']})
   expect(await f.manager.navigate('original-browser',url+'/later')).toMatchObject({id:'original-browser'})
   expect(contents.close).toHaveBeenCalledTimes(1)
+})
+
+// The actual manager keeps every unconfirmed native incarnation under the same Browser id.
+describe('Browser native close ownership', () => {
+  const identify = (view: InstanceType<typeof native.View>, pid: number) => {
+    Object.assign(view.webContents.mainFrame, { framesInSubtree: [{ detached: false, osProcessId: pid }] })
+  }
+  it.each(['pending', 'throw'] as const)('keeps old Profile resources observable after a %s close and releases only their confirmed destruction', async mode => {
+    const f = fixture()
+    await f.manager.create('original-browser', url, 'workspace')
+    const old = f.entry().view as InstanceType<typeof native.View>
+    identify(old, 141)
+    const failure = new Error('Original close failed')
+    old.webContents.close.mockImplementation(() => { if (mode === 'throw') throw failure })
+    if (mode === 'throw') await expect(f.manager.switchProfile('original-browser', 'replacement-profile')).rejects.toBe(failure)
+    else await f.manager.switchProfile('original-browser', 'replacement-profile')
+    const current = f.entry().view as InstanceType<typeof native.View>
+    identify(current, 142)
+    expect(current).not.toBe(old)
+    expect((await f.manager.restore('original-browser'))).toMatchObject({ profileId: 'replacement-profile', activity: { warning: expect.stringContaining('cleanup is unconfirmed') } })
+    expect(f.manager.resourceOwnerCounts()).toEqual({ browserViews: 2, releasedBrowserViews: 0 })
+    expect(f.manager.resourceProcessIds()).toEqual(expect.arrayContaining([141, 142]))
+    expect(f.manager.usesProfile('original-profile')).toBe(true)
+    const targets = f.manager.resourceTargets(new Map([[141, 1], [142, 2]]))
+    expect(targets).toHaveLength(1)
+    expect(targets[0]).toMatchObject({ id: 'original-browser', status: 'ready', resource: { processes: expect.arrayContaining([{ pid: 141, creationTime: 1 }, { pid: 142, creationTime: 2 }]) } })
+    expect(old.webContents.close).toHaveBeenCalledOnce()
+    old.webContents.dead = true
+    old.webContents.emit('destroyed')
+    expect(f.entry().view).toBe(current)
+    expect(current.webContents.isDestroyed()).toBe(false)
+    expect(f.manager.usesProfile('original-profile')).toBe(false)
+    expect(f.manager.resourceOwnerCounts()).toEqual({ browserViews: 1, releasedBrowserViews: 0 })
+    expect((await f.manager.restore('original-browser')).activity?.warning).toBeUndefined()
+    const messages = (Reflect.get(f.manager, 'window').webContents.send as ReturnType<typeof vi.fn>).mock.calls
+      .map(([, event]) => event).filter(event => event.type === 'updated' && event.browser.id === 'original-browser')
+    expect(messages.length).toBeGreaterThan(0)
+    expect(messages.at(-1).browser.activity.warning).toBeUndefined()
+    expect(old.webContents.close).toHaveBeenCalledOnce()
+  })
+  it('retains a closed page until native destruction and retries only an explicit Close', async () => {
+    const f = fixture()
+    await f.manager.create('original-browser', url, 'workspace')
+    const old = f.entry().view as InstanceType<typeof native.View>
+    identify(old, 151)
+    const original = new Error('Native close failed')
+    old.webContents.close.mockImplementation(() => { throw original })
+    expect(() => f.manager.close('original-browser')).toThrow(original)
+    expect(f.entry()).toBeUndefined()
+    expect(f.manager.resourceOwnerCounts()).toEqual({ browserViews: 1, releasedBrowserViews: 0 })
+    expect(f.manager.resourceTargets(new Map([[151, 1]]))).toMatchObject([{ id: 'original-browser', status: 'unavailable', resource: { state: 'unknown', retention: { reasons: ['close-unconfirmed'] }, processes: [{ pid: 151, creationTime: 1 }] } }])
+    expect(f.manager.resourceProcessIds()).toEqual([151])
+    expect(f.manager.usesProfile('original-profile')).toBe(true)
+    expect(old.webContents.close).toHaveBeenCalledOnce()
+    old.webContents.close.mockImplementation(() => { old.webContents.dead = true; old.webContents.emit('destroyed') })
+    await f.manager.close('original-browser')
+    expect(old.webContents.close).toHaveBeenCalledTimes(2)
+    expect(f.manager.resourceTargets(null)).toEqual([])
+    expect(f.manager.usesProfile('original-profile')).toBe(false)
+  })
+  it('keeps multiple old Profiles through later switching, and Close visits each original once', async () => {
+    const f = fixture()
+    await f.manager.create('original-browser', url, 'workspace')
+    const first = f.entry().view as InstanceType<typeof native.View>
+    first.webContents.close.mockImplementation(() => {})
+    await f.manager.switchProfile('original-browser', 'second-profile')
+    const second = f.entry().view as InstanceType<typeof native.View>
+    second.webContents.close.mockImplementation(() => {})
+    await f.manager.switchProfile('original-browser', 'third-profile')
+    const third = f.entry().view as InstanceType<typeof native.View>
+    expect(f.manager.resourceOwnerCounts().browserViews).toBe(3)
+    expect(f.manager.usesProfile('original-profile')).toBe(true)
+    expect(f.manager.usesProfile('second-profile')).toBe(true)
+    for (const old of [first, second]) old.webContents.close.mockImplementation(() => { old.webContents.dead = true; old.webContents.emit('destroyed') })
+    await f.manager.close('original-browser')
+    expect(first.webContents.close).toHaveBeenCalledTimes(2)
+    expect(second.webContents.close).toHaveBeenCalledTimes(2)
+    expect(third.webContents.close).toHaveBeenCalledOnce()
+    expect(f.manager.resourceOwnerCounts()).toEqual({ browserViews: 0, releasedBrowserViews: 0 })
+  })
+  it('private Close retries a prior same-id owner without repeating its new incarnation close', async () => {
+    const f = fixture()
+    await f.manager.create('original-browser', url, 'workspace')
+    const previous = f.entry().view as InstanceType<typeof native.View>
+    previous.webContents.close.mockImplementation(() => {})
+    await f.manager.close('original-browser')
+    await f.manager.create('original-browser', url, 'workspace', undefined, 'private')
+    const current = f.entry().view as InstanceType<typeof native.View>, storage = f.entry().storage
+    previous.webContents.close.mockImplementation(() => { previous.webContents.dead = true; previous.webContents.emit('destroyed') })
+    await f.manager.close('original-browser')
+    expect(previous.webContents.close).toHaveBeenCalledTimes(2)
+    expect(current.webContents.close).toHaveBeenCalledOnce()
+    expect(storage.session.clearStorageData).toHaveBeenCalledOnce()
+    expect(f.manager.resourceOwnerCounts().browserViews).toBe(0)
+  })
+  it('dispose visits retained old native owners while a current owner close fails', async () => {
+    const f = fixture()
+    await f.manager.create('original-browser', url, 'workspace')
+    const previous = f.entry().view as InstanceType<typeof native.View>
+    previous.webContents.close.mockImplementation(() => {})
+    await f.manager.switchProfile('original-browser', 'second-profile')
+    const current = f.entry().view as InstanceType<typeof native.View>, failure = new Error('Current native close failed')
+    previous.webContents.close.mockImplementation(() => { previous.webContents.dead = true; previous.webContents.emit('destroyed') })
+    current.webContents.close.mockImplementation(() => { throw failure })
+    expect(() => f.manager.dispose()).toThrow(failure)
+    expect(previous.webContents.close).toHaveBeenCalledTimes(2)
+    expect(f.manager.resourceOwnerCounts().browserViews).toBe(1)
+    current.webContents.dead = true; current.webContents.emit('destroyed')
+    expect(f.manager.resourceOwnerCounts().browserViews).toBe(0)
+  })
 })
