@@ -1052,15 +1052,23 @@ are shared. Personality, private memory, unsaved editor content and avatar
 creation are outside this operation.
 
 New enrollment freezes the selected saved PNG and exact public title/summary
-as its creation input. Its actor-private login View remains owned by Enrollment;
+as its first creation input. General identities use AMUX's own icon and public
+description. Creation does not repeat those fields through a profile upload or
+PATCH. Its actor-private login View remains owned by Enrollment;
 Mote list/inspect receipts contain safe child summaries. A parent `advance`
 without an `enrollment` decision only observes that child. To confirm an account
 or create, pass the exact child operation ID, offered action and own revision in
 `enrollment`; the parent never invents or automatically chooses either decision.
-Old parents preserve their original request and child facts, without starting a
-new Web intent. The resulting exact application may separately use the original
+An explicit `initialPublication` in the create input also authorizes conversation
+configuration and creator-only first publication, using Enrollment's fixed Setup
+identity. Settings includes that scope in the creation confirmation. Configuration
+finishes before creating and submitting that first version; genuine platform
+approval remains a separate result. The offered `continue-setup` action continues
+that same Setup, while inspect/list/recover-local remain local reads.
+Parents without that intent retain their original creation-only scope and saved
+child facts. The resulting exact application may separately use the original
 profile owner; upload, PATCH, publication requirements and online observations
-retain their separate meanings. No parent action publishes an application.
+retain their separate meanings. Explicit profile sync does not publish.
 
 Default preference saving remains an original Files CAS. The parent records the
 full save input and dispatch claim before calling it. A lost File acknowledgement
@@ -1089,7 +1097,7 @@ An independent new setup is separately named and keeps all previous requests.
 Settings remains the application identity library. Each exact application has
 a bounded public-profile observation and original-update view. Reading current
 profile data, inspecting a saved operation and explicitly advancing it retain
-their different meanings. No view submits a publication or treats a current
-profile/default value as an acknowledgement of an earlier unknown write.
+their different meanings. These profile views do not submit a publication or
+treat a current profile/default value as an acknowledgement of an earlier unknown write.
 Browser clients consume `@agentmux/core/mote-connections`, the pure existing
 parent contract and codec leaf, without loading the Node Runtime.
