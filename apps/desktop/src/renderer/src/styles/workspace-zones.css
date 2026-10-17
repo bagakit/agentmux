@@ -9,9 +9,10 @@
 .workspace-zone-entry:hover { background: var(--surface-2); }
 .workspace-zone-entry[aria-pressed="true"] { color: var(--text-2); background: var(--surface-3); }
 .workspace-zone-entry[aria-pressed="true"] .selector-row__identity strong { font-weight: 600; }
-.workspace-zone-entry .selector-row__identity strong { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; font-size: var(--fs-body); font-weight: 500; line-height: 1.35; }
+.workspace-zone-entry .selector-row__identity strong { display: flex; flex-wrap: wrap; column-gap: var(--sp-3); white-space: normal; font-size: var(--fs-body); font-weight: 500; line-height: 1.35; }
+.workspace-zone-entry__name { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-zone-entry .selector-row__identity small { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-1); line-height: 1.35; }
-.workspace-zone-entry__branch { margin-left: var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); font-weight: 400; }
+.workspace-zone-entry__branch { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-micro); font-weight: 400; }
 .workspace-zone-entry__branch > svg { margin-right: var(--sp-1); vertical-align: -1px; }
 .workspace-zone-entry__kind { flex: 0 0 auto; }
 .workspace-zone-entry__path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -21,6 +22,11 @@
 .workspace-zones-footer { flex: 0 0 auto; border-top: 1px solid var(--line); }
 .workspace-zones-issue, .workspace-zones-empty { margin: 0; padding: var(--sp-3) var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.4; overflow-wrap: anywhere; }
 .workspace-zones-issue { flex: 0 0 auto; color: var(--amber-text); }
+.workspace-zones-notice { flex: 0 0 auto; padding: var(--sp-3) var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.4; }
+.workspace-zones-notice[open] { max-height: 50%; overflow: auto; }
+.workspace-zones-notice > summary { cursor: pointer; }
+.workspace-zones-notice > summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
+.workspace-zones-notice > p { margin: var(--sp-3) 0 0; overflow-wrap: anywhere; }
 @media (forced-colors: active) {
   .workspace-zone-entry[aria-pressed="true"] { color: HighlightText; background: Highlight; forced-color-adjust: none; }
   .workspace-zone-entry[aria-pressed="true"] .selector-row__identity strong,

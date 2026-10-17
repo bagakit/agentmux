@@ -61,7 +61,12 @@ export const WorkspaceZonesPanel = memo(function WorkspaceZonesPanel({ workspace
       <button type="button" className="icon-button" aria-label="Refresh Zone Git metadata" title="Refresh current worktree branches" aria-busy={git.loading} onClick={() => { void git.refresh() }}><RefreshIcon size={12} /></button>
       <button type="button" className="workspace-zones-manage" aria-label="Manage worktrees"
       title="Manage worktrees in Git" onClick={() => onManageWorktrees()}>Worktrees<NextIcon size={12} aria-hidden="true" /></button></>} />
-    {context.issue ? <p className="workspace-zones-issue" role="status">{context.issue}</p> : null}
+    {context.issue ? context.files && !context.resource
+      ? <details className="workspace-zones-notice">
+        <summary>Files available. Choose a repository Zone for Git.</summary>
+        <p>{context.issue}</p>
+      </details>
+      : <p className="workspace-zones-issue" role="status">{context.issue}</p> : null}
     {git.issue ? <p className="workspace-zones-issue" role="status">Git metadata unavailable: {git.issue} {git.snapshot ? 'Last observation is shown.' : 'Existing Zones remain available.'} Refresh to retry.</p> : null}
     {git.snapshot?.kind === 'ready' && git.snapshot.warnings.length ? <p className="workspace-zones-issue" role="status">{git.snapshot.warnings.join(' ')}</p> : null}
     <div className="workspace-zones-list" role="group" aria-label="Zone working directories">
