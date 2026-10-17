@@ -70,8 +70,8 @@ async function run(label, mutant) {
     { TMPDIR: scratch, BROWSER_USE_MUTATION: mutant?.id ?? '', BROWSER_USE_LOADS: loads }) }
   finally { await rm(scratch, { recursive: true, force: true }) }
   const report = JSON.parse(await readFile(reportFile, 'utf8')), loaded = JSON.parse(await readFile(loads, 'utf8'))
-  assert.equal(report.testResults.length, 1); assert.equal(report.numTotalTests, 6)
-  assert.equal(report.numPendingTests, 0); assert.equal(report.testResults[0].assertionResults.length, 6)
+  assert.equal(report.testResults.length, 1); assert.equal(report.numTotalTests, 7)
+  assert.equal(report.numPendingTests, 0); assert.equal(report.testResults[0].assertionResults.length, 7)
   assert.equal(report.testResults[0].message, '', 'Setup/runtime failure is not assertion RED')
   assert.doesNotMatch(await readFile(join(evidence, label + '.log'), 'utf8'), /Unhandled Errors|Unhandled Rejection|Uncaught Exception/)
   assert.ok(Object.keys(loaded).length >= 10, 'Actual production consumers loaded')
@@ -103,7 +103,7 @@ try {
       if (proof.variant !== variant || !renderInputs.every(input => proof.sources[input]?.file === plan.inputs[input])) continue
       if (!renderInputs.every(input => proof.sources[input].consumed === (variant === 'shared-effect-cut' && input === owners.effects
         ? hash(inputs[input].replace('  const p = preferences', "  return ''; // private mutation: remove shared drawing\n  const p = preferences")) : plan.inputs[input]))) continue
-      if (variant === 'control' && proof.exit === 0 && proof.capture.complete && proof.capture.screenshots.length === 8 && proof.capture.blend?.changedActualPixels) return file
+      if (variant === 'control' && proof.exit === 0 && proof.capture.complete && proof.capture.screenshots.length === 14 && proof.capture.states?.length === 6 && proof.capture.blend?.changedActualPixels) return file
       if (variant === 'shared-effect-cut' && !proof.capture.complete && /AssertionError/.test(proof.capture.failure?.stack ?? '') && /Blend changes actual page-edge pixels/.test(proof.capture.failure?.message ?? '')) return file
     }
   }

@@ -95,6 +95,26 @@ it('merges concurrent first edits and keeps a later draft while persistence is p
   expect(f.owner.current.browser.agentAutomation).toBe(false)
 })
 
+it('previews real activity vocabulary, steady ownership and immediate handoff without invented waiting targets or writes', async () => {
+  await pane()
+  const before = await f.bytes()
+  for (const [phase, cue, owns] of [
+    ['observing', 'Observing', true], ['script', 'Script', true], ['navigating', 'Navigating', true],
+    ['waiting', 'Waiting', true], ['completed', 'Done', false], ['human', 'Your turn', false]
+  ] as const) {
+    await act(async () => {
+      const select = dom.container.querySelector<HTMLSelectElement>('[aria-label="Simulation state"]')!
+      select.value = phase; select.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(dom.container.querySelector('.browser-operation-status__cue')?.textContent).toBe(cue)
+    expect(Boolean(dom.container.querySelector('[data-browser-control-boundary]'))).toBe(owns)
+    expect(shadow().querySelector('.amux-browser-agent-pointer')).toBeNull()
+    expect(shadow().querySelector('.amux-browser-agent-ripple')).toBeNull()
+  }
+  expect(await f.bytes()).toBe(before)
+  expect(api.config.save).not.toHaveBeenCalled()
+})
+
 it('retains a conflicting draft and clears effects in the simulated human state without changing configuration', async () => {
   await pane(); await value('glowWidth', '35')
   await act(async () => { await f.owner.update(current => ({ ...current, browser: { ...current.browser, agentControl: { glowWidth: 54 } } })) })
