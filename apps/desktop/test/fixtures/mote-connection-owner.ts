@@ -33,7 +33,6 @@ export async function moteConnectionOwner(
     loseFileAck?: boolean
     afterFileWrite?(): Promise<void>
     authenticationUnknown?: boolean
-    profileUnknown?: boolean
     avatarChoice?: SpaceIconChoice | null
     renderAvatar?(svg: string): Promise<MoteAvatarImage>
   } = {}
@@ -191,19 +190,6 @@ export async function moteConnectionOwner(
       credential: async input => { await effect('credential'); return { kind: 'credential', secret: 'private-test-credential', privateState: input.privateState } }
     },
     profile: {
-      prepareUpload: (c, png) => ({ format: 'signed-image', body: JSON.stringify({ app: c.application, png }) }),
-      upload: async () => {
-        await effect('upload')
-        return { state: 'confirmed', avatarUrl: 'https://signed.example/avatar.png' }
-      },
-      preparePatch: (c, desired, avatarUrl) => ({
-        format: 'signed-patch',
-        body: JSON.stringify({ app: c.application, desired, avatarUrl })
-      }),
-      patch: async () => {
-        await effect('patch')
-        return options.profileUnknown ? { state: 'unknown', reason: 'effect-unconfirmed' } : { state: 'confirmed' }
-      },
       get: async (c, revision) => ({
         connectionId: c.connectionId,
         connectionRevision: revision,
