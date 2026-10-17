@@ -232,6 +232,52 @@ it('More has no terminal residue after a body menu closes', async () => {
   expect(item('Copy Region Link', opened)).toBeDefined()
 })
 
+it('modal isolation and live output keep the original open terminal tools available', async () => {
+  vi.mocked(api.sessions.attach).mockImplementation(async control => {
+    expect(control).toEqual(original.control)
+    return { ...attachment(original), terminal: { type: 'basic-vt', checkpoint: { runId: original.control.run.runId,
+      throughByte: 0, resizeRevision: 0, size: { cols: 80, rows: 24 }, restoreSize: { cols: 80, rows: 24 },
+      restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 }, restoreBytes: new TextEncoder().encode('\u001b[H'), resizes: [] } }
+  })
+  const terminal = await mount(), opened = await openBody()
+  const source = container.querySelector<HTMLElement>('.terminal-context-source')!
+  await vi.waitFor(() => expect(source.closest('[aria-hidden="true"]'), 'the actual Radix modal isolates its original surface').not.toBeNull())
+  expect(source.closest('[hidden], [inert]')).toBeNull()
+  const data = '\u001b[?1049h\u001b[HLive menu output\r\n', dataBytes = new TextEncoder().encode(data)
+  await act(async () => {
+    const event = { type: 'core', hostId: original.hostId, event: { type: 'terminal-output', run: original.control.run,
+      data, dataBytes, evidence: { outputByteRange: { startByte: output.length, endByte: output.length + dataBytes.length } } } } as RuntimeEvent
+    expect(fixture.listeners.size, 'the actual output consumer is subscribed').toBeGreaterThan(0)
+    for (const listener of fixture.listeners) listener(event)
+  })
+  await act(async () => await vi.waitFor(() => expect(terminal.buffer.active.type).toBe('alternate')))
+  await vi.waitFor(() => expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toBe('Live menu output'))
+  expect(menu(), 'normal output preserves the same popup').toBe(opened)
+  expect(opened.querySelector('[data-terminal-menu-tools]')).not.toBeNull()
+  expect(opened.textContent).toContain('The full-screen buffer has no terminal scrollback.')
+  await act(async () => item('Copy visible output', opened).click())
+  expect(copy).toHaveBeenCalledOnce(); expect(copy.mock.calls[0]![0]).toContain('Live menu output')
+  expect(fixture.terminals).toHaveLength(1)
+  expect(store.useAppStore.getState().agentComposerDrafts[original.id]).toBe('Original unsent draft')
+})
+
+it.each(['pointerup', 'pointercancel', 'pointermove'])(
+  'a consumed context gesture retains its tools when %s precedes the React commit', async type => {
+    await mount(); const target = body()
+    await act(async () => {
+      target.dispatchEvent(new PointerEvent('pointerdown', { button: 0, pointerType: 'touch', pointerId: 1,
+        clientX: 20, clientY: 8, bubbles: true, cancelable: true }))
+      target.dispatchEvent(new MouseEvent('contextmenu', { button: 2, clientX: 20, clientY: 8, bubbles: true, cancelable: true }))
+      // The source has been read synchronously, but the opening render has not committed yet.
+      target.dispatchEvent(new PointerEvent(type, { pointerType: 'touch', pointerId: 1, bubbles: true, cancelable: true }))
+    })
+    await vi.waitFor(() => expect(menu()).not.toBeNull())
+    expect(document.querySelectorAll('[role="menu"][data-state="open"]')).toHaveLength(1)
+    expect(menu()!.querySelector('[data-terminal-menu-tools]')).not.toBeNull()
+    expect(item('Copy visible output')).toBeDefined()
+    expect(api.sessions.write).not.toHaveBeenCalled(); expect(api.sessions.paste).not.toHaveBeenCalled()
+  })
+
 it('Escape returns focus to the actual original xterm through its real FocusScope close event', async () => {
   await mount(); const input = container.querySelector<HTMLElement>('.xterm-helper-textarea')!
   input.focus(); const opened = await openBody(), closed = watchFocusScopeClose(opened)
