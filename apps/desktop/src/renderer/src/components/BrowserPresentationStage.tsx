@@ -6,6 +6,9 @@ import { LatestBrowserBoundsSynchronizer, focusRingYieldOf, hasPositiveBrowserSt
 import { observeBrowserStageGeometry } from '../lib/browser-stage-geometry'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import type { WorkbenchViewTarget } from '../lib/workbench-presentation'
+import type { AgentMuxBrowserControl } from '@agentmux/core'
+import type { BrowserAgentControlPreferences } from '../../../shared/browser-agent-control'
+import { BrowserControlBoundary } from './BrowserControlBoundary'
 
 export type WorkbenchBrowserPresentation = {
   occurrence: BrowserPresentationOccurrence
@@ -185,14 +188,16 @@ export function useBrowserPresentationCapture(browserId: string) {
 
 type MediaOwner = ReturnType<typeof useBrowserPresentationCapture>
 /** A presentation owns geometry/lease/gesture only; page and Browser UI state stay in BrowserPane. */
-export function BrowserPresentationStage({ browserId, navigationId, presentation, inputSelected, blocked, media, stageRef, onInputSelected, children }: {
+export function BrowserPresentationStage({ browserId, navigationId, presentation, inputSelected, blocked, media, stageRef, onInputSelected, control, preferences, children }: {
   browserId: string; navigationId: string; presentation: WorkbenchBrowserPresentation; inputSelected: boolean; blocked: boolean
+  control?: AgentMuxBrowserControl | undefined; preferences?: BrowserAgentControlPreferences | undefined
   media: MediaOwner; stageRef?: Ref<HTMLDivElement> | undefined; onInputSelected?: (() => void) | undefined; children?: ReactNode
 }) {
   const windowDocument = useWorkbenchWindowDocument()
   const element = useRef<HTMLDivElement | null>(null)
   const video = useRef<HTMLVideoElement>(null)
   const still = useRef<HTMLCanvasElement>(null)
+  const [frameSize, setFrameSize] = useState<{ stream: MediaStream; width: number; height: number } | null>(null)
   const retainedFrame = useRef<MediaStream | null>(null)
   const lease = useRef<BrowserPresentationLease | null>(null)
   const [notice, setNotice] = useState<{ source: 'registration' | 'presentation' | 'input'; message: string } | null>(null)
@@ -314,6 +319,11 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
     if (!node || !stream) { setPlayback({ stream: null, phase: 'idle' }); return }
     let cancelled = false, playing = false, frameDelivered = false
     let frameRequest: number | null = null
+    const sizeChanged = () => {
+      if (cancelled || node.srcObject !== stream || node.videoWidth <= 0 || node.videoHeight <= 0) return
+      setFrameSize(current => current?.stream === stream && current.width === node.videoWidth && current.height === node.videoHeight
+        ? current : { stream, width: node.videoWidth, height: node.videoHeight })
+    }
     if (nativeCovered || !presentation.visible || blocked) {
       // A paused MediaStream video can still receive and convert every frame.
       // Retain one local frame, then release only this redundant receiver.
@@ -341,6 +351,7 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
     setPlayback({ stream, phase: 'starting' })
     const ready = () => {
       if (cancelled || node.srcObject !== stream || !playing) return
+      sizeChanged()
       if (canvas) canvas.hidden = true
       retainedFrame.current = null
       setPlayback({ stream, phase: 'ready' })
@@ -355,14 +366,14 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
     if (retainedFrame.current === stream) frameRequest = node.requestVideoFrameCallback(() => {
       frameRequest = null; frameDelivered = true; ready()
     })
-    node.addEventListener('loadeddata', frame); node.addEventListener('playing', frame)
+    node.addEventListener('loadeddata', frame); node.addEventListener('playing', frame); node.addEventListener('resize', sizeChanged)
     void node.play().then(() => {
       if (cancelled || node.srcObject !== stream) return
       playing = true; setPlayback({ stream, phase: 'first-frame' }); frame()
     }).catch(error => {
       if (!cancelled && node.srcObject === stream) setPlayback({ stream, phase: 'failed', message: error instanceof Error ? error.message : String(error) })
     })
-    return () => { cancelled = true; node.removeEventListener('loadeddata', frame); node.removeEventListener('playing', frame)
+    return () => { cancelled = true; node.removeEventListener('loadeddata', frame); node.removeEventListener('playing', frame); node.removeEventListener('resize', sizeChanged)
       if (frameRequest !== null) node.cancelVideoFrameCallback(frameRequest) }
   }, [media.stream, playbackRevision, nativeCovered, presentation.visible, blocked])
   const press = useRef<Promise<BrowserPresentationActivationReceipt> | null>(null)
@@ -449,6 +460,8 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
       onPointerDown={down} onPointerUp={event => void up(event)} onPointerCancel={event => void up(event, true)}>
       {media.stream ? <video ref={video} muted playsInline style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }} /> : null}
       {media.stream ? <canvas ref={still} hidden aria-hidden="true" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }} /> : null}
+      {control?.owner === 'agent' && preferences && !nativeCovered && frameSize?.stream === media.stream && frameSize
+        ? <BrowserControlBoundary preferences={preferences} viewport={frameSize} /> : null}
       {children}
     </div>
   </div>
