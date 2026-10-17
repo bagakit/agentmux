@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { AgentMuxError } from '@agentmux/core'
-import { parseConnectionConfig, parseConnectionProfileParams, parseConnectionProfileOperation, parseConnectionProfileObservation, type ConnectionConfig, type ConnectionEnrollmentCallContext, type ConnectionProfileOperation, type ConnectionProfilePort, type ConnectionProfileGet, type ConnectionProfileSync, type ConnectionProfileObservation, type ConnectionProfileReason } from '@agentmux/core/connections'
+import { parseConnectionConfig, parseConnectionProfileParams, parseConnectionProfileOperation, parseConnectionProfileObservation, type ConnectionConfig, type ConnectionEnrollmentCallContext, type ConnectionProfileDiagnostic, type ConnectionProfileOperation, type ConnectionProfilePort, type ConnectionProfileGet, type ConnectionProfileSync, type ConnectionProfileObservation, type ConnectionProfileReason } from '@agentmux/core/connections'
 import type { ConnectionHost, SecretPort } from './connection-host.js'
 import { ProfilePreparationError } from './connection-profile-adapter.js'
 import type { ProfileEffect, ProfileUploadEffect, ProfilePreparedRequest } from './connection-profile-adapter.js'
@@ -41,7 +41,14 @@ export class ConnectionProfileHost implements ConnectionProfilePort {
   private assertActor(row: Row, context: ConnectionEnrollmentCallContext): void { if(!same(row.actor,context.actor)) throw error('Only the original trusted actor may advance this profile operation.','CONTROL_PERMISSION_DENIED') }
   private async authority(context?: ConnectionEnrollmentCallContext): Promise<void> { if(this.closed) throw error('The original profile owner is closed.');context?.signal?.throwIfAborted();await context?.assertCurrent?.();if(this.closed)throw error('The original profile owner is closed.');context?.signal?.throwIfAborted() }
   private current(row: Row): boolean { const c=this.connections.readConfiguration(row.input.connectionId);return c?.revision===row.input.expectedConnectionRevision&&same(c.config,row.config) }
-  private reason(row: Row, reason: ConnectionProfileReason): ConnectionProfileOperation { this.safe(()=>this.connections.database.prepare("UPDATE connection_profile_operation SET record_json=json_set(record_json,'$.reason',?) WHERE operation_id=?").run(reason,row.input.operationId));return this.projection(this.safe(()=>this.read(row.input.operationId))!) }
+  private reason(row: Row, reason: ConnectionProfileReason, diagnostic?: ConnectionProfileDiagnostic): ConnectionProfileOperation {
+    this.safe(()=>{
+      if(diagnostic){
+        const checked=parseConnectionProfileOperation({...row.operation,reason,patch:{...row.operation.patch,diagnostic}})
+        this.connections.database.prepare("UPDATE connection_profile_operation SET record_json=json_set(record_json,'$.reason',?,'$.patch.diagnostic',json(?)) WHERE operation_id=?").run(reason,JSON.stringify(checked.patch.diagnostic),row.input.operationId)
+      }else this.connections.database.prepare("UPDATE connection_profile_operation SET record_json=json_set(record_json,'$.reason',?) WHERE operation_id=?").run(reason,row.input.operationId)
+    });return this.projection(this.safe(()=>this.read(row.input.operationId))!)
+  }
   async inspect(value: {operationId:string}, context?: ConnectionEnrollmentCallContext) { const i=parseConnectionProfileParams('connection.profile.inspect',value);return this.safe(()=>{const r=this.read(i.operationId);if(r && context?.actor.kind==='agent')this.assertActor(r,context);return {operation:r?this.projection(r):null}}) }
   async list(value: {connectionId:string;cursor?:string;limit?:number}, context?: ConnectionEnrollmentCallContext) {
     const i=parseConnectionProfileParams('connection.profile.ls',value), limit=i.limit??25
@@ -102,7 +109,7 @@ export class ConnectionProfileHost implements ConnectionProfilePort {
       const row=this.read(id)!;const wire=settlement.step==='upload'?row.uploadWire:row.patchWire
       if(row.operation[settlement.step].state!=='dispatching'||!same(wire,settlement.wire)){db.exec('COMMIT');return}
       const effect=settlement.effect
-      row.operation[settlement.step]={state:effect.state};delete row.operation.reason
+      row.operation[settlement.step]={state:effect.state,...(effect.state!=='confirmed'&&effect.diagnostic?{diagnostic:effect.diagnostic}:{})};delete row.operation.reason
       if(effect.state==='confirmed'){
         if(settlement.step==='upload'){
           const avatarUrl=(effect as Extract<ProfileUploadEffect,{state:'confirmed'}>).avatarUrl
@@ -138,7 +145,7 @@ export class ConnectionProfileHost implements ConnectionProfilePort {
       await this.authority(context)
       let wire:ProfilePreparedRequest
       try{wire=await (step==='upload'?adapter.prepareUpload(row.config,row.input.desired.avatar!.pngDataUrl):adapter.preparePatch(row.config,{...(row.input.desired.name===undefined?{}:{name:row.input.desired.name}),...(row.input.desired.description===undefined?{}:{description:row.input.desired.description})},row.avatarUrl??undefined,credential,context.signal));if(!wire.format||typeof wire.body!=='string')throw error('Unconfirmed prepared profile request.')}
-      catch(e){return this.reason(row,e instanceof ProfilePreparationError?e.reason:'source-unconfirmed')}
+      catch(e){return this.reason(row,e instanceof ProfilePreparationError?e.reason:'source-unconfirmed',e instanceof ProfilePreparationError?e.diagnostic:undefined)}
       await this.authority(context)
       const applicationKey=JSON.stringify(row.config.application), token={}
       if(step==='patch'&&activeApplicationWrites.has(applicationKey))return this.reason(row,'effect-unconfirmed')
