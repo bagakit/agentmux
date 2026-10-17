@@ -53,7 +53,7 @@ it.each(['applied', 'unchanged'] as const)('accepts %s navigation at the exact f
   if (!receipt) throw new Error('Expected the actual public Focus receipt')
   expect(seen).toEqual([request()])
   expect(receipt.navigation).toEqual({ state, requested: target, selection: {
-    surface: 'space', mainSurface: 'workbench', spaceView: 'workbench', goalId: 'previous-goal', space: {
+    surface: 'space', mainSurface: 'workbench', focusView: null, goalId: 'previous-goal', space: {
       spaceId: target.spaceId, zoneId: target.zoneId, workspaceId: target.displayWorkspaceId,
       groupId: target.groupId, tabId: target.tabId, regionId: target.regionId, topicId: null } } })
   // The resource home is deliberately different; it must never replace the explicit display location.
