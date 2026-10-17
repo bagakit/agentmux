@@ -9,6 +9,8 @@ import type { PerformanceSceneOwner } from './performance-scene.js'
 import { isApplicationAccessMethod, parseApplicationAccessParams, type AgentMuxApplicationAccessOwner } from '@agentmux/core'
 import { registerConversationReadIpc } from './conversation-read-ipc'
 import { registerBrowserResourceIpc } from './browser-resource-ipc.js'
+import { BrowserInputContextCaptureFiles, BrowserInputContextCaptures } from './browser-input-context-capture.js'
+import { registerBrowserInputContextIpc } from './browser-input-context-ipc.js'
 import { RendererV8Profiler } from './renderer-v8-profile.js'
 import { RendererMemoryInspector } from './renderer-memory.js'
 import { registerPerformanceCaptureIpc } from './performance-capture-ipc.js'
@@ -443,6 +445,9 @@ export async function registerIpc(args: {
   new BrowserTaskAssets(new BrowserTaskAssetFileStore(join(app.getPath('userData'), BROWSER_TASK_ASSETS_FILE)), { nameAudit }),
   new BrowserDownloads(join(app.getPath('userData'), 'browser-downloads'), files, id => workspace(config, id)),
   browserUploads)
+  const inputContextCaptures = new BrowserInputContextCaptures({ hostId: deliveryAttempts.hostId,
+    source: id => browsers.inputContext(id, deliveryAttempts.hostId),
+    files: new BrowserInputContextCaptureFiles(join(app.getPath('userData'), 'browser-input-context')) })
   const ensureBrowser = (id: string, input?: Parameters<BrowserViewManager['restore']>[1]) => browsers.ensure(id, async () => {
     let saved = browserColdDescriptor((await spatialState.read())?.graph ?? null, id)
     workspace(config, saved.workspaceId)
@@ -644,6 +649,7 @@ export async function registerIpc(args: {
    */
   const requireTrustedSender = (channel: PrivilegedChannel, event: IpcMainInvokeEvent): void =>
     assertSenderTrusted(senderTrust(channel, event.sender, contents))
+  registerBrowserInputContextIpc({ handle: handleWithEvent, trust: requireTrustedSender, captures: inputContextCaptures })
 
   const acceptWorkbenchWindow = (event: Electron.IpcMainEvent, response: import('../shared/workbench-windows.js').WorkbenchWindowResponse) => args.workbenchWindows.accept(event, response)
   ipcMain.on(WORKBENCH_WINDOW_RESPONSE, acceptWorkbenchWindow)
@@ -1746,14 +1752,16 @@ export async function registerIpc(args: {
     sourceChannel?: Parameters<RuntimeController['submitPrompt']>[8],
     goalContinuation?: { goalId: string; loopId: string },
     goalPmo?: GoalPmoIntent,
-    goalDispatch?: GoalDispatchReference
+    goalDispatch?: GoalDispatchReference,
+    inputContextCapture?: import('@agentmux/core/agent-input-context-capture').AgentInputContextCaptureReference
   ): Promise<SessionInputWriteResult> => sessionInputWriteResult(async () => {
     let effectiveAuthorHuman = false
+    if (inputContextCapture !== undefined) assertManualPromptSenderTrusted(event.sender, contents)
     if ('admissionIntent' in condition) {
       assertManualPromptSenderTrusted(event.sender, contents)
       if (goalContinuation || goalPmo || goalDispatch) throw new AgentMuxError('The original Goal input cannot become a new manual message.', 'CONTROL_REQUEST_CONFLICT')
       pauseUserProgress(session, 'Paused for your message.')
-      return await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, authorHuman, agentMuxNote, sourceChannel)
+      return await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, authorHuman, agentMuxNote, sourceChannel, inputContextCapture)
     }
     if (goalPmo) {
       assertManualPromptSenderTrusted(event.sender, contents)
@@ -1778,10 +1786,10 @@ export async function registerIpc(args: {
         assertManualPromptSenderTrusted(event.sender, contents)
         if (!args.progressLoops || typeof goalContinuation.goalId !== 'string' || typeof goalContinuation.loopId !== 'string') throw new AgentMuxError('The original Goal input owner is unavailable.', 'CONTROL_UNAVAILABLE')
         await args.progressLoops.submitGoalInitial({ hostId: session.hostId, agentSessionId: session.agentSessionId }, goalContinuation.goalId, goalContinuation.loopId, operationId, prompt, condition,
-          async (isCurrent, signal) => { await args.runtime.submitPrompt(session, prompt, operationId, condition, { isCurrent, signal }, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel) })
+          async (isCurrent, signal) => { await args.runtime.submitPrompt(session, prompt, operationId, condition, { isCurrent, signal }, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel, inputContextCapture) })
       } else {
         pauseUserProgress(session, 'Paused for your message.')
-        await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel)
+        await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel, inputContextCapture)
       }
     }
     if (goalDispatch) {
@@ -2236,6 +2244,7 @@ export async function registerIpc(args: {
   registerMoteConnectionIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath() })
   registerMotePreferencesIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath() })
   const control = new AgentMuxControlServer({
+    inputContextCaptures,
     windows: args.workbenchWindows,
     connections: connectorServices.connections,
     moteConnections,

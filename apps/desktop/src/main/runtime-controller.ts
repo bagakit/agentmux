@@ -1822,7 +1822,8 @@ export class RuntimeController {
     choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution; preparationRetry?: import('@agentmux/core').AgentPromptPreparationRetryFence },
     authorHuman?: boolean,
     agentMuxNote?: string,
-    sourceChannel: AgentMessageChannel = 'message-tool'
+    sourceChannel: AgentMessageChannel = 'message-tool',
+    inputContextCapture?: import('@agentmux/core/agent-input-context-capture').AgentInputContextCaptureReference
   ): Promise<void | AgentInputSubmissionReceipt> {
     const capturedCondition = validateAgentPromptInputBinding(condition)
     if ('admissionIntent' in capturedCondition) {
@@ -1832,6 +1833,7 @@ export class RuntimeController {
       return await this.trackHostLifecycleOperation(control.hostId, async () => await this.configuredClient(control.hostId).submitAgentPrompt({
         agentSessionId: control.agentSessionId, ...capturedCondition, execution: 'immediate', operationId, prompt,
         ...(agentMuxNote === undefined ? {} : { agentMuxNote }), sourceChannel,
+        ...(inputContextCapture ? { inputContextCapture } : {}),
         ...(authorHuman === true ? { authorHuman: true } : {})
       }))
     }
@@ -1859,6 +1861,7 @@ export class RuntimeController {
           prompt,
           ...(agentMuxNote === undefined ? {} : { agentMuxNote }),
           sourceChannel,
+          ...(inputContextCapture ? { inputContextCapture } : {}),
           ...(choice?.allowUncertainTurn === true && !automation ? { allowUncertainTurn: true } : {}),
           ...(!automation && choice?.execution !== undefined ? { execution: choice.execution } : {}),
           ...(!automation && choice?.preparationRetry ? { preparationRetry: choice.preparationRetry } : {}),

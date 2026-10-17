@@ -322,6 +322,23 @@ export class BrowserViewManager {
     return this.entries.get(id) === entry && entry.view === view ? target : null
   }
 
+  /** Freeze one existing Main-owned page observation without navigating, restoring or focusing it. */
+  inputContext(id: string, hostId: string): import('@agentmux/core/browser-input-context').BrowserInputContext | null {
+    const entry = this.entries.get(id)
+    if (!entry || entry.view.webContents.isDestroyed()) return null
+    const view = entry.view, contents = view.webContents, observedAt = Date.now()
+    const operation = entry.activity.operation
+    const running = operation?.steps.filter(step => step.status === 'running') ?? []
+    const context: import('@agentmux/core/browser-input-context').BrowserInputContext = {
+      kind: 'browser', version: 1, capturedAt: observedAt,
+      browser: { hostId, browserId: id, navigationId: entry.navigationId },
+      page: { url: contents.getURL() || entry.requestedUrl, title: contents.getTitle() },
+      ...(operation ? { activity: { operationId: operation.id, stepSequence: running.length === 1 ? running[0]!.sequence : null,
+        phase: operation.phase, observedAt } } : {})
+    }
+    return this.entries.get(id) === entry && entry.view === view ? context : null
+  }
+
   private projectTarget(entry: BrowserEntry): AgentMuxBrowserTarget {
     const contents = entry.view.webContents
     const available = !contents.isDestroyed()
