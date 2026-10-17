@@ -2057,8 +2057,8 @@ export class RuntimeController {
       let dispatched = false
       try {
       const client = await this.connectedClient(reference.hostId)
-      const descriptor = (await this.sessionHistorySources()).find(entry =>
-        entry.agentSessionId === reference.agentSessionId && entry.hostId === reference.hostId)
+      const descriptor = (await client.sessionHistorySources({ agentSessionId: reference.agentSessionId })).find(entry =>
+        entry.agentSessionId === reference.agentSessionId)
       if (!descriptor || descriptor.state !== 'retired' || descriptor.retiredAt !== expectedRetiredAt || !descriptor.history) {
         throw new AgentMuxError('The original Session retirement changed. Read its history again before continuing.', 'STALE_AGENT_SESSION')
       }
