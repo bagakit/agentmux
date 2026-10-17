@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest'
 import { parseConnectionEnrollmentDiagnostic, parseConnectionSetupResult as decodePublicResult, type ConnectionSetupOperation, type ConnectionSetupView } from '@agentmux/core/connections'
 import { parseConnectionSetupConfigurationReceipt, parseConnectionSetupResult } from '../src/connection-setup-codec.js'
+import { parseConnectionEnrollmentDiagnostic as parseSourceDiagnostic } from '../src/connection-enrollment-codec.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
 
@@ -87,6 +88,22 @@ it('authentication diagnostics retain bounded failure locations and keep histori
   }
   expect(() => parseConnectionEnrollmentDiagnostic({ ...original, boundary: 'https://private.example/token' })).toThrow()
   expect(() => parseConnectionEnrollmentDiagnostic({ stage: 'response', code: 'invalid-response', boundary: 'json' })).toThrow()
+})
+
+it('source and public diagnostic codecs admit only finite redirect reasons on the original authentication failure', () => {
+  const original = { stage: 'authentication', code: 'native-unconfirmed', step: 'console', failure: 'redirect-unconfirmed', boundary: 'handoff', httpStatus: 302 }
+  const reasons = ['missing-location', 'redirect-limit', 'invalid-url', 'unsupported-scheme', 'url-credentials', 'unexpected-port', 'unexpected-fragment', 'unexpected-host', 'unexpected-redirect', 'unexpected-final-host']
+  for (const decode of [parseSourceDiagnostic, parseConnectionEnrollmentDiagnostic]) {
+    expect(decode(original)).toEqual(original)
+    for (const redirectReason of reasons) expect(decode({ ...original, redirectReason })).toEqual({ ...original, redirectReason })
+    for (const redirectReason of ['unknown-reason', 'https://private.example/token', '', null, 1])
+      expect(() => decode({ ...original, redirectReason })).toThrow()
+    expect(() => decode({ ...original, failure: 'http-status', redirectReason: 'unexpected-host' })).toThrow()
+    expect(() => decode({ ...original, failure: undefined, redirectReason: 'unexpected-host' })).toThrow()
+    expect(() => decode({ stage: 'response', code: 'http-status', httpStatus: 302, redirectReason: 'unexpected-host' })).toThrow()
+    for (const field of ['location', 'url', 'host', 'path', 'query', 'hash', 'token', 'cookie'])
+      expect(() => decode({ ...original, redirectReason: 'unexpected-host', [field]: 'private-native-value' })).toThrow()
+  }
 })
 
 it('publication consumers share owner-declared subjects without vendor entry values or weakened source provenance', () => {
