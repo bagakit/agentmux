@@ -15,9 +15,11 @@ export function ProfileManagementLink({ url }: { url?: string | undefined }) {
 
 /** Original write receipt and separate current observations. Never declares publication. */
 export function ConnectionProfileResult({ operation }: { operation: ConnectionProfileOperation }) {
-  const patch = operation.patch.state
+  const patch = operation.patch.state, upload = operation.upload.state
   return <div className="bot-profile-result" data-profile-operation={operation.operationId}>
-    <p role="status">{patch === 'confirmed' ? 'Profile written. Check and publish it on the platform.'
+    <p role="status">{upload === 'unknown' || upload === 'dispatching' ? 'The image upload is not confirmed. Its original operation is kept; the profile write has not been confirmed.'
+      : upload === 'refused' ? 'The platform did not accept the image upload. The bot connection is kept.'
+      : patch === 'confirmed' ? 'Profile written. Check and publish it on the platform.'
       : patch === 'unknown' || patch === 'dispatching' ? 'The profile write is not confirmed. Its original operation is kept.'
       : patch === 'refused' ? 'The platform did not accept this profile update. The bot connection is kept.'
       : 'Profile update is not complete yet.'}</p>
@@ -33,9 +35,10 @@ export function ConnectionProfileResult({ operation }: { operation: ConnectionPr
   </div>
 }
 export function ConnectionProfileObservationView({ observation }: { observation: ConnectionProfileObservation }) {
+  const [failedAvatar, setFailedAvatar] = useState<string | null>(null)
   return <div className="bot-profile-observation" data-profile-observation={observation.connectionId}>
     <strong>Current online profile</strong>
-    {observation.profile ? <div className="mote-bot-profile">{observation.profile.avatarUrl ? <img src={observation.profile.avatarUrl} alt="Current bot avatar" width={40} height={40} referrerPolicy="no-referrer" /> : null}<div>{observation.profile.name ? <strong>{observation.profile.name}</strong> : null}{observation.profile.description ? <p>{observation.profile.description}</p> : null}</div></div> : <p className="mote-details__hint">Online profile not confirmed.</p>}
+    {observation.profile ? <div className="mote-bot-profile">{observation.profile.avatarUrl && failedAvatar !== observation.profile.avatarUrl ? <img src={observation.profile.avatarUrl} alt="Current bot avatar" width={40} height={40} referrerPolicy="no-referrer" onError={() => setFailedAvatar(observation.profile!.avatarUrl!)} /> : null}<div>{observation.profile.name ? <strong>{observation.profile.name}</strong> : null}{observation.profile.description ? <p>{observation.profile.description}</p> : null}{failedAvatar && failedAvatar === observation.profile.avatarUrl ? <small className="mote-details__hint">Online avatar preview unavailable.</small> : null}</div></div> : <p className="mote-details__hint">Online profile not confirmed.</p>}
     {observation.state !== 'observed' || observation.reason ? <p className="mote-details__hint">{observation.reason ? profileReason(observation.reason) : 'Some online fields are not confirmed.'}</p> : null}
     {observation.version || observation.reviewingVersionId ? <p className="mote-details__hint">{observation.reviewingVersionId ? 'A platform version is under review. ' : ''}{observation.version ? `Version status: ${observation.version.status}.` : ''}</p> : null}
     <details className="bot-profile-details"><summary>Observation sources</summary><dl><div><dt>App ID</dt><dd><code>{observation.application.appId}</code></dd></div><div><dt>Online version</dt><dd>{observation.onlineVersionId ?? 'Not confirmed'}</dd></div><div><dt>Description language</dt><dd>{observation.language ?? 'Not confirmed'}</dd></div>{observation.metadata?.description ? <div><dt>Application metadata</dt><dd>{observation.metadata.description} (not an online description)</dd></div> : null}</dl></details>
