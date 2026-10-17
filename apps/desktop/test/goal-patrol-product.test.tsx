@@ -7,6 +7,7 @@ import { demandExecutionReferences, type Demand, type DemandPatrol, type DemandP
 import type { GoalDelegationResult } from '@agentmux/core/goal-delegation'
 import { AGENTMUX_GOAL_SKILL_ENTRY, goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { GoalDelegationWork } from '../src/renderer/src/components/GoalDelegationWork'
+import { GoalResponsibilitySummary } from '../src/renderer/src/components/GoalResponsibilitySummary'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { refreshGoalDelegations } from '../src/renderer/src/lib/goal-delegation-work'
@@ -16,7 +17,7 @@ import { semantic } from './helpers/goal-responsibility-product'
 type Fixture = Awaited<ReturnType<typeof fixture>>
 function current() { return useAppStore.getState().demands.goal! }
 function button(label: string) {
-  const found = [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === label)
+  const found = [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === label)
   expect(found, label).toBeDefined(); return found!
 }
 async function prepared(options: { alignment?: boolean | 'empty' } = {}) {
@@ -48,6 +49,57 @@ async function updated(action: () => void | Promise<unknown>, assertion: () => u
 }
 
 describe('actual original PMO patrol CLI, Core Input and mounted business consumer', () => {
+  it('compact missing management shows why the click did not send and opens the original relationship picker without replay', async () => {
+    const f = await prepared(); f.patrolState.routeUnavailable = true
+    await mount(createElement(GoalDelegationWork, { demand: current(), compact: true }))
+    const drafts = { original: 'Keep this unsent user input' }
+    useAppStore.setState({ agentComposerDrafts: drafts })
+    await updated(() => button('PMO 巡查').click(), () => expect(current().patrolObservations?.[0]?.state).toBe('missing'))
+    const saved = (await f.demands.get('goal'))!, original = saved.patrols![0]!
+    expect(original.attempts).toEqual([]); expect(f.attempts).toEqual([])
+    expect(container.querySelector('.goal-patrol')!.textContent).toContain('请求已保存 · 尚未投递')
+    expect(container.querySelector('.goal-patrol')!.textContent).toContain(current().patrolObservations![0]!.reason)
+    expect(button('打开原 PMO')).toBeDefined()
+    const projection = await f.capture('missing-manager')
+    await act(async () => { useAppStore.setState({ sessions: projection.sessions }); button('选择 Supervisor').click() })
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+    expect(document.querySelector('[role="dialog"]')!.textContent).toContain('先在负责人中添加')
+    expect(document.querySelector('[data-session-id="owner"]')).not.toBeNull()
+    const update = vi.spyOn(api.demands, 'update').mockImplementation(async (id, patch, _operation, expectedUpdatedAt) =>
+      await f.demands.update(id, patch, { expectedUpdatedAt }))
+    await act(async () => button('Cancel').click())
+    expect(update).not.toHaveBeenCalled(); expect((await f.demands.get('goal'))!.supervisorSessionId).toBe('owner')
+    await act(async () => button('选择 Supervisor').click())
+    await act(async () => document.querySelector<HTMLInputElement>('[data-session-id="worker-a"] input')!.click())
+    update.mockRejectedValueOnce(new Error('Goal changed. Inspect the original Goal before saving.'))
+    await act(async () => button('Save relationships').click())
+    expect(document.querySelector('[role="dialog"]')!.textContent).toContain('Goal changed.')
+    expect(document.querySelector<HTMLInputElement>('[data-session-id="worker-a"] input')!.checked).toBe(true)
+    expect((await f.demands.get('goal'))!.supervisorSessionId).toBe('owner'); expect(f.attempts).toEqual([])
+    await updated(() => button('Save relationships').click(), () => expect(current().supervisorSessionId).toBe('worker-a'))
+    expect(update).toHaveBeenCalledWith('goal', { supervisorSessionId: 'worker-a' }, undefined, saved.updatedAt)
+    await updated(async () => await refreshGoalDelegations('goal'), () => expect(current().patrolObservations![0]!.state).toBe('stale'))
+    expect((await f.demands.get('goal'))!.patrols).toEqual([original])
+    expect(button('PMO 巡查').disabled).toBe(false); expect(f.attempts).toEqual([]); expect(f.nativeWrites).toEqual([])
+    expect(useAppStore.getState().agentComposerDrafts).toBe(drafts); expect(f.stop).not.toHaveBeenCalled()
+    await evidence('compact-missing-manager-real-click-explicit-selection-no-replay', await f.proof(), 'patrol')
+  }, 30_000)
+
+  it('missing responsibility scope explains that nothing was submitted and a pending observation does not hold the finished action busy', async () => {
+    const f = await prepared(), response = await read(f)
+    await mount(createElement(GoalResponsibilitySummary, { demand: { ...current(), responsibility: { ...current().responsibility!, scope: '' } }, active: false }))
+    let release!: (value: GoalDelegationResult) => void
+    const pending = new Promise<GoalDelegationResult>(resolve => { release = resolve })
+    f.read.mockImplementation(async () => await pending)
+    try {
+      await act(async () => { button('PMO 巡查').click(); await Promise.resolve() })
+      expect(container.querySelector('.goal-patrol')!.textContent).toContain('执行责任依据尚未确认，尚未提交巡查')
+      expect(button('PMO 巡查').disabled).toBe(false)
+      expect((await f.demands.get('goal'))!.patrols).toBeUndefined(); expect(f.attempts).toEqual([])
+    } finally { await act(async () => { release(response); await refreshGoalDelegations('goal') }) }
+    expect(f.stop).not.toHaveBeenCalled()
+  }, 30_000)
+
   it('one actual click coalesces duplicate intent, commits the original Core input and keeps delivery distinct from PMO writeback', async () => {
     vi.spyOn(api.demands, 'acceptGrounding')
     const f = await prepared(), drafts = { original: 'Do not replace this unsent user draft' }
