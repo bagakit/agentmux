@@ -3,6 +3,8 @@ import { act } from 'react'
 import { expect, it, vi } from 'vitest'
 import { RegionContextMenu } from '../src/renderer/src/components/RegionContextMenu'
 import { AgentRegionHeader } from '../src/renderer/src/components/AgentRegionHeader'
+import * as Menu from '../src/renderer/src/components/HoverDropdownMenu'
+import { WorkbenchActionRows, moveAlongWorkbenchActionRow } from '../src/renderer/src/components/WorkbenchActionRows'
 import { api } from '../src/renderer/src/lib/api'
 import { formatRegionAddress, formatSessionAddress } from '../src/renderer/src/lib/agent-address'
 import * as presentation from '../src/renderer/src/lib/session-presentation'
@@ -31,7 +33,7 @@ function scene(entry: Entry, copy: (text: string) => Promise<void>, session = or
 
 function item(menu: HTMLElement, label: string) {
   const found = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')]
-    .find(element => element.textContent?.trim() === label)
+    .find(element => (element.getAttribute('aria-label') ?? element.textContent)?.trim() === label)
   expect(found, `original menu item: ${label}`).toBeDefined()
   return found!
 }
@@ -54,16 +56,6 @@ async function open(entry: Entry) {
   return document.querySelector<HTMLElement>(`${selector}[data-state="open"]`)!
 }
 
-async function copyMenu(entry: Entry, menu: HTMLElement) {
-  if (entry === 'region-context') return menu
-  const trigger = item(menu, 'Copy link')
-  await act(async () => {
-    trigger.focus()
-    trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }))
-  })
-  await vi.waitFor(() => expect(document.getElementById(trigger.getAttribute('aria-controls')!)).not.toBeNull())
-  return document.getElementById(trigger.getAttribute('aria-controls')!)!
-}
 
 function executionReader() {
   // Core spatial execution is the controlled boundary; selectors, index, Store and menus are real.
@@ -98,8 +90,11 @@ it.each(entries.flatMap(entry => (['Copy Region Link', 'Copy Agent Link'] as con
   if (entry !== 'region-context') expect(dom.container.querySelector('.agent-region-header__name')?.textContent).toBe(current.label)
   const menu = await open(entry)
   expect(execution).toHaveBeenCalledWith({ tabId, regionId, agentSessionId: canonical })
-  const copies = await copyMenu(entry, menu)
-  await act(async () => item(copies, label).click())
+  const row = menu.querySelector<HTMLElement>('.workbench-menu-row[aria-label="Copy link"]')
+  expect(row).not.toBeNull()
+  expect([...row!.querySelectorAll('[role="menuitem"]')].map(item => item.getAttribute('aria-label'))).toEqual(['Copy Agent Link', 'Copy Region Link'])
+  expect(item(menu, label).closest('[role="menu"]')).toBe(menu)
+  await act(async () => item(menu, label).click())
   expect(copy).toHaveBeenCalledExactlyOnceWith(label === 'Copy Region Link' ? formatRegionAddress(regionId) : formatSessionAddress(canonical))
   await vi.waitFor(() => expect(document.querySelector('[role="menu"][data-state="open"]')).toBeNull())
 })
@@ -148,10 +143,61 @@ it.each(['missing-execution', 'foreign-only', 'ambiguous'] as const)('preserves 
   store.useAppStore.setState({ sessions })
   await dom.render(scene('region-context', async () => {}))
   const menu = await open('region-context')
-  expect([...menu.querySelectorAll('[role="menuitem"]')].some(element => element.textContent === 'Copy Agent Link')).toBe(false)
+  const copyRow = menu.querySelector<HTMLElement>('.workbench-menu-row[aria-label="Copy link"]')
+  expect(copyRow).not.toBeNull()
+  expect([...copyRow!.querySelectorAll('[role="menuitem"]')].map(element => element.getAttribute('aria-label'))).toEqual(['Copy Region Link'])
+  expect(item(menu, 'Copy Region Link').closest('[role="menu"]')).toBe(menu)
   await act(async () => item(menu, 'Restart Session…').click())
   expect(reportError).toHaveBeenCalled()
   expect(store.useAppStore.getState().error).toContain('original Agent Run is not confirmed')
   expect(restart).not.toHaveBeenCalled()
   expect(store.useAppStore.getState().sessions).toBe(sessions)
+})
+
+
+it.each(entries)('compact copy shortcuts navigate laterally and execute the exact original Region through %s', async entry => {
+  executionReader()
+  const current = originalSession(), copy = vi.fn(async (_text: string) => {})
+  store.useAppStore.setState({ sessions: [current] })
+  await dom.render(scene(entry, copy, current))
+  const menu = await open(entry), agent = item(menu, 'Copy Agent Link'), region = item(menu, 'Copy Region Link')
+  await act(async () => { agent.focus(); agent.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })) })
+  expect(document.activeElement).toBe(region)
+  expect(menu.querySelector('.workbench-menu-row[aria-label="Copy link"] .workbench-menu-row__label-text')?.textContent).toBe('Copy Region Link')
+  await act(async () => region.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true })))
+  expect(document.activeElement).toBe(agent); expect(copy).not.toHaveBeenCalled()
+  await act(async () => { region.focus(); region.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })) })
+  expect(copy).toHaveBeenCalledExactlyOnceWith(formatRegionAddress(regionId))
+  await vi.waitFor(() => expect(document.querySelector('[role="menu"][data-state="open"]')).toBeNull())
+})
+
+it('compact copy arrows follow the original row direction without invoking either action', async () => {
+  executionReader()
+  const current = originalSession(), copy = vi.fn(async (_text: string) => {})
+  store.useAppStore.setState({ sessions: [current] })
+  await dom.render(scene('more', copy, current))
+  const menu = await open('more'), agent = item(menu, 'Copy Agent Link'), region = item(menu, 'Copy Region Link')
+  menu.querySelector<HTMLElement>('.workbench-menu-row[aria-label="Copy link"] .workbench-menu-row__actions')!.style.direction = 'rtl'
+  await act(async () => { agent.focus(); agent.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true })) })
+  expect(document.activeElement).toBe(region)
+  await act(async () => region.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })))
+  expect(document.activeElement).toBe(agent); expect(copy).not.toHaveBeenCalled()
+})
+
+it('the shared row navigator skips disabled items and leaves its edge with the original menu', async () => {
+  const run = vi.fn()
+  await dom.render(<Menu.Root open><Menu.Trigger>Original row</Menu.Trigger><Menu.Content>
+    <WorkbenchActionRows rows={[{ id: 'policy', label: 'Original actions', clusters: [[
+      { label: 'First', disabled: false }, { label: 'Unavailable', disabled: true }, { label: 'Last', disabled: false }
+    ]] }]} itemKey={entry => entry.label} renderItem={(entry, props) => <Menu.Item {...props}
+      aria-label={entry.label} disabled={entry.disabled} onSelect={run} onKeyDown={moveAlongWorkbenchActionRow}>{entry.label}</Menu.Item>} />
+  </Menu.Content></Menu.Root>)
+  const menu = document.querySelector<HTMLElement>('[role="menu"]')!, first = item(menu, 'First'), last = item(menu, 'Last')
+  expect(item(menu, 'Unavailable').hasAttribute('data-disabled')).toBe(true)
+  await act(async () => { first.focus(); first.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })) })
+  expect(document.activeElement).toBe(last)
+  await act(async () => last.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })))
+  expect(document.activeElement).toBe(last); expect(run).not.toHaveBeenCalled()
+  await act(async () => last.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true })))
+  expect(document.activeElement).toBe(first)
 })
