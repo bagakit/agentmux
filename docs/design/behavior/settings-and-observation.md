@@ -43,7 +43,13 @@ Agent 工作状态与待处理状态消费同一 Core 语义事实，不能从 r
 
 ### Message Tool 设置分组
 
-Message Tool 在 Settings 中有专门分组，收拢输入形态、发送与编辑快捷键、Prompts 及真实存在的 Mailbox 偏好。导航、搜索、Overview 和窄窗分类沿同一设置目录；初始一行／两行偏好从 General 归入本组，保留原配置键、默认、生效范围和单字段保存。Mailbox 沿准确 Agent 的 Inbox、Outbox、历史与投递事实；尚无可编辑偏好时用紧凑说明解释入口，不伪造全局开关或新增空页。全局 Agent 通知仍归 Notifications。
+Message Tool 在 Settings 中有专门分组，依次提供五个独立入口：User Input、A2A、Automation、Prompts、amux Protocols。导航、搜索、Overview 和窄窗分类沿同一设置目录，不因归组复制配置、输入队列、资源库或协议解析器。User Input 持有初始一行／两行、快捷输入符与关键词建议，并就近展示同源发送／编辑快捷键；保留原配置键、默认、生效范围和单字段保存。
+
+A2A 设置持有面向用户的来信提醒偏好：跟随全局、静默或提示，复用 Notifications 的声音、呈现和停留时长。它不改变接收 Agent 的入箱、确认空闲时引用通知与按原 MID 主动取信合同，不代表已读、任务接受或授权。消息与原投递事实仍在准确 Agent 的 Inbox／Outbox，不在 Settings 另建收发箱。全局通知呈现仍归 Notifications。
+
+Automation 集中恢复后的自动续行、持续推进的新任务默认周期／Prompt、日历安排默认时区和 quiet follow-up 默认策略（静默时段、沉默时长、最小间隔、每日预算）。恢复续行复用原 continuity 字段及固定续行正文；恢复方式、时机、失败重试和同操作复查仍归 Execution，两页各自只保存所编辑字段，不能用陈旧整份 policy 覆盖另一页。新建任务默认值只在新表单／新目标初始化时消费，不重写已编辑草稿或既有任务；保存不创建、启用、暂停、停止任务，也不发送输入。准确 Agent 的任务创建、周期／Prompt、日历、来源绑定和生命周期动作仍归 Progress。A2A 引用通知继续归 A2A，不收入 Automation；Browser 等其他领域的自动化也不归本页。
+
+Prompts 保持独立可复用资源库；amux Protocols 保持独立只读公共协议参考。两者用途不同，不能合并为一个页面或按输入来源复制。新偏好复用同一 ConfigOwner 和公共 Settings get/set，发现、校验、持久化与真实新建任务／提醒消费者必须闭合，不提供仅改变显示的设置。
 
 Message Tool 内的快捷键说明与全局 Keyboard shortcuts 消费实际共享输入声明，包含常规发送、立即 steer、换行、历史与候选操作及各自适用条件。按键只在原输入作用域处理；IME、编辑器默认行为、草稿和原可用组合保持，说明收拢不成为新门禁。发送、排队与 steer 的含义唯一沿[输入合同](conversation-input.md#composer-静息形态与主操作)，不把当前只读手册当成可自定义键位。
 
@@ -223,7 +229,7 @@ Settings 为 Browser 提供独立的 **Browser use** 组，收拢原基础设置
 
 Preferences 中的 Execution 模块编辑全局恢复偏好，侧栏、Overview、搜索和窄窗分类使用同一模块目录。恢复时机、等待、自动恢复活动时间窗、确证退出后原生 resume、同一操作的复查次数与间隔沿同一配置 owner 编辑；默认值与合法政策由 Core 的 [continuity policy](../../../packages/core/src/agent-session-continuity.ts) 持有，恢复资格与执行语义仍归[Session 恢复](session-recovery.md)，设置页不另判 Run 或 Provider 状态。
 
-Execution 提供“Provider 不支持中断识别时，使用退出前 active 状态”的独立开关，默认关闭。页面明确 Provider 已支持但本次 unknown 不使用该兜底，并展示准确中断的原生恢复成功后只发送一次固定 `<amux:continue />`；正常结束回合、健康接回和 unknown 不主动发送。该标记可能开启一个普通 User 回合，投递不代表模型已经完成任务。技术恢复信息留在操作回执与服务窗，不提供新的恢复提醒或自定义续行正文编辑；历史已冻结正文和未知输入受据保留。自动原生恢复的活动时间窗覆盖退出前活动与已确认闲置，不能只将旧 working 作为不限时恢复资格。
+Automation 提供“Provider 不支持中断识别时，使用退出前 active 状态”的独立开关，默认关闭，与恢复后续行同组。页面明确 Provider 已支持但本次 unknown 不使用该兜底，并展示准确中断的原生恢复成功后只发送一次固定 `<amux:continue />`；正常结束回合、健康接回和 unknown 不主动发送。该标记可能开启一个普通 User 回合，投递不代表模型已经完成任务。技术恢复信息留在操作回执与服务窗，不提供新的恢复提醒或自定义续行正文编辑；历史已冻结正文和未知输入受据保留。Execution 保留自动原生恢复的活动时间窗，覆盖退出前活动与已确认闲置，不能只将旧 working 作为不限时恢复资格。
 
 保存只影响下一次准入的新恢复意图，不启动 Agent、不发消息、不修改原草稿或在途已冻结政策和正文。GUI 与 `settings inspect continuity`／已声明 `continuity.*` scalar 的 `settings set` 复用唯一 ConfigOwner，保留首次多字段并发 authored 合并、保存期间后续输入、原字段期望值与冲突；有效默认不回填未编辑字段。具体键和查询入口见[设置目录](../../settings-catalog.md)，不增加任意路径 setter 或第二配置 owner。
 
@@ -255,7 +261,7 @@ Prompt 的当前对象、未提交修改与只读使用示意应在同一编辑�
 
 远程管理的产品范围、拓扑、Host 连接配置与测试、来源核验和维护入口由 [Remote 管理 PRD](remote-management.md) 持有；本节只持有通用设置导航、草稿与保存，以及 Agent 配置和设备模块的相邻规则。
 
-- 设置结构优化必须落到真实页面。日常 Preferences 在前（Appearance、Notifications、General），Browser 基础设置与 Agent 操作呈现归独立的 [Browser use](#browser-use-与-agent-操作呈现) 组，Message Tool 独立归组（输入与 Mailbox、Prompts），资源配置随后（Agents、Workspaces），环境工作台与 Mobile 设备管理归 Remote，Conversation Channels 仅提供 InApp 与 Lark 两个子项，分别面向 App 内对话模式和外部对话应用；原能力全部保留，Copied paths 在 General 内与本地数据／诊断分层，原单字段草稿、expected 和保存范围不扩大。统一底栏入口进入 Overview，Workspaces 从资源导航进入；不新增第二齿轮，显式分区与 Executor ID 仍指向原精确对象；不保留独立 Copy Paths 页面或另造兼容路由。搜索仍能定位路径、`~`／absolute、字号、通知、日志、恢复、Provider 与设备接入。诊断或只读说明不进入偏好保存，不自动触发资源检测或更改健康 Run。
+- 设置结构优化必须落到真实页面。日常 Preferences 在前（Appearance、Notifications、General），Browser 基础设置与 Agent 操作呈现归独立的 [Browser use](#browser-use-与-agent-操作呈现) 组，Message Tool 独立归组，其五个入口沿[本组职责](#message-tool-设置分组)，资源配置随后（Agents、Workspaces），环境工作台与 Mobile 设备管理归 Remote，Conversation Channels 仅提供 InApp 与 Lark 两个子项，分别面向 App 内对话模式和外部对话应用；原能力全部保留，Copied paths 在 General 内与本地数据／诊断分层，原单字段草稿、expected 和保存范围不扩大。统一底栏入口进入 Overview，Workspaces 从资源导航进入；不新增第二齿轮，显式分区与 Executor ID 仍指向原精确对象；不保留独立 Copy Paths 页面或另造兼容路由。搜索仍能定位路径、`~`／absolute、字号、通知、日志、恢复、Provider 与设备接入。诊断或只读说明不进入偏好保存，不自动触发资源检测或更改健康 Run。
 
 - 用户要求「继续，直到设置界面质量彻底满意」。设置作为辅助界面，第一眼必须是当前对象和动作；Workspace 与 Executor 可按名字、路径或身份检索，大量资源不靠逐条扫读。Executor 常用身份与外观优先，高级启动配置按需进入；已有 Provider 与 Executor ID 保持不可修改，新 Executor 创建后直接进入编辑。改变分组或检查结果不能丢失展开、输入或焦点。
 - 设置保存仍经既有公开 API，启动配置的说明应明确针对后续启动，不能冒充已改变健康 Run。高级权限动作保持显式选择，不自动批准；所有分区保留原功能、草稿、错误反馈和 status bar。
