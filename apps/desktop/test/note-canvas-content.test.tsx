@@ -88,7 +88,7 @@ it('shows late related original blocks and actual reference/embed content withou
   await vi.waitFor(() => expect(dom.container.querySelector('.react-flow__node[data-id="closed-source"] .mobile-note-reference')?.textContent).toContain('The late decision is searchable'))
   expect(api.notebooks.content).toHaveBeenCalledTimes(2)
   expect(api.notebooks.graph).toHaveBeenCalledTimes(1)
-  expect(target.querySelector('[data-note-agent-author]')?.getAttribute('data-note-agent-author')).toBe('Agent ExactResearchSession')
+  expect(target.querySelector('[data-author-block]')?.textContent).toBe('Agent · ExactRes…')
   expect(dom.container.querySelector('.note-canvas-reader [contenteditable]')?.getAttribute('contenteditable')).toBe('false')
   expect((await store.read()).trail).toHaveLength(2)
   const more = dom.container.querySelector<HTMLButtonElement>('.note-canvas-more')!

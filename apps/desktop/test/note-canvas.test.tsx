@@ -118,8 +118,8 @@ it('reads related originals by default, reuses full context, and opens a selecte
   await dom.click('[aria-label="Full note: Original target"]')
   await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-reader')?.textContent).toContain('Saved target'))
   const block = dom.container.querySelector<HTMLElement>('.note-canvas-reader [data-block-id="target-block"]')!
-  expect(block.getAttribute('data-note-agent-author')).toBe('Agent ExactResearchSession')
-  expect(block.title).toContain('Created: Agent ExactResearchSession')
+  expect(block.querySelector('[data-author-block]')?.textContent).toBe('Agent · ExactRes…')
+  expect(block.querySelector('[data-author-block]')?.getAttribute('aria-haspopup')).toBe('dialog')
   expect(dom.container.querySelector('.note-canvas-reader [contenteditable]')?.getAttribute('contenteditable')).toBe('false')
   await act(async () => block.click()); await dom.click('.note-canvas-open-block')
   expect(open).toHaveBeenLastCalledWith((await store.read()).pages.target, 'target-block')
@@ -191,7 +191,7 @@ it('graph reading icons preserve exact original full and related content, action
     expect(api.notebooks.content).toHaveBeenCalledTimes(readCount); expect(api.notebooks.graph).toHaveBeenCalledTimes(1)
     expect(open).not.toHaveBeenCalled(); expect(await readFile(path, 'utf8')).toBe(saved); expect(await store.read()).toEqual(heldCatalog)
     await act(async () => title.click())
-    expect(open).toHaveBeenCalledExactlyOnceWith(heldCatalog.pages.target)
+    expect(open).toHaveBeenCalledExactlyOnceWith(heldCatalog.pages.target, undefined)
   } finally { release(); vi.unstubAllGlobals() }
 })
 
@@ -260,7 +260,7 @@ it('graph reading icons keep pending original reading static and uncatalogued ta
     const registered = dom.container.querySelector('.react-flow__node[data-id="target"]')!, pendingButton = registered.querySelector<HTMLButtonElement>('footer > button')!
     graphReadingIcon(registered.querySelector('.note-canvas-book')!, 'object.notebook')
     graphReadingIcon(pendingButton, 'action.show-full-note'); expect(pendingButton.disabled).toBe(false)
-    expect(registered.textContent).toContain('Reading related original blocks…')
+    expect(registered.textContent).toContain('Reading saved original…')
     await act(async () => pendingButton.click())
     graphReadingIcon(pendingButton, 'action.show-related-blocks')
     expect(api.notebooks.content).toHaveBeenCalledTimes(2)
@@ -544,7 +544,7 @@ it('lazily discovers closed original backlinks and reads actual source text only
   expect(vi.mocked(api.notebooks.content).mock.calls.length).toBeLessThanOrEqual(2)
   const sourcePage = (await store.read()).pages['closed-source']!
   await dom.click('[aria-label="Open source note: Original closed-source"]')
-  expect(open).toHaveBeenLastCalledWith(sourcePage)
+  expect(open).toHaveBeenLastCalledWith(sourcePage, undefined, expect.any(AbortSignal))
   expect(dom.container.querySelector<HTMLDetailsElement>('.note-links-coverage')?.open).toBe(false)
   await dom.click('.note-links-source-toggle')
   await vi.waitFor(() => expect(dom.container.textContent).toContain('Original closed source links to'))
@@ -554,17 +554,17 @@ it('lazily discovers closed original backlinks and reads actual source text only
   expect([...dom.container.querySelectorAll<HTMLDetailsElement>('.note-links-occurrence details')].every(item => !item.open)).toBe(true)
   const excerpt = [...dom.container.querySelectorAll<HTMLButtonElement>('button.note-links-excerpt')].find(item => item.textContent?.includes('Original closed source links to'))!
   await act(async () => excerpt.click())
-  expect(open).toHaveBeenLastCalledWith(sourcePage, 'source-inline')
+  expect(open).toHaveBeenLastCalledWith(sourcePage, 'source-inline', expect.any(AbortSignal))
   await dom.click('[aria-label="Open target page: Original target"]')
-  expect(open).toHaveBeenLastCalledWith((await store.read()).pages.target, undefined)
+  expect(open).toHaveBeenLastCalledWith((await store.read()).pages.target, undefined, expect.any(AbortSignal))
   const toPage = [...dom.container.querySelectorAll<HTMLButtonElement>('.note-links-actions button')].find(button => button.textContent === 'Open target page')!
   await act(async () => toPage.closest('details')!.querySelector('summary')!.click())
   await act(async () => toPage.click())
-  expect(open).toHaveBeenLastCalledWith((await store.read()).pages.target, undefined)
+  expect(open).toHaveBeenLastCalledWith((await store.read()).pages.target, undefined, expect.any(AbortSignal))
   const exactSource = [...dom.container.querySelectorAll<HTMLButtonElement>('.note-links-actions button')].filter(button => button.textContent === 'Open source block').at(-1)!
   if (!exactSource.closest('details')!.open) await act(async () => exactSource.closest('details')!.querySelector('summary')!.click())
   await act(async () => exactSource.click())
-  expect(open).toHaveBeenLastCalledWith((await store.read()).pages['closed-source'], 'source-inline')
+  expect(open).toHaveBeenLastCalledWith((await store.read()).pages['closed-source'], 'source-inline', expect.any(AbortSignal))
   const only = [...dom.container.querySelectorAll<HTMLButtonElement>('.note-links-controls button')].find(button => button.textContent === 'Selected block only')!
   await act(async () => only.click())
   expect(dom.container.querySelectorAll('.note-links-occurrence')).toHaveLength(4)

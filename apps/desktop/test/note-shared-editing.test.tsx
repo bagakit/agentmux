@@ -83,7 +83,7 @@ async function fixture(count = 2, undoAfterStage?: import('../src/main/note-shar
   const mount = (visible = surfaces.map((_, index) => index)) => dom.render(<>{surfaces.flatMap((surface, index) => visible.includes(index) ? [<section key={surface.regionId} data-test-note={surface.regionId}><WorkbenchPresentationContext.Provider value={{ active: true, retainedRegionId: null, tabHostId: 'primary', reference: { displayWorkspaceId: workspace.id, groupId: 'group', tabId: tabs[index]!.id, regionId: surface.regionId } }}><NoteFileSurfaceView tabId={tabs[index]!.id} surface={surface} /></WorkbenchPresentationContext.Provider></section>] : [])}</>)
   const rich = (index: number, embedded = false) => {
     const section = dom.container.querySelector(`[data-test-note="${surfaces[index]!.regionId}"]`)!
-    const selector = embedded ? '.note-shared-block .note-block-content' : '.note-original-editor > div .note-block-content'
+    const selector = embedded ? '.note-shared-content .note-block-content' : '.note-original-editor > div .note-block-content'
     const element = section.querySelector<HTMLElement>(selector) ?? section.querySelector<HTMLElement>('.note-block-content')
     return (element as HTMLElement & { editor: Editor }).editor
   }
@@ -126,7 +126,7 @@ it('saves dirty previously unanchored source through the real multi-file owner a
   const receipt = await vi.mocked(api.files.sharePublic).mock.results[0]!.value
   expect(receipt, JSON.stringify(receipt)).toMatchObject({ status: 'committed' })
   await vi.waitFor(async () => { const results = await Promise.allSettled(vi.mocked(api.notebooks.graph).mock.results.map(call => call.value)); const snapshots = results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []); expect(snapshots.some(value => value.graph.observations.some((item: { kind?: string }) => item.kind === 'shared-block')), JSON.stringify(snapshots.map(value => value.graph.observations))).toBe(true) })
-  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-shared-block .note-block-content'), dom.container.textContent ?? '').toHaveLength(2), { timeout: 3000 })
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-shared-content .note-block-content'), dom.container.textContent ?? '').toHaveLength(2), { timeout: 3000 })
   const names = (await readdir(f.root)).filter(name => name.startsWith('block-')); expect(names).toHaveLength(1)
   const sharedPath = names[0]!, sharedKey = documentKey(f.workspace.id, sharedPath)
   expect(await readFile(join(f.root, sharedPath), 'utf8')).toContain('Unsaved Original knowledge')
@@ -147,9 +147,43 @@ it('saves dirty previously unanchored source through the real multi-file owner a
   expect(await readFile(join(f.root, 'destination.note.md'), 'utf8')).not.toContain('Shared edit')
 })
 
+
+it('keeps shared dirty and failure status independent of a saved host and saves only the selected original', async () => {
+  const f = await fixture(); await f.mount(); await f.paste(await f.copy()); await act(async () => { await f.save() })
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-shared-content .note-block-content')).toHaveLength(2))
+  const sharedPaths = (await readdir(f.root)).filter(name => name.startsWith('block-'))
+  expect(sharedPaths).toHaveLength(1)
+  const sharedPath = sharedPaths[0]!, sharedKey = documentKey(f.workspace.id, sharedPath), hostKey = documentKey(f.workspace.id, 'destination.note.md')
+  const host = dom.container.querySelector('[data-test-note="destination-region"]')!
+  await act(async () => f.rich(1, true).commands.insertContentAt(1, 'Shared draft '))
+  await act(async () => f.rich(1).commands.insertContentAt(1, 'Host draft '))
+  const writesBeforeHost = vi.mocked(api.files.write).mock.calls.length
+  await act(async () => { await f.save() })
+  expect(vi.mocked(api.files.write).mock.calls.slice(writesBeforeHost).map(([, input]) => input.path)).toEqual(['destination.note.md'])
+  expect(useAppStore.getState().dirtyDocuments[hostKey]).toBe(false)
+  expect(useAppStore.getState().dirtyDocuments[sharedKey]).toBe(true)
+  expect(host.querySelector('.note-shared-content')?.textContent).toContain('Unsaved changes')
+  expect(await readFile(join(f.root, 'destination.note.md'), 'utf8')).toContain('Host draft ')
+  expect(await readFile(join(f.root, sharedPath), 'utf8')).not.toContain('Shared draft ')
+  vi.mocked(api.files.write).mockResolvedValueOnce({ status: 'error', code: 'EIO', message: 'Shared original write unavailable' })
+  const sharedSave = host.querySelector<HTMLButtonElement>('.note-shared-content .note-shared-block__header button')!
+  expect(sharedSave).not.toBeNull()
+  await act(async () => sharedSave.click())
+  await vi.waitFor(() => expect(host.querySelector('.note-shared-content')?.textContent).toContain('Shared original write unavailable'))
+  expect(useAppStore.getState().dirtyDocuments[hostKey]).toBe(false)
+  expect(useAppStore.getState().dirtyDocuments[sharedKey]).toBe(true)
+  expect(useAppStore.getState().documents[sharedKey]!.content).toContain('Shared draft ')
+  const beforeRetry = vi.mocked(api.files.write).mock.calls.length
+  await act(async () => sharedSave.click())
+  await vi.waitFor(() => expect(useAppStore.getState().dirtyDocuments[sharedKey]).toBe(false))
+  expect(vi.mocked(api.files.write).mock.calls.slice(beforeRetry).map(([, input]) => input.path)).toEqual([sharedPath])
+  expect(await readFile(join(f.root, sharedPath), 'utf8')).toContain('Shared draft ')
+  expect(await readFile(join(f.root, 'destination.note.md'), 'utf8')).not.toContain('Shared draft ')
+})
+
 it('routes host formatting and undo to the focused shared editor, preserves IME input and keeps normal prose outside', async () => {
   const f = await fixture(); await f.mount(); await f.paste(await f.copy()); await act(async () => { await f.save() })
-  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-shared-block .note-block-content')).toHaveLength(2), { timeout: 3000 })
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-shared-content .note-block-content')).toHaveLength(2), { timeout: 3000 })
   const left = f.rich(0, true), right = f.rich(1, true), rightDOM = right.view.dom
   await act(async () => { right.view.focus(); right.commands.setTextSelection(2) })
   const heading = dom.container.querySelector<HTMLButtonElement>('[data-test-note="destination-region"] .note-editor__tools [aria-label="Heading"]')!
@@ -179,7 +213,7 @@ it('keeps both old reference modes readable and read-only after the source is pr
   const f = await fixture(); await f.mount()
   await act(async () => f.rich(1).commands.insertContentAt(f.rich(1).state.doc.content.size - 1, ['reference', 'embed'].map(mode => ({ type: 'blockReference', attrs: { referenceId: 'old-' + mode, mode, target: { noteId: 'source', blockId: 'source-first' } } }))))
   await f.paste(await f.copy()); await act(async () => { await f.save() })
-  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-shared-block .note-block-content'), dom.container.textContent ?? '').toHaveLength(2), { timeout: 3000 })
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-shared-content .note-block-content'), dom.container.textContent ?? '').toHaveLength(2), { timeout: 3000 })
   // Leave only the old structural references in the destination; their original addresses stay intact.
   await act(async () => { const editor = f.rich(1); let from = -1, size = 0; editor.state.doc.descendants((node, pos) => { if (node.type.name === 'noteInclude') { from = pos; size = node.nodeSize } }); if (from >= 0) editor.view.dispatch(editor.state.tr.delete(from, from + size)) })
   await vi.waitFor(() => { const references = dom.container.querySelectorAll('[data-test-note="destination-region"] .note-reference'); expect(references).toHaveLength(2); for (const reference of references) { expect(reference.textContent).toContain('Original knowledge'); expect(reference.textContent).not.toContain('Empty block'); expect(reference.querySelector('[contenteditable="true"]')).toBeNull() } })
@@ -231,7 +265,7 @@ it('reveals an old descendant address inside its actual shared editor after a li
   await act(async () => { const editor = f.rich(0); editor.view.focus(); editor.commands.setTextSelection(2); editor.commands.toggleBulletList() })
   await f.paste(await f.copy()); await act(async () => { await f.save() })
   const originalKey = documentKey(f.workspace.id, 'source.note.md')
-  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-shared-block .note-block-content'), JSON.stringify({ text: dom.container.textContent, source: useAppStore.getState().documents[originalKey] })).toHaveLength(2), { timeout: 3000 })
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-shared-content .note-block-content'), JSON.stringify({ text: dom.container.textContent, source: useAppStore.getState().documents[originalKey] })).toHaveLength(2), { timeout: 3000 })
   const source = readNoteDocument(useAppStore.getState().documents[originalKey]!.content)
   expect(source).toMatchObject({ status: 'valid', note: { content: { content: expect.arrayContaining([expect.objectContaining({ type: 'noteInclude', attrs: expect.objectContaining({ forwardedBlockIds: ['source-first'] }) })]) } } })
   const originalRect = HTMLElement.prototype.getBoundingClientRect
@@ -264,7 +298,7 @@ it.each([false, true])('reuses the same system clipboard after its original sour
   }
   await f.mount()
   const clipboard = await f.copy(); await f.paste(clipboard); await act(async () => { await f.save() })
-  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-shared-block .note-block-content')).toHaveLength(2), { timeout: 3000 })
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-shared-content .note-block-content')).toHaveLength(2), { timeout: 3000 })
   const first = readNoteDocument(useAppStore.getState().documents[documentKey(f.workspace.id, 'destination.note.md')]!.content)
   if (first.status !== 'valid') throw Error('First destination required')
   const originalInclude = first.note.content.content!.find(node => node.type === 'noteInclude')!.attrs!
@@ -287,7 +321,7 @@ it('restores a pending source preview through the original FileDocument owner wi
   useAppStore.setState({ documents: { [destinationKey]: restored }, tabs: { [f.tabs[1]!.id]: f.tabs[1]! } })
   const reads = vi.mocked(api.notebooks.content).mock.calls.length
   await f.mount([1])
-  await vi.waitFor(() => expect(dom.container.querySelector('.note-shared-block .ProseMirror')?.textContent).toContain('Original knowledge'))
+  await vi.waitFor(() => expect(dom.container.querySelector('.note-shared-content .ProseMirror')?.textContent).toContain('Original knowledge'))
   expect(vi.mocked(api.notebooks.content).mock.calls.slice(reads).some(([id]) => id === 'source')).toBe(true)
   expect(Object.keys(useAppStore.getState().tabs)).toEqual([f.tabs[1]!.id])
   expect(useAppStore.getState().documents[documentKey(f.workspace.id, 'source.note.md')]?.content).toContain('Original knowledge')
@@ -318,7 +352,7 @@ it('keeps a new pending paste dirty when it arrives during the original sharing 
 
 it('releases the shared file observer when its final presentation unmounts during a save and then prunes the clean document', async () => {
   const f = await fixture(); await f.mount(); await f.paste(await f.copy()); await act(async () => { await f.save() })
-  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-shared-block .note-block-content')).toHaveLength(2), { timeout: 3000 })
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-shared-content .note-block-content')).toHaveLength(2), { timeout: 3000 })
   const sharedPath = (await readdir(f.root)).find(name => name.startsWith('block-'))!, key = documentKey(f.workspace.id, sharedPath)
   await act(async () => f.rich(1, true).commands.insertContentAt(1, 'Later '))
   let release!: () => void, entered!: () => void
@@ -348,7 +382,7 @@ it('marks a lost whole share reply as unknown and checks the same request withou
   // Issues are transient; the recovered original operation alone must expose recovery.
   await act(async () => useAppStore.setState({ documentIssues: {} }))
   expect(dom.container.textContent).toContain('Sharing needs confirmation')
-  expect(dom.container.querySelector('.note-shared-block')?.textContent).not.toContain('Cancel this use')
+  expect(dom.container.querySelector('.note-shared-content')?.textContent).not.toContain('Cancel this use')
   const check = Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button')).find(button => button.textContent === 'Check this sharing operation')!
   expect(check).toBeDefined()
   vi.mocked(api.files.inspectSharePublic).mockRejectedValueOnce(Error('Original Host inspection unavailable'))
@@ -365,10 +399,10 @@ it('marks a lost whole share reply as unknown and checks the same request withou
 
 it('copies an existing shared editor and pastes another editable use of that same file', async () => {
   const f = await fixture(3); await f.mount(); await f.paste(await f.copy()); await act(async () => { await f.save() })
-  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-shared-block .note-block-content')).toHaveLength(2), { timeout: 3000 })
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-shared-content .note-block-content')).toHaveLength(2), { timeout: 3000 })
   const source = f.rich(0, true)
   await act(async () => { source.view.focus(); source.commands.setTextSelection(2) })
-  const button = dom.container.querySelector<HTMLButtonElement>('[data-test-note="source-region"] .note-shared-block .note-block-action')!
+  const button = dom.container.querySelector<HTMLButtonElement>('[data-test-note="source-region"] .note-shared-content .note-block-action')!
   await act(async () => button.click())
   const data = f.clipboard()
   expect(JSON.parse(data.getData('application/x-agentmux-note-share')).include.noteId).toBe(f.rich(0).getJSON().content![0]!.attrs!.noteId)
@@ -450,8 +484,8 @@ it('ignores a malformed shared-reference clipboard and leaves ordinary prose edi
 it('keeps IME ownership independent when the same durable Region is presented twice', async () => {
   const f = await fixture(); await f.mount(); await f.paste(await f.copy()); await act(async () => { await f.save() })
   await dom.render(<>{['one', 'two'].map(copy => <section key={copy} data-copy={copy}><WorkbenchPresentationContext.Provider value={{ active: true, retainedRegionId: null, tabHostId: copy, reference: { displayWorkspaceId: f.workspace.id, groupId: 'group', tabId: f.tabs[0]!.id, regionId: f.surfaces[0]!.regionId } }}><NoteFileSurfaceView tabId={f.tabs[0]!.id} surface={f.surfaces[0]!} /></WorkbenchPresentationContext.Provider></section>)}</>)
-  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-shared-block .note-block-content')).toHaveLength(2), { timeout: 3000 })
-  const editor = (copy: string) => (dom.container.querySelector(`[data-copy="${copy}"] .note-shared-block .note-block-content`) as HTMLElement & { editor: Editor }).editor
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-shared-content .note-block-content')).toHaveLength(2), { timeout: 3000 })
+  const editor = (copy: string) => (dom.container.querySelector(`[data-copy="${copy}"] .note-shared-content .note-block-content`) as HTMLElement & { editor: Editor }).editor
   const left = editor('one'), right = editor('two'), sharedPath = (await readdir(f.root)).find(name => name.startsWith('block-'))!
   expect(left).not.toBe(right)
   await act(async () => { left.view.dom.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })); right.view.dom.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })) })
@@ -497,7 +531,7 @@ it('saves one naturally undone saved use while another Note keeps the same edita
 
 it('saves a naturally undone saved use while preserving a known dirty shared draft and its original file', async () => {
   const f = await fixture(); await f.mount(); await f.paste(await f.copy()); await act(async () => { await f.save() })
-  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-shared-block .note-block-content')).toHaveLength(2), { timeout: 3000 })
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-shared-content .note-block-content')).toHaveLength(2), { timeout: 3000 })
   const shared = (await readdir(f.root)).find(name => name.startsWith('block-'))!, sharedKey = documentKey(f.workspace.id, shared)
   await act(async () => f.rich(0, true).commands.insertContentAt(1, 'Later unsaved knowledge '))
   await act(async () => f.rich(1).commands.undo()); await act(async () => { await f.save() })
@@ -513,7 +547,7 @@ it('saves a naturally undone saved use together with a later pending paste throu
   const oldShared = (await readdir(f.root)).find(name => name.startsWith('block-'))!
   await act(async () => f.rich(1).commands.undo())
   await act(async () => { const source = f.rich(0); source.view.focus(); source.commands.setTextSelection(source.state.doc.content.size - 1) })
-  const outside = [...f.rich(0).view.dom.children].find(node => node.tagName === 'P' && node.textContent === 'Outside source')
+  const outside = f.rich(0).view.dom.querySelector<HTMLElement>('[data-block-id="source-outside"]')
   expect(outside).toBeDefined()
   await act(async () => outside!.dispatchEvent(new PointerEvent('pointermove', { bubbles: true })))
   const nextClipboard = await f.copy()
@@ -664,7 +698,7 @@ it('returns a definitively not-applied removal to the original conflict workflow
   expect(state.documents[key]!.content).toContain('Local draft remains ')
   expect(state.documentIssues[key]?.kind).toBe('changed')
   expect(api.files.shareUndoPublic).toHaveBeenCalledTimes(1)
-  const outside = [...f.rich(0).view.dom.children].find(node => node.tagName === 'P' && node.textContent === 'Outside source')!
+  const outside = f.rich(0).view.dom.querySelector<HTMLElement>('[data-block-id="source-outside"]')!
   await act(async () => outside.dispatchEvent(new PointerEvent('pointermove', { bubbles: true })))
   const clipboard = await f.copy(); expect(clipboard.getData('text/plain')).toBe('Outside source'); await f.paste(clipboard)
   await act(async () => { await useAppStore.getState().overwriteDocument(f.tabs[1]!.id, f.surfaces[1]!.regionId) })
@@ -725,7 +759,7 @@ it('reads actual collected-file history from its retained trusted File occurrenc
 
 it('keeps a shared file owned by another live IME composition before its text becomes a published dirty draft', async () => {
   const f = await fixture(); await f.mount(); await f.paste(await f.copy()); await act(async () => { await f.save() })
-  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-shared-block .note-block-content')).toHaveLength(2))
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-shared-content .note-block-content')).toHaveLength(2))
   const shared = (await readdir(f.root)).find(name => name.startsWith('block-'))!, key = documentKey(f.workspace.id, shared), source = f.rich(0, true)
   const original = readNoteDocument(useAppStore.getState().documents[key]!.content)
   if (original.status !== 'valid') throw Error('The original shared file is required')
@@ -756,18 +790,18 @@ it('previews and shares a whole heading section with distinct source and referen
   useAppStore.setState(state => ({ documents: { ...state.documents, [key]: read.document } }))
   await f.mount(); await f.paste(await f.copy())
   await vi.waitFor(() => {
-    const pending = dom.container.querySelector('[data-test-note="destination-region"] .note-shared-block')!
+    const pending = dom.container.querySelector('[data-test-note="destination-region"] .note-shared-content')!
     expect(pending.textContent).toContain('Nested chapter content')
     expect(pending.textContent).not.toContain('Next chapter stays outside')
   })
   await act(async () => { await f.save() })
-  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-shared-block .note-block-content')).toHaveLength(2), { timeout: 4000 })
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-shared-content .note-block-content')).toHaveLength(2), { timeout: 4000 })
   expect(f.rich(0).getJSON().content!.map(node => node.type)).toEqual(['noteInclude', 'heading', 'paragraph'])
   const sourceFrame = dom.container.querySelector('[data-test-note="source-region"] [data-shared-role="source"]')
   const referenceFrame = dom.container.querySelector('[data-test-note="destination-region"] [data-shared-role="reference"]')
   expect(sourceFrame?.getAttribute('aria-label')).toBe('Shared source')
   expect(referenceFrame?.getAttribute('aria-label')).toBe('Shared reference')
-  expect(sourceFrame?.querySelector('button')?.getAttribute('title')).toContain('edits update all uses')
+  expect(sourceFrame?.querySelector('[aria-label="Shared source · show details"]')?.getAttribute('aria-haspopup')).toBe('dialog')
   expect(f.rich(0, true).getText()).toContain('Nested chapter content')
   expect(f.rich(1, true).getText()).toContain('The complete chapter body')
   expect(f.rich(1, true).getText()).not.toContain('Outside chapter prose')
@@ -791,7 +825,7 @@ it('keeps a self-containing pending heading finite, undoable and editable', asyn
   await vi.waitFor(() => expect(dom.container.textContent).toContain('Circular reference'))
   const original = f.rich(0)
   expect(original.getJSON().content!.filter(node => node.type === 'noteInclude')).toHaveLength(1)
-  expect(dom.container.querySelectorAll('[data-test-note="source-region"] .note-shared-block').length).toBeLessThanOrEqual(2)
+  expect(dom.container.querySelectorAll('[data-test-note="source-region"] .note-shared-content').length).toBeLessThanOrEqual(2)
   await act(async () => { await f.save(0) })
   expect(useAppStore.getState().documentIssues[key]).toMatchObject({ code: 'NOTE_SHARE_DEPENDENCY_UNCONFIRMED' })
   expect((await readdir(f.root)).filter(path => path.startsWith('block-'))).toEqual([])
@@ -879,7 +913,7 @@ it('copies a pending include with its original proposal so another use can save 
   expect(payload.include).toBeUndefined()
   await f.paste(copied, 2); await act(async () => { await f.save(2) })
   expect((await readdir(f.root)).filter(path => path.startsWith('block-'))).toHaveLength(1)
-  await vi.waitFor(() => expect(dom.container.querySelector('[data-test-note="another-region"] .note-shared-block .note-block-content')?.textContent).toContain('Original knowledge'))
+  await vi.waitFor(() => expect(dom.container.querySelector('[data-test-note="another-region"] .note-shared-content .note-block-content')?.textContent).toContain('Original knowledge'))
 })
 
 it.each([false, true])('saves a legitimate shared DAG including a hidden destination: %s', async (hidden) => {
