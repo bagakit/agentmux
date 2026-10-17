@@ -89,3 +89,57 @@ it('keeps business callers usable when metadata reads or the diagnostic sink fai
   expect(reports[0]!.metadata).toMatchObject({ reporterDropped: 1, recorderReadFailures: 5 })
   expect(JSON.stringify(reports)).not.toContain('projection unavailable')
 })
+
+
+it.each(['regionId', 'dropped', 'now', 'monotonic', 'id'] as const)(
+  'isolates a failing %s producer callback and counts the unavailable occurrence after recovery', callback => {
+    const reports: AgentMuxClientIncidentReport[] = []
+    let broken = false, serial = 0
+    const unavailable = () => { if (broken) throw Error('private callback failure') }
+    const input = { hostId: 'local', agentSessionId: null, runId: 'run', read: () => ({ visible: true }),
+      regionId: () => { if (callback === 'regionId') unavailable(); return 'original-region' },
+      dropped: () => { if (callback === 'dropped') unavailable(); return 0 },
+      now: () => { if (callback === 'now') unavailable(); return 20 },
+      monotonic: () => { if (callback === 'monotonic') unavailable(); return 10 },
+      id: () => { if (callback === 'id') unavailable(); return `original-${++serial}` },
+      send: (report: AgentMuxClientIncidentReport) => { reports.push(report) } }
+    const recorder = createClientIncidentRecorder(input)
+    broken = true
+    expect(() => { recorder.begin('refresh-requested'); recorder.mark('replay-started') }).not.toThrow()
+    expect(recorder.capture('terminal-refresh', 'refresh-requested')).toBeNull()
+    expect(reports).toEqual([])
+    broken = false
+    expect(recorder.capture('terminal-refresh', 'refresh-completed')).toEqual(expect.any(String))
+    expect(reports).toHaveLength(1)
+    expect(reports[0]).toMatchObject({ observedAt: 20, elapsedMs: 0, metadata: { reporterDropped: 1 } })
+    expect(JSON.stringify(reports)).not.toContain('private callback failure')
+  })
+
+it('does not fabricate an original ID or elapsed origin when initialization observations are unavailable', () => {
+  let broken = true, serial = 0
+  const reports: AgentMuxClientIncidentReport[] = []
+  let recorder!: ReturnType<typeof createClientIncidentRecorder>
+  expect(() => { recorder = createClientIncidentRecorder({ hostId: 'local', agentSessionId: null, runId: 'run', regionId: () => null,
+    read: () => ({}), send: value => { reports.push(value) }, now: () => 20,
+    monotonic: () => { if (broken) throw Error('clock unavailable'); return 10 },
+    id: () => { if (broken) throw Error('identity unavailable'); return `original-${++serial}` } }) }).not.toThrow()
+  expect(recorder.capture('terminal-refresh', 'refresh-requested')).toBeNull()
+  broken = false
+  expect(recorder.capture('terminal-refresh', 'refresh-completed')).toBe('original-1')
+  expect(reports).toHaveLength(1)
+  expect(reports[0]).toMatchObject({ observedAt: 20, elapsedMs: null, stages: [],
+    metadata: { reporterDropped: 1, recorderReadFailures: 2 } })
+})
+
+it('reads only an own finite code observation without executing an error accessor', () => {
+  const reports: AgentMuxClientIncidentReport[] = []
+  let getters = 0
+  const error = Object.defineProperty(new Error('private original error'), 'code', { get() { getters++; throw Error('private getter') } })
+  const recorder = createClientIncidentRecorder({ hostId: 'local', agentSessionId: null, runId: 'run', regionId: () => null,
+    read: () => ({}), send: value => { reports.push(value) } })
+  expect(recorder.capture('terminal-attach-failed', 'attach-failed', error)).toEqual(expect.any(String))
+  expect(getters).toBe(0)
+  expect(reports).toHaveLength(1)
+  expect(reports[0]).toMatchObject({ code: null, metadata: { recorderReadFailures: 1 } })
+  expect(JSON.stringify(reports)).not.toContain('private original error')
+})
