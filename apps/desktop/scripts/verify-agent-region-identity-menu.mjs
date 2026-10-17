@@ -15,6 +15,8 @@ const privateRoot=await mkdtemp(_hygiene_fixturePath("tmp/amx-identity-menu-"))
 const evidence=join(repository,'.tmp/agent-region-identity-menu',("attempt-" + (globalThis.crypto.randomUUID()) + "")), fixture=join(desktop,'scripts/fixtures/agent-region-identity-menu')
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex')
 const visualOnly=process.argv.includes('--visual-only')
+const agentMenuOwning=process.argv.includes('--agent-menu-owning')
+assert.ok(!agentMenuOwning||visualOnly,'Agent menu proof uses the private Renderer fixture')
 const progressLayoutOwning=process.argv.includes('--progress-layout-owning')
 const terminalLoadingOwning=process.argv.includes('--terminal-loading-owning')
 const messageFeedbackOwning=process.argv.includes('--message-feedback-owning')
@@ -40,18 +42,25 @@ async function compiled(directory){
   for(const entry of entries){if(!entry.isFile())continue;const path=join(entry.parentPath,entry.name);files[path.slice(directory.length+1)]=hash(await readFile(path))}
   assert.ok(Object.keys(files).length>0,'The actual private renderer outputs are nonempty');return files
 }
-async function renderer(label,probe='complete',unreadableProgressActions=false,focusMutation=false,mailboxMutation=''){
+async function renderer(label,probe='complete',unreadableProgressActions=false,focusMutation=false,mailboxMutation='',menuMutation=false){
   const directory=join(evidence,label), outDir=join(privateRoot,label);await mkdir(directory,{recursive:true})
   const xtermFile=require.resolve('@xterm/xterm'), wrapper=join(privateRoot,'record-xterm.mjs')
   await writeFile(wrapper,`import xterm from ${JSON.stringify(xtermFile)};
     export class Terminal extends xterm.Terminal { constructor(...args){super(...args);const entries=globalThis.identityTerminals??=[];this.probeIdentity={id:entries.length,terminal:this,disposed:false};entries.push(this.probeIdentity)}
       dispose(){this.probeIdentity.disposed=true;return super.dispose()} }
   `)
-  const cssPath=composerToolbarOwning||mailboxLayoutOwning?join(repository,'packages/client-ui/src/styles/composer.css'):join(desktop,'src/renderer/src/styles',terminalLoadingOwning?'terminal.css':'agent.css'),cssBefore=await readFile(cssPath)
+  const cssPath=agentMenuOwning?join(desktop,'src/renderer/src/styles/agent-region-header.css'):composerToolbarOwning||mailboxLayoutOwning?join(repository,'packages/client-ui/src/styles/composer.css'):join(desktop,'src/renderer/src/styles',terminalLoadingOwning?'terminal.css':'agent.css'),cssBefore=await readFile(cssPath)
   const loadedSourceInputs={},importedStyleInputs={},progressCssMutations=[],sourceMutations=[]
   await build({configFile:false,root:fixture,base:'./',logLevel:'error',worker:{format:'es'},resolve:{alias:[{find:/^@xterm\/xterm$/,replacement:wrapper}]},
     plugins:[{name:'record-private-renderer-inputs',enforce:'pre',async transform(source,id){
       if((id.startsWith(join(desktop,'src')+'/')||id.startsWith(join(repository,'packages/client-ui/src')+'/')||id.startsWith(fixture+'/'))&&!id.includes('?'))loadedSourceInputs[id.slice(repository.length+1)]=hash(source)
+      if(menuMutation&&id===join(desktop,'src/renderer/src/components/AgentRegionMenuActions.tsx')){
+        const anchor="entry.kind === 'layout'\n          ? <AgentMenuSubmenu"
+        assert.equal(source.split(anchor).length,2,'Actual layout disclosure consumer is unique')
+        const altered=source.replace(anchor,"false\n          ? <AgentMenuSubmenu")
+        sourceMutations.push({path:id.slice(repository.length+1),original:hash(source),mutated:hash(altered),productionWritten:false})
+        return altered
+      }
       if(mailboxMutation==='compact'&&id===join(desktop,'src/renderer/src/components/SessionMailbox.tsx')){
         const anchor=/<InputMailboxRecords\s+compact(?=\s)/g
         assert.equal([...source.matchAll(anchor)].length,1,'The actual Desktop journal compact consumer is unique')
@@ -115,9 +124,9 @@ async function renderer(label,probe='complete',unreadableProgressActions=false,f
   assert.equal(importedStyleInputs[cssKey],hash(cssBefore),'The compiled renderer watches the exact owner CSS')
   assert.equal(hash(cssAfter),hash(cssBefore),'The owner CSS stays unchanged through compilation')
   assert.equal(progressCssMutations.length,unreadableProgressActions||mailboxMutation==='navigation'?1:0,'Requested actual CSS mutation is applied exactly once')
-  assert.equal(sourceMutations.length,focusMutation||mailboxMutation==='compact'?1:0)
+  assert.equal(sourceMutations.length,focusMutation||mailboxMutation==='compact'||menuMutation?1:0)
   const harnessInputs={}
-  if(mailboxLayoutOwning)for(const name of ['main.cjs','mailbox-layout.cjs']){
+  if(mailboxLayoutOwning||agentMenuOwning)for(const name of agentMenuOwning?['main.cjs','menu-product.cjs']:['main.cjs','mailbox-layout.cjs']){
     const source=await readFile(join(fixture,name));harnessInputs[name]=hash(source)
     await writeFile(join(directory,`driver-${name}`),source)
   }
@@ -129,7 +138,7 @@ async function renderer(label,probe='complete',unreadableProgressActions=false,f
   await writeFile(join(directory,'process.log'),log.join('\n'))
   const rendered=JSON.parse(await readFile(join(directory,'render.json'),'utf8'))
   assert.equal(outcome.timedOut,false);assert.equal(outcome.interruption,null)
-  if(mailboxLayoutOwning)await rm(outDir,{recursive:true})
+  if(mailboxLayoutOwning||agentMenuOwning)await rm(outDir,{recursive:true})
   return{outcome,rendered,directory,compiledFiles,terminalWrapperSha256}
 }
 async function mutation(label,file,from,to,probe,message){
@@ -151,7 +160,10 @@ async function productionCallers(){
   const contracts=[
     {symbol:'AgentRegionHeader',definition:'components/AgentRegionHeader.tsx',caller:'components/SessionPane.tsx',kind:'jsx'},
     {symbol:'useRegionMenuEntries',definition:'components/RegionContextMenu.tsx',caller:'components/AgentRegionHeader.tsx',kind:'call'},
-    {symbol:'RegionMenuEntryView',definition:'components/RegionContextMenu.tsx',caller:'components/AgentRegionHeader.tsx',kind:'jsx'},
+    {symbol:'AgentRegionMenuContent',definition:'components/AgentRegionMenuContent.tsx',caller:'components/AgentRegionHeader.tsx',kind:'jsx'},
+    {symbol:'AgentRegionMenuActions',definition:'components/AgentRegionMenuActions.tsx',caller:'components/AgentRegionMenuContent.tsx',kind:'jsx'},
+    {symbol:'useSessionStop',definition:'components/SessionStop.tsx',caller:'components/AgentRegionHeader.tsx',kind:'call'},
+    {symbol:'RegionMenuEntryView',definition:'components/RegionContextMenu.tsx',caller:'components/AgentRegionMenuActions.tsx',kind:'jsx'},
     {symbol:'agentDisplayName',definition:'lib/workbench-tabs.ts',caller:'components/SessionPane.tsx',kind:'call'},
     {symbol:'closeRegion',definition:'store.ts',caller:'components/WorkspaceWorkbench.tsx',kind:'call'},
     {symbol:'agentDisplayName',definition:'lib/workbench-tabs.ts',caller:'components/WorkspaceWorkbench.tsx',kind:'call'},
@@ -191,8 +203,14 @@ try{
   await mkdir(evidence,{recursive:true});result.sourceCommit=(await exec('git',['rev-parse','HEAD'],{cwd:repository})).stdout.trim()
   if(!visualOnly)result.sourceBefore=await sources()
   const swapOnly=process.argv.includes('--swap-render-only')
-  result.render=await renderer('fixed',visualOnly?(mailboxLayoutOwning?'mailbox-layout-owning':composerToolbarOwning?'composer-toolbar-owning':mailboxMotionOwning?'mailbox-motion-owning':messageFeedbackOwning?'message-feedback-owning':terminalLoadingOwning?'terminal-loading-owning':progressLayoutOwning?'composer-layout-owning':'composer-visual'):swapOnly?'swap-full':'complete');assert.equal(result.render.outcome.exitCode,0,JSON.stringify(result.render.rendered.failure));assert.equal(result.render.rendered.passed,true)
+  result.render=await renderer('fixed',visualOnly?(agentMenuOwning?'agent-menu-owning':mailboxLayoutOwning?'mailbox-layout-owning':composerToolbarOwning?'composer-toolbar-owning':mailboxMotionOwning?'mailbox-motion-owning':messageFeedbackOwning?'message-feedback-owning':terminalLoadingOwning?'terminal-loading-owning':progressLayoutOwning?'composer-layout-owning':'composer-visual'):swapOnly?'swap-full':'complete');assert.equal(result.render.outcome.exitCode,0,JSON.stringify(result.render.rendered.failure));assert.equal(result.render.rendered.passed,true)
   if(visualOnly){
+    if(agentMenuOwning){
+      const red=await renderer('menu-disclosure-red','agent-menu-owning',false,false,'',true)
+      assert.equal(red.outcome.exitCode,1);assert.equal(red.rendered.failure.name,'AssertionError')
+      assert.match(red.rendered.failure.message,/Layout commands stay behind their named submenu/)
+      result.mutations.push({label:'layout-disclosure-removed',red,productionWritten:false})
+    }
     if(mailboxLayoutOwning){
       const navigationRed=await renderer('mailbox-navigation-red','mailbox-layout-owning',false,false,'navigation')
       assert.equal(navigationRed.outcome.exitCode,1);assert.equal(navigationRed.rendered.failure.name,'AssertionError');assert.match(navigationRed.rendered.failure.message,/Mailbox navigation uses the original regular grid/)
