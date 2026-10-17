@@ -228,7 +228,7 @@ describe('Main-owned immutable Browser input scenes', () => {
 
   it('routes actual trusted IPC creation into the same inspect owner and refuses a page pretending to be the Workbench', async () => {
     const f = await fixture(), workbench = {}, untrustedPage = {}, handlers = new Map<string, (...args: any[]) => unknown>()
-    registerBrowserInputContextIpc({ captures: f.owner,
+    registerBrowserInputContextIpc({ captures: f.owner, readSelectionImage: async () => null,
       handle: (channel, listener) => { handlers.set(channel, listener) },
       trust: (channel, event) => assertSenderTrusted(senderTrust(channel, event.sender, workbench)) })
     const event = { sender: workbench } as Electron.IpcMainInvokeEvent
