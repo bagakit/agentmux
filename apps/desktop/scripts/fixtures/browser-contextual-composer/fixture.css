@@ -1,0 +1,7 @@
+html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+.contextual-fixture { height: 100%; display: grid; grid-template-rows: 36px minmax(0, 1fr); background: var(--bg); color: var(--text); }
+.contextual-fixture > header { display: flex; align-items: center; gap: 12px; padding: 0 14px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.contextual-fixture__body { min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 260px; }
+.contextual-fixture__browser { min-width: 0; min-height: 0; }
+.contextual-fixture__reader { padding: 12px; overflow: auto; border-left: 1px solid var(--line); }
+@media (max-width: 650px) { .contextual-fixture__body { grid-template-columns: minmax(0, 1fr); } .contextual-fixture__reader { display: none; } }

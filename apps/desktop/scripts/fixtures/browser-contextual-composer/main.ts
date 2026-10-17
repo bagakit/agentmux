@@ -1,0 +1,324 @@
+import assert from 'node:assert/strict'
+import { createServer } from 'node:http'
+import { readFile, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
+import { app, BrowserWindow, ipcMain, desktopCapturer, type WebContentsView } from 'electron'
+import { connectLocalAgentMux, AgentMuxFileAgentSessionStore, connectAgentMuxRpc, connectHostedAgentMux } from '@agentmux/core'
+import { composeAgentPrompt } from '../../../../../packages/core/src/agent-outbound-message'
+import { AgentMuxControlServer } from '../../../../../packages/core/src/public-rpc-server'
+import { AgentMuxHostedRuntimeService } from '../../../../../packages/core/src/hosted-runtime-service'
+import { createDesktopInputContextCaptureReader } from '../../../../host/src/input-context-capture-reader'
+import { RuntimeController } from '../../../src/main/runtime-controller'
+import { registerIpc } from '../../../src/main/ipc'
+import { ConfigStore, DEFAULT_CONFIG } from '../../../src/main/config-store'
+import { ScratchTopics } from '../../../src/main/scratch-topics'
+import { WorkbenchWindows } from '../../../src/main/workbench-windows'
+import { WorkbenchWindowStore } from '../../../src/main/workbench-window-store'
+import { createDesktopApplicationAccessOwner } from '../../../src/main/application-access-owner'
+import { desktopBusinessSocketPath } from '../../../src/main/desktop-host'
+
+const directory = process.env.AGENTMUX_CONTEXTUAL_ROOT!, source = process.env.AGENTMUX_CONTEXTUAL_SOURCE!
+app.on('window-all-closed', () => {})
+const receipt: any = { schema: 'agentmux.browser-contextual-composer.native.v1', passed: false, cases: [], ipc: [],
+  boundary: 'Private actual BrowserPane/WindowOverlay/NativeOverlay/Store → production sandbox preload/registerIpc/RuntimeController → Hosted SDK/Host capture reader/Core → shipped CodexProvider/real ctxmux PTY/repository controlled CLI. Renderer CDP interaction does not attest physical OS input or foreground focus. No user Browser, Agent, clipboard or upstream model is used.',
+  physicalInputQualified: false, independentVisualReview: 'not-performed' }
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+async function until<T>(read: () => T | Promise<T>, label: string): Promise<T> {
+  for (let attempt = 0; attempt < 500; attempt++) { const value = await read(); if (value) return value; await delay(25) }
+  throw new Error('Private contextual proof did not observe ' + label)
+}
+let window: BrowserWindow | undefined, core: any, sdk: any, rpc: any, hosted: any, hostServer: any, runtime: RuntimeController | undefined,
+  releaseIpc: (() => Promise<void>) | undefined, windows: WorkbenchWindows | undefined, access: any, session: any,
+  server: ReturnType<typeof createServer> | undefined
+const output: string[] = []
+async function run() {
+  await app.whenReady()
+  const store = new AgentMuxFileAgentSessionStore(join(directory, 'sessions.json'))
+  core = await connectLocalAgentMux({ store })
+  core.onEvent((event: any) => { if (event.type === 'terminal-output') output.push(event.data) })
+  session = await core.createAgent({ agentSessionId: 'contextual-recipient', createOperationId: 'contextual-create', providerId: 'codex',
+    executorId: 'contextual-codex', workspacePath: directory, commandOverride: join(source, 'packages/core/test/fixtures/fake-codex-cli.mjs'), injectAgentMuxGuide: false,
+    env: { AGENTMUX_FAKE_READY_MODE: 'before', AGENTMUX_FAKE_NATIVE_RECORD: '1', AGENTMUX_FAKE_NATIVE_RECORD_DIRECTORY: join(directory, 'native-records') } })
+  const attachment = await core.reattachAgent(session.agentSessionId, 0)
+  for (const event of attachment.attachment.replay) output.push(event.data)
+  await until(() => core.agentSession(session.agentSessionId).terminalPromptReadiness?.readyThroughByte !== undefined, 'real CodexProvider prompt readiness')
+  const captureReader = createDesktopInputContextCaptureReader({ desktopSocketPath: desktopBusinessSocketPath(), captureHostId: 'local', executionHostId: 'local' })
+  const identity = { runtimeId: randomUUID(), ownerInstanceId: randomUUID(), protocolVersion: 2, processId: process.pid, availability: 'connected' as const }
+  hosted = new AgentMuxHostedRuntimeService(core, join(directory, 'sessions.json'), () => ({ ...identity, ctxmux: core.runtimeIdentity() }), undefined, undefined, captureReader)
+  const socket = join(directory, 'semantic.sock')
+  hostServer = new AgentMuxControlServer({ socketPath: socket, coreClients: () => [{ hostId: 'local', client: core }], hostedRuntime: () => hosted })
+  await hostServer.start()
+  rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socket } })
+  sdk = await connectHostedAgentMux({ rpc })
+  runtime = new RuntimeController(store, async () => sdk)
+  const configStore = new ConfigStore(join(directory, 'config.json'))
+  const config = await configStore.save({ ...structuredClone(DEFAULT_CONFIG), hosts: [{ id: 'local', kind: 'local', label: 'Private collaboration' }],
+    workspaces: [{ id: 'contextual-workspace', name: 'Private collaboration', kind: 'folder', hostId: 'local', path: directory }],
+    executors: { 'contextual-codex': { providerId: 'codex', label: 'Browser collaborator', command: join(source, 'packages/core/test/fixtures/fake-codex-cli.mjs'), args: [], env: {}, injectAgentMuxGuide: false } },
+    browser: { ...DEFAULT_CONFIG.browser, agentAutomation: true, agentControl: { ...DEFAULT_CONFIG.browser.agentControl, showDiscussion: false } } })
+  window = new BrowserWindow({ width: 1120, height: 760, show: false, title: 'Browser collaboration · private proof',
+    webPreferences: { preload: join(directory, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } })
+  const contents = window.webContents
+  contents.on('console-message', (event: any) => { if (event.level === 'error') console.error('Renderer:', event.message) })
+  windows = new WorkbenchWindows(window, new WorkbenchWindowStore(join(directory, 'windows.json')), () => [{ x: 0, y: 0, width: 1600, height: 1000 }])
+  access = createDesktopApplicationAccessOwner(runtime, join(directory, 'application-access.sqlite'))
+  const register = ipcMain.handle.bind(ipcMain)
+  ipcMain.handle = (channel, handler) => register(channel, (event, ...args) => {
+    const fact: any = { channel, exactSender: event.sender === contents, exactFrame: event.senderFrame === contents.mainFrame, args }
+    if (channel.startsWith('browser:') || channel === 'sessions:submitPrompt' || channel === 'ui:publishNativeOverlays') receipt.ipc.push(fact)
+    return Promise.resolve(handler(event, ...args)).then(value => { fact.result = value; return value })
+  })
+  releaseIpc = await registerIpc({ window, workbenchWindows: windows, initialConfig: config, configStore, runtime, applicationAccess: access,
+    scratchTopics: new ScratchTopics(), progressLoops: { subscribe: () => () => {}, pauseTarget: async () => {} } as never })
+  server = createServer((request, response) => { response.writeHead(200, { 'content-type': 'text/html' }); response.end(`<!doctype html><meta name="viewport" content="width=device-width"><title>Original collaboration page</title><style>body{font:16px system-ui;margin:24px;min-height:1800px;background:#f5f7f6;color:#19342c}button{padding:12px}input{padding:10px;margin:12px}</style><h1>Original live page</h1><p>This Browser keeps working while its trace and opinion are read.</p><button id="action">Page action</button><input id="text" aria-label="Page draft"><script>globalThis.pageProof={events:[],clicks:0};document.querySelector('#action').onclick=()=>pageProof.clicks++;for(const type of ['pointerdown','pointerup','wheel','keydown','input'])addEventListener(type,e=>pageProof.events.push(type));</script>`) })
+  await new Promise<void>(resolve => server!.listen(0, '127.0.0.1', resolve))
+  const url = `http://127.0.0.1:${(server.address() as any).port}/original`
+  await window.loadFile(join(directory, 'renderer/index.html'))
+  window.showInactive()
+  if (process.env.AGENTMUX_CONTEXTUAL_FOREGROUND === '1') {
+    window.show(); app.focus({ steal: true }); window.focus()
+    await until(() => window!.isFocused(), 'authorized private native foreground window')
+  }
+  const evaluate = (expression: string) => contents.executeJavaScript(expression)
+  await until(() => evaluate('Boolean(window.contextualProof)'), 'actual Renderer entry')
+  const control = { kind: 'agent' as const, hostId: 'local', agentSessionId: session.agentSessionId, run: session.run }
+  const snapshot = await runtime.refresh(control, config)
+  receipt.setup = await evaluate(`contextualProof.setup(${JSON.stringify(config)},${JSON.stringify(snapshot)},${JSON.stringify(url)})`)
+  await until(() => evaluate('contextualProof.facts().stage?.width > 0'), 'original mounted BrowserPane stage')
+  const page = await until(() => window!.contentView.children.find(view => (view as WebContentsView).webContents?.getURL() === url) as WebContentsView | undefined, 'same actual native page')
+  await until(() => page.webContents.executeJavaScript('Boolean(globalThis.pageProof)'), 'original native document')
+  void evaluate(`window.agentmux.browser.runScript('contextual-browser', 'await waitForElement("Continue collaboration", 25000); return "finished"', ${JSON.stringify({ id: session.agentSessionId, name: snapshot.label })}, 'contextual-browser-program')`).then(report => { receipt.browserProgram = report })
+  await until(() => evaluate('contextualProof.facts().browser?.activity?.operation?.steps?.length > 0'), 'actual running Browser step')
+  const before = await page.webContents.executeJavaScript('({width:innerWidth,height:innerHeight,x:scrollX,y:scrollY,events:pageProof.events.slice()})')
+  contents.debugger.attach('1.3')
+  const click = async (selector: string) => {
+    const point = await evaluate(`(()=>{const element=document.querySelector(${JSON.stringify(selector)});if(!element)throw new Error('Missing original GUI control');const r=element.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,hit=document.elementFromPoint(x,y);return{x,y,width:r.width,height:r.height,hit:element===hit||element.contains(hit),target:hit?.outerHTML.slice(0,300)}})()`)
+    assert.ok(point.width > 0 && point.height > 0)
+    assert.equal(point.hit, true, 'The actual GUI action point must hit its original control: ' + selector + '\n' + point.target)
+    ;(receipt.clicks ??= []).push({ selector, point })
+    await contents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y })
+    for (const type of ['mousePressed', 'mouseReleased']) await contents.debugger.sendCommand('Input.dispatchMouseEvent', { type, x: point.x, y: point.y, button: 'left', clickCount: 1 })
+  }
+  const settled = () => evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+  const pageFacts = async () => ({ nativeBounds: page.getBounds(), document: await page.webContents.executeJavaScript('({width:innerWidth,height:innerHeight,x:scrollX,y:scrollY,visual:{width:visualViewport.width,height:visualViewport.height,scale:visualViewport.scale},events:pageProof.events.slice()})'),
+    stage: (await evaluate('contextualProof.facts()')).stage, url: page.webContents.getURL() })
+  async function capture(name: string) {
+    for (const [surface, picture] of [['renderer', await contents.capturePage()], ['window', await window!.capturePage()], ['page', await page.webContents.capturePage()]] as const) {
+      const file = name + '-' + surface + '.png'
+      await writeFile(join(directory, file), picture.toPNG())
+      ;(receipt.frames ??= []).push({ file, surface, pixels: picture.getSize(), actualWindow: window!.getBounds(),
+        boundary: surface === 'page' ? 'Original native Browser document only' : surface === 'renderer' ? 'Whole Renderer document; excludes the native Browser view' : 'Native BrowserWindow.capturePage API; composed native child inclusion needs independent pixel confirmation, not OS input proof' })
+    }
+    if (process.env.AGENTMUX_CONTEXTUAL_FOREGROUND === '1') {
+      if (process.env.AGENTMUX_CONTEXTUAL_CAPTURE_HANDOFF === '1' && name.includes('-fixed-')) return
+      window!.show(); app.focus({ steal: true }); window!.focus()
+      await until(() => window!.isFocused(), 'the exact authorized native capture window')
+      await settled()
+      assert.equal(window!.isFocused(), true, 'The exact private window must retain foreground for actual native capture')
+      const sourceId = window!.getMediaSourceId(), match = /^window:(\d+):\d+$/u.exec(sourceId)
+      assert.ok(match, 'Electron must return its exact native window media source identity')
+      const native = JSON.parse(execFileSync(join(directory, 'native-window'), [match[1]!, String(process.pid)], { encoding: 'utf8' }))
+      assert.notEqual(native.screenLocked, true, 'A locked desktop cannot qualify the composed native window')
+      assert.equal(native.onScreen, true); assert.equal(native.layer, 0)
+      const file = name + '-os-window.png'
+      ;(receipt.nativeCaptureAttempts ??= []).push({ native, sourceId, file })
+      if (process.env.AGENTMUX_CONTEXTUAL_CAPTURE_HANDOFF === '1') {
+        const request = { captureId: name, native, sourceId, file, pid: process.pid }
+        await writeFile(join(directory, 'capture-request.json'), JSON.stringify(request))
+        console.log('native-capture-ready:' + name)
+        const captured = await until(async () => {
+          try { const response = JSON.parse(await readFile(join(directory, 'capture-response.json'), 'utf8')); return response.captureId === name ? response : null }
+          catch { return null }
+        }, 'actual CUA image for the original native capture request')
+        assert.equal(captured.windowId, native.windowId); assert.equal(captured.pid, process.pid)
+        assert.equal(captured.file, file)
+        const bytes = await readFile(join(directory, file))
+        assert.ok(bytes.byteLength > 1000, 'The actual capture must retain real full-window image bytes')
+        receipt.frames.push({ file, surface: 'os-native-window', native, sourceId, captured,
+          boundary: 'Actual CUA screenshot of this exact private foreground window; complete original image bytes, no composition, separate from physical input proof' })
+        return
+      }
+      if (receipt.nativeCaptureAvailability?.status === 'unknown') return
+      try {
+        const size = window!.getBounds()
+        const sources = await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: size.width * 2, height: size.height * 2 }, fetchWindowIcons: false })
+        const source = sources.find(item => item.id === sourceId)
+        assert.ok(source && !source.thumbnail.isEmpty(), 'The exact private OS native window must produce a real captured image')
+        await writeFile(join(directory, file), source.thumbnail.toPNG())
+        receipt.frames.push({ file, surface: 'os-native-window', native, sourceId, pixels: source.thumbnail.getSize(), boundary: 'Actual Electron desktopCapturer OS capture of the exact foreground private PID/CGWindowID, including native Browser page and Chrome overlays; no image composition and no physical input claim' })
+        receipt.nativeCaptureAvailability = { status: 'captured', sourceId }
+      } catch (error) {
+        receipt.nativeCaptureAvailability = { status: 'unknown', sourceId, failure: String(error),
+          next: 'Capture this same private native window through the existing desktop tool; Renderer images do not replace the composed window.' }
+      }
+    }
+  }
+  await click('button[aria-label="Message Browser operator"]')
+  await until(() => evaluate('document.querySelector(".browser-contextual-composer__source")?.textContent.includes("Original collaboration page")'), 'actual captured scene in original nonmodal discussion')
+  const body = '  Keep this original opinion\n<amux>Authored example</amux>\n'
+  await evaluate(`document.querySelector(${JSON.stringify('textarea[aria-label="Opinion for Browser operator"]')}).focus()`)
+  await contents.debugger.sendCommand('Input.insertText', { text: body })
+  await click('.browser-contextual-composer .primary-button')
+  const freeze = await until(() => receipt.ipc.find((call: any) => call.channel === 'browser:freezeInputContext' && call.result), 'actual GUI frozen operation ID')
+  const operationId = freeze.args[0].operationId
+  assert.equal(freeze.args[0].prompt, body, 'GUI must keep original authored bytes')
+  await evaluate(`contextualProof.flush(${JSON.stringify(session.agentSessionId)})`)
+  const key = { kind: 'prompt' as const, agentSessionId: session.agentSessionId, expectedRun: session.run, submissionId: operationId }
+  const original = await until(async () => { const record = await core.inspectAgentPromptSubmission(key); return record?.admission ? record : null }, 'actual original Core admission from normal Renderer queue')
+  const message = original.admission.intent.message, context = freeze.result.record.inputContext
+  assert.deepEqual(message.inputContext, context, 'GUI queue reference must reach the original Host capture reader')
+  assert.equal(message.inputContextSource, 'host-capture')
+  assert.equal(message.authorHuman, true, 'The real trusted user GUI remains human-authored')
+  assert.equal(message.authorAgentSessionId, undefined, 'User opinion must not become Agent-to-Agent input')
+  assert.equal(message.userContent, body)
+  assert.equal(context.page.url, url)
+  assert.equal(context.activity.operationId, 'contextual-browser-program')
+  assert.equal(context.activity.stepSequence, 1)
+  const wire = composeAgentPrompt(body, message.systemContext, context).text
+  assert.equal(original.admission.intent.prompt, wire)
+  await until(() => output.join('').replace(/\r\n/gu, '\n').includes('codex-submit:' + wire.replace(/\r\n/gu, '\n') + ':accepted'), 'real repository CLI accepted the actual Provider wire')
+  const submit = receipt.ipc.find((call: any) => call.channel === 'sessions:submitPrompt' && call.args[2] === operationId)
+  assert.ok(submit?.exactSender && submit.exactFrame, 'Original production preload reaches the trusted Main submit handler')
+  assert.deepEqual(submit.args.at(-1), freeze.result.reference, 'Only the original typed capture reference crosses submit IPC')
+  assert.equal(receipt.browserProgram, undefined, 'The original Browser program must still be running during live viewport checks')
+  assert.deepEqual(await page.webContents.executeJavaScript('({width:innerWidth,height:innerHeight,x:scrollX,y:scrollY,events:pageProof.events.slice()})'), before, 'Discussion must not change original live viewport, scroll or page input')
+  const history = await core.readAgentSessionHistory({ hostId: 'local', agentSessionId: session.agentSessionId, source: 'captured', kind: 'user-message', query: body, limit: 10 })
+  const received = history.userMessages.find((message: any) => message.source.submissionId === 'prompt:' + operationId)
+  assert.ok(received, 'The original Core user-message reader returns the actual submitted input')
+  assert.deepEqual(received.author, { kind: 'human' })
+  assert.deepEqual(received.inputContext, context)
+  const timelineItem = (await core.sessionTimeline(session.agentSessionId)).items.find((item: any) => item.id === received.rawId)
+  assert.ok(timelineItem)
+  await evaluate(`contextualProof.reader(${JSON.stringify(received)},${JSON.stringify(timelineItem)})`)
+  await until(() => evaluate('document.querySelector(".contextual-fixture__reader")?.textContent.includes("Keep this original opinion")'), 'shared shipped conversation reader consumes the actual received wire')
+  assert.equal(await evaluate('document.querySelectorAll(".contextual-fixture__reader .conversation-browser-context").length'), 1,
+    'The shared Reader folds the generated Browser context separately from the original opinion')
+  assert.equal(await evaluate('document.querySelector(".contextual-fixture__reader .conversation-browser-context").open'), false)
+  assert.equal(await evaluate('document.querySelector(".contextual-fixture__reader .conversation-browser-context").dataset.browserContextSource'), 'host-capture')
+  await click('button[aria-label="Copy message"]')
+  await until(() => evaluate('contextualProof.facts().copies.length'), 'shared whole-message Copy consumer')
+  assert.equal((await evaluate('contextualProof.facts()')).copies[0], body, 'Captured whole-message Copy keeps the exact original human opinion')
+  await evaluate(`contextualProof.wire(${JSON.stringify(original.admission.intent.prompt)},${JSON.stringify(received)})`); await settled()
+  assert.equal(await evaluate('document.querySelectorAll(".contextual-fixture__reader .conversation-browser-context").length'), 1, 'The shared wire Reader presents the actually received Browser context once')
+  assert.equal(await evaluate('document.querySelector(".contextual-fixture__reader .conversation-browser-context").dataset.browserContextSource'), 'caller-declared', 'Native wire cannot borrow the Main capture source')
+  await click('button[aria-label="Copy message"]')
+  await until(() => evaluate('contextualProof.facts().copies.length === 2'), 'native whole-message Copy consumer')
+  assert.equal((await evaluate('contextualProof.facts()')).copies[1], wire, 'Native whole-message Copy keeps the actual received wire')
+  receipt.input = { key, originalMessage: message, originalWire: original.admission.intent.prompt, reference: freeze.result.reference,
+    acceptedInputBytes: (await core.statusAgent(session.agentSessionId)).run.acceptedInputBytes }
+  receipt.received = received
+  receipt.receivedWire = { source: 'original-Core-admission-and-real-CLI-consumer', text: original.admission.intent.prompt }
+  receipt.renderer = await evaluate('contextualProof.facts()')
+  receipt.cases.push({ name: 'actual-browser-opinion-through-original-queue-main-host-core-provider', passed: true })
+  console.log('Actual GUI opinion, Provider wire and shared Reader consumers: GREEN')
+  await writeFile(join(directory, 'baseline-renderer.png'), (await contents.capturePage()).toPNG())
+  await page.webContents.executeJavaScript('document.body.insertAdjacentHTML("beforeend","<button>Continue collaboration</button>")')
+  await until(() => receipt.browserProgram, 'original Browser completion')
+  assert.equal(receipt.browserProgram.report.outcome.kind, 'completed')
+  await click('button[aria-label="Close discussion"]')
+  const operator = JSON.stringify({ id: session.agentSessionId, name: snapshot.label })
+  async function startProgram(id: string) {
+    await page.webContents.executeJavaScript('document.querySelector("#continue-proof")?.remove()')
+    let report: any
+    const completion = evaluate(`window.agentmux.browser.runScript('contextual-browser', 'await waitForElement("Trace continuation", 25000); return "finished"', ${operator}, ${JSON.stringify(id)})`).then(value => { report = value; return value })
+    await until(async () => { const browser = (await evaluate('contextualProof.facts()')).browser; return browser.activity.operation?.id === id && browser.activity.operation?.steps.length > 0 && browser.retention.reasons.includes('operation') }, 'actual Main operation retention for ' + id)
+    await settled()
+    return async () => {
+      assert.equal(report, undefined, 'The original Browser program must still own its trace viewport')
+      await page.webContents.executeJavaScript('document.body.insertAdjacentHTML("beforeend","<button id=continue-proof>Trace continuation</button>")')
+      const result = await completion
+      assert.equal(result.report.outcome.kind, 'completed')
+      await settled()
+    }
+  }
+  async function openTrace() {
+    const observations: any[] = []
+    ;(receipt.traceOpening ??= []).push(observations)
+    observations.push({ phase: 'before-menu', facts: await evaluate('contextualProof.facts()') })
+    await click('.browser-operation-status__trigger')
+    await until(() => evaluate('Boolean(document.querySelector("[aria-label=\\"Open browser activity timeline\\"]"))'), 'real activity disclosure')
+    observations.push({ phase: 'open-menu', facts: await evaluate('contextualProof.facts()') })
+    await click('[aria-label="Open browser activity timeline"]')
+    await until(() => evaluate('Boolean(document.querySelector("aside[aria-label=\\"Browser activity trace\\"]"))'), 'original trace reader')
+    await settled()
+    observations.push({ phase: 'open-trace', facts: await evaluate('contextualProof.facts()') })
+  }
+  const traceReceipts: any[] = []
+  receipt.trace = traceReceipts
+  for (const shape of [{ name: 'normal', width: 1120, height: 760 }, { name: 'narrow', width: 360, height: 760 }, { name: 'short', width: 760, height: 420 }]) {
+    window.setSize(shape.width, shape.height)
+    await settled(); await delay(100)
+    for (const viewport of ['responsive', { width: 640, height: 480, screenPosition: 'desktop' }]) {
+      receipt.currentCase = { shape, viewport, mode: 'live-floating' }
+      await evaluate(`window.agentmux.browser.setViewport('contextual-browser', ${JSON.stringify(viewport)})`)
+      await settled(); await delay(100)
+      const finish = await startProgram('trace-floating-' + shape.name + '-' + (typeof viewport === 'string' ? 'responsive' : 'fixed'))
+      const original = await pageFacts()
+      await openTrace()
+      const trace = await evaluate('(()=>{const e=document.querySelector("aside[aria-label=\\"Browser activity trace\\"]");return{floating:e.classList.contains("browser-trace-rail--floating"),sameDocument:e.ownerDocument===document,modal:e.getAttribute("aria-modal"),visibility:getComputedStyle(e).visibility,positioned:Boolean(e.style.left&&e.style.top),box:e.getBoundingClientRect().toJSON()}})()')
+      assert.equal(trace.floating, true, 'Opening a live trace must float without taking page flow space')
+      assert.equal(trace.sameDocument, true)
+      assert.equal(trace.modal, 'false')
+      assert.equal(trace.visibility, 'visible', 'The live trace must actually be painted after its original parent ref commits')
+      assert.equal(trace.positioned, true)
+      assert.deepEqual(await pageFacts(), original, 'Opening live trace must preserve original page viewport, geometry, scroll and input')
+      for (const appearance of ['dark', 'light']) {
+        await evaluate(`contextualProof.appearance(${JSON.stringify(appearance)})`); await settled()
+        await capture('trace-' + shape.name + '-' + (typeof viewport === 'string' ? 'responsive' : 'fixed') + '-' + appearance)
+      }
+      await click('button[aria-label="Close browser activity timeline"]'); await settled()
+      assert.deepEqual(await pageFacts(), original, 'Closing live trace must preserve original page viewport, geometry, scroll and input')
+      await click('button[aria-label="Message Browser operator"]'); await settled()
+      assert.equal(await evaluate('getComputedStyle(document.querySelector(".browser-contextual-composer")).visibility'), 'visible', 'The opinion entry and actual discussion remain usable at this window size')
+      assert.deepEqual(await pageFacts(), original, 'Reading the original opinion must preserve the running Browser viewport')
+      for (const appearance of ['dark', 'light']) {
+        await evaluate(`contextualProof.appearance(${JSON.stringify(appearance)})`); await settled()
+        await capture('discussion-' + shape.name + '-' + (typeof viewport === 'string' ? 'responsive' : 'fixed') + '-' + appearance)
+      }
+      await click('button[aria-label="Close discussion"]'); await settled()
+      assert.deepEqual(await pageFacts(), original, 'Closing the original opinion must preserve the running Browser viewport')
+      traceReceipts.push({ shape, viewport, original, trace })
+      await finish()
+      console.log('Actual live trace viewport: ' + shape.name + ' ' + (typeof viewport === 'string' ? 'responsive' : 'fixed') + ' GREEN')
+    }
+    await evaluate("window.agentmux.browser.setViewport('contextual-browser', 'responsive')"); await settled(); await delay(100)
+    await openTrace()
+    receipt.currentCase = { shape, mode: 'idle-dock-then-live-close' }
+    assert.equal(await evaluate('document.querySelector("aside[aria-label=\\"Browser activity trace\\"]").classList.contains("browser-trace-rail--floating")'), false, 'An idle trace may dock')
+    const finish = await startProgram('trace-held-' + shape.name)
+    const original = await pageFacts()
+    await click('button[aria-label="Close browser activity timeline"]'); await settled()
+    assert.deepEqual(await pageFacts(), original, 'Closing a previously docked trace must preserve the live page footprint, including narrow column layout')
+    assert.equal(await evaluate('Boolean(document.querySelector(".browser-trace-held"))'), true, 'A previously docked trace retains its original footprint during execution')
+    await click('.browser-trace-held button'); await settled()
+    assert.deepEqual(await pageFacts(), original, 'Reopening the held trace must reuse its original dock footprint')
+    await click('button[aria-label="Close browser activity timeline"]'); await settled()
+    await finish()
+    await until(() => evaluate('!document.querySelector("aside[aria-label=\\"Browser activity trace\\"]")'), 'original dock reservation released after Main operation completion')
+    traceReceipts.push({ shape, heldDock: true, original })
+  }
+  receipt.trace = traceReceipts
+  receipt.cases.push({ name: 'native-live-trace-viewport-and-original-dock-footprint', passed: true })
+  receipt.passed = true
+}
+void run().catch(async error => {
+  receipt.failure = error instanceof Error ? { name: error.name, message: error.message, stack: error.stack } : { name: 'ThrownValue', message: String(error) }; console.error(error)
+  if (window && !window.isDestroyed()) {
+    try {
+      receipt.failureRenderer = await window.webContents.executeJavaScript('({facts:window.contextualProof?.facts(),menus:[...document.querySelectorAll("[role=menu]")].map(e=>e.outerHTML),buttons:[...document.querySelectorAll(".browser-toolbar button")].map(e=>({label:e.getAttribute("aria-label"),state:e.getAttribute("data-state"),box:e.getBoundingClientRect().toJSON()}))})')
+      await writeFile(join(directory, 'failure-renderer.png'), (await window.webContents.capturePage()).toPNG())
+    } catch (diagnostic) { receipt.failureDiagnostic = String(diagnostic) }
+  }
+}).finally(async () => {
+  const cleanup: string[] = []
+  for (const release of [async () => { if (session && core) await core.stopAgent(session.agentSessionId, core.agentSession(session.agentSessionId).run) },
+    () => releaseIpc?.(), () => runtime?.dispose(), () => access?.dispose(), () => windows?.dispose(), () => sdk?.dispose(), () => rpc?.dispose(), () => hostServer?.stop(), () => hosted?.dispose(), () => core?.dispose(),
+    () => { if (window && !window.isDestroyed()) window.destroy() }, () => { if (!server) return; server.closeAllConnections(); return new Promise<void>(resolve => server!.close(() => resolve())) }]) {
+    try { await release() } catch (error) { cleanup.push(String(error)) }
+  }
+  receipt.cleanupFailures = cleanup
+  await writeFile(join(directory, 'native-receipt.json'), JSON.stringify(receipt, null, 2))
+  app.exit(receipt.passed && !cleanup.length ? 0 : 1)
+})
