@@ -45,7 +45,7 @@ export function dataUrlByteLength(dataUrl: string): number {
   return Math.max(0, Math.floor(payload.length * 3 / 4) - padding)
 }
 
-function canvas(width: number, height: number): HTMLCanvasElement {
+function canvas(width: number, height: number, document: Document = globalThis.document): HTMLCanvasElement {
   const element = document.createElement('canvas')
   element.width = Math.max(1, Math.floor(width))
   element.height = Math.max(1, Math.floor(height))
@@ -69,15 +69,16 @@ function renderComposite(input: {
   outputScale: number
   shapes: readonly ScreenshotShape[]
   crop?: NormalizedRect | null
+  document?: Document
 }): HTMLCanvasElement {
   const size = screenshotCropGeometry(input.displayWidth, input.displayHeight, input.outputScale, input.crop)
-  const output = canvas(size.width, size.height)
+  const output = canvas(size.width, size.height, input.document)
   const context = output.getContext('2d')
   if (!context) throw new Error('Screenshot compose requires a 2D canvas')
   context.drawImage(input.image, 0, 0, size.width, size.height)
   drawScreenshotShapes(context, screenshotOutputShapes(input.shapes, input.crop).map((shape) => scaleShape(shape, size.scale)))
   if (!input.crop) return output
-  const cropped = canvas(size.cropWidth, size.cropHeight)
+  const cropped = canvas(size.cropWidth, size.cropHeight, output.ownerDocument)
   const target = cropped.getContext('2d')
   if (!target) throw new Error('Screenshot crop requires a 2D canvas')
   target.drawImage(output, size.left, size.top, cropped.width, cropped.height, 0, 0, cropped.width, cropped.height)
@@ -86,7 +87,7 @@ function renderComposite(input: {
 
 function downscale(source: HTMLCanvasElement, factor: number): HTMLCanvasElement {
   if (factor === 1) return source
-  const output = canvas(source.width * factor, source.height * factor)
+  const output = canvas(source.width * factor, source.height * factor, source.ownerDocument)
   const context = output.getContext('2d')
   if (!context) throw new Error('Screenshot downscale requires a 2D canvas')
   context.drawImage(source, 0, 0, output.width, output.height)
@@ -100,7 +101,7 @@ function pngDataUrl(source: HTMLCanvasElement): Promise<string> {
         reject(new Error('Screenshot PNG encoding failed'))
         return
       }
-      const reader = new FileReader()
+      const reader = new (source.ownerDocument.defaultView?.FileReader ?? FileReader)()
       reader.onload = () => resolve(String(reader.result))
       reader.onerror = () => reject(reader.error ?? new Error('Screenshot PNG could not be read'))
       reader.readAsDataURL(blob)
@@ -115,6 +116,7 @@ export async function composeScreenshot(input: {
   outputScale: number
   shapes: readonly ScreenshotShape[]
   crop?: NormalizedRect | null
+  document?: Document
 }): Promise<BrowserPng> {
   const composite = renderComposite(input)
   for (const step of SCREENSHOT_DOWNSCALE_STEPS) {

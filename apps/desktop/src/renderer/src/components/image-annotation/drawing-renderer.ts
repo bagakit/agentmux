@@ -174,7 +174,7 @@ function drawPixelate(context: CanvasRenderingContext2D, shape: PixelateShape): 
   const right = Math.min(context.canvas.width, Math.ceil((rect.x + rect.width) * transform.a + transform.e))
   const bottom = Math.min(context.canvas.height, Math.ceil((rect.y + rect.height) * transform.d + transform.f))
   if (right <= x || bottom <= y) return
-  const sample = document.createElement('canvas')
+  const sample = context.canvas.ownerDocument.createElement('canvas')
   sample.width = Math.max(1, Math.ceil((right - x) / Math.max(1, shape.blockSize * transform.a)))
   sample.height = Math.max(1, Math.ceil((bottom - y) / Math.max(1, shape.blockSize * transform.d)))
   const small = sample.getContext('2d')
