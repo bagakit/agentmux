@@ -190,6 +190,31 @@ describe('Main-owned immutable Browser input scenes', () => {
     readFault.mockRestore(); putFault.mockRestore()
   })
 
+  it.each(['return', 'throw'] as const)('preserves a completed live receipt when an older disk read later %ss', async outcome => {
+    const f = await fixture(), owner = f.create(), read = f.files.read.bind(f.files), put = f.files.put.bind(f.files)
+    let started!: () => void, release!: () => void, firstRead = true
+    const readingStarted = new Promise<void>(resolve => { started = resolve }), blocked = new Promise<void>(resolve => { release = resolve })
+    const readFault = vi.spyOn(f.files, 'read').mockImplementation(async (kind, id) => {
+      if (kind === 'input' && firstRead) {
+        firstRead = false; started(); await blocked
+        if (outcome === 'throw') throw new Error('Older read failed after publication')
+      }
+      return read(kind, id)
+    })
+    const putFault = vi.spyOn(f.files, 'put').mockImplementation(async (kind, id, value) => {
+      await put(kind, id, value)
+      if (kind === 'input') throw new Error('Original durability unconfirmed')
+    })
+    const reading = owner.read({ hostId: 'local', operationId: f.input.operationId })
+    await readingStarted
+    const frozen = await owner.freeze(f.input)
+    expect(frozen.diskDurability).toBe('unconfirmed')
+    release()
+    await expect(reading).resolves.toEqual(frozen)
+    expect(await owner.read(frozen.reference)).toEqual(frozen)
+    readFault.mockRestore(); putFault.mockRestore()
+  })
+
   it('rejects an unavailable or different page and exact foreign Host without restoring or rerouting it', async () => {
     const f = await fixture()
     f.source.mockReturnValue(null)

@@ -158,6 +158,9 @@ process.on('uncaughtException',fail);app.whenReady().then(()=>import(${JSON.stri
       AGENTMUX_RUNTIME_DIRECTORY: join(directory, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(directory, 'state'),
       AGENTMUX_AGENT_SESSION_STORE: join(directory, 'sessions.json'), AGENTMUX_MESSAGE_QUEUE_PATH: join(directory, 'messages.ndjson') })
     const result = await execute(require('electron'), [join(directory, 'bootstrap.cjs')], env, label)
+    if (result.code !== 0) {
+      for (const name of ['main.mjs', 'api.mjs']) await writeFile(join(output, label + '-' + name), await readFile(join(dist, name)))
+    }
     const actual = JSON.parse(await readFile(join(directory, 'native-receipt.json'), 'utf8'))
     await writeFile(join(output, label + '.native.json'), JSON.stringify(actual, null, 2))
     if (mutation) {
