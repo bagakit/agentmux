@@ -1,6 +1,7 @@
 import { appearanceSettings } from './modules/appearance.js'
 import { generalSettings } from './modules/general.js'
 import { notificationsSettings } from './modules/notifications.js'
+import { a2aSettings } from './modules/a2a.js'
 import { browserSettings } from './modules/browser.js'
 import { toolkitSettings } from './modules/toolkit.js'
 import { profileSettings } from './modules/profile.js'
@@ -16,6 +17,7 @@ export const scalarSettings = [
   ...goalsSettings,
   ...notesSettings,
   ...continuitySettings,
+  ...a2aSettings,
   ...appearanceSettings,
   ...generalSettings,
   ...notificationsSettings,

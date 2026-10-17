@@ -571,6 +571,8 @@ export type AppConfig = {
   // explicit default when it is absent (same shape as the scratch-workspace back-fill), and every read
   // goes through resolveNotificationModeId, which also defaults. Absence therefore never means "off".
   notifications?: NotificationSettings
+  /** User-facing A2A arrival banners; independent of Agent Inbox reference delivery. */
+  a2a?: import('./a2a-preferences').A2APreferences
   /**
    * 用户拥有的本地 prompt 库。可选是因为字段是后加的（同 `appLinkSchemes` 的落地路径），既有磁盘
    * config 没有它，写成必需会让整块配置判失败。

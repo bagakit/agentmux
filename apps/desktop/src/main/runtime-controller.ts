@@ -667,7 +667,7 @@ export class RuntimeController {
         this.clearHostObservationWarnings(prepared.id)
         const unsubscribe = prepared.client.onEvent((event) => {
           if (this.hosts.get(prepared.id)?.client === prepared.client) this.publish(prepared.id, event)
-        })
+        }, { observeMessages: true })
         this.hosts.set(prepared.id, { ...prepared, unsubscribe, historyObservationDisposers: new Set() })
         if (prepared.warning) this.endpointWarnings.set(prepared.id, prepared.warning)
         else this.endpointWarnings.delete(prepared.id)
