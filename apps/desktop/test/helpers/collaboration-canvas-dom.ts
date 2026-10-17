@@ -14,7 +14,7 @@ export function installCollaborationCanvasGeometry(width = 1440, height = 900) {
     observe(target: Element) {
       if (this.targets.has(target)) return
       this.targets.add(target)
-      queueMicrotask(() => { if (this.targets.has(target)) this.callback([{ target, contentRect: target.getBoundingClientRect() } as ResizeObserverEntry], this as unknown as ResizeObserver) })
+      queueMicrotask(() => { if (this.targets.has(target)) this.callback([{ target, contentRect: target.getBoundingClientRect(), borderBoxSize: [{ inlineSize: (target as HTMLElement).offsetWidth, blockSize: (target as HTMLElement).offsetHeight }] } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver) })
     }
     unobserve(target: Element) { this.targets.delete(target) }
     disconnect() { this.targets.clear() }
