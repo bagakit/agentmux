@@ -21,7 +21,7 @@ vi.mock('../src/providers/codex-native-rpc.js', () => ({ connectCodexNativeActor
 
 class Child extends EventEmitter {
   stderr = new PassThrough()
-  kill = vi.fn(() => true)
+  kill = vi.fn(() => { this.stderr.end(); return true })
 }
 let children: Child[], pending: Promise<number> | undefined, originalBytes: Buffer[]
 const current = (): AgentTerminalFrontendObservation => boundary.handlers.current()
@@ -106,5 +106,24 @@ it('publishes one stable initial generation before slow backend preparation and 
     await vi.waitFor(() => expect(current().state).toBe('attached'))
     expect(current().frontendId).toBe(originalId)
     expect(boundary.publish.mock.calls.every(call => call[0].frontendId === originalId)).toBe(true)
+  } finally { endpoint.resolve([{ endpoint: 'ws://127.0.0.1:12345' }]) }
+})
+
+it('keeps complete preparation diagnostics before TUI start and drains later background logs without changing its screen or lifecycle', async () => {
+  const endpoint = Promise.withResolvers<Array<{ endpoint: string }>>()
+  boundary.listeners.mockReturnValueOnce(endpoint.promise)
+  pending = runCodexManaged({ command: 'private-provider', args: [], serverConfig: [], frontendArgs: [] })
+  try {
+    await vi.waitFor(() => expect(boundary.handlers).toBeDefined())
+    children[0]!.stderr.write('native preparation diagnostic\n')
+    endpoint.resolve([{ endpoint: 'ws://127.0.0.1:12345' }])
+    await vi.waitFor(() => expect(current().state).toBe('attached'))
+    const bytes = Buffer.concat(originalBytes)
+    children[0]!.stderr.write('late background server log\n'.repeat(128))
+    expect(Buffer.concat(originalBytes)).toEqual(bytes)
+    expect(bytes.toString()).toBe('native preparation diagnostic\n')
+    expect(current()).toMatchObject({ state: 'attached', backendState: 'running' })
+    expect(current().message).toBeUndefined()
+    expect(children[0]!.kill).not.toHaveBeenCalled()
   } finally { endpoint.resolve([{ endpoint: 'ws://127.0.0.1:12345' }]) }
 })

@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.native-input.json",
+  "include": ["codex-managed-diagnostic-stream.test.ts", "codex-native-diagnostics.test.ts", "codex-managed-run-diagnostics.test.ts",
+    "native-diagnostics-runtime.integration.test.ts", "helpers/native-diagnostic-source.ts", "vitest.native-diagnostics.config.mts"]
+}
