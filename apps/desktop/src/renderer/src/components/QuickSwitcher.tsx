@@ -63,16 +63,16 @@ export function QuickSwitcher({ open, onClose, returnFocus }: { open: boolean; o
   const activated = useRef(false)
 
   const items = useMemo(
-    () =>
+    () => open && mode === 'sessions' ?
       buildQuickSwitchIndex({ topics: scratchTopicsForConfig(config, scratchTopicSnapshots),
         config,
         sessions,
         tabs,
         tabGroupOf: (workspaceId, tabId) => tabGroupForTab(layouts[workspaceId], tabId)
-      }),
-    [config, scratchTopicSnapshots, sessions, tabs, layouts]
+      }) : [],
+    [open, mode, config, scratchTopicSnapshots, sessions, tabs, layouts]
   )
-  const results = useMemo(() => rankQuickSwitchItems(items, query), [items, query])
+  const results = useMemo(() => open && mode === 'sessions' ? rankQuickSwitchItems(items, query) : [], [open, mode, items, query])
 
   // The highlighted row must always sit within the current results, so any narrowing of the list
   // pins the selection back to the first (best-ranked, above-the-fold) row.
