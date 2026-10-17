@@ -24,7 +24,7 @@ async function command(version = 'codex-cli 0.163.0') {
 }
 
 it.runIf(process.platform === 'darwin')('qualifies create, preserving the original Provider invocation and Electron Node contract in the final launch plan', async () => {
-  const f = await command(), original = { command: f.path, args: ['--no-alt-screen', '--profile', 'original-profile', '--dangerously-bypass-hook-trust', 'Original initial prompt'], env: { ORIGINAL_FIXTURE: 'kept' } }
+  const f = await command(), original = { command: f.path, args: ['--no-alt-screen', '--profile', 'original-profile', '--dangerously-bypass-hook-trust', '--', 'Original initial prompt'], env: { ORIGINAL_FIXTURE: 'kept' } }
   const prepared = await prepareCodexManagedLaunch(original, 'original-lifecycle', { kind: 'create', prompt: 'Original initial prompt' })
   expect(prepared.nativeActor?.launch).toEqual({ command: original.command, args: original.args })
   expect(prepared.nativeActor?.lifecycleOperationId).toBe('original-lifecycle'); expect(prepared.nativeActor?.token).toMatch(/^[a-f0-9]{64}$/u)
@@ -55,12 +55,11 @@ it.runIf(process.platform === 'darwin').each([false, true])('prepares normal Cor
   const choices = (id: string) => [undefined, ...CODEX_LAUNCH_OPTIONS.find(option => option.id === id)!.choices.map(choice => choice.id)]
   for (const sandbox of choices('sandbox')) for (const approval of choices('approval')) {
     const permissionArgv = resolveLaunchOptionArgv('codex', CODEX_LAUNCH_OPTIONS, { ...(sandbox ? { sandbox } : {}), ...(approval ? { approval } : {}) })
-    const args = ['resume', sid, '--dangerously-bypass-hook-trust', ...(withPrompt ? [prompt] : []),
-      '--no-alt-screen', '--model', 'original-model', ...permissionArgv,
-      '-C', f.root, '--enable', 'original-feature']
+    const args = ['--dangerously-bypass-hook-trust', '--no-alt-screen', '--model', 'original-model', ...permissionArgv,
+      '-C', f.root, '--enable', 'original-feature', 'resume', sid, ...(withPrompt ? ['--', prompt] : [])]
     const original = { command: f.path, args, env: { ORIGINAL_FIXTURE: 'kept' } }
     const prepared = await prepareCodexManagedLaunch(original, 'original-resume-lifecycle', { kind: 'resume', ...(withPrompt ? { prompt } : {}) })
-    const tuiArgs = ['resume', sid, '--dangerously-bypass-hook-trust', ...(withPrompt ? [prompt] : []), '--no-alt-screen', '--model', 'original-model', '-C', f.root, '--enable', 'original-feature']
+    const tuiArgs = ['--dangerously-bypass-hook-trust', '--no-alt-screen', '--model', 'original-model', '-C', f.root, '--enable', 'original-feature', 'resume', sid, ...(withPrompt ? ['--', prompt] : [])]
     expect(prepared.nativeActor?.launch).toEqual({ command: original.command, args: tuiArgs })
     expect(prepared.nativeActor?.lifecycleOperationId).toBe('original-resume-lifecycle')
     expect(JSON.parse(prepared.plan.args[1]!)).toEqual({ command: original.command, args: tuiArgs, serverConfig: ['--enable', 'original-feature'], frontendArgs: ['--dangerously-bypass-hook-trust', '--no-alt-screen'],
@@ -73,11 +72,11 @@ it.runIf(process.platform === 'darwin').each([false, true])('prepares normal Cor
 it.runIf(process.platform === 'darwin')('retains an exact prompt even when its text is a flag or configuration value and gives each resume its own actor', async () => {
   const f = await command(), sid = '00000000-0000-4000-8000-000000000001'
   for (const prompt of ['--dangerously-bypass-hook-trust', '--sandbox', 'read-only']) {
-    const args = ['resume', sid, prompt, '--sandbox', 'read-only', '--ask-for-approval', 'on-request', '--dangerously-bypass-hook-trust']
+    const args = ['--sandbox', 'read-only', '--ask-for-approval', 'on-request', '--dangerously-bypass-hook-trust', 'resume', sid, '--', prompt]
     const original = { command: f.path, args, env: {} }
     const a = await prepareCodexManagedLaunch(original, 'first-resume', { kind: 'resume', prompt })
     const b = await prepareCodexManagedLaunch(original, 'second-resume', { kind: 'resume', prompt })
-    expect(a.nativeActor?.launch.args).toEqual(['resume', sid, prompt, '--dangerously-bypass-hook-trust'])
+    expect(a.nativeActor?.launch.args).toEqual(['--dangerously-bypass-hook-trust', 'resume', sid, '--', prompt])
     expect(JSON.parse(a.plan.args[1]!).resume).toMatchObject({ sandbox: 'read-only', approvalPolicy: 'on-request' })
     expect(b.nativeActor?.actorId).not.toBe(a.nativeActor!.actorId)
     expect(b.nativeActor?.token).not.toBe(a.nativeActor!.token)
@@ -88,21 +87,21 @@ it.runIf(process.platform === 'darwin')('does not qualify custom profile/config,
   const f = await command(), sid = '00000000-0000-4000-8000-000000000001'
   for (const tail of [['-p', 'original-profile'], ['--config', 'approval_policy="never"'], ['--config=model="original"'],
     ['--sandbox', 'future-policy'], ['--ask-for-approval', 'future-policy'], ['-s', 'read-only', '--sandbox', 'workspace-write'], ['-a', 'never', '--ask-for-approval', 'on-request'], ['--sandbox']]) {
-    const plan = { command: f.path, args: ['resume', sid, ...tail], env: {} }
+    const plan = { command: f.path, args: [...tail, 'resume', sid], env: {} }
     expect(await prepareCodexManagedLaunch(plan, 'original-resume-lifecycle', { kind: 'resume' })).toEqual({ plan })
   }
 })
 
 it.runIf(process.platform === 'darwin')('qualifies the configured bypass for create and transfers its exact native policy on resume', async () => {
   const f = await command(), sid = '00000000-0000-4000-8000-000000000001', flag = '--dangerously-bypass-approvals-and-sandbox'
-  const create = { command: f.path, args: [flag, '--dangerously-bypass-hook-trust', 'Original initial prompt'], env: {} }
+  const create = { command: f.path, args: [flag, '--dangerously-bypass-hook-trust', '--', 'Original initial prompt'], env: {} }
   const first = await prepareCodexManagedLaunch(create, 'original-create', { kind: 'create', prompt: 'Original initial prompt' })
   expect(first.nativeActor?.launch).toEqual({ command: create.command, args: create.args })
   expect(JSON.parse(first.plan.args[1]!)).toEqual({ command: create.command, args: create.args, serverConfig: [], frontendArgs: ['--dangerously-bypass-hook-trust'] })
   for (const prompt of ['Original continuation', flag]) {
-    const args = ['resume', sid, '--dangerously-bypass-hook-trust', prompt, flag, '--model', 'original-model', '-C', '.']
+    const args = [flag, '--dangerously-bypass-hook-trust', '--model', 'original-model', '-C', '.', 'resume', sid, '--', prompt]
     const next = await prepareCodexManagedLaunch({ ...create, args }, 'original-resume', { kind: 'resume', prompt })
-    const actualArgs = args.filter((_, index) => index !== 4)
+    const actualArgs = args.slice(1)
     expect(next.nativeActor?.launch).toEqual({ command: create.command, args: actualArgs })
     expect(JSON.parse(next.plan.args[1]!)).toEqual({ command: create.command, args: actualArgs, serverConfig: [], frontendArgs: ['--dangerously-bypass-hook-trust'],
       resume: { threadId: sid, sandbox: 'danger-full-access', approvalPolicy: 'never', model: 'original-model', cwd: '.' } })
@@ -113,19 +112,19 @@ it.runIf(process.platform === 'darwin')('keeps duplicate or mixed bypass permiss
   const f = await command(), sid = '00000000-0000-4000-8000-000000000001', flag = '--dangerously-bypass-approvals-and-sandbox'
   for (const tail of [[flag], ['--sandbox', 'read-only'], ['--ask-for-approval', 'never'], ['--profile', 'original-profile'], ['-c', 'model="original"']]) {
     for (const args of [[flag, ...tail], [...tail, flag]]) for (const kind of ['create', 'resume'] as const) {
-      const plan = { command: f.path, args: [...(kind === 'resume' ? ['resume', sid] : []), ...args], env: {} }
+      const plan = { command: f.path, args: [...args, ...(kind === 'resume' ? ['resume', sid] : [])], env: {} }
       expect(await prepareCodexManagedLaunch(plan, 'original-lifecycle', { kind })).toEqual({ plan })
     }
   }
 })
 
 it.runIf(process.platform === 'darwin')('does not strip a misplaced resume prompt or upgrade a different native version', async () => {
-  const f = await command(), args = ['resume', '00000000-0000-4000-8000-000000000001', '--model', 'original-model', 'Original resume prompt']
+  const f = await command(), sid = '00000000-0000-4000-8000-000000000001', args = ['--model', 'original-model', 'resume', sid, 'Original resume prompt']
   const plan = { command: f.path, args, env: {} }
   expect(await prepareCodexManagedLaunch(plan, 'original-resume-lifecycle', { kind: 'resume', prompt: 'Original resume prompt' })).toEqual({ plan })
-  const old = await command('codex-cli 0.162.0'), unsupported = { ...plan, command: old.path, args: args.slice(0, 2) }
+  const old = await command('codex-cli 0.162.0'), unsupported = { ...plan, command: old.path, args: ['resume', sid] }
   expect(await prepareCodexManagedLaunch(unsupported, 'original-resume-lifecycle', { kind: 'resume' })).toEqual({ plan: unsupported })
-  const relative = { ...plan, args: [...args.slice(0, 2), '-C', 'original-relative-workspace'] }
+  const relative = { ...plan, args: ['-C', 'original-relative-workspace', 'resume', sid] }
   const prepared = await prepareCodexManagedLaunch(relative, 'relative-resume-lifecycle', { kind: 'resume' })
   expect(JSON.parse(prepared.plan.args[1]!).resume.cwd).toBe('original-relative-workspace')
 })
@@ -238,9 +237,9 @@ it.runIf(process.platform === 'darwin').each([
   { flag: false, prompt: '--dangerously-bypass-hook-trust' }
 ])('preserves only the original parsed Hook switch on the first real native resume: %j', async ({ flag, prompt }) => {
   const f = await nativeLifecycleFixture()
-  const original = { command: f.plan.command, args: ['resume', f.plan.resume!.threadId,
-    ...(flag ? ['--dangerously-bypass-hook-trust'] : []), prompt,
-    '--sandbox', 'read-only', '--ask-for-approval', 'on-request', '--model', 'original-model', '-C', f.root], env: {} }
+  const original = { command: f.plan.command, args: [...(flag ? ['--dangerously-bypass-hook-trust'] : []),
+    '--sandbox', 'read-only', '--ask-for-approval', 'on-request', '--model', 'original-model', '-C', f.root,
+    'resume', f.plan.resume!.threadId, '--', prompt], env: {} }
   const prepared = await prepareCodexManagedLaunch(original, 'original-lifecycle', { kind: 'resume', prompt })
   expect(prepared.nativeActor).toBeDefined()
   f.plan = JSON.parse(prepared.plan.args[1]!)
