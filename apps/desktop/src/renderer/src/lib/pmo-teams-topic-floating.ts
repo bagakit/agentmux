@@ -40,6 +40,12 @@ export type PmoTeamsTopicFloatingState = {
   targetTopicId?: string | undefined
   /** Expected identity of a remembered Agent; absence leaves ordinary explicit targets unchanged. */
   targetAgent?: Pick<MoteRecentAgent, 'hostId' | 'sessionId' | 'presentationSessionId'> | undefined
+  /** Explicit original Agent destination; it does not make the Agent a Mote member. */
+  agentTarget?: { agentSessionId: string | null; hostId?: string | undefined } | undefined
+  /** Entry feedback only. Agent working state remains the original Session fact. */
+  entryMessage?: string | undefined
+  /** Transient navigation correlation; the original Goal owner still owns the operation. */
+  entryContext?: { kind: 'goal-patrol'; goalId: string; scope: string | null; afterReportOperationId: string | null } | undefined
   /** null means no current selection; existing Topic members remain navigable. A missing string remains an exact recovery target. */
   targetTabId?: string | null | undefined
   /** Exact selected occurrence; null keeps an unconfirmed saved placement. */
@@ -62,6 +68,8 @@ function validReference(value: unknown): value is WorkbenchProjectionSelection {
 
 const CLOSED: PmoTeamsTopicFloatingState = { open: false, preview: false }
 let state: PmoTeamsTopicFloatingState | undefined
+let conversationEntrySequence = 0
+function nextConversationEntry(): number { return ++conversationEntrySequence }
 /** Read the original mounted owner without initializing, opening or retargeting it. */
 export function readPmoTeamsTopicFloatingState(): PmoTeamsTopicFloatingState | null { return state ?? null }
 const listeners = new Set<() => void>()
@@ -83,6 +91,7 @@ function readState(): PmoTeamsTopicFloatingState {
         typeof value.targetTabId === 'string' && value.targetTabId.trim() ? { targetTabId: value.targetTabId.trim() } : {}),
       ...(Object.hasOwn(value, 'reference') ? { reference: validReference(value.reference) ? value.reference : null } : {}),
       ...(value.targetAgent && typeof value.targetAgent.hostId === 'string' && typeof value.targetAgent.sessionId === 'string' && typeof value.targetAgent.presentationSessionId === 'string' ? { targetAgent: { hostId: value.targetAgent.hostId, sessionId: value.targetAgent.sessionId, presentationSessionId: value.targetAgent.presentationSessionId } } : {}),
+      ...(value.agentTarget && (value.agentTarget.agentSessionId === null || typeof value.agentTarget.agentSessionId === 'string') ? { agentTarget: value.agentTarget } : {}),
       ...(value.railMode === 'cards' || value.railMode === 'avatars' ? { railMode: value.railMode } : {}),
       ...(validSize(value.size) ? { size: value.size } : {}),
       ...(invalidChoice ? { focusChatTopicId: null, preferenceIssue: 'The saved Chat recipient is unconfirmed. Select a Mote to confirm the recipient.' } : typeof value.focusChatTopicId === 'string' ? { focusChatTopicId: value.focusChatTopicId.trim() } : {}) }
@@ -105,11 +114,13 @@ function update(next: Partial<PmoTeamsTopicFloatingState>, persist = true): void
   if (resolved.open === current.open && resolved.preview === current.preview &&
     resolved.targetTopicId === current.targetTopicId && resolved.targetTabId === current.targetTabId &&
     JSON.stringify(resolved.reference) === JSON.stringify(current.reference) && JSON.stringify(resolved.targetAgent) === JSON.stringify(current.targetAgent) &&
+    JSON.stringify(resolved.agentTarget) === JSON.stringify(current.agentTarget) && resolved.entryMessage === current.entryMessage &&
+    JSON.stringify(resolved.entryContext) === JSON.stringify(current.entryContext) &&
     resolved.railMode === current.railMode && sameSize(resolved.size, current.size) && resolved.focusChatTopicId === current.focusChatTopicId &&
     resolved.preferenceIssue === current.preferenceIssue && resolved.conversationEntry === current.conversationEntry && !retryPreference) return
   state = resolved
-  if (persist && (resolved.open !== current.open || resolved.targetTopicId !== current.targetTopicId || resolved.targetTabId !== current.targetTabId || JSON.stringify(resolved.reference) !== JSON.stringify(current.reference) || JSON.stringify(resolved.targetAgent) !== JSON.stringify(current.targetAgent) || resolved.railMode !== current.railMode || !sameSize(resolved.size, current.size) || resolved.focusChatTopicId !== current.focusChatTopicId || retryPreference)) {
-    try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ open: resolved.open,
+  if (persist && (resolved.open !== current.open || JSON.stringify(resolved.agentTarget) !== JSON.stringify(current.agentTarget) || resolved.targetTopicId !== current.targetTopicId || resolved.targetTabId !== current.targetTabId || JSON.stringify(resolved.reference) !== JSON.stringify(current.reference) || JSON.stringify(resolved.targetAgent) !== JSON.stringify(current.targetAgent) || resolved.railMode !== current.railMode || !sameSize(resolved.size, current.size) || resolved.focusChatTopicId !== current.focusChatTopicId || retryPreference)) {
+    try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ open: resolved.open, agentTarget: resolved.agentTarget,
       targetTopicId: resolved.targetTopicId, targetTabId: resolved.targetTabId, targetAgent: resolved.targetAgent, reference: resolved.reference, railMode: resolved.railMode, size: resolved.size, focusChatTopicId: resolved.focusChatTopicId }))
       state = { ...resolved, preferenceIssue: undefined }
     } catch { state = { ...resolved, preferenceIssue: 'Mote preferences could not be saved. This window keeps your choice and size; select the Mote or resize again to retry.' } }
@@ -126,6 +137,7 @@ function captureFocus(onReturnFocus?: () => void): void {
 
 /** Select from durable Tabs first; never borrow another Mote while one restores. */
 export function pmoTeamsTopicFloatingTargetTopicId(floating: PmoTeamsTopicFloatingState, tabs: Readonly<Record<string, WorkbenchTab>>): string {
+  if (floating.agentTarget) return floating.targetTabId ? tabs[floating.targetTabId]?.topicId ?? '' : ''
   return floating.targetTopicId ?? (floating.targetTabId ? tabs[floating.targetTabId]?.topicId : undefined) ?? PMO_TEAMS_TOPIC_ID
 }
 export function pmoTeamsTopicFloatingTargetTabId(
@@ -134,6 +146,7 @@ export function pmoTeamsTopicFloatingTargetTabId(
   layout: WorkspaceLayout | undefined,
   _pmoSessionId: string | null
 ): string | undefined {
+  if (floating.agentTarget) return floating.targetTabId ?? undefined
   if (floating.targetTabId === null) return undefined
   if (floating.targetTabId) return floating.targetTabId
   const topicId = pmoTeamsTopicFloatingTargetTopicId(floating, tabs)
@@ -149,6 +162,7 @@ export function pmoTeamsTopicFloatingTargetTabId(
 
 /** Only entering without an explicit target uses the original saved default. No global navigation or Run operation. */
 export function floatingMoteDefaultSelection(floating: PmoTeamsTopicFloatingState): PmoTeamsTopicFloatingState {
+  if (floating.agentTarget) return floating
   const current = useAppStore.getState(), topicId = pmoTeamsTopicFloatingTargetTopicId(floating, current.tabs)
   const workspace = current.config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)
   const topics = scratchTopicsForWorkspace(current.scratchTopicSnapshots, workspace)
@@ -164,6 +178,7 @@ export function floatingMoteDefaultSelection(floating: PmoTeamsTopicFloatingStat
 
 /** Capture a first confirmed local choice once; unknown saved addresses stay verbatim. */
 function initialFloatingSelection(floating: PmoTeamsTopicFloatingState): PmoTeamsTopicFloatingState {
+  if (floating.agentTarget) return floating
   const current = useAppStore.getState()
   const topicId = pmoTeamsTopicFloatingTargetTopicId(floating, current.tabs)
   const tabId = pmoTeamsTopicFloatingTargetTabId(floating, current.tabs, current.layouts[SCRATCH_WORKSPACE_ID], null)
@@ -189,6 +204,16 @@ function initialFloatingSelection(floating: PmoTeamsTopicFloatingState): PmoTeam
 /** A bookmark never authorizes a different Agent that later occupies its Region. */
 export function pmoTeamsTopicFloatingAgentIssue(floating: PmoTeamsTopicFloatingState,
   tab: WorkbenchTab | undefined, session?: SessionSnapshot): string | null {
+  if (floating.agentTarget) {
+    if (!floating.agentTarget.agentSessionId) return '原 Goal 尚未确认 Supervisor。巡查请求保留；请明确选择 Supervisor。'
+    if (!floating.reference) return '原 Agent 的准确对话位置尚未确认。原身份、请求和输入保留；请选择原位置或读取原 Session。'
+    const region = tab?.regions[floating.reference.regionId]
+    if (!region || region.kind !== 'agent' || !session && !floating.targetAgent && region.sessionId !== floating.agentTarget.agentSessionId ||
+      floating.targetAgent && region.sessionId !== floating.targetAgent.presentationSessionId ||
+      session?.control.kind === 'agent' && (session.control.agentSessionId !== floating.agentTarget.agentSessionId ||
+        floating.agentTarget.hostId && session.control.hostId !== floating.agentTarget.hostId))
+      return '原 Agent 未在所选位置确认。原身份和工作保留；请重新读取原对话位置。'
+  }
   if (!floating.targetAgent || !floating.reference) return null
   const region = tab?.id === floating.reference.tabId ? tab.regions[floating.reference.regionId] : undefined
   if (!region || region.kind !== 'agent' || region.sessionId !== floating.targetAgent.presentationSessionId || session?.control.kind === 'agent' &&
@@ -222,7 +247,7 @@ export function pmoTeamsTopicFloatingViewTargets(
   const topicId = pmoTeamsTopicFloatingTargetTopicId(floating, tabs)
   const tabId = pmoTeamsTopicFloatingTargetTabId(floating, tabs, layout, pmoSessionId)
   const tab = tabId ? tabs[tabId] : undefined
-  if (!tab || tab.workspaceId !== SCRATCH_WORKSPACE_ID || tab.topicId !== topicId) return undefined
+  if (!tab || !floating.agentTarget && (tab.workspaceId !== SCRATCH_WORKSPACE_ID || tab.topicId !== topicId)) return undefined
   if (projection) {
     const current = useAppStore.getState()
     const projected = projectWorkbenchProjection(current.layouts[projection.displayWorkspaceId], tabs, projection)
@@ -266,13 +291,14 @@ export function pinPmoTeamsTopicFloating(): void {
 export function requestPmoTeamsTopicFloatingOpen(options?: { targetTopicId?: string; targetTabId?: string; reference?: WorkbenchProjectionSelection; onReturnFocus?: () => void }): void {
   cancelClose()
   captureFocus(options?.onReturnFocus)
-  const previous = snapshot(), current = useAppStore.getState()
+  const retained = snapshot(), previous = retained.agentTarget ? { ...retained, targetTopicId: undefined, targetTabId: undefined, reference: undefined, targetAgent: undefined } : retained
+  const current = useAppStore.getState()
   const suppliedReference = options?.reference ? { displayWorkspaceId: options.reference.displayWorkspaceId,
     groupId: options.reference.groupId, tabId: options.reference.tabId, regionId: options.reference.regionId } : undefined
   const tabId = options?.targetTabId?.trim() ?? options?.reference?.tabId
   const topicId = options?.targetTopicId?.trim() ?? (tabId ? current.tabs[tabId]?.topicId : undefined)
   const retargeted = Boolean(topicId && topicId !== previous.targetTopicId || tabId && tabId !== previous.targetTabId)
-  let next: PmoTeamsTopicFloatingState = { ...previous, open: true, preview: false, ...(topicId ? { targetTopicId: topicId } : {}),
+  let next: PmoTeamsTopicFloatingState = { ...previous, open: true, preview: false, agentTarget: undefined, entryMessage: undefined, entryContext: undefined, ...(topicId ? { targetTopicId: topicId } : {}),
     ...(tabId ? { targetTabId: tabId } : topicId && topicId !== previous.targetTopicId ? { targetTabId: undefined } : {}),
     ...(suppliedReference ? { reference: suppliedReference } : retargeted ? { reference: undefined } : {}),
     ...(tabId || suppliedReference || retargeted ? { targetAgent: undefined } : {}) }
@@ -285,7 +311,7 @@ export function requestPmoTeamsTopicFloatingOpen(options?: { targetTopicId?: str
     resolvedTabId !== pmoTeamsTopicFloatingTargetTabId(previous, current.tabs, layout, current.agentFocus.pmo.sessionId) ||
     Boolean(suppliedReference && (!previous.reference || !sameWorkbenchProjectionSelection(suppliedReference, previous.reference)))
   if (isOpening) {
-    next = { ...next, conversationEntry: (previous.conversationEntry ?? 0) + 1 }
+    next = { ...next, conversationEntry: nextConversationEntry() }
     const workspace = current.config?.workspaces.find(one => one.id === SCRATCH_WORKSPACE_ID)
     const topics = scratchTopicsForWorkspace(current.scratchTopicSnapshots, workspace)
     const topic = topics?.find(one => one.id === resolvedTopicId)
@@ -305,13 +331,50 @@ export function requestPmoTeamsTopicFloatingOpen(options?: { targetTopicId?: str
     document.querySelector<HTMLElement>('[data-pmo-teams-topic-floating]')?.focus({ preventScroll: true })
   })
 }
+
+/** Open the original Agent synchronously, before any business input or recovery awaits. */
+export function requestAgentConversationFloatingOpen(agentSessionId: string | null, hostId?: string, entryMessage?: string, originalReference?: WorkbenchProjectionSelection,
+  entryContext?: PmoTeamsTopicFloatingState['entryContext']): number {
+  cancelClose(); captureFocus()
+  const current = useAppStore.getState(), previous = snapshot()
+  const suppliedReference = originalReference ? { displayWorkspaceId: originalReference.displayWorkspaceId, groupId: originalReference.groupId,
+    tabId: originalReference.tabId, regionId: originalReference.regionId } : undefined
+  const sessions = current.sessions.filter(session => session.kind === 'agent' && session.control.agentSessionId === agentSessionId && (!hostId || session.control.hostId === hostId))
+  const session = sessions.length === 1 ? sessions[0] : undefined
+  const candidates = Object.values(current.tabs).flatMap(tab => Object.values(tab.regions).flatMap(region =>
+    session && region.kind === 'agent' && region.sessionId === session.id ? [{ tab, region }] : []))
+  const sameOriginal = previous.agentTarget?.agentSessionId === agentSessionId && (!hostId || previous.agentTarget.hostId === hostId || previous.targetAgent?.hostId === hostId)
+  const previousCandidate = sameOriginal && previous.reference ? candidates.find(item => item.tab.id === previous.reference!.tabId && item.region.regionId === previous.reference!.regionId) : undefined
+  const candidate = suppliedReference ? candidates.find(item => item.tab.id === suppliedReference.tabId && item.region.regionId === suppliedReference.regionId)
+    : previousCandidate ?? (candidates.length === 1 ? candidates[0] : undefined)
+  const references = candidate ? Object.entries(current.layouts).flatMap(([displayWorkspaceId, layout]) => layout.groups
+    .filter(group => groupIds(layout.root).includes(group.id) && group.tabOrder.includes(candidate.tab.id))
+    .map(group => ({ displayWorkspaceId, groupId: group.id, tabId: candidate.tab.id, regionId: candidate.region.regionId }))) : []
+  const retained = sameOriginal && previous.reference ? references.find(reference => sameWorkbenchProjectionSelection(reference, previous.reference!)) : undefined
+  const reference = suppliedReference ?? retained ?? (sameOriginal && previous.reference ? previous.reference : references.length === 1 ? references[0] : null)
+  const sameEntry = Boolean(sameOriginal && entryContext && previous.entryContext && JSON.stringify(entryContext) === JSON.stringify(previous.entryContext))
+  const conversationEntry = sameEntry && previous.conversationEntry !== undefined ? previous.conversationEntry : nextConversationEntry()
+  update({ open: true, preview: false, agentTarget: { agentSessionId, ...(hostId ? { hostId } : {}) },
+    targetTopicId: undefined, targetTabId: suppliedReference?.tabId ?? candidate?.tab.id ?? (sameOriginal ? previous.targetTabId ?? null : null), reference,
+    targetAgent: session?.control.kind === 'agent' ? { hostId: session.control.hostId, sessionId: session.control.agentSessionId, presentationSessionId: session.id } : sameOriginal ? previous.targetAgent : undefined,
+    entryMessage, entryContext, conversationEntry })
+  if (session && reference) current.setViewMode(session.id, 'activity', { focus: false })
+  requestAnimationFrame(() => {
+    if (snapshot().open && snapshot().agentTarget?.agentSessionId === agentSessionId && snapshot().conversationEntry === conversationEntry)
+      document.querySelector<HTMLElement>('[data-pmo-teams-topic-floating]')?.focus({ preventScroll: true })
+  })
+  return conversationEntry
+}
+export function setAgentConversationFloatingMessage(agentSessionId: string | null, entryMessage?: string, expectedEntry?: number): void {
+  if (snapshot().agentTarget?.agentSessionId === agentSessionId && (expectedEntry === undefined || snapshot().conversationEntry === expectedEntry)) update({ entryMessage }, false)
+}
 export function requestPmoTeamsTopicFloatingClose(options?: { restoreFocus?: boolean }): void {
   cancelClose()
   const active = document.activeElement
   const inside = active instanceof HTMLElement && Boolean(active.closest('[data-pmo-teams-topic-floating]'))
   const target = returnFocus
   returnFocus = null
-  update({ open: false, preview: false, conversationEntry: undefined })
+  update({ open: false, preview: false, ...(snapshot().agentTarget ? {} : { conversationEntry: undefined }) })
   if (options?.restoreFocus === false || !inside) return
   requestAnimationFrame(() => {
     if (snapshot().open || snapshot().preview) return
@@ -328,7 +391,12 @@ export function subscribePmoTeamsTopicFloatingState(listener: () => void): () =>
   listeners.add(listener)
   unsubscribeTabRemoved ??= subscribeWorkbenchTabRemoved((tab, placement) => {
     const current = state
-    if (!current || current.targetTabId !== tab.id || tab.workspaceId !== SCRATCH_WORKSPACE_ID ||
+    if (!current || current.targetTabId !== tab.id) return
+    if (current.agentTarget) {
+      update({ entryMessage: '原对话 Tab 已关闭。原 Agent 身份与位置引用保留；读取原 Session 后继续。' }, false)
+      return
+    }
+    if (tab.workspaceId !== SCRATCH_WORKSPACE_ID ||
       current.targetTopicId && current.targetTopicId !== tab.topicId) return
     const topicId = current.targetTopicId ?? tab.topicId
     if (!topicId) return

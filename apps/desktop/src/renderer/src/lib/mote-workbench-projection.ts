@@ -20,11 +20,11 @@ export function moteWorkbenchProjection(catalog: AgentMuxSpaceCatalog | null, ta
   const retained: MoteWorkbenchProjectionResult = { catalog, projection: null, choices: [], retainedTabId: floating.targetTabId ?? tab?.id, issue: null, issueKind: null }
   const identityIssue = pmoTeamsTopicFloatingAgentIssue(floating, tab)
   if (identityIssue) return { ...retained, issue: identityIssue, issueKind: 'identity' }
-  if (!tab || !catalog || floating.targetTopicId && tab.topicId !== floating.targetTopicId) return retained
+  if (!tab || !catalog || !floating.agentTarget && floating.targetTopicId && tab.topicId !== floating.targetTopicId) return retained
   const entity = catalog.tabs.find(item => item.tabId === tab.id)
   const zone = entity?.zoneId ? catalog.zones.find(item => item.zoneId === entity.zoneId) : undefined
   const choices = [...new Map(catalog.locations.filter(location => location.tabId === tab.id &&
-    location.regionId === tab.layout.activeRegionId).map(({ displayWorkspaceId, groupId, tabId, regionId }) => {
+    location.regionId === (floating.agentTarget && floating.reference ? floating.reference.regionId : tab.layout.activeRegionId)).map(({ displayWorkspaceId, groupId, tabId, regionId }) => {
       const reference = { displayWorkspaceId, groupId, tabId, regionId }
       return [JSON.stringify(reference), reference] as const
     })).values()]
@@ -48,7 +48,7 @@ export function moteWorkbenchProjection(catalog: AgentMuxSpaceCatalog | null, ta
   return { catalog, retainedTabId: tab.id, choices,
     issueKind: parentConfirmed ? 'parent-available' : null,
     issue: parentConfirmed ? 'The exact discussion location is not confirmed. Its original content and reference are kept.' : null, projection: {
-    entity: zone ? { kind: 'zone', zoneId: zone.zoneId } : { kind: 'tab', tabId: tab.id },
+    entity: zone && !floating.agentTarget ? { kind: 'zone', zoneId: zone.zoneId } : { kind: 'tab', tabId: tab.id },
     presentationId: PMO_FLOATING_TAB_SLOT_PREFIX.replace(/-slot$/, ''),
     displayWorkspaceId: reference.displayWorkspaceId, catalog,
     selectionMode: parentConfirmed ? 'parent-occurrence' : 'occurrence',

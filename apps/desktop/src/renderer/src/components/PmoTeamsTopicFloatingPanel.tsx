@@ -10,6 +10,7 @@ import { scratchMoteTopics } from '../lib/scratch-topic-snapshots'
 import { keepPmoTeamsTopicFloatingPreview, leavePmoTeamsTopicFloatingPreview, pinPmoTeamsTopicFloating,
   createPmoTeamsTopicTargetSelector, requestPmoTeamsTopicFloatingClose, requestPmoTeamsTopicFloatingOpen, PMO_FLOATING_TAB_SLOT_PREFIX,
   readPmoTeamsTopicFloatingState, subscribePmoTeamsTopicFloatingState, pmoTeamsTopicFloatingTargetTopicId,
+  requestAgentConversationFloatingOpen,
   pmoTeamsTopicFloatingAgentIssue, resolvePmoTeamsTopicFloatingSize, type PmoTeamsTopicFloatingSize,
   type PmoTeamsTopicFloatingState } from '../lib/pmo-teams-topic-floating'
 import { moteTargetStatus, usePmoTeamsTopicTarget } from '../lib/pmo-teams-topic-target'
@@ -32,13 +33,15 @@ import { SpaceObjectContextMenu } from './SpaceObjectContextMenu'
 import { MoteArchiveNotice, useMoteArchiveAction } from './MoteArchiveNotice'
 import { primaryMoteHasBot } from '../lib/primary-mote-executor'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
-import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
+import { workbenchProjectionLocationsMatchOwner, type WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import type { MoteWorkbenchProjectionResult } from '../lib/mote-workbench-projection'
 import { workbenchDisplayReferenceMatches } from '../lib/workbench-resource-display'
 import { spatialCatalog } from '../lib/space-agent-control'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { contextOperationKey, type MoteContextFailure, type MoteContextOperation, type MoteContextTarget } from '../../../shared/mote-context-observation'
 import { MoteContextStatus } from './MoteContextStatus'
+import { formatSessionAddress } from '@agentmux/core/sharing'
+import type { PmoTeamsTopicTarget } from '../lib/pmo-teams-topic-target'
 
 const ThemeStatusNeutralIcon = semanticIconComponent('status.neutral')
 const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
@@ -49,6 +52,40 @@ const ThemeLayoutOpenLeftIcon = semanticIconComponent('layout.open-left')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 
+/** The shared workbench presents the exact original Agent, including Project Agents. */
+function OriginalAgentConversation({ floating, target, projectionState, visible, onSelect }: {
+  floating: PmoTeamsTopicFloatingState; target: PmoTeamsTopicTarget; projectionState?: MoteWorkbenchProjectionResult | undefined
+  visible: boolean; onSelect(reference: WorkbenchProjectionSelection): void
+}) {
+  const agent = floating.agentTarget!
+  const session = useAppStore(state => state.sessions.find(item => item.kind === 'agent' && item.control.agentSessionId === agent.agentSessionId && (!agent.hostId || item.control.hostId === agent.hostId)))
+  const tabs = useAppStore(state => state.tabs)
+  const choices = useMemo(() => {
+    const catalog = projectionState?.catalog
+    if (!catalog || !session) return []
+    return catalog.locations.filter(location => {
+      const region = tabs[location.tabId]?.regions[location.regionId]
+      return region?.kind === 'agent' && region.sessionId === session.id && workbenchProjectionLocationsMatchOwner(catalog, location.tabId, [location])
+    })
+  }, [projectionState?.catalog, session?.id, tabs])
+  const issue = target.identityIssue ?? projectionState?.issue
+  return <>
+    <div className="workbench-restore-notice mote-context-notice original-agent-conversation" data-original-agent={agent.agentSessionId ?? ''}>
+      <strong>{target.label}</strong><span>{target.statusText} · {agent.agentSessionId ?? 'Supervisor 未确认'}</span>
+      {floating.entryMessage ? <span role="status">{floating.entryMessage}</span> : null}
+      {issue ? <span role="status">{issue}</span> : null}
+      {issue ? <>
+        <button type="button" className="small-button" onClick={() => requestAgentConversationFloatingOpen(agent.agentSessionId, agent.hostId, floating.entryMessage, floating.reference ?? undefined, floating.entryContext)}>重新读取原对话</button>
+        {agent.agentSessionId ? <button type="button" className="small-button" onClick={() => void api.ui.openObjectLink(formatSessionAddress(agent.agentSessionId!))}>读取原 Session</button> : null}
+        {choices.map((reference, index) => <button type="button" className="small-button" key={JSON.stringify(reference)} onClick={() => onSelect(reference)}>原对话位置 {index + 1}</button>)}
+      </> : null}
+    </div>
+    {!target.identityIssue && target.tab ? <WorkspaceWorkbench workspaceId={projectionState?.projection?.displayWorkspaceId ?? target.tab.workspaceId}
+      {...(target.tab.topicId ? { topicId: target.tab.topicId } : {})} topicIsolation="bound-only" viewOwnership="projection"
+      projection={projectionState?.projection ?? undefined} viewHostPrefix={PMO_FLOATING_TAB_SLOT_PREFIX}
+      retainedTabId={target.tab.id} visible={visible} interactiveResize={false} /> : null}
+  </>
+}
 
 function capturedContextReference(reference: WorkbenchProjectionSelection | null | undefined): WorkbenchProjectionSelection | null {
   return reference ? { displayWorkspaceId: reference.displayWorkspaceId, groupId: reference.groupId,
@@ -289,24 +326,24 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
     [floating.open, floating.preview, target.topicId, target.tabId, floating.reference?.displayWorkspaceId,
       floating.reference?.groupId, floating.reference?.tabId, floating.reference?.regionId])
   useEffect(() => {
-    if (!floating.open) return
+    if (!floating.open || floating.agentTarget) return
     // A missing exact Tab has no proven Topic; do not turn a derived default into saved identity.
     if (!floating.targetTopicId && typeof floating.targetTabId === 'string' && !target.tab) return
     if (!floating.targetTopicId || floating.targetTabId === undefined && target.tabId)
       setFloating({ targetTopicId: target.topicId, ...(target.tabId ? { targetTabId: target.tabId } : {}) })
     else if (floating.targetTabId === undefined && !target.tabId && discussionChoices.length === 0 && motes.some(topic => topic.id === target.topicId))
       setFloating({ targetTabId: null })
-  }, [floating.open, floating.targetTopicId, floating.targetTabId, target.topicId, target.tabId, target.tab, discussionChoices.length, motes, setFloating])
+  }, [floating.open, floating.agentTarget, floating.targetTopicId, floating.targetTabId, target.topicId, target.tabId, target.tab, discussionChoices.length, motes, setFloating])
   useEffect(() => {
     const reference = projectionState?.projection?.selection[0]
     if (floating.open && floating.reference === undefined && reference?.tabId === target.tabId)
       setFloating({ reference })
   }, [floating.open, floating.reference, target.tabId, projectionState?.projection, setFloating])
   useEffect(() => {
-    if (floating.open && target.session && pmoFocusSessionId(useAppStore.getState().agentFocus) !== target.session.id) focusPmoSession(target.session.id)
-  }, [floating.open, target.session, focusPmoSession])
+    if (floating.open && !floating.agentTarget && target.session && pmoFocusSessionId(useAppStore.getState().agentFocus) !== target.session.id) focusPmoSession(target.session.id)
+  }, [floating.open, floating.agentTarget, target.session, focusPmoSession])
   useEffect(() => {
-    if (!floating.open || !scratch || target.identityIssue) return
+    if (!floating.open || floating.agentTarget || !scratch || target.identityIssue) return
     let current = true
     const captured: MoteContextTarget = { workspaceId: SCRATCH_WORKSPACE_ID, hostId: scratch.hostId, directoryPath: scratch.path,
       topicId: target.topicId, tabId: target.tabId ?? null, reference: capturedContextReference(floatingRef.current.reference) }
@@ -329,7 +366,7 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
         }
       })
     return () => { current = false; settleContextOperation(operation, 'unconfirmed') }
-  }, [floating.open, scratch, target.topicId, target.tabId, target.identityIssue, preparationAttempt, openScratchTopic])
+  }, [floating.open, floating.agentTarget, scratch, target.topicId, target.tabId, target.identityIssue, preparationAttempt, openScratchTopic])
 
   useLayoutEffect(() => {
     const panel = panelRef.current
@@ -609,18 +646,29 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
       onOpenMoteSpace={openSpace} /> : null}
     <div className="pmo-teams-topic-floating__content">
     {floating.preferenceIssue ? <div role="status" className="workbench-restore-notice mote-size-notice">{floating.preferenceIssue}</div> : null}
-    {selectedMote?.moteArchive?.state === 'archived' ? <div role="status" className="workbench-restore-notice mote-context-notice" data-mote-archived={selectedMote.id}>
+    {!floating.agentTarget && selectedMote?.moteArchive?.state === 'archived' ? <div role="status" className="workbench-restore-notice mote-context-notice" data-mote-archived={selectedMote.id}>
       <span>{selectedMote.title} · Archived. The original work surface remains available.</span>
       <button type="button" className="small-button" disabled={archive.pending === selectedMote.id} onClick={() => void archive.change(selectedMote, false)}>Restore Mote</button>
     </div> : null}
-    <MoteArchiveNotice workspaceId={SCRATCH_WORKSPACE_ID} issue={archive.issue ?? (selectedMote?.moteArchive?.state === 'unknown' ? selectedMote.moteArchive.issue : null)} failure={archive.failure} targetName={selectedMote?.title} />
-    {!scratch ? <div role="status" className="workbench-restore-notice">Original Mote retained · Workspace is still restoring</div> : null}
-    {visible && (directoryError || !topics || !motes.some(mote => mote.id === target.topicId)) ? <div role="status" className="workbench-restore-notice mote-context-notice">
+    {!floating.agentTarget ? <MoteArchiveNotice workspaceId={SCRATCH_WORKSPACE_ID} issue={archive.issue ?? (selectedMote?.moteArchive?.state === 'unknown' ? selectedMote.moteArchive.issue : null)} failure={archive.failure} targetName={selectedMote?.title} /> : null}
+    {!scratch && !floating.agentTarget ? <div role="status" className="workbench-restore-notice">Original Mote retained · Workspace is still restoring</div> : null}
+    {visible && !floating.agentTarget && (directoryError || !topics || !motes.some(mote => mote.id === target.topicId)) ? <div role="status" className="workbench-restore-notice mote-context-notice">
       <span>{directoryError ? 'Mote directory could not be refreshed: ' + directoryError : 'Mote directory is not confirmed yet.'} The current work surface is retained.</span>
       <button type="button" className="small-button" onClick={() => void refreshTopics(SCRATCH_WORKSPACE_ID, true)}>Retry directory</button>
     </div> : null}
     <div className="pmo-teams-topic-floating__body">
-      <MoteProfilePopover workspaceId={SCRATCH_WORKSPACE_ID} topicId={target.topicId} reference={floating.reference}
+      {floating.agentTarget ? <OriginalAgentConversation floating={floating} target={target} projectionState={projectionState} visible={visible}
+        onSelect={reference => {
+          const state = useAppStore.getState(), region = state.tabs[reference.tabId]?.regions[reference.regionId]
+          const session = region?.kind === 'agent' ? sessionPresentationById(state.sessions).get(region.sessionId) : undefined
+          if (!session || session.control.kind !== 'agent' || session.control.agentSessionId !== floating.agentTarget?.agentSessionId ||
+            floating.agentTarget.hostId && session.control.hostId !== floating.agentTarget.hostId || !workbenchDisplayReferenceMatches(state.layouts[reference.displayWorkspaceId], reference)) {
+            reportError(new Error('所选位置未确认原 Agent。原身份与工作面保留，请重新读取。')); return
+          }
+          state.setViewMode(session.id, 'activity', { focus: false })
+          setFloating({ targetTabId: reference.tabId, reference, agentTarget: floating.agentTarget,
+            targetAgent: { hostId: session.control.hostId, sessionId: session.control.agentSessionId, presentationSessionId: session.id } })
+        }} /> : <MoteProfilePopover workspaceId={SCRATCH_WORKSPACE_ID} topicId={target.topicId} reference={floating.reference}
         active={visible} onReferenceSelect={selectFileReference}>{profileTrigger =>
       !target.tabId && discussionChoices.length === 0 && !motes.some(topic => topic.id === target.topicId) ?
         <div role="status" className="workbench-restore-notice" data-workbench-pending-owner>Original Mote retained · Topic directory is still being confirmed</div> :
@@ -639,7 +687,7 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
             {profileTrigger}
             <button type="button" className="pane-action"
             aria-label="Open in Space" title="Open current Mote in Space" onClick={() => openSpace()}><ThemeActionOpenExternalIcon size={14} /></button></>} /></MoteWorkface>}
-      </MoteProfilePopover>
+      </MoteProfilePopover>}
     </div>
     </div>
     <MoteRenameDialog target={renameTarget && scratch ? { topic: renameTarget, workspace: scratch } : null} onClose={() => setRenameTarget(null)} returnFocus={returnToMote} />
