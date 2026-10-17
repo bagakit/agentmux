@@ -17,8 +17,15 @@ export type RendererOverlayCost = {
 export type RendererInputRequestCost = { started: number; completed: number; failed: number; pending: number; wall: RendererWorkTiming }
 export type RendererConsumerCost = { checks: number; changes: number; commits: number }
 export type RendererVisibilityCost = { visible: RendererConsumerCost; hidden: RendererConsumerCost }
+/** This terminal instance's lifetime writes. Callback wait overlaps other work; it is not CPU. */
+export type RendererTerminalWriteCost = {
+  started: number; completed: number; bytes: number; stringCodeUnits: number
+  callbackWall: RendererWorkTiming
+}
 export type RendererTerminalCost = {
-  sessionId: string; runId: string; regionId: string | null
+  hostId: string; sessionId: string; runId: string; regionId: string | null; instanceId: number
+  writes: Record<RendererTerminalWriteContext['cause'], RendererTerminalWriteCost>
+  renderCallbacks: number
   visible: boolean; visibleSinceAt: number | null; readySinceAt: number | null
   revealed: boolean; liveReady: boolean; acceptsInput: boolean; replaying: boolean
   inFlightWrites: number; queuedItems: number; queuedBytes: number; pendingItems: number; pendingBytes: number

@@ -626,6 +626,9 @@ export function TerminalView({
     rememberedSelectionRef.current = ''
     let incidents: ReturnType<typeof createClientIncidentRecorder> | undefined
     let renderCallbacks = 0, writeCompletions = 0
+    const writeCost = () => ({ started: 0, completed: 0, bytes: 0, stringCodeUnits: 0,
+      callbackWall: { count: 0, totalMs: 0, maxMs: 0 } })
+    const writes = { live: writeCost(), history: writeCost(), checkpoint: writeCost() }
     const terminal = new Terminal({
       ...terminalOptions(themeId, fontSizeRef.current),
       scrollback: 5_000
@@ -725,9 +728,18 @@ export function TerminalView({
         runId: session.control.run.runId, regionId: linkOriginRef.current.regionId ?? null, instanceId: performanceInstance, cause }
       linkPreviewWrites++
       clearLinkPreview()
+      const cost = writes[cause]
+      cost.started++
+      if (typeof data === 'string') cost.stringCodeUnits += data.length
+      else cost.bytes += data.byteLength
       try {
         await terminalWrite(terminal, data)
         writeCompletions++
+        cost.completed++
+        const elapsed = Math.max(0, rendererPerformance.start() - observationStarted)
+        cost.callbackWall.count++
+        cost.callbackWall.totalMs += elapsed
+        cost.callbackWall.maxMs = Math.max(cost.callbackWall.maxMs, elapsed)
       } finally {
         rendererPerformance.terminalWrite(observationVisible, data, observationStarted, observationContext)
         linkPreviewWrites--
@@ -1008,7 +1020,11 @@ export function TerminalView({
     // Count callbacks only; no buffer, geometry or archive work is scheduled per frame.
     const incidentRender = terminal.onRender(() => { renderCallbacks++ })
     const releasePerformance = rendererPerformance.registerTerminal(() => ({
-      sessionId: session.id, runId: session.control.run.runId, regionId: linkOriginRef.current.regionId ?? null,
+      hostId: session.control.hostId, sessionId: session.control.kind === 'agent' ? session.control.agentSessionId : session.id, runId: session.control.run.runId,
+      regionId: linkOriginRef.current.regionId ?? null, instanceId: performanceInstance,
+      writes: { live: { ...writes.live, callbackWall: { ...writes.live.callbackWall } },
+        history: { ...writes.history, callbackWall: { ...writes.history.callbackWall } },
+        checkpoint: { ...writes.checkpoint, callbackWall: { ...writes.checkpoint.callbackWall } } }, renderCallbacks,
       visible: visibleRef.current, visibleSinceAt: visibleSinceRef.current, readySinceAt,
       revealed, liveReady: readyForLiveOutput, acceptsInput: acceptsCurrentInput(), replaying: replayingContinuation,
       inFlightWrites: linkPreviewWrites, queuedItems: liveOutputQueue.length, queuedBytes: liveOutputQueue.byteLength, pendingItems: pending.length, pendingBytes: pending.length ? pendingBytes : 0,
