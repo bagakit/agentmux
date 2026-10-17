@@ -119,7 +119,6 @@ input:where([type='checkbox'], [type='radio'], [type='range'], [type='color'], [
 .global-system-notices__details { position: fixed; inset: auto; margin: 0; visibility: hidden; width: min(420px, 90vw); max-height: 70vh; overflow-y: auto; padding: var(--sp-3); border: 0; border-radius: var(--radius); color: var(--text-2); background: var(--surface-2); box-shadow: var(--elev-2), var(--hl); }
 .global-system-notices__heading { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); font-size: var(--fs-meta); }
 .global-system-notices__details .service-window { margin: 0; padding: var(--sp-2) 0; border: 0; background: transparent; box-shadow: none; }
-.global-system-notices__details .service-window__body { overflow-wrap: anywhere; }
 .global-system-notices__section { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin: var(--sp-3) 0 var(--sp-1); color: var(--text-3); font-size: var(--fs-micro); font-weight: 500; }
 .global-system-notices__section h3 { margin: 0; font: inherit; }
 .global-system-notices__section span { margin-left: var(--sp-1); font-variant-numeric: tabular-nums; }
