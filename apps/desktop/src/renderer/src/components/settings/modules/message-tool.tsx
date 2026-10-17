@@ -22,10 +22,10 @@ async function saveCompletion(messageToolCompletion: ComposerInputConfig, expect
 export const messageToolSettingsModule = {
   id: 'message-tool',
   group: 'message-tool',
-  title: 'Input & Mailbox',
-  description: 'Input layout, configurable shortcut input, sending shortcuts, and each Agent’s mailbox.',
+  title: 'User Input',
+  description: 'Input layout, shortcut prefixes, prompt suggestions and sending shortcuts.',
   icon: semanticIconComponent('object.inbox'),
-  keywords: 'message tool composer input initial layout one line two lines send immediately steer queue mailbox inbox outbox history source keyboard shortcuts enter draft skills commands files agents trigger prefix dollar slash at 技能 指令 文件 引用 快捷输入 一行 两行 初始 发送 立即发送 邮箱 历史 快捷键',
+  keywords: 'message tool composer user input initial layout one line two lines send immediately steer queue keyboard shortcuts enter draft skills commands files agents trigger prefix dollar slash at 技能 指令 文件 引用 快捷输入 用户输入 一行 两行 初始 发送 立即发送 快捷键',
   searchTargets: [
     { id: 'initial-layout', title: 'Initial layout', keywords: 'one line two lines input composer' },
     { id: 'completion-command', title: 'Commands prefix', keywords: 'shortcut input trigger symbol slash prompts' },
@@ -33,9 +33,8 @@ export const messageToolSettingsModule = {
     { id: 'completion-reference', title: 'Agents & files prefix', keywords: 'shortcut input trigger symbol at references' },
     { id: 'completion-keywords', title: 'Suggest saved prompts by keyword', keywords: 'shortcut input suggestions bare keyword' },
     { id: 'message-shortcuts', title: 'Keyboard shortcuts', keywords: 'sending enter steer queue draft', kind: 'info' },
-    { id: 'mailbox', title: 'Mailbox', keywords: 'inbox outbox history', kind: 'info' },
   ],
-  savedSummary: config => `${(config.messageToolInitialLayout ?? MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT) === 'one-line' ? 'One-line' : 'Two-line'} input · Per-Agent mailbox`,
+  savedSummary: config => `${(config.messageToolInitialLayout ?? MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT) === 'one-line' ? 'One-line' : 'Two-line'} input · Shortcut prefixes`,
   Pane({ config }) {
     return <MessageToolSettingsPane initialLayout={config.messageToolInitialLayout ?? MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT} onSave={saveInitialLayout} {...(config.messageToolCompletion ? { completion: config.messageToolCompletion } : {})} onSaveCompletion={saveCompletion} />
   }

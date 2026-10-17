@@ -40,6 +40,7 @@ import { USER_PROFILE_NAME_LIMIT, USER_PROFILE_ABOUT_LIMIT, USER_PROFILE_AVATAR_
 import { FOCUS_RECENT_ACTIVITY_HOURS, FOCUS_REPLY_LINES, FOCUS_PREVIEW_TRIGGERS, FOCUS_RECENT_INPUTS } from '../shared/focus-preferences.js'
 import { NOTE_CONTENT_WIDTHS, validNoteFontSize } from '../shared/notes-preferences.js'
 import { GOALS_VIEW_IDS } from '../shared/goals-preferences.js'
+import { validateAutomationPreferences } from '../shared/automation-preferences.js'
 import { BROWSER_START_PAGE_TITLE_LIMIT, BROWSER_START_PAGE_SUBTITLE_LIMIT, validBrowserStartPageText, validBrowserStartPageImage } from '../shared/browser-start-page.js'
 import { BROWSER_AGENT_CONTROL_LIMITS as EFFECT_LIMITS, BROWSER_AGENT_GLOW_BLENDS, BROWSER_AGENT_GLOW_ANIMATIONS, validBrowserAgentGlowColor } from '../shared/browser-agent-control.js'
 
@@ -312,8 +313,21 @@ const configSchema = z
       try { normalizeAgentContinuityPolicy(authored as AppConfig['continuity']) }
       catch { context.addIssue({ code: 'custom', message: 'Invalid continuity policy. The maximum retry base delay must be at least the initial retry base delay.' }) }
     }),
+    automation: z.object({
+      progressIntervalMs: z.number().int().min(60_000).max(Number.MAX_SAFE_INTEGER).optional(),
+      progressPrompt: z.string().optional(),
+      calendarTimezone: z.string().optional(),
+      checkInSilenceMs: z.number().optional(),
+      checkInMinIntervalMs: z.number().optional(),
+      checkInDailyBudget: z.number().optional(),
+      checkInQuietStart: z.string().optional(),
+      checkInQuietEnd: z.string().optional()
+    }).strict().optional().superRefine((value, context) => {
+      try { validateAutomationPreferences(value as AppConfig['automation']) }
+      catch (error) { context.addIssue({ code: 'custom', message: error instanceof Error ? error.message : 'Invalid automation defaults.' }) }
+    }),
     // Preserve authored historical data; this retired preference has no loading effect.
-    startup: z.object({ skipAgentAvailabilityCheckWait: z.boolean().optional() }).strict().optional(),
+    startup: z.object({ skipAgentAvailabilityCheckWait: z.boolean().optional().describe('Retained historical preference; not an editable setting') }).strict().optional(),
     profile: z.object({
       displayName: z.string().max(USER_PROFILE_NAME_LIMIT).refine(value => !/[\r\n\x00-\x1f]/.test(value)),
       about: z.string().max(USER_PROFILE_ABOUT_LIMIT),

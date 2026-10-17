@@ -10,7 +10,7 @@ export const inappConversationSettingsModule = {
   keywords: 'inapp in-app conversation activity terminal view reading input messages 对话 应用内 阅读 消息',
   searchTargets: [
     { id: 'conversation-view', title: 'Conversation view', keywords: 'activity terminal switch mode', kind: 'info' },
-    { id: 'input-preferences', title: 'Input & Mailbox', keywords: 'layout shortcut input mailbox', kind: 'action' },
+    { id: 'input-preferences', title: 'User Input', keywords: 'layout shortcut input prefixes', kind: 'action' },
     { id: 'appearance-preferences', title: 'Appearance', keywords: 'theme application typography', kind: 'action' },
     { id: 'references', title: 'Keyboard shortcuts and amux Protocols', keywords: 'read-only reference message format', kind: 'action' },
   ],
@@ -22,9 +22,9 @@ export const inappConversationSettingsModule = {
         <p className="settings-group-note">Read messages and work in the same Agent Session. Use Show Activity or Show Terminal in its input toolbar to switch that Agent’s view.</p>
       </section>
       <section className="settings-group" data-settings-field="input-preferences">
-        <header><span>Input &amp; Mailbox</span></header>
-        <p className="settings-group-note">Choose input layout and shortcut prefixes, or learn how to use each Agent’s mailbox. These preferences are shared with other views using the same input.</p>
-        <button type="button" className="small-button" onClick={() => onNavigate('message-tool')}>Open Input &amp; Mailbox</button>
+        <header><span>User Input</span></header>
+        <p className="settings-group-note">Choose input layout, shortcut prefixes and prompt suggestions. These preferences are shared with other views using the same input.</p>
+        <button type="button" className="small-button" onClick={() => onNavigate('message-tool')}>Open User Input</button>
       </section>
       <section className="settings-group" data-settings-field="appearance-preferences">
         <header><span>Appearance</span></header>

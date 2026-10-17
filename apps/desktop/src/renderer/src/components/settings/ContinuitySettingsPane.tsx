@@ -1,8 +1,9 @@
-import { DEFAULT_AGENT_CONTINUITY_CONTINUATION, DEFAULT_AGENT_CONTINUITY_POLICY, normalizeAgentContinuityPolicy, type AgentMuxContinuityPolicy } from '@agentmux/core/agent-session-continuity'
+import { DEFAULT_AGENT_CONTINUITY_POLICY, normalizeAgentContinuityPolicy, type AgentMuxContinuityPolicy } from '@agentmux/core/agent-session-continuity'
 import { TextInput } from '@agentmux/client-ui/input'
 import { useId, type ReactNode } from 'react'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraftRecord } from './use-setting-draft'
+import { executionSettings, type ExecutionSettings } from './continuity-settings-fields'
 import '../../styles/settings-continuity.css'
 
 const defaults = DEFAULT_AGENT_CONTINUITY_POLICY
@@ -17,21 +18,21 @@ function milliseconds(value: string): number {
   return Number.isSafeInteger(parsed) ? parsed : NaN
 }
 function editValue(policy: AgentMuxContinuityPolicy) {
-  return { ...policy, activeRecoveryDelayMs: seconds(policy.activeRecoveryDelayMs), confirmedIdleWindowMs: seconds(policy.confirmedIdleWindowMs),
+  return { ...executionSettings(policy), activeRecoveryDelayMs: seconds(policy.activeRecoveryDelayMs), confirmedIdleWindowMs: seconds(policy.confirmedIdleWindowMs),
     recheckIntervalMs: seconds(policy.recheckIntervalMs), recheckMaxAttempts: String(policy.recheckMaxAttempts),
     retryInitialDelayMs: seconds(policy.retryInitialDelayMs), retryMaxDelayMs: seconds(policy.retryMaxDelayMs), retryMaxAttempts: String(policy.retryMaxAttempts) }
 }
-function policyValue(value: ReturnType<typeof editValue>): AgentMuxContinuityPolicy {
-  return normalizeAgentContinuityPolicy({ ...value, activeRecoveryDelayMs: milliseconds(value.activeRecoveryDelayMs),
+function policyValue(value: ReturnType<typeof editValue>): ExecutionSettings {
+  return executionSettings(normalizeAgentContinuityPolicy({ ...value, activeRecoveryDelayMs: milliseconds(value.activeRecoveryDelayMs),
     confirmedIdleWindowMs: milliseconds(value.confirmedIdleWindowMs), recheckIntervalMs: milliseconds(value.recheckIntervalMs),
     recheckMaxAttempts: /^\d+$/.test(value.recheckMaxAttempts) ? Number(value.recheckMaxAttempts) : NaN,
     retryInitialDelayMs: milliseconds(value.retryInitialDelayMs), retryMaxDelayMs: milliseconds(value.retryMaxDelayMs),
-    retryMaxAttempts: /^\d+$/.test(value.retryMaxAttempts) ? Number(value.retryMaxAttempts) : NaN })
+    retryMaxAttempts: /^\d+$/.test(value.retryMaxAttempts) ? Number(value.retryMaxAttempts) : NaN }))
 }
 
 export function ContinuitySettingsPane({ preferences, onSave }: {
   preferences: Partial<AgentMuxContinuityPolicy> | undefined
-  onSave(value: AgentMuxContinuityPolicy, expected: AgentMuxContinuityPolicy): Promise<void>
+  onSave(value: ExecutionSettings, expected: ExecutionSettings): Promise<void>
 }) {
   const saved = normalizeAgentContinuityPolicy(preferences), draft = useSettingDraftRecord(editValue(saved)), saveState = useSettingsSave(), id = useId()
   const source = (key: keyof AgentMuxContinuityPolicy) => Object.hasOwn(preferences ?? {}, key) ? 'Custom saved value' : 'Built-in default'
@@ -79,18 +80,6 @@ export function ContinuitySettingsPane({ preferences, onSave }: {
         <TextInput id={`${id}-attempts`} className="continuity-count" aria-label="Recheck count" inputMode="numeric" value={draft.value.recheckMaxAttempts}
           aria-invalid={!/^\d+$/.test(draft.value.recheckMaxAttempts) || !Number.isSafeInteger(Number(draft.value.recheckMaxAttempts))} onChange={event => draft.setField('recheckMaxAttempts', event.target.value)} /></div>
       {duration('recheckIntervalMs', 'Recheck interval', 'Delay between follow-up observations of the same recovery operation.')}
-    </section>
-    <section className="settings-group" data-continuity-interruption-settings>
-      <header><span>Continue interrupted work</span><small>After native recovery</small></header>
-      <label className="browser-automation-toggle" data-settings-field="continuationEnabled"><input type="checkbox" aria-label="Continue interrupted work after recovery" checked={draft.value.continuationEnabled} onChange={event => draft.setField('continuationEnabled', event.target.checked)} />
-        <span><strong>Continue interrupted work after recovery</strong><small>After the same conversation is restored, send the fixed continuation only when the previous work was interrupted. Healthy reconnects send nothing.</small>{facts('continuationEnabled', defaults.continuationEnabled ? 'On' : 'Off')}</span></label>
-      <label className="browser-automation-toggle" data-settings-field="activeInterruptionFallback"><input type="checkbox" aria-label="Use active state when interruption detection is unsupported" checked={draft.value.activeInterruptionFallback} onChange={event => draft.setField('activeInterruptionFallback', event.target.checked)} />
-        <span><strong>Use active state when interruption detection is unsupported</strong><small>Only when the Provider cannot detect interruptions, treat the main session’s active state before exit as interrupted. A Provider that supports detection but reports an unknown result never uses this fallback.</small>{facts('activeInterruptionFallback', defaults.activeInterruptionFallback ? 'On' : 'Off')}</span></label>
-      <div className="continuity-preview" aria-label="Recovery delivery preview">
-        <p className="continuity-hint">{draft.value.continuationEnabled ? 'Interrupted work receives one fixed continuation after native recovery succeeds:' : 'Automatic continuation is off. No continuation is sent after recovery.'}</p>
-        {draft.value.continuationEnabled && <pre data-continuity-continuation-preview>{DEFAULT_AGENT_CONTINUITY_CONTINUATION}</pre>}
-        <p className="continuity-hint">The continuation may open one new model turn. Unknown earlier input is never replayed. Saving these preferences starts no recovery and sends nothing.</p>
-      </div>
     </section>
     {!valid && <p className="settings-inline-error" role="alert">Enter nonnegative seconds (up to millisecond precision) and whole-number counts within the safe integer range. The maximum retry base delay must be at least the initial retry base delay.</p>}
     <SettingsSaveBar save={saveState} dirty={draft.dirty} onSave={() => void save()} disabled={!valid} />
