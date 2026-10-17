@@ -25,6 +25,7 @@
 .settings-workflows__destinations small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
 .settings-workflows__inline-action { display: flex; align-items: center; gap: var(--sp-4); }
 .settings-workflows__inline-action button { flex: 0 0 auto; }
+[data-inapp-conversation-settings] .settings-workflows__inline-action { flex-wrap: wrap; }
 .settings-reading-size { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); margin: var(--sp-3) 0; }
 .settings-reading-size label { display: grid; gap: var(--sp-1); }
 .settings-reading-size strong { font-size: var(--fs-body); font-weight: 500; }
