@@ -1100,7 +1100,8 @@ type AppState = {
     signal?: AbortSignal,
     options?: SpatialControlOptions & { admittedControlRequestId?: string }
   ): Promise<AgentMuxControlResult>
-  selectSession(id: string, tabGroupId?: string): void
+  /** Whether the original display selection was committed. Refusal preserves the current context. */
+  selectSession(id: string, tabGroupId?: string): boolean
   prepareWorkbenchLayout(workspaceId: string): WorkspaceLayout
   createWorkbenchZone(input: { workspaceId: string; spaceIds: readonly string[] }): Promise<{ zone: AgentMuxZoneFact; save: AgentMuxSpatialSave; issues: AgentMuxSpatialIssue[] }>
   setZoneSpaceRelation(zoneId: string, spaceId: string, linked: boolean): Promise<AgentMuxSpaceBindingReport>
@@ -6577,7 +6578,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
   },
   selectSession(id, preferredTabGroupId) {
-    if (!workbenchViewCloseAllowsSession(get().closingWorkbenchViews, id)) return
+    if (!workbenchViewCloseAllowsSession(get().closingWorkbenchViews, id)) return false
     const current = get(), catalog = workbenchSelectionCatalog(current)
     const existing = Object.values(current.tabs).flatMap((tab) => (
       workbenchSurfaces(tab).flatMap((surface) => (
@@ -6603,13 +6604,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           reference.displayWorkspaceId === held.displayWorkspaceId && reference.groupId === held.groupId && reference.tabId === held.tabId && reference.regionId === held.regionId)
       if (references.length !== 1) {
         current.reportError(new Error('The Session has no unique confirmed display occurrence. Its original workface and input are kept; choose its exact Tab, Group and Region.'), { kind: 'indeterminate' })
-        return
+        return false
       }
       const reference = references[0]!
       let choice: AgentMuxDesktopSpaceSelection
       try { choice = resolveWorkbenchOccurrenceSelection(current, catalog, { workspaceId: reference.displayWorkspaceId,
         groupId: reference.groupId, tabId: reference.tabId, regionId: reference.regionId }, 'navigation') }
-      catch (error) { current.reportError(error, { kind: 'indeterminate' }); return }
+      catch (error) { current.reportError(error, { kind: 'indeterminate' }); return false }
       set((state) => ({
         activeWorkspaceId: reference.displayWorkspaceId, workbenchSpaceSelection: choice,
         retainedSpatialFocus: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null,
@@ -6617,11 +6618,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         displacedAgentSessionIds: state.displacedAgentSessionIds.filter((sessionId) => sessionId !== id)
       }))
       get().focusRegion(reference.displayWorkspaceId, reference.tabId, reference.regionId, 'pointer', reference.groupId)
-      return
+      return true
     }
     const session = get().sessions.find((candidate) => candidate.id === id)
     const workspace = session ? workspaceForSession(get().config, session, scratchTopicsForConfig(get().config, get().scratchTopicSnapshots)) : null
-    if (!session || !workspace) return
+    if (!session || !workspace) return false
     const { tabId, regionId } = availableWorkbenchTabIdentity(current.tabs, incarnation => sessionTabId(id, incarnation))
     const layout = get().layouts[workspace.id] ?? createWorkspaceLayout(newTabGroupId())
     const existingTabGroupId = tabGroupForTab(layout, tabId)
@@ -6639,20 +6640,20 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // Tab 已在某个分组里就只需激活；新建时必须真的挂上。挂不上（`preferredTabGroupId` 指向一个
     // 已不存在的分组）原先静默回落成原 layout：Tab 记录进了 state.tabs 而不在任何 tabOrder 里。
     // 这里刻意不「退回 activeGroupId」——请求的分组不在场时换一个窗口安放，正是 #307 那个
-    // 「浮层里开到背后主界面」的形态。selectSession 是同步 void 动作，抛出只会变成事件处理里的
+    // 「浮层里开到背后主界面」的形态。selectSession 通过同步结果表达是否完成选择，抛出只会变成事件处理里的
     // 未捕获异常，所以走 reportError 把失败摆到界面上。
     const nextLayout = existingTabGroupId
       ? activateLayoutTab(layout, targetTabGroupId, tabId)
       : addTabPlacement(layout, targetTabGroupId, tabId)
     if (!nextLayout) {
       get().reportError(new Error('The Tab Group is no longer available'))
-      return
+      return false
     }
     const next = { ...get(), tabs: { ...get().tabs, [tab.id]: tab }, layouts: { ...get().layouts, [workspace.id]: nextLayout } }
     let choice: AgentMuxDesktopSpaceSelection
     try { choice = resolveWorkbenchOccurrenceSelection(next, workbenchSelectionCatalog(next),
       { workspaceId: workspace.id, groupId: targetTabGroupId, tabId: tab.id, regionId }, 'navigation') }
-    catch (error) { get().reportError(error, { kind: 'indeterminate' }); return }
+    catch (error) { get().reportError(error, { kind: 'indeterminate' }); return false }
     set((state) => ({
       activeWorkspaceId: workspace.id,
       mainSurface: 'workbench',
@@ -6663,6 +6664,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // Placement succeeded in this same commit; a later intentional close is not this old failure.
       displacedAgentSessionIds: state.displacedAgentSessionIds.filter((sessionId) => sessionId !== id)
     }))
+    return true
   },
   prepareWorkbenchLayout(workspaceId) {
     const state = get(), layout = state.layouts[workspaceId]
