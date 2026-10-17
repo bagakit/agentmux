@@ -25,9 +25,9 @@ const envelope = { messageId: 'graph-message', senderSessionId: session.control.
 function Fixture() {
   const state = useAppStore()
   const presentation = executionFocusPresentation(state.agentFocus.execution, state.tabs, spatialCatalog(state, []), () => {})
-  return <><GlobalFocusSurface presentation={presentation} onSelectContext={open} />
-    <AgentCollaborationMap request={state.collaborationMapTarget} active={state.mainSurface === 'workbench' && state.spaceView === 'map'}
-      onClose={() => useAppStore.getState().setSpaceView('workbench')} onOpen={(context, reference) => open(context.id, reference)} /></>
+  return <><GlobalFocusSurface visible={state.mainSurface === 'agents' && state.focusView === 'list'} presentation={presentation} onSelectContext={open} />
+    <AgentCollaborationMap request={state.collaborationMapTarget} active={state.mainSurface === 'agents' && state.focusView === 'map'}
+      onOpen={(context, reference) => { open(context.id, reference); useAppStore.getState().setMainSurface('workbench') }} /></>
 }
 const open = vi.fn()
 const graph = () => document.querySelector<HTMLElement>('.collaboration-map')!
@@ -39,7 +39,7 @@ beforeEach(() => {
   const tab = createWorkbenchTab(ref.tabId, { regionId: ref.regionId, kind: 'agent', phase: 'attached', workspaceId: workspace.id, sessionId: session.id })
   const peerTab = createWorkbenchTab('graph-peer-tab', { regionId: 'graph-peer-region', kind: 'agent', phase: 'attached', workspaceId: workspace.id, sessionId: peer.id })
   executionBindings.clear(); executionBindings.set(JSON.stringify([ref.tabId, ref.regionId]), { hostId: session.control.hostId }); executionBindings.set(JSON.stringify([peerTab.id, 'graph-peer-region']), { hostId: peer.control.hostId })
-  useAppStore.setState({ config: composerConfig, sessions: [session, peer, isolated], tabs: { [tab.id]: tab, [peerTab.id]: peerTab }, layouts: { [workspace.id]: createWorkspaceLayout(ref.groupId, [tab.id, peerTab.id]) }, activeWorkspaceId: workspace.id, mainSurface: 'agents', spaceView: 'workbench', collaborationMapTarget: null, agentNames: { [session.id]: 'Graph task', [peer.id]: 'Peer task', [isolated.id]: 'Isolated task' },
+  useAppStore.setState({ config: composerConfig, sessions: [session, peer, isolated], tabs: { [tab.id]: tab, [peerTab.id]: peerTab }, layouts: { [workspace.id]: createWorkspaceLayout(ref.groupId, [tab.id, peerTab.id]) }, activeWorkspaceId: workspace.id, mainSurface: 'agents', focusView: 'list', collaborationMapTarget: null, agentNames: { [session.id]: 'Graph task', [peer.id]: 'Peer task', [isolated.id]: 'Isolated task' },
     timelines: {}, agentComposerDrafts: { [session.id]: 'Original graph draft' }, agentFocus: { execution: { sessionId: session.id, history: [], reference: ref }, pmo: { sessionId: null } } })
   open.mockReset()
   vi.spyOn(api.sessions, 'messageEvents').mockImplementation(async (reference, options): Promise<AgentMuxRpcResult<'message.events'>> => ({ ...reference, participantSessionId: reference.agentSessionId, afterSequence: options?.afterSequence ?? 0,
@@ -56,13 +56,13 @@ it('locates the exact Focus Agent in the shared map and keeps the complete world
   expect(api.sessions.messageEvents).not.toHaveBeenCalled()
   await click('Locate Agent in map')
   await settleCollaborationCanvas(() => {
-    expect(graph()?.textContent).toContain('1 connections')
+    expect(graph()?.querySelector('[aria-label="Map sources"]')?.getAttribute('title')).toContain('1 connections')
     expect(graph()?.querySelector('.focus-context[data-session-id="graph-peer"]')).not.toBeNull()
     expect(graph()?.querySelector('.focus-context[data-session-id="graph-isolated"]')).not.toBeNull()
   })
-  expect(useAppStore.getState()).toMatchObject({ mainSurface: 'workbench', spaceView: 'map', collaborationMapTarget: { kind: 'focus', subject: { hostId: session.control.hostId, agentSessionId: session.control.agentSessionId } } })
+  expect(useAppStore.getState()).toMatchObject({ mainSurface: 'agents', focusView: 'map', collaborationMapTarget: { kind: 'focus', subject: { hostId: session.control.hostId, agentSessionId: session.control.agentSessionId } } })
   expect(api.sessions.messageEvents).toHaveBeenCalledWith({ hostId: session.control.hostId, agentSessionId: session.control.agentSessionId }, { latest: true, limit: 50 })
-  expect(graph().textContent).toContain('3 Agents')
+  expect(graph().querySelector('[aria-label="Map sources"]')?.getAttribute('title')).toContain('3 Agents')
   await settleCollaborationCanvas(() => expect(graph().querySelector('.focus-context[data-session-id="graph-agent"]')).not.toBeNull())
   expect(graph().querySelector('.focus-context[data-session-id="graph-peer"]')).not.toBeNull()
   expect(api.sessions.readMessage).not.toHaveBeenCalled(); expect(api.sessions.dispatch).not.toHaveBeenCalled()
@@ -74,7 +74,7 @@ it('locates the exact Focus Agent in the shared map and keeps the complete world
   await act(async () => [...graph().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.startsWith('Open workface'))!.click())
   expect(open).toHaveBeenCalledExactlyOnceWith(peer.id, { displayWorkspaceId: workspace.id, groupId: ref.groupId, tabId: 'graph-peer-tab', regionId: 'graph-peer-region' })
   expect(graph().hidden).toBe(true)
-  expect(useAppStore.getState().spaceView).toBe('workbench')
+  expect(useAppStore.getState().focusView).toBe('map')
   expect(useAppStore.getState().agentComposerDrafts[session.id]).toBe('Original graph draft')
 })
 it('offers explicit source reading, keeps failure local and leaves healthy relations visible', async () => {
@@ -86,7 +86,7 @@ it('offers explicit source reading, keeps failure local and leaves healthy relat
   await act(async () => vi.waitFor(() => expect(graph().textContent).toContain('Deliberate original body unavailable')))
   expect(api.sessions.readMessage).toHaveBeenCalledExactlyOnceWith({ hostId: session.control.hostId, agentSessionId: session.control.agentSessionId }, 'graph-message')
   await settleCollaborationCanvas(() => expect(graph().querySelector('.focus-context[data-session-id="graph-agent"]')).not.toBeNull())
-  await act(async () => useAppStore.getState().setSpaceView('workbench'))
+  await act(async () => useAppStore.getState().setFocusView('list'))
   expect(graph().hidden).toBe(true)
   const count = vi.mocked(api.sessions.messageEvents).mock.calls.length
   await act(async () => useAppStore.setState({ agentNames: { unrelated: 'Other work' } }))
@@ -95,13 +95,14 @@ it('offers explicit source reading, keeps failure local and leaves healthy relat
 
 it('relation controls filter the actual canvas and inspector without changing input or Session state', async () => {
   await dom.render(createElement(Fixture)); await click('Locate Agent in map')
-  await act(async () => vi.waitFor(() => expect(graph()?.textContent).toContain('1 connections')))
+  await act(async () => vi.waitFor(() => expect(graph()?.querySelector('[aria-label="Map sources"]')?.getAttribute('title')).toContain('1 connections')))
   const original = useAppStore.getState().agentComposerDrafts
-  const toggle = graph().querySelector<HTMLButtonElement>('.collaboration-toolbar__kinds [data-kind="communication"]')!
+  await act(async () => graph().querySelector('[aria-label="Filter map relations"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+  const toggle = document.querySelector<HTMLElement>('.collaboration-filter-menu [data-kind="communication"]')!
   await act(async () => toggle.click())
-  expect(toggle.getAttribute('aria-pressed')).toBe('false'); expect(graph().textContent).toContain('0 connections')
+  expect(toggle.getAttribute('aria-checked')).toBe('false'); expect(graph().querySelector('[aria-label="Map sources"]')?.getAttribute('title')).toContain('0 connections')
   await act(async () => toggle.click())
-  expect(graph().textContent).toContain('1 connections')
+  expect(graph().querySelector('[aria-label="Map sources"]')?.getAttribute('title')).toContain('1 connections')
   expect(useAppStore.getState().agentComposerDrafts).toBe(original); expect(open).not.toHaveBeenCalled()
 })
 
@@ -113,4 +114,55 @@ it('keeps an unconfirmed workface readable without navigating a same-SID locatio
   await act(async () => [...graph().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.startsWith('Open workface'))!.click())
   expect(open).not.toHaveBeenCalled(); expect(graph().textContent).toContain('Original workface location is unconfirmed')
   expect(graph().querySelector('.focus-context[data-session-id="graph-peer"]')).not.toBeNull()
+})
+
+it('opens Map without a selected Agent and returns to the same map through Focus view controls', async () => {
+  useAppStore.setState({ agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } } })
+  await dom.render(createElement(Fixture))
+  const viewButton = (label: string) => [...document.querySelectorAll<HTMLButtonElement>('.focus-view-switch button')].find(button => button.getAttribute('aria-label') === label && !button.closest('[hidden]'))!
+  expect(viewButton('Map')).toBeTruthy()
+  await act(async () => viewButton('Map').click())
+  await settleCollaborationCanvas(() => expect(graph().querySelector('.collaboration-agent')).not.toBeNull())
+  const map = graph(), target = useAppStore.getState().collaborationMapTarget
+  const draft = useAppStore.getState().agentComposerDrafts
+  await act(async () => viewButton('List').click())
+  expect(map.hidden).toBe(true)
+  const reads = vi.mocked(api.sessions.messageEvents).mock.calls.length
+  await act(async () => useAppStore.setState({ agentNames: { ...useAppStore.getState().agentNames, unrelated: 'Other task' } }))
+  expect(api.sessions.messageEvents).toHaveBeenCalledTimes(reads)
+  await act(async () => viewButton('Map').click())
+  expect(graph()).toBe(map); expect(map.hidden).toBe(false)
+  expect(useAppStore.getState().collaborationMapTarget).toBe(target)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(draft)
+  expect(api.sessions.readMessage).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled()
+})
+
+it('uses keyboard search to explicitly locate an Agent and discloses sources without losing the selection', async () => {
+  await dom.render(createElement(Fixture)); await click('Locate Agent in map')
+  await settleCollaborationCanvas(() => expect(graph().querySelector('.collaboration-agent')).not.toBeNull())
+  const input = graph().querySelector<HTMLInputElement>('[aria-label="Find Agent in map"]')!
+  const original = graph().querySelector('.collaboration-inspector h3')!.textContent
+  const query = async (value: string) => act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  const key = async (value: string) => act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true })))
+  await query('task'); await key('ArrowDown')
+  const candidate = document.getElementById(input.getAttribute('aria-activedescendant')!)!
+  expect(candidate.getAttribute('aria-selected')).toBe('true')
+  expect(graph().querySelector('.collaboration-inspector h3')!.textContent).toBe(original)
+  await key('Escape'); expect(input.value).toBe('task'); expect(input.getAttribute('aria-expanded')).toBe('false')
+  await query('Peer'); await key('Enter')
+  expect(graph().querySelector('.collaboration-inspector h3')!.textContent).toBe('Peer task')
+  expect(input.value).toBe(''); expect(input.getAttribute('aria-expanded')).toBe('false')
+  const relation = graph().querySelector<HTMLButtonElement>('.collaboration-relation')!
+  expect(relation.textContent).toContain('Graph task'); expect(relation.textContent).toContain('Incoming')
+  expect(relation.textContent).not.toContain('Peer task')
+  await click('Map sources')
+  expect(graph().querySelector('.collaboration-inspector h3')!.textContent).toBe('Sources')
+  expect(graph().querySelector('.collaboration-sources')).not.toBeNull()
+  await click('Map sources')
+  expect(graph().querySelector('.collaboration-inspector h3')!.textContent).toBe('Peer task')
+  expect(api.sessions.readMessage).not.toHaveBeenCalled(); expect(api.sessions.dispatch).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled()
+  expect(useAppStore.getState().agentComposerDrafts[session.id]).toBe('Original graph draft')
 })
