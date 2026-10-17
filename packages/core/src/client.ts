@@ -1008,6 +1008,10 @@ export class AgentMuxClient {
       // This Session came from the original Store's unique Run binding, not this observer's cache.
       status: async session => { const run = await this.kernel.status(session.run.runId); this.assertAgentRun(session, run, [session]); return run },
       watch: (run, changed) => this.kernel.observeLifecycle(run, changed),
+      frontend: async session => {
+        await this.ensureTerminalFrontendObservation(session)
+        return this.terminalFrontendWatches.get(session.agentSessionId)?.frontend
+      },
       update: async (session, change) => {
         const updated = await this.updateExactAgentSession(session.agentSessionId, session.run, change)
         this.publishSession(updated); return updated
@@ -4964,7 +4968,8 @@ export class AgentMuxClient {
         } else if (input.action === 'continue') {
           if (['settled', 'cancelled'].includes(supervision.phase) || supervision.cancellation) throw new AgentMuxError(
             'The original recovery intent has already closed; an old control cannot reopen it.', 'AGENT_CONTINUITY_SUPERSEDED')
-          if (supervision.phase === 'paused' && supervision.process?.state !== 'running') {
+          if (supervision.phase === 'paused' && (supervision.process?.state !== 'running' || active.frontendReconnect ||
+            supervision.reason === 'frontend-retry-budget-exhausted')) {
             const limit = supervision.attemptLimit + input.additionalAttempts
             if (!Number.isSafeInteger(limit)) throw new AgentMuxError('The explicit recovery budget exceeds its exact integer range.', 'INVALID_AGENT_CONTINUITY_CONTROL')
             next.attemptLimit = limit; next.phase = 'observing'; next.reason = 'explicit-control'; next.observedAt = observedAt
@@ -6143,12 +6148,20 @@ export class AgentMuxClient {
       hostId: 'local', expectedRun: input.expectedRun, observedAt: now,
       session: current ? this.projectSession(current) : null, retirement: retirement ? structuredClone(retirement) : null,
       run, catalog, capability, ...(launchExecutable === undefined ? {} : { launchExecutable }) })
-    if (decision.kind === 'reattachable' && current && (receipt.trigger === 'manual' || receipt.frontendReconnect)) {
+    if (decision.kind === 'reattachable' && current) {
       const provider = this.providers.get(current.providerId)
       await this.ensureTerminalFrontendObservation(current)
       const frontend = this.terminalFrontendWatches.get(current.agentSessionId)?.frontend
-      if (current.nativeActor?.frontendControl && provider.reconnectTerminalFrontend && !receipt.frontendReconnect && (!frontend || frontend.state === 'unknown')) return pending('provider-unverified', evidence)
-      if (current.nativeActor?.frontendControl && provider.reconnectTerminalFrontend && (frontend?.state === 'detached' || receipt.frontendReconnect)) {
+      const automaticFrontend = !['manual', 'input'].includes(receipt.trigger) && frontend && sameRun(frontend.run, current.run) &&
+        frontend.state === 'detached' && frontend.backendState === 'running' && typeof frontend.exitCode === 'number' && frontend.exitCode !== 0
+      if (current.nativeActor?.frontendControl && provider.reconnectTerminalFrontend && (receipt.trigger === 'manual' || receipt.frontendReconnect) &&
+        !receipt.frontendReconnect && (!frontend || frontend.state === 'unknown')) return pending('provider-unverified', evidence)
+      if (current.nativeActor?.frontendControl && provider.reconnectTerminalFrontend &&
+        ((receipt.trigger === 'manual' || automaticFrontend) && frontend?.state === 'detached' || receipt.frontendReconnect)) {
+        if (automaticFrontend && !receipt.frontendReconnect) {
+          const lifecycle = await this.store.readLifecycleReservation(current.agentSessionId)
+          if (lifecycle?.kind === 'stop' && sameRun(lifecycle.expectedRun, current.run)) return pending('intent-cancelled', evidence)
+        }
         try {
           const target = current.nativeHandle
           if (target?.kind !== 'provider' || target.providerId !== current.providerId || !run?.pid) throw new AgentMuxError(
@@ -6156,6 +6169,9 @@ export class AgentMuxClient {
           if (!receipt.frontendReconnect) receipt.nativeTarget = structuredClone(target)
           else if (!matchesProviderNativeSessionTarget(receipt.nativeTarget, target)) throw new AgentMuxError(
             'The original frontend recovery native target changed. Its original operation and input are retained.', 'AGENT_TERMINAL_FRONTEND_UNCONFIRMED')
+          if (automaticFrontend && !receipt.supervision && !receipt.intentOperationId) receipt.supervision = {
+            phase: 'observing', activeAttemptOperationId: receipt.operationId, attemptCount: 1,
+            attemptLimit: Math.min(Number.MAX_SAFE_INTEGER, 1 + policy.retryMaxAttempts), observedAt: now, reason: 'frontend-reconnect-pending' }
           receipt.frontendReconnect ??= { previousFrontendId: frontend!.frontendId, outputAfterByte: run.latestOutputBytes }
           // Persist original operation/target/boundary before the frontend side effect.
           await pending('operation-unconfirmed', evidence)
@@ -6181,7 +6197,8 @@ export class AgentMuxClient {
         } catch (error) {
           receipt.error = error instanceof Error ? error.message : String(error)
           receipt.errorCode = error instanceof AgentMuxError ? error.code : 'AGENT_TERMINAL_FRONTEND_UNCONFIRMED'
-          return pending('operation-unconfirmed', evidence)
+          if (prior) receipt.rechecks++
+          return pending('operation-unconfirmed', evidence, receipt.rechecks < policy.recheckMaxAttempts ? now + policy.recheckIntervalMs : undefined)
         }
       }
     }
@@ -8185,7 +8202,10 @@ export class AgentMuxClient {
       return session
     }
     const frontendReconnect = session.continuity?.frontendReconnect
-    const frontendId = frontendReconnect?.frontendId ?? session.terminalHandshake?.frontendId
+    if (session.nativeActor?.frontendControl && !session.terminalHandshake) await this.ensureTerminalFrontendObservation(session)
+    const observedFrontend = this.terminalFrontendWatches.get(session.agentSessionId)?.frontend
+    const frontendId = frontendReconnect?.frontendId ?? session.terminalHandshake?.frontendId ??
+      (!session.terminalHandshake && observedFrontend && sameRun(observedFrontend.run, session.run) && observedFrontend.state !== 'unknown' ? observedFrontend.frontendId : undefined)
     const outputAfterByte = frontendReconnect?.frontendId ? frontendReconnect.outputAfterByte : session.terminalHandshake?.outputAfterByte ?? 0
     const operationId = terminalHandshakeOperationIdentity(
       session.providerId,
@@ -8762,6 +8782,7 @@ export class AgentMuxClient {
       watch.frontend = { run: { ...session.run }, frontendId: watch.frontend?.frontendId ?? current.nativeActor!.actorId,
         state: 'unknown', backendState: 'unknown', source: 'managed-process', observedAt: Date.now(), message }
       this.publishSession(current)
+      this.continuitySupervisor.wake(session.agentSessionId)
     }
     watch.pending = (async () => {
       try {
@@ -8775,6 +8796,10 @@ export class AgentMuxClient {
             watch.frontend = { ...observation, run: { ...session.run } }
             if (observation.state === 'detached') this.promptSubmission.cancelReadiness(session.agentSessionId)
             this.publishSession(current)
+            // A bootstrap failure can arrive after a bounded handshake observation
+            // paused. This new authoritative generation fact resumes only its intent.
+            if (observation.state === 'detached') this.continuitySupervisor.observe(this.registry.get(session.agentSessionId), true)
+            this.continuitySupervisor.wake(session.agentSessionId)
           } })
         return true
       } catch (error) { unavailable(error instanceof Error ? error.message : String(error)); return false }
