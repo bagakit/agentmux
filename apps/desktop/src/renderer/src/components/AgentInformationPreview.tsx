@@ -9,6 +9,9 @@ import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { WorkbenchTopology } from './WorkbenchTopology'
 import { agentBookmarks } from '../lib/agent-bookmarks'
 import { AgentInformationReader } from './AgentInformationReader'
+import { useAppStore } from '../store'
+import { resolveFocusPreviewTrigger } from '../../../shared/focus-preferences'
+import { useAgentPreviewIntent } from '../lib/use-agent-preview-intent'
 
 /** Mounted once by App, outside transient, filtered and retained surface trees. */
 export function AgentInformationPreviewHost() {
@@ -46,22 +49,23 @@ export function useAgentInformationPreview(context: FocusContext, requested: boo
   openWorkface: () => void, options?: { readingKey: 'ArrowRight'; readingBranch: { attach(element: HTMLElement): () => void; retainedEscape(event: KeyboardEvent): boolean } }) {
   const document = useWorkbenchDocument()
   const active = useWorkbenchPresentationActive(), enabled = requested && active
+  const previewTrigger = useAppStore(state => resolveFocusPreviewTrigger(state.config?.focus?.previewTrigger))
   const anchor = useRef<HTMLButtonElement>(null), token = useRef({}).current
-  const intent = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const intent = useAgentPreviewIntent(() => show(), previewTrigger, enabled)
   const departure = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const restoringFocus = useRef(false), id = useId()
   const open = useSyncExternalStore(agentInformationPreview.subscribe, () => agentInformationPreview.getAll().some(request => request.token === token), () => false)
   const close = useCallback(() => {
-    clearTimeout(intent.current); clearTimeout(departure.current)
+    intent.cancel(); clearTimeout(departure.current)
     agentInformationPreview.dismiss(token)
-  }, [token])
+  }, [token, intent.cancel])
   function keepOpen() { clearTimeout(departure.current) }
   function suppressRestoredFocus() {
     restoringFocus.current = true
     queueMicrotask(() => { restoringFocus.current = false })
   }
   function show(enterReading = false) {
-    clearTimeout(intent.current); keepOpen()
+    intent.cancel(); keepOpen()
     const trigger = anchor.current
     // Only the transient peek needs an available visible invoker; Agent actions stay independent.
     if (!enabled || !trigger?.isConnected || trigger.closest('[inert]') || !workbenchDocumentVisible(document)) return false
@@ -71,9 +75,9 @@ export function useAgentInformationPreview(context: FocusContext, requested: boo
         suppressRestoredFocus(); trigger.focus({ preventScroll: true })
       } })
   }
-  function showSoon() { clearTimeout(intent.current); keepOpen(); if (enabled && agentInformationPreview.schedule(token, () => clearTimeout(intent.current))) intent.current = setTimeout(show, 180) }
+  function showSoon() { intent.cancel(); keepOpen(); if (enabled && previewTrigger !== 'keyboard' && agentInformationPreview.schedule(token, intent.cancel)) intent.schedule() }
   function hideSoon() {
-    clearTimeout(intent.current); keepOpen()
+    intent.cancel(); keepOpen()
     departure.current = setTimeout(() => {
       if (document.getElementById(id)?.contains(document.activeElement) || document.activeElement === anchor.current) return
       close()
@@ -81,7 +85,7 @@ export function useAgentInformationPreview(context: FocusContext, requested: boo
   }
   useLayoutEffect(() => { agentInformationPreview.noteContent(token, context); close() }, [context.id, context.hostId, context.runId, context.name, context.state, context.detail,
     context.recap?.text, context.recap?.source, context.recap?.origin, context.recap?.reading?.text,
-    context.recap?.reading?.truncated, context.workspacePath, context.originAddress, enabled, close, document])
+    context.recap?.reading?.truncated, context.workspacePath, context.originAddress, enabled, previewTrigger, close, document])
   useLayoutEffect(() => () => { close() }, [close])
   const position = identity?.tabs.some(tab => tab.regions.length > 1) ? <span className="focus-context__position"
     aria-label={`${identity.occurrenceCount} confirmed ${identity.occurrenceCount === 1 ? 'position' : 'positions'}`}
@@ -90,7 +94,7 @@ export function useAgentInformationPreview(context: FocusContext, requested: boo
     }}><WorkbenchTopology tabs={identity.tabs} interactive={false} enabled={enabled && !open} /></span> : undefined
   return { anchor, position, describedBy: open ? id : undefined, close, suppressRestoredFocus,
     triggerEvents: { 'aria-keyshortcuts': enabled ? options?.readingKey ?? 'ArrowDown' : undefined, onPointerEnter: showSoon, onPointerLeave: hideSoon,
-      onFocus: () => { if (!restoringFocus.current) show() }, onBlur: hideSoon, onPointerDown: close,
+      onFocus: () => { if (previewTrigger !== 'keyboard' && !restoringFocus.current) show() }, onBlur: hideSoon, onPointerDown: close,
       onKeyDown: (event: ReactKeyboardEvent<HTMLButtonElement>) => {
         if (event.key !== (options?.readingKey ?? 'ArrowDown') || !enabled) return
         const reader = document.getElementById(id)?.querySelector<HTMLElement>('.agent-information-reader__reading')
