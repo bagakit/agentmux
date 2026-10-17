@@ -736,7 +736,10 @@ function WorkbenchRegionNode({ node, nodePath, tab, surfaceVisible, onDragging }
 }) {
   return node.type === 'leaf'
     ? <WorkbenchRegionSlot regionId={node.regionId} />
-    : <WorkbenchRegionBranch node={node} nodePath={nodePath} tab={tab} surfaceVisible={surfaceVisible} onDragging={onDragging} />
+    : <WorkbenchRegionBranch node={node} nodePath={nodePath} tab={tab} surfaceVisible={surfaceVisible} onDragging={onDragging}>
+      <WorkbenchRegionNode node={node.first} nodePath={nodePath ? `${nodePath}.first` : 'first'} tab={tab} surfaceVisible={surfaceVisible} onDragging={onDragging} />
+      <WorkbenchRegionNode node={node.second} nodePath={nodePath ? `${nodePath}.second` : 'second'} tab={tab} surfaceVisible={surfaceVisible} onDragging={onDragging} />
+    </WorkbenchRegionBranch>
 }
 
 // 一格（leaf）单独成组件：消费键盘关格意图的 effect、以及「关这一格要不要确认」的决定，都得跑在组件顶层
@@ -1014,16 +1017,17 @@ function WorkbenchRegionContent({
 }
 
 /** Thin leaf destinations: all actions/content remain with the original Region owner. */
-function WorkbenchBrowserPresentationSlots({ tab, target, node }: { tab: WorkbenchTab; target: WorkbenchViewTarget; node: WorkbenchRegionLayoutNode }): ReactNode {
+function WorkbenchBrowserPresentationSlots({ tab, target, node, nodePath = '' }: { tab: WorkbenchTab; target: WorkbenchViewTarget; node: WorkbenchRegionLayoutNode; nodePath?: string }): ReactNode {
   if (node.type === 'leaf') return tab.regions[node.regionId]?.kind === 'browser'
     ? <div id={workbenchBrowserStageHostId(target, node.regionId)} className="workbench-region-slot" data-browser-occurrence-slot={node.regionId} />
     : tab.regions[node.regionId]?.kind === 'agent'
       ? <div id={workbenchSessionStageHostId(target, node.regionId)} className="workbench-region-slot" data-session-occurrence-slot={node.regionId} />
     : <div role="status" className="workbench-restore-notice">This Region remains in its original work surface. Simultaneous live display is not available yet.</div>
-  return <div className="workbench-browser-presentation-split" style={{ display: 'flex', flex: 1, minHeight: 0, minWidth: 0, flexDirection: node.direction === 'horizontal' ? 'row' : 'column' }}>
-    <div style={{ display: 'flex', flex: node.ratio, minHeight: 0, minWidth: 0 }}><WorkbenchBrowserPresentationSlots tab={tab} target={target} node={node.first} /></div>
-    <div style={{ display: 'flex', flex: 1 - node.ratio, minHeight: 0, minWidth: 0 }}><WorkbenchBrowserPresentationSlots tab={tab} target={target} node={node.second} /></div>
-  </div>
+  return <WorkbenchRegionBranch className="workbench-browser-presentation-split"
+    node={node} nodePath={nodePath} tab={tab} surfaceVisible={target.visible !== false}>
+    <WorkbenchBrowserPresentationSlots tab={tab} target={target} node={node.first} nodePath={nodePath ? `${nodePath}.first` : 'first'} />
+    <WorkbenchBrowserPresentationSlots tab={tab} target={target} node={node.second} nodePath={nodePath ? `${nodePath}.second` : 'second'} />
+  </WorkbenchRegionBranch>
 }
 
 /** Project the Store's accepted ratio into the existing PanelGroup, leaving drag commits with its owner. */
@@ -1044,17 +1048,21 @@ function WorkbenchRegionBranch({
   nodePath,
   tab,
   surfaceVisible,
-  onDragging
+  onDragging,
+  className,
+  children
 }: {
   node: Extract<WorkbenchRegionLayoutNode, { type: 'split' }>
   nodePath: string
   tab: WorkbenchTab
   surfaceVisible: boolean
-  onDragging: (active: boolean) => void
+  onDragging?: (active: boolean) => void
+  className?: string
+  children: [ReactNode, ReactNode]
 }) {
   const updateRegionSplitRatio = useAppStore.getState().updateRegionSplitRatio
   const [dragging, setDragging] = useState(false)
-  useEffect(() => () => { if (dragging) onDragging(false) }, [dragging, onDragging])
+  useEffect(() => () => { if (dragging) onDragging?.(false) }, [dragging, onDragging])
   const commitRef = useRef((ratio: number) => (
     updateRegionSplitRatio(tab.workspaceId, tab.id, nodePath, ratio)
   ))
@@ -1072,17 +1080,11 @@ function WorkbenchRegionBranch({
     <PanelGroup
       ref={groupRef}
       direction={node.direction}
-      className="workbench-region-split"
+      className={`workbench-region-split ${className ?? ''}`}
       onLayout={(sizes) => committer.observeLayout(sizes)}
     >
       <Panel defaultSize={node.ratio * 100} minSize={MIN_SPLIT_PERCENT}>
-        <WorkbenchRegionNode
-          node={node.first}
-          nodePath={nodePath ? `${nodePath}.first` : 'first'}
-          tab={tab}
-          surfaceVisible={surfaceVisible}
-          onDragging={onDragging}
-        />
+        {children[0]}
       </Panel>
       <WorkbenchSplitHandle
         className="workbench-region-resize-handle"
@@ -1091,17 +1093,11 @@ function WorkbenchRegionBranch({
         disabled={!surfaceVisible}
         onDragging={(active) => {
           setDragging(active)
-          onDragging(active)
+          onDragging?.(active)
         }}
       />
       <Panel defaultSize={(1 - node.ratio) * 100} minSize={MIN_SPLIT_PERCENT}>
-        <WorkbenchRegionNode
-          node={node.second}
-          nodePath={nodePath ? `${nodePath}.second` : 'second'}
-          tab={tab}
-          surfaceVisible={surfaceVisible}
-          onDragging={onDragging}
-        />
+        {children[1]}
       </Panel>
     </PanelGroup>
   )
