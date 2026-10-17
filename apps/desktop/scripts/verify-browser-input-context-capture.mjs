@@ -117,6 +117,13 @@ process.on('uncaughtException',fail);app.whenReady().then(()=>import(${JSON.stri
       external: ['electron'], metafile: true, logLevel: 'warning',
       banner: { js: "import {createRequire as __createProofRequire} from 'node:module';const require=__createProofRequire(import.meta.url);" },
       plugins: [{ name: 'actual-capture-production', setup(plugin) {
+        // Keep the standalone CLI module's conditional top-level await out of the
+        // source bundle's RPC import cycle; consume its actual built asset unchanged.
+        plugin.onResolve({ filter: /codex-managed-run\.js$/ }, async () => {
+          const source = join(root, 'packages/core/src/providers/codex-managed-run.ts'), asset = join(root, 'packages/core/dist/providers/codex-managed-run.js')
+          await bind(source); await bind(asset)
+          return { path: asset, external: true }
+        })
         plugin.onResolve({ filter: /^[^./]/ }, async args => {
           if (isBuiltin(args.path) || args.path === 'electron' || aliases[args.path]) return null
           const resolver = createRequire(args.importer || join(root, 'package.json'))
