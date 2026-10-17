@@ -14,6 +14,7 @@ import { NoteCanvas } from '../src/renderer/src/components/NoteCanvas'
 import { api } from '../src/renderer/src/lib/api'
 import { noteCanvasScopeKey } from '../src/renderer/src/lib/note-canvas-state'
 import { useNotebookLibrary } from '../src/renderer/src/lib/notebook-library'
+import { openNotebookFile } from '../src/renderer/src/lib/recall-notebooks'
 import { createWorkbenchTab, documentKey } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
@@ -106,4 +107,86 @@ it('discards a delayed Arrange reply after a later real React Flow keyboard gest
   expect(useAppStore.getState().noteCanvasLayouts[key]!.positions[page.noteId]).toEqual(manual)
   expect(worker.terminated).toBe(true)
   expect(dom.container.querySelector<HTMLElement>('.react-flow__node')!.style.transform).toContain(`${manual!.x}px`)
+})
+
+function unregisteredShared() {
+  const note = newNoteDocument('Shared original evidence', 'independent-shared', 'shared-evidence')
+  note.kind = 'shared-block'
+  note.content.content![0]!.content!.push({ type: 'noteLink', attrs: { referenceId: 'shared-self-link', text: 'Shared evidence', target: { noteId: note.noteId, blockId: 'shared-evidence' } }, content: [{ type: 'text', text: '[[Shared evidence]]' }] })
+  const file = { path, revision: 'shared-saved-revision', content: serializeNoteDocument(note) }
+  const currentDraft = { ...file, content: file.content.replace('Shared original evidence', 'Unsaved shared edit preserved') }
+  const catalog = emptyNotebookState()
+  const observation = { noteId: note.noteId, resource: page.resource, status: 'read' as const, actualNoteId: note.noteId, revision: file.revision, kind: 'shared-block' as const, fileIdentity: 'confirmed' as const, blockIds: ['shared-evidence'] }
+  vi.mocked(api.notebooks.graph).mockResolvedValue({ catalog, graph: { catalogRevision: catalog.revision, scope: { kind: 'catalog' }, scannedScope: 'catalog', completeness: 'complete', hierarchy: [], references: [], duplicateNoteIds: [], observations: [observation] } })
+  vi.mocked(api.notebooks.content).mockResolvedValue({ ...observation, content: file.content })
+  vi.mocked(api.files.read).mockResolvedValue({ status: 'read', document: file })
+  useAppStore.setState({ documents: { [docKey]: currentDraft }, dirtyDocuments: { [docKey]: true } })
+  return { note, file, currentDraft }
+}
+
+it('opens an unregistered shared block and its inline child through the original Files owner preserving its dirty document and region', async () => {
+  const { note, currentDraft } = unregisteredShared(), openPage = vi.fn()
+  await dom.render(<NoteCanvas scope={{ kind: 'note', noteId: note.noteId }} onOpen={openPage} />)
+  await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-reader [data-note-inline-link]')).not.toBeNull())
+  expect(dom.container.querySelector('button.note-canvas-title')?.textContent).toContain('Shared original evidence')
+  await dom.click('.note-canvas-reader [data-note-inline-link]')
+  await vi.waitFor(() => expect(useAppStore.getState().documentRevealTargets[docKey]).toMatchObject({ noteBlock: { noteId: note.noteId, blockId: 'shared-evidence' } }))
+  expect(openPage).not.toHaveBeenCalled()
+  expect(useAppStore.getState().documents[docKey]).toEqual(currentDraft)
+  expect(useAppStore.getState().dirtyDocuments[docKey]).toBe(true)
+  expect(Object.keys(useAppStore.getState().tabs)).toEqual(['original-tab'])
+  expect(Object.keys(useAppStore.getState().tabs['original-tab']!.regions)).toEqual(['original-region'])
+  expect(useAppStore.getState().mainSurface).toBe('workbench')
+  expect(useNotebookLibrary.getState().state!.pages[note.noteId]).toBeUndefined()
+})
+
+it('keeps a changed shared identity unopenable and preserves later navigation after a delayed read', async () => {
+  const { note, file } = unregisteredShared()
+  await dom.render(<NoteCanvas scope={{ kind: 'note', noteId: note.noteId }} onOpen={() => { throw new Error('No synthetic page') }} />)
+  await vi.waitFor(() => expect(dom.container.querySelector('button.note-canvas-title')).not.toBeNull())
+  vi.mocked(api.files.read).mockResolvedValueOnce({ status: 'read', document: { ...file, content: file.content.replace('independent-shared', 'another-note-identity') } })
+  await dom.click('button.note-canvas-title')
+  await vi.waitFor(() => expect(dom.container.textContent).toContain('The shared file identity changed.'))
+  expect(useAppStore.getState().mainSurface).toBe('recall')
+  expect(useAppStore.getState().documentRevealTargets[docKey]).toBeUndefined()
+  let release!: (value: Awaited<ReturnType<typeof api.files.read>>) => void
+  vi.mocked(api.files.read).mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+  await dom.click('button.note-canvas-title')
+  await act(async () => useAppStore.setState({ recallNoteId: 'later-choice' }))
+  await act(async () => release({ status: 'read', document: file }))
+  await vi.waitFor(() => expect(dom.container.textContent).toContain('Your later navigation is kept.'))
+  expect(useAppStore.getState().recallNoteId).toBe('later-choice')
+  expect(useAppStore.getState().documentRevealTargets[docKey]).toBeUndefined()
+})
+
+it.each(['hide', 'supersede'] as const)('cancels shared file navigation during the second original read when the graph intent is %s', async action => {
+  const { note, file, currentDraft } = unregisteredShared()
+  const signals: AbortSignal[] = []
+  const openFile = (original: { noteId: string; resource: NotebookPage['resource'] }, blockId: string | undefined, signal: AbortSignal) => {
+    signals.push(signal)
+    return openNotebookFile({ ...original, workface: page.workface }, undefined, undefined, blockId ? { noteId: original.noteId, blockId } : undefined, undefined, signal)
+  }
+  const render = (active: boolean) => dom.render(<NoteCanvas scope={{ kind: 'note', noteId: note.noteId }} active={active} onOpen={() => { throw Error('No catalog page for this file') }} onOpenFile={openFile} />)
+  await render(true)
+  await vi.waitFor(() => expect(dom.container.querySelector('button.note-canvas-title')).not.toBeNull())
+  let release!: (value: Awaited<ReturnType<typeof api.files.read>>) => void
+  vi.mocked(api.files.read).mockResolvedValueOnce({ status: 'read', document: file })
+    .mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+  await dom.click('button.note-canvas-title')
+  await vi.waitFor(() => expect(signals).toHaveLength(1))
+  expect(signals[0]!.aborted).toBe(false)
+  if (action === 'hide') await render(false)
+  else {
+    await dom.click('button.note-canvas-title')
+    await vi.waitFor(() => expect(signals).toHaveLength(2))
+    expect(signals[1]!.aborted).toBe(false)
+  }
+  expect(signals[0]!.aborted).toBe(true)
+  const afterIntent = useAppStore.getState().recallZoneSelection
+  await act(async () => release({ status: 'read', document: file }))
+  expect(useAppStore.getState().recallZoneSelection).toBe(afterIntent)
+  expect(useAppStore.getState().documents[docKey]).toEqual(currentDraft)
+  expect(useAppStore.getState().dirtyDocuments[docKey]).toBe(true)
+  expect(useAppStore.getState().mainSurface).toBe('recall')
+  expect(Object.keys(useAppStore.getState().tabs)).toEqual(['original-tab'])
 })

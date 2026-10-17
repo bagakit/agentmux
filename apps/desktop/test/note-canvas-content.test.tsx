@@ -12,6 +12,10 @@ import { act } from 'react'
 import { ReactFlowProvider, useReactFlow, useViewport } from '@xyflow/react'
 import { noteCanvasScopeKey } from '../src/renderer/src/lib/note-canvas-state'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { createWorkspaceLayout } from '@agentmux/layout'
+import { createWorkbenchTab, documentKey } from '../src/renderer/src/lib/workbench-tabs'
+import { composerConfig } from './helpers/composer-dom-fixture'
+import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
 import { LocalExecutionHost } from '@agentmux/core'
 import { AgentMuxNotebookStore } from '@agentmux/core/notebook-store'
 import type { NotebookGraphSnapshot } from '../src/shared/notebook-observation'
@@ -27,7 +31,7 @@ import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
 import { installNoteCanvasBlockRows } from './helpers/note-canvas-block-dom'
 
 const dom = composerDOM(), scope = { kind: 'note', noteId: 'target' } as const
-let directory: string, store: AgentMuxNotebookStore
+let directory: string, store: AgentMuxNotebookStore, files: WorkspaceFiles
 const body = (id: string, text: string, references = false) => serializeNoteDocument({ schema: 'agentmux.note.v1', noteId: id, content: { type: 'doc', content: [
   { type: 'paragraph', attrs: { blockId: id + '-block', provenance: { created: { actor: { kind: 'agent', id: 'ExactResearchSession' }, at: _tailRefreshFixtureEpoch(0, 1) }, lastEdited: { actor: { kind: 'agent', id: 'ExactResearchSession' }, at: _tailRefreshFixtureEpoch(0, 1) } } }, content: [{ type: 'text', text }] },
   ...references ? [
@@ -52,7 +56,7 @@ beforeEach(async () => {
     await recordMarkdownProvenance(store, { hostId: 'local', workspaceId: 'notes', workspacePath: directory, path: id + '.note.md' }, content, { kind: 'agent', id: 'ExactResearchSession' })
     await store.apply({ expectedRevision: (await store.read()).revision, operationId: 'register-' + id, change: { kind: 'register', noteId: id, title: 'Original ' + id, resource: { hostId: 'local', workspaceId: 'notes', workspacePath: directory, path: id + '.note.md' } } }, { kind: 'user', id: 'ui-test' })
   }
-  const services = createNotebookObservationServices(store, { files: new WorkspaceFiles(() => new LocalExecutionHost()), workspace: () => workspace })
+  const services = createNotebookObservationServices(store, { files: files = new WorkspaceFiles(() => new LocalExecutionHost()), workspace: () => workspace })
   const sender = Object.assign(new EventEmitter(), { isDestroyed: () => false })
   const observation = createRendererNotebookObservation(createPreloadNotebookObservation(async (channel, input) => {
     if (channel === 'notebook:graph') return structuredClone(await services.requests.graph(sender, input))
@@ -67,7 +71,7 @@ beforeEach(async () => {
   vi.spyOn(api.notebooks, 'onChange').mockImplementation(listener => store.subscribe(listener))
   useAppStore.setState({ noteCanvasLayouts: {}, noteCanvasSaveIssues: {}, documents: {}, dirtyDocuments: {} })
 })
-afterEach(async () => { await rm(directory, { recursive: true, force: true }) })
+afterEach(async () => { await rm(directory, { recursive: true, force: true }); vi.unstubAllGlobals() })
 async function ready() { await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-canvas-title[data-note-id]')).toHaveLength(2)) }
 it('shows late related original blocks and actual reference/embed content without Read body or a graph rescan', async () => {
   installNoteCanvasBlockRows()
@@ -257,3 +261,104 @@ it('keeps the direct incoming source beside its root readable on first entry wit
 })
 
 function noteFromMarkdown(content:string) { const read=readNoteDocument(content);expect(read.status).toBe('valid');if(read.status!=='valid')throw Error(read.message);return read.note }
+
+it('automatically summarizes an unrelated unanchored page without creating paragraph entities', async () => {
+  const note = noteFromMarkdown(body('target', 'Unused'))
+  note.content.content = ['Opening context', 'Second useful paragraph', 'Third useful paragraph', 'Fourth kept in original'].map(text => ({ type: 'paragraph', content: [{ type: 'text', text }] }))
+  await writeFile(join(directory, 'target.note.md'), serializeNoteDocument(note))
+  await writeFile(join(directory, 'closed-source.note.md'), body('closed-source', 'No links here'))
+  await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />)
+  await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-reader')?.textContent).toContain('Opening context'))
+  const target = dom.container.querySelector('.react-flow__node[data-id="target"]')!
+  expect(target.querySelector('[data-reading-mode="summary"]')).not.toBeNull()
+  expect(target.textContent).toContain('Third useful paragraph')
+  expect(target.textContent).not.toContain('Fourth kept in original')
+  expect(dom.container.querySelectorAll('.react-flow__node')).toHaveLength(1)
+  expect(api.notebooks.content).toHaveBeenCalledTimes(1)
+  await dom.click('[aria-label="Full note: Original target"]')
+  await vi.waitFor(() => expect(target.textContent).toContain('Fourth kept in original'))
+  expect(api.notebooks.content).toHaveBeenCalledTimes(1)
+})
+
+async function sharedGraphFixture(duplicate = false) {
+  const shared = noteFromMarkdown(body('shared-content', 'Reusable research conclusion'))
+  shared.kind = 'shared-block'
+  shared.title = 'Research conclusion'
+  shared.content.content!.push({ type: 'paragraph', attrs: { blockId: 'shared-child' }, content: [{ type: 'text', text: 'Precise evidence inside shared content' }] })
+  const sharedContent = serializeNoteDocument(shared)
+  await writeFile(join(directory, 'block-shared.note.md'), sharedContent)
+  if (duplicate) await writeFile(join(directory, 'duplicate-shared.note.md'), sharedContent)
+  for (const id of ['target', 'closed-source']) {
+    const note = noteFromMarkdown(body(id, 'Host ordinary paragraph'))
+    note.content.content!.push({ type: 'noteInclude', attrs: { blockId: id + '-include', referenceId: id + '-use', noteId: shared.noteId, path: 'block-shared.note.md' } })
+    if (id === 'target') note.content.content!.push({ type: 'blockReference', attrs: { blockId: 'specific-use', referenceId: 'specific-evidence', mode: 'reference', target: { noteId: shared.noteId, blockId: 'shared-child' } } })
+    await writeFile(join(directory, id + '.note.md'), serializeNoteDocument(note))
+  }
+  return { shared, sharedContent }
+}
+
+it('reads one independent shared node for two hosts with whole-file include and exact child endpoints', async () => {
+  const geometry = installNoteCanvasBlockRows()
+  Object.assign(geometry.rows, { 'shared-child': 180, 'target-include': 120, 'closed-source-include': 120, 'specific-use': 230 })
+  await sharedGraphFixture()
+  await dom.render(<NoteCanvas scope={{ kind: 'notebook', notebookId: (await store.read()).pages.target!.notebookId }} onOpen={() => {}} />)
+  await vi.waitFor(() => expect(dom.container.querySelector('.react-flow__node[data-id="shared-content"] .note-canvas-reader')?.textContent).toContain('Precise evidence inside shared content'))
+  const shared = dom.container.querySelector('.react-flow__node[data-id="shared-content"]')!
+  expect(shared.querySelector('.note-canvas-title')?.textContent).toContain('Research conclusion')
+  expect(shared.querySelector('[data-kind="shared-block"]')).not.toBeNull()
+  expect(shared.querySelector('[data-reading-mode="document"]')).not.toBeNull()
+  const host = dom.container.querySelector('.react-flow__node[data-id="closed-source"]')!
+  await vi.waitFor(() => expect(host.querySelector('.note-canvas-reader')?.textContent).toContain('Host ordinary paragraph'))
+  expect(host.querySelector('.note-include-link')?.textContent).toContain('Research conclusion')
+  expect(host.querySelector('.note-canvas-reader')?.textContent).not.toContain('Reusable research conclusion')
+  expect(dom.container.querySelectorAll('.react-flow__node')).toHaveLength(3)
+  expect(vi.mocked(api.notebooks.content).mock.calls.filter(([id]) => id === 'shared-content')).toHaveLength(1)
+  await vi.waitFor(() => expect(dom.container.querySelector('[data-target-note="shared-content"][data-target-block="shared-child"]')).not.toBeNull())
+  const includes = [...dom.container.querySelectorAll<HTMLButtonElement>('[data-target-note="shared-content"][data-relationship-kind="embed"]')]
+  expect(includes).toHaveLength(2)
+  expect(includes.every(edge => edge.dataset.targetKind === 'page' && edge.dataset.targetAttachment === 'page' && !edge.dataset.targetBlock)).toBe(true)
+  expect(includes.every(edge => edge.textContent?.includes('shared block'))).toBe(true)
+  await act(async () => includes[0]!.click())
+  await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-comparison-to .note-canvas-reader')?.textContent).toContain('Reusable research conclusion'))
+  expect(dom.container.querySelector('.note-canvas-comparison-to')?.textContent).toContain('Research conclusion')
+  expect(dom.container.querySelector('.note-canvas-comparison-to')?.textContent).toContain('Open shared original')
+  expect((await store.read()).pages['shared-content']).toBeUndefined()
+  expect(api.notebooks.graph).toHaveBeenCalledTimes(1)
+})
+
+it('keeps duplicate unregistered shared identities unread and unopenable instead of choosing an observed file', async () => {
+  await sharedGraphFixture(true)
+  await dom.render(<NoteCanvas scope={{ kind: 'notebook', notebookId: (await store.read()).pages.target!.notebookId }} onOpen={() => {}} />)
+  await vi.waitFor(() => expect(dom.container.querySelector('.react-flow__node[data-id="shared-content"]')).not.toBeNull())
+  const shared = dom.container.querySelector('.react-flow__node[data-id="shared-content"]')!
+  expect(shared.querySelector('button.note-canvas-title')).toBeNull()
+  expect(shared.querySelector('.note-canvas-reader')).toBeNull()
+  expect(vi.mocked(api.notebooks.content).mock.calls.some(([id]) => id === 'shared-content')).toBe(false)
+  expect(shared.textContent).not.toContain('Reusable research conclusion')
+})
+
+it('opens the accurate unregistered shared Markdown after its body changes on disk without substituting a catalog page', async () => {
+  await sharedGraphFixture()
+  const workspace = { id: 'notes', hostId: 'local', path: directory, name: 'Notes', kind: 'folder' as const }
+  const spaceId = directoryIdentity('local', directory)
+  const tab = { ...createWorkbenchTab('shared-file-tab', { kind: 'file', regionId: 'shared-file-region', workspaceId: 'notes', path: 'block-shared.note.md' }), space: { spaceId, zoneId: homeZoneId(spaceId) } }
+  useAppStore.setState({ config: { ...composerConfig, workspaces: [workspace] }, loading: false, mainSurface: 'recall', activeWorkspaceId: 'notes', tabs: { [tab.id]: tab }, layouts: { notes: createWorkspaceLayout('shared-file-group', [tab.id]) } })
+  vi.spyOn(api.files, 'read').mockImplementation(async (_workspaceId, path) => files.read(workspace, path))
+  vi.spyOn(api.files, 'observe').mockResolvedValue(undefined)
+  const openPage = vi.fn()
+  await dom.render(<NoteCanvas scope={{ kind: 'note', noteId: 'shared-content' }} onOpen={openPage} />)
+  await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-reader')?.textContent).toContain('Reusable research conclusion'))
+  const current = await files.read(workspace, 'block-shared.note.md')
+  if (current.status !== 'read') throw new Error('Actual shared file was not read')
+  const changed = noteFromMarkdown(current.document.content)
+  changed.content.content![0]!.content = [{ type: 'text', text: 'Latest evidence remains a healthy original' }]
+  await writeFile(join(directory, 'block-shared.note.md'), serializeNoteDocument(changed))
+  await dom.click('button.note-canvas-title')
+  const key = documentKey('notes', 'block-shared.note.md')
+  await vi.waitFor(() => expect(useAppStore.getState().documents[key]?.content).toContain('Latest evidence remains a healthy original'))
+  expect(useAppStore.getState().mainSurface).toBe('workbench')
+  expect(openPage).not.toHaveBeenCalled()
+  expect((await store.read()).pages['shared-content']).toBeUndefined()
+  expect(Object.keys(useAppStore.getState().tabs)).toEqual(['shared-file-tab'])
+  expect(dom.container.querySelector('.note-canvas-reader')?.textContent).not.toContain('Latest evidence remains a healthy original')
+})

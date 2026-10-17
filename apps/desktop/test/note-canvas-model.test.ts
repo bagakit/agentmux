@@ -2,7 +2,7 @@ import { fixtureEpoch as _tailRefreshFixtureEpoch, fixturePath as _tailRefreshFi
 import { expect, it } from 'vitest'
 import { emptyNotebookState } from '@agentmux/core/notebook-catalog'
 import type { NotebookGraphSnapshot } from '../src/shared/notebook-observation'
-import { projectNoteCanvas, initialCanvasPositions, attachNoteCanvasRelationships } from '../src/renderer/src/lib/note-canvas-model'
+import { projectNoteCanvas, canvasSharedObservation, initialCanvasPositions, attachNoteCanvasRelationships } from '../src/renderer/src/lib/note-canvas-model'
 import { arrangeNoteCanvas } from '../src/renderer/src/lib/note-canvas-layout-engine'
 
 function fixture(): NotebookGraphSnapshot {
@@ -77,4 +77,22 @@ it('uses the existing Graphviz engine for real non-overlapping sized Note coordi
   const result = await arrangeNoteCanvas({ nodes, edges: [{ source: nodes[0]!.id, target: 'other' }, { source: 'other', target: nodes[0]!.id }, { source: 'other', target: 'other' }] })
   expect(Object.keys(result).sort()).toEqual(nodes.map(node => node.id).sort())
   for (const a of nodes) for (const b of nodes) if (a !== b) { const p = result[a.id]!, q = result[b.id]!; expect(p.x + a.width <= q.x || q.x + b.width <= p.x || p.y + a.height <= q.y || q.y + b.height <= p.y).toBe(true) }
+})
+
+it('requires one confirmed shared file observation without manufacturing a catalog page', () => {
+  const snapshot = fixture(), resource = snapshot.catalog.pages.shared!.resource
+  delete snapshot.catalog.pages.shared
+  const observation = { noteId: 'shared', resource, status: 'read' as const, actualNoteId: 'shared', kind: 'shared-block' as const, fileIdentity: 'confirmed' as const, revision: 'shared-revision', blockIds: ['actual-shared-child'] }
+  snapshot.graph.observations.push(observation)
+  const result = projectNoteCanvas(snapshot, { kind: 'note', noteId: 'root' }, ['root', 'left', 'right'])
+  expect(result.notes.filter(note => note.id === 'shared')).toHaveLength(1)
+  expect(result.notes.find(note => note.id === 'shared')).toMatchObject({ kind: 'shared-block', title: 'Shared block' })
+  expect(result.notes.find(note => note.id === 'shared')!.page).toBeUndefined()
+  expect(canvasSharedObservation(snapshot, 'shared')).toBe(observation)
+  observation.fileIdentity = 'unknown' as typeof observation.fileIdentity
+  expect(canvasSharedObservation(snapshot, 'shared')).toBeUndefined()
+  observation.fileIdentity = 'confirmed'
+  snapshot.graph.observations.push({ ...observation, resource: { ...resource, path: 'duplicate.note.md' } })
+  expect(canvasSharedObservation(snapshot, 'shared')).toBeUndefined()
+  expect(projectNoteCanvas(snapshot, { kind: 'note', noteId: 'shared' }, []).notes[0]!.observation).toBeUndefined()
 })
