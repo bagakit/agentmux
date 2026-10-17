@@ -508,8 +508,9 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
   async inspect(value: ConnectionSetupInspect, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView> {
     const result = await this.inspectOriginal(value, context)
     if (result.operation?.goal.kind === 'profile-update' && value.requestTrace === undefined) {
-      const projected = await this.profile.view(result.operation.operationId, context)
-      return { ...result, ...(projected.profileUpdate ? { profileUpdate: projected.profileUpdate } : {}) }
+      const projected = await this.profile.view(result.operation.operationId, context, false, true)
+      if (!value.applicationConfiguration && !value.applicationInspection) return projected
+      return { ...result, ...(projected.operation?.revision === result.operation.revision && projected.profileUpdate ? { profileUpdate: projected.profileUpdate } : {}) }
     }
     if (!result.operation?.initialPublication || value.requestTrace !== undefined) return result
     const initial = await this.initial.view(result.operation.operationId, context)

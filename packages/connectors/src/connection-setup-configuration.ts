@@ -374,7 +374,7 @@ export class SetupApplicationConfiguration {
     await this.owner.authority(context, row)
     const fresh = this.owner.read(row.operation.operationId)!, qualified = base.reason !== 'connection-revised' && base.operation?.authentication?.stepId === fresh.operation.authentication?.stepId
     const required = this.requiredPublicationSources(partial, plan)
-    const sources = Object.fromEntries(Object.entries(required).filter(([, source]) => qualified && this.publicationSourceCurrent(fresh, source)).map(([key, source]) => [key, source.receipt]))
+    const sources = Object.fromEntries(Object.entries(plan ? required : partial).filter(([, source]) => qualified && this.publicationSourceCurrent(fresh, source)).map(([key, source]) => [key, source.receipt]))
     if (!qualified || !Object.values(required).every(source => this.publicationSourceCurrent(fresh, source))) plan = null
     const complete = qualified && !!plan && this.publicationSourcesCurrent(fresh, required, plan.requiredSubjects)
     const capability = complete && plan && draft && plan.privateIntent ? 'disabled' : 'unknown'
