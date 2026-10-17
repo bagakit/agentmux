@@ -4,12 +4,12 @@ import { readFileSync, existsSync, appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 const root = resolve(import.meta.dirname, '../../..')
 const sources: Record<string, string> = process.env.AGENTMUX_PERFORMANCE_SOURCES ? JSON.parse(readFileSync(process.env.AGENTMUX_PERFORMANCE_SOURCES, 'utf8')) : {}
-const aliases = ['core', 'relay', 'demand', 'client-ui'].flatMap(pkg => {
+const aliases = ['core', 'relay', 'demand', 'client-ui', 'identity'].flatMap(pkg => {
  const manifest = JSON.parse(readFileSync(resolve(root, `packages/${pkg}/package.json`), 'utf8'))
  return Object.entries(manifest.exports).flatMap(([key, value]) => {
   const target = typeof value === 'string' ? value : (value as { types?: string; import?: string }).types ?? (value as { import?: string }).import
   if (!target) return []
-  const path = resolve(root, `packages/${pkg}/` + target.replace(/^\.\/dist\/(src\/)?/u, 'src/').replace(/\.js$/u, '.ts'))
+  const path = resolve(root, `packages/${pkg}/` + target.replace(/^\.\/dist\/(src\/)?/u, 'src/').replace(/\.d\.ts$/u, '.ts').replace(/\.js$/u, '.ts'))
   const name = '@agentmux/' + pkg + (key === '.' ? '' : key.slice(1))
   const wildcard = path.includes('*')
   const present = wildcard ? existsSync(path.slice(0, path.indexOf('*'))) : existsSync(path)
