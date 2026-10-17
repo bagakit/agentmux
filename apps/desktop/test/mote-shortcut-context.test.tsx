@@ -1,3 +1,4 @@
+import { fixtureEpoch as _batchFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, createElement, Fragment } from 'react'
@@ -9,7 +10,7 @@ import type { AgentTimelineSnapshot } from '@agentmux/core'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { api } from '../src/renderer/src/lib/api'
-import { pmoTeamsTopicFloatingTargetTabId, requestPmoTeamsTopicFloatingOpen, usePmoTeamsTopicFloatingState } from '../src/renderer/src/lib/pmo-teams-topic-floating'
+import { pmoTeamsTopicFloatingTargetTabId, requestAgentConversationFloatingOpen, requestPmoTeamsTopicFloatingClose, requestPmoTeamsTopicFloatingOpen, usePmoTeamsTopicFloatingState } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 import { usePmoTeamsTopicTarget } from '../src/renderer/src/lib/pmo-teams-topic-target'
 import { addWorkbenchRegion, createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { MAX_AGENT_STEER_QUEUE_ENTRIES, useAppStore } from '../src/renderer/src/store'
@@ -55,8 +56,8 @@ const config: AppConfig = {
 }
 function agent(id: string, state: Agent['status']['state']): Agent {
   return { id, kind: 'agent', providerId: 'fixture', executorId: 'fixture', hostId: 'local', workspacePath: _hygiene_fixturePath("topics/topic--launcher--leader"),
-    label: id, createdAt: 1, updatedAt: 2, agentSessionUpdatedAt: 2, processState: 'running', latestOutputBytes: 0,
-    status: { state, source: 'native-hook', observedAt: 2 },
+    label: id, createdAt: _batchFixtureEpoch(0, 0, 1), updatedAt: _batchFixtureEpoch(0, 0, 2), agentSessionUpdatedAt: _batchFixtureEpoch(0, 0, 2), processState: 'running', latestOutputBytes: 0,
+    status: { state, source: 'native-hook', observedAt: _batchFixtureEpoch(0, 0, 2) },
     capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
     control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: `healthy-${id}` } } }
 }
@@ -102,7 +103,7 @@ beforeEach(() => {
     layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('mote-group', [currentTab.id, otherTab.id]) },
     scratchTopicSnapshots: { [SCRATCH_WORKSPACE_ID]: { scope: scratchTopicsScope(config.workspaces[0]!), topics: [topic], revision: 0, reading: false, error: null } },
     workspaceFileRevisions: {}, timelines: {}, agentNames: {}, viewModes: { [current.id]: 'terminal' }, activeWorkspaceId: 'original-project', mainSurface: 'board',
-    agentFocus: { execution: { sessionId: 'execution', history: [{ sessionId: 'execution', focusedAt: 123 }] }, pmo: { sessionId: other.id } },
+    agentFocus: { execution: { sessionId: 'execution', history: [{ sessionId: 'execution', focusedAt: _batchFixtureEpoch(0, 0, 123) }] }, pmo: { sessionId: other.id } },
     agentComposerDrafts: { [current.id]: 'Original draft', execution: 'Execution draft' }, agentSteerQueues: {}, agentSteerInFlight: {}, reportError: vi.fn() })
   window.localStorage.setItem(savedKey, JSON.stringify({ open: false, targetTabId: currentTab.id,
     targetTopicId: PMO_TEAMS_TOPIC_ID, reference: currentReference }))
@@ -117,6 +118,41 @@ afterEach(async () => {
 })
 
 describe('Mote shortcut current context', () => {
+  it('keeps exact-host original conversation lookup independent of unrelated Sessions while open and retained closed', async () => {
+    const local = { ...current, id: 'local-owner-view' }
+    const alias = { ...current, control: { ...current.control, agentSessionId: 'different-canonical-agent' } }
+    const remote = { ...current, id: 'remote-owner-view', hostId: 'remote', control: { ...current.control, hostId: 'remote' } }
+    const sessions = [...Array.from({ length: 256 }, (_, index) => agent(`unrelated-${index}`, 'working')), alias, remote, local, other]
+    useAppStore.setState({ sessions, tabs: { [currentTab.id]: { ...currentTab,
+      regions: { 'current-region': { ...currentTab.regions['current-region']!, kind: 'agent', phase: 'attached', sessionId: local.id } }
+    }, [otherTab.id]: otherTab } })
+    await render()
+    await act(async () => requestAgentConversationFloatingOpen(current.control.agentSessionId, 'local', undefined,
+      { ...currentReference, tabId: 'retained-missing-tab' })); await settle()
+    const notice = container.querySelector<HTMLElement>('.original-agent-conversation')!
+    expect(notice.dataset.originalAgent).toBe(current.control.agentSessionId)
+    const choices = [...notice.querySelectorAll('button')].filter(button => button.textContent?.startsWith('原对话位置 '))
+    expect(choices).toHaveLength(1)
+    await act(async () => choices[0]!.click()); await settle()
+    expect(saved().reference).toMatchObject(currentReference)
+    expect(container.querySelector<HTMLElement>('[role="dialog"]')!.dataset.moteTargetSession).toBe(local.id)
+    const retainedReference = saved().reference
+
+    const wholeCollectionFind = vi.spyOn(sessions, 'find')
+    for (const phase of ['open', 'closed']) {
+      if (phase === 'closed') { await act(async () => requestPmoTeamsTopicFloatingClose()); await settle() }
+      wholeCollectionFind.mockClear()
+      for (let revision = 1; revision <= 20; revision++) await act(async () => useAppStore.setState({
+        agentComposerDrafts: { ...useAppStore.getState().agentComposerDrafts, [other.id]: `Unrelated draft ${phase} ${revision}` },
+        timelines: { [other.id]: { agentSessionId: other.id, revision, items: [] } }
+      }))
+      expect(wholeCollectionFind, phase).not.toHaveBeenCalled()
+      expect(useAppStore.getState().sessions).toBe(sessions)
+      expect(saved().reference).toEqual(retainedReference)
+      expect(saved().open).toBe(phase === 'open')
+    }
+  })
+
   it.each([
     ['working', 'Working'], ['waiting', 'Needs reply'], ['error', 'Failed'], ['running', 'Status unknown']
   ] as const)('shows the current Agent %s fact while another Agent needs a reply', async (state, text) => {
@@ -357,11 +393,13 @@ describe('Mote shortcut current context', () => {
     const launch = vi.fn(); useAppStore.setState({ launchAgent: launch })
     await render()
     await act(async () => button('Open Mote').click()); await settle()
-    expect(container.textContent).toContain('Context preparation did not complete')
+    const retry = () => container.querySelector<HTMLButtonElement>('[data-mote-context-retry="ensure-mote"]')
+    expect(retry()).not.toBeNull()
+    expect(container.querySelector('.mote-context-status__cause')?.textContent).toBe('Metadata read failed')
     expect(container.querySelector<HTMLElement>('[role="dialog"]')!.dataset.moteStatus).toBe('Working')
     expect(container.querySelector('[data-projected-target]')?.getAttribute('data-projected-target')).toBe(currentTab.id)
-    await act(async () => Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Retry context')!.click()); await settle()
-    expect(container.textContent).not.toContain('Context preparation did not complete')
+    await act(async () => retry()!.click()); await settle()
+    expect(retry()).toBeNull()
     expect(saved().targetTabId).toBe(currentTab.id)
     expect(useAppStore.getState().sessions).toEqual([current, other]); expect(launch).not.toHaveBeenCalled()
   })
