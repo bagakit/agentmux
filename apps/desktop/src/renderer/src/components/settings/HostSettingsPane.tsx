@@ -285,7 +285,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
                   {check?.observedAt ? <time dateTime={new Date(check.observedAt).toISOString()}>{new Date(check.observedAt).toLocaleString()}</time> : null}
                   {check?.state === 'error' ? <button type="button" className="small-button remote-overview__connection-action" onClick={() => selectHostPanel(host.id, 'connection')}>Review connection</button> : null}
                   {check?.detail && check.state === 'error' ? <details className="remote-overview__check-details"><summary>Connection test details</summary><p>{check.detail}</p></details> : null}</div>
-                <HostSessionSummary sessions={hostSessions} active={active && (wide || view === 'editor')} onOpen={id => { useAppStore.getState().selectSession(id); onClose?.() }} />
+                <HostSessionSummary sessions={hostSessions} active={active && (wide || view === 'editor')} onOpen={id => { if (useAppStore.getState().selectSession(id)) onClose?.() }} />
                 <HostRuntimePanel host={host} committed={config.hosts.find(item => item.id === host.id)} active={active && !pendingHostNavigation && (measuredWide === true || view === 'editor')} />
                 <HostNetworkPanel host={host} committed={config.hosts.find(item => item.id === host.id)} state={network.reads[host.id]} onRead={network.read}
                   active={active && !pendingHostNavigation && (measuredWide === true || view === 'editor')} visible={network.visible} />
