@@ -1,4 +1,5 @@
 import { agentInputContextCaptureProofFields, parseAgentInputContextCaptureReference } from './agent-input-context-capture.js'
+import { AMUX_CONTINUE_MARKER } from './amux-protocol-definition.js'
 import type {
   AgentCapabilitySnapshot,
   AgentCatalogEntry,
@@ -38,7 +39,7 @@ export type AgentMuxContinuityPolicy = {
 }
 
 export const DEFAULT_AGENT_CONTINUITY_REMINDER = 'This is the same conversation restored after its previous process ended. Preserve the existing task, decisions and user constraints. Previous input with an unknown outcome has not been replayed. Review the retained conversation before taking further action.'
-export const DEFAULT_AGENT_CONTINUITY_CONTINUATION = '<amux:continue />'
+export const DEFAULT_AGENT_CONTINUITY_CONTINUATION = AMUX_CONTINUE_MARKER
 export const DEFAULT_AGENT_CONTINUITY_POLICY: Readonly<AgentMuxContinuityPolicy> = Object.freeze({
   activeRecovery: 'automatic', activeRecoveryDelayMs: 0,
   confirmedIdleWindowMs: 24 * 60 * 60 * 1000, resumeAfterExit: true,

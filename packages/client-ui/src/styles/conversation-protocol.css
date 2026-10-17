@@ -1,0 +1,26 @@
+.conversation-protocol {
+  min-width: 0;
+  margin-block: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  color: var(--text-2);
+}
+.conversation-protocol__header { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); min-width: 0; font-size: var(--fs-meta); }
+.conversation-protocol__header > svg { flex: none; color: var(--text-3); }
+.conversation-protocol__header > strong { color: var(--text); font-weight: 600; }
+.conversation-protocol__header > code { min-width: 0; color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
+.conversation-protocol__description { margin: var(--sp-2) 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.conversation-protocol__keyword { display: inline-block; margin-block-start: var(--sp-2); color: var(--text); overflow-wrap: anywhere; }
+.conversation-protocol__attributes { display: grid; gap: var(--sp-1); margin: var(--sp-2) 0; font-size: var(--fs-meta); }
+.conversation-protocol__attributes > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 3fr); gap: var(--sp-2); }
+.conversation-protocol__attributes dt { color: var(--text-3); overflow-wrap: anywhere; }
+.conversation-protocol__attributes dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.conversation-protocol__body { margin: var(--sp-2) 0; color: var(--text); font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+.conversation-protocol__original { margin-block-start: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
+.conversation-protocol__original > summary { display: flex; align-items: center; gap: var(--sp-1); min-height: 24px; cursor: pointer; list-style: none; }
+.conversation-protocol__original > summary::-webkit-details-marker { display: none; }
+.conversation-protocol__original > summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; border-radius: var(--radius-sm); }
+.conversation-protocol__original[open] > summary > svg { transform: rotate(90deg); }
+.conversation-protocol__original > pre { margin: var(--sp-2) 0 0; color: var(--text-2); font-family: var(--font-mono); font-size: var(--fs-micro); white-space: pre-wrap; overflow-wrap: anywhere; }

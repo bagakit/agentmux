@@ -4,6 +4,7 @@ import { memo, type ComponentProps } from 'react'
 import { SemanticIcon } from '../theme/icons.js'
 import { AgentMarkdown } from './AgentMarkdown.js'
 import { ConversationBrowserContext } from './ConversationBrowserContext.js'
+import { ConversationAmuxProtocol } from './ConversationAmuxProtocol.js'
 
 const Markdown = memo(AgentMarkdown)
 type MarkdownProps = Omit<ComponentProps<typeof AgentMarkdown>, 'content' | 'className'>
@@ -32,7 +33,7 @@ export function ConversationInputText({ text, prefix, inputContext, inputContext
       <summary><SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />Declared context{prefix.declaredContexts!.length > 1 ? ` ${index + 1}` : ''}</summary>
       <pre>{context.raw}</pre>
     </details>)}
-    {prefix?.kind === 'references' ? <section className="log-turn__references" aria-label="A2A message references">
+    {prefix?.protocol ? <ConversationAmuxProtocol declaration={prefix.protocol} /> : prefix?.kind === 'references' ? <section className="log-turn__references" aria-label="A2A message references">
       <p>A2A Inbox references</p>
       <ul>{prefix.references.map((reference, index) => <li key={index}>
         <span>Declared source <code>{reference.declaredAgentSessionId}</code></span>

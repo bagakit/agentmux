@@ -1,4 +1,5 @@
 import { AGENTMUX_GOAL_SKILL_ENTRY } from './goal-role-guidance.js'
+import { AMUX_PROTOCOL_DEFINITIONS } from './amux-protocol-definition.js'
 import { DOMImplementation, XMLSerializer } from '@xmldom/xmldom'
 import { AGENTMUX_SELF_CONTEXT_VERB } from './agent-self-context.js'
 import { AGENTMUX_AGENT_MESSAGING_ENTRY } from './agent-messaging-guidance.js'
@@ -48,7 +49,7 @@ const AWAIT_USER_REQUEST = 'No request yet. Wait for the user.'
  * 出站文本的唯一组装出口是那一个函数，署名不该被第二处直接拼。
  */
 function amuxEnvelope(text: string): string {
-  const document = new DOMImplementation().createDocument(null, 'amux', null)
+  const document = new DOMImplementation().createDocument(null, AMUX_PROTOCOL_DEFINITIONS.context.tag, null)
   const envelope = document.documentElement!
   // Platform text remains text even when a rule or note contains XML-looking syntax.
   envelope.appendChild(document.createTextNode(`\n${text}\n`))

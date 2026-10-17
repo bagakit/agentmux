@@ -3,6 +3,10 @@ import type { AgentMuxMessageEnvelope } from './agent-message-envelope.js'
 import { composeOutboundMessage } from './agent-outbound-message.js'
 import { AGENTMUX_A2A_REMINDER } from './agent-messaging-guidance.js'
 import { browserInputContextJson, parseBrowserInputContext, type BrowserInputContext } from './browser-input-context.js'
+import { AMUX_PROTOCOL_DEFINITIONS, AMUX_CONTINUE_MARKER, formatAmuxReactionMarker, isAmuxReactionCode, type AmuxProtocolDeclaration, type AmuxProtocolId } from './amux-protocol-definition.js'
+import { formatAmuxSharing, formatAmuxObjectLink } from './sharing.js'
+
+export { AMUX_PROTOCOL_DEFINITIONS, type AmuxProtocolDeclaration, type AmuxProtocolId } from './amux-protocol-definition.js'
 
 /**
  * Source plus unchanged authored body. Core authorizes identity before delivery;
@@ -29,7 +33,8 @@ export function renderAgentMuxMessageEnvelope(envelope: Pick<AgentMuxMessageEnve
   if (envelope.sender.kind === 'agent-session' && envelope.senderSessionId !== null) {
     // The authored body is opaque. Only the fixed final reminder is escaped, so
     // tags, code and even complete example envelopes inside the body stay exact.
-    return `<amux:a2a from="${attributeText(envelope.senderSessionId)}" msg-id="${attributeText(envelope.messageId)}">\n${envelope.body}\n${reminderText(AGENTMUX_A2A_REMINDER)}\n</amux:a2a>`
+    const tag = AMUX_PROTOCOL_DEFINITIONS.a2a.tag
+    return `<${tag} from="${attributeText(envelope.senderSessionId)}" msg-id="${attributeText(envelope.messageId)}">\n${envelope.body}\n${reminderText(AGENTMUX_A2A_REMINDER)}\n</${tag}>`
   }
   if (envelope.sender.kind === 'external') {
     const source = [envelope.sender.actor.application.domain, envelope.sender.actor.application.appId, envelope.sender.actor.idType,
@@ -41,6 +46,7 @@ export function renderAgentMuxMessageEnvelope(envelope: Pick<AgentMuxMessageEnve
 }
 
 type AgentMuxMessageReading = {
+  protocol?: AmuxProtocolDeclaration
   reminder?: { raw: string; text: string }
   /** Complete input-leading declarations, preserved as original source spans. */
   declaredContexts?: readonly { raw: string; inputContext?: BrowserInputContext }[]
@@ -88,7 +94,7 @@ export type AgentMuxMessagePacket = {
 /** Only a reading wire; the caller owns the original records and notice input identity. */
 export function renderAgentMuxMessageReferences(references: readonly { senderSessionId: string; messageId: string }[], reminder?: string): string {
   if (references.length === 0) return ''
-  const tag = references.length === 1 && reminder === undefined ? 'amux:a2a' : 'a2a'
+  const tag = references.length === 1 && reminder === undefined ? AMUX_PROTOCOL_DEFINITIONS['a2a-reference'].tag : 'a2a'
   const items = references.map(reference => `<${tag} from="${attributeText(reference.senderSessionId)}" msg-id="${attributeText(reference.messageId)}" read-via="message --skill" />`)
   if (tag === 'amux:a2a') return items[0]!
   if (reminder !== undefined) items.push(reminderText(reminder))
@@ -264,11 +270,82 @@ function parseA2aContainer(text: string): AgentMuxMessagePrefix | null {
 }
 
 function parseSenderPrefix(text: string): AgentMuxMessagePrefix | null {
-  if (text.startsWith('<amux:a2a')) {
+  const a2aStart = `<${AMUX_PROTOCOL_DEFINITIONS.a2a.tag}`
+  if (text.startsWith(a2aStart) && /^[\s/>]|^$/u.test(text.slice(a2aStart.length, a2aStart.length + 1))) {
     const reference = parseReference(text, 'amux:a2a')
     return reference ? referenceReading([reference]) : parseA2a(text)
   }
   const packet = parsePacket(text)
-  return packet ? { kind: 'content', sourceLabel: packet.name, declaredAgentSessionId: null,
-    body: packet.parts.map(part => part.text).join(''), packet } : null
+  if (packet) return { kind: 'content', sourceLabel: packet.name, declaredAgentSessionId: null,
+    body: packet.parts.map(part => part.text).join(''), packet }
+  const protocol = parseStandaloneProtocol(text)
+  return protocol ? { kind: 'content', sourceLabel: '', declaredAgentSessionId: null, body: '', protocol } : null
 }
+
+/** Only a complete standalone declaration is projected. Opaque bodies are never XML-parsed. */
+function parseStandaloneProtocol(text: string): AmuxProtocolDeclaration | null {
+  if (text === AMUX_CONTINUE_MARKER) return { id: 'continue', tag: AMUX_PROTOCOL_DEFINITIONS.continue.tag, attributes: [], body: null, raw: text }
+  const reactionOpening = `<${AMUX_PROTOCOL_DEFINITIONS.reaction.tag} `
+  if (text.startsWith(reactionOpening) && text.endsWith(' />')) {
+    const code = text.slice(reactionOpening.length, -3)
+    if (isAmuxReactionCode(code) && text === formatAmuxReactionMarker(code)) {
+      return { id: 'reaction', tag: AMUX_PROTOCOL_DEFINITIONS.reaction.tag, attributes: [], body: null, raw: text, code }
+    }
+  }
+  const header = /^<amux:([a-z][a-z0-9-]*)((?: +[a-z][a-z0-9-]*="[^<>"\r\n]*")*) *(\/?)>/u.exec(text)
+  if (!header) return null
+  const tag = `amux:${header[1]}`
+  // A malformed known format cannot borrow the generic card's validity.
+  if (Object.values(AMUX_PROTOCOL_DEFINITIONS).some(definition => definition.tag === tag)) return null
+  const selfClosing = header[3] === '/'
+  const closing = `</${tag}>`
+  if (selfClosing ? text.length !== header[0].length : !text.endsWith(closing)) return null
+  const body = selfClosing ? null : text.slice(header[0].length, -closing.length)
+  try {
+    const document = new DOMParser({ onError: onWarningStopParsing }).parseFromString(`<declaration${header[2]}/>`, 'text/xml')
+    const element = document.documentElement
+    if (!element || element.tagName !== 'declaration' || element.childNodes.length || Array.from(document.childNodes).some(node => node !== element)) return null
+    const attrs = Array.from(element.attributes).map(attribute => ({ name: attribute.name, value: attribute.value }))
+    if (new Set(attrs.map(attribute => attribute.name)).size !== attrs.length) return null
+    // xmldom decodes numeric references without enforcing XML 1.0 character ranges.
+    if (attrs.some(attribute => !/^[\u0009\u000A\u000D\u0020-\uD7FF\uE000-\uFFFD\u{10000}-\u{10FFFF}]*$/u.test(attribute.value))) return null
+    return { tag, attributes: attrs, body, raw: text }
+  } catch { return null }
+}
+
+export type AgentMuxProtocolCatalogEntry = {
+  id: AmuxProtocolId
+  title: string
+  description: string
+  syntax: string
+  form: 'envelope' | 'marker' | 'frame' | 'link'
+  examples: readonly { label: string; wire: string }[]
+}
+
+const sampleReference = { senderSessionId: 'SID', messageId: 'MID' }
+const protocolExamples = {
+  context: () => [{ label: 'Guidance and original request', wire: composeOutboundMessage({ amux: 'Platform guidance.', user: 'Original request.' }) }],
+  browser: () => [{ label: 'Declared page observation', wire: composeOutboundMessage({ inputContext: {
+    kind: 'browser', version: 1, capturedAt: 0, browser: { hostId: 'local', browserId: 'BID', navigationId: null },
+    page: { url: 'https://example.org/', title: 'Example page' }
+  }, user: 'Original request.' }) }],
+  a2a: () => [{ label: 'Original message', wire: renderAgentMuxMessageEnvelope({ messageId: 'MID', sender: { kind: 'agent-session', agentSessionId: 'SID' }, senderSessionId: 'SID', body: 'Original message body.' }) }],
+  'a2a-reference': () => [
+    { label: 'Single reference', wire: renderAgentMuxMessageReferences([sampleReference]) },
+    { label: 'Merged references', wire: renderAgentMuxMessageReferences([sampleReference, { senderSessionId: 'SID-2', messageId: 'MID-2' }]) }
+  ],
+  continue: () => [{ label: 'Continuation declaration', wire: AMUX_CONTINUE_MARKER }],
+  reaction: () => [
+    { label: 'Standalone keyword declaration', wire: formatAmuxReactionMarker('ok') },
+    { label: 'Marker remains text inside guidance', wire: composeOutboundMessage({ amux: formatAmuxReactionMarker('ok'), user: 'Original selected Prompt body.' }) }
+  ],
+  sharing: () => [
+    { label: 'File context', wire: formatAmuxSharing('File', 'docs/example.md\nOriginal file context.') },
+    { label: 'Browser context', wire: formatAmuxSharing('Browser', 'https://example.org/\nOriginal page context.') }
+  ],
+  link: () => [{ label: 'Exact object identity', wire: formatAmuxObjectLink({ kind: 'agent', agentSessionId: 'SID' }) }]
+} satisfies Record<AmuxProtocolId, () => readonly { label: string; wire: string }[]>
+
+/** Local compiled reading capabilities, not the connected Runtime's version or permissions. */
+export const AGENTMUX_PROTOCOL_CATALOG: readonly AgentMuxProtocolCatalogEntry[] = Object.entries(AMUX_PROTOCOL_DEFINITIONS)
+  .map(([id, definition]) => ({ id: id as AmuxProtocolId, ...definition, examples: protocolExamples[id as AmuxProtocolId]() }))
