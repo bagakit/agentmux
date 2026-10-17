@@ -102,7 +102,7 @@ export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
 export function MobileConversationSurface({ client, agentSessionId, connection, platform, onAttach, onShowTerminal, visible = true, displayName,
   openWorkspaceFile, readPastedImage, openHttpLink }: MobileConversationSurfaceProps) {
   const feed = useRef<HTMLDivElement>(null), follow = useRef(initFollowState())
-  const reading = useHostedConversation(client, agentSessionId, visible && connection.state === 'connected', snapshot => canReplaceCapturedWindow(feed.current, snapshot, !follow.current.following),
+  const reading = useHostedConversation(client, agentSessionId, visible && connection.state === 'connected', (snapshot, displayed) => canReplaceCapturedWindow(feed.current, snapshot, !follow.current.following, displayed),
     (page, previous) => !protectsConversationWindow(feed.current, page, !follow.current.following, previous ?? undefined, { current: previous }))
   const [jump, setJump] = useState(false)
   useEffect(() => { follow.current = initFollowState(); setJump(false) }, [agentSessionId])

@@ -32,7 +32,7 @@ const matchesSource = (a: AgentSessionHistorySource, b?: AgentSessionHistorySour
 /** DOM reading state over complete frames from the one public backend Reader. */
 export function useSessionConversationWindow(reading: ConversationReading | undefined,
   beforeCommit: (page: AgentSessionHistoryPage, intent: ConversationReadingIntent, currentOriginal?: AgentSessionHistoryPage, projection?: ConversationWindowProjection) => boolean,
-  coverageDuration = 24 * 3_600_000, beforeCapturedCommit?: (snapshot: AgentTimelineSnapshot) => boolean) {
+  coverageDuration = 24 * 3_600_000, beforeCapturedCommit?: (snapshot: AgentTimelineSnapshot, displayed?: AgentTimelineSnapshot) => boolean) {
   const displayed = useRef<AgentSessionHistoryPage | null>(null)
   const boundary = useRef<string | null>(null)
   const intent = useRef<ConversationReadingIntent>('seed')
@@ -41,12 +41,12 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
   const acceptedBinding = useRef({ key, bindingKey })
   const view = useConversationView(api.conversation, reading?.reference, reading?.enabled === true, {
     ...(reading ? { identity: reading.identity } : {}),
-    beforeCommit: (snapshot, operation) => {
+    beforeCommit: (snapshot, operation, displayedFrame) => {
       const next = projectConversationWindow(snapshot), page = next.historyPage
       const currentIntent = operation === 'changes' || operation === 'reopen' ? 'live' : intent.current
       if (page && !beforeCommit(page, currentIntent, displayed.current ?? undefined, { current: displayed.current,
         ...(boundary.current ? { recordBoundary: { beforeRecordId: boundary.current } } : {}) })) return false
-      if (beforeCapturedCommit?.(next.captured) === false) return false
+      if (beforeCapturedCommit?.(next.captured, displayedFrame ? projectConversationWindow(displayedFrame).captured : undefined) === false) return false
       acceptedBinding.current = { key, bindingKey }
       return true
     }
