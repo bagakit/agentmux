@@ -256,7 +256,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
       pending(id, false)
     }
   }
-  async function begin(capability: ConnectionEnrollmentCapability, includeAvatar: boolean) {
+  async function begin(capability: ConnectionEnrollmentCapability, includeAvatar: boolean, name?: string) {
     if (!profile || creating.current === draft.current) return
     if (!includeAvatar || !profile.image) {
       setIssue(
@@ -278,7 +278,8 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
           },
           adapterId: capability.adapterId,
           domain: capability.domain,
-          avatar: includeAvatar ? 'include-saved' : 'omit'
+          avatar: includeAvatar ? 'include-saved' : 'omit',
+          ...(name === undefined ? {} : { name: name.trim() })
         }
       })
     } finally {
