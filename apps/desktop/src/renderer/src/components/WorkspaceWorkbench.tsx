@@ -1776,7 +1776,6 @@ export function WorkspaceWorkbench({
   }
   const projectionEntity = projection?.entity
   const projectionKey = projectionEntity ? `${projection?.presentationId}:${projectionEntity.kind}:${projectionEntity.kind === 'zone' ? projectionEntity.zoneId : projectionEntity.kind === 'tab' ? projectionEntity.tabId : projectionEntity.regionId}` : null
-  const projectionSlotKey = projection && JSON.stringify([projection.entity, projection.selection])
   const [projectionActiveGroupId, setProjectionActiveGroupId] = useState<string | null>(null)
   useEffect(() => setProjectionActiveGroupId(null), [projectionKey])
   const effectiveViewHostPrefix = projection ? `${projection.presentationId}-slot` : viewHostPrefix
@@ -2069,7 +2068,7 @@ export function WorkspaceWorkbench({
     return <WorkbenchProjectionContext.Provider value={projectionContext}>
       <div ref={workbenchRef} className="workspace-workbench">
         <div className="pane-body">{projectionNotice}
-        {confirmed ? <div key={projectionSlotKey} id={workbenchRegionProjectionSlotId(effectiveViewHostPrefix, reference)}
+        {confirmed ? <div key={workbenchRegionProjectionSlotId(effectiveViewHostPrefix, reference)} id={workbenchRegionProjectionSlotId(effectiveViewHostPrefix, reference)}
           data-workbench-tab-id={reference.tabId} data-workbench-group-id={reference.groupId} className="workbench-region-slot" />
           : projectionNotice ? null : <div role="status" className="workbench-restore-notice">The exact Region occurrence is not confirmed here. Its content and reference are kept; choose its original location.</div>}
         </div>
@@ -2088,7 +2087,7 @@ export function WorkspaceWorkbench({
     return <WorkbenchProjectionContext.Provider value={projectionContext}>
       <div ref={workbenchRef} className="workspace-workbench">
         <div className="pane-body">{projectionNotice}
-        {confirmed ? <div key={projectionSlotKey} id={workbenchProjectionSlotId(effectiveViewHostPrefix, reference)}
+        {confirmed ? <div key={workbenchProjectionSlotId(effectiveViewHostPrefix, reference)} id={workbenchProjectionSlotId(effectiveViewHostPrefix, reference)}
           data-workbench-tab-id={tab.id} data-workbench-group-id={reference.groupId} className="workbench-tab-slot" />
           : projectionNotice ? null : <div role="status" className="workbench-restore-notice">The exact Tab occurrence is not confirmed here. Its content and reference are kept; choose its original location.</div>}
         </div>
