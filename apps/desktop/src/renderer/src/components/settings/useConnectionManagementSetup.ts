@@ -12,7 +12,10 @@ type Reading = { key: string; source: Source; id: string; value: ConnectionSetup
 type PublicationForm = { version: string; notes: string; reason: string; visibility: 'current' | 'creator-only'; desktop: string; mobile: string; versionId: string; fullRelease: boolean }
 const emptyPublicationForm: PublicationForm = { version: '1.0.0', notes: '', reason: '', visibility: 'current', desktop: '', mobile: '', versionId: '', fullRelease: false }
 const scope = (record: ConnectionRecord | null) => record ? JSON.stringify([record.config.connectionId, record.config.adapterId, record.config.application, record.revision]) : ''
-const inputOf = (operation: ConnectionSetupOperation): ConnectionSetupBegin => ({ operationId: operation.operationId, connectionId: operation.connectionId, expectedConnectionRevision: operation.expectedConnectionRevision, goal: operation.goal, ...(operation.source ? { source: operation.source } : {}) })
+const inputOf = (operation: ConnectionSetupOperation): ConnectionSetupBegin => {
+  if (operation.goal.kind !== 'agent-conversation') throw new Error('This task belongs to the original profile update view.')
+  return { operationId: operation.operationId, connectionId: operation.connectionId, expectedConnectionRevision: operation.expectedConnectionRevision, goal: operation.goal, ...(operation.source ? { source: operation.source } : {}) }
+}
 
 /** The mounted Settings task retains safe submissions; private readings and timers are disposable. */
 export function useConnectionManagementSetup(record: ConnectionRecord | null, active: boolean, opened: boolean) {
@@ -39,7 +42,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
     : configuration?.effect === 'submit-application-version' ? { effect: configuration.effect, ...(configuration.draft?.kind === 'submit-version' ? { draft: configuration.draft } : {}) }
     : { effect: configurationEffect as 'enable-messaging' | 'use-persistent-connection' | 'use-persistent-callback' | 'add-card-actions' | 'add-message-reception' }
   const supported = !!record && visibleCatalog?.value?.support?.connectionRevision === record.revision && visibleCatalog.value.support.capabilities.includes('management-authentication')
-  const originals = visibleCatalog?.value?.operations ?? []
+  const originals = (visibleCatalog?.value?.operations ?? []).filter(operation => operation.goal.kind === 'agent-conversation')
   const local = submissions.filter(item => item.input.connectionId === record?.config.connectionId && item.source === source)
   const choices = [...originals.map(operation => ({ input: inputOf(operation), operation })), ...local.filter(item => !originals.some(o => o.operationId === item.input.operationId)).map(item => ({ input: item.input, operation: null }))]
   const busy = (visible?.pending ?? false) || guidedCheck

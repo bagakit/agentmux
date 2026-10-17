@@ -241,6 +241,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
               view.actions.some(action => action.kind === 'continue-authentication'))
           }
         }
+        if (result.setupOperationId && token === lifetime.current && selection.current === id) setDriving(true)
         if (token === lifetime.current && order === occurrences.current.get(id) && selection.current === id)
           setMessage({ kind: 'notice', text: '' })
       }
@@ -417,6 +418,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     refreshSource,
     begin,
     sync,
+    acceptOperation: accept,
     check,
     send,
     select(id: string) {

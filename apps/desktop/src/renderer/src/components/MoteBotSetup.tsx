@@ -8,6 +8,7 @@ import { SelectionField } from './SelectionField'
 import { BotConfirmationCode } from './BotConfirmationCode'
 import { ConnectionProfileResult } from './ConnectionProfileResult'
 import { ConnectionProfileProgress } from './ConnectionProfileProgress'
+import { ConsoleProfileProgress, MoteProfileSetup } from './MoteProfileSetup'
 import { InitialBotSetupResult, initialSetupStageLabels } from './settings/InitialBotSetupResult'
 import { ConnectionProfileTrace } from './settings/ConnectionProfileTrace'
 import { ConnectionRequestTrace } from './settings/ConnectionRequestTrace'
@@ -76,13 +77,12 @@ export function MoteBotSetup({
   ]
   const unfinished = setup.operations.find(
     (item) =>
-      item.action === 'create'
-        ? !item.enrollment?.configured || item.defaultLink.state !== 'saved' || !!item.enrollment.initialPublication && item.enrollment.initialSetup?.progress?.state !== 'complete'
-        : !item.profile || !['confirmed', 'refused'].includes(item.profile.patch.state)
+      item.action === 'create' &&
+      (!item.enrollment?.configured || item.defaultLink.state !== 'saved' || !!item.enrollment.initialPublication && item.enrollment.initialSetup?.progress?.state !== 'complete')
   )
   const resumeId =
     unfinished?.operationId ??
-    setup.requests.find((item) => !ids.has(item.input.operationId))?.input.operationId
+    setup.requests.find((item) => item.action === 'create' && !ids.has(item.input.operationId))?.input.operationId
   useEffect(() => {
     if (!shortcut.current || !setup.historyReady || setup.loading || !setup.profile || !capability) return
     shortcut.current = false
@@ -192,10 +192,15 @@ export function MoteBotSetup({
       {setup.issue}
     </p>
   ) : null
+  if (profileTask && operation?.setupOperationId) return <section className="mote-bot-setup" aria-label="Mote bot profile">
+    <button type="button" className="small-button" onClick={() => { newDraft(); onCurrent() }}>Back to bot profile</button>
+    <MoteProfileSetup key={operation.operationId} operation={operation} automatic={setup.driving} onOperation={setup.acceptOperation} />
+    {setupFeedback}
+  </section>
   return (
     <section className="mote-bot-setup" aria-label="Mote bot profile" data-bot-journey-stage={profileTask ? undefined : guideStage}>
       <div className="mote-bot-task">
-      {profileTask ? <ConnectionProfileProgress operation={operation?.profile} started={!!selected} sourceConfirmed={selected ? !!operation?.snapshot : !!setup.profile} /> : <BotSetupGuide stage={guideStage} currentStatus={initialProgress ? initialProgress.state === 'complete' ? 'Confirmed' : initialSetupStageLabels[initialProgress.stage] : enrollment?.application && !savedConnection ? 'Created · saving' : undefined} confirmedSteps={[...(setup.profile || operation?.snapshot ? [1] : []), ...(enrollment?.authentication?.stage === 'confirmed' ? [2] : []), ...(enrollment?.application ? [3] : [])]} currentStep={!selected ? 1 : savedConnection ? 4 : enrollment?.application || primaryEnrollmentAction?.kind === 'create' ? 3 : 2} />}
+      {profileTask ? operation?.profileOperationId ? <ConnectionProfileProgress operation={operation.profile} started sourceConfirmed /> : <ConsoleProfileProgress started={!!selected} sourceConfirmed={selected ? !!operation?.snapshot : !!setup.profile} unconfirmed={selected && !operation?.setup ? 'request' : undefined} /> : <BotSetupGuide stage={guideStage} currentStatus={initialProgress ? initialProgress.state === 'complete' ? 'Confirmed' : initialSetupStageLabels[initialProgress.stage] : enrollment?.application && !savedConnection ? 'Created · saving' : undefined} confirmedSteps={[...(setup.profile || operation?.snapshot ? [1] : []), ...(enrollment?.authentication?.stage === 'confirmed' ? [2] : []), ...(enrollment?.application ? [3] : [])]} currentStep={!selected ? 1 : savedConnection ? 4 : enrollment?.application || primaryEnrollmentAction?.kind === 'create' ? 3 : 2} />}
       <div className="mote-bot-task__content">
       {!selected ? (
         <>
@@ -212,7 +217,7 @@ export function MoteBotSetup({
                     <p>{setup.profile.description}</p>
                   ) : (
                     <p className="mote-details__hint">
-                      No public description is saved. The bot’s description will be kept.
+                      No public description is saved. The bot’s primary description will be empty.
                     </p>
                   )}
                 </div>
