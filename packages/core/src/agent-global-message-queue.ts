@@ -1,5 +1,5 @@
 import { validateBroadcastIntent, parseBroadcastReceipt, type AgentMuxMessageBroadcastIntent, type AgentMuxMessageBroadcastReceipt, type AgentMuxBroadcastIssue, type AgentMuxBroadcastTargetResult } from './agent-message-broadcast.js'
-import { parseMessageEventsPage, type AgentMuxMessageEventsQuery, type AgentMuxMessageEventsPage } from './agent-message-events.js'
+import { parseMessageEventsPage, parseMessageEventsQuery, type AgentMuxMessageEventsQuery, type AgentMuxMessageEventsPage } from './agent-message-events.js'
 import { agentInputContextCaptureProofFields } from './agent-input-context-capture.js'
 import { validateAgentMuxMessageEnvelope, messageEnvelopeString as nonEmpty, messageEnvelopeTimestamp as finiteTimestamp, type AgentMuxMessageEnvelope } from './agent-message-envelope.js'
 export { validateAgentMuxMessageEnvelope } from './agent-message-envelope.js'
@@ -1243,14 +1243,9 @@ export class DurableAgentMuxMessageQueue {
 
   /** Read exact original event metadata from both sides without decoding any message body. */
   async listMessageEvents(input: AgentMuxMessageEventsQuery, reauthorize: () => Promise<void>): Promise<AgentMuxMessageEventsPage> {
-    const participant = nonEmpty(input.participantSessionId, 'Message participant Session id')
-    const after = input.afterSequence ?? 0, limit = input.limit ?? 50
-    if (input.messageId !== undefined && input.broadcastOperationId !== undefined) throw new AgentMuxError('Select one original message or broadcast scope.', 'INVALID_CONTROL_REQUEST')
-    if (input.messageId !== undefined) nonEmpty(input.messageId, 'Original message ID')
-    if (input.broadcastOperationId !== undefined) nonEmpty(input.broadcastOperationId, 'Original broadcast operation ID')
-    if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100 ||
-        input.throughSequence !== undefined && (!Number.isSafeInteger(input.throughSequence) || input.throughSequence < after)) throw new AgentMuxError(
-      'Message events require a nonnegative original sequence boundary and limit 1–100.', 'INVALID_CONTROL_REQUEST')
+    input = parseMessageEventsQuery(input)
+    const participant = input.participantSessionId, after = input.afterSequence ?? 0, limit = input.limit ?? 50
+    const backward = input.latest === true || input.beforeSequence !== undefined
     return this.withLock(async () => {
       await reauthorize()
       initializeMessageEventIndex(this.db)
@@ -1265,9 +1260,11 @@ export class DurableAgentMuxMessageQueue {
         .replace('SELECT position.message_id FROM', 'SELECT message_id FROM')
       const scopeArgs = input.messageId !== undefined ? [input.messageId] : input.broadcastOperationId !== undefined ? [input.broadcastOperationId] : []
       const index = scope ? ' INDEXED BY message_event_by_message' : ''
+      const before = input.beforeSequence === undefined ? '' : ' AND event_sequence<?'
       const rows = this.db.prepare(`WITH selected AS (
         SELECT DISTINCT event_sequence FROM message_event_positions${index}
-          WHERE participant_id=? AND event_sequence>? AND event_sequence<=?${scope} ORDER BY event_sequence LIMIT ?)
+          WHERE participant_id=? AND event_sequence>? AND event_sequence<=?${before}${scope}
+          ORDER BY event_sequence ${backward ? 'DESC' : 'ASC'} LIMIT ?)
       SELECT event.sequence, json_extract(event.json, '$.kind') AS kind,
         COALESCE(json_extract(event.json, '$.at'), json_extract(event.json, '$.envelope.createdAt')) AS at,
         COALESCE(json_extract(event.json, '$.notificationId'), json_extract(event.json, '$.notification.notificationId')) AS notification_id,
@@ -1284,9 +1281,11 @@ export class DurableAgentMuxMessageQueue {
           LEFT JOIN message_broadcast_targets target ON target.message_id=m.message_id
           LEFT JOIN message_broadcasts batch ON batch.operation_id=target.operation_id
           WHERE position.participant_id=? AND position.event_sequence=event.sequence${referenceScope}) AS references_json
-      FROM selected JOIN records event ON event.sequence=selected.event_sequence ORDER BY event.sequence`)
-        .all(participant, after, through, ...scopeArgs, limit + 1, participant, ...scopeArgs)
-      const events = rows.slice(0, limit).map(row => ({ sequence: Number(row.sequence), kind: row.kind, at: row.at === null ? null : Number(row.at),
+      FROM selected JOIN records event ON event.sequence=selected.event_sequence ORDER BY event.sequence ${backward ? 'DESC' : 'ASC'}`)
+        .all(participant, after, through, ...(input.beforeSequence === undefined ? [] : [input.beforeSequence]), ...scopeArgs, limit + 1, participant, ...scopeArgs)
+      const selected = rows.slice(0, limit)
+      if (backward) selected.reverse()
+      const events = selected.map(row => ({ sequence: Number(row.sequence), kind: row.kind, at: row.at === null ? null : Number(row.at),
         messages: (JSON.parse(String(row.references_json)) as Array<import('./agent-message-events.js').AgentMuxMessageEventReference & { broadcast: unknown }>).map(ref => {
           if (ref.broadcast !== null) return ref
           const { broadcast: _absent, ...original } = ref
@@ -1295,8 +1294,10 @@ export class DurableAgentMuxMessageQueue {
         ...(row.notification_id === null ? {} : { notificationId: String(row.notification_id) }),
         ...(row.state === null ? {} : { state: String(row.state) }), ...(row.reason === null ? {} : { reason: String(row.reason) }),
         ...(row.reply_id === null ? {} : { replyMessageId: String(row.reply_id) }), ...(row.event_kind === null ? {} : { eventKind: String(row.event_kind) }) }))
-      return parseMessageEventsPage({ participantSessionId: participant, afterSequence: after, throughSequence: through, incarnation, messageId: input.messageId ?? null, broadcastOperationId: input.broadcastOperationId ?? null, events,
-        nextAfterSequence: rows.length > limit ? events.at(-1)!.sequence : null }, input)
+      return parseMessageEventsPage({ participantSessionId: participant, afterSequence: after, latest: input.latest ?? false,
+        beforeSequence: input.beforeSequence ?? null, throughSequence: through, incarnation, messageId: input.messageId ?? null, broadcastOperationId: input.broadcastOperationId ?? null, events,
+        nextAfterSequence: !backward && rows.length > limit ? events.at(-1)!.sequence : null,
+        nextBeforeSequence: backward && rows.length > limit ? events[0]!.sequence : null }, input)
     })
   }
 

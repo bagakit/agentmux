@@ -5,6 +5,10 @@ import { assertDispatchEventKind } from './agent-handoff.js'
 export type AgentMuxMessageEventsQuery = {
   participantSessionId: string
   afterSequence?: number
+  /** Select the newest related events, returned in original ascending order. */
+  latest?: true
+  /** Exclusive older-page position within the original frozen journal boundary. */
+  beforeSequence?: number
   /** Freeze the original journal boundary while traversing this result. */
   throughSequence?: number
   incarnation?: string
@@ -39,12 +43,35 @@ export type AgentMuxMessageEvent = {
 export type AgentMuxMessageEventsPage = {
   participantSessionId: string
   afterSequence: number
+  latest: boolean
+  beforeSequence: number | null
   throughSequence: number
   incarnation: string
   messageId: string | null
   broadcastOperationId: string | null
   events: readonly AgentMuxMessageEvent[]
   nextAfterSequence: number | null
+  nextBeforeSequence: number | null
+}
+
+/** One query contract for SDK, RPC and journal readers; no input or consumption effects. */
+export function parseMessageEventsQuery(value: unknown): AgentMuxMessageEventsQuery {
+  const invalid = (): never => { throw new AgentMuxError('Message events require one original participant, sequence direction and frozen continuation.', 'INVALID_CONTROL_REQUEST') }
+  const keys = ['participantSessionId', 'afterSequence', 'latest', 'beforeSequence', 'throughSequence', 'incarnation', 'messageId', 'broadcastOperationId', 'limit']
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !keys.includes(key))) return invalid()
+  const p = value as Record<string, unknown>
+  if (!id(p.participantSessionId) || p.latest !== undefined && p.latest !== true ||
+      [p.afterSequence, p.latest, p.beforeSequence].filter(value => value !== undefined).length > 1 ||
+      p.messageId !== undefined && p.broadcastOperationId !== undefined) return invalid()
+  for (const key of ['incarnation', 'messageId', 'broadcastOperationId']) if (p[key] !== undefined && !id(p[key])) return invalid()
+  for (const key of ['afterSequence', 'beforeSequence', 'throughSequence', 'limit']) if (p[key] !== undefined &&
+    (!Number.isSafeInteger(p[key]) || Number(p[key]) < (key === 'beforeSequence' || key === 'limit' ? 1 : 0))) return invalid()
+  if (p.limit !== undefined && Number(p.limit) > 100 || p.throughSequence !== undefined &&
+      Number(p.throughSequence) < Number(p.afterSequence ?? 0) ||
+      p.beforeSequence !== undefined && (p.throughSequence === undefined || Number(p.beforeSequence) > Number(p.throughSequence) + 1)) return invalid()
+  if (p.throughSequence !== undefined && p.incarnation === undefined) throw new AgentMuxError(
+    'Keep the original journal incarnation with its frozen message event boundary.', 'MESSAGE_EVENT_SOURCE_CHANGED')
+  return { ...(p as AgentMuxMessageEventsQuery) }
 }
 
 const fail = (): never => { throw new AgentMuxError('The original message event page is malformed or belongs to another participant.', 'CONTROL_PROTOCOL_ERROR') }
@@ -55,8 +82,10 @@ function object(value: unknown, keys: readonly string[]): Record<string, unknown
 }
 
 export function parseMessageEventsPage(value: unknown, input: AgentMuxMessageEventsQuery): AgentMuxMessageEventsPage {
-  const page = object(value, ['participantSessionId', 'afterSequence', 'throughSequence', 'incarnation', 'messageId', 'broadcastOperationId', 'events', 'nextAfterSequence'])
+  try { input = parseMessageEventsQuery(input) } catch { return fail() }
+  const page = object(value, ['participantSessionId', 'afterSequence', 'latest', 'beforeSequence', 'throughSequence', 'incarnation', 'messageId', 'broadcastOperationId', 'events', 'nextAfterSequence', 'nextBeforeSequence'])
   if (page.messageId !== (input.messageId ?? null) || page.broadcastOperationId !== (input.broadcastOperationId ?? null) || !id(page.incarnation) || input.incarnation !== undefined && page.incarnation !== input.incarnation || page.participantSessionId !== input.participantSessionId || page.afterSequence !== (input.afterSequence ?? 0) ||
+      page.latest !== (input.latest ?? false) || page.beforeSequence !== (input.beforeSequence ?? null) ||
       !Number.isSafeInteger(page.throughSequence) || (page.throughSequence as number) < (page.afterSequence as number) ||
       input.throughSequence !== undefined && page.throughSequence !== input.throughSequence || !Array.isArray(page.events) ||
       page.events.length > (input.limit ?? 50)) return fail()
@@ -64,6 +93,7 @@ export function parseMessageEventsPage(value: unknown, input: AgentMuxMessageEve
   for (const entry of page.events) {
     const event = object(entry, ['sequence', 'kind', 'at', 'messages', 'notificationId', 'state', 'reason', 'replyMessageId', 'eventKind'])
     if (!Number.isSafeInteger(event.sequence) || (event.sequence as number) <= previous || (event.sequence as number) > (page.throughSequence as number) ||
+        input.beforeSequence !== undefined && (event.sequence as number) >= input.beforeSequence ||
         !['message', 'delivery', 'delivery-issue', 'dispatch-open', 'dispatch-event', 'a2a-notification', 'a2a-notification-result'].includes(String(event.kind)) ||
         event.at !== null && (typeof event.at !== 'number' || !Number.isFinite(event.at)) || !Array.isArray(event.messages) || !event.messages.length) return fail()
     previous = event.sequence as number
@@ -96,6 +126,9 @@ export function parseMessageEventsPage(value: unknown, input: AgentMuxMessageEve
       try { assertDispatchEventKind(event.eventKind) } catch { return fail() }
     }
   }
-  if (page.nextAfterSequence !== null && (!page.events.length || page.nextAfterSequence !== previous)) return fail()
+  const backward = input.latest === true || input.beforeSequence !== undefined
+  if (backward ? page.nextAfterSequence !== null : page.nextBeforeSequence !== null) return fail()
+  if (page.nextAfterSequence !== null && (!page.events.length || page.nextAfterSequence !== previous) ||
+      page.nextBeforeSequence !== null && (!page.events.length || page.nextBeforeSequence !== (page.events[0] as AgentMuxMessageEvent).sequence)) return fail()
   return page as unknown as AgentMuxMessageEventsPage
 }

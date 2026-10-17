@@ -1727,7 +1727,7 @@ export type AgentMuxObservationOrigin =
 export type AgentMuxClientEvent = (
   /** Original journal change; live=false is initial/recovered catch-up, never a fresh user alert. */
   | { type: 'agent-message-changed'; messageId: string; sequence: number; messageSequence: number; live: boolean;
-      recordKind: 'message' | 'delivery' | 'delivery-issue' | 'a2a-notification' | 'a2a-notification-result';
+      recordKind: 'message' | 'delivery' | 'delivery-issue' | 'dispatch-open' | 'dispatch-event' | 'a2a-notification' | 'a2a-notification-result';
       senderSessionId: string; recipientSessionId: string }
   /** Derived journal observation for human reading; never Input or Agent consumption authority. */
   | { type: 'agent-message-observation'; state: 'available' | 'unavailable'; code?: string; message?: string }

@@ -83,11 +83,14 @@ export const messageObservationJournalSchema = `
   CREATE TRIGGER IF NOT EXISTS message_notification_observation_record_insert AFTER INSERT ON records
     WHEN json_extract(NEW.json, '$.kind') IN ('a2a-notification', 'a2a-notification-result')
     BEGIN INSERT INTO message_observation_records VALUES (NEW.sequence); END;
+  CREATE TRIGGER IF NOT EXISTS message_dispatch_observation_record_insert AFTER INSERT ON records
+    WHEN json_extract(NEW.json, '$.kind') IN ('dispatch-open', 'dispatch-event')
+    BEGIN INSERT INTO message_observation_records VALUES (NEW.sequence); END;
 `
 
 export const messageObservationQuery = `WITH changed AS (
   SELECT position.sequence, json_extract(r.json, '$.kind') AS record_kind,
-    COALESCE(json_extract(r.json, '$.envelope.messageId'), json_extract(r.json, '$.messageId')) AS message_id,
+    COALESCE(json_extract(r.json, '$.envelope.messageId'), json_extract(r.json, '$.messageId'), json_extract(r.json, '$.sourceMessageId')) AS message_id,
     COALESCE(json_extract(r.json, '$.notification.notificationId'), json_extract(r.json, '$.notificationId')) AS notification_id
   FROM message_observation_records position JOIN records r ON r.sequence=position.sequence
   WHERE position.sequence > ? AND position.sequence <= ? ORDER BY position.sequence LIMIT 100),

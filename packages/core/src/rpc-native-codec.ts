@@ -760,7 +760,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         break
       }
       case 'message.events': {
-        const page = record(p, ['hostId', 'participantSessionId', 'afterSequence', 'throughSequence', 'incarnation', 'messageId', 'broadcastOperationId', 'events', 'nextAfterSequence'])
+        const page = record(p, ['hostId', 'participantSessionId', 'afterSequence', 'latest', 'beforeSequence', 'throughSequence', 'incarnation', 'messageId', 'broadcastOperationId', 'events', 'nextAfterSequence', 'nextBeforeSequence'])
         string(page.hostId)
         if (input.hostId !== undefined && page.hostId !== input.hostId || credentials && page.participantSessionId !== credentials.agentSessionId) fail()
         const { hostId: _hostId, ...original } = page
