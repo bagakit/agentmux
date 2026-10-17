@@ -22,6 +22,7 @@ import { parseMotePreferencesReadResult, type MoteConnectionRef } from '@agentmu
 import { connectionIdentityObservation, connectionNeedsInitialSetup, moteConnectionChoice, type AgentMoteConnectionSource } from '../lib/mote-connection-default'
 
 const CloseIcon = semanticIconComponent('action.close')
+const LoadingIcon = semanticIconComponent('status.loading')
 const AgentIcon = semanticIconComponent('object.agent')
 const GroupIcon = semanticIconComponent('object.conversation')
 const ConnectIcon = semanticIconComponent('navigation.forward')
@@ -345,6 +346,7 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
           </section>
           {application}
           {defaultNote ? <p className="agent-connector-note" role="status" data-mote-bot-source>{defaultNote}</p> : null}
+          {busy ? <p className="agent-connector-note" role="status" aria-busy="true" data-connector-request-pending><LoadingIcon size={13} animation="spin" /> Working on this group request…</p> : null}
           {showingCurrentBinding && binding ? <><section className="agent-connector-status" aria-label="Group connection status"><div><strong>Group saved</strong><span>{binding.state === 'active' ? 'Sharing enabled locally' : 'Sharing paused'} · New {binding.scope.publication === 'future-shared-conversation' ? 'conversation content' : 'replies and questions'}</span></div><button className="agent-connector-text-action" disabled={busy || binding.state === 'paused'} onClick={pause}>Pause sharing</button><p className="agent-connector-note" aria-label="Group member access">{approvedMembers === null ? 'Member access not confirmed' : unconfirmedMembers ? 'Member access not confirmed. Last confirmed: ' + (approvedMembers === 0 ? 'no members approved' : approvedMembers + (approvedMembers === 1 ? ' member approved' : ' members approved')) : approvedMembers === 0 ? 'No members approved to use this Agent' : approvedMembers + (approvedMembers === 1 ? ' member approved to use this Agent' : ' members approved to use this Agent')}</p></section></> : null}
           {bindingPending || binding && changingGroup ? <p className="agent-connector-note" role="status">{bindingPending ? 'The group change is not confirmed. Check its original status.' : 'Your current group stays connected until you confirm this change.'}</p> : null}
           {audience && audienceLinks.length && !linkIntent ? <p role="status" className="agent-connector-note">Several original joining requests are kept. Check their receipts below before generating another.</p> : audience ? <ConnectorRoomJoinLink key={JSON.stringify([connectionId, audience])} submitted={!!linkIntent} operation={linkOperation} pending={busy} prominent={showingCurrentBinding || mode === 'create' && !!created && !binding}
