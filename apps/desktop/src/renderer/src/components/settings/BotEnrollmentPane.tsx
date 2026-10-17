@@ -18,7 +18,7 @@ import { api } from '../../lib/api'
 import { SelectionField } from '../SelectionField'
 import { ConnectionSetupResult } from './ConnectionSetupResult'
 import { BrandIcon } from '../BrandIcon'
-import { desktopBotCreationPreset } from '../../lib/bot-creation-preset'
+import { desktopBotCreationPreset, generatedBotName } from '../../lib/bot-creation-preset'
 import { BotSetupGuide, type BotSetupGuideStage } from './BotSetupGuide'
 
 const BotIcon = semanticIconComponent('object.conversations')
@@ -59,7 +59,7 @@ export function useBotEnrollment(active: boolean) {
   const [catalogState, setCatalogState] = useState<'initial' | 'reading' | 'ready' | 'unconfirmed'>('initial')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [issuer, setIssuer] = useState(''),
-    [label, setLabel] = useState('')
+    [label, setLabel] = useState(generatedBotName)
   const [submissions, setSubmissions] = useState<ConnectionEnrollmentBeginInput[]>([])
   const [submittedId, setSubmittedId] = useState<string | null>(null)
   const submitted =
@@ -149,7 +149,8 @@ export function useBotEnrollment(active: boolean) {
   const begin = async (issuer: ConnectionEnrollmentCapability, label: string, preset?: ConnectionEnrollmentPreset) => {
     const intent = draft.current, current = epoch.current
     if (creating.current === intent || issuer.availability !== 'available') return
-    const name = label.trim() || 'AgentMux bot'
+    const name = label.trim()
+    if (!name) { setIssue('Enter a bot name before signing in.'); return }
     creating.current = intent
     setPreparing(true)
     setIssue('')
@@ -306,7 +307,7 @@ export function useBotEnrollment(active: boolean) {
       currentInput.current = null
       setSelectedId(null)
       setSubmittedId(null)
-      setLabel('')
+      setLabel(generatedBotName())
       setIssue('')
     },
     operation: selectedOperation
@@ -384,7 +385,7 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved, onContinue 
     : stage === 'confirmed' ? 'create'
     : view?.challenge || ['waiting', 'scanned', 'handoff'].includes(stage) ? 'scan'
     : 'attention'
-  const name = operation?.preset?.name ?? (submitted && 'preset' in submitted ? submitted.preset?.name : null) ?? current?.label ?? (label.trim() || 'AgentMux bot')
+  const name = operation?.preset?.name ?? (submitted && 'preset' in submitted ? submitted.preset?.name : null) ?? current?.label ?? label.trim()
   const feedback = enrollment.issue ? <p role="status" className="connector-check-feedback" data-enrollment-feedback>{enrollment.issue}</p> : null
   const identity = <div className="connector-enrollment__bot-preview">
     {enrollment.preset ? <img src={enrollment.preset.avatar.pngDataUrl} alt="Bot avatar" width={40} height={40} /> : current ? <BotIcon size={28} /> : <BrandIcon size={40} />}
@@ -403,7 +404,7 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved, onContinue 
       {unfinished ? <div className="connector-enrollment__resume"><strong>{submitted!.label}</strong><p>Your previous setup is kept. Open it to check the result.</p><button data-enrollment-resume className="primary-button" onClick={() => enrollment.select(submitted!.operationId)}>Resume this setup</button>{feedback}</div> : <>
         <div className="connector-enrollment__identity-editor">
           <BrandIcon size={40} />
-          <label className="settings-field connector-enrollment__name"><span>Bot name</span><TextInput aria-label="New bot name" value={label} disabled={enrollment.preparing} onChange={event => enrollment.setLabel(event.target.value)} placeholder="AgentMux bot" /><small>Uses the AgentMux avatar</small></label>
+          <label className="settings-field connector-enrollment__name"><span>Bot name</span><TextInput aria-label="New bot name" value={label} disabled={enrollment.preparing} onChange={event => enrollment.setLabel(event.target.value)} placeholder="AMUX-…" /><small>Uses the AgentMux avatar</small></label>
         </div>
         {available.length > 1 ? <SelectionField label="Bot creation platform" value={selectedIssuer ? issuerKey(selectedIssuer) : issuer} options={available.map(item => ({ value: issuerKey(item), label: item.label }))} onValueChange={enrollment.setIssuer} /> : null}
         <div className="connector-enrollment__action" aria-busy={enrollment.preparing}>
