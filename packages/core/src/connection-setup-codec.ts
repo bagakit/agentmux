@@ -2,7 +2,7 @@ import { parseConnectionRequestTrace, parseConnectionRequestTraceSelector } from
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { CONNECTION_SETUP_READ_ACTIONS, connectionSetupPublicationSubjects, connectionSetupConfigurationSubject, connectionSetupPermissionActionPurpose, type ConnectionSetupReadSubject, type ConnectionSetupReadSummary, type ConnectionSetupPermissionReview, type ConnectionSetupMessageReceptionReview, type ConnectionSetupPublicationDraft, type ConnectionSetupPublicationReview, type ConnectionSetupPublicationEffect } from './connection-setup-contract.js'
-import type { ConnectionSetupBegin, ConnectionSetupChallenge, ConnectionSetupInspectionReceipt, ConnectionSetupConfigurationReceipt, ConnectionSetupMethod, ConnectionSetupOperation, ConnectionSetupParamsMap, ConnectionSetupResultMap, ConnectionSetupView } from './connection-setup-contract.js'
+import type { ConnectionSetupBegin, ConnectionSetupChallenge, ConnectionSetupInspectionReceipt, ConnectionSetupConfigurationReceipt, ConnectionSetupMethod, ConnectionSetupInitialProgress, ConnectionSetupOperation, ConnectionSetupParamsMap, ConnectionSetupResultMap, ConnectionSetupView } from './connection-setup-contract.js'
 
 export const CONNECTION_SETUP_RPC_METHODS = { 'connection.setup.begin': 'long', 'connection.setup.advance': 'long', 'connection.setup.inspect': 'long', 'connection.setup.ls': 'long' } as const
 export const isConnectionSetupMethod = (value: unknown): value is ConnectionSetupMethod => typeof value === 'string' && Object.hasOwn(CONNECTION_SETUP_RPC_METHODS, value)
@@ -27,18 +27,32 @@ export function parseConnectionSetupAuthentication(value: unknown): NonNullable<
   if (result.secureStorage === 'stored' && result.request !== 'confirmed') fail()
   return result
 }
+export function parseConnectionSetupInitialPublication(value: unknown) {
+  const initial = object(value, ['version', 'notes'])
+  const result = { version: text(initial.version), notes: text(initial.notes) }
+  if (!/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u.test(result.version) || result.version === '0.0.0' || result.version.length > 64 || result.notes.length > 500) fail()
+  return result
+}
+export function parseConnectionSetupInitialProgress(value: unknown): ConnectionSetupInitialProgress {
+  const initial = object(value, ['stage', 'state', 'versionId'])
+  const result: ConnectionSetupInitialProgress = { stage: choice(initial.stage, ['authentication', 'messaging', 'event-transport', 'permissions', 'message-reception', 'callback-transport', 'card-actions', 'publication-create', 'publication-submit', 'publication-status']), state: choice(initial.state, ['pending', 'running', 'attention', 'approval-required', 'complete']), ...(initial.versionId === undefined ? {} : { versionId: id(initial.versionId) }) }
+  if (['complete', 'approval-required'].includes(result.state) && (result.stage !== 'publication-status' || !result.versionId)) fail()
+  return result
+}
 function begin(value: unknown): ConnectionSetupBegin {
-  const p = object(value, ['operationId', 'connectionId', 'expectedConnectionRevision', 'goal', 'source']), g = object(p.goal, ['kind', 'interaction'])
+  const p = object(value, ['operationId', 'connectionId', 'expectedConnectionRevision', 'goal', 'source', 'initialPublication']), g = object(p.goal, ['kind', 'interaction'])
   const source = p.source === undefined ? undefined : object(p.source, ['kind', 'operationId', 'expectedRevision'])
-  return { operationId: id(p.operationId), connectionId: id(p.connectionId), expectedConnectionRevision: integer(p.expectedConnectionRevision), goal: { kind: choice(g.kind, ['agent-conversation']), interaction: choice(g.interaction, ['messages', 'cards']) }, ...(source ? { source: { kind: choice(source.kind, ['enrollment']), operationId: id(source.operationId), expectedRevision: integer(source.expectedRevision) } } : {}) }
+  const initialPublication = p.initialPublication === undefined ? undefined : parseConnectionSetupInitialPublication(p.initialPublication)
+  if (initialPublication && !source) fail()
+  return { operationId: id(p.operationId), connectionId: id(p.connectionId), expectedConnectionRevision: integer(p.expectedConnectionRevision), goal: { kind: choice(g.kind, ['agent-conversation']), interaction: choice(g.interaction, ['messages', 'cards']) }, ...(initialPublication ? { initialPublication } : {}), ...(source ? { source: { kind: choice(source.kind, ['enrollment']), operationId: id(source.operationId), expectedRevision: integer(source.expectedRevision) } } : {}) }
 }
 export function parseConnectionSetupChallenge(value: unknown): ConnectionSetupChallenge {
   const p = object(value, ['qrPayload', 'expiresAt', 'nextPollAt'])
   return { qrPayload: text(p.qrPayload), expiresAt: p.expiresAt === null ? null : integer(p.expiresAt, 0), nextPollAt: integer(p.nextPollAt, 0) }
 }
 export function parseConnectionSetupOperation(value: unknown): ConnectionSetupOperation {
-  const p = object(value, ['operationId', 'connectionId', 'expectedConnectionRevision', 'goal', 'source', 'revision', 'adapterId', 'application', 'request', 'secureStorage', 'reason', 'authentication'])
-  const input = begin(Object.fromEntries(['operationId', 'connectionId', 'expectedConnectionRevision', 'goal', 'source'].map(k => [k, p[k]])))
+  const p = object(value, ['operationId', 'connectionId', 'expectedConnectionRevision', 'goal', 'source', 'initialPublication', 'revision', 'adapterId', 'application', 'request', 'secureStorage', 'reason', 'authentication'])
+  const input = begin(Object.fromEntries(['operationId', 'connectionId', 'expectedConnectionRevision', 'goal', 'source', 'initialPublication'].map(k => [k, p[k]])))
   const a = object(p.application, ['domain', 'appId']), r = object(p.request, ['kind', 'state', 'attemptId']), domain = text(a.domain)
   if (!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(domain)) fail()
   const result: ConnectionSetupOperation = { ...input, revision: integer(p.revision), adapterId: id(p.adapterId), application: { domain, appId: id(a.appId) }, request: { state: choice(r.state, ['not-dispatched', 'dispatching', 'confirmed', 'unknown', 'refused']), attemptId: r.attemptId === null ? null : id(r.attemptId) }, secureStorage: choice(p.secureStorage, ['not-started', 'storing', 'stored', 'unknown']), ...(p.reason === undefined ? {} : { reason: choice(p.reason, ['adapter-unavailable', 'secure-storage-unavailable', 'request-unconfirmed', 'challenge-unconfirmed']) }) }
@@ -225,7 +239,7 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
     let support: ConnectionSetupResultMap['connection.setup.ls']['support'] = null
     if (p.support !== null) {
       const s = object(p.support, ['connectionRevision', 'capabilities'])
-      const supportedCapabilities = ['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation'] as const
+      const supportedCapabilities = ['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation', 'initial-setup'] as const
       if (!Array.isArray(s.capabilities) || s.capabilities.length > supportedCapabilities.length) fail()
       const capabilities = (s.capabilities as unknown[]).map(value => choice(value, supportedCapabilities))
       if (new Set(capabilities).size !== capabilities.length) fail()
@@ -233,11 +247,11 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
     }
     return { operations, next: p.next === null ? null : text(p.next), support } as ConnectionSetupResultMap[M]
   }
-  const p = object(value, ['operation', 'challenge', 'reason', 'continuation', 'receipt', 'applicationInspection', 'applicationConfiguration', 'requestTrace']), operation = p.operation === null ? null : parseConnectionSetupOperation(p.operation), challenge = p.challenge === null ? null : parseConnectionSetupChallenge(p.challenge)
+  const p = object(value, ['operation', 'challenge', 'reason', 'continuation', 'receipt', 'applicationInspection', 'applicationConfiguration', 'requestTrace', 'initialSetup']), operation = p.operation === null ? null : parseConnectionSetupOperation(p.operation), challenge = p.challenge === null ? null : parseConnectionSetupChallenge(p.challenge)
   if (operation && operation.operationId !== (input as { operationId: string }).operationId || !operation && (method === 'connection.setup.begin' || challenge !== null)) fail()
   if (method === 'connection.setup.begin' && operation) {
     // Select the admitted fields explicitly: summaries also contain safe result fields.
-    const admitted = begin(Object.fromEntries(['operationId', 'connectionId', 'expectedConnectionRevision', 'goal', 'source'].map(k => [k, operation[k as keyof ConnectionSetupOperation]])))
+    const admitted = begin(Object.fromEntries(['operationId', 'connectionId', 'expectedConnectionRevision', 'goal', 'source', 'initialPublication'].map(k => [k, operation[k as keyof ConnectionSetupOperation]])))
     if (JSON.stringify(admitted) !== JSON.stringify(input)) fail()
   }
   const challengeRequest = operation?.authentication?.request ?? operation?.request.state
@@ -245,6 +259,10 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
   if (challenge && (challengeRequest !== 'confirmed' || challengeStorage !== 'stored')) fail()
   if (challenge && operation?.request.kind === 'enrollment-handoff' && !operation.authentication) fail()
   const result: ConnectionSetupView = { operation, challenge, ...(p.reason === undefined ? {} : { reason: choice(p.reason, ['connection-revised', 'challenge-unavailable']) }) }
+  if (p.initialSetup !== undefined) {
+    if (!operation?.initialPublication) fail()
+    result.initialSetup = parseConnectionSetupInitialProgress(p.initialSetup)
+  }
   const traceSelector = method === 'connection.setup.inspect' ? (input as ConnectionSetupParamsMap['connection.setup.inspect']).requestTrace : undefined
   if ((traceSelector !== undefined) !== (p.requestTrace !== undefined)) fail()
   if (p.requestTrace !== undefined) {

@@ -1,4 +1,4 @@
-import type { ConnectionApplication, ConnectionSetupChallenge, ConnectionSetupAccount, ConnectionSetupAuthenticationStage, ConnectionSetupReadSubject, ConnectionSetupReadSummary, ConnectionSetupCapability, ConnectionSetupPermissionPurpose, ConnectionSetupPermissionReview, ConnectionSetupMessageReceptionReview, ConnectionSetupPublicationDraft, ConnectionSetupPublicationEffect, ConnectionSetupPublicationReview, ConnectionSetupSubmissionResponse } from '@agentmux/core/connections'
+import type { ConnectionApplication, ConnectionSetupChallenge, ConnectionSetupAccount, ConnectionSetupAuthenticationStage, ConnectionSetupReadSubject, ConnectionSetupReadSummary, ConnectionSetupCapability, ConnectionSetupPermissionPurpose, ConnectionSetupPermissionReview, ConnectionSetupMessageReceptionReview, ConnectionSetupInitialPublication, ConnectionSetupPublicationDraft, ConnectionSetupPublicationEffect, ConnectionSetupPublicationReview, ConnectionSetupSubmissionResponse } from '@agentmux/core/connections'
 
 export type SetupAdapterInput = Readonly<{ operationId: string; connectionId: string; attemptId: string; application: Readonly<ConnectionApplication> }>
 export type SetupChallengeReceipt = { kind: 'challenge'; challenge: ConnectionSetupChallenge; privateState: string } | { kind: 'unknown' }
@@ -27,6 +27,8 @@ export interface ConnectionSetupAdapter {
   /** Separate local implementation declaration; only an admitted current-auth action calls it. */
   readonly applicationConfiguration?: {
     readonly domains: readonly string[]
+    /** Pure native entry selection for an explicitly authorized first creator-only version. */
+    initialPublicationDraft?(input: ConnectionSetupInitialPublication): Promise<Extract<ConnectionSetupPublicationDraft, { kind: 'create-version' }>>
     publicationPlan(effect: ConnectionSetupPublicationEffect, states: Record<string, string>, draft: ConnectionSetupPublicationDraft | null, creator: ConnectionSetupAccount | null, provenance: { creatorIsCurrent: boolean; initialVersion: SetupInitialPublication | null }): Promise<SetupPublicationPlan>
     createVersion(input: SetupAdapterInput & { privateState: string; privateIntent: string; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupPublicationReceipt>
     submitVersion(input: SetupAdapterInput & { privateState: string; privateIntent: string; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupPublicationReceipt>

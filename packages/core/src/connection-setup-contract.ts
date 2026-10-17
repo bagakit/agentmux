@@ -5,14 +5,21 @@ import type { ConnectionEnrollmentCallContext } from './connection-enrollment-co
 /** A finite platform-management intent, distinct from application creation and local save. */
 export type ConnectionSetupGoal = { kind: 'agent-conversation'; interaction: 'messages' | 'cards' }
 export type ConnectionSetupEnrollmentSource = { kind: 'enrollment'; operationId: string; expectedRevision: number }
-export type ConnectionSetupBegin = { operationId: string; connectionId: string; expectedConnectionRevision: number; goal: ConnectionSetupGoal; source?: ConnectionSetupEnrollmentSource }
+/** Explicit creation consent: configure the original application's conversation capabilities and submit its first creator-only version. */
+export type ConnectionSetupInitialPublication = { version: string; notes: string }
+export type ConnectionSetupBegin = { operationId: string; connectionId: string; expectedConnectionRevision: number; goal: ConnectionSetupGoal; source?: ConnectionSetupEnrollmentSource; initialPublication?: ConnectionSetupInitialPublication }
+export type ConnectionSetupInitialProgress = {
+  stage: 'authentication' | 'messaging' | 'event-transport' | 'permissions' | 'message-reception' | 'callback-transport' | 'card-actions' | 'publication-create' | 'publication-submit' | 'publication-status'
+  state: 'pending' | 'running' | 'attention' | 'approval-required' | 'complete'
+  versionId?: string
+}
 export type ConnectionSetupInput = { operationId: string }
 /** Local child selection only. It never requests the platform or repairs a secure ACK. */
 export type ConnectionSetupInspect = ConnectionSetupInput & { requestTrace?: ConnectionRequestTraceSelector; applicationInspection?: { selectedStepId?: string; cursor?: string; limit?: number; versionId?: string }; applicationConfiguration?: ConnectionSetupConfigurationSelector }
 export type ConnectionSetupAdvance = ConnectionSetupInput & { expectedRevision: number; decision: { actionId: string; value: 'continue' | 'confirm' | 'renew' }; versionId?: string; publicationDraft?: ConnectionSetupPublicationDraft }
 export type ConnectionSetupList = { connectionId: string; cursor?: string; limit?: number }
 /** Local implementation discovery for this exact revision, never platform authority or readiness. */
-export type ConnectionSetupSupport = { connectionRevision: number; capabilities: Array<'management-authentication' | 'application-inspection' | 'messaging-capability' | 'persistent-event-transport' | 'application-permissions' | 'message-reception' | 'card-actions' | 'application-publication' | 'enrollment-continuation'> }
+export type ConnectionSetupSupport = { connectionRevision: number; capabilities: Array<'management-authentication' | 'application-inspection' | 'messaging-capability' | 'persistent-event-transport' | 'application-permissions' | 'message-reception' | 'card-actions' | 'application-publication' | 'enrollment-continuation' | 'initial-setup'> }
 export type ConnectionSetupListing = { operations: ConnectionSetupOperation[]; next: string | null; support: ConnectionSetupSupport | null }
 export type ConnectionSetupReason = 'adapter-unavailable' | 'secure-storage-unavailable' | 'request-unconfirmed' | 'challenge-unconfirmed'
 export type ConnectionSetupAuthenticationStage = 'waiting' | 'scanned' | 'handoff' | 'account' | 'confirmed' | 'expired' | 'unknown'
@@ -146,6 +153,8 @@ export type ConnectionSetupOperation = ConnectionSetupBegin & {
 /** Active confirmation material; never a URL or evidence of login, grants or setup completion. */
 export type ConnectionSetupChallenge = { qrPayload: string; expiresAt: number | null; nextPollAt: number }
 export type ConnectionSetupView = {
+  /** Local projection of original reads/effects; complete does not assert connection or message readiness. */
+  initialSetup?: ConnectionSetupInitialProgress
   requestTrace?: ConnectionRequestTrace
   operation: ConnectionSetupOperation | null
   challenge: ConnectionSetupChallenge | null
