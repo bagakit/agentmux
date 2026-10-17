@@ -78,6 +78,8 @@ Desktop 当前、History、退休会话阅读、Mobile 和 Focus 采用同一 Co
 
 当前原生来源核对、已保存历史来源与同观察资源内临时可读来源的边界仅见[《Provider 能力对齐与移植边界》](agent-capabilities-and-messaging.md#provider-能力对齐与移植边界)。共同阅读面消费 Core 确认的来源；核对或保存失败保留已读正文、选区、草稿与可用输入并显示原服务窗，不自行猜当前源或混用旧游标。
 
+共同 Reader 对原窗口的较早游标扩窗可明确请求 `preserveCurrent`：本次补读只有在不驱逐任何原已接受贡献、保留版本及实时头时才能提交。Core 按原记录、保留版本／位置及 canonical 事件组装的真实记录与字节成本，在驱逐、发布候选帧或提交前核对既有窗口预算；超界返回 `AGENT_CONVERSATION_WINDOW_FULL`，保原帧、版本、较早游标、来源关联及实时观察可继续，不截掉一部分记录冒称成功。此策略只适用于原较早扩窗及其同次续传，不用于开启最新、重放当前帧、锚点、单条记录或较新导航；续传与重试不能借另一个策略复用在途帧。它不扩大预算，也不禁用原显式历史导航；没有请求保留的明确阅读仍按原有界淘汰与返程合同继续。客户端拒绝呈现已推进的帧不能代替 Core 的事务保证，窗口边界也不等于来源失败或 Agent 失效。
+
 ### 稳定记录引用
 
 Core 的纯 `ConversationItemRef` 引用原 `ConversationRef`（Host／AgentSession）及准确记录 source：native 保 providerId、nativeSessionId、recordId，captured 保原 recordId。它适用于原输入、回复和系统发言，不把回复伪装成用户输入，也不把 captured 与 native 的同裸 ID／正文合并。`conversationItemRef(record)` 在记录缺权威 Host 时返回 null；原正文、来源与未知时间仍可读，不以当前焦点补身份。该引用只指向原记录，不持有正文、Reader、空间位置、Run 或新的对话生命周期。
