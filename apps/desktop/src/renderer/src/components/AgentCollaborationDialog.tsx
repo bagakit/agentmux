@@ -2,6 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useShallow } from 'zustand/react/shallow'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
+import { createCollaborationAreasSelector, type CollaborationAreaRequest } from '../lib/collaboration-areas'
+import type { WorkspaceAgentScopeState } from '../lib/workspace-agent-scope'
 import type { AgentMuxRpcResult } from '@agentmux/core'
 import { MailboxOriginalMessage } from './MailboxCollaboration'
 import { collaborationWorkfaces } from '../lib/collaboration-workface'
@@ -13,7 +15,7 @@ import { agentRegionExecution, useAppStore } from '../store'
 import { workspaceForSession, topicIdForSession } from '../lib/workbench-tabs'
 import { workbenchSelectionCatalog } from '../lib/desktop-focus-navigation'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
-import { collaborationAgents, collaborationSubjectKey, projectCollaboration, visibleCollaboration, type CollaborationArea, type CollaborationEvidence, type CollaborationRelation, type CollaborationSubject } from '../lib/agent-collaboration'
+import { collaborationAgents, collaborationSubjectKey, projectCollaboration, visibleCollaboration, type CollaborationEvidence, type CollaborationRelation, type CollaborationSubject } from '../lib/agent-collaboration'
 import { useCollaborationReading, type CollaborationSource } from '../lib/use-collaboration-reading'
 import { createFocusContextIdentitySelector } from '../lib/focus-context-identity'
 import { createFocusGoalLinksSelector } from '../lib/focus-goal-links'
@@ -23,7 +25,7 @@ import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { AgentCollaborationGraph, COLLABORATION_LABELS, type CollaborationSelection } from './AgentCollaborationGraph'
 import { MailboxA2A } from './MailboxA2A'
 
-export type CollaborationRequest = { kind: 'focus'; subject: CollaborationSubject; name: string } | { kind: 'space'; workspaceId: string }
+export type CollaborationRequest = { kind: 'focus'; subject: CollaborationSubject; name: string } | ({ kind: 'space' } & CollaborationAreaRequest)
 const allKinds = ['communication', 'creation', 'supervision'] as const
 const nameOf = (context: FocusContext | undefined, id: string) => context?.name ?? id
 
@@ -36,15 +38,17 @@ function CollaborationReadingDialog({ request, onClose, onOpen }: { request: Col
   const [documentVisible, setDocumentVisible] = useState(!workbenchDocument.hidden)
   useEffect(() => { const update = () => setDocumentVisible(!workbenchDocument.hidden); workbenchDocument.addEventListener('visibilitychange', update); return () => workbenchDocument.removeEventListener('visibilitychange', update) }, [workbenchDocument])
   const enabled = active && documentVisible
-  type Facts = { sessions: ReturnType<typeof useAppStore.getState>['sessions']; config: ReturnType<typeof useAppStore.getState>['config']; snapshots: ReturnType<typeof useAppStore.getState>['scratchTopicSnapshots']; names: ReturnType<typeof useAppStore.getState>['agentNames'] }
+  type Facts = WorkspaceAgentScopeState & { names: ReturnType<typeof useAppStore.getState>['agentNames'] }
   const retainedFacts = useRef<Facts | null>(null)
   const facts = useAppStore(useShallow(state => {
     if (!enabled && retainedFacts.current) return retainedFacts.current
-    retainedFacts.current = { sessions: state.sessions, config: state.config, snapshots: state.scratchTopicSnapshots, names: state.agentNames }
+    retainedFacts.current = { sessions: state.sessions, config: state.config, scratchTopicSnapshots: state.scratchTopicSnapshots, names: state.agentNames,
+      tabs: state.tabs, layouts: state.layouts, spaceZoneBindings: state.spaceZoneBindings, workbenchSpaceSelection: state.workbenchSpaceSelection,
+      topicCategories: state.topicCategories, projectGroups: state.projectGroups, spatialRequests: state.spatialRequests }
     return retainedFacts.current
   }))
   const contexts = useMemo(() => {
-    const topics = scratchTopicsForConfig(facts.config, facts.snapshots)
+    const topics = scratchTopicsForConfig(facts.config, facts.scratchTopicSnapshots)
     return facts.sessions.filter(session => session.kind === 'agent').map(session => ({ ...agentContextForSession(session, undefined, facts.names[session.id], workspaceForSession(facts.config, session, topics), topicIdForSession(facts.config, session, topics)), recap: undefined }))
   }, [facts])
   const originals = useMemo(() => collaborationAgents(contexts), [contexts])
@@ -52,17 +56,9 @@ function CollaborationReadingDialog({ request, onClose, onOpen }: { request: Col
   const [broader, setBroader] = useState(false), [budget, setBudget] = useState(24)
   const [selection, setSelection] = useState<CollaborationSelection>(subjectKey ? { kind: 'agent', id: subjectKey } : null)
   const [kinds, setKinds] = useState<ReadonlySet<CollaborationRelation['kind']>>(new Set(allKinds))
-  const areas = useMemo<CollaborationArea[]>(() => {
-    const groups = new Map<string, CollaborationArea>()
-    for (const [id, agent] of originals) {
-      const context = agent.context!
-      if (!broader && request.kind === 'space' && context.workspaceId !== request.workspaceId) continue
-      const areaId = JSON.stringify([context.hostId, context.workspaceId, context.topicId])
-      const held = groups.get(areaId) ?? { id: areaId, name: context.topicId ?? context.workspaceName, kind: context.topicId ? 'topic' : 'project', members: [] }
-      groups.set(areaId, { ...held, members: [...held.members, id] })
-    }
-    return [...groups.values()]
-  }, [originals, broader, request])
+  const areaSelector = useMemo(() => createCollaborationAreasSelector(agentRegionExecution), [])
+  const scope = useMemo(() => areaSelector(facts, request.kind === 'space' ? request : undefined), [areaSelector, facts, request])
+  const areas = useMemo(() => request.kind === 'space' && !broader ? scope.areas.filter(area => scope.current.includes(area.id)) : scope.areas, [scope, request.kind, broader])
   const available = useMemo(() => request.kind === 'focus' && !broader ? [request.subject] : [...new Set(areas.flatMap(area => area.members))].flatMap(id => { const subject = originals.get(id)?.subject; return subject ? [subject] : [] }), [request, broader, areas, originals])
   const subjects = useMemo(() => available.slice(0, budget), [available, budget])
   const reading = useCollaborationReading(subjects, enabled)
@@ -94,7 +90,7 @@ function CollaborationReadingDialog({ request, onClose, onOpen }: { request: Col
   return <Dialog.Root open onOpenChange={value => { if (!value) onClose() }}><DocumentOverlayPortal component={Dialog.Portal}>
     <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
     <Dialog.Content className="collaboration-dialog dialog-surface" aria-describedby="collaboration-coverage">
-      <header className="collaboration-dialog__header"><div><SemanticIcon name="object.topology" size={16} /><Dialog.Title>Collaboration</Dialog.Title><span>{request.kind === 'focus' ? request.name : facts.config?.workspaces.find(workspace => workspace.id === request.workspaceId)?.name ?? 'Space'}</span></div>
+      <header className="collaboration-dialog__header"><div><SemanticIcon name="object.topology" size={16} /><Dialog.Title>Collaboration</Dialog.Title><span>{request.kind === 'focus' ? request.name : scope.title}</span></div>
         <Dialog.Close asChild><button type="button" className="icon-button" aria-label="Close collaboration graph"><SemanticIcon name="action.close" size={16} /></button></Dialog.Close></header>
       <div className="collaboration-toolbar">
         <div className="collaboration-toolbar__scope" role="group" aria-label="Graph scope"><button type="button" aria-pressed={!broader} onClick={() => { setBroader(false); setBudget(24) }}>{request.kind === 'focus' ? 'Direct relations' : 'Current area'}</button><button type="button" aria-pressed={broader} onClick={() => { setBroader(true); setBudget(24) }}>All areas</button></div>
@@ -103,6 +99,7 @@ function CollaborationReadingDialog({ request, onClose, onOpen }: { request: Col
       </div>
       <div className="collaboration-dialog__body"><AgentCollaborationGraph ready={reading.sources.some(source => source.incarnation !== null || Boolean(source.issues.events))} agents={projection.agents} areas={visibleAreas} relations={relations} pulses={enabled ? reading.pulses : []} selection={selection} onSelect={setSelection} onOpen={open} identities={identities} goals={goals} />
         <aside className="collaboration-inspector" aria-label="Collaboration details">
+          {scope.issue || areas.some(area => area.issue) ? <section className="collaboration-area-issues" aria-label="Area membership issues" role="status">{scope.issue ? <p>{scope.issue}</p> : null}{areas.filter(area => area.issue).map(area => <p key={area.id}><strong>{area.name}</strong> · {area.issue}</p>)}</section> : null}
           {navigation ? <section className="collaboration-navigation" aria-label="Original workface locations"><h4>{navigation.context.name}</h4>{navigation.locations.length ? <><p>Choose a workface.</p>{navigation.locations.map(location => <button key={JSON.stringify(location)} type="button" className="small-button" onClick={() => {
             const current = collaborationWorkfaces(useAppStore.getState(), navigation.context, agentRegionExecution)
             if (!current.some(value => JSON.stringify(value) === JSON.stringify(location))) { setNavigation({ context: navigation.context, locations: current }); return }
