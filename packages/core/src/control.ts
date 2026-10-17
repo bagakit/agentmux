@@ -13,7 +13,7 @@ import type { AgentExecutorId, AgentProviderId, AgentExecutableObservation } fro
 import type { WorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import type { AgentPromptCondition } from './agent-prompt-condition.js'
 import type { AgentMuxBrowserCompletion } from './browser-completion-facts.js'
-import type { AgentMuxBrowserMode, AgentMuxBrowserTargetsResult } from './browser-targets.js'
+import type { AgentMuxBrowserMode, AgentMuxBrowserTarget, AgentMuxBrowserTargetsResult } from './browser-targets.js'
 import type { BrowserDefaultPayload, BrowserDefaultResult } from './browser-default.js'
 export * from './browser-default.js'
 import type { AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult } from './space-control.js'
@@ -515,6 +515,7 @@ export type AgentMuxControlDemandActivityReadRequest = RequestBase & { operation
  * 没有 `destination`：它作用在一个已存在的 Browser 上（`browserId`），不是往某个空间落一个新东西。
  * 这也是它不叫 `open.*` 的原因。
  */
+export type AgentMuxControlBrowserRestoreRequest = RequestBase & { operation: 'browser.restore'; browserId: string }
 export type AgentMuxControlBrowserTargetsRequest = RequestBase & { operation: 'browser.targets'; workspaceId?: string }
 export type AgentMuxControlBrowserRunRequest = RequestBase & {
   operation: 'browser.run'
@@ -683,6 +684,7 @@ export type AgentMuxControlRequest =
   | AgentMuxControlDemandLinkProjectRequest
   | AgentMuxControlDemandDecisionLogRequest
   | AgentMuxControlBrowserRunRequest
+  | AgentMuxControlBrowserRestoreRequest
   | AgentMuxControlBrowserTargetsRequest
   | AgentMuxControlBrowserHistoryRequest
   | AgentMuxControlBrowserReplayRequest
@@ -811,6 +813,7 @@ export type AgentMuxControlResult =
       // 收窄全部失效。receipt 侧改名，wire 侧的字段名不动（那是协议，见 control-host 的读取点）。
       runOperation: AgentMuxControlBrowserOperation
     }
+  | { operation: 'browser.restore'; target: AgentMuxBrowserTarget }
   | ({ operation: 'browser.targets' } & AgentMuxBrowserTargetsResult)
   | { operation: 'browser.history'; operations: AgentMuxControlBrowserOperation[] }
   | {
@@ -1076,6 +1079,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   // 而掐死的表现是 CONTROL_TIMEOUT，看起来像页面出了事。子进程自己还有一道更紧的超时兜底（脚本执行器
   // 的 timeoutMs），所以这里给长预算不等于没有上限。
   'browser.run': 'long',
+  'browser.restore': 'long',
   'browser.targets': 'short',
   'browser.history': 'short',
   'browser.task.assets': 'short',

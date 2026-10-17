@@ -94,7 +94,7 @@ export function rpcControlRequest(method: keyof typeof AGENTMUX_RPC_CONTROL_METH
   if (method === 'toolkit.stop' && body.input !== undefined) {
     const p = rpcRecord(body.input, ['executionId']); delete body.input; Object.assign(body, p)
   }
-  if (operation.startsWith('browser.') && operationId !== undefined) body.operationId = operationId
+  if (operation !== 'browser.restore' && operation.startsWith('browser.') && operationId !== undefined) body.operationId = operationId
   const usesCaller = ['inspect.region', 'inspect.tab', 'open.terminal', 'open.browser', 'send',
     'arrange', 'promote.region', 'interrupt', 'resume', 'stop', 'demand.start', 'demand.continuation-action', 'browser.run', 'browser.replay',
     'browser.stop', 'agent.open'].includes(operation)
@@ -188,6 +188,9 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
       if ((request.operation === 'message.pending.edit' || request.operation === 'message.pending.stop' || request.operation === 'message.pending.archive' || request.operation === 'message.pending.restore') &&
           (actual.message as { pendingId?: string })?.pendingId !== request.pendingId) fail()
       if (request.operation === 'message.pending.send' && actual.pendingId !== request.pendingId) fail()
+      break
+    case 'browser.restore':
+      if ((actual.target as { id?: string })?.id !== request.browserId) fail()
       break
     case 'browser.targets':
       if (request.workspaceId && (result as Extract<AgentMuxControlResult, { operation: 'browser.targets' }>).targets.some(target => target.workspaceId !== request.workspaceId)) fail()

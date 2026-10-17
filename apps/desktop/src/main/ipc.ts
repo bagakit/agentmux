@@ -2200,6 +2200,19 @@ export async function registerIpc(args: {
     browsers: { release: browsers.release.bind(browsers), restore: ensureBrowser },
     workspace: value => verifiedBrowserWorkspace(config.workspaces, value)
   })
+  handleWithEvent('browser:restoreResource', async (event, id: string, controlRequestId?: string) => {
+    requireTrustedSender('browser:restoreResource', event)
+    const admitted = controlRequestId === undefined ? nameChangeRequests.getStore()! : controlBridge.nameRequest(controlRequestId,
+      request => request.operation === 'browser.restore' && request.browserId === id)
+    return await nameChangeRequests.run(admitted, async () => {
+      await ensureBrowser(id)
+      const target = browsers.target(id)
+      if (!target || target.id !== id || target.source !== 'embedded' || target.status !== 'ready') {
+        throw new AgentMuxError('The original Browser restoration observation is unconfirmed. Keep its identity and original request; do not automatically repeat the operation.', 'CONTROL_UNAVAILABLE')
+      }
+      return target
+    })
+  })
   handle('browser:close', (id: string) => browsers.close(id))
   const detach = args.runtime.attach(contents)
   const rpcHttp = agentMuxRpcHttpOptions()

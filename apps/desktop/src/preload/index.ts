@@ -643,6 +643,7 @@ const api: AgentMuxPreloadApi = {
   browser: {
     listRetainedUploads: () => ipcRenderer.invoke('browser:listRetainedUploads'),
     discardRetainedUpload: (selectionId, document) => ipcRenderer.invoke('browser:discardRetainedUpload', selectionId, document),
+    restoreResource: (id, admittedControlRequestId) => ipcRenderer.invoke('browser:restoreResource', id, admittedControlRequestId),
     listTargets: workspaceId => ipcRenderer.invoke('browser:listTargets', workspaceId),
     createExternalPairing: workspaceId => ipcRenderer.invoke('browser:createExternalPairing', workspaceId),
     revealExternalExtension: () => ipcRenderer.invoke('browser:revealExternalExtension'),

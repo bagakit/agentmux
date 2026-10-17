@@ -310,18 +310,29 @@ export class BrowserViewManager {
   onNativeInput: ((owner: NativeBrowserOwner, input: NativeBrowserPageInput) => boolean) | undefined
   /** Facts from real embedded page owners; external tabs never enter this registry. */
   targets(): AgentMuxBrowserTarget[] {
-    return [...this.entries.values()].map(entry => {
-      const contents = entry.view.webContents
-      const available = !contents.isDestroyed()
-      const workspaceId = entry.workspaceId
-      return { id: entry.id, workspaceId, source: 'embedded', mode: entry.storage.mode, status: available ? 'ready' : 'unavailable',
-        url: available ? contents.getURL() : '', title: available ? contents.getTitle().slice(0, 512) : '',
-        navigationId: entry.navigationId,
-        capabilities: workspaceId ? [...BROWSER_PAGE_CAPABILITY_NAMES] : BROWSER_PAGE_CAPABILITY_NAMES.filter(name =>
-          !['uploadFiles', 'download', 'readDownload', 'extractStructured', 'readResult'].includes(name)),
-        ...(!available ? { warning: 'The embedded page surface is unavailable. Its original Region remains.' } :
-          !workspaceId ? { warning: 'This embedded page has no verified Workspace binding. Workspace file and durable result capabilities are unavailable.' } : {}) }
-    })
+    return [...this.entries.values()].map(entry => this.projectTarget(entry))
+  }
+
+  /** Read one existing native owner without discovering or acquiring other pages. */
+  target(id: string): AgentMuxBrowserTarget | null {
+    const entry = this.entries.get(id)
+    if (!entry) return null
+    const view = entry.view
+    const target = this.projectTarget(entry)
+    return this.entries.get(id) === entry && entry.view === view ? target : null
+  }
+
+  private projectTarget(entry: BrowserEntry): AgentMuxBrowserTarget {
+    const contents = entry.view.webContents
+    const available = !contents.isDestroyed()
+    const workspaceId = entry.workspaceId
+    return { id: entry.id, workspaceId, source: 'embedded', mode: entry.storage.mode, status: available ? 'ready' : 'unavailable',
+      url: available ? contents.getURL() : '', title: available ? contents.getTitle().slice(0, 512) : '',
+      navigationId: entry.navigationId,
+      capabilities: workspaceId ? [...BROWSER_PAGE_CAPABILITY_NAMES] : BROWSER_PAGE_CAPABILITY_NAMES.filter(name =>
+        !['uploadFiles', 'download', 'readDownload', 'extractStructured', 'readResult'].includes(name)),
+      ...(!available ? { warning: 'The embedded page surface is unavailable. Its original Region remains.' } :
+        !workspaceId ? { warning: 'This embedded page has no verified Workspace binding. Workspace file and durable result capabilities are unavailable.' } : {}) }
   }
   /** One read of the existing owners; no page acquisition or persistent resource index. */
   resourceTargets(processes: ReadonlyMap<number, number> | null): AgentMuxBrowserTarget[] {

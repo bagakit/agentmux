@@ -6291,6 +6291,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     //
     // 这一处是 T-008 验收点名的「两处没有编译器保护」之一。今天不是了：browser.run 进联合之后，
     // 下面的 `request.destination` 与 `request.url` 各报一处 TS2339——漏掉这个分支编译不过。
+    if (request.operation === 'browser.restore') {
+      const target = await api.browser.restoreResource(request.browserId, options?.admittedControlRequestId)
+      requireActive()
+      return { operation: request.operation, target }
+    }
     if (request.operation === 'browser.targets') {
       const facts = await api.browser.listTargets(request.workspaceId)
       requireActive()

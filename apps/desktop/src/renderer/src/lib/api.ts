@@ -1283,6 +1283,7 @@ const mockApi: AgentMuxDesktopApi = {
   browser: {
     listRetainedUploads: async () => { throw new Error('Selected-file snapshots require the Desktop Main owner.') },
     discardRetainedUpload: async () => { throw new Error('Selected-file cleanup requires the Desktop Main owner and local person confirmation.') },
+    restoreResource: async () => { throw new Error('Browser resource restoration requires the Desktop Main owner.') },
     listTargets: async () => ({ targets: [], coverage: 'partial', warning: 'Browser target discovery requires the Desktop Main owner.' }),
     createExternalPairing: async () => { throw new Error('External Browser connections require the Desktop Main owner.') },
     revealExternalExtension: async () => { throw new Error('External Browser connections require the Desktop Main owner.') },

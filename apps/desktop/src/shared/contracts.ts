@@ -1971,6 +1971,7 @@ export type AgentMuxDesktopApi = {
   browser: {
     listRetainedUploads(): Promise<import('./browser-upload.js').BrowserRetainedUploads>
     discardRetainedUpload(selectionId: string, document?: WorkbenchWindowDocument): Promise<boolean>
+    restoreResource(id: string, admittedControlRequestId?: string): Promise<AgentMuxBrowserTarget>
     listTargets(workspaceId?: string): Promise<import('@agentmux/core').AgentMuxBrowserTargetsResult>
     createExternalPairing(workspaceId: string): Promise<AgentMuxExternalBrowserPairing>
     revealExternalExtension(): Promise<void>
