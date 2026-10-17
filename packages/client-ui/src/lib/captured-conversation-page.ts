@@ -67,8 +67,10 @@ export function canReplaceCapturedWindow(viewport: HTMLElement | null, snapshot:
       if (preserveAnchor && captured && !retained.has(key)) return false
     }
     const original = previous.get(key), next = retained.get(key)
-    if (captured && range && (!next || !original || conversationRevision(original) !== conversationRevision(next))) {
-      try { if (range.intersectsNode(node)) return false } catch { return false }
+    if (captured && range) {
+      try {
+        if (range.intersectsNode(node) && (!next || !original || conversationRevision(original) !== conversationRevision(next))) return false
+      } catch { return false }
     }
   }
   return true
