@@ -3,7 +3,7 @@
 .mote-connection__row > span { flex: 1; }
 .mote-connection__row strong { max-width: 55%; overflow-wrap: anywhere; color: var(--text); font-weight: 500; }
 .mote-connection__row:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-sm); }
-.mote-connection-dialog { position: fixed; z-index: var(--layer-dialog); top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(448px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; padding: 0; }
+.mote-connection-dialog { position: fixed; z-index: var(--layer-dialog); top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(448px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; padding: 0; container-type: inline-size; container-name: connector; }
 .mote-connection-dialog__header { display: flex; align-items: flex-start; gap: var(--sp-3); padding: var(--sp-5); }
 .mote-connection-dialog__header > div { flex: 1; min-width: 0; }
 .mote-connection-dialog__header h2 { margin: 0; color: var(--text); font: inherit; font-weight: 600; overflow-wrap: anywhere; }
