@@ -228,6 +228,8 @@ export async function copyRuntimeApplication(appPath, source) {
   await cp(join(coreRoot, 'dist'), join(coreRuntime, 'dist'), { recursive: true })
   await cp(join(coreRoot, 'vendor'), join(coreRuntime, 'vendor'), { recursive: true })
   await cp(join(coreRoot, 'bin'), join(coreRuntime, 'bin'), { recursive: true })
+  await mkdir(join(coreRuntime, 'src'), { recursive: true })
+  await cp(join(coreRoot, 'src', 'ctxmux-artifact-contract.json'), join(coreRuntime, 'src', 'ctxmux-artifact-contract.json'))
   await writeFile(join(coreRuntime, 'release.json'), JSON.stringify({ sourceCommit: source.commit, sourceTree: source.tree }) + '\n')
   await writeEmbeddedCoreCli(join(coreRuntime, 'bin', 'amux'), join(appPath, 'Contents', 'MacOS', PRODUCT_NAME), join(coreRuntime, 'dist', 'agentmux.js'))
   await symlink('amux', join(coreRuntime, 'bin', 'agentmux'))
@@ -289,6 +291,8 @@ export async function copyRuntimeApplication(appPath, source) {
     chmod(join(coreRuntime, 'bin', 'amux'), 0o755),
     chmod(join(outBin, 'amux'), 0o755)
   ])
+  await run(process.execPath, [join(coreRuntime, 'bin', 'install-ctxmux.mjs')])
+  process.stdout.write('ctxmux_install_validation=passed\n')
 }
 
 async function materializeDependencies(sourcePackage, dependencies, destination) {

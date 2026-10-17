@@ -312,6 +312,7 @@
   "files": [
     "bin",
     "dist",
+    "src/ctxmux-artifact-contract.json",
     "examples",
     "vendor",
     "THIRD_PARTY_NOTICES.md"
