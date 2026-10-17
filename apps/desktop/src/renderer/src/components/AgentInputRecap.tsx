@@ -27,11 +27,14 @@ export function AgentInputRecap({ request, enabled, available, follow = false }:
   const reflow = useRef<{ container: HTMLElement; anchor: ReturnType<typeof captureReadingAnchor> } | null>(null)
   const current = inputReading(reader, limit)
   useLayoutEffect(() => {
-    if (enabled && (!request.pinned || follow) && !frozen) held.current = current
-    if (request.pinned && !follow && !frozen) setFrozen(held.current ?? current)
+    // An initial placeholder is not a reading cut. Empty and captured-only
+    // results qualify through the same complete accepted frame as native inputs.
+    const accepted = Boolean(reader.conversation.snapshot) && !reader.loading
+    if (enabled && (!request.pinned || follow) && !frozen && accepted) held.current = current
+    if (request.pinned && !follow && !frozen && (held.current || accepted)) setFrozen(held.current ?? current)
   })
   useEffect(() => {
-    if (!enabled || !frozen || follow || paused || reader.loading || !(reader.nativeHistoryPage || reader.error || reader.observationError)) return
+    if (!enabled || !frozen || follow || paused || reader.loading || !(reader.conversation.snapshot || reader.error || reader.observationError)) return
     // A protected bookmark keeps the presented cut, including its selected input.
     // Let the original batch settle, then park this same view until explicit follow.
     if (request.bookmark) { setPaused(true); return }
@@ -43,7 +46,7 @@ export function AgentInputRecap({ request, enabled, available, follow = false }:
       if (container) reflow.current = { container, anchor: captureReadingAnchor(container) }
     }
     setFrozen({ ...current, messages }); setPaused(true)
-  }, [enabled, frozen, follow, request.bookmark, paused, reader.loading, reader.nativeHistoryPage, reader.error, reader.observationError])
+  }, [enabled, frozen, follow, request.bookmark, paused, reader.loading, reader.conversation.snapshot, reader.error, reader.observationError])
   useLayoutEffect(() => {
     if (reflow.current) { restoreReadingAnchor(reflow.current.container, reflow.current.anchor); reflow.current = null }
   }, [frozen])
