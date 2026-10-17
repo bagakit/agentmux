@@ -19,9 +19,9 @@ import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM(), secret = 'credential-value-held-only-by-host', key = randomBytes(32)
 const encryption: CredentialEncryption = {
-  isEncryptionAvailable: () => true,
-  encryptString: value => { const nonce = randomBytes(12), cipher = createCipheriv('aes-256-gcm', key, nonce); return Buffer.concat([nonce, cipher.update(value, 'utf8'), cipher.final(), cipher.getAuthTag()]) },
-  decryptString: value => { const decipher = createDecipheriv('aes-256-gcm', key, value.subarray(0, 12)); decipher.setAuthTag(value.subarray(-16)); return Buffer.concat([decipher.update(value.subarray(12, -16)), decipher.final()]).toString('utf8') }
+  isAsyncEncryptionAvailable: async () => true,
+  encryptStringAsync: async value => { const nonce = randomBytes(12), cipher = createCipheriv('aes-256-gcm', key, nonce); return Buffer.concat([nonce, cipher.update(value, 'utf8'), cipher.final(), cipher.getAuthTag()]) },
+  decryptStringAsync: async value => { const decipher = createDecipheriv('aes-256-gcm', key, value.subarray(0, 12)); decipher.setAuthTag(value.subarray(-16)); return { result: Buffer.concat([decipher.update(value.subarray(12, -16)), decipher.final()]).toString('utf8'), shouldReEncrypt: false } }
 }
 let directory: string, database: DatabaseSync, owner: ConnectionHost, secrets: DesktopConnectorSecrets, server: AgentMuxControlServer
 let completedLists = 0, completedChecks = 0
@@ -243,7 +243,7 @@ describe('Settings uses the original connection owner through public service', (
 
 describe('Host credential and availability boundary', () => {
   it('rejects plaintext fallback, preserves original credential operations and redacts encryption exceptions', async () => {
-    const unavailable = new DesktopConnectorSecrets(database, { ...encryption, isEncryptionAvailable: () => false })
+    const unavailable = new DesktopConnectorSecrets(database, { ...encryption, isAsyncEncryptionAvailable: async () => false })
     await expect(unavailable.store({ operationId: 'unavailable', secret })).rejects.toMatchObject({ code: 'CONNECTION_CREDENTIAL_UNAVAILABLE' })
     const basicText = new DesktopConnectorSecrets(database, { ...encryption, getSelectedStorageBackend: () => 'basic_text' })
     await expect(basicText.store({ operationId: 'basic-text', secret })).rejects.toMatchObject({ code: 'CONNECTION_CREDENTIAL_UNAVAILABLE' })
@@ -252,7 +252,7 @@ describe('Host credential and availability boundary', () => {
     expect(await secrets.store({ operationId: 'credential-store', secret })).toEqual(saved)
     expect(await secrets.inspect('credential-store')).toEqual(saved)
     await expect(secrets.store({ operationId: 'credential-store', secret: 'different' })).rejects.toMatchObject({ code: 'CONNECTION_OPERATION_CONFLICT' })
-    const faulty = new DesktopConnectorSecrets(database, { ...encryption, encryptString: () => { throw new Error(secret) } })
+    const faulty = new DesktopConnectorSecrets(database, { ...encryption, encryptStringAsync: async () => { throw new Error(secret) } })
     const error = await faulty.store({ operationId: 'encryption-failure', secret }).catch(error => error)
     expect(error.code).toBe('CONNECTION_CREDENTIAL_UNCONFIRMED'); expect(JSON.stringify(error)).not.toContain(secret); expect(error.message).not.toContain(secret)
     expect(await secrets.resolve(saved.credentialRef)).toBe(secret)

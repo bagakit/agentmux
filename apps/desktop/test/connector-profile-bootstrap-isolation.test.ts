@@ -18,15 +18,15 @@ const fixture = await vi.hoisted(async () => {
   return { bootstrap, home: join(bootstrap, 'home'), profile: join(bootstrap, 'profile'),
     handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: any[]) => any>(),
     connections: undefined as ConnectionPort | undefined,
-    encryption: undefined as { isEncryptionAvailable(): boolean; encryptString(value: string): Buffer; decryptString(value: Buffer): string } | undefined }
+    encryption: undefined as { isAsyncEncryptionAvailable(): Promise<boolean>; encryptStringAsync(value: string): Promise<Buffer>; decryptStringAsync(value: Buffer): Promise<{ result: string; shouldReEncrypt: boolean }> } | undefined }
 })
 vi.mock('node:os', async original => ({ ...await original<typeof import('node:os')>(), homedir: () => fixture.home }))
 vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
   app: { getPath: (name: string) => name === 'home' ? fixture.home : fixture.profile, getAppPath: () => fixture.profile },
   safeStorage: {
-    isEncryptionAvailable: () => fixture.encryption!.isEncryptionAvailable(),
-    encryptString: (value: string) => fixture.encryption!.encryptString(value),
-    decryptString: (value: Buffer) => fixture.encryption!.decryptString(value)
+    isAsyncEncryptionAvailable: async () => fixture.encryption!.isAsyncEncryptionAvailable(),
+    encryptStringAsync: (value: string) => fixture.encryption!.encryptStringAsync(value),
+    decryptStringAsync: (value: Buffer) => fixture.encryption!.decryptStringAsync(value)
   },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: any[]) => any) => fixture.handlers.set(channel, handler),
     removeHandler: (channel: string) => fixture.handlers.delete(channel), on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
@@ -55,7 +55,7 @@ afterAll(async () => { await rm(fixture.bootstrap, { recursive: true }) })
 
 function encryption() {
   const original = enrollmentEncryption()
-  return { isEncryptionAvailable: vi.fn(original.isEncryptionAvailable), encryptString: vi.fn(original.encryptString), decryptString: vi.fn(original.decryptString) }
+  return { isAsyncEncryptionAvailable: vi.fn(original.isAsyncEncryptionAvailable), encryptStringAsync: vi.fn(original.encryptStringAsync), decryptStringAsync: vi.fn(original.decryptStringAsync) }
 }
 function directory(root: string, profile: 'default' | 'a' | 'b') {
   return profile === 'default' ? join(root, 'home', '.agentmux', 'connectors') : join(root, profile, 'connectors')
@@ -104,7 +104,7 @@ async function original(f: Awaited<ReturnType<typeof registered>>, profile: stri
   expect((await f.connections.list()).connections.map(row => row.config.connectionId)).toEqual(['connection-' + profile])
   expect(await f.connections.service!.get()).toEqual({ enabled: false, revision: 1 })
   expect((await f.connections.service!.inspect({ operationId: operation(profile) })).operation).toMatchObject({ operationId: operation(profile), service: { enabled: false, revision: 1 } })
-  expect(f.secure.isEncryptionAvailable).not.toHaveBeenCalled(); expect(f.secure.decryptString).not.toHaveBeenCalled()
+  expect(f.secure.isAsyncEncryptionAvailable).not.toHaveBeenCalled(); expect(f.secure.decryptStringAsync).not.toHaveBeenCalled()
 }
 
 it('keeps the actual registered default and explicit profile owners separate without decrypting metadata', async () => {
@@ -131,9 +131,9 @@ it('reopens original profile records in a second owned process without reseeding
       await original(f, 'a')
       const stored = await f.invoke('connections:storeCredential', { operationId: 'credential-a', secret })
       expect(stored).toEqual({ credentialRef: expected.credentialRef })
-      expect(f.secure.isEncryptionAvailable).toHaveBeenCalledTimes(1)
-      expect(f.secure.decryptString).toHaveBeenCalledTimes(1)
-      expect(f.secure.encryptString).not.toHaveBeenCalled()
+      expect(f.secure.isAsyncEncryptionAvailable).toHaveBeenCalledTimes(1)
+      expect(f.secure.decryptStringAsync).toHaveBeenCalledTimes(1)
+      expect(f.secure.encryptStringAsync).not.toHaveBeenCalled()
       expect((await f.connections.inspect({ operationId: 'connection-after-reopen' })).operation).toMatchObject({ operationId: 'connection-after-reopen', connection: { revision: 2, config: { label: 'Saved before child' } } })
       expect(process.pid).not.toBe(expected.parentPid)
       await writeFile(join(expected.root, 'child-receipt.json'), JSON.stringify({ pid: process.pid, credentialRef: stored.credentialRef }))

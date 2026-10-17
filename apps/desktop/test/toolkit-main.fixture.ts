@@ -18,7 +18,7 @@ vi.mock('electron', () => ({ app: { get isPackaged(){return fixture.packaged},ge
     off: (channel: string, handler: Function) => fixture.ipc.listeners.get(channel)?.delete(handler),
     removeListener: (channel: string, handler: Function) => fixture.ipc.listeners.get(channel)?.delete(handler) },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {},
-  safeStorage: { isEncryptionAvailable: () => false },
+  safeStorage: { isAsyncEncryptionAvailable: async () => false },
   nativeTheme: Object.assign(new EventEmitter(), { shouldUseDarkColors: false }) }))
 vi.mock('node:os', async original => ({ ...await original(), homedir: () => fixture.directory }))
 vi.mock('../src/main/browser-profile-manager.js', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))

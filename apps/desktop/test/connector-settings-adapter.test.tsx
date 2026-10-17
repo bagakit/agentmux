@@ -19,7 +19,7 @@ beforeEach(async () => {
   sdk = defaultFeishuSdkTransport()
   // Only encryption and platform network I/O are controlled. The original default registry is used.
   services = await createDesktopConnections({ directory: join(original.root, 'settings-feishu'),
-    encryption: { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value), decryptString: value => value.toString() },
+    encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: value.toString(), shouldReEncrypt: false }) },
     bindings: { spatial: original.spatial, checkpoint: async ref => await original.client.conversationCheckpoint(ref) },
     ingress: { core: hostId => hostId === 'local' ? original.client : undefined } })
   cleanup.push(() => services.close())

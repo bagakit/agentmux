@@ -33,7 +33,7 @@ beforeEach(async () => {
   useAppStore.setState({ botTaskSelections: {} })
   directory = await mkdtemp(join(tmpdir(), 'settings-auth-'))
   const encryption = enrollmentEncryption(); secureAvailable = true
-  services = await createDesktopConnections({ directory: join(directory, 'connections'), encryption: { ...encryption, isEncryptionAvailable: () => secureAvailable } })
+  services = await createDesktopConnections({ directory: join(directory, 'connections'), encryption: { ...encryption, isAsyncEncryptionAvailable: async () => secureAvailable } })
   server = new AgentMuxControlServer({ socketPath: join(directory, 'control.sock'), connections: services.connections,
     coreClients: () => { throw new Error('Connection authentication may not borrow an Agent Runtime') } })
   await server.start()

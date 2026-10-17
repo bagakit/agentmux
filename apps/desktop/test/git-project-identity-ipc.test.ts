@@ -29,7 +29,7 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
     if (!handler) throw new Error(`Missing registered Main handler: ${channel}`)
     return await handler({ sender: fixture.sender } as unknown as IpcMainInvokeEvent, ...values)
   }, on: vi.fn(), off: vi.fn(), send: vi.fn() },
-  clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, safeStorage: { isEncryptionAvailable: () => false } }))
+  clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, safeStorage: { isAsyncEncryptionAvailable: async () => false } }))
 vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/core')>(),
   AgentMuxControlServer: class { async start() {} async stop() {} } }))
 vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({ list: async () => [], snapshot: async () => ({ demands: [] }), subscribe: () => () => {} }) }))

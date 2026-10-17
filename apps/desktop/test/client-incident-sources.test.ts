@@ -20,7 +20,7 @@ const ipc = vi.hoisted(() => ({ root: '', handlers: new Map<string, Function>(),
   control: null as AgentMuxControlServerOptions | null }))
 vi.mock('node:os', async original => ({ ...await original<typeof import('node:os')>(), homedir: () => ipc.root }))
 vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
-  safeStorage: { isEncryptionAvailable: () => false, encryptString: vi.fn(), decryptString: vi.fn() },
+  safeStorage: { isAsyncEncryptionAvailable: async () => false, encryptStringAsync: vi.fn(async () => {}), decryptStringAsync: vi.fn(async () => {}) },
   contextBridge: { exposeInMainWorld: (_name: string, api: AgentMuxPreloadApi) => { ipc.api = api } },
   ipcRenderer: { invoke: ipc.invoke, on: vi.fn(), removeListener: vi.fn(), off: vi.fn(), send: vi.fn() },
   webFrame: { getZoomFactor: () => 1 },
