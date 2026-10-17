@@ -32,7 +32,7 @@ export async function roomDiscoveryFixture(effect?: (request: RoomReadWire) => P
   vi.spyOn(defaultHttpInstance, 'request').mockImplementation(native as typeof defaultHttpInstance.request)
   const open = async () => {
     // No adapters, spatial state, Binding or Runtime injected: use production default registration.
-    services = await createDesktopConnections({ directory, encryption: { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value), decryptString: value => value.toString() } })
+    services = await createDesktopConnections({ directory, encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: (value.toString()), shouldReEncrypt: false }) } })
     server = new AgentMuxControlServer({ socketPath, connections: services.connections, coreClients: () => [] })
     await server.start(); sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
   }
