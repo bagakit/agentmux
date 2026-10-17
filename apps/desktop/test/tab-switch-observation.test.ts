@@ -1,6 +1,7 @@
 import { expect, it, vi } from 'vitest'
 import type { RendererTabSwitchTarget, RendererTabSwitchTerminal } from '@agentmux/core/control'
-import { createTabSwitchObservation, tabSwitchEventTimestamp } from '../src/renderer/src/lib/tab-switch-observation'
+import { createTabSwitchObservation } from '../src/renderer/src/lib/tab-switch-observation'
+import { trustedRendererEventTimestamp } from '../src/renderer/src/lib/renderer-event-clock'
 
 const target: RendererTabSwitchTarget = { presentationId: 'space', displayWorkspaceId: 'workspace', groupId: 'left', tabId: 'tab', regionId: 'region' }
 const ready: RendererTabSwitchTerminal = { sessionId: 'session', runId: 'run', readySinceAt: 1,
@@ -15,9 +16,9 @@ function fixture() {
 
 it('uses the original handler start and only the trusted original Window event clock', () => {
   const view = {} as Window, other = {} as Window
-  expect(tabSwitchEventTimestamp({ isTrusted: true, view, timeStamp: 80 }, view)).toBe(80)
-  expect(tabSwitchEventTimestamp({ isTrusted: false, view, timeStamp: 80 }, view)).toBeNull()
-  expect(tabSwitchEventTimestamp({ isTrusted: true, view: other, timeStamp: 80 }, view)).toBeNull()
+  expect(trustedRendererEventTimestamp({ isTrusted: true, view, timeStamp: 80 }, view)).toBe(80)
+  expect(trustedRendererEventTimestamp({ isTrusted: false, view, timeStamp: 80 }, view)).toBeNull()
+  expect(trustedRendererEventTimestamp({ isTrusted: true, view: other, timeStamp: 80 }, view)).toBeNull()
   const f = fixture(); f.advance(20)
   const id = f.costs.begin(target, 'other', 80, 100)
   f.costs.selected(target, 'already-selected-handler'); f.advance(5); f.costs.actionEnded(id, 'returned')

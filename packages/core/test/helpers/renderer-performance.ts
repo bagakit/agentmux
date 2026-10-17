@@ -16,7 +16,7 @@ export function performanceFixture(): RendererPerformanceSnapshot {
     overlay: { triggers: { initial: 0, demand: 0, mutation: 0, resize: 0, scroll: 0, toggle: 0, font: 0, collect: 0 }, scheduled: 0, coalesced: 0, candidates: 0, geometryReads: 0, nativeDemandCount: null, latestCandidates: null, latestGeometryReads: null, collect: timing() },
     terminalWrites: { visible: timing(), hidden: timing(), bytes: 0, stringCodeUnits: 0 },
     inputDelay: { state: 'unsupported', reason: 'unsupported in fixture', durationThresholdMs: 16, timing: timing() },
-    longTasks: { state: 'unsupported', reason: 'unsupported in fixture', timing: timing() }, terminals: [], omittedTerminals: 0, unavailableTerminals: 0, tabSwitches: [], tabSwitchesOmitted: 0, slowEvents: [], slowEventsOmitted: kindCounts(),
+    longTasks: { state: 'unsupported', reason: 'unsupported in fixture', timing: timing() }, terminals: [], omittedTerminals: 0, unavailableTerminals: 0, tabSwitches: [], tabSwitchesOmitted: 0, surfaceSwitches: [], surfaceSwitchesOmitted: 0, slowEvents: [], slowEventsOmitted: kindCounts(),
     timingEpochs: { durationMs: 10000, basis: 'monotonic-occurrence-start', recordingSinceMonoMs: 0, observedMonoMs: 0,
       current: { startMonoMs: 0, endMonoMs: 10000, timings: kindTiming() }, previous: null, late: kindCounts(), unknown: kindCounts() },
     observerCost: { snapshots: timing(), performanceCallbacks: timing() } }

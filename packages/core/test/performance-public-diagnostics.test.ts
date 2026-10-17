@@ -5,6 +5,7 @@ import { terminalWriteContextFixture } from './helpers/renderer-performance.js'
 import { expect, it, vi } from 'vitest'
 import { createRendererPerformance } from '../../../apps/desktop/src/renderer/src/lib/renderer-performance'
 import { createTabSwitchObservation } from '../../../apps/desktop/src/renderer/src/lib/tab-switch-observation'
+import { createSurfaceSwitchObservation } from '../../../apps/desktop/src/renderer/src/lib/surface-switch-observation'
 import { appendFileSync, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '../src/control.js'
@@ -52,6 +53,15 @@ it('preserves nonempty stage evidence and unknown sources through actual Unix RP
   navigation.begin(target, 'terminal', null); navigation.selected(target, 'layout-effect')
   callbacks.shift()!(time); callbacks.shift()!(time); time += 1500
   observation.renderer.data!.performance = { ...renderer.snapshot(), tabSwitches: navigation.snapshot(), tabSwitchesOmitted: navigation.omitted() }
+  const surfaces = createSurfaceSwitchObservation(() => time, () => 1000 + time,
+    callback => { callbacks.push(callback); return callbacks.length }, () => {}, () => true)
+  surfaces.committed('space', true)
+  const activation = surfaces.begin('space', 'focus', null)
+  time += 13; surfaces.actionEnded(activation, 'returned'); time += 11; surfaces.committed('focus', true)
+  callbacks.shift()!(time); time += 16; callbacks.shift()!(time)
+  surfaces.begin('focus', 'goals', null); surfaces.committed('goals', false); time += 150
+  observation.renderer.data!.performance.surfaceSwitches = surfaces.snapshot()
+  observation.renderer.data!.performance.surfaceSwitchesOmitted = surfaces.omitted()
   const pendingRequest = renderer.beginInputRequest('user', renderer.start(), { hostId: 'local', sessionId: 'public-session', runId: 'public-run' })
   expect(pendingRequest.parent).toBeDefined()
   observation.renderer.data!.performance.inputRequestDetails = renderer.snapshot().inputRequestDetails
@@ -61,6 +71,11 @@ it('preserves nonempty stage evidence and unknown sources through actual Unix RP
   expect(expectedRenderer.slowEvents.find(event => event.retainedAs.includes('current-peak') && event.kind === 'terminal-write')).toMatchObject({ terminal: { runId: 'exact-peak-run', cause: 'checkpoint', payload: { unit: 'string-code-units', length: 14 } } })
   expect(expectedRenderer.timingEpochs.current.timings['terminal-write']).toEqual({ count: 41, totalMs: 4616.7, maxMs: 1816.7 })
   expect(expectedRenderer.tabSwitches[0]).toMatchObject({ state: 'pending', pendingStage: 'input-gate', elapsedMs: 1500 })
+  expect(expectedRenderer.surfaceSwitches).toMatchObject([
+    { source: 'footer-click', from: 'space', to: 'focus', eventAtMonoMs: null, inputDelayMs: null, actionEndedMs: 13,
+      selectedMs: 24, selectedSource: 'layout-effect', frameMs: 40, state: 'observed' },
+    { source: 'footer-click', from: 'focus', to: 'goals', selectedMs: 0, frameMs: null, pendingStage: 'presentation', elapsedMs: 150, state: 'pending' }
+  ])
   expect(parseToolkitSnapshot(toolkit)).toEqual(toolkit)
   const receipt = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'correlated-input', operation: 'toolkit.get', ok: true, result: { snapshot: toolkit } }
   expect(parseAgentMuxControlReceipt(receipt)).toEqual(receipt)
