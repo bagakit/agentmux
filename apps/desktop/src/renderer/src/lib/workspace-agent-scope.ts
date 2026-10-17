@@ -1,6 +1,6 @@
 import type { AgentMuxSpaceCatalog } from '@agentmux/core'
 import type { SessionSnapshot, WorkspaceRecord, ScratchTopicSnapshot } from '../../../shared/contracts'
-import { SCRATCH_WORKSPACE_ID, scratchTopicPhysicalPath } from '../../../shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, scratchTopicIdFromWorkspacePath, scratchTopicPhysicalPath } from '../../../shared/scratch-topics'
 import { originalTopicAddress, topicSpatialAddress } from '../../../shared/space-addresses'
 import { workspaceProjectId } from './workspace-projects'
 import type { NavigationState } from './desktop-focus-navigation'
@@ -25,6 +25,7 @@ type ObjectScope = {
 const noExecution: WorkspaceAgentExecutionResolver = () => null
 const same = (a: readonly unknown[], b: readonly unknown[]) => a.length === b.length && a.every((value, i) => value === b[i])
 const sessionKey = (session: AgentSessionSnapshot) => JSON.stringify([session.control.hostId, session.control.agentSessionId])
+const referenceKey = (ref: Reference) => JSON.stringify([ref.tabId, ref.regionId, ref.agentSessionId])
 
 /** One structural Region index shared across consumers; Runtime publications do not rebuild it. */
 const referenceIndexes = new WeakMap<AgentMuxSpaceCatalog, Map<string, Reference[]>>()
@@ -51,12 +52,16 @@ function append(target: Map<string, AgentSessionSnapshot>, session: SessionSnaps
   const key = sessionKey(session), old = target.get(key)
   if (!old || old.id !== old.control.agentSessionId && session.id === session.control.agentSessionId) target.set(key, session)
 }
-function addReferences(target: Map<string, AgentSessionSnapshot>, sessions: readonly SessionSnapshot[], refs: readonly Reference[], resolve: WorkspaceAgentExecutionResolver): boolean {
+function addReferences(target: Map<string, AgentSessionSnapshot>, sessions: readonly SessionSnapshot[], refs: readonly Reference[], resolve: WorkspaceAgentExecutionResolver,
+  confirmed?: Map<string, { hostId: string }>): boolean {
   if (!refs.length) return false
   const index = agentSessionPresentationIndex(sessions)
   let unconfirmed = false
   for (const ref of refs) {
-    const execution = resolve(ref)
+    const observed = resolve(ref), key = referenceKey(ref)
+    if (observed) confirmed?.set(key, observed)
+    else unconfirmed = true
+    const execution = observed ?? confirmed?.get(key)
     if (!execution) { unconfirmed = true; continue }
     for (const session of index.get(ref.agentSessionId) ?? []) append(target, session, execution.hostId, ref.agentSessionId)
   }
@@ -92,13 +97,14 @@ function objectScope(state: WorkspaceAgentScopeState, workspace: WorkspaceRecord
     if (path) paths.add(path)
   }
   if (topic && !topic.readError) paths.add(scratchTopicPhysicalPath(resource, topic))
+  if (topic) for (const path of paths) if (scratchTopicIdFromWorkspacePath(resource.path, path, topics) !== topicId) paths.delete(path)
   const hasZone = address && catalog.zones.some(zone => zone.zoneId === address.zoneId)
   const display = topic ? topicSpatialAddress(state.config, topic, state.spaceZoneBindings, state.topicCategories) : address
   const selectionMatches = kind === 'mote' ? choice.spaceId === address?.spaceId && (!choice.zoneId || catalog.bindings.some(binding => binding.spaceId === choice.spaceId && binding.zoneId === choice.zoneId)) : choice.zoneId === address?.zoneId && choice.spaceId === display?.spaceId
   const issue = topic?.readError ?? (!address || !hasZone || !selectionMatches || kind === 'unknown'
     ? 'The selected object membership is unconfirmed. Its exact reference and existing Agents are kept; refresh the original directory or spatial facts.'
     : !topic ? 'Original directory discovery is unavailable. Confirmed spatial membership remains available; retry the same directory.' : null)
-  return { key: JSON.stringify(['object-agent-list', resource.id, resource.hostId, topicId]), title: topic?.title ?? catalog.spaces.find(space => space.spaceId === address?.spaceId)?.name ?? 'Agents',
+  return { key: JSON.stringify(['object-agent-list', resource.id, resource.hostId, resource.path, topicId, address?.spaceId, address?.zoneId]), title: topic?.title ?? catalog.spaces.find(space => space.spaceId === address?.spaceId)?.name ?? 'Agents',
     topicId, hostId: resource.hostId, paths: [...paths], collaborators: topic?.collaborators ?? [], kind,
     spaceId: address?.spaceId ?? null, zoneId: address?.zoneId ?? null, issue }
 }
@@ -126,7 +132,6 @@ export function workspaceAgentListMembers(state: WorkspaceAgentScopeState, works
   if (workspace.id === SCRATCH_WORKSPACE_ID) for (const topic of topics ?? []) addCollaborators(result, state.sessions, workspace.hostId, topic.collaborators)
   const catalog = catalogFor(state)
   addReferences(result, state.sessions, references(catalog, workspaceZones(state, workspace, catalog)), resolveExecution)
-  for (const session of createWorkspaceAgentListSelector(resolveExecution)(state, workspace).sessions) append(result, session)
   return [...result.values()]
 }
 
@@ -135,21 +140,30 @@ export function createWorkspaceAgentListSelector(resolveExecution: WorkspaceAgen
   const natural = createWorkspaceAgentSessionsSelector()
   let inputs: readonly unknown[] = [], scope: ObjectScope | null = null, held: ObjectScope | null = null
   let refs: readonly Reference[] = [], refInputs: readonly unknown[] = []
+  const confirmedExecutions = new Map<string, { hostId: string }>()
   let previous: WorkspaceAgentList | null = null
   return (state: WorkspaceAgentScopeState, workspace: WorkspaceRecord, sourceSessions: readonly SessionSnapshot[] = state.sessions): WorkspaceAgentList => {
     const topics = scratchTopicsForConfig(state.config, state.scratchTopicSnapshots), catalog = catalogFor(state)
     const nextInputs = [workspace, state.workbenchSpaceSelection, topics, state.spaceZoneBindings, catalog]
     if (!same(inputs, nextInputs)) {
       scope = objectScope(state, workspace, catalog)
-      if (scope?.issue && held?.key === scope.key && !scope.paths.length) scope = { ...held, issue: scope.issue }
+      const metadata = topics?.find(topic => topic.id === scope?.topicId)
+      if (scope?.issue && held?.key === scope.key && (!metadata || metadata.readError)) scope = {
+        ...held, ...scope, paths: [...new Set([...held.paths, ...scope.paths])].filter(path => !topics?.some(topic =>
+          topic.id !== scope!.topicId && scratchTopicIdFromWorkspacePath(workspace.path, path, [topic]) === topic.id)),
+        collaborators: [...held.collaborators, ...scope.collaborators]
+      }
       if (scope && !scope.issue) held = scope
       if (!scope || held?.key !== scope.key) held = scope
       inputs = nextInputs
     }
     const key = scope?.key ?? JSON.stringify(['workspace-agent-list', workspace.id, workspace.hostId, workspace.path])
+    if (previous?.key !== key) confirmedExecutions.clear()
     const nextRefInputs = [catalog, scope, workspace]
     if (!same(refInputs, nextRefInputs)) {
       refs = references(catalog, scope ? objectZones(scope, catalog) : workspaceZones(state, workspace, catalog))
+      const retained = new Set(refs.map(referenceKey))
+      for (const key of confirmedExecutions.keys()) if (!retained.has(key)) confirmedExecutions.delete(key)
       refInputs = nextRefInputs
     }
     const result = new Map<string, AgentSessionSnapshot>()
@@ -160,7 +174,7 @@ export function createWorkspaceAgentListSelector(resolveExecution: WorkspaceAgen
       for (const session of natural(sourceSessions, workspace, topics)) append(result, session)
       if (workspace.id === SCRATCH_WORKSPACE_ID) for (const topic of topics ?? []) addCollaborators(result, sourceSessions, workspace.hostId, topic.collaborators)
     }
-    const unknownExecution = addReferences(result, sourceSessions, refs, resolveExecution)
+    const unknownExecution = addReferences(result, sourceSessions, refs, resolveExecution, confirmedExecutions)
     const sessions = [...result.values()], title = scope?.title ?? workspace.name
     const issue = scope?.issue ?? (unknownExecution ? 'Some original Agent execution identities are unconfirmed. Confirmed members remain available; refresh those exact spatial references.' : null)
     if (previous && previous.key === key && previous.title === title && previous.issue === issue && same(previous.sessions, sessions)) return previous

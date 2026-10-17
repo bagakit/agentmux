@@ -4705,7 +4705,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   scratchTopicOrder: [],
   workspaceAgentOrder: {},
   async setWorkspaceAgentOrder(workspaceId, order) {
-    return await executeWorkspaceAgentOrder({ get,
+    return await executeWorkspaceAgentOrder({ get, resolveExecution: agentRegionExecution,
       set: (id, value) => set(state => ({ workspaceAgentOrder: { ...state.workspaceAgentOrder, [id]: value } })),
       save: () => saveWorkbenchSelection(false)
     }, { schemaVersion: 5, requestId: crypto.randomUUID(), operation: 'space.agent-order', displayWorkspaceId: workspaceId, order: workspaceAgentOrderMembers(order) })
@@ -5612,7 +5612,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         request.operation === 'settings.resource.remove') {
       throw Object.assign(new Error('Settings requests belong to the Main configuration owner.'), { code: 'CONTROL_FAILED' })
     }
-    if (request.operation === 'space.agent-order') return { operation: request.operation, ...await executeWorkspaceAgentOrder({ get,
+    if (request.operation === 'space.agent-order') return { operation: request.operation, ...await executeWorkspaceAgentOrder({ get, resolveExecution: agentRegionExecution,
       set: (id, value) => set(state => ({ workspaceAgentOrder: { ...state.workspaceAgentOrder, [id]: value } })),
       save: () => saveWorkbenchSelection(false)
     }, request) }

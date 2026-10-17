@@ -1,7 +1,6 @@
 import type { AgentMuxSpaceControlRequest, AgentMuxSpatialSave, AgentMuxWorkspaceAgentOrderMember, AgentMuxWorkspaceAgentOrderReport } from '@agentmux/core/control'
-import type { AppConfig, SessionSnapshot } from '../../../shared/contracts'
-import { scratchTopicsForWorkspace, type ScratchTopicsSnapshot } from './scratch-topic-snapshots'
-import { workspaceAgentSessions } from './surface-tool-dock'
+import type { SessionSnapshot } from '../../../shared/contracts'
+import { workspaceAgentListMembers, type WorkspaceAgentScopeState, type WorkspaceAgentExecutionResolver } from './workspace-agent-scope'
 
 export const EMPTY_WORKSPACE_AGENT_ORDER: readonly string[] = Object.freeze([])
 export function workspaceAgentOrderKey(session: { hostId: string; id: string; control?: SessionSnapshot['control'] }): string {
@@ -36,14 +35,26 @@ export function orderedWorkspaceAgents<T extends { hostId: string; id: string; c
     return a.createdAt - b.createdAt || (ak < bk ? -1 : ak > bk ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
   }).filter(session => { const key = workspaceAgentOrderKey(session); if (seen.has(key)) return false; seen.add(key); return true })
 }
-type State = {
-  config: AppConfig | null
-  sessions: SessionSnapshot[]
-  scratchTopicSnapshots: Record<string, ScratchTopicsSnapshot>
+
+/** A narrowed object reorders only its own slots in the original Workspace preference. */
+export function mergeWorkspaceAgentSubsetOrder(
+  sessions: readonly { hostId: string; id: string; createdAt: number }[],
+  order: readonly string[],
+  subset: readonly string[],
+  reordered: readonly string[]
+): string[] {
+  const keys = [...new Set([...order, ...orderedWorkspaceAgents(sessions, order).map(workspaceAgentOrderKey), ...subset])]
+  const members = new Set(subset)
+  let index = 0
+  return keys.map(key => members.has(key) ? reordered[index++]! : key)
+}
+
+type State = WorkspaceAgentScopeState & {
   workspaceAgentOrder: Record<string, string[]>
 }
 type Ports = {
   get(): State
+  resolveExecution?: WorkspaceAgentExecutionResolver
   set(workspaceId: string, order: string[]): void
   save(): Promise<AgentMuxSpatialSave>
 }
@@ -54,7 +65,7 @@ export async function executeWorkspaceAgentOrder(ports: Ports, request: Request)
   const before = Object.hasOwn(state.workspaceAgentOrder, displayWorkspaceId) ? state.workspaceAgentOrder[displayWorkspaceId]! : EMPTY_WORKSPACE_AGENT_ORDER
   const workspaces = state.config?.workspaces.filter(value => value.id === displayWorkspaceId) ?? []
   const workspace = workspaces.length === 1 ? workspaces[0] : undefined
-  const members = workspace ? workspaceAgentSessions(state.sessions, workspace, scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspace)) : []
+  const members = workspace ? workspaceAgentListMembers(state, workspace, ports.resolveExecution) : []
   const references = (keys: readonly string[]) => keys.flatMap(key => { const value = member(key); return value ? [value] : [] })
   const report = (outcome: AgentMuxWorkspaceAgentOrderReport['outcome'], issues: AgentMuxWorkspaceAgentOrderReport['issues'] = [], save: AgentMuxSpatialSave | null = null, stored = before): AgentMuxWorkspaceAgentOrderReport => ({
     scope: 'workspace-agent-list', displayWorkspaceId, storedOrder: references(stored),
