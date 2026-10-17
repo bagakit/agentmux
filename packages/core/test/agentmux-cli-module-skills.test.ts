@@ -179,7 +179,10 @@ describe('local progressive AgentMux module skills', () => {
         'before asking for a persona', 'source, date and evidence links',
         'save with that revision/CAS and read back', 'source-only withdrawal marker',
         'existing discussions keep their earlier context', 'authorized secure storage path',
-        'do not persist the secret', 'amux mote playbook pmo', 'amux goal --skill'
+        'do not persist the secret', 'amux mote playbook pmo', 'amux goal --skill',
+        'Keep MEMORY.md a short current index', 'reusable results in outcome/',
+        'refresh its short\nindex links', 'Update the relevant existing note when a conclusion changes',
+        'nothing useful changed, no extra note is needed'
       ]) expect(mote.stdout, duty).toContain(duty)
 
       const pmo = await run(['--endpoint', selectedEndpoint, 'mote', 'playbook', 'pmo'])
@@ -196,6 +199,31 @@ describe('local progressive AgentMux module skills', () => {
       ]) expect(manual, duty).toContain(duty)
       expect(manual).toContain(goalRoleGuidance({ role: 'manager' }))
       expect(manual).not.toContain('## Executor responsibilities')
+    }
+    expect(connections).toBe(0)
+    expect((await readdir(root, { recursive: true })).sort()).toEqual(originalFiles)
+  })
+
+  it('actual compiled Topic skill explains existing structure and confirmed knowledge maintenance offline', async () => {
+    const dead = `unix:${join(root, 'never-started.sock')}`
+    for (const selectedEndpoint of [endpoint, dead]) {
+      const topic = await run(['--endpoint', selectedEndpoint, 'topic', '--skill'])
+      expect(topic.code, topic.stderr).toBe(0); expect(topic.stderr).toBe('')
+      // Assert useful duties in the actual CLI output rather than equality with its source constant.
+      for (const duty of [
+        'topic.md: short current purpose', 'refs/: original source material and evidence',
+        'outcome/: reusable findings and deliverables', '.agents/: concise collaborator identity and handoff',
+        'Wiki: selected startup instructions and context', 'do not require a new taxonomy or moving old',
+        'confirmed decision, important correction, reusable result or open commitment',
+        'update the relevant original\nknowledge', 'source, date, scope and evidence links',
+        'Correct the relevant existing note or entry', 'mark superseded conclusions clearly',
+        'No extra note is needed when nothing', 'save with its revision/CAS and read back before',
+        'needed update that was not saved or confirmed', 'after an unknown result instead of blindly writing again',
+        'delivery to a new Session and actual model use remain separate facts'
+      ]) expect(topic.stdout, duty).toContain(duty)
+      expect(topic.stdout).toContain('topic knowledge ls/search/read/write')
+      expect(topic.stdout).toContain('amux file --skill')
+      expect(topic.stdout).not.toContain('## Remember at useful moments')
     }
     expect(connections).toBe(0)
     expect((await readdir(root, { recursive: true })).sort()).toEqual(originalFiles)

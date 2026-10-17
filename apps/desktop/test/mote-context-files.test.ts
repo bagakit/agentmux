@@ -82,6 +82,8 @@ it('does not guess Topic instructions when the original object kind is unknown',
   expect(prepared.snapshot.kind).toBeUndefined()
   expect(prepared.prompt).toContain('Original AGENTS.md was not loaded:')
   expect(prepared.prompt).not.toContain(DEFAULT_TOPIC_AGENT_INSTRUCTIONS)
+  expect(prepared.prompt).not.toContain('"$AGENTMUX_CLI" topic --skill')
+  expect(prepared.prompt).not.toContain('"$AGENTMUX_CLI" mote --skill')
 })
 
 it('reports a concurrent context edit as unloaded and preserves the actual later bytes', async () => {
@@ -102,23 +104,35 @@ it('loads the exact 64 KiB boundary without truncating the original text', async
   expect(prepared.prompt).not.toContain('was not loaded:')
 })
 
-it.each(['original-custom', 'compact-default'] as const)('delivers %s guide through real RuntimeController and Core creation, keeping human input separate', async kind => {
+it.each([
+  { kind: 'topic', custom: false }, { kind: 'topic', custom: true },
+  { kind: 'mote', custom: false }, { kind: 'mote', custom: true }
+] as const)('delivers current $kind methods with custom=$custom through real RuntimeController and Core, preserving originals', async ({ kind, custom }) => {
   const { injectedContextCore } = await import('./helpers/injected-context-core')
   const { RuntimeController } = await import('../src/main/runtime-controller')
   const { DEFAULT_CONFIG } = await import('../src/main/config-store')
-  const h = await fixture(), mote = await h.owner.ensureMote(h.workspace, 'launcher:actual-context-consumer')
-  const text = kind === 'compact-default' ? await readFile(join(mote.physicalDirectoryPath!, 'AGENTS.md'), 'utf8')
-    : '# Actual guide\nKeep the source distinction.\n'
+  const h = await fixture(), topic = await h.owner.ensure(h.workspace, 'launcher:actual-context-consumer', undefined, kind === 'mote')
+  const text = custom ? '# Actual guide\r\nKeep the source distinction and my existing organization.\r\n'
+    : await readFile(join(topic.physicalDirectoryPath!, 'AGENTS.md'), 'utf8')
   const memory = ("# Memory\nConfirmed scoped choice, source original fixture, " + _hygiene_fixtureCivil(10, 12) + ".\n")
-  await writeFile(join(mote.physicalDirectoryPath!, 'MEMORY.md'), memory)
-  if (kind === 'original-custom') await writeFile(join(mote.physicalDirectoryPath!, 'AGENTS.md'), text)
+  const originalResult = '# Existing result\r\nOriginal scope and source stay here.\r\n'
+  await writeFile(join(topic.physicalDirectoryPath!, 'outcome/retained.md'), originalResult)
+  if (kind === 'mote') await writeFile(join(topic.physicalDirectoryPath!, 'MEMORY.md'), memory)
+  if (custom) {
+    await writeFile(join(topic.physicalDirectoryPath!, 'AGENTS.md'), text)
+    await h.owner.setWikiEnabled(h.workspace, topic.id, false)
+  }
   else {
     // The default file is a discoverable entry, while the full contract stays with the Goal owner.
     // Compare against the independent canonical module, not a second copy of the entry's prose.
     expect(text).not.toContain(goalRoleGuidanceContract())
     expect(text).not.toContain('## Executor responsibilities')
     expect(text).not.toContain('## Management responsibilities')
+    expect(text).toContain('"$AGENTMUX_CLI" ' + kind + ' --skill')
   }
+  const originalTopic = await readFile(join(topic.physicalDirectoryPath!, 'topic.md'))
+  const originalWiki = await readFile(join(topic.physicalDirectoryPath!, '.agentmux/topic-wiki.md'))
+  const originalSoul = kind === 'mote' ? await readFile(join(topic.physicalDirectoryPath!, 'SOUL.md')) : null
   const coreRoot = join(h.root, 'private-core'); await mkdir(coreRoot)
   const f = await injectedContextCore(coreRoot)
   const runtime = new RuntimeController(f.store, async () => { throw new Error('Unrelated Host connection must not be created') })
@@ -127,24 +141,44 @@ it.each(['original-custom', 'compact-default'] as const)('delivers %s guide thro
   runtime.commit({ hosts: [{ id: 'local', config: config.hosts.find(host => host.id === 'local')!, client: f.core,
     executionHost: { kind: 'local', dispose: vi.fn() } as never }], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   const create = vi.spyOn(f.core, 'createAgentWithDelivery')
+  const userInput = '  比较当前决定与更正。 <original> & &amp;\r\nKeep my exact request.  \n'
   try {
     const result = await runtime.launchAgent({ hostId: 'local', executorId: 'fixture', workspacePath: h.workspace.path,
-      agentSessionId: 'actual-context-session', scratchTopicId: mote.id, createOperationId: 'actual-context-create', prompt: 'Original human request' }, config)
+      agentSessionId: 'actual-context-session', scratchTopicId: topic.id, createOperationId: 'actual-context-create', prompt: userInput }, config)
     expect(create).toHaveBeenCalledTimes(1)
-    expect(create.mock.calls[0]![0]).toMatchObject({ prompt: 'Original human request', workspacePath: mote.physicalDirectoryPath })
+    expect(create.mock.calls[0]![0]).toMatchObject({ prompt: userInput, workspacePath: topic.physicalDirectoryPath })
     expect(create.mock.calls[0]![0].agentMuxNote).toContain(text)
-    expect(create.mock.calls[0]![0].agentMuxNote).toContain(memory)
-    if (kind === 'compact-default') {
-      expect(create.mock.calls[0]![0].agentMuxNote).toContain('mote --skill')
-      expect(create.mock.calls[0]![0].agentMuxNote).toContain('mote playbook pmo')
-    }
     const saved = f.core.agentSession(result.created.agentSessionId)
     const timeline = await f.core.sessionTimeline(result.created.agentSessionId)
     const system = timeline.items.filter(item => item.kind === 'system_message').map(item => item.content).join('\n\n')
     expect(system).toContain(text)
-    expect(system).toContain('Confirmed scoped choice, source original fixture')
-    expect(timeline.items.filter(item => item.kind === 'user_message').map(item => item.content)).toEqual(['Original human request'])
-    expect(saved.workspacePath).toBe(mote.physicalDirectoryPath)
+    expect(system).toContain('"$AGENTMUX_CLI" ' + kind + ' --skill')
+    expect(system).toMatch(/confirmed[\s\S]*decision[\s\S]*correction[\s\S]*result/i)
+    expect(system).toMatch(/maintain|update/i)
+    if (kind === 'mote') {
+      expect(system).toContain(memory)
+      expect(system).toContain('mote playbook pmo')
+      expect(system).not.toContain('"$AGENTMUX_CLI" topic --skill')
+    } else {
+      expect(system).not.toContain('Knowledge for Mote')
+      expect(system).not.toContain('mote playbook pmo')
+    }
+    if (custom) {
+      expect(system).toContain('Topic Wiki injection is disabled')
+      expect(system).not.toContain('## Routing')
+    }
+    // Detailed methods stay in the public module rather than repeating an entire handbook at launch.
+    expect(system).not.toContain('## Remember at useful moments')
+    expect(timeline.items.filter(item => item.kind === 'user_message').map(item => item.content)).toEqual([userInput])
+    expect(saved.workspacePath).toBe(topic.physicalDirectoryPath)
+    expect(await readFile(join(topic.physicalDirectoryPath!, 'AGENTS.md'), 'utf8')).toBe(text)
+    expect(await readFile(join(topic.physicalDirectoryPath!, 'topic.md'))).toEqual(originalTopic)
+    expect(await readFile(join(topic.physicalDirectoryPath!, '.agentmux/topic-wiki.md'))).toEqual(originalWiki)
+    expect(await readFile(join(topic.physicalDirectoryPath!, 'outcome/retained.md'), 'utf8')).toBe(originalResult)
+    if (kind === 'mote') {
+      expect(await readFile(join(topic.physicalDirectoryPath!, 'SOUL.md'))).toEqual(originalSoul)
+      expect(await readFile(join(topic.physicalDirectoryPath!, 'MEMORY.md'), 'utf8')).toBe(memory)
+    } else expect(await readFile(join(topic.physicalDirectoryPath!, 'MEMORY.md')).catch(error => error.code)).toBe('ENOENT')
     expect(f.start).toHaveBeenCalledTimes(1); expect(f.stop).not.toHaveBeenCalled()
   } finally { await runtime.dispose(); await f.dispose(); vi.unstubAllEnvs() }
 })
@@ -259,8 +293,9 @@ it('starts with blank Mote defaults, then carries public Files corrections acros
       'MEMORY.md': DEFAULT_MOTE_MEMORY, 'BEHAVIOR.md': DEFAULT_MOTE_BEHAVIOR }
     for (const [name, content] of Object.entries(defaults)) expect(await readFile(join(mote.physicalDirectoryPath!, name), 'utf8')).toBe(content)
     expect(original.result.document.content).toBe(DEFAULT_MOTE_MEMORY)
-    const cli=resolve('packages/core/.tmp/mote-memory/cli.mjs')
-    await build({entryPoints:['packages/core/src/agentmux.ts'],outfile:cli,platform:'node',format:'esm',packages:'external',bundle:true,logLevel:'silent'})
+    // Exercise the same compiled command as other public CLI consumers; bundling a second CLI
+    // changes its module initialization semantics and does not qualify the shipped artifact.
+    const cli = process.env.AGENTMUX_TEST_OBJECT_CLI ?? resolve('packages/core/bin/amux')
     const preference = 'Preference: start with the conclusion.'
     const commitment = 'Open commitment: review the original experiment when its result is ready.'
     const source = 'Source: explicit user choice, ' + _hygiene_fixtureCivil(10, 12) + ', this Mote only.'
