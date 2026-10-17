@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
+import ts from 'typescript'
 
 import { terminalIdentityMenuActions } from '../src/renderer/src/lib/terminal-identity-menu.js'
 describe('terminal identity menu shares its own Agent', () => {
@@ -59,11 +60,35 @@ describe('TerminalContextMenu / TerminalView 真把这份 actions 接上了', ()
     const start = view.indexOf(anchor)
     expect(start, '接线的锚点没了').toBeGreaterThan(-1)
     const block = view.slice(start, start + 500)
-    expect(block).toContain('sessionId: session.id')
+    expect(block).toContain('session.control.agentSessionId')
+    expect(block).toContain(': session.id')
     expect(block).toContain('sessionKind: session.kind')
     // 不许从 store 取活跃会话：用户右键的那一格往往恰恰不是聚焦的那一格。
     expect(block).not.toContain('activeSession')
     expect(block).not.toContain('sharingMetadata')
+  })
+
+  it('the real caller binds Agent addresses to exact control and plain terminals to their own Session', () => {
+    const source = ts.createSourceFile('TerminalView.tsx', readFileSync(new URL('../src/renderer/src/components/TerminalView.tsx', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    const consumers: ts.JsxOpeningLikeElement[] = []
+    const visit = (node: ts.Node): void => {
+      if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) && node.tagName.getText(source) === 'TerminalContextMenu') consumers.push(node)
+      ts.forEachChild(node, visit)
+    }
+    visit(source); expect(consumers).toHaveLength(1)
+    const attribute = consumers[0]!.attributes.properties.find(property => ts.isJsxAttribute(property) && property.name.getText(source) === 'identityActions')
+    expect(attribute && ts.isJsxAttribute(attribute) && attribute.initializer && ts.isJsxExpression(attribute.initializer)).toBe(true)
+    const call = (attribute as ts.JsxAttribute).initializer as ts.JsxExpression
+    expect(call.expression && ts.isCallExpression(call.expression)).toBe(true)
+    const invocation = call.expression as ts.CallExpression
+    expect(invocation.expression.getText(source)).toBe('terminalIdentityMenuActions')
+    expect(ts.isObjectLiteralExpression(invocation.arguments[0]!)).toBe(true)
+    const target = (invocation.arguments[0] as ts.ObjectLiteralExpression).properties.find(property => ts.isPropertyAssignment(property) && property.name.getText(source) === 'sessionId') as ts.PropertyAssignment
+    expect(target).toBeDefined(); expect(ts.isConditionalExpression(target.initializer)).toBe(true)
+    const branch = target.initializer as ts.ConditionalExpression
+    expect(branch.condition.getText(source)).toBe("session.kind === 'agent'")
+    expect(branch.whenTrue.getText(source)).toBe('session.control.agentSessionId')
+    expect(branch.whenFalse.getText(source)).toBe('session.id')
   })
 
   it('写剪贴板走共用出口，不绕过它直接碰 IPC', () => {

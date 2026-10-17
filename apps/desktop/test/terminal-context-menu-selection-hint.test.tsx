@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
-import { allStyleRules } from './helpers/styles.js'
+import { readStyleSheet, stripCssComments } from './helpers/styles.js'
 
 /**
  * 终端右键菜单要能**自己解释**为什么 Copy 变灰（#610）。
@@ -248,10 +248,16 @@ describe('提示的样式落在共享 CSS 规则里，且那条规则真的带�
   // 取值。选择器必须整条相等——子串命中会被兄弟规则（例如某个 `.x .tab-context-menu__hint`）替被删的
   // 规则作保（这条坑在 surface-tool-dock.test.ts 的 ruleBody 注释里已记过一次）。
   const HINT = '.tab-context-menu__hint'
+  const rules = stripCssComments(readStyleSheet('./chrome.css'))
+
+  it('the actual style entry imports the owning Chrome sheet', () => {
+    const entry = readFileSync(fileURLToPath(new URL('../src/renderer/src/styles/index.css', import.meta.url)), 'utf8')
+    expect(stripCssComments(entry)).toMatch(/@import\s+['"]\.\/chrome\.css['"]\s*;/)
+  })
 
   /** 一条规则的声明体（注释已剥除）；选择器整条相等才算命中，不在场时空串。 */
   function ruleBody(selector: string): string {
-    for (const [, selectors, body] of allStyleRules().matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    for (const [, selectors, body] of rules.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
       if (selectors!.split(',').some((one) => one.trim() === selector)) return body!
     }
     return ''
