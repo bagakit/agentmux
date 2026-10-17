@@ -153,7 +153,10 @@ export async function installMoteNative(options: Options) {
     })
     handled.push(channel)
   }
-  handlePresentation('browser:registerPresentation', (event, input) => browsers.registerPresentation(event.sender, event.senderFrame, input))
+  handlePresentation('browser:registerPresentation', (event, input) => {
+    const frame = event.senderFrame
+    return browsers.registerPresentation(event.sender, frame, input, frame ? { processId: frame.processId, frameToken: frame.frameToken } : null)
+  })
   handlePresentation('browser:updatePresentation', (event, leaseId, geometry) => {
     browsers.updatePresentation(event.sender, event.senderFrame, leaseId, geometry); refreshChrome()
   })

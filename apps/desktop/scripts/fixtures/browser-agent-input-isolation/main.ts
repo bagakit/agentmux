@@ -129,9 +129,10 @@ async function run() {
     await pause(80)
   }
   const action = await point('#action'), frameAction = await point('#action', true), drag = await point('#drag')
-  const lease = manager.registerPresentation(win.webContents, win.webContents.mainFrame, { browserId: 'page', occurrence: {
+  const requesterFrame = win.webContents.mainFrame
+  const lease = manager.registerPresentation(win.webContents, requesterFrame, { browserId: 'page', occurrence: {
     presentationId: 'proof-original', location: { displayWorkspaceId: 'workspace', groupId: 'group', tabId: 'tab', regionId: 'region' }
-  }, geometry: { visible: true, bounds: page.getBounds() } })
+  }, geometry: { visible: true, bounds: page.getBounds() } }, { processId: requesterFrame.processId, frameToken: requesterFrame.frameToken })
   const capture = manager.armPresentationCapture(win.webContents, win.webContents.mainFrame, lease.leaseId)
   const trackIds = await win.webContents.executeJavaScript('navigator.mediaDevices.getDisplayMedia({video:true,audio:false}).then(stream=>{globalThis.proofStream=stream;return stream.getVideoTracks().map(track=>track.id)})', true)
   console.log('native-proof:capture')
@@ -450,11 +451,12 @@ async function run() {
   await waitFor(() => retiredPageContents.executeJavaScript('!!globalThis.proof'), 'second original page')
   const borrowed = new BrowserWindow({ width: 900, height: 780, show: false })
   manager.setPresentationWindowOwner(() => borrowed)
-  const borrowedLease = manager.registerPresentation(win.webContents, win.webContents.mainFrame, {
+  const borrowedRequesterFrame = win.webContents.mainFrame
+  const borrowedLease = manager.registerPresentation(win.webContents, borrowedRequesterFrame, {
     browserId: 'retired-page', occurrence: { presentationId: 'borrowed-page', location: {
       displayWorkspaceId: 'workspace', groupId: 'group', tabId: 'tab', regionId: 'borrowed-region' } },
     geometry: { visible: true, bounds: originalBounds }
-  })
+  }, { processId: borrowedRequesterFrame.processId, frameToken: borrowedRequesterFrame.frameToken })
   await manager.activatePresentation(win.webContents, win.webContents.mainFrame, borrowedLease.leaseId, { kind: 'select', focus: 'preserve' })
   const moving = cli(['browser', 'run', '--browser', 'retired-page', '--operation-id', 'native-host-return'], 'await js("new Promise(resolve => globalThis.finishMoving = resolve)"); return "healthy"')
   await waitFor(() => retiredPageContents.executeJavaScript('typeof finishMoving === "function"'), 'program on borrowed native host')

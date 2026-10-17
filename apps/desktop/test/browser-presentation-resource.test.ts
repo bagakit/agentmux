@@ -20,7 +20,8 @@ const native = vi.hoisted(() => {
     readonly session = new Session()
     url = _hygiene_fixtureFileUrl("app/renderer/index.html")
     dead = false
-    readonly mainFrame = { url: this.url, detached: false, parent: null }
+    readonly mainFrame = { url: this.url, detached: false, parent: null, processId: 1, frameToken: 'original-frame' }
+    documentRevision = 0
     readonly listeners = new Map<string, Set<(...args: any[]) => void>>()
     readonly navigationHistory = { canGoBack: () => false, canGoForward: () => false }
     send = vi.fn()
@@ -53,6 +54,8 @@ const native = vi.hoisted(() => {
     async loadURL(url: string) {
       this.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false, url })
       this.url = url; this.mainFrame.url = url
+      this.mainFrame.frameToken = 'frame-' + ++this.documentRevision
+      this.emit('did-navigate', {}, url)
       this.emit('did-finish-load'); this.emit('did-stop-loading')
     }
     reload() { void this.loadURL(this.url) }
@@ -114,8 +117,9 @@ async function fixture(focused = true) {
   cleanup.push(() => { manager.dispose(); rmSync(root, { recursive: true }) })
   const browser = await manager.create('browser', 'https://generic.example/one', 'resource-space')
   const source = views[0]!, frame = app.mainFrame
+  const identity = () => ({ processId: frame.processId, frameToken: frame.frameToken })
   const register = (id: string, value = geometry) => manager.registerPresentation(app as never, frame as never,
-    { browserId: 'browser', occurrence: occurrence(id), geometry: value })
+    { browserId: 'browser', occurrence: occurrence(id), geometry: value }, identity())
   const events = (): BrowserPresentationEvent[] => app.send.mock.calls
     .filter(([channel]) => channel === 'agentmux:browser-presentation-event').map(([, value]) => value)
     .filter(value => value.type !== 'native-coverage-changed')
@@ -130,7 +134,7 @@ async function fixture(focused = true) {
     expect(result).toHaveLength(1)
     return result[0]
   }
-  return { manager, app, frame, source, views, register, events, coverage, request, browser, addChildView, window }
+  return { manager, app, frame, source, views, identity, register, events, coverage, request, browser, addChildView, window }
 }
 
 it('confirms native coverage only after the exact source capture is acknowledged', async () => {
@@ -366,28 +370,27 @@ it('rejects foreign requester, child frame and invalid occurrence/bounds without
   const f = await fixture()
   for (const [sender, frame] of [[new native.Contents(), f.frame], [f.app, { ...f.frame, parent: f.frame }]]) {
     expect(() => f.manager.registerPresentation(sender as never, frame as never,
-      { browserId: 'browser', occurrence: occurrence('A'), geometry })).toThrow('Untrusted')
+      { browserId: 'browser', occurrence: occurrence('A'), geometry }, f.identity())).toThrow('Untrusted')
   }
   expect(() => f.manager.registerPresentation(f.app as never, f.frame as never,
-    { browserId: 'browser', occurrence: occurrence('A'), geometry: { visible: true, bounds: { ...geometry.bounds, width: 0 } } })).toThrow('bounds')
+    { browserId: 'browser', occurrence: occurrence('A'), geometry: { visible: true, bounds: { ...geometry.bounds, width: 0 } } }, f.identity())).toThrow('bounds')
   expect(f.views).toEqual([f.source]); expect(f.source.webContents.dead).toBe(false)
 })
 
-it.each(['document-loading', 'frame-mismatch', 'document-url-mismatch'] as const)(
+it.each(['frame-mismatch', 'document-url-mismatch'] as const)(
   'explains %s without consuming the occurrence or changing the original page', async reason => {
     const f = await fixture(), before = f.manager.target('browser')
     const frame = reason === 'frame-mismatch' ? { ...f.frame } : f.frame
-    const loading = vi.spyOn(f.app, 'isLoadingMainFrame').mockReturnValue(reason === 'document-loading')
     const url = f.frame.url
     if (reason === 'document-url-mismatch') f.frame.url += '?other-document'
     try {
       expect(() => f.manager.registerPresentation(f.app as never, frame as never,
-        { browserId: 'browser', occurrence: occurrence('A'), geometry }))
+        { browserId: 'browser', occurrence: occurrence('A'), geometry }, f.identity()))
         .toThrow(`Untrusted Browser presentation document (${reason})`)
       expect(f.manager.target('browser')).toEqual(before)
       expect(f.views).toEqual([f.source])
       expect(f.source.webContents.dead).toBe(false)
-    } finally { loading.mockRestore(); f.frame.url = url }
+    } finally { f.frame.url = url }
     expect(f.register('A').leaseId).toBeTruthy()
     expect(f.views).toEqual([f.source])
   })
@@ -400,6 +403,50 @@ it('arms one capture from a visible exact lease and waits for actual media ackno
   f.manager.ackPresentationCapture(f.app as never, f.frame as never, capture.captureId, { outcome: 'ready', trackIds: ['actual-video-id'] })
   expect(f.manager.armPresentationCapture(f.app as never, f.frame as never, b.leaseId)).toEqual(capture)
 })
+it('keeps the exact document eligible for registration and capture while resources load', async () => {
+  const f = await fixture()
+  const loading = vi.spyOn(f.app, 'isLoadingMainFrame').mockReturnValue(true)
+  try {
+    const lease = f.register('loading')
+    const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, lease.leaseId)
+    expect(f.request()).toEqual({ video: f.source.webContents.mainFrame })
+    f.manager.ackPresentationCapture(f.app as never, f.frame as never, capture.captureId, { outcome: 'ready', trackIds: ['original-track'] })
+    f.manager.updatePresentation(f.app as never, f.frame as never, lease.leaseId, geometry)
+    expect(f.source.webContents.dead).toBe(false)
+  } finally { loading.mockRestore() }
+})
+
+it('retires a document registered during navigation when the same native wrapper commits a new document', async () => {
+  const f = await fixture()
+  f.register('before-navigation')
+  f.app.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false, url: f.app.url })
+  const during = f.register('during-navigation')
+  const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, during.leaseId)
+  f.frame.frameToken = 'committed-document'
+  // The real native wrapper mutates in place even for a same-URL reload.
+  expect(f.app.mainFrame).toBe(f.frame)
+  expect(f.request()).toBeNull()
+  f.app.emit('did-navigate', {}, f.app.url)
+  expect(f.events()).toContainEqual({ type: 'capture-revoked', browserId: 'browser', captureId: capture.captureId, reason: 'requester-ended' })
+  expect(() => f.manager.updatePresentation(f.app as never, f.frame as never, during.leaseId, geometry)).toThrow('Unknown')
+  expect(f.source.webContents.dead).toBe(false)
+})
+
+it('rejects an old request snapshot without revoking a new document registered before its commit notification', async () => {
+  const f = await fixture(), original = f.identity()
+  f.register('old-document')
+  f.frame.frameToken = 'new-document'
+  const current = f.register('new-document')
+  const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, current.leaseId)
+  f.app.emit('did-navigate', {}, f.app.url)
+  expect(() => f.manager.registerPresentation(f.app as never, f.frame as never,
+    { browserId: 'browser', occurrence: occurrence('stale-request'), geometry }, original)).toThrow('document-changed')
+  expect(f.request()).toEqual({ video: f.source.webContents.mainFrame })
+  f.manager.ackPresentationCapture(f.app as never, f.frame as never, capture.captureId, { outcome: 'ready', trackIds: ['new-track'] })
+  f.manager.updatePresentation(f.app as never, f.frame as never, current.leaseId, geometry)
+  expect(f.source.webContents.dead).toBe(false)
+})
+
 it('denies a same-session child frame, other origin or audio without consuming the trusted pending arm', async () => {
   const f = await fixture(), lease = f.register('A')
   f.manager.armPresentationCapture(f.app as never, f.frame as never, lease.leaseId)
@@ -726,7 +773,7 @@ it('selects the exact child lease before rehosting the same native page and scop
   const notify = vi.fn(); f.manager.onNativeVisibilityChange = notify
   const original = f.register('A')
   await f.manager.activatePresentation(f.app as never, f.frame as never, original.leaseId, { kind: 'select' })
-  const borrowed = f.manager.registerPresentation(f.app as never, f.frame as never, { browserId: 'browser', occurrence: occurrence('B'), geometry, window: identity })
+  const borrowed = f.manager.registerPresentation(f.app as never, f.frame as never, { browserId: 'browser', occurrence: occurrence('B'), geometry, window: identity }, f.identity())
   await f.manager.activatePresentation(f.app as never, f.frame as never, borrowed.leaseId, { kind: 'select' })
   expect(childViews).toEqual([f.source]); expect(f.views).not.toContain(f.source)
   expect(f.manager.windowForView(f.source as never)).toBe(child)
@@ -758,7 +805,7 @@ it('keeps the original reachable viewport when the selected native child refuses
   } }
   const identity = { windowId: 'child', documentGeneration: 'original-document' }
   f.manager.setPresentationWindowOwner(scope => scope?.windowId === identity.windowId ? child as never : f.window as never)
-  const borrowed = f.manager.registerPresentation(f.app as never, f.frame as never, { browserId: 'browser', occurrence: occurrence('B'), geometry: { visible: true, bounds: { x: 5000, y: 4000, width: 200, height: 100 } }, window: identity })
+  const borrowed = f.manager.registerPresentation(f.app as never, f.frame as never, { browserId: 'browser', occurrence: occurrence('B'), geometry: { visible: true, bounds: { x: 5000, y: 4000, width: 200, height: 100 } }, window: identity }, f.identity())
   await expect(f.manager.activatePresentation(f.app as never, f.frame as never, borrowed.leaseId, { kind: 'select' })).rejects.toBe(failure)
   expect(f.coverage().at(-1)).toEqual(confirmed)
   expect(f.events()).toEqual(control)
