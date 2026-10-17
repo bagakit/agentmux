@@ -5,13 +5,14 @@ const base = 'apps/desktop/src/renderer/src/'
 await verifyRendererSourceMutations({
   name: 'activity-cascade',
   owningConfig: 'apps/desktop/scripts/fixtures/project-activity-cascade/vitest.mutations.config.mts',
-  evidenceRoot: resolve(import.meta.dirname, '../../../.bagakit/feature-tracker/activity-cascade/mutations'),
-  tests: ['apps/desktop/test/project-activity-spaces.test.ts', 'apps/desktop/test/project-activity-menu.test.tsx'],
+  evidenceRoot: resolve(import.meta.dirname, '../../../.bagakit/feature-tracker/activity-clarity/mutations'),
+  tests: ['apps/desktop/test/project-activity-spaces.test.ts', 'apps/desktop/test/project-activity-menu.test.tsx', 'apps/desktop/test/project-activity-clarity.test.tsx'],
   sources: [base + 'lib/project-activity-spaces.ts', base + 'components/ProjectActivityMenu.tsx',
     base + 'components/ProjectActivity.tsx', base + 'components/ProjectActivityMetrics.tsx',
     base + 'components/HoverDropdownMenu.tsx', base + 'components/AgentInformationPreview.tsx',
     base + 'components/AgentInformationReader.tsx', base + 'lib/agent-information-preview.ts',
     'apps/desktop/test/helpers/composer-dom-fixture.tsx', 'apps/desktop/test/helpers/agent-information-root.tsx', 'apps/desktop/test/helpers/client-ui-render.tsx',
+    'apps/desktop/test/helpers/spatial-control-owner-fixture.ts', 'apps/desktop/test/helpers/startup-observation-api-fixture.ts',
     'apps/desktop/scripts/lib/fixture-values.mjs'],
   mutations: [
     { label: 'original-execution-host', file: base + 'lib/project-activity-spaces.ts',
@@ -25,6 +26,21 @@ await verifyRendererSourceMutations({
       after: 'unplaced: []' },
     { label: 'exact-unplaced-subject', file: base + 'components/ProjectActivityMenu.tsx',
       before: 'subjects.length !== 1 || subjects[0]?.hostId !== session.hostId || surfaces.some(surface => agentRegionExecution(surface)?.hostId !== session.hostId)',
+      after: 'false' },
+    { label: 'direct-single-group', file: base + 'components/ProjectActivityMenu.tsx',
+      before: 'spaces.zones.length + (spaces.unplaced.length ? 1 : 0) === 1',
+      after: 'spaces.zones.length + (spaces.unplaced.length ? 1 : 0) === -1' },
+    { label: 'one-row-reading-target', file: base + 'components/ProjectActivityMenu.tsx',
+      before: '<AgentContextContent context={context} presentation="card" />',
+      after: '<AgentContextContent context={context} identity={hover.position} presentation="card" />' },
+    { label: 'repeated-agent-relationship', file: base + 'components/ProjectActivityMenu.tsx',
+      before: 'identity && identity.occurrenceCount > 1 ? <span',
+      after: 'identity && identity.occurrenceCount > 9 ? <span' },
+    { label: 'readable-status-summary', file: base + 'components/ProjectActivityMenu.tsx',
+      before: '<Menu.Label className="project-activity-menu__summary">{metricLabel}</Menu.Label>',
+      after: '<Menu.Label className="project-activity-menu__summary">{null}</Menu.Label>' },
+    { label: 'same-tab-region-disambiguation', file: base + 'components/ProjectActivityMenu.tsx',
+      before: 'tab.agents.filter(candidate => candidate.session.id === agent.session.id && candidate.session.hostId === agent.session.hostId).length > 1',
       after: 'false' }
   ]
 })
