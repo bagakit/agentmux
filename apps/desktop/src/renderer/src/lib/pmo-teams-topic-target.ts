@@ -35,14 +35,14 @@ export function moteTargetStatus(tab: WorkbenchTab | undefined, session: Session
 /** The shortcut and workface consume one exact target, never PMO-wide status. */
 export function usePmoTeamsTopicTarget(floating: PmoTeamsTopicFloatingState) {
   const topicId = useAppStore(state => pmoTeamsTopicFloatingTargetTopicId(floating, state.tabs))
-  const selectTab = useMemo(() => createPmoTeamsTopicTargetSelector(floating), [floating.targetTopicId, floating.targetTabId])
+  const selectTab = useMemo(() => createPmoTeamsTopicTargetSelector(floating), [floating.targetTopicId, floating.targetTabId, floating.agentTarget])
   const tabId = useAppStore(selectTab)
   const unresolvedTabs = useAppStore(state => !tabId && floating.targetTabId !== null ? state.tabs : null)
   const selectionUnconfirmed = useMemo(() => Boolean(unresolvedTabs && Object.values(unresolvedTabs).some(tab =>
     tab.workspaceId === SCRATCH_WORKSPACE_ID && tab.topicId === topicId)), [unresolvedTabs, topicId])
   const tab = useAppStore((state) => {
     const candidate = tabId ? state.tabs[tabId] : undefined
-    return candidate?.workspaceId === SCRATCH_WORKSPACE_ID && candidate.topicId === topicId ? candidate : undefined
+    return floating.agentTarget ? candidate : candidate?.workspaceId === SCRATCH_WORKSPACE_ID && candidate.topicId === topicId ? candidate : undefined
   })
   const sessions = useWorkbenchTabSessions(tab)
   const names = useWorkbenchTabRecord('agentNames', tab)
@@ -59,12 +59,12 @@ export function usePmoTeamsTopicTarget(floating: PmoTeamsTopicFloatingState) {
   const region = identityIssue ? undefined : rawRegion, session = identityIssue ? undefined : observedSession
   const topics = useAppStore(state => scratchTopicsForWorkspace(state.scratchTopicSnapshots,
     state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)))
-  const moteName = useMemo(() => topics?.find(topic => topic.id === topicId)?.title ??
-    (topicId === PMO_TEAMS_TOPIC_ID ? PMO_TEAMS_TOPIC_TITLE : 'Saved Mote'), [topics, topicId])
+  const moteName = useMemo(() => floating.agentTarget ? '原 Agent' : topics?.find(topic => topic.id === topicId)?.title ??
+    (topicId === PMO_TEAMS_TOPIC_ID ? PMO_TEAMS_TOPIC_TITLE : 'Saved Mote'), [topics, topicId, floating.agentTarget])
   const name = useMemo(() => identityIssue ? moteName : tab
     ? workbenchTabDisplayName(tab, sessions, names, timelines)
     : tabId ? 'Saved context' : moteName, [tab, tabId, sessions, names, timelines, moteName, identityIssue])
-  const statusText = identityIssue ? 'Original Agent retained' : selectionUnconfirmed ? 'Restoring discussion' : moteTargetStatus(tab, session, tabId, regionId ?? null)
+  const statusText = identityIssue ? floating.agentTarget ? '状态待确认 · 原身份保留' : 'Original Agent retained' : selectionUnconfirmed ? 'Restoring discussion' : moteTargetStatus(tab, session, tabId, regionId ?? null)
   const label = name === moteName ? moteName : `${moteName} · ${name}`
   return { topicId, tabId, tab, region, session, name, moteName, label, statusText, identityIssue }
 }

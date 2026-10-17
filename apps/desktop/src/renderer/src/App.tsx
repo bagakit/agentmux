@@ -208,13 +208,13 @@ function DesktopApp() {
     if (current && (current.open !== moteFloating.open || current.targetTabId !== moteFloating.targetTabId ||
       current.targetTopicId !== moteFloating.targetTopicId || JSON.stringify(current.reference) !== JSON.stringify(moteFloating.reference))) return
     const topicId = pmoTeamsTopicFloatingTargetTopicId(current ?? moteFloating, state.tabs)
-    if (!tab?.regions[reference.regionId] || tab.topicId !== topicId ||
+    if (!tab?.regions[reference.regionId] || !current?.agentTarget && tab.topicId !== topicId ||
       !workbenchDisplayReferenceMatches(state.layouts[reference.displayWorkspaceId], reference)) {
       state.reportError(new Error('This exact discussion location is no longer confirmed. Its original content is kept; choose its current location.'))
       return
     }
     state.focusRegion(reference.displayWorkspaceId, reference.tabId, reference.regionId, 'floating-pointer', reference.groupId)
-    setMoteFloating({ targetTabId: reference.tabId, reference })
+    setMoteFloating({ targetTabId: reference.tabId, reference, ...(current?.agentTarget ? { agentTarget: current.agentTarget, targetAgent: current.targetAgent } : {}) })
   }, [setMoteFloating, moteFloating])
   const moteProjection = useMemo(() => {
     const id = pmoTeamsTopicFloatingTargetTabId(moteFloating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId)
@@ -234,7 +234,7 @@ function DesktopApp() {
         onSelectRegion: (regionId: string) => selectMoteReference({ ...held, regionId }) })) }
     }
     return targets
-  }, [moteFloating.open, moteFloating.preview, moteFloating.targetTopicId, moteFloating.targetTabId, moteFloating.reference,
+  }, [moteFloating.open, moteFloating.preview, moteFloating.targetTopicId, moteFloating.targetTabId, moteFloating.reference, moteFloating.agentTarget, moteFloating.targetAgent,
     tabs, layouts, agentFocus.pmo.sessionId, moteProjection, selectMoteReference])
   const [focusView, setFocusView] = useState<'tab' | 'region' | 'closed' | 'unconfirmed'>('tab')
   const selectFocusReference = useCallback<WorkbenchProjection['onSelect']>(reference => {
