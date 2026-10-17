@@ -42,10 +42,16 @@ export function desktopSpatialGraph(state: SpatialWorkbench, topics: readonly Sc
     const binding = state.spaceZoneBindings[id] ?? (original.length === 1 ? { spaceId: original[0]!.spaceId, workspaceId: zone.workspaceId } : undefined);
     if (!binding)
       continue;
-    const { relations: _, ...origin } = binding;
+    const { relations: _, resource: _resource, workspacePath: _workspacePath, ...origin } = binding;
     const saved = previous?.resources[zoneKey(id)];
+    const workspace = state.config?.workspaces.find(workspace => workspace.id === zone.workspaceId);
+    const followsWorkspace = binding.directoryPath === undefined && zone.kind !== 'home' && zone.kind !== 'unknown' &&
+      workspace?.hostId === zone.hostId && workspace.path === zone.directoryPath;
+    const descriptor = saved && typeof saved === 'object' && !Array.isArray(saved) ? { ...saved } : {};
+    delete descriptor.workspacePath;
     const originalKind = originalSources.spaces.find(space => space.spaceId === origin.spaceId)?.kind;
-    resources[zoneKey(id)] = json({ ...(saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {}), ...origin,
+    resources[zoneKey(id)] = json({ ...descriptor, ...origin,
+      ...(followsWorkspace ? { workspacePath: workspace.path } : {}),
       ...(originalKind === 'topic' || originalKind === 'mote' ? { contentKind: originalKind } : {}) });
   }
   if (previous) {
@@ -122,7 +128,7 @@ export function desktopWorkbenchFromSpatial(graph: AgentMuxSpatialGraph, onUnava
   }
   return { tabs, layouts: graph.layouts };
 }
-export function desktopBindingsFromSpatial(graph: AgentMuxSpatialGraph): SpaceZoneBindings {
+export function desktopBindingsFromSpatial(graph: AgentMuxSpatialGraph, config?: Pick<import('../../../shared/contracts').AppConfig, 'workspaces'> | null): SpaceZoneBindings {
   const result: SpaceZoneBindings = {};
   for (const zone of graph.zones) {
     const original = graph.resources[zoneKey(zone.zoneId)];
@@ -134,10 +140,22 @@ export function desktopBindingsFromSpatial(graph: AgentMuxSpatialGraph): SpaceZo
     const originalSpace = graph.spaces.find(space => space.spaceId === spaceId);
     const originalKind = origin?.contentKind ?? originalSpace?.kind;
     const topicId = typeof origin?.topicId === 'string' ? origin.topicId : originalSpace?.topicId;
+    const workspace = config?.workspaces.find(workspace => workspace.id === zone.workspaceId);
+    // Absence of an explicit descriptor is not evidence that an updated Core path is a default.
+    // The saved anchor also recognizes an older default ACK after a Workspace path rebind.
+    const followsWorkspace = zone.kind !== 'home' && zone.kind !== 'unknown' && zone.directoryPath !== null &&
+      origin?.workspaceId === zone.workspaceId && typeof origin.spaceId === 'string' && !Object.hasOwn(origin, 'directoryPath') && (
+        origin.workspacePath === zone.directoryPath ||
+        workspace?.hostId === zone.hostId && workspace.path === zone.directoryPath ||
+        origin.workspacePath === undefined && zone.kind === 'directory' && originalSpace?.hostId === zone.hostId && originalSpace.directoryPath === zone.directoryPath);
+    const { zoneId: _, workspaceId: __, ...resource } = zone;
     result[zone.zoneId] = { spaceId, workspaceId: zone.workspaceId,
       ...(originalKind === 'topic' || originalKind === 'mote' ? { contentKind: originalKind } : {}),
       ...(topicId ? { topicId } : {}),
-      ...(zone.kind === 'home' && zone.directoryPath ? { directoryPath: zone.directoryPath } : {}),
+      ...(!followsWorkspace && zone.directoryPath !== null ? { directoryPath: zone.directoryPath }
+        : !followsWorkspace && typeof origin?.directoryPath === 'string' ? { directoryPath: origin.directoryPath } : {}),
+      ...(followsWorkspace ? { workspacePath: zone.directoryPath! } : {}),
+      resource,
       relations: Object.fromEntries(graph.spaces.map(s => [s.spaceId, relationships.some(b => b.spaceId === s.spaceId)])) };
   }
   return result;

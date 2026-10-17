@@ -5056,7 +5056,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         coreSpatialPersistence=new DesktopSpatialPersistence(api.spatial,error=>get().reportWorkbenchSaveFailure(error))
         try {
           const spatial=await coreSpatialPersistence.read()
-          if(spatial) set({topicCategories:categoriesFromSpatial(spatial.graph),projectGroups:spatial.graph.projectGroups ?? [],restoredWorkbench:desktopWorkbenchFromSpatial(spatial.graph,id=>get().reportWorkbenchSaveFailure(new Error('Host resources are unavailable for saved Tab '+id+'. Its Core identity is retained. Restore the original Host connection.'))),spaceZoneBindings:desktopBindingsFromSpatial(spatial.graph)})
+          if(spatial) set({topicCategories:categoriesFromSpatial(spatial.graph),projectGroups:spatial.graph.projectGroups ?? [],restoredWorkbench:desktopWorkbenchFromSpatial(spatial.graph,id=>get().reportWorkbenchSaveFailure(new Error('Host resources are unavailable for saved Tab '+id+'. Its Core identity is retained. Restore the original Host connection.'))),spaceZoneBindings:desktopBindingsFromSpatial(spatial.graph,get().config)})
         } catch(error) {get().reportWorkbenchSaveFailure(error)}
       } else get().reportWorkbenchSaveFailure(new Error('Core spatial storage API is unavailable. Original work is retained; restore the Host connection to save positions.'))
       // Restored intent is readable evidence. Only an explicit Send can authorize its execution.
@@ -5084,6 +5084,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const demandRead = api.demands.list().then(
         value => ({ status: 'fulfilled', value }) as const,
         reason => ({ status: 'rejected', reason }) as const)
+      const resourceBindingsBeforeRead = get().spaceZoneBindings
       const configRead = await api.config.get()
       const avatarHandoff = await handoffSpaceIcons(get().config !== configBeforeRead && get().config !== null ? get().config! : configRead)
       const persistedSessionIds = persistedSessionSurfaceIds(get().restoredWorkbench)
@@ -5092,6 +5093,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // that committed fact; use the existing Store identity, with no second configuration cache.
       const config = persistedState.config !== configBeforeRead && persistedState.config !== null
         ? persistedState.config : avatarHandoff.config
+      // The first Core read can precede configuration. Resolve old default descriptors now that
+      // their original Workspace is known, without replacing later local binding edits.
+      if (coreSpatialPersistence?.current && get().spaceZoneBindings === resourceBindingsBeforeRead) {
+        set({ spaceZoneBindings: desktopBindingsFromSpatial(coreSpatialPersistence.current.graph, config) })
+      }
       set({ startupProgress: { step: 'layout' } })
       const visibleSessions = persistedState.sessions
       const restoredUi = restorePersistedUiState(config, persistedState)
@@ -5286,7 +5292,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               live.regions[regionId] && sameSpatialValue(old.tabs[id]?.regions[regionId],persisted.tabs[id]?.regions[regionId]) ? live.regions[regionId] : region]))
             return [id,{...tab,regions}]
           }))}
-          set({tabs,layouts:saved.graph.layouts,topicCategories:categoriesFromSpatial(saved.graph),projectGroups:saved.graph.projectGroups ?? [],spaceZoneBindings:desktopBindingsFromSpatial(saved.graph)})
+          set({tabs,layouts:saved.graph.layouts,topicCategories:categoriesFromSpatial(saved.graph),projectGroups:saved.graph.projectGroups ?? [],spaceZoneBindings:desktopBindingsFromSpatial(saved.graph,current.config)})
           applyNameAcknowledgement(saved)
         }
         // Keep observation and local edit capture available even when the first storage read
