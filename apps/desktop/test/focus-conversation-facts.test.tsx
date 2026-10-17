@@ -16,7 +16,6 @@ vi.mock('@agentmux/core/conversation', async original => {
 })
 // Keep the original Focus, Store, Core projection and card. Isolate unrelated native paint and IO.
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () => null }))
-vi.mock('../src/renderer/src/components/AgentAvatar', () => ({ AgentAvatar: () => null }))
 vi.mock('../src/renderer/src/lib/use-focus-hierarchy', () => ({ useFocusHierarchy: () => ({ facts: { topics: {}, worktrees: [] }, errors: [] }) }))
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
 import { FocusNavigationPreview } from '../src/renderer/src/components/FocusNavigationPreview'
