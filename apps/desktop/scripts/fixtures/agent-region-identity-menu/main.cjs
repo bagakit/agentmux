@@ -9,6 +9,7 @@ const messageFeedbackProof = require('./message-feedback.cjs')
 const mailboxMotionProof = require('./mailbox-motion.cjs')
 const composerToolbarProof = require('./composer-toolbar.cjs')
 const mailboxLayoutProof = require('./mailbox-layout.cjs')
+const agentMenuProof = require('./menu-product.cjs')
 const [html, privateRoot, evidence, probe = 'complete'] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
@@ -308,7 +309,14 @@ async function selection(label,width,input='mouse') {
   const conjunction=await evaluate(`({active:identityMenu.facts().active,open:${menu}?.dataset.state==='open'})`)
   assert.deepEqual(conjunction,{active:rightId,open:true})
   const before=await evaluate('identityMenu.facts()')
-  const actual=item(label==='Split'?'Split Down':label)
+  let selectedMenu=menu
+  if(label==='Split'||label==='Copy Region Link'||label==='Copy Agent Link'){
+    const trigger=item(label==='Split'?'Split and layout':'Copy link')
+    await evaluate(`${trigger}.focus()`);await key('ArrowRight','ArrowRight',39)
+    selectedMenu=`document.getElementById(${trigger}.getAttribute('aria-controls'))`
+    await waitFor(visible(selectedMenu));await painted()
+  }
+  const actual=`([...${selectedMenu}.querySelectorAll('[role="menuitem"]')].find(item=>(item.getAttribute('aria-label')??item.textContent).trim()===${JSON.stringify(label==='Split'?'Split Down':label)}))`
   assert.equal(await evaluate(visible(actual)),true,'Actual selected menu item is visible')
   const menuPng=await capture(`${width}-${label.replaceAll(' ','-')}-${input}-conjunction`)
   // Capture must not change the focus fact. The capture listener also records this at the trusted click.
@@ -349,7 +357,8 @@ app.whenReady().then(async()=>{
     result.consoleErrors=[];win.webContents.on('console-message',details=>{if(details.level==='error')result.consoleErrors.push(details.message)})
     await win.loadFile(html);win.webContents.debugger.attach('1.3');await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
     await waitFor('Boolean(window.identityMenu)')
-    if(probe==='mailbox-layout-owning')await mailboxLayoutProof({win,evaluate,waitFor,visible,painted,click,key,seed,capture,result,surface})
+    if(probe==='agent-menu-owning')await agentMenuProof({win,evaluate,waitFor,visible,painted,click,key,point,seed,capture,result,surface,more,menu,open,close,measurement,selection})
+    else if(probe==='mailbox-layout-owning')await mailboxLayoutProof({win,evaluate,waitFor,visible,painted,click,key,seed,capture,result,surface})
     else if(probe==='composer-toolbar-owning')await composerToolbarProof({win,evaluate,waitFor,visible,painted,click,key,seed,capture,result,surface})
     else if(probe==='mailbox-motion-owning')await mailboxMotionProof({win,evaluate,waitFor,visible,painted,click,key,seed,capture,result,surface})
     else if(probe==='message-feedback-owning')await messageFeedbackProof({win,evaluate,waitFor,visible,painted,click,key,seed,capture,result,surface})

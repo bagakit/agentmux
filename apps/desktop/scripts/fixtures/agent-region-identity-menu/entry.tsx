@@ -120,7 +120,7 @@ api.ui.writeClipboardText = async text => { clipboard.push(text); if (failCopy) 
 api.sessions.resize = async (...args) => { resizes.push(args); return resize(...args) }
 for(const type of ['pointerdown','click','keydown'])document.addEventListener(type, event => {
   const item = event.target instanceof Element ? event.target.closest('[role="menuitem"]') : null
-  const submenu = item?.closest<HTMLElement>('.region-swap-menu[role="menu"]')
+  const submenu = item?.closest<HTMLElement>('.workbench-menu-submenu[role="menu"]')
   const owners = submenu ? [...document.querySelectorAll<HTMLElement>('.agent-region-menu')].filter(parent =>
     [...parent.querySelectorAll('[role="menuitem"][aria-haspopup="menu"]')].some(trigger => trigger.getAttribute('aria-controls') === submenu.id)) : []
   if (submenu && owners.length !== 1) throw new Error('Swap selection must identify one original Region menu through its actual submenu trigger')
@@ -286,6 +286,14 @@ const probe = {
         run: session.control.run, observedAt: Date.now() }
     } : session) }))
     return { generation, release() { clearTimeout(timeout); api.sessions.attach = attach; release() } }
+  },
+  menuSource(state: 'confirmed' | 'changed' | 'unknown') {
+    flushSync(() => useAppStore.setState(current => ({ sessions: current.sessions.map(session => session.id === first.id && session.kind === 'agent'
+      ? { ...session, nativeHandle: { kind: 'provider', providerId: session.providerId, sessionId: 'preview-original-native' },
+          capabilities: { ...session.capabilities, providerFork: { current: true } },
+          observedNativeHandle: { kind: 'provider', providerId: session.providerId, sessionId: state === 'changed' ? 'preview-candidate-native' : 'preview-original-native' },
+          nativeSourceObservation: state === 'confirmed' ? undefined : { state, run: session.control.run, observedAt: Date.now(), reason: 'Authoritative current candidate differs from the retained source.' } }
+      : session) })))
   },
   mode(mode: 'terminal' | 'cold' | 'notice') { const generation = original.mode(mode); naming(); return generation },
   observe() { const generation = original.observe(); naming(); return generation },
