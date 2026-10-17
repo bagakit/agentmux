@@ -175,9 +175,12 @@ export const ConversationView = memo(function ConversationView({
       const user = record.input
       const itemRef = conversationItemRef(record)
       const speaker = record.role === 'process' ? undefined : record.speaker
-      const described = speaker && item.kind !== 'system-message' ? describeSpeaker?.(speaker) : undefined
+      const adopted = item.conversation?.adoptedInput
+      const a2aNotificationId = adopted?.purpose === 'a2a-notification' && adopted.key.kind === 'prompt' ? adopted.key.submissionId : undefined
+      const described = speaker && item.kind !== 'system-message' && !a2aNotificationId ? describeSpeaker?.(speaker) : undefined
       const body = <ConversationMessage sources={record.sources} {...(record.event ? { conversationEvent: record.event } : {})} messageId={messageIdForRecord?.(item) ?? user?.id ?? recordId} conversationSessionId={sessionId}
           renderSubmissionOriginal={source => { const original = originals.get(source.id); return original ? <ConversationOriginalRecordContent record={original} renderRecord={renderOriginal} /> : null }}
+          {...(a2aNotificationId ? { a2aNotificationId } : {})}
           {...(completedNativeReply(item) ? { status: 'complete' } : {})}
           {...(itemRef ? { itemRef } : {})}
           located={locatedMessageKey === conversationMessageSourceKey(sessionId, record.source)}
@@ -186,7 +189,7 @@ export const ConversationView = memo(function ConversationView({
           nativeResourceRecord={{ source: page.source, recordId: item.id, ...(item.turnId === undefined ? {} : { turnId: item.turnId }) }}
           content={record.contentParts} {...(item.questionAnswers ? { questionAnswers: item.questionAnswers } : {})} {...(item.messagePhase ? { messagePhase: item.messagePhase } : {})} {...(user ? { inputSource: user.source, publicContent: user.publicContent } : {})}
           {...(speaker ? { speaker } : {})}
-          name={item.kind === 'system-message' ? page.source.providerId : described?.name ?? (user ? 'Input' : speaker ? 'Assistant' : recordTitle(item))}
+          name={a2aNotificationId ? 'AgentMux' : item.kind === 'system-message' ? page.source.providerId : described?.name ?? (user ? 'Input' : speaker ? 'Assistant' : recordTitle(item))}
           providerId={described?.providerId ?? page.source.providerId}
           {...(describeSpeaker ? { describeSpeaker } : {})}
           {...(item.startedAt === undefined ? {} : { createdAt: item.startedAt })}
