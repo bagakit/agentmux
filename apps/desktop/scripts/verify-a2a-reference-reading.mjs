@@ -10,6 +10,7 @@ const config = 'apps/desktop/scripts/fixtures/a2a-reference-reading/vitest.ownin
 const sources = [
   'apps/desktop/scripts/verify-a2a-reference-reading.mjs', config, 'apps/desktop/scripts/fixtures/a2a-reference-reading/mutations.mjs',
   'apps/desktop/scripts/fixtures/a2a-reference-reading/worker.mjs', 'apps/desktop/scripts/lib/a2a-inbox-product-proof.mjs',
+  'apps/desktop/scripts/probe-process.mjs',
   ...['runtime', 'native-agent'].map(name => `apps/desktop/scripts/fixtures/a2a-inbox-product/${name}.mjs`),
   'packages/core/src/agent-message-render.ts', 'packages/core/src/types.ts', 'packages/core/src/conversation-provenance.ts',
   'packages/core/test/agent-message-reference-reading.test.ts', 'packages/core/test/agent-message-render.test.ts', 'packages/core/test/agent-message-leading-context.test.ts',

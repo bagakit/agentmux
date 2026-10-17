@@ -48,7 +48,7 @@ const owns = ['apps/desktop/src', 'apps/desktop/electron.vite.config.ts', 'apps/
   'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.base.json', 'tsconfig.shared.json', 'patches',
   'packages/core/scripts/build.mjs', 'packages/core/scripts/clean-build.mjs', 'packages/core/bin', 'packages/core/native', 'packages/client-ui/scripts',
   ...assets, ...packages.flatMap(name => ['src', 'package.json', 'tsconfig.json', 'tsconfig.build.json'].map(path => 'packages/' + name + '/' + path))]
-const fixturePaths = ['apps/desktop/scripts/lib/a2a-inbox-product-proof.mjs',
+const fixturePaths = ['apps/desktop/scripts/lib/a2a-inbox-product-proof.mjs', 'apps/desktop/scripts/probe-process.mjs',
   'apps/desktop/scripts/fixtures/a2a-inbox-product/runtime.mjs', 'apps/desktop/scripts/fixtures/a2a-inbox-product/native-agent.mjs',
   'apps/desktop/scripts/fixtures/a2a-reference-reading/worker.mjs']
 const requiredLoaded = ['apps/desktop/src/main/index.ts', 'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/main/runtime-controller.ts',
