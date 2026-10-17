@@ -3865,7 +3865,16 @@ export class BrowserViewManager {
 
   /** Saved presentation changes wake only live Browser feedback; input ownership is unchanged. */
   refreshAgentFeedback(): void {
-    for (const entry of this.entries.values()) if (entry.visible && entry.activeRun) void entry.feedback?.refreshPreferences()
+    for (const entry of this.entries.values()) if (entry.activeRun) {
+      if (entry.visible) void entry.feedback?.refreshPreferences()
+      const shield = entry.inputShield
+      void shield?.refreshAppearance().catch(() => {
+        if (entry.inputShield !== shield || !this.agentOwnsInput(entry)) return
+        const warning = 'Browser edge appearance could not be updated. The page and Agent remain usable; save the appearance again to retry.'
+        entry.activity = { ...entry.activity, warning: entry.activity.warning ?? warning }
+        try { this.emit(entry) } catch { /* The current owner retains its notice without affecting input. */ }
+      })
+    }
   }
 
   /** Trusted presentation bytes for an already-live owner; never acquires or restores a Browser. */
@@ -3909,7 +3918,7 @@ export class BrowserViewManager {
         if (!this.owns(entry, view) || entry.activeRun?.operationId !== operationId) return
         this.releaseInputShield(entry)
         this.inputIsolationFailed(entry)
-      })
+      }, this.feedbackPreferences)
       entry.inputShield = shield
       shield.contents.once('destroyed', () => queueMicrotask(() => this.observeInputShieldDestruction(entry.id, shield)))
       shield.contents.on('input-event', (_event, input) => {

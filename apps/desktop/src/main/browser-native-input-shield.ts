@@ -1,6 +1,10 @@
 import { WebContentsView, type BrowserWindow, type WebContents } from 'electron'
+import { browserAgentBoundaryAppearance, type BrowserAgentControlPreferences } from '../shared/browser-agent-control.js'
 
-const DOCUMENT = 'data:text/html,' + encodeURIComponent('<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;user-select:none}</style>')
+function documentFor(preferences: BrowserAgentControlPreferences): string {
+  const appearance = browserAgentBoundaryAppearance(preferences)
+  return 'data:text/html,' + encodeURIComponent(`<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;user-select:none}svg{position:absolute;inset:0;width:100%;height:100%;overflow:hidden;pointer-events:none;color:${appearance.color};opacity:${appearance.opacity}}</style><svg xmlns="http://www.w3.org/2000/svg" data-browser-control-boundary aria-hidden="true"><rect width="100%" height="100%" fill="none" stroke="currentColor" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`)
+}
 
 /** A sibling native surface owns human hit-testing; CDP still addresses the original page.
  * Never prevent mouse events on the page: Electron sends CDP mouse input through
@@ -25,7 +29,8 @@ export class BrowserNativeInputShield {
   }
 
   constructor(private readonly page: WebContentsView, private readonly window: () => BrowserWindow,
-    private readonly isCurrent: () => boolean, private readonly onFailure: () => void) {
+    private readonly isCurrent: () => boolean, private readonly onFailure: () => void,
+    private readonly preferences: () => BrowserAgentControlPreferences) {
     this.source = page.webContents
     this.view = new WebContentsView({ webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false,
       focusOnNavigation: false, navigateOnDragDrop: false } })
@@ -45,11 +50,18 @@ export class BrowserNativeInputShield {
     this.page.on('bounds-changed', this.boundsChanged)
     this.source.on('focus', this.focused)
     this.synchronize()
-    return this.contents.loadURL(DOCUMENT).then(() => {
+    return this.contents.loadURL(documentFor(this.preferences())).then(() => {
       if (!this.current()) return
       this.synchronize()
       this.focused()
     })
+  }
+
+  /** Only saved appearance changes touch this document; page navigations cannot remove it. */
+  async refreshAppearance(): Promise<void> {
+    if (!this.current() || this.contents.isDestroyed()) return
+    const appearance = browserAgentBoundaryAppearance(this.preferences())
+    await this.contents.executeJavaScript(`Object.assign(document.querySelector('[data-browser-control-boundary]').style, ${JSON.stringify(appearance)})`)
   }
 
   /** Presentation may repair pair ordering; ownership must not depend on adjacency.
@@ -90,6 +102,7 @@ export class BrowserNativeInputShield {
     this.disposed = true
     const failures: unknown[] = []
     for (const release of [
+      () => this.view.setVisible(false),
       () => this.page.off('bounds-changed', this.boundsChanged),
       () => { if (!this.source.isDestroyed()) this.source.off('focus', this.focused) },
       () => {
