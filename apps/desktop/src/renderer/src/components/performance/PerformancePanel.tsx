@@ -31,5 +31,6 @@ export const PerformancePanel = memo(function PerformancePanel(selection: Toolki
     ? <PerformanceScript api={api.toolkit} back={() => setScriptOpen(false)} close={close} />
     : <PerformanceOverview {...observation} close={close} paused={paused} onPause={() => setPaused(value => !value)} scene={scene}
       singleCaptureBusy={singleCaptureBusy} onSingleCaptureBusyChange={setSingleCaptureBusy}
-      onViewScript={() => setScriptOpen(true)} onConfigure={() => { close(); settings.open('toolkit') }} />}</ToolkitPopover>
+      onViewScript={() => setScriptOpen(true)} onConfigure={() => { close(); settings.open('toolkit') }}
+      onManageBrowsers={() => { close(); settings.open('browser') }} />}</ToolkitPopover>
 })

@@ -36,6 +36,7 @@ export type SurfaceMemoryCandidate = {
 
 export type SurfaceMemoryPolicy = {
   nowMs: number
+  browserAutomaticMemoryRelease?: boolean
   parkingEnabled?: boolean
   measurementActive?: boolean
   releaseDelayMs?: number
@@ -83,6 +84,7 @@ function selectForKind(
   kind: SurfaceMemoryKind,
   policy: SurfaceMemoryPolicy
 ): Set<string> {
+  if (kind === 'browser' && policy.browserAutomaticMemoryRelease === false) return new Set()
   if (policy.parkingEnabled === false || policy.measurementActive === true) return new Set()
   const releaseDelayMs = policy.releaseDelayMs ?? (
     kind === 'monaco' ? MONACO_MEMORY_RELEASE_DELAY_MS : BROWSER_MEMORY_RELEASE_DELAY_MS
@@ -144,6 +146,7 @@ function nextForKind(
   kind: SurfaceMemoryKind,
   policy: SurfaceMemoryPolicy
 ): number | null {
+  if (kind === 'browser' && policy.browserAutomaticMemoryRelease === false) return null
   if (policy.parkingEnabled === false || policy.measurementActive === true) return null
   const releaseDelayMs = policy.releaseDelayMs ?? (
     kind === 'monaco' ? MONACO_MEMORY_RELEASE_DELAY_MS : BROWSER_MEMORY_RELEASE_DELAY_MS

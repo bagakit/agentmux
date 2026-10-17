@@ -77,6 +77,7 @@ export function useSurfaceMemoryBudget({
   const dirtyDocuments = useAppStore((state) => state?.dirtyDocuments) ?? EMPTY_FLAGS
   const savingDocuments = useAppStore((state) => state?.savingDocuments) ?? EMPTY_FLAGS
   const activeWorkspaceId = useAppStore((state) => state?.activeWorkspaceId) ?? null
+  const browserAutomaticMemoryRelease = useAppStore(state => state?.config?.browser.automaticMemoryRelease !== false)
   const candidates = useMemo(
     () => collectSurfaceMemoryCandidates({
       tabs,
@@ -176,10 +177,11 @@ export function useSurfaceMemoryBudget({
   const policy = useMemo(() => ({
     // A delayed renderer commit must schedule against the actual clock, not the old timer tick.
     nowMs: Date.now(),
+    browserAutomaticMemoryRelease,
     parkingEnabled,
     measurementActive,
     releaseCooldownUntilMs
-  }), [bookkeepingRevision, candidateKey, measurementActive, nowMs, parkingEnabled, releaseCooldownUntilMs])
+  }), [bookkeepingRevision, browserAutomaticMemoryRelease, candidateKey, measurementActive, nowMs, parkingEnabled, releaseCooldownUntilMs])
   const released = useMemo(
     () => selectSurfaceMemoryReleases(stampedCandidates, policy),
     [policy, stampedCandidates]
