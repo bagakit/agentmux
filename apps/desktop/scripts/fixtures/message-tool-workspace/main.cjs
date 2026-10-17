@@ -3,10 +3,10 @@ const assert = require('node:assert/strict')
 const { createHash } = require('node:crypto')
 const fs = require('node:fs/promises')
 const path = require('node:path')
-const [html, privateRoot, evidence] = process.argv.slice(2)
+const [html, privateRoot, evidence, mode = 'full'] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
-const result = { passed: false, captureOnly: true, aestheticReview: 'not-performed', userRunTouched: false,
+const result = { passed: false, mode, captureOnly: true, aestheticReview: 'not-performed', userRunTouched: false,
   runtime: { electron: process.versions.electron, chromium: process.versions.chrome }, scenes: [], frames: [] }
 let win
 const surface = `document.querySelector('[data-workbench-region-id="region-actions-target"]')`
@@ -47,14 +47,51 @@ async function frame(width, theme, state) {
   assert.ok(png.length > 0); await fs.writeFile(path.join(evidence, file), png)
   result.frames.push({ width, theme, state, file, sha256: createHash('sha256').update(png).digest('hex') })
 }
-async function layout() {
+function densityCheck(condition, code, actual, expected) {
+  try { assert.ok(condition, `${code}: ${JSON.stringify(actual)}; expected ${expected}`) }
+  catch (error) { error.density = { code, actual, expected }; throw error }
+}
+async function densityOracle({ secondary = false, search = false, coarse = false, record = true } = {}) {
+  const actual = await evaluate(`(()=>{
+    const p=${panel},content=p.querySelector('.composer-mailbox__content'),bounds=content.getBoundingClientRect();
+    const displayed=n=>!n.closest('[hidden]')&&n.getBoundingClientRect().height>0;
+    const sizes=selector=>[...p.querySelectorAll(selector)].filter(displayed).map(n=>({height:n.getBoundingClientRect().height,width:n.getBoundingClientRect().width}));
+    const records=[...p.querySelectorAll('.composer-mailbox__record')].filter(displayed).filter(n=>{const r=n.getBoundingClientRect();return r.top>=bounds.top&&r.bottom<=bounds.bottom&&r.left>=bounds.left&&r.right<=bounds.right&&n.querySelector('[data-record-key]')?.textContent.trim()});
+    return{pointer:matchMedia('(pointer: coarse)').matches?'coarse':matchMedia('(pointer: fine)').matches?'fine':'none',
+      primary:sizes('.composer-mailbox__folders:not(.composer-mailbox__folders--secondary) > button'),secondary:sizes('.composer-mailbox__folders--secondary > button'),
+      search:sizes('.input-history__search > input, .input-history__search > button'),automation:sizes('.composer-mailbox__automation'),actions:sizes('.composer-mailbox__record-actions > button'),
+      bodyToken:parseFloat(getComputedStyle(${surface}).getPropertyValue('--fs-body')),bodySizes:[...p.querySelectorAll('.composer-mailbox__preview, .log-turn__body')].filter(displayed).map(n=>parseFloat(getComputedStyle(n).fontSize)),
+      fullyVisibleRecords:records.map(n=>n.querySelector('[data-record-key]').dataset.recordKey)}
+  })()`)
+  assert.equal(actual.pointer, coarse ? 'coarse' : 'fine', 'The density check uses the actual pointer media')
+  assert.equal(actual.primary.length, 3, 'The density check consumes all primary navigation controls')
+  if (secondary) assert.ok(actual.secondary.length >= 2, 'The secondary navigation is actually mounted')
+  if (search) assert.equal(actual.search.length, 3, 'The original query input, submit and refresh controls are mounted')
+  assert.equal(actual.automation.length, 1, 'The original Automation entry remains mounted')
+  if (coarse) {
+    densityCheck([...actual.primary, ...actual.secondary].every(size => size.height >= 44), 'COARSE_NAV_TARGET', [...actual.primary, ...actual.secondary], 'height >= 44px')
+    assert.ok(actual.actions.length > 0, 'The coarse check consumes real record actions')
+    densityCheck(actual.actions.every(size => size.height >= 44 && size.width >= 44), 'COARSE_ACTION_TARGET', actual.actions, 'width and height >= 44px')
+  } else {
+    densityCheck(actual.primary.every(size => size.height <= 28), 'PRIMARY_NAV_HEIGHT', actual.primary.map(size => size.height), '<= 28px')
+    densityCheck(actual.secondary.every(size => size.height <= 28), 'SECONDARY_NAV_HEIGHT', actual.secondary.map(size => size.height), '<= 28px')
+    densityCheck(actual.search.every(size => size.height >= 24 && size.height <= 28), 'SEARCH_HEIGHT', actual.search.map(size => size.height), '24–28px')
+    densityCheck(actual.automation[0].height <= 30, 'AUTOMATION_HEIGHT', actual.automation[0].height, '<= 30px')
+  }
+  assert.equal(actual.bodyToken, 12, 'The shared body text token remains unchanged')
+  assert.ok(actual.bodySizes.length > 0, 'Real message bodies are present for font measurement')
+  densityCheck(actual.bodySizes.every(size => size === actual.bodyToken), 'MESSAGE_BODY_FONT', actual.bodySizes, 'the shared fs-body token')
+  if (record) assert.ok(actual.fullyVisibleRecords.length > 0, 'At least one complete original record is visible without scrolling')
+  return actual
+}
+async function layout(options) {
   const actual = await evaluate(`(()=>{const p=${panel},r=p.getBoundingClientRect();return{width:p.clientWidth,scroll:p.scrollWidth,top:r.top,bottom:r.bottom,tabs:[...p.querySelectorAll('[role="tab"]')].filter(n=>!n.closest('[hidden]')).map(n=>{const l=n.querySelector('.composer-mailbox__folder-label')??n,b=n.getBoundingClientRect();return{label:l.textContent,complete:l.scrollWidth<=l.clientWidth+1,left:b.left,right:b.right,top:b.top,inside:b.left>=r.left-1&&b.right<=r.right+1}})}})()`)
   assert.ok(actual.scroll <= actual.width + 1, 'The actual mailbox has no horizontal overflow')
   assert.ok(actual.top >= 0 && actual.bottom <= await evaluate('innerHeight'), 'The original mailbox stays inside the viewport')
   assert.ok(actual.tabs.length >= 3 && actual.tabs.every(item => item.complete && item.inside), 'All visible navigation labels remain complete and contained')
   assert.deepEqual(actual.tabs.slice(0, 3).map(item => item.label), ['Inputs', 'Agent messages', 'Notices'])
   assert.equal(new Set(actual.tabs.slice(0, 3).map(item => Math.round(item.top))).size, 1, 'Primary navigation keeps one readable row')
-  return actual
+  return { ...actual, density: await densityOracle(options) }
 }
 async function rowAffordances() {
   assert.equal(await evaluate("matchMedia('(hover: hover) and (pointer: fine)').matches"), true, 'The real desktop hover rules are active')
@@ -80,6 +117,47 @@ async function rowAffordances() {
   await painted()
   return { send, metadata }
 }
+async function originalSurfacePreserved(original, before) {
+  const after = await evaluate('({terminal:messageWorkspace.terminal(),facts:messageWorkspace.facts(),sameEditor:window.workspaceEditor===' + editor + '})')
+  assert.equal(after.sameEditor, true, 'Reading keeps the original composer editor')
+  assert.equal(after.facts.drafts[original.agentSessionId], original.draft)
+  assert.deepEqual(after.facts.queues, before.facts.queues, 'Reading never dispatches or reorders pending inputs')
+  assert.deepEqual(after.terminal, before.terminal, 'The original terminal instance and geometry remain unchanged')
+  assert.equal(after.facts.calls.filter(item => /dispatch|automation-/.test(item.action)).length, 0)
+}
+async function interactionStates(width, theme, original, before, geometry) {
+  result.stage.action = 'ordinary-record-hover'
+  const ordinary = `${visiblePanel}.querySelector('.composer-mailbox__record:has(.composer-mailbox__record-actions):not(:has(.composer-mailbox__record-status, .composer-outbox__send, [role="status"]))')`
+  await waitFor(visible(ordinary))
+  await evaluate(`${ordinary}.scrollIntoView({block:'nearest'})`)
+  await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: 1 })
+  await painted()
+  const resting = await evaluate(`(()=>{const row=${ordinary},footer=row.querySelector('.composer-mailbox__record-footer');return{key:row.querySelector('[data-record-key]').dataset.recordKey,hovered:row.matches(':hover'),focused:row.matches(':focus-within'),opacity:getComputedStyle(footer).opacity,pointerEvents:getComputedStyle(footer).pointerEvents}})()`)
+  assert.equal(resting.hovered, false); assert.equal(resting.focused, false)
+  assert.equal(resting.opacity, '0'); assert.equal(resting.pointerEvents, 'none')
+  const point = await evaluate(`(()=>{const r=${ordinary}.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+  await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point })
+  await painted()
+  const hover = await evaluate(`(()=>{const row=${ordinary},footer=row.querySelector('.composer-mailbox__record-footer');return{hovered:row.matches(':hover'),opacity:getComputedStyle(footer).opacity,pointerEvents:getComputedStyle(footer).pointerEvents,actions:[...footer.querySelectorAll('button')].map(n=>{const r=n.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return{label:n.getAttribute('aria-label'),enabled:!n.disabled,hit:n===hit||n.contains(hit)}})}})()`)
+  assert.equal(hover.hovered, true); assert.equal(hover.opacity, '1'); assert.equal(hover.pointerEvents, 'auto')
+  assert.ok(hover.actions.length > 0 && hover.actions.every(action => action.enabled && action.hit), 'The original secondary actions appear and are hit-testable on real pointer hover')
+  await frame(width, theme, 'record-hover')
+
+  result.stage.action = 'search-keyboard-focus'
+  await click(query)
+  assert.equal(await evaluate(`document.activeElement===${query}`), true)
+  await key('Tab', 'Tab', 9)
+  const submit = `${query}.closest('form').querySelector('button[type="submit"]')`
+  const focus = await evaluate(`(()=>{const n=${submit},style=getComputedStyle(n),r=n.getBoundingClientRect();return{active:document.activeElement===n,visible:n.matches(':focus-visible'),outlineStyle:style.outlineStyle,outlineWidth:parseFloat(style.outlineWidth),outlineColor:style.outlineColor,height:r.height,label:n.getAttribute('aria-label'),query:${query}.value}})()`)
+  assert.equal(focus.active, true, 'A real Tab moves from the query input to its original search button')
+  assert.equal(focus.visible, true); assert.notEqual(focus.outlineStyle, 'none'); assert.ok(focus.outlineWidth > 0)
+  assert.ok(focus.height >= 24 && focus.height <= 28); assert.equal(focus.query, '')
+  await frame(width, theme, 'search-focus')
+  await key('Escape', 'Escape', 27)
+  await waitFor(`!${panel}.matches(':popover-open')`)
+  await originalSurfacePreserved(original, before)
+  result.scenes.push({ width, theme, geometry, resting, hover, focus, originalSurfacePreserved: true })
+}
 async function scenario(width, theme, short = false) {
   result.stage = { width, theme, short, action: 'seed' }
   await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width: width * 2 + 1, height: short ? 540 : 800, deviceScaleFactor: 1, mobile: false })
@@ -92,10 +170,32 @@ async function scenario(width, theme, short = false) {
   await waitFor(`${panel}.matches(':popover-open')`)
   await choose('Inputs')
   await waitFor(`${visiblePanel}.querySelectorAll('button[data-record-key]').length===5`)
-  const geometry = await layout()
+  const geometry = await layout({ search: true })
+  if (mode === 'interaction-states') {
+    await interactionStates(width, theme, original, before, geometry)
+    return
+  }
+  if (mode === 'density') {
+    await choose('Agent messages'); await choose('Received')
+    await waitFor(`${visiblePanel}.querySelectorAll('button[data-record-key^="a2a:"]').length===25`)
+    const agentGeometry = await layout({ secondary: true })
+    result.scenes.push({ width, theme, short, geometry, agentGeometry })
+    await key('Escape', 'Escape', 27)
+    return
+  }
   const affordances = short ? undefined : await rowAffordances()
   await frame(width, theme, short ? 'inputs-short' : 'inputs')
-  if (short) { await key('Escape', 'Escape', 27); return }
+  if (short) {
+    await win.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 })
+    await painted()
+    const coarseInputs = await densityOracle({ search: true, coarse: true, record: false })
+    await choose('Agent messages'); await choose('Received')
+    await waitFor(`${visiblePanel}.querySelectorAll('button[data-record-key^="a2a:"]').length===25`)
+    const coarseAgents = await densityOracle({ secondary: true, coarse: true, record: false })
+    await win.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: false })
+    result.short = { geometry, coarseInputs, coarseAgents }
+    await key('Escape', 'Escape', 27); return
+  }
   if (width === 380 && theme === 'dark') {
     await click(buttons('编辑这条待发消息'))
     const queuedEditor = `${panel}.querySelector('textarea[aria-label="编辑待发消息"]')`
@@ -123,6 +223,7 @@ async function scenario(width, theme, short = false) {
   await click(journal)
   await waitFor(`${visiblePanel}.querySelector('.log-turn__body')?.textContent.includes('原文末尾仍然可读')`)
   assert.equal(await evaluate(`${panel}.querySelectorAll('.log-turn__body').length`), 1)
+  const detailDensity = await densityOracle({ record: false })
   await click(buttons('Copy message'))
   await waitFor(`messageWorkspace.facts().clipboard.at(-1)===${JSON.stringify(original.journalWire)}`)
   const scroll = await evaluate(`(()=>{const n=${panel}.querySelector('.composer-mailbox__content');n.scrollTop=37;return n.scrollTop})()`)
@@ -142,7 +243,7 @@ async function scenario(width, theme, short = false) {
   result.stage.action = 'agent-messages'
   await choose('Agent messages'); await choose('Received')
   await waitFor(`${visiblePanel}.querySelectorAll('button[data-record-key^="a2a:"]').length===25`)
-  await layout()
+  const agentGeometry = await layout({ secondary: true })
   if (width === 380 || width === 320) await frame(width, theme, 'received')
   assert.equal((await evaluate('identityMenu.mailboxLayoutFacts().calls')).filter(item => item.action === 'read').length, 0, 'A2A metadata does not read full bodies per row')
   const incoming = `([...${visiblePanel}.querySelectorAll('button[data-record-key]')].find(n=>n.dataset.recordKey===${JSON.stringify('a2a:' + original.incoming)}))`
@@ -186,13 +287,8 @@ async function scenario(width, theme, short = false) {
   await key('Escape', 'Escape', 27)
   await waitFor(`!${panel}.matches(':popover-open')`)
   assert.equal(await evaluate(`document.activeElement===${surface}.querySelector('.composer__mailbox')`), true)
-  const after = await evaluate('({terminal:messageWorkspace.terminal(),facts:messageWorkspace.facts(),sameEditor:window.workspaceEditor===' + editor + '})')
-  assert.equal(after.sameEditor, true, 'Reading keeps the original composer editor')
-  assert.equal(after.facts.drafts[original.agentSessionId], original.draft)
-  assert.deepEqual(after.facts.queues, before.facts.queues, 'Reading never dispatches or reorders pending inputs')
-  assert.deepEqual(after.terminal, before.terminal, 'The original terminal instance and geometry remain unchanged')
-  assert.equal(after.facts.calls.filter(item => /dispatch|automation-/.test(item.action)).length, 0)
-  result.scenes.push({ width, theme, geometry, affordances, queryAndRefresh: true, journalDetailAndCopy: true, retainedAutomation: true, originalSurfacePreserved: true })
+  await originalSurfacePreserved(original, before)
+  result.scenes.push({ width, theme, geometry, agentGeometry, detailDensity, affordances, queryAndRefresh: true, journalDetailAndCopy: true, retainedAutomation: true, originalSurfacePreserved: true })
 }
 app.whenReady().then(async () => {
   try {
@@ -202,12 +298,16 @@ app.whenReady().then(async () => {
     win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     await waitFor('Boolean(window.messageWorkspace)')
-    for (const theme of ['dark', 'light']) for (const width of [640, 380, 320]) await scenario(width, theme)
-    await scenario(320, 'dark', true)
+    if (mode === 'density') await scenario(320, 'dark', true)
+    else if (mode === 'interaction-states') await scenario(380, 'dark')
+    else {
+      for (const theme of ['dark', 'light']) for (const width of [640, 380, 320]) await scenario(width, theme)
+      await scenario(320, 'dark', true)
+    }
     result.passed = true
   } catch (error) {
-    result.failure = { name: error.name, message: error.message, stack: error.stack }
-    if (win) await frame(result.stage?.width ?? 0, result.stage?.theme ?? 'unknown', 'failure').catch(() => {})
+    result.failure = { name: error.name, message: error.message, stack: error.stack, ...(error.density ? { density: error.density } : {}) }
+    if (win && mode !== 'density') await frame(result.stage?.width ?? 0, result.stage?.theme ?? 'unknown', 'failure').catch(() => {})
   } finally {
     await fs.writeFile(path.join(evidence, 'render.json'), JSON.stringify(result, null, 2) + '\n')
     win?.destroy(); app.exit(result.passed ? 0 : 1)
