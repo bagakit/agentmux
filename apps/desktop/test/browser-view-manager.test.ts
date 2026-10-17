@@ -276,7 +276,6 @@ function fakeWindow() {
         }
       },
       isDestroyed: () => false,
-      getContentBounds: () => ({ x: 0, y: 0, width: 1200, height: 800 }),
       webContents: {
         isDestroyed: () => false,
         send(channel: string, value: unknown) {
@@ -991,7 +990,8 @@ describe('BrowserViewManager', () => {
     manager.setViewport(original.id, { width: 1440, height: 900, screenPosition: 'desktop' })
     expect(contents.deviceEmulation).toMatchObject({ screenPosition: 'desktop', viewSize: { width: 1296, height: 810 }, scale: 300 / 1296 })
     expect(await manager.create(sibling.id, sibling.url)).toEqual(sibling)
-    await manager.release(original.id)
+    manager.setBounds(original.id, null)
+    expect(await release(manager, original.id)).toMatchObject({ status: 'released' })
     const restored = await manager.restore(original.id, { workspaceId: 'workspace-a' })
     expect(restored).toMatchObject({ id: original.id, url: original.url, profileId: 'work', viewport: { width: 1440, height: 900, screenPosition: 'desktop' } })
     expect(fixture.children.at(-1)!.webContents.deviceEmulation).toMatchObject({ screenPosition: 'desktop', viewSize: { width: 1296, height: 810 } })
@@ -1020,7 +1020,7 @@ describe('BrowserViewManager', () => {
     expect(fixture.sent).toHaveLength(sentBefore)
     view.webContents.zoomFactor = DEFAULT_BROWSER_ZOOM_FACTOR
     expect(manager.setViewport(initial.id, 'responsive').viewport).toBe('responsive')
-    await manager.release(initial.id)
+    expect(await release(manager, initial.id)).toMatchObject({ status: 'released' })
     await expect(manager.restore(initial.id, { viewport: { width: 0, height: 400, screenPosition: 'mobile' } })).rejects.toThrow('Unknown browser viewport')
     expect(await manager.restore(initial.id)).toMatchObject({ id: initial.id, viewport: 'responsive', url: initial.url, profileId: initial.profileId })
     manager.close(initial.id)
@@ -2073,8 +2073,11 @@ it('native attachment lookup preserves the exact current view and window without
   const fixture = fakeWindow(), manager = browserManager(fixture.window)
   for (let index = 0; index < 24; index++) await manager.create(`unrelated-native-owner-${index}`, 'https://example.org')
   const originalAttachments = new Set(fixture.children)
-  await manager.create('exact-native-owner', 'https://example.org')
+  const original = await manager.create('exact-native-owner', 'https://example.org')
   const view = fixture.children.find(view => !originalAttachments.has(view))!
+  expect(manager.nativeOwnerForView(view as never)).toBeUndefined()
+  // Native bounds publish retention; measure only the physical attachment lookup below.
+  manager.setBounds('exact-native-owner', { x: 10, y: 20, width: 120, height: 80 })
   const records = (manager as unknown as { entries: Map<string, { view: unknown }> }).entries
   const unrelatedReads = vi.fn()
   const restore = [...records.entries()].filter(([id]) => id !== 'exact-native-owner').map(([, entry]) => {
@@ -2084,14 +2087,16 @@ it('native attachment lookup preserves the exact current view and window without
   })
   const title = vi.spyOn(view.webContents, 'getTitle').mockImplementation(() => { throw new Error('A native attachment does not need its title') })
   try {
-    expect(manager.nativeOwnerForView(view as never)).toBeUndefined()
-    manager.setBounds('exact-native-owner', { x: 10, y: 20, width: 120, height: 80 })
     expect(manager.nativeOwnerForView(view as never, fixture.window)).toMatchObject({ browserId: 'exact-native-owner', view })
     expect(manager.nativeOwnerForView(view as never, fakeWindow().window)).toBeUndefined()
     expect(manager.nativeOwnerForView({} as never, fixture.window)).toBeUndefined()
+    manager.setBounds('exact-native-owner', { x: 10, y: 20, width: 120, height: 80 })
+    manager.setBounds('exact-native-owner', { x: 10, y: 20, width: 120, height: 80 })
     expect(unrelatedReads, 'An exact physical attachment lookup must not read unrelated Browser entries').not.toHaveBeenCalled()
     expect(title).not.toHaveBeenCalled()
-    await manager.release('exact-native-owner')
+    title.mockRestore()
+    manager.setBounds('exact-native-owner', null)
+    expect(await manager.release('exact-native-owner', original.navigationId)).toMatchObject({ status: 'released' })
     expect(manager.nativeOwnerForView(view as never, fixture.window)).toBeUndefined()
     await manager.restore('exact-native-owner')
     manager.setBounds('exact-native-owner', { x: 10, y: 20, width: 120, height: 80 })
