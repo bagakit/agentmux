@@ -2,6 +2,7 @@
 import { act } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { moteBotUi } from './fixtures/mote-bot-ui'
+import { confirmAndCreateMote } from './fixtures/mote-connection-owner'
 import { useAppStore } from '../src/renderer/src/store'
 import { moteConnectionBaseline } from '@agentmux/core/mote-preferences'
 
@@ -22,11 +23,11 @@ async function confirmAndCreate() {
   await vi.waitFor(async () => { await f.settle(); expect(document.querySelector('[aria-label="Bot to create"]')).not.toBeNull() })
   expect(document.querySelector('[aria-label="Bot to create"]')?.textContent).toContain('Saved public name')
   expect(document.querySelector('[aria-label="Bot to create"] img')?.getAttribute('alt')).toBe('Avatar chosen for this bot')
-  expect(document.querySelector('[aria-label="Bot to create"]')?.textContent).toContain('Creates one bot')
-  await f.click('Create this bot')
+  expect(document.querySelector('[aria-label="Bot to create"]')?.textContent).toContain('configures conversations')
+  await f.click('Create, configure & publish')
 }
 
-it('creates from the saved public profile through original IPC/Core/Main/default Host and keeps every result separate', async () => {
+it('creates the saved public profile once and keeps unconfirmed initial setup separate from its saved identity', async () => {
   await create()
   expect(document.querySelector('.mote-bot-confirmation')?.textContent).toContain('Sign in to Feishu')
   expect(document.body.textContent).not.toContain('DO-NOT-PUBLISH-DISPLAY')
@@ -41,20 +42,33 @@ it('creates from the saved public profile through original IPC/Core/Main/default
   expect(input.avatar).toBe('include-saved')
   expect((await f.cli('ls', { target: f.target() })).operations[0].operationId).toBe(input.operationId)
   await confirmAndCreate()
-  await text('Original save confirmed'); await text('Profile written. Check and publish it on the platform.')
+  await text('Original save confirmed'); await text('This setup needs attention')
   const saved = (await f.client.call('space.mote.connection.inspect', { operationId: input.operationId })).operation!
   expect(saved.defaultSave?.observedReceipt?.status).toBe('saved')
-  expect(saved.profile?.patch.state).toBe('confirmed')
-  expect(saved.profile?.online?.profile?.description).toBe('Original online description')
-  expect(f.calls.filter(r => r.method === 'PATCH')).toHaveLength(1)
-  const wire = f.calls.find(r => r.method === 'PATCH')!.data
-  expect(JSON.stringify(wire)).toContain('Saved public name'); expect(JSON.stringify(wire)).not.toContain('DO-NOT-PUBLISH')
-  expect(f.calls.some(r => r.url?.endsWith('/publish'))).toBe(false)
+  expect(saved.profileOperationId).toBeNull(); expect(saved.profile).toBeNull()
+  expect(saved.enrollment?.initialPublication).toEqual(input.initialPublication)
+  expect(saved.enrollment?.initialSetup?.progress).toEqual({ stage: 'messaging', state: 'attention' })
+  expect(f.calls).toEqual([])
+  const requests = f.registration.mock.calls.map(([url, init]) => ({ path: new URL(String(url)).pathname, init }))
+  const creation = requests.filter(request => request.path === '/developers/v1/manifest/upsert_by_template')
+  expect(creation).toHaveLength(1)
+  const wire = JSON.parse(String(creation[0]!.init?.body))
+  expect(wire.createAppUserCustomField.i18n.zh_cn).toEqual({ name: 'Saved public name', description: 'Saved public summary.' })
+  expect(JSON.stringify(wire)).not.toContain('DO-NOT-PUBLISH')
+  expect(requests.filter(request => request.path === '/developers/v1/app/upload/image')).toHaveLength(1)
+  expect(requests.some(request => request.path.includes('/publish/commit/'))).toBe(false)
 })
 
-it('continues the saved Mote identity into the same bot setup with its original enrollment source', async () => {
-  await create(); await confirmAndCreate(); await text('Original save confirmed')
-  const parent = (await f.client.call('space.mote.connection.inspect', { operationId: original().operationId })).operation!
+it('continues an original creation without publication intent into the same setup using its saved enrollment source', async () => {
+  const input = await f.input('original-manual-setup')
+  expect(input).not.toHaveProperty('initialPublication')
+  await f.client.call('space.mote.connection.create', input)
+  const parent = await confirmAndCreateMote(f, input.operationId)
+  expect(parent.enrollment).not.toHaveProperty('initialPublication')
+  expect(parent.enrollment).not.toHaveProperty('initialSetup')
+  await f.open(); await f.click('Previous bot operations')
+  await act(async () => (document.querySelector('[data-mote-bot-operation="' + input.operationId + '"]') as HTMLElement).click())
+  await text('Original save confirmed')
   expect(parent.enrollment?.configured).not.toBeNull()
   await f.click('Continue bot setup')
   expect(f.navigation.openMoteLark).toHaveBeenCalledWith({
@@ -109,7 +123,7 @@ it.each(['missing', 'unobserved'] as const)('shows a %s saved bot before disclos
   expect(notice.textContent).toContain('cli_mote_1')
   expect(notice.closest('details')).toBeNull()
   expect(document.querySelector<HTMLDetailsElement>('.mote-bot-existing')?.open).toBe(false)
-  await text('Create another bot for this Mote'); await f.click('Review saved bot')
+  await text('Resume original setup'); await f.click('Review saved bot')
   expect(document.querySelector<HTMLDetailsElement>('.mote-bot-existing')?.open).toBe(true)
   expect((await f.preferences.read({ kind: 'connection', target: f.target() })).values).toEqual(before.values)
   expect(f.saves).not.toHaveBeenCalled(); expect(f.writes).toBe(writes); expect(f.beginCount).toBe(1)
@@ -170,6 +184,7 @@ it('does not let a late Mote A create result populate Mote B and allows an indep
 it('synchronizes only the exact selected bot and preserves an unknown patch without another upload or write', async () => {
   await create(); await confirmAndCreate(); await text('Original save confirmed')
   await f.click('Back to bot profile'); await text('Sync Mote profile')
+  const nativeRequests = f.registration.mock.calls.length
   f.setUnknownPatch(); await f.click('Sync Mote profile'); await text('The profile write is not confirmed')
   const inputs = f.parentCalls.mock.calls.filter(([m]) => m === 'space.mote.connection.sync')
   expect(inputs).toHaveLength(1)
@@ -177,10 +192,7 @@ it('synchronizes only the exact selected bot and preserves an unknown patch with
   const before = f.calls.filter(r => r.method === 'PATCH').length
   await f.click('Check saved progress'); await text('The profile write is not confirmed')
   expect(f.calls.filter(r => r.method === 'PATCH')).toHaveLength(before)
-  expect(f.registration.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
-    '/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross', '/', '/', '/app',
-    '/developers/v1/app/upload/image', '/developers/v1/manifest/upsert_by_template', '/developers/v1/secret/cli_mote_1'
-  ])
+  expect(f.registration.mock.calls).toHaveLength(nativeRequests)
 })
 
 it('keeps a lost default ACK separate from the current file and allows a new association of the same created app', async () => {
