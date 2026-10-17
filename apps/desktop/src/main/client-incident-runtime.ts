@@ -12,6 +12,16 @@ type ProbeScope = { executor: object; host: object; owner: object; sequence: num
 type Attempt = { id: string; started: number; sequence: number; scope: ProbeScope | null; related: string | null; stages: Stages }
 type ConnectionScope = { attemptId: string; started: number; occurrenceId: string; state: Connection['state']; diagnostic: boolean; code: string | null; stages: Stages }
 
+function ownErrorData(value: unknown, key: 'cause' | 'code'): unknown {
+  try {
+    if (!value || typeof value !== 'object') return null
+    const property = Object.getOwnPropertyDescriptor(value, key)
+    return property && Object.hasOwn(property, 'value') ? property.value : null
+  } catch { return null }
+}
+
+const incidentCode = (error: unknown): string | null => safeClientIncidentCode(ownErrorData(error, 'code'))
+
 /** Observes existing operations only. Diagnostic admission never changes their result or starts another operation. */
 export class ClientIncidentRuntimeOwner {
   private readonly probes = new WeakMap<AppConfig, Map<string, Map<string, ProbeScope>>>()
@@ -37,7 +47,7 @@ export class ClientIncidentRuntimeOwner {
     try {
       // This is the local diagnostic subscription, not a failure of any execution Host or Run.
       const metadata = { disposed }
-      const code = error && typeof error === 'object' && 'code' in error ? error.code : null
+      const code = incidentCode(error)
       this.record(this.archive.hostId, 'connection-failed', 'observation-unavailable', randomUUID(), null,
         code, metadata, [{ stage: 'observation-unavailable', elapsedMs: 0, metadata }], 0)
     } catch { /* Even unavailable diagnostic admission cannot block the original IPC owner. */ }
@@ -90,7 +100,7 @@ export class ClientIncidentRuntimeOwner {
       const metadata: AgentMuxClientIncidentMetadata = { executorId, probeAvailability: availability }
       const elapsed = Math.max(0, performance.now() - attempt.started)
       const stage = failed ? 'probe-failed' : 'probe-completed'
-      const code = result && 'cause' in result ? result.cause?.code : error && typeof error === 'object' && 'code' in error ? error.code : null
+      const code = incidentCode(result ? ownErrorData(result, 'cause') : error)
       const occurrence = failed || attempt.related ? this.record(hostId, failed ? 'capability-probe-failed' : 'capability-probe-recovered',
         stage, attempt.id, attempt.related, code, metadata, [...attempt.stages, { stage, elapsedMs: elapsed, metadata }], elapsed) : null
       if (attempt.scope && attempt.sequence >= attempt.scope.settled) {
@@ -107,7 +117,7 @@ export class ClientIncidentRuntimeOwner {
       const owner = this.runtime.executionHost(hostId), failed = event.state !== 'restored' || !!event.diagnostic
       let boundaries = this.connections.get(owner)
       if (!boundaries) { boundaries = new Map(); this.connections.set(owner, boundaries) }
-      const previous = boundaries.get(origin.boundary), code = safeClientIncidentCode(event.diagnostic?.code)
+      const previous = boundaries.get(origin.boundary), code = incidentCode(event.diagnostic)
       if (!failed && !previous) return
       if (previous?.state === event.state && previous.diagnostic === !!event.diagnostic && previous.code === code) return
       const started = previous?.started ?? performance.now(), elapsed = Math.max(0, performance.now() - started)
