@@ -251,9 +251,7 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
   const usage = session?.kind === 'agent' ? session.turnUsage : request.session?.kind === 'agent' ? request.session.turnUsage : undefined
   const sourceNotice = !sameSource ? 'Original Run or source is no longer confirmed. This reading is kept; new source data is not attached.'
     : request.bookmark && !readingSameSource ? 'Reading an earlier Run or source. Show latest to follow the current Agent.' : null
-  const routineObservation = observation?.reason && currentContext.bucket === 'idle' && currentContext.processState === 'running' &&
-    !currentContext.runUnobserved && currentContext.state !== 'disconnected'
-  const service = !routineObservation && !currentContext.detailIsRecap && currentContext.detailKind === 'service' ? currentContext.detail : null
+  const service = !currentContext.detailIsRecap && currentContext.detailKind === 'service' ? currentContext.detail : null
   const displayPath = usePathDisplay(), path = displayPath(context.workspacePath, context.hostId)
   const source = <>
     <h3>Status and source</h3><p>{currentContext.detail}</p>

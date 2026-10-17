@@ -10,10 +10,19 @@ import { workspaceProjectId } from './workspace-projects'
 
 export type LauncherRecap = { text: string; displayText?: string; reading?: { text: string; truncated: boolean }; source: 'Last assistant message' | 'Last prompt' | 'Last reply observation' | 'Saved conversation excerpt'; origin: 'timeline' | 'native' }
 
+const RECAP_EXCERPT_LENGTH = 800
+
+/** Keep source line boundaries for the shared Markdown grammar. This is the
+ * same compact excerpt budget, not a limit on the original reading. */
+export function launcherRecapExcerpt(recap: LauncherRecap): string {
+  const source = recap.reading?.text ?? recap.displayText ?? recap.text
+  return source.length > RECAP_EXCERPT_LENGTH ? `${source.slice(0, RECAP_EXCERPT_LENGTH - 1).trimEnd()}…` : source
+}
+
 function excerpt(text: string | undefined): Pick<LauncherRecap, 'text' | 'displayText' | 'reading'> | null {
   const value = text?.replace(/\s+/gu, ' ').trim()
   if (!value) return null
-  const clamp = (body: string) => body.length > 800 ? `${body.slice(0, 799).trimEnd()}…` : body
+  const clamp = (body: string) => body.length > RECAP_EXCERPT_LENGTH ? `${body.slice(0, RECAP_EXCERPT_LENGTH - 1).trimEnd()}…` : body
   // Interpret complete reading wrappers before flattening; declarations prove no author.
   const parsedBody = parseAgentMuxMessagePrefix(text!)?.body.trim()
   const reading = parsedBody || text!.trim()

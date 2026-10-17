@@ -39,7 +39,7 @@ export type FocusContext = {
   /** undefined is a deferred retained-card read, never evidence of no history. */
   recap: LauncherRecap | null | undefined
   detailIsRecap: boolean
-  detailKind?: 'activity' | 'message' | 'service'
+  detailKind?: 'activity' | 'message' | 'service' | 'observation'
   activitySemantic?: AgentObservation['semantic']
 }
 export function groupFocusContexts(rows: readonly FocusContext[]): Record<FocusBucket, FocusContext[]> {
@@ -213,7 +213,7 @@ function agentContextWithConversation(session: SessionSnapshot, timeline: AgentT
     detailKind = 'service'
   } else if (bucket === 'idle' && activityExplanation) {
     detail = `${activityExplanation.label} · ${activityExplanation.detail}`
-    detailKind = 'service'
+    detailKind = session.processState === 'running' && state !== 'disconnected' ? 'observation' : 'service'
   } else if (session.kind === 'terminal' && (state === 'error' || state === 'exited' || state === 'disconnected')) {
     const facts = [session.status.exitReason === 'user-stopped' ? 'Stopped by you' : null,
       session.status.detail?.trim(), session.status.exitCode === undefined ? null : `Exit code ${session.status.exitCode}`].filter(Boolean)
