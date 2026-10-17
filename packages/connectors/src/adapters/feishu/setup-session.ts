@@ -52,6 +52,7 @@ export async function applicationRequest(input: SetupAdapterInput & { privateSta
   const receipt = await requestFeishuConsole({ state: native.state, cookies: native.cookies, path, body, referer: '/app/' + encodeURIComponent(input.application.appId), developerPanel, ...(input.assertCurrent ? { assertCurrent: input.assertCurrent } : {}) }, signal)
   const diagnostic = receipt.kind === 'unknown' && (receipt.diagnostic.stage === 'request' || receipt.diagnostic.stage === 'response') ? {
     code: receipt.diagnostic.code,
+    ...('nativeCode' in receipt.diagnostic && receipt.diagnostic.nativeCode !== undefined ? { nativeCode: receipt.diagnostic.nativeCode } : {}),
     ...('httpStatus' in receipt.diagnostic && receipt.diagnostic.httpStatus !== undefined ? { httpStatus: receipt.diagnostic.httpStatus } : {})
   } : undefined
   return { payload: receipt.kind === 'response' ? receipt.payload : null, ...(diagnostic ? { diagnostic } : {}), ...(receipt.authentication ? { authentication: serializeSnapshot(input, receipt.authentication) } : {}) }

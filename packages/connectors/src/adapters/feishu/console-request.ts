@@ -49,5 +49,7 @@ export async function requestFeishuConsole(input: Input, signal?: AbortSignal): 
   let payload: Record<string, unknown> | null
   try { payload = record(JSON.parse(await readNativeAccountResponse(response))) } catch { return reject('invalid-json') }
   if (!payload || !Number.isSafeInteger(payload.code)) return reject('invalid-response')
-  return payload.code === 0 ? { kind: 'response', payload, httpStatus: response.status, ...(authentication ? { authentication } : {}) } : reject('platform-error')
+  return payload.code === 0
+    ? { kind: 'response', payload, httpStatus: response.status, ...(authentication ? { authentication } : {}) }
+    : unknown({ stage: 'response', code: 'platform-error', httpStatus: response.status, nativeCode: payload.code as number }, authentication)
 }
