@@ -1,0 +1,5 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "rootDir": "../../..", "module": "ESNext", "moduleResolution": "Bundler", "noEmit": true, "allowImportingTsExtensions": true, "lib": ["ES2024", "DOM", "DOM.Iterable"] },
+  "include": ["codex-resumed-turn-interruption.test.ts", "vitest.resumed-turn-interruption.config.mts"]
+}
