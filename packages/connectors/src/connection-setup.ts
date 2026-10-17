@@ -25,7 +25,7 @@ const admitted = (o: ConnectionSetupOperation) => ({ operationId: o.operationId,
 export class ConnectionSetupHost implements ConnectionSetupPort {
   private closed = false
   private readonly pending = new Map<string, Promise<ConnectionSetupView>>()
-  private readonly nativeRequests = new Set<string>()
+  private readonly nativeRequests = new Map<string, AuthEnvelope | null>()
   private readonly unsettled = new Map<string, PrivateEnvelope>()
   private readonly unsettledAuthentication = new Map<string, AuthEnvelope>()
   private readonly profile: ProfileConnectionSetup
@@ -86,6 +86,7 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
     if (auth?.request === 'dispatching' && this.nativeRequests.has(auth.stepId)) return []
     if (auth?.request === 'confirmed' && auth.secureStorage !== 'stored') {
       const step = this.authStep(row.operation.operationId)
+      if (step && auth.secureStorage === 'storing' && this.pending.has('advance:' + step.input.decision.actionId)) return []
       return step ? [{ actionId: step.input.decision.actionId, expectedRevision: step.input.expectedRevision, kind: step.input.decision.value === 'confirm' ? 'confirm-account' : step.input.decision.value }] : []
     }
     const kinds: ConnectionSetupAuthenticationAction['kind'][] = stage === 'account' ? ['confirm-account', 'renew'] : ['waiting', 'scanned', 'handoff'].includes(stage) ? ['continue', 'renew'] : ['renew']
@@ -133,14 +134,29 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
   private async authenticationView(row: Row, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView> {
     const operation = this.summary(row), auth = operation.authentication!
     let snapshot: AuthEnvelope | null = null
+    let challengeSource: ConnectionSetupView['challengeSource']
     try { snapshot = await this.authenticationSnapshot(row) } catch { /* Exact snapshot remains unconfirmed, never a fresh platform request. */ }
+    if (!snapshot) {
+      const step = this.authStep(operation.operationId)
+      // Presentation follows only the exact live call, never a search through old auth history.
+      // These sources cannot qualify authenticationSource or another platform action.
+      const source = auth.request === 'dispatching' && auth.secureStorage === 'not-started' && step?.input.decision.value === 'continue'
+        ? this.nativeRequests.get(auth.stepId)
+        : auth.request === 'confirmed' && auth.secureStorage === 'storing' && step && this.pending.has('advance:' + step.input.decision.actionId)
+          ? this.unsettledAuthentication.get(auth.stepId) : null
+      if (source && source.attemptId === auth.attemptId && ['waiting', 'scanned', 'handoff', 'expired'].includes(source.stage)) {
+        snapshot = source
+        if (['waiting', 'scanned'].includes(source.stage)) challengeSource = { attemptId: source.attemptId, stepId: source.stepId }
+      }
+    }
     await this.authority(context, row)
     if (!this.current(row)) return { operation, challenge: null, reason: 'connection-revised' }
     const fresh = this.read(row.operation.operationId)
-    if (!fresh || fresh.operation.revision !== row.operation.revision) return { operation: fresh ? this.summary(fresh) : operation, challenge: null, reason: 'challenge-unavailable' }
+    if (!fresh) return { operation, challenge: null, reason: 'challenge-unavailable' }
+    if (fresh.operation.revision !== row.operation.revision) return this.authenticationView(fresh, context)
     const stage = snapshot?.stage ?? (auth.request === 'dispatching' && this.nativeRequests.has(auth.stepId) ? 'handoff' : 'unknown')
     const challenge = snapshot?.challenge && (snapshot.challenge.expiresAt === null || snapshot.challenge.expiresAt > Date.now()) ? snapshot.challenge : null
-    return { operation, challenge, ...(!snapshot ? { reason: 'challenge-unavailable' as const } : {}), continuation: { stage, account: snapshot?.account ?? null, actions: this.actions(row, stage, snapshot?.account ?? null) } }
+    return { operation, challenge, ...(challenge && challengeSource ? { challengeSource } : {}), ...(!snapshot ? { reason: 'challenge-unavailable' as const } : {}), continuation: { stage, account: snapshot?.account ?? null, actions: this.actions(row, stage, snapshot?.account ?? null) } }
   }
   private touch(row: Row): void {
     const operation = structuredClone(row.operation); delete operation.authentication; operation.revision++
@@ -265,7 +281,7 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
     if (!this.current(row) || row.operation.authentication?.stepId !== step.authentication.stepId || step.input.decision.value !== 'confirm' && !adapter?.domains.includes(row.operation.application.domain)) return this.advanceView(this.updateAuth(step, a => { a.request = 'unknown'; a.stage = 'unknown' }), context)
     let snapshot: AuthEnvelope | null = null
     const input = { operationId: row.operation.operationId, connectionId: row.operation.connectionId, attemptId: step.authentication.attemptId, application: row.operation.application }
-    this.nativeRequests.add(step.authentication.stepId)
+    this.nativeRequests.set(step.authentication.stepId, source)
     try {
       if (step.input.decision.value === 'confirm') {
         if (!source?.account || source.stage !== 'account') throw new Error()
@@ -435,7 +451,7 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
     if (!this.current(row)) return this.view(row, context)
     row = this.save(row, o => { o.request = { state: 'dispatching', attemptId: randomUUID() }; delete o.reason })
     let receipt: Awaited<ReturnType<typeof adapter.begin>>
-    this.nativeRequests.add(row.operation.request.attemptId!)
+    this.nativeRequests.set(row.operation.request.attemptId!, null)
     try { receipt = await adapter.begin({ operationId: row.operation.operationId, connectionId: row.operation.connectionId, attemptId: row.operation.request.attemptId!, application: row.operation.application }, context.signal) }
     catch { receipt = { kind: 'unknown' } }
     finally { this.nativeRequests.delete(row.operation.request.attemptId!) }

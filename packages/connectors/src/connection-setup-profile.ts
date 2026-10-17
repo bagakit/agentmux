@@ -329,7 +329,7 @@ export class ProfileConnectionSetup {
       const request = base.operation?.authentication?.request ?? base.operation?.request.state
       const storage = base.operation?.authentication?.secureStorage ?? base.operation?.secureStorage
       const stage = base.continuation?.stage
-      const state = request === 'dispatching' ? 'running' : request === 'confirmed' && storage === 'stored' && !base.reason
+      const state = request === 'dispatching' || request === 'confirmed' && storage === 'storing' && base.challengeSource ? 'running' : request === 'confirmed' && storage === 'stored' && !base.reason
         ? stage === 'handoff' ? 'running' : stage === 'waiting' || stage === 'scanned' || stage === 'account' ? 'pending' : 'attention'
         : 'attention'
       return finish('authentication', state)
