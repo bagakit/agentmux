@@ -189,8 +189,7 @@ export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive
           <MailboxRecordRow recordKey={`queue:${entry.id}`} label={state.label}
             avatar={<ConversationSpeakerAvatar speaker={{role:'unknown',id:UNKNOWN_SPEAKER_ID}} name="Author unknown" size={18} />}
             text={entry.text} metadata={<MailboxTime value={entry.enqueuedAt} />} source={entry.archived ? 'Archived original message' : 'Pending original message'}
-            onOpen={(_key,event) => { if (!editingId) onSelect(entry.id,event) }} />
-          <div className="composer-mailbox__record-actions composer-outbox__actions">
+            onOpen={(_key,event) => { if (!editingId) onSelect(entry.id,event) }} actions={<>
             {!conditionChanged && !entry.archived && onSend ? <button key="send" type="button" className="composer-tool composer-outbox__send" disabled={!canSend}
               aria-label={(entry.immediateSend ?? sendImmediately) ? 'Send queued message immediately' : 'Send queued message'} title={canSend ? '只发送这条原消息' : state.detail}
               onClick={() => onSend(entry.id)}><ThemeActionSubmitIcon size={14} /></button> : null}
@@ -214,7 +213,7 @@ export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive
                 try { await onArchive(entry.id,entry.text,!entry.archived) } catch(error) { setFailure({id:entry.id,text:entry.text,message:presentError(error)}) }
               }}>{entry.archived ? <ThemeActionRestoreIcon size={14} /> : <ThemeActionArchiveIcon size={14} />}</button> : null}
             {entry.archived && entry.confirmed && onHistory ? <button key="history" type="button" className="composer-tool" aria-label="读取原记录" title="读取原记录" onClick={() => onHistory(entry.id)}><ReadIcon size={14} aria-hidden="true" /></button> : null}
-          </div>
+          </>} />
           {ownFailure ? <p role="alert" className="composer-mailbox__risk">{ownFailure}</p> : null}
           {selected ? <MailboxLocationContext sessionId={sessionId} pending>{(_summary,executionDetails) => <article className="composer-outbox__inline" data-record-key={`queue:${entry.id}`}>
             {editingId === entry.id && onEdit ? <ComposerQueuedMessageEditor key={entry.id} entry={entry} onSave={onEdit} onCancel={() => setEditingId(null)} /> : null}

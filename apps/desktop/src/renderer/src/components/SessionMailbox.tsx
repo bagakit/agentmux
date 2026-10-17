@@ -22,6 +22,7 @@ import { serviceNoticeFingerprint, useReadReceipts, type useServiceNotices } fro
 import { useSessionUserMessages } from '../lib/session-user-messages'
 import { useSessionMessages } from '../lib/use-session-messages'
 import { MailboxA2A } from './MailboxA2A'
+import { MailboxNavigation } from './MailboxNavigation'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import type { AgentSessionControl } from '../../../shared/contracts'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
@@ -128,9 +129,9 @@ function MessageHistory({ mailboxOrigin, items, selectedKey, onOpen, onCopy, rea
       const item = record.item
       return <li key={messageKey(item)}><MailboxRecordRow recordKey={messageKey(item)} label={authorLabel(item)} text={item.message.content}
       avatar={identity(item).avatar} source={<span title={describeConversationInputSource(item.message.source).title}>{describeConversationInputSource(item.message.source).caption}</span>}
-      metadata={<>{time(item) === undefined ? null : <MailboxTime value={time(item)} />}
-        {state(item) !== 'complete' && !(item.message.source.kind === 'native') ? <span className="composer-mailbox__risk">Delivery not confirmed</span> : null}</>}
-      onOpen={onOpen} /><div className="composer-mailbox__record-actions">{renderNavigation(item)}</div></li>})}
+      metadata={time(item) === undefined ? null : <MailboxTime value={time(item)} />}
+      status={state(item) !== 'complete' && !(item.message.source.kind === 'native') ? <span className="composer-mailbox__risk">Delivery not confirmed</span> : null}
+      actions={renderNavigation(item)} onOpen={onOpen} /></li>})}
   </ol> : <MailboxEmpty title="No recorded messages" />
 }
 
@@ -521,23 +522,12 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       <div className="composer-mailbox__heading"><strong>Messages</strong><span className="composer-mailbox__subject" title={mailboxSessionId}>{mailboxSessionId ? reading?.describeSpeaker?.({ role: 'agent', id: mailboxSessionId }, 18)?.name || mailboxSessionId : 'Agent unknown'}</span>
         <button type="button" className="composer-tool" aria-label="Close mailbox" popoverTarget={id} popoverTargetAction="hide"
           onClick={() => trigger.current!.focus({ preventScroll: true })}><ThemeActionCloseIcon size={14} /></button></div>
-      <div className="composer-mailbox__folders" role="tablist" aria-label="Mailbox folders">
-        {folders.map((name, index) => { const Icon = name === 'progress' ? ProgressIcon : folderIcons[name], count = name === 'inbox' ? receipts.unread.length : name === 'system' ? system.unread.length : name === 'user' ? pendingCount : 0
-          const label = name === 'collaboration' ? 'Supervised collaboration' : name === 'progress' ? progressLabel : name === 'outbox' ? folderLabels[name] : `${folderLabels[name]}: ${count} ${name === 'user' ? 'pending' : name === 'inbox' ? 'unread in loaded messages' : name === 'system' ? 'unread' : 'loaded'}`
-          return <button key={name} type="button" className={name === 'progress' || name === 'collaboration' ? 'composer-mailbox__utility-tab' : undefined} title={label} aria-label={label}
-          id={`${id}-${name}-tab`} role="tab" aria-controls={`${id}-${name}`} aria-selected={folder === name}
-          tabIndex={folder === name ? 0 : -1} onClick={() => chooseFolder(name)}
-          onKeyDown={(event) => {
-            if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
-            event.preventDefault()
-            const next = folders[event.key === 'Home' ? 0 : event.key === 'End' ? folders.length - 1 :
-              (index + (event.key === 'ArrowRight' ? 1 : folders.length - 1)) % folders.length]!
-            chooseFolder(next)
-            document.getElementById(`${id}-${next}-tab`)?.focus()
-          }}>
-          <Icon size={13} aria-hidden="true" /><span className="composer-mailbox__folder-label">{folderLabels[name]}</span>{count ? <span className="composer-mailbox__count" aria-hidden="true">{count > 99 ? '99+' : count}</span> : null}
-        </button>})}
-      </div>
+      <MailboxNavigation id={id} selected={folder} onSelect={chooseFolder} items={folders.map(name => {
+        const Icon = name === 'progress' ? ProgressIcon : folderIcons[name]
+        const count = name === 'inbox' ? receipts.unread.length : name === 'system' ? system.unread.length : name === 'user' ? pendingCount : 0
+        const description = name === 'collaboration' ? 'Supervised collaboration' : name === 'progress' ? progressLabel : name === 'outbox' ? folderLabels[name] : `${folderLabels[name]}: ${count} ${name === 'user' ? 'pending' : name === 'inbox' ? 'unread in loaded messages' : 'unread'}`
+        return { key: name, label: folderLabels[name], description, icon: <Icon size={13} aria-hidden="true" />, count }
+      })} />
       {detail ? <div className="composer-mailbox__back"><button ref={back} type="button" className="composer-tool" aria-label={`Back to ${folderLabels[folder]}`} title={`Back to ${folderLabels[folder]}`} onClick={leaveRecord}><ThemeNavigationBackIcon size={14} aria-hidden="true" /><span>{folderLabels[folder]}</span></button></div> : null}
       <div ref={body} className="composer-mailbox__content" onFocusCapture={event => { lastReadingFocus.current = event.target }}>
       {(['inbox', 'outbox'] as const).map(name => {
@@ -555,7 +545,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       })}
       <div id={`${id}-user`} role="tabpanel" aria-labelledby={`${id}-user-tab`} aria-busy={Boolean(inputHistory?.history.loading || inputMailbox.loading)} hidden={folder !== 'user'}>
         {readingMounted && folder === 'user' ? <>
-          <InputMailboxRecords mailbox={userInputMailbox} hostId={inputMailboxHost} reading={reading} onCopy={onCopyQueued}
+          <InputMailboxRecords compact mailbox={userInputMailbox} hostId={inputMailboxHost} reading={reading} onCopy={onCopyQueued}
             renderLocal={item => {
               const original = journalLocal.get(inputMailboxItemKey(inputMailboxHost,item))
               if (!original) return null
@@ -592,7 +582,8 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
           {notices.map(item => <li key={item.id} className="composer-notice" data-kind={item.notice.kind}><MailboxRecordRow
             recordKey={`notice:${item.id}:${serviceNoticeFingerprint(item)}`} label={(item.summary ?? item.notice.notice).step}
             text={(item.summary ?? item.notice.notice).mode.slice(0,240)}
-            metadata={<><span>{item.notice.kind === 'indeterminate' ? 'Status unknown' : 'Service notice'}</span>{item.observedAt === undefined ? null : <MailboxTime value={item.observedAt} />}</>}
+            metadata={item.observedAt === undefined ? null : <MailboxTime value={item.observedAt} />}
+            status={item.notice.kind === 'indeterminate' ? 'Status unknown' : 'Service notice'}
             onOpen={selectRecord} /></li>)}
         </ol> : <MailboxEmpty title={system.available ? 'No current notices' : 'Waiting for Session status'} /> : null}
       </div>
