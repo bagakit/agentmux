@@ -10,7 +10,7 @@ import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { desktopElementVisible } from '../lib/desktop-presentation'
 import { SettingsOverviewPane } from './settings/SettingsOverviewPane'
 import { SettingsSearchResults } from './settings/SettingsSearchResults'
-import { LiquidSelectionSurface } from './LiquidSelectionSurface'
+import { SettingsSidebarNavigation } from './settings/SettingsSidebarNavigation'
 import { SETTINGS_GROUPS } from './settings/settings-catalog'
 import { settingsCatalog, settingsModules, visibleSettingsSections, settingsNavGroups, type SettingsPageId, type SettingsSectionId } from './settings/settings-modules'
 import '../styles/settings-search.css'
@@ -19,7 +19,6 @@ const ThemeActionSearchIcon = semanticIconComponent('action.search')
 const ThemeActionClearIcon = semanticIconComponent('action.clear')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
-const ThemeObjectBoardIcon = semanticIconComponent('object.board')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 
 
@@ -200,19 +199,9 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
-        <nav aria-label="Settings sections">
-          <LiquidSelectionSurface selected={showResults ? null : active} active={visible} targetAttribute="data-settings-target" />
-          {!query.trim() ? <button type="button" className={active === 'overview' ? 'selected' : ''} aria-current={active === 'overview' ? 'page' : undefined} data-settings-target="overview" data-settings-overview-nav onClick={() => setActive('overview')}><ThemeObjectBoardIcon size={15} /><span><strong>Overview</strong></span></button> : null}
-          {navGroups.map((group) => (
-            <Fragment key={group.id}>
-              <p className="settings-nav-group" data-settings-group={group.id}>{group.title}</p>
-              {group.items.map((item) => {
-                const Icon = item.icon
-                return <button key={item.id} className={active === item.id && !showResults ? 'selected' : ''} aria-current={active === item.id && !showResults ? 'page' : undefined} title={`${item.title}: ${item.description}`} data-settings-target={item.id} onClick={() => chooseSection(item.id)}><Icon size={15} /><span><strong>{item.title}</strong></span></button>
-              })}
-            </Fragment>
-          ))}
-        </nav>
+        <SettingsSidebarNavigation groups={navGroups} selected={showResults ? null : active} activeGroup={currentSection?.group}
+          navigationGroup={settingsModules.find(candidate => candidate.id === initialSection)?.group}
+          searching={searching} visible={visible} navigationKey={route} onOpen={section => chooseSection(section as SettingsPageId)} />
       </aside>
       <main className="settings-content">
         <header className="settings-content__header">

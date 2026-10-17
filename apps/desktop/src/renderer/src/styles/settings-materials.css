@@ -9,19 +9,20 @@
 }
 .settings-sidebar { border-color: var(--material-control-line); }
 .settings-sidebar nav { position: relative; isolation: isolate; }
-.settings-sidebar nav > button, .settings-sidebar nav > p { position: relative; z-index: 1; }
-.settings-sidebar nav > .liquid-selection + p { margin-top: var(--sp-2); }
-.settings-sidebar nav > button {
+.settings-sidebar nav button[data-settings-target], .settings-sidebar nav > .settings-nav-section { position: relative; z-index: 1; }
+
+.settings-sidebar nav button[data-settings-target] {
   transition: background-color var(--dur-fast), color var(--dur-fast), box-shadow var(--dur-fast);
 }
 .settings-sidebar nav > .liquid-selection { border: 0; background: var(--surface-2); box-shadow: var(--hl); }
-.settings-sidebar nav > button.selected {
+.settings-sidebar nav button[data-settings-target].selected {
   background: transparent;
   box-shadow: none;
 }
-.settings-sidebar nav > button:hover { box-shadow: var(--hl); }
-.settings-sidebar nav > button.selected:hover { background: transparent; box-shadow: none; }
-.settings-sidebar nav > button:focus-visible,
+.settings-sidebar nav button[data-settings-target]:hover { box-shadow: var(--hl); }
+.settings-sidebar nav button[data-settings-target].selected:hover { background: transparent; box-shadow: none; }
+.settings-sidebar nav button[data-settings-target]:focus-visible,
+.settings-nav-group:focus-visible,
 .settings-section-picker:focus-visible {
   outline: 2px solid var(--focus-line);
   outline-offset: 2px;
@@ -55,7 +56,8 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .settings-sidebar nav > button { transition: none; }
+  .settings-nav-group > svg { transition: none; }
+  .settings-sidebar nav button[data-settings-target] { transition: none; }
   .settings-pane-stack { animation: none; }
 }
 
