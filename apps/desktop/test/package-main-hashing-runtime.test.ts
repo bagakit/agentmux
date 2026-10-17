@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import { constants as fsConstants } from 'node:fs'
 import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -28,10 +29,10 @@ it('the production Desktop copying block supplies Main hashing and static-avatar
   })
   // Execute every direct dependency copying statement unchanged, rather than manually
   // requesting hashes from the materializer. Removing the production call removes its output.
-  const copyDependencies = new Function('readFile', 'mkdir', 'cp', 'readdir', 'join', 'dirname', 'lstat', 'realpath',
+  const copyDependencies = new Function('readFile', 'mkdir', 'cp', 'readdir', 'join', 'dirname', 'lstat', 'realpath', 'fsConstants',
     'repositoryRoot', 'desktopRoot', 'coreRoot', 'connectorsRoot', functions.join('\n') +
     '\nreturn async function(appResources) {\n' + copyingStatements.map(statement => statement.getText(source)).join('\n') + '\n}')(
-    readFile, mkdir, cp, readdir, join, dirname, lstat, realpath,
+    readFile, mkdir, cp, readdir, join, dirname, lstat, realpath, fsConstants,
     repositoryRoot, join(repositoryRoot, 'apps/desktop'), join(repositoryRoot, 'packages/core'), join(repositoryRoot, 'packages/connectors')) as (appResources: string) => Promise<void>
   const temporary = await mkdtemp(join(tmpdir(), 'agentmux-main-hashing-'))
   try {
