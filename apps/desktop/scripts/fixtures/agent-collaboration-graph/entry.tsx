@@ -4,7 +4,9 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import { conversationRevision, parseConversationReadPage, projectConversationTimeline, type ConversationTimelineReadInput } from '@agentmux/core/conversation'
 import { parseMessageEventsPage } from '../../../../../packages/core/src/agent-message-events'
 import type { AgentMuxMessageEvent, AgentMuxSpawnRecord, AgentTimelineSnapshot } from '@agentmux/core'
-import type { RuntimeEvent, SessionSnapshot } from '../../../src/shared/contracts'
+import type { RuntimeEvent, SessionSnapshot, ScratchTopicSnapshot, WorkspaceRecord } from '../../../src/shared/contracts'
+import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../../../src/shared/scratch-topics'
+import { directoryIdentity, homeZoneId, workspaceZoneId } from '../../../src/shared/space-addresses'
 import { App } from '../../../src/renderer/src/App'
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
@@ -19,17 +21,36 @@ const originalConfig = await api.config.get(), originalSnapshot = await api.sess
 const base = originalSnapshot.sessions.find((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => session.kind === 'agent')
 if (!base || !originalConfig.workspaces[0]) throw Error('Nonempty typed platform samples required')
 const now = Date.now(), hostId = 'local', incarnation = 'fixture-collaboration-journal'
-const projects = [
-  { ...originalConfig.workspaces[0], id: 'fixture-protocol', hostId, name: 'Agent protocol', path: fixturePath('private/graph/protocol'), kind: 'folder' as const },
-  { ...originalConfig.workspaces[0], id: 'fixture-quality', hostId, name: 'Product quality', path: fixturePath('private/graph/quality'), kind: 'folder' as const }
+const projects: WorkspaceRecord[] = [
+  { ...originalConfig.workspaces[0], id: 'fixture-protocol', hostId, name: 'Agent protocol', path: fixturePath('private/graph/protocol'), repoPath: fixturePath('private/graph/protocol'), kind: 'folder' as const },
+  { ...originalConfig.workspaces[0], id: 'fixture-worktree', hostId, name: 'Delivery worktree', path: fixturePath('private/graph/protocol/.worktrees/delivery'), repoPath: fixturePath('private/graph/protocol'), kind: 'worktree' as const },
+  { ...originalConfig.workspaces[0], id: SCRATCH_WORKSPACE_ID, hostId, name: 'Topics', path: fixturePath('private/graph/topics'), kind: 'folder' as const }
 ]
+const scratch = projects[2]!
+const category = { categoryId: '11111111-1111-4111-8111-111111111111', hostId,
+  spaceId: directoryIdentity(hostId, fixturePath('private/graph/categories/quality')), directoryPath: fixturePath('private/graph/categories/quality'), title: 'Product quality', revision: null }
+const topics: ScratchTopicSnapshot[] = [
+  { id: 'view:graph-review', title: 'Read model notes', kind: 'topic', physicalDirectoryPath: fixturePath('private/graph/objects/read-model') },
+  { id: 'view:graph-design', title: 'Interaction design', kind: 'mote', physicalDirectoryPath: fixturePath('private/graph/objects/interaction') }
+].map(value => { const directoryPath = scratchTopicDirectoryName(value.id)
+  return { ...value, directoryPath, identityDirectoryPath: scratch.path + '/' + directoryPath,
+    confirmedDirectoryPaths: [scratch.path + '/' + directoryPath, value.physicalDirectoryPath], topicPath: directoryPath + '/topic.md', summary: '', collaborators: [],
+    ...(value.kind === 'mote' ? { soul: { path: directoryPath + '/SOUL.md', content: 'Keep original interaction sources available.', version: 'fixture-soul' } } : {}) } as ScratchTopicSnapshot
+})
+const address = (topic: ScratchTopicSnapshot) => { const spaceId = directoryIdentity(hostId, topic.identityDirectoryPath!); return { spaceId, zoneId: homeZoneId(spaceId) } }
+const moteAddress = address(topics[1]!), topicAddress = address(topics[0]!)
+const projectSpace = directoryIdentity(hostId, projects[0]!.path), worktreeZone = workspaceZoneId(projectSpace, projects[1]!.id)
+const bindings = { ...Object.fromEntries(topics.map(topic => [address(topic).zoneId, { spaceId: address(topic).spaceId, workspaceId: scratch.id,
+  topicId: topic.id, contentKind: topic.kind, directoryPath: topic.physicalDirectoryPath,
+  ...(topic.kind === 'topic' ? { relations: { [category.spaceId]: true } } : {}) }])),
+  [worktreeZone]: { spaceId: projectSpace, workspaceId: projects[1]!.id, relations: { [moteAddress.spaceId]: true } } }
 const identities = [
   ['fixture-ui', 'Conversation renderer', 'codex', 0], ['fixture-core', 'A2A delivery', 'claude', 0],
   ['fixture-review', 'Read model review', 'gemini', 1], ['fixture-design', 'Interaction design', 'codex', 1]
 ] as const
 const { pendingInteraction: _pending, ...plainBase } = base
-const sessions: SessionSnapshot[] = identities.map(([id, label, providerId, area], index) => ({ ...plainBase,
-  id, label, providerId, executorId: providerId, hostId, workspacePath: projects[area]!.path,
+const sessions: SessionSnapshot[] = identities.map(([id, label, providerId], index) => ({ ...plainBase,
+  id, label, providerId, executorId: providerId, hostId, workspacePath: index < 2 ? projects[index]!.path : topics[index - 2]!.physicalDirectoryPath!,
   processState: 'running', status: { state: index === 2 ? 'done' : 'working', source: 'native-hook', observedAt: now },
   control: { ...base.control, hostId, agentSessionId: id, run: { runId: 'fixture-run-' + id } }
 }))
@@ -44,19 +65,21 @@ const timelines: Record<string, AgentTimelineSnapshot> = Object.fromEntries(iden
 }))
 const config = { ...originalConfig, hosts: originalConfig.hosts.filter(host => host.id === hostId), workspaces: projects,
   appearance: { ...originalConfig.appearance, appAppearance: 'dark' as const }, focus: { recentActivityHours: 48 as const, ...originalConfig.focus, previewTrigger: 'quick' as const } }
-const tabs = Object.fromEntries(sessions.map((session, at) => { const project = projects[at < 2 ? 0 : 1]!
-  const tab = createWorkbenchTab('tab-' + session.id, { regionId: 'region-' + session.id, workspaceId: project.id, kind: 'agent', phase: 'attached', sessionId: session.id }, session.label)
+const tabs = Object.fromEntries(sessions.map((session, at) => {
+  const workspace = projects[at < 2 ? at : 2]!, topic = at < 2 ? undefined : topics[at - 2]
+  const tab = { ...createWorkbenchTab('tab-' + session.id, { regionId: 'region-' + session.id, workspaceId: workspace.id, kind: 'agent', phase: 'attached', sessionId: session.id }, session.label),
+    ...(topic ? { topicId: topic.id, space: { ...address(topic), spaceId: topic.kind === 'topic' ? category.spaceId : address(topic).spaceId } } : {}) }
   return [tab.id, tab] }))
-const layouts = Object.fromEntries(projects.map((project, area) => [project.id, createWorkspaceLayout('group-' + area, sessions.slice(area * 2, area * 2 + 2).map(session => 'tab-' + session.id))]))
+const layouts = Object.fromEntries(projects.map((project, area) => [project.id, createWorkspaceLayout('group-' + area, sessions.filter((_, at) => area === 2 ? at >= 2 : at === area).map(session => 'tab-' + session.id))]))
 // Feed the original spatial API before App's real initialize reads it. Execution
 // Host/cwd live in its region facts, rather than in a mocked resolver or action.
 const initialSpatial = await api.spatial.read()
 await api.spatial.commit({ expectedRevision: initialSpatial?.revision ?? 0,
-  graph: desktopSpatialGraph({ ...useAppStore.getState(), config, sessions, tabs, layouts }, []) })
+  graph: desktopSpatialGraph({ ...useAppStore.getState(), config, sessions, tabs, layouts, spaceZoneBindings: bindings, topicCategories: [category] }, topics) })
 api.config.get = async () => structuredClone(config)
 api.sessions.snapshot = async () => ({ sessions: structuredClone(sessions), timelines: structuredClone(timelines), recoveryCandidates: [] })
 api.sessions.timeline = async control => structuredClone(timelines[control.agentSessionId]!)
-api.scratch.listTopics = async () => []
+api.scratch.listTopics = async () => structuredClone(topics)
 api.workspaces.listBranches = async id => ({ kind: 'not-a-git-repository', hostId, workspacePath: projects.find(project => project.id === id)?.path ?? projects[0]!.path })
 const listeners = new Set<(event: RuntimeEvent) => void>()
 api.sessions.onEvent = listener => { listeners.add(listener); return () => { listeners.delete(listener) } }
@@ -146,6 +169,17 @@ Object.assign(window, { graphCapture: {
   remember() { originalState = useAppStore.getState(); originalDraft = document.querySelector('[data-fixture-session="fixture-ui"] textarea'); originalDraft?.setSelectionRange(4, 12) },
   appearance(appAppearance: 'dark' | 'light') { useAppStore.setState(state => ({ config: state.config ? { ...state.config, appearance: { ...state.config.appearance, appAppearance } } : null })) },
   surface(surface: 'workbench' | 'agents') { useAppStore.getState().setMainSurface(surface) },
+  async area(kind: 'project' | 'topic' | 'mote' | 'linked-mote' | 'category') {
+    const target = kind === 'project' ? { kind: 'space' as const, spaceId: projectSpace, zoneId: workspaceZoneId(projectSpace, projects[0]!.id), displayWorkspaceId: projects[0]!.id, groupId: 'group-0', tabId: 'tab-fixture-ui', regionId: 'region-fixture-ui' }
+      : kind === 'category' ? { kind: 'space' as const, spaceId: category.spaceId }
+      : kind === 'linked-mote' ? { kind: 'space' as const, spaceId: moteAddress.spaceId, zoneId: worktreeZone, displayWorkspaceId: projects[1]!.id, groupId: 'group-1', tabId: 'tab-fixture-core', regionId: 'region-fixture-core' }
+      : { kind: 'space' as const, spaceId: kind === 'topic' ? category.spaceId : moteAddress.spaceId, zoneId: kind === 'topic' ? topicAddress.zoneId : moteAddress.zoneId,
+        displayWorkspaceId: scratch.id, groupId: 'group-2', tabId: kind === 'topic' ? 'tab-fixture-review' : 'tab-fixture-design', regionId: kind === 'topic' ? 'region-fixture-review' : 'region-fixture-design' }
+    const outcome = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: 'fixture-area-' + crypto.randomUUID(), operation: 'focus', target, inputPolicy: 'preserve' })
+    if (outcome.operation !== 'focus' || outcome.navigation.state === 'rejected') throw Error('Original area navigation did not apply: ' + JSON.stringify(outcome))
+    useAppStore.getState().setWorkspaceTool('agents')
+    return outcome.navigation.selection
+  },
   fail(value: boolean) { failEvents = value },
   live(live = true) {
     const sequence = events.at(-1)!.sequence + 1, mid = 'fixture-live-' + sequence, ref = reference(mid, 'fixture-core', 'fixture-ui')
@@ -159,5 +193,6 @@ Object.assign(window, { graphCapture: {
     draftMounted: originalDraft?.isConnected, sameDraft: originalDraft === document.querySelector('[data-fixture-session="fixture-ui"] textarea'),
     draft: originalDraft?.value, range: [originalDraft?.selectionStart, originalDraft?.selectionEnd], reads: [...reads], controls: [...controls],
     selectedSession: state.agentFocus.execution.sessionId, originalRun: sessions[0]!.control.run.runId,
+    activeWorkspaceId: state.activeWorkspaceId, choice: structuredClone(state.workbenchSpaceSelection),
     graph: Boolean(document.querySelector('.collaboration-dialog')), readers: document.querySelectorAll('[data-agent-reading-host]').length } }
 } })

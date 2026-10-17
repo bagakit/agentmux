@@ -2,26 +2,34 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { createServer } from 'node:http'
-import { mkdtemp, mkdir, readFile, writeFile, readdir, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, writeFile, readdir, rm, rename } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve, relative, extname, sep, join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { runProbeProcess, listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
 
 const root = resolve(import.meta.dirname, '../../..'), desktop = join(root, 'apps/desktop')
 const fixture = join(desktop, 'scripts/fixtures/agent-collaboration-graph')
-assert.ok(process.argv[2] === '--evidence' && process.argv[3] && process.argv.length === 4, 'Use --evidence <new private evidence directory>')
-const evidence = resolve(process.argv[3]); await mkdir(evidence, { recursive: true })
-assert.equal((await readdir(evidence)).length, 0, 'Keep prior captures; use an empty evidence directory')
-const privateRoot = await mkdtemp(join(tmpdir(), 'amux-collaboration-capture-')), compiled = join(privateRoot, 'compiled')
+const scriptPath = fileURLToPath(import.meta.url)
+const compiling = process.argv[2] === '--compile'
+assert.ok(compiling ? process.argv.length === 5 : process.argv[2] === '--evidence' && process.argv[3] && process.argv.length === 4, 'Use --evidence <new private evidence directory>')
+const evidence = resolve(process.argv[compiling ? 4 : 3]); await mkdir(evidence, { recursive: true })
+if (!compiling) assert.equal((await readdir(evidence)).length, 0, 'Keep prior captures; use an empty evidence directory')
+const privateRoot = compiling ? resolve(process.argv[3]) : await mkdtemp(join(tmpdir(), 'amux-collaboration-capture-')), compiled = join(privateRoot, 'compiled')
+assert.ok(privateRoot.startsWith(join(tmpdir(), 'amux-collaboration-capture-')) && !relative(tmpdir(), privateRoot).includes(sep), 'Compilation stays in its own private capture root')
 const require = createRequire(join(desktop, 'package.json')), hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const sources = {}, isolated = [], logs = []
 const receipt = { schema: 'agentmux.collaboration-graph-capture.v1', capturedPass: false, captureOnly: true, aestheticReview: 'not-performed',
-  boundary: 'Current source App, actual initialization/Store, Focus entry, Graph, shared Focus cards and sole AgentInformationPreviewHost/Reader. Only platform API facts and unrelated PTY/Monaco painting are controlled. Private synthetic identities, events and content; no Core/Provider/Runtime, real messages, restart or installed-product claim.' }
-let server
-try {
-  const harnessFiles = ['index.html', 'entry.tsx', 'main.cjs'].map(name => join(fixture, name)).concat([new URL(import.meta.url).pathname, join(desktop, 'scripts/probe-process.mjs')])
-  receipt.harness = Object.fromEntries(await Promise.all(harnessFiles.map(async file => [relative(root, file), hash(await readFile(file))])))
+  boundary: 'Current source App, actual initialization/Store, Focus and Space entries, original area owners, Graph, shared Focus cards and sole AgentInformationPreviewHost/Reader. Only platform API facts and unrelated PTY/Monaco painting are controlled. Private synthetic identities, events and content; no Core/Provider/Runtime, real messages, restart or installed-product claim.' }
+let compilationWrites = Promise.resolve()
+function publishCompilation(value) {
+  return compilationWrites = compilationWrites.then(async () => {
+    const file = join(evidence, 'compilation.json'), next = file + '.next'
+    await writeFile(next, JSON.stringify(value) + '\n'); await rename(next, file)
+  })
+}
+async function compileRenderer() {
+  let transformed = 0
   const core = JSON.parse(await readFile(join(root, 'packages/core/package.json'), 'utf8'))
   const aliases = Object.entries(core.exports).map(([key, entry]) => ({
     find: new RegExp('^' + (key === '.' ? '@agentmux/core' : '@agentmux/core/' + key.slice(2)).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'),
@@ -35,6 +43,11 @@ try {
     plugins: [{ name: 'collaboration-source-and-unrelated-paint', enforce: 'pre', async transform(source, id) {
       if (!id.startsWith(root + sep) || id.includes('/node_modules/') || id.includes('?') || !/\.(tsx?|css|mjs)$/.test(id)) return
       sources[relative(root, id)] = hash(source)
+      if (++transformed % 200 === 0) {
+        const progress = { phase: 'transforming', transformed }
+        await publishCompilation(progress)
+        process.stdout.write(JSON.stringify(progress) + '\n')
+      }
       const component = id.slice(id.lastIndexOf('/') + 1)
       if (component === 'SessionPane.tsx') {
         isolated.push({ file: relative(root, id), boundary: 'Unrelated PTY/Agent painting only; original Store draft' })
@@ -47,8 +60,36 @@ try {
     }, async generateBundle() {
       for (const file of this.getWatchFiles()) if (file.startsWith(root + sep) && !file.includes('/node_modules/') && file.endsWith('.css')) sources[relative(root, file)] = hash(await readFile(file))
     } }] })
+}
+if (compiling) {
+  await publishCompilation({ phase: 'starting', transformed: 0 })
+  try {
+    await compileRenderer()
+    await publishCompilation({ phase: 'complete', inputs: sources, isolated })
+    process.exit(0)
+  } catch (error) {
+    await publishCompilation({ phase: 'failed', failure: error.message })
+    process.exit(1)
+  }
+}
+const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== 'ELECTRON_RUN_AS_NODE' && !/^(AGENTMUX_|CTXMUX_)/.test(key)))
+Object.assign(env, { AGENTMUX_DESKTOP_USER_DATA: join(privateRoot, 'user-data'), AGENTMUX_RUNTIME_DIRECTORY: join(privateRoot, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(privateRoot, 'state') })
+let server
+try {
+  const harnessFiles = ['index.html', 'entry.tsx', 'main.cjs'].map(name => join(fixture, name)).concat([scriptPath, join(desktop, 'scripts/probe-process.mjs')])
+  receipt.harness = Object.fromEntries(await Promise.all(harnessFiles.map(async file => [relative(root, file), hash(await readFile(file))])))
+  receipt.phase = 'compiling'; await writeFile(join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
+  receipt.compilationProcess = await runProbeProcess(process.execPath, [scriptPath, '--compile', privateRoot, evidence],
+    { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 120000, onLine: line => logs.push(line) })
+  const compilationText = await readFile(join(evidence, 'compilation.json'), 'utf8').catch(error => error.code === 'ENOENT' ? '' : Promise.reject(error))
+  if (compilationText.trim()) receipt.compilation = JSON.parse(compilationText)
+  assert.equal(receipt.compilationProcess.timedOut, false, 'Source compilation timed out; retain its phase receipt')
+  assert.equal(receipt.compilationProcess.exitConfirmed, true, 'The source compiler exit is unconfirmed')
+  assert.equal(receipt.compilationProcess.exitCode, 0, receipt.compilation?.failure ?? 'Source compilation failed')
+  assert.equal(receipt.compilation?.phase, 'complete')
+  Object.assign(sources, receipt.compilation.inputs); isolated.push(...receipt.compilation.isolated)
   receipt.inputs = sources; receipt.isolated = isolated
-  for (const owner of ['App.tsx', 'GlobalFocusSurface.tsx', 'FocusToolbar.tsx', 'AgentCollaborationDialog.tsx', 'AgentCollaborationGraph.tsx', 'FocusContextCardBody.tsx', 'FocusContextRow.tsx', 'AgentInformationPreview.tsx', 'AgentInformationReader.tsx', 'store.ts', 'collaboration.css']) {
+  for (const owner of ['App.tsx', 'GlobalFocusSurface.tsx', 'FocusToolbar.tsx', 'SurfaceToolDock.tsx', 'WorkspaceCollaboration.tsx', 'collaboration-areas.ts', 'collaboration-presentation.ts', 'workspace-agent-scope.ts', 'AgentCollaborationDialog.tsx', 'AgentCollaborationGraph.tsx', 'FocusContextCardBody.tsx', 'FocusContextRow.tsx', 'AgentInformationPreview.tsx', 'AgentInformationReader.tsx', 'store.ts', 'collaboration.css']) {
     assert.ok(Object.keys(sources).some(file => file.endsWith('/' + owner)), 'Actual owning module must compile: ' + owner)
   }
   receipt.outputs = {}
@@ -68,8 +109,7 @@ try {
     } catch { response.writeHead(404); response.end('Not found') }
   })
   await new Promise(done => server.listen(0, '127.0.0.1', done))
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== 'ELECTRON_RUN_AS_NODE' && !/^(AGENTMUX_|CTXMUX_)/.test(key)))
-  Object.assign(env, { AGENTMUX_DESKTOP_USER_DATA: join(privateRoot, 'user-data'), AGENTMUX_RUNTIME_DIRECTORY: join(privateRoot, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(privateRoot, 'state') })
+  receipt.phase = 'capturing'; await writeFile(join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
   receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), `http://127.0.0.1:${server.address().port}/`, privateRoot, evidence],
     { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 100000, onLine: line => logs.push(line) })
   const actualText = await readFile(join(evidence, 'actual.json'), 'utf8').catch(error => error.code === 'ENOENT' ? '' : Promise.reject(error))
@@ -94,6 +134,7 @@ finally {
   if (remaining.length) { await stopProbeProcesses(-1, privateRoot); remaining = await listProbeProcesses(-1, privateRoot) }
   receipt.cleanup = { remaining, removed: false, evidencePreserved: true }
   if (!remaining.length) { await rm(privateRoot, { recursive: true }); receipt.cleanup.removed = true }
+  receipt.phase = receipt.capturedPass ? 'complete' : 'failed'
   await writeFile(join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
   console.log(JSON.stringify({ capturedPass: receipt.capturedPass, evidence, failure: receipt.failure?.message, pendingIndependentVisualReview: true }))
 }
