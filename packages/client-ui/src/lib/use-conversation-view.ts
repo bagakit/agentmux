@@ -202,12 +202,13 @@ export function useConversationView(client: ConversationViewClient | null, refer
           const sourceError = sourceReadError(complete)
           // Resume replays the retained frame. It cannot replace the failed cut's
           // retry intent with another replay of that same unavailable coverage.
-          if (sourceError && kind !== 'resume') retryOperation.current = { client, key, kind: frame.operation, selection: frame.selection }
+          if (sourceError && kind !== 'resume') retryOperation.current = { client, key, kind, selection }
           setState(value => ({ ...value, ...(current.held ? {} : { snapshot: complete, historical: frame.historical, sourceError }), held: current.held,
             // A live update or retained-frame replay does not fulfill a failed
             // navigation. Resolve only its operation, a new explicit cut, or
             // replace it with the current frame's actual source failure.
-            ...(sourceError || kind === 'latest' || kind === 'reopen' || value.errorOperation === kind ? { error: null, errorOperation: null } : {}),
+            ...(current.held && sourceError ? { error: sourceError, errorOperation: kind }
+              : sourceError || kind === 'latest' || kind === 'reopen' || value.errorOperation === kind ? { error: null, errorOperation: null } : {}),
             newerAvailable: kind === 'latest' || kind === 'changes' && !more && !current.held && !current.historical ? false : value.newerAvailable }))
           if (more) current.dirty = true
         } catch (error) { if (isCurrent()) {
