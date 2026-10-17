@@ -11,6 +11,7 @@
 - [Browser 场景消息与框选沟通](#browser-场景消息与框选沟通)
 - [匿名 Browser](#匿名-browser)
 - [Browser 空白起始页](#browser-空白起始页)
+- [原生网页子窗口](#原生网页子窗口)
 - [Browser 通用交接闭环](#browser-通用交接闭环)
 - [Browser RSI 记录与回放可达性](#browser-rsi-记录与回放可达性)
 - [原生 Browser 与 Agent 身份浮层](#原生-browser-与-agent-身份浮层)
@@ -146,6 +147,12 @@
 - 用户要求“Browser 输入框应记录历史，支持复制／粘贴／剪切”。顶部地址／搜索框及 Survey／Launcher 的同一人工入口共享输入行为；只记录人显式提交的非空地址与搜索词，不采集未提交草稿、网页密码／表单或 Agent／CLI／脚本导航，不主动读取剪贴板作为历史来源；人粘贴后显式提交的地址／搜索按同一输入处理。历史按实际 Workspace 与 Profile 隔离，有界、去重、最近优先，保留搜索词与 URL query／fragment 的原意；带 URL userinfo 的输入不持久化，不猜任意文本是否秘密。用户能删除单条或清空当前范围，普通进程重启后仍可召回；历史与网页 back／forward 和 Agent 操作记录分开，未知归属不借默认 Profile 混库。读取／保存失败就近持续说明该能力降级，原输入、页面、正常导航与健康 Run 继续可用。
 - 输入建议中的历史按需从原输入框就地展开；键盘上下选择、明确提交、Escape 收回与鼠标选择可用，IME 组合输入不误提交。未选定历史时保留当前草稿与选区；新的编辑、Workspace／Profile 或请求归属变化后，晚到历史与导航投影不能覆盖草稿或夺回焦点。列表不改变原 Browser／Tab／Region／分割生命周期，不因浮层隐藏整页；紧凑呈现只见密度 SSOT[《Browser RSI 操作表面》](../presentation/browser-workface.md#browser-rsi-操作表面)。
 - 地址／搜索框和网页基础文本编辑支持平台原生复制、粘贴、剪切及原选择语义；快捷键与按需菜单复用成熟编辑能力，不建立另一份剪贴板或全局快捷键通道。可编辑、只读、空选区、disabled、密码与 contenteditable 沿真实平台能力区分，正常密码编辑不额外受限，不读取或保存秘密／选区／剪贴板内容到历史或日志。人工菜单只编辑原 window／WebContents／frame 与原局部输入目标；导航、销毁、换页或人切到另一个输入后，旧菜单不作用新目标，也不夺回焦点。普通 input、textarea、contenteditable 与嵌入 frame 的基础编辑保持，现 Region 菜单不能截走输入的原生编辑入口；不以脚本赋值或合成 ClipboardEvent 冒原生成功。
+
+### 原生网页子窗口
+
+- 网页通过 `window.open`、链接或表单目标打开的原生子窗口，应具有可选择、复制和编辑准确地址的导航入口，以及后退、前进、刷新／加载中停止；键盘操作和窄窗同样可达。这类子窗口与移出工作台的独立窗口是不同宿主，不因后者已有 BrowserPane 而省略子窗口导航。地址的基础编辑、草稿、IME 与原生剪贴语义沿[原地址输入合同](#browser-地址搜索输入历史与基础编辑)。
+- 导航始终作用于该子窗口的原生页面，地址、历史栈、加载和可用动作消费其 Main／WebContents 的原事实，不建立第二份导航状态或从标题、图标猜状态。补充窗口导航不得靠重开 Browser 或重放 URL 来替代原窗口创建请求，须保留原网站 Session、Profile／匿名会话、`opener`／`noopener`、命名窗口复用、表单目标和 `window.close()` 的语义；原页面与其他工作面保持。
+- 其他 App 可通过系统 HTTP(S) 入口使用 AgentMux 的浏览能力，目的地仍沿[系统网页进入原 Survey](knowledge-workflows.md#survey临时-zone-工作面与知识入口)及原 Settings 的系统默认选择合同；是否设为默认由本人决定。子窗口导航不改变外部链接目的地，也不隐含新增独立窗口默认项或目的地配置。
 
 ### Browser 通用认证与 passkey 能力
 
