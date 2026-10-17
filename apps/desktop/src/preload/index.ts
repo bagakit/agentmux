@@ -578,8 +578,8 @@ const api: AgentMuxPreloadApi = {
       return ipcRenderer.invoke('sessions:paste', session, text, terminalData, ...(parent ? [parent] : []))
     },
     recordDeliveryFailure: record => ipcRenderer.invoke('sessions:recordDeliveryFailure', record),
-    submitPrompt: (session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel, goalContinuation, goalPmo, goalDispatch) =>
-      ipcRenderer.invoke('sessions:submitPrompt', session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel, goalContinuation, goalPmo, goalDispatch),
+    submitPrompt: (session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel, goalContinuation, goalPmo, goalDispatch, inputContextCapture) =>
+      ipcRenderer.invoke('sessions:submitPrompt', session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel, goalContinuation, goalPmo, goalDispatch, inputContextCapture),
     replyQuestion: (session, input) => ipcRenderer.invoke('sessions:replyQuestion', session, input),
     inputMailbox: (session, options) => ipcRenderer.invoke('sessions:inputMailbox', session, options),
     inspectInput: (session, key) => ipcRenderer.invoke('sessions:inspectInput', session, key),
@@ -647,6 +647,8 @@ const api: AgentMuxPreloadApi = {
     }
   },
   browser: {
+    captureInputContext: browserId => ipcRenderer.invoke('browser:captureInputContext', browserId),
+    freezeInputContext: input => ipcRenderer.invoke('browser:freezeInputContext', input),
     listRetainedUploads: () => ipcRenderer.invoke('browser:listRetainedUploads'),
     discardRetainedUpload: (selectionId, document) => ipcRenderer.invoke('browser:discardRetainedUpload', selectionId, document),
     restoreResource: (id, admittedControlRequestId) => ipcRenderer.invoke('browser:restoreResource', id, admittedControlRequestId),

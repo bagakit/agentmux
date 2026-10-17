@@ -150,6 +150,8 @@ export const PRIVILEGED_SENDER_LABELS = {
   'browser:listRetainedUploads': 'Selected-file snapshots',
   'browser:discardRetainedUpload': 'Selected-file snapshots',
   'browser:listTargets': 'Browser targets',
+  'browser:captureInputContext': 'Browser input scene',
+  'browser:freezeInputContext': 'Browser input scene',
   'browser:restoreResource': 'Browser resource restoration',
   'browser:createExternalPairing': 'External Browser connection',
   'browser:revealExternalExtension': 'External Browser connection',
