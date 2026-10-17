@@ -1,4 +1,5 @@
-import { pendingNoteShares, clearPendingNoteShares, applyNoteDraftShareEcho, applyNoteDraftRestoreEcho, bindNoteDraftBlockIdentity, noteBlockFingerprint, noteNodeAtPath } from './lib/note-share-staging'
+import { noteShareRange, noteShareSiblingRange } from '../../shared/note-share-range'
+import { pendingNoteShares, promotedPendingNoteShares, clearPendingNoteShares, applyNoteDraftShareEcho, applyNoteDraftRestoreEcho, bindNoteDraftBlockIdentity, noteBlockFingerprint, noteNodeAtPath } from './lib/note-share-staging'
 import { noteShareUndoRecoveryMessage, removedSavedNoteIncludes } from './lib/note-share-removal'
 import { fileShareSourceOperation, parseFileHistoryResult, parseFileShareResult, parseFileShareUndoResult, type FileShareUndoParams, type FileShareUndoResult, type FileShareParams, type FileShareResult, type FileWriteParams } from '@agentmux/core/files'
 import { retainFileDocument, hasFileDocumentConsumer, type NoteFileTarget } from './lib/file-document-consumers'
@@ -2482,17 +2483,47 @@ async function applyNoteShareResult(key: string, original: NoteShareAttempt, res
         generation: state.documentGenerations[key] ?? 0, resource: { hostId: original.params.destination.expectedResource.hostId, path: original.params.destination.expectedResource.workspacePath } } } } }
   })
 }
-async function enqueueNoteShareSave(tabId: string, regionId?: string, explicit?: NoteFileTarget, overwrite = false): Promise<boolean> {
+async function enqueueNoteShareSave(tabId: string, regionId?: string, explicit?: NoteFileTarget, overwrite = false, ancestors: ReadonlySet<string> = new Set(), explicitRead?: import('@agentmux/core/files').FileReadParams): Promise<boolean> {
   const initial = useAppStore.getState(), surface = explicit ?? fileSurface(initial.tabs[tabId], regionId)
   if (!surface) return false
   const key = documentKey(surface.workspaceId, surface.path), retained = originalNoteShareAttempt(key)
   if (retained) { await useAppStore.getState().inspectNoteShare(surface.workspaceId, surface.path); return true }
+  const settled = promotedPendingNoteShares(key)
+  if (settled.length) clearPendingNoteShares(key, settled)
   const tickets = pendingNoteShares(key), note = initial.documents[key] ? readNoteDocument(initial.documents[key]!.content) : null
   if (note?.status !== 'valid') return false
   const surviving = new Set<string>()
   const collect = (node: import('@tiptap/core').JSONContent) => { if (node.type === 'noteInclude' && tickets.has(node.attrs?.referenceId)) surviving.add(node.attrs!.referenceId as string); node.content?.forEach(collect) }; collect(note.note.content)
   const selected = [...surviving].map(id => tickets.get(id)!)
   if (!selected.length) return false
+  // Resolve retained uses inside the exact source chapter before reserving save tails.
+  // Otherwise the outer shared file could persist an include whose file does not exist.
+  try {
+    for (const ticket of selected) {
+      const path = new Set([...ancestors, ticket.operationId])
+      const source = ticket.copy.source, sourceKey = documentKey(source.workspaceId, source.path)
+      await useAppStore.getState().loadNoteFile(source)
+      await drainNoteInput(source.workspaceId, source.path)
+      const document = useAppStore.getState().documents[sourceKey], parsed = document ? readNoteDocument(document.content) : null
+      const workspace = useAppStore.getState().config?.workspaces.find(value => value.id === source.workspaceId)
+      if (parsed?.status !== 'valid' || parsed.note.noteId !== source.noteId || workspace?.hostId !== source.hostId || workspace.path !== source.workspacePath) throw Error('The original nested sharing source identity is unconfirmed. Its complete draft is kept; restore that exact source before saving.')
+      const nodes = ticket.copy.block.blockId ? noteShareRange(parsed.note.content, ticket.copy.block.blockId)?.nodes
+        : (() => { const parent = noteNodeAtPath(parsed.note.content, ticket.copy.block.path.slice(0, -1)), index = ticket.copy.block.path.at(-1), node = index === undefined ? undefined : parent?.content?.[index]; return parent && index !== undefined && node && noteBlockFingerprint(node) === ticket.copy.block.fingerprint ? noteShareSiblingRange(parent, index) : undefined })()
+      const nested = pendingNoteShares(sourceKey), dependencies = new Set<string>()
+      const visit = (node: import('@tiptap/core').JSONContent) => { if (node.type === 'noteInclude' && nested.has(node.attrs?.referenceId)) dependencies.add(String(node.attrs!.referenceId)); node.content?.forEach(visit) }
+      nodes?.forEach(visit)
+      if (!dependencies.size) continue
+      if ([...dependencies].some(reference => path.has(nested.get(reference)!.operationId))) throw Error('This pending chapter contains its own shared use. Your draft is kept; move that use outside the chapter or undo it before saving.')
+      await enqueueNoteShareSave('', undefined, source, false, path, ticket.copy.read)
+      if ([...dependencies].some(reference => pendingNoteShares(sourceKey).has(reference))) throw Error('An inner shared source still needs confirmation. Your complete draft is kept; check that original sharing operation before saving this outer use.')
+      // Inner receipts changed the original file and may have replaced its structure.
+      return await enqueueNoteShareSave(tabId, regionId, explicit, overwrite, ancestors, explicitRead)
+    }
+  } catch (error) {
+    useAppStore.getState().reportError(error)
+    useAppStore.setState(state => reduceDocumentWriteError(state, surface.workspaceId, surface.path, 'NOTE_SHARE_DEPENDENCY_UNCONFIRMED', presentError(error)))
+    return true
+  }
   const keys = [...new Set([key, ...selected.map(ticket => documentKey(ticket.copy.source.workspaceId, ticket.copy.source.path))])]
   const waits = keys.map(id => fileSaveTails.get(id) ?? Promise.resolve())
   const operation = (async () => {
@@ -2508,7 +2539,7 @@ async function enqueueNoteShareSave(tabId: string, regionId?: string, explicit?:
     const selectedReferences = new Set(active.map(ticket => ticket.include.referenceId)), latestTickets = pendingNoteShares(key)
     if ([...references].some(id => latestTickets.has(id) && !selectedReferences.has(id))) throw Error('A later shared use arrived while this save was waiting. Your complete draft is kept; save again to share these uses together.')
     const topics = scratchTopicsForConfig(state.config, state.scratchTopicSnapshots) ?? []
-    const destinationRead = explicit ? noteResourceReadParams(state, topics, explicit) : noteHistoryReadParams(state, topics, tabId, regionId ?? fileSurface(state.tabs[tabId])!.regionId)
+    const destinationRead = explicitRead ?? (explicit ? noteResourceReadParams(state, topics, explicit) : noteHistoryReadParams(state, topics, tabId, regionId ?? fileSurface(state.tabs[tabId])!.regionId))
     if (!destinationRead) throw Error('The original Note mapping is unconfirmed. The pending sharing draft is kept.')
     const proposals = new Map<string, { content: string; generation: number }>()
     const prepare = async (read: import('@agentmux/core/files').FileReadParams, workspaceId: string, path: string, noteId: string): Promise<FileWriteParams> => {
@@ -2516,7 +2547,8 @@ async function enqueueNoteShareSave(tabId: string, regionId?: string, explicit?:
       // to the existing dirty document and is reconciled after this original receipt.
       const document = state.documents[documentKey(workspaceId, path)]
       const observed = await api.files.readPublic(read)
-      if (!observed.resource || observed.resource.path !== path || observed.result.status !== 'read') throw Error('The original sharing file could not be confirmed. Its current draft is kept.')
+      const workspace = state.config?.workspaces.find(value => value.id === workspaceId)
+      if (!observed.resource || !workspace || observed.resource.workspaceId !== workspaceId || observed.resource.hostId !== workspace.hostId || observed.resource.workspacePath !== workspace.path || observed.resource.path !== path || observed.result.status !== 'read') throw Error('The original sharing file could not be confirmed at its exact Workspace resource. Its current draft is kept.')
       const original = document ?? observed.result.document
       proposals.set(documentKey(workspaceId, path), { content: original.content, generation: state.documentGenerations[documentKey(workspaceId, path)] ?? 0 })
       const header = readNoteMarkdownHeader(original.content)
