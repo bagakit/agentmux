@@ -10,12 +10,24 @@ const read = (v: string | undefined) => { try { return v === undefined ? null : 
 function range(value: unknown): { native: Record<string, unknown>; public: ConnectionSetupPublicationAudience } | null {
   const r = record(value)
   if (!r || r.isAll !== 0 && r.isAll !== 1) return null
-  const ids = (v: unknown) => {
+  // Online visibility uses collection-specific identity fields, not display labels.
+  const ids = (v: unknown, fields: readonly string[], rawString = false) => {
     if (!Array.isArray(v)) return null
-    const result = v.map(item => record(item)?.id)
+    const result = v.map(item => {
+      if (rawString && typeof item === 'string' && nativeId(item)) return item
+      const entity = record(item)
+      if (!entity) return null
+      const values = fields.filter(key => Object.hasOwn(entity, key)).map(key => {
+        const value = entity[key]
+        if (key === 'id') return nativeId(value) ? value : null
+        if (key === 'user_id' && typeof value === 'number' && Number.isSafeInteger(value)) return String(value)
+        return typeof value === 'string' && nativeId(value) ? value : null
+      })
+      return values.length && values.every(value => value !== null && value === values[0]) ? values[0]! : null
+    })
     return result.every(nativeId) && new Set(result).size === result.length ? result : null
   }
-  const departments = ids(r.departments), members = ids(r.members), groups = ids(r.groups)
+  const departments = ids(r.departments, ['id', 'departmentId', 'open_department_id'], true), members = ids(r.members, ['id', 'openId', 'user_id']), groups = ids(r.groups, ['id', 'openChatId', 'chat_id'])
   return departments && members && groups ? { native: { departments, members, groups, isAll: r.isAll }, public: { all: r.isAll === 1, departments, people: members, groups } } : null
 }
 function versionList(data: Record<string, unknown> | null): ConnectionSetupPublicationReview['versions'] | null {
@@ -75,11 +87,11 @@ const validVersion = (v: string) => v.length <= 64 && /^(0|[1-9][0-9]*)\.(0|[1-9
 const compare = (a: string, b: string) => { const aa = a.split('.').map(BigInt), bb = b.split('.').map(BigInt); for (let i = 0; i < 3; i++) if (aa[i] !== bb[i]) return aa[i]! > bb[i]! ? 1 : -1; return 0 }
 
 /** The finite sourced form is interpreted here; the Host never fills native defaults. */
-function reviewPublication(effect: ConnectionSetupPublicationEffect, states: Record<string, string>, draft: ConnectionSetupPublicationDraft | null, creator: ConnectionSetupAccount | null, provenance: SetupPublicationProvenance, profilePlanning = false): SetupPublicationPlan {
+function reviewPublication(effect: ConnectionSetupPublicationEffect, states: Record<string, string>, draft: ConnectionSetupPublicationDraft | null, creator: ConnectionSetupAccount | null, provenance: SetupPublicationProvenance): SetupPublicationPlan {
   const pending = read(states.pending), detail = read(states.version), features = read(states.features), versions = versionList(read(states.versions)), issues: string[] = []
   const review: ConnectionSetupPublicationReview = { versions: versions ?? [], selectedVersion: null, changes: [], audience: null, proposedAudience: null, entries: null, sharing: null, reasonRequired: null, creatorAudienceAvailable: creator !== null, issues }
   const { initialVersion, creatorIsCurrent, profileUpdate } = provenance
-  const profileMode = Boolean(profileUpdate) || profilePlanning
+  const profileMode = Boolean(profileUpdate)
   const profileVersion = profileMode ? nextProfileVersion(read(states.versions)) : null
   if (profileUpdate && !label(profileUpdate.readbackStepId)) issues.push('The original profile readback is unconfirmed')
   const requiredSubjects = [...connectionSetupPublicationSubjects(effect)]
@@ -229,8 +241,7 @@ function nextProfileVersion(data: Record<string, unknown> | null): string | null
 export function feishuProfilePublicationDraft(states: Record<string, string>, notes: string): Extract<ConnectionSetupPublicationDraft, { kind: 'create-version' }> | null {
   const version = nextProfileVersion(read(states.versions))
   if (!version) return null
-  const draft = { kind: 'create-version' as const, version, notes, visibility: 'current' as const }
-  return reviewPublication('create-application-version', states, draft, null, { creatorIsCurrent: false, initialVersion: null }, true).privateIntent ? draft : null
+  return { kind: 'create-version', version, notes, visibility: 'current' }
 }
 
 export function reviewFeishuPublication(effect: ConnectionSetupPublicationEffect, states: Record<string, string>, draft: ConnectionSetupPublicationDraft | null, creator: ConnectionSetupAccount | null, provenance: SetupPublicationProvenance = { creatorIsCurrent: false, initialVersion: null }): SetupPublicationPlan {
