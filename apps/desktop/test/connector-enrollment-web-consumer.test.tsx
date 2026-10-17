@@ -156,6 +156,37 @@ it('keeps independently available creation after list failure and reaches native
   expect(dom.draft('agent-1')).toBe('Keep my draft')
 }, 20_000)
 
+it('submits the AMUX default name, description and original icon in the first Console creation', async () => {
+  await dom.render(<MountedSettings />)
+  await click('[data-enrollment-new]')
+  const name = dom.container.querySelector<HTMLInputElement>('[aria-label="New bot name"]')!.value
+  expect(name).toMatch(/^AMUX-[0-9A-F]{8}$/u)
+  await reachAccount()
+  await click('[data-enrollment-action="confirm-account"]')
+  await vi.waitFor(() => expect(dom.container.querySelector('[data-enrollment-action="create"]')).not.toBeNull())
+  const begin = calls.find(call => call.method === 'connection.enrollment.begin')!.input as import('@agentmux/core/connections').ConnectionEnrollmentBeginInput
+  expect(begin.preset).toEqual({ name, description: 'Conversations with your agents in AMUX.', avatar: { pngDataUrl: 'data:image/png;base64,' + asset.toString('base64') } })
+  await click('[data-enrollment-action="create"]')
+  await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('[data-enrollment-saved]')).not.toBeNull() }, { timeout: 6000 })
+  const writes = platform.filter(call => call.path.startsWith('/developers/'))
+  expect(writes.map(call => call.path)).toEqual(['/developers/v1/app/upload/image', '/developers/v1/manifest/upsert_by_template', '/developers/v1/secret/' + APP.appId])
+  const upload = writes[0]!.body as FormData, icon = upload.get('file') as File
+  expect(icon.type).toBe('image/png')
+  expect(Buffer.from(await icon.arrayBuffer())).toEqual(asset)
+  expect(upload.get('scale')).toBe('{"width":512,"height":512}')
+  expect(JSON.parse(String(writes[1]!.body))).toMatchObject({
+    appManifestTemplateID: 'developer_console',
+    createAppUserCustomField: {
+      avatar: 'https://images.example.test/settings-bot.png',
+      i18n: { zh_cn: { name, description: 'Conversations with your agents in AMUX.' } },
+      primaryLang: 'zh_cn'
+    }
+  })
+  expect(calls.filter(call => call.method === 'connection.enrollment.begin')).toHaveLength(1)
+  expect(calls.some(call => call.method === 'connection.profile.sync')).toBe(false)
+  expect((await services.connections.list()).connections[0]!.config.label).toBe(name)
+}, 20_000)
+
 it.each(['headers', 'body'] as const)('ends only the original QR init observation when its %s stall, then explicitly renews the same setup', async phase => {
   const timeout = AbortSignal.timeout.bind(AbortSignal)
   // Compress only the native request clock; Unix IPC and React keep their real scheduling.
