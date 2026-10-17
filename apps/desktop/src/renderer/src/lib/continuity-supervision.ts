@@ -37,9 +37,15 @@ export function continuitySupervisionPresentation(session: Agent) {
   const inputUnconfirmed = root.previousInput?.outcome === 'unknown' || root.launchInput && ['prepared', 'unknown', 'launch-carried'].includes(root.launchInput.state) ||
     root.recoveryDelivery && !['accepted', 'not-applied', 'superseded'].includes(root.recoveryDelivery.phase)
   if (supervision.phase === 'settled' && contextConfirmed && !inputUnconfirmed) return null
+  // Core keeps this original intent available to observe a later frontend exit.
+  // A healthy connection alone neither needs a context-check banner nor confirms context.
+  const frontendAttached = supervision.phase === 'observing' && supervision.reason === 'frontend-attached' && !targetChanged &&
+    session.terminalFrontend?.state === 'attached' && session.terminalFrontend.run.runId === session.control.run.runId
+  const frontendNormalExit = supervision.phase === 'settled' && supervision.reason === 'frontend-normal-exit' && !targetChanged
+  if ((frontendAttached || frontendNormalExit) && !inputUnconfirmed) return null
   const title = supervision.phase === 'cancelled' ? 'Automatic recovery cancelled'
     : waitingForInitialAttempt ? supervision.phase === 'paused' ? 'Initial recovery paused' : 'Waiting for initial recovery'
-    : targetChanged ? 'Original recovery target is unconfirmed' : { observing: 'Checking restored context', 'retry-wait': 'Recovery retry scheduled', paused: 'Recovery paused',
+    : targetChanged ? 'Original recovery target is unconfirmed' : frontendAttached ? 'Original input needs review' : { observing: 'Checking restored context', 'retry-wait': 'Recovery retry scheduled', paused: 'Recovery paused',
     settled: 'Original input needs review', cancelled: 'Automatic recovery cancelled' }[supervision.phase]
   const process = supervision.process
   const processDetail = session.processState === 'exited'

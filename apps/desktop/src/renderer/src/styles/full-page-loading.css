@@ -61,6 +61,9 @@
 .full-page-loading--region.full-page-loading--failed { --recovery-accent: var(--red); }
 .full-page-loading--region .full-page-loading__details[open] summary { color: var(--text-2); }
 .full-page-loading--region .full-page-loading__details dl { padding-top: var(--sp-3); border-top: 1px solid var(--line-soft); }
+.session-frontend-diagnostic { width: 100%; min-width: 0; margin-top: var(--sp-6); font-size: var(--fs-meta); line-height: 1.5; }
+.session-frontend-diagnostic > span { color: var(--text-3); }
+.session-frontend-diagnostic pre { max-height: 12em; overflow: auto; margin: var(--sp-3) 0 0; padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-2); font: var(--fs-meta)/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 @keyframes full-page-loading-arrive { from { opacity: 0; translate: 0 4px; } to { opacity: 1; translate: 0 0; } }
 @container (max-width: 440px) {
   .full-page-loading--region .full-page-loading__stage { padding: var(--sp-7); }
