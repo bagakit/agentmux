@@ -5,7 +5,7 @@ import type { SessionHistoryReference } from '../../../shared/contracts'
 import { MailboxCopyAction, MailboxDraftAction, MailboxEmpty, MailboxRecordRow, MailboxSourceNotice, MailboxTime } from './MailboxReading'
 
 /** Delivery is an original transport fact; reading never accepts a task. */
-export function a2aDeliveryLabel(delivery: AgentMuxMessageMetadata['delivery']): string {
+function a2aDeliveryLabel(delivery: AgentMuxMessageMetadata['delivery']): string {
   if (delivery.state === 'queued') return delivery.reason ? 'Delivery unconfirmed' : 'Saved · delivery pending'
   if (delivery.state === 'delivered') return 'Delivered'
   if (delivery.state === 'failed') return 'Delivery failed'
@@ -15,6 +15,21 @@ export function a2aDeliveryLabel(delivery: AgentMuxMessageMetadata['delivery']):
   if (delivery.state === 'cancelled') return 'Delivery cancelled'
   const unknown: never = delivery.state
   return unknown
+}
+
+type MessageDelivery = Pick<AgentMuxMessageMetadata, 'deliveryMode' | 'notification' | 'delivery'>
+
+/** Inbox persistence and notification input do not attest original-body reading. */
+export function a2aMessageDeliveryLabel(message: MessageDelivery): string {
+  if (message.deliveryMode !== 'reference') return a2aDeliveryLabel(message.delivery)
+  const state = message.notification?.state
+  return state === 'submitted' ? 'Saved to inbox · Notification submitted'
+    : state === 'unconfirmed' ? 'Saved to inbox · Notification unconfirmed'
+    : state === 'pending' ? message.notification?.notificationId ? 'Saved to inbox · Notification pending' : 'Saved to inbox · Awaiting idle notification' : 'Saved to inbox'
+}
+
+function a2aMessageDeliveryReason(message: MessageDelivery): string | undefined {
+  return message.deliveryMode === 'reference' ? message.notification?.reason : message.delivery.reason
 }
 
 export function a2aMessageKey(message: AgentMuxMessageMetadata): string { return `a2a:${message.envelope.messageId}` }
@@ -87,7 +102,8 @@ export function MailboxA2A(props: Props) {
   }, [active, scope, selectedId, props.readMessage])
   const current = detail?.scope === scope && detail.messageId === selectedId ? detail : undefined
   const record = current?.record
-  const delivery = selected?.delivery ?? record?.delivery
+  const deliveryMessage = selected ?? record
+  const deliveryReason = deliveryMessage ? a2aMessageDeliveryReason(deliveryMessage) : undefined
   const issues = <>
     {props.error ? <MailboxSourceNotice title="Message reading is unconfirmed" message={props.error} action="Refresh messages" onAction={() => void props.refresh()} /> : null}
     {props.observationError ? <MailboxSourceNotice title="Automatic message updates are unavailable" message={props.observationError} action="Refresh messages" onAction={() => void props.refresh()} /> : null}
@@ -112,10 +128,11 @@ export function MailboxA2A(props: Props) {
           <dt>Sender Run</dt><dd>{record.envelope.senderRunId ?? 'Not recorded'}</dd>
           <dt>Recipient Run</dt><dd>{record.envelope.recipientRunId ?? 'Not determined at first save'}</dd>
           <dt>Saved</dt><dd><MailboxTime value={record.envelope.createdAt} complete /></dd>
-          <dt>Last observed delivery</dt><dd>{a2aDeliveryLabel(delivery!)}{delivery!.reason ? ` · ${delivery!.reason}` : ''}</dd>
+          <dt>{deliveryMessage?.deliveryMode === 'reference' ? 'Last observed notification' : 'Last observed delivery'}</dt><dd>{a2aMessageDeliveryLabel(deliveryMessage!)}{deliveryReason ? ` · ${deliveryReason}` : ''}</dd>
+          {deliveryMessage?.notification?.notificationId ? <><dt>Notification input</dt><dd><code>{deliveryMessage.notification.notificationId}</code></dd></> : null}
         </dl>} />
-      <p className="composer-mailbox__source">{a2aDeliveryLabel(delivery!)}. Reading does not acknowledge this message or accept its task.</p>
-      {delivery!.reason ? <p className="composer-mailbox__risk">{delivery!.reason}</p> : null}
+      <p className="composer-mailbox__source">{a2aMessageDeliveryLabel(deliveryMessage!)}. Reading does not acknowledge this message or accept its task.</p>
+      {deliveryReason ? <p className="composer-mailbox__risk">{deliveryReason}</p> : null}
     </>}
   </article>
   return <>{issues}<div className="composer-mailbox__reading-tools"><span>{direction === 'incoming' ? 'Other Agents → this Agent' : 'This Agent → other Agents'} · {items.length} loaded</span>
@@ -124,7 +141,7 @@ export function MailboxA2A(props: Props) {
       {recent.map(item => <li key={item.envelope.messageId}><MailboxRecordRow recordKey={a2aMessageKey(item)}
         label={`${direction === 'incoming' ? 'From' : 'To'} ${name(peerId(item))}`} text={undefined} bodyPreview={item.bodyPreview}
         source={<>{peerId(item)} · {item.envelope.messageId}</>}
-        metadata={<><MailboxTime value={item.envelope.createdAt} /><span>{a2aDeliveryLabel(item.delivery)}</span></>}
+        metadata={<><MailboxTime value={item.envelope.createdAt} /><span>{a2aMessageDeliveryLabel(item)}</span></>}
         onOpen={props.onOpen} />
         <div className="composer-mailbox__record-actions">
           {onCopy ? <MailboxCopyAction value={item.envelope.messageId} onCopy={async () => onCopy((await readForAction(item.envelope.messageId)).envelope.body)} /> : null}
