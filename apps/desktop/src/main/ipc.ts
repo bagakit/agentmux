@@ -87,7 +87,7 @@ import { sessionAgentLaunchResult } from '../shared/session-agent-launch-result.
 import { CONTINUOUS_PROGRESS_CHANGED, SCHEDULE_CHANGED, NATIVE_BROWSER_VISIBILITY_CHANNEL, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts.js'
 import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
-import { inspectDesktopClient } from './client-observation.js'
+import { inspectDesktopClient, registerLoadedIdentityIpc } from './client-observation.js'
 import { inspectMoteContext, moteContextEvidencePort } from './mote-context-observation.js'
 import { observeClientRpcSnapshot } from './rpc-client-observations.js'
 import { SessionHistoryObservationOwners } from './session-history-observation.js'
@@ -666,6 +666,8 @@ export async function registerIpc(args: {
    */
   const requireTrustedSender = (channel: PrivilegedChannel, event: IpcMainInvokeEvent): void =>
     assertSenderTrusted(senderTrust(channel, event.sender, contents))
+  registerLoadedIdentityIpc({ handleWithEvent, assertTrusted: requireTrustedSender, package: args.loadedPackage ?? null,
+    renderer: () => contents.isLoadingMainFrame() ? null : args.loadedRenderer?.() ?? null })
   registerBrowserInputContextIpc({ handle: handleWithEvent, trust: requireTrustedSender, ...browserInputContextPorts })
 
   const acceptWorkbenchWindow = (event: Electron.IpcMainEvent, response: import('../shared/workbench-windows.js').WorkbenchWindowResponse) => args.workbenchWindows.accept(event, response)
