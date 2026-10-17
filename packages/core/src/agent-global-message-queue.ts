@@ -407,6 +407,13 @@ export class DurableAgentMuxMessageQueue {
     return this.withLock(async () => Boolean(this.db.prepare('SELECT 1 FROM a2a_message_notifications WHERE recipient_id=? AND submitted=0 LIMIT 1').get(agentSessionId)))
   }
 
+  /** New original references distinguish work at the same idle boundary from outcome observations. */
+  async pendingNotificationPosition(agentSessionId: string, runId: string): Promise<number> {
+    return this.withLock(async () => Number(this.db.prepare(`SELECT COALESCE(MAX(message_sequence),0) AS position
+      FROM a2a_message_notifications WHERE recipient_id=? AND run_id=? AND submitted=0 AND notification_id IS NULL`)
+      .get(agentSessionId, runId)!.position))
+  }
+
   /** Explicit user notification also resolves IDs without loading opaque original bodies. */
   async readNotificationMessages(messageIds: readonly string[]) {
     return this.withLock(async () => messageIds.map(messageId => {
@@ -422,7 +429,8 @@ export class DurableAgentMuxMessageQueue {
 
   /** Freeze the bounded original reference set atomically, before entering the Input owner. */
   async prepareNotification(input: { notificationId: string; agentSessionId: string; condition: AgentPromptCondition;
-    idle?: AgentMuxMessageNotification['idle']; messageIds?: readonly string[] }): Promise<AgentMuxMessageNotification | null> {
+    idle?: AgentMuxMessageNotification['idle']; messageIds?: readonly string[];
+    originalInputAbsent?: () => Promise<boolean> }): Promise<AgentMuxMessageNotification | null> {
     return this.withLock(async () => {
       const condition = validateAgentPromptCondition(input.condition)
       const existing = this.notification(input.notificationId)
@@ -456,6 +464,9 @@ export class DurableAgentMuxMessageQueue {
         key: { kind: 'prompt', agentSessionId: input.agentSessionId, expectedRun: condition.expectedRun, submissionId: input.notificationId },
         messageIds: references.map(reference => reference.messageId), wire, condition,
         mode: input.idle ? 'idle' : 'steer', ...(input.idle ? { idle: input.idle } : {}), state: 'pending' }
+      if (this.db.prepare('SELECT 1 FROM input_intents WHERE input_id=?').get(agentInputJournalKey(notice.key)) ||
+          input.originalInputAbsent && !await input.originalInputAbsent()) throw new AgentMuxError(
+        'Another original input already owns this notification operation ID.', 'AGENT_PROMPT_OPERATION_CONFLICT')
       await this.appendRecord({ kind: 'a2a-notification', sequence: this.nextSequence, notification: notice })
       return this.notification(input.notificationId)!
     }, true)
@@ -562,6 +573,8 @@ export class DurableAgentMuxMessageQueue {
   async savePromptInput(intent: AgentInputJournalIntent, originalClaimAbsent?: () => Promise<boolean>): Promise<AgentInputJournalEntry | null> {
     return this.withLock(async () => {
       const key = validateAgentPromptInputKey(intent.key), existing = this.input(key)
+      if (key.kind === 'prompt' && this.notification(key.submissionId)) throw new AgentMuxError(
+        'This input identity belongs to an original Inbox notification.', 'AGENT_PROMPT_OPERATION_CONFLICT')
       if (existing) {
         if (!isDeepStrictEqual(existing.intent.source, intent.source) || !isDeepStrictEqual(existing.intent.admissionIntent, intent.admissionIntent) || existing.intent.execution !== intent.execution) throw new AgentMuxError('Input identity already names another original content, author or target intent.', 'AGENT_PROMPT_OPERATION_CONFLICT')
         return existing
@@ -635,10 +648,10 @@ export class DurableAgentMuxMessageQueue {
   }
 
   /** Only the original metadata claim runs here; no Provider or Native awaits. */
-  async withUncontrolledInputClaim<T>(key: import('./agent-prompt-condition.js').AgentPromptInputKey, claim: () => Promise<T>, originalClaim?: () => Promise<boolean>): Promise<T> {
+  async withUncontrolledInputClaim<T>(key: import('./agent-prompt-condition.js').AgentPromptInputKey, claim: () => Promise<T>, originalClaim?: () => Promise<boolean>, expectedNotificationId?: string): Promise<T> {
     return await this.withLock(async () => {
       const notice = key.kind === 'prompt' ? this.notification(key.submissionId) : undefined
-      if (notice && (notice.state !== 'pending' || !isDeepStrictEqual(notice.key, key))) throw new AgentMuxError(
+      if (notice ? expectedNotificationId !== notice.notificationId || notice.state !== 'pending' || !isDeepStrictEqual(notice.key, key) : expectedNotificationId !== undefined) throw new AgentMuxError(
         'This original notification no longer authorizes a new input claim.', 'A2A_NOTIFICATION_CONFLICT')
       if (this.input(key)) throw new AgentMuxError('The original controlled input requires its journal gate and intent.', 'AGENT_PROMPT_OPERATION_CONFLICT')
       if (this.db.prepare('SELECT 1 FROM input_intents WHERE input_id=?').get(agentInputJournalKey(key)) && (!originalClaim || !await originalClaim())) throw new AgentMuxError('This accepted original input has no available admission to rejoin. Its recorded identity is retained.', 'AGENT_INPUT_READ_UNCONFIRMED')

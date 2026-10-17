@@ -1,6 +1,8 @@
 import { AgentMuxError } from './errors.js'
 import { validateAgentPromptCondition, validateAgentPromptInputKey, type AgentPromptCondition, type AgentPromptInputKey } from './agent-prompt-condition.js'
 import { messageEnvelopeString } from './agent-message-envelope.js'
+import { isDeepStrictEqual } from 'node:util'
+import type { AgentPromptSubmissionRecord } from './types.js'
 
 export const MAX_A2A_NOTIFICATION_BYTES = 64 * 1024
 
@@ -24,6 +26,19 @@ export type AgentMuxMessageNotificationStatus = {
   notificationId?: string
   key?: Extract<AgentPromptInputKey, { kind: 'prompt' }>
   reason?: string
+}
+
+/** Only the original platform producer can supply a notification's input outcome. */
+export function isMessageNotificationInput(notice: AgentMuxMessageNotification, record: AgentPromptSubmissionRecord | null): record is AgentPromptSubmissionRecord {
+  const admission = record?.admission, intent = admission?.intent
+  return record?.agentSessionId === notice.key.agentSessionId && isDeepStrictEqual(record.run, notice.key.expectedRun) &&
+    isDeepStrictEqual(admission?.inputKey, notice.key) && admission?.submissionId === notice.notificationId &&
+    isDeepStrictEqual(intent?.run, notice.key.expectedRun) && intent?.prompt === notice.wire &&
+    isDeepStrictEqual(intent.message, { systemContext: notice.wire, a2aNotificationId: notice.notificationId }) &&
+    (notice.mode === 'idle'
+      ? intent.execution === 'default' && isDeepStrictEqual(intent.admissionIntent, { kind: 'exact-condition', condition: notice.condition }) &&
+        admission.completionId === notice.idle?.completionId && intent.plan.kind === 'native-rpc' && intent.plan.operation === 'queue-idle'
+      : intent.execution === 'immediate' && isDeepStrictEqual(intent.admissionIntent, { kind: 'manual-actor', expectedRun: notice.key.expectedRun }))
 }
 
 export function validateMessageNotification(value: AgentMuxMessageNotification): AgentMuxMessageNotification {
