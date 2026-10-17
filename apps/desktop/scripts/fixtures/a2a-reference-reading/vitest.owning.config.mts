@@ -26,7 +26,8 @@ export default defineConfig({
     { find: /^react-dom(?:\/(.*))?$/u, replacement: resolve(root, 'packages/client-ui/node_modules/react-dom') + '/$1' }] },
   plugins: [{ name: 'a2a-reference-actual-compiler-input', enforce: 'pre', transform(code, id) {
     const file = id.split('?')[0]!
-    if (!['packages/core/src/', 'packages/client-ui/src/', 'packages/identity/src/', 'apps/desktop/src/'].some(path => file.startsWith(resolve(root, path) + '/'))) return
+    if (!['packages/core/src/', 'packages/client-ui/src/', 'packages/identity/src/', 'apps/desktop/src/',
+      'packages/core/test/', 'packages/client-ui/test/', 'apps/desktop/test/', 'apps/desktop/scripts/lib/', 'test/'].some(path => file.startsWith(resolve(root, path) + '/'))) return
     const before = code, mutation = process.env.AGENTMUX_A2A_REFERENCE_MUTATION
     const edit = mutation ? readingMutations.find(item => item.label === mutation) : undefined
     if (mutation && !edit) throw new Error('Unknown A2A reference mutation')
@@ -50,6 +51,7 @@ export default defineConfig({
     'packages/client-ui/test/a2a-reference-reading.test.tsx',
     'packages/client-ui/test/conversation-leading-context.test.tsx',
     'apps/desktop/test/mailbox-a2a.test.tsx',
-    'apps/desktop/test/input-mailbox-body-boundary.test.tsx'
+    'apps/desktop/test/input-mailbox-body-boundary.test.tsx',
+    'apps/desktop/test/session-mailbox-author-boundary.test.tsx'
   ] }
 })
