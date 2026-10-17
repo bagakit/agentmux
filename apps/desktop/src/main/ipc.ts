@@ -112,11 +112,6 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
-/** The paste write and the pasted-image read share ONE extension whitelist and ONE byte cap
- *  (`PASTED_IMAGE_*` in contracts). A `Set` is derived here for the `.has()` membership test; the
- *  tuple itself stays the SSOT so the read side cannot drift from what the write accepted. */
-const PASTED_IMAGE_EXTENSION_SET = new Set<string>(PASTED_IMAGE_EXTENSIONS)
-
 import {
   app,
   clipboard,
@@ -187,7 +182,6 @@ import type {
 import type { AgentMuxControlErrorCode, AgentMuxInteractionResponse } from '@agentmux/core'
 import type { SessionHistoryPageOptions } from '../shared/contracts.js'
 import { BROWSER_PNG_MAX_BASE64_CHARS, AGENT_ATTENTION_ACTIVATE_CHANNEL, CONTROL_CANCEL_CHANNEL, CONTROL_REQUEST_CHANNEL, CONTROL_RESPONSE_CHANNEL, SESSION_HISTORY_OBSERVATION_CHANNEL, WORKSPACE_FILE_INVALIDATED_CHANNEL } from '../shared/contracts.js'
-import { PASTED_IMAGE_EXTENSIONS, PASTED_IMAGE_MAX_BYTES } from '@agentmux/client-ui/pasted-images'
 import { createAgentNotifier } from './agent-notifier.js'
 import { ExternalBrowserBridge } from './browser-external-bridge.js'
 import { ExternalBrowserOwner } from './browser-external-owner.js'
@@ -211,7 +205,7 @@ import { BrowserProfileManager } from './browser-profile-manager.js'
 import { BrowserInputHistoryStore } from './browser-input-history.js'
 import type { BrowserInputHistoryTarget, BrowserInputHistoryScope } from '../shared/browser-input-history.js'
 import { browserPngFromBytes, nativeImageFromBrowserPng } from './browser-image.js'
-import { pastedDirectory } from './pasted-directory.js'
+import { savePastedImage } from './pasted-image-write.js'
 import { readPastedImage } from './pasted-image-read.js'
 import { ConfigStore } from './config-store.js'
 import { ConfigOwner } from './config-owner.js'
@@ -1481,15 +1475,7 @@ export async function registerIpc(args: {
     requireTrustedSender('ui:savePastedImage', event)
     // A CLI Agent reads images from disk, so a paste becomes a file it can open. The renderer supplies
     // bytes only — never a destination — so it cannot aim this write anywhere.
-    const bytes = Buffer.from(input.bytes)
-    if (bytes.byteLength === 0) throw new Error('Pasted image is empty.')
-    if (bytes.byteLength > PASTED_IMAGE_MAX_BYTES) throw new Error('Pasted image exceeds the size limit.')
-    const extension = PASTED_IMAGE_EXTENSION_SET.has(input.extension) ? input.extension : 'png'
-    const directory = pastedDirectory(app.getPath('home'))
-    await mkdir(directory, { recursive: true, mode: 0o700 })
-    const path = join(directory, `paste-${Date.now()}-${randomUUID().slice(0, 8)}.${extension}`)
-    await writeFile(path, bytes, { mode: 0o600 })
-    return path
+    return (await savePastedImage(app.getPath('home'), input)).path
   })
   handle('ui:readPastedImage', (path: string) => readPastedImage(app.getPath('home'), path))
   handleWithEvent('ui:revealCrashLog', async (event) => {
