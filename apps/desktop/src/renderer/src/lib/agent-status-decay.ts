@@ -5,12 +5,14 @@ import { useEffect } from 'react'
 // 同 api.ts 用 '@agentmux/core/launch-option' 的理由。
 import {
   DECAYED_SEMANTIC_STATE,
+  agentActivityRemainingMs,
   agentDisplayState,
   msUntilSemanticStatusStale,
   semanticStatusStale
 } from '@agentmux/core/agent-status'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { useAppStore } from '../store'
+import { observeAgentSession } from './agent-observation'
 
 // 让「永远转的圈」停下。
 //
@@ -72,8 +74,9 @@ export function nextAgentStatusDecayDelayMs(
 ): number | null {
   const delays = sessions.flatMap((session) => {
     if (session.kind !== 'agent') return []
-    const ms = msUntilSemanticStatusStale(session.status, now)
-    return ms > 0 ? [ms] : []
+    const status = msUntilSemanticStatusStale(session.status, now)
+    const activity = agentActivityRemainingMs(observeAgentSession(session, now), now)
+    return [status, activity].filter(ms => ms > 0)
   })
   if (delays.length === 0) return null
   return Math.max(1, Math.min(...delays))
@@ -94,7 +97,14 @@ export function useAgentStatusDecay(): void {
     decay(Date.now())
     const delay = nextAgentStatusDecayDelayMs(useAppStore.getState().sessions, Date.now())
     if (delay === null) return
-    const timer = window.setTimeout(() => decay(Date.now()), delay)
+    const timer = window.setTimeout(() => {
+      const observed = useAppStore.getState().sessions
+      decay(Date.now())
+      // Native currentActivity can expire while display status is already running.
+      // Invalidate cached presentation once at its Core deadline; keep every fact
+      // and Session object intact. The next effect has no expired deadline to arm.
+      if (useAppStore.getState().sessions === observed) useAppStore.setState({ sessions: [...observed] })
+    }, delay)
     return () => window.clearTimeout(timer)
   }, [sessions, decay])
 }
