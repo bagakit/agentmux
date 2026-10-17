@@ -104,7 +104,8 @@ export async function arrangeCollaboration(input: CollaborationLayoutInput, sign
     if (source === target) { const list = within.get(source) ?? []; list.push(edge); within.set(source, list) }
     else between.push({ source, target })
   }
-  const viz = await graphviz(signal), local = new Map<string, CollaborationLayoutBox[]>(), groups: { id: string; width: number; height: number }[] = []
+  const local = new Map<string, CollaborationLayoutBox[]>(), groups: { id: string; width: number; height: number }[] = []
+  const emptyAreas: typeof input.areas[number][] = []
   for (const area of input.areas) {
     signal?.throwIfAborted()
     const members = area.members.map(id => {
@@ -112,10 +113,11 @@ export async function arrangeCollaboration(input: CollaborationLayoutInput, sign
       if (!node || node.areaId !== area.id || seen.has(id)) throw Error('Original area membership is inconsistent. Existing map positions are kept.')
       seen.add(id); return node
     })
-    if (area.folded || !members.length) {
-      local.set(area.id, []); groups.push({ id: area.id, width: 276, height: members.length ? 54 : COLLABORATION_AREA_HEADER }); continue
+    if (!members.length) { emptyAreas.push(area); continue }
+    if (area.folded) {
+      local.set(area.id, []); groups.push({ id: area.id, width: 276, height: 54 }); continue
     }
-    const placed = positions(viz, members, within.get(area.id) ?? [], 'sfdp')
+    const placed = positions(await graphviz(signal), members, within.get(area.id) ?? [], 'sfdp')
     const boxes = members.map(node => ({ id: node.id, areaId: area.id, kind: 'agent' as const, folded: false,
       x: placed.get(node.id)!.x - node.width / 2, y: placed.get(node.id)!.y - node.height / 2, width: node.width, height: node.height }))
     const extent = bounds(boxes.flatMap(box => [{ x: box.x, y: box.y }, { x: box.x + box.width, y: box.y + box.height }]))
@@ -124,11 +126,22 @@ export async function arrangeCollaboration(input: CollaborationLayoutInput, sign
   }
   if (seen.size !== nodes.size) throw Error('Some original members have no original area. Existing map positions are kept.')
   signal?.throwIfAborted()
-  const arranged = positions(viz, groups, between, 'fdp'), output: CollaborationLayoutBox[] = []
+  const arranged = groups.length ? positions(await graphviz(signal), groups, between, 'fdp') : new Map<string, CollaborationLayoutPoint>()
+  const output: CollaborationLayoutBox[] = []
   for (const group of groups) {
     const point = arranged.get(group.id)!, x = point.x - group.width / 2, y = point.y - group.height / 2
     output.push({ ...group, areaId: group.id, kind: 'area', x, y, folded: areas.get(group.id)!.folded })
     for (const box of local.get(group.id)!) output.push({ ...box, x: box.x + x, y: box.y + y })
+  }
+  // Empty original places remain discoverable without exerting force on occupied work areas.
+  const occupied = output.length ? bounds(output.filter(box => box.kind === 'area').flatMap(box => [{ x: box.x, y: box.y }, { x: box.x + box.width, y: box.y + box.height }])) : { x: 0, y: 0, width: 0, height: 0 }
+  const emptyWidth = 184, emptyHeight = 32, shelfGap = 12
+  const columns = groups.length ? Math.max(1, Math.floor((occupied.width + shelfGap) / (emptyWidth + shelfGap))) : 4
+  const shelfY = occupied.y + occupied.height + (groups.length ? gap : 0)
+  for (const [index, area] of emptyAreas.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0).entries()) {
+    signal?.throwIfAborted()
+    output.push({ id: area.id, areaId: area.id, kind: 'area', folded: area.folded,
+      x: occupied.x + index % columns * (emptyWidth + shelfGap), y: shelfY + Math.floor(index / columns) * (emptyHeight + shelfGap), width: emptyWidth, height: emptyHeight })
   }
   return output
 }
@@ -140,7 +153,7 @@ class Obstacles {
   private extent: CollaborationLayoutBounds
   constructor(boxes: readonly CollaborationLayoutBox[]) {
     for (const original of boxes) {
-      const box = original.kind === 'area' && !original.folded ? { ...original, height: COLLABORATION_AREA_HEADER } : original
+      const box = original.kind === 'area' && !original.folded ? { ...original, height: Math.min(original.height, COLLABORATION_AREA_HEADER) } : original
       if (this.byId.has(box.id) || !dimension(box.width) || !dimension(box.height) || !Number.isFinite(box.x) || !Number.isFinite(box.y)) throw Error('Original fixed map geometry is inconsistent. Existing connections are kept.')
       this.byId.set(box.id, box)
       for (const key of this.keys(box)) { const values = this.cells.get(key) ?? []; values.push(box); this.cells.set(key, values) }
