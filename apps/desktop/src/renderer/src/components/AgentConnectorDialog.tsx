@@ -297,7 +297,7 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
     {session.nativeHandle?.kind !== 'provider' ? <p role="status" className="agent-connector-note">The Agent’s conversation source is not confirmed yet. You can keep working locally.</p> : null}
   </section>
   const applicationChoice = <SelectionField id={fieldId + '-application'} label="Group application" value={connectionId} disabled={busy}
-    triggerLabel={connection ? 'Change' : 'Choose'} className="agent-connector-source__change"
+    triggerLabel={connection ? 'Change' : 'Choose'} className="agent-connector-source__change" menuClassName="agent-connector-application-menu"
     onValueChange={value => { initialized.current = true; explicitlySelected.current = true; setConnectionId(value); setGroup(''); setConfirmed(false) }} options={[{ value: '', label: 'Choose an application…' }, ...connections.filter(item => !connectionNeedsInitialSetup(item) || item.config.connectionId === connectionId && (!!binding || !!roomIntent || !!bindingIntent)).map(item => ({ value: item.config.connectionId, label: item.config.label, disabled: !item.config.enabled, description: connectionIdentityObservation(item).label + ' · ' + item.config.application.domain + ' · ' + item.config.application.appId }))]} />
   const identityObservation = connection ? connectionIdentityObservation(connection) : null
   const defaultChoice = moteDefault.ref ? moteConnectionChoice(moteDefault.ref, connections) : null
