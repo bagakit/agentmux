@@ -31,4 +31,5 @@
 .browser-contextual-composer > footer button { flex: none; }
 
 .browser-trace-rail--floating { position: fixed; z-index: var(--layer-popover); width: 360px; max-width: calc(100vw - 16px); max-height: min(520px, calc(100vh - 80px)); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface-2); box-shadow: var(--elev-2); pointer-events: auto; }
+.browser-trace-rail .browser-rsi-history__list { max-height: min(160px, 24vh); overflow-y: auto; }
 .browser-trace-held { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: var(--sp-3); font-size: var(--fs-micro); color: var(--text-3); }
