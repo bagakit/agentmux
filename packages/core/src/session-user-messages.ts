@@ -57,7 +57,7 @@ export function projectSessionUserMessages(params: {
   // 1. Process native user messages from historyPage (only if matching the target agentSessionId)
   if (historyPage && historyPage.items && historyPage.agentSessionId === agentSessionId) {
     for (const item of historyPage.items) {
-      if (item.kind !== 'user-message') continue
+      if (item.kind !== 'user-message' || item.conversation?.adoptedInput?.purpose === 'a2a-notification') continue
       const stableId = buildNativeMessageStableId(
         historyPage.source.providerId,
         historyPage.source.nativeSessionId,

@@ -192,9 +192,15 @@ export function normalizeAgentTimelineItem(value: unknown): AgentTimelineItem {
     source.source !== 'user' || typeof source.content !== 'string' || !source.content)) {
     throw new AgentMuxError('Timeline user-content boundary is invalid.', 'INVALID_AGENT_TIMELINE')
   }
+  const a2aNotificationId = source.a2aNotificationId === undefined ? undefined : text(source.a2aNotificationId, 'A2A notification input ID')
+  if (a2aNotificationId !== undefined && (source.kind !== 'system_message' || source.source !== 'agentmux' ||
+      source.authorHuman !== undefined || source.authorAgentSessionId !== undefined || source.authorExternal !== undefined)) throw new AgentMuxError(
+    'An A2A notification must retain its original platform source.', 'INVALID_AGENT_TIMELINE')
   const inputRef = source.inputRef === undefined ? undefined : validateAgentPromptInputKey(source.inputRef)
-  if (inputRef && (source.kind !== 'user_message' || source.source !== 'user' || source.publicContent !== 'confirmed' || inputRef.agentSessionId !== source.agentSessionId))
+  if (inputRef && (inputRef.agentSessionId !== source.agentSessionId || !(source.kind === 'user_message' && source.source === 'user' && source.publicContent === 'confirmed' ||
+      source.kind === 'system_message' && source.source === 'agentmux' && a2aNotificationId !== undefined && inputRef.kind === 'prompt' && inputRef.submissionId === a2aNotificationId)))
     throw new AgentMuxError('Timeline input identity does not describe its original public user submission.', 'INVALID_AGENT_TIMELINE')
+  if (a2aNotificationId !== undefined && (!inputRef || inputRef.kind !== 'prompt' || inputRef.submissionId !== a2aNotificationId)) throw new AgentMuxError('A platform notification requires its exact original input key.', 'INVALID_AGENT_TIMELINE')
   if (source.authorExternal !== undefined && (authorAgent.authorAgentSessionId !== undefined || source.authorHuman === true)) throw new AgentMuxError('External attribution cannot claim another author.', 'INVALID_AGENT_TIMELINE')
   if (source.activityState !== undefined && source.kind !== 'lifecycle') {
     throw new AgentMuxError('Activity state requires a lifecycle item.', 'INVALID_AGENT_TIMELINE')
@@ -212,6 +218,7 @@ export function normalizeAgentTimelineItem(value: unknown): AgentTimelineItem {
     ...(contentEligibility === undefined ? {} : { contentEligibility }),
     ...(source.publicContent === undefined ? {} : { publicContent: 'confirmed' as const }),
     ...(inputRef ? { inputRef } : {}),
+    ...(a2aNotificationId === undefined ? {} : { a2aNotificationId }),
     ...authorAgent,
     ...(source.authorExternal === undefined ? {} : { authorExternal: parseAgentExternalMessageAuthor(source.authorExternal) }),
     ...(source.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(source.sourceDevice) }),
