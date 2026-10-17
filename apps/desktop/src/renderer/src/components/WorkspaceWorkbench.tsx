@@ -1788,8 +1788,9 @@ export function WorkspaceWorkbench({
   // Page content keeps full Tab facts; only home references use the structural projection.
   const homeTabs = useAppStore(useShallow(state =>
     workbenchDisplayTabs(workbenchNavigationTabs(state.tabs), workspaceId, residentLayout)))
-  const presentedAgentIds = useMemo(() => [...new Set(Object.values(tabs).flatMap(tab =>
-    Object.values(tab.regions).flatMap(region => region.kind === 'agent' ? [region.sessionId] : [])))], [tabs])
+  // Only resource owners decide content repeatability; projected chrome has no mode consumer.
+  const presentedAgentIds = useMemo(() => viewOwnership === 'owner' ? [...new Set(Object.values(tabs).flatMap(tab =>
+    tab.workspaceId === workspaceId ? Object.values(tab.regions).flatMap(region => region.kind === 'agent' ? [region.sessionId] : []) : []))] : [], [tabs, viewOwnership, workspaceId])
   const activityPresentable = useWorkbenchActivityPresentation(presentedAgentIds)
   const ordinaryDisplayIds = useMemo(() => [...new Set(Object.values(tabs).flatMap(tab =>
     tab.workspaceId === workspaceId && viewTargets?.[tab.id] ? viewTargets[tab.id]!.flatMap(target => (target.surface === 'space' || target.surface === 'mote') && target.reference ? [target.reference.displayWorkspaceId] : []) : []))], [tabs, viewTargets, workspaceId])
