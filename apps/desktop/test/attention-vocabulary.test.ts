@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { readFileSync, readdirSync } from 'node:fs'
 import ts from 'typescript'
@@ -116,10 +117,10 @@ function agentSession(id: string, state: AgentDisplayState): SessionSnapshot {
     hostId: 'local',
     workspacePath: _hygiene_fixturePath("repo"),
     label: `Agent ${id}`,
-    createdAt: 1,
-    updatedAt: 1,
+    createdAt: _tailFixtureEpoch(0, 0, 1),
+    updatedAt: _tailFixtureEpoch(0, 0, 1),
     processState: 'running',
-    status: { state, source: 'native-hook', observedAt: 1 },
+    status: { state, source: 'native-hook', observedAt: _tailFixtureEpoch(0, 0, 1) },
     latestOutputBytes: 0,
     control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: `run-${id}` } }
   } as unknown as SessionSnapshot
@@ -133,7 +134,7 @@ function quickSwitchItem(id: string, state: AgentDisplayState | null): QuickSwit
     subtitle: '',
     providerId: null,
     state,
-    observedAt: 1,
+    observedAt: _tailFixtureEpoch(0, 0, 1),
     target: { kind: 'session', sessionId: id }
   }
 }
@@ -161,13 +162,10 @@ describe('every attention surface reads the same table', () => {
     expect(attentionAccentFor('error')).toBe('error')
   })
 
-  it('the window rollup counts and jumps to exactly the table states', () => {
+  it('the Dock rollup counts exactly the table states', () => {
     for (const state of AGENT_DISPLAY_STATES) {
       const rollup = summarizeAgentAttention([agentSession('only', state)])
       expect(rollup.needsYou).toBe(isNeedsYouState(state) ? 1 : 0)
-      // The count and the jump target were two separate hand-written copies; they must not be able to
-      // disagree about a single Session.
-      expect(rollup.needsYouSessionId).toBe(isNeedsYouState(state) ? 'only' : null)
     }
   })
 
@@ -224,7 +222,7 @@ const USER_WORD_FOR_STATE: Record<AgentDisplayState, string> = {
 
 function statesInColumn(column: (typeof PROJECT_BOARD_COLUMNS)[number]): AgentDisplayState[] {
   return AGENT_DISPLAY_STATES.filter(
-    (state) => sessionBoardColumn({ status: { state, source: 'native-hook', observedAt: 1 } }) === column
+    (state) => sessionBoardColumn({ status: { state, source: 'native-hook', observedAt: _tailFixtureEpoch(0, 0, 1) } }) === column
   )
 }
 

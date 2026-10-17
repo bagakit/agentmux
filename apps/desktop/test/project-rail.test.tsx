@@ -1,10 +1,10 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { allStyles } from './helpers/styles.js'
 import type { AppConfig, SessionSnapshot, ScratchTopicSnapshot } from '../src/shared/contracts.js'
-import { producingAgentCount, workingAgentCount } from '../src/renderer/src/lib/project-board.js'
 import { projectWorkspaces, removeProjectWorkspaces, projectGroupKey, workspaceProjectId } from '../src/renderer/src/lib/workspace-projects.js'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
 import type { SpaceIconOverrides } from '../src/renderer/src/lib/space-object-appearance.js'
@@ -19,6 +19,9 @@ const fixture = vi.hoisted(() => ({
     layouts: {},
     tabs: {},
     scratchTopicOrder: [],
+    topicCategories: [],
+    projectGroups: [],
+    spaceZoneBindings: {},
     workspaceFileRevisions: {},
     openScratchTopic: vi.fn(async () => {}),
     reportError: vi.fn(),
@@ -96,10 +99,10 @@ function session(
       hostId: 'local',
       workspacePath,
       label: id,
-      createdAt: 1,
-      updatedAt: 1,
+      createdAt: _tailFixtureEpoch(0, 0, 1),
+      updatedAt: _tailFixtureEpoch(0, 0, 1),
       processState: 'running',
-      status: { state, source: 'run-process', observedAt: 1 },
+      status: { state, source: 'run-process', observedAt: _tailFixtureEpoch(0, 0, 1) },
       latestOutputBytes: 0,
       control: { kind: 'terminal', hostId: 'local', runId: `run-${id}`, run: { runId: `run-${id}` } }
     }
@@ -107,7 +110,7 @@ function session(
   return {
     id,
     kind: 'agent',
-    agentSessionUpdatedAt: 1,
+    agentSessionUpdatedAt: _tailFixtureEpoch(0, 0, 1),
     providerId: 'codex',
     executorId: 'codex',
     capabilities: {
@@ -120,10 +123,10 @@ function session(
     hostId: 'local',
     workspacePath,
     label: id,
-    createdAt: 1,
-    updatedAt: 1,
+    createdAt: _tailFixtureEpoch(0, 0, 1),
+    updatedAt: _tailFixtureEpoch(0, 0, 1),
     processState: 'running',
-    status: { state, source: 'run-process', observedAt: 1 },
+    status: { state, source: 'native-hook', observedAt: Date.now() },
     latestOutputBytes: 0,
     control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: `run-${id}` } }
   }
@@ -157,31 +160,8 @@ afterEach(() => {
   fixture.topics = []
 })
 
-describe('workingAgentCount', () => {
-  it('uses the Board working column and excludes idle, finished, and terminal sessions', () => {
-    expect(workingAgentCount([
-      session('starting', _hygiene_fixturePath("alpha"), 'starting'),
-      session('running', _hygiene_fixturePath("alpha"), 'running'),
-      session('working', _hygiene_fixturePath("alpha"), 'working'),
-      session('waiting', _hygiene_fixturePath("alpha"), 'waiting'),
-      session('done', _hygiene_fixturePath("alpha"), 'done'),
-      session('terminal', _hygiene_fixturePath("alpha"), 'running', 'terminal')
-    ])).toBe(3)
-  })
-
-  it('separates semantic production from a quiet live Session', () => {
-    expect(producingAgentCount([
-      session('starting', _hygiene_fixturePath("alpha"), 'starting'),
-      session('working', _hygiene_fixturePath("alpha"), 'working'),
-      session('running', _hygiene_fixturePath("alpha"), 'running'),
-      session('waiting', _hygiene_fixturePath("alpha"), 'waiting'),
-      session('terminal', _hygiene_fixturePath("alpha"), 'running', 'terminal')
-    ])).toBe(2)
-  })
-})
-
 describe('Project Rail selection and running signals', () => {
-  it('shows a running marker for every running project, including the selected one', () => {
+  it('marks confirmed work while keeping process-only activity unknown', () => {
     fixture.state.config = structuredClone(config)
     fixture.state.sessions = [
       session('agent-a', _hygiene_fixturePath("alpha"), 'working'),
@@ -190,12 +170,12 @@ describe('Project Rail selection and running signals', () => {
     ]
     const markup = renderRail()
     const runningRows = markup.match(/data-running="true"/g) ?? []
-    expect(runningRows).toHaveLength(2)
+    expect(runningRows).toHaveLength(1)
     expect(markup).toContain('project-rail-row--active')
     expect(markup).toContain('class="project-activity__metric project-activity__metric--working"')
-    expect(markup).toContain('class="project-activity__metric project-activity__metric--idle"')
+    expect(markup).toContain('class="project-activity__metric project-activity__metric--unknown"')
     expect(markup).toContain('Alpha · 1 Agent is working')
-    expect(markup).toContain('Beta · 1 idle')
+    expect(markup).toContain('Beta · 1 activity unknown')
     expect(markup).not.toContain('Beta · 1 Agent is working')
     expect(markup).not.toContain('Gamma · 1 Agent is working')
   })
@@ -221,13 +201,7 @@ describe('Project Rail selection and running signals', () => {
     expect(markup).toContain('project-rail-row--active')
   })
 
-  it('separates "producing now" from "merely live" without forking the count', () => {
-    // 两个词、一个数。`running` 不是边角状态而是主稳态（`unknown → 'running'` 的三条来路之一是
-    // 15 分钟静默衰减），所以「正在吐字」与「半小时前说过一句话」同在 Board 的 working 列里。
-    // 一个词盖住两者，用户就看不出哪个值得等。
-    //
-    // 这条同时钉住**计数不许跟着分叉**：两个项目各一个 Agent，词不同、数都必须是 1。#582 的四处
-    // 报出两组数就是从「同一个问题判两次」开始的，区分用词不该把那道收敛重新打开。
+  it('keeps process-only activity unknown beside confirmed production', () => {
     fixture.state.config = structuredClone(config)
     fixture.state.sessions = [
       session('producing', _hygiene_fixturePath("alpha"), 'working'),
@@ -235,10 +209,10 @@ describe('Project Rail selection and running signals', () => {
     ]
     const markup = renderRail()
     expect(rowFor(markup, 'Alpha')).toContain('data-running="true"')
-    expect(rowFor(markup, 'Beta')).toContain('data-running="true"')
+    expect(rowFor(markup, 'Beta')).not.toContain('data-running="true"')
     // 数字在 aria-label 上（`__count` 是 aria-hidden 的字形，读屏只能听见这一份）。
     expect(markup).toContain('1 Working')
-    expect(rowFor(markup, 'Beta')).not.toContain('class="project-activity"')
+    expect(rowFor(markup, 'Beta')).toContain('1 activity unknown')
     expect(markup).not.toContain('1 Running')
   })
 
@@ -254,7 +228,7 @@ describe('Project Rail selection and running signals', () => {
     const idle = markup.match(/project-activity__metric--idle[\s\S]*?<strong>([^<]*)<\/strong>/)?.[1]
     expect(working).toBe('2')
     expect(idle).toBeUndefined()
-    expect(markup).toContain('2 Working · 1 Idle')
+    expect(markup).toContain('2 Working · 1 Activity unknown')
   })
 
   it('shares the row icon slot while giving Topics its own identity', () => {
