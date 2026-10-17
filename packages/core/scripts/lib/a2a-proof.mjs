@@ -4,7 +4,7 @@ const fixtureRootPath = relative => { const temporary = relative.replace(/^(?:pr
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -12,11 +12,11 @@ const root = resolve(import.meta.dirname, '../../../..')
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 
 /** Mutations run in a private compiled copy; no shared source, output or user Runtime is mutated. */
-export async function runA2aProof({ name, tests, regressionTests = [], mutations, callers, sourceInputs, environment }) {
+export async function runA2aProof({ name, tests, regressionTests = [], mutations, callers, sourceInputs, environment, freezeTests = false, frozenSupport = [] }) {
   const evidence = join(root, '.tmp', `${name}-${Date.now()}`)
   const copy = await realpath(await mkdtemp(fixtureRootPath("tmp/amx-a2a-proof-")))
   const core = join(copy, 'core'), dist = join(core, 'dist')
-  const inputs = [...new Set([...sourceInputs, ...tests, ...regressionTests, ...mutations.flatMap(mutation => mutation.tests ?? []), ...callers.map(item => item.path)])]
+  const inputs = [...new Set([...sourceInputs, ...frozenSupport, ...tests, ...regressionTests, ...mutations.flatMap(mutation => mutation.tests ?? []), ...callers.map(item => item.path)])]
   const sourceHashes = async () => Object.fromEntries(await Promise.all(inputs.map(async path => [path, hash(await readFile(join(root, path)))])))
   const receipt = { schema: 'agentmux.a2a-protocol-proof.v1', name, privateCopyRoot: copy, passed: false, sharedTreeMutations: 0, cases: [] }
   const originals = new Map()
@@ -24,9 +24,9 @@ export async function runA2aProof({ name, tests, regressionTests = [], mutations
     const outputPath = join(evidence, `${label}.json`)
     const result = await new Promise((yes, no) => {
       const child = spawn(process.execPath, [join(root, 'node_modules/vitest/vitest.mjs'), 'run', ...selectedTests,
-        ...(testRoot === copy ? ['--config', join(copy, 'vitest.config.mts')] : []),
+        ...(testRoot === copy || freezeTests ? ['--config', join(copy, 'vitest.config.mts')] : []),
         '--maxWorkers=1', '--reporter=json', `--outputFile=${outputPath}`], {
-        cwd: testRoot, env: { ...process.env, ...environment({ core, dist, url: path => pathToFileURL(join(dist, path)).href }) },
+        cwd: freezeTests ? copy : testRoot, env: { ...process.env, ...environment({ core, dist, url: path => pathToFileURL(join(dist, path)).href }) },
         stdio: ['ignore', 'pipe', 'pipe']
       })
       let output = ''
@@ -56,10 +56,33 @@ export async function runA2aProof({ name, tests, regressionTests = [], mutations
     }))
     assert.ok(receipt.callers.length > 0)
     await mkdir(core, { recursive: true })
-    await cp(join(root, 'packages/core/dist'), dist, { recursive: true })
+    await cp(join(root, 'packages/core/dist'), dist, { recursive: true, ...(freezeTests ? { filter: path => !/\.ts$/u.test(path) } : {}) })
     await cp(join(root, 'packages/core/package.json'), join(core, 'package.json'))
     for (const entry of ['vendor', 'bin', 'node_modules']) await symlink(join(root, 'packages/core', entry), join(core, entry))
     const projectTests = [...new Set(mutations.flatMap(mutation => mutation.projectTests ?? []))]
+    if (freezeTests) {
+      assert.equal(projectTests.length, 0, 'Frozen Core tests and copied Desktop tests have separate module graphs')
+      const { staleDistComplaint } = await import(pathToFileURL(join(root, 'vitest.dist-freshness.ts')).href)
+      assert.equal(await staleDistComplaint(join(root, 'packages/core')), null, 'Freeze a freshly compiled candidate before running this gate')
+      await symlink(join(root, 'node_modules'), join(copy, 'node_modules'))
+      await mkdir(join(copy, 'packages/core'), { recursive: true })
+      await symlink(join(root, 'packages/core/node_modules'), join(copy, 'packages/core/node_modules'))
+      await writeFile(join(copy, 'package.json'), '{"type":"module"}\n')
+      for (const path of inputs) {
+        const target = join(copy, 'snapshot', path)
+        await mkdir(resolve(target, '..'), { recursive: true })
+        await cp(join(root, path), target)
+        assert.equal(hash(await readFile(target)), receipt.sourceBefore[path], `Candidate changed during freeze: ${path}`)
+      }
+      const testGraph = [...new Set([...tests, ...regressionTests, ...mutations.flatMap(mutation => mutation.tests ?? []), ...frozenSupport])]
+      for (const path of testGraph) {
+        await mkdir(resolve(join(copy, path), '..'), { recursive: true })
+        await cp(join(copy, 'snapshot', path), join(copy, path))
+      }
+      await writeFile(join(copy, 'vitest.config.mts'), `import { defineConfig } from 'vitest/config'\nexport default defineConfig({ esbuild: { jsx: 'automatic' }, server: { fs: { allow: ${JSON.stringify([copy, root])} } }, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, test: { include: ${JSON.stringify([...new Set([...tests, ...regressionTests, ...mutations.flatMap(mutation => mutation.tests ?? [])])])} } })\n`)
+      receipt.frozenTests = { inputs: testGraph, sourceSnapshot: true, mutableWorkingTreeUsedByTests: false }
+      receipt.compiledInputs = Object.fromEntries(await Promise.all((await readdir(dist, { recursive: true })).filter(path => path.endsWith('.js')).map(async path => [path, hash(await readFile(join(dist, path)))])))
+    }
     if (projectTests.length) {
       // Registered IPC tests retain their real relative module graph and local mocks in this copy.
       await cp(join(root, 'apps/desktop/src'), join(copy, 'apps/desktop/src'), { recursive: true })
@@ -107,7 +130,10 @@ export async function runA2aProof({ name, tests, regressionTests = [], mutations
       process.stdout.write(`${mutation.label}: RED -> GREEN\n`)
     }
     receipt.sourceAfter = await sourceHashes()
-    assert.deepEqual(receipt.sourceAfter, receipt.sourceBefore)
+    if (freezeTests) {
+      receipt.liveSourceChangedDuringRun = Object.keys(receipt.sourceBefore).filter(path => receipt.sourceBefore[path] !== receipt.sourceAfter[path])
+      for (const [path, originalHash] of Object.entries(receipt.sourceBefore)) assert.equal(hash(await readFile(join(copy, 'snapshot', path))), originalHash)
+    } else assert.deepEqual(receipt.sourceAfter, receipt.sourceBefore)
     for (const [file, bytes] of originals) assert.equal(await readFile(join(dist, file), 'utf8'), bytes)
     receipt.passed = true
   } catch (error) { receipt.failure = { message: error.message, stack: error.stack } }
@@ -118,5 +144,7 @@ export async function runA2aProof({ name, tests, regressionTests = [], mutations
     await writeFile(join(evidence, 'receipt.json'), `${JSON.stringify(receipt, null, 2)}\n`)
   }
   assert.equal(receipt.passed, true, receipt.failure?.message)
-  process.stdout.write(`${JSON.stringify({ passed: true, mutants: receipt.cases.length, receipt: join(evidence, 'receipt.json') })}\n`)
+  const result = { passed: true, mutants: receipt.cases.length, receipt: join(evidence, 'receipt.json') }
+  process.stdout.write(`${JSON.stringify(result)}\n`)
+  return result
 }
