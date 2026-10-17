@@ -31,6 +31,7 @@ import { formatScreenshotContext } from './browser-screenshot/context'
 import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { BrowserOperationHistory, BrowserOperatorPresence, BrowserOperationWarning, BrowserOperationTimeline, BrowserReplayPreview } from './BrowserOperationSurface'
 import { BrowserStartPage } from './BrowserStartPage'
+import { BrowserRecoverySurface } from './BrowserRecoverySurface'
 import type { BrowserStartPageConfig } from '../../../shared/browser-start-page'
 import { BrowserAddressInput, type BrowserAddressInputHandle } from './BrowserAddressInput'
 import { BrowserViewportOptions, BrowserViewportSizeDialog } from './BrowserViewportControls'
@@ -78,7 +79,6 @@ const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
 const ThemeActionInspectIcon = semanticIconComponent('action.inspect')
 const ThemeActionCopyIcon = semanticIconComponent('action.copy')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
-const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
 const ThemeNavigationForwardIcon = semanticIconComponent('navigation.forward')
@@ -1009,14 +1009,17 @@ function BrowserPaneContent({
             onEdited={screenshotEdited}
             onOriginalOpened={() => setScreenshot(current => current ? { kind: 'open', key: current.key } : null)}
             onError={reportError}
-          /> ) : connectionUnavailable ? <div className="pane-state" role="status" aria-live="polite">
-          <ThemeObjectBrowserIcon size={23} />
-          <strong>{restoring ? 'Restoring browser' : restoreError ? 'Browser connection needs attention' : 'Browser parked'}</strong>
-          <span>{restoreError ?? (restoring ? 'Waiting for the original page connection. Your page, address and other work are kept.' : 'Switch back to this tab to restore the original page.')}</span>
-          <span>You can edit the address or open it in your external browser while the connection is unavailable.</span>
-          {restoreError ? <button className="small-button" type="button" disabled={restoring}
-            onClick={retryConnection}>Retry connection</button> : null}
-        </div> : elementSelection ? (
+          /> ) : connectionUnavailable ? <BrowserRecoverySurface
+          url={tab.url} title={tab.title} faviconDataUrl={tab.faviconDataUrl}
+          heading={restoring ? 'Restoring browser' : restoreError ? 'Browser connection needs attention' : 'Browser parked'}
+          description={restoring ? 'Reconnecting the original page. Your tab, address and other work are kept.'
+            : restoreError ? 'Your tab and address are kept. Retry the connection or edit the address.'
+              : 'Return to this tab to restore the original page. Your address is kept.'}
+          error={restoreError ?? tab.error} busy={busy} restoring={restoring} retryLabel="Retry connection"
+          onRetry={restoreError ? retryConnection : undefined}
+          onEditAddress={() => addressInput.current?.focus()}
+          onCopy={text => copyTextToClipboard(text, reportError)}
+        /> : elementSelection ? (
           <section className="browser-selection-result" aria-label="Selected element context">
             <header><ThemeActionInspectIcon size={17} /><span><strong>{elementSelection.accessibleName || `<${elementSelection.tagName}>`}</strong><small>{elementSelection.pageTitle || elementSelection.pageUrl}</small></span></header>
             <dl>
@@ -1071,15 +1074,17 @@ function BrowserPaneContent({
             </div>
           </div>
         ) : tab.error ? (
-          <div className="pane-state pane-state--error">
-            <ThemeStatusWarningIcon size={20} />
-            <strong>Page could not be loaded</strong>
-            <span>{tab.error}</span>
-            <button className="small-button" type="button" onClick={() => void run(async () => {
+          <BrowserRecoverySurface url={tab.url} title={tab.title} faviconDataUrl={tab.faviconDataUrl}
+            heading="Page needs attention"
+            description="Your tab and address are kept. Retry, or check the address to continue."
+            error={tab.error} busy={busy}
+            onEditAddress={() => addressInput.current?.focus()}
+            onCopy={text => copyTextToClipboard(text, reportError)}
+            onRetry={() => void run(async () => {
               const browser = await api.browser.create(tab.browserId, tab.url, tab.workspaceId, tab.profileId || undefined, tab.mode)
               return browser.error ? await api.browser.reload(tab.browserId) : browser
-            })}><ThemeActionRefreshIcon size={12} /> Retry</button>
-          </div>
+            })}
+          />
         ) : tab.url === 'about:blank' ? (
           startPageConfig ? <BrowserStartPage config={startPageConfig} visible={visible} historyRevision={historyRevision}
             historyTarget={{ kind: 'browser', browserId: tab.browserId, profileId: tab.profileId }}

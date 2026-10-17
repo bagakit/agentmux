@@ -11,7 +11,7 @@ import { WindowOverlayPortal } from './WindowOverlayHost'
 const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
 
 
-export type BrowserAddressInputHandle = { submit(text?: string): void }
+export type BrowserAddressInputHandle = { submit(text?: string): void; focus(): void }
 type Props = Omit<ComponentPropsWithoutRef<typeof TextInput>, 'value' | 'onChange' | 'onSubmit' | 'onCompositionStart' | 'onCompositionUpdate' | 'onCompositionEnd'> & {
   value: string
   onValueChange(value: string): void
@@ -81,7 +81,7 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
     } else setNotice('Input history cannot be saved until its Workspace and Profile are confirmed. Browsing continues.')
     onSubmit(text)
   }
-  useImperativeHandle(ref, () => ({ submit }), [value, currentTarget, props.disabled, submitDisabled, historyTarget, onSubmit, onDeferredHistoryFailure, onHistoryChange])
+  useImperativeHandle(ref, () => ({ submit, focus() { input.current?.focus(); input.current?.select() } }), [value, currentTarget, props.disabled, submitDisabled, historyTarget, onSubmit, onDeferredHistoryFailure, onHistoryChange])
 
   useEffect(() => {
     ++request.current; setLoadedHistory(null); setOpen(false); setFiltering(false); setSelected(-1); setLoading(false); setNotice(null)
