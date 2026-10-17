@@ -40,7 +40,8 @@ it('preserves nonempty stage evidence and unknown sources through actual Unix RP
   // Use actual production recorders, not a hand-authored public field fixture.
   let time = 1000
   const renderer = createRendererPerformance(() => time, () => 1000 + time)
-  time = 1070; renderer.sessionEvent('status', 1000)
+  time = 1070; renderer.sessionEvent('agent-status', 1000)
+  time = 1090; renderer.sessionEvent('agent-session', 1070)
   time = 2900; renderer.terminalWrite(false, 'private-output', 1083.3, { ...terminalWriteContextFixture(), runId: 'exact-peak-run', cause: 'checkpoint' })
   for (let i = 0; i < 40; i++) { time += 100; renderer.terminalWrite(false, new Uint8Array(1), time - 70, terminalWriteContextFixture()) }
   const callbacks: FrameRequestCallback[] = []
@@ -66,6 +67,8 @@ it('preserves nonempty stage evidence and unknown sources through actual Unix RP
   expect(pendingRequest.parent).toBeDefined()
   observation.renderer.data!.performance.inputRequestDetails = renderer.snapshot().inputRequestDetails
   const expectedRenderer = observation.renderer.data!.performance
+  expect(expectedRenderer.sessionEvents.byType['agent-status']).toEqual({ count: 1, totalMs: 70, maxMs: 70 })
+  expect(expectedRenderer.sessionEvents.byType['agent-session']).toEqual({ count: 1, totalMs: 20, maxMs: 20 })
   expect(expectedRenderer.slowEventsOmitted['terminal-write']).toBe(36)
   expect(expectedRenderer.slowEvents.some(event => event.kind === 'session-event')).toBe(true)
   expect(expectedRenderer.slowEvents.find(event => event.retainedAs.includes('current-peak') && event.kind === 'terminal-write')).toMatchObject({ terminal: { runId: 'exact-peak-run', cause: 'checkpoint', payload: { unit: 'string-code-units', length: 14 } } })
@@ -113,6 +116,22 @@ it('preserves nonempty stage evidence and unknown sources through actual Unix RP
     expect(cli.code).toBe(0); expect(cli.stderr).toBe('')
     const parsedCli = JSON.parse(cli.stdout.trim())
     expect(parsedCli.result.observation.renderer.data.performance).toEqual(expectedRenderer)
+    const watchEntry = process.env.AGENTMUX_TEST_OBJECT_CLI ?? resolve('packages/core/bin/amux')
+    const watch = spawn(process.execPath, [watchEntry, '--endpoint', 'unix://' + path, 'system', 'metrics', 'watch'], {
+      env: objectCliEnvironment(directory), stdio: ['ignore', 'pipe', 'pipe'] })
+    const watchClosed = new Promise<number | null>(resolve => watch.once('close', resolve))
+    let watchOutput = '', watchError = ''
+    watch.stdout.on('data', bytes => { watchOutput += bytes.toString() }); watch.stderr.on('data', bytes => { watchError += bytes.toString() })
+    try {
+      await vi.waitFor(() => { expect(watchError).toBe(''); expect(watchOutput).toContain('\n') }, { timeout: 5000 })
+      watch.kill('SIGINT')
+      expect(await watchClosed).toBe(0)
+      const frames = watchOutput.trim().split('\n').map(line => JSON.parse(line))
+      expect(frames).toHaveLength(1)
+      expect(frames[0].result.initial.observation.renderer.data.performance).toEqual(expectedRenderer)
+      if (process.env.AGENTMUX_SESSION_EVENT_CLI_RAW) appendFileSync(process.env.AGENTMUX_SESSION_EVENT_CLI_RAW,
+        JSON.stringify({ get: cli, watch: { code: 0, stdout: watchOutput, stderr: watchError } }) + '\n')
+    } finally { if (watch.exitCode === null && watch.signalCode === null) watch.kill('SIGKILL'); await watchClosed }
     const viaToolkit = await client.call('toolkit.inspect', { toolId: 'performance' })
     expect(viaToolkit.snapshot).toEqual(toolkit)
     const toolkitCli = await runCompiledObjectCli(['--endpoint', 'unix://' + path, 'toolkit', 'inspect', 'performance'], objectCliEnvironment(directory))
@@ -126,7 +145,7 @@ it('preserves nonempty stage evidence and unknown sources through actual Unix RP
       onError(error) { resultError = error }
     })
     const compiledCli = process.env.AGENTMUX_TEST_OBJECT_CLI ?? resolve('packages/core/bin/amux')
-    const child = spawn(process.execPath, [resolve('apps/desktop/resources/toolkit/performance.mjs'), compiledCli], {
+    const child = spawn(process.execPath, [process.env.AGENTMUX_TEST_PERFORMANCE_SCRIPT ?? resolve('apps/desktop/resources/toolkit/performance.mjs'), compiledCli], {
       env: objectCliEnvironment(directory, { ...channel.env, AGENTMUX_RPC_ENDPOINT: 'unix://' + path }), stdio: ['ignore', 'pipe', 'pipe'] })
     let scriptOutput = '', scriptError = ''
     child.stdout.on('data', bytes => { scriptOutput += bytes.toString() }); child.stderr.on('data', bytes => { scriptError += bytes.toString() })
