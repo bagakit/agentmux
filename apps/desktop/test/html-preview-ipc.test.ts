@@ -17,9 +17,9 @@ function fixture() {
       const channel = node.arguments[0].text
       expect(handlers[channel]).toBeUndefined()
       const js = ts.transpile(`(${node.arguments[1]!.getText(source)})`, { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None })
-      handlers[channel] = new Function('requireTrustedSender', 'args', 'htmlPreviews', 'workspace', 'config', `return ${js}`)(
+      handlers[channel] = new Function('requireTrustedSender', 'contents', 'htmlPreviews', 'workspace', 'config', `return ${js}`)(
         (channel: PrivilegedChannel, event: { sender: unknown }) => assertSenderTrusted(senderTrust(channel, event.sender, sender)),
-        { window: { webContents: { mainFrame } } }, { open, release }, (_config: unknown, id: string) => {
+        { mainFrame }, { open, release }, (_config: unknown, id: string) => {
           if (id !== resource.id) throw new Error('Unknown original workspace')
           return resource
         }, {})
