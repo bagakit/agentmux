@@ -527,6 +527,20 @@ function runRef(runId: string): AgentMuxRunRef {
   return { runId }
 }
 
+/** Only a committed rollback makes a failed resume a terminal, read-only operation. */
+function rolledBackResumeFailure(session: AgentMuxStoredAgentSession | undefined, operationId: string): AgentMuxError | null {
+  const original = session?.continuityOperations?.[operationId]
+  const failedRun = original?.newRun
+  if (!session || !original || original.supervision || original.intentOperationId || original.action ||
+      original.kind !== 'unavailable' || original.reason !== 'process-exited' ||
+      original.errorCode !== AGENT_TERMINAL_HANDSHAKE_FAILED || !failedRun ||
+      original.nativeTarget?.kind !== 'provider' || original.nativeTarget.providerId !== session.providerId ||
+      !sameRun(original.previousRun, session.run) && !session.retiredRuns.some(run => sameRun(run, original.previousRun)) ||
+      !session.retiredRuns.some(run => sameRun(run, failedRun)) ||
+      sameRun(original.previousRun, failedRun)) return null
+  return new AgentMuxError(original.error ?? 'The original resume Run exited during startup.', original.errorCode)
+}
+
 /**
  * Normalize the one transport error which has a precise meaning inside the terminal handshake.
  *
@@ -5561,9 +5575,8 @@ export class AgentMuxClient {
       const invocationCapability = issueAgentCapability()
       // Re-resolve the posture the create fixed and append it to the resume args exactly as createAgent
       // does, so the sandbox/approval/permission-mode flags survive the stop/resume boundary rather than
-      // reverting to the Provider's more permissive default. buildResumeArgs orders these per provider
-      // (codex places them after the positional prompt, claude before) and the positional prompt is a
-      // distinct token, so intermixing the option flags stays CLI-valid.
+      // reverting to the Provider's more permissive default. The Provider owns the native argument
+      // order and the prompt's data boundary; Core retains the configured invocation intact.
       let { plan, deferredResumePrompt } = this.buildResumePlan(current, input, prompt)
       const executableContext = { workspacePath: current.workspacePath, env: terminalEnvironment(plan.env) }
       const capability = await this.probeAgent(current.providerId, plan.command, executableContext)
@@ -6111,6 +6124,8 @@ export class AgentMuxClient {
     if (prior && !sameRun(prior.previousRun, input.expectedRun)) {
       throw new AgentMuxError('A continuity operation must retain its original Run.', 'CONTINUITY_OPERATION_MISMATCH')
     }
+    const priorFailure = rolledBackResumeFailure(current ?? undefined, input.operationId)
+    if (priorFailure) throw priorFailure
     const now = Date.now(), policy = prior?.policy ?? normalizeAgentContinuityPolicy(input.policy)
     const receipt: AgentMuxContinuityOperation = prior ? structuredClone(prior) : {
       operationId: input.operationId, agentSessionId: input.agentSessionId, trigger: input.trigger ?? 'manual',
@@ -6468,6 +6483,12 @@ export class AgentMuxClient {
     } catch (error) {
       const known = await recordKnownSupervisedStart(error)
       if (known) return known
+      try { current = this.registry.get(input.agentSessionId) } catch {}
+      const failure = rolledBackResumeFailure(current ?? undefined, input.operationId)
+      if (failure) {
+        failure.cause = error
+        throw failure
+      }
       if (error instanceof AgentMuxError && ['AGENT_SESSION_BUSY', 'STALE_AGENT_SESSION', 'UNKNOWN_AGENT_SESSION'].includes(error.code)) {
         const retired = await this.store.readRetiredAgentSession(input.agentSessionId)
         this.assertConnectionEpoch(epoch)
@@ -6478,7 +6499,6 @@ export class AgentMuxClient {
       }
       receipt.error = error instanceof Error ? error.message : String(error)
       if (receipt.launchInput?.state === 'prepared') receipt.launchInput.state = error instanceof AgentMuxError && error.controlFailure?.disposition === 'not_applied' ? 'not-applied' : 'unknown'
-      try { current = this.registry.get(input.agentSessionId) } catch {}
       return pending('operation-unconfirmed', evidence, policy.recheckMaxAttempts > 0 ? now + policy.recheckIntervalMs : undefined)
     }
   }
