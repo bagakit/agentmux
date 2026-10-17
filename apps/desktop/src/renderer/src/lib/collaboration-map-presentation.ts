@@ -8,8 +8,8 @@ import type { CollaborationAgent } from './agent-collaboration'
 /** Original activity facts choose visual weight; no activity is inferred from map use or output. */
 export function collaborationAgentPresentation(session: Extract<SessionSnapshot, { kind: 'agent' }>, name?: string): Pick<CollaborationAgent, 'name' | 'tier' | 'lastActivityAt'> {
   const bucket = focusBucketForSession(session, false)
-  const tier = bucket === 'working' || bucket === 'attention' ? 'active'
-    : session.processState === 'exited' && !session.runUnobserved ? 'closed'
+  const tier = session.processState === 'exited' && !session.runUnobserved ? 'closed'
+    : bucket === 'working' || bucket === 'attention' ? 'active'
       : session.processState === 'running' && observeAgentSession(session, Date.now()).semantic === 'idle' ? 'idle' : 'unknown'
   return { name: name ?? session.label, tier, lastActivityAt: focusActivityEntryTime(session) ?? null }
 }
