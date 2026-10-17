@@ -81,6 +81,7 @@ export type AgentMuxContinuityInterruption = {
   nativeTarget: Extract<AgentNativeSessionHandle, { kind: 'provider' }>
   observedAt: number
   nativeObservedAt?: number
+  nativeSourceId?: string
   nativeTurnId?: string
   evidenceId?: string
   reason: string
@@ -204,6 +205,10 @@ export type AgentMuxContinuityOperation = {
   rechecks: number
   interruptedWorking?: boolean
   interruption?: AgentMuxContinuityInterruption
+  /** Run-bound original-turn decision, optionally refined by the exact resumed actor. Never rewrites interruption. */
+  resumedInterruption?: AgentMuxContinuityInterruption & { run: AgentMuxRunRef; rootOperationId: string }
+  /** Original Start and contiguous protocol ACKs, retained before a delayed continuation decision. */
+  resumedInputBoundary?: { initialInputByte: number; protocolInput?: { operationId: string; startByte: number; endByte: number }; superseded?: true }
   kind: 'pending' | 'starting' | 'resumed' | 'reattachable' | 'unavailable' | 'conflict' | 'retired'
   reason: string
   evidence: AgentMuxAgentContinuityRunEvidence | { kind: 'unknown-session' } | { kind: 'agent-session-store' } | { kind: 'hook-ingress-owner' } | { kind: 'user-retired'; observedAt: number }
@@ -297,9 +302,28 @@ export function normalizeAgentContinuityOperation(value: unknown): AgentMuxConti
       interruption.source === 'active-fallback' && interruption.support !== 'unsupported' ||
       interruption.source === 'native-protocol' && interruption.support !== 'provider' ||
       interruption.nativeObservedAt !== undefined && (!Number.isSafeInteger(interruption.nativeObservedAt) || interruption.nativeObservedAt < 0) ||
-      [interruption.evidenceId, interruption.nativeTurnId].some(value => value !== undefined && (typeof value !== 'string' || !value)))) {
+      [interruption.evidenceId, interruption.nativeTurnId, interruption.nativeSourceId].some(value => value !== undefined && (typeof value !== 'string' || !value)))) {
     throw new TypeError('Invalid original continuity interruption evidence.')
   }
+  const resumed = op.resumedInterruption
+  if (resumed && (!['provider', 'unsupported'].includes(resumed.support) || !['native-protocol', 'active-fallback'].includes(resumed.source) ||
+      resumed.source === 'native-protocol' && resumed.support !== 'provider' || resumed.source === 'active-fallback' && resumed.support !== 'unsupported' ||
+      !['interrupted', 'not-interrupted'].includes(resumed.state) || !op.newRun || resumed.run?.runId !== op.newRun.runId ||
+      resumed.rootOperationId !== (op.intentOperationId ?? op.operationId) || typeof resumed.previousRun?.runId !== 'string' || !resumed.previousRun.runId ||
+      resumed.nativeTarget?.kind !== 'provider' || resumed.nativeTarget.providerId !== op.nativeTarget?.providerId ||
+      resumed.nativeTarget.sessionId !== op.nativeTarget?.sessionId ||
+      [resumed.nativeTurnId, resumed.nativeSourceId, resumed.evidenceId].some(value => value !== undefined && (typeof value !== 'string' || !value)) ||
+      typeof resumed.reason !== 'string' || !resumed.reason ||
+      !Number.isSafeInteger(resumed.observedAt) || resumed.observedAt < 0 ||
+      resumed.nativeObservedAt !== undefined && (!Number.isSafeInteger(resumed.nativeObservedAt) || resumed.nativeObservedAt < 0))) {
+    throw new TypeError('Invalid recovered original-turn evidence.')
+  }
+  const boundary = op.resumedInputBoundary
+  if (boundary && (!op.newRun || !Number.isSafeInteger(boundary.initialInputByte) || boundary.initialInputByte < 0 ||
+      boundary.superseded !== undefined && boundary.superseded !== true || boundary.protocolInput &&
+      (typeof boundary.protocolInput.operationId !== 'string' || !boundary.protocolInput.operationId || !Number.isSafeInteger(boundary.protocolInput.startByte) ||
+        !Number.isSafeInteger(boundary.protocolInput.endByte) || boundary.protocolInput.startByte < boundary.initialInputByte ||
+        boundary.protocolInput.endByte <= boundary.protocolInput.startByte))) throw new TypeError('Invalid resumed input boundary.')
   const delivery = op.recoveryDelivery
   if (delivery && (!delivery.context || delivery.context.agentSessionId !== op.agentSessionId || delivery.context.newRun?.runId !== op.newRun?.runId ||
     delivery.context.previousRun?.runId !== op.previousRun.runId || delivery.context.interruptedWorking !== true ||

@@ -6,6 +6,7 @@ import { parseTerminalFrontendObservation, type AgentTerminalFrontend } from './
 import { parseAgentRestartInput, type AgentMuxAgentRestartIdentity, type AgentMuxAgentRestartInput, type AgentMuxAgentRestartInspection } from './agent-session-restart.js'
 import { AgentSessionContinuitySupervisor } from './agent-session-continuity-supervisor.js'
 import { inspectAgentSessionInterruption } from './agent-session-interruption.js'
+import { observeResumedTurnInterruption } from './agent-session-resumed-interruption.js'
 import { confirmNativeInputAdoption, confirmNativeInputAdoptions } from './native-input-adoption.js'
 import { parseAgentInputMailboxRead, type AgentInputMailboxRead, type AgentInputMailboxPage, type AgentInputMailboxItem } from './agent-input-mailbox.js'
 import { AgentSessionContinuityInputs, createContinuityInputDelivery, prepareContinuityLaunchInput, bindContinuityLaunchInput } from './agent-session-continuity-input.js'
@@ -736,6 +737,11 @@ function wholeMouseReports(data: AgentMuxRunInputData): boolean {
   return offset === data.length && offset > 0
 }
 
+type TerminalFrontendWatch = {
+  key: string; controller: AbortController; attempt?: AbortController; observer?: { dispose(): void }; pending: Promise<boolean>; frontend?: AgentTerminalFrontend
+  retry?: ReturnType<typeof setTimeout>; failures: number; ready: Set<() => void>
+}
+
 export class AgentMuxClient {
   private readonly hostExecutorOwner: AgentMuxHostExecutorOwner | undefined
   private readonly creationAuthority: AgentMuxCreationAuthority | undefined
@@ -914,6 +920,7 @@ export class AgentMuxClient {
   }>()
   private readonly continuitySupervisor: AgentSessionContinuitySupervisor
   private readonly providerReads = new Set<AbortController>()
+  private readonly resumedInterruptionReads = new Map<string, Promise<AgentMuxStoredAgentSession>>()
   private readonly conversationReadState = new ConversationReaderState()
   /** Consumer-owned read-only resources; never occupy Provider page slots or Run lifecycle locks. */
   private readonly historyObservationControllers = new Map<string, Set<NativeHistoryObservationResource>>()
@@ -968,9 +975,7 @@ export class AgentMuxClient {
     key: string; controller: AbortController; observer?: { dispose(): void }; pending: Promise<void>
     recordId?: string; sequence?: number
   }>()
-  private readonly terminalFrontendWatches = new Map<string, {
-    key: string; controller: AbortController; observer?: { dispose(): void }; pending: Promise<boolean>; frontend?: AgentTerminalFrontend
-  }>()
+  private readonly terminalFrontendWatches = new Map<string, TerminalFrontendWatch>()
   private readonly screenEvidence: AgentScreenEvidenceStore
   private readonly promptSubmission: AgentPromptSubmissionCoordinator
 
@@ -1026,7 +1031,8 @@ export class AgentMuxClient {
     })
     this.kernel = new CtxmuxRunAdapter()
     this.continuitySupervisor = new AgentSessionContinuitySupervisor({
-      read: id => this.store.readMetadata(id), lifecycle: id => this.store.readLifecycleReservation(id),
+      read: async id => { const session = await this.store.readMetadata(id); return session ? await this.observeResumedInterruption(session) : null },
+      lifecycle: id => this.store.readLifecycleReservation(id),
       // This Session came from the original Store's unique Run binding, not this observer's cache.
       status: async session => { const run = await this.kernel.status(session.run.runId); this.assertAgentRun(session, run, [session]); return run },
       watch: (run, changed) => this.kernel.observeLifecycle(run, changed),
@@ -1144,6 +1150,19 @@ export class AgentMuxClient {
     this.continuityInputs = new AgentSessionContinuityInputs({ providers: this.providers,
       read: id => this.registry.get(id),
       status: async session => { const run = await this.kernel.status(session.run.runId); this.assertAgentRun(session, run); return run },
+      updateOperation: async (id, operationId, update) => {
+        const current = this.registry.get(id)
+        const next = await this.updateExactAgentSession(id, current.run, value => {
+          const original = value.continuityOperations?.[operationId]
+          if (!original || original.recoveryDelivery) return value
+          const operation = structuredClone(original); update(operation)
+          if (isDeepStrictEqual(operation, original)) return value
+          return { ...value, updatedAt: Math.max(value.updatedAt + 1, Date.now()),
+            continuityOperations: { ...value.continuityOperations, [operationId]: operation },
+            ...(value.continuity?.operationId === operationId ? { continuity: operation } : {}) }
+        })
+        this.publishSession(next)
+      },
       update: async (id, operationId, update) => {
         const current = this.registry.get(id)
         const next = await this.updateExactAgentSession(id, current.run, value => {
@@ -1920,7 +1939,7 @@ export class AgentMuxClient {
     const nativeStatusWatches = [...this.nativeStatusWatches.values()]
     for (const watch of nativeStatusWatches) { watch.controller.abort(); watch.observer?.dispose() }
     this.nativeStatusWatches.clear()
-    for (const watch of this.terminalFrontendWatches.values()) { watch.controller.abort(); watch.observer?.dispose() }
+    for (const watch of this.terminalFrontendWatches.values()) watch.controller.abort()
     this.terminalFrontendWatches.clear()
     this.agentInputCursors.clear()
     for (const lane of this.agentInputTails.values()) {
@@ -1953,6 +1972,8 @@ export class AgentMuxClient {
     await Promise.allSettled([...this.inputWaitingRecipients.values()].map(value => value.pending))
     this.cancelReconnect()
     this.reopensDisposed = true
+    for (const watch of this.terminalFrontendWatches.values()) watch.controller.abort()
+    this.terminalFrontendWatches.clear()
     this.providerReadsDisposed = true
     this.conversationReadState.dispose()
     this.cancelProviderReads()
@@ -5695,6 +5716,7 @@ export class AgentMuxClient {
       }
       if (continuity?.operationId === input.operationId && continuity.kind === 'starting') {
         next.continuity = { ...continuity, kind: 'resumed', newRun: { ...next.run }, observedAt: Date.now() }
+        if (run.acceptedInputBytes !== null) next.continuity.resumedInputBoundary = { initialInputByte: run.acceptedInputBytes }
         if (restartReservation) { delete next.continuity.errorCode; delete next.continuity.error }
         bindContinuityLaunchInput(next.continuity, next.run)
         const recoveryDelivery = createContinuityInputDelivery(next.continuity, run.acceptedInputBytes ?? undefined)
@@ -5999,6 +6021,37 @@ export class AgentMuxClient {
     return restored
   }
 
+  /** The existing continuity observer owns this read; native evidence never starts another writer. */
+  private async observeResumedInterruption(session: AgentMuxStoredAgentSession): Promise<AgentMuxStoredAgentSession> {
+    const active = Object.values(session.continuityOperations ?? {}).find(op => op.kind === 'resumed' && op.newRun?.runId === session.run.runId)
+    if (!active || active.recoveryDelivery || active.resumedInterruption || this.reopensDisposed) return session
+    const key = JSON.stringify([session.agentSessionId, session.run.runId, active.operationId])
+    const existing = this.resumedInterruptionReads.get(key)
+    if (existing) return await existing
+    const controller = new AbortController(), epoch = this.connectionEpoch
+    this.providerReads.add(controller)
+    const pending = observeResumedTurnInterruption(session, {
+      provider: this.providers.get(session.providerId), signal: controller.signal,
+      status: async () => { const run = await this.kernel.status(session.run.runId); this.assertAgentRun(session, run, [session]); return run },
+      save: async change => {
+        if (controller.signal.aborted || epoch !== this.connectionEpoch || this.reopensDisposed) return session
+        const updated = await this.updateExactAgentSession(session.agentSessionId, session.run, change)
+        if (!isDeepStrictEqual(updated.continuityOperations, session.continuityOperations)) {
+          this.publishSession(updated); this.continuityInputs.track(updated)
+        }
+        return updated
+      }
+    }).catch(error => {
+      if (!controller.signal.aborted && epoch === this.connectionEpoch && !this.reopensDisposed) this.publisher.publish({
+        type: 'agent-error', agentSessionId: session.agentSessionId, code: 'AGENT_CONTINUITY_OBSERVATION_UNCONFIRMED',
+        message: `The original recovered turn is unconfirmed. Its Session, healthy Run and ordinary input remain available. ${error instanceof Error ? error.message : String(error)}`,
+        evidence: { source: 'agentmux', run: { ...session.run }, observedAt: Date.now() } })
+      return session
+    }).finally(() => { this.providerReads.delete(controller); if (this.resumedInterruptionReads.get(key) === pending) this.resumedInterruptionReads.delete(key) })
+    this.resumedInterruptionReads.set(key, pending)
+    return await pending
+  }
+
   private async performAgentContinuity(input: AgentMuxAgentContinuityInput, intentOperationId?: string, inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource, captured?: ResolvedAgentInputContextCapture): Promise<AgentMuxAgentContinuityResult> {
     // A different public Core owner may already have frozen or completed this
     // same operation. Admit only this exact current binding, never a registry catalog.
@@ -6105,6 +6158,12 @@ export class AgentMuxClient {
       return saved && (['launch-carried', 'terminal-confirmed', 'not-applied'].includes(saved.state) ||
         receipt.launchInput?.state === 'prepared' && saved.state !== 'prepared') ? saved : receipt.launchInput ?? saved
     }
+    const resumedFacts = (value: AgentMuxStoredAgentSession) => {
+      const saved = value.continuityOperations?.[receipt.operationId]
+      return { ...(saved?.resumedInputBoundary ? { resumedInputBoundary: saved.resumedInputBoundary } : {}),
+        ...(saved?.resumedInterruption ? { resumedInterruption: saved.resumedInterruption,
+          interruptedWorking: saved.interruptedWorking, ...(saved.recoveryInputs ? { recoveryInputs: saved.recoveryInputs } : {}) } : {}) }
+    }
     const record = async (result: AgentMuxAgentContinuityResult, reason?: string): Promise<AgentMuxAgentContinuityResult> => {
       receipt.kind = result.kind
       receipt.reason = reason ?? ('reason' in result ? result.reason : result.kind)
@@ -6136,11 +6195,11 @@ export class AgentMuxClient {
             if (latest?.supervision && ((latest.kind === 'starting' && result.kind === 'conflict') ||
                 latest.newRun && sameRun(latest.newRun, value.run) && !receipt.newRun)) return value
             return { ...retainExecutor(value),
-            continuity: { ...structuredClone(receipt), ...(value.continuityOperations?.[receipt.operationId]?.recoveryDelivery
+            continuity: { ...structuredClone(receipt), ...resumedFacts(value), ...(value.continuityOperations?.[receipt.operationId]?.recoveryDelivery
               ? { recoveryDelivery: value.continuityOperations[receipt.operationId]!.recoveryDelivery! } : {}),
               ...(originalLaunch(value) ? { launchInput: originalLaunch(value)! } : {}),
               ...(value.continuityOperations?.[receipt.operationId]?.supervision ? { supervision: value.continuityOperations[receipt.operationId]!.supervision! } : {}) },
-            continuityOperations: { ...value.continuityOperations, [receipt.operationId]: { ...structuredClone(receipt),
+            continuityOperations: { ...value.continuityOperations, [receipt.operationId]: { ...structuredClone(receipt), ...resumedFacts(value),
               ...(value.continuityOperations?.[receipt.operationId]?.recoveryDelivery ? { recoveryDelivery: value.continuityOperations[receipt.operationId]!.recoveryDelivery! } : {}),
               ...(originalLaunch(value) ? { launchInput: originalLaunch(value)! } : {}),
               ...(value.continuityOperations?.[receipt.operationId]?.supervision ? { supervision: value.continuityOperations[receipt.operationId]!.supervision! } : {}) } } }
@@ -6162,6 +6221,7 @@ export class AgentMuxClient {
       if (current?.continuityOperations?.[receipt.operationId]?.recoveryDelivery) receipt.recoveryDelivery = structuredClone(current.continuityOperations[receipt.operationId]!.recoveryDelivery!)
       if (current?.continuityOperations?.[receipt.operationId]?.launchInput) receipt.launchInput = structuredClone(current.continuityOperations[receipt.operationId]!.launchInput!)
       if (current?.continuityOperations?.[receipt.operationId]?.supervision) receipt.supervision = structuredClone(current.continuityOperations[receipt.operationId]!.supervision!)
+      if (current) Object.assign(receipt, structuredClone(resumedFacts(current)))
       this.continuitySupervisor.schedule(input, receipt)
       return { ...result, ...((result.kind === 'resumed' || result.kind === 'reattachable') && current ? { session: this.projectSession(current) } : {}), continuity: structuredClone(receipt) }
     }
@@ -6403,8 +6463,11 @@ export class AgentMuxClient {
         ...(receipt.launchInput ? { prompt: receipt.launchInput.input.prompt,
           ...(receipt.launchInput.input.agentMuxNote === undefined ? {} : { agentMuxNote: receipt.launchInput.input.agentMuxNote }) } : {})
       }, input.expectedRun, capability ?? undefined)
-      current = this.registry.get(input.agentSessionId)
-      return record({ kind: 'resumed', session, previousRun: { ...input.expectedRun }, run: { ...session.run },
+      current = await this.observeResumedInterruption(this.registry.get(input.agentSessionId))
+      // Re-read the accepted attempt so record cannot overwrite its separately observed evidence.
+      const completed = current.continuityOperations?.[receipt.operationId]
+      if (completed) Object.assign(receipt, structuredClone(completed))
+      return record({ kind: 'resumed', session: this.projectSession(current), previousRun: { ...input.expectedRun }, run: { ...session.run },
         evidence: { kind: 'provider-native', providerId: decision.nativeHandle.providerId,
           nativeSessionId: decision.nativeHandle.sessionId, previousRun: decision.evidence } }, receipt.reason)
     } catch (error) {
@@ -7993,6 +8056,10 @@ export class AgentMuxClient {
     let current: AgentMuxStoredAgentSession
     try { current = this.registry.get(session.agentSessionId) }
     catch (error) { if (error instanceof AgentMuxError && error.code === 'UNKNOWN_AGENT_SESSION') return; throw error }
+    const frontendWatch = this.terminalFrontendWatches.get(current.agentSessionId)
+    if (frontendWatch && frontendWatch.key !== JSON.stringify([current.run.runId, current.nativeActor])) {
+      frontendWatch.controller.abort(); this.terminalFrontendWatches.delete(current.agentSessionId)
+    }
     this.continuitySupervisor.observe(current)
     const projected = this.projectSession(current)
     if (local) {
@@ -8398,7 +8465,7 @@ export class AgentMuxClient {
       return session
     }
     const frontendReconnect = session.continuity?.frontendReconnect
-    if (session.nativeActor?.frontendControl && !session.terminalHandshake) await this.ensureTerminalFrontendObservation(session)
+    if (session.nativeActor?.frontendControl && !session.terminalHandshake) await this.observeInitialTerminalFrontend(session)
     const observedFrontend = this.terminalFrontendWatches.get(session.agentSessionId)?.frontend
     const frontendId = frontendReconnect?.frontendId ?? session.terminalHandshake?.frontendId ??
       (!session.terminalHandshake && observedFrontend && sameRun(observedFrontend.run, session.run) && observedFrontend.state !== 'unknown' ? observedFrontend.frontendId : undefined)
@@ -8551,9 +8618,17 @@ export class AgentMuxClient {
             assertState(current.terminalHandshake)
             return current
           }
-          const initialReadiness = current.terminalPromptReadiness?.source === 'initial-composer'
+          let initialReadiness = current.terminalPromptReadiness?.source === 'initial-composer'
             ? current.terminalPromptReadiness
             : undefined
+          // The original unopened composer was prepared before its generation existed.
+          // Bind only that unconsumed intent alongside this new exact query claim;
+          // an existing ACK or any consumed readiness is never rewritten.
+          if (frontendId && initialReadiness && initialReadiness.readyThroughByte === undefined &&
+              initialReadiness.consumedBySubmissionId === undefined && initialReadiness.id === terminalInitialPromptReadinessIdentity(current,
+                terminalHandshakeOperationIdentity(current.providerId, current.run.runId, handshake))) {
+            initialReadiness = { ...initialReadiness, id: initialReadinessId }
+          }
           if (
             initialReadiness &&
             (
@@ -8966,44 +9041,97 @@ export class AgentMuxClient {
     if (this.reopensDisposed) return false
     const current = this.registry.findByRun(session.run), provider = this.providers.get(session.providerId)
     if (!current?.nativeActor?.frontendControl || !provider.observeTerminalFrontend) return true
-    const key = JSON.stringify([session.run.runId, current.nativeActor.actorId])
+    const key = JSON.stringify([session.run.runId, current.nativeActor])
     const existing = this.terminalFrontendWatches.get(session.agentSessionId)
-    if (existing?.key === key && existing.frontend?.state !== 'unknown') return await existing.pending
-    existing?.controller.abort(); existing?.observer?.dispose()
-    const watch: { key: string; controller: AbortController; observer?: { dispose(): void }; pending: Promise<boolean>; frontend?: AgentTerminalFrontend } = {
-      key, controller: new AbortController(), pending: Promise.resolve(false)
+    if (existing?.key === key && !existing.controller.signal.aborted) return await existing.pending
+    existing?.controller.abort()
+    const watch: TerminalFrontendWatch = {
+      key, controller: new AbortController(), pending: Promise.resolve(false), failures: 0,
+      ready: new Set()
     }
     this.terminalFrontendWatches.set(session.agentSessionId, watch)
-    const live = (): boolean => !watch.controller.signal.aborted && this.terminalFrontendWatches.get(session.agentSessionId) === watch &&
-      this.registry.findByRun(session.run)?.agentSessionId === session.agentSessionId
-    const unavailable = (message: string): void => {
-      if (!live()) return
-      watch.frontend = { run: { ...session.run }, frontendId: watch.frontend?.frontendId ?? current.nativeActor!.actorId,
-        state: 'unknown', backendState: 'unknown', source: 'managed-process', observedAt: Date.now(), message }
-      this.publishSession(current)
-      this.continuitySupervisor.wake(session.agentSessionId)
+    const live = (): boolean => {
+      const latest = this.registry.findByRun(session.run)
+      return !watch.controller.signal.aborted && this.terminalFrontendWatches.get(session.agentSessionId) === watch &&
+        latest?.agentSessionId === session.agentSessionId && JSON.stringify([latest.run.runId, latest.nativeActor]) === key
     }
-    watch.pending = (async () => {
+    watch.controller.signal.addEventListener('abort', () => {
+      if (watch.retry) clearTimeout(watch.retry)
+      watch.attempt?.abort(); watch.observer?.dispose()
+    }, { once: true })
+    const retry = (): void => {
+      if (!live() || watch.retry) return
+      const delay = Math.min(5000, 250 * 2 ** Math.min(watch.failures++, 5))
+      watch.retry = setTimeout(() => {
+        delete watch.retry
+        if (!live()) { watch.controller.abort(); return }
+        watch.pending = attempt()
+      }, delay)
+      watch.retry.unref?.()
+    }
+    const attempt = async (): Promise<boolean> => {
+      watch.attempt?.abort(); watch.observer?.dispose(); delete watch.observer
+      const controller = new AbortController(); watch.attempt = controller
+      const active = (): boolean => live() && watch.attempt === controller && !controller.signal.aborted
+      const unavailable = (message: string): void => {
+        if (!active()) return
+        watch.frontend = { run: { ...session.run }, frontendId: watch.frontend?.frontendId ?? current.nativeActor!.actorId,
+          state: 'unknown', backendState: 'unknown', source: 'managed-process', observedAt: Date.now(), message }
+        controller.abort(); watch.observer?.dispose(); delete watch.observer
+        this.publishSession(current); this.continuitySupervisor.wake(session.agentSessionId)
+        retry()
+      }
+      const openingTimer = setTimeout(() => unavailable('The original frontend reader did not finish opening. The Session, Run and input remain available.'),
+        TERMINAL_HANDSHAKE_TIMEOUT_MS)
       try {
-        const run = await this.requireCurrentAgentRun(current)
-        if (run.state.type !== 'running' || !run.pid) return false
-        watch.observer = await provider.observeTerminalFrontend!({ processId: run.pid, nativeActor: current.nativeActor!, workspacePath: current.workspacePath,
-          signal: watch.controller.signal, onUnavailable: unavailable, onFrontend: value => {
-            if (!live()) return
+        const run = await observePromptInput(controller.signal, () => this.requireCurrentAgentRun(current))
+        if (!active()) return false
+        if (run.state.type !== 'running' || !run.pid) { watch.controller.abort(); return false }
+        // Dispose a late subscription too: cancellation never waits for a Provider reader.
+        const opening = provider.observeTerminalFrontend!({ processId: run.pid, nativeActor: current.nativeActor!, workspacePath: current.workspacePath,
+          signal: controller.signal, onUnavailable: unavailable, onFrontend: value => {
+            if (!active()) return
             const observation = parseTerminalFrontendObservation(value)
-            if (watch.frontend && observation.observedAt < watch.frontend.observedAt) return
+            if (watch.frontend && watch.frontend.state !== 'unknown' && observation.observedAt < watch.frontend.observedAt) return
             watch.frontend = { ...observation, run: { ...session.run } }
+            if (observation.state !== 'unknown') { watch.failures = 0; for (const ready of watch.ready) ready() }
             if (observation.state === 'detached') this.promptSubmission.cancelReadiness(session.agentSessionId)
             this.publishSession(current)
-            // A bootstrap failure can arrive after a bounded handshake observation
-            // paused. This new authoritative generation fact resumes only its intent.
-            if (observation.state === 'detached') this.continuitySupervisor.observe(this.registry.get(session.agentSessionId), true)
+            // Every new exact fact can reawaken a paused original observation.
+            this.continuitySupervisor.observe(this.registry.get(session.agentSessionId), true)
             this.continuitySupervisor.wake(session.agentSessionId)
           } })
+        void opening.then(observer => { if (!active()) observer.dispose() }, () => {})
+        const observer = await observePromptInput(controller.signal, () => opening)
+        if (!active()) { observer.dispose(); return false }
+        watch.observer = observer
         return true
       } catch (error) { unavailable(error instanceof Error ? error.message : String(error)); return false }
-    })()
+      finally { clearTimeout(openingTimer) }
+    }
+    watch.pending = attempt()
     return await watch.pending
+  }
+
+  private async observeInitialTerminalFrontend(session: AgentMuxStoredAgentSession): Promise<void> {
+    // The one bounded handshake observation includes establishing the Provider reader.
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(new AgentMuxError(
+      'The original frontend generation is still unconfirmed. Its Run and ordinary input remain available.',
+      AGENT_TERMINAL_HANDSHAKE_TIMEOUT)), TERMINAL_HANDSHAKE_TIMEOUT_MS)
+    let watch: TerminalFrontendWatch | undefined, ready!: () => void
+    const abort = (): void => controller.abort(watch?.controller.signal.reason)
+    try {
+      await observePromptInput(controller.signal, () => this.ensureTerminalFrontendObservation(session))
+      watch = this.terminalFrontendWatches.get(session.agentSessionId)
+      if (!watch || watch.frontend?.state && watch.frontend.state !== 'unknown') return
+      watch.controller.signal.addEventListener('abort', abort, { once: true })
+      if (watch.controller.signal.aborted) abort()
+      await observePromptInput(controller.signal, () => new Promise<void>(resolve => { ready = resolve; watch!.ready.add(ready) }))
+    } finally {
+      clearTimeout(timer)
+      if (watch) { watch.controller.signal.removeEventListener('abort', abort); watch.ready.delete(ready) }
+    }
   }
 
   private async ensureNativeStatusObservation(session: AgentMuxStoredAgentSession | AgentMuxAgentSession): Promise<boolean> {
@@ -10443,7 +10571,7 @@ export class AgentMuxClient {
     this.releaseEndedRunHook(runRef(event.runId), agentSession)
     if (agentSession) {
       const frontendWatch = this.terminalFrontendWatches.get(agentSession.agentSessionId)
-      if (frontendWatch) { frontendWatch.controller.abort(); frontendWatch.observer?.dispose(); this.terminalFrontendWatches.delete(agentSession.agentSessionId) }
+      if (frontendWatch && JSON.parse(frontendWatch.key)[0] === event.runId) { frontendWatch.controller.abort(); this.terminalFrontendWatches.delete(agentSession.agentSessionId) }
       const watch = this.nativeStatusWatches.get(agentSession.agentSessionId)
       if (watch && JSON.parse(watch.key)[0] === event.runId) {
         this.nativeStatusWatches.delete(agentSession.agentSessionId)
