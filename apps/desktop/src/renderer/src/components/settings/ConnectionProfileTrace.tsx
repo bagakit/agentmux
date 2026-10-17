@@ -1,7 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ConnectionProfileOperation } from '@agentmux/core/connections'
+import type { ConnectionProfileDiagnostic, ConnectionProfileOperation } from '@agentmux/core/connections'
 import { api } from '../../lib/api'
 import { profileEffectLabels } from '../ConnectionProfileProgress'
+
+function safeEffect(effect: ConnectionProfileOperation['upload']) {
+  const diagnostic = effect.diagnostic
+  return { state: effect.state, ...(diagnostic ? { diagnostic: {
+    stage: diagnostic.stage,
+    ...(diagnostic.nativeCode === undefined ? {} : { nativeCode: diagnostic.nativeCode }),
+    ...(diagnostic.httpStatus === undefined ? {} : { httpStatus: diagnostic.httpStatus }),
+    ...(diagnostic.transportCode === undefined ? {} : { transportCode: diagnostic.transportCode })
+  } } : {}) }
+}
+function Diagnostic({ diagnostic }: { diagnostic?: ConnectionProfileDiagnostic | undefined }) {
+  return diagnostic ? <>{diagnostic.stage}{diagnostic.nativeCode === undefined ? null : ` · Platform code ${diagnostic.nativeCode}`}{diagnostic.httpStatus === undefined ? null : ` · HTTP ${diagnostic.httpStatus}`}{diagnostic.transportCode ? ` · ${diagnostic.transportCode}` : null}{diagnostic.nativeCode === undefined && diagnostic.httpStatus === undefined && !diagnostic.transportCode ? ' · Network details not recorded' : null}</> : <>Network details not recorded</>
+}
 
 /** Reads the existing original profile receipt; never refreshes platform observations or advances writes. */
 export function ConnectionProfileTrace({ operationId, parentId, original }: {
@@ -38,7 +51,7 @@ export function ConnectionProfileTrace({ operationId, parentId, original }: {
         <button type="button" className="small-button" disabled={!operation} onClick={async () => {
           if (!operation) return
           try {
-            await api.ui.writeClipboardText(JSON.stringify({ operationId: operation.operationId, parentOperationId: parentId, upload: operation.upload, patch: operation.patch, publication: operation.publication, reason: operation.reason ?? null }, null, 2))
+            await api.ui.writeClipboardText(JSON.stringify({ operationId: operation.operationId, parentOperationId: parentId, upload: safeEffect(operation.upload), patch: safeEffect(operation.patch), publication: operation.publication, reason: operation.reason ?? null }, null, 2))
             setCopied('Sanitized trace copied.')
           } catch { setCopied('Could not copy. The original receipt remains available here.') }
         }}>Copy diagnosis</button>
@@ -46,7 +59,7 @@ export function ConnectionProfileTrace({ operationId, parentId, original }: {
       <p role="status" className="connector-request-trace__feedback">{visible?.issue || copied}</p>
       {operation ? <div className="connector-request-trace__scroll" tabIndex={0} aria-label="Original profile effects"><table>
         <thead><tr><th>Original effect</th><th>Result</th></tr></thead>
-        <tbody>{([['upload', 'Upload bot image'], ['patch', 'Write bot profile']] as const).map(([key, label]) => <tr key={key}><td>{label}</td><td data-result={operation[key].state}>{profileEffectLabels[operation[key].state]}</td></tr>)}</tbody>
+        <tbody>{([['upload', 'Upload bot image'], ['patch', 'Write bot profile']] as const).map(([key, label]) => <tr key={key}><td>{label}</td><td data-result={operation[key].state}>{profileEffectLabels[operation[key].state]}<small><Diagnostic diagnostic={operation[key].diagnostic} /></small></td></tr>)}</tbody>
       </table></div> : <p>The original profile request is kept. Its effect receipts are not available yet.</p>}
       <div className="connector-request-trace__identity"><span>Original profile update</span><code>{operationId ?? 'Awaiting the original child receipt'}</code><span>Mote request</span><code>{parentId}</code></div>
     </div>

@@ -109,3 +109,5 @@
 .connector-request-trace__identity code { overflow-wrap: anywhere; }
 .connector-request-trace__feedback:empty { display: none; }
 .connector-profile-trace table { min-width: 0; }
+
+.connector-profile-trace td { overflow-wrap: anywhere; }
