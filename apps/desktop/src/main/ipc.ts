@@ -2014,6 +2014,10 @@ export async function registerIpc(args: {
       return await browsers.runScript(id, code, operator, undefined, operationId)
     })
   })
+  handleWithEvent('browser:setOperatorAvatar', async (event, input: Parameters<import('../shared/contracts.js').AgentMuxDesktopApi['browser']['setOperatorAvatar']>[0]) => {
+    requireTrustedSender('browser:setOperatorAvatar', event)
+    return await browsers.setOperatorAvatar(input)
+  })
   handleWithEvent('browser:checkOutcomeFields', async (event, id: string, input: import('../shared/browser-outcome-criteria.js').BrowserOutcomeFieldRunInput) => {
     requireTrustedSender('browser:checkOutcomeFields', event)
     if (config.browser.agentAutomation !== true) throw new Error('Browser automation is off. Turn it on in Settings › Browser.')

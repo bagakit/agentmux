@@ -1284,6 +1284,7 @@ const mockApi: AgentMuxDesktopApi = {
   },
   browser: {
     listRetainedUploads: async () => { throw new Error('Selected-file snapshots require the Desktop Main owner.') },
+    setOperatorAvatar: async () => false,
     captureInputContext: async () => { throw new Error('Browser scene capture requires the Desktop Main owner.') },
     freezeInputContext: async () => { throw new Error('Browser scene provenance requires the Desktop Main owner.') },
     discardRetainedUpload: async () => { throw new Error('Selected-file cleanup requires the Desktop Main owner and local person confirmation.') },
