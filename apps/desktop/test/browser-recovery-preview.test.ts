@@ -109,15 +109,32 @@ describe('optional Browser recovery preview owner', () => {
     expect(await f.store.read(scope)).toEqual({ status: 'missing' })
   })
 
-  it('retires a publication which lost its original source while native IO was in flight', async () => {
+  it.each([
+    { reason: 'navigation', cancelled: false },
+    { reason: 'visibility cancellation', cancelled: true }
+  ])('keeps qualified history when $reason follows atomic replacement', async ({ cancelled }) => {
     const f = await fixture(), entered = latch(), gate = latch()
+    await f.store.record(scope, preview(), () => true)
+    const next = preview(scope, 'Newly viewed page'), controller = new AbortController()
     let current = true
     const rename = io.rename.getMockImplementation()!
-    io.rename.mockImplementationOnce(async (...args) => { entered.release(); await gate.promise; return rename(...args) })
-    const record = f.store.record(scope, preview(), () => current)
-    await entered.promise; current = false; gate.release()
-    expect(await record).toEqual({ status: 'skipped' })
-    expect(await f.store.read(scope)).toEqual({ status: 'missing' })
+    io.rename.mockImplementationOnce(async (...args) => {
+      const result = await rename(...args)
+      entered.release()
+      await gate.promise
+      return result
+    })
+    const record = f.store.record(scope, next, () => current, controller.signal)
+    await entered.promise
+    expect(JSON.parse(await readFile(f.path, 'utf8'))).toEqual({ version: 1, preview: next })
+    current = false
+    if (cancelled) controller.abort()
+    const read = f.store.read(scope)
+    gate.release()
+    const recorded = await record
+    expect(await read).toEqual({ status: 'available', preview: next })
+    expect(recorded).toEqual({ status: 'recorded' })
+    expect(await new BrowserRecoveryPreviewStore(f.directory).read(scope)).toEqual({ status: 'available', preview: next })
   })
 
   it('leaves a previous record intact when its capture signal was already cancelled', async () => {
