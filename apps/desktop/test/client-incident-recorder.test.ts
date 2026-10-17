@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from 'vitest'
 import type { AgentMuxClientIncidentReport } from '@agentmux/core/client-incident'
-import { createClientIncidentRecorder, clientIncidentDispatcher } from '../src/renderer/src/lib/client-incident-recorder'
+import { createClientIncidentRecorder, createClientIncidentDispatcher } from '../src/renderer/src/lib/client-incident-recorder'
 import { api } from '../src/renderer/src/lib/api'
 
 afterEach(() => vi.restoreAllMocks())
@@ -46,7 +46,7 @@ it('holds one real IPC slot during slow reporting and bounds independent queued 
   let release!: (receipt: { accepted: boolean }) => void
   const open = vi.spyOn(api.clientIncidents, 'open').mockResolvedValue({ token: 'document-token' })
   const report = vi.spyOn(api.clientIncidents, 'report').mockImplementation(() => new Promise(resolve => { release = resolve }))
-  const sender = clientIncidentDispatcher(document.implementation.createHTMLDocument())
+  const sender = createClientIncidentDispatcher(() => api.clientIncidents)
   const reports: AgentMuxClientIncidentReport[] = []
   const recorder = createClientIncidentRecorder({ hostId: 'local', agentSessionId: null, runId: 'run', regionId: () => null,
     read: () => ({}), send: value => reports.push(value) })
@@ -66,7 +66,7 @@ it('holds one real IPC slot during slow reporting and bounds independent queued 
 it('never replays an unknown report and retries only document discovery for a new incident', async () => {
   const open = vi.spyOn(api.clientIncidents, 'open').mockResolvedValue({ token: 'document-token' })
   const report = vi.spyOn(api.clientIncidents, 'report').mockRejectedValueOnce(new Error('reply lost')).mockResolvedValue({ accepted: true })
-  const sender = clientIncidentDispatcher(document.implementation.createHTMLDocument()), reports: AgentMuxClientIncidentReport[] = []
+  const sender = createClientIncidentDispatcher(() => api.clientIncidents), reports: AgentMuxClientIncidentReport[] = []
   const recorder = createClientIncidentRecorder({ hostId: 'local', agentSessionId: null, runId: 'run', regionId: () => null,
     read: () => ({}), send: value => reports.push(value) })
   recorder.capture('terminal-attach-failed', 'attach-failed'); sender.send(reports[0]!)
@@ -79,7 +79,7 @@ it('never replays an unknown report and retries only document discovery for a ne
 
 it('keeps business callers usable when metadata reads or the diagnostic sink fail', () => {
   const reports: AgentMuxClientIncidentReport[] = []
-  const send = vi.fn((_report: AgentMuxClientIncidentReport) => { throw new Error('archive unavailable') })
+  const send = vi.fn((_report: AgentMuxClientIncidentReport): void => { throw new Error('archive unavailable') })
   const recorder = createClientIncidentRecorder({ hostId: 'local', agentSessionId: null, runId: 'run', regionId: () => null,
     read: () => { throw new Error('projection unavailable') }, send })
   expect(() => { recorder.begin('attach-requested'); recorder.capture('terminal-attach-failed', 'attach-failed') }).not.toThrow()
