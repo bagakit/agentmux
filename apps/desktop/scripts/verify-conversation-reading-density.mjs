@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { join, relative, resolve } from 'node:path'
+import { join, relative, resolve, sep } from 'node:path'
+import { promisify } from 'node:util'
 import { captureReadingDensity } from './fixtures/conversation-reading-density/capture.mjs'
 
 const root = resolve(import.meta.dirname, '../../..'), area = join(root, '.local/conversation-duplication')
@@ -10,6 +11,40 @@ const config = 'apps/desktop/scripts/fixtures/conversation-reading-density/vites
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const read = async file => JSON.parse(await readFile(file, 'utf8'))
 const own = 'apps/desktop/scripts/verify-conversation-reading-density.mjs'
+const command = promisify(execFile)
+async function consumeQualifiedCandidate(candidateRoot) {
+  const candidate = resolve(candidateRoot)
+  assert.notEqual(candidate, root, 'The explicit candidate must name its own checkout')
+  const git = async (cwd, ...args) => (await command('git', args, { cwd, maxBuffer: 8 * 1024 * 1024 })).stdout.trim()
+  assert.equal(await git(candidate, 'status', '--porcelain', '--untracked-files=no'), '', 'The exact qualified candidate must have no tracked edits')
+  const mainHead = await git(root, 'rev-parse', 'refs/heads/main'), candidateHead = await git(candidate, 'rev-parse', 'HEAD')
+  await git(root, 'merge-base', '--is-ancestor', candidateHead, mainHead)
+  const pointer = await read(join(candidate, '.local/conversation-duplication/reading-current.json'))
+  const candidateDirectory = resolve(candidate, pointer.directory)
+  assert.ok(candidateDirectory.startsWith(join(candidate, '.local/conversation-duplication/reading-')), 'The source receipt belongs to the original candidate')
+  const receiptFile = join(candidateDirectory, 'receipt.json'), receipt = await read(receiptFile)
+  assert.equal(hash(await readFile(receiptFile)), pointer.receiptSha256)
+  assert.equal(receipt.schema, 'agentmux.conversation-reading-density.v1'); assert.equal(receipt.passed, true)
+  for (const file of [own, config, 'packages/client-ui/src/components/ConversationView.tsx', 'apps/desktop/src/renderer/src/components/ActivityView.tsx', 'apps/mobile/src/conversation/MobileConversationSurface.tsx']) assert.ok(receipt.sources[file], 'The original task owner and product consumers must be qualified: ' + file)
+  const tree = async (cwd, head) => new Map((await git(cwd, 'ls-tree', '-rz', '--full-tree', head)).split('\0').filter(Boolean).map(entry => {
+    const tab = entry.indexOf('\t'); return [entry.slice(tab + 1), entry.slice(0, tab).split(' ')[2]]
+  }))
+  const candidateTree = await tree(candidate, candidateHead), mainTree = await tree(root, mainHead)
+  let trackedInputs = 0
+  for (const file of Object.keys(receipt.sources)) {
+    if (!candidateTree.has(file)) continue // Generated dist remains bound by the original candidate's source hashes.
+    trackedInputs++
+    assert.equal(candidateTree.get(file), mainTree.get(file), 'A tested source differs from current main: ' + file)
+  }
+  assert.ok(trackedInputs > 0, 'Nonempty exact main/candidate source comparison')
+  const action = process.argv.includes('--verify') ? '--verify' : '--check-prepared'
+  assert.ok(process.argv.includes('--prepare') || process.argv.includes('--check-prepared') || process.argv.includes('--verify'), 'Explicit candidate routing consumes prepared proof only')
+  const env = { ...process.env }; delete env.AGENTMUX_READING_DENSITY_CANDIDATE_ROOT
+  const result = await command(process.execPath, [join(candidate, own), action], { cwd: candidate, env, maxBuffer: 8 * 1024 * 1024 })
+  process.stdout.write(result.stdout)
+  console.log(JSON.stringify({ consumedOriginalCandidate: true, rootMainHead: mainHead, candidateHead, candidateRoot: candidate, trackedInputs,
+    action, boundary: 'Consumes exact unchanged candidate evidence; does not adopt a workspace, rerun expensive qualification, change Tracker status or claim root worktree edits were tested.' }))
+}
 const configText = await readFile(join(root, config), 'utf8')
 const mutations = [...configText.matchAll(/^\s*'([^']+)': \[/gmu)].map(match => match[1])
 assert.ok(mutations.length > 0 && new Set(mutations).size === mutations.length, 'Nonempty unique mutations from the actual owning config')
@@ -43,6 +78,68 @@ async function tests(directory, name, mutation, adjacent = false) {
   return { ...execution, report: relative(root, report), loaded: relative(root, loaded), cases: cases.map(item => ({ name: item.fullName, status: item.status })),
     assertionFailures: cases.filter(item => item.status === 'failed' && item.failureMessages.some(message => message.includes('AssertionError'))).length, inputs }
 }
+async function typeProof(types) {
+  assert.equal(types.exit, 0); assert.equal(types.signal, null)
+  assert.ok(types.inputs?.length > 0, 'Actual candidate type inputs must be recorded')
+  for (const input of types.inputs) assert.equal(hash(await readFile(join(root, input.path))), input.sha256, 'A checked type input changed: ' + input.path)
+  await readFile(join(root, types.log))
+}
+async function typecheck(directory) {
+  const paths = {}, manifests = []
+  for (const name of ['core', 'client-ui', 'demand', 'diagnostic-evidence', 'relay', 'identity']) {
+    const file = join(root, 'packages', name, 'package.json'), manifest = await read(file)
+    manifests.push(file)
+    for (const [key, entry] of Object.entries(manifest.exports)) {
+      const target = typeof entry === 'string' ? entry : entry.types
+      assert.equal(typeof target, 'string', 'Exact candidate type export: ' + manifest.name + key)
+      paths[key === '.' ? manifest.name : manifest.name + key.slice(1)] = [join(root, 'packages', name, target)]
+    }
+  }
+  const original = join(root, 'packages/client-ui/tsconfig.json'), configFile = join(directory, 'types.tsconfig.json')
+  await writeFile(configFile, JSON.stringify({ extends: original, compilerOptions: { baseUrl: root, paths } }) + '\n')
+  const result = await execute(process.execPath, [join(root, 'node_modules/typescript/bin/tsc'), '--noEmit', '--pretty', 'false', '--listFiles', '-p', configFile], join(directory, 'types.log'))
+  assert.equal(result.signal, null); assert.equal(result.exit, 0, 'Exact candidate shared types: ' + result.log)
+  const files = (await readFile(join(root, result.log), 'utf8')).split('\n').filter(file => /\.[cm]?tsx?$/u.test(file.trim())).map(file => file.trim())
+  assert.ok(files.length > 0, 'TypeScript reports its actual input files')
+  const inputs = new Set([original, configFile, ...manifests])
+  for (const file of files) {
+    if (file.includes('/node_modules/')) continue
+    assert.ok(file.startsWith(root + sep), 'First-party type input lies outside the candidate: ' + file)
+    inputs.add(file)
+  }
+  return { ...result, inputs: await Promise.all([...inputs].map(async file => ({ path: relative(root, file), sha256: hash(await readFile(file)) }))) }
+}
+async function testProof(receipt) {
+  assert.ok(receipt.baseline && receipt.adjacent && receipt.restored && receipt.types, 'Every original test/type stage must have completed')
+  assert.deepEqual(receipt.mutants.map(mutant => mutant.name), mutations, 'Every current implementation mutation was proved')
+  const runs = [receipt.baseline, ...receipt.mutants, receipt.adjacent, receipt.restored]
+  for (const run of runs) {
+    const report = await read(join(root, run.report)), cases = report.testResults.flatMap(item => item.assertionResults)
+    assert.ok(cases.length > 0 && report.numTotalTests === cases.length)
+    assert.deepEqual(cases.map(item => ({ name: item.fullName, status: item.status })), run.cases)
+    const inputs = (await readFile(join(root, run.loaded), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+    assert.ok(inputs.length > 0); assert.deepEqual(inputs, run.inputs)
+    for (const input of inputs) assert.equal(hash(await readFile(join(root, input.path))), input.originalSHA256, 'Original tested candidate changed: ' + input.path)
+    assert.equal(run.signal, null)
+    if (receipt.mutants.includes(run)) {
+      assert.ok(run.exit > 0 && run.assertionFailures > 0); assert.equal(report.success, false)
+      assert.equal(cases.filter(item => item.status === 'failed' && item.failureMessages.some(message => message.includes('AssertionError'))).length, run.assertionFailures)
+      const changed = inputs.filter(input => input.mutation === run.name)
+      assert.equal(changed.length, 1); assert.notEqual(changed[0].sha256, changed[0].originalSHA256)
+    } else { assert.equal(run.exit, 0); assert.equal(report.success, true); assert.ok(report.numPassedTests > 0 && report.numFailedTests === 0) }
+  }
+  assert.deepEqual(receipt.restored.cases, receipt.baseline.cases)
+  await typeProof(receipt.types)
+}
+async function currentReceipt(requirePassed = true) {
+  const pointer = await read(join(area, 'reading-current.json')), directory = resolve(root, pointer.directory)
+  assert.ok(directory.startsWith(area + '/reading-'), 'The qualification belongs to this local owner')
+  const file = join(directory, 'receipt.json'), receipt = await read(file)
+  assert.equal(hash(await readFile(file)), pointer.receiptSha256)
+  assert.equal(receipt.schema, 'agentmux.conversation-reading-density.v1')
+  if (requirePassed) { assert.equal(pointer.passed, true); assert.equal(receipt.passed, true) }
+  return { pointer, directory, receipt }
+}
 async function prepare() {
   const directory = join(area, 'reading-' + Date.now()); await mkdir(directory, { recursive: true })
   const receipt = { schema: 'agentmux.conversation-reading-density.v1', passed: false, sources: {}, baseline: null, mutants: [], restored: null, capture: null }
@@ -68,8 +165,8 @@ async function prepare() {
     assert.equal(receipt.restored.exit, 0, 'Restored actual implementation')
     assert.deepEqual(receipt.restored.cases.map(item => item.name), receipt.baseline.cases.map(item => item.name))
     mergeSources(receipt.sources, Object.fromEntries(receipt.restored.inputs.map(input => [input.path, input.originalSHA256])))
-    receipt.types = await execute('pnpm', ['--filter', '@agentmux/client-ui', 'typecheck'], join(directory, 'types.log'))
-    assert.equal(receipt.types.signal, null); assert.equal(receipt.types.exit, 0, 'Shared component types: ' + receipt.types.log)
+    receipt.types = await typecheck(directory)
+    mergeSources(receipt.sources, Object.fromEntries(receipt.types.inputs.map(input => [input.path, input.sha256])))
     receipt.capture = await captureReadingDensity(join(directory, 'visual'))
     mergeSources(receipt.sources, receipt.capture.sources)
     for (const [file, sha] of Object.entries(receipt.sources)) assert.equal(hash(await readFile(join(root, file))), sha, 'Source changed during qualification: ' + file)
@@ -91,24 +188,22 @@ async function prepare() {
   console.log(JSON.stringify({ prepared: true, directory: relative(root, directory), sourceSha256: receipt.sourceSha256, captureSha256: receipt.captureSha256,
     tests: receipt.baseline.cases.length, mutants: receipt.mutants.length, images: receipt.capture.frames.length, independentReview: 'pending', boundary: receipt.capture.boundary }))
 }
-async function verify() {
-  const pointer = await read(join(area, 'reading-current.json')), directory = resolve(root, pointer.directory)
-  assert.ok(directory.startsWith(area + '/reading-'), 'The qualification belongs to this local owner')
-  assert.equal(pointer.passed, true, 'Preparation passed')
-  const receiptFile = join(directory, 'receipt.json'), receipt = await read(receiptFile)
-  assert.equal(hash(await readFile(receiptFile)), pointer.receiptSha256)
-  assert.equal(receipt.schema, 'agentmux.conversation-reading-density.v1'); assert.equal(receipt.passed, true)
+async function verify(preparedOnly = false) {
+  const { pointer, directory, receipt } = await currentReceipt()
   assert.equal(sourceHash(receipt.sources), pointer.sourceSha256)
   for (const [file, sha] of Object.entries(receipt.sources)) assert.equal(hash(await readFile(join(root, file))), sha, 'Qualified source changed: ' + file)
   assert.ok(Object.keys(receipt.artifacts).length > 0, 'Nonempty exact proof artifacts')
   for (const [file, sha] of Object.entries(receipt.artifacts)) assert.equal(hash(await readFile(join(root, file))), sha, 'Qualified proof changed: ' + file)
-  for (const file of [receipt.baseline.report, receipt.adjacent.report, receipt.restored.report]) {
-    const report = await read(join(root, file)); assert.equal(report.success, true); assert.ok(report.numPassedTests > 0 && report.numFailedTests === 0)
-  }
-  assert.deepEqual(receipt.mutants.map(mutant => mutant.name), mutations)
-  for (const mutant of receipt.mutants) { assert.ok(mutant.exit > 0 && mutant.assertionFailures > 0); assert.equal((await read(join(root, mutant.report))).success, false) }
+  await testProof(receipt)
   const captureFile = join(directory, 'visual/capture.json'), capture = await read(captureFile)
   assert.equal(hash(await readFile(captureFile)), pointer.captureSha256); assert.equal(capture.passed, true)
+  assert.ok(capture.frames.length > 0)
+  for (const frame of capture.frames) assert.equal(hash(await readFile(join(directory, 'visual', frame.file))), frame.sha256, 'Exact original captured image: ' + frame.file)
+  if (preparedOnly) {
+    console.log(JSON.stringify({ prepared: true, independentReview: 'pending', directory: pointer.directory, tests: receipt.baseline.cases.length,
+      mutants: receipt.mutants.length, images: capture.frames.length, sourceSha256: pointer.sourceSha256, captureSha256: pointer.captureSha256 }))
+    return
+  }
   const visual = await read(join(area, 'visual-review.json'))
   assert.ok(visual.reviewer && visual.reviewer !== 'plan_review', 'Independent full-image reviewer identity')
   assert.equal(visual.passed, true); assert.equal(visual.captureSha256, pointer.captureSha256)
@@ -124,6 +219,8 @@ async function verify() {
     images: capture.frames.length, sourceSha256: pointer.sourceSha256, captureSha256: pointer.captureSha256 }))
 }
 await mkdir(area, { recursive: true })
-if (process.argv.includes('--prepare')) await prepare()
+if (process.env.AGENTMUX_READING_DENSITY_CANDIDATE_ROOT) await consumeQualifiedCandidate(process.env.AGENTMUX_READING_DENSITY_CANDIDATE_ROOT)
+else if (process.argv.includes('--prepare')) await prepare()
+else if (process.argv.includes('--check-prepared')) await verify(true)
 else if (process.argv.includes('--verify')) await verify()
-else throw Error('Use --prepare to produce candidate evidence or --verify to consume independent reviews')
+else throw Error('Use --prepare, --check-prepared or --verify')

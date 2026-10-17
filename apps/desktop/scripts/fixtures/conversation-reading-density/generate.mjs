@@ -4,21 +4,28 @@ import { join, relative, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 import { registerHooks } from 'node:module'
 import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { candidateExport } from './candidate-export.mjs'
 import { fixtureEpoch } from '../../../../../test/fixture-values.mjs'
 import { sessionId, source, originalRows, appendedRow, snapshots, reply, draft } from './scene.mjs'
 
 const root = resolve(import.meta.dirname, '../../../../..'), coreBuildInputs = {}
-const observed = registerHooks({ load(url, context, next) {
+const observed = registerHooks({ resolve(specifier, context, next) {
+  if (!specifier.startsWith('@agentmux/')) return next(specifier, context)
+  const { file, manifest } = candidateExport(root, specifier)
+  coreBuildInputs[relative(root, manifest)] = createHash('sha256').update(readFileSync(manifest)).digest('hex')
+  return { url: pathToFileURL(file).href, shortCircuit: true }
+}, load(url, context, next) {
   const loaded = next(url, context)
   if (url.startsWith('file:')) {
     const file = fileURLToPath(url)
-    if (file.startsWith(join(root, 'packages/core/dist/')) && file.endsWith('.js')) coreBuildInputs[relative(root, file)] = createHash('sha256').update(readFileSync(file)).digest('hex')
+    if (file.startsWith(join(root, 'packages/')) && /\.[cm]?[jt]s$/u.test(file)) coreBuildInputs[relative(root, file)] = createHash('sha256').update(readFileSync(file)).digest('hex')
   }
   return loaded
 } })
-const { AgentMuxClient, AgentMuxFileAgentSessionStore } = await import('@agentmux/core')
-const { consumeConversationWindowPage } = await import('@agentmux/core/conversation')
+const { AgentMuxClient, AgentMuxFileAgentSessionStore } = await import(pathToFileURL(join(root, 'packages/core/dist/index.js')).href)
+const { consumeConversationWindowPage } = await import(pathToFileURL(join(root, 'packages/core/dist/conversation.js')).href)
+assert.ok(coreBuildInputs['packages/core/dist/index.js'] && coreBuildInputs['packages/core/dist/conversation.js'], 'The exact candidate Core entry points were actually loaded')
 assert.ok(process.argv[2], 'An explicitly owned private sample directory is required')
 const directory = resolve(process.argv[2]), nativePath = join(directory, 'native.jsonl')
 await mkdir(directory, { recursive: true })

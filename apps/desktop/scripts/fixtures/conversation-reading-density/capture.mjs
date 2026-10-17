@@ -8,6 +8,7 @@ import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { extname, join, relative, resolve, sep } from 'node:path'
 import { runProbeProcess, stopProbeProcesses } from '../../probe-process.mjs'
+import { candidateExport } from './candidate-export.mjs'
 const fixture = import.meta.dirname, root = resolve(fixture, '../../../../..')
 const require = createRequire(join(root, 'apps/desktop/package.json'))
 const { build, loadConfigFromFile } = require('vite'), hash = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -29,7 +30,13 @@ export async function captureReadingDensity(evidence) {
     await build({ configFile: false, root: fixture, base: './', logLevel: 'error', esbuild: { jsx: 'automatic' }, worker: { format: 'es' },
       resolve: { ...config.config.resolve, conditions: ['browser', 'module', 'production', 'import', 'default'] }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' },
       build: { outDir: compiled, emptyOutDir: true, target: 'esnext' },
-      plugins: [{ name: 'actual-wrapper-inputs', enforce: 'pre', transform(code, id) {
+      plugins: [{ name: 'actual-reading-inputs', enforce: 'pre', resolveId(specifier) {
+        if (!specifier.startsWith('@agentmux/')) return
+        const { file, manifest } = candidateExport(root, specifier, true)
+        receipt.sources[relative(root, manifest)] = hash(readFileSync(manifest))
+        return file
+      }, transform(code, id) {
+        assert.ok(id.startsWith(root + sep) || id.includes('/node_modules/') || !/\/(?:packages|apps)\/[^/]+\/(?:src|dist)\//u.test(id), 'First-party browser source is outside this exact candidate: ' + id)
         if (id.startsWith(root + sep) && !id.includes('/node_modules/') && !id.includes('?') && /\.([cm]?[jt]sx?|css)$/.test(id)) receipt.sources[relative(root, id)] = hash(readFileSync(id))
       }, async generateBundle() {
         for (const file of this.getWatchFiles()) if (file.startsWith(root + sep) && !file.includes('/node_modules/') && file.endsWith('.css')) receipt.sources[relative(root, file)] = hash(await readFile(file))
@@ -37,8 +44,9 @@ export async function captureReadingDensity(evidence) {
     const sample = JSON.parse(await readFile(join(temporary, 'reading.json'), 'utf8'))
     assert.ok(Object.keys(sample.coreBuildInputs).length > 0, 'Actual Node Core build inputs')
     Object.assign(receipt.sources, sample.coreBuildInputs)
+    for (const file of ['packages/client-ui/src/components/ConversationView.tsx', 'apps/desktop/src/renderer/src/components/ActivityView.tsx', 'apps/mobile/src/conversation/MobileConversationSurface.tsx']) assert.ok(receipt.sources[file], 'The actual candidate product consumer must be loaded: ' + file)
     await cp(join(temporary, 'reading.json'), join(compiled, 'reading.json')); await cp(join(temporary, 'reading.json'), join(evidence, 'public-reading.json'))
-    for (const name of ['capture.mjs', 'generate.mjs', 'main.cjs', 'scene.mjs', 'desktop.tsx', 'index.html', 'preview.css', 'vitest.owning.config.mts']) receipt.sources[relative(root, join(fixture, name))] = hash(await readFile(join(fixture, name)))
+    for (const name of ['capture.mjs', 'candidate-export.mjs', 'generate.mjs', 'main.cjs', 'scene.mjs', 'desktop.tsx', 'index.html', 'preview.css', 'vitest.owning.config.mts']) receipt.sources[relative(root, join(fixture, name))] = hash(await readFile(join(fixture, name)))
     const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' }
     server = createServer(async (request, response) => {
       try {
