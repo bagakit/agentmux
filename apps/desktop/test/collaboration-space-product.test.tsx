@@ -62,9 +62,10 @@ it('opens the real Space graph from a captured area without retargeting it when 
   expect(reads.map(call => call[0].agentSessionId).sort()).toEqual([defaultAgent.id, neighborAgent.id].sort())
   expect(graph().querySelector('.focus-context[data-session-id="default-agent"]')).not.toBeNull()
   expect(graph().querySelector('.focus-context[data-session-id="custom-agent"]')).toBeNull()
-  const originalSelection = state.workbenchSpaceSelection
+  const originalSelection = state.workbenchSpaceSelection, originalGraph = graph()
   await act(async () => useAppStore.setState({ workbenchSpaceSelection: choice(ordinaryTopicId), agentNames: { ...state.agentNames, [defaultAgent.id]: 'Original sender updated' } }))
   expect(api.sessions.messageEvents).toHaveBeenCalledTimes(2)
+  expect(graph()).toBe(originalGraph)
   expect(graph().querySelector('.focus-context[data-session-id="default-agent"]')).not.toBeNull()
   expect(graph().querySelector('.focus-context[data-session-id="ordinary-agent"]')).toBeNull()
   expect(useAppStore.getState().agentComposerDrafts).toBe(draft); expect(open).not.toHaveBeenCalled()
