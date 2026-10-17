@@ -19,8 +19,8 @@ import { BotSetupGuide, type BotSetupGuideStage } from './settings/BotSetupGuide
 import '../styles/connector-experience.css'
 
 const LoadingIcon = semanticIconComponent('status.loading')
-const creationComplete = (operation: MoteConnectionOperation) => !!operation.enrollment?.configured && operation.defaultLink.state === 'saved' &&
-  (!operation.enrollment.initialPublication || operation.enrollment.initialSetup?.progress?.state === 'complete')
+const creationComplete = (operation: MoteConnectionOperation, enrollment = operation.enrollment) => !!enrollment?.configured && operation.defaultLink.state === 'saved' &&
+  (!enrollment.initialPublication || enrollment.initialSetup?.progress?.state === 'complete')
 
 const enrollmentActionLabel: Record<ConnectionEnrollmentActionKind, string> = {
   'continue-authentication': 'Check sign-in',
@@ -112,8 +112,9 @@ export function MoteBotSetup({
     onCreateIntentConsumed?.()
     if (resumeId) void setup.check(resumeId)
   }, [setup.selectedId, setup.checking, operation, setup.historyReady, setup.loading, setup.profile, capability, resumeId])
-  const enrollment = setup.enrollmentView?.operation && setup.enrollmentView.operation.operationId === operation?.enrollmentOperationId && setup.enrollmentView.operation.revision >= (operation?.enrollment?.revision ?? 0) ? setup.enrollmentView.operation : operation?.enrollment
+  const enrollment = setup.enrollmentView?.operation && setup.enrollmentView.operation.operationId === operation?.enrollmentOperationId && setup.enrollmentView.operation.revision >= (operation?.enrollment?.revision ?? 0) && (!operation?.enrollment?.initialSetup || setup.enrollmentView.operation.initialSetup?.operationId === operation.enrollment.initialSetup.operationId) ? setup.enrollmentView.operation : operation?.enrollment
   const initialSetup = enrollment?.initialSetup, initialProgress = initialSetup?.progress
+  const completedCreation = operation?.action === 'create' && !!enrollment?.initialPublication && creationComplete(operation, enrollment)
   const challenge = setup.enrollmentView?.challenge,
     busy = !!setup.selectedId && setup.busy.includes(setup.selectedId)
   const enrollmentActions = (setup.enrollmentView?.actions ?? []).filter(
@@ -195,11 +196,12 @@ export function MoteBotSetup({
     <div className="mote-bot-actions">
       <button
         type="button"
-        className={primaryEnrollmentAction ? 'small-button' : 'primary-button'}
+        className={completedCreation || primaryEnrollmentAction ? 'small-button' : 'primary-button'}
+        aria-busy={busy || setup.checking}
         disabled={busy}
         onClick={() => void setup.check(operation.operationId)}
       >
-        {busy ? 'Checking setup…' : 'Check saved progress'}
+        {busy || setup.checking ? <LoadingIcon size={14} animation="spin" /> : null}Check saved progress
       </button>
     </div>
   ) : null
@@ -223,7 +225,7 @@ export function MoteBotSetup({
   return (
     <section className="mote-bot-setup" aria-label="Mote bot profile" data-bot-journey-stage={profileTask ? undefined : guideStage}>
       <div className="mote-bot-task">
-      {profileTask ? operation?.profileOperationId ? <ConnectionProfileProgress operation={operation.profile} started sourceConfirmed /> : <ConsoleProfileProgress started={!!selected} sourceConfirmed={selected ? !!operation?.snapshot : !!setup.profile} unconfirmed={selected && !operation?.setup ? 'request' : undefined} /> : <BotSetupGuide stage={guideStage} currentStatus={initialProgress ? initialProgress.state === 'complete' ? 'Confirmed' : initialSetupStageLabels[initialProgress.stage] : enrollment?.application && !savedConnection ? 'Created · saving' : undefined} confirmedSteps={[...(setup.profile || operation?.snapshot ? [1] : []), ...(enrollment?.authentication?.stage === 'confirmed' ? [2] : []), ...(enrollment?.application ? [3] : [])]} currentStep={!selected ? 1 : savedConnection ? 4 : enrollment?.application || primaryEnrollmentAction?.kind === 'create' ? 3 : 2} />}
+      {profileTask ? operation?.profileOperationId ? <ConnectionProfileProgress operation={operation.profile} started sourceConfirmed /> : <ConsoleProfileProgress started={!!selected} sourceConfirmed={selected ? !!operation?.snapshot : !!setup.profile} unconfirmed={selected && !operation?.setup ? 'request' : undefined} /> : <BotSetupGuide stage={guideStage} title={completedCreation ? 'Bot setup complete' : undefined} description={completedCreation ? 'Creation, configuration, first publication and this Mote’s saved bot choice are confirmed. Message delivery and group conversations are checked separately.' : undefined} currentStatus={initialProgress ? initialProgress.state === 'complete' ? 'Confirmed' : initialSetupStageLabels[initialProgress.stage] : enrollment?.application && !savedConnection ? 'Created · saving' : undefined} confirmedSteps={[...(setup.profile || operation?.snapshot ? [1] : []), ...(enrollment?.authentication?.stage === 'confirmed' ? [2] : []), ...(enrollment?.application ? [3] : []), ...(completedCreation ? [4] : [])]} currentStep={completedCreation ? null : !selected ? 1 : savedConnection ? 4 : enrollment?.application || primaryEnrollmentAction?.kind === 'create' ? 3 : 2} />}
       <div className="mote-bot-task__content">
       {setup.checking ? <p role="status" data-bot-task-reading aria-busy="true"><LoadingIcon size={14} animation="spin" /> Reading the original saved result…</p> : null}
       {!selected ? (
