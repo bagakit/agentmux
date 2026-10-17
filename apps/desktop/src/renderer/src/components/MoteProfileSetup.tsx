@@ -72,8 +72,14 @@ export function MoteProfileSetup({ operation, automatic, onOperation }: {
         operationId: parentId, ...(setup ? { setup } : {})
       })
       if (!active.current) return
-      callback.current(receipt)
+      const authentication = receipt.setup?.authentication
+      const stillWaiting = authentication?.request === 'confirmed' && authentication.secureStorage === 'stored' && (authentication.stage === 'waiting' || authentication.stage === 'scanned')
+      // Refresh the private view before its still-waiting parent revision can unmount the QR.
+      // Terminal or unknown results take effect immediately, even if the next local read stalls.
+      if (!stillWaiting) callback.current(receipt)
       await inspect()
+      if (!active.current) return
+      if (stillWaiting) callback.current(receipt)
       if (drive) setDriving(true)
     } catch (error) { if (active.current) { setDriving(false); setReading(previous => ({ ...previous, issue: presentError(error) })) } }
     finally { pending.current = false; if (active.current) setBusy(false) }
