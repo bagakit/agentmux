@@ -20,7 +20,7 @@ function inputReading(reader: ReturnType<typeof useSessionUserMessages>): InputR
 /** The original reader supplies facts; a pin retains only the presented inputs. */
 export function AgentInputRecap({ request, enabled, available, follow = false }: { request: PreviewRequest; enabled: boolean; available: boolean; follow?: boolean }) {
   const [paused, setPaused] = useState(false), [frozen, setFrozen] = useState<InputReading | null>(null)
-  const reader = useSessionUserMessages(paused || frozen && !enabled ? undefined : request.control, { enabled: enabled && !paused })
+  const reader = useSessionUserMessages(request.control, { enabled: enabled && !paused })
   const region = useRef<HTMLElement>(null), held = useRef<InputReading | null>(null)
   const reflow = useRef<{ container: HTMLElement; anchor: ReturnType<typeof captureReadingAnchor> } | null>(null)
   const current = inputReading(reader)
@@ -29,7 +29,10 @@ export function AgentInputRecap({ request, enabled, available, follow = false }:
     if (request.pinned && !follow && !frozen) setFrozen(held.current ?? current)
   })
   useEffect(() => {
-    if (!enabled || !frozen || request.bookmark || paused || reader.loading || !(reader.nativeHistoryPage || reader.error || reader.observationError)) return
+    if (!enabled || !frozen || follow || paused || reader.loading || !(reader.nativeHistoryPage || reader.error || reader.observationError)) return
+    // A protected bookmark keeps the presented cut, including its selected input.
+    // Let the original batch settle, then park this same view until explicit follow.
+    if (request.bookmark) { setPaused(true); return }
     // Keep every already presented input. Only the original in-flight native batch
     // may fill unused slots; later captured requests cannot evict selected text.
     const messages = retainConversationInputs(frozen.messages, reader.messages.filter(message => message.source.kind === 'native'), 6)
@@ -38,7 +41,7 @@ export function AgentInputRecap({ request, enabled, available, follow = false }:
       if (container) reflow.current = { container, anchor: captureReadingAnchor(container) }
     }
     setFrozen({ ...current, messages }); setPaused(true)
-  }, [enabled, frozen, paused, reader.loading, reader.nativeHistoryPage, reader.error, reader.observationError])
+  }, [enabled, frozen, follow, request.bookmark, paused, reader.loading, reader.nativeHistoryPage, reader.error, reader.observationError])
   useLayoutEffect(() => {
     if (reflow.current) { restoreReadingAnchor(reflow.current.container, reflow.current.anchor); reflow.current = null }
   }, [frozen])
