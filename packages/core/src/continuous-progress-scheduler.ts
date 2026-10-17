@@ -1,4 +1,5 @@
 import { mintObjectId } from './object-id.js'
+import { AgentMuxError } from './errors.js'
 import type { AgentPromptCondition } from './agent-prompt-condition.js'
 import { parseAgentScheduleTiming, type AgentScheduleCalendar, type AgentScheduleCheckInPolicy, type AgentScheduleCheckInState, type AgentScheduleTiming } from './agent-schedule.js'
 
@@ -99,9 +100,14 @@ export class ContinuousProgressScheduler {
     return structuredClone(loop)
   }
 
-  pause(loopId: string): ContinuousProgressLoop { return this.update(loopId, { status: 'paused' }) }
+  pause(loopId: string): ContinuousProgressLoop {
+    const loop = this.require(loopId)
+    if (isAgentSchedule(loop) && loop.status === 'stopped') throw new AgentMuxError('An ended arrangement cannot pause or resume. Save a new arrangement explicitly.', 'SCHEDULE_CANCELLED')
+    return this.update(loopId, { status: 'paused' })
+  }
   resume(loopId: string): ContinuousProgressLoop {
     const loop = this.require(loopId)
+    if (isAgentSchedule(loop) && loop.status === 'stopped') throw new AgentMuxError('An ended arrangement cannot pause or resume. Save a new arrangement explicitly.', 'SCHEDULE_CANCELLED')
     return this.update(loopId, { status: 'active', nextCheckAt: isAgentSchedule(loop) ? loop.nextCheckAt : this.now() + loop.intervalMs })
   }
   stop(loopId: string): ContinuousProgressLoop { return this.update(loopId, { status: 'stopped' }) }
