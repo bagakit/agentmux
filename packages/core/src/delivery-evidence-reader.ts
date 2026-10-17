@@ -89,19 +89,22 @@ export function deliveryEvidenceReader(options: {
   } }
 }
 
+const isDeliveryEvidence = (data: AgentMuxDiagnosticEvidenceRead['data']): data is AgentMuxDeliveryEvidence =>
+  data !== null && 'kind' in data && data.kind === 'delivery'
+
 export function relatedDeliveryEvidence(read: AgentMuxDiagnosticEvidenceRead): AgentMuxDiagnosticEvidenceTarget[] {
-  if (read.target.domain !== 'delivery.client' || read.data?.kind !== 'delivery' || !read.data.coreLogId || !read.data.hostId) return []
+  if (read.target.domain !== 'delivery.client' || !isDeliveryEvidence(read.data) || !read.data.coreLogId || !read.data.hostId) return []
   return [{ domain: 'delivery.core', hostId: read.data.hostId, logId: read.data.coreLogId }]
 }
 export function deliveryEvidenceRelations(reads: readonly AgentMuxDiagnosticEvidenceRead[]): DiagnosticEvidenceRelation[] {
   const relations: DiagnosticEvidenceRelation[] = []
   for (const read of reads) {
-    if (read.target.domain !== 'delivery.client' || !read.recordRef || read.data?.kind !== 'delivery' || !read.data.coreLogId || !read.data.hostId) continue
+    if (read.target.domain !== 'delivery.client' || !read.recordRef || !isDeliveryEvidence(read.data) || !read.data.coreLogId || !read.data.hostId) continue
     const data = read.data
     const target = reads.find(candidate => candidate.target.domain === 'delivery.core' &&
       candidate.target.hostId === data.hostId && candidate.target.logId === data.coreLogId)
     const to: DiagnosticEvidenceRef = target?.recordRef ?? { domain: 'delivery.core', logId: data.coreLogId!, authority: null, routeHostId: data.hostId }
-    const original = target?.data?.kind === 'delivery' ? target.data : null
+    const original = target && isDeliveryEvidence(target.data) ? target.data : null
     const conflict = original && (['agentSessionId', 'operationId', 'expectedRunId', 'afterSubmissionId'] as const)
       .some(key => data[key] !== null && original[key] !== null && data[key] !== original[key])
     const verified = read.authorityStatus === 'verified' && target?.authorityStatus === 'verified' &&

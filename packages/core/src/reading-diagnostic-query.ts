@@ -189,6 +189,8 @@ export function parseReadingDiagnosticSourceRead(value: unknown, request: Readin
       authority.kind !== readAuthority.kind || authority.id !== readAuthority.id || authority.lifetime !== 'instance' || readAuthority.lifetime !== 'instance' || authorityStatus !== 'verified' ||
       p.persistence !== 'observed' || raw.returned !== 'withheld' || raw.retention !== 'not-retained') return invalid()
     if (target.authority && (target.authority.kind !== authority.kind || target.authority.id !== authority.id)) return invalid()
+    if (p.observedAt !== (data.events.at(-1)?.wallMs ?? data.startedAt)) return invalid()
+    if (p.completeness !== (data.coverage.overwritten || data.coverage.rejected || data.coverage.publicationFailures ? 'partial' : 'complete')) return invalid()
     recordRef = { domain: 'reading.lifecycle', logId: target.logId, authority, routeHostId: target.hostId }
   } else if (p.data !== null || p.recordRef !== null) return invalid()
   return { target, recordRef, readAuthority, authorityStatus, availability, data, persistence: p.persistence as 'observed' | 'unconfirmed' | null,

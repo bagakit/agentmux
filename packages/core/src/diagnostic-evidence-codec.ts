@@ -1,3 +1,5 @@
+import { parseReadingDiagnosticRecord } from './reading-diagnostic.js'
+import { parseReadingDiagnosticTarget, parseReadingDiagnosticFindResult, parseReadingDiagnosticSourceRead } from './reading-diagnostic-query.js'
 import { parsePerformanceSceneEvidence } from './performance-scene-evidence.js'
 import { isDeepStrictEqual } from 'node:util'
 import { parseMoteContextEvidenceTarget, parseMoteContextEvidence } from './mote-context-observation.js'
@@ -59,6 +61,7 @@ export function parseDiagnosticEvidenceParams(value: unknown): AgentMuxDiagnosti
 }
 function parseTarget(v: unknown): AgentMuxDiagnosticEvidenceTarget {
   const p = rpcRecord(v)
+  if (p.domain === 'reading.lifecycle') { const target = parseReadingDiagnosticTarget(p); if (Buffer.byteLength(JSON.stringify(target)) > 1024) bad(); return target }
   if (p.domain === 'delivery.client' || p.domain === 'delivery.core') {
     rpcRecord(p, ['domain', 'hostId', 'logId', 'authority']); text(p.hostId); validateDeliveryLogId(p.logId)
     if (p.authority !== undefined) { const a = object(p.authority, ['kind', 'id']); text(a.kind); text(a.id) }
@@ -137,7 +140,23 @@ export function parseDiagnosticEvidenceResult(value: unknown, request: unknown):
       member(raw.returned, ['included', 'withheld', 'unavailable']); member(raw.truncated, [true, false, null])
       if (!params.includeRaw && raw.returned === 'included') bad()
       if (r.availability === 'found') {
-        if (target.domain === 'mote.context.client') {
+        if (target.domain === 'reading.lifecycle') {
+          if ('logId' in target) {
+            const data = parseReadingDiagnosticRecord(r.data)
+            if (data.logId !== target.logId || data.scope.owner !== 'core' || r.recordRef === null || r.scope !== 'record' || raw.returned !== 'withheld') bad()
+            // The aggregate wraps only the route; validate the original instance facts unchanged.
+            parseReadingDiagnosticSourceRead({ ...r, target: { ...target, hostId: data.scope.hostId },
+              recordRef: { ...rpcRecord(r.recordRef), routeHostId: data.scope.hostId } }, { ...target, hostId: data.scope.hostId })
+          } else {
+            if (r.recordRef !== null || r.scope !== 'interval-observation' || r.persistence !== null || r.observedAt !== null || raw.returned !== 'withheld' || raw.retention !== 'not-retained' || raw.truncated !== false || r.authorityStatus !== 'verified' || r.issue !== null) bad()
+            const query = { hostId: target.hostId, ...target.recent,
+              maxBytes: Math.min((rpcRecord(r.data).query as { maxBytes: number }).maxBytes, 128 * 1024) }
+            if (!Number.isSafeInteger(query.maxBytes) || query.maxBytes < 4096 || query.maxBytes > limits.maxBytes) bad()
+            const page = parseReadingDiagnosticFindResult(r.data, query)
+            if (page.availability !== 'found') bad()
+            if (!isDeepStrictEqual(r.readAuthority, page.authority) || r.completeness !== (page.coverage.complete && !page.issue ? 'complete' : 'partial')) bad()
+          }
+        } else if (target.domain === 'mote.context.client') {
           if (r.recordRef !== null || r.readAuthority !== null || r.authorityStatus !== 'unavailable' ||
             r.persistence !== null || r.scope !== 'point-observation' || r.observedAt !== null) bad()
           const data = parseMoteContextEvidence(r.data, target, params.includeRaw === true)
@@ -167,8 +186,8 @@ export function parseDiagnosticEvidenceResult(value: unknown, request: unknown):
     for (const key of Object.keys(limits)) if (b[key] !== limits[key as keyof typeof limits]) bad()
     for (const key of ['usedReads', 'usedBytes', 'elapsedMs']) number(b[key])
     if (b.usedReads !== reads.length || b.usedBytes !== Buffer.byteLength(JSON.stringify(p))) bad()
-    array(p.capabilities, 8, item => { const c = object(item, ['domain', 'target', 'raw', 'read']); member(c.domain, ['delivery.client', 'delivery.core', 'native-recorder-failure', 'toolkit.performance-failure', 'mote.context.client', 'performance.scene']); member(c.target, ['log-id', 'session-run', 'execution-id', 'mote-context', 'capture-id']); member(c.raw, [true, false]); member(c.read, ['supported', 'not-exposed'])
-      if ((c.domain === 'mote.context.client') !== (c.target === 'mote-context') || (c.domain === 'performance.scene') !== (c.target === 'capture-id') || c.domain === 'performance.scene' && c.raw !== false) bad()
+    array(p.capabilities, 8, item => { const c = object(item, ['domain', 'target', 'raw', 'read']); member(c.domain, ['delivery.client', 'delivery.core', 'native-recorder-failure', 'toolkit.performance-failure', 'mote.context.client', 'performance.scene', 'reading.lifecycle']); member(c.target, ['log-id', 'session-run', 'execution-id', 'mote-context', 'capture-id', 'reading-lifecycle']); member(c.raw, [true, false]); member(c.read, ['supported', 'not-exposed'])
+      if ((c.domain === 'reading.lifecycle') !== (c.target === 'reading-lifecycle') || c.domain === 'reading.lifecycle' && c.raw !== false || (c.domain === 'mote.context.client') !== (c.target === 'mote-context') || (c.domain === 'performance.scene') !== (c.target === 'capture-id') || c.domain === 'performance.scene' && c.raw !== false) bad()
     })
     return p as AgentMuxDiagnosticEvidenceResult
   } catch { return bad() }

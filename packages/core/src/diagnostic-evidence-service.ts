@@ -1,3 +1,4 @@
+import { readReadingDiagnosticEvidence } from './reading-diagnostic-evidence.js'
 import { readPerformanceSceneEvidence } from './performance-scene-evidence.js'
 import { toolkitFailureEvidenceReader } from './toolkit-failure-evidence-reader.js'
 import { rpcControlRequest } from './rpc-business-codec.js'
@@ -12,6 +13,7 @@ import type { AgentMuxDiagnosticEvidenceData, AgentMuxDiagnosticEvidenceInspectP
 export async function inspectDiagnosticEvidence(query: DiagnosticEvidenceQuery, params: AgentMuxDiagnosticEvidenceInspectParams,
   ports: AgentMuxRpcServiceOptions, caller: AgentMuxRpcCoreClient | undefined, signal?: AbortSignal): Promise<AgentMuxDiagnosticEvidenceResult> {
   const capabilities: AgentMuxDiagnosticEvidenceResult['capabilities'] = [
+    ...(ports.coreClients ? [{ domain: 'reading.lifecycle' as const, target: 'reading-lifecycle' as const, raw: false, read: 'supported' as const }] : []),
     ...(ports.deliveryAttempts ? [{ domain: 'delivery.client' as const, target: 'log-id' as const, raw: true, read: 'supported' as const }] : []),
     ...(ports.coreClients ? [{ domain: 'delivery.core' as const, target: 'log-id' as const, raw: true, read: 'supported' as const }] : []),
     ...(ports.toolkit ? [{ domain: 'toolkit.performance-failure' as const, target: 'execution-id' as const, raw: true, read: 'supported' as const }] : []),
@@ -29,6 +31,19 @@ export async function inspectDiagnosticEvidence(query: DiagnosticEvidenceQuery, 
   const reader: DiagnosticEvidenceReader<AgentMuxDiagnosticEvidenceTarget, AgentMuxDiagnosticEvidenceData> = { async read(target, bounds) {
     const missing = (code: Parameters<typeof unavailableDiagnosticEvidence>[1]) => unavailableDiagnosticEvidence<AgentMuxDiagnosticEvidenceTarget, AgentMuxDiagnosticEvidenceData>(target, code)
     if (caller && target.hostId !== caller.hostId) return missing('DIAGNOSTIC_EVIDENCE_SOURCE_FORBIDDEN')
+    if (target.domain === 'reading.lifecycle') {
+      const scopes = (await ports.coreClients?.() ?? []).filter(scope => scope.hostId === target.hostId && (!caller || scope.client === caller.client))
+      if (scopes.length !== 1) return missing(scopes.length ? 'DIAGNOSTIC_EVIDENCE_SOURCE_CORRUPT' : 'DIAGNOSTIC_EVIDENCE_SOURCE_UNAVAILABLE')
+      const client = scopes[0]!.client
+      return readReadingDiagnosticEvidence(target, { hostId: target.hostId,
+        read: async request => {
+          const result = await client.readReadingDiagnostic({ ...request, hostId: 'local' })
+          return { ...result, target: request, ...(result.recordRef ? { recordRef: { ...result.recordRef, routeHostId: request.hostId } } : {}) }
+        }, find: async request => {
+          const result = await client.findReadingDiagnostics({ ...request, hostId: 'local' })
+          return { ...result, query: request, records: result.records.map(summary => ({ ...summary, reference: { ...summary.reference, routeHostId: request.hostId } })) }
+        } }, bounds)
+    }
     if (target.domain === 'performance.scene') {
       if (!ports.metrics?.inspectScene) return missing('DIAGNOSTIC_EVIDENCE_SOURCE_UNSUPPORTED')
       if (target.hostId !== 'local') return missing('DIAGNOSTIC_EVIDENCE_SOURCE_UNAVAILABLE')
