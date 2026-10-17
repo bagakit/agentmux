@@ -105,6 +105,32 @@ describe('actual isolated feedback document script', () => {
     await vi.advanceTimersByTimeAsync(900)
     expect(state().operationId).toBe('two'); expect(state().point).toEqual({ x: 140, y: 70 }); expect(state().host).not.toBeNull()
   })
+  it('observations recheck the original anchor without rebuilding or renewing a completed cue', async () => {
+    vi.useFakeTimers(); const element = target(); apply(base, element)
+    apply({ ...base, revision: 2, phase: 'completed' })
+    const { host, expiresAt, token, point } = state()
+    await vi.advanceTimersByTimeAsync(400)
+    apply({ ...base, revision: 3, phase: 'observe' })
+    expect(state()).toMatchObject({ host, expiresAt, token, point, phase: 'completed' })
+    await vi.advanceTimersByTimeAsync(499); expect(state().host).toBe(host)
+    await vi.advanceTimersByTimeAsync(1); expect(state().host).toBeNull()
+    apply({ ...base, revision: 4, phase: 'observe' }); expect(state().host).toBeNull()
+    apply({ ...base, revision: 5 }, element)
+    element.getBoundingClientRect = () => ({ left: 21, top: 30, right: 101, bottom: 50, width: 80, height: 20, x: 21, y: 30, toJSON() {} })
+    apply({ ...base, revision: 6, phase: 'observe' })
+    expect(state().host).toBeNull(); expect(state().history).toBeNull()
+  })
+  it('trusted DOM input alone cannot identify a human or erase the original action', () => {
+    apply(base, target())
+    const host = state().host
+    for (const type of ['pointerdown', 'keydown', 'wheel']) {
+      const event = new Event(type); Object.defineProperty(event, 'isTrusted', { value: true })
+      document.dispatchEvent(event)
+      expect(state().host).toBe(host); expect(state().phase).toBe('running')
+    }
+    apply({ ...base, revision: 2, phase: 'clear' })
+    expect(state().host).toBeNull(); expect(state().history).toBeNull()
+  })
   it('high-revision clear/complete from an old owner and expired injection cannot change the new owner', () => {
     apply({ ...base, operationId: 'two', token: 'private-two' }, target())
     apply({ ...base, revision: 999, phase: 'clear' }); expect(state().operationId).toBe('two'); expect(state().host).not.toBeNull()
@@ -130,6 +156,18 @@ describe('actual isolated feedback document script', () => {
   })
 })
 describe('actual Main feedback owner', () => {
+  it('readonly observation leaves an in-flight action generation valid', async () => {
+    let revision = 0
+    const feedback = showBrowserOperationFeedback({ operationId: 'one', navigationId: () => 'nav', operatorName: 'Agent',
+      contents: { isDestroyed: () => false, executeJavaScriptInIsolatedWorld: async (_world, scripts) => new Function(scripts[0]!.code)() },
+      nextRevision: () => ++revision, isCurrent: () => true, warn: () => { throw new Error('Unexpected display warning') } })
+    const action = await feedback.begin('js'), host = state().host
+    await feedback.observe()
+    expect(state().host).toBe(host); expect(state().phase).toBe('running')
+    await feedback.completeAction(action)
+    expect(state().host).toBe(host); expect(state().phase).toBe('completed')
+    await feedback.clear()
+  })
   it('an old Main instance allocates a newer revision yet cannot clear a new operation', async () => {
     let revision = 0
     const contents = { isDestroyed: () => false, executeJavaScriptInIsolatedWorld: async (_world: number, scripts: { code: string }[]) =>
@@ -229,13 +267,10 @@ describe('T024 actual document motion and invalidation consumers', () => {
     expect(state().host).toBeNull(); expect(state().history).toBeNull()
     apply({ ...base, revision: 2, token: 'new' }, target(100, 70)); expect(moves).toHaveLength(0)
   })
-  it.each(['human', 'wheel', 'hide', 'geometry', 'clear'])('%s invalidates even already invisible history, so the next actual point is static', async reason => {
+  it.each(['hide', 'geometry', 'clear'])('%s invalidates even already invisible history, so the next actual point is static', async reason => {
     vi.useFakeTimers(); apply(base, target()); apply({ ...base, revision: 2, phase: 'completed' })
     await vi.advanceTimersByTimeAsync(1000); expect(state().history.point).toEqual({ x: 60, y: 40 })
-    if (reason === 'human' || reason === 'wheel') {
-      const event = new Event(reason === 'human' ? 'pointerdown' : 'wheel'); Object.defineProperty(event, 'isTrusted', { value: true })
-      document.dispatchEvent(event)
-    } else if (reason === 'hide') window.dispatchEvent(new Event('pagehide'))
+    if (reason === 'hide') window.dispatchEvent(new Event('pagehide'))
     else if (reason === 'geometry') { vi.stubGlobal('scrollY', 1); window.dispatchEvent(new Event('scroll')) }
     else apply({ ...base, revision: 3, phase: 'clear' })
     expect(state().history).toBeNull()

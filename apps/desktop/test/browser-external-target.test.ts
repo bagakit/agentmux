@@ -1,3 +1,4 @@
+import { fixtureEpoch as _batchFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { coldBrowserTargets } from '../src/main/browser-cold-descriptor'
 import { browserResourceLocations } from '../src/main/browser-resource-directory'
 import { browserRunResult, unwrapBrowserRunResult } from '../src/shared/browser-run-result'
@@ -495,6 +496,37 @@ async function programOwner(f: Awaited<ReturnType<typeof fixture>>, uploads: imp
   return { page, journal, evidence, refs, journalFile, journalSaves }
 }
 
+// The original shared-tab transport executes the actual feedback declarations in a
+// document double. This checks owner consumption, not Native Chrome or OS pixels.
+async function feedbackDocument(f: Awaited<ReturnType<typeof fixture>>) {
+  const { Window } = await import('happy-dom')
+  const { buildBrowserOperationTargetFeedbackDeclaration } = await import('../src/main/browser-operation-feedback.js')
+  const page = new Window({ width: 800, height: 600, url: 'https://fixture.invalid/form' })
+  const target = page.document.createElement('button'); page.document.body.append(target)
+  target.getBoundingClientRect = () => new page.DOMRect(20, 30, 80, 20)
+  const declaration = buildBrowserOperationTargetFeedbackDeclaration()
+  const state = () => (page as any).__agentMuxBrowserOperationFeedback
+  const original = f.api.debugger.sendCommand.getMockImplementation()!
+  const observations: { host: unknown; token: string; expiresAt: number; phase: string }[] = []
+  let snapshots = 0
+  let onFollowingSnapshot: (() => Promise<void>) | undefined
+  f.api.debugger.sendCommand.mockImplementation(async (transport, method, params) => {
+    if (method === 'Runtime.evaluate' && params?.contextId !== undefined) {
+      const value = page.eval(params.expression)
+      if (state()?.phase === 'completed' && state()?.host) observations.push({ host: state().host,
+        token: state().token, expiresAt: state().expiresAt, phase: state().phase })
+      return { result: { value } }
+    }
+    if (method === 'Runtime.callFunctionOn' && params?.functionDeclaration === declaration) {
+      return { result: { value: page.eval('(' + declaration + ')').call(target, ...params.arguments.map((argument: any) => argument.value)) } }
+    }
+    if (method === 'Accessibility.getFullAXTree' && ++snapshots > 1) await onFollowingSnapshot?.()
+    return await original(transport, method, params)
+  })
+  cleanups.push(async () => { state()?.cleanup?.(); await page.happyDOM.abort(); page.close() })
+  return { state, observations, followingSnapshot: (callback: () => Promise<void>) => { onFollowingSnapshot = callback } }
+}
+
 
 // Execute the original Desktop branches, preload invokes and registered Main callbacks.
 // Only the UI/IPC frame and empty embedded-page context are Source fixture inputs.
@@ -826,9 +858,68 @@ describe('external page owner uses the existing program and journal', () => {
     // to make an illegal next read; one microtask would sample before either path can continue.
     await new Promise<void>(resolve => setTimeout(resolve, 100))
     expect(f.api.debugger.sendCommand.mock.calls.filter(call => call[1] === 'Runtime.evaluate' && call[2]?.expression === 'counter')).toEqual([])
-    f.api.debugger.onEvent.emit({ tabId: 1 }, 'Page.loadEventFired', { timestamp: 1 })
+    f.api.debugger.onEvent.emit({ tabId: 1 }, 'Page.loadEventFired', { timestamp: _batchFixtureEpoch(0, 0, 1) })
     expect((await run).outcome.kind).toBe('completed')
     expect(binding.navigationId).toBe('next-document')
     expect(f.api.debugger.sendCommand.mock.calls.filter(call => call[1] === 'Runtime.evaluate' && call[2]?.expression === 'counter')).toHaveLength(1)
   })
 })
+
+describe('external feedback original owner lifecycle', () => {
+  it('keeps the same bounded completed cue through the same program ordinary snapshot', async () => {
+    const f = await fixture(), binding = await f.share(), o = await programOwner(f), display = await feedbackDocument(f)
+    const entered = deferred(), held = deferred()
+    display.followingSnapshot(async () => { entered.resolve(); await held.promise })
+    const run = o.page.runScript(binding.id, 'const page=await snapshot();await click(page.nodes[0].ref);return await snapshot()', ownerOperator())
+    try {
+      await entered.promise
+      const original = display.observations[0]
+      expect(original, 'Actual target completion reached the original document').toBeDefined()
+      expect(display.state().phase).toBe('completed')
+      expect(display.state().host, 'Readonly snapshot retains the original completed host').toBe(original!.host)
+      expect(display.state().token).toBe(original!.token)
+      expect(display.state().expiresAt, 'Readonly observation cannot renew the original deadline').toBe(original!.expiresAt)
+    } finally { held.resolve() }
+    expect((await run).outcome.kind).toBe('completed')
+    expect(f.counter).toBe(1)
+    expect(display.observations.length).toBeGreaterThan(0)
+    expect(display.observations.every(cue => cue.host === display.observations[0]!.host && cue.token === display.observations[0]!.token && cue.expiresAt === display.observations[0]!.expiresAt)).toBe(true)
+    expect(f.api.tabs.update).not.toHaveBeenCalled(); expect(f.api.windows.update).not.toHaveBeenCalled()
+  })
+
+  it('invalidates completed action feedback before the original wait dispatcher observes the page', async () => {
+    const f = await fixture(), binding = await f.share(), o = await programOwner(f), display = await feedbackDocument(f)
+    const report = await o.page.runScript(binding.id, 'const page=await snapshot();await click(page.nodes[0].ref);return await waitForElement("Fixture button",1000)', ownerOperator())
+    expect(report.outcome.kind).toBe('completed')
+    expect(display.observations.length).toBeGreaterThan(0)
+    expect(display.state().phase).toBe('clear')
+    expect(display.state().host).toBeNull(); expect(display.state().history).toBeNull()
+    expect(f.counter).toBe(1)
+  })
+
+  it.each(['stop', 'withdraw'] as const)('clears the recorded original cue through actual %s ownership cleanup', async reason => {
+    const f = await fixture(), binding = await f.share(), o = await programOwner(f), display = await feedbackDocument(f)
+    const entered = deferred(), held = deferred()
+    display.followingSnapshot(async () => { entered.resolve(); await held.promise })
+    const id = 'original-feedback-' + reason
+    const run = o.page.runScript(binding.id, 'const page=await snapshot();await click(page.nodes[0].ref);return await snapshot()', ownerOperator(), id)
+    await entered.promise
+    const original = display.observations[0]
+    expect(original, 'Actual original feedback existed before cleanup').toBeDefined()
+    const ending = reason === 'stop' ? o.page.stopOperationById(id) : f.popup({ type: 'unshare', tabId: 1 })
+    try {
+      await ending
+      await vi.waitFor(() => {
+        expect(binding.status).toBe('revoked')
+        expect(display.state().host).toBeNull(); expect(display.state().history).toBeNull()
+      })
+      expect(f.api.debugger.sendCommand.mock.calls.some(call => call[1] === 'Runtime.evaluate' && call[2]?.expression === buildOwnedFeedbackClearScript(id))).toBe(true)
+    } finally { held.resolve() }
+    const result = await run
+    expect(result.outcome.kind).toBe(reason === 'stop' ? 'stopped' : 'indeterminate')
+    expect(f.counter).toBe(1)
+    expect(f.api.tabs.update).not.toHaveBeenCalled(); expect(f.api.windows.update).not.toHaveBeenCalled()
+  })
+})
+
+function ownerOperator() { return { id: owner.callerId, name: 'Fixture Agent' } }
