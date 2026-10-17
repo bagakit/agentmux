@@ -17,14 +17,14 @@ import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-valu
 
 const dom = composerDOM(), H = 'host-01', J = 'host-02'
 let config = connectionsConfig(composerConfig)
-const onSave = vi.fn(async () => {})
+const onSave = vi.fn(async () => {}), onClose = vi.fn()
 beforeEach(() => {
   installNoteCanvasGeometry()
   config = connectionsConfig(composerConfig)
   useAppStore.setState({ config, sessions: [], hostChecks: {} })
-  onSave.mockClear()
+  onSave.mockClear(); onClose.mockClear()
 })
-const show = (active = true) => dom.render(<HostSettingsPane config={config} active={active} onSave={onSave} />)
+const show = (active = true) => dom.render(<HostSettingsPane config={config} active={active} onSave={onSave} onClose={onClose} />)
 const editor = () => dom.container.querySelector<HTMLElement>('[data-resource-editor]')!
 async function mode(name: 'Topology' | 'List') {
   await dom.click(`[aria-label="${name}"]`)
@@ -90,7 +90,7 @@ it('inactive Settings release the graph while the original Host draft remains av
 })
 
 
-it('existing Agent and Terminal rows on same-path Hosts navigate through the original Store action to their original projections', async () => {
+it('session-navigation: existing Agent and Terminal rows on same-path Hosts navigate through the original Store action to their original projections', async () => {
   const base = composerSession('host-a-agent')
   const agent: SessionSnapshot = { ...base, hostId: H, workspacePath: config.workspaces[0]!.path,
     control: { ...base.control, hostId: H } }
@@ -119,12 +119,54 @@ it('existing Agent and Terminal rows on same-path Hosts navigate through the ori
     expect(useAppStore.getState().agentFocus.execution.sessionId).toBe(session.id)
     expect(useAppStore.getState().tabs[`tab-${session.id}`]!.layout.activeRegionId).toBe(`region-${session.id}`)
   }
+  expect(onClose).toHaveBeenCalledTimes(2)
   await graph(J)
   expect([...dom.container.querySelectorAll<HTMLElement>('[data-host-session]')].map(node => node.dataset.hostSession)).toEqual([other.id])
   expect(useAppStore.getState().sessions).toEqual([agent, shell, other])
   expect(Object.keys(useAppStore.getState().tabs)).toEqual(tabs.map(tab => tab.id))
   expect(onSave).not.toHaveBeenCalled()
   } finally { releasePresentation() }
+})
+
+it('session-navigation: a retained Session can create its original projection before Settings closes', async () => {
+  const base = composerSession('unprojected-agent')
+  const session: SessionSnapshot = { ...base, hostId: H, workspacePath: config.workspaces[0]!.path, control: { ...base.control, hostId: H } }
+  useAppStore.setState({ sessions: [session], tabs: {}, layouts: { 'project-a': createWorkspaceLayout('original-group') },
+    activeWorkspaceId: 'project-a', workbenchSpaceSelection: null,
+    agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } } })
+  const release = installDesktopPresentationOwner(() => ({ loading: false, overlays: { settings: true, quickSwitcher: false }, floating: null }))
+  try {
+    await show(); await graph(H); await dom.click(`[data-host-session="${session.id}"]`)
+    expect(onClose).toHaveBeenCalledOnce()
+    const state = useAppStore.getState(), selection = state.workbenchSpaceSelection
+    expect(selection?.tabId).toBeTypeOf('string')
+    expect(Object.keys(state.tabs)).toHaveLength(1)
+    expect(state.tabs[selection!.tabId!]!.regions[selection!.regionId!]).toMatchObject({ kind: 'agent', sessionId: session.id })
+    expect(state.sessions).toEqual([session])
+  } finally { release() }
+})
+
+it.each(['missing resource', 'ambiguous occurrence'])('session-navigation: %s retains Remote context when the original owner refuses', async refusal => {
+  const base = composerSession('retained-agent')
+  const session: SessionSnapshot = { ...base, hostId: H, workspacePath: config.workspaces[0]!.path, control: { ...base.control, hostId: H } }
+  const tabs = refusal === 'ambiguous occurrence' ? ['first', 'second'].map(name => createWorkbenchTab(name, {
+    kind: 'agent', phase: 'attached', regionId: `${name}-region`, workspaceId: 'project-a', sessionId: session.id
+  })) : []
+  if (refusal === 'missing resource') config = { ...config, workspaces: [] }
+  const state = { config, sessions: [session], tabs: Object.fromEntries(tabs.map(tab => [tab.id, tab])),
+    layouts: { 'project-a': createWorkspaceLayout('original-group', tabs.map(tab => tab.id)) }, activeWorkspaceId: 'project-a',
+    workbenchSpaceSelection: null, agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } } }
+  useAppStore.setState(state)
+  const release = installDesktopPresentationOwner(() => ({ loading: false, overlays: { settings: true, quickSwitcher: false }, floating: null }))
+  try {
+    await show(); await graph(H); await dom.click(`[data-host-session="${session.id}"]`)
+    expect(onClose, 'Remote keeps context after owner navigation refusal').not.toHaveBeenCalled()
+    expect(editor().dataset.resourceEditor).toBe(H)
+    expect(useAppStore.getState().workbenchSpaceSelection).toBeNull()
+    expect(useAppStore.getState().tabs).toEqual(state.tabs)
+    expect(useAppStore.getState().layouts).toEqual(state.layouts)
+    expect(useAppStore.getState().sessions).toEqual([session])
+  } finally { release() }
 })
 
 it('Agent configuration Refresh uses original local detection and exact remote discovery rather than guessing from a global template', async () => {
