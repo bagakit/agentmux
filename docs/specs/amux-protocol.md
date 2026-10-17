@@ -8,7 +8,7 @@
 
 | 形式 | 表达的内容 | 业务 owner |
 | --- | --- | --- |
-| `<amux>…</amux>` | 平台说明或本页定义的 A2A 子项容器，可独立或随原请求投递 | [注入上下文](../design/behavior/agent-capabilities-and-messaging.md#agentmux-注入上下文)与[A2A 通知](../design/behavior/agent-capabilities-and-messaging.md#a2a-引用通知与投递方式的待定边界) |
+| `<amux>…</amux>` | 平台说明或本页定义的 A2A 子项容器，可独立或随原请求投递 | [注入上下文](../design/behavior/agent-capabilities-and-messaging.md#agentmux-注入上下文)与[A2A 通知](../design/behavior/agent-capabilities-and-messaging.md#a2a-引用通知与主动取信) |
 | `<amux:a2a …>` | 容器中唯一一个 `a2a` 子项的简写；成对标签携带原信，自闭合标签引用原信 | [A2A 原信与队列](../design/behavior/agent-capabilities-and-messaging.md#a2a-身份信封与持久化全局消息队列) |
 | `<amux:continue />` | 原恢复流程选择的默认接续文本 | [Session 恢复](../design/behavior/session-recovery.md) |
 | `<amux:reaction CODE />` | 用户选定快捷回复的含义标记 | [reaction 快捷回复](../design/behavior/conversation-input.md#回复卡片的-reaction-快捷回复) |
@@ -108,7 +108,7 @@
 
 引用只含原作者 `from`、原信 `msg-id` 与固定发现入口 `read-via="message --skill"`，不携带正文、摘要或预览。自闭合表示原文没有在此展开，不能解释成一封空正文原信。Agent 需要处理时，先通过 `"$AGENTMUX_CLI" message --skill` 发现取信用法，再按原 `msg-id` 主动读取；这不要求处理每封无关来信，也不表示已经读取、理解、接单或完成。
 
-`read-via` 的值固定为上述发现入口，由 Core 生成；它不是任意命令、URL 或授权载体。reader 只提供发现提示，不自动执行属性值、取信或确认消费。空闲投递、steer 资格、通知与原信的独立身份及实际回执由[通知行为合同](../design/behavior/agent-capabilities-and-messaging.md#a2a-引用通知与投递方式的待定边界)持有，不增加为可读属性。合并通知不新建 A2A 原信，每个 `msg-id` 继续引用原 journal 中的同一原信。
+`read-via` 的值固定为上述发现入口，由 Core 生成；它不是任意命令、URL 或授权载体。reader 只提供发现提示，不自动执行属性值、取信或确认消费。空闲投递、steer 资格、通知与原信的独立身份及实际回执由[通知行为合同](../design/behavior/agent-capabilities-and-messaging.md#a2a-引用通知与主动取信)持有，不增加为可读属性。合并通知不新建 A2A 原信，每个 `msg-id` 继续引用原 journal 中的同一原信。
 
 ### 精确文本边界
 
@@ -157,12 +157,13 @@ Browser 使用同样定界，将首行的 `File` 换成 `Browser`。准确拼接
 | 职责 | 当前源码入口 |
 | --- | --- |
 | 平台文本与原请求的组合 | [`composeOutboundMessage` / `composeAgentPrompt` / `composeAgentLaunchPrompt`](../../packages/core/src/agent-outbound-message.ts) |
-| 已核 A2A 的可读生成与共同解析 | [`renderAgentMuxMessageEnvelope` / `parseAgentMuxMessagePrefix`](../../packages/core/src/agent-message-render.ts) |
+| 已核 A2A 的可读生成与共同解析 | [`renderAgentMuxMessageEnvelope` / `renderAgentMuxMessageReferences` / `parseAgentMuxMessagePrefix`](../../packages/core/src/agent-message-render.ts) |
 | 提醒和协作规则的同源投影 | [`agent-messaging-guidance`](../../packages/core/src/agent-messaging-guidance.ts) |
 | 原消息身份与队列 | [`agent-message-envelope`](../../packages/core/src/agent-message-envelope.ts)、[`agent-global-message-queue`](../../packages/core/src/agent-global-message-queue.ts) |
+| 引用通知与原输入 | [`agent-message-notification`](../../packages/core/src/agent-message-notification.ts)、[`agent-message-notifications`](../../packages/core/src/agent-message-notifications.ts)、[`client`](../../packages/core/src/client.ts) |
 | 当前接续、快捷回复、分享和链接 | 上述各节的原 producer／parser；不另造统一控制分发器 |
 | 普通与完整资源阅读、原始 Copy | [对话机制](../architecture/conversation.md#可读信封与原输入)与[共同阅读合同](conversation-protocol.md#readable-agentmux-envelopes) |
 
-本页新增的容器长式与引用形态是已确认的扩展合同；表中列出的既有入口不证明这些扩展已实现或被实际客户端消费。对应 producer、reader 与引用通知链仍须沿原 owner 接线并验收，不能用规范更新代替产品交付。
+表中源码是核对生产与读取边界的入口；具体候选的真实调用、采用和客户端消费须分别验收，不能用格式识别或规范更新代替产品交付。
 
 增加或修改一种表示时，先在本页明确格式和原内容边界，再沿原 producer、共同 reader、资源阅读、Copy 和实际消费者核对；涉及公共能力时按[公共能力贡献约定](../guides/public-capability-contributions.md)判断 CLI／RPC 影响。可读格式不持有另一份运行状态、消息 Store 或业务生命周期。
