@@ -6,10 +6,10 @@ import { parseReadingDiagnosticRecord, type ReadingDiagnosticRecord } from './re
 
 export const CLIENT_READING_INCIDENT_KINDS = ['conversation-reading-progress', 'conversation-reading-failure',
   'conversation-reading-held', 'conversation-reading-recovered'] as const
-export const CLIENT_INCIDENT_KINDS = ['terminal-attach-failed', 'terminal-replay-failed', 'terminal-output-gap',
+export const CLIENT_INCIDENT_KINDS = ['terminal-attach-failed', 'terminal-replay-failed', 'terminal-output-gap', 'terminal-continuation-unavailable',
   'terminal-reveal-deadline', 'terminal-context-lost', 'terminal-refresh', 'terminal-recovered',
-  'capability-probe-failed', 'capability-probe-recovered', 'connection-failed', 'connection-recovered', ...CLIENT_READING_INCIDENT_KINDS] as const
-export const CLIENT_INCIDENT_STAGES = ['attach-requested', 'attach-received', 'replay-started', 'replay-applied',
+  'capability-probe', 'capability-probe-failed', 'capability-probe-recovered', 'connection-failed', 'connection-recovered', ...CLIENT_READING_INCIDENT_KINDS] as const
+export const CLIENT_INCIDENT_STAGES = ['attach-requested', 'attach-received', 'replay-started', 'replay-applied', 'replay-failed', 'output-gap',
   'live-ready', 'revealed', 'reveal-deadline', 'attach-failed', 'refresh-requested', 'refresh-completed',
   'refresh-failed', 'context-lost', 'visibility', 'resize', 'connection-state', 'probe-started',
   'probe-completed', 'probe-failed', 'observation-unavailable', 'observation-restored', 'reading-observed'] as const
@@ -17,7 +17,9 @@ export const CLIENT_INCIDENT_CODES = ['EIO', 'ENOSPC', 'EACCES', 'ENOENT', 'EDQU
   'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EEXIST', 'ENOTDIR', 'EISDIR', 'EROFS', 'EINVAL', 'ABORT_ERR',
   'CONTROL_UNAVAILABLE', 'CONTROL_TIMEOUT', 'CONTROL_PROTOCOL_ERROR', 'CONTROL_CANCELLED', 'CONTROL_PERMISSION_DENIED',
   'RUNTIME_UNAVAILABLE', 'RUNTIME_OWNER_CHANGED', 'CTXMUX_run_not_found', 'STALE_AGENT_SESSION', 'STALE_AGENT_SESSION_BINDING',
-  'UNKNOWN_AGENT_SESSION', 'INVALID_CONTROL_REQUEST'] as const
+  'UNKNOWN_AGENT_SESSION', 'INVALID_CONTROL_REQUEST', 'CTXMUX_EVENT_INVALID', 'EXECUTOR_HOST_CHANGED', 'EXECUTOR_CHECK_FAILED',
+  'SETTING_RESOURCE_NOT_FOUND', 'EXECUTABLE_SEARCH_UNAVAILABLE', 'EXECUTABLE_WORKSPACE_REQUIRED',
+  'EXECUTABLE_NOT_FILE', 'EXECUTABLE_CHECK_FAILED', 'CTXMUX_CONNECTION_OBSERVATION_FAILED'] as const
 export type AgentMuxClientIncidentKind = typeof CLIENT_INCIDENT_KINDS[number]
 export type AgentMuxClientReadingIncidentKind = typeof CLIENT_READING_INCIDENT_KINDS[number]
 export type AgentMuxClientIncidentStage = typeof CLIENT_INCIDENT_STAGES[number]
@@ -40,6 +42,12 @@ export type AgentMuxClientIncidentMetadata = {
   processState?: 'running' | 'exited' | 'lost' | 'unknown'
   bufferType?: 'normal' | 'alternate'
   renderer?: 'webgl' | 'dom' | 'unknown'
+  continuationType?: 'not-requested' | 'basic-vt' | 'unknown' | 'unavailable'
+  continuationReason?: 'origin_unknown' | 'source_gap' | 'tail_evicted' | 'checkpoint_too_large' | 'invalid_checkpoint'
+  executorId?: string
+  probeAvailability?: 'unknown' | 'check-failed' | 'missing' | 'available'
+  connectionBoundary?: 'consumer-core' | 'core-ctxmux'
+  connectionState?: 'lost' | 'retrying' | 'restored' | 'unrecoverable'
 }
 export type AgentMuxClientIncidentReference =
   | { domain: 'delivery.client' | 'delivery.core'; hostId: string; logId: string; authority?: Pick<DiagnosticEvidenceAuthority, 'kind' | 'id'> }
@@ -152,7 +160,8 @@ const metadataNumbers = ['latestOutputBytes', 'cursorBytes', 'parserAppliedBytes
   'clientWidth', 'clientHeight', 'baseY', 'viewportY', 'bufferLength', 'resizeRevision', 'renderCallbacks', 'writeCompletions', 'liveQueueBytes', 'liveQueueItems', 'historyOverwritten', 'reporterDropped', 'recorderReadFailures']
 const metadataBooleans = ['visible', 'revealed', 'liveReady', 'replaying', 'readOnly', 'canControl', 'disposed']
 export function parseClientIncidentMetadata(value: unknown): AgentMuxClientIncidentMetadata {
-  const p = object(value, [...metadataNumbers, ...metadataBooleans, 'attachmentId', 'attachmentState', 'processState', 'bufferType', 'renderer'], [])
+  const p = object(value, [...metadataNumbers, ...metadataBooleans, 'attachmentId', 'attachmentState', 'processState', 'bufferType', 'renderer',
+    'executorId', 'probeAvailability', 'connectionBoundary', 'connectionState', 'continuationType', 'continuationReason'], [])
   for (const key of metadataNumbers) if (Object.hasOwn(p, key)) number(p[key])
   for (const key of metadataBooleans) if (Object.hasOwn(p, key)) member(p[key], [true, false])
   if (Object.hasOwn(p, 'attachmentId')) id(p.attachmentId, true)
@@ -160,6 +169,12 @@ export function parseClientIncidentMetadata(value: unknown): AgentMuxClientIncid
   if (Object.hasOwn(p, 'processState')) member(p.processState, ['running', 'exited', 'lost', 'unknown'])
   if (Object.hasOwn(p, 'bufferType')) member(p.bufferType, ['normal', 'alternate'])
   if (Object.hasOwn(p, 'renderer')) member(p.renderer, ['webgl', 'dom', 'unknown'])
+  if (Object.hasOwn(p, 'continuationType')) member(p.continuationType, ['not-requested', 'basic-vt', 'unknown', 'unavailable'])
+  if (Object.hasOwn(p, 'continuationReason')) member(p.continuationReason, ['origin_unknown', 'source_gap', 'tail_evicted', 'checkpoint_too_large', 'invalid_checkpoint'])
+  if (Object.hasOwn(p, 'executorId')) id(p.executorId)
+  if (Object.hasOwn(p, 'probeAvailability')) member(p.probeAvailability, ['unknown', 'check-failed', 'missing', 'available'])
+  if (Object.hasOwn(p, 'connectionBoundary')) member(p.connectionBoundary, ['consumer-core', 'core-ctxmux'])
+  if (Object.hasOwn(p, 'connectionState')) member(p.connectionState, ['lost', 'retrying', 'restored', 'unrecoverable'])
   return { ...p } as AgentMuxClientIncidentMetadata
 }
 function reference(value: unknown) {
