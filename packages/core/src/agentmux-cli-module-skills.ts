@@ -439,6 +439,25 @@ may name Session, source/date and what changed or why nothing was needed; it is 
 not a save receipt or proof that every turn was assessed. Do not start another Agent, schedule or
 extra model round merely to maintain memory; say when maintenance was not performed or confirmed.
 
+## Improve a method from real feedback
+
+Fix the current task first. After an important correction, repeated waste or useful result,
+assess whether there is a reusable method. In the relevant original note, record its source,
+date, applicable conditions, concrete steps and failure or non-applicable conditions. Keep
+single-case evidence visibly limited; a proposed method is not a confirmed user preference.
+No useful method means no extra record. Already-authorized knowledge maintenance does not
+need another approval for each scoped note.
+
+Use the same Files revision/CAS and readback workflow. Add only a short scoped link to MEMORY
+when future recall needs it; do not inject a whole method library. At later relevant work,
+read the current linked original before applying it. Use actual results and counterexamples
+to narrow, correct or withdraw that same method, preserving unrelated evidence. A saved method,
+its delivery, an actual read and improved results are separate facts; report only what is known.
+
+Method maintenance does not authorize changing SOUL identity, BEHAVIOR choices, MOTE settings,
+user instructions, global installed skills or permissions. Do not add per-turn reflection,
+another model round, a background learning loop or a timer just to claim self-improvement.
+
 ## Correct or withdraw knowledge
 
 Correct only the relevant original knowledge. When asked to forget, remove its recall text and
@@ -463,6 +482,28 @@ the exact available discussion. Explain relevance, source, scope and a concrete 
 follow-ups brief and timely. Discussion or read-only research does not authorize external messages,
 purchases, schedules or writes. Persistent identity does not imply an always-running process:
 promise later autonomous work only when the capability and its actual arrangement are confirmed.
+
+## Keep an idea close to its sources
+
+For an idea, discover this exact Mote and read the relevant originals with amux file --skill.
+Give a few concrete proposals with their reason, source, scope and next step; label a proposal
+as a proposal. Within authorized knowledge maintenance, update its relevant existing note or
+create an ordinary Markdown note through Files: first confirm the exact target is absent,
+use its returned resource for create-only, then read back. Preserve user content. Add a short
+MEMORY link only when useful for later recall. Existing registered Notes keep their Notebook
+catalog owner; read amux notebook --skill when those relationships need editing. No new Idea
+object or fixed folder scheme is required. Saving an idea does not confirm a Goal or authorize
+its execution. Source drafts and unsaved editor feedback remain drafts until saved and read back.
+
+## Arrange a bounded reminder to yourself
+
+Read amux schedule --skill, then amux schedule create --help. For authorized work that needs a
+later check, discover your exact Session target and save one finite reminder with a clear purpose
+and deadline. Say what was arranged and retain its schedule ID, revision and original operationId
+for inspect, pause or cancel. Calendar timing and a relative once-only countdown share that owner.
+An authorized own-task reminder does not enable recurring greetings, external messages or a
+background reflection loop. The connected Host must be running; do not promise delivery while
+the App is closed, the Host is asleep or offline. A reminder delivered is not work completed.
 
 For Project/Goal coordination, read amux mote playbook pmo and amux goal --skill. The default PMO
 role delegates detailed design and implementation to execution Agents in the target Project;
