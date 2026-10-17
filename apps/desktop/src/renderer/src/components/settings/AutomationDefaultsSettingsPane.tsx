@@ -52,24 +52,27 @@ export function AutomationDefaultsSettingsPane({ preferences, onSave }: {
     submitted.finish(await save.run(() => onSave(policyValue(submitted.value), policyValue(submitted.expected))))
   }
   return <div className="settings-pane-stack continuity-settings automation-defaults">
-    <p className="continuity-scope">Defaults for new task forms and targets. Edited drafts and saved tasks keep their choices. Saving creates no task and sends no message.</p>
-    <section className="settings-group"><header><span>Continuous progress defaults</span><small>{saved.progressIntervalMs / 60_000} minutes</small></header>
+    <div className="automation-defaults-heading"><h3>New task defaults</h3><p className="continuity-scope">Used when you create a task. Existing tasks and edited drafts keep their choices; saving creates no task and sends no message.</p></div>
+    <section className="settings-group"><header><span>Progress tasks</span><small>Saved: {saved.progressIntervalMs / 60_000} minutes</small></header>
       {number('progressIntervalMs', 'Default progress interval', 'minutes', 'Built-in default: 30 minutes. At least one minute.')}
       <div className="automation-defaults-prompt" data-settings-field="progressPrompt"><label htmlFor={`${id}-prompt`}><strong>Default progress prompt</strong><small>Starts blank by default. Review the instruction when creating each task.</small></label>
         <ComposerTextarea id={`${id}-prompt`} aria-label="Default progress prompt" rows={4} value={draft.value.progressPrompt} onValueChange={value => draft.setField('progressPrompt', value)} /></div>
     </section>
-    <section className="settings-group"><header><span>Arrangement defaults</span><small>{saved.calendarTimezone || 'System timezone'}</small></header>
+    <section className="settings-group"><header><span>Calendar arrangements</span><small>Saved: {saved.calendarTimezone || 'System timezone'}</small></header>
       <div className="continuity-setting-row" data-settings-field="calendarTimezone"><label htmlFor={`${id}-timezone`}><strong>Default arrangement timezone</strong><small>Leave blank to use the system timezone when a new form opens. Enter an IANA name, such as Asia/Shanghai.</small></label>
         <TextInput id={`${id}-timezone`} aria-label="Default arrangement timezone" placeholder="System timezone" value={draft.value.calendarTimezone} onChange={event => draft.setField('calendarTimezone', event.target.value)} /></div>
     </section>
-    <section className="settings-group"><header><span>Quiet follow-up defaults</span><small>Explicit opt-in per arrangement</small></header>
+    <details className="continuity-disclosure" data-automation-quiet-defaults>
+      <summary><span>Quiet follow-up<small>Only used when you enable it for a new arrangement</small></span><span className="continuity-disclosure-value">Saved: {saved.checkInDailyBudget} per day</span></summary>
+      <div className="continuity-disclosure-body">
       <p className="continuity-hint">Used only when you enable quiet follow-up on a new arrangement. Quiet hours use that arrangement’s timezone.</p>
       {(['checkInQuietStart', 'checkInQuietEnd'] as const).map(key => <div className="continuity-setting-row" data-settings-field={key} key={key}><label htmlFor={`${id}-${key}`}><strong>{key === 'checkInQuietStart' ? 'Quiet period starts' : 'Quiet period ends'}</strong><small>Built-in default: {_batchAutomationDefaults[key]}.</small></label>
         <TextInput id={`${id}-${key}`} aria-label={key === 'checkInQuietStart' ? 'Quiet period starts' : 'Quiet period ends'} type="time" value={draft.value[key]} onChange={event => draft.setField(key, event.target.value)} /></div>)}
       {number('checkInSilenceMs', 'Minimum silence before follow-up', 'hours', 'Built-in default: 18 hours. Choose a duration from 5 minutes to 30 days.')}
       {number('checkInMinIntervalMs', 'Minimum follow-up interval', 'hours', 'Built-in default: 20 hours. Choose a duration from 5 minutes to 30 days.')}
       {number('checkInDailyBudget', 'Daily follow-up budget', 'attempts', 'Built-in default: 1 attempt per local day. Choose 1 to 3.')}
-    </section>
+      </div>
+    </details>
     {!!issue && <p className="settings-inline-error" role="alert">{issue}</p>}
     <SettingsSaveBar save={save} dirty={draft.dirty} disabled={!!issue} label="Save task defaults" onSave={() => void commit()} />
   </div>

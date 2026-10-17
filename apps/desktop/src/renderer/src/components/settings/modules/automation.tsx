@@ -17,7 +17,7 @@ async function saveDefaults(value: AutomationDefaults, expected: AutomationDefau
 
 export const automationSettingsModule = {
   id: 'automation', group: 'message-tool', title: 'Automation', icon: semanticIconComponent('action.refresh'),
-  description: 'Recovery continuation and defaults for new progress tasks and calendar arrangements.',
+  description: 'Continue interrupted work and set defaults for new tasks.',
   keywords: 'automation progress calendar schedule quiet follow-up interruption continuation 自动化 持续推进 日历 安排 静默 续行',
   searchTargets: [
     { id: 'continuationEnabled', title: 'Continue interrupted work', keywords: 'send continuation after recovery 续行' },
@@ -27,7 +27,6 @@ export const automationSettingsModule = {
   savedSummary: config => `Continuation ${normalizeAgentContinuityPolicy(config.continuity).continuationEnabled ? 'on' : 'off'} · ${automationDefaultsSavedSummary(config.automation)}`,
   Pane({ config }) {
     return <div className="settings-pane-stack" data-automation-settings>
-      <p className="settings-group-note">Create and manage tasks in each Agent’s Messages → Progress.</p>
       <ContinuationSettingsPane preferences={config.continuity} onSave={saveContinuitySettings} />
       <AutomationDefaultsSettingsPane preferences={config.automation} onSave={saveDefaults} />
     </div>
