@@ -42,7 +42,7 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
       const operation = view.operation
       const adapter = operation && this.connections.registeredAdapter(operation.adapterId)?.setup?.applicationConfiguration
       return operation?.initialPublication && adapter?.domains.includes(operation.application.domain) ? adapter.initialPublicationDraft?.(operation.initialPublication) ?? null : null
-    })
+    }, id => this.configuration.originalEffect(id))
   }
   close(): void { this.closed = true; this.nativeRequests.clear(); this.unsettled.clear(); this.unsettledAuthentication.clear(); this.inspection.close(); this.configuration.close() }
   private safe<T>(run: () => T): T {
