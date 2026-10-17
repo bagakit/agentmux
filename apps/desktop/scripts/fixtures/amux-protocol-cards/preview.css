@@ -1,0 +1,3 @@
+.protocol-capture .message-wrapper-preview__reading { position: relative; }
+.protocol-capture[data-scene='settings'] > .message-wrapper-preview__reading { overflow: hidden; }
+.protocol-capture .settings-page { position: absolute; inset: 0; }
