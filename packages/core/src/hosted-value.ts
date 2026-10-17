@@ -14,7 +14,7 @@ export function parseHostedMessageEvent(value: unknown): void {
     if (Object.keys(p).some(key => !['type', 'messageId', 'sequence', 'messageSequence', 'recordKind', 'live', 'senderSessionId', 'recipientSessionId'].includes(key)) || typeof p.live !== 'boolean') invalid()
     for (const key of ['messageId', 'senderSessionId', 'recipientSessionId']) identity(key)
     for (const key of ['sequence', 'messageSequence']) if (!Number.isSafeInteger(p[key]) || (p[key] as number) < 1) invalid()
-    if (!['message', 'delivery', 'delivery-issue', 'a2a-notification', 'a2a-notification-result'].includes(p.recordKind as string) ||
+    if (!['message', 'delivery', 'delivery-issue', 'dispatch-open', 'dispatch-event', 'a2a-notification', 'a2a-notification-result'].includes(p.recordKind as string) ||
       (p.messageSequence as number) > (p.sequence as number) ||
       (p.recordKind === 'message' ? p.messageSequence !== p.sequence : p.messageSequence === p.sequence)) invalid()
   } else if (p.type === 'agent-message-observation') {

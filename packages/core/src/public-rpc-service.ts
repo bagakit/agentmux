@@ -289,7 +289,7 @@ const NATIVE_FIELDS = {
   'message.notify': ['operationId', 'messageIds', 'hostId'],
   'message.read': ['operationId', 'messageId', 'hostId'],
   'message.ls': ['hostId', 'participantSessionId', 'direction', 'beforeSequence', 'limit'],
-  'message.events': ['hostId', 'participantSessionId', 'afterSequence', 'throughSequence', 'incarnation', 'messageId', 'broadcastOperationId', 'limit'],
+  'message.events': ['hostId', 'participantSessionId', 'afterSequence', 'latest', 'beforeSequence', 'throughSequence', 'incarnation', 'messageId', 'broadcastOperationId', 'limit'],
   'message.dispatch.open': ['sourceMessageId'], 'message.dispatch.inspect': ['sourceMessageId'],
   'message.dispatch.read': ['sourceMessageId', 'hostId'],
   'message.dispatch.ls': ['hostId', 'participantSessionId', 'afterSourceMessageId', 'limit'],
@@ -1779,14 +1779,12 @@ export class AgentMuxRpcService {
             direction: p.direction, ...(p.beforeSequence === undefined ? {} : { beforeSequence: rpcCount(p.beforeSequence, -1, Number.MAX_SAFE_INTEGER) }),
             limit: rpcCount(p.limit, 50, 100), ...auth }), hostId }
         }
-        else if (method === 'message.events') result = { ...await owner.client.listMessageEvents({
+        else if (method === 'message.events') {
+          const { hostId: _hostId, ...query } = p
+          result = { ...await owner.client.listMessageEvents({ ...query,
           participantSessionId: rpcString(p.participantSessionId ?? caller?.agentSessionId, 'Participant Session ID'),
-          ...(p.incarnation === undefined ? {} : { incarnation: rpcString(p.incarnation, 'Original journal incarnation') }),
-          ...(p.messageId === undefined ? {} : { messageId: rpcString(p.messageId, 'Original message ID') }),
-          ...(p.broadcastOperationId === undefined ? {} : { broadcastOperationId: rpcString(p.broadcastOperationId, 'Original broadcast operation ID') }),
-          ...(p.afterSequence === undefined ? {} : { afterSequence: rpcCount(p.afterSequence, 0, Number.MAX_SAFE_INTEGER) }),
-          ...(p.throughSequence === undefined ? {} : { throughSequence: rpcCount(p.throughSequence, 0, Number.MAX_SAFE_INTEGER) }),
-          limit: rpcCount(p.limit, 50, 100), ...auth }), hostId }
+          ...auth }), hostId }
+        }
         else if (method === 'message.dispatch.read') result = { ...await owner.client.readDispatch({
           sourceMessageId: rpcString(p.sourceMessageId, 'Source message ID'), ...auth }), hostId }
         else result = { ...await owner.client.listDispatches({

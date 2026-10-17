@@ -362,10 +362,13 @@ dispatch threads. Use message ls --direction incoming|outgoing for bounded origi
 and body previews; message read --message-id ID retrieves one original body, without
 creating a delivery batch or advancing ack. Keep nextBeforeSequence with the same Host,
 participant and direction. message read --operation-id retains original intake lookup.
-message events reads the same original message/delivery/notification changes from either side,
+message events reads the same original message/delivery/notification/dispatch changes from either side,
 without opening bodies or consuming. Narrow by an original MID or broadcast operation when needed.
-Preserve that exact scope, journal incarnation and throughSequence when paging
-with nextAfterSequence; another journal cannot inherit the old cursor. These observations are not
+Use --latest for a bounded recent window. Preserve its exact scope, journal incarnation and
+throughSequence when paging older with --before-sequence nextBeforeSequence; forward reads use
+--after-sequence and nextAfterSequence. For new changes start after the prior throughSequence.
+Returned events always keep original ascending order; another journal cannot inherit the old cursor.
+These observations are not
 model adoption, task acceptance or business completion.
 Use message inbox check only for explicit batch consumption, and read the exact original message or
 dispatch before replying. Keep operationId, messageId, source message, thread and reply

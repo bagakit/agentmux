@@ -4236,10 +4236,12 @@ export class AgentMuxClient {
 
   /** Original journal events from either side; no Runtime connection or consumer mutation. */
   async listMessageEvents(input: import('./agent-message-events.js').AgentMuxMessageEventsQuery & { caller?: { agentSessionId: string; capability: string } }): Promise<import('./agent-message-events.js').AgentMuxMessageEventsPage> {
-    const caller = input.caller
+    const { caller, ...query } = input
     if (caller && caller.agentSessionId !== input.participantSessionId) throw new AgentMuxError(
       'An Agent can only browse its own original events.', 'MESSAGE_PARTICIPANT_MISMATCH')
-    return this.messageQueue.listMessageEvents(input, async () => {
+    this.messageReadUsed = true
+    void this.observeMessageReads()?.refresh()
+    return this.messageQueue.listMessageEvents(query, async () => {
       if (caller) await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
     })
   }
