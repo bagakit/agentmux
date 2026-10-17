@@ -143,7 +143,7 @@ async function authenticatedFixture(request?: AgentMuxInteractionRequest, retain
     invalidate() { observe?.({ kind: 'invalidated', source }) } }
 }
 
-it('authenticated Mobile keeps captured speech visible beside distinct native records, preserving authors, failures, selection and original reads', async () => {
+it('authenticated Mobile keeps compact sends beside distinct native records and preserves their expanded authors, failures, selection and original reads', async () => {
   const f = await authenticatedFixture(), sharedBody = 'Repeated original input'
   const nativePage: AgentSessionHistoryPage = { agentSessionId: sid, source, nextCursor: 'original-unread-page', items: [
     { id: 'input-duplicated', kind: 'user-message', contentParts: [{ kind: 'text', text: sharedBody }] },
@@ -161,10 +161,19 @@ it('authenticated Mobile keeps captured speech visible beside distinct native re
       title: 'Observed reply', content: 'Captured original reply', authorAgentSessionId: 'exact-peer-author' }
   ]
   for (const item of items) await f.store.applyTimelineMutation({ type: 'append', agentSessionId: sid, item })
-  const reads = vi.spyOn(f.core, 'sessionHistoryPage'), view = await mount(f.surface())
+  const reads = vi.spyOn(f.core, 'sessionHistoryPage'), changes = vi.spyOn(f.core, 'readConversationChanges'), view = await mount(f.surface())
   const readOptions = () => reads.mock.calls.map(([, options]) => ({ limit: options?.limit, cursor: options?.cursor }))
   await vi.waitFor(() => expect(view.element.textContent).toContain('Captured original reply'))
   const record = (id: string) => view.element.querySelector<HTMLElement>(`[data-message-id="${id}"]`)!
+  for (const [id, status] of [['input-duplicated', '提交已记录'], ['input-failed', '提交失败'], ['input-unconfirmed', '提交未确认']] as const) {
+    const row = view.element.querySelector<HTMLElement>(`[data-submission-id="${id}"]`)!, detail = row.querySelector<HTMLDetailsElement>('details')!
+    expect(detail.open).toBe(false); expect(row.querySelector('.log-turn__body')).toBeNull()
+    const summary = detail.querySelector('summary')!
+    expect(summary.textContent).toContain('消息发送'); expect(summary.textContent).toContain(status)
+    expect(summary.textContent).not.toContain('Message Tool'); expect(summary.textContent).not.toContain(f.device.name)
+    expect(summary.textContent).not.toContain('已进入对话'); expect(summary.querySelector('.message-disclosure__preview')).not.toBeNull()
+    await act(async () => { detail.open = true; detail.dispatchEvent(new Event('toggle')) })
+  }
   for (const id of ['captured:input-duplicated', 'captured:input-failed', 'captured:input-unconfirmed', 'reply-captured']) {
     expect(record(id), id).not.toBeNull()
     expect(record(id).closest('details:not([open]), [hidden], [inert]'), `${id} is readable without opening another conversation`).toBeNull()
@@ -174,6 +183,7 @@ it('authenticated Mobile keeps captured speech visible beside distinct native re
   expect(view.element.querySelectorAll('[data-native-record-id="input-duplicated"]')).toHaveLength(1)
   expect(record('captured:input-duplicated').querySelector('.log-turn__body')!.textContent).toBe(sharedBody)
   expect(record('captured:input-duplicated').dataset.speakerRole).toBe('human')
+  await click(record('captured:input-duplicated').querySelector<HTMLButtonElement>('[aria-label="Message details"]')!)
   expect(record('captured:input-duplicated').textContent).toContain('Message Tool')
   expect(record('captured:input-duplicated').textContent).toContain(f.device.name)
   expect(record('captured:input-failed').dataset.status).toBe('failed')
@@ -183,18 +193,20 @@ it('authenticated Mobile keeps captured speech visible beside distinct native re
   expect(record('reply-captured').dataset.speakerRole).toBe('agent')
   expect(record('reply-captured').querySelector('.log-turn__sender-id')!.textContent).toContain('exact-peer-author')
   expect(record('reply-captured').dataset.messageSourceKey).toBe(JSON.stringify([sid, 'captured', 'reply-captured']))
-  expect(readOptions()).toEqual([{ limit: 30, cursor: undefined }])
+  expect(readOptions()).toEqual([{ limit: 100, cursor: undefined }])
   const native = view.element.querySelector('[data-native-record-id="native-answer"] .log-turn__body')!, text = native.querySelector('p')!.firstChild!
   const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 6); window.getSelection()!.addRange(range)
   const reply = record('reply-captured'), body = reply.querySelector('.log-turn__body')!
   await vi.waitFor(() => expect(f.core.providers.get('codex').observeSessionHistory).toHaveBeenCalledTimes(1))
+  const changeReadsBefore = changes.mock.calls.length
   await f.store.applyTimelineMutation({ type: 'update', agentSessionId: sid, itemId: 'reply-captured', updatedAt: _historyTailFixtureEpoch(0, 0, 5), content: 'Captured reply grows in place' })
   await act(async () => f.invalidate())
   await vi.waitFor(() => expect(body.textContent).toBe('Captured reply grows in place'))
   expect(record('reply-captured')).toBe(reply); expect(reply.querySelector('.log-turn__body')).toBe(body)
   expect(view.element.querySelector('[data-native-record-id="native-answer"] .log-turn__body')).toBe(native)
   expect(window.getSelection()!.getRangeAt(0)).toBe(range); expect(range.toString()).toBe('Native')
-  expect(readOptions()).toEqual([{ limit: 30, cursor: undefined }, { limit: 30, cursor: undefined }])
+  expect(readOptions()).toEqual([{ limit: 100, cursor: undefined }])
+  expect(changes.mock.calls.slice(changeReadsBefore).some(([input]) => input.hostId === 'local' && input.agentSessionId === sid)).toBe(true)
   expect(button(view.element, '更早消息')).toBeDefined()
   expect(f.writes).toHaveLength(0); expect(f.submit).not.toHaveBeenCalled(); expect(f.reply).not.toHaveBeenCalled()
   await f.recordProof('visible-captured-reading', { passed: true, boundary: 'Authenticated HTTP/Hosted/Core/FileStore → actual MobileConversationSurface; controlled Provider history',
@@ -646,6 +658,11 @@ it('authenticated Mobile shows submission activity only for the original exact s
   }
   const view = await mount(f.surface()), submission = (id = 'known-submission') => view.element.querySelector<HTMLElement>(`[data-submission-id="${id}"]`)!
   await vi.waitFor(() => { expect(submission()).not.toBeNull(); expect(view.element.querySelector('[data-native-record-id="original-unrelated"]')).not.toBeNull() })
+  const initialDetail = submission().querySelector<HTMLDetailsElement>('details')!
+  expect(initialDetail.open).toBe(false); expect(submission().querySelector('.log-turn__body')).toBeNull()
+  expect(initialDetail.querySelector('summary')?.textContent).toContain('消息发送')
+  expect(initialDetail.querySelector('summary')?.textContent).toContain('提交已记录')
+  expect(initialDetail.querySelector('.message-disclosure__preview')?.textContent).toBe(body)
   expect(submission().querySelector('[data-icon-animation]')).toBeNull()
   let release!: () => void, once = true
   const real = native.client.readConversationChanges.bind(native.client); closes.push(async () => release?.())
@@ -665,6 +682,15 @@ it('authenticated Mobile shows submission activity only for the original exact s
   await act(async () => release())
   await vi.waitFor(() => expect(view.element.querySelector('[data-native-record-id="canonical-input"] [data-submission-record]'), view.element.textContent ?? '').not.toBeNull())
   expect(submission()).toBeNull(); expect(submission('unrelated-submission')).not.toBeNull()
+  const accepted = view.element.querySelector<HTMLElement>('[data-native-record-id="canonical-input"] [data-submission-record]')!, acceptedDetail = accepted.querySelector<HTMLDetailsElement>('details')!
+  expect(view.element.querySelectorAll('[data-original-contribution]')).toHaveLength(0)
+  expect(acceptedDetail.open).toBe(false); expect(accepted.querySelector('summary')?.textContent).toContain('已进入对话')
+  expect(accepted.querySelector('summary')?.textContent).toContain('消息发送'); expect(accepted.querySelector('summary time')).not.toBeNull()
+  expect(accepted.querySelector('.log-turn__body')).toBeNull()
+  await act(async () => { acceptedDetail.open = true; acceptedDetail.dispatchEvent(new Event('toggle')) })
+  expect(accepted.querySelector('.log-turn__body')?.textContent).toBe(body)
+  expect(accepted.querySelector('[aria-label="Copy message"]')).not.toBeNull(); expect(accepted.querySelector('[aria-label="Message details"]')).not.toBeNull()
+  expect([...accepted.querySelectorAll('summary')].some(summary => summary.textContent === 'Original record JSON')).toBe(true)
   expect(view.element.querySelector('[data-native-record-id="canonical-input"] [data-icon-animation]')).toBeNull()
   expect(native.controls.slice(0, 5).map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0]); expect(f.openTerminal).not.toHaveBeenCalled()
 })
