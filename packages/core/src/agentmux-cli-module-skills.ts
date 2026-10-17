@@ -2,6 +2,7 @@ import { AGENTMUX_CLI_COMMANDS } from './agentmux-cli-commands.js'
 import { AGENTMUX_AGENT_MESSAGING_GUIDANCE } from './agent-messaging-guidance.js'
 import { DIAGNOSTIC_GUIDE, GOAL_ACTIVITY_GUIDE, SPATIAL_GUIDE } from './agentmux-cli-shared-guides.js'
 import { goalRoleGuidanceContract } from './goal-role-guidance.js'
+import { AGENTMUX_PROTOCOL_CATALOG } from './agent-message-render.js'
 
 interface ModuleDefinition {
   summary: string
@@ -507,7 +508,16 @@ resource revisions. Inspect the exact current owner and supported fields before 
 them. A saved route/template is not a connected Host, running Agent or human approval.
 
 Read amux settings --help to select the exact configuration domain, then the matching leaf
-help for its fields, authority, revision and save receipt. Discovering settings saves nothing.`
+help for its fields, authority, revision and save receipt. Discovering settings saves nothing.
+
+## Local readable protocol reference
+
+Settings → Message Tool → amux Protocols shows this app version's formats and original wire
+examples using the shared message cards. The following list comes from this local CLI's
+same Core definitions; it does not describe the connected Runtime or an older installation.
+Reading a declaration does not authenticate its author, execute hints or grant permissions.
+
+${AGENTMUX_PROTOCOL_CATALOG.map(entry => `- ${entry.title}: ${entry.syntax.replaceAll('\n', ' ')}\n  ${entry.description}`).join('\n')}`
   },
   space: {
     summary: 'Durable spatial identities, display layout and exact navigation',

@@ -9,6 +9,7 @@ import { keyboardShortcutsSettingsModule } from './modules/keyboard-shortcuts'
 import { agentsSettingsModule } from './modules/agents'
 import { promptsSettingsModule } from './modules/prompts'
 import { messageToolSettingsModule } from './modules/message-tool'
+import { amuxProtocolsSettingsModule } from './modules/amux-protocols'
 import { profileSettingsModule } from './modules/profile'
 import { focusSettingsModule } from './modules/focus'
 import { hostsSettingsModule } from './modules/hosts'
@@ -33,6 +34,7 @@ export const settingsModules = [
   keyboardShortcutsSettingsModule,
   messageToolSettingsModule,
   promptsSettingsModule,
+  amuxProtocolsSettingsModule,
   moteSettingsModule,
   spaceSettingsModule,
   focusSettingsModule,
