@@ -67,7 +67,7 @@ describe('Mote vector identity', () => {
       expect(path['fill-rule']).toBe('evenodd')
       const d = path.d!
       expect(d.length).toBeGreaterThan(100)
-      expect(d.match(/[Mm]/gu)).toHaveLength(2)
+      expect(d.match(/[Mm]/gu)).toHaveLength(3) // One silhouette and two transparent eyes.
       expect(svg.querySelector('filter, linearGradient, radialGradient, animate, image')).toBeNull()
       return d
     })
