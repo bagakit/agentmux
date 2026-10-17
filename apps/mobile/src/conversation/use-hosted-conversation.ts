@@ -15,16 +15,16 @@ const sameSource = (a: AgentSessionHistoryPage, b: AgentSessionHistoryPage) => a
 
 /** Complete accepted public Reader frames; transport loss retains the original view and resource owner. */
 export function useHostedConversation(client: AgentMuxHostedClient | null, id: string | null, active: boolean,
-  beforeCapturedCommit?: (snapshot: AgentTimelineSnapshot) => boolean,
+  beforeCapturedCommit?: (snapshot: AgentTimelineSnapshot, displayed?: AgentTimelineSnapshot) => boolean,
   beforeNativeCommit?: (page: AgentSessionHistoryPage, previous: AgentSessionHistoryPage | null) => boolean) {
   const [metadata, setMetadata] = useState<Metadata>(() => empty(id))
   const selected = metadata.id === id ? metadata : empty(id)
   const activityOwner = useMemo(() => ({}), [client, id, active])
   const displayed = useRef<AgentSessionHistoryPage | null>(null)
   const view = useConversationView(client, id ? { hostId: 'local', agentSessionId: id } : undefined, active, {
-    beforeCommit: snapshot => {
+    beforeCommit: (snapshot, _operation, displayedFrame) => {
       const next = projectConversationWindow(snapshot)
-      return beforeCapturedCommit?.(next.captured) !== false && (!next.historyPage || beforeNativeCommit?.(next.historyPage, displayed.current) !== false)
+      return beforeCapturedCommit?.(next.captured, displayedFrame ? projectConversationWindow(displayedFrame).captured : undefined) !== false && (!next.historyPage || beforeNativeCommit?.(next.historyPage, displayed.current) !== false)
     }
   })
   const reading = useMemo(() => view.snapshot ? projectConversationWindow(view.snapshot) : null, [view.snapshot])

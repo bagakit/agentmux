@@ -413,9 +413,9 @@ export function ActivityView({
       edgeRef.current.earlier = false; edgeRef.current.newer = false
     }
     return true
-  }, RULER_WINDOWS[rulerWindow], snapshot => {
+  }, RULER_WINDOWS[rulerWindow], (snapshot, displayed) => {
     if (!feedEl) return true
-    if (!canReplaceCapturedWindow(feedEl, snapshot, !followRef.current.following)) return false
+    if (!canReplaceCapturedWindow(feedEl, snapshot, !followRef.current.following, displayed)) return false
     anchorRef.current = captureReadingAnchor(feedEl)
     return true
   })

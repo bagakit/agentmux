@@ -1,5 +1,5 @@
 import type { AgentTimelineItem, AgentTimelineSnapshot, AgentSessionHistoryReadInput, AgentSessionHistoryReadPage } from '@agentmux/core'
-import { consumeJsonReadEntry, parseAgentSessionHistoryReadPage, type JsonReadAssembly } from '@agentmux/core/conversation'
+import { consumeJsonReadEntry, parseAgentSessionHistoryReadPage, conversationRevision, type JsonReadAssembly } from '@agentmux/core/conversation'
 import { normalizeAgentTimelineItem } from '@agentmux/core/timeline'
 
 export type CapturedConversationPage = {
@@ -47,9 +47,10 @@ export function retainCapturedItems(earlier: readonly AgentTimelineItem[], curre
 }
 
 /** Reading-only admission in the original window owner, not a source/input capability. */
-export function canReplaceCapturedWindow(viewport: HTMLElement | null, snapshot: AgentTimelineSnapshot, preserveAnchor: boolean): boolean {
+export function canReplaceCapturedWindow(viewport: HTMLElement | null, snapshot: AgentTimelineSnapshot, preserveAnchor: boolean, displayed?: AgentTimelineSnapshot): boolean {
   if (!viewport) return true
-  const retained = new Set(snapshot.items.map(item => JSON.stringify([snapshot.agentSessionId, 'captured', item.id])))
+  const retained = new Map(snapshot.items.map(item => [JSON.stringify([snapshot.agentSessionId, 'captured', item.id]), item]))
+  const previous = new Map(displayed?.items.map(item => [JSON.stringify([displayed.agentSessionId, 'captured', item.id]), item]))
   const selection = viewport.ownerDocument.defaultView?.getSelection(), range = selection && !selection.isCollapsed && selection.rangeCount ? selection.getRangeAt(0) : null
   const bounds = viewport.getBoundingClientRect()
   let anchorSeen = false
@@ -65,7 +66,8 @@ export function canReplaceCapturedWindow(viewport: HTMLElement | null, snapshot:
       anchorSeen = true
       if (preserveAnchor && captured && !retained.has(key)) return false
     }
-    if (captured && !retained.has(key) && range) {
+    const original = previous.get(key), next = retained.get(key)
+    if (captured && range && (!next || !original || conversationRevision(original) !== conversationRevision(next))) {
       try { if (range.intersectsNode(node)) return false } catch { return false }
     }
   }
