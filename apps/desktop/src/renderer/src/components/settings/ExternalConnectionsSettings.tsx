@@ -4,22 +4,24 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { ConnectionConfigureInput, ConnectionRecord, ConnectionSetupEnrollmentSource } from '@agentmux/core/connections'
 import { SettingsNavigation, type SettingsNavigationRequest, type MoteLarkSettingsOrigin } from '../SettingsNavigation'
-import { useAppStore } from '../../store'
+import { setBotTaskSelection, useAppStore } from '../../store'
 import { isSessionSurface } from '../../lib/workbench-surface-kinds'
 import { sessionPresentationById } from '../../lib/session-presentation'
 import { api } from '../../lib/api'
 import { BotEnrollmentPane, useBotEnrollment } from './BotEnrollmentPane'
 import { ConnectionProfilePanel } from './ConnectionProfilePanel'
 import { ConnectionSetupResult, connectionSummary } from './ConnectionSetupResult'
+import { ConnectionRequestTrace } from './ConnectionRequestTrace'
 import { ConnectionManagementSetup } from './ConnectionManagementSetup'
 import { MoteConnectionPanel } from '../MoteConnectionIdentity'
-import { botTaskSelectionKey } from '../../lib/bot-task-selection'
+import { botTaskSelectionKey, managementTaskScope, restoredManagementTask } from '../../lib/bot-task-selection'
 import { MoteIdentityCards } from './MoteIdentityCards'
 import '../../styles/connector-identity-cards.css'
 import '../../styles/connector-experience.css'
 import { useConnectionManagementSetup } from './useConnectionManagementSetup'
 
 const LinkIcon = semanticIconComponent('action.open-external')
+const LoadingIcon = semanticIconComponent('status.loading')
 const GroupIcon = semanticIconComponent('object.conversations')
 const platform = (domain: string) => domain === 'open.feishu.cn' ? 'Feishu' : domain === 'open.larksuite.com' ? 'Lark' : domain
 
@@ -44,8 +46,10 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
   }
   const [records, setRecords] = useState<ConnectionRecord[]>([]), [issue, setIssue] = useState(''), [busy, setBusy] = useState(false)
   const [listIssue, setListIssue] = useState('')
+  const [restoration, setRestoration] = useState(() => !navigationRequest?.moteLarkOrigin && !origin ? restoredManagementTask(useAppStore.getState().botTaskSelections) : null)
+  const [restoreReading, setRestoreReading] = useState({ pending: !!restoration, issue: '' }), [restoreAttempt, setRestoreAttempt] = useState(0)
   const [view, setView] = useState<'loading' | 'library' | 'enrollment' | 'new' | 'saved' | 'edit' | 'management' | 'mote'>(() =>
-    !navigationRequest?.moteLarkOrigin && !origin && useAppStore.getState().botTaskSelections[botTaskSelectionKey({ kind: 'enrollment' })] ? 'enrollment' : 'loading')
+    restoration ? 'management' : !navigationRequest?.moteLarkOrigin && !origin && useAppStore.getState().botTaskSelections[botTaskSelectionKey({ kind: 'enrollment' })] ? 'enrollment' : 'loading')
   const [moteSelection, setMoteSelection] = useState<{ origin: MoteLarkSettingsOrigin; create: boolean } | null>(null)
   useEffect(() => { if (!active) setMoteSelection(current => current?.create ? { ...current, create: false } : current) }, [active])
   const [libraryRevision, setLibraryRevision] = useState(0)
@@ -70,9 +74,27 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
   useEffect(() => { const epoch = ++generation.current; if (active) void read(epoch); return () => { generation.current++ } }, [active])
   const enrolled = enrollment.operation?.configured
   useEffect(() => { if (active && enrolled) void read() }, [active, enrolled])
+  const connectionSource = api.connections.call
+  const clearManagementRoute = () => { setRestoration(null); setBotTaskSelection({ kind: 'management-route' }, null) }
+  useEffect(() => {
+    if (!active || !restoration || selected) return
+    let cancelled = false
+    const source = connectionSource, target = restoration.scope
+    setRestoreReading({ pending: true, issue: '' })
+    void source('connection.inspect', { connectionId: target.connectionId }).then(result => {
+      if (cancelled || api.connections.call !== source) return
+      const record = result.connection
+      if (!record) { setRestoreReading({ pending: false, issue: 'This saved application is not visible. The original request is kept.' }); return }
+      if (botTaskSelectionKey(managementTaskScope(record)) !== botTaskSelectionKey(target)) { setRestoreReading({ pending: false, issue: 'The saved application no longer matches this original target. The original request is kept.' }); return }
+      setSelected(record); setLabel(record.config.label); setAppId(record.config.application.appId); setDomain(record.config.application.domain); setEnabled(record.config.enabled); setSecret('')
+      setRestoreReading({ pending: false, issue: '' })
+    }).catch(error => { if (!cancelled && api.connections.call === source) setRestoreReading({ pending: false, issue: presentError(error) }) })
+    return () => { cancelled = true }
+  }, [active, restoration, selected, restoreAttempt, connectionSource])
   const edit = (record: ConnectionRecord | null) => {
     appliedRoute.current = navigationRequest
     if (pending.current) { setIssue('Check this save before changing the application.'); return }
+    clearManagementRoute()
     setSelected(record); setLabel(record?.config.label ?? ''); setAppId(record?.config.application.appId ?? ''); setDomain(record?.config.application.domain ?? 'open.feishu.cn'); setEnabled(record?.config.enabled ?? true); setSecret(''); setIssue(''); setSaveNotice(''); setView(record ? 'edit' : 'new')
   }
   const saved = (record: ConnectionRecord, notice: string) => {
@@ -128,10 +150,10 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
     try { await api.ui.openExternal(`https://${applicationDomain}/app`) }
     catch (error) { setIssue(presentError(error)) }
   }
-  const existing = () => { setContinuation(null); appliedRoute.current = navigationRequest; if (selected && !pending.current) edit(null); else setView('new') }
-  const startEnrollment = () => { setContinuation(null); appliedRoute.current = navigationRequest; setMoteSelection(null); enrollment.startAnother(); setView('enrollment') }
-  const openMote = (origin: MoteLarkSettingsOrigin, create = false) => { setContinuation(null); appliedRoute.current = navigationRequest; setMoteSelection({ origin, create }); setView('mote'); setIssue('') }
-  const library = () => { setContinuation(null); returnMote.current = moteSelection?.origin.topicId ?? null; appliedRoute.current = navigationRequest; setView('library'); setMoteSelection(null); setIssue(''); setLibraryRevision(value => value + 1) }
+  const existing = () => { clearManagementRoute(); setContinuation(null); appliedRoute.current = navigationRequest; if (selected && !pending.current) edit(null); else setView('new') }
+  const startEnrollment = () => { clearManagementRoute(); setContinuation(null); appliedRoute.current = navigationRequest; setMoteSelection(null); enrollment.startAnother(); setView('enrollment') }
+  const openMote = (origin: MoteLarkSettingsOrigin, create = false) => { clearManagementRoute(); setContinuation(null); appliedRoute.current = navigationRequest; setMoteSelection({ origin, create }); setView('mote'); setIssue('') }
+  const library = () => { clearManagementRoute(); setContinuation(null); returnMote.current = moteSelection?.origin.topicId ?? null; appliedRoute.current = navigationRequest; setView('library'); setMoteSelection(null); setIssue(''); setLibraryRevision(value => value + 1) }
   useLayoutEffect(() => {
     const scroll = pane.current?.closest<HTMLElement>('.settings-content__scroll')
     if (!scroll) return
@@ -209,6 +231,13 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
         </article>) : <p className="settings-group-note">{listIssue ? 'Your saved identities could not be read. Refresh to try again.' : 'No saved identities yet. Start with a Mote above or create a general identity.'}</p>}
       </section>
     </section> : null}
+    {view === 'management' && !current && restoration ? <section className="connector-setup" data-management-restoring>
+      <button type="button" className="connector-back small-button" onClick={library}>All identities</button>
+      <header><h3>Original bot setup</h3><p>Read the saved application and its selected original request.</p></header>
+      <dl className="connector-identity"><div><dt>App ID</dt><dd><code>{restoration.scope.appId}</code></dd></div><div><dt>Original request</dt><dd><code>{restoration.operationId}</code></dd></div></dl>
+      {restoreReading.pending ? <p role="status" data-management-activity aria-busy="true"><LoadingIcon size={14} animation="spin" /> Reading the original saved application…</p> : <><p role="status" className="connector-check-feedback">{restoreReading.issue}</p><button className="small-button" onClick={() => setRestoreAttempt(value => value + 1)}>Read original application again</button></>}
+      <ConnectionRequestTrace source={{ kind: 'setup', operationId: restoration.operationId }} />
+    </section> : null}
     {view === 'management' && current ? <ConnectionManagementSetup record={current} model={management} platformLabel={platform(current.config.application.domain)} onBack={() => { setView('saved'); setIssue('') }} onLibrary={library} onConsole={() => openConsole(current.config.application.domain)} /> : editing || view === 'saved' && current ? <section className="connector-setup" data-connection-editor>
       {!pending.current ? <button type="button" className="connector-back small-button" onClick={() => { moteSelection ? setView('mote') : library(); setIssue('') }}>{moteSelection ? 'Back to Mote identity' : 'All identities'}</button> : null}
       {editing ? <>
@@ -228,7 +257,7 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
       </> : current ? <>
         <header className="connector-setup__heading"><span className="connector-setup__mark"><GroupIcon size={22} /></span><div><h3 className="connector-editor-title">{current.config.label}</h3><p>{platform(current.config.application.domain)} bot application</p></div></header>
         {saveNotice ? <p className="settings-group-note" role="status">{saveNotice}</p> : null}
-        {management.supported || management.choices.length || management.catalog?.issue ? <div className="connector-next-step"><div><strong>Prepare this bot for conversations</strong><p>Continue its account, message settings and publication in one place.</p></div><button className="primary-button" data-management-open onClick={() => setView('management')}>Continue bot setup</button></div> : null}
+        {management.selectedId || management.supported || management.choices.length || management.catalog?.issue ? <div className="connector-next-step"><div><strong>Prepare this bot for conversations</strong><p>Continue its account, message settings and publication in one place.</p></div><button className="primary-button" data-management-open onClick={() => { if (management.selectedId) setBotTaskSelection(managementTaskScope(current), management.selectedId); setView('management') }}>Continue bot setup</button></div> : null}
         <details className="connector-optional"><summary>Connection status and checks</summary><ConnectionSetupResult record={current} active={active} /></details>
         <div className="connector-editor-actions"><button className="small-button" disabled={busy} onClick={() => edit(current)}>Edit application</button>{management.catalog?.issue ? <button className="small-button" onClick={() => void management.list()}>Check setup support</button> : null}</div>
         <details className="connector-setup-help"><summary>Finish setup in {platform(current.config.application.domain)}</summary><ol><li>Enable the bot capability in your application.</li><li>In Events & Callbacks, choose persistent connection and add <code>im.message.receive_v1</code>.</li><li>Enable the messaging and group permissions required by the features you use, then publish the application.</li></ol><p className="settings-group-note">Keep this application enabled here while finishing event setup.</p><button className="small-button" data-management-console onClick={() => void openConsole(current.config.application.domain)}>Open {platform(current.config.application.domain)} console <LinkIcon size={12} /></button></details>
