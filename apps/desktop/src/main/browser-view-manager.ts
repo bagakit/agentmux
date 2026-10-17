@@ -1,4 +1,5 @@
 import type { WorkbenchWindowDocument } from '../shared/workbench-windows.js'
+import type { BrowserInputFrameCapture } from '../shared/browser-input-context-capture.js'
 import { BROWSER_FAVICON_TIMEOUT_MS, readBrowserFavicon } from './browser-favicon.js'
 import type { BrowserColdDescriptor } from './browser-cold-descriptor.js'
 import { readScreenshotViewport, screenshotSource, SCREENSHOT_VIEWPORT_SCRIPT } from './browser-screenshot-source.js'
@@ -1528,6 +1529,17 @@ export class BrowserViewManager {
   }
 
   async captureScreenshot(id: string, transport?: { view: WebContentsView; sendCommand: BrowserCdpSender }): Promise<BrowserScreenshotCapture> {
+    return (await this.captureObservedScreenshot(id, transport)).capture
+  }
+
+  /** The original capture owner observes activity around these exact pixels. */
+  async captureInputFrame(id: string, hostId: string): Promise<BrowserInputFrameCapture> {
+    const result = await this.captureObservedScreenshot(id, undefined, hostId)
+    if (!result.before || !result.after) throw new Error('The original Browser frame observation is unavailable. Keep the draft; text input remains available.')
+    return { capture: result.capture, before: result.before, after: result.after }
+  }
+
+  private async captureObservedScreenshot(id: string, transport?: { view: WebContentsView; sendCommand: BrowserCdpSender }, hostId?: string) {
     if (this.entries.get(id)?.releaseAttempt?.pending) await this.prepareForConsumption(id)
     const entry = this.require(id)
     const view = entry.view
@@ -1546,6 +1558,7 @@ export class BrowserViewManager {
     const readViewport = () => readScreenshotViewport(() => view.webContents.executeJavaScriptInIsolatedWorld(BROWSER_SELECTION_WORLD_ID, [{ code: SCREENSHOT_VIEWPORT_SCRIPT }]))
     const before = await readViewport()
     requireCurrent()
+    const inputBefore = hostId === undefined ? undefined : this.inputContext(id, hostId)
     let image: BrowserScreenshotCapture['image']
     if (transport) {
       // Reuse this operation's original session. CDP waits for a presented frame;
@@ -1564,11 +1577,16 @@ export class BrowserViewManager {
     }
     const after = await readViewport()
     requireCurrent()
+    const inputAfter = hostId === undefined ? undefined : this.inputContext(id, hostId)
     return {
-      browserId: id,
-      navigationId,
-      source: screenshotSource(url, title, before, after),
-      image
+      before: inputBefore,
+      after: inputAfter,
+      capture: {
+        browserId: id,
+        navigationId,
+        source: screenshotSource(url, title, before, after),
+        image
+      }
     }
     } finally { entry.resourceReads -= 1; this.emit(entry) }
   }
