@@ -385,7 +385,7 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
     return () => { current = false; stop(); cancelDeparture() }
   }, [request.token, request.pinned, request.bookmark?.bounds, document, visible])
   function escapeReading(event: KeyboardEvent) {
-    if (event.defaultPrevented || wasWindowOverlayDismissed(event) || isImeOwnedKeyboardEvent(event)) return
+    if (event.defaultPrevented && !request.readingBranch?.retainedEscape(event) || wasWindowOverlayDismissed(event) || isImeOwnedKeyboardEvent(event)) return
     if (event.key.toLowerCase() === 'p' && !event.metaKey && !event.ctrlKey && !event.altKey && panel.current?.contains(document.activeElement) &&
       !(event.target && (event.target as Element).nodeType === 1 && (event.target as Element).closest('input, textarea, [contenteditable="true"]'))) { event.preventDefault(); togglePin(); return }
     if (event.key !== 'Escape') return
@@ -398,12 +398,14 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
   }
   useEffect(() => {
     const outside = (event: Event) => { if (!panel.current?.contains(event.target as Node)) agentInformationPreview.dismiss(request.token) }
+    const detachBranch = panel.current ? request.readingBranch?.attach(panel.current) : undefined
     document.addEventListener('keydown', escapeReading)
     document.addEventListener('pointerdown', outside, true)
     window.addEventListener('scroll', outside, true)
     const resize = () => agentInformationPreview.dismiss(request.token)
     window.addEventListener('resize', resize)
     return () => {
+      detachBranch?.()
       document.removeEventListener('keydown', escapeReading)
       document.removeEventListener('pointerdown', outside, true); window.removeEventListener('scroll', outside, true); window.removeEventListener('resize', resize)
     }

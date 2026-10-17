@@ -11,6 +11,7 @@ export type AgentInformationPreview = {
   token: object; id: string; context: FocusContext
   identity?: FocusContextIdentity | undefined; goalLinks?: FocusGoalLinks | undefined
   anchor: HTMLButtonElement; keepOpen(): void; restoreFocus(): void; openWorkface(): void
+  readingBranch?: { attach(element: HTMLElement): () => void; retainedEscape(event: KeyboardEvent): boolean } | undefined
   session: SessionSnapshot | undefined; control: AgentSessionControl | undefined; sourceKey: string | undefined
   enterReading: boolean; pinned: boolean; contentChanged: boolean
   focusReading?: object | undefined

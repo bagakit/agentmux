@@ -20,7 +20,6 @@ import { originalTopicAddress, directoryIdentity } from '../../../shared/space-a
 import { TopicCategoryDialog } from './TopicCategoryDialog'
 import { orderTopics, partitionPinned } from '../lib/topic-order'
 import { rowAttention, rowAttentionLabel } from '../lib/row-attention'
-import type { ActivityContextInput } from '../lib/activity-groups'
 import { fileNavigationSelection, useAppStore } from '../store'
 import { matchesSpaceQuery } from '../lib/space-tree-navigation'
 import { categorySpaceIconTarget, topicSpaceIconTarget, type SpaceIconOverrides, type SpaceIconTarget } from '../lib/space-object-appearance'
@@ -144,12 +143,6 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, vi
     const filtered = objects.filter((topic) => matchesSpaceQuery(query, heading, label, topic.title, topic.summary, scratchTopicPhysicalPath(workspace, topic), workspace.hostId))
     const ids = partitionPinned(orderTopics(filtered.map((topic) => topic.id), order), pinned ?? [])
     const sectionSessions = objects.flatMap((topic) => byTopic.get(topic.id) ?? [])
-    const contexts: ActivityContextInput[] = objects.flatMap((topic) => {
-      const bucket = byTopic.get(topic.id)
-      return bucket?.length ? [{ id: topic.id, kind: 'topic', label: topic.id === PMO_TEAMS_TOPIC_ID ? 'Mote' : topic.title,
-        hostId: workspace.hostId, path: bucket[0]!.workspacePath }] : []
-    })
-    const contextById = new Map(contexts.map((context) => [context.id, context]))
     return <nav className="space-section space-motes-section" aria-label={heading}>
       <div className="space-category-heading"><SpaceSectionHeader label={heading} count={objects.length} icon={<MoteIcon size={14} />}
         expanded={expanded} filtering={filtering} onToggle={() => toggleGroup(key)}
@@ -157,7 +150,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, vi
         actions={<button type="button" className="icon-button mote-directory-archive" aria-label="Show archived Motes in Space"
           aria-pressed={showArchived} title={`${showArchived ? 'Hide' : 'Show'} archived Motes · ${archivedMotes.length}`}
           onClick={() => setShowArchived(value => !value)}><ThemeActionArchiveIcon size={13} /><span>{archivedMotes.length}</span></button>}
-        activity={!expanded && sectionSessions.some((session) => session.kind === 'agent') ? <ProjectActivity compact visible={visible} sessions={sectionSessions} contexts={contexts} /> : undefined} /></div>
+        activity={!expanded && sectionSessions.some((session) => session.kind === 'agent') ? <ProjectActivity compact visible={visible} sessions={sectionSessions} /> : undefined} /></div>
       {filtering && ids.length === 0 ? <p className="space-tree-empty" role="status">No matching {label}</p> : null}
       <div className="mote-directory" data-mote-directory-view={directoryView} style={{ '--mote-directory-avatar-size': `${avatarSize}px` } as CSSProperties}>
       {expanded ? ids.map((id) => {
@@ -214,7 +207,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, vi
               title="Edit SOUL.md · New sessions use saved changes" onClick={editMote}><ThemeActionEditNoteIcon size={12} /></button> : null}
             {archived ? <button type="button" className="icon-button space-row-action" aria-label={`Restore Mote ${name}`} title="Restore Mote"
               disabled={archive.pending === id} onClick={() => void archive.change(topic, false)}><ThemeActionRestoreIcon size={12} /></button> : null}
-            {bucket.some((session) => session.kind === 'agent') ? <ProjectActivity compact visible={visible} sessions={bucket} contexts={contextById.has(id) ? [contextById.get(id)!] : []} /> : null}
+            {bucket.some((session) => session.kind === 'agent') ? <ProjectActivity compact visible={visible} sessions={bucket} /> : null}
           </div>
           {topic.readError ? <div className="surface-inline-error" role="alert">{name}: {topic.readError}. Its work surface is retained.</div> : null}
           {topic.moteArchive?.state === 'unknown' ? <MoteArchiveNotice workspaceId={workspace.id} issue={topic.moteArchive.issue} /> : null}

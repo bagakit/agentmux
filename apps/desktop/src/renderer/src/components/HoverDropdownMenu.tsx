@@ -22,6 +22,9 @@ const Context = createContext<{
   change(open: boolean): void
   enter(event: PointerEvent): void
   leave(event: PointerEvent): void
+  branch: { attach(element: HTMLElement): () => void; retainedEscape(event: KeyboardEvent): boolean; enterKeyboard(): void }
+  containsBranch(target: EventTarget | null): boolean
+  retainBranchEscape(event: KeyboardEvent): void
 } | null>(null)
 
 function useMenu() {
@@ -29,6 +32,9 @@ function useMenu() {
   if (!context) throw new Error('Hover menu parts require Root')
   return context
 }
+
+/** A portalled reading surface remains part of its invoking menu's disclosure. */
+export function useHoverMenuBranch() { return useMenu().branch }
 
 type ItemPointerProps = Pick<ComponentPropsWithoutRef<typeof Menu.Item>,
   'disabled' | 'onPointerMove' | 'onPointerLeave' | 'onPointerDown'>
@@ -112,7 +118,7 @@ export const SubTrigger = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<ty
 )
 
 export const SubContent = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<typeof Menu.SubContent>>(
-  function SubContent({ onPointerEnter, onPointerLeave, ...props }, ref) {
+  function SubContent({ onPointerEnter, onPointerLeave, onInteractOutside, onFocusOutside, onEscapeKeyDown, ...props }, ref) {
     const menu = useMenu()
     return <Menu.SubContent {...props} ref={node => {
       if (node) node.addEventListener('focusScope.autoFocusOnMount', event => {
@@ -121,6 +127,18 @@ export const SubContent = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<ty
       if (typeof ref === 'function') ref(node)
       else if (ref) ref.current = node
     }}
+      onInteractOutside={event => {
+        if (menu.containsBranch(event.target)) event.preventDefault()
+        onInteractOutside?.(event)
+      }}
+      onFocusOutside={event => {
+        if (menu.containsBranch(event.target)) event.preventDefault()
+        onFocusOutside?.(event)
+      }}
+      onEscapeKeyDown={event => {
+        if (menu.containsBranch(event.target)) { menu.retainBranchEscape(event); event.preventDefault() }
+        onEscapeKeyDown?.(event)
+      }}
       onPointerEnter={event => {
         onPointerEnter?.(event)
         if (!event.defaultPrevented) menu.enter(event)
@@ -146,6 +164,8 @@ export function Root({ open: controlled, onOpenChange, children }: ComponentProp
   const content = useRef<HTMLDivElement | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const identity = useRef(Symbol())
+  const branches = useRef(new Set<HTMLElement>())
+  const retainedEscapes = useRef(new WeakSet<KeyboardEvent>())
   function cancelClose() { clearTimeout(timer.current) }
   function change(next: boolean) {
     cancelClose()
@@ -176,9 +196,37 @@ export function Root({ open: controlled, onOpenChange, children }: ComponentProp
   function leave(event: PointerEvent) {
     if (event.pointerType !== 'mouse' || !hover.current) return
     cancelClose()
-    timer.current = setTimeout(() => changeRef.current(false), 180)
+    timer.current = setTimeout(() => {
+      if (![...branches.current].some(element => element.contains(document.activeElement))) changeRef.current(false)
+    }, 180)
   }
-  return <Context.Provider value={{ open, hover, trigger, content, change, enter, leave }}>
+  const branch = useRef({ retainedEscape: (event: KeyboardEvent) => retainedEscapes.current.has(event), enterKeyboard: () => { hover.current = false }, attach(element: HTMLElement) {
+    branches.current.add(element)
+    const enterBranch = () => cancelClose()
+    const leaveBranch = () => {
+      if (hover.current) {
+        cancelClose()
+        timer.current = setTimeout(() => {
+          if (![...branches.current].some(element => element.contains(document.activeElement))) changeRef.current(false)
+        }, 180)
+      }
+    }
+    element.addEventListener('pointerenter', enterBranch)
+    element.addEventListener('pointerleave', leaveBranch)
+    element.addEventListener('focusin', enterBranch)
+    element.addEventListener('focusout', leaveBranch)
+    return () => {
+      branches.current.delete(element)
+      element.removeEventListener('pointerenter', enterBranch)
+      element.removeEventListener('pointerleave', leaveBranch)
+      element.removeEventListener('focusin', enterBranch)
+      element.removeEventListener('focusout', leaveBranch)
+    }
+  } }).current
+  const containsBranch = (target: EventTarget | null) => Boolean(target && (target as Node).nodeType &&
+    [...branches.current].some(element => element.contains(target as Node)))
+  const retainBranchEscape = (event: KeyboardEvent) => retainedEscapes.current.add(event)
+  return <Context.Provider value={{ open, hover, trigger, content, change, enter, leave, branch, containsBranch, retainBranchEscape }}>
     <Menu.Root open={open} onOpenChange={change} modal={false}>{children}</Menu.Root>
   </Context.Provider>
 }
@@ -207,7 +255,7 @@ export const Trigger = forwardRef<HTMLButtonElement, ComponentPropsWithoutRef<ty
           event.preventDefault()
           menu.hover.current = false
           menu.content.current?.focus()
-        }
+        } else menu.hover.current = false
       }}
       onKeyDown={(event) => {
         onKeyDown?.(event)
@@ -223,7 +271,7 @@ export const Trigger = forwardRef<HTMLButtonElement, ComponentPropsWithoutRef<ty
 )
 
 export const Content = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<typeof Menu.Content>>(
-  function Content({ onPointerEnter, onPointerLeave, onPointerDown, onCloseAutoFocus, onKeyDown, onPointerDownOutside, onContextMenu, ...props }, ref) {
+  function Content({ onPointerEnter, onPointerLeave, onPointerDown, onCloseAutoFocus, onKeyDown, onPointerDownOutside, onInteractOutside, onEscapeKeyDown, onContextMenu, ...props }, ref) {
     const menu = useMenu()
     return <Menu.Content {...props} ref={(node) => {
       // FocusScope exposes a cancellable DOM mount event. DropdownMenu deliberately omits the
@@ -235,6 +283,14 @@ export const Content = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<typeo
       if (typeof ref === 'function') ref(node)
       else if (ref) ref.current = node
     }}
+      onInteractOutside={event => {
+        if (menu.containsBranch(event.target)) event.preventDefault()
+        onInteractOutside?.(event)
+      }}
+      onEscapeKeyDown={event => {
+        if (menu.containsBranch(event.target)) { menu.retainBranchEscape(event); event.preventDefault() }
+        onEscapeKeyDown?.(event)
+      }}
       onPointerEnter={(event) => {
         onPointerEnter?.(event)
         if (!event.defaultPrevented) menu.enter(event)
@@ -259,7 +315,6 @@ export const Content = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<typeo
       onCloseAutoFocus={(event) => {
         if (menu.hover.current) event.preventDefault()
         onCloseAutoFocus?.(event)
-        menu.hover.current = false
       }}
       onKeyDown={(event) => {
         onKeyDown?.(event)

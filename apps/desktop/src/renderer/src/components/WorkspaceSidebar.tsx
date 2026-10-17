@@ -36,7 +36,6 @@ import { SpaceDisclosure, SpaceSectionHeader } from './SpaceSectionHeader'
 import { WorkspaceRowContextMenu } from './WorkspaceRowContextMenu'
 import { ConfirmationDialog } from './ConfirmationDialog'
 import { SidebarToggleChrome } from './TopRowChrome'
-import { activityContextsForWorkspaces } from '../lib/activity-groups'
 import { matchesSpaceQuery, navigateSpaceTree } from '../lib/space-tree-navigation'
 import { folderLastActivityAt } from '../lib/space-folder-icon-recency'
 import { usePathDisplay } from '../hooks/usePathDisplay'
@@ -240,7 +239,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
     const hasChildren = descendants.length > 0
     const collapsed = !filtering && collapsedProjectGroups[projectCollapseKey(project.id)] === true
     const workspaces = collapsed ? projectRelations.rolledWorkspaces.get(project.id)! : project.workspaces
-    return <ProjectPresence key={project.id} workspaces={workspaces} recencyWorkspaces={project.workspaces} visible={visible}>{(projectSessions, lastActivityAt, contexts) => {
+    return <ProjectPresence key={project.id} workspaces={workspaces} recencyWorkspaces={project.workspaces} visible={visible}>{(projectSessions, lastActivityAt) => {
       const target = folderSpaceIconTarget(project)
       const manualIcon = icons[target.key] ?? null
       const identity = <SpaceObjectIcon kind="folder" name={project.name} workspaceId={project.preferredWorkspaceId} folderIdentityKey={target.key}
@@ -328,7 +327,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
             onChangeIcon={() => changeIcon(target)}
             onGroupProjects={() => setGroupDialog({ seed: project.id })}
           >
-            <div className="project-rail-entry" data-space-entry>{row}{projectSessions.some((session) => session.kind === 'agent') ? <ProjectActivity compact visible={visible} sessions={projectSessions} contexts={contexts} /> : null}</div>
+            <div className="project-rail-entry" data-space-entry>{row}{projectSessions.some((session) => session.kind === 'agent') ? <ProjectActivity compact visible={visible} sessions={projectSessions} /> : null}</div>
           </WorkspaceRowContextMenu>
           {/* Branch pins key by workspaceProjectId(workspace) — which is exactly project.id (see
               projectWorkspaces). The pinned branch name labels the row; navigation prefers the
@@ -479,7 +478,6 @@ function GroupHeader({
   const displayPath = usePathDisplay()
   const workspaces = useMemo(() => group.nodes.flatMap(node => node.project.workspaces), [group.nodes])
   const groupSessions = useDirectorySessions(workspaces, visible)
-  const contexts = useMemo(() => activityContextsForWorkspaces(workspaces), [workspaces])
   const attention = rowAttention(groupSessions)
   const attentionLabel = rowAttentionLabel(attention)
   const producing = producingAgentCount(groupSessions)
@@ -520,7 +518,6 @@ function GroupHeader({
           compact
           visible={visible}
           sessions={groupSessions}
-          contexts={contexts}
         />
       ) : null}
     </div>
@@ -531,17 +528,15 @@ function ProjectPresence({ workspaces, recencyWorkspaces, visible, children }: {
   workspaces: readonly WorkspaceRecord[]
   recencyWorkspaces: readonly WorkspaceRecord[]
   visible: boolean
-  children(sessions: SessionSnapshot[], lastActivityAt: number | null, contexts: ReturnType<typeof activityContextsForWorkspaces>): ReactNode
+  children(sessions: SessionSnapshot[], lastActivityAt: number | null): ReactNode
 }) {
   const sessions = useDirectorySessions(workspaces, visible)
   const own = useDirectorySessions(recencyWorkspaces, visible)
   const lastActivityAt = useMemo(() => folderLastActivityAt(own, Date.now()), [own])
-  const contexts = useMemo(() => activityContextsForWorkspaces(workspaces), [workspaces])
-  return children(sessions, lastActivityAt, contexts)
+  return children(sessions, lastActivityAt)
 }
 
 function DirectoryActivity({ workspaces, visible }: { workspaces: readonly WorkspaceRecord[]; visible: boolean }) {
   const sessions = useDirectorySessions(workspaces, visible)
-  const contexts = useMemo(() => activityContextsForWorkspaces(workspaces), [workspaces])
-  return sessions.some(session => session.kind === 'agent') ? <ProjectActivity compact visible={visible} sessions={sessions} contexts={contexts} /> : null
+  return sessions.some(session => session.kind === 'agent') ? <ProjectActivity compact visible={visible} sessions={sessions} /> : null
 }
