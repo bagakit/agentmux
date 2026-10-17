@@ -1,10 +1,11 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
+import { EventEmitter } from 'node:events'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createBrowserPageDispatch } from '../src/main/browser-page-dispatch.js'
 
-const native = vi.hoisted(() => ({ views: [] as any[], mode: 'click', key: undefined as string | undefined, onFeedback: undefined as undefined | (() => void), displayFails: false, displayThrows: false, displayAllThrows: false, observe: undefined as undefined | (() => Promise<unknown>), takeover: undefined as undefined | (() => void) }))
+const native = vi.hoisted(() => ({ views: [] as any[], mode: 'click', key: undefined as string | undefined, onFeedback: undefined as undefined | (() => void), onWaiting: undefined as undefined | (() => Promise<void>), displayFails: false, displayThrows: false, displayAllThrows: false, observe: undefined as undefined | (() => Promise<unknown>), takeover: undefined as undefined | (() => void) }))
 vi.mock('../src/main/browser-page-dispatch.js', async importOriginal => {
   const actual = await importOriginal<typeof import('../src/main/browser-page-dispatch.js')>()
   return { ...actual, createBrowserPageDispatch: (...args: Parameters<typeof actual.createBrowserPageDispatch>) => {
@@ -20,6 +21,12 @@ vi.mock('../src/main/browser-page-dispatch.js', async importOriginal => {
 vi.mock('../src/main/browser-script-runner.js', () => ({ runBrowserScript: async ({ onPageCall }: any) => {
   try {
     const page = await onPageCall('snapshot', [])
+    if (native.mode === 'held-wait') {
+      const waiting = onPageCall('wait', [0])
+      await native.onWaiting!()
+      await waiting
+      return { completed: true, value: true, logs: [] }
+    }
     if (native.mode === 'concurrent-observe') native.observe = () => onPageCall('snapshot', [])
     if (native.mode === 'concurrent') await Promise.all([onPageCall('click', [page.nodes[0].ref]), onPageCall('hover', [page.nodes[0].ref])])
     else await onPageCall(['navigation', 'concurrent-observe', 'wait'].includes(native.mode) ? 'click' : native.mode, [page.nodes[0].ref, native.key ?? 'private-invocation-value'])
@@ -34,8 +41,10 @@ vi.mock('../src/main/browser-script-runner.js', () => ({ runBrowserScript: async
 } }))
 vi.mock('electron', async () => {
   const { EventEmitter } = await import('node:events')
+  let nextId = 90
   class Contents extends EventEmitter {
-    id = 91; url = ''; attached = false; destroyed = false; actions = 0; displayAttempts = 0; feedbackCalls = 0; feedbackPayloads: any[] = []; scripts: string[] = []; commands: string[] = []
+    id = ++nextId; url = ''; attached = false; destroyed = false; focused = false; focusCalls = 0; actions = 0; displayAttempts = 0; feedbackCalls = 0; feedbackPayloads: any[] = []; scripts: string[] = []; commands: string[] = []
+    displays: Array<{ family: 'action' | 'control' | 'revision' | 'selection' | 'annotation' | 'unknown'; payload?: any; code: string }> = []
     readonly session = Object.assign(new EventEmitter(), { setPermissionCheckHandler() {}, setPermissionRequestHandler() {}, setDevicePermissionHandler() {} })
     readonly navigationHistory = { canGoBack: () => false, canGoForward: () => false }
     readonly mainFrame = { framesInSubtree: [] }
@@ -57,12 +66,47 @@ vi.mock('electron', async () => {
       }
     })
     isDestroyed() { return this.destroyed }; isLoading() { return false }; getURL() { return this.url }; getTitle() { return 'Page' }
+    isLoadingMainFrame() { return false }
+    isFocused() { return this.focused }
+    focus() { for (const view of native.views) view.webContents.focused = false; this.focused = true; this.focusCalls++; this.emit('focus') }
     getZoomFactor() { return 1 }; setZoomFactor() {}; setBackgroundThrottling() {}; getBackgroundThrottling() { return true }
     disableDeviceEmulation() {}; enableDeviceEmulation() {}; setWindowOpenHandler() {}
-    executeJavaScriptInIsolatedWorld(_world: number, scripts: any[]) { this.displayAttempts++; if (native.displayAllThrows && this.displayAttempts <= 16) throw new Error('Persistent native display failure'); if (native.displayThrows && scripts.some(s => s.code.includes('\"phase\":\"running\"'))) throw new Error('Synchronous native display failure'); this.scripts.push(...scripts.map(s => s.code)); return Promise.resolve(!(native.displayFails && scripts.some(s => s.code.includes('\"phase\":\"running\"')))) }
-    async loadURL(url: string) { const previous = this.url; this.url = url; if (previous) this.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false, url }) }; close() { this.destroyed = true; this.emit('destroyed') }
+    executeJavaScriptInIsolatedWorld(_world: number, scripts: Array<{ code: string }>) {
+      this.displayAttempts++
+      const calls = scripts.map(({ code }) => {
+        this.scripts.push(code)
+        const start = code.lastIndexOf(')(')
+        const payload = start >= 0 && code.slice(start + 2, -1).startsWith('{') ? JSON.parse(code.slice(start + 2, -1)) : undefined
+        const family = payload && typeof payload.active === 'boolean' && code.includes('__agentMuxBrowserControlFeedback') ? 'control'
+          : payload && typeof payload.phase === 'string' && code.includes('__agentMuxBrowserOperationFeedback') ? 'action'
+          : !payload && code.includes('Math.max(...[globalThis.__agentMuxBrowserOperationFeedback?.revision') ? 'revision'
+          : _world === 1208 && code.includes('__agentMuxBrowserSelection') ? 'selection'
+          : _world === 1208 && code.includes('__agentMuxBrowserAnnotations') ? 'annotation' : 'unknown'
+        const call = { family, payload, code } as typeof this.displays[number]
+        this.displays.push(call)
+        return call
+      })
+      if (calls.some(call => call.family === 'unknown')) throw new Error('Unclassified isolated-world script')
+      if (native.displayAllThrows && calls.some(call => call.family === 'action' || call.family === 'control')) throw new Error('Persistent native feedback display failure')
+      const running = calls.some(call => call.family === 'action' && call.payload.phase === 'running')
+      if (native.displayThrows && running) throw new Error('Synchronous native display failure')
+      return Promise.resolve(!(native.displayFails && running))
+    }
+    async loadURL(url: string) { this.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false, url }); this.url = url; this.emit('did-navigate', {}, url); this.emit('dom-ready'); this.emit('did-finish-load'); this.emit('did-stop-loading') }
+    close() { if (this.destroyed) return; this.destroyed = true; this.focused = false; this.emit('destroyed') }
   }
-  class View { readonly webContents = new Contents(); constructor() { native.views.push(this) }; setVisible() {}; setBounds() {} }
+  class View extends EventEmitter {
+    readonly webContents = new Contents()
+    private visible = true
+    private bounds = { x: 0, y: 0, width: 0, height: 0 }
+    backgroundColor = ''
+    constructor() { super(); native.views.push(this) }
+    setVisible(value: boolean) { this.visible = value }
+    getVisible() { return this.visible }
+    setBackgroundColor(value: string) { this.backgroundColor = value }
+    setBounds(value: typeof this.bounds) { const changed = Object.keys(value).some(key => value[key as keyof typeof value] !== this.bounds[key as keyof typeof value]); this.bounds = { ...value }; if (changed) this.emit('bounds-changed') }
+    getBounds() { return { ...this.bounds } }
+  }
   return { WebContentsView: View }
 })
 import { BrowserViewManager } from '../src/main/browser-view-manager.js'
@@ -70,21 +114,36 @@ import { BrowserRefLedgerStore } from '../src/main/browser-ref-ledger-store.js'
 const roots: string[] = [], managers: BrowserViewManager[] = []
 afterEach(async () => {
   for (const manager of managers.splice(0)) manager.dispose()
+  // Every attempted script remains visible, including failures and newly introduced families.
+  for (const view of native.views) {
+    expect(view.webContents.displays).toHaveLength(view.webContents.scripts.length)
+    expect(view.webContents.displays.filter((call: any) => call.family === 'unknown')).toEqual([])
+  }
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
-  native.views.length = 0; native.mode = 'click'; native.key = undefined; native.onFeedback = undefined; native.displayFails = false; native.displayThrows = false; native.displayAllThrows = false; native.observe = undefined; native.takeover = undefined
+  native.views.length = 0; native.mode = 'click'; native.key = undefined; native.onFeedback = undefined; native.onWaiting = undefined; native.displayFails = false; native.displayThrows = false; native.displayAllThrows = false; native.observe = undefined; native.takeover = undefined
 })
+const actionPayloads = (contents: any, start = 0): any[] => contents.displays.slice(start).filter((call: any) => call.family === 'action').map((call: any) => call.payload)
+const controlPayloads = (contents: any): any[] => contents.displays.filter((call: any) => call.family === 'control').map((call: any) => call.payload)
 async function managerFixture() {
   const root = await mkdtemp(_hygiene_fixturePath("tmp/amx-action-feedback-source-")); roots.push(root)
   const children: any[] = [], events: any[] = []
-  const window = { contentView: { addChildView: (v: any) => children.push(v), removeChildView() {} },
-    isDestroyed: () => false, webContents: { isDestroyed: () => false, send: (_name: string, e: any) => events.push(e) } }
+  const window = { getContentBounds: () => ({ x: 0, y: 0, width: 1000, height: 700 }), isFocused: () => true,
+    contentView: { get children() { return [...children] }, addChildView: (view: any, index?: number) => {
+      const previous = children.indexOf(view)
+      if (previous >= 0) children.splice(previous, 1)
+      children.splice(index ?? children.length, 0, view)
+    }, removeChildView: (view: any) => { const index = children.indexOf(view); if (index >= 0) children.splice(index, 1) } },
+    isDestroyed: () => false, webContents: Object.assign(new EventEmitter(), { isDestroyed: () => false, send: (_name: string, e: any) => events.push(structuredClone(e)) }) }
   const manager = new BrowserViewManager(window as never, { defaultProfileId: () => 'default', resolvePartition: () => 'persist:feedback' },
     new BrowserRefLedgerStore(join(root, 'refs.json')), { rememberedSchemes: async () => ({}), rememberScheme: async () => {}, openExternal() {} })
   managers.push(manager)
   await manager.create('browser-one', 'https://generic.invalid/one', 'workspace')
+  const source = children.find(view => view.webContents.getURL() === 'https://generic.invalid/one')
   await manager.create('sibling', 'https://generic.invalid/two', 'workspace')
+  const sibling = children.find(view => view.webContents.getURL() === 'https://generic.invalid/two')
   manager.setBounds('browser-one', { x: 0, y: 0, width: 500, height: 400 })
-  return { manager, contents: children[0].webContents, sibling: children[1].webContents, events }
+  const siblingBefore = { scripts: [...sibling.webContents.scripts], commands: [...sibling.webContents.commands] }
+  return { manager, contents: source.webContents, sibling: sibling.webContents, siblingBefore, children, events }
 }
 describe('actual dispatcher action feedback consumer', () => {
   it('passes the resolved node/sender after the original scroll and rechecks control after asynchronous display', async () => {
@@ -152,10 +211,11 @@ describe('actual BrowserViewManager consumer', () => {
     expect(report.outcome.kind).toBe('completed'); expect(f.contents.actions).toBe(1); expect(f.contents.feedbackCalls).toBe(1)
     expect(f.contents.attached).toBe(false); expect(f.contents.destroyed).toBe(false)
     expect(f.contents.scripts.length).toBeGreaterThan(0)
-    expect(f.contents.scripts.at(-1)).toContain('"phase":"completed"')
-    expect(f.sibling.commands).toEqual([]); expect(f.sibling.scripts).toEqual([]); expect(f.sibling.destroyed).toBe(false)
-    const count = f.contents.scripts.length; f.manager.setBounds('browser-one', null)
-    expect(f.contents.scripts.slice(count)).toHaveLength(1); expect(f.contents.scripts.at(-1)).toContain('"phase":"clear"')
+    expect(actionPayloads(f.contents).at(-1).phase).toBe('completed')
+    expect(controlPayloads(f.contents).at(-1).active).toBe(false)
+    expect(f.sibling.commands).toEqual(f.siblingBefore.commands); expect(f.sibling.scripts).toEqual(f.siblingBefore.scripts); expect(f.sibling.destroyed).toBe(false)
+    const count = f.contents.displays.length; f.manager.setBounds('browser-one', null)
+    expect(actionPayloads(f.contents, count)).toMatchObject([{ phase: 'clear' }])
   })
   it('the same operation binds each action to its actual new navigation and a fresh decoration token', async () => {
     const f = await managerFixture(); native.mode = 'navigation'
@@ -166,11 +226,11 @@ describe('actual BrowserViewManager consumer', () => {
     expect(first.operationId).toBe(report.runOperation?.id); expect(second.operationId).toBe(first.operationId)
     expect(second.navigationId).not.toBe(first.navigationId); expect(second.token).not.toBe(first.token)
     expect(f.contents.getURL()).toBe('https://generic.invalid/next'); expect(f.contents.attached).toBe(false)
-    const count = f.contents.scripts.length
+    const count = f.contents.displays.length
     f.contents.emit('input-event', {}, { type: 'mouseDown' })
-    expect(f.contents.scripts.slice(count)).toHaveLength(1); expect(f.contents.scripts.at(-1)).toContain('\"phase\":\"clear\"')
+    expect(actionPayloads(f.contents, count)).toMatchObject([{ phase: 'clear' }])
     expect(f.contents.attached).toBe(false); expect(report.runOperation?.phase).toBe('completed')
-    expect(f.sibling.commands).toEqual([]); expect(f.sibling.scripts).toEqual([])
+    expect(f.sibling.commands).toEqual(f.siblingBefore.commands); expect(f.sibling.scripts).toEqual(f.siblingBefore.scripts)
   })
   it('actual concurrent page calls keep both healthy actions while stale feedback cannot borrow the newer action label', async () => {
     const f = await managerFixture(); native.mode = 'concurrent'
@@ -178,41 +238,42 @@ describe('actual BrowserViewManager consumer', () => {
     expect(report.outcome.kind).toBe('completed'); expect(f.contents.actions).toBe(2)
     expect(f.contents.feedbackPayloads).toHaveLength(1)
     expect(f.contents.feedbackPayloads[0].label).toBe('Agent · Hover')
-    expect(f.contents.scripts.at(-1)).toContain('Hover complete')
-    expect(f.contents.attached).toBe(false); expect(f.sibling.commands).toEqual([]); expect(f.sibling.scripts).toEqual([])
+    expect(actionPayloads(f.contents).at(-1).label).toBe('Hover complete')
+    expect(f.contents.attached).toBe(false); expect(f.sibling.commands).toEqual(f.siblingBefore.commands); expect(f.sibling.scripts).toEqual(f.siblingBefore.scripts)
   })
-  it('a concurrent readonly call cannot replace the original action guard after display and permit a late human action', async () => {
+  it('a concurrent readonly call cannot replace the action guard before explicit takeover', async () => {
     const f = await managerFixture(); native.mode = 'concurrent-observe'
-    native.takeover = () => f.contents.emit('input-event', {}, { type: 'mouseDown' })
-    const report = await f.manager.runScript('browser-one', 'actual concurrent worker double')
+    native.takeover = () => { void f.manager.stopOperationById('concurrent-observe') }
+    const report = await f.manager.runScript('browser-one', 'actual concurrent worker double', undefined, undefined, 'concurrent-observe')
     expect(report.outcome.kind).toBe('stopped'); expect(f.contents.feedbackCalls).toBe(1)
     expect(f.contents.commands.filter((name: string) => name === 'Accessibility.getFullAXTree')).toHaveLength(2)
     expect(f.contents.actions).toBe(0); expect(f.contents.attached).toBe(false)
     expect(f.events.at(-1).browser.activity.control).toBe('human')
-    expect(f.sibling.commands).toEqual([]); expect(f.sibling.scripts).toEqual([])
+    expect(f.sibling.commands).toEqual(f.siblingBefore.commands); expect(f.sibling.scripts).toEqual(f.siblingBefore.scripts)
   })
-  it('a real input during feedback stops the original late action while preserving both healthy pages', async () => {
+  it('explicit takeover during feedback stops the original late action while preserving both healthy pages', async () => {
     const f = await managerFixture()
-    native.onFeedback = () => f.contents.emit('input-event', {}, { type: 'mouseDown' })
-    const report = await f.manager.runScript('browser-one', 'actual worker double')
+    native.onFeedback = () => { void f.manager.stopOperationById('feedback-takeover') }
+    const report = await f.manager.runScript('browser-one', 'actual worker double', undefined, undefined, 'feedback-takeover')
     expect(f.contents.feedbackCalls).toBe(1); expect(f.contents.actions).toBe(0)
     expect(report.outcome.kind).toBe('stopped'); expect(report.runOperation?.phase).toBe('stopped')
     expect(f.events.at(-1).browser.activity.control).toBe('human')
-    expect(f.contents.scripts.at(-1)).toContain('"phase":"clear"')
+    expect(actionPayloads(f.contents).at(-1).phase).toBe('clear')
+    expect(controlPayloads(f.contents).at(-1).active).toBe(false)
     expect(f.contents.destroyed).toBe(false); expect(f.sibling.destroyed).toBe(false)
-    expect(f.sibling.scripts).toEqual([]); expect(f.sibling.commands).toEqual([])
+    expect(f.sibling.scripts).toEqual(f.siblingBefore.scripts); expect(f.sibling.commands).toEqual(f.siblingBefore.commands)
   })
   it.each(['false', 'synchronous throw', 'persistent clear/display throw'])('%s display result leaves the actual action completed with a persistent local service warning', async (kind) => {
     const f = await managerFixture(); native.displayFails = kind === 'false'; native.displayThrows = kind === 'synchronous throw'; native.displayAllThrows = kind === 'persistent clear/display throw'
     const report = await f.manager.runScript('browser-one', 'actual worker double')
     expect(report.outcome.kind).toBe('completed'); expect(f.contents.actions).toBe(1)
-    expect(f.contents.feedbackCalls).toBe(0); expect(f.contents.displayAttempts).toBeLessThanOrEqual(4); expect(f.contents.destroyed).toBe(false); expect(f.contents.attached).toBe(false)
+    expect(f.contents.feedbackCalls).toBe(0); expect(actionPayloads(f.contents).length).toBeLessThanOrEqual(4); expect(f.contents.destroyed).toBe(false); expect(f.contents.attached).toBe(false)
     expect(report.runOperation?.warning).toContain('feedback could not be displayed')
     expect(f.events.at(-1).browser.activity.warning).toContain('remain usable')
     native.displayFails = false; native.displayThrows = false; native.displayAllThrows = false; native.observe = undefined; native.takeover = undefined
     const next = await f.manager.runScript('browser-one', 'second healthy run')
     expect(next.outcome.kind).toBe('completed'); expect(f.contents.actions).toBe(2)
-    expect(f.sibling.commands).toEqual([]); expect(f.sibling.scripts).toEqual([])
+    expect(f.sibling.commands).toEqual(f.siblingBefore.commands); expect(f.sibling.scripts).toEqual(f.siblingBefore.scripts)
   })
   it('fill feedback is connected without disclosing its value and opaque calls create no target pointer', async () => {
     const f = await managerFixture(); native.mode = 'fillInput'
@@ -223,6 +284,46 @@ describe('actual BrowserViewManager consumer', () => {
     await f.manager.runScript('browser-one', 'actual worker double')
     expect(f.contents.feedbackCalls).toBe(before)
   })
+  it.each(['completed', 'takeover'])('keeps the waiting owner active until %s and never wakes the sibling', async end => {
+    const f = await managerFixture(); native.mode = 'held-wait'
+    f.contents.focus()
+    const operationId = 'waiting-control-' + end
+    let shield: any, observed = false
+    native.onWaiting = async () => {
+      await Promise.resolve()
+      expect(f.events.at(-1).browser.activity.operation.phase).toBe('waiting')
+      expect(f.manager.target('browser-one')?.control).toMatchObject({ owner: 'agent', activeOperationId: operationId, inputIsolation: 'isolated' })
+      expect(controlPayloads(f.contents).length).toBeGreaterThan(0)
+      expect(controlPayloads(f.contents).every(payload => payload.active)).toBe(true)
+      const owner = f.manager.nativeOwner('browser-one')!
+      shield = owner.inputShield
+      expect(shield).toBeDefined()
+      expect(f.children.indexOf(shield)).toBe(f.children.indexOf(owner.view) + 1)
+      expect(shield.getBounds()).toEqual(owner.view.getBounds())
+      expect(shield.getVisible()).toBe(true)
+      expect(shield.backgroundColor).toBe('#00000000')
+      expect(shield.webContents.isFocused()).toBe(true); expect(f.contents.isFocused()).toBe(false)
+      // A queued page input may invalidate the transient cue; it cannot grant takeover.
+      f.contents.emit('input-event', {}, { type: 'mouseDown' })
+      f.manager.refreshAgentFeedback()
+      await Promise.resolve()
+      expect(actionPayloads(f.contents).at(-1).phase).toBe('clear')
+      expect(controlPayloads(f.contents).at(-1).active).toBe(true)
+      expect(f.manager.target('browser-one')?.control?.owner).toBe('agent')
+      expect(f.sibling.commands).toEqual(f.siblingBefore.commands); expect(f.sibling.scripts).toEqual(f.siblingBefore.scripts); expect(f.sibling.focusCalls).toBe(0)
+      observed = true
+      if (end === 'takeover') await f.manager.stopOperationById(operationId)
+    }
+    const report = await f.manager.runScript('browser-one', 'actual waiting worker', { id: 'original-agent', name: 'Original Agent' }, undefined, operationId)
+    expect(observed, JSON.stringify(report)).toBe(true)
+    expect(report.outcome.kind).toBe(end === 'takeover' ? 'stopped' : 'completed')
+    expect(controlPayloads(f.contents).at(-1)).toMatchObject({ operationId, active: false })
+    expect(f.manager.target('browser-one')?.control).toMatchObject({ owner: 'human', activeOperationId: null, inputIsolation: 'inactive' })
+    expect(shield.webContents.isDestroyed()).toBe(true); expect(f.children).not.toContain(shield)
+    expect(f.contents.isFocused()).toBe(true)
+    expect(f.contents.attached).toBe(false); expect(f.contents.destroyed).toBe(false)
+    expect(f.sibling.commands).toEqual(f.siblingBefore.commands); expect(f.sibling.scripts).toEqual(f.siblingBefore.scripts); expect(f.sibling.focusCalls).toBe(0)
+  })
 })
 
 describe('T024 actual Main display semantics', () => {
@@ -230,24 +331,24 @@ describe('T024 actual Main display semantics', () => {
     const f = await managerFixture()
     const first = await f.manager.runScript('browser-one', 'actual first tool call')
     expect(first.outcome.kind).toBe('completed')
-    const before = f.contents.scripts.length
+    const before = f.contents.displays.length
     const second = await f.manager.runScript('browser-one', 'actual next tool call')
     expect(second.outcome.kind).toBe('completed'); expect(f.contents.actions).toBe(2)
-    const payloads = f.contents.scripts.slice(before).map((script: string) => JSON.parse(script.slice(script.lastIndexOf(')(') + 2, -1)))
+    const payloads = actionPayloads(f.contents, before)
     expect(payloads.length).toBeGreaterThan(0)
     const clears = payloads.filter((p: any) => p.phase === 'clear')
     expect(clears).toHaveLength(3) // Previous op, next snapshot, next actual action begin.
     expect(clears.map((p: any) => p.clearReason)).toEqual(['replace', 'replace', 'replace'])
     native.mode = 'wait'
-    const start = f.contents.scripts.length
+    const start = f.contents.displays.length
     const waited = await f.manager.runScript('browser-one', 'actual wait call')
     expect(waited.outcome.kind).toBe('completed')
-    const waiting = f.contents.scripts.slice(start).map((script: string) => JSON.parse(script.slice(script.lastIndexOf(')(') + 2, -1)))
+    const waiting = actionPayloads(f.contents, start)
     expect(waiting.length).toBeGreaterThan(0)
     expect(waiting.filter((p: any) => p.phase === 'clear').at(-1).clearReason).toBe('invalidate')
     f.contents.emit('input-event', {}, { type: 'mouseDown' })
-    expect(JSON.parse(f.contents.scripts.at(-1).slice(f.contents.scripts.at(-1).lastIndexOf(')(') + 2, -1)).clearReason).toBe('invalidate')
-    expect(f.sibling.commands).toEqual([]); expect(f.sibling.scripts).toEqual([])
+    expect(actionPayloads(f.contents).at(-1).clearReason).toBe('invalidate')
+    expect(f.sibling.commands).toEqual(f.siblingBefore.commands); expect(f.sibling.scripts).toEqual(f.siblingBefore.scripts)
   })
   it.each(['Enter', 'Meta+Enter', 'private-invocation-value'])('pressKey %s consumes actual single-key semantics without fabricating chords or text', async key => {
     const f = await managerFixture(); native.mode = 'pressKey'; native.key = key
@@ -257,16 +358,16 @@ describe('T024 actual Main display semantics', () => {
     expect(payload.method).toBe('pressKey'); expect(payload.keyLabel).toBe(key === 'Enter' ? 'Enter' : '⌨')
     expect(payload.label).toBe(key === 'Enter' ? 'Agent · Key Enter' : 'Agent · Key ⌨')
     expect(f.contents.scripts.join('')).not.toContain('Meta+Enter'); expect(f.contents.scripts.join('')).not.toContain('private-invocation-value')
-    expect(f.sibling.commands).toEqual([]); expect(f.sibling.scripts).toEqual([])
+    expect(f.sibling.commands).toEqual(f.siblingBefore.commands); expect(f.sibling.scripts).toEqual(f.siblingBefore.scripts)
   })
   it.each(['js', 'cdp'])('only actual %s opaque work enables the executor method, with no code or params in display payload', async method => {
     const f = await managerFixture(); native.mode = method
     const report = await f.manager.runScript('browser-one', 'actual opaque worker')
     expect(report.outcome.kind).toBe('completed'); expect(f.contents.feedbackPayloads).toHaveLength(0)
-    const payloads = f.contents.scripts.map((script: string) => JSON.parse(script.slice(script.lastIndexOf(')(') + 2, -1)))
+    const payloads = actionPayloads(f.contents)
     const running = payloads.filter((p: any) => p.phase === 'running')
     expect(running).toHaveLength(1); expect(running[0].method).toBe(method); expect(running[0].kind).toBe('page')
     expect(f.contents.scripts.join('')).not.toContain('private-invocation-value')
-    expect(f.contents.attached).toBe(false); expect(f.sibling.commands).toEqual([]); expect(f.sibling.scripts).toEqual([])
+    expect(f.contents.attached).toBe(false); expect(f.sibling.commands).toEqual(f.siblingBefore.commands); expect(f.sibling.scripts).toEqual(f.siblingBefore.scripts)
   })
 })
