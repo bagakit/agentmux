@@ -153,3 +153,42 @@ it('does not let an old restore overwrite a newer source that was released again
   expect(restore).toHaveBeenCalledTimes(2)
   expect(apply).not.toHaveBeenCalled();expect(container.textContent).toContain('Restoring browser')
 })
+
+
+it('keeps Browser close unconfirmed visible without disabling browsing or the original address draft', async () => {
+  const unknown = { ...page, retention: { status: 'unknown' as const, reasons: ['close-unconfirmed' as const] } }
+  const release = vi.spyOn(api.browser, 'release'), restore = vi.spyOn(api.browser, 'restore')
+  const navigate = vi.spyOn(api.browser, 'navigate').mockResolvedValue(unknown)
+  const reload = vi.spyOn(api.browser, 'reload').mockResolvedValue(unknown)
+  await render(false, unknown)
+  const notice = container.querySelector<HTMLElement>('.service-window')
+  expect(notice?.getAttribute('role')).toBe('status')
+  expect(notice?.textContent).toContain('Browser close unconfirmed')
+  expect(notice?.textContent).toContain('This page remains available.')
+  expect(notice?.textContent).toContain('reopen this same Browser')
+  expect(address().disabled).toBe(false)
+  await fill('keep browsing with this draft'); address().setSelectionRange(4, 12)
+  await render(false, { ...unknown, title: 'A normal later title' })
+  expect(container.querySelector('.service-window')?.textContent).toContain('Browser close unconfirmed')
+  expect(address().value).toBe('keep browsing with this draft')
+  expect(address().selectionStart).toBe(4); expect(address().selectionEnd).toBe(12)
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Reload"]')!.click())
+  expect(reload).toHaveBeenCalledExactlyOnceWith(page.id)
+  await act(async () => address().form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
+  expect(navigate).toHaveBeenCalledOnce()
+  expect(release).not.toHaveBeenCalled(); expect(restore).not.toHaveBeenCalled()
+  expect(container.textContent).not.toContain('Browser parked')
+  await render(false, { ...page, retention: { status: 'retained', reasons: ['beforeunload'] } })
+  expect(container.textContent).not.toContain('Browser close unconfirmed')
+})
+
+
+it('does not describe an unconfirmed cold or confirmed released Browser as an available closing page', async () => {
+  await render(false, { ...page, retention: { status: 'unknown', reasons: ['document-unconfirmed'] } })
+  expect(container.textContent).not.toContain('Browser close unconfirmed')
+  await act(async () => root.render(<BrowserPane tab={{ ...page, nativeOwnerReleased: true,
+    retention: { status: 'unknown', reasons: ['close-unconfirmed'] }, kind: 'browser', browserId: page.id,
+    regionId: 'original-region', workspaceId: 'original-workspace' }} visible={false} />))
+  expect(container.textContent).not.toContain('Browser close unconfirmed')
+  expect(container.textContent).toContain('Browser parked')
+})
