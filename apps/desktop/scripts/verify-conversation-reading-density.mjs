@@ -30,11 +30,27 @@ async function consumeQualifiedCandidate(candidateRoot) {
     const tab = entry.indexOf('\t'); return [entry.slice(tab + 1), entry.slice(0, tab).split(' ')[2]]
   }))
   const candidateTree = await tree(candidate, candidateHead), mainTree = await tree(root, mainHead)
+  const featureOwners = [own, config,
+    'packages/core/src/providers/codex-saved-history.ts', 'packages/core/src/session-history.ts', 'packages/core/src/types.ts', 'packages/core/src/conversation-timeline.ts',
+    'packages/core/test/codex-native-collaboration.test.ts', 'packages/core/test/vitest.native-collaboration.config.mts',
+    'packages/client-ui/src/components/ConversationView.tsx', 'packages/client-ui/src/components/ConversationMessage.tsx',
+    'packages/client-ui/src/components/CapturedConversationMessage.tsx', 'packages/client-ui/src/components/NativeProcessObservation.tsx',
+    'packages/client-ui/src/components/WorkflowObservation.tsx', 'packages/client-ui/src/lib/conversation-reply-preview.ts', 'packages/client-ui/src/styles/conversation-message.css',
+    'apps/desktop/src/renderer/src/components/ActivityView.tsx', 'apps/mobile/src/conversation/MobileConversationSurface.tsx',
+    'apps/desktop/test/conversation-reading-density.test.tsx', 'apps/desktop/test/conversation-reading-activity-density.test.tsx',
+    'apps/desktop/test/conversation-source-roles.test.tsx', 'apps/desktop/test/conversation-process-collapse.test.tsx', 'apps/desktop/test/conversation-chronological-reading.test.tsx',
+    ...[...candidateTree.keys()].filter(file => file.startsWith('apps/desktop/scripts/fixtures/conversation-reading-density/'))]
+  const ownerPaths = new Set(featureOwners)
+  for (const file of ownerPaths) {
+    assert.ok(candidateTree.has(file), 'The accepted contribution must exist in the qualified candidate: ' + file)
+    assert.equal(candidateTree.get(file), mainTree.get(file), 'An accepted contribution differs from current main: ' + file)
+  }
   let trackedInputs = 0
+  const laterMainDrift = []
   for (const file of Object.keys(receipt.sources)) {
     if (!candidateTree.has(file)) continue // Generated dist remains bound by the original candidate's source hashes.
     trackedInputs++
-    assert.equal(candidateTree.get(file), mainTree.get(file), 'A tested source differs from current main: ' + file)
+    if (!ownerPaths.has(file) && candidateTree.get(file) !== mainTree.get(file)) laterMainDrift.push({ path: file, candidateBlob: candidateTree.get(file), mainBlob: mainTree.get(file) ?? null })
   }
   assert.ok(trackedInputs > 0, 'Nonempty exact main/candidate source comparison')
   const action = process.argv.includes('--verify') ? '--verify' : '--check-prepared'
@@ -43,7 +59,8 @@ async function consumeQualifiedCandidate(candidateRoot) {
   const result = await command(process.execPath, [join(candidate, own), action], { cwd: candidate, env, maxBuffer: 8 * 1024 * 1024 })
   process.stdout.write(result.stdout)
   console.log(JSON.stringify({ consumedOriginalCandidate: true, rootMainHead: mainHead, candidateHead, candidateRoot: candidate, trackedInputs,
-    action, boundary: 'Consumes exact unchanged candidate evidence; does not adopt a workspace, rerun expensive qualification, change Tracker status or claim root worktree edits were tested.' }))
+    ownerInputs: ownerPaths.size, laterMainDrift, action,
+    boundary: 'Qualifies this contribution in the exact main ancestor. Its accepted owners and actual product consumers match current main; later parallel main changes are listed, not claimed tested. Candidate source/build/artifact identities remain exact. No workspace adoption, expensive rerun, Tracker mutation or claim about root worktree edits.' }))
 }
 const configText = await readFile(join(root, config), 'utf8')
 const mutations = [...configText.matchAll(/^\s*'([^']+)': \[/gmu)].map(match => match[1])
@@ -86,7 +103,7 @@ async function typeProof(types) {
 }
 async function typecheck(directory) {
   const paths = {}, manifests = []
-  for (const name of ['core', 'client-ui', 'demand', 'diagnostic-evidence', 'relay', 'identity']) {
+  for (const name of ['core', 'client-ui', 'demand', 'diagnostic-evidence', 'relay', 'identity', 'git']) {
     const file = join(root, 'packages', name, 'package.json'), manifest = await read(file)
     manifests.push(file)
     for (const [key, entry] of Object.entries(manifest.exports)) {
@@ -109,8 +126,8 @@ async function typecheck(directory) {
   }
   return { ...result, inputs: await Promise.all([...inputs].map(async file => ({ path: relative(root, file), sha256: hash(await readFile(file)) }))) }
 }
-async function testProof(receipt) {
-  assert.ok(receipt.baseline && receipt.adjacent && receipt.restored && receipt.types, 'Every original test/type stage must have completed')
+async function testProof(receipt, includeTypes = true) {
+  assert.ok(receipt.baseline && receipt.adjacent && receipt.restored, 'Every original test stage must have completed')
   assert.deepEqual(receipt.mutants.map(mutant => mutant.name), mutations, 'Every current implementation mutation was proved')
   const runs = [receipt.baseline, ...receipt.mutants, receipt.adjacent, receipt.restored]
   for (const run of runs) {
@@ -122,6 +139,7 @@ async function testProof(receipt) {
     for (const input of inputs) assert.equal(hash(await readFile(join(root, input.path))), input.originalSHA256, 'Original tested candidate changed: ' + input.path)
     assert.equal(run.signal, null)
     if (receipt.mutants.includes(run)) {
+      assert.deepEqual(run.cases.map(item => item.name), receipt.baseline.cases.map(item => item.name), 'Every mutation uses the original complete collection')
       assert.ok(run.exit > 0 && run.assertionFailures > 0); assert.equal(report.success, false)
       assert.equal(cases.filter(item => item.status === 'failed' && item.failureMessages.some(message => message.includes('AssertionError'))).length, run.assertionFailures)
       const changed = inputs.filter(input => input.mutation === run.name)
@@ -129,7 +147,7 @@ async function testProof(receipt) {
     } else { assert.equal(run.exit, 0); assert.equal(report.success, true); assert.ok(report.numPassedTests > 0 && report.numFailedTests === 0) }
   }
   assert.deepEqual(receipt.restored.cases, receipt.baseline.cases)
-  await typeProof(receipt.types)
+  if (includeTypes) await typeProof(receipt.types)
 }
 async function currentReceipt(requirePassed = true) {
   const pointer = await read(join(area, 'reading-current.json')), directory = resolve(root, pointer.directory)
@@ -140,11 +158,22 @@ async function currentReceipt(requirePassed = true) {
   if (requirePassed) { assert.equal(pointer.passed, true); assert.equal(receipt.passed, true) }
   return { pointer, directory, receipt }
 }
-async function prepare() {
+async function prepare(resumeCapture = false) {
   const directory = join(area, 'reading-' + Date.now()); await mkdir(directory, { recursive: true })
   const receipt = { schema: 'agentmux.conversation-reading-density.v1', passed: false, sources: {}, baseline: null, mutants: [], restored: null, capture: null }
   try {
     for (const file of [own, config]) receipt.sources[file] = hash(await readFile(join(root, file)))
+    if (resumeCapture) {
+      const original = await currentReceipt(false)
+      assert.equal(original.receipt.sources[config], receipt.sources[config], 'The original owning test contract is unchanged')
+      await testProof(original.receipt, false)
+      for (const [file, sha] of Object.entries(original.receipt.sources)) if (file !== own) assert.equal(hash(await readFile(join(root, file))), sha, 'An original test proof input changed: ' + file)
+      for (const field of ['baseline', 'mutants', 'adjacent', 'restored']) receipt[field] = original.receipt[field]
+      mergeSources(receipt.sources, Object.fromEntries([receipt.baseline, ...receipt.mutants, receipt.adjacent, receipt.restored].flatMap(run => run.inputs.map(input => [input.path, input.originalSHA256]))))
+      receipt.reusedTests = { receipt: relative(root, join(original.directory, 'receipt.json')), sha256: original.pointer.receiptSha256,
+        boundary: 'Only the complete unchanged original tests and actual implementation mutations are reused. Exact candidate types and capture always run again; no earlier type or capture failure is treated as passing.' }
+      console.log('Original test/config/loaded-source proof verified; exact types and capture remain unqualified.')
+    } else {
     receipt.baseline = await tests(directory, 'baseline')
     assert.equal(receipt.baseline.exit, 0, 'Owning baseline: ' + receipt.baseline.log)
     mergeSources(receipt.sources, Object.fromEntries(receipt.baseline.inputs.map(input => [input.path, input.originalSHA256])))
@@ -165,6 +194,7 @@ async function prepare() {
     assert.equal(receipt.restored.exit, 0, 'Restored actual implementation')
     assert.deepEqual(receipt.restored.cases.map(item => item.name), receipt.baseline.cases.map(item => item.name))
     mergeSources(receipt.sources, Object.fromEntries(receipt.restored.inputs.map(input => [input.path, input.originalSHA256])))
+    }
     receipt.types = await typecheck(directory)
     mergeSources(receipt.sources, Object.fromEntries(receipt.types.inputs.map(input => [input.path, input.sha256])))
     receipt.capture = await captureReadingDensity(join(directory, 'visual'))
@@ -176,6 +206,7 @@ async function prepare() {
     const runs = [receipt.baseline, ...receipt.mutants, receipt.adjacent, receipt.restored]
     const files = [...runs.flatMap(run => [run.report, run.loaded, run.log]), receipt.types.log,
       ...['capture.json', 'actual.json', 'public-reading.json'].map(file => relative(root, join(directory, 'visual', file)))]
+    if (receipt.reusedTests) files.push(receipt.reusedTests.receipt)
     for (const file of files) receipt.artifacts[file] = hash(await readFile(join(root, file)))
     receipt.passed = true
   } catch (error) { receipt.failure = { message: error.message, stack: error.stack }; console.error(receipt.failure.message) }
@@ -220,7 +251,8 @@ async function verify(preparedOnly = false) {
 }
 await mkdir(area, { recursive: true })
 if (process.env.AGENTMUX_READING_DENSITY_CANDIDATE_ROOT) await consumeQualifiedCandidate(process.env.AGENTMUX_READING_DENSITY_CANDIDATE_ROOT)
+else if (process.argv.includes('--resume-capture')) await prepare(true)
 else if (process.argv.includes('--prepare')) await prepare()
 else if (process.argv.includes('--check-prepared')) await verify(true)
 else if (process.argv.includes('--verify')) await verify()
-else throw Error('Use --prepare, --check-prepared or --verify')
+else throw Error('Use --prepare, --resume-capture, --check-prepared or --verify')
