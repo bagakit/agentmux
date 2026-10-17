@@ -5,6 +5,7 @@ import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
+import { sourceAliases } from './fixtures/launcher-launchpad/vitest.owning.config.mts'
 import { runProbeProcess } from './probe-process.mjs'
 
 const root = path.resolve(import.meta.dirname, '../../..')
@@ -16,28 +17,23 @@ const { build } = await import(pathToFileURL(require.resolve('vite')).href)
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const bench = 'apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx'
 const state = 'apps/desktop/src/renderer/src/components/WorkbenchEmptyState.tsx'
-const sources = [bench, state, 'apps/desktop/src/renderer/src/components/FullPageLoadingSurface.tsx',
+const notice = 'apps/desktop/src/renderer/src/components/ServiceWindowNotice.tsx'
+const sources = [bench, state, notice, 'apps/desktop/src/renderer/src/components/SurfaceState.tsx', 'apps/desktop/src/renderer/src/styles/surface-state.css', 'apps/desktop/src/renderer/src/styles/agent.css', 'apps/desktop/src/renderer/src/styles/workbench.css', 'apps/desktop/src/renderer/src/components/FullPageLoadingSurface.tsx',
   'apps/desktop/src/renderer/src/styles/full-page-loading.css', 'apps/desktop/src/renderer/src/styles/tokens.css']
-const receipt = { schema: 'agentmux.workbench-empty-state.v1', passed: false, visualReview: 'pending-independent-review', mutations: [], productionConsumers: [] }
+const receipt = { captureOnly: process.argv.includes('--capture-only'), schema: 'agentmux.workbench-empty-state.v1', passed: false, visualReview: 'pending-independent-review', mutations: [], productionConsumers: [] }
 await fs.mkdir(evidence, { recursive: true })
 try {
   receipt.sourceBefore = Object.fromEntries(await Promise.all(sources.map(async file => [file, hash(await fs.readFile(path.join(root, file)))])))
-  const manifest = JSON.parse(await fs.readFile(path.join(root, 'packages/core/package.json'), 'utf8'))
-  const aliases = Object.entries(manifest.exports).map(([key, value]) => ({
-    find: new RegExp('^' + (key === '.' ? '@agentmux/core' : '@agentmux/core/' + key.slice(2)).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'),
-    replacement: path.join(root, 'packages/core', value.import.replace('./dist/', './src/').replace(/\.js$/, '.ts'))
-  }))
-  aliases.push({ find: /^@agentmux\/layout$/, replacement: path.join(root, 'packages/core/src/spatial-layout.ts') })
   const mutations = [
-    { name: 'unknown-is-not-loading', file: state, before: 'phase="parked"', after: 'phase="loading"', failure: 'Unconfirmed placement is not active loading' },
-    { name: 'full-state-consumed-by-workbench', file: bench, before: '/> : !showReferenceBody ? unplacedSurface : null}', after: '/> : null}', failure: 'One coherent state replaces the banner plus empty canvas' }
+    { name: 'unknown-is-not-loading', file: notice, before: 'aria-live={ariaLive}', after: 'aria-live={ariaLive} aria-busy={true}', failure: 'Unconfirmed placement is not active loading' },
+    { name: 'full-state-consumed-by-workbench', file: bench, before: 'notice={projectionIssue} layout={layout}', after: 'notice={projectionIssue} layout="inline"', failure: 'Unconfirmed workface fills the available surface' }
   ]
   const execute = async mutation => {
     const label = mutation?.name ?? 'baseline', directory = path.join(evidence, label)
     await fs.mkdir(directory, { recursive: true })
     const compiled = new Map(), loaded = []
     await build({ configFile: false, root: fixture, base: './', logLevel: 'error', define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
-      resolve: { alias: aliases }, plugins: [{ name: 'empty-workbench-source', enforce: 'pre',
+      resolve: { alias: sourceAliases }, esbuild: { jsx: 'automatic' }, worker: { format: 'es' }, plugins: [{ name: 'empty-workbench-source', enforce: 'pre',
         resolveId(id) {
           if (/^(\.\.\/)+shared\/zone-file-resource(?:\.js)?$/.test(id)) return '\0unused-zone-file-resource'
           if (/(^|\/)ConversationView(?:\.js)?$/.test(id)) return '\0unused-conversation-view'
@@ -81,7 +77,7 @@ try {
     console.log('empty-workbench ' + label + ': ' + (mutation ? 'mutation killed' : 'passed'))
   }
   await execute(null)
-  for (const mutation of mutations) await execute(mutation)
+  if (!process.argv.includes('--capture-only')) for (const mutation of mutations) await execute(mutation)
   const walk = async directory => (await Promise.all((await fs.readdir(directory, { withFileTypes: true })).map(entry =>
     entry.isDirectory() ? walk(path.join(directory, entry.name)) : /\.tsx?$/.test(entry.name) ? [path.join(directory, entry.name)] : []))).flat()
   const files = await walk(path.join(root, 'apps/desktop/src/renderer/src')); assert.ok(files.length > 0)
