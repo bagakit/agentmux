@@ -110,6 +110,8 @@ export const PRIVILEGED_SENDER_LABELS = {
   'sessions:inputMailbox': 'original input mailbox reading',
   'sessions:messages': 'original A2A participant message reading',
   'sessions:message': 'original A2A message body reading',
+  'sessions:messageEvents': 'original A2A participant event reading',
+  'sessions:spawns': 'original Agent creation relationship reading',
   'sessions:cancelHistoryRead': 'history read cancellation',
   'sessions:releaseHistoryObservation': 'history observation',
   'continuousProgress:list': 'continuous progress',

@@ -2511,6 +2511,14 @@ export class RuntimeController {
     return { ...await this.configuredClient(reference.hostId).listMessages({ ...options, participantSessionId: reference.agentSessionId }), hostId: reference.hostId }
   }
 
+  async sessionMessageEvents(reference: SessionHistoryReference, options?: import('../shared/contracts.js').SessionMessageEventsOptions): Promise<AgentMuxRpcResult<'message.events'>> {
+    return { ...await this.configuredClient(reference.hostId).listMessageEvents({ ...options, participantSessionId: reference.agentSessionId }), hostId: reference.hostId }
+  }
+
+  async sessionSpawns(reference: SessionHistoryReference, options: import('../shared/contracts.js').SessionSpawnPageOptions): Promise<AgentMuxRpcResult<'agent.spawn.ls'>> {
+    return { ...await this.configuredClient(reference.hostId).listAgentSpawns({ ...options, participantSessionId: reference.agentSessionId }), hostId: reference.hostId }
+  }
+
   async sessionMessage(reference: SessionHistoryReference, messageId: string) {
     const message = await this.configuredClient(reference.hostId).readMessage({ messageId })
     if (message && message.envelope.senderSessionId !== reference.agentSessionId && message.envelope.recipientSessionId !== reference.agentSessionId) throw new AgentMuxError(
