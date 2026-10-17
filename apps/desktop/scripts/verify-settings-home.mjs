@@ -13,6 +13,13 @@ const owned = await fs.mkdtemp(path.join(os.tmpdir(),'amux-settings-home-'))
 const env = {...process.env,TMPDIR:owned,TEMP:owned,TMP:owned}; delete env.ELECTRON_RUN_AS_NODE
 const inputs = new Map(), runs = []
 const navigationMutant = process.argv.includes('--navigation-mutation')
+const pageArguments = process.argv.filter(argument => argument.startsWith('--pages='))
+assert.ok(pageArguments.length <= 1, 'One explicit page selection')
+const requestedPages = pageArguments.length ? pageArguments[0].slice('--pages='.length).split(',') : null
+if (requestedPages) {
+  assert.ok(requestedPages.every(Boolean), 'Page selection is nonempty')
+  assert.equal(new Set(requestedPages).size, requestedPages.length, 'Page selection contains no duplicate')
+}
 let navigationMutationLoads = 0
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 await fs.mkdir(evidence,{recursive:true})
@@ -28,7 +35,7 @@ async function bind(file) {
 try {
   for (const file of ['index.html','entry.mjs','main.cjs','vitest.config.mts','scenario.md']) await bind(path.join(fixture,file))
   for (const file of ['apps/desktop/scripts/verify-settings-home.mjs','apps/desktop/test/settings-home.test.tsx','apps/desktop/test/settings-overview.test.tsx']) await bind(path.join(root,file))
-  for (const mode of process.argv.includes('--visual-only') || navigationMutant ? [] : ['baseline','entry','drafts','exact','destination','restored']) {
+  for (const mode of process.argv.includes('--visual-only') || navigationMutant ? [] : ['baseline','expanded','entry','drafts','exact','destination','restored']) {
     const directory = path.join(evidence,mode), temporary = path.join(owned,mode), output = []
     await fs.mkdir(directory)
     await fs.mkdir(temporary)
@@ -73,7 +80,7 @@ try {
   await fs.cp(compiled,path.join(evidence,'compiled'),{recursive:true})
   const visual = path.join(evidence,'visual'), stderr=[]
   await fs.mkdir(visual)
-  const capture = await runProbeProcess(require('electron'),[path.join(fixture,'main.cjs'),path.join(compiled,'index.html'),owned,visual,navigationMutant?'navigation':'full'],{
+  const capture = await runProbeProcess(require('electron'),[path.join(fixture,'main.cjs'),path.join(compiled,'index.html'),owned,visual,navigationMutant?'navigation':'full',requestedPages?.join(',')??''],{
     cwd:root,env,timeoutMs:180000,onLine:line=>stderr.push(line)
   })
   await fs.writeFile(path.join(visual,'stderr.log'),stderr.join('\n'))
@@ -88,7 +95,8 @@ try {
     assert.equal(capture.exitCode,0,render.failure?.message)
     assert.equal(render.passed,true,render.failure?.message)
     assert.ok(render.catalog.length>0)
-    for (const entry of render.catalog) for (const theme of ['dark','light']) {
+    assert.ok(render.scope.resolved.length > 0)
+    for (const entry of render.catalog.filter(entry=>render.scope.resolved.includes(entry.id))) for (const theme of ['dark','light']) {
       assert.ok(render.frames.some(frame=>frame.page===entry.id&&frame.theme===theme&&frame.position==='top'),'Every actual page is captured in both themes: '+entry.id)
     }
   }
@@ -100,7 +108,7 @@ try {
     assert.ok(found.length>0,'Actual definition-excluded product consumer: '+symbol)
     callers.push(...found.map(node=>({file,symbol,line:tree.getLineAndCharacterOfPosition(node.getStart()).line+1})))
   }
-  const relevant = [...inputs].filter(([file])=>/SettingsPanel|TopRowChrome|\/App\.tsx|\/settings\/|styles\/(settings|surfaces)|settings-home|settings-overview\.test/.test(file))
+  const relevant = [...inputs]
   assert.ok(relevant.length>0)
   for (const [file,digest] of relevant) assert.equal(sha(await fs.readFile(file)),digest,'Changed candidate source: '+path.relative(root,file))
   const receipt={passed:true,captureOnly:!navigationMutant,aestheticReview:'not-performed',assertionRed:navigationMutant,testEvidence:runs.length?'passed-with-owning-mutations':navigationMutant?'native-navigation-assertion-red':'not-run',
@@ -111,7 +119,7 @@ try {
     '| Page | Theme | Position | Screenshot |','| --- | --- | --- | --- |',
     ...render.frames.map(frame=>`| ${frame.page} | ${frame.theme} | ${frame.position} | [${frame.file}](visual/${frame.file}) |`),''].join('\n'))
   if (!navigationMutant) await fs.writeFile(path.join(root,'.tmp/settings-home/latest.json'),JSON.stringify({evidence,receipt:path.join(evidence,'receipt.json')},null,2))
-  console.log(JSON.stringify({passed:true,assertionRed:navigationMutant,evidence,pages:render.catalog.length+1,frames:render.frames.length,aestheticReview:'not-performed'}))
+  console.log(JSON.stringify({passed:true,assertionRed:navigationMutant,evidence,pages:render.scope?.resolved.length??render.catalog.length+1,frames:render.frames.length,aestheticReview:'not-performed'}))
 } finally {
   assert.deepEqual(await listProbeProcesses(-1,owned),[],'Owned private Renderer processes have exited')
   await fs.rm(owned,{recursive:true,force:true})

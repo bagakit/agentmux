@@ -2,7 +2,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const { app, BrowserWindow } = require('electron')
-const [html, owned, evidence, mode = 'full'] = process.argv.slice(2)
+const [html, owned, evidence, mode = 'full', pages = ''] = process.argv.slice(2)
 app.setPath('userData', path.join(owned, 'user-data'))
 app.setPath('sessionData', path.join(owned, 'session-data'))
 const result = { passed: false, captureOnly: true, aestheticReview: 'not-performed', frames: [], interactions: [],
@@ -98,6 +98,14 @@ app.whenReady().then(async () => {
     catalog = await read('window.settingsHomeProbe.catalog')
     assert.ok(catalog.length > 0,'The actual page inventory is nonempty')
     result.catalog = catalog
+    const requested = pages ? pages.split(',') : null
+    const available = ['overview', ...catalog.map(entry=>entry.id)]
+    const selected = requested ?? available
+    assert.ok(selected.length > 0 && selected.every(id=>available.includes(id)), 'Every selected page exists in the actual catalog')
+    assert.equal(new Set(selected).size, selected.length, 'No duplicate page selection')
+    result.scope = {requested, resolved:available.filter(id=>selected.includes(id))}
+    const reviewCatalog = catalog.filter(entry=>selected.includes(entry.id))
+
     result.original = await read('window.settingsHomeProbe.beginSurface()')
     assert.ok(result.original.tabs>0&&result.original.sessions>0&&result.original.layouts>0)
     await click(node('.window-status-bar [aria-label="Settings"]'))
@@ -165,7 +173,7 @@ app.whenReady().then(async () => {
     await capture('appearance-narrow-draft','appearance','light')
     await resize(1440,940)
     await theme('dark'); await disclosureGeometry()
-    for (const entry of catalog) {
+    for (const entry of reviewCatalog) {
       await nav(entry.id)
       const pane = node(`[data-settings-pane="${entry.id}"]`)
       await read(`${pane}.scrollTop=0`)
@@ -193,7 +201,7 @@ app.whenReady().then(async () => {
         await read(`${scroll}.scrollTop=0`)
       }
     }
-    for (const id of ['agents','prompts','hosts','browser-agent-control','automation','continuity','general','lark','toolkit']) {
+    for (const {id} of reviewCatalog) {
       await resize(500,840); await nav(id); await theme('light'); await capture(`page-${id}-compact`,id,'light')
       if (id==='agents') {
         const row = '[data-settings-pane="agents"] .settings-agent-templates [data-resource-row="codex"]'
