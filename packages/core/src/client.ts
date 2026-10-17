@@ -2676,16 +2676,12 @@ export class AgentMuxClient {
     resources.add(resource); this.historyObservationControllers.set(input.agentSessionId, resources)
     let native: AgentSessionHistoryObservationHandle | undefined, opening: import('./conversation-changes.js').ConversationWatchOpening | undefined
     let pendingCaptured = false, unsubscribe = () => {}, nativeEnded = () => {}, releaseView = () => {}, disposed = false
-    let publishedInvalidation = false
     const emit = (value: ConversationObservation): void => {
       if (!opening || controller.signal.aborted) return
       diagnostic?.recorder.record({ phase: value.kind === 'invalidated' ? 'source-invalidated' : 'source-watch-unavailable', sourceHostId: ref.hostId,
         sourceKind: value.source.kind, ...(value.source.kind === 'native' ? { nativeSource: { providerId: value.source.providerId, nativeSessionId: value.source.nativeSessionId } } : {}),
         ...(value.kind === 'unavailable' ? { reason: readingDiagnosticFailureReason({ code: value.code }) } : {}) })
-      if (value.kind === 'unavailable' || !publishedInvalidation) {
-        diagnostic?.recorder.flush(value.kind === 'unavailable' ? 'failure' : 'progress')
-        if (value.kind === 'invalidated') publishedInvalidation = true
-      }
+      diagnostic?.recorder.flush(value.kind === 'unavailable' ? 'failure' : 'progress')
       try { listener(parseConversationObservation({ ...value, hostId: input.hostId }, opening)) } catch { /* Read callbacks cannot gate the original Agent. */ }
     }
     const captured = () => {

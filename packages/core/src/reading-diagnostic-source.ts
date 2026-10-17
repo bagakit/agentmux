@@ -10,6 +10,7 @@ import { parseReadingDiagnosticFindParams, parseReadingDiagnosticTarget,
 
 const MAX_RECORDS = 64, MAX_BYTES = 512 * 1024, MAX_ACTIVE = 32
 const size = (value: unknown): number => Buffer.byteLength(JSON.stringify(value))
+const normalRecord = (record: ReadingDiagnosticRecord): boolean => record.trigger === 'progress' || record.trigger === 'release'
 /** Ephemeral observations from this one Core client. No IO, timer, source reads or durable-history claim. */
 export class CoreReadingDiagnosticSource {
   private readonly instanceId = mintObjectId()
@@ -36,11 +37,25 @@ export class CoreReadingDiagnosticSource {
   private retain(input: ReadingDiagnosticRecord): void {
     const record = parseReadingDiagnosticRecord(input), bytes = size(record)
     if (bytes > MAX_BYTES || this.records.some(entry => entry.record.logId === record.logId)) { this.rejected++; return }
+    if (normalRecord(record)) {
+      let first = true
+      for (let index = 0; index < this.records.length; index++) {
+        const previous = this.records[index]!.record
+        if (!normalRecord(previous) || previous.scope.consumerId !== record.scope.consumerId || previous.scope.hostId !== record.scope.hostId || previous.scope.agentSessionId !== record.scope.agentSessionId) continue
+        if (first) first = false
+        else this.evictRecord(index--)
+      }
+    }
     // JSON metadata is detached again at the receiving owner; callers never receive these internal values.
     this.records.push({ serial: ++this.serial, bytes, record }); this.bytes += bytes
     while (this.records.length > MAX_RECORDS || this.bytes > MAX_BYTES) {
-      this.bytes -= this.records.shift()!.bytes; this.evicted++
+      const normal = this.records.findIndex(entry => normalRecord(entry.record))
+      this.evictRecord(normal < 0 ? 0 : normal)
     }
+  }
+  private evictRecord(index: number): void {
+    const [entry] = this.records.splice(index, 1)
+    if (entry) { this.bytes -= entry.bytes; this.evicted++ }
   }
   read(input: ReadingDiagnosticExactTarget): DiagnosticEvidenceRead<ReadingDiagnosticExactTarget, ReadingDiagnosticRecord> {
     const target = parseReadingDiagnosticTarget(input)
