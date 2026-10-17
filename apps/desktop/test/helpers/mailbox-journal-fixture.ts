@@ -45,6 +45,7 @@ export function mailboxJournal() {
       for (const listener of listeners) {
         listener({ type: 'core', hostId, event: { type: 'agent-message-observation', state: 'available' } })
         listener({ type: 'core', hostId, event: { type: 'agent-message-changed', messageId: record.envelope.messageId, sequence: record.sequence,
+          messageSequence: record.sequence, recordKind: 'message', live: true,
           senderSessionId: record.envelope.senderSessionId!, recipientSessionId: record.envelope.recipientSessionId! } })
       }
     })
