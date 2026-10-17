@@ -1,4 +1,3 @@
-import { resolve } from 'node:path'
 import { verifyRendererSourceMutations } from './lib/verify-renderer-source-mutations.mjs'
 
 const component = name => `apps/desktop/src/renderer/src/components/${name}.tsx`
@@ -6,7 +5,6 @@ const target = 'apps/desktop/src/renderer/src/lib/agent-menu-target.ts'
 const store = 'apps/desktop/src/renderer/src/store.ts'
 await verifyRendererSourceMutations({
   name: 'focus-agent-targets',
-  evidenceRoot: resolve('.bagakit/feature-tracker/features/f-34b8fktjy/artifacts'),
   owningConfig: 'apps/desktop/test/vitest.context-hover.config.mts',
   tests: ['apps/desktop/test/focus-stop-agent.test.tsx', 'apps/desktop/test/session-restart.test.tsx'],
   sources: [target, store, ...['FocusStopAgent', 'SessionRestart', 'FocusContextMenu', 'FocusToolbar', 'RegionContextMenu', 'WorkspaceWorkbench'].map(component),
