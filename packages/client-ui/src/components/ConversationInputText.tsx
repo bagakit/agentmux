@@ -43,10 +43,11 @@ export function ConversationInputText({ text, prefix, inputContext, inputContext
       <p>{prefix.reminder.text}</p>
     </details> : null
   const a2a = prefix?.kind === 'references' || prefix?.declaredMessageId !== undefined
+  const browserImages = { visible: markdown.visible ?? true, readOnly: markdown.readOnly ?? false, readOnlyImages: markdown.readOnlyImages ?? false }
   return <>
-    {inputContext && matching < 0 ? <ConversationBrowserContext context={inputContext} source={inputContextSource} /> : null}
+    {inputContext && matching < 0 ? <ConversationBrowserContext {...browserImages} context={inputContext} source={inputContextSource} /> : null}
     {prefix?.declaredContexts?.map((context, index) => context.inputContext
-      ? <ConversationBrowserContext key={index} context={context.inputContext} source={index === matching ? inputContextSource ?? 'caller-declared' : 'caller-declared'} raw={context.raw} />
+      ? <ConversationBrowserContext {...browserImages} key={index} context={context.inputContext} source={index === matching ? inputContextSource ?? 'caller-declared' : 'caller-declared'} raw={context.raw} />
       : <details key={index} className="log-turn__declared-context">
       <summary><SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />{AMUX_PROTOCOL_DEFINITIONS.context.title}{prefix.declaredContexts!.length > 1 ? ` ${index + 1}` : ''}</summary>
       <pre>{context.raw}</pre>
