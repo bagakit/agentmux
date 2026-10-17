@@ -47,6 +47,7 @@ amux system diagnostics inspect --domain native-recorder-failure --host-id HOST 
 amux system diagnostics inspect --domain reading.lifecycle --host-id HOST --recent --session-id SID --limit 8
 amux system diagnostics inspect --domain reading.lifecycle --host-id HOST --logid LOGID --authority CORE_INSTANCE_ID
 amux system diagnostics inspect --domain client.incident --host-id local --recent --session-id SID --limit 8
+amux system diagnostics inspect --domain client.incident --host-id local --recent --limit 16
 amux system diagnostics inspect --domain client.incident --host-id local --logid LOGID --authority ARCHIVE_ID
 amux system diagnostics inspect --input mote-context-query.json
 ```
@@ -58,6 +59,15 @@ amux system diagnostics inspect --input mote-context-query.json
 先查看 availability、失败阶段、已确认事实、issue、completeness 与原目标，再看关系的 verification。Native not-exposed 表示根因材料缺失，不能以关联成功补造根因。raw 明确请求且来源有权限才读取；retained 不等于本次 included，也不代表无限保留。
 
 对话更新延迟先查原 Core `reading.lifecycle` 与 client `client.incident` 的近期候选，再按各自引用准确读取；同 Session 只构成背景关联，不能把不同消费生命周期或跨进程 wall 时间拼成同一次耗时。Core 元数据仅覆盖当前实例；Renderer 消费阶段沿原 client 档案留存，卸载后是否可查取决于实际保存、预算和覆盖。`confirmed` 是原写入确认，重启后 `observed` 只说明现有原字节可读；近期为空、候选已淘汰或采集未覆盖均不能证明业务没有更新。无需通过重发、重开页面或恢复原工作面制造诊断材料。
+## 客户端故障档案与原来源引用
+
+`client.incident` 由宿主显式注入 [Main archive](../../apps/desktop/src/main/client-incident-archive.ts)，保留自动报告的有限阶段、计数、原尝试和来源身份。先用 `--recent` 在当前 archive Host 发现候选，再以返回的原 `recordRef.logId` 和 authority 精查；archive 路线与报告中的执行 Host 分别保真。recent 的 coverage、persistence 和 cursor 均沿 [公共类型](../../packages/core/src/client-incident.ts)，空结果不能证明此前没有异常。`--include-raw` 不会给事件记录添加终端正文、错误文本、路径或截图。
+
+报告只在原 owner 已有准确 typed 引用时填写 `references`。默认查询沿 [引用投影](../../packages/core/src/client-incident-evidence.ts) 将这些声明交给原 Delivery、Toolkit、Scene reader，继续使用同一查询预算、实际在途槽、权限和安全投影。引用原 logId、executionId 或 captureId，不迁移原件，不按相近时刻、同 Session 或文案补关联；Toolkit/Scene 没有原 logId，读回仍为 `recordRef=null`。读取成功只表示准确目标可读，不升级为 owner-confirmed 因果。
+
+`--no-related` 只读事件原记录。关联源缺失、原件损坏、被淘汰、不可用或权限拒绝时，主记录和其他合法来源仍保留；查看各 read 的原 target、availability、issue 与 coverage。没有已得引用时 `references=[]`，不代表其他来源正常，也不表示普通终端事件已经自动关联全部诊断材料。
+
+统一入口没有 Crash reader；不要构造 Crash logId 或广告该来源 supported。已有保留 Crash 事实继续用只读 `amux system crash-log inspect`，该入口不因此变成事件关联 reader。`native-recorder-failure` 仍明确 `not-exposed`，不以事件或 Scene 的读取结果代签 Native 首故障已取得。读取过程不提交输入、不刷新会话、不探测连接，也不启动新的采集。
 
 ## owner 的必要取舍
 
