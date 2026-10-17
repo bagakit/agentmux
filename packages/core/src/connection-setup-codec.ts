@@ -1,8 +1,9 @@
-import { parseConnectionRequestTrace, parseConnectionRequestTraceSelector } from './connection-request-trace.js'
+import { parseDesiredConnectionProfile, connectionProfileAvatarDigest } from './connection-profile-codec.js'
+import { parseConnectionRequestTrace, parseConnectionRequestTraceSelector, parseConnectionSetupRequestDiagnostic } from './connection-request-trace.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { CONNECTION_SETUP_READ_ACTIONS, connectionSetupPublicationSubjects, connectionSetupConfigurationSubject, connectionSetupPermissionActionPurpose, type ConnectionSetupReadSubject, type ConnectionSetupReadSummary, type ConnectionSetupPermissionReview, type ConnectionSetupMessageReceptionReview, type ConnectionSetupPublicationDraft, type ConnectionSetupPublicationReview, type ConnectionSetupPublicationEffect } from './connection-setup-contract.js'
-import type { ConnectionSetupBegin, ConnectionSetupChallenge, ConnectionSetupInspectionReceipt, ConnectionSetupConfigurationReceipt, ConnectionSetupMethod, ConnectionSetupInitialProgress, ConnectionSetupOperation, ConnectionSetupParamsMap, ConnectionSetupResultMap, ConnectionSetupView } from './connection-setup-contract.js'
+import type { ConnectionSetupBegin, ConnectionSetupChallenge, ConnectionSetupInspectionReceipt, ConnectionSetupConfigurationReceipt, ConnectionSetupMethod, ConnectionSetupInitialProgress, ConnectionSetupProfileProgress, ConnectionSetupGoal, ConnectionSetupOperationGoal, ConnectionSetupRequestDiagnostic, ConnectionSetupOperation, ConnectionSetupParamsMap, ConnectionSetupResultMap, ConnectionSetupView } from './connection-setup-contract.js'
 
 export const CONNECTION_SETUP_RPC_METHODS = { 'connection.setup.begin': 'long', 'connection.setup.advance': 'long', 'connection.setup.inspect': 'long', 'connection.setup.ls': 'long' } as const
 export const isConnectionSetupMethod = (value: unknown): value is ConnectionSetupMethod => typeof value === 'string' && Object.hasOwn(CONNECTION_SETUP_RPC_METHODS, value)
@@ -12,7 +13,7 @@ function text(value: unknown): string { if (typeof value !== 'string' || !value.
 function id(value: unknown): string { const v = text(value); if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(v)) fail(); return v }
 function integer(value: unknown, min = 1, max = Number.MAX_SAFE_INTEGER): number { if (!Number.isSafeInteger(value) || (value as number) < min || (value as number) > max) fail(); return value as number }
 function choice<T extends string>(value: unknown, values: readonly T[]): T { if (!values.includes(value as T)) fail(); return value as T }
-const configurationEffect = (value: unknown) => choice(value, ['enable-messaging', 'use-persistent-connection', 'use-persistent-callback', 'add-card-actions', 'add-application-permissions', 'add-message-reception', 'create-application-version', 'submit-application-version'] as const)
+const configurationEffect = (value: unknown) => choice(value, ['enable-messaging', 'use-persistent-connection', 'use-persistent-callback', 'add-card-actions', 'add-application-permissions', 'add-message-reception', 'create-application-version', 'submit-application-version', 'upload-profile-avatar', 'update-application-profile'] as const)
 const permissionPurpose = (value: unknown) => choice(value, ['agent-conversation', 'mote-profile-sync'] as const)
 const names = (value: unknown): string[] => { if (!Array.isArray(value)) fail(); const result = (value as unknown[]).map(text); if (new Set(result).size !== result.length) fail(); return result }
 const stage = (value: unknown) => choice(value, ['waiting', 'scanned', 'handoff', 'account', 'confirmed', 'expired', 'unknown'] as const)
@@ -39,12 +40,47 @@ export function parseConnectionSetupInitialProgress(value: unknown): ConnectionS
   if (['complete', 'approval-required'].includes(result.state) && (result.stage !== 'publication-status' || !result.versionId)) fail()
   return result
 }
-function begin(value: unknown): ConnectionSetupBegin {
-  const p = object(value, ['operationId', 'connectionId', 'expectedConnectionRevision', 'goal', 'source', 'initialPublication']), g = object(p.goal, ['kind', 'interaction'])
-  const source = p.source === undefined ? undefined : object(p.source, ['kind', 'operationId', 'expectedRevision'])
+export function connectionSetupGoalSummary(goal: ConnectionSetupGoal): ConnectionSetupOperationGoal {
+  if (goal.kind === 'agent-conversation') return goal
+  const { avatar, ...fields } = goal.desired
+  return { kind: 'profile-update', desired: { ...fields, ...(avatar ? { avatarSha256: connectionProfileAvatarDigest(avatar.pngDataUrl) } : {}) }, publication: goal.publication }
+}
+function goal(value: unknown, safe: boolean): ConnectionSetupGoal | ConnectionSetupOperationGoal {
+  const g = rpcRecord(value)
+  if (g.kind === 'agent-conversation') { object(g, ['kind', 'interaction']); return { kind: 'agent-conversation', interaction: choice(g.interaction, ['messages', 'cards']) } }
+  object(g, ['kind', 'desired', 'publication']); choice(g.kind, ['profile-update'])
+  const pub = object(g.publication, ['notes']), notes = text(pub.notes)
+  if (notes.length > 500) fail()
+  if (!safe) return { kind: 'profile-update', desired: parseDesiredConnectionProfile(g.desired), publication: { notes } }
+  const d = object(g.desired, ['name', 'description', 'avatarSha256'])
+  const desired = { ...(d.name === undefined ? {} : { name: text(d.name) }), ...(d.description === undefined ? {} : { description: typeof d.description === 'string' && !d.description.includes('\0') ? d.description : fail() }), ...(d.avatarSha256 === undefined ? {} : { avatarSha256: text(d.avatarSha256) }) }
+  if (!Object.keys(desired).length || desired.avatarSha256 !== undefined && !/^[a-f0-9]{64}$/u.test(desired.avatarSha256)) fail()
+  return { kind: 'profile-update', desired, publication: { notes } }
+}
+function admission(value: unknown, safe: boolean) {
+  const p = object(value, ['operationId', 'connectionId', 'expectedConnectionRevision', 'goal', 'source', 'initialPublication'])
+  const intent = goal(p.goal, safe), source = p.source === undefined ? undefined : object(p.source, ['kind', 'operationId', 'expectedRevision'])
   const initialPublication = p.initialPublication === undefined ? undefined : parseConnectionSetupInitialPublication(p.initialPublication)
-  if (initialPublication && !source) fail()
-  return { operationId: id(p.operationId), connectionId: id(p.connectionId), expectedConnectionRevision: integer(p.expectedConnectionRevision), goal: { kind: choice(g.kind, ['agent-conversation']), interaction: choice(g.interaction, ['messages', 'cards']) }, ...(initialPublication ? { initialPublication } : {}), ...(source ? { source: { kind: choice(source.kind, ['enrollment']), operationId: id(source.operationId), expectedRevision: integer(source.expectedRevision) } } : {}) }
+  if (initialPublication && !source || intent.kind === 'profile-update' && (source || initialPublication)) fail()
+  return { operationId: id(p.operationId), connectionId: id(p.connectionId), expectedConnectionRevision: integer(p.expectedConnectionRevision), goal: intent, ...(initialPublication ? { initialPublication } : {}), ...(source ? { source: { kind: choice(source.kind, ['enrollment']), operationId: id(source.operationId), expectedRevision: integer(source.expectedRevision) } } : {}) }
+}
+function begin(value: unknown): ConnectionSetupBegin { return admission(value, false) as ConnectionSetupBegin }
+export function parseConnectionSetupProfileProgress(value: unknown): ConnectionSetupProfileProgress {
+  const p = object(value, ['stage', 'state', 'versionId', 'actions', 'publicationDraft', 'blockedBy'])
+  if (!Array.isArray(p.actions) || p.actions.length > 1) fail()
+  const result: ConnectionSetupProfileProgress = { stage: choice(p.stage, ['authentication', 'profile-preflight', 'avatar-upload', 'profile-write', 'profile-readback', 'publication-create', 'publication-submit', 'publication-status']), state: choice(p.state, ['pending', 'running', 'attention', 'approval-required', 'complete']), ...(p.versionId === undefined ? {} : { versionId: id(p.versionId) }), actions: (p.actions as unknown[]).map(value => { const a = object(value, ['kind', 'actionId', 'expectedRevision']); return { kind: choice(a.kind, ['continue-profile-update', 'recover-configuration-effect']), actionId: id(a.actionId), expectedRevision: integer(a.expectedRevision) } }) }
+  if (['complete', 'approval-required'].includes(result.state) && (result.stage !== 'publication-status' || !result.versionId)) fail()
+  if (p.blockedBy !== undefined) {
+    const b = object(p.blockedBy, ['kind', 'operationId', 'connectionId'])
+    if (result.stage !== 'profile-write' || result.state !== 'attention' || result.actions.length) fail()
+    result.blockedBy = { kind: choice(b.kind, ['profile-operation']), operationId: id(b.operationId), connectionId: id(b.connectionId) }
+  }
+  if (p.publicationDraft !== undefined) {
+    const draft = parseConnectionSetupPublicationDraft(p.publicationDraft)
+    if (draft.kind !== 'create-version' || result.stage !== 'publication-create' || result.state !== 'attention' || result.actions.length) fail()
+    result.publicationDraft = draft as Extract<ConnectionSetupPublicationDraft, { kind: 'create-version' }>
+  }
+  return result
 }
 export function parseConnectionSetupChallenge(value: unknown): ConnectionSetupChallenge {
   const p = object(value, ['qrPayload', 'expiresAt', 'nextPollAt'])
@@ -52,10 +88,10 @@ export function parseConnectionSetupChallenge(value: unknown): ConnectionSetupCh
 }
 export function parseConnectionSetupOperation(value: unknown): ConnectionSetupOperation {
   const p = object(value, ['operationId', 'connectionId', 'expectedConnectionRevision', 'goal', 'source', 'initialPublication', 'revision', 'adapterId', 'application', 'request', 'secureStorage', 'reason', 'authentication'])
-  const input = begin(Object.fromEntries(['operationId', 'connectionId', 'expectedConnectionRevision', 'goal', 'source', 'initialPublication'].map(k => [k, p[k]])))
+  const input = admission(Object.fromEntries(['operationId', 'connectionId', 'expectedConnectionRevision', 'goal', 'source', 'initialPublication'].map(k => [k, p[k]])), true)
   const a = object(p.application, ['domain', 'appId']), r = object(p.request, ['kind', 'state', 'attemptId']), domain = text(a.domain)
   if (!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(domain)) fail()
-  const result: ConnectionSetupOperation = { ...input, revision: integer(p.revision), adapterId: id(p.adapterId), application: { domain, appId: id(a.appId) }, request: { state: choice(r.state, ['not-dispatched', 'dispatching', 'confirmed', 'unknown', 'refused']), attemptId: r.attemptId === null ? null : id(r.attemptId) }, secureStorage: choice(p.secureStorage, ['not-started', 'storing', 'stored', 'unknown']), ...(p.reason === undefined ? {} : { reason: choice(p.reason, ['adapter-unavailable', 'secure-storage-unavailable', 'request-unconfirmed', 'challenge-unconfirmed']) }) }
+  const result: ConnectionSetupOperation = { ...input, goal: input.goal as ConnectionSetupOperationGoal, revision: integer(p.revision), adapterId: id(p.adapterId), application: { domain, appId: id(a.appId) }, request: { state: choice(r.state, ['not-dispatched', 'dispatching', 'confirmed', 'unknown', 'refused']), attemptId: r.attemptId === null ? null : id(r.attemptId) }, secureStorage: choice(p.secureStorage, ['not-started', 'storing', 'stored', 'unknown']), ...(p.reason === undefined ? {} : { reason: choice(p.reason, ['adapter-unavailable', 'secure-storage-unavailable', 'request-unconfirmed', 'challenge-unconfirmed']) }) }
   if (result.request.state === 'not-dispatched' && result.request.attemptId !== null || result.request.state !== 'not-dispatched' && result.request.attemptId === null || result.secureStorage === 'stored' && result.request.state !== 'confirmed') fail()
   if (input.source) result.request.kind = choice(r.kind, ['enrollment-handoff'])
   else if (r.kind !== undefined) fail()
@@ -200,20 +236,25 @@ export function parseConnectionSetupMessageReceptionReview(value: unknown): Conn
 }
 export function parseConnectionSetupConfigurationReceipt(value: unknown): ConnectionSetupConfigurationReceipt {
   const effect = configurationEffect(rpcRecord(value).effect)
-  const common = ['effect', 'stepId', 'input', 'request', 'secureStorage']
-  const p = object(value, [...common, ...(effect === 'add-application-permissions' ? ['purpose', 'sourceStepIds', 'scopeNames', 'requiresDataRangeConfiguration'] : effect === 'add-message-reception' ? ['sourceStepIds', 'transport'] : effect === 'create-application-version' || effect === 'submit-application-version' ? ['sourceStepIds', 'versionId', 'submission'] : ['sourceStepId'])])
+  const common = ['effect', 'stepId', 'input', 'request', 'secureStorage', 'diagnostic']
+  const p = object(value, [...common, ...(effect === 'add-application-permissions' ? ['purpose', 'sourceStepIds', 'scopeNames', 'requiresDataRangeConfiguration'] : effect === 'add-message-reception' ? ['sourceStepIds', 'transport'] : effect === 'create-application-version' || effect === 'submit-application-version' ? ['sourceStepIds', 'profileReadbackStepId', 'versionId', 'submission'] : ['sourceStepId', ...(effect === 'update-application-profile' ? ['avatarStepId'] : [])])])
   const input = parseConnectionSetupParams('connection.setup.advance', p.input), request = requestState(p.request), secureStorage = choice(p.secureStorage, ['not-started', 'storing', 'stored', 'unknown'] as const), stepId = id(p.stepId)
   if (input.decision.value !== 'confirm' || secureStorage === 'stored' && !['confirmed', 'unknown'].includes(request)) fail()
   if (effect === 'create-application-version' || effect === 'submit-application-version') {
     const sourceStepIds = parsePublicationSourceIds(p.sourceStepIds, effect, input.publicationDraft), versionId = p.versionId === null ? null : id(p.versionId)
     const draft = input.publicationDraft
     if (!draft || (effect === 'create-application-version' ? draft.kind !== 'create-version' || !input.decision.actionId.startsWith('setup-publish-create:') : draft.kind !== 'submit-version' || !input.decision.actionId.startsWith('setup-publish-submit:') || versionId !== draft.versionId) || request === 'confirmed' && versionId === null || input.versionId !== undefined) fail()
-    if (Object.values(sourceStepIds).includes(stepId)) fail()
+    if (Object.values(sourceStepIds).includes(stepId) || p.profileReadbackStepId !== undefined && id(p.profileReadbackStepId) === stepId) fail()
     const submission = p.submission === null ? null : parseSubmission(p.submission)
     if (effect === 'create-application-version' && submission !== null || effect === 'submit-application-version' && (request === 'confirmed') !== (submission !== null)) fail()
-    return { effect, stepId, input, request, secureStorage, sourceStepIds, versionId, submission }
+    return { effect, stepId, input, request, secureStorage, sourceStepIds, ...(p.profileReadbackStepId === undefined ? {} : { profileReadbackStepId: id(p.profileReadbackStepId) }), versionId, submission }
   }
   if (input.publicationDraft !== undefined || input.versionId !== undefined) fail()
+  if (effect === 'upload-profile-avatar' || effect === 'update-application-profile') {
+    const sourceStepId = id(p.sourceStepId), avatarStepId = p.avatarStepId === undefined ? undefined : id(p.avatarStepId)
+    if ([sourceStepId, avatarStepId].includes(stepId) || !input.decision.actionId.startsWith(effect === 'upload-profile-avatar' ? 'setup-profile-upload:' : 'setup-profile-write:')) fail()
+    return { effect, stepId, sourceStepId, ...(avatarStepId ? { avatarStepId } : {}), input, request, secureStorage, ...(p.diagnostic === undefined ? {} : { diagnostic: parseConnectionSetupRequestDiagnostic(p.diagnostic) }) }
+  }
   if (effect === 'add-message-reception') {
     const sources = object(p.sourceStepIds, ['catalog', 'settings']), sourceStepIds = { catalog: id(sources.catalog), settings: id(sources.settings) }
     if (new Set([stepId, sourceStepIds.catalog, sourceStepIds.settings]).size !== 3 || !input.decision.actionId.startsWith('setup-reception:')) fail()
@@ -239,7 +280,7 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
     let support: ConnectionSetupResultMap['connection.setup.ls']['support'] = null
     if (p.support !== null) {
       const s = object(p.support, ['connectionRevision', 'capabilities'])
-      const supportedCapabilities = ['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation', 'initial-setup'] as const
+      const supportedCapabilities = ['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation', 'initial-setup', 'profile-update'] as const
       if (!Array.isArray(s.capabilities) || s.capabilities.length > supportedCapabilities.length) fail()
       const capabilities = (s.capabilities as unknown[]).map(value => choice(value, supportedCapabilities))
       if (new Set(capabilities).size !== capabilities.length) fail()
@@ -247,18 +288,24 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
     }
     return { operations, next: p.next === null ? null : text(p.next), support } as ConnectionSetupResultMap[M]
   }
-  const p = object(value, ['operation', 'challenge', 'reason', 'continuation', 'receipt', 'applicationInspection', 'applicationConfiguration', 'requestTrace', 'initialSetup']), operation = p.operation === null ? null : parseConnectionSetupOperation(p.operation), challenge = p.challenge === null ? null : parseConnectionSetupChallenge(p.challenge)
+  const p = object(value, ['operation', 'challenge', 'reason', 'continuation', 'receipt', 'applicationInspection', 'applicationConfiguration', 'requestTrace', 'initialSetup', 'profileUpdate']), operation = p.operation === null ? null : parseConnectionSetupOperation(p.operation), challenge = p.challenge === null ? null : parseConnectionSetupChallenge(p.challenge)
   if (operation && operation.operationId !== (input as { operationId: string }).operationId || !operation && (method === 'connection.setup.begin' || challenge !== null)) fail()
   if (method === 'connection.setup.begin' && operation) {
     // Select the admitted fields explicitly: summaries also contain safe result fields.
-    const admitted = begin(Object.fromEntries(['operationId', 'connectionId', 'expectedConnectionRevision', 'goal', 'source', 'initialPublication'].map(k => [k, operation[k as keyof ConnectionSetupOperation]])))
-    if (JSON.stringify(admitted) !== JSON.stringify(input)) fail()
+    const admitted = admission(Object.fromEntries(['operationId', 'connectionId', 'expectedConnectionRevision', 'goal', 'source', 'initialPublication'].map(k => [k, operation[k as keyof ConnectionSetupOperation]])), true)
+    const expected = { ...input as ConnectionSetupBegin, goal: connectionSetupGoalSummary((input as ConnectionSetupBegin).goal) }
+    if (JSON.stringify(admitted) !== JSON.stringify(expected)) fail()
   }
   const challengeRequest = operation?.authentication?.request ?? operation?.request.state
   const challengeStorage = operation?.authentication?.secureStorage ?? operation?.secureStorage
   if (challenge && (challengeRequest !== 'confirmed' || challengeStorage !== 'stored')) fail()
   if (challenge && operation?.request.kind === 'enrollment-handoff' && !operation.authentication) fail()
   const result: ConnectionSetupView = { operation, challenge, ...(p.reason === undefined ? {} : { reason: choice(p.reason, ['connection-revised', 'challenge-unavailable']) }) }
+  if (p.profileUpdate !== undefined) {
+    if (operation?.goal.kind !== 'profile-update') fail()
+    result.profileUpdate = parseConnectionSetupProfileProgress(p.profileUpdate)
+    if (result.profileUpdate.actions.some(a => a.kind === 'continue-profile-update' && a.expectedRevision !== operation!.revision)) fail()
+  }
   if (p.initialSetup !== undefined) {
     if (!operation?.initialPublication) fail()
     result.initialSetup = parseConnectionSetupInitialProgress(p.initialSetup)
@@ -329,7 +376,7 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
   if (p.applicationConfiguration !== undefined) {
     if (!operation || method === 'connection.setup.begin' || method === 'connection.setup.inspect' && !(input as ConnectionSetupParamsMap['connection.setup.inspect']).applicationConfiguration) fail()
     const raw = rpcRecord(p.applicationConfiguration), effect = configurationEffect(raw.effect)
-    const c = object(raw, ['effect', 'subject', 'effects', 'next', 'selected', 'capability', 'actions', 'reason', 'unresolved', ...(effect === 'add-application-permissions' ? ['purpose', 'sources', 'review'] : effect === 'add-message-reception' ? ['sources', 'review'] : effect === 'create-application-version' || effect === 'submit-application-version' ? ['sources', 'requiredSubjects', 'draft', 'review'] : ['source'])])
+    const c = object(raw, ['effect', 'subject', 'effects', 'next', 'selected', 'capability', 'actions', 'reason', 'unresolved', 'unresolvedProfile', ...(effect === 'add-application-permissions' ? ['purpose', 'sources', 'review'] : effect === 'add-message-reception' ? ['sources', 'review'] : effect === 'create-application-version' || effect === 'submit-application-version' ? ['sources', 'requiredSubjects', 'draft', 'review'] : ['source'])])
     const selector = method === 'connection.setup.inspect' ? (input as ConnectionSetupParamsMap['connection.setup.inspect']).applicationConfiguration : undefined
     if (!Array.isArray(c.effects) || c.effects.length > (selector?.limit ?? 25) || !Array.isArray(c.actions) || c.actions.length > 2 || selector && selector.effect !== effect) fail()
     const effects = (c.effects as unknown[]).map(parseConnectionSetupConfigurationReceipt), selected = c.selected === null ? null : parseConnectionSetupConfigurationReceipt(c.selected)
@@ -345,7 +392,7 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
       if (source.input.operationId !== operation!.operationId || source.subject !== subject || source.request !== 'confirmed' || source.secureStorage !== 'stored') fail()
       return source
     }
-    const actions = (c.actions as unknown[]).map(value => { const a = object(value, ['actionId', 'expectedRevision', 'kind']); return { actionId: id(a.actionId), expectedRevision: integer(a.expectedRevision), kind: choice(a.kind, ['enable-messaging', 'use-persistent-connection', 'use-persistent-callback', 'add-card-actions', 'add-application-permissions', 'add-message-reception', 'create-application-version', 'submit-application-version', 'recover-configuration-effect'] as const) } })
+    const actions = (c.actions as unknown[]).map(value => { const a = object(value, ['actionId', 'expectedRevision', 'kind']); return { actionId: id(a.actionId), expectedRevision: integer(a.expectedRevision), kind: choice(a.kind, ['enable-messaging', 'use-persistent-connection', 'use-persistent-callback', 'add-card-actions', 'add-application-permissions', 'add-message-reception', 'create-application-version', 'submit-application-version', 'upload-profile-avatar', 'update-application-profile', 'recover-configuration-effect'] as const) } })
     if (new Set(actions.map(a => a.actionId)).size !== actions.length || new Set(actions.map(a => a.kind)).size !== actions.length) fail()
     if (actions.some(a => a.kind !== 'recover-configuration-effect' && (a.kind !== effect || capability !== 'disabled' || a.expectedRevision !== operation!.revision || c.reason !== undefined))) fail()
     if (actions.some(a => a.kind === 'recover-configuration-effect') && (!selected || !['confirmed', 'unknown'].includes(selected.request) || !['storing', 'unknown'].includes(selected.secureStorage))) fail()
@@ -368,6 +415,7 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
       if (actions.some(a => a.kind === effect && (!a.actionId.startsWith('setup-reception:') || review?.reception !== 'missing' || review.transport !== 'persistent-connection'))) fail()
       result.applicationConfiguration = { ...common, effect, subject: 'event-settings', sources, review }
     } else if (effect === 'create-application-version' || effect === 'submit-application-version') {
+      if (operation!.goal.kind === 'profile-update' && [...effects, ...(selected ? [selected] : [])].some(receipt => (receipt.effect === 'create-application-version' || receipt.effect === 'submit-application-version') && !receipt.profileReadbackStepId)) fail()
       const rawSources = object(c.sources, connectionSetupPublicationSubjects(effect).map(subject => subject.slice(12))), sources: Record<string, ConnectionSetupInspectionReceipt> = {}
       for (const subject of connectionSetupPublicationSubjects(effect)) { const key = subject.slice(12); if (rawSources[key] !== undefined) { const source = sourceReceipt(rawSources[key], subject); if (!source) fail(); sources[key] = source! } }
       const draft = c.draft === null ? null : parseConnectionSetupPublicationDraft(c.draft), review = c.review === null ? null : parseConnectionSetupPublicationReview(c.review)
@@ -389,12 +437,21 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
       if (sources.version && (draft?.kind !== 'submit-version' || sources.version.versionId !== draft.versionId)) fail()
       if (review && (review.versions.length > 0 && !sources.versions || review.selectedVersion && (!sources.version || draft?.kind !== 'submit-version' || review.selectedVersion.versionId !== draft.versionId) || review.changes.length > 0 && !(effect === 'create-application-version' ? sources.pending : sources.version) || review.audience && !(effect === 'create-application-version' ? sources.visibility : sources.version) || review.proposedAudience && !(effect === 'create-application-version' ? sources.visibility || initialReview : sources.version) || review.entries && !(effect === 'create-application-version' ? sources.pending || initialReview : sources.version) || review.sharing && (!(effect === 'create-application-version' ? sources.sharing : sources.version) || !sources.features) || review.reasonRequired !== null && !sources.pending || review.creatorAudienceAvailable && !operation!.source)) fail()
       result.applicationConfiguration = { ...common, effect, subject: effect === 'create-application-version' ? 'publication-pending' : 'publication-version', sources, requiredSubjects, draft, review }
+    } else if (effect === 'upload-profile-avatar' || effect === 'update-application-profile') {
+      const source = sourceReceipt(c.source, 'application-details')
+      if (c.subject !== 'application-details' || operation!.goal.kind !== 'profile-update' || capability !== 'unknown' && (!source || !qualified)) fail()
+      result.applicationConfiguration = { ...common, effect, subject: 'application-details', source }
     } else {
       const subject = connectionSetupConfigurationSubject(effect), source = sourceReceipt(c.source, subject)
       if (c.subject !== subject || capability !== 'unknown' && (!source || !qualified)) fail()
       result.applicationConfiguration = { ...common, effect, subject, source }
     }
     if (result.applicationConfiguration.reason === 'original-effect-unconfirmed' && actions.some(a => a.kind !== 'recover-configuration-effect')) fail()
+    if (c.unresolvedProfile !== undefined) {
+      const u = object(c.unresolvedProfile, ['operationId', 'connectionId'])
+      if (effect !== 'update-application-profile' || result.applicationConfiguration.reason !== 'original-effect-unconfirmed') fail()
+      result.applicationConfiguration.unresolvedProfile = { operationId: id(u.operationId), connectionId: id(u.connectionId) }
+    }
     if (c.unresolved !== undefined) {
       const u = object(c.unresolved, ['operationId', 'connectionId', 'stepId'])
       if (result.applicationConfiguration.reason !== 'original-effect-unconfirmed') fail()

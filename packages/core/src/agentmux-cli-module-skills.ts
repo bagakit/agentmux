@@ -194,9 +194,19 @@ The latter reads only the exact event-settings source and offers one explicit ap
 switch to persistent connection. Warn that existing event consumers are affected. Already persistent
 needs no write; unknown native modes stay unknown. Its accepted write is not readback or publication.
 Unknown results are isolated by app/effect/source subject and cannot block independent bot-enable. Copy an offered enable-messaging or use-persistent-connection action with explicit confirm;
+An existing bot profile uses the finite goal {kind: profile-update, desired: {name?, description?,
+ avatar?: {pngDataUrl}}, publication: {notes}} on the same connection.setup.begin API. Original
+PNG bytes stay private; public history contains only avatarSha256. Empty description explicitly
+clears the primary locale while preserving other localized descriptions. The original Console
+session, upload, full profile write, fresh readback and publication keep separate receipts. Observe
+profileUpdate stages and copy only its offered continue-profile-update or local ACK action. A
+profile operation never creates another application. The existing published include/exclude
+ranges are retained. Other pending changes require explicit review through the returned
+publicationDraft and the original create-application-version action. Inspect remains local;
+unknown native writes are not replayed, and original historical Profile receipts stay queryable.
 For necessary permissions select --application-configuration add-application-permissions with
---permission-purpose agent-conversation (messages and create/bind groups) or explicit mote-profile-sync
-(also update the Mote application's own profile). Consume offered read-permission-catalog and
+--permission-purpose agent-conversation (messages and create/bind groups)
+Consume offered read-permission-catalog and
 read-application-permissions separately. Each original read owns its receipt and recovery; an incomplete
 review cannot authorize additions. Confirm only the exact offered add-application-permissions action;
 the Host binds its purpose and native missing IDs without a second caller scope list. Zero missing

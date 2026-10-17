@@ -1,8 +1,9 @@
+import { ProfileConnectionSetup } from './connection-setup-profile.js'
 import { InitialConnectionSetup } from './connection-setup-initial.js'
 import { readConnectionRequestTrace } from './connection-request-trace.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { AgentMuxError } from '@agentmux/core'
-import { parseConnectionSetupAccount, parseConnectionSetupAuthentication, parseConnectionSetupChallenge, parseConnectionSetupOperation, parseConnectionSetupParams, type ConnectionEnrollmentCallContext, type ConnectionSetupAdvance, type ConnectionSetupAuthenticationAction, type ConnectionSetupBegin, type ConnectionSetupInspect, type ConnectionSetupListing, type ConnectionSetupOperation, type ConnectionSetupPort, type ConnectionSetupView } from '@agentmux/core/connections'
+import { connectionSetupGoalSummary, parseConnectionSetupAccount, parseConnectionSetupAuthentication, parseConnectionSetupChallenge, parseConnectionSetupOperation, parseConnectionSetupParams, type ConnectionEnrollmentCallContext, type ConnectionSetupAdvance, type ConnectionSetupAuthenticationAction, type ConnectionSetupBegin, type ConnectionSetupInspect, type ConnectionSetupListing, type ConnectionSetupOperation, type ConnectionSetupPort, type ConnectionSetupView } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import type { EnrollmentSecrets } from './connection-enrollment-adapter.js'
 import { SetupApplicationInspection } from './connection-setup-inspection.js'
@@ -18,7 +19,7 @@ type AuthEnvelope = PrivateEnvelope & { stepId: string; stage: Authentication['s
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 const sameActor = (a: ConnectionEnrollmentCallContext['actor'], b: ConnectionEnrollmentCallContext['actor']) => a.kind === b.kind && a.id === b.id
 const failure = (message: string, code = 'CONNECTION_SETUP_UNCONFIRMED') => new AgentMuxError(message, code)
-const admitted = (o: ConnectionSetupOperation): ConnectionSetupBegin => ({ operationId: o.operationId, connectionId: o.connectionId, expectedConnectionRevision: o.expectedConnectionRevision, goal: o.goal, ...(o.initialPublication ? { initialPublication: o.initialPublication } : {}), ...(o.source ? { source: o.source } : {}) })
+const admitted = (o: ConnectionSetupOperation) => ({ operationId: o.operationId, connectionId: o.connectionId, expectedConnectionRevision: o.expectedConnectionRevision, goal: o.goal, ...(o.initialPublication ? { initialPublication: o.initialPublication } : {}), ...(o.source ? { source: o.source } : {}) })
 
 /** Finite authentication intent in the original Connection DB. Never owns current bot configuration. */
 export class ConnectionSetupHost implements ConnectionSetupPort {
@@ -27,6 +28,7 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
   private readonly nativeRequests = new Set<string>()
   private readonly unsettled = new Map<string, PrivateEnvelope>()
   private readonly unsettledAuthentication = new Map<string, AuthEnvelope>()
+  private readonly profile: ProfileConnectionSetup
   private readonly initial: InitialConnectionSetup
   private readonly inspection: SetupApplicationInspection
   private readonly configuration: SetupApplicationConfiguration
@@ -37,7 +39,8 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
     connections.database.exec('CREATE TABLE IF NOT EXISTS connection_setup_auth_step (ordinal INTEGER PRIMARY KEY AUTOINCREMENT, step_id TEXT UNIQUE NOT NULL, operation_id TEXT NOT NULL, action_id TEXT UNIQUE NOT NULL, input_json TEXT NOT NULL, record_json TEXT NOT NULL, private_ref TEXT)')
     connections.database.exec('CREATE INDEX IF NOT EXISTS connection_setup_auth_by_operation ON connection_setup_auth_step(operation_id,ordinal)')
     this.inspection = new SetupApplicationInspection({ connections, secrets, read: id => this.read(id), authority: (context, row) => this.authority(context, row), current: row => this.current(row), snapshot: row => this.authenticationSource(row), acceptAuthentication: (row, field, childStepId, authStepId, ref) => this.acceptAuthentication(row, field, childStepId, authStepId, ref), touch: row => this.touch(row), view: (row, context) => this.view(row, context) })
-    this.configuration = new SetupApplicationConfiguration({ connections, secrets, inspection: this.inspection, creator: row => this.creator(row), acceptAuthentication: (row, field, childStepId, authStepId, ref) => this.acceptAuthentication(row, field, childStepId, authStepId, ref), read: id => this.read(id), authority: (context, row) => this.authority(context, row), current: row => this.current(row), touch: row => this.touch(row), view: (row, context) => this.view(row, context) })
+    this.configuration = new SetupApplicationConfiguration({ profileInput: row => this.profile.input(row), connections, secrets, inspection: this.inspection, creator: row => this.creator(row), acceptAuthentication: (row, field, childStepId, authStepId, ref) => this.acceptAuthentication(row, field, childStepId, authStepId, ref), read: id => this.read(id), authority: (context, row) => this.authority(context, row), current: row => this.current(row), touch: row => this.touch(row), view: (row, context) => this.view(row, context) })
+    this.profile = new ProfileConnectionSetup({ inspect: (input, context) => this.inspectOriginal(input, context), advance: (input, context) => this.advanceOriginal(input, context) }, secrets, id => this.read(id), id => this.configuration.profileDraft(id), id => this.configuration.profileReadback(id))
     this.initial = new InitialConnectionSetup({ inspect: (input, context) => this.inspectOriginal(input, context), advance: (input, context) => this.advanceOriginal(input, context) }, async view => {
       const operation = view.operation
       const adapter = operation && this.connections.registeredAdapter(operation.adapterId)?.setup?.applicationConfiguration
@@ -184,7 +187,16 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
     return { ...await this.view(row, context), receipt: { actionId: step.input.decision.actionId, stepId: step.authentication.stepId, state } }
   }
   async advance(value: ConnectionSetupAdvance, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView> {
+    const input = parseConnectionSetupParams('connection.setup.advance', value)
+    const row = this.read(input.operationId)
+    await this.authority(context, row)
+    const continued = await this.profile.advance(input, context)
+    if (continued) return continued
     const result = await this.advanceOriginal(value, context)
+    if (result.operation?.goal.kind === 'profile-update') {
+      const projected = await this.profile.view(result.operation.operationId, context, true)
+      return { ...result, operation: projected.operation, challenge: projected.challenge, ...(projected.continuation ? { continuation: projected.continuation } : {}), ...(projected.profileUpdate ? { profileUpdate: projected.profileUpdate } : {}) }
+    }
     if (!result.operation?.initialPublication) return result
     const projected = await this.initial.view(result.operation.operationId, context)
     return { ...result, ...(projected.initialSetup ? { initialSetup: projected.initialSetup } : {}) }
@@ -375,18 +387,19 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
   async begin(value: ConnectionSetupBegin, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView> {
     const input = parseConnectionSetupParams('connection.setup.begin', value)
     await this.authority(context)
+    const safeInput = { ...input, goal: connectionSetupGoalSummary(input.goal) }
     let row = this.safe(() => {
       const db = this.connections.database; db.exec('BEGIN IMMEDIATE')
       try {
         let row = this.read(input.operationId)
         if (row) {
           if (!sameActor(row.actor, context.actor)) throw failure('The original management request belongs to another actor.', 'CONNECTION_SETUP_AUTHORITY_REQUIRED')
-          if (!same(admitted(row.operation), input)) throw failure('This original management request has different input. Inspect it without replacing its identity.', 'CONNECTION_OPERATION_CONFLICT')
+          if (!same(admitted(row.operation), safeInput)) throw failure('This original management request has different input. Inspect it without replacing its identity.', 'CONNECTION_OPERATION_CONFLICT')
         } else {
           const current = this.connections.readConfiguration(input.connectionId)
           if (!current) throw failure('The exact saved bot is unknown.', 'UNKNOWN_CONNECTION')
           if (current.revision !== input.expectedConnectionRevision) throw failure('The exact saved bot revision changed. Read it before admitting a new request.', 'CONNECTION_REVISION_CONFLICT')
-          const operation: ConnectionSetupOperation = { ...input, revision: 1, adapterId: current.config.adapterId, application: current.config.application, request: { ...(input.source ? { kind: 'enrollment-handoff' as const } : {}), state: 'not-dispatched', attemptId: null }, secureStorage: 'not-started' }
+          const operation: ConnectionSetupOperation = { ...safeInput, revision: 1, adapterId: current.config.adapterId, application: current.config.application, request: { ...(input.source ? { kind: 'enrollment-handoff' as const } : {}), state: 'not-dispatched', attemptId: null }, secureStorage: 'not-started' }
           parseConnectionSetupOperation(operation)
           db.prepare('INSERT INTO connection_setup_operation(operation_id,connection_id,actor_json,record_json) VALUES(?,?,?,?)').run(input.operationId, input.connectionId, JSON.stringify(context.actor), JSON.stringify(operation))
           row = { operation, actor: { kind: context.actor.kind, id: context.actor.id }, privateRef: null }
@@ -394,10 +407,12 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
         db.exec('COMMIT'); return row
       } catch (error) { db.exec('ROLLBACK'); throw error }
     })
+    if (input.goal.kind === 'profile-update' && !await this.profile.freeze(input, row)) return { ...await this.view(row, context), profileUpdate: { stage: 'profile-preflight', state: 'attention', actions: [] } }
     const running = this.pending.get(input.operationId)
-    if (running) { await running; return row.operation.initialPublication ? this.initial.view(input.operationId, context) : this.view(this.read(input.operationId), context) }
+    if (running) { await running; if (row.operation.goal.kind === 'profile-update') return this.profile.view(input.operationId, context); return row.operation.initialPublication ? this.initial.view(input.operationId, context) : this.view(this.read(input.operationId), context) }
     const work = (async () => {
       const result = await this.run(row, context)
+      if (result.operation?.goal.kind === 'profile-update') return this.profile.view(input.operationId, context, true)
       return result.operation?.initialPublication ? this.initial.view(input.operationId, context, true) : result
     })()
     this.pending.set(input.operationId, work)
@@ -467,6 +482,10 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
   }
   async inspect(value: ConnectionSetupInspect, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView> {
     const result = await this.inspectOriginal(value, context)
+    if (result.operation?.goal.kind === 'profile-update' && value.requestTrace === undefined) {
+      const projected = await this.profile.view(result.operation.operationId, context)
+      return { ...result, ...(projected.profileUpdate ? { profileUpdate: projected.profileUpdate } : {}) }
+    }
     if (!result.operation?.initialPublication || value.requestTrace !== undefined) return result
     const initial = await this.initial.view(result.operation.operationId, context)
     return { ...result, ...(initial.initialSetup ? { initialSetup: initial.initialSetup } : {}) }
@@ -502,7 +521,7 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
       const setup = current && this.connections.registeredAdapter(current.config.adapterId)?.setup
       const support: ConnectionSetupListing['support'] = current ? {
         connectionRevision: current.revision,
-        capabilities: [...(setup?.domains.includes(current.config.application.domain) ? ['management-authentication' as const] : []), ...(setup?.applicationInspection?.domains.includes(current.config.application.domain) ? ['application-inspection' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.messagingCapability === 'function' && typeof setup.applicationConfiguration.enableMessaging === 'function' ? ['messaging-capability' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.eventTransportCapability === 'function' && typeof setup.applicationConfiguration.usePersistentConnection === 'function' ? ['persistent-event-transport' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.permissionPlan === 'function' && typeof setup.applicationConfiguration.addApplicationPermissions === 'function' ? ['application-permissions' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.messageReceptionPlan === 'function' && typeof setup.applicationConfiguration.addMessageReception === 'function' ? ['message-reception' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.callbackTransportCapability === 'function' && typeof setup.applicationConfiguration.usePersistentCallback === 'function' && typeof setup.applicationConfiguration.cardActionsCapability === 'function' && typeof setup.applicationConfiguration.addCardActions === 'function' ? ['card-actions' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.publicationPlan === 'function' && typeof setup.applicationConfiguration.createVersion === 'function' && typeof setup.applicationConfiguration.submitVersion === 'function' ? ['application-publication' as const] : []), ...(setup?.enrollmentContinuation?.domains.includes(current.config.application.domain) && typeof setup.enrollmentContinuation.resume === 'function' ? ['enrollment-continuation' as const] : []), ...(setup?.enrollmentContinuation?.domains.includes(current.config.application.domain) && setup.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.initialPublicationDraft === 'function' ? ['initial-setup' as const] : [])]
+        capabilities: [...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && setup.applicationConfiguration.applicationProfile ? ['profile-update' as const] : []), ...(setup?.domains.includes(current.config.application.domain) ? ['management-authentication' as const] : []), ...(setup?.applicationInspection?.domains.includes(current.config.application.domain) ? ['application-inspection' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.messagingCapability === 'function' && typeof setup.applicationConfiguration.enableMessaging === 'function' ? ['messaging-capability' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.eventTransportCapability === 'function' && typeof setup.applicationConfiguration.usePersistentConnection === 'function' ? ['persistent-event-transport' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.permissionPlan === 'function' && typeof setup.applicationConfiguration.addApplicationPermissions === 'function' ? ['application-permissions' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.messageReceptionPlan === 'function' && typeof setup.applicationConfiguration.addMessageReception === 'function' ? ['message-reception' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.callbackTransportCapability === 'function' && typeof setup.applicationConfiguration.usePersistentCallback === 'function' && typeof setup.applicationConfiguration.cardActionsCapability === 'function' && typeof setup.applicationConfiguration.addCardActions === 'function' ? ['card-actions' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.publicationPlan === 'function' && typeof setup.applicationConfiguration.createVersion === 'function' && typeof setup.applicationConfiguration.submitVersion === 'function' ? ['application-publication' as const] : []), ...(setup?.enrollmentContinuation?.domains.includes(current.config.application.domain) && typeof setup.enrollmentContinuation.resume === 'function' ? ['enrollment-continuation' as const] : []), ...(setup?.enrollmentContinuation?.domains.includes(current.config.application.domain) && setup.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.initialPublicationDraft === 'function' ? ['initial-setup' as const] : [])]
       } : null
       const actor = context?.actor.kind === 'agent' ? context.actor : undefined
       const rows = this.connections.database.prepare(actor ? "SELECT operation_id,ordinal FROM connection_setup_operation WHERE connection_id=? AND ordinal<? AND json_extract(actor_json,'$.kind')=? AND json_extract(actor_json,'$.id')=? ORDER BY ordinal DESC LIMIT ?" : 'SELECT operation_id,ordinal FROM connection_setup_operation WHERE connection_id=? AND ordinal<? ORDER BY ordinal DESC LIMIT ?').all(...(actor ? [input.connectionId, before, actor.kind, actor.id, limit + 1] : [input.connectionId, before, limit + 1]))

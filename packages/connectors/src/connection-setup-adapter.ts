@@ -1,4 +1,8 @@
-import type { ConnectionApplication, ConnectionSetupChallenge, ConnectionSetupAccount, ConnectionSetupAuthenticationStage, ConnectionSetupReadSubject, ConnectionSetupReadSummary, ConnectionSetupCapability, ConnectionSetupPermissionPurpose, ConnectionSetupPermissionReview, ConnectionSetupMessageReceptionReview, ConnectionSetupInitialPublication, ConnectionSetupPublicationDraft, ConnectionSetupPublicationEffect, ConnectionSetupPublicationReview, ConnectionSetupSubmissionResponse } from '@agentmux/core/connections'
+import type { ConnectionApplication, ConnectionSetupChallenge, ConnectionSetupAccount, ConnectionSetupAuthenticationStage, ConnectionSetupReadSubject, ConnectionSetupReadSummary, ConnectionSetupCapability, ConnectionSetupPermissionPurpose, ConnectionSetupPermissionReview, ConnectionSetupMessageReceptionReview, ConnectionSetupInitialPublication, ConnectionSetupPublicationDraft, ConnectionSetupPublicationEffect, ConnectionSetupPublicationReview, ConnectionSetupSubmissionResponse, ConnectionSetupRequestDiagnostic } from '@agentmux/core/connections'
+
+export type SetupProfileDesired = { name?: string; description?: string; avatarSha256?: string }
+export type SetupProfilePlan = { baseline: 'confirmed' | 'unknown'; privateIntent: string | null; matches: 'matched' | 'different' | 'unknown' }
+export type SetupPublicationProvenance = { creatorIsCurrent: boolean; initialVersion: SetupInitialPublication | null; profileUpdate?: { readbackStepId: string; createdVersion: SetupInitialPublication | null } | null }
 
 export type SetupAdapterInput = Readonly<{ operationId: string; connectionId: string; attemptId: string; application: Readonly<ConnectionApplication> }>
 export type SetupChallengeReceipt = { kind: 'challenge'; challenge: ConnectionSetupChallenge; privateState: string } | { kind: 'unknown' }
@@ -10,7 +14,7 @@ export type SetupMessageReceptionPlan = { review: ConnectionSetupMessageReceptio
 export type SetupPublicationPlan = { review: ConnectionSetupPublicationReview; privateIntent: string | null; requiredSubjects: ConnectionSetupReadSubject[] }
 export type SetupInitialPublication = { versionId: string; draft: Extract<ConnectionSetupPublicationDraft, { kind: 'create-version' }> }
 export type SetupPublicationReceipt = ({ kind: 'accepted'; privateState: string; versionId: string; submission: ConnectionSetupSubmissionResponse | null } | { kind: 'unknown' }) & { authentication?: string }
-export type SetupConfigurationReceipt = ({ kind: 'accepted'; privateState: string; requiresDataRangeConfiguration?: boolean | null } | { kind: 'unknown' }) & { authentication?: string }
+export type SetupConfigurationReceipt = ({ kind: 'accepted'; privateState: string; requiresDataRangeConfiguration?: boolean | null } | { kind: 'unknown' }) & { authentication?: string; diagnostic?: ConnectionSetupRequestDiagnostic }
 export type SetupInspectionReceipt = ({ kind: 'observed'; applicationInfoReadPermission: 'confirmed' | 'unknown'; privateState: string } | { kind: 'unknown' }) & { authentication?: string }
 export interface ConnectionSetupAdapter {
   /** Local implementation availability only, never exact-application management eligibility. */
@@ -29,7 +33,14 @@ export interface ConnectionSetupAdapter {
     readonly domains: readonly string[]
     /** Pure native entry selection for an explicitly authorized first creator-only version. */
     initialPublicationDraft?(input: ConnectionSetupInitialPublication): Promise<Extract<ConnectionSetupPublicationDraft, { kind: 'create-version' }>>
-    publicationPlan(effect: ConnectionSetupPublicationEffect, states: Record<string, string>, draft: ConnectionSetupPublicationDraft | null, creator: ConnectionSetupAccount | null, provenance: { creatorIsCurrent: boolean; initialVersion: SetupInitialPublication | null }): Promise<SetupPublicationPlan>
+    publicationPlan(effect: ConnectionSetupPublicationEffect, states: Record<string, string>, draft: ConnectionSetupPublicationDraft | null, creator: ConnectionSetupAccount | null, provenance: SetupPublicationProvenance): Promise<SetupPublicationPlan>
+    /** Finite existing-application profile update. Native metadata and uploaded URLs stay private. */
+    readonly applicationProfile?: {
+      plan(desired: SetupProfileDesired, applicationState: string, avatarUploadState?: string): Promise<SetupProfilePlan>
+      uploadAvatar(input: SetupAdapterInput & { privateState: string; pngDataUrl: string; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupConfigurationReceipt>
+      update(input: SetupAdapterInput & { privateState: string; privateIntent: string; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupConfigurationReceipt>
+      publicationDraft(states: Record<string, string>, notes: string): Promise<Extract<ConnectionSetupPublicationDraft, { kind: 'create-version' }> | null>
+    }
     createVersion(input: SetupAdapterInput & { privateState: string; privateIntent: string; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupPublicationReceipt>
     submitVersion(input: SetupAdapterInput & { privateState: string; privateIntent: string; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupPublicationReceipt>
     /** Local interpretation of the exact already-bound raw bot read, with zero network effects. */

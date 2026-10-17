@@ -93,7 +93,7 @@ export class InitialConnectionSetup {
       }
     }
     for (const item of stages) {
-      if (base.operation.goal.interaction !== 'cards' && (item.stage === 'callback-transport' || item.stage === 'card-actions')) continue
+      if (base.operation.goal.kind !== 'agent-conversation' || base.operation.goal.interaction !== 'cards' && (item.stage === 'callback-transport' || item.stage === 'card-actions')) continue
       const state = await this.configure(operationId, item.selector, item.reads, context, run)
       if (state) return finish(item.stage, state)
     }

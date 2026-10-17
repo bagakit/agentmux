@@ -13,10 +13,6 @@ export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] 
   const adapter: ConnectionAdapter = {
     adapterId: 'feishu',
     profile: {
-      prepareUpload: async (config, pngDataUrl) => (await feishu()).profile.prepareUpload(config, pngDataUrl),
-      preparePatch: async (config, desired, avatarUrl, credential, signal) => (await feishu()).profile.preparePatch(config, desired, avatarUrl, credential, signal),
-      upload: async (config, request, credential, signal) => (await feishu()).profile.upload(config, request, credential, signal),
-      patch: async (config, request, credential, signal) => (await feishu()).profile.patch(config, request, credential, signal),
       get: async (config, revision, credential, signal) => (await feishu()).profile.get(config, revision, credential, signal)
     },
     setup: {
@@ -26,6 +22,12 @@ export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] 
       enrollmentContinuation: { domains: ['open.feishu.cn'], resume: async input => (await feishu()).setup.enrollmentContinuation!.resume(input) },
       applicationConfiguration: {
         domains: ['open.feishu.cn'],
+        applicationProfile: {
+          plan: async (...input) => (await feishu()).setup.applicationConfiguration!.applicationProfile!.plan(...input),
+          uploadAvatar: async (...input) => (await feishu()).setup.applicationConfiguration!.applicationProfile!.uploadAvatar(...input),
+          update: async (...input) => (await feishu()).setup.applicationConfiguration!.applicationProfile!.update(...input),
+          publicationDraft: async (...input) => (await feishu()).setup.applicationConfiguration!.applicationProfile!.publicationDraft(...input)
+        },
         initialPublicationDraft: async input => (await feishu()).setup.applicationConfiguration!.initialPublicationDraft!(input),
         publicationPlan: async (...input) => (await feishu()).setup.applicationConfiguration!.publicationPlan(...input),
         createVersion: async (input, signal) => (await feishu()).setup.applicationConfiguration!.createVersion(input, signal),
