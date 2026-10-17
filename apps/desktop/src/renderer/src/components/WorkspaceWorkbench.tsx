@@ -552,22 +552,7 @@ function SortableWorkbenchTab({
   )
 }
 
-function SurfaceContent({
-  surface,
-  tabId,
-  groupId,
-  surfaceVisible,
-  nativeSurfacesVisible,
-  interactiveResize,
-  headerPortalTargetId,
-  focus,
-  focusForPresentation,
-  browserFrame,
-  onBrowserInputSelected,
-  onBrowserRegionSplit,
-  onBrowserRegionClose,
-  primaryPresentationHostId
-}: {
+type SurfaceContentProps = {
   surface: WorkbenchSurface
   tabId: string
   groupId: string | undefined
@@ -583,13 +568,51 @@ function SurfaceContent({
   onBrowserInputSelected?: ((target: WorkbenchViewTarget) => void) | undefined
   onBrowserRegionSplit?: ((direction: SplitDirection) => void) | undefined
   onBrowserRegionClose?: (() => void) | undefined
-}) {
+}
+
+function SurfaceContent({ surface, ...props }: SurfaceContentProps) {
   const parked = useTerminalRegionParked(surface.regionId)
   const monacoReleased = useMonacoSurfaceReleased(surface.regionId)
   const browserReleased = useBrowserSurfaceReleased(surface.regionId)
   const browserPresentation = useWorkbenchBrowserPresentation()
   const browserTargets = useContext(WorkbenchBrowserTargetsContext)
   const independentDocument = useWorkbenchDocument() !== document
+  return <SurfaceContentBody {...props} surface={surface} parked={parked} monacoReleased={monacoReleased}
+    browserReleased={browserReleased} browserPresentation={browserPresentation} browserTargets={browserTargets}
+    independentDocument={independentDocument} />
+}
+
+// Shared resource notifications can change another Region's facts. Keep their lightweight
+// readers outside the content body so unchanged facts preserve the original child tree.
+const SurfaceContentBody = memo(function SurfaceContentBody({
+  surface,
+  tabId,
+  groupId,
+  surfaceVisible,
+  nativeSurfacesVisible,
+  interactiveResize,
+  headerPortalTargetId,
+  focus,
+  focusForPresentation,
+  browserFrame,
+  onBrowserInputSelected,
+  onBrowserRegionSplit,
+  onBrowserRegionClose,
+  primaryPresentationHostId,
+  parked,
+  monacoReleased,
+  browserReleased,
+  browserPresentation,
+  browserTargets,
+  independentDocument
+}: SurfaceContentProps & {
+  parked: boolean
+  monacoReleased: boolean
+  browserReleased: boolean
+  browserPresentation: ReturnType<typeof useWorkbenchBrowserPresentation>
+  browserTargets: readonly WorkbenchViewTarget[]
+  independentDocument: boolean
+}) {
   if (isSessionSurface(surface)) {
     return (
       <SessionPane
@@ -675,7 +698,7 @@ function SurfaceContent({
     )
   }
   return assertUnreachableSurface(surface)
-}
+})
 
 type RegionSwapTargets = Parameters<typeof regionSwapMenuEntries>[0]['regions']
 
