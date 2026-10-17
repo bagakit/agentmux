@@ -14,6 +14,8 @@ export interface DurableWriteOptions {
 export class DurableWriteError extends Error {
   readonly code?: string
   private readonly cleanupFailures: { operation: string; code: string | null; message: string }[] = []
+  /** Original owner cleanup receipts; callers need not parse human-facing error detail. */
+  get cleanupIncomplete(): boolean { return this.cleanupFailures.length > 0 }
   get detail(): string { return JSON.stringify({ path: this.path.slice(0, 1024), phase: this.phase, cleanupFailures: this.cleanupFailures }) }
   addCleanupFailure(operation: string, error: unknown): void {
     if (this.cleanupFailures.length >= 2) return

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { mintObjectId } from '@agentmux/core/object-id'
-import { link, mkdir, open, opendir, unlink } from 'node:fs/promises'
+import { link, lstat, mkdir, open, opendir, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { durableWriteFile, DurableWriteError, parseClientIncidentRecord, parseClientIncidentReport,
   type AgentMuxClientIncidentRecord, type AgentMuxClientIncidentReport, type AgentMuxClientIncidentProducer,
@@ -9,7 +9,7 @@ import type { DiagnosticEvidenceRead, DiagnosticEvidenceAuthority, DiagnosticEvi
 
 /** Limits protect the diagnostic owner only. Rejected reports never affect the original operation.
  * The queue retains at most half a MiB while one real disk write is pending; a timed-out caller
- * never releases that IO slot. The manifest bounds startup and discovery without directory scans.
+ * never releases that IO slot. The manifest bounds discovery; startup only scans a bounded number of owned temporary names.
  */
 export const CLIENT_INCIDENT_LIMITS = Object.freeze({ records: 128, bytes: 2 * 1024 * 1024,
   recordBytes: 40 * 1024, queue: 32, queueBytes: 512 * 1024, readers: 4,
@@ -44,13 +44,19 @@ export class ClientIncidentArchive {
   private draining: Promise<void> | null = null
   private actualReaders = 0
   private cleanupBlocked: string | null = null
+  private writeBlocked = false
   private readonly ready: Promise<void>
   constructor(readonly directory: string, private readonly dependencies: {
     write?: typeof durableWriteFile; now?: () => number; beforeRead?: (path: string) => Promise<void>; remove?: typeof unlink
   } = {}) { this.ready = this.initialize().catch(() => { this.startup = 'unavailable' }) }
   private now() { return this.dependencies.now?.() ?? Date.now() }
-  private write(path: string, content: string) {
-    return (this.dependencies.write ?? durableWriteFile)(path, content, { mode: 0o600, requireDirectorySync: true })
+  private async write(path: string, content: string): Promise<void> {
+    if (this.writeBlocked) throw new Error('Diagnostic publication is waiting for original temporary-file cleanup.')
+    try { await (this.dependencies.write ?? durableWriteFile)(path, content, { mode: 0o600, requireDirectorySync: true }) }
+    catch (error) {
+      if (error instanceof DurableWriteError && error.cleanupIncomplete) { this.writeBlocked = true; this.counters.cleanupFailures++ }
+      throw error
+    }
   }
   private get authority(): DiagnosticEvidenceAuthority | null {
     return this.manifest ? { kind: 'client-incident-archive', id: this.manifest.archiveId, lifetime: 'durable' } : null
@@ -103,6 +109,7 @@ export class ClientIncidentArchive {
     const earlyCounters = this.counters
     let existing = true
     await mkdir(this.directory, { recursive: true, mode: 0o700 })
+    await this.cleanupTemporaryFiles()
     const path = join(this.directory, 'index.json')
     try { this.manifest = this.parseManifest(await this.readFile(path, CLIENT_INCIDENT_LIMITS.indexBytes)) }
     catch (error) {
@@ -144,7 +151,10 @@ export class ClientIncidentArchive {
     }
     if (this.startup === 'unavailable' || this.queue.filter(item => item.producer.producerInstanceId === producer.producerInstanceId).length >= 8 || this.queue.length >= CLIENT_INCIDENT_LIMITS.queue ||
         this.queueBytes + bytes > CLIENT_INCIDENT_LIMITS.queueBytes) { this.counters.dropped++; return { accepted: false } }
-    const pending = { logId: mintObjectId(), report, producer: structuredClone(producer), receivedAt: this.now(), bytes, key, digest: fingerprint }
+    const logId = mintObjectId()
+    if (this.memory.has(logId) || this.queue.some(item => item.logId === logId) ||
+      this.manifest?.entries.some(entry => entry.summary.recordRef.logId === logId)) { this.counters.dropped++; return { accepted: false } }
+    const pending = { logId, report, producer: structuredClone(producer), receivedAt: this.now(), bytes, key, digest: fingerprint }
     this.accepted.set(key, { logId: pending.logId, digest: fingerprint })
     this.queue.push(pending); this.queueBytes += bytes
     this.startDrain()
@@ -173,6 +183,21 @@ export class ClientIncidentArchive {
       }
     }
   }
+  /** Bounded restart recovery for this owner's unpublished durableWriteFile temporary names. */
+  private async cleanupTemporaryFiles(): Promise<void> {
+    const directory = await opendir(this.directory)
+    let entries = 0
+    try {
+      for await (const entry of directory) {
+        if (++entries > CLIENT_INCIDENT_LIMITS.records * 2 + 8) { this.writeBlocked = true; this.counters.cleanupFailures++; break }
+        if (!/^(?:index\.json|[1-9A-HJ-NP-Za-km-z]{12}\.candidate)\.[0-9]+\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/u.test(entry.name)) continue
+        try { await (this.dependencies.remove ?? unlink)(join(this.directory, entry.name)) }
+        catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { this.writeBlocked = true; this.counters.cleanupFailures++ }
+        }
+      }
+    } finally { await directory.close().catch(() => {}) }
+  }
   private async cleanupCandidate(logId: string): Promise<boolean> {
     try {
       await (this.dependencies.remove ?? unlink)(join(this.directory, logId + '.candidate'))
@@ -183,8 +208,14 @@ export class ClientIncidentArchive {
     return true
   }
   private async publish(pending: Pending): Promise<void> {
+    if (this.writeBlocked) { this.counters.dropped++; return }
     if (this.cleanupBlocked && !await this.cleanupCandidate(this.cleanupBlocked)) { this.counters.dropped++; return }
     const manifest = this.manifest!, authority = this.authority!
+    if (manifest.entries.some(entry => entry.summary.recordRef.logId === pending.logId)) { this.counters.dropped++; return }
+    try {
+      await lstat(join(this.directory, pending.logId + '.json'))
+      this.counters.dropped++; return
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
     const record = parseClientIncidentRecord({ kind: 'client-incident', logId: pending.logId, authority,
       receivedAt: pending.receivedAt, producer: pending.producer, report: pending.report })
     const content = JSON.stringify(record) + '\n', bytes = Buffer.byteLength(content)
@@ -217,10 +248,13 @@ export class ClientIncidentArchive {
       try { await directory.sync() } finally { await directory.close() }
       entry.summary.persistence = 'confirmed'
     } catch (error) {
-      this.counters.writeFailures++
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+        manifest.entries = manifest.entries.filter(current => current !== entry)
+        this.memory.delete(record.logId); this.accepted.delete(pending.key); this.counters.dropped++
+      } else this.counters.writeFailures++
       if (error instanceof DurableWriteError && error.phase === 'after-replace') entry.summary.persistence = 'unconfirmed'
     } finally { await this.cleanupCandidate(record.logId) }
-    await this.saveIndex()
+    if (!this.writeBlocked) await this.saveIndex()
   }
   /** Testing/shutdown may await owned writes; no user operation waits for this promise. */
   async flush(): Promise<void> { await this.ready; await this.draining }
