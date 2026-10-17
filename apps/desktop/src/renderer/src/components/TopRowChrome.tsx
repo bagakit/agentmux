@@ -53,16 +53,18 @@ export function TopRowLeadingChrome() {
   const projectRailOpen = sidebars?.projectRailOpen ?? preferredProjects
   const toolsOpen = sidebars?.toolsOpen ?? preferredTools
   const { mainSurface, workspace } = useSurfaceIdentity()
+  const focusView = useAppStore(state => state.focusView)
+  const focusMap = mainSurface === 'agents' && focusView === 'map'
   const toolDockOwnsChrome = !projectRailOpen
     && toolsOpen
     && mainSurface === 'workbench' && Boolean(workspace)
-  const chromeOwnedOutsideMain = projectRailOpen || toolDockOwnsChrome
-  const globalSurfaceNeedsTrafficLightInset = (mainSurface === 'agents' || mainSurface === 'board' || mainSurface === 'survey' || mainSurface === 'recall') && chromeOwnedOutsideMain
+  const chromeOwnedOutsideMain = !focusMap && (projectRailOpen || toolDockOwnsChrome)
+  const globalSurfaceNeedsTrafficLightInset = focusMap || (mainSurface === 'agents' || mainSurface === 'board' || mainSurface === 'survey' || mainSurface === 'recall') && chromeOwnedOutsideMain
   return (
     <div
       className={`top-row-leading-chrome ${chromeOwnedOutsideMain ? '' : 'top-row-leading-chrome--compact'}${globalSurfaceNeedsTrafficLightInset ? ' top-row-leading-chrome--global-inset' : ''}`}
     >
-      {chromeOwnedOutsideMain ? null : <SidebarToggleChrome />}
+      {focusMap || chromeOwnedOutsideMain ? null : <SidebarToggleChrome />}
       <TopBreadcrumb />
     </div>
   )
@@ -78,11 +80,14 @@ export function SidebarToggleChrome() {
 }
 
 function ProjectRailToggle() {
+  const mainSurface = useAppStore(state => state.mainSurface)
+  const focusView = useAppStore(state => state.focusView)
   const preferredProjects = useAppStore((state) => state.projectRailOpen)
   const originalToggle = useAppStore((state) => state.toggleProjectRail)
   const sidebars = useContext(WindowSidebarLayoutContext)
   const projectRailOpen = sidebars?.projectRailOpen ?? preferredProjects
   const toggleProjectRail = sidebars?.toggleProjectRail ?? originalToggle
+  if (mainSurface === 'agents' && focusView === 'map') return null
   const label = `${projectRailOpen ? 'Hide' : 'Show'} projects sidebar`
   return (
     <button
