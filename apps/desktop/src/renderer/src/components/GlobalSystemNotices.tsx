@@ -17,6 +17,7 @@ import { desktopElementVisible } from '../lib/desktop-presentation'
 import { SettingsNavigation } from './SettingsNavigation'
 import { executorsForHost, hostExecutorInventoryMatches } from '../lib/executors'
 import { runtimeEndpointNotice } from '../lib/runtime-endpoint-notice'
+import { notificationPreview } from '../lib/notification-preview'
 
 const ThemeStatusUnreadIcon = semanticIconComponent('status.unread')
 const ThemeObjectNotificationsIcon = semanticIconComponent('object.notifications')
@@ -209,18 +210,21 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
     for (const inbox of inboxes) if (inbox.unread.length) inbox.acknowledge(inbox.unread)
     if (eventInbox.unread.length) eventInbox.acknowledge(eventInbox.unread)
   }, [open, agentChecksInbox, environmentInbox, ownershipInbox, nameMetadataInbox, endpointInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox, navigationInbox, currentErrorInbox, eventInbox])
-  const recentEvents = [...projection.history].reverse()
-  const sessionsByIdentity = new Map(sessions.map(session => [JSON.stringify([session.hostId, session.id]), session]))
+  const recentEvents = open ? [...projection.history].reverse() : []
+  const sessionsByIdentity = new Map((open ? sessions : []).map(session => [JSON.stringify([session.hostId, session.id]), session]))
   const unreadEventIds = new Set(eventInbox.unread)
-  const readEvents = projection.history.filter(event => !unreadEventIds.has(event.id)).length
+  const readEvents = open ? projection.history.filter(event => !unreadEventIds.has(event.id)).length : 0
   const latestUnreadEvent = [...events].reverse().find(event => unreadEventIds.has(event.id))
+  const announcement = useMemo(() => latestUnreadEvent
+    ? notificationPreview(latestUnreadEvent.context?.summary ?? latestUnreadEvent.message, 'announcement') : '',
+  [latestUnreadEvent?.context?.summary, latestUnreadEvent?.message])
   const liveVolume = serviceNoticeAriaLive(latestUnreadEvent?.context?.kind ?? 'indeterminate')
   function navigationAction(action: NonNullable<ServiceNoticeItem['action']>) {
     return { label: action.label, run() { action.run(); detailsRef.current?.hidePopover?.() } }
   }
   return <div className="global-system-notices">
     <span className="global-system-notices__announcement" role={liveVolume === 'assertive' ? 'alert' : 'status'} aria-live={liveVolume}>
-      {latestUnreadEvent ? `${latestUnreadEvent.context?.summary ?? Array.from(latestUnreadEvent.message.replace(/\s+/g, ' ')).slice(0, 100).join('')}. Review system notifications for details.` : ''}
+      {latestUnreadEvent ? `${announcement}. Review system notifications for details.` : ''}
     </span>
     <button ref={triggerRef} type="button" className="global-system-notices__trigger" data-unread={unread > 0}
       aria-label={`System notifications: ${unread} unread, ${currentCount} current, ${projection.history.length} recent events`}
@@ -233,6 +237,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
     <div ref={detailsRef} id={id} popover="auto" className="global-system-notices__details" aria-label="System notifications"
       data-state={open ? 'open' : 'closed'}
       onToggle={(event) => { if (event.target === event.currentTarget) setOpen(event.newState === 'open') }}>
+      {open ? <>
       <div className="global-system-notices__heading">
         <strong>System notifications</strong>
         <button type="button" className="icon-button" aria-label="Collapse system notifications" title="Collapse system notifications"
@@ -280,10 +285,11 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
         const session = subject?.kind === 'agent' ? sessionsByIdentity.get(JSON.stringify([subject.hostId, subject.agentSessionId])) : undefined
         return <NotificationItem key={event.id} eventId={event.id} kind={event.context?.kind ?? 'indeterminate'}
           title={event.context?.summary ?? (event.context?.kind === 'agent-broken' ? `${session?.label ?? 'Agent'} stopped unexpectedly` : event.message)}
-          detail={event.message}
+          detail={event.message} summary={event.context?.summary}
           {...(session ? { action: navigationAction({ label: `Open ${session.label}`, run: () => { void selectSession(session.id) } }) } : {})} />
       })}
       {!available ? <p>Waiting for Runtime status.</p> : count === 0 ? <p>No system notifications.</p> : null}
+      </> : null}
     </div>
     <ModalAttachmentDismissal active={Boolean(open && detailsRef.current && getModalOverlayContainer(detailsRef.current))} targetRef={detailsRef}
       onOwnerRemoved={() => detailsRef.current?.hidePopover()}

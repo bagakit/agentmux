@@ -1,17 +1,19 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { serviceNoticeAriaLive, type ServiceNoticeKind } from '../lib/service-window-notice'
+import { notificationPreview } from '../lib/notification-preview'
 
 const WarningIcon = semanticIconComponent('status.warning')
 const InfoIcon = semanticIconComponent('status.info')
 
 /** Shared compact presentation. Reading, copying and navigation never settle the original issue. */
-export function NotificationItem({ title, kind, detail, children, action, eventId, noticeId }: {
+export function NotificationItem({ title, kind, detail, summary, children, action, eventId, noticeId }: {
   title: string
   kind: ServiceNoticeKind
   detail: string
+  summary?: string | undefined
   children?: ReactNode
   action?: { label: string; run(): void }
   eventId?: string
@@ -19,6 +21,7 @@ export function NotificationItem({ title, kind, detail, children, action, eventI
 }) {
   const Icon = kind === 'agent-broken' ? WarningIcon : InfoIcon
   const [copy, setCopy] = useState<{ detail: string; label: string } | null>(null)
+  const [expanded, setExpanded] = useState(false)
   const generation = useRef(0), currentDetail = useRef(detail)
   if (currentDetail.current !== detail) { currentDetail.current = detail; ++generation.current }
   useEffect(() => () => { ++generation.current }, [])
@@ -31,21 +34,23 @@ export function NotificationItem({ title, kind, detail, children, action, eventI
       label: accepted ? 'Copied' : `Copy failed: ${presentError(failure)}` })
   }
   const volume = serviceNoticeAriaLive(kind)
-  const titlePoints = Array.from(title.replace(/\s+/g, ' ').trim())
-  const heading = titlePoints.length > 100 ? `${titlePoints.slice(0, 100).join('')}…` : titlePoints.join('')
+  const heading = useMemo(() => notificationPreview(title, 'title'), [title])
   return <article className="notification-item" data-kind={kind} data-event-id={eventId} data-notice-id={noticeId}
     role={volume === 'assertive' ? 'alert' : 'status'} aria-live={volume}>
     <Icon size={14} className="notification-item__icon" aria-hidden="true" />
     <div className="notification-item__body">
       <strong className="notification-item__title">{heading}</strong>
       <div className="notification-item__controls">
-        <details className="notification-item__details">
+        <details className="notification-item__details" onToggle={event => {
+          if (event.target === event.currentTarget) setExpanded(event.currentTarget.open)
+        }}>
           <summary>Details</summary>
-          <div className="notification-item__original" tabIndex={0} aria-label={`Complete details: ${title}`}>
+          {expanded ? <div className="notification-item__original" tabIndex={0} aria-label={`Complete details: ${heading}`}>
+            {summary && !detail.includes(summary) ? <p>{summary}</p> : null}
             {children ?? <p>{detail}</p>}
             <button type="button" className="small-button" disabled={copy?.detail === detail && copy.label === 'Copying…'} onClick={() => void copyDetails()}>Copy details</button>
             {copy?.detail === detail ? <span role="status">{copy.label}</span> : null}
-          </div>
+          </div> : null}
         </details>
         {action ? <button type="button" className="small-button notification-item__action" onClick={action.run}>{action.label}</button> : null}
       </div>
