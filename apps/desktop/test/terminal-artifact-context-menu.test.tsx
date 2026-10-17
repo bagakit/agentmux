@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
+import ts from 'typescript'
 import { hostPlatform, revealInFileManagerLabel } from '../src/renderer/src/lib/host-platform'
 import { terminalFileMenuActions } from '../src/renderer/src/lib/terminal-file-action'
 
@@ -35,9 +36,21 @@ describe('terminal path context actions', () => {
   })
 
   it('wires reveal and system open through the typed files seam from the real terminal caller', () => {
-    expect(viewSource).toContain('pathActions={terminalFileMenuActions({')
-    expect(viewSource).toContain('api.files.reveal(linkOriginRef.current.workspaceId, path)')
-    expect(viewSource).toContain('api.files.openSystem(linkOriginRef.current.workspaceId, path)')
-    expect(viewSource).toContain('terminalPathAtPointer(')
+    const source = ts.createSourceFile('TerminalView.tsx', viewSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    const helpers: ts.FunctionDeclaration[] = [], consumers: ts.JsxOpeningLikeElement[] = []
+    const visit = (node: ts.Node): void => {
+      if (ts.isFunctionDeclaration(node) && node.name?.text === 'pathMenuActions') helpers.push(node)
+      if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) && node.tagName.getText(source) === 'TerminalContextMenu') consumers.push(node)
+      ts.forEachChild(node, visit)
+    }
+    visit(source)
+    expect(helpers).toHaveLength(1); expect(consumers).toHaveLength(1)
+    const helper = helpers[0]!.getText(source)
+    expect(helper).toContain('return terminalFileMenuActions({')
+    expect(helper).toContain('api.files.reveal(linkOriginRef.current.workspaceId, path)')
+    expect(helper).toContain('api.files.openSystem(linkOriginRef.current.workspaceId, path)')
+    const attribute = (name: string) => consumers[0]!.attributes.properties.find(property => ts.isJsxAttribute(property) && property.name.getText(source) === name)?.getText(source)
+    expect(attribute('pathActions')).toBe('pathActions={pathMenuActions(pathActions)}')
+    expect(attribute('contextSource')).toContain('pathActions: pathMenuActions(point && rootRef.current ? terminalPathAtPointer(')
   })
 })
