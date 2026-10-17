@@ -288,3 +288,25 @@ it('cancels a collapsed copy while a later original page is held', async () => {
   } finally { await act(async () => { release(); await returned }) }
   expect(clipboard).not.toHaveBeenCalled(); expect(container.textContent).toContain('Diagnosis copy canceled.')
 }, 30_000)
+
+
+it('distinguishes a retained task with an unloaded trace from a setup that has not started', async () => {
+  const localReads = f.connectionCalls.mock.calls.length, platformRequests = f.registration.mock.calls.length
+  for (const diagnosisTarget of [
+    { kind: 'mote', operationId: 'retained-parent', sourceTarget: null },
+    { kind: 'enrollment', operationId: 'retained-enrollment' }
+  ] as const) {
+    await act(async () => root!.render(<ConnectionRequestTrace source={null} diagnosisTarget={diagnosisTarget} />))
+    expect(container.querySelector('summary')!.textContent).toContain('Trace not loaded')
+    expect(container.textContent).toContain('The original task is kept. Its trace is not loaded yet.')
+    expect(container.textContent).not.toContain('No request yet')
+    expect(container.textContent).not.toContain('Requests will appear here when this setup starts.')
+    expect([...container.querySelectorAll('button')].find(button => button.textContent === 'Copy diagnosis')!.disabled).toBe(false)
+  }
+  await act(async () => root!.render(<ConnectionRequestTrace source={null} />))
+  expect(container.querySelector('summary')!.textContent).toContain('No request yet')
+  expect(container.textContent).toContain('Requests will appear here when this setup starts.')
+  expect([...container.querySelectorAll('button')].find(button => button.textContent === 'Copy diagnosis')!.disabled).toBe(true)
+  expect(f.connectionCalls.mock.calls).toHaveLength(localReads)
+  expect(f.registration.mock.calls).toHaveLength(platformRequests)
+})
