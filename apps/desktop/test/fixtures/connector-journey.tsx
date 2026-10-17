@@ -85,8 +85,11 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
       if (context) document.querySelector('[data-workbench-region-id="' + regionId + '"]')!.dispatchEvent(new MouseEvent('contextmenu', { button: 2, clientX: 24, clientY: 24, bubbles: true, cancelable: true }))
       else { trigger!.focus(); trigger!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) }
     })
+    let submenu: HTMLElement | undefined
+    await vi.waitFor(async () => { await act(async () => {}); submenu = [...document.querySelectorAll<HTMLElement>('.agent-region-menu[data-owner-region-id="' + regionId + '"] [role="menuitem"][aria-haspopup="menu"]')].find(node => node.textContent?.trim() === 'Lark'); expect(submenu, 'original Lark menu').toBeDefined() }, { timeout: 6000 })
+    await act(async () => { submenu!.focus(); submenu!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })) })
     let item: HTMLElement | undefined
-    await vi.waitFor(async () => { await act(async () => {}); item = [...document.querySelectorAll<HTMLElement>(context ? '.region-context-menu [role="menuitem"]' : '.agent-region-menu[data-owner-region-id="' + regionId + '"] [role="menuitem"]')].find(node => node.textContent?.trim() === label); expect(item, 'actual ' + label + ' action').toBeDefined() }, { timeout: 6000 })
+    await vi.waitFor(async () => { await act(async () => {}); item = [...document.querySelectorAll<HTMLElement>('[data-connector-menu-group] [role="menuitem"]')].find(node => node.textContent?.trim() === label); expect(item, 'actual ' + label + ' action').toBeDefined() }, { timeout: 6000 })
     await act(async () => item!.click())
     await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('[role="dialog"]')).not.toBeNull() })
     await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector<HTMLElement>('[aria-label="Group application"]')?.dataset.value, document.querySelector('[role="dialog"]')?.textContent).toBe(connectionConfig.connectionId) }, { timeout: 6000 })
