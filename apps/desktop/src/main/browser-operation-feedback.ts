@@ -16,7 +16,7 @@ const ACTION_LABELS: Record<string, string> = {
 }
 
 type FeedbackPayload = {
-  revision: number; operationId: string; navigationId: string; phase: 'running' | 'completed' | 'clear' | 'click' | 'appearance' | 'preferences'
+  revision: number; operationId: string; navigationId: string; phase: 'running' | 'completed' | 'clear' | 'click' | 'appearance' | 'preferences' | 'observe'
   kind: 'page' | 'target'; token: string; label: string; method: string; keyLabel: string
   operatorName: string; actionLabel: string
   deadline: number; completedMs: number; moveMs: number; clearReason: 'replace' | 'invalidate'
@@ -31,6 +31,12 @@ function applyFeedback(payload: FeedbackPayload, target?: Element): boolean {
   if (previous && payload.phase !== 'running' && (previous.operationId !== payload.operationId || previous.navigationId !== payload.navigationId || previous.token !== payload.token)) return false
   if (previous && previous.revision >= payload.revision) return false
   if (payload.phase !== 'clear' && Date.now() > payload.deadline) return false
+  if (payload.phase === 'observe') {
+    if (!previous) return false
+    previous.revision = payload.revision
+    previous.observe()
+    return true // Recheck the original anchor without rebuilding or renewing the cue.
+  }
   if (payload.phase === 'appearance' || payload.phase === 'preferences' || payload.phase === 'click') {
     if (!previous || !previous.host || !['running', 'completed'].includes(previous.phase)) return false
     previous.revision = payload.revision
@@ -63,7 +69,7 @@ function applyFeedback(payload: FeedbackPayload, target?: Element): boolean {
     bridge.clear = (reason: 'replace' | 'invalidate') => {
       bridge.source?.postMessage({ channel: 'agentmux-feedback', type: 'clear', token: bridge.token,
         operationId: bridge.operationId, navigationId: bridge.navigationId, reason }, '*')
-      // Invisible history still belongs to this actual document, so human input can invalidate it after detach.
+      // Invisible history still belongs to this document; its input owner can invalidate it after detach.
       if (reason === 'invalidate') bridge.source = null
     }
     bridge.listener = (event: MessageEvent) => {
@@ -153,15 +159,11 @@ function applyFeedback(payload: FeedbackPayload, target?: Element): boolean {
         event.data.token !== state.token || event.data.operationId !== state.operationId || event.data.navigationId !== state.navigationId) return
     state.hide(event.data.reason === 'replace' ? 'replace' : 'invalidate')
   }
-  const onHuman = (event: Event) => { if (event.isTrusted) invalidate() }
   const onVisibility = () => { if (document.hidden) invalidate() }
   const onMotion = () => { if (media.matches) stopMotion() }
   state.cleanup = () => {
     clearTimeout(timer); stopMotion(); removeRipple()
     window.removeEventListener('message', onClear)
-    document.removeEventListener('pointerdown', onHuman, true)
-    document.removeEventListener('keydown', onHuman, true)
-    document.removeEventListener('wheel', onHuman, true)
     document.removeEventListener('visibilitychange', onVisibility)
     window.removeEventListener('pagehide', invalidate)
     window.removeEventListener('scroll', onGeometry, true)
@@ -170,6 +172,7 @@ function applyFeedback(payload: FeedbackPayload, target?: Element): boolean {
     media.removeEventListener('change', onMotion)
     state.host?.remove()
   }
+  state.observe = onGeometry
   state.complete = (completed: FeedbackPayload) => {
     if (globals[key] !== state || state.phase !== 'running') return
     state.phase = 'completed'; state.host?.setAttribute('data-phase', 'completed')
@@ -190,9 +193,6 @@ function applyFeedback(payload: FeedbackPayload, target?: Element): boolean {
   window.addEventListener('scroll', onGeometry, true)
   document.addEventListener('scroll', onGeometry, true)
   window.addEventListener('resize', onGeometry, true)
-  document.addEventListener('pointerdown', onHuman, true)
-  document.addEventListener('keydown', onHuman, true)
-  document.addEventListener('wheel', onHuman, { capture: true, passive: true })
   document.addEventListener('visibilitychange', onVisibility)
   window.addEventListener('pagehide', invalidate)
   media.addEventListener('change', onMotion)
@@ -502,6 +502,14 @@ export class BrowserOperationFeedback {
     if (completed) await this.completeAction()
     else await this.clear()
     await this.hideControl()
+  }
+  /** Readonly calls revalidate the original cue, without stealing an in-flight action's generation. */
+  async observe(): Promise<void> {
+    if (this.mode === 'clear') return
+    if (!this.current()) { await this.clear(); return }
+    const payload = this.payload('observe', 'page', Date.now() + DISPLAY_BUDGET_MS)
+    await this.bounded(Promise.all([this.page(payload),
+      ...(this.target ? [this.document(this.target, { ...payload, kind: 'target' })] : [])]), this.generation)
   }
   async clear(reason: FeedbackPayload['clearReason'] = 'invalidate'): Promise<void> {
     await this.clearAt(++this.generation, reason)

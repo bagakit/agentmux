@@ -178,7 +178,8 @@ export class ExternalBrowserOwner {
           let cue: number | undefined
           try {
             if (actions.has(method)) { requireCurrent(); cue = await ownedFeedback.begin(method, method === 'pressKey' ? args[1] : undefined); requireCurrent() }
-            else await ownedFeedback.clear(waits.has(method) ? 'invalidate' : 'replace')
+            else if (waits.has(method)) await ownedFeedback.clear()
+            else await ownedFeedback.observe()
             const value = await dispatch(method, args, { beforeAction: requireCurrent, recordTarget: target => { currentStep.target = target },
               ...(cue === undefined ? {} : { feedback: async (node, sender) => { requireCurrent(); await ownedFeedback.showTarget(node, sender, cue); requireCurrent() } }) })
             if (cue !== undefined) await ownedFeedback.completeAction(cue)
