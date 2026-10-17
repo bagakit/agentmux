@@ -3645,6 +3645,7 @@ export class BrowserViewManager {
         this.inputIsolationFailed(entry)
       })
       entry.inputShield = shield
+      shield.contents.once('destroyed', () => queueMicrotask(() => this.observeInputShieldDestruction(entry.id, shield)))
       shield.contents.on('input-event', (_event, input) => {
         if (!this.agentOwnsInput(entry) || !['mouseDown', 'mouseMove', 'mouseEnter', 'mouseLeave'].includes(input.type)) return
         const owner = this.nativeOwner(entry.id)
@@ -3659,7 +3660,7 @@ export class BrowserViewManager {
         if (entry.inputShield !== shield || !this.agentOwnsInput(entry)) return
         this.inputIsolationFailed(entry)
       })
-      await Promise.race([shield.ready, new Promise<void>((resolve, reject) => {
+      await Promise.race([shield.prepare(), new Promise<void>((resolve, reject) => {
         abort = resolve
         signal.addEventListener('abort', abort, { once: true })
         timer = setTimeout(() => reject(new Error('Native input surface preparation was not confirmed')), 1500)
@@ -3686,6 +3687,22 @@ export class BrowserViewManager {
     // not turn the still-healthy page/program into a failure; inspect retains the
     // original operation, isolation fact and persistent warning for the next read.
     try { this.emit(entry) } catch { /* Keep current owner facts even when this projection is unavailable. */ }
+  }
+
+  private observeInputShieldDestruction(id: string, shield: BrowserNativeInputShield): void {
+    try {
+      const current = this.entries.get(id)
+      if (current?.inputShield === shield) {
+        this.releaseInputShield(current)
+        if (this.agentOwnsInput(current)) this.inputIsolationFailed(current)
+        else this.emit(current)
+        return
+      }
+      const retired = this.releasedEntries.get(id)
+      if (retired?.inputShield !== shield) return
+      this.cleanupReleasedOwner(retired)
+      if (retired.cleanupOnly && !retired.inputShield && !retired.pendingSwitch && !retired.detachedView) this.releasedEntries.delete(id)
+    } catch { /* The original owner retains any unconfirmed cleanup reference; native notification cannot fail a healthy Browser. */ }
   }
 
   private synchronizeInputShield(entry: BrowserEntry): void {

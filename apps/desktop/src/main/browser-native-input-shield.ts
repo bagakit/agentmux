@@ -10,8 +10,8 @@ export class BrowserNativeInputShield {
   readonly view: WebContentsView
   readonly contents: WebContents
   private readonly source: WebContents
-  readonly ready: Promise<void>
   private disposed = false
+  private closeRequested = false
   private host: BrowserWindow | undefined
   private readonly focused = (): void => {
     try {
@@ -30,6 +30,10 @@ export class BrowserNativeInputShield {
     this.view = new WebContentsView({ webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false,
       focusOnNavigation: false, navigateOnDragDrop: false } })
     this.contents = this.view.webContents
+  }
+
+  /** The Browser owner publishes this cleanup identity before native setup can fail. */
+  prepare(): Promise<void> {
     this.view.setBackgroundColor('#00000000')
     this.contents.setWindowOpenHandler(() => ({ action: 'deny' }))
     this.contents.on('will-navigate', event => event.preventDefault())
@@ -38,19 +42,14 @@ export class BrowserNativeInputShield {
     // macOS does not route OS input into a nested WebContentsView reliably.
     // Use the same native parent as the page; the Browser owner exposes the
     // ordered pair to Chrome so a floating stage moves both original surfaces.
-    try {
-      page.on('bounds-changed', this.boundsChanged)
-      this.source.on('focus', this.focused)
+    this.page.on('bounds-changed', this.boundsChanged)
+    this.source.on('focus', this.focused)
+    this.synchronize()
+    return this.contents.loadURL(DOCUMENT).then(() => {
+      if (!this.current()) return
       this.synchronize()
-      this.ready = this.contents.loadURL(DOCUMENT).then(() => {
-        if (!this.current()) return
-        this.synchronize()
-        this.focused()
-      })
-    } catch (error) {
-      try { this.dispose() } catch { /* Preserve the original admission failure. */ }
-      throw error
-    }
+      this.focused()
+    })
   }
 
   get isolated(): boolean {
@@ -66,7 +65,10 @@ export class BrowserNativeInputShield {
     if (!this.current() || this.contents.isDestroyed()) return
     const host = this.window()
     if (this.host !== host || host.contentView.children.indexOf(this.view) !== host.contentView.children.indexOf(this.page) + 1) {
-      if (this.host && !this.host.isDestroyed() && this.host.contentView.children.includes(this.view)) this.host.contentView.removeChildView(this.view)
+      if (this.host && !this.host.isDestroyed() && this.host.contentView.children.includes(this.view)) {
+        this.host.contentView.removeChildView(this.view)
+        if (this.host.contentView.children.includes(this.view)) throw new Error('The native input surface remains attached to its earlier host')
+      }
       this.host = host
       const index = host.contentView.children.indexOf(this.page)
       if (index < 0) throw new Error('The original Browser native parent is not attached')
@@ -86,8 +88,10 @@ export class BrowserNativeInputShield {
       () => {
         if (this.host && !this.host.isDestroyed() && this.host.contentView.children.includes(this.view)) this.host.contentView.removeChildView(this.view)
       },
-      () => { if (!this.contents.isDestroyed()) this.contents.close() }
+      () => { if (!this.contents.isDestroyed() && !this.closeRequested) { this.contents.close(); this.closeRequested = true } }
     ]) try { release() } catch (error) { failures.push(error) }
+    if (this.host && !this.host.isDestroyed() && this.host.contentView.children.includes(this.view)) failures.push(new Error('The native input surface is still attached'))
+    if (!this.contents.isDestroyed()) failures.push(new Error('The native input surface destruction is unconfirmed'))
     const host = this.window()
     if (restoreFocus && !this.source.isDestroyed() && this.page.getVisible() && !host.isDestroyed() && host.isFocused()) this.source.focus()
     if (failures.length) throw new AggregateError(failures, 'The exact Browser native input surface could not be released')
