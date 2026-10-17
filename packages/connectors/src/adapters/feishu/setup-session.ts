@@ -49,7 +49,7 @@ async function applicationRequest(input: SetupAdapterInput & { privateState: str
   if (input.application.domain !== 'open.feishu.cn') return { payload: null }
   let native: ReturnType<typeof readNativeAccountState>
   try { native = readNativeAccountState(snapshot(input)) } catch { return { payload: null } }
-  const receipt = await requestFeishuConsole({ state: native.state, cookies: native.cookies, path, body, referer: 'https://open.feishu.cn/app/' + encodeURIComponent(input.application.appId), developerPanel, ...(input.assertCurrent ? { assertCurrent: input.assertCurrent } : {}) }, signal)
+  const receipt = await requestFeishuConsole({ state: native.state, cookies: native.cookies, path, body, referer: '/app/' + encodeURIComponent(input.application.appId), developerPanel, ...(input.assertCurrent ? { assertCurrent: input.assertCurrent } : {}) }, signal)
   return { payload: receipt.kind === 'response' ? receipt.payload : null, ...(receipt.authentication ? { authentication: serializeSnapshot(input, receipt.authentication) } : {}) }
 }
 
