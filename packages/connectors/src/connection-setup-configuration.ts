@@ -72,6 +72,11 @@ export class SetupApplicationConfiguration {
     if (result.request === 'dispatching' && !this.live.has(result.stepId)) result.request = 'unknown'
     return result
   }
+  /** Exact original phase already admitted by this owner, independent of later source invalidation. */
+  originalEffect(operationId: string): ConnectionSetupConfigurationReceipt | null {
+    const child = this.find(operationId, {})
+    return child ? this.summary(child) : null
+  }
   private binding(row: Parent, child: Child): string {
     const o = row.operation, effect = child.receipt.effect
     if (child.receipt.effect === 'create-application-version' || child.receipt.effect === 'submit-application-version') return digest({ operationId: o.operationId, connectionId: o.connectionId, revision: o.expectedConnectionRevision, application: o.application, adapterId: o.adapterId, goal: o.goal, actor: row.actor, effect, draft: child.receipt.input.publicationDraft, nativeIntentDigest: child.publicationIntentDigest, authenticationStepId: child.authenticationStepId, sourceStepIds: child.receipt.sourceStepIds, versionId: child.receipt.versionId, submission: child.receipt.submission })

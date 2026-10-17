@@ -1,4 +1,4 @@
-import { connectionSetupDecisionForAction, CONNECTION_SETUP_READ_ACTIONS, type ConnectionEnrollmentCallContext, type ConnectionSetupAction, type ConnectionSetupAdvance, type ConnectionSetupInitialProgress, type ConnectionSetupInspect, type ConnectionSetupPort, type ConnectionSetupPublicationDraft, type ConnectionSetupReadSubject, type ConnectionSetupView } from '@agentmux/core/connections'
+import { connectionSetupDecisionForAction, CONNECTION_SETUP_READ_ACTIONS, type ConnectionEnrollmentCallContext, type ConnectionSetupAction, type ConnectionSetupAdvance, type ConnectionSetupConfigurationReceipt, type ConnectionSetupInitialProgress, type ConnectionSetupInspect, type ConnectionSetupPort, type ConnectionSetupPublicationDraft, type ConnectionSetupReadSubject, type ConnectionSetupView } from '@agentmux/core/connections'
 
 type Selector = NonNullable<ConnectionSetupInspect['applicationConfiguration']>
 type Stage = ConnectionSetupInitialProgress['stage']
@@ -21,7 +21,7 @@ const stages: Array<{ stage: Stage; selector: Selector; reads: ConnectionSetupRe
 
 /** One finite creation flow over the existing Setup owner. All facts remain in its original child journals. */
 export class InitialConnectionSetup {
-  constructor(private readonly port: Port, private readonly draft: (view: ConnectionSetupView) => Promise<Extract<ConnectionSetupPublicationDraft, { kind: 'create-version' }> | null>) {}
+  constructor(private readonly port: Port, private readonly draft: (view: ConnectionSetupView) => Promise<Extract<ConnectionSetupPublicationDraft, { kind: 'create-version' }> | null>, private readonly originalEffect: (operationId: string) => ConnectionSetupConfigurationReceipt | null) {}
   private async advance(operationId: string, action: ConnectionSetupAction, context: ConnectionEnrollmentCallContext, extra: Partial<ConnectionSetupAdvance> = {}): Promise<ConnectionSetupView> {
     return this.port.advance({ operationId, expectedRevision: action.expectedRevision, decision: { actionId: action.actionId, value: connectionSetupDecisionForAction(action) }, ...extra }, context)
   }
@@ -83,6 +83,15 @@ export class InitialConnectionSetup {
       if (confirm) base = await this.advance(operationId, confirm, context)
     }
     if (base.reason || base.continuation?.stage !== 'confirmed' || base.operation?.authentication?.request !== 'confirmed' || base.operation.authentication.secureStorage !== 'stored') return finish('authentication', base.operation?.authentication?.request === 'dispatching' ? 'running' : 'attention')
+    if (!run) {
+      // An admitted later writer can invalidate an earlier mode read while its own request or readback is pending.
+      // Keep that exact original phase visible; an observation gap cannot move the request back to an earlier phase.
+      const original = this.originalEffect(operationId), current = stages.find(item => item.selector.effect === original?.effect)
+      if (current) {
+        const state = await this.configure(operationId, current.selector, current.reads, context, false)
+        if (state) return finish(current.stage, state)
+      }
+    }
     for (const item of stages) {
       if (base.operation.goal.interaction !== 'cards' && (item.stage === 'callback-transport' || item.stage === 'card-actions')) continue
       const state = await this.configure(operationId, item.selector, item.reads, context, run)
