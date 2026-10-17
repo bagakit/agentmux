@@ -28,6 +28,12 @@ export async function prepareNotebookWorkface(notebook: Notebook, workspaceId: s
 }
 /** Closing a page never loses this resource. Reopening uses the same file and original workbench. */
 export async function openNotebookPage(page: NotebookPage, onSelectReference?: (reference: WorkbenchProjectionSelection) => void, selectedReference?: WorkbenchProjectionSelection | null, target?: NoteBlockTarget, origin?: NotePageOpenOrigin): Promise<boolean> {
+  return openNotebookFile(page, onSelectReference, selectedReference, target, origin)
+}
+
+/** Shared Markdown uses the same original file and workface navigation as a catalog page. */
+export async function openNotebookFile(page: Pick<NotebookPage, 'noteId' | 'resource' | 'workface'>, onSelectReference?: (reference: WorkbenchProjectionSelection) => void, selectedReference?: WorkbenchProjectionSelection | null, target?: NoteBlockTarget, origin?: NotePageOpenOrigin, signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted) return false
   const before = useAppStore.getState()
   if (target && target.noteId !== page.noteId) throw new Error('The requested block belongs to another Note. The original page is kept; choose its exact source.')
   if (!notebookPageResourceMatches(page, before.config)) throw new Error('The Note’s original Host or folder is unavailable. Its page and history are kept; reconnect this resource.')
@@ -50,10 +56,12 @@ export async function openNotebookPage(page: NotebookPage, onSelectReference?: (
   if (!origin) before.setRecallZoneSelection(reference ? surveySelectReference(initial, reference) : initial)
   const heldSelection = useAppStore.getState().recallZoneSelection
   const observed = await api.files.read(page.resource.workspaceId, page.resource.path)
+  if (signal?.aborted) return false
   const read = observed.status === 'read' ? readNoteDocument(observed.document.content) : null
   if (read?.status !== 'valid' || read.note.noteId !== page.noteId) throw new Error('The original Note file could not be confirmed. Its directory entry and sources are kept; reconnect or restore this same file.')
   if (matches.length && !reference) throw new Error('This page is already open in multiple locations. Choose its Tab in the work surface, then reopen from this Notebook. Your page and all locations are kept.')
   const current = useAppStore.getState()
+  if (signal?.aborted || current.mainSurface !== before.mainSurface) return false
   if (origin && fileNavigationSelection(current) !== heldNavigation) return false
   if (current.recallNotebookId !== heldBook || current.recallNoteId !== heldNote || current.recallZoneSelection !== heldSelection) return false
   const groupId = reference?.groupId ?? origin?.reference.groupId ?? current.prepareWorkbenchLayout(displayWorkspaceId).activeGroupId
@@ -65,5 +73,5 @@ export async function openNotebookPage(page: NotebookPage, onSelectReference?: (
     } }
   return current.openFile(page.resource.path, groupId, target ? { line: 1, noteBlock: target } : undefined, page.resource.workspaceId, true,
     { displayWorkspaceId, ...(reference ? { reference } : {}), space: { zoneId: zone.zoneId, spaceId: zoneContext(current, scratchTopicsForWorkspace(current.scratchTopicSnapshots, current.config?.workspaces.find(w => w.id === SCRATCH_WORKSPACE_ID)) ?? [], zone) },
-      resource: { hostId: page.resource.hostId, path: page.resource.workspacePath }, ...(origin ? { ...(origin.projection ? { projection: origin.projection } : {}) } : { projection }) })
+      resource: { hostId: page.resource.hostId, path: page.resource.workspacePath }, ...(origin ? { ...(origin.projection ? { projection: origin.projection } : {}) } : { projection }) }, signal)
 }

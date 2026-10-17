@@ -24,7 +24,7 @@ export async function changeNotebook(change: NotebookChange, operationId: string
   useNotebookLibrary.setState({ state, issue: null }); return state
 }
 export type NoteNotebookContext = { notebookId?: string; parentNoteId?: string | null; source?: NoteSource }
-export function notebookPageResourceMatches(page: NotebookPage, config: { workspaces: { id: string; hostId: string; path: string }[] } | null): boolean {
+export function notebookPageResourceMatches(page: Pick<NotebookPage, 'resource'>, config: { workspaces: { id: string; hostId: string; path: string }[] } | null): boolean {
   const workspace = config?.workspaces.find(item => item.id === page.resource.workspaceId)
   return workspace?.hostId === page.resource.hostId && workspace.path === page.resource.workspacePath
 }
