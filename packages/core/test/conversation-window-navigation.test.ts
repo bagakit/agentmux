@@ -129,8 +129,8 @@ it('accounts for both immutable head and live versions when a Provider cannot re
   expect(retainedBytes).toBeLessThanOrEqual(32 * 1024 * 1024)
   expect(changed.units.length).toBeLessThan(snapshot.units.length)
   expect(changed.window.outside.older).not.toBeNull()
-  expect(projectConversationWindow(changed).historyPage!.items[0]!.contentParts).toEqual([{ kind: 'text', text: 'y'.repeat(body.length) }])
-  expect(originalHead.original.kind === 'native' && originalHead.original.item.contentParts).toEqual([{ kind: 'text', text: body }])
+  expect(projectConversationWindow(changed).historyPage!.items[0]!.contentParts).toEqual([{ kind: 'text', text: 'y'.repeat(body.length), contentEligibility: 'public' }])
+  expect(originalHead.original.kind === 'native' && originalHead.original.item.contentParts).toEqual([{ kind: 'text', text: body, contentEligibility: 'public' }])
   expect(f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
 }, 30000)
 
