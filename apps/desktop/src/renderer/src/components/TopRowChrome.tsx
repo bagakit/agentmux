@@ -8,6 +8,7 @@ import { SettingsNavigation } from './SettingsNavigation'
 import { FocusNavigationPreview } from './FocusNavigationPreview'
 import { SURFACE_NAVIGATION_PLUGINS } from './SurfaceNavigation'
 import { OVERLAY_LAYER_BANDS, WindowOverlayPortal } from './WindowOverlayHost'
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 
 const ThemeLayoutSidebarProjectsIcon = semanticIconComponent('layout.sidebar-projects')
@@ -163,6 +164,7 @@ export function SurfaceSwitch({ settingsOpen = false, onCloseSettings }: {
   onCloseSettings?: () => void
 }) {
   const settings = useContext(SettingsNavigation)!
+  const document = useWorkbenchDocument()
   const mainSurface = useAppStore((state) => state.mainSurface)
   const setMainSurface = useAppStore((state) => state.setMainSurface)
   const [tooltip, setTooltip] = useState<{ id: string; left: number; top: number } | null>(null)
@@ -175,6 +177,7 @@ export function SurfaceSwitch({ settingsOpen = false, onCloseSettings }: {
   useEffect(() => cancelHover, [])
   // Window-level host [data-overlay-host] adapter (WindowOverlayPortal wraps createPortal into host):
   const showTooltip = (id: string, target: HTMLElement) => {
+    if (document.visibilityState === 'hidden') return
     const rect = target.getBoundingClientRect()
     setTooltip({ id, left: rect.left, top: rect.top - 8 })
   }
@@ -188,13 +191,16 @@ export function SurfaceSwitch({ settingsOpen = false, onCloseSettings }: {
       if (event.key === 'Escape') dismiss()
     }
     const onBlur = dismiss
+    const onVisibility = () => { if (document.visibilityState === 'hidden') dismiss() }
+    document.addEventListener('visibilitychange', onVisibility)
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('blur', onBlur)
     return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('blur', onBlur)
     }
-  }, [])
+  }, [document])
   const activePlugin = tooltip
     ? SURFACE_NAVIGATION_PLUGINS.find((plugin) => plugin.id === tooltip.id)
     : null
