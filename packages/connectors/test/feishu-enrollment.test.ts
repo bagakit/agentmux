@@ -89,13 +89,17 @@ it.each([{}, { status: null }, { status: 0 }, { status: 2 }])('uses enter_app ha
   expect(JSON.parse(result.privateState).authentication.phase).toBe('cross-login')
   expect(network.calls).toHaveLength(2)
 })
-it.each([7, ' ', 'http://accounts.feishu.cn/cross', 'https://foreign.example/cross', 'https://user@accounts.feishu.cn/cross', 'https://accounts.feishu.cn:8443/cross', 'https://accounts.feishu.cn/cross#fragment'])('keeps an unqualified handoff unknown without following its URL: %s', async crossLoginUri => {
+it.each([
+  [7, undefined], [' ', 'invalid-url'], ['http://accounts.feishu.cn/cross', 'unsupported-scheme'],
+  ['https://foreign.example/cross', 'unexpected-host'], ['https://user@accounts.feishu.cn/cross', 'url-credentials'],
+  ['https://accounts.feishu.cn:8443/cross', 'unexpected-port'], ['https://accounts.feishu.cn/cross#fragment', 'unexpected-fragment']
+])('keeps an unqualified handoff unknown without following its URL: %s', async (crossLoginUri, redirectReason) => {
   const network = remote(
     Response.json({ code: 0, data: { step_info: { token: 'private-handoff-qr' } } }, { headers: { 'x-flow-key': 'private-handoff-flow' } }),
     Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { cross_login_uri: crossLoginUri } } })
   )
   const original = input(), adapter = createFeishuEnrollment(), initial = authentication(await adapter.begin(original))
-  expect(await adapter.advance({ ...original, privateState: initial.privateState })).toEqual({ kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed', step: 'poll', failure: typeof crossLoginUri !== 'string' ? 'invalid-response' : 'redirect-unconfirmed', httpStatus: 200, boundary: 'handoff' } })
+  expect(await adapter.advance({ ...original, privateState: initial.privateState })).toEqual({ kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed', step: 'poll', failure: typeof crossLoginUri !== 'string' ? 'invalid-response' : 'redirect-unconfirmed', httpStatus: 200, boundary: 'handoff', ...(redirectReason ? { redirectReason } : {}) } })
   expect(network.calls).toHaveLength(2)
 })
 it.each([
@@ -139,7 +143,7 @@ it.each(['https://foreign.example/private-target', 'http://ask.feishu.cn/private
   const handoff = authentication(await adapter.advance({ ...original, privateState: initial.privateState }))
   expect(network.calls).toHaveLength(2)
   const unknown = await adapter.advance({ ...original, privateState: handoff.privateState })
-  expect(unknown).toEqual({ kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed', step: 'cross-login', failure: 'redirect-unconfirmed', httpStatus: 302, boundary: 'handoff' } })
+  expect(unknown).toEqual({ kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed', step: 'cross-login', failure: 'redirect-unconfirmed', httpStatus: 302, boundary: 'handoff', redirectReason: location.startsWith('http:') ? 'unsupported-scheme' : 'unexpected-host' } })
   expect(network.calls.map(call => new URL(call.url).pathname)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross'])
   expect(JSON.stringify(unknown)).not.toContain('private-target')
 })
@@ -474,4 +478,135 @@ it('keeps opaque authentication failure named without inventing a response statu
   const network = remote(new TypeError('private-auth-detail'))
   expect(await createFeishuEnrollment().begin(input())).toMatchObject({ kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed', step: 'initialize' } })
   expect(network.calls).toHaveLength(1)
+})
+
+async function consoleReady(...responses: Remote[]) {
+  const network = remote(
+    Response.json({ code: 0, data: { step_info: { token: 'private-console-qr' } } }, { headers: { 'x-flow-key': 'private-console-flow', 'set-cookie': 'shared=private-shared; Domain=.feishu.cn; Path=/; Secure' } }),
+    Response.json({ code: 0, data: { next_step: 'enter_app' } }),
+    new Response('Fixed landing'),
+    ...responses
+  )
+  const original = input(), adapter = createFeishuEnrollment()
+  let view = authentication(await adapter.begin(original))
+  for (let index = 0; index < 2; index++) view = authentication(await adapter.advance({ ...original, privateState: view.privateState }))
+  expect(view).toMatchObject({ stage: 'handoff', account: null, challenge: null })
+  expect(network.calls).toHaveLength(3)
+  return { original, adapter, network, view }
+}
+
+it.each([
+  [301, '/app?lang=zh', 'https://open.feishu.cn/app?lang=zh'],
+  [302, '/app/', 'https://open.feishu.cn/app/'],
+  [303, '/region/app#local-view', 'https://open.feishu.cn/region/app'],
+  [307, 'https://open.larkoffice.com/region/app?lang=en#local-view', 'https://open.larkoffice.com/region/app?lang=en'],
+  [308, '?lang=zh', 'https://open.feishu.cn/app?lang=zh']
+] as const)('follows Console HTTP %s without treating path or query as account authority', async (status, location, expected) => {
+  const f = await consoleReady(new Response(null, { status, headers: { location } }), new Response(html(), { headers: { 'content-type': 'text/html' } }))
+  const next = authentication(await f.adapter.advance({ ...f.original, privateState: f.view.privateState }))
+  expect(next).toMatchObject({ stage: 'handoff', account: null, challenge: null })
+  expect(f.network.calls).toHaveLength(4)
+  expect(JSON.parse(next.privateState).authentication).toMatchObject({ phase: 'console', url: expected, hops: 1, referer: 'https://open.feishu.cn/app' })
+  const account = authentication(await f.adapter.advance({ ...f.original, privateState: next.privateState }))
+  expect(f.network.calls).toHaveLength(5)
+  expect(f.network.calls.at(-1)!.url).toBe(expected)
+  expect(account).toMatchObject({ stage: 'account', account: { userId: 'original-user', tenantId: 'original-tenant' } })
+  expect(JSON.parse(account.privateState).authentication.consoleOrigin).toBe(new URL(expected).origin)
+})
+
+it('keeps the original scoped cookies and referer through Console issuer intermediates', async () => {
+  const f = await consoleReady(
+    new Response(null, { status: 302, headers: { location: '/auth/callback?state=synthetic', 'set-cookie': 'consoleOnly=private-console; Path=/; Secure' } }),
+    new Response(null, { status: 302, headers: { location: 'https://accounts.feishu.cn/accounts/console?state=synthetic' } }),
+    new Response(null, { status: 303, headers: { location: 'https://ask.feishu.cn/console-callback#local', 'set-cookie': 'issuerOnly=private-issuer; Path=/; Secure' } }),
+    new Response(null, { status: 307, headers: { location: 'https://open.feishu.cn/region/app?lang=zh#local' } }),
+    new Response(html(), { headers: { 'content-type': 'text/html' } })
+  )
+  let view = f.view
+  for (let index = 0; index < 5; index++) {
+    const count = f.network.calls.length
+    view = authentication(await f.adapter.advance({ ...f.original, privateState: view.privateState }))
+    expect(f.network.calls).toHaveLength(count + 1)
+    expect(view.stage).toBe(index === 4 ? 'account' : 'handoff')
+    if (index < 4) expect(view.account).toBeNull()
+  }
+  const calls = f.network.calls.slice(3), headers = calls.map(call => new Headers(call.options.headers))
+  expect(calls.map(call => call.url)).toEqual(['https://open.feishu.cn/app', 'https://open.feishu.cn/auth/callback?state=synthetic', 'https://accounts.feishu.cn/accounts/console?state=synthetic', 'https://ask.feishu.cn/console-callback', 'https://open.feishu.cn/region/app?lang=zh'])
+  expect(headers.map(value => value.get('referer'))).toEqual(['https://ask.feishu.cn/', ...calls.slice(0, -1).map(call => call.url)])
+  expect(headers.map(value => value.get('cookie')?.split('; ').sort())).toEqual([['shared=private-shared'], ['consoleOnly=private-console', 'shared=private-shared'], ['shared=private-shared'], ['shared=private-shared'], ['consoleOnly=private-console', 'shared=private-shared']])
+  expect(headers.every(value => !value.has('x-flow-key') && !value.has('x-csrf-token'))).toBe(true)
+})
+
+it.each([
+  [undefined, 'missing-location'], ['https://[', 'invalid-url'], ['http://open.feishu.cn/app', 'unsupported-scheme'],
+  ['https://user:secret@open.feishu.cn/app', 'url-credentials'], ['https://open.feishu.cn:8443/app', 'unexpected-port'],
+  ['https://foreign.example/console?private=reference', 'unexpected-host']
+] as const)('keeps an unqualified Console redirect unknown with its exact %s boundary', async (location, redirectReason) => {
+  const f = await consoleReady(new Response(null, { status: 302, headers: location ? { location } : {} }))
+  const view = await f.adapter.advance({ ...f.original, privateState: f.view.privateState })
+  expect(view).toEqual({ kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed', step: 'console', failure: 'redirect-unconfirmed', boundary: 'handoff', httpStatus: 302, redirectReason } })
+  expect(f.network.calls).toHaveLength(4)
+  expect(JSON.stringify(view)).not.toContain('private=reference')
+})
+
+it.each(['https://accounts.feishu.cn/accounts/console', 'https://ask.feishu.cn/console'])('does not grant an account from trusted non-Console HTML at %s', async location => {
+  const f = await consoleReady(new Response(null, { status: 302, headers: { location } }), new Response(html(), { headers: { 'content-type': 'text/html' } }))
+  const next = authentication(await f.adapter.advance({ ...f.original, privateState: f.view.privateState }))
+  expect(next.stage).toBe('handoff'); expect(next.account).toBeNull()
+  const unknown = await f.adapter.advance({ ...f.original, privateState: next.privateState })
+  expect(unknown).toEqual({ kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed', step: 'console', failure: 'redirect-unconfirmed', boundary: 'bootstrap', httpStatus: 200, redirectReason: 'unexpected-final-host' } })
+  expect(f.network.calls).toHaveLength(5)
+})
+
+it.each([300, 304, 305, 306, 399])('does not follow nonredirect Console HTTP %s even with a Location', async status => {
+  const f = await consoleReady(new Response(null, { status, headers: { location: 'https://open.feishu.cn/app' } }))
+  expect(await f.adapter.advance({ ...f.original, privateState: f.view.privateState })).toEqual({ kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed', step: 'console', failure: 'http-status', httpStatus: status } })
+  expect(f.network.calls).toHaveLength(4)
+})
+
+it.each([20, 21])('bounds only the Console observation after %s redirect responses without failing earlier hydration', async redirects => {
+  const responses = Array.from({ length: redirects }, (_, index) => new Response(null, { status: 302, headers: { location: '/app?hop=' + index } }))
+  const f = await consoleReady(...responses, new Response(html(), { headers: { 'content-type': 'text/html' } }))
+  let view = f.view
+  for (let index = 0; index < redirects; index++) {
+    const before = f.network.calls.length
+    const next = await f.adapter.advance({ ...f.original, privateState: view.privateState })
+    expect(f.network.calls).toHaveLength(before + 1)
+    if (index === 20) {
+      expect(next).toEqual({ kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed', step: 'console', failure: 'redirect-unconfirmed', boundary: 'handoff', httpStatus: 302, redirectReason: 'redirect-limit' } })
+      return
+    }
+    view = authentication(next)
+    expect(view.stage).toBe('handoff'); expect(view.account).toBeNull()
+  }
+  const account = authentication(await f.adapter.advance({ ...f.original, privateState: view.privateState }))
+  expect(account.stage).toBe('account')
+  expect(f.network.calls).toHaveLength(24)
+})
+
+it('keeps the original cross-login eight-redirect bound and fragment qualification', async () => {
+  const f = remote(
+    Response.json({ code: 0, data: { step_info: { token: 'private-cross-qr' } } }, { headers: { 'x-flow-key': 'private-cross-flow' } }),
+    Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { cross_login_uri: 'https://accounts.feishu.cn/cross' } } }),
+    ...Array.from({ length: 9 }, (_, index) => new Response(null, { status: 302, headers: { location: '/cross?hop=' + index } }))
+  )
+  const original = input(), adapter = createFeishuEnrollment()
+  let view = authentication(await adapter.begin(original))
+  view = authentication(await adapter.advance({ ...original, privateState: view.privateState }))
+  for (let index = 0; index < 9; index++) {
+    const next = await adapter.advance({ ...original, privateState: view.privateState })
+    expect(f.calls).toHaveLength(3 + index)
+    if (index === 8) expect(next).toEqual({ kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed', step: 'cross-login', failure: 'redirect-unconfirmed', boundary: 'handoff', httpStatus: 302, redirectReason: 'redirect-limit' } })
+    else view = authentication(next)
+  }
+})
+
+it('rejects a redirect while polling without following its Location', async () => {
+  const f = remote(
+    Response.json({ code: 0, data: { step_info: { token: 'private-poll-qr' } } }, { headers: { 'x-flow-key': 'private-poll-flow' } }),
+    new Response(null, { status: 302, headers: { location: 'https://open.feishu.cn/app' } })
+  )
+  const original = input(), adapter = createFeishuEnrollment(), view = authentication(await adapter.begin(original))
+  expect(await adapter.advance({ ...original, privateState: view.privateState })).toEqual({ kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed', step: 'poll', failure: 'redirect-unconfirmed', boundary: 'handoff', httpStatus: 302, redirectReason: 'unexpected-redirect' } })
+  expect(f.calls).toHaveLength(2)
 })

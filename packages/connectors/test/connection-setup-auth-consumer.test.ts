@@ -587,7 +587,7 @@ it.each(['throw new Error("fixture-before-bootstrap");', 'for (;;) {}'] as const
   expect(fetch.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross-login', '/', '/', '/app'])
 }, 30_000)
 
-it.each(['https://open.feishu.cn/unqualified-bootstrap', 'https://open.feishu.cn/app?source=unqualified'] as const)('console redirects cannot promote an unsourced page %s to identity', async target => {
+it.each(['https://open.feishu.cn/console/profile', 'https://open.feishu.cn/app?lang=zh'] as const)('final Console document %s supplies identity independently of its path and query', async target => {
   const f = await fixture(), route = nativeRoute()
   const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     if (String(url) === 'https://open.feishu.cn/app') return new Response('', { status: 302, headers: { location: target } })
@@ -596,9 +596,16 @@ it.each(['https://open.feishu.cn/unqualified-bootstrap', 'https://open.feishu.cn
   }); vi.stubGlobal('fetch', fetch)
   let view = await f.sdk.call('connection.setup.begin', f.input)
   for (let step = 0; step < 8 && !['account', 'unknown'].includes(view.continuation!.stage); step++) view = await advance(f, view)
-  expect(fetch.mock.calls.map(([url]) => { const u = new URL(String(url)); return u.origin + u.pathname })).not.toContain(target)
-  expect(view.continuation).toMatchObject({ stage: 'unknown', account: null })
-  expect(view.continuation?.actions.map(action => action.kind)).not.toContain('confirm-account')
+  expect(fetch.mock.calls.map(([url]) => { const u = new URL(String(url)); return u.origin + u.pathname + u.search })).toEqual([
+    expect.stringMatching(/^https:\/\/accounts\.feishu\.cn\/accounts\/qrlogin\/init\?/),
+    expect.stringMatching(/^https:\/\/accounts\.feishu\.cn\/accounts\/qrlogin\/polling\?/),
+    'https://accounts.feishu.cn/cross-login', 'https://ask.feishu.cn/', 'https://ask.feishu.cn/', 'https://open.feishu.cn/app', target
+  ])
+  expect(view.continuation).toMatchObject({ stage: 'account', account: { userId: USER, tenantId: TENANT } })
+  expect(view.continuation?.actions.map(action => action.kind)).toContain('confirm-account')
+  const count = fetch.mock.calls.length
+  expect(result(await f.cli(['advance', '--input', '-'], advanceInput(view, 'confirm-account'))).continuation?.stage).toBe('confirmed')
+  expect(fetch).toHaveBeenCalledTimes(count)
 }, 30_000)
 
 it('parallel local Vault recovery on a fresh owner returns the same stored action after its original durable ACK was delayed', async () => {
@@ -933,3 +940,70 @@ it('explicit related bootstrap mutations remain unknown through the original pub
     expect(fetch).toHaveBeenCalledTimes(count)
   }
 }, 45_000)
+
+it('continues the original Console transport through Setup SDK and compiled CLI before exact account consent', async () => {
+  const f = await fixture(), before = await f.sdk.call('connection.inspect', { connectionId: f.input.connectionId }), route = nativeRoute()
+  const endpoints = ['https://open.feishu.cn/app', 'https://open.feishu.cn/console/callback?state=fixture', 'https://accounts.feishu.cn/accounts/console?state=fixture', 'https://ask.feishu.cn/console-handoff', 'https://open.feishu.cn/region/app?lang=zh']
+  const requests = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+    const target = String(url), index = endpoints.indexOf(target)
+    if (index < 0) return route(url, init)
+    expect(init?.method).toBe('GET'); expect(init?.redirect).toBe('manual')
+    const headers = new Headers(init?.headers)
+    expect(headers.get('referer')).toBe(index === 0 ? 'https://ask.feishu.cn/' : endpoints[index - 1])
+    expect(headers.get('x-flow-key')).toBeNull(); expect(headers.get('x-csrf-token')).toBeNull()
+    const cookies = headers.get('cookie')?.split('; ').sort()
+    expect(cookies).toEqual(index === 1 || index === 4 ? ['consoleOnly=fixture-console-cookie', `session=${SESSION}`, 'web_session=fixture-console-session'] : index === 3 ? ['askOnly=fixture-ask-cookie', `session=${SESSION}`, 'web_session=fixture-console-session'] : [`session=${SESSION}`, 'web_session=fixture-console-session'])
+    if (index === 4) return new Response(bootstrap(), { headers: { 'content-type': 'text/html' } })
+    return new Response(null, { status: [302, 303, 307, 308][index], headers: {
+      location: endpoints[index + 1]! + (index === 0 || index === 3 ? '#local-view' : ''),
+      ...(index === 0 ? { 'set-cookie': 'consoleOnly=fixture-console-cookie; Path=/; Secure' } : {})
+    } })
+  }); vi.stubGlobal('fetch', requests)
+  let view = result(await f.cli(['begin', '--input', '-'], f.input))
+  const attemptId = view.operation!.request.attemptId
+  for (let index = 0; index < 9; index++) {
+    const original = advanceInput(view), count = requests.mock.calls.length
+    view = index % 2 ? result(await f.cli(['advance', '--input', '-'], original)) : await f.sdk.call('connection.setup.advance', original)
+    expect(requests).toHaveBeenCalledTimes(count + 1)
+    expect(view.operation?.request.attemptId).toBe(attemptId)
+    expect(view.continuation?.stage).toBe(index === 8 ? 'account' : 'handoff')
+    if (index < 8) { expect(view.continuation?.account).toBeNull(); expect(view.continuation?.actions.map(action => action.kind)).not.toContain('confirm-account') }
+    expect((await f.sdk.call('connection.setup.advance', original)).receipt).toEqual(view.receipt)
+    expect(requests).toHaveBeenCalledTimes(count + 1)
+  }
+  expect(requests.mock.calls.map(([url]) => { const target = new URL(String(url)); return target.origin + target.pathname + target.search })).toEqual([
+    expect.stringMatching(/^https:\/\/accounts\.feishu\.cn\/accounts\/qrlogin\/init\?/),
+    expect.stringMatching(/^https:\/\/accounts\.feishu\.cn\/accounts\/qrlogin\/polling\?/),
+    'https://accounts.feishu.cn/cross-login', 'https://ask.feishu.cn/', 'https://ask.feishu.cn/', ...endpoints
+  ])
+  expect(view.continuation?.account).toEqual({ userId: USER, tenantId: TENANT, userName: 'Fixture account', tenantName: 'Fixture enterprise' })
+  const count = requests.mock.calls.length
+  const confirmed = result(await f.cli(['advance', '--input', '-'], advanceInput(view, 'confirm-account')))
+  expect(confirmed.continuation?.stage).toBe('confirmed')
+  expect(requests).toHaveBeenCalledTimes(count)
+  expect(await f.sdk.call('connection.inspect', { connectionId: f.input.connectionId })).toEqual(before)
+}, 30_000)
+
+it('keeps valid identity HTML from a Console issuer intermediate unknown through the original Setup owner', async () => {
+  const f = await fixture(), route = nativeRoute(), before = await f.sdk.call('connection.inspect', { connectionId: f.input.connectionId })
+  const requests = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+    if (String(url) === 'https://open.feishu.cn/app') return new Response(null, { status: 302, headers: { location: 'https://accounts.feishu.cn/accounts/console' } })
+    if (String(url) === 'https://accounts.feishu.cn/accounts/console') return new Response(bootstrap(), { headers: { 'content-type': 'text/html' } })
+    return route(url, init)
+  }); vi.stubGlobal('fetch', requests)
+  let view = await f.sdk.call('connection.setup.begin', f.input), original: ConnectionSetupAdvance | undefined
+  for (let index = 0; index < 6; index++) {
+    original = advanceInput(view)
+    const count = requests.mock.calls.length
+    view = await f.sdk.call('connection.setup.advance', original)
+    expect(requests).toHaveBeenCalledTimes(count + 1)
+  }
+  expect(view.continuation).toMatchObject({ stage: 'unknown', account: null })
+  expect(view.continuation?.actions.map(action => action.kind)).not.toContain('confirm-account')
+  const count = requests.mock.calls.length
+  expect((await f.sdk.call('connection.setup.advance', original!)).receipt).toEqual(view.receipt)
+  const { receipt: _actionReceipt, ...inspection } = view
+  expect(result(await f.cli(['inspect', '--operation-id', f.input.operationId]))).toEqual(inspection)
+  expect(requests).toHaveBeenCalledTimes(count)
+  expect(await f.sdk.call('connection.inspect', { connectionId: f.input.connectionId })).toEqual(before)
+}, 30_000)
