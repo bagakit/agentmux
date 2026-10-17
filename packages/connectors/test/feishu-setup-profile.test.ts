@@ -181,7 +181,14 @@ it.each(['versions', 'desktop-entry', 'mobile-entry', 'audience', 'sharing', 'sp
   if (missing === 'features') states.features = '{}'
   if (missing === 'split-sharing') states.features = JSON.stringify({ hitFeatureKeyList: ['openplatform.b2c.bot_b2c_share_switch_split'] })
   const calls = wire()
-  expect(await leaf().publicationDraft(states, 'Original profile update.')).toBeNull()
+  const configuration = new FeishuAdapter().setup.applicationConfiguration!
+  const draft = await leaf().publicationDraft(states, 'Original profile update.')
+  if (missing === 'versions') expect(draft).toBeNull()
+  else expect(draft).toEqual({ kind: 'create-version', version: '1.0.12', notes: 'Original profile update.', visibility: 'current' })
+  const plan = await configuration.publicationPlan('create-application-version', states, draft, null, { creatorIsCurrent: false, initialVersion: null, profileUpdate: { readbackStepId: 'original-readback', createdVersion: null } })
+  expect(plan.privateIntent).toBeNull()
+  expect(plan.review.issues.length).toBeGreaterThan(0)
+  if (missing !== 'versions') expect(plan.review.issues).not.toContain('Confirm a version and release notes')
   expect(calls).toHaveLength(0)
 })
 
@@ -190,13 +197,14 @@ it.each(['api', 'contact', 'data'] as const)('retains known %s review-reason req
   pending.ChangeScope.addScopesV2 = ['original-added-scope']
   pending.applyReasonConfig = kind === 'api' ? { apiPrivilegeNeedReason: true } : kind === 'contact' ? { contactPrivilegeNeedReason: true, isContactExpand: true } : { dataPrivilegeNeedReason: true, isDataPrivilegeExpandMap: { original: true } }
   states.pending = JSON.stringify(pending)
-  const configuration = new FeishuAdapter().setup.applicationConfiguration!, draft = { kind: 'create-version' as const, version: '1.0.12', notes: 'Original profile update.', visibility: 'current' as const }
+  const configuration = new FeishuAdapter().setup.applicationConfiguration!, draft = await leaf().publicationDraft(states, 'Original profile update.')
+  expect(draft).toEqual({ kind: 'create-version', version: '1.0.12', notes: 'Original profile update.', visibility: 'current' })
   const provenance = { creatorIsCurrent: false, initialVersion: null, profileUpdate: { readbackStepId: 'original-readback', createdVersion: null } }
   const review = await configuration.publicationPlan('create-application-version', states, draft, null, provenance)
   expect(review.privateIntent).toBeNull()
   expect(review.review.reasonRequired).toBe(true)
   expect(review.review.changes).toContainEqual({ category: 'permissions', details: ['Add permission: original-added-scope'] })
-  const accepted = await configuration.publicationPlan('create-application-version', states, { ...draft, reason: 'Original explicit review reason.' }, null, provenance)
+  const accepted = await configuration.publicationPlan('create-application-version', states, { ...draft!, reason: 'Original explicit review reason.' }, null, provenance)
   expect(accepted.review.changes).toEqual(review.review.changes)
   const body = JSON.parse(accepted.privateIntent!).body
   expect(body.remark).toBe('Original explicit review reason.')
@@ -246,10 +254,79 @@ it.each([
   expect(await new FeishuAdapter().setup.applicationConfiguration!.publicationPlan('create-application-version', states, await p.publicationDraft(states, 'Original update'), null, { creatorIsCurrent: false, initialVersion: null, profileUpdate: { readbackStepId: 'original-readback', createdVersion: null } })).toMatchObject({ privateIntent: expect.any(String) })
 })
 
-it('does not derive profile publication from missing complete sources or change the original audience', async () => {
+it('derives only a version candidate independently of dispatch sources without changing the original audience', async () => {
   const p = leaf(), states = publicationStates()
-  for (const bad of [{ ...states, visibility: '{}' }, { ...states, versions: '{}' }, { ...states, pending: '{}' }]) expect(await p.publicationDraft(bad, 'Original update')).toBeNull()
+  expect(await p.publicationDraft({ versions: states.versions }, 'Original update')).toEqual({ kind: 'create-version', version: '1.0.12', notes: 'Original update', visibility: 'current' })
+  expect(await p.publicationDraft({ ...states, versions: '{}' }, 'Original update')).toBeNull()
   const configuration = new FeishuAdapter().setup.applicationConfiguration!, draft = (await p.publicationDraft(states, 'Original update'))!
   const changedAudience = await configuration.publicationPlan('create-application-version', states, { ...draft, visibility: 'creator-only' }, { userId: 'creator', tenantId: 'tenant' }, { creatorIsCurrent: true, initialVersion: null, profileUpdate: { readbackStepId: 'original-readback', createdVersion: null } })
   expect(changedAudience.privateIntent).toBeNull()
+})
+
+
+// Exact online-visibility collections from the reference rename contract; outgoing IDs are not another input schema.
+type NativeRangeFixture = { departments: unknown[]; groups: unknown[]; members: unknown[]; isAll: number }
+const referenceAudience: { whiteList: NativeRangeFixture; blackList: NativeRangeFixture } = {
+  whiteList: { departments: [{ departmentId: 'od-1' }, { open_department_id: 'od-2' }, 'od-3'], groups: [{ openChatId: 'oc-1' }, { chat_id: 'oc-2' }], isAll: 0, members: [{ openId: 'ou_1' }, { user_id: 12345 }] },
+  blackList: { departments: [], groups: [], isAll: 0, members: [] }
+}
+const referenceNativeAudience: { visibleSuggest: { departments: string[]; groups: string[]; members: string[]; isAll: number }; blackVisibleSuggest: { departments: string[]; groups: string[]; members: string[]; isAll: number } } = {
+  visibleSuggest: { departments: ['od-1', 'od-2', 'od-3'], groups: ['oc-1', 'oc-2'], isAll: 0, members: ['ou_1', '12345'] },
+  blackVisibleSuggest: { departments: [], groups: [], isAll: 0, members: [] }
+}
+const profileProvenance = { creatorIsCurrent: false, initialVersion: null, profileUpdate: { readbackStepId: 'original-profile-readback', createdVersion: null } }
+
+it.each(['reference-collections', 'complete-exclusions'] as const)('reads and preserves the complete %s audience in the exact original profile create and submit requests', async shape => {
+  const setup = new FeishuAdapter().setup, configuration = setup.applicationConfiguration!, states = profilePublicationStates(), input = scope()
+  const source = structuredClone(referenceAudience)
+  const expected = structuredClone(referenceNativeAudience)
+  if (shape === 'complete-exclusions') {
+    source.blackList = { departments: [{ departmentId: 'exclude-department' }], groups: [{ chat_id: 'exclude-group' }], isAll: 0, members: [{ openId: 'exclude-member' }] }
+    expected.blackVisibleSuggest = { departments: ['exclude-department'], groups: ['exclude-group'], isAll: 0, members: ['exclude-member'] }
+    source.whiteList.members = [{ id: 'original-id', openId: 'original-id' }]
+    expected.visibleSuggest.members = ['original-id']
+  }
+  const calls = wire(path => Response.json({ code: 0, data: path.includes('/visible/online/') ? source : path.includes('/create/') ? { versionId: 'profile-original-version' } : {} }))
+  const observed = await setup.applicationInspection!.read({ ...input, subject: 'publication-visibility' })
+  expect(observed.kind).toBe('observed')
+  if (observed.kind !== 'observed') throw Error('Original audience read missing')
+  expect(JSON.parse(observed.privateState)).toEqual(source)
+  states.visibility = observed.privateState
+  const draft = await leaf().publicationDraft(states, 'Original profile update.')
+  const plan = await configuration.publicationPlan('create-application-version', states, draft, null, profileProvenance)
+  expect(plan.review.issues).toEqual([])
+  expect(plan.review.audience).toEqual({ include: { all: false, departments: expected.visibleSuggest.departments, people: expected.visibleSuggest.members, groups: expected.visibleSuggest.groups }, exclude: { all: false, departments: expected.blackVisibleSuggest.departments, people: expected.blackVisibleSuggest.members, groups: expected.blackVisibleSuggest.groups } })
+  expect(await configuration.createVersion({ ...input, privateIntent: plan.privateIntent! })).toMatchObject({ kind: 'accepted', versionId: 'profile-original-version' })
+  expect(JSON.parse(String(calls[1]!.init.body))).toEqual({ appVersion: '1.0.12', changeLog: 'Original profile update.', pcDefaultAbility: 'bot', mobileDefaultAbility: 'bot', ...expected, b2cShareSuggest: false })
+  const version = { appVersion: draft!.version, versionStatus: 0, versionId: 'profile-original-version', visibleRange: source }
+  const submit = await configuration.publicationPlan('submit-application-version', { ...states, version: JSON.stringify(version) }, { kind: 'submit-version', versionId: version.versionId, fullRelease: false }, null, { ...profileProvenance, profileUpdate: { ...profileProvenance.profileUpdate, createdVersion: { versionId: version.versionId, draft: draft! } } })
+  expect(submit.review.audience).toEqual(plan.review.audience)
+  expect(await configuration.submitVersion({ ...input, privateIntent: submit.privateIntent! })).toMatchObject({ kind: 'accepted', versionId: version.versionId })
+  expect(calls.map(call => call.target.pathname)).toEqual(['/developers/v1/visible/online/' + appId, '/developers/v1/app_version/create/' + appId, '/developers/v1/publish/commit/' + appId + '/' + version.versionId])
+  expect(JSON.parse(String(calls[2]!.init.body))).toEqual({ clientId: appId })
+})
+
+it.each([
+  { whiteList: { ...audience.whiteList, departments: [{ id: 7, departmentId: 'different-department' }] }, blackList: audience.blackList },
+  { whiteList: { ...audience.whiteList, members: [{ id: 'original-member', openId: 'different-member' }] }, blackList: audience.blackList },
+  { whiteList: { ...audience.whiteList, groups: [{ id: 'original-group', chat_id: 'different-group' }] }, blackList: audience.blackList },
+  { whiteList: { ...audience.whiteList, members: [{ id: 'original-member', openId: null }] }, blackList: audience.blackList },
+  { whiteList: { ...audience.whiteList, departments: ['original-department', { unknownId: 'unsupported' }] }, blackList: audience.blackList },
+  { whiteList: { ...audience.whiteList, members: ['unsupported-raw-member'] }, blackList: audience.blackList },
+  { whiteList: { ...audience.whiteList, groups: ['unsupported-raw-group'] }, blackList: audience.blackList },
+  { whiteList: { ...audience.whiteList, departments: [7] }, blackList: audience.blackList },
+  { whiteList: { ...audience.whiteList, members: [{ openId: 'duplicate' }, { user_id: 'duplicate' }] }, blackList: audience.blackList },
+  { whiteList: { ...audience.whiteList, groups: undefined }, blackList: audience.blackList },
+  { whiteList: audience.whiteList },
+  { whiteList: audience.whiteList, blackList: { ...audience.blackList, isAll: '0' } }
+])('retains an unsupported, conflicting or incomplete audience as a real review issue: %j', async visibility => {
+  const configuration = new FeishuAdapter().setup.applicationConfiguration!, states = { ...profilePublicationStates(), visibility: JSON.stringify(visibility) }, calls = wire()
+  const draft = await leaf().publicationDraft(states, 'Original profile update.')
+  expect(draft).toEqual({ kind: 'create-version', version: '1.0.12', notes: 'Original profile update.', visibility: 'current' })
+  const plan = await configuration.publicationPlan('create-application-version', states, draft, null, profileProvenance)
+  expect(plan.privateIntent).toBeNull()
+  expect(plan.review.audience).toBeNull()
+  expect(plan.review.issues).toContain('Both complete current visibility ranges are required')
+  expect(plan.review.issues).not.toContain('Confirm a version and release notes')
+  expect(calls).toHaveLength(0)
 })
