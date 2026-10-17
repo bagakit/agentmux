@@ -123,6 +123,11 @@ export type AgentProviderPreparedPromptTransport = Readonly<{
 export type AgentProviderSessionStatusContext = AgentProviderPromptExecutionContext & { signal: AbortSignal }
 export type AgentProviderManagedLaunch = { plan: AgentLaunchPlan; nativeActor?: AgentPrivateNativeActor }
 export type AgentProviderNativeInputContext = { processId: number; nativeActor: AgentPrivateNativeActor; workspacePath: string; signal: AbortSignal }
+/** Read the frozen original turn through the actor of an already successful native resume. */
+export type AgentProviderResumedTurnInterruptionContext = AgentProviderNativeInputContext & {
+  nativeHandle: Readonly<AgentNativeSessionHandle>
+  previousTurn: Readonly<AgentPromptExecutionEvidence & { nativeTurnId: string }>
+}
 export type AgentProviderPreparedNativeInput = {
   plan: AgentNativePromptInputPlan
   /** Called only after Core persists the original claim and correlation. */
@@ -182,6 +187,8 @@ export type AgentProvider = {
   verifyPromptExecutionTransport?(context: AgentProviderPromptExecutionContext): Promise<boolean>
   preparePromptExecutionTransport?(context: AgentProviderPromptExecutionContext & { signal: AbortSignal }): Promise<AgentProviderPreparedPromptTransport | null>
   readPromptExecutionEvidence?(context: AgentProviderPromptExecutionContext): Promise<AgentPromptExecutionEvidence | null>
+  /** null is unknown, never unsupported. Retain original activity time; this read does not renew it. */
+  readResumedTurnInterruption?(context: AgentProviderResumedTurnInterruptionContext): Promise<AgentPromptExecutionEvidence | null>
   observeSessionStatus?(context: AgentProviderSessionStatusObservationContext): Promise<{ dispose(): void }>
   planInteractionResponse(
     request: AgentMuxInteractionRequest,
@@ -235,6 +242,7 @@ export type AgentProviderDefinition = {
   verifyPromptExecutionTransport?: (context: AgentProviderPromptExecutionContext) => Promise<boolean>
   preparePromptExecutionTransport?: AgentProvider['preparePromptExecutionTransport']
   readPromptExecutionEvidence?: (context: AgentProviderPromptExecutionContext) => Promise<AgentPromptExecutionEvidence | null>
+  readResumedTurnInterruption?: AgentProvider['readResumedTurnInterruption']
   observeSessionStatus?: (context: AgentProviderSessionStatusObservationContext) => Promise<{ dispose(): void }>
   interaction?: AgentTerminalInteractionProtocol
   posture?: PostureControlDeclaration
@@ -395,6 +403,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     ...(definition.verifyPromptExecutionTransport ? { verifyPromptExecutionTransport: definition.verifyPromptExecutionTransport } : {}),
     ...(definition.preparePromptExecutionTransport ? { preparePromptExecutionTransport: definition.preparePromptExecutionTransport } : {}),
     ...(definition.readPromptExecutionEvidence ? { readPromptExecutionEvidence: definition.readPromptExecutionEvidence } : {}),
+    ...(definition.readResumedTurnInterruption ? { readResumedTurnInterruption: definition.readResumedTurnInterruption } : {}),
     ...(definition.observeTerminalFrontend ? { observeTerminalFrontend: definition.observeTerminalFrontend } : {}),
     ...(definition.reconnectTerminalFrontend ? { reconnectTerminalFrontend: definition.reconnectTerminalFrontend } : {}),
     ...(definition.observeSessionStatus ? { observeSessionStatus: definition.observeSessionStatus } : {}),
