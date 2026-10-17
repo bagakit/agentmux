@@ -7,7 +7,7 @@ import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { useAppStore } from '../store'
 import { RegionMenuEntryView } from './RegionContextMenu'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
-import { useFocusStopAgent } from './FocusStopAgent'
+import { useSessionStop } from './SessionStop'
 import { useSessionRestart } from './SessionRestart'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 
@@ -25,7 +25,7 @@ export function FocusContextMenu({ open, context, children, onOpenChange, onRena
   const sessionId = context.id
   const actionOwnsFocus = useRef(false)
   const origin = useRef<HTMLElement | null>(null)
-  const stop = useFocusStopAgent(active)
+  const stop = useSessionStop(active)
   const restart = useSessionRestart(active)
   const actions = context.control ? agentRosterMenuActions({ sessionId: context.control.agentSessionId, writeClipboardText: async text => {
     await copyTextToClipboard(text, error => useAppStore.getState().reportError(error))

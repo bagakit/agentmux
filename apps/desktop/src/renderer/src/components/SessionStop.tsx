@@ -5,7 +5,7 @@ import { useAppStore } from '../store'
 import { ConfirmationDialog } from './ConfirmationDialog'
 
 /** Confirmation state only. Core owns stopping, retirement and the resulting Run events. */
-export function useFocusStopAgent(active = true) {
+export function useSessionStop(active = true) {
   const [request, setRequest] = useState<{ target: ReturnType<typeof retainAgentMenuTarget>; name: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const flight = useRef(false)
