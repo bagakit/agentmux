@@ -2,13 +2,13 @@ import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
 import { spawn, execFileSync } from 'node:child_process'
 import { createRequire, isBuiltin } from 'node:module'
-import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const root = resolve(import.meta.dirname, '../../..'), require = createRequire(join(root, 'apps/desktop/package.json'))
-const { build } = createRequire(join(root, 'packages/core/package.json'))('esbuild')
+const { build, transform } = createRequire(join(root, 'packages/core/package.json'))('esbuild')
 const { build: viteBuild } = await import(pathToFileURL(require.resolve('vite')).href)
 const output = join(root, '.tmp/pasted-image-persistence', randomUUID())
 await mkdir(output, { recursive: true })
@@ -52,7 +52,27 @@ async function mutationReceipt(mutation) {
   return mutation ? { id: mutation.id, file: mutation.file, original: sources.get(mutation.file),
     consumed: hash((await readFile(join(root, mutation.file), 'utf8')).replace(mutation.from, mutation.to)) } : null
 }
-for (const mutation of mutations) { await bind(join(root, mutation.file)); assert.equal((await readFile(join(root, mutation.file), 'utf8')).split(mutation.from).length, 2, 'Unique production anchor: ' + mutation.id) }
+for (const mutation of mutations) {
+  const file = join(root, mutation.file); await bind(file)
+  const original = await readFile(file, 'utf8')
+  assert.equal(original.split(mutation.from).length, 2, 'Unique production anchor: ' + mutation.id)
+  await transform(original.replace(mutation.from, mutation.to), { loader: 'ts', target: 'esnext', sourcefile: mutation.file })
+}
+// Honor the workspace's declared browser source exports, including CSS imports. Installed
+// workspace links may point at a different worktree and cannot supply this candidate's UI.
+const browserSourceAliases = []
+for (const name of await readdir(join(root, 'packages'))) {
+  const manifest = join(root, 'packages', name, 'package.json')
+  let pkg; try { pkg = JSON.parse(await readFile(manifest, 'utf8')) } catch { continue }
+  await bind(manifest)
+  for (const [key, spec] of Object.entries(pkg.exports ?? {}).sort(([a], [b]) => Number(a.includes('*')) - Number(b.includes('*')) || b.length - a.length)) {
+    const target = typeof spec === 'string' ? spec : spec.browser
+    if (!target?.startsWith('./src/')) continue
+    const pattern = pkg.name + (key === '.' ? '' : key.slice(1))
+    browserSourceAliases.push({ find: new RegExp('^' + pattern.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&').replace('\\*', '(.+)') + '$'),
+      replacement: resolve(dirname(manifest), target).replace('*', '$1') })
+  }
+}
 async function units(label, mutation) {
   const report = join(output, label + '.tests.json'), config = join(output, label + '.config.mts'), loaded = join(output, label + '.loaded.json')
   await writeFile(config, `import base from ${JSON.stringify(join(root, 'apps/desktop/test/pasted-image-persistence.config.mts'))};
@@ -131,9 +151,13 @@ async function native(label, mutation) {
   renderer = join(output, 'renderer')
   await viteBuild({ configFile: false, root: dirname(html), base: './', logLevel: 'error',
     define: { __AGENTMUX_WEB_PREVIEW__: 'false', 'process.env.NODE_ENV': '"production"' },
-    esbuild: { jsx: 'automatic' }, resolve: { dedupe: ['react', 'react-dom'] }, worker: { format: 'es' },
+    esbuild: { jsx: 'automatic' }, resolve: { dedupe: ['react', 'react-dom'], alias: browserSourceAliases }, worker: { format: 'es' },
     plugins: [{ name: 'pasted-renderer-source-binding', async transform(_source, id) { const file = id.split('?')[0]; if (file.startsWith(root + '/') && !file.includes('/node_modules/')) await bind(file) } }],
     build: { outDir: renderer, emptyOutDir: true, rollupOptions: { input: html }, chunkSizeWarningLimit: 10000 } })
+  }
+  for (const expected of ['apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx',
+    'apps/desktop/src/renderer/src/lib/use-composer-attachments.ts', 'packages/client-ui/src/components/AgentComposer.tsx']) {
+    assert.ok(sources.has(expected), 'Actual pasted consumer must bind candidate source: ' + expected)
   }
   await symlink(renderer, join(directory, 'renderer'), 'dir')
   await writeFile(join(directory, 'bootstrap.cjs'), `const {app}=require('electron'),fs=require('node:fs'),path=require('node:path');
