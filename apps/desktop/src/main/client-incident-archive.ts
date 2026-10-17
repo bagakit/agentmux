@@ -151,7 +151,7 @@ export class ClientIncidentArchive {
   /** Main stamps the actual receiving owner. The Renderer cannot supply any archive authority. */
   enqueue(input: AgentMuxClientIncidentReport, producer: AgentMuxClientIncidentProducer): ClientIncidentReceipt {
     let report: AgentMuxClientIncidentReport
-    try { report = structuredClone(parseClientIncidentReport(input)) } catch { this.counters.invalid++; return { accepted: false } }
+    try { report = parseClientIncidentReport(input) } catch { this.counters.invalid++; return { accepted: false } }
     const bytes = Buffer.byteLength(JSON.stringify({ report, producer })) + 1024
     if (bytes > CLIENT_INCIDENT_LIMITS.recordBytes) { this.counters.invalid++; return { accepted: false } }
     const key = JSON.stringify([producer.appInstanceId, producer.producerInstanceId, report.occurrenceId]), fingerprint = digest({ report, producer })
