@@ -25,7 +25,8 @@ if (args.includes('app-server')) {
   const token = process.env.AGENTMUX_CODEX_ACTOR_TOKEN
   assert.ok(token); assert.equal(args[args.indexOf('--ws-token-sha256') + 1], createHash('sha256').update(token).digest('hex'))
   const fd = openSync(nativePath, 'a+', 0o600)
-  const append = payload => writeSync(fd, JSON.stringify({ timestamp: new Date().toISOString(), type: 'event_msg', payload }) + '\n')
+  let ordinal = readFileSync(nativePath, 'utf8').split('\n').filter(Boolean).length
+  const append = payload => writeSync(fd, JSON.stringify({ timestamp: new Date().toISOString(), ordinal: ++ordinal, type: 'event_msg', payload }) + '\n')
   if (readFileSync(nativePath).length === 0) {
     writeSync(fd, JSON.stringify({ type: 'session_meta', payload: {
       id: nativeId, cwd: process.cwd(), source: 'vscode', thread_source: 'user', history_mode: 'paginated'
