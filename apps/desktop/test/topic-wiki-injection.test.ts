@@ -1,3 +1,4 @@
+import { preparedContext } from './helpers/prepared-topic-context'
 import { mkdir, mkdtemp, rm, writeFile, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -21,8 +22,8 @@ describe('Topic Wiki injection', () => {
     await writeFile(wikiPath, `${DEFAULT_TOPIC_WIKI}\nUse a receipt.\n`)
     const edited = await topics.read(workspace, topic.id)
     expect(edited?.wiki?.updatedAt).toEqual(expect.any(Number))
-    expect((await topics.prepareAgent(workspace, topic.id, { providerId: 'codex', sessionId: 'enabled' })).prompt).toContain('Use a receipt.')
+    expect(preparedContext(await topics.prepareAgent(workspace, topic.id, { providerId: 'codex', sessionId: 'enabled' }))).toContain('Use a receipt.')
     await topics.setWikiEnabled(workspace, topic.id, false)
-    expect((await topics.prepareAgent(workspace, topic.id, { providerId: 'codex', sessionId: 'disabled' })).prompt).not.toContain('Use a receipt.')
+    expect(preparedContext(await topics.prepareAgent(workspace, topic.id, { providerId: 'codex', sessionId: 'disabled' }))).not.toContain('Use a receipt.')
   })
 })

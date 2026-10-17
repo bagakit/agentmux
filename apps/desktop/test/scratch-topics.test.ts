@@ -1,3 +1,4 @@
+import { preparedContext } from './helpers/prepared-topic-context'
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -79,14 +80,14 @@ describe('filesystem-backed Scratch Topics', () => {
     expect(disabled.wiki?.enabled).toBe(false)
     expect(await readFile(statePath, 'utf8')).toContain('false')
     const preparedDisabled = await topics.prepareAgent(workspace, topic.id, { providerId: 'codex', sessionId: 'disabled' })
-    expect(preparedDisabled.prompt).toContain('Topic Wiki injection is disabled')
-    expect(preparedDisabled.prompt).not.toContain('User rule: keep receipts.')
+    expect(preparedContext(preparedDisabled)).toContain('Topic Wiki injection is disabled')
+    expect(preparedContext(preparedDisabled)).not.toContain('User rule: keep receipts.')
 
     const reset = await topics.resetWiki(workspace, topic.id)
     expect(reset.wiki).toMatchObject({ source: 'default', enabled: true, content: DEFAULT_TOPIC_WIKI })
     const preparedReset = await topics.prepareAgent(workspace, topic.id, { providerId: 'codex', sessionId: 'reset' })
-    expect(preparedReset.prompt).toContain(`Topic Wiki injection (version ${reset.wiki?.version}`)
-    expect(preparedReset.prompt).toContain('High-risk or ambiguous writes require user confirmation.')
+    expect(preparedContext(preparedReset)).toContain(`Topic Wiki injection (version ${reset.wiki?.version}`)
+    expect(preparedContext(preparedReset)).toContain('High-risk or ambiguous writes require user confirmation.')
   })
 
   it('lists every Topic directory from the Scratch filesystem without a View binding', async () => {
@@ -208,12 +209,12 @@ it('creates original behavior defaults once and reads custom Mote behavior into 
   const saved = serializeMoteBehaviorDocument(DEFAULT_MOTE_BEHAVIOR, { engagement: 'I', information: 'N', decisions: 'T', approach: 'P', custom: '## Project habits\nKeep my original examples.\n' })
   await writeFile(file, saved)
   const first = await owner.prepareAgent(workspace, mote.id, { providerId: 'codex', sessionId: 'behavior-a' })
-  expect(first.prompt).toContain('Saved behavior from BEHAVIOR.md (version ')
-  expect(first.prompt).toContain('MBTI style: INTP'); expect(first.prompt).toContain('Keep my original examples.')
+  expect(preparedContext(first)).toContain('Saved behavior from BEHAVIOR.md (version ')
+  expect(preparedContext(first)).toContain('MBTI style: INTP'); expect(preparedContext(first)).toContain('Keep my original examples.')
   await writeFile(file, saved.replace('version: 1', 'version: 2'))
   const second = await owner.prepareAgent(workspace, mote.id, { providerId: 'codex', sessionId: 'behavior-b' })
-  expect(second.prompt).toContain('BEHAVIOR.md is unconfirmed'); expect(second.prompt).not.toContain('MBTI style: INTP')
-  expect(first.prompt).toContain('MBTI style: INTP'); expect(second.absolutePath).toBe(first.absolutePath)
+  expect(preparedContext(second)).toContain('BEHAVIOR.md is unconfirmed'); expect(preparedContext(second)).not.toContain('MBTI style: INTP')
+  expect(preparedContext(first)).toContain('MBTI style: INTP'); expect(second.absolutePath).toBe(first.absolutePath)
   expect((await owner.read(workspace, mote.id))?.id).toBe(mote.id)
 })
 

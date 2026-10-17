@@ -12,6 +12,28 @@ import {
   issueAgentCapability
 } from '../src/agent-capability.js'
 import { planDiscussion } from '../src/agent-discussion.js'
+import { MAX_AGENT_PROMPT_BYTES, agentPromptExceedsBudget } from '../src/agent-prompt-budget.js'
+
+it('budgets whole optional sources against escaped final wire including all omission notes', () => {
+  const optional = [
+    { text: 'First original source: ' + '甲'.repeat(9000), omittedText: 'Read original /first.md; not loaded.' },
+    { text: 'Second original source: ' + '<&>'.repeat(8000), omittedText: 'Read original /second.md; not loaded.' },
+    { text: 'Small original source: complete.', omittedText: 'Read original /small.md; not loaded.' }
+  ]
+  const result = composeAgentLaunchPrompt(NASTY_USER, true, 'Required identity and authority.', optional)
+  expect(result.systemContext).toContain(optional[0].text)
+  expect(result.systemContext).toContain(optional[1].omittedText)
+  expect(result.systemContext).not.toContain(optional[1].text)
+  expect(result.systemContext).toContain(optional[2].text)
+  expect(result.systemContext).toContain('Required identity and authority.')
+  expect(result.text.endsWith(NASTY_USER)).toBe(true)
+  expect(agentPromptExceedsBudget(result.text)).toBe(false)
+  expect(optional[1].text).toContain('<&>') // The source itself remains unchanged.
+  const mandatory = composeAgentLaunchPrompt('x'.repeat(MAX_AGENT_PROMPT_BYTES), true, 'Required authority.', optional)
+  expect(agentPromptExceedsBudget(mandatory.text)).toBe(true)
+  expect(mandatory.text.endsWith('x'.repeat(MAX_AGENT_PROMPT_BYTES))).toBe(true)
+  expect(mandatory.systemContext).toContain('Required authority.')
+})
 
 // AgentMux 出站文本此前散在四处各拼各的（启动提示、discuss 首条、send、resume）；这里锁定
 // 它们收敛到同一个出口 composeOutboundMessage，且 AgentMux 自己的话进 <amux> 信封署名、

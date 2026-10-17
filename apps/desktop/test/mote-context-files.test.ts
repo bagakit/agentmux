@@ -1,3 +1,4 @@
+import { preparedContext } from './helpers/prepared-topic-context'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 const { fixtureCivil: _hygiene_fixtureCivil } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
@@ -10,6 +11,7 @@ import { ScratchTopics } from '../src/main/scratch-topics'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { DEFAULT_MOTE_AGENT_INSTRUCTIONS, DEFAULT_TOPIC_AGENT_INSTRUCTIONS, DEFAULT_MOTE_MEMORY } from '../src/shared/topic-agent-instructions'
 import { goalRoleGuidanceContract } from '@agentmux/core/goal-role-guidance'
+import { MAX_AGENT_PROMPT_BYTES } from '@agentmux/core/agent-prompt-budget'
 import type { WorkspaceRecord } from '../src/shared/contracts'
 
 vi.mock('electron', () => ({ nativeImage: {}, app: { getPath: () => _hygiene_fixturePath("not-used-by-this-test") } }))
@@ -38,6 +40,69 @@ async function fixture() {
   return { root, workspace, owner: new ScratchTopics() }
 }
 
+it.each(['blank', 'single-memory', 'combined', 'escaped', 'personality-wiki'] as const)(
+  'launches the original short question through final Core budget with %s sources', async mode => {
+  const { injectedContextCore } = await import('./helpers/injected-context-core')
+  const { RuntimeController } = await import('../src/main/runtime-controller')
+  const { DEFAULT_CONFIG } = await import('../src/main/config-store')
+  const h = await fixture(), mote = await h.owner.ensureMote(h.workspace, 'launcher:budget-' + mode)
+  const directory = mote.physicalDirectoryPath!
+  const edits: Record<string, string> = mode === 'single-memory' ? { 'MEMORY.md': 'm'.repeat(MAX_AGENT_PROMPT_BYTES) }
+    : mode === 'combined' ? { 'AGENTS.md': '甲'.repeat(11000), 'MEMORY.md': '乙'.repeat(11000) }
+    : mode === 'escaped' ? { 'MEMORY.md': '<&>'.repeat(6000) }
+    : mode === 'personality-wiki' ? { 'SOUL.md': '# SOUL\n' + '甲<&>'.repeat(15000), '.agentmux/topic-wiki.md': '乙<&>'.repeat(15000) } : {}
+  for (const [path, content] of Object.entries(edits)) await writeFile(join(directory, path), content)
+  const paths = ['AGENTS.md', 'MEMORY.md', 'SOUL.md', 'BEHAVIOR.md', '.agentmux/topic-wiki.md']
+  const originals = await Promise.all(paths.map(path => readFile(join(directory, path))))
+  const coreRoot = join(h.root, 'private-core'); await mkdir(coreRoot)
+  const f = await injectedContextCore(coreRoot)
+  const runtime = new RuntimeController(f.store, async () => { throw new Error('Unrelated Host must not be connected') })
+  const config = { ...structuredClone(DEFAULT_CONFIG), workspaces: [h.workspace], executors: {
+    fixture: { providerId: 'claude' as const, label: 'Private fixture', command: 'private-fixture', args: [], env: {}, injectAgentMuxGuide: true } } }
+  runtime.commit({ hosts: [{ id: 'local', config: config.hosts.find(host => host.id === 'local')!, client: f.core,
+    executionHost: { kind: 'local', dispose: vi.fn() } as never }], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
+  const create = vi.spyOn(f.core, 'createAgentWithDelivery')
+  const user = '  继续我的原问题 <原文> &amp;\r\n保留空白。  \n'
+  try {
+    const result = await runtime.launchAgent({ hostId: 'local', executorId: 'fixture', workspacePath: h.workspace.path,
+      agentSessionId: 'budget-session', scratchTopicId: mote.id, createOperationId: 'budget-create', prompt: user }, config)
+    const timeline = await f.core.sessionTimeline(result.created.agentSessionId)
+    const system = timeline.items.filter(item => item.kind === 'system_message').map(item => item.content).join('\n\n')
+    expect(system).toContain('AgentMux runtime guide:')
+    expect(system).toContain('Your persistent Mote identity is ' + mote.id)
+    expect(system).toContain('mote --skill')
+    expect(timeline.items.filter(item => item.kind === 'user_message').map(item => item.content)).toEqual([user])
+    const wire = (f.start.mock.calls[0]![0] as unknown as { args: string[] }).args.find(arg => arg.startsWith('<amux>'))!
+    expect(Buffer.byteLength(wire)).toBeLessThanOrEqual(MAX_AGENT_PROMPT_BYTES)
+    expect(wire.endsWith(user)).toBe(true)
+    if (mode === 'blank') {
+      expect(system).toContain(DEFAULT_MOTE_AGENT_INSTRUCTIONS)
+      expect(system).toContain(DEFAULT_MOTE_MEMORY)
+      expect(system).not.toContain('final message budget')
+    } else {
+      const omitted = mode === 'personality-wiki' ? ['SOUL.md', '.agentmux/topic-wiki.md'] : ['MEMORY.md']
+      for (const path of omitted) {
+        expect(system).toContain('Original ' + path + ' was not loaded into this new Session')
+        expect(system).toContain(join(directory, path))
+        expect(system).not.toContain(edits[path])
+      }
+      if (mode === 'combined') expect(system).toContain(edits['AGENTS.md'])
+    }
+    for (const [index, path] of paths.entries()) expect(await readFile(join(directory, path))).toEqual(originals[index])
+    const originalIntent = create.mock.calls[0]![0]
+    const fresh = await f.make()
+    const retry = await fresh.core.createAgentWithDelivery(originalIntent)
+    expect(retry.session.run).toEqual(result.created.run)
+    expect(f.start).toHaveBeenCalledTimes(1)
+    for (const optionalContext of [
+      originalIntent.optionalContext!.map((part, index) => index ? part : { ...part, text: part.text + 'changed' }),
+      originalIntent.optionalContext!.map((part, index) => index ? part : { ...part, omittedText: part.omittedText + 'changed' }),
+      [...originalIntent.optionalContext!].reverse()
+    ]) await expect(fresh.core.createAgentWithDelivery({ ...originalIntent, optionalContext })).rejects.toMatchObject({ code: 'AGENT_FORK_OPERATION_CONFLICT' })
+    expect(f.start).toHaveBeenCalledTimes(1); expect(f.stop).not.toHaveBeenCalled()
+  } finally { await runtime.dispose(); await f.dispose(); vi.unstubAllEnvs() }
+})
+
 it('creates distinct short Topic and Mote entry points and delivers them even when Wiki injection is disabled', async () => {
   const h = await fixture()
   for (const mote of [false, true]) {
@@ -46,10 +111,10 @@ it('creates distinct short Topic and Mote entry points and delivers them even wh
     expect(await readFile(join(topic.physicalDirectoryPath!, 'AGENTS.md'), 'utf8')).toBe(expected)
     await h.owner.setWikiEnabled(h.workspace, topic.id, false)
     const prepared = await h.owner.prepareAgent(h.workspace, topic.id, { providerId: 'codex', sessionId: 'new-' + mote })
-    expect(prepared.prompt).toContain(expected)
-    expect(prepared.prompt).toMatch(/Original AGENTS.md \(version [0-9a-f]{16}; loaded for this new Session only\)/)
-    expect(prepared.prompt).toContain('Topic Wiki injection is disabled')
-    if (!mote) expect(prepared.prompt).not.toContain('## Remember usefully')
+    expect(preparedContext(prepared)).toContain(expected)
+    expect(preparedContext(prepared)).toMatch(/Original AGENTS.md \(version [0-9a-f]{16}; loaded for this new Session only\)/)
+    expect(preparedContext(prepared)).toContain('Topic Wiki injection is disabled')
+    if (!mote) expect(preparedContext(prepared)).not.toContain('## Remember usefully')
   }
 })
 
@@ -61,7 +126,7 @@ it('keeps custom entry, personality, behavior, settings and evidence byte-for-by
   const fresh = new ScratchTopics()
   await fresh.ensureMote(h.workspace, topic.id); await fresh.ensureMote(h.workspace, topic.id)
   const prepared = await fresh.prepareAgent(h.workspace, topic.id, { providerId: 'claude', sessionId: 'custom-entry-new' })
-  expect(prepared.prompt).toContain(files['AGENTS.md']); expect(prepared.prompt).toContain(files['SOUL.md'])
+  expect(preparedContext(prepared)).toContain(files['AGENTS.md']); expect(preparedContext(prepared)).toContain(files['SOUL.md'])
   for (const [path, bytes] of Object.entries(files)) expect(await readFile(join(topic.physicalDirectoryPath!, path), 'utf8')).toBe(bytes)
 })
 
@@ -70,8 +135,8 @@ it('prepares an old non-primary Mote with missing AGENTS from its original kind,
   await rm(join(mote.physicalDirectoryPath!, 'AGENTS.md'))
   const prepared = await new ScratchTopics().prepareAgent(h.workspace, mote.id, { providerId: 'codex', sessionId: 'old-new' })
   expect(prepared.snapshot.kind).toBe('mote')
-  expect(prepared.prompt).toContain(DEFAULT_MOTE_AGENT_INSTRUCTIONS)
-  expect(prepared.prompt).not.toContain('This is a shared Topic, not a persistent Mote persona.')
+  expect(preparedContext(prepared)).toContain(DEFAULT_MOTE_AGENT_INSTRUCTIONS)
+  expect(preparedContext(prepared)).not.toContain('This is a shared Topic, not a persistent Mote persona.')
 })
 
 it('does not guess Topic instructions when the original object kind is unknown', async () => {
@@ -80,10 +145,10 @@ it('does not guess Topic instructions when the original object kind is unknown',
   const outside = join(h.root, 'outside-soul'); await writeFile(outside, '# foreign'); await symlink(outside, join(mote.physicalDirectoryPath!, 'SOUL.md'))
   const prepared = await h.owner.prepareAgent(h.workspace, mote.id, { providerId: 'codex', sessionId: 'unknown-kind-new' })
   expect(prepared.snapshot.kind).toBeUndefined()
-  expect(prepared.prompt).toContain('Original AGENTS.md was not loaded:')
-  expect(prepared.prompt).not.toContain(DEFAULT_TOPIC_AGENT_INSTRUCTIONS)
-  expect(prepared.prompt).not.toContain('"$AGENTMUX_CLI" topic --skill')
-  expect(prepared.prompt).not.toContain('"$AGENTMUX_CLI" mote --skill')
+  expect(preparedContext(prepared)).toContain('Original AGENTS.md was not loaded:')
+  expect(preparedContext(prepared)).not.toContain(DEFAULT_TOPIC_AGENT_INSTRUCTIONS)
+  expect(preparedContext(prepared)).not.toContain('"$AGENTMUX_CLI" topic --skill')
+  expect(preparedContext(prepared)).not.toContain('"$AGENTMUX_CLI" mote --skill')
 })
 
 it('reports a concurrent context edit as unloaded and preserves the actual later bytes', async () => {
@@ -91,17 +156,18 @@ it('reports a concurrent context edit as unloaded and preserves the actual later
   readFault.grow = true
   const prepared = await h.owner.prepareAgent(h.workspace, mote.id, { providerId: 'codex', sessionId: 'drift-new' })
   expect(readFault.grow).toBe(false)
-  expect(prepared.prompt).toContain('The original context file changed during reading')
-  expect(prepared.prompt).not.toContain(DEFAULT_MOTE_AGENT_INSTRUCTIONS)
+  expect(preparedContext(prepared)).toContain('The original context file changed during reading')
+  expect(preparedContext(prepared)).not.toContain(DEFAULT_MOTE_AGENT_INSTRUCTIONS)
   expect(await readFile(join(mote.physicalDirectoryPath!, 'AGENTS.md'), 'utf8')).toContain('Concurrent original edit.')
 })
 
-it('loads the exact 64 KiB boundary without truncating the original text', async () => {
+it('omits the exact 64 KiB file when final overhead prevents whole delivery', async () => {
   const h = await fixture(), mote = await h.owner.ensureMote(h.workspace, 'launcher:boundary-entry')
   const content = 'x'.repeat(65535) + '\n'; await writeFile(join(mote.physicalDirectoryPath!, 'AGENTS.md'), content)
   const prepared = await h.owner.prepareAgent(h.workspace, mote.id, { providerId: 'codex', sessionId: 'boundary-new' })
-  expect(prepared.prompt).toContain(content)
-  expect(prepared.prompt).not.toContain('was not loaded:')
+  expect(preparedContext(prepared)).not.toContain(content)
+  expect(preparedContext(prepared)).toContain('final message budget')
+  expect(await readFile(join(mote.physicalDirectoryPath!, 'AGENTS.md'), 'utf8')).toBe(content)
 })
 
 it.each([
@@ -147,7 +213,7 @@ it.each([
       agentSessionId: 'actual-context-session', scratchTopicId: topic.id, createOperationId: 'actual-context-create', prompt: userInput }, config)
     expect(create).toHaveBeenCalledTimes(1)
     expect(create.mock.calls[0]![0]).toMatchObject({ prompt: userInput, workspacePath: topic.physicalDirectoryPath })
-    expect(create.mock.calls[0]![0].agentMuxNote).toContain(text)
+    expect(create.mock.calls[0]![0].optionalContext?.some(part => part.text.includes(text))).toBe(true)
     const saved = f.core.agentSession(result.created.agentSessionId)
     const timeline = await f.core.sessionTimeline(result.created.agentSessionId)
     const system = timeline.items.filter(item => item.kind === 'system_message').map(item => item.content).join('\n\n')
@@ -193,9 +259,9 @@ it.each(['symlink', 'oversized', 'invalid-utf8', 'directory'] as const)('keeps n
   else if (kind === 'directory') await mkdir(file)
   else await writeFile(file, kind === 'oversized' ? 'x'.repeat(65537) : Buffer.from([0xc3, 0x28]))
   const prepared = await h.owner.prepareAgent(h.workspace, topic.id, { providerId: 'codex', sessionId: 'bad-new-' + kind })
-  expect(prepared.prompt).toContain('Original AGENTS.md was not loaded:')
-  expect(prepared.prompt).toContain('Existing work, input and healthy Agents remain available.')
-  expect(prepared.prompt).not.toContain('FOREIGN PRIVATE CONTEXT')
+  expect(preparedContext(prepared)).toContain('Original AGENTS.md was not loaded:')
+  expect(preparedContext(prepared)).toContain('Existing work, input and healthy Agents remain available.')
+  expect(preparedContext(prepared)).not.toContain('FOREIGN PRIVATE CONTEXT')
   expect(prepared.absolutePath).toBe(topic.physicalDirectoryPath)
 })
 
@@ -206,9 +272,9 @@ it('uses the current exact Mote guide without crossing Mote homes or rewriting a
   const first = await h.owner.prepareAgent(h.workspace, a.id, { providerId: 'codex', sessionId: 'first' })
   await writeFile(join(a.physicalDirectoryPath!, 'AGENTS.md'), '# Guide A updated\nCorrected knowledge A.\n')
   const second = await new ScratchTopics().prepareAgent(h.workspace, a.id, { providerId: 'claude', sessionId: 'second' })
-  expect(first.prompt).toContain('Exact original knowledge A.'); expect(first.prompt).not.toContain('Corrected knowledge A.')
-  expect(second.prompt).toContain('Corrected knowledge A.'); expect(second.prompt).not.toContain('Exact original knowledge A.')
-  expect(first.prompt + second.prompt).not.toContain('Foreign knowledge B.')
+  expect(preparedContext(first)).toContain('Exact original knowledge A.'); expect(preparedContext(first)).not.toContain('Corrected knowledge A.')
+  expect(preparedContext(second)).toContain('Corrected knowledge A.'); expect(preparedContext(second)).not.toContain('Exact original knowledge A.')
+  expect(preparedContext(first) + preparedContext(second)).not.toContain('Foreign knowledge B.')
 })
 
 
@@ -220,8 +286,8 @@ it('supplements only missing Mote memory including old non-primary Motes, withou
   expect((await h.owner.prepareAgent(h.workspace, topic.id, {providerId:'codex',sessionId:'ordinary-new'})).prompt).not.toContain('A Topic file is not Mote recall.')
   await rm(join(a.physicalDirectoryPath!, 'MEMORY.md'))
   const fresh = await new ScratchTopics().prepareAgent(h.workspace, a.id, {providerId:'codex',sessionId:'old-memory-new'})
-  expect(fresh.prompt).toContain(DEFAULT_MOTE_MEMORY)
-  expect(fresh.prompt).toContain('Knowledge for Mote ' + a.id)
+  expect(preparedContext(fresh)).toContain(DEFAULT_MOTE_MEMORY)
+  expect(preparedContext(fresh)).toContain('Knowledge for Mote ' + a.id)
 })
 
 it('loads current original memory, keeps Motes isolated and does not reuse withdrawn recall text', async () => {
@@ -232,15 +298,15 @@ it('loads current original memory, keeps Motes isolated and does not reuse withd
   const first = await h.owner.prepareAgent(h.workspace, a.id, {providerId:'codex',sessionId:'memory-first'})
   await writeFile(file, '# Memory A\nCorrection: use the current confirmed choice. Source: user correction.\n')
   const corrected = await new ScratchTopics().prepareAgent(h.workspace, a.id, {providerId:'claude',sessionId:'memory-corrected'})
-  expect(first.prompt).toContain('Withdraw this exact knowledge.')
-  expect(corrected.prompt).toContain('Correction: use the current confirmed choice.')
-  expect(corrected.prompt).not.toContain('Withdraw this exact knowledge.')
+  expect(preparedContext(first)).toContain('Withdraw this exact knowledge.')
+  expect(preparedContext(corrected)).toContain('Correction: use the current confirmed choice.')
+  expect(preparedContext(corrected)).not.toContain('Withdraw this exact knowledge.')
   await writeFile(file, '# Memory A\nWithdrawn source: memory-first. No recall text.\n')
   const withdrawn = await h.owner.prepareAgent(h.workspace, a.id, {providerId:'codex',sessionId:'memory-withdrawn'})
-  expect(withdrawn.prompt).toContain('Withdrawn source: memory-first.')
-  expect(withdrawn.prompt).not.toContain('Correction: use the current confirmed choice.')
-  expect(first.prompt + corrected.prompt + withdrawn.prompt).not.toContain('FOREIGN MOTE MEMORY')
-  expect(withdrawn.prompt).toMatch(/Original MEMORY.md \(version [0-9a-f]{16}; loaded for this new Session only\)/)
+  expect(preparedContext(withdrawn)).toContain('Withdrawn source: memory-first.')
+  expect(preparedContext(withdrawn)).not.toContain('Correction: use the current confirmed choice.')
+  expect(preparedContext(first) + preparedContext(corrected) + preparedContext(withdrawn)).not.toContain('FOREIGN MOTE MEMORY')
+  expect(preparedContext(withdrawn)).toMatch(/Original MEMORY.md \(version [0-9a-f]{16}; loaded for this new Session only\)/)
 })
 
 it.each(['symlink', 'oversized', 'invalid-utf8', 'directory'] as const)('keeps original input available when memory cannot be loaded: %s', async kind => {
@@ -250,9 +316,9 @@ it.each(['symlink', 'oversized', 'invalid-utf8', 'directory'] as const)('keeps o
   else if (kind === 'directory') await mkdir(file)
   else await writeFile(file, kind === 'oversized' ? 'x'.repeat(65537) : Buffer.from([0xc3, 0x28]))
   const prepared = await h.owner.prepareAgent(h.workspace, mote.id, {providerId:'codex',sessionId:'bad-memory-new-' + kind})
-  expect(prepared.prompt).toContain('Original MEMORY.md was not loaded:')
-  expect(prepared.prompt).not.toContain('FOREIGN MEMORY SECRET')
-  expect(prepared.prompt).toContain(DEFAULT_MOTE_AGENT_INSTRUCTIONS)
+  expect(preparedContext(prepared)).toContain('Original MEMORY.md was not loaded:')
+  expect(preparedContext(prepared)).not.toContain('FOREIGN MEMORY SECRET')
+  expect(preparedContext(prepared)).toContain(DEFAULT_MOTE_AGENT_INSTRUCTIONS)
   expect(prepared.absolutePath).toBe(mote.physicalDirectoryPath)
 })
 
@@ -261,8 +327,8 @@ it('keeps original memory available across actual private client process restart
   const h = await fixture(), mote = await h.owner.ensureMote(h.workspace, 'launcher:process-memory')
   const output = resolve('apps/desktop/.tmp/mote-memory/new-session-child.mjs'), stub = resolve('.tmp/mote-memory/electron-stub.mjs')
   await mkdir(resolve('apps/desktop/.tmp/mote-memory'), {recursive:true}); await mkdir(resolve('.tmp/mote-memory'), {recursive:true}); await writeFile(stub, 'export const nativeImage = {};')
-  await build({stdin:{contents:`import {ScratchTopics} from './apps/desktop/src/main/scratch-topics.ts';
-    const input=JSON.parse(process.argv[2]);const prepared=await new ScratchTopics().prepareAgent(input.workspace,input.id,{providerId:'codex',sessionId:input.sessionId});console.log(JSON.stringify({pid:process.pid,prompt:prepared.prompt}));`,resolveDir:process.cwd(),loader:'ts'},
+  await build({stdin:{contents:`import {ScratchTopics} from './apps/desktop/src/main/scratch-topics.ts'; import {preparedContext} from './apps/desktop/test/helpers/prepared-topic-context.ts';
+    const input=JSON.parse(process.argv[2]);const prepared=await new ScratchTopics().prepareAgent(input.workspace,input.id,{providerId:'codex',sessionId:input.sessionId});console.log(JSON.stringify({pid:process.pid,prompt:preparedContext(prepared)}));`,resolveDir:process.cwd(),loader:'ts'},
     outfile:output,platform:'node',format:'esm',bundle:true,packages:'external',alias:{electron:stub},logLevel:'silent'})
   const run = promisify(execFile), memory = join(mote.physicalDirectoryPath!, 'MEMORY.md')
   await writeFile(memory, '# Memory\nOriginal process knowledge.\n')
@@ -352,7 +418,7 @@ it('starts with blank Mote defaults, then carries public Files corrections acros
       expect(system.length).toBeGreaterThan(0)
       expect(timeline.items.filter(item => item.kind === 'user_message').map(item => item.content)).toEqual([userInput])
       if (body !== null) {
-        expect(input.agentMuxNote!.split(body)).toHaveLength(2)
+        expect(input.optionalContext!.map(part => part.text).join('\n\n').split(body)).toHaveLength(2)
         expect(system.split(body)).toHaveLength(2) // Exact current MEMORY appears once in real Core context.
       }
       expect(f.core.agentSession(result.created.agentSessionId).workspacePath).toBe(topic.physicalDirectoryPath)

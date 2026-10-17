@@ -1,3 +1,4 @@
+import { preparedContext } from './helpers/prepared-topic-context'
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -28,13 +29,13 @@ it('delivers new primary defaults and exactly one app-owned role through the act
   expect(primary.soul?.content).toBe(DEFAULT_MOTE_SOUL)
   expect(primary.wiki?.content).toBe(DEFAULT_PMO_TEAMS_TOPIC_WIKI)
   const prepared = await h.topics.prepareAgent(h.workspace, primary.id, { providerId: 'codex', sessionId: 'default-primary' })
-  expect(prepared.prompt.length).toBeGreaterThan(1500)
-  expect(prepared.prompt).toContain("Start from the user's real question.")
-  expect(prepared.prompt).toContain('without requiring a personality, knowledge-base setup or introductory interview')
-  expect(prepared.prompt).toContain('mote --skill')
-  expect(prepared.prompt).toContain('mote playbook pmo')
-  expect(prepared.prompt).toContain('without claiming unseen conversations or running tools')
-  expect(prepared.prompt.split(MOTE_COORDINATION_ROLE)).toHaveLength(2)
+  expect(preparedContext(prepared).length).toBeGreaterThan(1500)
+  expect(preparedContext(prepared)).toContain("Start from the user's real question.")
+  expect(preparedContext(prepared)).toContain('without requiring a personality, knowledge-base setup or introductory interview')
+  expect(preparedContext(prepared)).toContain('mote --skill')
+  expect(preparedContext(prepared)).toContain('mote playbook pmo')
+  expect(preparedContext(prepared)).toContain('without claiming unseen conversations or running tools')
+  expect(preparedContext(prepared).split(MOTE_COORDINATION_ROLE)).toHaveLength(2)
   expect(prepared.absolutePath).toBe(primary.physicalDirectoryPath!)
   expect(await readFile(join(primary.physicalDirectoryPath!, MOTE_SOUL_PATH), 'utf8')).toBe(DEFAULT_MOTE_SOUL)
 })
@@ -49,13 +50,13 @@ it('keeps custom Mote Topic Wiki and ordinary Topic defaults on their original o
   expect(plain.wiki?.content).toBe(DEFAULT_TOPIC_WIKI)
   await h.topics.setWikiEnabled(h.workspace, custom.id, false)
   const prepared = await h.topics.prepareAgent(h.workspace, custom.id, { providerId: 'codex', sessionId: 'disabled-wiki' })
-  expect(prepared.prompt).toContain(DEFAULT_MOTE_SOUL)
-  expect(prepared.prompt.split(MOTE_COORDINATION_ROLE)).toHaveLength(2)
-  expect(prepared.prompt).toContain('Topic Wiki injection is disabled')
+  expect(preparedContext(prepared)).toContain(DEFAULT_MOTE_SOUL)
+  expect(preparedContext(prepared).split(MOTE_COORDINATION_ROLE)).toHaveLength(2)
+  expect(preparedContext(prepared)).toContain('Topic Wiki injection is disabled')
   const ordinary = await h.topics.prepareAgent(h.workspace, plain.id, { providerId: 'codex', sessionId: 'ordinary' })
-  expect(ordinary.prompt.length).toBeGreaterThan(200)
-  expect(ordinary.prompt).not.toContain(DEFAULT_MOTE_SOUL)
-  expect(ordinary.prompt).not.toContain(MOTE_COORDINATION_ROLE)
+  expect(preparedContext(ordinary).length).toBeGreaterThan(200)
+  expect(preparedContext(ordinary)).not.toContain(DEFAULT_MOTE_SOUL)
+  expect(preparedContext(ordinary)).not.toContain(MOTE_COORDINATION_ROLE)
 })
 
 it('preserves both edited homes and intentionally repeated user Wiki byte-for-byte after owner recreation', async () => {
@@ -83,10 +84,10 @@ it('preserves both edited homes and intentionally repeated user Wiki byte-for-by
     expect(await readFile(join(old.directory, SCRATCH_TOPIC_WIKI_PATH), 'utf8')).toBe(old.wiki)
     expect(await readFile(join(old.directory, 'outcome', 'retained.md'), 'utf8')).toBe(old.result)
     const prepared = await reopened.prepareAgent(h.workspace, old.id, { providerId: 'codex', sessionId: 'retained-' + old.id.split(':')[1] })
-    expect(prepared.prompt).toContain(old.soul)
-    expect(prepared.prompt).toContain(old.wiki)
+    expect(preparedContext(prepared)).toContain(old.soul)
+    expect(preparedContext(prepared)).toContain(old.wiki)
     // User-authored repeats are preserved rather than silently cleaned.
-    expect(prepared.prompt.split(MOTE_COORDINATION_ROLE)).toHaveLength(3)
+    expect(preparedContext(prepared).split(MOTE_COORDINATION_ROLE)).toHaveLength(3)
   }
 })
 
@@ -103,8 +104,8 @@ it('changes the primary Wiki only on explicit reset and keeps saved personality 
   expect(reset.wiki).toMatchObject({ content: DEFAULT_PMO_TEAMS_TOPIC_WIKI, source: 'default', enabled: true })
   expect(reset.soul?.content).toBe(savedSoul)
   const prepared = await h.topics.prepareAgent(h.workspace, primary.id, { providerId: 'codex', sessionId: 'reset-primary' })
-  expect(prepared.prompt.split(MOTE_COORDINATION_ROLE)).toHaveLength(2)
-  expect(prepared.prompt).toContain(savedSoul)
+  expect(preparedContext(prepared).split(MOTE_COORDINATION_ROLE)).toHaveLength(2)
+  expect(preparedContext(prepared)).toContain(savedSoul)
   const custom = await h.topics.ensureMote(h.workspace, 'launcher:reset-custom')
   expect((await h.topics.resetWiki(h.workspace, custom.id)).wiki?.content).toBe(DEFAULT_TOPIC_WIKI)
 })

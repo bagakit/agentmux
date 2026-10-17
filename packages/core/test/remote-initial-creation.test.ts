@@ -75,6 +75,35 @@ async function fixture() {
 }
 
 describe('remote initial creation admission', () => {
+  it('forwards budgeted optional context through hosted signed creation and binds the entire intent', async () => {
+    const f = await fixture()
+    const source = await hostedTestClient(f.source), target = await hostedTestClient(f.target)
+    const optionalContext = [
+      { text: 'Small original source <&> complete.', omittedText: 'Small original was not loaded; read /small.md.' },
+      { text: '<&>'.repeat(20000), omittedText: 'Large original was not loaded; read /large.md.' }
+    ]
+    const original = { ...f.input, optionalContext }
+    try {
+      await f.pin()
+      const admission = await source.sdk.attestAgentCreation({ caller: { agentSessionId: 'source-session', capability: f.capability },
+        target: { runtimeId: 'target-runtime', intentDigest: hostAgentCreationIntent(original) } })
+      const request = { ...original, initialMessageAdmission: admission }
+      const receipt = await target.sdk.createHostAgentWithDelivery(request)
+      const timeline = await f.target.sessionTimeline(receipt.session.agentSessionId)
+      const system = timeline.items.filter(item => item.kind === 'system_message').map(item => item.content).join('\n\n')
+      expect(system).toContain(optionalContext[0].text)
+      expect(system).toContain(optionalContext[1].omittedText)
+      expect(system).not.toContain(optionalContext[1].text)
+      expect(timeline.items.filter(item => item.kind === 'user_message').map(item => item.content).join()).toContain(f.input.prompt!)
+      expect((await target.sdk.createHostAgentWithDelivery(request)).session.run).toEqual(receipt.session.run)
+      for (const changed of [
+        optionalContext.map((part, i) => i ? part : { ...part, text: part.text + 'changed' }),
+        optionalContext.map((part, i) => i ? part : { ...part, omittedText: part.omittedText + 'changed' }),
+        [...optionalContext].reverse()
+      ]) await expect(target.sdk.createHostAgentWithDelivery({ ...request, optionalContext: changed })).rejects.toBeInstanceOf(Error)
+      expect(f.start).toHaveBeenCalledTimes(1); expect(f.stop).not.toHaveBeenCalled()
+    } finally { await source.dispose(); await target.dispose() }
+  })
   it('Hosted direct createAgent retains the original prepared start and unknown prompt without global recovery or replay', async () => {
     const f = await fixture(), global = vi.spyOn(f.target, 'connect').mockRejectedValue(new Error('Unrelated private recovery is unavailable'))
     const input = vi.spyOn((f.target as any).kernel, 'input').mockRejectedValue(new Error('Creation retries must not input'))
