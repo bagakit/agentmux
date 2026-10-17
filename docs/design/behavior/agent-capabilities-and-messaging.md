@@ -316,7 +316,7 @@ Readiness 是 Provider 协议提供并绑定原对象和用途的输入环境事
 
 ## Agents 全局层级与拓扑图
 
-Focus 与 Space、Goals 位于同一组全局工作面。Focus 打开时 Project Rail 被遮挡，Project 只作为 Agent 的归属事实和未来拓扑图的分组边界，不再在左侧重复出现。Agents 当前先保留可用的分组/详情表面；引力图是独立 Feature：活跃 Agent 居中，不活跃 Agent 灰度保留；同一 Project 或 Demand 的 Agent 距离更近，Project 关联范围形成多边形区域。图中的节点、边和状态必须复用现有 Session/Project/Demand 事实，不能建立第二套 Agent registry。
+Focus 与 Space、Goals 位于同一组全局工作面。Focus 打开时 Project Rail 被遮挡，Project 作为 Agent 的归属事实，不再在左侧重复出现。Agents 保留可用的分组／详情表面；按工作区域组织的关系观察归[A2A 协作图](a2a-collaboration.md#工作区域与-agent-协作图)，作为 Space／Focus 的附属视图。图的范围、入口与事实归属由该专题定义，不另立独立全局引力图或第二套 Agent registry。
 
 ## Claude Prompt 提交
 
