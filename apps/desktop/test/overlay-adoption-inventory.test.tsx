@@ -139,7 +139,7 @@ describe('window overlay host runtime contract', () => {
     })
   })
 
-  it('counterexample: without synchronous host initialization, overlay portals fall back to document.body or fail', () => {
+  it('synchronously ensures one window host before a portal resolves its container', () => {
     document.body.innerHTML = ''
     // If the host node is removed/missing before query, raw DOM query returns null
     const uninitialized = document.querySelector('[data-overlay-host]')
@@ -155,7 +155,7 @@ describe('window overlay host runtime contract', () => {
     expect(getWindowOverlayHost()).toBe(initialized)
   })
 
-  it('rejects silent document.body fallback when WindowOverlayHost is explicitly unavailable', () => {
+  it('honors an explicit container and ensures the window host when none is provided', () => {
     const originalHost = document.querySelector('[data-overlay-host]')
     originalHost?.remove()
 
