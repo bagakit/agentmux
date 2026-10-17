@@ -309,13 +309,7 @@ async function selection(label,width,input='mouse') {
   const conjunction=await evaluate(`({active:identityMenu.facts().active,open:${menu}?.dataset.state==='open'})`)
   assert.deepEqual(conjunction,{active:rightId,open:true})
   const before=await evaluate('identityMenu.facts()')
-  let selectedMenu=menu
-  if(label==='Split'||label==='Copy Region Link'||label==='Copy Agent Link'){
-    const trigger=item(label==='Split'?'Split and layout':'Copy link')
-    await evaluate(`${trigger}.focus()`);await key('ArrowRight','ArrowRight',39)
-    selectedMenu=`document.getElementById(${trigger}.getAttribute('aria-controls'))`
-    await waitFor(visible(selectedMenu));await painted()
-  }
+  const selectedMenu=menu
   const actual=`([...${selectedMenu}.querySelectorAll('[role="menuitem"]')].find(item=>(item.getAttribute('aria-label')??item.textContent).trim()===${JSON.stringify(label==='Split'?'Split Down':label)}))`
   assert.equal(await evaluate(visible(actual)),true,'Actual selected menu item is visible')
   const menuPng=await capture(`${width}-${label.replaceAll(' ','-')}-${input}-conjunction`)

@@ -55,9 +55,9 @@ async function renderer(label,probe='complete',unreadableProgressActions=false,f
     plugins:[{name:'record-private-renderer-inputs',enforce:'pre',async transform(source,id){
       if((id.startsWith(join(desktop,'src')+'/')||id.startsWith(join(repository,'packages/client-ui/src')+'/')||id.startsWith(fixture+'/'))&&!id.includes('?'))loadedSourceInputs[id.slice(repository.length+1)]=hash(source)
       if(menuMutation&&id===join(desktop,'src/renderer/src/components/AgentRegionMenuActions.tsx')){
-        const anchor="entry.kind === 'layout'\n          ? <AgentMenuSubmenu"
-        assert.equal(source.split(anchor).length,2,'Actual layout disclosure consumer is unique')
-        const altered=source.replace(anchor,"false\n          ? <AgentMenuSubmenu")
+        const anchor='{workspace.map(render)}'
+        assert.equal(source.split(anchor).length,2,'Actual root layout consumer is unique')
+        const altered=source.replace(anchor,'{null}')
         sourceMutations.push({path:id.slice(repository.length+1),original:hash(source),mutated:hash(altered),productionWritten:false})
         return altered
       }
@@ -206,10 +206,12 @@ try{
   result.render=await renderer('fixed',visualOnly?(agentMenuOwning?'agent-menu-owning':mailboxLayoutOwning?'mailbox-layout-owning':composerToolbarOwning?'composer-toolbar-owning':mailboxMotionOwning?'mailbox-motion-owning':messageFeedbackOwning?'message-feedback-owning':terminalLoadingOwning?'terminal-loading-owning':progressLayoutOwning?'composer-layout-owning':'composer-visual'):swapOnly?'swap-full':'complete');assert.equal(result.render.outcome.exitCode,0,JSON.stringify(result.render.rendered.failure));assert.equal(result.render.rendered.passed,true)
   if(visualOnly){
     if(agentMenuOwning){
-      const red=await renderer('menu-disclosure-red','agent-menu-owning',false,false,'',true)
+      const red=await renderer('menu-root-layout-red','agent-menu-owning',false,false,'',true)
       assert.equal(red.outcome.exitCode,1);assert.equal(red.rendered.failure.name,'AssertionError')
-      assert.match(red.rendered.failure.message,/Layout commands stay behind their named submenu/)
-      result.mutations.push({label:'layout-disclosure-removed',red,productionWritten:false})
+      assert.match(red.rendered.failure.message,/Layout commands remain at the menu root/)
+      const restored=await renderer('menu-root-layout-restored','agent-menu-owning')
+      assert.equal(restored.outcome.exitCode,0,JSON.stringify(restored.rendered.failure));assert.equal(restored.rendered.passed,true)
+      result.mutations.push({label:'root-layout-consumer-removed',red,restored,productionWritten:false})
     }
     if(mailboxLayoutOwning){
       const navigationRed=await renderer('mailbox-navigation-red','mailbox-layout-owning',false,false,'navigation')

@@ -15,8 +15,8 @@ module.exports = async function agentMenuProof({win,evaluate,waitFor,visible,pai
     result.frames.push({file:name+'.png',png})
   }
   async function bounded(root) {
-    const rect=await evaluate(`(()=>{const e=${root},r=e.getBoundingClientRect();return{left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:innerWidth,height:innerHeight,scrollWidth:e.scrollWidth,clientWidth:e.clientWidth}})()`)
-    assert.ok(rect.left>=0&&rect.right<=rect.width&&rect.top>=0&&rect.bottom<=rect.height,'Menu stays inside the actual viewport')
+    const rect=await evaluate(`(()=>{const e=${root},r=e.getBoundingClientRect(),s=getComputedStyle(e),wrapper=e.closest('[data-radix-popper-content-wrapper]'),child=e.querySelector('[role="status"]');return{left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:innerWidth,height:innerHeight,menuWidth:r.width,menuHeight:r.height,scrollWidth:e.scrollWidth,clientWidth:e.clientWidth,style:{boxSizing:s.boxSizing,width:s.width,maxWidth:s.maxWidth,paddingLeft:s.paddingLeft,paddingRight:s.paddingRight},popper:wrapper?.getBoundingClientRect().toJSON(),child:child?{scrollWidth:child.scrollWidth,clientWidth:child.clientWidth,text:child.textContent}:null}})()`)
+    assert.ok(rect.left>=0&&rect.right<=rect.width&&rect.top>=0&&rect.bottom<=rect.height,'Menu stays inside the actual viewport: '+JSON.stringify(rect))
     assert.ok(rect.scrollWidth<=rect.clientWidth,'Menu content has no horizontal overflow')
   }
   for(const appearance of ['dark','light']) {
@@ -28,30 +28,32 @@ module.exports = async function agentMenuProof({win,evaluate,waitFor,visible,pai
       await open('hover')
       assert.deepEqual(await measurement(true),before,'Disclosure preserves the real terminal instance, grid and geometry')
       const labels=await evaluate(`[...${menu}.querySelectorAll('[role="menuitem"]')].map(node=>(node.getAttribute('aria-label')??node.textContent).trim())`)
-      assert.ok(labels.includes('Split and layout'),'Layout commands stay behind their named submenu')
-      assert.ok(labels.includes('Copy link')&&labels.includes('Session details'),'Links and complete identity remain discoverable')
-      assert.ok(!labels.some(label=>label.startsWith('Split ' )&&label!=='Split and layout'),'Root does not expose anonymous layout commands')
+      assert.ok(labels.includes('Split Right')&&labels.includes('Split Down'),'Layout commands remain at the menu root')
+      assert.ok(labels.includes('Copy Agent Link')&&labels.includes('Copy Region Link')&&labels.includes('Session details'),'Links and complete identity remain discoverable')
+      const copyRow=`${menu}.querySelector('.workbench-menu-row[aria-label="Copy link"]')`
+      assert.deepEqual(await evaluate(`[...${copyRow}.querySelectorAll('[role="menuitem"]')].map(node=>node.getAttribute('aria-label'))`),['Copy Agent Link','Copy Region Link'],'Copy links share one compact root row')
+      assert.equal(await evaluate(`${item(menu,'Copy Region Link')}.closest('[role="menu"]')===${menu}`),true,'Copy has no nested disclosure')
       assert.equal(await evaluate(`${menu}.textContent.includes('Host ID:')`),false,'Raw diagnostics do not dominate the root menu')
       await bounded(menu);await frame(`${width}-${appearance}-menu`)
-      const layout=await submenu('Split and layout','hover')
-      await bounded(layout);await frame(`${width}-${appearance}-layout`)
-      // Enter the child through the real mouse path; hover disclosure retains the editor's focus.
-      const split=item(layout,'Split Right')
-      await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseMoved',...await point(split),buttons:0})
-      assert.equal(await evaluate(visible(layout)),true,'Pointer can cross from trigger to the actual layout controls')
-      await close(false);await open('keyboard');await submenu('Split and layout')
-      await evaluate(`${split}.focus()`);await key('ArrowLeft','ArrowLeft',37)
-      // The leftmost action returns to its parent along the original Radix boundary.
-      await evaluate(`${item(layout,'Split Left')}.focus()`);await key('ArrowLeft','ArrowLeft',37)
-      await waitFor(`!${layout}`)
+      await close(false);await open('keyboard')
+      const agentLink=item(menu,'Copy Agent Link'),regionLink=item(menu,'Copy Region Link')
+      await evaluate(`${agentLink}.focus()`);await key('ArrowRight','ArrowRight',39)
+      assert.equal(await evaluate(`document.activeElement===${regionLink}`),true,'Right moves to the next compact copy action')
+      await key('ArrowLeft','ArrowLeft',37)
+      assert.equal(await evaluate(`document.activeElement===${agentLink}`),true,'Left returns to the original compact copy action')
+      if(appearance==='dark'&&width===320){
+        const label=await evaluate(`${menu}.querySelector('[data-connector-menu-group]').getAttribute('aria-label')`)
+        const notice=await submenu(`${label} service notice`)
+        const text=await evaluate(`${notice}.querySelector('[role="status"]').textContent.trim()`)
+        assert.ok(text.length>0,'The complete service notice remains keyboard-readable')
+        assert.equal(await evaluate(`${menu}.textContent.includes(${JSON.stringify(text)})`),false,'The root keeps long service details behind their named notice')
+        await frame('320-dark-service-notice');await bounded(notice)
+        await key('ArrowLeft','ArrowLeft',37);await waitFor(`!${notice}`)
+      }
       const details=await submenu('Session details')
       assert.equal(await evaluate(`${details}.textContent.includes('Host ID:')&&${details}.textContent.includes('Directory:')`),true,'Full bound execution identity is readable on demand')
       await bounded(details);await frame(`${width}-${appearance}-details`)
       await key('ArrowLeft','ArrowLeft',37);await waitFor(`!${details}`)
-      const links=await submenu('Copy link')
-      assert.deepEqual(await evaluate(`[...${links}.querySelectorAll('[role="menuitem"]')].map(node=>node.textContent.trim())`),['Copy Agent Link','Copy Region Link'])
-      await bounded(links)
-      await key('ArrowLeft','ArrowLeft',37);await waitFor(`!${links}`)
       await close()
       assert.equal(await evaluate(`document.activeElement===${more}`),true,'Keyboard returns to the original trigger')
       await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mousePressed',...await point(`${surface}.querySelector('.agent-region-header__name')`),button:'right',clickCount:1})
@@ -61,7 +63,7 @@ module.exports = async function agentMenuProof({win,evaluate,waitFor,visible,pai
       assert.deepEqual(await evaluate(`[...${menu}.querySelectorAll('[role="menuitem"]')].map(node=>(node.getAttribute('aria-label')??node.textContent).trim())`),labels,'Both invoking gestures expose the same actions')
       await bounded(menu);await frame(`${width}-${appearance}-context`)
       await key('Escape','Escape',27);await waitFor(`!${menu}`)
-      assert.deepEqual(await measurement(true),before,'Submenu dismissal preserves the original terminal')
+      assert.deepEqual(await measurement(true),before,'Menu dismissal preserves the original terminal')
     }
   }
   await seed(320)
