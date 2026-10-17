@@ -170,3 +170,34 @@ it('renders cleanup wall duration and original resource owner without write payl
   expect(peak.textContent).not.toContain('bytes')
   expect(peak.textContent).not.toContain('history')
 })
+
+it('discloses current terminal instances only on demand and preserves exact live facts through refresh', async () => {
+  const { terminalCostFixture } = await import('../../../packages/core/test/helpers/renderer-performance')
+  const snapshot = structuredClone(samples.fresh), performance = snapshot.observation!.renderer.data!.performance
+  const visible = terminalCostFixture(1), hidden = terminalCostFixture(2)
+  visible.writes.live = { started: 3, completed: 2, bytes: 37, stringCodeUnits: 0, callbackWall: { count: 2, totalMs: 11, maxMs: 7 } }
+  visible.renderCallbacks = 4
+  hidden.visible = false; hidden.writes.checkpoint.stringCodeUnits = 9
+  performance.terminals = [visible, hidden]; performance.omittedTerminals = 3; performance.unavailableTerminals = 1
+  await render(snapshot); await openRenderer()
+  const disclosure = node<HTMLDetailsElement>('[data-performance-terminals]')
+  expect(disclosure.textContent).toContain('2 current instances')
+  expect(container.querySelector('[data-terminal-instance]')).toBeNull()
+  await act(async () => { disclosure.open = true; disclosure.dispatchEvent(new Event('toggle')) })
+  const first = node('[data-terminal-instance="1"]'), second = node('[data-terminal-instance="2"]')
+  expect(first.textContent).toContain('Host host-1Session session-1')
+  expect(first.textContent).toContain('Run run-1Region region-1')
+  expect(first.textContent).toContain('3 started · 2 completed37 bytes')
+  expect(first.textContent).toContain('4 render callbacks')
+  expect(second.textContent).toContain('Hidden · instance 2')
+  expect(second.textContent).toContain('9 string code units')
+  expect(disclosure.textContent).toContain('3 instances omitted · 1 unavailable')
+  expect(disclosure.textContent).toContain('not CPU')
+  expect(disclosure.textContent).toContain('Lifetime counts')
+  const next = structuredClone(snapshot); next.observation!.renderer.data!.performance.terminals[0]!.writes.live.completed = 3
+  await render(next)
+  expect(node('[data-terminal-instance="1"]')).toBe(first); expect(disclosure.open).toBe(true)
+  expect(first.textContent).toContain('3 started · 3 completed')
+  await act(async () => { disclosure.open = false; disclosure.dispatchEvent(new Event('toggle')) })
+  expect(container.querySelector('[data-terminal-instance]')).toBeNull()
+})

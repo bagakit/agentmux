@@ -1,7 +1,7 @@
 import { fixtureEpoch as _batchFixtureEpoch } from "../../../../test/fixture-values.mjs"
 import { createInputPerformanceRecorder } from '../../src/performance-diagnostics.js'
 import type { RendererPerformanceSnapshot, RendererTerminalWriteContext } from '../../src/metrics.js'
-import { RENDERER_TIMING_KINDS } from '../../src/renderer-performance.js'
+import { RENDERER_TIMING_KINDS, type RendererTerminalCost } from '../../src/renderer-performance.js'
 export function performanceFixture(): RendererPerformanceSnapshot {
   const timing = () => ({ count: 0, totalMs: 0, maxMs: 0 })
   const kinds = RENDERER_TIMING_KINDS
@@ -24,4 +24,16 @@ export function performanceFixture(): RendererPerformanceSnapshot {
 
 export function terminalWriteContextFixture(): RendererTerminalWriteContext {
   return { hostId: 'local', sessionId: 'fixture-session', runId: 'fixture-run', regionId: 'fixture-region', instanceId: 1, cause: 'history' }
+}
+
+export function terminalCostFixture(instanceId: number): RendererTerminalCost {
+  const timing = () => ({ count: 0, totalMs: 0, maxMs: 0 })
+  const write = () => ({ started: 0, completed: 0, bytes: 0, stringCodeUnits: 0, callbackWall: timing() })
+  return { hostId: `host-${instanceId}`, sessionId: `session-${instanceId}`, runId: `run-${instanceId}`, regionId: `region-${instanceId}`, instanceId,
+    writes: { live: write(), history: write(), checkpoint: write() }, renderCallbacks: 0,
+    visible: true, visibleSinceAt: 1, readySinceAt: null, revealed: false, liveReady: false, acceptsInput: false, replaying: true,
+    inFlightWrites: 0, queuedItems: 0, queuedBytes: 0, pendingItems: 0, pendingBytes: 0, cols: 80, rows: 24, normalLines: 24, alternateLines: 24,
+    interaction: { observedSinceAt: 1, keydown: { count: 0, unknownDelayCount: 0, delay: timing() },
+      wheel: { count: 0, unknownDelayCount: 0, delay: timing() },
+      writeRequests: { started: 0, completed: 0, failed: 0, pending: 0, wall: timing(), lastStartedAt: null, lastSettledAt: null }, lastEvent: null } }
 }

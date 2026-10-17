@@ -1,6 +1,6 @@
 import type { MetricsObservation, RendererMemorySnapshot } from '../../src/metrics.js'
 import type { ToolkitMetricsSnapshot } from '../../src/toolkit.js'
-import { performanceFixture } from './renderer-performance.js'
+import { performanceFixture, terminalCostFixture } from './renderer-performance.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../../test/fixture-values.mjs'
 
 
@@ -16,7 +16,7 @@ export function deepMetricsSnapshot(): ToolkitMetricsSnapshot {
   const pending = { state: 'pending', data: null, observedAt: null, lastSuccessAt: null, reason: null } as const
   const performance = performanceFixture()
   performance.observedAt = 1000
-  performance.terminals = [{ sessionId: 'session', runId: 'run', regionId: 'region', visible: true,
+  performance.terminals = [{ ...terminalCostFixture(1), sessionId: 'session', runId: 'run', regionId: 'region', visible: true,
     visibleSinceAt: 1, readySinceAt: 1, revealed: true, liveReady: true, acceptsInput: true,
     replaying: false, inFlightWrites: 0, queuedItems: 0, queuedBytes: 0, pendingItems: 0, pendingBytes: 0,
     cols: 80, rows: 24, normalLines: 100, alternateLines: 24,
