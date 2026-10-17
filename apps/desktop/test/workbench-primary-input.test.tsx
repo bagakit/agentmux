@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { StableWorkbenchView } from '../src/renderer/src/components/StableWorkbenchView'
-import { committedSecondaryWorkbenchTarget, focusedPrimaryWorkbenchTarget, type WorkbenchViewTarget } from '../src/renderer/src/lib/workbench-presentation'
+import { committedPrimaryWorkbenchTarget, committedSecondaryWorkbenchTarget, focusedPrimaryWorkbenchTarget, type WorkbenchViewTarget } from '../src/renderer/src/lib/workbench-presentation'
 import { addWorkbenchRegion, createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { workbenchRegionProjectionSlotId } from '../src/renderer/src/lib/workbench-projection'
 
@@ -32,6 +33,29 @@ it('uses the connected visible primary input and its exact committed occurrence,
   expect(focusedPrimaryWorkbenchTarget(tab, [target])).toBe(target)
   expect(geometry).toHaveBeenCalled()
   expect(input.value).toBe('Existing draft')
+})
+
+it('retains only the exact active primary placement when no editable input is focused', () => {
+  input.blur()
+  const active = { ...target, active: true }
+  expect(committedPrimaryWorkbenchTarget(tab, [active])).toBe(active)
+  expect(focusedPrimaryWorkbenchTarget(tab, [active])).toBeUndefined()
+  for (const mismatch of [target, { ...active, visible: false }, { ...active, hostId: 'another-host' },
+    { ...active, reference: { ...reference, displayWorkspaceId: 'another-display' } },
+    { ...active, reference: { ...reference, groupId: 'another-group' } },
+    { ...active, reference: { ...reference, regionId: 'missing-region' } }]) {
+    expect(committedPrimaryWorkbenchTarget(tab, [mismatch])).toBeUndefined()
+  }
+  const duplicate = destination.firstElementChild!.cloneNode(false); destination.append(duplicate)
+  expect(committedPrimaryWorkbenchTarget(tab, [active])).toBeUndefined()
+  destination.removeChild(duplicate)
+})
+
+it('keeps a primary Tab occurrence when its selected sibling caret changes', () => {
+  const split = addWorkbenchRegion(tab, 'original-region', 'right', { kind: 'agent', phase: 'attached', workspaceId: 'resource', regionId: 'sibling-region', sessionId: 'sibling-session' })
+  const siblingTarget = { ...target, active: true, reference: { ...reference, regionId: 'sibling-region' } }
+  expect(committedPrimaryWorkbenchTarget(split, [siblingTarget])).toBe(siblingTarget)
+  expect(committedPrimaryWorkbenchTarget(split, [siblingTarget, { ...siblingTarget }])).toBeUndefined()
 })
 it('rejects a different display, Group, Tab, Region or host and unknown presentation visibility', () => {
   const unknownVisible = { ...target }; delete unknownVisible.visible
@@ -102,6 +126,7 @@ it('keeps the unique committed home when logical selection changes to a valid si
     const duplicate = homeHost.cloneNode(false); destination.append(duplicate)
     expect(committedSecondaryWorkbenchTarget(split, secondaryTarget, target.hostId, homeReference)).toBeUndefined(); destination.removeChild(duplicate)
     secondaryHome.hidden = true
-    expect(committedSecondaryWorkbenchTarget(split, secondaryTarget, target.hostId, homeReference)).toBeUndefined()
+    // Positioning may hide a committed secondary; this retains placement, not input authority.
+    expect(committedSecondaryWorkbenchTarget(split, secondaryTarget, target.hostId, homeReference)).toBe(secondaryTarget)
   } finally { secondaryHome.remove() }
 })
