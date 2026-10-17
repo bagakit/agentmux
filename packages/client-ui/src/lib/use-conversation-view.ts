@@ -9,6 +9,7 @@ export type ConversationViewOperation = 'latest' | 'older' | 'newer' | 'changes'
 type Operation = ConversationViewOperation
 export type ConversationSourceRead = { reference: ConversationRef; nativeSource: NonNullable<ConversationTimelineReadInput['nativeSource']> }
 type Selection = Pick<ConversationTimelineReadInput, 'nativeSource' | 'anchor'>
+type PendingFrame = { snapshot: ConversationWindowSnapshot; historical: boolean; operation: Operation; selection: Selection }
 type ViewState = { snapshot: ConversationWindowSnapshot | null; loading: boolean; operation: Operation | null; sourceRead: ConversationSourceRead | null; error: Error | null; errorOperation: Operation | null; sourceError: Error | null; observationError: Error | null; held: boolean; historical: boolean; newerAvailable: boolean }
 const empty = (): ViewState => ({ snapshot: null, loading: false, operation: null, sourceRead: null, error: null, errorOperation: null, sourceError: null, observationError: null, held: false, historical: false, newerAvailable: false })
 const errorOf = (error: unknown) => error instanceof Error ? error : new Error(String(error))
@@ -22,7 +23,7 @@ function sourceReadError(snapshot: ConversationWindowSnapshot): Error | null {
 /** Presentation lifetime for the original public Reader. The client retains only
  * complete accepted frames and transport assembly; Core owns source pages/joins. */
 export function useConversationView(client: ConversationViewClient | null, reference: ConversationRef | undefined, active: boolean,
-  options: { identity?: string; beforeCommit?(snapshot: ConversationWindowSnapshot, operation: Operation): boolean } = {}) {
+  options: { identity?: string; beforeCommit?(snapshot: ConversationWindowSnapshot, operation: Operation, displayed: ConversationWindowSnapshot | null): boolean } = {}) {
   const key = reference ? JSON.stringify([reference.hostId, reference.agentSessionId, options.identity]) : ''
   const [state, setState] = useState<ViewState>(empty)
   const snapshot = state.snapshot && reference && state.snapshot.hostId === reference.hostId && state.snapshot.agentSessionId === reference.agentSessionId ? state.snapshot : null
@@ -31,8 +32,8 @@ export function useConversationView(client: ConversationViewClient | null, refer
   const owner = useRef<{ key: string; controller: AbortController; snapshot: ConversationWindowSnapshot | null;
     request: AbortController | null; handle: ConversationObservationHandle | null; observed: ConversationWindowSnapshot | null; inFlight: Promise<void> | null; timer: ReturnType<typeof setTimeout> | null;
     retryTimer: ReturnType<typeof setTimeout> | null; retryDelay: number; historical: boolean; dirty: boolean; held: boolean;
-    binding: ConversationWindowSnapshot | null; failures: Map<string, Error>; invalidations: number; unavailable: number } | null>(null)
-  const retained = useRef<{ client: ConversationViewClient; key: string; snapshot: ConversationWindowSnapshot; historical: boolean } | null>(null)
+    binding: ConversationWindowSnapshot | null; failures: Map<string, Error>; pending: PendingFrame | null; invalidations: number; unavailable: number } | null>(null)
+  const retained = useRef<{ client: ConversationViewClient; key: string; snapshot: ConversationWindowSnapshot; historical: boolean; pending: PendingFrame | null } | null>(null)
   const beforeCommit = useRef(options.beforeCommit); beforeCommit.current = options.beforeCommit
   const operation = useRef<(kind: Operation, selection?: Selection, recoverObservation?: boolean) => Promise<void>>(async () => {})
   const retryOperation = useRef<{ client: ConversationViewClient | null; key: string; kind: Operation; selection: Selection }>({ client, key, kind: 'latest', selection: {} })
@@ -45,7 +46,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
     const current = { key, controller: new AbortController(), snapshot: parked?.snapshot ?? null as ConversationWindowSnapshot | null,
       request: null as AbortController | null, handle: null as ConversationObservationHandle | null, observed: null as ConversationWindowSnapshot | null, inFlight: null as Promise<void> | null,
       timer: null as ReturnType<typeof setTimeout> | null, retryTimer: null as ReturnType<typeof setTimeout> | null, retryDelay: 100,
-      historical: parked?.historical ?? false, dirty: false, held: false,
+      historical: parked?.historical ?? false, dirty: false, held: Boolean(parked?.pending), pending: parked?.pending ?? null,
       binding: null as ConversationWindowSnapshot | null, failures: new Map<string, Error>(), invalidations: 0, unavailable: 0 }
     owner.current = current
     setState(value => value.snapshot?.hostId === reference.hostId && value.snapshot.agentSessionId === reference.agentSessionId
@@ -191,18 +192,23 @@ export function useConversationView(client: ConversationViewClient | null, refer
           // Preloading older pages does not close a still-retained source head.
           // Returning from an evicted-head window must catch up its original cut.
           if (wasHistorical && !current.historical) current.dirty = true
-          retained.current = { client, key, snapshot: complete, historical: current.historical }
-          current.held = beforeCommit.current?.(complete, kind) === false
+          // A replay or live delta of the same pending view keeps the original
+          // navigation intent. Explicit navigation starts its own transaction.
+          const original = (kind === 'resume' || kind === 'changes') && current.pending?.snapshot.window.id === complete.window.id ? current.pending : null
+          const frame: PendingFrame = { snapshot: complete, historical: current.historical, operation: original?.operation ?? kind, selection: original?.selection ?? selection }
+          current.held = beforeCommit.current?.(complete, frame.operation, committed.current.snapshot) === false
+          current.pending = current.held ? frame : null
+          retained.current = { client, key, snapshot: complete, historical: current.historical, pending: current.pending }
           const sourceError = sourceReadError(complete)
           // Resume replays the retained frame. It cannot replace the failed cut's
           // retry intent with another replay of that same unavailable coverage.
-          if (sourceError && kind !== 'resume') retryOperation.current = { client, key, kind, selection }
-          setState(value => ({ ...value, ...(current.held ? {} : { snapshot: complete }), held: current.held,
+          if (sourceError && kind !== 'resume') retryOperation.current = { client, key, kind: frame.operation, selection: frame.selection }
+          setState(value => ({ ...value, ...(current.held ? {} : { snapshot: complete, historical: frame.historical, sourceError }), held: current.held,
             // A live update or retained-frame replay does not fulfill a failed
             // navigation. Resolve only its operation, a new explicit cut, or
             // replace it with the current frame's actual source failure.
             ...(sourceError || kind === 'latest' || kind === 'reopen' || value.errorOperation === kind ? { error: null, errorOperation: null } : {}),
-            sourceError, historical: current.historical, newerAvailable: kind === 'latest' || kind === 'changes' && !more && !current.held && !current.historical ? false : value.newerAvailable }))
+            newerAvailable: kind === 'latest' || kind === 'changes' && !more && !current.held && !current.historical ? false : value.newerAvailable }))
           if (more) current.dirty = true
         } catch (error) { if (isCurrent()) {
           if (complete && complete.window.id !== current.snapshot?.window.id) release(complete)
@@ -272,10 +278,12 @@ export function useConversationView(client: ConversationViewClient | null, refer
   }, [])
   const acceptHeld = useCallback(() => {
     const current = owner.current
-    if (!current?.held || !current.snapshot || beforeCommit.current?.(current.snapshot, 'changes') === false) return
-    current.held = false
-    setState(value => ({ ...value, snapshot: current.snapshot, held: false,
-      newerAvailable: current.historical || current.dirty ? value.newerAvailable : false }))
+    const frame = current?.pending
+    if (!current?.held || !frame || beforeCommit.current?.(frame.snapshot, frame.operation, committed.current.snapshot) === false) return
+    current.held = false; current.pending = null
+    if (retained.current?.key === current.key) retained.current.pending = null
+    setState(value => ({ ...value, snapshot: frame.snapshot, historical: frame.historical, sourceError: sourceReadError(frame.snapshot), held: false,
+      newerAvailable: frame.historical || current.dirty ? value.newerAvailable : false }))
     if (current.dirty && !current.historical) void operation.current('changes')
   }, [])
   const reading = useMemo(() => snapshot ? projectConversationWindow(snapshot) : null, [snapshot])
