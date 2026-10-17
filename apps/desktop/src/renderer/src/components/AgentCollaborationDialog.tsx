@@ -47,11 +47,6 @@ function CollaborationReadingDialog({ request, onClose, onOpen }: { request: Col
       topicCategories: state.topicCategories, projectGroups: state.projectGroups, spatialRequests: state.spatialRequests }
     return retainedFacts.current
   }))
-  const contexts = useMemo(() => {
-    const topics = scratchTopicsForConfig(facts.config, facts.scratchTopicSnapshots)
-    return facts.sessions.filter(session => session.kind === 'agent').map(session => ({ ...agentContextForSession(session, undefined, facts.names[session.id], workspaceForSession(facts.config, session, topics), topicIdForSession(facts.config, session, topics)), recap: undefined }))
-  }, [facts])
-  const originals = useMemo(() => collaborationAgents(contexts), [contexts])
   const subjectKey = request.kind === 'focus' ? collaborationSubjectKey(request.subject) : undefined
   const [broader, setBroader] = useState(false), [budget, setBudget] = useState(24)
   const [selection, setSelection] = useState<CollaborationSelection>(subjectKey ? { kind: 'agent', id: subjectKey } : null)
@@ -59,10 +54,28 @@ function CollaborationReadingDialog({ request, onClose, onOpen }: { request: Col
   const areaSelector = useMemo(() => createCollaborationAreasSelector(agentRegionExecution), [])
   const scope = useMemo(() => areaSelector(facts, request.kind === 'space' ? request : undefined), [areaSelector, facts, request])
   const areas = useMemo(() => request.kind === 'space' && !broader ? scope.areas.filter(area => scope.current.includes(area.id)) : scope.areas, [scope, request.kind, broader])
-  const available = useMemo(() => request.kind === 'focus' && !broader ? [request.subject] : [...new Set(areas.flatMap(area => area.members))].flatMap(id => { const subject = originals.get(id)?.subject; return subject ? [subject] : [] }), [request, broader, areas, originals])
+  const available = useMemo(() => {
+    if (request.kind === 'focus' && !broader) return [request.subject]
+    const members = new Set(areas.flatMap(area => area.members)), subjects = new Map<string, CollaborationSubject>()
+    for (const session of facts.sessions) if (session.kind === 'agent') {
+      const subject = { hostId: session.control.hostId, agentSessionId: session.control.agentSessionId }, key = collaborationSubjectKey(subject)
+      if (members.has(key)) subjects.set(key, subject)
+    }
+    return [...subjects.values()]
+  }, [request, broader, areas, facts.sessions])
   const subjects = useMemo(() => available.slice(0, budget), [available, budget])
   const reading = useCollaborationReading(subjects, enabled)
-  const projection = useMemo(() => projectCollaboration(reading.sources, originals), [reading.sources, originals])
+  const recorded = useMemo(() => projectCollaboration(reading.sources, new Map()), [reading.sources])
+  const wanted = useMemo(() => new Set([...(request.kind === 'focus' && !broader ? [subjectKey!] : areas.flatMap(area => area.members)), ...recorded.agents.keys()]), [request.kind, broader, subjectKey, areas, recorded.agents])
+  const contexts = useMemo(() => {
+    const topics = scratchTopicsForConfig(facts.config, facts.scratchTopicSnapshots)
+    return facts.sessions.flatMap(session => {
+      if (session.kind !== 'agent' || session.hostId !== session.control.hostId || !wanted.has(collaborationSubjectKey(session.control))) return []
+      return [{ ...agentContextForSession(session, undefined, facts.names[session.id], workspaceForSession(facts.config, session, topics), topicIdForSession(facts.config, session, topics)), recap: undefined }]
+    })
+  }, [facts.sessions, facts.config, facts.scratchTopicSnapshots, facts.names, wanted])
+  const originals = useMemo(() => collaborationAgents(contexts), [contexts])
+  const projection = useMemo(() => ({ ...recorded, agents: new Map([...recorded.agents, ...originals]) }), [recorded, originals])
   const members = useMemo(() => new Set(areas.flatMap(area => area.members)), [areas])
   const relations = useMemo(() => visibleCollaboration(projection.relations, members, kinds, broader ? undefined : subjectKey), [projection, members, kinds, broader, subjectKey])
   const visibleAreas = useMemo(() => {
