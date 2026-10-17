@@ -278,10 +278,10 @@ Mote 的默认人格与知识维护约束：新建或补缺失的 Mote SOUL 默�
 
 ### 会话入口与原文件记忆
 
-- Mote 和普通 Topic 在原目录补缺失的 `AGENTS.md`，说明真实 `amux` 发现与使用入口、当前指令和权限优先、原文件用途及协作者检查。普通 Topic 必读 `topic.md`；Mote 另读 `SOUL.md`、存在的 `BEHAVIOR.md` / `MOTE.md`、`MEMORY.md` 和相关原资料。已有 AGENTS 与用户人格逐字保留；预制不会把普通 Topic 变成 PMO。指令文件不授予新权限，也不是 Runtime 状态。
-- 新 Session 由原 `prepareAgent` 路径实际读取该对象的 AGENTS；Mote 另读取原 `MEMORY.md`，带版本进入原 Core 初始上下文，不依赖某家 Provider 自动发现文件。读取只限准确原目录的有界普通文件；读取失败、文件变化、非法编码或超限均明确说明未加载，保留原输入、Session 和资料。恢复已有 Session 继续原上下文，不热替换、不重启；文件编辑后下次新 Session 使用新版本。
+- Mote 和普通 Topic 在原目录补缺失的 `AGENTS.md`，说明真实 `amux` 发现与使用入口、当前指令和权限优先、原文件用途及协作者检查。普通 Topic 必读 `topic.md`；Mote 另读 `SOUL.md`、存在的 `BEHAVIOR.md` / `MOTE.md`、`MEMORY.md` 和相关原资料。当前知识使用与维护方法对新建和已有对象均须可发现，不能因对象创建较早或保留旧 AGENTS 而缺少入口，也不要求用户重建对象或 Session。已有 AGENTS 与用户人格逐字保留，原知识及自主组织方式保全；当前方法沿各自原模块 owner 提供，Mote 的详细方法继续复用原 `amux mote --skill`。预制不会把普通 Topic 变成 PMO。指令文件不授予新权限，也不是 Runtime 状态。
+- 新 Session 由原 `prepareAgent` 路径实际读取该对象的 AGENTS；Mote 另读取原 `MEMORY.md`，带版本进入原 Core 初始上下文，不依赖某家 Provider 自动发现文件。读取只限准确原目录的有界普通文件；读取失败、文件变化、非法编码或超限均明确说明未加载，保留原输入、Session 和资料。恢复已有 Session 继续原上下文，不热替换、不重启；文件编辑后下次新 Session 使用新版本。原文件保存、当前方法可发现、上下文实际送入某个 Session 与该 Agent 采用方法分别表达，不能从模板或文件更新推定现有 Session 已采用。
 - `MEMORY.md` 是新建或补缺失时的简短默认索引，正文仍只有原文件一份，允许链接既有资料、保留自主组织方式。默认内容为空，不将旧聊天自动当作确认知识。原文件树和 Editor 负责查看与编辑；AGENTS / MEMORY 属于核心上下文，不混入 Recent ideas。
-- 原 Agent 在正常协作回合中按 AGENTS 评估值得长期保留的确认偏好、决定、更正、承诺与证据链接，写清来源、日期和适用范围，区分提案与确认。通过原 Files 的准确资源、revision/CAS 保存后实际读回，才说“已记住”；未知结果先检查，不盲重写。无需新增时可记录带来源的 Agent 自报维护说明；自报记录、旧文件 marker、Run 结束或回答文字都不证明本轮实际完成语义提取或保存。
+- 原 Agent 在正常协作回合中沿本对象的知识方法入口评估值得长期保留的确认偏好、决定、更正、承诺与证据链接，写清来源、日期和适用范围，区分提案与确认。通过原 Files 的准确资源、revision/CAS 保存后实际读回，才说“已记住”；未知结果先检查，不盲重写。无需新增时可记录带来源的 Agent 自报维护说明；自报记录、旧文件 marker、Run 结束或回答文字都不证明本轮实际完成语义提取或保存。
 - 用户可在原 Editor 改正或移除条目。撤回可保留无原正文的最小 source 标记，指导后续 Agent 不从旧材料重新吸收；原 CAS 拒绝旧 revision，但不保证模型读最新版后永不重新提出旧内容，也不声称已擦除 Provider 历史或当前活跃模型上下文。
 - 本机制自动完成的是新 Session 的原文件加载。正常回合的评估与写入仍由该 Agent 执行，未执行不能称为已保存；不另起后台 Agent、额外独立模型回合或无限追问。系统逐轮强制评估、逐 operation 冻结上下文与可信 assessment 回执尚属独立未实现能力，不能用本节提示词或模板交付代签。
 - 公共能力复用 `whoami`、`--skill`、准确空间发现及 `file.read/create/write`；模板与原文件加载不新增 Memory RPC 或第二存储。GUI、Agent 和 CLI 均检查同一原文件与 Files 回执，记忆不代替 Goal/Task、权限和 Session/Run 权威事实。
