@@ -224,6 +224,8 @@ export type GitCommitSnapshot = {
   parentOid: string | null
 }
 export type GitCommitDetails = GitHistoryCommit & {
+  /** Original author email from Git metadata; a display hint, never verified identity. */
+  authorEmail: string
   /** Full decoded commit message, including body and original line breaks. */
   message: string
   committer: string

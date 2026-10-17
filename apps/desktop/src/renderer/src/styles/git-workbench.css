@@ -12,7 +12,6 @@
 .git-workbench__message-format { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-1); color: var(--text-3); font: var(--fs-micro) var(--font-mono); }
 .git-workbench__message-format > span + span::before { content: '·'; margin-right: var(--sp-2); color: var(--text-3); }
 .git-workbench__message-breaking { color: var(--red-text); }
-.git-workbench__message-body { margin: 0 0 var(--sp-2); color: var(--text-2); font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .git-workbench__raw-message { margin: var(--sp-2) 0 var(--sp-3); }
 .git-workbench__raw-message summary { width: fit-content; max-width: 100%; color: var(--text-3); font-size: var(--fs-micro); cursor: pointer; }
 .git-workbench__raw-message summary:hover { color: var(--text); }
@@ -25,6 +24,7 @@
 .git-workbench__identity { display: flex; align-items: flex-start; gap: var(--sp-2); }
 .git-workbench__identity > span:last-child { min-width: 0; }
 .git-workbench__author-initials { display: inline-flex; flex: 0 0 26px; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: var(--surface-2); color: var(--text-2); font-size: var(--fs-micro); font-weight: 500; user-select: none; }
+.git-workbench__author-initials img { display: block; width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
 .git-workbench__person { display: block; color: var(--text-2); }
 .git-workbench__identity-time { display: block; color: var(--text-3); font-size: var(--fs-micro); }
 .git-workbench__references { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); }
