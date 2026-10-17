@@ -42,7 +42,7 @@ function applyControlFeedback(payload: ControlFeedback): boolean {
   }
   const shadow = host.attachShadow({ mode: 'closed' })
   const sheet = new CSSStyleSheet()
-  sheet.replaceSync(payload.css + '\n:host,*{pointer-events:none;box-sizing:border-box}.amux-browser-agent-glow{mix-blend-mode:normal}')
+  sheet.replaceSync(payload.css + '\n:host,*{pointer-events:none;box-sizing:border-box}:host::before,:host::after{content:none!important;display:none!important;pointer-events:none!important}.amux-browser-agent-glow{mix-blend-mode:normal}')
   shadow.adoptedStyleSheets = [sheet]
   const effects = document.createElement('div'); effects.className = 'amux-browser-agent-effects'
   const glow = document.createElement('div'); glow.className = 'amux-browser-agent-glow'
