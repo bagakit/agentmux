@@ -181,20 +181,6 @@ it('does not let a late Mote A create result populate Mote B and allows an indep
   expect((await f.client.call('space.mote.connection.ls', { target: f.target(1) })).operations.map(x => x.operationId)).toEqual([b])
 })
 
-it('synchronizes only the exact selected bot and preserves an unknown patch without another upload or write', async () => {
-  await create(); await confirmAndCreate(); await text('Original save confirmed')
-  await f.click('Back to bot profile'); await text('Sync Mote profile')
-  const nativeRequests = f.registration.mock.calls.length
-  f.setUnknownPatch(); await f.click('Sync Mote profile'); await text('The profile write is not confirmed')
-  const inputs = f.parentCalls.mock.calls.filter(([m]) => m === 'space.mote.connection.sync')
-  expect(inputs).toHaveLength(1)
-  expect((inputs[0]![1] as any).connection.application.appId).toBe('cli_mote_1')
-  const before = f.calls.filter(r => r.method === 'PATCH').length
-  await f.click('Check saved progress'); await text('The profile write is not confirmed')
-  expect(f.calls.filter(r => r.method === 'PATCH')).toHaveLength(before)
-  expect(f.registration.mock.calls).toHaveLength(nativeRequests)
-})
-
 it('keeps a lost default ACK separate from the current file and allows a new association of the same created app', async () => {
   await f.close(); f = await moteBotUi({ loseFileAck: true })
   await create(); await confirmAndCreate(); await text('Original save not confirmed')

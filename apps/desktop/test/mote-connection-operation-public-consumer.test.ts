@@ -222,10 +222,10 @@ it('freezes an explicit manual name across source edits and owner reopening whil
     expectedConnectionRevision: 1, avatar: current.avatar
   }))
   expect(synced.snapshot.name).toBe('Later saved Mote name')
-  expect(synced.profile.desired.name).toBe('Later saved Mote name')
+  expect(synced.setup.goal.desired.name).toBe('Later saved Mote name')
   expect(synced.enrollmentOperationId).toBeNull()
   expect(synced.defaultLink.state).toBe('not-requested')
-  expect(resumed.counts).toEqual({ begin: 0, authentication: 1, creationUpload: 1, create: 1, credential: 1, upload: 1, patch: 1 })
+  expect(resumed.counts).toEqual({ begin: 0, authentication: 1, creationUpload: 1, create: 1, credential: 1, upload: 0, patch: 0 })
   expect(await readFile(join(f.motes[0]!.directory, 'topic.md'), 'utf8')).toBe('# Later saved Mote name\n\nLater saved summary.\n')
 }, 30_000)
 
@@ -265,6 +265,10 @@ it('retains immutable child identity and snapshot when the original saved topic 
     pending = await f.client.call('space.mote.connection.create', input)
   await writeFile(join(f.motes[0]!.directory, 'topic.md'), '# Later title\nLater public summary\n')
   const done = await confirmAndCreateMote(f, input.operationId)
+  const foreignSetup = { operationId: 'foreign-child', expectedRevision: 1, decision: { actionId: 'foreign-action', value: 'confirm' as const } }
+  await expect(f.client.call('space.mote.connection.advance', { operationId: input.operationId, setup: foreignSetup })).rejects.toMatchObject({ code: 'CONNECTION_OPERATION_CONFLICT' })
+  await expect(f.client.call('space.mote.connection.advance', { operationId: input.operationId, enrollment: { operationId: 'foreign-child', ownRevision: 1, decision: { actionId: 'foreign-action', kind: 'confirm-account' } } })).rejects.toMatchObject({ code: 'CONNECTION_OPERATION_CONFLICT' })
+  expect((await f.client.call('space.mote.connection.inspect', { operationId: input.operationId })).operation).toEqual(done)
   expect(done.snapshot).toEqual(pending.snapshot)
   expect(done.enrollmentOperationId).toBe(pending.enrollmentOperationId)
   expect(done.profileOperationId).toBe(pending.profileOperationId)
@@ -495,17 +499,26 @@ it('keeps default association available when the same healthy app has a later co
   expect((await f.preferences.read({ kind: 'connection', target: f.target() })).values!.connection).toEqual(done.connection)
 }, 30_000)
 
-it('keeps a saved default independent of an unknown profile PATCH and never replays that child', async () => {
-  const f = await fixture({ generic: true, profileUnknown: true }),
-    input = await f.input()
+it('keeps historical profile writes readable without executing them or changing the saved default', async () => {
+  const f = await fixture(), input = await f.input()
   await f.client.call('space.mote.connection.create', input)
   const done = await confirmAndCreateMote(f, input.operationId)
-  expect(done.defaultLink.state).toBe('saved')
-  expect(done.profile).toBeNull()
-  const synced = await f.client.call('space.mote.connection.sync', { operationId: 'explicit-profile-sync', source: input.source, connection: done.connection!, expectedConnectionRevision: 1, avatar: input.avatar })
-  expect(synced.profile!.patch.state).toBe('unknown')
-  expect((await f.client.call('space.mote.connection.advance', { operationId: synced.operationId })).profile!.patch.state).toBe('unknown')
-  expect(f.counts).toEqual({ begin: 1, authentication: 1, creationUpload: 1, create: 1, credential: 1, upload: 1, patch: 1 })
+  const synced = await f.client.call('space.mote.connection.sync', { operationId: 'historical-profile-parent', source: input.source, connection: done.connection!, expectedConnectionRevision: 1, avatar: input.avatar })
+  const db = f.connections.database!
+  const row = JSON.parse(String(db.prepare('SELECT record_json FROM mote_connection_operation WHERE operation_id=?').get(synced.operationId)!.record_json))
+  const child = { operationId: 'historical-profile-child', connectionId: done.connection!.connectionId, connectionRevision: 1, application: done.connection!.application, language: null,
+    fields: ['name','description','avatar'], desired: { name: synced.snapshot.name, description: synced.snapshot.description, avatarSha256: synced.snapshot.avatarSha256 },
+    upload: { state: 'confirmed' }, patch: { state: 'unknown', diagnostic: { stage: 'patch', httpStatus: 502 } }, publication: 'not-requested', online: null, reason: 'effect-unconfirmed' }
+  db.exec('CREATE TABLE IF NOT EXISTS connection_profile_operation (ordinal INTEGER PRIMARY KEY AUTOINCREMENT, operation_id TEXT NOT NULL UNIQUE, connection_id TEXT NOT NULL, input_json TEXT NOT NULL, config_json TEXT NOT NULL, actor_json TEXT NOT NULL, record_json TEXT NOT NULL, upload_wire TEXT, patch_wire TEXT, avatar_url TEXT)')
+  db.prepare('INSERT INTO connection_profile_operation(operation_id,connection_id,input_json,config_json,actor_json,record_json,patch_wire) VALUES(?,?,?,?,?,?,?)').run(child.operationId, child.connectionId, '{"original":"private input"}', '{}', JSON.stringify(row.actor), JSON.stringify(child), '{"original":"private frozen wire"}')
+  delete row.setupInput; delete row.operation.setup; delete row.operation.setupOperationId
+  row.profileInput = { original: 'Retained opaque original input' }; row.operation.profileOperationId = child.operationId; row.operation.profile = child
+  db.prepare('UPDATE mote_connection_operation SET record_json=? WHERE operation_id=?').run(JSON.stringify(row), synced.operationId)
+  const original = db.prepare('SELECT * FROM connection_profile_operation WHERE operation_id=?').get(child.operationId)
+  expect((await f.client.call('space.mote.connection.advance', { operationId: synced.operationId })).profile).toEqual(child)
+  expect(body(await cli(f, 'inspect', { operationId: synced.operationId })).operation.profile).toEqual(child)
+  expect(db.prepare('SELECT * FROM connection_profile_operation WHERE operation_id=?').get(child.operationId)).toEqual(original)
+  expect(f.counts.upload).toBe(0); expect(f.counts.patch).toBe(0)
   expect((await f.preferences.read({ kind: 'connection', target: f.target() })).values!.connection).toEqual(done.connection)
 }, 30_000)
 
@@ -565,11 +578,14 @@ it('syncs the same exact saved app without another enrollment or default write',
       avatar: 'include-saved' as const
     }
   const synced = body(await cli(f, 'sync', sync))
+  await expect(f.client.call('space.mote.connection.advance', { operationId: sync.operationId, setup: { operationId: 'foreign-child', expectedRevision: 1, decision: { actionId: 'foreign-action', value: 'confirm' } } })).rejects.toMatchObject({ code: 'CONNECTION_OPERATION_CONFLICT' })
+  await expect(f.client.call('space.mote.connection.advance', { operationId: sync.operationId, enrollment: { operationId: 'foreign-child', ownRevision: 1, decision: { actionId: 'foreign-action', kind: 'confirm-account' } } })).rejects.toMatchObject({ code: 'CONNECTION_OPERATION_CONFLICT' })
+  expect((await f.client.call('space.mote.connection.inspect', { operationId: sync.operationId })).operation).toEqual(synced)
   expect(synced.enrollmentOperationId).toBeNull()
   expect(synced.defaultLink.state).toBe('not-requested')
   expect(synced.defaultSave).toBeNull()
-  expect(synced.profile.patch.state).toBe('confirmed')
-  expect(f.counts).toEqual({ begin: 1, authentication: 1, creationUpload: 1, create: 1, credential: 1, upload: 1, patch: 1 })
+  expect(synced.profile).toBeNull(); expect(synced.setupOperationId).toBeTruthy(); expect(synced.setup?.goal.kind).toBe('profile-update')
+  expect(f.counts).toEqual({ begin: 1, authentication: 1, creationUpload: 1, create: 1, credential: 1, upload: 0, patch: 0 })
   expect(f.writes).toBe(writes)
   await expect(
     f.client.call('space.mote.connection.sync', {
@@ -578,7 +594,7 @@ it('syncs the same exact saved app without another enrollment or default write',
       connection: { ...sync.connection, application: { ...sync.connection.application, appId: 'different-app' } }
     })
   ).rejects.toMatchObject({ code: 'CONNECTION_REVISION_CONFLICT' })
-  expect(f.counts.patch).toBe(1)
+  expect(f.counts.patch).toBe(0)
 }, 30_000)
 
 it('requires transport authority and correlates original child receipts without accepting payload-authored privilege', async () => {
