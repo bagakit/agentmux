@@ -188,7 +188,7 @@ import { ExternalBrowserOwner } from './browser-external-owner.js'
 import { BrowserViewManager } from './browser-view-manager.js'
 import { browserColdDescriptor, coldBrowserTargets } from './browser-cold-descriptor.js'
 import { BrowserRecoveryPreviewStore } from './browser-recovery-preview.js'
-import type { BrowserRecoveryPreviewReadResult } from '../shared/browser-recovery-preview.js'
+import type { BrowserRecoveryPreviewReadResult, BrowserRecoveryPreviewScope } from '../shared/browser-recovery-preview.js'
 import { browserResourceLocations } from './browser-resource-directory.js'
 import type { NativeOverlayRegion } from '../shared/native-overlay.js'
 import { BrowserOperationFileStore, BrowserOperationJournal, BROWSER_OPERATION_JOURNAL_FILE, browserOperationAlreadyExistsError } from './browser-operation-journal.js'
@@ -461,6 +461,19 @@ export async function registerIpc(args: {
     }
     return saved
   }, input)
+  const resolveRecoveryPreviewScope = async (id: string): Promise<BrowserRecoveryPreviewScope | null> => {
+    const original = browsers.recoveryPreviewScope(id)
+    if (original) return original
+    const savedState = await spatialState.read()
+    // A live/released owner created during the disk read remains the identity authority.
+    const current = browsers.recoveryPreviewScope(id)
+    if (current) return current
+    const saved = browserColdDescriptor(savedState?.graph ?? null, id)
+    if (saved.mode === 'normal' && !saved.profileId) return null
+    return saved.mode === 'private'
+      ? { browserId: id, workspaceId: saved.workspaceId, mode: 'private', profileId: null }
+      : { browserId: id, workspaceId: saved.workspaceId, mode: 'normal', profileId: saved.profileId! }
+  }
   browsers.setPresentationWindowOwner((document, occurrence) => args.workbenchWindows.presentationWindow(document, occurrence))
   const nativeChrome = new NativeOverlayWindows(args.window, browsers, args.workbenchWindows)
   const releaseNativeWindowOwner = args.workbenchWindows.setNativeOwner({ beforeClosing: async window => {
@@ -1926,20 +1939,9 @@ export async function registerIpc(args: {
   handleWithEvent('browser:getRecoveryPreview', async (event, id: string): Promise<BrowserRecoveryPreviewReadResult> => {
     requireTrustedSender('browser:getRecoveryPreview', event)
     try {
-      let scope = browsers.recoveryPreviewScope(id)
-      if (!scope) {
-        const savedState = await spatialState.read()
-        // A live/released owner created during the disk read remains the identity authority.
-        scope = browsers.recoveryPreviewScope(id)
-        if (!scope) {
-          const saved = browserColdDescriptor(savedState?.graph ?? null, id)
-          if (saved.mode === 'normal' && !saved.profileId) return {
-            status: 'unavailable', warning: 'The original Browser Profile for this preview is unconfirmed. The page and Retry remain available.'
-          }
-          scope = saved.mode === 'private'
-            ? { browserId: id, workspaceId: saved.workspaceId, mode: 'private', profileId: null }
-            : { browserId: id, workspaceId: saved.workspaceId, mode: 'normal', profileId: saved.profileId! }
-        }
+      const scope = await resolveRecoveryPreviewScope(id)
+      if (!scope) return {
+        status: 'unavailable', warning: 'The original Browser Profile for this preview is unconfirmed. The page and Retry remain available.'
       }
       return await browserRecoveryPreviews.read(scope)
     } catch {
@@ -2249,7 +2251,27 @@ export async function registerIpc(args: {
       return target
     })
   })
-  handle('browser:close', (id: string) => browsers.close(id))
+  handle('browser:close', async (id: string) => {
+    // Existing native owners retire synchronously along their original Close path.
+    if (browsers.recoveryPreviewScope(id)) return await browsers.close(id)
+    let scope: BrowserRecoveryPreviewScope | null = null
+    try {
+      scope = await resolveRecoveryPreviewScope(id)
+      if (!scope) console.warn('The cold Browser preview Profile is unconfirmed. The original Close still proceeds.')
+    }
+    catch { console.warn('The cold Browser preview scope is unconfirmed. The original Close still proceeds.') }
+    try {
+      // This must run after the await too: a native owner may have appeared during the cold read.
+      await browsers.close(id)
+    } finally {
+      if (scope) {
+        // Enqueue retirement now; optional cache IO must not delay the original Close ACK.
+        void browserRecoveryPreviews.remove(scope).then(removed => {
+          if (removed.warning) console.warn(removed.warning)
+        }).catch(error => console.warn('Browser closed; its historical preview cleanup is unconfirmed:', error))
+      }
+    }
+  })
   const detach = args.runtime.attach(contents)
   const rpcHttp = agentMuxRpcHttpOptions()
   const connectorServices = await createDesktopConnections({ directory: join(homedir(), '.agentmux', 'connectors'), encryption: safeStorage,
