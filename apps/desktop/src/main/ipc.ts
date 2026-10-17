@@ -1591,6 +1591,14 @@ export async function registerIpc(args: {
     requireTrustedSender('sessions:message', event)
     return await args.runtime.sessionMessage(session, messageId)
   })
+  handleWithEvent('sessions:messageEvents', async (event, session: import('../shared/contracts.js').SessionHistoryReference, options?: import('../shared/contracts.js').SessionMessageEventsOptions) => {
+    requireTrustedSender('sessions:messageEvents', event)
+    return await args.runtime.sessionMessageEvents(session, options)
+  })
+  handleWithEvent('sessions:spawns', async (event, session: import('../shared/contracts.js').SessionHistoryReference, options: import('../shared/contracts.js').SessionSpawnPageOptions) => {
+    requireTrustedSender('sessions:spawns', event)
+    return await args.runtime.sessionSpawns(session, options)
+  })
   handle('sessions:creation', async (hostId: string, agentSessionId: string) => await args.runtime.agentCreation(hostId, agentSessionId))
   handle('sessions:resolveCreationSessionId', async (hostId: string, createOperationId: string) => args.runtime.resolveCreationSessionId(hostId, createOperationId))
   handle('sessions:historySources', async (options?: { observation: true }) => {

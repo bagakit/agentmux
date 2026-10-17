@@ -966,6 +966,8 @@ const mockApi: AgentMuxDesktopApi = {
     dispatch: async () => { throw new Error('Original collaboration message details require the connected desktop Host. The selected source is retained.') },
     listMessages: async () => { throw new Error('Original A2A messages require their connected Host. The current reading window is retained.') },
     readMessage: async () => { throw new Error('The original A2A body requires its connected Host. Keep the original message ID and selection.') },
+    messageEvents: async () => { throw new Error('Original A2A event reading requires its connected Host. The participant and reading window remain available.') },
+    spawns: async () => { throw new Error('Original Agent creation relationships require their connected Host. The original Session identity is retained.') },
     notifyInputOccupation: async () => { throw new Error('User input observation requires the connected desktop Host. The original Agent and draft remain available.') },
     nativeSessions: async input => ({ hostId: input.hostId, executorId: input.executorId,
       providerId: mockConfig.executors[input.executorId]?.providerId ?? 'codex',
