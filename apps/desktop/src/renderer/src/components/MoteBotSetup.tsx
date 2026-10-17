@@ -501,8 +501,8 @@ export function MoteBotSetup({
       )}
       </div>
       </div>
-      {profileTask && selected ? <ConnectionProfileTrace operationId={operation?.profileOperationId ?? undefined} parentId={operation?.operationId ?? setup.selectedId!} original={operation?.profile} /> : !profileTask ? <ConnectionRequestTrace source={enrollment ? { kind: 'enrollment', operationId: enrollment.operationId } : null} revision={enrollment?.revision} title={enrollment?.initialSetup ? "Sign-in & creation requests" : undefined} /> : null}
-      {!profileTask && enrollment?.configured && initialSetup ? <ConnectionRequestTrace source={{ kind: 'setup', operationId: initialSetup.operationId }} revision={JSON.stringify(initialProgress)} title="Configuration & publication requests" /> : null}
+      {profileTask && operation?.profileOperationId ? <ConnectionProfileTrace operationId={operation?.profileOperationId ?? undefined} parentId={operation?.operationId ?? setup.selectedId!} original={operation?.profile} /> : !profileTask || selected ? <ConnectionRequestTrace source={enrollment ? { kind: 'enrollment', operationId: enrollment.operationId } : null} revision={enrollment?.revision} enrollmentView={setup.enrollmentView} diagnosisTarget={setup.selectedId ? { kind: 'mote', operationId: setup.selectedId, sourceTarget: target, ...(raw ? { action: raw.action, phase: raw.phase } : {}) } : null} title={profileTask ? "Profile update requests" : enrollment?.initialSetup ? "Sign-in & creation requests" : undefined} /> : null}
+      {!profileTask && enrollment?.configured && initialSetup ? <ConnectionRequestTrace source={{ kind: 'setup', operationId: initialSetup.operationId }} revision={JSON.stringify(initialProgress)} hideCopy title="Configuration & publication requests" /> : null}
       {resumeId || selected ? (
         <details className="mote-bot-history">
           <summary>Create another bot</summary>
