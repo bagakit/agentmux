@@ -129,7 +129,7 @@ type BrowserEntry = {
   appLinkPrompt: { url: string; scheme: string } | null
   activity: BrowserActivityState
   humanControl: boolean
-  activeRun: { operationId: string; stop: () => void } | undefined
+  activeRun: { operationId: string; signal: AbortSignal; stop: () => void } | undefined
   runInFlight: boolean
   controlRevision: number
   inputShield?: BrowserNativeInputShield | undefined
@@ -238,6 +238,9 @@ type ReleasedBrowser = {
   viewport: BrowserViewport
   pendingSwitch?: PendingProfileSwitch
   detachedView?: WebContentsView
+  inputShield?: BrowserNativeInputShield
+  /** An explicit person-facing Close retires the page; only native cleanup remains. */
+  cleanupOnly?: true
 }
 
 type BrowserRestoreInput = {
@@ -359,24 +362,36 @@ export class BrowserViewManager {
   }
   /** One read of the existing owners; no page acquisition or persistent resource index. */
   resourceTargets(processes: ReadonlyMap<number, number> | null): AgentMuxBrowserTarget[] {
+    const identities = (native: WebContents[]): { pid: number; creationTime: number }[] | null => {
+      if (!native.length) return []
+      if (!processes) return null
+      try {
+        const pids = new Set(native.flatMap(contents => contents.mainFrame.framesInSubtree.filter(frame => !frame.detached).map(frame => frame.osProcessId)))
+        return pids.size && [...pids].every(pid => pid > 0 && Number.isFinite(processes.get(pid)) && processes.get(pid)! > 0)
+          ? [...pids].map(pid => ({ pid, creationTime: processes.get(pid)! })) : null
+      } catch { return null }
+    }
     const live = this.targets().map(target => {
       const entry = this.entries.get(target.id)!
-      let identities: { pid: number; creationTime: number }[] | null = null
+      let observed: { pid: number; creationTime: number }[] | null = null
       let retention: AgentMuxBrowserRetention = { status: 'unknown', reasons: ['owner-unavailable'] }
       try {
         retention = this.retention(entry)
-        if (processes && !entry.view.webContents.isDestroyed()) {
-          const pids = new Set(entry.view.webContents.mainFrame.framesInSubtree.filter(frame => !frame.detached).map(frame => frame.osProcessId))
-          if (pids.size && [...pids].every(pid => pid > 0 && Number.isFinite(processes.get(pid)) && processes.get(pid)! > 0)) identities = [...pids].map(pid => ({ pid, creationTime: processes.get(pid)! }))
-        }
+        if (!entry.view.webContents.isDestroyed()) observed = identities([entry.view.webContents,
+          ...(entry.inputShield && !entry.inputShield.contents.isDestroyed() ? [entry.inputShield.contents] : [])])
       } catch { /* Keep this original target; incomplete native observation is unknown. */ }
       return { ...target, resource: { state: target.status === 'ready' ? 'live' as const : 'unknown' as const,
-        locations: [], processes: identities, retention } }
+        locations: [], processes: observed, retention } }
     })
-    const released: AgentMuxBrowserTarget[] = [...this.releasedEntries.values()].map(entry => ({
+    const released = [...this.releasedEntries.values()].map<AgentMuxBrowserTarget>(entry => ({
       id: entry.id, workspaceId: entry.workspaceId, source: 'embedded', mode: entry.storage.mode,
-      status: 'unavailable', url: entry.requestedUrl, title: '', capabilities: [],
-      resource: { state: 'released', locations: [], processes: [] }
+      status: 'unavailable', url: entry.cleanupOnly ? '' : entry.requestedUrl, title: '', capabilities: [],
+      ...(entry.inputShield ? { warning: entry.cleanupOnly
+        ? 'This Browser was closed explicitly. Its original native input surface cleanup is unconfirmed; use Close to retry cleanup. Open a new Browser for a fresh page.'
+        : 'The page was released, but its native input surface cleanup is unconfirmed. Reopen or close this original Browser to retry its retained cleanup.' } : {}),
+      resource: { state: entry.inputShield ? 'unknown' : 'released', locations: [],
+        processes: identities(entry.inputShield && !entry.inputShield.contents.isDestroyed() ? [entry.inputShield.contents] : []),
+        ...(entry.inputShield ? { retention: { status: 'unknown', reasons: ['close-unconfirmed'] } } : {}) }
     }))
     return [...live, ...released]
   }
@@ -392,6 +407,8 @@ export class BrowserViewManager {
     if (previous && previous !== window && !previous.isDestroyed()) previous.contentView.removeChildView(view)
     try { window.contentView.addChildView(view, index); this.viewWindows.set(view, window) }
     catch (error) { if (previous && previous !== window && !previous.isDestroyed()) { previous.contentView.addChildView(view, 1); this.viewWindows.set(view, previous) } throw error }
+    const id = this.browserIdsByView.get(view), entry = id ? this.entries.get(id) : undefined
+    if (entry?.view === view) this.synchronizeInputShield(entry)
   }
   private detachView(view: WebContentsView): void {
     const host = this.windowForView(view)
@@ -403,6 +420,7 @@ export class BrowserViewManager {
     for (const entry of this.entries.values()) {
       for (const id of [...entry.presentationLeaseIds]) { const lease = this.presentationLeases.get(id); if (lease?.window === window) this.removePresentationLease(lease) }
       if (this.windowForView(entry.view) === window) { this.placeView(entry.view, this.window); entry.view.setVisible(false); entry.visible = false }
+      this.synchronizeInputShield(entry)
       this.publishNativeCoverage(entry)
       const candidate = entry.pendingSwitch?.view
       if (candidate && this.windowForView(candidate) === window) this.placeView(candidate, this.window)
@@ -860,6 +878,7 @@ export class BrowserViewManager {
         }
       }
     } finally {
+      if (this.owns(capture.entry, capture.source)) this.synchronizeInputShield(capture.entry)
       if (staging && !staging.isDestroyed()) {
         try { if (staging.contentView.children.includes(capture.source)) staging.contentView.removeChildView(capture.source) }
         catch (error) { errors.push(error) }
@@ -953,7 +972,9 @@ export class BrowserViewManager {
   /** Actual OS owners, including out-of-process frames; a shared PID is reported only once. */
   resourceProcessIds(): number[] {
     const pids = new Set<number>()
-    for (const entry of this.entries.values()) for (const contents of [entry.view.webContents, ...(entry.inputShield ? [entry.inputShield.contents] : [])]) {
+    const live = [...this.entries.values()].flatMap(entry => [entry.view.webContents, ...(entry.inputShield ? [entry.inputShield.contents] : [])])
+    const retired = [...this.releasedEntries.values()].flatMap(entry => entry.inputShield ? [entry.inputShield.contents] : [])
+    for (const contents of [...live, ...retired]) {
       if (!contents || contents.isDestroyed()) continue
       for (const frame of contents.mainFrame.framesInSubtree) {
         if (!frame.detached && frame.osProcessId > 0) pids.add(frame.osProcessId)
@@ -1104,6 +1125,7 @@ export class BrowserViewManager {
     if (contents.debugger?.isAttached?.() || contents.isDevToolsOpened?.()) reasons.add('debugger')
     if (!entry.resourceDocumentConfirmed || typeof contents.isBeingCaptured !== 'function' || typeof contents.isCurrentlyAudible !== 'function') reasons.add('document-unconfirmed')
     if (entry.releaseAttempt?.pending && entry.releaseAttempt.view === entry.view) reasons.add('close-unconfirmed')
+    if (entry.inputShield && (entry.inputIsolation === 'unconfirmed' || !this.agentOwnsInput(entry))) reasons.add('close-unconfirmed')
     return { status: reasons.has('document-unconfirmed') || reasons.has('close-unconfirmed') ? 'unknown' : reasons.size ? 'retained' : 'eligible', reasons: [...reasons] }
   }
 
@@ -1121,6 +1143,11 @@ export class BrowserViewManager {
     const released = this.releasedEntries.get(id)
     if (!released) throw new Error(`Unknown released browser: ${id}`)
     this.assertWorkspaceBinding(released.workspaceId, input?.workspaceId ?? null)
+    if (released.cleanupOnly) {
+      this.cleanupReleasedOwner(released)
+      if (!released.inputShield && !released.pendingSwitch && !released.detachedView) this.releasedEntries.delete(id)
+      throw new Error('This Browser was closed explicitly. Use Close to retry its remaining native cleanup, or open a new Browser for a fresh page.')
+    }
     if (input?.mode !== undefined && input.mode !== released.storage.mode) throw new Error('An existing Browser cannot change mode. Open a new Browser instead.')
     const profileId = input?.profileId ?? released.storage.profileId
     if (released.storage.mode === 'private' && profileId !== null) throw new Error('A private Browser cannot use a saved Profile.')
@@ -1136,7 +1163,7 @@ export class BrowserViewManager {
     this.cleanupReleasedOwner(released)
     this.releasedEntries.delete(id)
     try {
-      const snapshot = await this.createEntry(id, url, storage, viewport, released.workspaceId)
+      const snapshot = await this.createEntry(id, url, storage, viewport, released.workspaceId, released.inputShield)
       return snapshot
     } catch (error) {
       this.releasedEntries.set(id, { ...released, storage, requestedUrl: url, viewport })
@@ -1149,7 +1176,8 @@ export class BrowserViewManager {
     url: string,
     storage: BrowserStorage,
     viewport: BrowserViewport = 'responsive',
-    workspaceId: string | null = null
+    workspaceId: string | null = null,
+    retiredInputShield?: BrowserNativeInputShield
   ): Promise<BrowserSnapshot> {
     if (!isBrowserViewport(viewport)) throw new Error('Unknown browser viewport or invalid dimensions')
     if (this.entries.has(id)) throw new Error(`Browser already exists: ${id}`)
@@ -1173,12 +1201,13 @@ export class BrowserViewManager {
       error: null,
       driving: false,
       appLinkPrompt: null,
-      activity: { operation: null, control: 'human' },
+      activity: { operation: null, control: 'human', ...(retiredInputShield ? { warning: 'An earlier native Browser input surface could not be fully released. The original Browser has reopened; use Return to Agent to retry cleanup before starting a fresh isolated program.' } : {}) },
       humanControl: false,
       activeRun: undefined,
       runInFlight: false,
       controlRevision: 0,
-      inputIsolation: 'inactive',
+      inputIsolation: retiredInputShield ? 'unconfirmed' : 'inactive',
+      inputShield: retiredInputShield,
       feedbackRevision: 0,
       presentationLeaseIds: new Set(), captureId: null, inputLeaseId: null, firstPress: null,
       resourceRisk: new Set(), resourceDocumentConfirmed: false, resourceReads: 0, publishedRetention: null, releaseAttempt: null
@@ -1646,6 +1675,7 @@ export class BrowserViewManager {
     entry.inputIsolation = 'preparing'
     entry.activeRun = {
       operationId: operation.id,
+      signal: stopController.signal,
       stop: () => {
         if (stopRequested) return
         stopRequested = true
@@ -1821,6 +1851,9 @@ export class BrowserViewManager {
       entry.driving = false
       if (entry.activeRun?.operationId === operation.id) { entry.activeRun = undefined; ++entry.controlRevision }
       this.releaseInputShield(entry)
+      // The original source can end before the live target is projected again.
+      // Its returned operation still reports the final dispatch/control facts.
+      operation.control = this.controlState(entry)
       await feedback.end(operation.phase === 'completed')
       const cleanupWarning = session.detach()
       if (cleanupWarning) {
@@ -2403,7 +2436,7 @@ export class BrowserViewManager {
     entry.humanControl = false
     ++entry.controlRevision
     const { warning: _warning, ...activity } = entry.activity
-    entry.activity = { ...activity, control: 'agent' }
+    entry.activity = { ...(entry.inputShield ? entry.activity : activity), control: 'agent' }
     this.emit(entry)
     return this.snapshot(entry)
   }
@@ -2923,11 +2956,7 @@ export class BrowserViewManager {
       if (becomingVisible) { this.synchronizeVisiblePage(entry, entry.view); this.emit(entry) }
       if (hostChanged) this.notifyNativeVisibility(previousWindow)
       if (becomingVisible || boundsChanged || hostChanged) this.notifyNativeVisibility(nativeWindow)
-    } finally {
-      try { entry.inputShield?.synchronize() }
-      catch { this.releaseInputShield(entry); this.inputIsolationFailed(entry) }
-      this.publishNativeCoverage(entry)
-    }
+    } finally { this.synchronizeInputShield(entry); this.publishNativeCoverage(entry) }
   }
 
   /**
@@ -2954,12 +2983,15 @@ export class BrowserViewManager {
     try { this.destroyOwner(id) } catch (error) { failures.push(error) }
     // A failed native teardown must still retire this incarnation. Late popup callbacks compare
     // this exact storage object; a newly created Browser with the same id remains independent.
-    if (this.entries.get(id)?.storage === storage) this.entries.delete(id)
+    if (this.entries.get(id)?.storage === storage) {
+      if (entry) this.retainClosedInputShield(entry)
+      this.entries.delete(id)
+    }
     // destroyOwner can remove the map entry before native close throws. Keep using the captured
     // exact view to finish that consumer, independently of any later incarnation with this id.
     try { if (entry && !entry.view.webContents.isDestroyed() && !this.window.isDestroyed()) this.detachView(entry.view) } catch (error) { failures.push(error) }
     try { if (entry && !entry.view.webContents.isDestroyed()) entry.view.webContents.close() } catch (error) { failures.push(error) }
-    if (this.releasedEntries.get(id)?.storage === storage) this.releasedEntries.delete(id)
+    if (this.releasedEntries.get(id)?.storage === storage && !this.releasedEntries.get(id)?.inputShield) this.releasedEntries.delete(id)
     try { if (notify) this.send({ type: 'closed', id }) } catch (error) { failures.push(error) }
     try { await this.clearPrivateStorage(storage) } catch (error) { failures.push(error) }
     if (failures.length) throw new AggregateError(failures, 'Private Browser closed with website-data cleanup failures.')
@@ -3007,8 +3039,10 @@ export class BrowserViewManager {
     if (!entry) {
       const released = this.releasedEntries.get(id)
       if (!released) return false
+      if (released.inputShield) released.cleanupOnly = true
       this.cleanupReleasedOwner(released)
-      return this.releasedEntries.delete(id)
+      if (!released.inputShield) this.releasedEntries.delete(id)
+      return true
     }
     this.releaseInputShield(entry)
     this.cancelPendingSwitch(entry, new Error('Browser owner released during profile switch'))
@@ -3035,6 +3069,7 @@ export class BrowserViewManager {
       ).catch(() => {})
     }
     this.clearFavicon(entry)
+    this.retainClosedInputShield(entry)
     this.entries.delete(id)
     this.notifyNativeVisibility(this.windowForView(entry.view))
     if (!this.window.isDestroyed()) {
@@ -3285,6 +3320,7 @@ export class BrowserViewManager {
       this.releasedEntries.set(entry.id, released)
       const cleanupErrors: unknown[] = []
       this.releaseInputShield(entry)
+      if (entry.inputShield) { released.inputShield = entry.inputShield; entry.inputShield = undefined }
       try { this.revokePresentationCapture(entry, 'source-released') } catch (error) { cleanupErrors.push(error) }
       if (entry.captureId) this.presentationCaptures.delete(entry.captureId)
       entry.captureId = null
@@ -3310,7 +3346,8 @@ export class BrowserViewManager {
         this.send({ type: 'released', id: entry.id, navigationId: entry.navigationId })
         return
       }
-      const reason = cleanupErrors.map(error => error instanceof Error ? error.message : String(error)).join('; ')
+      const reason = [...cleanupErrors.map(error => error instanceof Error ? error.message : String(error)),
+        ...(released.inputShield ? ['Native input surface cleanup is unconfirmed; reopening or Close retries its retained cleanup identity.'] : [])].join('; ')
       this.send({ type: 'unavailable', id: entry.id, error: 'Browser native page was destroyed. Retry to reopen this page.' + (reason ? ` Cleanup failed: ${reason}` : '') })
     })
   }
@@ -3433,8 +3470,19 @@ export class BrowserViewManager {
     if (errors.length) throw new AggregateError(errors, 'Browser profile candidate cleanup failed: ' + errors.map(error => error instanceof Error ? error.message : String(error)).join('; '))
   }
 
+  private retainClosedInputShield(entry: BrowserEntry): void {
+    if (!entry.inputShield) return
+    this.releasedEntries.set(entry.id, { id: entry.id, workspaceId: entry.workspaceId, storage: entry.storage,
+      requestedUrl: entry.requestedUrl, viewport: entry.viewport, inputShield: entry.inputShield, cleanupOnly: true })
+    entry.inputShield = undefined
+  }
+
   private cleanupReleasedOwner(released: ReleasedBrowser): void {
     const errors: unknown[] = []
+    if (released.inputShield) {
+      try { released.inputShield.dispose(); delete released.inputShield }
+      catch { /* Keep its unique cleanup reference; a healthy same-ID restore remains available. */ }
+    }
     if (released.pendingSwitch) {
       try {
         this.releasePendingSwitch(released.pendingSwitch)
@@ -3568,7 +3616,7 @@ export class BrowserViewManager {
     this.send({ type: 'updated', browser })
   }
 
-  private agentOwnsInput(entry: BrowserEntry): boolean { return entry.activeRun !== undefined && !entry.humanControl }
+  private agentOwnsInput(entry: BrowserEntry): boolean { return entry.activeRun !== undefined && !entry.activeRun.signal.aborted && !entry.humanControl }
 
   private requireHumanInput(entry: BrowserEntry): void {
     if (!this.agentOwnsInput(entry)) return
@@ -3591,7 +3639,7 @@ export class BrowserViewManager {
     let timer: ReturnType<typeof setTimeout> | undefined, abort: (() => void) | undefined
     try {
       const shield = new BrowserNativeInputShield(view, () => this.windowForView(view), () =>
-        this.owns(entry, view) && entry.activeRun?.operationId === operationId && !entry.humanControl, () => {
+        this.owns(entry, view) && entry.activeRun?.operationId === operationId && this.agentOwnsInput(entry), () => {
         if (!this.owns(entry, view) || entry.activeRun?.operationId !== operationId) return
         this.releaseInputShield(entry)
         this.inputIsolationFailed(entry)
@@ -3638,6 +3686,11 @@ export class BrowserViewManager {
     // not turn the still-healthy page/program into a failure; inspect retains the
     // original operation, isolation fact and persistent warning for the next read.
     try { this.emit(entry) } catch { /* Keep current owner facts even when this projection is unavailable. */ }
+  }
+
+  private synchronizeInputShield(entry: BrowserEntry): void {
+    try { entry.inputShield?.synchronize() }
+    catch { this.releaseInputShield(entry); this.inputIsolationFailed(entry) }
   }
 
   private releaseInputShield(entry: BrowserEntry): void {
