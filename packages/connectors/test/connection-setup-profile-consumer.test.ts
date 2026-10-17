@@ -11,6 +11,7 @@ import {
   parseConnectionSetupResult,
   type ConnectionSetupBegin,
   type ConnectionSetupView,
+  type ConnectionSetupRequestDiagnostic,
   type ConnectionSetupPublicationReview
 } from '@agentmux/core/connections'
 import type { ConnectionAdapter } from '@agentmux/connectors'
@@ -42,6 +43,7 @@ async function fixture(
     publicationIssue?: boolean
     planUnavailable?: boolean
     publicationReadFailure?: string
+    diagnostic?: ConnectionSetupRequestDiagnostic
   } = {}
 ) {
   const root = await mkdtemp(join(tmpdir(), 'console-profile-')),
@@ -227,7 +229,7 @@ async function fixture(
         return options.unknown === 'upload'
           ? {
               kind: 'unknown',
-              diagnostic: { httpStatus: 502, code: 'http-status' }
+              diagnostic: options.diagnostic ?? { httpStatus: 502, code: 'http-status' }
             }
           : { kind: 'accepted', privateState: 'private-uploaded-avatar' }
       },
@@ -238,7 +240,7 @@ async function fixture(
         return options.unknown === 'write'
           ? {
               kind: 'unknown',
-              diagnostic: { httpStatus: 502, code: 'http-status' }
+              diagnostic: options.diagnostic ?? { httpStatus: 502, code: 'http-status' }
             }
           : { kind: 'accepted', privateState: 'private-updated-profile' }
       },
@@ -735,6 +737,26 @@ it.each(['upload', 'write'] as const)(
   },
   30000
 )
+it('keeps a safe response code on the original Setup effect through SDK, CLI and owner restart', async () => {
+  const diagnostic = { code: 'platform-error' as const, httpStatus: 200, nativeCode: 10003 }
+  const f = await fixture({ unknown: 'upload', diagnostic })
+  const view = await f.begin()
+  expect(view.profileUpdate).toMatchObject({ stage: 'avatar-upload', state: 'attention', actions: [] })
+  const input = { operationId: f.input.operationId, requestTrace: { limit: 100 } }
+  const first = await f.sdk.call('connection.setup.inspect', input)
+  const original = first.requestTrace!.entries.find(row => row.effect === 'upload-profile-avatar')!
+  expect(original).toMatchObject({ request: 'unknown', secureStorage: 'not-started', diagnostic })
+  const count = f.requests.length
+  await f.reopen()
+  const current = await f.sdk.call('connection.setup.inspect', input)
+  const cli = await f.cli(['setup', 'inspect', '--operation-id', f.input.operationId, '--request-trace'])
+  for (const observed of [current, cli]) {
+    const step = observed.requestTrace.entries.find((row: any) => row.effect === 'upload-profile-avatar')
+    expect(step).toEqual(original)
+    expect(step.diagnostic).toEqual(diagnostic)
+  }
+  expect(f.requests).toHaveLength(count)
+}, 30000)
 it.each(['upload', 'write', 'readback'] as const)(
   'keeps the actual pending %s phase readable through local public inspect',
   async (hold) => {

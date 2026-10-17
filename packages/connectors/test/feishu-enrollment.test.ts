@@ -471,7 +471,7 @@ it('reports only observed response categories, never native text or a guessed no
   const cases: Array<[Response | Error, unknown]> = [
     [new Response(null, { status: 302, headers: { location: 'https://attacker.invalid/' } }), { stage: 'response', code: 'http-status', httpStatus: 302 }],
     [Response.json({ code: 17, message: 'private-platform-detail' }, { status: 403 }), { stage: 'response', code: 'http-status', httpStatus: 403 }],
-    [Response.json({ code: 17, message: 'private-platform-detail' }), { stage: 'response', code: 'platform-error', httpStatus: 200 }],
+    [Response.json({ code: 17, message: 'private-platform-detail' }), { stage: 'response', code: 'platform-error', httpStatus: 200, nativeCode: 17 }],
     [new Response('private-non-json', { headers: { 'content-type': 'application/json' } }), { stage: 'response', code: 'invalid-json', httpStatus: 200 }],
     [new TypeError('private-transport-detail'), { stage: 'request', code: 'transport-unconfirmed' }]
   ]

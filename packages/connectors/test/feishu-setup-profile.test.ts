@@ -107,10 +107,16 @@ it.each(['upload', 'update'] as const)('retains actual %s HTTP failure facts wit
 
 it('preserves platform rejection and cancellation as separate finite facts without retrying a leaf', async () => {
   const calls = wire(() => Response.json({ code: 10003, msg: 'synthetic private denial' })), p = leaf(), input = scope()
-  expect(await p.uploadAvatar({ ...input, pngDataUrl })).toEqual({ kind: 'unknown', diagnostic: { code: 'platform-error', httpStatus: 200 } })
+  expect(await p.uploadAvatar({ ...input, pngDataUrl })).toEqual({ kind: 'unknown', diagnostic: { code: 'platform-error', httpStatus: 200, nativeCode: 10003 } })
   expect(calls).toHaveLength(1)
   const controller = new AbortController(); controller.abort()
   expect(await p.uploadAvatar({ ...input, pngDataUrl }, controller.signal)).toEqual({ kind: 'unknown', diagnostic: { code: 'cancelled' } })
+  expect(calls).toHaveLength(1)
+})
+
+it.each([undefined, null, '17', 1.5, Number.MAX_SAFE_INTEGER + 1])('does not turn a malformed native code into a profile acknowledgment: %j', async code => {
+  const calls = wire(() => Response.json({ code, message: 'private-native-detail' }))
+  expect(await leaf().uploadAvatar({ ...scope(), pngDataUrl })).toEqual({ kind: 'unknown', diagnostic: { code: 'invalid-response', httpStatus: 200 } })
   expect(calls).toHaveLength(1)
 })
 
