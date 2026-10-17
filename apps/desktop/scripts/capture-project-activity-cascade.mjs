@@ -10,9 +10,9 @@ const root = resolve(import.meta.dirname, '../../..'), desktop = join(root, 'app
 let evidenceArgument, mutation
 for (let index = 2; index < process.argv.length; index += 2) {
   const flag = process.argv[index], value = process.argv[index + 1]
-  assert.ok(value && ['--evidence', '--mutation'].includes(flag), 'Use optional --evidence <directory> and --mutation branch-protection')
+  assert.ok(value && ['--evidence', '--mutation'].includes(flag), 'Use optional --evidence <directory> and --mutation branch-protection|narrow-reader-escape')
   if (flag === '--evidence') { assert.equal(evidenceArgument, undefined); evidenceArgument = value }
-  else { assert.equal(mutation, undefined); assert.equal(value, 'branch-protection'); mutation = value }
+  else { assert.equal(mutation, undefined); assert.ok(['branch-protection', 'narrow-reader-escape'].includes(value)); mutation = value }
 }
 const evidence = evidenceArgument ? resolve(evidenceArgument) : join(root, '.bagakit/feature-tracker/activity-cascade/visual', ...(mutation ? [mutation] : []))
 await mkdir(evidence, { recursive: true })
@@ -34,6 +34,13 @@ try {
         assert.equal(count, 3, 'The actual owning branch interaction/focus guards exist and are nonempty')
         const code = source.replaceAll(anchor, 'if (false) event.preventDefault()')
         transformations.push({ path: relative(root, path), mutation, occurrences: count, sourceSHA256: hash(source), loadedSHA256: hash(code) })
+        return { contents: code, loader: 'tsx' }
+      }
+      if (mutation === 'narrow-reader-escape' && component === 'ProjectActivityMenu.tsx') {
+        const anchor = 'if (event.defaultPrevented || !activeGroup) return'
+        assert.equal(source.split(anchor).length - 1, 1, 'The actual narrow menu defers Escape to its original Reader branch')
+        const code = source.replace(anchor, 'if (!activeGroup) return')
+        transformations.push({ path: relative(root, path), mutation, occurrences: 1, sourceSHA256: hash(source), loadedSHA256: hash(code) })
         return { contents: code, loader: 'tsx' }
       }
       if (['SessionPane.tsx', 'EditorPane.tsx', 'GitBranchDiffPane.tsx', 'NewTabSurface.tsx', 'ExcalidrawFilePreview.tsx', 'PdfContent.tsx', 'monaco.ts'].includes(component)) {

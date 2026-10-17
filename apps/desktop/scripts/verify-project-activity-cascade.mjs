@@ -5,7 +5,7 @@ const base = 'apps/desktop/src/renderer/src/'
 await verifyRendererSourceMutations({
   name: 'activity-cascade',
   owningConfig: 'apps/desktop/scripts/fixtures/project-activity-cascade/vitest.mutations.config.mts',
-  evidenceRoot: resolve(import.meta.dirname, '../../../.bagakit/feature-tracker/activity-clarity/mutations'),
+  evidenceRoot: resolve(import.meta.dirname, '../../../.bagakit/feature-tracker/activity-clarity/mutations-final'),
   tests: ['apps/desktop/test/project-activity-spaces.test.ts', 'apps/desktop/test/project-activity-menu.test.tsx', 'apps/desktop/test/project-activity-clarity.test.tsx'],
   sources: [base + 'lib/project-activity-spaces.ts', base + 'components/ProjectActivityMenu.tsx',
     base + 'components/ProjectActivity.tsx', base + 'components/ProjectActivityMetrics.tsx',
@@ -41,6 +41,24 @@ await verifyRendererSourceMutations({
       after: '<Menu.Label className="project-activity-menu__summary">{null}</Menu.Label>' },
     { label: 'same-tab-region-disambiguation', file: base + 'components/ProjectActivityMenu.tsx',
       before: 'tab.agents.filter(candidate => candidate.session.id === agent.session.id && candidate.session.hostId === agent.session.hostId).length > 1',
-      after: 'false' }
+      after: 'false' },
+    { label: 'narrow-single-panel', file: base + 'components/ProjectActivityMenu.tsx',
+      before: 'const singlePanel = narrow || Boolean(activeGroup)',
+      after: 'const singlePanel = false' },
+    { label: 'return-original-group', file: base + 'components/ProjectActivityMenu.tsx',
+      before: 'row.dataset.activityGroup === pending.group',
+      after: 'false' },
+    { label: 'resize-original-agent-focus', file: base + 'components/ProjectActivityMenu.tsx',
+      before: 'row.dataset.activityPosition === pending.position',
+      after: 'false' },
+    { label: 'stable-narrow-target', file: base + 'components/ProjectActivityMenu.tsx',
+      before: '<button type="button" {...props} aria-haspopup="menu" onClick=',
+      after: '<button type="button" {...props} aria-haspopup="menu" onPointerEnter={() => enterGroup(group.key, false)} onClick=' },
+    { label: 'pointer-group-entry-focus', file: base + 'components/ProjectActivityMenu.tsx',
+      before: 'event.detail === 0',
+      after: 'true' },
+    { label: 'stationary-pointer-reading', file: base + 'components/ProjectActivityMenu.tsx',
+      before: 'onPointerEnter={() => { hoverStarted.current = false }}',
+      after: 'onPointerEnter={() => { hoverStarted.current = false; hover.triggerEvents.onPointerEnter() }}' }
   ]
 })
