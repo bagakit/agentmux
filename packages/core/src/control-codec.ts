@@ -71,7 +71,7 @@ import { parseMetricsObservation, type MetricsObservation, type MetricsSubscript
 import { assertToolkitResultTarget, isToolkitOperation, parseToolkitRequest, parseToolkitResult } from './toolkit.js'
 import { parseDesktopFocusRequest, parseDesktopFocusSuccessReceipt } from './desktop-focus-parser.js'
 import { isBrowserTaskControlOperation, parseBrowserTaskControlPayload, parseBrowserTaskControlResult } from './browser-task-control.js'
-import { parseBrowserTarget, parseBrowserTargetsResult, parseBrowserReleaseReceipt } from './control-browser-targets.js'
+import { parseBrowserControl, parseBrowserTarget, parseBrowserTargetsResult, parseBrowserReleaseReceipt } from './control-browser-targets.js'
 import { isSpaceControlOperation, parseSpaceControlRequest, parseSpaceControlSuccessReceipt, spaceControlId } from './space-control-parser.js'
 import { parseGitOpenParams, parseGitOpenResult } from './public-rpc-git.js'
 import { settingsResourceBudget, settingsResourceEnvelope, settingsResourceRecord, settingsResourceValue } from './settings-resource-json.js'
@@ -1588,6 +1588,7 @@ function browserOperation(value: unknown): AgentMuxControlBrowserOperation {
     steps: source.steps,
     ...(source.replayOf === undefined ? {} : { replayOf: identity(source.replayOf, 'Control browser operation replay id is invalid.', 'CONTROL_PROTOCOL_ERROR') }),
     ...(completion ? { completion } : {}),
+    ...(source.control === undefined ? {} : { control: parseBrowserControl(source.control) }),
     ...(warning ? { warning } : {})
   }
 }

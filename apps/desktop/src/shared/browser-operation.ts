@@ -43,6 +43,8 @@ export type BrowserOperation = {
   replayOf?: string
   warning?: string
   outcome?: { registration: BrowserOutcomeRegistration; evaluation?: BrowserOutcomeEvaluation }
+  /** Transient host control facts; persisted history never revives input isolation. */
+  control?: import('@agentmux/core').AgentMuxBrowserControl
 }
 export type BrowserReplayPlan = {
   schema: 'agentmux.browser-replay.v1'

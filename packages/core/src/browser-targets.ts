@@ -1,5 +1,14 @@
 export type AgentMuxBrowserMode = 'normal' | 'private'
 
+/** Current host-owned input facts. A retained operation alone grants no control. */
+export type AgentMuxBrowserControl = {
+  /** Current webpage input recipient; an idle embedded page is human-usable. */
+  owner: 'agent' | 'human' | 'unknown'
+  activeOperationId: string | null
+  revision: number
+  inputIsolation: 'inactive' | 'preparing' | 'isolated' | 'unconfirmed' | 'unsupported'
+}
+
 /** One addressable page, with its actual transport capabilities. No host UI or profile object. */
 export type AgentMuxBrowserTarget = {
   id: string
@@ -15,6 +24,7 @@ export type AgentMuxBrowserTarget = {
   capabilities: readonly string[]
   /** Present when the target exposes a bounded CDP subset rather than all engine commands. */
   cdpMethods?: readonly string[]
+  control?: AgentMuxBrowserControl
   resource?: AgentMuxBrowserResource
   warning?: string
 }

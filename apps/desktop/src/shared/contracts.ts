@@ -1323,6 +1323,8 @@ export type BrowserSnapshot = {
   driving: boolean
   /** Transient Main admission facts; missing means unknown. */
   retention?: import('@agentmux/core').AgentMuxBrowserRetention
+  /** Current Main-owned input authority, independent of operation progress or display. */
+  control?: import('@agentmux/core').AgentMuxBrowserControl
   /**
    * 这一页正等着用户回答「要不要把这个应用链接交给系统」。`null` 表示没有待答的。
    *
@@ -1555,8 +1557,10 @@ export type BrowserPresentationActivationReceipt =
       outcome: 'input-unconfirmed'
       reason: 'source-changed' | 'navigation-changed' | 'capture-changed'
         | 'geometry-changed' | 'hidden' | 'window-not-focused' | 'unknown-input-scope'
-        | 'input-dispatch-failed'
+        | 'input-dispatch-failed' | 'agent-control-active' | 'control-changed'
       message: string
+      /** Confirmed transport submissions, never a page-effect acknowledgement; absent means unknown. */
+      inputDispatch?: 'not-started' | 'press-sent' | 'gesture-sent'
     }
 
 export type BrowserPresentationLease = { leaseId: string }

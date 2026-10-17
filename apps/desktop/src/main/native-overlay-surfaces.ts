@@ -80,7 +80,7 @@ export class NativeOverlaySurfaces {
         // CDP and other native producers also emit input-event. Never relay an action from a
         // page covered by another actual native owner, even when the source Browser is alive.
         const topmost = [...this.window.contentView.children].reverse().find(view => view.getVisible() && atPoint(view.getBounds(), x, y))
-        if (topmost !== owner.view) return false
+        if (topmost !== owner.view && topmost !== owner.inputShield) return false
       }
       const zoom = this.window.webContents.getZoomFactor()
       this.onBrowserInput({ type: pointer.type === 'mouseDown' ? 'pointerDown' : pointer.type === 'mouseLeave' ? 'pointerLeave' : 'pointerMove',
@@ -411,7 +411,7 @@ export class NativeOverlaySurfaces {
       if (!projection || !this.current(projection) || !this.window.contentView.children.includes(projection.view)) return []
       const pages = projection.region.browserStages?.flatMap(stage => {
         const owner = this.containedOwner(projection, stage)
-        return owner ? [owner.view] : []
+        return owner ? [owner.view, ...(owner.inputShield ? [owner.inputShield] : [])] : []
       }) ?? []
       return [{ projection, pages: [...new Set(pages)] }]
     })

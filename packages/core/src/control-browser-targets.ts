@@ -1,4 +1,4 @@
-import type { AgentMuxBrowserTarget, AgentMuxBrowserTargetsResult, AgentMuxBrowserResource, AgentMuxBrowserReleaseReceipt, AgentMuxBrowserRetention } from './browser-targets.js'
+import type { AgentMuxBrowserControl, AgentMuxBrowserTarget, AgentMuxBrowserTargetsResult, AgentMuxBrowserResource, AgentMuxBrowserReleaseReceipt, AgentMuxBrowserRetention } from './browser-targets.js'
 import { BROWSER_PAGE_CAPABILITY_NAMES } from './browser-page-capability.js'
 import { AgentMuxError } from './errors.js'
 
@@ -8,6 +8,17 @@ const capabilities = new Set(BROWSER_PAGE_CAPABILITY_NAMES)
 function text(value: unknown, limit: number, empty = false): string {
   if (typeof value !== 'string' || value.length > limit || (!empty && !value.trim())) throw new AgentMuxError('Browser target fact is invalid.', 'CONTROL_PROTOCOL_ERROR')
   return value
+}
+export function parseBrowserControl(value: unknown): AgentMuxBrowserControl {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new AgentMuxError('Browser control fact is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  const row = value as Record<string, unknown>
+  if (Object.keys(row).some(key => !['owner', 'activeOperationId', 'revision', 'inputIsolation'].includes(key)) ||
+    !['agent', 'human', 'unknown'].includes(String(row.owner)) ||
+    !['inactive', 'preparing', 'isolated', 'unconfirmed', 'unsupported'].includes(String(row.inputIsolation)) ||
+    !Number.isSafeInteger(row.revision) || Number(row.revision) < 0) throw new AgentMuxError('Browser control fact is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  const activeOperationId = row.activeOperationId === null ? null : text(row.activeOperationId, 200)
+  if (['preparing', 'isolated'].includes(String(row.inputIsolation)) && (row.owner !== 'agent' || activeOperationId === null)) throw new AgentMuxError('Browser isolation requires its original active operation.', 'CONTROL_PROTOCOL_ERROR')
+  return { owner: row.owner as AgentMuxBrowserControl['owner'], activeOperationId, revision: Number(row.revision), inputIsolation: row.inputIsolation as AgentMuxBrowserControl['inputIsolation'] }
 }
 /** Discovery facts carry no pairing secret, profile or credential store. */
 export function parseBrowserTargetsResult(value: unknown): AgentMuxBrowserTargetsResult {
@@ -42,6 +53,7 @@ export function parseBrowserTarget(raw: unknown): AgentMuxBrowserTarget {
     status: row.status as AgentMuxBrowserTarget['status'], url: text(row.url, 8192, true), title: text(row.title, 512, true),
     ...(row.navigationId === undefined ? {} : { navigationId: text(row.navigationId, 200) }), capabilities: [...row.capabilities] as string[],
     ...(row.cdpMethods === undefined ? {} : { cdpMethods: [...row.cdpMethods as string[]] }),
+    ...(row.control === undefined ? {} : { control: parseBrowserControl(row.control) }),
     ...(row.resource === undefined ? {} : { resource: parseBrowserResource(row.resource) }),
     ...(row.warning === undefined ? {} : { warning: text(row.warning, 2000) }) }
 }

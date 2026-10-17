@@ -13,7 +13,7 @@ import type { AgentExecutorId, AgentProviderId, AgentExecutableObservation } fro
 import type { WorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import type { AgentPromptCondition } from './agent-prompt-condition.js'
 import type { AgentMuxBrowserCompletion } from './browser-completion-facts.js'
-import type { AgentMuxBrowserMode, AgentMuxBrowserTarget, AgentMuxBrowserTargetsResult, AgentMuxBrowserReleaseReceipt } from './browser-targets.js'
+import type { AgentMuxBrowserControl, AgentMuxBrowserMode, AgentMuxBrowserTarget, AgentMuxBrowserTargetsResult, AgentMuxBrowserReleaseReceipt } from './browser-targets.js'
 import type { BrowserDefaultPayload, BrowserDefaultResult } from './browser-default.js'
 export * from './browser-default.js'
 import type { AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult } from './space-control.js'
@@ -115,6 +115,7 @@ export const AGENTMUX_CONTROL_ERROR_CODES = [
   // 去改设置就能解，而这一条只能由人**明确交还控制**才解得开——两件事的恢复动作不一样，
   // 折成一个码就等于告诉调用方去做一件没用的事。
   'BROWSER_HUMAN_CONTROL_ACTIVE',
+  'BROWSER_AGENT_CONTROL_ACTIVE',
   // An accepted identity belongs to its original receipt; repeating it is not a new run.
   'BROWSER_OPERATION_ALREADY_EXISTS'
 ] as const
@@ -734,6 +735,7 @@ export type AgentMuxControlBrowserOperation = {
   warning?: string
   /** Main-owned goal evidence, separate from the script termination outcome. */
   completion?: AgentMuxBrowserCompletion
+  control?: AgentMuxBrowserControl
 }
 
 /** Core keeps replay assets opaque beyond their version and join identity. Desktop owns step semantics. */
