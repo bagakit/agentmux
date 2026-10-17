@@ -6,6 +6,7 @@ import { agentRegionExecution, useAppStore } from '../store'
 import { useShallow } from 'zustand/react/shallow'
 import { createFocusProjectionSelector, focusNeutralGroupSummary, FOCUS_BUCKETS, groupFocusContexts, type FocusBucket } from '../lib/focus-context'
 import { FocusContextCards } from './FocusContextCards'
+import { FOCUS_BUCKET_PRESENTATION } from './FocusContextState'
 import { useFocusHierarchy } from '../lib/use-focus-hierarchy'
 import { deriveFocusProjectLanes, deriveRetainedFocusProjects, focusProjectKey } from '../lib/focus-project-lanes'
 import { useFocusHistorySources } from '../lib/focus-history-sources'
@@ -51,10 +52,6 @@ import { createFocusContextIdentitySelector } from '../lib/focus-context-identit
 import { workbenchNavigationTabs } from '../lib/workbench-navigation-catalog'
 
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
-const ThemeObjectInboxIcon = semanticIconComponent('object.inbox')
-const ThemeStatusWorkingIcon = semanticIconComponent('status.working')
-const ThemeStatusCompletedIcon = semanticIconComponent('status.completed')
-const ThemeStatusNeutralIcon = semanticIconComponent('status.neutral')
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
 const ThemeActionFilterIcon = semanticIconComponent('action.filter')
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
@@ -275,7 +272,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   }, [visible, documentActive, hasBoardCards])
   const matchingGroups = groupFocusContexts(matching)
   const neutralSummary = focusNeutralGroupSummary(matchingGroups.idle)
-  const bucketMeta = { attention: { label: 'Attention', icon: ThemeObjectInboxIcon }, working: { label: 'Working', icon: ThemeStatusWorkingIcon }, results: { label: 'Results', icon: ThemeStatusCompletedIcon }, idle: { label: neutralSummary.label, icon: ThemeStatusNeutralIcon } }
+  const bucketMeta = { ...FOCUS_BUCKET_PRESENTATION, idle: { ...FOCUS_BUCKET_PRESENTATION.idle, label: neutralSummary.label } }
   const buckets = FOCUS_BUCKETS
   const projectOptions = useMemo(() => {
     const options = [...new Map([...allLanes.map(lane => ({ id: focusProjectKey(lane.hostId, lane.projectId), name: lane.labels[0]!, hostId: lane.hostId })),
