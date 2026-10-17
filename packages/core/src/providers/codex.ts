@@ -1,6 +1,7 @@
 import { planCodexQuestionReply } from './codex-question.js'
 import { observeCodexTerminalFrontend, reconnectCodexTerminalFrontend } from './codex-managed-frontend.js'
 import { readCodexPromptExecutionEvidence, createCodexPromptExecutionTransportVerifier } from './codex-prompt-execution-evidence.js'
+import { readCodexResumedTurnInterruption } from './codex-resumed-turn-interruption.js'
 import { listCodexNativeSessions, assertCodexNativeResumeSource } from './codex-native-catalog.js'
 import { createCodexPromptTransportPreparation } from './codex-prompt-transport-preparation.js'
 import { inspectCodexPromptExecution, inspectCodexPromptPreparationWait } from './codex-prompt-execution.js'
@@ -214,6 +215,7 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
     verifyPromptExecutionTransport,
     preparePromptExecutionTransport: createCodexPromptTransportPreparation(verifyPromptExecutionTransport),
     readPromptExecutionEvidence: readCodexPromptExecutionEvidence,
+    readResumedTurnInterruption: readCodexResumedTurnInterruption,
     observeSessionStatus: observeCodexSessionStatus,
     planPromptInput: prompt => ({
       kind: 'render-then-submit',
