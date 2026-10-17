@@ -6,7 +6,7 @@
 
 ## 格式与业务归属
 
-当前支持的形式、名称、语法摘要和实际 formatter 生成的示例由 Core 的[可读协议定义](../../packages/core/src/amux-protocol-definition.ts)与[阅读目录](../../packages/core/src/agent-message-render.ts)持有；设置的 **Message Tool → amux Protocols**、搜索与本地发现直接消费该目录，不维护第二份完整名单。下文分别定义格式不变量与业务归属。
+当前支持的形式、名称、用途和实际 formatter 生成的完整 wire 示例由 Core 的[可读协议定义](../../packages/core/src/amux-protocol-definition.ts)与[阅读目录](../../packages/core/src/agent-message-render.ts)持有；设置的 **Message Tool → amux Protocols**、搜索与本地发现直接消费该目录，不维护第二份完整名单。下文分别定义格式不变量与业务归属。
 
 这些形式共享可发现的名称，各有适用边界。它们不是一个通用 XML namespace、RPC 或可执行指令语言；不能把所有形式交给同一个 XML DOM 或扫描器来推断控制行为。Provider 原生协议、结构化消息记录、操作回执和外部 Skill 声明包保留其原合同。
 
