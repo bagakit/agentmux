@@ -119,7 +119,9 @@ describe('original domain owners → typed public RPC → compiled CLI', () => {
       missingEvidence: [{ source: 'native-recorder-first-failure', availability: 'not-exposed' }] })
     for (const secret of ['private-error-text', 'private-stack', 'private-prompt', 'private-digest']) expect(JSON.stringify(evidence)).not.toContain(secret)
     const raw = await rpc.call('system.diagnostics.inspect', { target, includeRaw: true })
-    expect(raw.reads[0]?.data?.original).toEqual(saved.record); const rawCore = raw.reads[1]?.data; expect(rawCore?.kind === 'delivery' ? rawCore.original?.error.message : null).toBe(failure.message)
+    const rawClient = raw.reads[0]?.data, rawCore = raw.reads[1]?.data
+    expect(rawClient && 'kind' in rawClient && rawClient.kind === 'delivery' ? rawClient.original : null).toEqual(saved.record)
+    expect(rawCore && 'kind' in rawCore && rawCore.kind === 'delivery' ? rawCore.original?.error.message : null).toBe(failure.message)
     expect(() => parseDiagnosticEvidenceResult(raw, { target })).toThrow()
     const cli = await runCompiledObjectCli(['--endpoint', `unix://${socketPath}`, 'system', 'diagnostics', 'inspect', '--domain', 'delivery.client', '--host-id', 'local', '--logid', report.logId], objectCliEnvironment(root))
     expect(cli.code, cli.stderr).toBe(0)
