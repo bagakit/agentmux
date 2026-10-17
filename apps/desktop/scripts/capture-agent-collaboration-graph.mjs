@@ -19,8 +19,8 @@ const privateRoot = compiling ? resolve(process.argv[3]) : await mkdtemp(join(tm
 assert.ok(privateRoot.startsWith(join(tmpdir(), 'amux-collaboration-capture-')) && !relative(tmpdir(), privateRoot).includes(sep), 'Compilation stays in its own private capture root')
 const require = createRequire(join(desktop, 'package.json')), hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const sources = {}, isolated = [], instrumented = [], logs = []
-const receipt = { schema: 'agentmux.collaboration-graph-capture.v1', capturedPass: false, captureOnly: true, aestheticReview: 'not-performed',
-  boundary: 'Current source App, actual initialization/Store, Focus List/Map and original Space workfaces, original area owners, Graph, shared Focus cards and sole AgentInformationPreviewHost/Reader. Only platform API facts and unrelated PTY/Monaco painting are controlled. Private synthetic identities, events and content; no Core/Provider/Runtime, real messages, restart or installed-product claim.' }
+const receipt = { schema: 'agentmux.collaboration-graph-capture.v1', scenario: 'focus-map-readability', capturedPass: false, captureOnly: true, aestheticReview: 'not-performed',
+  boundary: 'Current source App, actual initialization/Store, Focus List/Map and original Space workfaces, original area owners, Graph, shared Focus cards and sole AgentInformationPreviewHost/Reader. The distribution includes permanent empty areas, uneven populated groups, isolated members and observed dense cross-area relations. Only platform API facts and unrelated PTY/Monaco painting are controlled. Private synthetic identities, events and content; no Core/Provider/Runtime, real messages, restart or installed-product claim.' }
 let compilationWrites = Promise.resolve()
 function publishCompilation(value) {
   return compilationWrites = compilationWrites.then(async () => {
@@ -89,7 +89,7 @@ const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key
 Object.assign(env, { AGENTMUX_DESKTOP_USER_DATA: join(privateRoot, 'user-data'), AGENTMUX_RUNTIME_DIRECTORY: join(privateRoot, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(privateRoot, 'state'), COLLABORATION_CAPTURE_NODE: process.execPath })
 let server
 try {
-  const harnessFiles = ['index.html', 'entry.tsx', 'main.cjs', 'server-host.mjs'].map(name => join(fixture, name)).concat([scriptPath, join(desktop, 'scripts/probe-process.mjs'), join(desktop, 'scripts/fixtures/desktop-map/source-loader.mjs'), join(desktop, 'scripts/fixtures/performance-failure-evidence/source-loader.mjs'), join(desktop, 'test/helpers/desktop-map-source-mutations.mjs'), join(root, 'packages/core/dist/control-endpoint-listener-worker.js'), join(root, 'packages/core/src/control-endpoint-listener-worker.ts')])
+  const harnessFiles = ['index.html', 'entry.tsx', 'main.cjs', 'server-host.mjs', 'scenario.md'].map(name => join(fixture, name)).concat([scriptPath, join(desktop, 'scripts/probe-process.mjs'), join(desktop, 'scripts/fixtures/desktop-map/source-loader.mjs'), join(desktop, 'scripts/fixtures/performance-failure-evidence/source-loader.mjs'), join(desktop, 'test/helpers/desktop-map-source-mutations.mjs'), join(root, 'packages/core/dist/control-endpoint-listener-worker.js'), join(root, 'packages/core/src/control-endpoint-listener-worker.ts')])
   receipt.harness = Object.fromEntries(await Promise.all(harnessFiles.map(async file => [relative(root, file), hash(await readFile(file))])))
   receipt.publicTransport = { boundary: 'Original Core source publication spawns its existing compiled listener asset; only listener transport uses dist. Its bytes and corresponding source are bound in harness; CLI, Core business and Renderer remain original source.', file: 'packages/core/dist/control-endpoint-listener-worker.js' }
   receipt.phase = 'compiling'; await writeFile(join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')

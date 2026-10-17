@@ -2,7 +2,7 @@ const assert = require('node:assert/strict'), fs = require('node:fs/promises'), 
 const { app, BrowserWindow } = require('electron')
 const [url, privateRoot, evidence] = process.argv.slice(2)
 for (const name of ['home', 'appData', 'userData', 'sessionData']) app.setPath(name, path.join(privateRoot, name))
-const result = { schema: 'agentmux.collaboration-map-actual.v1', passed: false, captureOnly: true, aestheticReview: 'not-performed', frames: [], checks: [], failures: [], rendererErrors: [], rendererMessages: [], performance: [],
+const result = { schema: 'agentmux.collaboration-map-actual.v1', scenario: 'focus-map-readability', passed: false, captureOnly: true, aestheticReview: 'not-performed', frames: [], checks: [], failures: [], rendererErrors: [], rendererMessages: [], performance: [],
   conditions: { nativeRenderer: true, electron: process.versions.electron, chromium: process.versions.chrome, node: process.versions.node, platform: process.platform, arch: process.arch, privateWindowShown: false, backgroundThrottling: false, focusEmulated: true, viewport: [1440, 900], physicalDisplayRefreshQualified: false,
     instrumentation: 'Transparent real Worker traffic observer; counter in original context function; LongTask and rAF during finite windows; DOM census only at window boundaries. Callback, counter, Worker-observer and census costs are recorded. Clock-call and constructor-listener residual overhead is uncalibrated; these are instrumented results, not an uninstrumented product claim.' },
   boundary: 'Original current source App/Space/Focus/Map/Worker/cards/sole Reader/Store. Only typed platform facts and unrelated PTY/Monaco paint are controlled. No Provider, real message, user Run, installed package, durability or aesthetic qualification.' }
@@ -28,13 +28,14 @@ app.whenReady().then(async () => {
     const key = async (value, modifiers = 0) => { for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key: value, code: value === 'a' ? 'KeyA' : value, modifiers, ...(type === 'keyDown' && value === 'a' && modifiers === 4 ? { commands: ['selectAll'] } : {}) }) }
     const frame = async name => {
       await settle()
-      if (!name.endsWith('-live')) await until('finite entrance settled', () => read(`![...document.getAnimations()].some(a=>a.playState==='running'&&Number.isFinite(a.effect?.getComputedTiming().iterations)&&a.effect?.target?.closest?.('.collaboration-map,.agent-information-reader'))`))
+      if (!name.endsWith('-live')) await until('finite entrance settled', () => read(`![...document.getAnimations()].some(a=>a.playState==='running'&&Number.isFinite(a.effect?.getComputedTiming().iterations)&&a.effect?.target?.closest?.('.collaboration-map,.agent-information-reader,.collaboration-filter-menu'))`))
       const file = name + '.png'; await fs.writeFile(path.join(evidence, file), (await win.webContents.capturePage()).toPNG()); result.frames.push({ file, label: name, viewport: win.getContentSize() }); await checkpoint()
     }
     const check = async (name, action) => { phase = name; try { await action(); result.checks.push({ name, passed: true }) } catch (error) { result.checks.push({ name, passed: false }); result.failures.push({ name, message: error.message, stack: error.stack }); await frame('failure-' + name) } finally { await checkpoint() } }
     const facts = () => read('window.graphCapture.facts()')
-    const intact = async (selection = true) => { const state = await facts(); for (const field of ['sameTabs', 'layoutsPreserved', 'sameDrafts', 'sameFocus', ...(selection ? ['selectionPreserved'] : []), 'draftMounted', 'sameDraft']) assert.equal(state[field], true, field + ': ' + JSON.stringify(state.layoutDifference ?? state.selectionDifference ?? null)); assert.equal(state.draft, 'Original unsent reply · retain this exact draft.'); assert.equal(state.storedDraft, state.draft); assert.deepEqual(state.range, [4, 12]); assert.deepEqual(state.controls, result.before.controls); return state }
+    const intact = async (selection = true) => { const state = await facts(); for (const field of ['sameTabs', 'layoutsPreserved', 'sameDrafts', 'sameFocus', ...(selection ? ['selectionPreserved'] : []), 'draftMounted', 'sameDraft']) assert.equal(state[field], true, field + ': ' + JSON.stringify(state.layoutDifference ?? state.selectionDifference ?? null)); assert.equal(state.draft, 'Original unsent reply · retain this exact draft.'); assert.equal(state.storedDraft, state.draft); assert.deepEqual(state.range, [4, 12]); assert.deepEqual(state.controls, result.before.controls); assert.deepEqual(state.chrome.preferences,result.before.chrome.preferences,'Map keeps original sidebar preferences'); return state }
     const matrix = () => read(`document.querySelector('.collaboration-map .react-flow__viewport')?.getAttribute('style')`)
+    const fullMap = async () => { const state = await facts(), chrome = state.chrome; assert.equal(chrome.map.length,1); assert.equal(chrome.rail.length,0,'Focus Map has no visible Project Rail'); assert.equal(chrome.list.length,0,'Focus Map has no visible List'); assert.equal(chrome.dock.length,0,'Focus Map has no visible Space dock'); assert.ok(chrome.map[0].left<=2&&chrome.map[0].width>=chrome.viewportWidth-4,'Actual Focus Map fills its client width'); return chrome }
     const mapReady = async () => {
       await until('actual Focus Map', () => read(`Boolean(document.querySelector('.collaboration-map[data-desktop-focus-view="map"]:not([hidden])'))`))
       await until('native Worker world boxes', () => read(`window.graphCapture.workerSamples().some(sample=>sample.boxes?.agents>=8)`))
@@ -64,16 +65,45 @@ app.whenReady().then(async () => {
       await settle(); const point = await rect(`.collaboration-map [data-session-id="${id}"]`); assert.ok(point.hit, 'Located Agent is actually actionable')
     }
     const measure = async (label, action) => { await read(`window.graphCapture.beginMeasurement(${JSON.stringify(label)})`); try { await action() } finally { result.performance.push(await read('window.graphCapture.endMeasurement()')); await checkpoint() } }
-    const pan = async () => {
-      const point = await read(`(()=>{const canvas=document.querySelector('.collaboration-canvas'),r=canvas.getBoundingClientRect();for(let row=2;row<7;row++)for(let col=2;col<7;col++){const x=r.left+r.width*col/9,y=r.top+r.height*row/9,e=document.elementFromPoint(x,y);if(e?.closest('.react-flow__pane')&&!e.closest('.react-flow__node,button'))return{x,y}}throw Error('No actual canvas background for a drag')})()`)
+    const overview = async label => {
+      if (await read(`Boolean(document.querySelector('.collaboration-inspector:not([hidden])'))`)) await click('[aria-label="Close map details"]')
+      await pause(350); const readCount=(await facts()).reads.length
+      await click('[aria-label="Overview"]'); await pause(350); await until('original overview projection', () => read(`document.querySelectorAll('.collaboration-area[data-overview="true"]').length>0&&!document.querySelector('.collaboration-canvas__progress')`))
+      const observation=await read(`({camera:document.querySelector('.collaboration-map .react-flow__viewport').getAttribute('style'),fullCards:document.querySelectorAll('.collaboration-map .focus-context[data-session-id]').length,agentLabels:document.querySelectorAll('.collaboration-agent[data-overview="true"] strong').length,areas:[...document.querySelectorAll('.collaboration-area__summary')].map(e=>({label:e.getAttribute('aria-label'),width:e.getBoundingClientRect().width,height:e.getBoundingClientRect().height})),paths:document.querySelectorAll('.collaboration-map .react-flow__edge-path').length})`)
+      assert.equal(observation.fullCards,0); assert.equal(observation.agentLabels,0,'Overview uses original Agent points instead of unreadable tiny labels'); assert.ok(observation.areas.length>0&&observation.areas.every(area=>area.width>0&&area.height>0)); assert.equal((await facts()).reads.length,readCount,'Overview does not read the whole world'); await fullMap(); await intact(); await frame(label)
+      ;(result.overviews ??= []).push({label,...observation,readCountBefore:readCount,readCountAfter:(await facts()).reads.length})
+    }
+    const dragCanvas = async (dx, dy) => {
+      const point = await read(`(()=>{const canvas=document.querySelector('.collaboration-canvas'),r=canvas.getBoundingClientRect();for(let row=2;row<8;row++)for(let col=2;col<8;col++){const x=r.left+r.width*col/9,y=r.top+r.height*row/9,e=document.elementFromPoint(x,y);if(x+${dx}<r.left+8||x+${dx}>r.right-8||y+${dy}<r.top+8||y+${dy}>r.bottom-8)continue;if(e?.closest('.react-flow__pane')&&!e.closest('.react-flow__node,button'))return{x,y}}throw Error('No actual canvas background for a bounded drag')})()`)
       const before = await matrix(); await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point }); await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 })
-      for (let at = 1; at <= 12; at++) { await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x - at * 8, y: point.y + at * 3, buttons: 1 }); await pause(16) }
-      await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x - 96, y: point.y + 36, button: 'left', clickCount: 1 }); await pause(150)
+      for (let at = 1; at <= 12; at++) { await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x + dx * at / 12, y: point.y + dy * at / 12, buttons: 1 }); await pause(16) }
+      await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x + dx, y: point.y + dy, button: 'left', clickCount: 1 }); await pause(150)
       assert.notEqual(await matrix(), before, 'Actual pointer drag changed the camera')
+    }
+    const pan = () => dragCanvas(-96, 36)
+    const revealCanvasControl = async selector => {
+      for (let attempt=0;attempt<12;attempt++) {
+        const target=await read(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),c=document.querySelector('.collaboration-canvas');if(!e||!c)return null;const r=e.getBoundingClientRect(),v=c.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;return{visible:x>v.left+24&&x<v.right-24&&y>v.top+24&&y<v.bottom-24,dx:Math.max(-400,Math.min(400,v.left+v.width/2-x)),dy:Math.max(-400,Math.min(400,v.top+v.height/2-y))}})()`)
+        assert.ok(target,'Original canvas control exists before a real pan')
+        if(target.visible)return
+        await dragCanvas(target.dx,target.dy)
+      }
+      throw Error('Original canvas control remained outside the actual viewport after bounded pointer pans')
     }
     phase = 'load-original-app'; await checkpoint(); await win.loadURL(url); win.webContents.debugger.attach('1.3'); await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     await until('original App initialize', () => read(`window.graphCapture?.ready&&!window.graphCapture.facts().loading&&window.graphCapture.facts().ids.includes('fixture-ui')`))
-    await read('window.graphCapture.prepare()'); await until('original mounted workface', () => read(`Boolean(document.querySelector('[data-fixture-session="fixture-ui"] textarea'))`)); await read('window.graphCapture.remember()'); result.before = await facts(); assert.deepEqual(result.before.controls, [], 'Initialization does not launch or operate a Run'); await frame('workbench-entry')
+    await read('window.graphCapture.prepare();window.graphCapture.clearFocusForEntry()'); await until('original mounted workface', () => read(`Boolean(document.querySelector('[data-fixture-session="fixture-ui"] textarea'))`)); await read('window.graphCapture.remember()'); result.before = await facts(); result.entryBefore=result.before; result.distribution=await read('window.graphCapture.distribution()'); assert.deepEqual(result.before.controls, [], 'Initialization does not launch or operate a Run'); assert.equal(result.before.selectedSession,null); assert.equal(result.before.mapTarget,null); assert.ok(result.before.chrome.rail.length&&result.before.chrome.dock.length,'Original Space sidebar preferences are actually visible'); await frame('workbench-entry')
+    await check('initial-gui-entry-keeps-accurate-context-and-full-width', async () => {
+      await click('button.surface-navigation__focus'); await until('unselected original Focus List', () => read(`window.graphCapture.facts().focusView==='list'&&window.graphCapture.facts().selectedSession===null`)); await frame('unselected-focus-list')
+      await click('[aria-label="Map"]'); await mapReady(); await read('window.graphCapture.rememberMap()'); const target=(await facts()).mapTarget; assert.equal(target.kind,'focus'); assert.deepEqual(target.subject,{hostId:'local',agentSessionId:'fixture-ui'},'An exact original Space Agent remains the real default target'); const chrome=await fullMap()
+      await until('initial working area is readable', () => read(`document.querySelectorAll('.collaboration-map .focus-context[data-session-id]').length>0`)); const camera=await matrix(), sample=(await read('window.graphCapture.workerSamples()')).filter(sample=>sample.input&&sample.boxes).at(-1)
+      const canonical=[...new Set(sample.boxes.ids.map(id=>JSON.parse(id)[1]))].sort(); assert.deepEqual(canonical,result.distribution.expectedInitialAgentKeys.slice().sort()); assert.equal(sample.input.areas.filter(area=>area.members===0).length,60)
+      result.initialView={chrome,camera,areas:sample.input.areas.length,emptyAreas:60,canonicalAgents:canonical.length,entryIntent:'GUI List to Map without an explicit Agent argument',listExecutionSelection:null,target}; await intact(); await frame('map-first-context-readable')
+      await click('button[aria-label="Space: show terminal and file workbench"]'); await until('original sidebar presentation returned', async () => { const state=await facts(); return state.chrome.rail.length>0&&state.chrome.dock.length>0 }); await intact()
+    })
+    // The next scenes retain the original exact workface and its independent
+    // focus invariant. This seed does not open or replace the retained Map.
+    await read('window.graphCapture.prepare();window.graphCapture.remember()'); result.before=await facts()
     await check('source-cli-original-app-admission-and-dom-inspect', async () => {
       const { fork } = require('node:child_process')
       assert.ok(process.env.COLLABORATION_CAPTURE_NODE, 'Original Node executable is required for source CLI')
@@ -118,17 +148,18 @@ app.whenReady().then(async () => {
       await click('[aria-label="Locate Agent in map"]'); await mapReady(); assert.equal((await facts()).sameMap, true); assert.equal((await facts()).mapTarget.subject.agentSessionId, 'fixture-ui'); await intact()
     })
     await check('space-context-locates-in-retained-focus-map', async () => {
-      await click('button[aria-label="Space: show terminal and file workbench"]'); await click('[aria-label="Show Space tools"]'); await click('[data-space-tool="agents"]'); await until('original Space context action', () => read(`Boolean(document.querySelector('[aria-label="Locate Space in Focus map"]'))`)); await frame('space-context-entry')
+      await click('button[aria-label="Space: show terminal and file workbench"]'); await click('[data-space-tool="agents"]'); await until('original Space context action', () => read(`Boolean(document.querySelector('[aria-label="Locate Space in Focus map"]'))`)); await frame('space-context-entry')
       await click('[aria-label="Locate Space in Focus map"]'); await mapReady(); const current = await facts(); assert.equal(current.mainSurface,'agents'); assert.equal(current.focusView,'map'); assert.equal(current.sameMap,true); assert.equal(current.mapTarget.kind,'focus'); assert.deepEqual(current.mapTarget.subject,{hostId:'local',agentSessionId:'fixture-ui'}); assert.equal(await read(`Boolean(document.querySelector('.collaboration-map [data-surface-tools-toggle]'))`),false); await intact(); await frame('space-context-in-focus-map')
-      await click('button[aria-label="Space: show terminal and file workbench"]'); await click('[aria-label="Hide Space tools"]'); await click('button.surface-navigation__focus'); await mapReady(); await intact()
+      await click('button[aria-label="Space: show terminal and file workbench"]'); await until('original Space tools preference survives Map', () => read(`Boolean(document.querySelector('[aria-label="Hide Space tools"]'))`)); await click('button.surface-navigation__focus'); await mapReady(); await intact()
     })
     await check('compact-empty-areas-retain-closed-members', async () => {
       const sample = (await read('window.graphCapture.workerSamples()')).filter(sample=>sample.input&&sample.boxes).at(-1), empty = sample.input.areas.filter(area=>area.members===0)
-      assert.ok(empty.length>0,'Nonempty original empty-area sample'); const boxes = empty.map(area=>sample.boxes.areas.find(box=>box.id===area.id)); assert.ok(boxes.every(Boolean)); assert.ok(boxes.every(box=>box.height===40),'Actual empty areas use header-only world geometry')
+      assert.ok(empty.length>0,'Nonempty original empty-area sample'); const boxes = empty.map(area=>sample.boxes.areas.find(box=>box.id===area.id)); assert.ok(boxes.every(Boolean)); assert.ok(boxes.every(box=>box.height===32),'Actual empty areas use header-only world geometry')
       const closedIds = sample.boxes.ids.filter(id=>JSON.parse(JSON.parse(id)[1])[1].startsWith('fixture-retired-')); assert.equal(closedIds.length,4,'All original closed members retain actual boxes')
-      await click('[aria-label="Fit graph"]'); await pause(350); await until('compact empty areas actually rendered', () => read(`document.querySelectorAll('.collaboration-area[data-empty="true"]').length>0&&document.querySelectorAll('.collaboration-agent__mark[data-tier="closed"]').length>0`))
-      const rendered = await read(`[...document.querySelectorAll('.collaboration-area[data-empty="true"]')].map(e=>({name:e.querySelector('.collaboration-area__heading span')?.textContent,height:e.closest('.react-flow__node').style.height,heading:e.querySelector('.collaboration-area__heading')?.tagName,buttons:e.querySelectorAll('button').length,count:e.querySelector('small')?.textContent}))`)
-      assert.ok(rendered.every(area=>area.height==='40px'&&area.heading==='DIV'&&area.buttons===0&&area.count==='0')); result.emptyAreas={boxes,rendered,closedIds}; await frame('map-overview-compact-areas'); await locate('fixture-core'); await intact()
+      assert.equal(empty.length,60,'Permanent empty areas remain present alongside occupied areas')
+      await click('[aria-label="Overview"]'); await pause(350); await until('compact empty areas actually rendered', () => read(`document.querySelectorAll('.collaboration-area[data-empty="true"]').length>0&&document.querySelectorAll('.collaboration-agent--closed .collaboration-agent__point').length>0`))
+      const rendered = await read(`[...document.querySelectorAll('.collaboration-area[data-empty="true"]')].map(e=>({label:e.querySelector('.collaboration-area__summary')?.getAttribute('aria-label'),height:e.closest('.react-flow__node').style.height,foldControls:e.querySelectorAll('[aria-expanded]').length,text:e.textContent}))`)
+      assert.ok(rendered.every(area=>area.height==='32px'&&area.foldControls===0&&area.label?.endsWith(' · 0 Agents'))); result.emptyAreas={boxes,rendered,closedIds}; await fullMap(); await frame('map-overview-compact-areas'); await locate('fixture-core'); await intact()
     })
     await check('nonempty-native-path-clearance', async () => {
       result.routing = await read(`(()=>{const cards=[...document.querySelectorAll('.collaboration-map [data-collaboration-agent]')].map(e=>({id:e.dataset.collaborationAgent,r:e.getBoundingClientRect()})),paths=[...document.querySelectorAll('.collaboration-map .react-flow__edge-path')],collisions=[];for(const path of paths){const matrix=path.getScreenCTM(),length=path.getTotalLength(),hit=new Set();if(!matrix||!length)continue;for(let at=1;at<100;at++){const p=path.getPointAtLength(length*at/100),point=new DOMPoint(p.x,p.y).matrixTransform(matrix);for(const card of cards){const r=card.r;if(point.x>r.left+3&&point.x<r.right-3&&point.y>r.top+3&&point.y<r.bottom-3)hit.add(card.id)}}for(const card of hit)collisions.push({edge:path.closest('.react-flow__edge')?.dataset.id,card})}return{cards:cards.length,paths:paths.length,collisions}})()`)
@@ -163,7 +194,7 @@ app.whenReady().then(async () => {
       const body = await read('window.graphCapture.rememberBody()'), bodyReads = (await facts()).reads.filter(read=>read.kind==='body').length
       assert.ok(body.text&&body.selection&&body.messageId,'Nonempty original message and real text selection')
       await click('[aria-label="Map sources"]'); assert.equal(await read(`document.querySelector('[aria-label="Map sources"]').getAttribute('aria-expanded')`),'true'); await frame('map-sources-panel')
-      assert.ok(await read(`(()=>{const section=[...document.querySelectorAll('.collaboration-sources section')].find(e=>e.querySelector('strong')?.textContent==='fixture-ui'),button=[...section?.querySelectorAll('button')??[]].find(e=>e.textContent==='Earlier events');if(!button)return false;button.setAttribute('data-capture-earlier','');return true})()`)); await click('[data-capture-earlier]')
+      assert.ok(await read(`(()=>{const section=[...document.querySelectorAll('.collaboration-sources section')].find(e=>e.querySelector('strong')?.textContent==='fixture-ui'),button=[...section?.querySelectorAll('button')??[]].find(e=>e.textContent==='Earlier events');if(!button)return false;button.setAttribute('data-capture-earlier','');const owner=button.closest('.collaboration-inspector');if(!owner)return false;owner.scrollBy({top:button.getBoundingClientRect().top-owner.getBoundingClientRect().top-owner.clientHeight/2,behavior:'instant'});return true})()`)); await click('[data-capture-earlier]')
       await until('original backward page requested', async () => (await facts()).reads.some(read=>read.kind==='events'&&read.options?.beforeSequence!==undefined)); await frame('map-earlier-events'); assert.equal((await facts()).reads.filter(read=>read.kind==='body').length,bodyReads,'Hidden original Evidence does not read body')
       await click(await markByText('.collaboration-inspector button','Back to selection','data-capture-back-selection')); await until('original detail resumed', () => read(`document.querySelector('[aria-label="Map sources"]').getAttribute('aria-expanded')==='false'`)); await settle()
       const resumed = await read('window.graphCapture.bodyState()'); assert.equal(resumed.connected,true); assert.equal(resumed.sameBody,true); for(const field of ['text','selection','messageId'])assert.equal(resumed[field],body[field],'Original body '+field)
@@ -172,10 +203,10 @@ app.whenReady().then(async () => {
     await check('folded-original-internal-relations', async () => {
       await locate('fixture-core')
       const heading = await markByText('.collaboration-area__heading span', 'Agent protocol', 'data-capture-project-heading')
-      await click(heading); await until('actual internal relation badge', () => read(`Boolean(document.querySelector('.collaboration-area__internal'))`)); await click('.collaboration-area__internal')
+      await revealCanvasControl(heading); await click(heading); await until('actual internal relation badge', () => read(`Boolean(document.querySelector('.collaboration-area__internal'))`)); await revealCanvasControl('.collaboration-area__internal'); await click('.collaboration-area__internal')
       await until('all original internal relation IDs', () => read(`document.querySelectorAll('[aria-label="Grouped connections"] .collaboration-relation').length===4`))
       result.folded = await read(`({badge:document.querySelector('.collaboration-area__internal').textContent,relations:[...document.querySelectorAll('[aria-label="Grouped connections"] .collaboration-relation')].map(e=>({kind:e.dataset.kind,text:e.textContent})),selfPaths:[...document.querySelectorAll('.react-flow__edge')].filter(e=>{const id=JSON.parse(e.dataset.id);return id[1]===id[2]}).length})`)
-      assert.equal(result.folded.selfPaths,0); await frame('map-folded'); await click(heading); await mapReady(); await locate('fixture-core'); await intact()
+      assert.equal(result.folded.selfPaths,0); await frame('map-folded'); await revealCanvasControl(heading); await click(heading); await mapReady(); await locate('fixture-core'); await intact()
     })
     await check('finite-live-without-camera-or-layout-reset', async () => {
       const camera = await matrix(), workers = (await read('window.graphCapture.workerSamples()')).length
@@ -200,11 +231,34 @@ app.whenReady().then(async () => {
       await locate('fixture-core'); await move('.collaboration-map [data-session-id="fixture-core"]'); await until('Reader for original Open', () => read(`Boolean(document.querySelector('.agent-information-reader'))`)); await click('[aria-label="Open Agent"]'); await until('original workface opened', () => read(`!window.graphCapture.facts().graph&&Boolean(document.querySelector('[data-fixture-session="fixture-core"]'))`)); assert.equal((await facts()).selectedSession,'fixture-core'); assert.equal((await facts()).draft,'Original unsent reply · retain this exact draft.'); await frame('opened-original-workface')
       assert.equal((await facts()).mainSurface,'workbench'); assert.equal((await facts()).focusView,'map'); await click('button.surface-navigation__focus'); await mapReady(); await read('window.graphCapture.remember()')
     })
+    await check('observed-dense-cross-area-overview-and-exact-reading', async () => {
+      const beforeBodies=(await facts()).reads.filter(read=>read.kind==='body').length
+      for (const subject of result.distribution.denseSubjects) {
+        await locate(subject.agentSessionId); await until('original participant metadata loaded '+subject.agentSessionId, async () => (await facts()).reads.some(read=>read.kind==='events'&&read.participant===subject.agentSessionId)); await mapReady()
+      }
+      assert.equal((await facts()).reads.filter(read=>read.kind==='body').length,beforeBodies,'Visiting participants reads metadata without opening message bodies')
+      const arranged=(await read('window.graphCapture.workerSamples()')).filter(sample=>sample.input).length
+      await click('[aria-label="Arrange map"]'); await until('explicit arrangement uses observed source facts', () => read(`window.graphCapture.workerSamples().filter(sample=>sample.input).length>${arranged}&&!document.querySelector('.collaboration-canvas__progress')`))
+      const sample=(await read('window.graphCapture.workerSamples()')).filter(sample=>sample.input&&sample.complete).at(-1)
+      const actual=new Set(sample.input.edges.filter(edge=>edge.kind==='communication').map(edge=>JSON.stringify([JSON.parse(edge.source)[1],JSON.parse(edge.target)[1]])))
+      assert.equal(result.distribution.denseCommunication.length,36)
+      for(const expected of result.distribution.denseCommunication)assert.ok(actual.has(JSON.stringify([expected.sender,expected.recipient])),'The actual Worker receives observed cross-area message '+expected.messageId)
+      assert.equal(sample.input.areas.filter(area=>area.members===0).length,60)
+      result.dense={actualWorkerInput:sample.input,expectedCommunication:result.distribution.denseCommunication,visited:result.distribution.denseSubjects,bodyReads:beforeBodies}
+      await overview('map-dense-observed-overview')
+      // The name and count are rendered by the original area owner. Select that
+      // exact public canvas action, rather than guessing a member from its label.
+      const summary=await read(`(()=>{const e=[...document.querySelectorAll('.collaboration-area__summary')].find(e=>e.getAttribute('aria-label')?.startsWith('Locate Agent protocol · '));if(!e)return null;e.setAttribute('data-capture-dense-area','');return{label:e.getAttribute('aria-label')}})()`)
+      assert.ok(summary); await click('[data-capture-dense-area]'); await until('actual region activation enters readable detail', () => read(`document.querySelectorAll('.collaboration-agent:not([data-overview="true"])').length>0`)); await frame('map-dense-region-detail')
+      const subject=result.distribution.denseSubjects[0]; await locate(subject.agentSessionId); await until('original active card at exact target', () => read(`Boolean(document.querySelector('.collaboration-map .focus-context[data-session-id="${subject.agentSessionId}"]'))`)); await frame('map-dense-exact-agent')
+      await click('.collaboration-inspector .collaboration-relation[data-kind="communication"]'); await until('original dense message evidence', () => read(`document.querySelectorAll('.collaboration-evidence article').length>0`)); assert.equal((await facts()).reads.filter(read=>read.kind==='body').length,beforeBodies); await frame('map-dense-original-relation'); await intact()
+    })
     await check('native-product-scale-and-viewport-consumption', async () => {
       for (const size of [240,480]) {
         await measure('grow-'+size, async () => { result['growth'+size]=await read(`window.graphCapture.grow(${size})`); await until('original snapshot membership '+size, () => read(`window.graphCapture.facts().ids.length===${size-4}`)); await until('full original Map world '+size, () => read(`document.querySelector('[aria-label="Map sources"]')?.title.includes('${size} Agents')`)); await until('all mixed world boxes '+size, () => read(`window.graphCapture.workerSamples().some(sample=>sample.input?.nodes>=${size}&&sample.boxes?.agents===sample.input.nodes)`)); await until('finite native layout '+size, () => read(`!document.querySelector('.collaboration-canvas__progress')`)); await pause(350) })
         const workers = await read('window.graphCapture.workerSamples()'), sample = workers.filter(sample=>sample.input?.nodes>=size&&sample.boxes?.agents===sample.input.nodes).at(-1)
         assert.ok(sample&&Object.keys(sample.input.sizes).length>=3,'Actual Worker places mixed sizes, including isolated/closed members'); const expected=result['growth'+size].expectedAgentKeys.slice().sort(), canonical=ids=>[...new Set(ids.map(id=>JSON.parse(id)[1]))].sort(); assert.deepEqual(canonical(sample.input.ids),expected,'Every original identity enters the real Worker'); assert.deepEqual(canonical(sample.boxes.ids),expected,'Every original identity receives actual world geometry'); result['world'+size]=sample
+        assert.equal(sample.input.areas.filter(area=>area.members===0).length,60); await overview('map-world-overview-'+size)
         await locate('fixture-core'); await measure('idle-'+size, () => pause(500)); await measure('pan-'+size, pan)
         const arranged = (await read('window.graphCapture.workerSamples()')).filter(sample=>sample.input).length
         await measure('zoom-'+size, async () => { for(let at=0;at<4;at++){await click('[aria-label="Zoom out"]');await pause(90)}await pause(250) }); assert.equal((await read('window.graphCapture.workerSamples()')).filter(sample=>sample.input).length,arranged,'Zoom does not change original world box sizes'); assert.equal((await facts()).census.fullCards,0)

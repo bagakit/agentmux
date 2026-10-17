@@ -17,7 +17,7 @@ import type { CollaborationLayoutRequest, CollaborationLayoutResponse } from '..
 import '../../../src/renderer/src/styles/index.css'
 
 // Transparent instrumentation: actual browser Workers and original context code execute.
-const nativeWorkers: Array<{ input?: { nodes: number; connections: number; ids: string[]; sizes: Record<string, number>; areas: Array<{ id: string; members: number }> }; boxes?: { agents: number; ids: string[]; areas: Array<{ id: string; width: number; height: number }> }; complete?: boolean; terminated?: boolean; observerMS: number }> = []
+const nativeWorkers: Array<{ input?: { nodes: number; connections: number; ids: string[]; sizes: Record<string, number>; areas: Array<{ id: string; members: number }>; edges: Array<{ id: string; source: string; target: string; kind: string }> }; boxes?: { agents: number; ids: string[]; areas: Array<{ id: string; width: number; height: number }> }; complete?: boolean; terminated?: boolean; observerMS: number }> = []
 const OriginalWorker = window.Worker
 class ObservedWorker extends OriginalWorker {
   private readonly sample: typeof nativeWorkers[number] = { observerMS: 0 }
@@ -37,7 +37,7 @@ class ObservedWorker extends OriginalWorker {
     if (request?.type === 'arrange' && Array.isArray(request.input?.nodes) && Array.isArray(request.input?.connections)) {
       const sizes: Record<string, number> = {}
       for (const node of request.input.nodes) { const size = `${node.width}x${node.height}`; sizes[size] = (sizes[size] ?? 0) + 1 }
-      this.sample.input = { nodes: request.input.nodes.length, connections: request.input.connections.length, ids: request.input.nodes.map(node => node.id), sizes, areas: request.input.areas.map(area => ({ id: area.id, members: area.members.length })) }
+      this.sample.input = { nodes: request.input.nodes.length, connections: request.input.connections.length, ids: request.input.nodes.map(node => node.id), sizes, areas: request.input.areas.map(area => ({ id: area.id, members: area.members.length })), edges: request.input.connections.map(({ id, source, target, kind }) => ({ id, source, target, kind })) }
     }
     this.sample.observerMS += performance.now() - start
     if (Array.isArray(options)) super.postMessage(message, options); else super.postMessage(message, options)
@@ -95,7 +95,9 @@ const projects: WorkspaceRecord[] = [
 ]
 const scratch = projects[2]!
 const background = Array.from({ length: 8 }, (_, index): WorkspaceRecord => ({ id: 'fixture-background-' + index, hostId, name: 'Independent work ' + (index + 1), path: fixturePath('private/graph/independent/' + index), kind: 'folder' }))
-projects.push(...background)
+const emptyProjects = Array.from({ length: 60 }, (_, index): WorkspaceRecord => ({ id: 'fixture-empty-' + index, hostId, name: index % 3 ? 'Unassigned project ' + (index + 1) : '归档与材料 ' + (index + 1), path: fixturePath('private/graph/empty/' + index), kind: 'folder' }))
+const singletonProjects = Array.from({ length: 12 }, (_, index): WorkspaceRecord => ({ id: 'fixture-singleton-' + index, hostId, name: 'Independent contributor ' + (index + 1), path: fixturePath('private/graph/singleton/' + index), kind: 'folder' }))
+projects.push(...background, ...singletonProjects, ...emptyProjects)
 const category = { categoryId: '11111111-1111-4111-8111-111111111111', hostId,
   spaceId: directoryIdentity(hostId, fixturePath('private/graph/categories/quality')), directoryPath: fixturePath('private/graph/categories/quality'), title: 'Product quality', revision: null }
 const topics: ScratchTopicSnapshot[] = [
@@ -127,16 +129,22 @@ let sessions: SessionSnapshot[] = identities.map(([id, label, providerId], index
   control: { ...base.control, hostId, agentSessionId: id, run: { runId: 'fixture-run-' + id } }
 }))
 const originalSessions = sessions
-const extraSessions: SessionSnapshot[] = Array.from({ length: 472 }, (_, index) => {
+const extraSessions: Array<Extract<SessionSnapshot, { kind: 'agent' }>> = Array.from({ length: 472 }, (_, index) => {
   const id = 'fixture-isolated-' + String(index).padStart(3, '0'), activity = index % 4, run = { runId: 'fixture-run-' + id }
+  const slot = (index - singletonProjects.length) % 24
+  const workspace = index < singletonProjects.length ? singletonProjects[index]! : slot < 8 ? projects[0]! : background[Math.floor((slot - 8) / 2)]!
   const native = { source: 'native-hook' as const, run, nativeSessionId: 'native-' + id, nativeTurnId: 'turn-' + id, sourceId: 'source-' + id, sequence: 1, hookReceiptId: 'receipt-' + id, observedAt: now }
   return { ...plainBase, id, label: ['Investigating source', 'Waiting for next task', 'Retained result', 'Activity unconfirmed'][activity] + ' ' + String(index).padStart(3, '0'), providerId: 'codex', executorId: 'codex', hostId,
-    workspacePath: background[Math.floor(index / 4) % background.length]!.path, createdAt: now - (index + 1) * 1000, updatedAt: now, agentSessionUpdatedAt: now,
+    workspacePath: workspace.path, createdAt: now - (index + 1) * 1000, updatedAt: now, agentSessionUpdatedAt: now,
     control: { kind: 'agent', hostId, agentSessionId: id, run }, nativeSessionId: native.nativeSessionId, nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: native.nativeSessionId },
     processState: activity === 2 ? 'exited' : 'running', status: { state: activity === 0 ? 'working' : activity === 2 ? 'done' : 'running', source: 'native-hook', observedAt: now },
     ...(activity !== 3 ? { semanticStatus: { state: activity === 0 ? 'working' as const : 'done' as const, source: 'native-hook' as const, observedAt: now, stateEnteredAt: now - (index + 1) * 3600000, currentActivityRevision: 1 } } : {}),
     ...(activity !== 2 ? { currentActivity: { ...native, state: activity === 0 ? 'active' as const : activity === 1 ? 'idle' as const : 'unknown' as const } } : {}) }
 })
+// Keep the four original workfaces separate from a realistic, uneven map catalog.
+// Empty Projects never acquire members during the later 240/480 growth scenes.
+const initialSessions = [...originalSessions, ...extraSessions.slice(0, 88)]
+sessions = initialSessions
 const retired: AgentSessionHistoryDescriptor[] = Array.from({ length: 4 }, (_, index) => ({ agentSessionId: 'fixture-retired-' + index, hostId, state: 'retired', retiredAt: now - (index + 1) * 86400000, history: { providerId: 'codex', executorId: 'codex', workspacePath: projects[0]!.path, createdAt: now - (index + 3) * 86400000 } }))
 const timelines: Record<string, AgentTimelineSnapshot> = Object.fromEntries(identities.map(([id, label]) => {
   const items: AgentTimelineSnapshot['items'] = [
@@ -149,12 +157,12 @@ const timelines: Record<string, AgentTimelineSnapshot> = Object.fromEntries(iden
 }))
 const config = { ...originalConfig, hosts: originalConfig.hosts.filter(host => host.id === hostId), workspaces: projects,
   appearance: { ...originalConfig.appearance, appAppearance: 'dark' as const }, focus: { recentActivityHours: 48 as const, ...originalConfig.focus, previewTrigger: 'quick' as const } }
-const tabs = Object.fromEntries(sessions.map((session, at) => {
+const tabs = Object.fromEntries(originalSessions.map((session, at) => {
   const workspace = projects[at < 2 ? at : 2]!, topic = at < 2 ? undefined : topics[at - 2]
   const tab = { ...createWorkbenchTab('tab-' + session.id, { regionId: 'region-' + session.id, workspaceId: workspace.id, kind: 'agent', phase: 'attached', sessionId: session.id }, session.label),
     ...(topic ? { topicId: topic.id, space: { ...address(topic), spaceId: topic.kind === 'topic' ? category.spaceId : address(topic).spaceId } } : {}) }
   return [tab.id, tab] }))
-const layouts = Object.fromEntries(projects.map((project, area) => [project.id, createWorkspaceLayout('group-' + area, sessions.filter((_, at) => area === 2 ? at >= 2 : area < 2 && at === area).map(session => 'tab-' + session.id))]))
+const layouts = Object.fromEntries(projects.map((project, area) => [project.id, createWorkspaceLayout('group-' + area, originalSessions.filter((_, at) => area === 2 ? at >= 2 : area < 2 && at === area).map(session => 'tab-' + session.id))]))
 // Feed the original spatial API before App's real initialize reads it. Execution
 // Host/cwd live in its region facts, rather than in a mocked resolver or action.
 const initialSpatial = await api.spatial.read()
@@ -209,6 +217,16 @@ const events: AgentMuxMessageEvent[] = [
   { sequence: 5, kind: 'dispatch-open', at: now - 5000, messages: [refs[0]!] },
   { sequence: 6, kind: 'message', at: now - 4000, messages: [refs[3]!] }
 ]
+const denseSenders = extraSessions.slice(0, 88).filter(session => session.workspacePath === projects[0]!.path).slice(0, 12)
+const densePeers = extraSessions.slice(singletonProjects.length, 88).filter(session => session.workspacePath !== projects[0]!.path && session.processState === 'running').slice(0, 12)
+if (denseSenders.length !== 12 || densePeers.length !== 12) throw Error('The declared cross-area collaboration input must be nonempty and complete')
+const denseRefs: ReturnType<typeof reference>[] = []
+for (let sender = 0; sender < denseSenders.length; sender++) for (let offset = 0; offset < 3; offset++) {
+  const ref = reference(`fixture-dense-${sender}-${offset}`, denseSenders[sender]!.id, densePeers[(sender + offset) % densePeers.length]!.id)
+  denseRefs.push(ref); refs.push(ref)
+  events.push({ sequence: events.at(-1)!.sequence + 1, kind: 'message', at: now - 3000, messages: [ref] })
+  if (offset === 0 && sender % 4 === 0) events.push({ sequence: events.at(-1)!.sequence + 1, kind: 'dispatch-open', at: now - 2000, messages: [ref] })
+}
 let failEvents = false
 api.sessions.messageEvents = async (subject, options = {}) => {
   reads.push({ kind: 'events', participant: subject.agentSessionId, options: structuredClone(options) })
@@ -231,11 +249,14 @@ api.sessions.messageEvents = async (subject, options = {}) => {
 const creation: AgentMuxSpawnRecord = { agentSessionId: 'fixture-core', phase: 'active', currentRun: { runId: 'fixture-run-fixture-core' }, createdAt: now - 50000,
   creation: { createOperationId: 'fixture-creation', initialPrompt: 'not-requested', createdRun: { runId: 'fixture-run-fixture-core' },
     createdBy: { agentSessionId: 'fixture-ui', run: { runId: 'fixture-run-fixture-ui' }, owner: { kind: 'local' } } } }
+const creations: AgentMuxSpawnRecord[] = [creation, ...densePeers.slice(0, 4).map((session, index): AgentMuxSpawnRecord => ({ agentSessionId: session.id, phase: 'active', currentRun: session.control.run, createdAt: now - 10000,
+  creation: { createOperationId: 'fixture-dense-creation-' + index, initialPrompt: 'not-requested', createdRun: session.control.run,
+    createdBy: { agentSessionId: denseSenders[index]!.id, run: denseSenders[index]!.control.run, owner: { kind: 'local' } } } }))]
 api.sessions.spawns = async (subject, options) => {
   reads.push({ kind: 'spawns', participant: subject.agentSessionId, options: structuredClone(options) })
-  const matches = options.direction === 'created' ? subject.agentSessionId === 'fixture-ui' : subject.agentSessionId === 'fixture-core'
+  const matches = creations.filter(record => options.direction === 'created' ? record.creation?.createdBy?.agentSessionId === subject.agentSessionId : record.agentSessionId === subject.agentSessionId)
   return { hostId: subject.hostId, participantSessionId: subject.agentSessionId, direction: options.direction, creatorRuntimeId: null,
-    records: matches ? [creation] : [], nextCursor: null, coverage: { scope: 'selected-owner', history: 'recorded-creations' } }
+    records: matches, nextCursor: null, coverage: { scope: 'selected-owner', history: 'recorded-creations' } }
 }
 api.sessions.dispatches = async subject => ({ hostId: subject.hostId, participantSessionId: subject.agentSessionId, dispatches: [], nextSourceMessageId: null })
 api.sessions.readMessage = async (subject, mid) => {
@@ -250,6 +271,13 @@ api.sessions.readMessage = async (subject, mid) => {
 createClientUiRoot(document.getElementById('root')!).render(createElement(App))
 let originalState: ReturnType<typeof useAppStore.getState> | undefined, originalDraft: HTMLTextAreaElement | null = null, originalMap: Element | null = null, originalBody: HTMLElement | null = null
 const structuralValue = (value: unknown) => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item)
+function visibleSurfaces(selector: string) {
+  return [...document.querySelectorAll<HTMLElement>(selector)].flatMap(element => {
+    const rect = element.getBoundingClientRect(), style = getComputedStyle(element)
+    return rect.width > 0 && rect.height > 0 && !element.closest('[hidden],[inert]') && style.visibility === 'visible' && rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight && rect.left < innerWidth
+      ? [{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }] : []
+  })
+}
 Object.assign(window, { graphCapture: {
   ready: true, reads, controls, census, beginMeasurement, endMeasurement,
   async publicControl(request: Parameters<NonNullable<typeof admittedControl>>[0]) {
@@ -260,7 +288,13 @@ Object.assign(window, { graphCapture: {
   },
   cancelPublicControl(requestId: string) { publicSignals.get(requestId)?.abort() },
 
-  rememberMap() { originalMap = document.querySelector('.collaboration-map') },
+  rememberMap() { const current = document.querySelector('.collaboration-map'); if (originalMap && current !== originalMap) throw Error('The original map owner was replaced'); originalMap = current },
+  distribution() { return { emptyProjectIds: emptyProjects.map(project => project.id), singletonProjectIds: singletonProjects.map(project => project.id),
+    denseSubjects: [...denseSenders, ...densePeers].map(session => ({ hostId, agentSessionId: session.id })),
+    denseCommunication: denseRefs.map(ref => ({ messageId: ref.messageId, sender: JSON.stringify([hostId, ref.senderSessionId]), recipient: JSON.stringify([hostId, ref.recipientSessionId]) })),
+    expectedInitialAgentKeys: [...initialSessions.map(session => JSON.stringify([session.hostId, session.kind === 'agent' ? session.control.agentSessionId : session.id])), ...retired.map(source => JSON.stringify([source.hostId, source.agentSessionId]))],
+    initialCanonicalAgents: initialSessions.length + retired.length, permanentEmptyAreas: emptyProjects.length, initialSnapshotMembers: initialSessions.length } },
+  clearFocusForEntry() { useAppStore.getState().focusExecutionSession(null, undefined, { navigate: false }) },
   rememberBody() {
     originalBody = document.querySelector('.collaboration-evidence .composer-mailbox__detail .log-turn__body')
     if (!originalBody) throw Error('Original message body must exist before measuring its preservation')
@@ -290,7 +324,7 @@ Object.assign(window, { graphCapture: {
     return { expectedWorldAgents: sessions.length + retired.length, expectedAgentKeys: [...sessions.map(session => JSON.stringify([session.hostId, session.kind === 'agent' ? session.control.agentSessionId : session.id])), ...retired.map(source => JSON.stringify([source.hostId, source.agentSessionId]))], snapshotMembers: sessions.length, retiredMembers: retired.length, unassociatedMembers: added.filter(session => !refs.some(ref => ref.senderSessionId === session.id || ref.recipientSessionId === session.id)).length, nativeActivityCounts: { active: sessions.filter(session => session.kind === 'agent' && session.currentActivity?.state === 'active').length, idle: sessions.filter(session => session.kind === 'agent' && session.currentActivity?.state === 'idle').length, unknown: sessions.filter(session => session.kind === 'agent' && session.currentActivity?.state === 'unknown').length, exited: sessions.filter(session => session.processState === 'exited').length }, fixtureMutationMS: performance.now() - start }
   },
   prepare() {
-    useAppStore.setState({ activeWorkspaceId: projects[0]!.id, mainSurface: 'workbench', toolsOpen: false, projectRailOpen: false,
+    useAppStore.setState({ activeWorkspaceId: projects[0]!.id, mainSurface: 'workbench', toolsOpen: true, projectRailOpen: true,
       agentNames: Object.fromEntries(identities.map(([id, name]) => [id, name])), agentComposerDrafts: { 'fixture-ui': 'Original unsent reply · retain this exact draft.' } })
     useAppStore.getState().focusRegion(projects[0]!.id, 'tab-fixture-ui', 'region-fixture-ui', 'pointer', 'group-0')
   },
@@ -316,5 +350,7 @@ Object.assign(window, { graphCapture: {
     sameMap: originalMap === document.querySelector('.collaboration-map'), census: census(),
     activeWorkspaceId: state.activeWorkspaceId, choice: structuredClone(state.workbenchSpaceSelection),
     documentHidden: document.hidden, visibilityState: document.visibilityState,
-    publicAdmissionReady: Boolean(admittedControl), publicRequests: [...publicRequests], mainSurface: state.mainSurface, focusView: state.focusView, mapTarget: state.collaborationMapTarget, graph: Boolean(document.querySelector('.collaboration-map[data-desktop-focus-view="map"]:not([hidden])')), instrumentation: structuredClone(instrumentation()), readers: document.querySelectorAll('[data-agent-reading-host]').length } }
+    publicAdmissionReady: Boolean(admittedControl), publicRequests: [...publicRequests], mainSurface: state.mainSurface, focusView: state.focusView, mapTarget: state.collaborationMapTarget, graph: Boolean(document.querySelector('.collaboration-map[data-desktop-focus-view="map"]:not([hidden])')),
+    chrome: { viewportWidth: innerWidth, map: visibleSurfaces('[data-desktop-focus-view="map"]'), list: visibleSurfaces('[data-desktop-focus-view="list"]'), rail: visibleSurfaces('.project-rail-shell'), dock: visibleSurfaces('[data-surface-tool-dock]'), preferences: { toolsOpen: state.toolsOpen, projectRailOpen: state.projectRailOpen } },
+    instrumentation: structuredClone(instrumentation()), readers: document.querySelectorAll('[data-agent-reading-host]').length } }
 } })
