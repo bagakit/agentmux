@@ -18,5 +18,5 @@ export const a2aSettingsModule = {
   keywords: 'a2a agent message inbox arrival notification silent notify global 来信 提醒 静默',
   searchTargets: [{ id: 'a2a-notifications', title: 'Incoming message notifications', keywords: 'follow global silent notify banner sound' }],
   savedSummary: config => ({ 'follow-global': 'Follow global notifications', silent: 'Silent', notify: 'Notify for background messages' })[resolveA2ANotifications(config)],
-  Pane({ config }) { return <A2ASettingsPane notifications={resolveA2ANotifications(config)} onSave={saveNotifications} /> }
+  Pane({ config, onNavigate }) { return <A2ASettingsPane notifications={resolveA2ANotifications(config)} onSave={saveNotifications} onOpenNotifications={() => onNavigate('notifications')} /> }
 } as const satisfies SettingsModule
