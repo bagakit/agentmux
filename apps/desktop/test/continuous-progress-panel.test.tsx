@@ -53,7 +53,7 @@ describe('continuous progress panel', () => {
     await act(async () => { details.open = true })
     expect([...details.querySelectorAll('dd')].map(el => el.textContent)).toEqual(['Codex (codex)', 'local', 'agent-1', _hygiene_fixturePath("repo")])
     expect(dom.container.querySelector('.continuous-progress-panel__decision p')!.textContent).toBe('Original decision\nwith its full reason.')
-    expect(dom.container.querySelector('form') !== null).toBe(status === 'stopped')
+    expect([...dom.container.querySelectorAll('form')].some(form => !form.closest('.calendar-schedules'))).toBe(status === 'stopped')
     expect(dom.container.querySelector('[aria-label="Check continuous progress now"]')?.hasAttribute('disabled') ?? true).toBe(status !== 'active')
     expect([...dom.container.querySelectorAll('.continuous-progress-panel__summary dt')].map(el => el.textContent)).toEqual(status === 'active'
       ? ['Loop', 'Agent execution', 'Next check', 'Last check'] : ['Loop', 'Agent execution', 'Last check'])
