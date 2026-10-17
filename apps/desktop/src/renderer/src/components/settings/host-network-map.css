@@ -34,4 +34,4 @@
 .network-map__racks .host-network__addresses { border-top: 0; }
 .network-map__racks .host-network__addresses summary { align-items: flex-start; flex-wrap: wrap; }
 .network-map__racks .host-network__addresses summary > small { width: 100%; margin-left: 14px; }
-.network-map__racks .host-network__address-list > div { grid-template-columns: minmax(0, 1fr); }
+.network-map__racks .host-network__address-list > div { grid-template-columns: 70px minmax(0, 1fr); align-items: start; gap: 8px; }
