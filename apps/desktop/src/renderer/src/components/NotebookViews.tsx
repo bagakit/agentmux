@@ -2,7 +2,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { NotebookPage } from '@agentmux/core/notebook-catalog'
 import { NotebookDirectoryContextMenu, type NoteTalkHandler } from './NotebookDirectoryContextMenu'
 import { SurfaceModeSwitch } from './SurfaceModeSwitch'
-import { NoteCanvas } from './NoteCanvas'
+import { NoteCanvas, type NoteCanvasProps } from './NoteCanvas'
 
 const ThemeObjectTreeIcon = semanticIconComponent('object.tree')
 const ThemeLayoutGridIcon = semanticIconComponent('layout.grid')
@@ -29,6 +29,6 @@ export function NotebookCards({ pages, onOpen, onTalk }: { pages: NotebookPage[]
     <ThemeObjectNoteIcon size={18} strokeWidth={1.4} /><strong>{page.title}</strong><span>{sourceLabel(page)}</span><small>{new Date(page.updatedAt).toLocaleDateString()}</small>
   </button>)}</div></NotebookDirectoryContextMenu>
 }
-export function NotebookGraph({ notebookId, pages, onOpen, onTalk, active = true, expandOnFirstView = true }: { notebookId: string; pages: NotebookPage[]; onOpen(page: NotebookPage, blockId?: string): void; onTalk?: NoteTalkHandler | undefined; active?: boolean; expandOnFirstView?: boolean }) {
-  return <NoteCanvas scope={{ kind: 'notebook', notebookId }} seedNoteIds={pages.map(page => page.noteId)} expandOnFirstView={expandOnFirstView} active={active} onOpen={onOpen} onTalk={onTalk} />
+export function NotebookGraph({ notebookId, pages, onOpen, onOpenFile, onTalk, active = true, expandOnFirstView = true }: { notebookId: string; pages: NotebookPage[]; onOpen(page: NotebookPage, blockId?: string): void; onOpenFile?: NoteCanvasProps['onOpenFile']; onTalk?: NoteTalkHandler | undefined; active?: boolean; expandOnFirstView?: boolean }) {
+  return <NoteCanvas scope={{ kind: 'notebook', notebookId }} seedNoteIds={pages.map(page => page.noteId)} expandOnFirstView={expandOnFirstView} active={active} onOpen={onOpen} onOpenFile={onOpenFile} onTalk={onTalk} />
 }

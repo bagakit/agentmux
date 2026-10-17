@@ -11,7 +11,7 @@ type Request = { full: boolean; attempt: number }
 
 /** One ephemeral observation per original/snapshot, shared by every reader on this surface. */
 export function useNoteCanvasContent(snapshot: NotebookGraphSnapshot | null, active: boolean, visible: readonly string[], priority: readonly string[]) {
-  const observed = useMemo(() => new Set(snapshot?.graph.observations.filter(value => value.status === 'read' && value.kind === 'shared-block').map(value => value.noteId)), [snapshot])
+  const observed = useMemo(() => new Set(snapshot?.graph.observations.filter(value => value.status === 'read' && value.kind === 'shared-block' && value.fileIdentity === 'confirmed' && !snapshot!.graph.duplicateNoteIds.includes(value.noteId)).map(value => value.noteId)), [snapshot])
   const [results, setResults] = useState<Record<string, CanvasContent>>({})
   const [explicit, setExplicit] = useState<Record<string, Request>>({})
   const jobs = useRef(new Map<string, { controller: AbortController; snapshot: NotebookGraphSnapshot; request: Request }>())
@@ -67,9 +67,9 @@ export function useNoteCanvasContent(snapshot: NotebookGraphSnapshot | null, act
   }, [active])
   const documents = useMemo(() => Object.entries(results).flatMap(([id, result]) => {
     const value = result.value
-    return result.snapshot === snapshot && value?.status === 'read' && noteContentMatchesGraph(snapshot!, value) && !snapshot!.graph.duplicateNoteIds.includes(id)
+    return result.snapshot === snapshot && value?.status === 'read' && noteContentMatchesGraph(snapshot!, value) && !snapshot!.graph.duplicateNoteIds.includes(id) && (value.kind !== 'shared-block' || observed.has(id))
       ? [{ location: { workspaceId: value.resource.workspaceId, path: value.resource.path }, document: result.document! }] : []
-  }), [results, snapshot])
+  }), [results, snapshot, observed])
   const knowledge = useMemo(() => noteKnowledge(documents), [documents])
   return { results, documents, knowledge, request }
 }

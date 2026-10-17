@@ -1,3 +1,4 @@
+import type { NoteSource } from '@agentmux/client-ui/note/note-knowledge'
 import type { NotebookPage } from '@agentmux/core/notebook-catalog'
 import type { NotebookGraph, NoteContentMetadata } from '@agentmux/core'
 import type { NotebookGraphSnapshot } from '../../../shared/notebook-observation'
@@ -6,9 +7,22 @@ import type { NoteCanvasScope } from './note-canvas-state'
 export type CanvasReference = NotebookGraph['references'][number]
 export type CanvasRelationship = { id: string; kind: 'hierarchy' | 'reference' | 'embed' | 'link'; source: string; target: string; sourceKind: 'page' | 'block'; targetKind: 'page' | 'block'; references: CanvasReference[] }
 export type CanvasAttachedRelationship = CanvasRelationship & { aggregateId: string; sourceBlockId?: string; targetBlockId?: string }
-export type CanvasNote = { id: string; page?: NotebookPage; observation?: NoteContentMetadata; title: string; notebook: string; root: boolean; context: boolean; neighbors: number; incoming: number; outgoing: number; unbound: CanvasReference[] }
+export type CanvasNote = { id: string; kind?: 'shared-block'; page?: NotebookPage; observation?: NoteContentMetadata; title: string; notebook: string; root: boolean; context: boolean; neighbors: number; incoming: number; outgoing: number; unbound: CanvasReference[] }
 export type CanvasProjection = { notes: CanvasNote[]; relationships: CanvasRelationship[]; unbound: CanvasReference[] }
 const key = (kind: string, from: string, to: string, targetKind: string) => JSON.stringify([kind, from, to, targetKind])
+
+/** Only the scan owner can confirm a shared file's globally unique identity. */
+export function canvasSharedObservation(snapshot: NotebookGraphSnapshot, noteId: string) {
+  const candidates = snapshot.graph.observations.filter(value => value.noteId === noteId)
+  const value = candidates.length === 1 ? candidates[0] : undefined
+  return !snapshot.graph.duplicateNoteIds.includes(noteId) && value?.status === 'read' && value.kind === 'shared-block' && value.fileIdentity === 'confirmed' ? value : undefined
+}
+
+export function canvasNoteTitle(item: CanvasNote, source?: NoteSource): string {
+  if (item.kind !== 'shared-block' || !source) return item.title
+  const text = source.note.title?.trim() || [...source.blocks.values()].find(block => block.text.trim())?.text.trim()
+  return text ? text.length > 72 ? text.slice(0, 71) + '…' : text : 'Shared block'
+}
 
 /** A projection of the original observation. It neither reads files nor infers new links. */
 export function projectNoteCanvas(snapshot: NotebookGraphSnapshot, scope: NoteCanvasScope, expanded: readonly string[], seedNoteIds?: readonly string[]): CanvasProjection {
@@ -46,11 +60,17 @@ export function projectNoteCanvas(snapshot: NotebookGraphSnapshot, scope: NoteCa
     outgoing.set(reference.source.noteId, (outgoing.get(reference.source.noteId) ?? 0) + 1)
     if (reference.target.kind !== 'unbound') incoming.set(reference.target.noteId, (incoming.get(reference.target.noteId) ?? 0) + 1)
   }
-  const observations = new Map(graph.observations.map(value => [value.noteId, value]))
+  const observations = new Map<string, NoteContentMetadata>(), repeated = new Set<string>()
+  for (const value of graph.observations) {
+    if (observations.has(value.noteId)) repeated.add(value.noteId)
+    else observations.set(value.noteId, value)
+  }
+  for (const id of repeated) observations.delete(id)
   const notes = [...visible].map(id => {
     const page = catalog.pages[id], observation = observations.get(id)
-    return { id, ...(page ? { page } : {}), ...(observation ? { observation } : {}), title: page?.title ?? 'Uncatalogued note',
-      notebook: page ? catalog.notebooks[page.notebookId]?.name ?? 'Original notebook' : 'Outside this directory',
+    const shared = observation?.status === 'read' && observation.kind === 'shared-block'
+    return { id, ...(shared ? { kind: 'shared-block' as const } : {}), ...(page ? { page } : {}), ...(observation ? { observation } : {}), title: page?.title ?? (shared ? 'Shared block' : 'Uncatalogued note'),
+      notebook: shared ? 'Shared block' : page ? catalog.notebooks[page.notebookId]?.name ?? 'Original notebook' : 'Outside this directory',
       root: scope.kind === 'note' && id === scope.noteId, context: !seeds.has(id), neighbors: adjacent.get(id)?.size ?? 0, incoming: incoming.get(id) ?? 0, outgoing: outgoing.get(id) ?? 0, unbound: unbound.get(id) ?? [] }
   })
   return { notes, relationships: [...relationships.values()].filter(edge => visible.has(edge.source) && visible.has(edge.target)), unbound: [...unbound.values()].flat().filter(reference => visible.has(reference.source.noteId)) }
