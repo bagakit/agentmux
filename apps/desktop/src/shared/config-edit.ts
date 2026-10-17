@@ -22,6 +22,7 @@ export function configValuesEqual(a: unknown, b: unknown): boolean {
 }
 
 function effective(path: string, value: unknown): unknown {
+  if (path === 'browser.automaticMemoryRelease') return value ?? true
   if (path === 'continuity') return normalizeAgentContinuityPolicy(value as Partial<AgentMuxContinuityPolicy> | undefined)
   if (path.startsWith('continuity.')) return value ?? normalizeAgentContinuityPolicy()[path.slice('continuity.'.length) as keyof AgentMuxContinuityPolicy]
   if (path === 'browser.startPage') return resolveBrowserStartPage(value as Partial<BrowserStartPageConfig> | undefined)

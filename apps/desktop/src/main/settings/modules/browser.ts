@@ -8,6 +8,9 @@ const writeStartPage = <K extends keyof BrowserStartPageConfig>(config: Paramete
   ({ ...config, browser: { ...config.browser, startPage: { ...resolveBrowserStartPage(config.browser.startPage), [key]: value } } })
 
 export const browserSettings = [
+  booleanSetting('browser.automaticMemoryRelease', DEFAULT_CONFIG.browser.automaticMemoryRelease !== false,
+    config => config.browser.automaticMemoryRelease !== false,
+    (config, automaticMemoryRelease) => ({ ...config, browser: { ...config.browser, automaticMemoryRelease } })),
   textSetting('browser.startPage.title', config => resolveBrowserStartPage(config.browser.startPage).title,
     (config, value) => writeStartPage(config, 'title', value), value => validBrowserStartPageText(value, BROWSER_START_PAGE_TITLE_LIMIT), DEFAULT_BROWSER_START_PAGE.title),
   textSetting('browser.startPage.subtitle', config => resolveBrowserStartPage(config.browser.startPage).subtitle,

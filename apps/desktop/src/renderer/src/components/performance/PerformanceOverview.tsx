@@ -55,10 +55,11 @@ function RunRow({ run, card, fields, facts, onToggle, basis }: { run: RunUsage; 
   </details>
 }
 
-export function PerformanceOverview({ snapshot, close, paused = false, pending = false, error, onPause, onConfigure, onViewScript,
+export function PerformanceOverview({ snapshot, close, paused = false, pending = false, error, onPause, onConfigure, onViewScript, onManageBrowsers,
   scene, singleCaptureBusy = false, onSingleCaptureBusyChange }: {
   snapshot: ToolkitMetricsSnapshot | null; close(): void
   paused?: boolean; pending?: boolean; error?: string | null; onPause?(): void; onConfigure(): void; onViewScript(): void
+  onManageBrowsers?(): void
   scene?: PerformanceSceneState; singleCaptureBusy?: boolean; onSingleCaptureBusyChange?(busy: boolean): void
 }) {
   const [scope, setScope] = useState<'app' | 'runs' | 'runtime'>('app')
@@ -247,6 +248,7 @@ export function PerformanceOverview({ snapshot, close, paused = false, pending =
     </div>
     <footer className="performance-actions"><button type="button" onClick={onViewScript}><ThemeObjectSourceCodeIcon size={13} />View script</button>
       {onPause ? <button type="button" data-performance-observation-toggle onClick={onPause}>{paused ? <ThemeActionResumeIcon size={12} /> : <ThemeActionPauseIcon size={12} />}{paused ? 'Resume' : 'Pause'}</button> : null}
+      {onManageBrowsers ? <button type="button" onClick={onManageBrowsers}>Manage browsers</button> : null}
       <button type="button" onClick={onConfigure}><ThemeObjectSettingsIcon size={13} />Configure</button></footer>
   </>
 }
