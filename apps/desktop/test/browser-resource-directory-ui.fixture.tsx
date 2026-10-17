@@ -180,14 +180,14 @@ it('shares one all-Workspace directory and preserves partial positions while ded
   await render(true)
   expect(read).toHaveBeenCalledExactlyOnceWith(undefined)
   expect(section().textContent).toContain('Original other-workspace')
-  expect(resources().querySelector('[data-browser-process-total]')?.textContent).toContain('128 MiB in 1 matched unique processes')
-  expect(resources().querySelector('[data-browser-process-total]')?.textContent).toContain('1 process identities have no matching sample')
+  expect(resources().querySelector('[data-browser-process-total]')?.textContent).toContain('128 MiB1 unique processes')
+  expect(resources().textContent).toContain('1 unmatched process identities')
   expect(resources().textContent).toContain('2 App processes omitted')
   expect(row('a').textContent).toContain('original-position-256'); expect(row('a').textContent).toContain('shared')
   expect(row('reused').textContent).toContain('No matching process reading')
   const partial = embedded('a'); partial.resource!.locations = []; partial.resource!.processes = null
   current = { targets: [partial], coverage: 'partial' }; await change()
-  expect(row('a').textContent).toContain('Previous positions:'); expect(row('a').textContent).toContain('original-position-256')
+  expect(row('a').textContent).toContain('Previous positions'); expect(row('a').textContent).toContain('original-position-256')
   expect(row('a').textContent).toContain('Process ownership unconfirmed')
   expect(row('b').textContent).toContain('Previously observed')
   expect(resources().querySelector('[data-browser-process-total]')?.textContent).not.toContain('128 MiB')
@@ -195,7 +195,7 @@ it('shares one all-Workspace directory and preserves partial positions while ded
   expect(row('a').textContent).not.toContain('original-position-256'); expect(container.querySelector('[data-browser-resource="b"]')).toBeNull()
   metricSnapshot = { ...metricSnapshot, observation: null }
   await act(async () => { for (const id of metricIds) for (const listener of wire.listeners.get(TOOLKIT_CHANGED_CHANNEL) ?? []) listener({}, { id, snapshot: metricSnapshot }) }); await settle()
-  expect(resources().querySelector('[data-browser-process-total]')?.textContent).toContain('Waiting for process readings.')
+  expect(resources().querySelector('[data-browser-process-total]')?.textContent).toContain('Process reading unconfirmed')
 })
 
 it('dispatches one finite release batch serially through preload and keeps each original mixed receipt without retry', async () => {
@@ -205,34 +205,66 @@ it('dispatches one finite release batch serially through preload and keeps each 
   release.mockImplementationOnce(() => first.promise)
     .mockImplementationOnce(async (browserId: string, navigationId: string) => ({ browserId, navigationId, status: 'retained', reasons: ['document-used'] }))
     .mockImplementationOnce(async (browserId: string, navigationId: string) => ({ browserId, navigationId, status: 'unknown', reasons: ['document-unconfirmed'] }))
-  await resourceClick('Release shown eligible (3)')
+  await act(async () => resources().querySelector<HTMLInputElement>('[aria-label="Select eligible pages in this filter"]')!.click()); await settle()
+  await resourceClick('Release selected (3)')
   expect(release.mock.calls).toEqual([['a', 'navigation-a']])
   await resourceClick('Releasing…', 'a'); expect(release).toHaveBeenCalledTimes(1)
   const after = { ...embedded('a'), navigationId: 'later-document' }
   current = { targets: [after, embedded('b'), embedded('c')], coverage: 'complete' }; await change()
   await act(async () => first.resolve({ browserId: 'a', navigationId: 'navigation-a', status: 'released', reasons: [] })); await settle()
   expect(release.mock.calls).toEqual([['a', 'navigation-a'], ['b', 'navigation-b'], ['c', 'navigation-c']])
-  expect(row('a').textContent).toContain('Previous document · release released')
-  expect(row('a').textContent).toContain('Running'); expect(row('b').textContent).toContain('release retained: document-used')
-  expect(row('c').textContent).toContain('release unknown: document-unconfirmed')
+  expect(row('a').textContent).toContain('Previous document · Released')
+  expect(row('b').querySelector('[data-result="retained"]')?.textContent).toContain('Kept')
+  expect(row('c').textContent).toContain('Protection unconfirmed')
   await change(); await render(false); await render(true)
   expect(release).toHaveBeenCalledTimes(3)
   // Main can return unknown before dispatching close. Later authority may confirm the same document eligible.
   expect(current.targets.find(target => target.id === 'c')?.navigationId).toBe('navigation-c')
   expect(current.targets.find(target => target.id === 'c')?.resource?.retention?.status).toBe('eligible')
   expect(row('c').querySelector<HTMLButtonElement>('button')!.disabled).toBe(false)
-  expect([...resources().querySelectorAll('button')].find(button => button.textContent === 'Release shown eligible (3)')?.disabled).toBe(false)
+  expect([...resources().querySelectorAll('button')].find(button => button.textContent === 'Release selected (3)')?.disabled).toBe(false)
   release.mockResolvedValueOnce({ browserId: 'c', navigationId: 'navigation-c', status: 'unknown', reasons: [] })
   await resourceClick('Release memory', 'c')
   expect(release).toHaveBeenCalledTimes(4); expect(release).toHaveBeenLastCalledWith('c', 'navigation-c')
-  expect(row('c').textContent).toContain('release unknown: Release outcome unconfirmed; original identity kept.')
+  expect(row('c').textContent).toContain('Unconfirmed · Release outcome unconfirmed; original identity kept.')
   expect(row('c').textContent).not.toContain('Native page released')
   release.mockResolvedValueOnce({ browserId: 'c', navigationId: 'navigation-c', status: 'retained', reasons: [] })
   await resourceClick('Release memory', 'c')
   expect(release).toHaveBeenCalledTimes(5)
-  expect(row('c').textContent).toContain('release retained: Release not applied; original identity kept.')
+  expect(row('c').textContent).toContain('Kept · Release not applied; original identity kept.')
   expect(row('c').textContent).not.toContain('Native page released')
   expect(restore).not.toHaveBeenCalled()
+})
+
+it('keeps the selected original document when refresh, filtering and new pages change the visible directory', async () => {
+  current = { targets: [embedded('a'), embedded('b')], coverage: 'complete' }; await render(true)
+  await act(async () => row('a').querySelector<HTMLInputElement>('input[type="checkbox"]')!.click()); await settle()
+  current = { targets: [{ ...embedded('a'), navigationId: 'new-document-a' }, embedded('b'), embedded('later')], coverage: 'complete' }
+  await change()
+  const search = resources().querySelector<HTMLInputElement>('[aria-label="Find Browser resources"]')!
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'Original b'); search.dispatchEvent(new Event('input', { bubbles: true })) }); await settle()
+  expect(resources().textContent).toContain('1 selected · includes pages outside this filter')
+  await resourceClick('Release selected (1)')
+  expect(release.mock.calls).toEqual([['a', 'navigation-a']])
+  expect(restore).not.toHaveBeenCalled()
+})
+
+it('keeps explicit comparison order and keyboard target while original process readings update', async () => {
+  const a = embedded('a'), b = embedded('b')
+  b.resource!.processes = [{ pid: 78, creationTime: 100 }]
+  current = { targets: [a, b], coverage: 'complete' }
+  const data = metricSnapshot.observation!.app.data!
+  data.processes = [{ pid: 77, creationTime: 100, role: 'browser', type: 'Tab', cpuPercent: 0, intervalMs: 1000, rssKib: 0 },
+    { pid: 78, creationTime: 100, role: 'browser', type: 'Tab', cpuPercent: null, intervalMs: null, rssKib: 2048 }]
+  await render(true); await resourceClick('Process memory')
+  expect([...resources().querySelectorAll('[data-browser-resource]')].map(item => item.getAttribute('data-browser-resource'))).toEqual(['b', 'a'])
+  expect(row('a').querySelector('.browser-resources__memory')?.textContent).toContain('0 MiB')
+  const originalButton = row('b').querySelector<HTMLButtonElement>('button')!; originalButton.focus()
+  data.processes[0]!.rssKib = 999999
+  await act(async () => { for (const id of metricIds) for (const listener of wire.listeners.get(TOOLKIT_CHANGED_CHANNEL) ?? []) listener({}, { id, snapshot: structuredClone(metricSnapshot) }) }); await settle()
+  expect([...resources().querySelectorAll('[data-browser-resource]')].map(item => item.getAttribute('data-browser-resource'))).toEqual(['b', 'a'])
+  expect(document.activeElement).toBe(originalButton)
+  expect(release).not.toHaveBeenCalled(); expect(restore).not.toHaveBeenCalled()
 })
 
 it('restores a known identity without catalog fanout or treating missing resource as fresh released/process facts', async () => {
@@ -243,12 +275,12 @@ it('restores a known identity without catalog fanout or treating missing resourc
   expect(restore).toHaveBeenCalledExactlyOnceWith('cold', undefined)
   expect(wire.invoke).toHaveBeenCalledWith('browser:restoreResource', 'cold', undefined)
   expect(read).toHaveBeenCalledTimes(reads)
-  expect(row('cold').textContent).toContain('restore ready: Original native page ready')
-  expect(row('cold').textContent).toContain('Previously observed · Released')
+  expect(row('cold').textContent).toContain('Restored · Original native page ready')
+  expect(row('cold').textContent).toContain('Previously observed')
   await act(async () => older.resolve(current)); await settle()
-  expect(row('cold').textContent).toContain('Previously observed · Released')
+  expect(row('cold').textContent).toContain('Previously observed')
   current = { targets: [embedded('cold')], coverage: 'complete' }; await change()
-  expect(row('cold').textContent).toContain('Running'); expect(row('cold').textContent).not.toContain('Previously observed · Released')
+  expect(row('cold').textContent).toContain('Running'); expect(row('cold').textContent).not.toContain('Previously observed')
 })
 
 it('keeps a wrong-source release receipt unknown and leaves the original workbench untouched', async () => {
@@ -257,20 +289,20 @@ it('keeps a wrong-source release receipt unknown and leaves the original workben
   release.mockResolvedValueOnce({ browserId: 'foreign', navigationId: 'navigation-a', status: 'released', reasons: [] })
   await resourceClick('Release memory', 'a')
   expect(release).toHaveBeenCalledExactlyOnceWith('a', 'navigation-a')
-  expect(row('a').textContent).toContain('release unknown: Release did not confirm this original document')
-  expect(row('a').textContent).not.toContain('release released:')
+  expect(row('a').textContent).toContain('Unconfirmed · Release did not confirm this original document')
+  expect(row('a').textContent).not.toContain('Native page released')
   expect(useAppStore.getState()).toMatchObject(positions)
   await change(); expect(release).toHaveBeenCalledTimes(1)
   read.mockRejectedValueOnce(new Error('Saved directory unavailable')); await change()
   await resourceClick('Release memory', 'healthy')
   expect(release).toHaveBeenLastCalledWith('healthy', 'navigation-healthy')
-  expect(row('healthy').textContent).toContain('release released:')
+  expect(row('healthy').textContent).toContain('Released · Native page released')
 })
 
 it('saves both Browser fields through the module and preload with original expected values while keeping a later edit', async () => {
   await render(true)
   const automation = container.querySelector<HTMLInputElement>('[data-settings-field="agent-automation"] input')!
-  const automatic = resources().querySelector<HTMLInputElement>('input[type="checkbox"]')!
+  const automatic = resources().querySelector<HTMLInputElement>('.browser-resources__policy input')!
   expect(automatic.checked).toBe(true)
   await act(async () => { automation.click(); automatic.click() }); await settle()
   const saving = deferred<AppConfig>(); saveConfig.mockReturnValueOnce(saving.promise)
