@@ -59,6 +59,35 @@ const plan: BrowserReplayPlan = {
 }
 
 describe('BrowserOperationStatus', () => {
+  it.each([
+    ['snapshot', 'Observing', 'action.inspect'],
+    ['js', 'Script', 'object.source-code'],
+    ['cdp', 'Command', 'object.source-code'],
+    ['gotoUrl', 'Navigating', 'object.browser']
+  ])('shows the actual current %s step beside its operator without reviving historical work', (method, cue, icon) => {
+    const current = { ...operation, steps: [{ ...operation.steps[1]!, method }] }
+    const render = (control: typeof agentControl | typeof humanControl) => renderToStaticMarkup(createElement(BrowserOperationStatus, {
+      browserId: operation.browserId, activity: { ...activity, operation: current }, control
+    }))
+    expect(render(agentControl)).toContain(`browser-operation-status__cue\">${cue}</span>`)
+    expect(render(agentControl)).toContain(`data-semantic-icon=\"${icon}\"`)
+    expect(render(humanControl)).not.toContain(`browser-operation-status__cue\">${cue}</span>`)
+    const foreign = renderToStaticMarkup(createElement(BrowserOperationStatus, {
+      browserId: 'another-browser', activity: { ...activity, operation: current }, control: agentControl
+    }))
+    expect(foreign).toContain('Activity details are loading')
+    expect(foreign).not.toContain(`browser-operation-status__cue\">${cue}</span>`)
+  })
+
+  it('states the completed handoff while keeping the original result available', () => {
+    const markup = renderToStaticMarkup(createElement(BrowserOperationStatus, {
+      browserId: operation.browserId, activity: { ...activity, operation: { ...operation, phase: 'completed' } }, control: humanControl
+    }))
+    expect(markup).toContain('Completed · You have control')
+    expect(markup).toContain('browser-operation-status__cue\">Done</span>')
+    expect(markup).not.toContain('data-icon-animation="execute"')
+  })
+
   it('leaves an idle human-owned Browser page unobscured', () => {
     const markup = renderToStaticMarkup(createElement(BrowserOperationStatus, {
       activity: { operation: null, control: 'human' },

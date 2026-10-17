@@ -3,6 +3,8 @@ import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { BrowserPresentationEvent } from '../src/shared/contracts'
+import type { AgentMuxBrowserControl } from '@agentmux/core'
+import { resolveBrowserAgentControl, type BrowserAgentControlPreferences } from '../src/shared/browser-agent-control'
 
 const bridge = vi.hoisted(() => ({
   registerPresentation: vi.fn(), updatePresentation: vi.fn(), removePresentation: vi.fn(),
@@ -24,13 +26,13 @@ const presentation = (id: string): WorkbenchBrowserPresentation => ({
   target: { hostId: id, surface: 'space', active: true }
 })
 const presentations = [presentation('stage-a'), presentation('stage-b')]
-type WorkfaceOptions = { secondVisible?: boolean; secondBlocked?: boolean }
-function Workfaces({ secondVisible = true, secondBlocked = false }: WorkfaceOptions) {
+type WorkfaceOptions = { secondVisible?: boolean; secondBlocked?: boolean; control?: AgentMuxBrowserControl; preferences?: BrowserAgentControlPreferences }
+function Workfaces({ secondVisible = true, secondBlocked = false, control, preferences }: WorkfaceOptions) {
   const media = useBrowserPresentationCapture(browserId)
   return createElement('div', null, ...presentations.map((item, index) => createElement(BrowserPresentationStage, {
     key: item.occurrence.presentationId, browserId, navigationId: 'original-navigation',
     presentation: index === 1 ? { ...item, visible: secondVisible } : item,
-    inputSelected: index === 0, blocked: index === 1 && secondBlocked, media
+    inputSelected: index === 0, blocked: index === 1 && secondBlocked, media, control, preferences
   }, createElement('span', { 'data-original-page': item.occurrence.presentationId }, 'Original page and draft'))))
 }
 function deferred<T>() {
@@ -178,6 +180,29 @@ afterEach(async () => {
     else delete (prototype as unknown as Record<string, unknown>)[key]
   }
   vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals()
+})
+
+it('fits the agent boundary to actual mirrored frames and releases it on human handoff without touching capture ownership', async () => {
+  const control: AgentMuxBrowserControl = { owner: 'agent', activeOperationId: 'original-operation', revision: 1, inputIsolation: 'isolated' }
+  const preferences = resolveBrowserAgentControl()
+  await mount({ control, preferences })
+  expect(container.querySelector('[data-browser-control-boundary]')).toBeNull()
+  await frame('stage-a'); await frame('stage-b')
+  expect(stage('stage-b').querySelector('[data-browser-control-boundary]')?.getAttribute('viewBox')).toBe('0 0 640 320')
+  await emit(coverage('lease-stage-a'))
+  expect(stage('stage-a').querySelector('[data-browser-control-boundary]')).toBeNull()
+  const counts = controlCounts()
+  await act(async () => {
+    Object.assign(state(video('stage-b')), { width: 320, height: 640 })
+    video('stage-b').dispatchEvent(new Event('resize'))
+  })
+  expect(stage('stage-b').querySelector('[data-browser-control-boundary]')?.getAttribute('viewBox')).toBe('0 0 320 640')
+  await mount({ control, preferences: { ...preferences, glowEnabled: false } })
+  expect(stage('stage-b').querySelector<SVGElement>('[data-browser-control-boundary]')?.style.opacity).toBe('0')
+  await mount({ control: { ...control, owner: 'human', activeOperationId: null, revision: 2, inputIsolation: 'inactive' }, preferences })
+  expect(container.querySelector('[data-browser-control-boundary]')).toBeNull()
+  expect(controlCounts()).toEqual(counts)
+  expect(stopTrack).not.toHaveBeenCalled()
 })
 
 it('keeps desired selection, its receipt and input-owner facts separate from physical coverage', async () => {
