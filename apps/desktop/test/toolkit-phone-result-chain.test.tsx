@@ -7,7 +7,6 @@ import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/pro
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
-import { createRequire } from 'node:module'
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, connectAgentMuxRpc, defaultAgentMuxControlSocketPath, type AgentMuxClientEvent, type AgentMuxRun, type AgentMuxRunAttachment } from '@agentmux/core'
 import { type ToolkitScriptSnapshot } from '@agentmux/core/control'
@@ -27,23 +26,16 @@ import { composerDOM } from './helpers/composer-dom-fixture'
 vi.mock('electron', () => ({ app: { getPath: () => process.cwd(), getAppPath: () => process.cwd() } }))
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
-const { build } = createRequire(resolve(repository, 'packages/core/package.json'))('esbuild')
 const dom = composerDOM()
 const appOrigin = 'https://192.0.2.44:4700'
 const hash = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex')
 let moduleDirectory: string, cli: string, preload: string
-const cliInputs: Record<string, string> = {}
 let cliSha256: string, helperSha256: string
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }) })
 beforeAll(async () => {
   moduleDirectory = await mkdtemp(fixturePath('tmp/amux-phone-cli-'))
-  cli = join(moduleDirectory, 'agentmux.js'); preload = join(moduleDirectory, 'observe-env.mjs')
-  await writeFile(join(moduleDirectory, 'package.json'), JSON.stringify({ type: 'module' }))
-  await build({ entryPoints: [resolve(repository, 'packages/core/src/agentmux.ts'), resolve(repository, 'packages/core/src/toolkit-result-channel.ts')],
-    outdir: moduleDirectory, bundle: true, platform: 'node', format: 'esm', logLevel: 'silent',
-    plugins: [{ name: 'record-private-source-cli', setup(builder: any) { builder.onLoad({ filter: /\/packages\/core\/src\/.*\.ts$/ }, async (args: { path: string }) => { const bytes = await readFile(args.path); cliInputs[args.path.slice(repository.length + 1)] = hash(bytes); return { contents: bytes, loader: 'ts' } }) } }],
-    banner: { js: "import { createRequire as toolkitFixtureRequire } from 'node:module'; const require = toolkitFixtureRequire(import.meta.url);" } })
-  cliSha256 = hash(await readFile(cli)); helperSha256 = hash(await readFile(join(moduleDirectory, 'toolkit-result-channel.js')))
+  cli = resolve(repository, 'packages/core/dist/agentmux.js'); preload = join(moduleDirectory, 'observe-env.mjs')
+  cliSha256 = hash(await readFile(cli)); helperSha256 = hash(await readFile(join(dirname(cli), 'toolkit-result-channel.js')))
   await writeFile(preload, `import {appendFileSync} from 'node:fs';
 const device=process.argv.includes('device');
 appendFileSync(process.env.PRIVATE_ENV_REPORT,JSON.stringify({device,args:process.argv.slice(2),pathPresent:Boolean(process.env.AGENTMUX_TOOLKIT_RESULT_PATH),tokenPresent:Boolean(process.env.AGENTMUX_TOOLKIT_RESULT_TOKEN),sessionPresent:Boolean(process.env.AGENTMUX_AGENT_SESSION_ID),capabilityPresent:Boolean(process.env.AGENTMUX_AGENT_CAPABILITY)})+'\\n');
@@ -143,7 +135,7 @@ it.each(['', 'Native bridge diagnostic\n', 'NativeError: logger initialization\n
     const persisted = JSON.parse(await readFile(join(directory, 'receipts.json'), 'utf8'))
     expect(persisted.tools[MOBILE_CONNECTION_TOOL_ID].display.latestConfirmed.document).toEqual(snapshot.display!.latestConfirmed!.document)
     if (process.env.AGENTMUX_TOOLKIT_CONSUMER_EVIDENCE) await appendFile(join(process.env.AGENTMUX_TOOLKIT_CONSUMER_EVIDENCE, 'producer-chain.jsonl'), JSON.stringify({
-      diagnostic, privateCli: { cliSha256, helperSha256, sourceInputs: cliInputs }, settingsLink, settingsDevices, snapshot, observed, launches: processes.launches.map(value => ({ externalCwd: !value.cwd.startsWith(repository), argv: value.args.slice(0, 2), scriptSha256: hash(value.args[2]!), cliModule: value.args.at(-3) === cli })),
+      diagnostic, compiledCli: { cliSha256, helperSha256 }, settingsLink, settingsDevices, snapshot, observed, launches: processes.launches.map(value => ({ externalCwd: !value.cwd.startsWith(repository), argv: value.args.slice(0, 2), scriptSha256: hash(value.args[2]!), cliModule: value.args.at(-3) === cli })),
       publicCalls: { get: get.mock.calls.length, evaluate: evaluate.mock.calls.length, run: run.mock.calls.length, action: action.mock.calls.length }, clipboard: clipboard.mock.calls,
       sources: Object.fromEntries(await Promise.all(['apps/desktop/resources/toolkit/mobile-connection/query.mjs', 'apps/desktop/src/main/toolkit-custom-owner.ts', 'apps/desktop/src/renderer/src/components/toolkit/MobileConnectionResult.tsx', 'packages/core/src/toolkit.ts', 'packages/core/src/toolkit-result-channel.ts'].map(async path => [path, hash(await readFile(resolve(repository, path)))])))
     }) + '\n')
