@@ -31,10 +31,10 @@ export function useConversationView(client: ConversationViewClient | null, refer
   const owner = useRef<{ key: string; controller: AbortController; snapshot: ConversationWindowSnapshot | null;
     request: AbortController | null; handle: ConversationObservationHandle | null; observed: ConversationWindowSnapshot | null; inFlight: Promise<void> | null; timer: ReturnType<typeof setTimeout> | null;
     retryTimer: ReturnType<typeof setTimeout> | null; retryDelay: number; historical: boolean; dirty: boolean; held: boolean;
-    binding: ConversationWindowSnapshot | null; invalidations: number; unavailable: number } | null>(null)
+    binding: ConversationWindowSnapshot | null; failures: Map<string, Error>; invalidations: number; unavailable: number } | null>(null)
   const retained = useRef<{ client: ConversationViewClient; key: string; snapshot: ConversationWindowSnapshot; historical: boolean } | null>(null)
   const beforeCommit = useRef(options.beforeCommit); beforeCommit.current = options.beforeCommit
-  const operation = useRef<(kind: Operation, selection?: Selection) => Promise<void>>(async () => {})
+  const operation = useRef<(kind: Operation, selection?: Selection, recoverObservation?: boolean) => Promise<void>>(async () => {})
   const retryOperation = useRef<{ client: ConversationViewClient | null; key: string; kind: Operation; selection: Selection }>({ client, key, kind: 'latest', selection: {} })
 
   useEffect(() => {
@@ -46,7 +46,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
       request: null as AbortController | null, handle: null as ConversationObservationHandle | null, observed: null as ConversationWindowSnapshot | null, inFlight: null as Promise<void> | null,
       timer: null as ReturnType<typeof setTimeout> | null, retryTimer: null as ReturnType<typeof setTimeout> | null, retryDelay: 100,
       historical: parked?.historical ?? false, dirty: false, held: false,
-      binding: null as ConversationWindowSnapshot | null, invalidations: 0, unavailable: 0 }
+      binding: null as ConversationWindowSnapshot | null, failures: new Map<string, Error>(), invalidations: 0, unavailable: 0 }
     owner.current = current
     setState(value => value.snapshot?.hostId === reference.hostId && value.snapshot.agentSessionId === reference.agentSessionId
       ? { ...value, loading: true, operation: parked ? 'resume' : 'latest', sourceRead: null } : { ...empty(), loading: true, operation: 'latest' })
@@ -68,40 +68,60 @@ export function useConversationView(client: ConversationViewClient | null, refer
       current.retryTimer = setTimeout(() => { current.retryTimer = null; void read('resume') }, current.retryDelay)
       current.retryDelay = Math.min(current.retryDelay * 2, 5000)
     }
-    const bind = async (snapshot: ConversationWindowSnapshot, isCurrent: () => boolean) => {
-      if (current.handle && !current.handle.closed.aborted && current.observed?.window.id === snapshot.window.id) return
+    const watchError = (failures: Map<string, Error>) => failures.size
+      ? Object.assign(new Error([...failures.values()].map(error => error.message).join(' ')), { code: ([...failures.values()][0] as Error & { code?: string }).code }) : null
+    const bind = async (snapshot: ConversationWindowSnapshot, isCurrent: () => boolean, recover: boolean) => {
+      if (current.handle && !current.handle.closed.aborted && current.observed?.window.id === snapshot.window.id && !(recover && current.failures.size)) return
       const oldHandle = current.handle, oldSnapshot = current.observed
+      const failures = new Map<string, Error>()
+      let handle: ConversationObservationHandle | null = null, opening = true
       current.binding = snapshot
-      let handle: ConversationObservationHandle
       try { handle = await client.observeConversation({ ...ref, view: snapshot.window.view! }, observation => {
-        if (!alive()) return
-        if (observation.kind === 'unavailable') current.unavailable++
-        else current.invalidations++
-        if (observation.kind === 'unavailable') setState(value => ({ ...value, observationError: Object.assign(new Error(observation.message), { code: observation.code }) }))
-        else {
-          setState(value => ({ ...value, observationError: null, newerAvailable: current.historical || current.held || value.newerAvailable }))
-          schedule()
+        // A binding owns its notifications only while opening or installed.
+        // Disposed generations cannot settle or poison a replacement.
+        if (!alive() || !opening && (!handle || current.handle !== handle)) return
+        if (observation.kind === 'unavailable') {
+          current.unavailable++
+          failures.set(conversationSourceKey(observation.source), Object.assign(new Error(observation.message), { code: observation.code }))
+          if (!opening) setState(value => ({ ...value, observationError: watchError(failures) }))
+        } else {
+          current.invalidations++
+          if (!opening) {
+            setState(value => ({ ...value, newerAvailable: current.historical || current.held || value.newerAvailable }))
+            schedule()
+          }
         }
-      }, { signal }) } finally { if (current.binding === snapshot) current.binding = null }
+      }, { signal }) } finally { opening = false; if (current.binding === snapshot) current.binding = null }
       if (!isCurrent()) { handle.dispose(); if (snapshot.window.id !== current.snapshot?.window.id) release(snapshot); return }
       if (handle.sourceHostId !== snapshot.sourceHostId || handle.scope.sources.length !== snapshot.scope.sources.length ||
         handle.scope.sources.some(source => !snapshot.scope.sources.some(original => conversationSourceKey(source) === conversationSourceKey(original)))) {
         handle.dispose(); throw Object.assign(new Error('The observation returned another original source scope. The accepted frame is retained.'), { code: 'CONTROL_PROTOCOL_ERROR' })
       }
-      current.handle = handle; current.observed = snapshot
+      if (handle.closed.aborted) { handle.dispose(); throw errorOf(handle.closed.reason ?? 'The original conversation observation ended while opening.') }
+      // Startup notifications qualify the observer; checkpoint/read coverage is
+      // a separate fact and cannot revoke an observer that opened successfully.
+      if (failures.size && oldHandle && !oldHandle.closed.aborted && oldSnapshot?.window.id === snapshot.window.id) {
+        handle.dispose()
+        for (const [source, error] of failures) current.failures.set(source, error)
+        setState(value => ({ ...value, observationError: watchError(current.failures) }))
+        return
+      }
+      current.handle = handle; current.observed = snapshot; current.failures = failures
+      setState(value => ({ ...value, observationError: watchError(failures) }))
       current.retryDelay = 100
       if (current.retryTimer) { clearTimeout(current.retryTimer); current.retryTimer = null }
       oldHandle?.dispose(); if (oldSnapshot?.window.id !== snapshot.window.id) release(oldSnapshot)
+      const installed = handle
       handle.closed.addEventListener('abort', () => {
-        if (alive() && current.handle === handle) {
-          setState(value => ({ ...value, observationError: errorOf(handle.closed.reason ?? 'Conversation observation ended. The original window remains available.') }))
+        if (alive() && current.handle === installed) {
+          setState(value => ({ ...value, observationError: errorOf(installed.closed.reason ?? 'Conversation observation ended. The original window remains available.') }))
           reconnect()
         }
       }, { once: true })
       // The same physical-page checkpoint closes the read→watch interval.
       current.dirty = true
     }
-    const read = (kind: Operation, selection: Selection = {}): Promise<void> => {
+    const read = (kind: Operation, selection: Selection = {}, recoverObservation = false): Promise<void> => {
       if (!alive()) return Promise.resolve()
       if (current.inFlight && (kind === 'changes' || kind === 'resume')) return current.inFlight
       if (kind !== 'latest' && !current.snapshot || kind === 'older' && !current.snapshot?.window.navigation.older || kind === 'newer' && !current.snapshot?.window.navigation.newer) return Promise.resolve()
@@ -162,7 +182,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
             const failure = sourceReadError(complete)
             if (failure) throw failure
           }
-          try { await bind(complete, isCurrent) }
+          try { await bind(complete, isCurrent, recoverObservation || kind === 'resume') }
           catch (error) { if (isCurrent()) { setState(value => ({ ...value, observationError: errorOf(error) })); reconnect() } }
           if (!isCurrent()) return
           current.snapshot = complete
@@ -244,7 +264,12 @@ export function useConversationView(client: ConversationViewClient | null, refer
       watch: { binding: Boolean(current?.binding), bound: Boolean(current?.handle), closed: current?.handle?.closed.aborted ?? null,
         windowId: current?.observed?.window.id ?? null, invalidations: current?.invalidations ?? 0, unavailable: current?.unavailable ?? 0 } }
   }, [])
-  const retry = useCallback(() => operation.current(retryOperation.current.kind, retryOperation.current.selection), [])
+  const retry = useCallback(() => {
+    const value = committed.current.state
+    return value.observationError && !value.error && !value.sourceError
+      ? operation.current('resume', {}, true)
+      : operation.current(retryOperation.current.kind, retryOperation.current.selection, Boolean(value.observationError))
+  }, [])
   const acceptHeld = useCallback(() => {
     const current = owner.current
     if (!current?.held || !current.snapshot || beforeCommit.current?.(current.snapshot, 'changes') === false) return
