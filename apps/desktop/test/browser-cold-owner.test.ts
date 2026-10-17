@@ -7,6 +7,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab, type BrowserWorkbenchSurface } from '../src/renderer/src/lib/workbench-tabs'
 import { verifiedBrowserWorkspace } from '../src/main/browser-workspace-binding.js'
+import { registerBrowserResourceIpc } from '../src/main/browser-resource-ipc.js'
 import type { AppConfig } from '../src/shared/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -54,6 +55,8 @@ const native = vi.hoisted(() => {
     getTitle = () => 'Original Browser'
     isLoading = () => false
     isLoadingMainFrame = () => false
+    isBeingCaptured = () => false
+    isCurrentlyAudible = () => false
     isDestroyed = () => this.dead
     on(event: string, listener: (...args: any[]) => void) {
       const set = this.listeners.get(event) ?? new Set()
@@ -70,6 +73,7 @@ const native = vi.hoisted(() => {
       this.loads.push(url)
       this.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false, url })
       this.url = url; this.mainFrame.url = url
+      this.emit('did-navigate', {}, url)
       this.emit('did-finish-load'); this.emit('did-stop-loading')
     }
     reload() { void this.loadURL(this.url) }
@@ -152,7 +156,22 @@ function ipcFunction(name: string, ports: Record<string, unknown>) {
     if (ts.isCallExpression(node) && ['handleWithEvent', 'handle'].includes(node.expression.getText(file)) && node.arguments[0] && ts.isStringLiteral(node.arguments[0]) && node.arguments[0].text === name) found.push(node.arguments[1]!)
     ts.forEachChild(node, walk)
   }
-  walk(file); expect(found).toHaveLength(1)
+  walk(file)
+  if (name === 'browser:restore') {
+    const registrations: ts.CallExpression[] = []
+    function findRegistration(node: ts.Node) {
+      if (ts.isCallExpression(node) && node.expression.getText(file) === 'registerBrowserResourceIpc') registrations.push(node)
+      ts.forEachChild(node, findRegistration)
+    }
+    findRegistration(file); expect(registrations).toHaveLength(1)
+    const handlers = new Map<string, (...args: any[]) => any>()
+    const lifecyclePorts = { ...ports, registerBrowserResourceIpc, handle: (channel: string, handler: (...args: any[]) => any) => handlers.set(channel, handler) }
+    const code = ts.transpile(registrations[0]!.getText(file), { target: ts.ScriptTarget.ES2022 })
+    new Function(...Object.keys(lifecyclePorts), code)(...Object.values(lifecyclePorts))
+    expect(handlers.has(name)).toBe(true)
+    return handlers.get(name)!
+  }
+  expect(found).toHaveLength(1)
   const code = ts.transpile(`const execute = ${found[0]!.getText(file)}`, { target: ts.ScriptTarget.ES2022 })
   return new Function(...Object.keys(ports), code + ';return execute')(...Object.values(ports))
 }
@@ -162,7 +181,7 @@ function mainPorts(manager: BrowserViewManager, graph = savedGraph()) {
   const config = { workspaces: [{ id: 'workspace' }], browser: { agentAutomation: true } }
   const ensureBrowser = ipcFunction('ensureBrowser', { browsers: manager, browserColdDescriptor, spatialState, browserProfiles, config,
     workspace: (_config: unknown, id: string) => { if (id !== 'workspace') throw new Error('Wrong workspace') } })
-  return { spatialState, browserProfiles, config, ensureBrowser }
+  return { browsers: manager, spatialState, browserProfiles, config, ensureBrowser }
 }
 
 describe('cold Browser ownership through the original Main owner', () => {
@@ -257,7 +276,7 @@ describe('cold Browser ownership through the original Main owner', () => {
   it('restores a released owner from its Main URL/profile/viewport rather than a stale cold description', async () => {
     const { manager, views } = fixture()
     await manager.create('page-0', 'https://fixture.invalid/original', 'workspace', 'original', 'normal', 'desktop')
-    await manager.navigate('page-0', 'https://fixture.invalid/later'); await manager.release('page-0')
+    const current = await manager.navigate('page-0', 'https://fixture.invalid/later'); expect(await manager.release('page-0', current.navigationId)).toMatchObject({ status: 'released' })
     const cold = vi.fn(async () => browserColdDescriptor(savedGraph(), 'page-0'))
     const restored = await manager.ensure('page-0', cold)
     expect(cold).not.toHaveBeenCalled(); expect(views).toHaveLength(1)
@@ -267,7 +286,7 @@ describe('cold Browser ownership through the original Main owner', () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
     const { manager } = fixture(), ports = mainPorts(manager)
     const actual = await manager.create('page-0', 'https://fixture.invalid/later', 'workspace', 'original', 'normal', 'desktop')
-    await manager.release('page-0')
+    expect(await manager.release('page-0', actual.navigationId)).toMatchObject({ status: 'released' })
     const restore = ipcFunction('browser:restore', { ...ports, verifiedBrowserWorkspace })
     const bridge = vi.spyOn(api.browser, 'restore').mockImplementation((id, input) => restore(id, input))
     const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private fixture' }], executors: {},
