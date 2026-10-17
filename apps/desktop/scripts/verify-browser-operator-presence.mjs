@@ -10,10 +10,14 @@ import { runProbeProcess, stopProbeProcesses } from './probe-process.mjs'
 
 const root = resolve(import.meta.dirname, '../../..'), require = createRequire(join(root, 'apps/desktop/package.json'))
 const baselineOnly = process.argv.includes('--baseline')
+const osCapture = process.argv.includes('--os-capture')
 const receiptIndex = process.argv.indexOf('--receipt')
 const rendererIndex = process.argv.indexOf('--renderer-receipt')
-assert.ok(process.argv.slice(2).every((arg, index, args) => ['--baseline', '--receipt', '--renderer-receipt'].includes(arg) || index > 0 && ['--receipt', '--renderer-receipt'].includes(args[index - 1])))
+const proofIndex = process.argv.indexOf('--native-proof')
+assert.ok(process.argv.slice(2).every((arg, index, args) => ['--baseline', '--receipt', '--renderer-receipt', '--os-capture', '--native-proof'].includes(arg) || index > 0 && ['--receipt', '--renderer-receipt', '--native-proof'].includes(args[index - 1])))
 assert.ok(!baselineOnly || rendererIndex < 0, 'The baseline diagnostic qualifies only its original native Main consumer')
+assert.ok(!osCapture || !baselineOnly && rendererIndex < 0 && proofIndex >= 0 && process.platform === 'darwin', 'OS capture joins an explicit existing source proof on macOS')
+assert.ok(osCapture || proofIndex < 0, 'The native proof join belongs to OS capture only')
 const receiptPath = resolve(receiptIndex < 0 ? join(root, '.tmp/browser-agent-collaboration/operator-presence-proof/receipt.json') : process.argv[receiptIndex + 1])
 const out = join(dirname(receiptPath), 'attempt-' + randomUUID())
 await mkdir(out, { recursive: true })
@@ -21,7 +25,7 @@ const temporary = await realpath(await mkdtemp(fixturePath('tmp/amx-operator-pre
 const projection = join(temporary, 'source'), sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const git = args => execFileSync('git', args, { cwd: root, maxBuffer: 24 * 1024 * 1024 })
 const candidate = git(['rev-parse', 'HEAD']).toString().trim(), tree = git(['rev-parse', 'HEAD^{tree}']).toString().trim()
-const receipt = { schema: 'agentmux.browser-operator-presence.v1', candidate, tree, passed: false, diagnostic: baselineOnly,
+const receipt = { schema: 'agentmux.browser-operator-presence.v1', candidate, tree, passed: false, diagnostic: baselineOnly || osCapture,
   taskComplete: false, qualifications: { nativeMain: false, rendererPngGeneration: 'not-tested', osWindowAesthetics: 'not-tested', physicalInput: 'not-tested' },
   sources: {}, externalInputs: {}, runs: [], sharedSourceMutations: 0, cleanup: {},
   boundary: 'Stock Electron, committed Main source, real BVM/dispatcher/script worker, private native documents, ConfigStore/ConfigOwner save observer and actual validated avatar setter. Native page capturePage pixels are not OS whole-window or aesthetic proof. No user App, Browser, Run, upstream model or business message.' }
@@ -49,6 +53,31 @@ async function bind(path, sourceRoot = root) {
   else sourceInputs.set(key, { path, sha256: digest, bytes: bytes.length })
 }
 try {
+  let avatar
+  if (osCapture) {
+    const proofFile = resolve(process.argv[proofIndex + 1]), bytes = await readFile(proofFile), proof = JSON.parse(bytes)
+    assert.equal(proof.schema, receipt.schema); assert.equal(proof.passed, true)
+    assert.equal(proof.qualifications.nativeMain, true); assert.equal(proof.qualifications.rendererPngGeneration, true)
+    assert.deepEqual(proof.sourceDrift, []); assert.equal(proof.sharedSourceMutations, 0)
+    const original = proof.renderer?.actual?.runs.find(run => run.label === 'native-baseline')?.actual
+    assert.equal(proof.renderer?.actual?.presenceDiagnosticComplete, true); assert.equal(original?.presence?.passed, true)
+    assert.ok(original.ipc.every(call => call.channel !== 'sessions:submitPrompt'))
+    const accepted = original.presence.accepted
+    assert.equal(accepted.channel, 'browser:setOperatorAvatar'); assert.equal(accepted.exactSender, true); assert.equal(accepted.exactFrame, true); assert.equal(accepted.result, true)
+    const products = Object.entries(proof.sources).filter(([file]) => file.startsWith('apps/desktop/src/') || file.startsWith('packages/'))
+    assert.ok(products.length > 10)
+    for (const [file, value] of products) {
+      await bind(join(root, file))
+      assert.equal(sourceInputs.get(file).sha256, value.sha256, 'The prior native/Renderer product input remains original: ' + file)
+    }
+    avatar = { png: accepted.args[0].png, operator: original.presence.report.report.runOperation.operator }
+    assert.equal(avatar.operator.id, accepted.args[0].operatorId)
+    receipt.sourceProof = { path: proofFile, sha256: sha(bytes), candidate: proof.candidate, productInputs: Object.fromEntries(products),
+      rendererReceiptSha256: proof.renderer.sha256, avatarSha256: sha(Buffer.from(avatar.png.split(',')[1], 'base64')),
+      boundary: 'Reuses only the completed source-bound native and actual Renderer artwork facts. OS images below are new observations, not replay of the original operation.' }
+    await writeFile(join(out, 'source-proof.json'), bytes)
+    await writeFile(join(temporary, 'original-artwork.json'), JSON.stringify(avatar))
+  }
   const fixtures = (await readdir(join(root, 'apps/desktop/scripts/fixtures/browser-operator-presence'))).filter(name => name.endsWith('.ts')).map(name => 'apps/desktop/scripts/fixtures/browser-operator-presence/' + name)
   for (const path of [import.meta.filename, join(root, 'apps/desktop/scripts/probe-process.mjs'), ...fixtures.map(path => join(root, path))]) await bind(path)
   const projected = ['apps/desktop/src/main', 'apps/desktop/src/shared', 'apps/desktop/browser-extension',
@@ -86,6 +115,11 @@ try {
   const executable = require('electron'), electronEntry = require.resolve('electron')
   receipt.engine = { version: require('electron/package.json').version, executable, sha256: sha(await readFile(executable)), entrySha256: sha(await readFile(electronEntry)) }
   await symlink(join(root, 'node_modules'), join(temporary, 'node_modules'))
+  if (osCapture) {
+    const helper = join(root, 'apps/desktop/scripts/fixtures/browser-contextual-composer/native-window.swift')
+    await bind(helper)
+    execFileSync('xcrun', ['swiftc', helper, '-o', join(temporary, 'native-window')])
+  }
   async function bundle(label, mutation) {
     let applied = false, transformation = null
     await build({ configFile: false, root: projection, logLevel: 'error', ssr: { noExternal: true }, resolve: { alias: aliases },
@@ -125,9 +159,10 @@ try {
     await writeFile(bootstrap, `const {app}=require('electron'),fs=require('node:fs'),path=require('node:path');const root=${JSON.stringify(privateRoot)};const fail=error=>{console.error(error);try{fs.writeFileSync(${JSON.stringify(nativeFile)},JSON.stringify({passed:false,cases:[],failure:{name:error.name,message:error.message,stack:error.stack}}))}finally{app.exit(1)}};try{for(const key of ['home','appData','userData','sessionData']){const value=path.join(root,key);fs.mkdirSync(value,{recursive:true});app.setPath(key,value)}app.commandLine.appendSwitch('site-per-process');app.commandLine.appendSwitch('no-proxy-server');app.whenReady().then(()=>import(${JSON.stringify(pathToFileURL(entry).href)})).catch(fail)}catch(error){fail(error)};`)
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(AGENTMUX_|CTXMUX_)/u.test(key) && key !== 'ELECTRON_RUN_AS_NODE'))
     Object.assign(env, { AGENTMUX_PRESENCE_PRIVATE: privateRoot, AGENTMUX_PRESENCE_OUTPUT: out, AGENTMUX_PRESENCE_RECEIPT: nativeFile, AGENTMUX_PRESENCE_LABEL: label })
+    if (osCapture) Object.assign(env, { AGENTMUX_PRESENCE_OS: '1', AGENTMUX_PRESENCE_HANDOFF: temporary })
     const lines = []
     try {
-      processOutcome = await runProbeProcess(executable, [bootstrap], { cwd: privateRoot, env, timeoutMs: 90_000,
+      processOutcome = await runProbeProcess(executable, [bootstrap], { cwd: privateRoot, env, timeoutMs: osCapture ? 240_000 : 90_000,
         onLine: line => { lines.push(line); process.stderr.write(line + '\n') } })
       receipt.nativeProcesses ??= []
       receipt.nativeProcesses.push({ label, privateRoot, ...processOutcome, cleanupConfirmed: false })
@@ -159,10 +194,16 @@ try {
       row.owningAssertion = { message: mutation.assertion, status: 'AssertionRED' }
     } else {
       assert.equal(processOutcome.exitCode, 0, actual.failure?.message); assert.equal(actual.passed, true, actual.failure?.message)
-      assert.equal(actual.cases.length, 16, 'The original native ownership, preferences, avatar, two frame and invalidation consumers are complete')
-      assert.ok(actual.cases.every(test => test.passed))
-      assert.equal(actual.cases.filter(test => test.name === 'saved-preferences-native-pixels').length, 8)
-      assert.deepEqual(actual.cases.filter(test => test.name === 'actual-frame-pointer-label-and-ack').map(test => test.kind), ['local', 'separate'])
+      if (osCapture) {
+        assert.equal(actual.cases.length, 8, 'Eight native window contexts are nonempty')
+        assert.equal(actual.captures.length, 9, 'Eight ownership images and one ordinary completed cue are observed once')
+        assert.equal(actual.captureQualified, true, 'Original native-window and cue lifetime observations qualify')
+      } else {
+        assert.equal(actual.cases.length, 16, 'The original native ownership, preferences, avatar, two frame and invalidation consumers are complete')
+        assert.ok(actual.cases.every(test => test.passed))
+        assert.equal(actual.cases.filter(test => test.name === 'saved-preferences-native-pixels').length, 8)
+        assert.deepEqual(actual.cases.filter(test => test.name === 'actual-frame-pointer-label-and-ack').map(test => test.kind), ['local', 'separate'])
+      }
     }
     await rm(join(temporary, label), { recursive: true, force: true })
     return actual
@@ -179,9 +220,15 @@ try {
     assert.equal(result.signal, null, 'An interrupted consumer is not product evidence: ' + label)
     assert.equal(result.code, 0, 'The original consumer must finish successfully: ' + label)
   }
-  const actual = await native('baseline')
+  if (osCapture) console.error('operator-os-handoff: ' + temporary)
+  const actual = await native(osCapture ? 'os-window' : 'baseline')
   receipt.qualifications.nativeMain = actual.passed
-  if (!baselineOnly) {
+  if (osCapture) {
+    receipt.qualifications.osWindowCapture = actual.captureQualified
+    receipt.qualifications.rendererPngGeneration = 'reused-source-bound-proof'
+    receipt.qualifications.osWindowAesthetics = 'independent-review-pending'
+    receipt.osDiagnosticComplete = true
+  } else if (!baselineOnly) {
     for (const mutation of mutations) await native(mutation.id, mutation)
     await native('restored')
     const unit = join(root, 'apps/desktop/scripts/verify-browser-operator-presence-unit.mjs'), unitOut = join(out, 'unit')
@@ -239,4 +286,4 @@ try {
   await mkdir(dirname(receiptPath), { recursive: true }); await writeFile(receiptPath, JSON.stringify(receipt, null, 2))
 }
 console.log(JSON.stringify({ passed: receipt.passed, nativeMain: receipt.qualifications.nativeMain, diagnosticCompleted: receipt.diagnosticCompleted ?? false, receipt: receiptPath }))
-if (receipt.failure || !baselineOnly && !receipt.passed) process.exitCode = 1
+if (receipt.failure || !baselineOnly && !osCapture && !receipt.passed) process.exitCode = 1

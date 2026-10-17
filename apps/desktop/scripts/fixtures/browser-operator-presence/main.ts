@@ -11,6 +11,7 @@ import { BrowserViewManager } from '../../../src/main/browser-view-manager.js'
 import { BrowserRefLedgerStore } from '../../../src/main/browser-ref-ledger-store.js'
 import { resolveBrowserAgentControl } from '../../../src/shared/browser-agent-control.js'
 import { avatarAndFrames } from './native-actions.js'
+import { captureOperatorWindows } from './os-capture.js'
 
 const privateRoot = process.env.AGENTMUX_PRESENCE_PRIVATE!, output = process.env.AGENTMUX_PRESENCE_OUTPUT!
 const receiptFile = process.env.AGENTMUX_PRESENCE_RECEIPT!, label = process.env.AGENTMUX_PRESENCE_LABEL!
@@ -145,7 +146,7 @@ async function run() {
   await avatarAndFrames(manager, contents, url, receipt)
   receipt.passed = true
 }
-void run().catch(error => {
+void (process.env.AGENTMUX_PRESENCE_OS === '1' ? captureOperatorWindows(receipt) : run()).catch(error => {
   receipt.failure = { name: error.name, message: error.message, stack: error.stack }
   console.error(error)
 }).finally(async () => {
