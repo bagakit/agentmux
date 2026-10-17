@@ -4,6 +4,7 @@ import {
   CONNECTION_SETUP_READ_ACTIONS,
   connectionSetupDecisionForAction,
   connectionSetupGoalSummary,
+  connectionSetupPublicationSubjects,
   parseConnectionSetupParams,
   type ConnectionEnrollmentCallContext,
   type ConnectionSetupAdvance,
@@ -36,14 +37,6 @@ type Draft = Extract<
 const hash = (v: unknown) =>
   createHash('sha256').update(JSON.stringify(v)).digest('hex')
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
-const preflight: ConnectionSetupReadSubject[] = [
-  'application-details',
-  'publication-versions',
-  'publication-visibility',
-  'publication-pending',
-  'publication-sharing',
-  'publication-features'
-]
 const stopped = (view: ConnectionSetupView) => {
   const c = view.applicationConfiguration,
     r = c?.selected
@@ -359,14 +352,14 @@ export class ProfileConnectionSetup {
       return finish('avatar-upload', stopped(upload)!, undefined, upload)
     let readback = await this.readback(id)
     if (!readback && !write.applicationConfiguration?.selected) {
-      let planned = await this.draft(id)
       if (run) {
-        for (const subject of preflight)
-          if (!(await this.read(id, subject, context)))
-            return finish('profile-preflight', 'attention')
-        planned = await this.draft(id)
-      }
-      if (!planned) {
+        if (!(await this.read(id, 'application-details', context)))
+          return finish('profile-preflight', 'attention')
+      } else if (
+        !write.applicationConfiguration ||
+        !('source' in write.applicationConfiguration) ||
+        !write.applicationConfiguration.source
+      ) {
         return finish(
           'profile-preflight',
           await this.readState(id, 'application-details', context)
@@ -377,6 +370,8 @@ export class ProfileConnectionSetup {
         { effect: 'upload-profile-avatar' },
         context
       )
+      if (upload.applicationConfiguration?.capability === 'unknown')
+        return finish('profile-preflight', 'attention', undefined, upload)
       if (
         row.operation.goal.desired.avatarSha256 &&
         upload.applicationConfiguration?.capability !== 'enabled'
@@ -397,7 +392,13 @@ export class ProfileConnectionSetup {
         context
       )
       if (write.applicationConfiguration?.capability !== 'enabled') {
-        if (!run) return finish('profile-write', 'pending', undefined, write)
+        if (!run)
+          return finish(
+            'profile-write',
+            write.applicationConfiguration?.capability === 'unknown' ? 'attention' : 'pending',
+            undefined,
+            write
+          )
         const action = write.applicationConfiguration?.actions.find(
           (a) => a.kind === 'update-application-profile'
         )
@@ -421,30 +422,24 @@ export class ProfileConnectionSetup {
     }
     // Publication changes are re-read after base_info; only its actual original version can be submitted.
     let draft = await this.draft(id)
-    let create = draft
-      ? await this.config(
-          id,
-          { effect: 'create-application-version', draft },
-          context
-        )
-      : null
-    if (!create?.applicationConfiguration?.selected && run) {
-      for (const subject of preflight.filter(
-        (s) => s !== 'application-details'
-      ))
+    let create = await this.config(
+      id,
+      { effect: 'create-application-version', ...(draft ? { draft } : {}) },
+      context
+    )
+    if (!create.applicationConfiguration?.selected && run) {
+      for (const subject of connectionSetupPublicationSubjects('create-application-version'))
         if (!(await this.read(id, subject, context)))
           return finish('publication-create', 'attention')
       draft = await this.draft(id)
-      create = draft
-        ? await this.config(
-            id,
-            { effect: 'create-application-version', draft },
-            context
-          )
-        : null
+      create = await this.config(
+        id,
+        { effect: 'create-application-version', ...(draft ? { draft } : {}) },
+        context
+      )
     }
-    if (!draft || !create?.applicationConfiguration)
-      return finish('publication-create', 'attention')
+    if (!draft || !create.applicationConfiguration)
+      return finish('publication-create', 'attention', undefined, create)
     if (stopped(create))
       return finish('publication-create', stopped(create)!, undefined, create)
     if (!create.applicationConfiguration.selected) {
@@ -461,7 +456,14 @@ export class ProfileConnectionSetup {
           undefined,
           draft
         )
-      if (!run) return finish('publication-create', 'pending')
+      if (!run)
+        return finish(
+          'publication-create',
+          create.applicationConfiguration.capability === 'unknown' ||
+          create.applicationConfiguration.review?.issues.length ? 'attention' : 'pending',
+          undefined,
+          create
+        )
       const action = create.applicationConfiguration.actions.find(
         (a) => a.kind === 'create-application-version'
       )
