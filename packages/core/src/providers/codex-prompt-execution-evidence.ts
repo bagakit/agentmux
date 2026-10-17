@@ -24,7 +24,9 @@ export class CodexPromptTransportUnconfirmedError extends AgentMuxError {
   }
 }
 
-export function codexTurnRecordEvidence(value: unknown, sourceId: string, nativeSessionId: string): AgentPromptExecutionEvidence | null {
+/** Undefined ignores an unrelated/older record; null means a malformed native turn fact. */
+export function codexTurnRecordEvidence(value: unknown, sourceId: string, nativeSessionId: string,
+  previous: AgentPromptExecutionEvidence | null = null): AgentPromptExecutionEvidence | null | undefined {
   const item = value as { timestamp?: unknown; type?: unknown; ordinal?: unknown; payload?: {
     type?: unknown; turn_id?: unknown; thread_id?: unknown; reason?: unknown; error?: unknown
   } }
@@ -32,9 +34,16 @@ export function codexTurnRecordEvidence(value: unknown, sourceId: string, native
   const boundary = item?.type === 'event_msg' && ['task_started', 'task_complete', 'turn_aborted'].includes(String(event?.type))
   const turnRecord = item?.type === 'turn_context' || (item?.type === 'event_msg' &&
     event?.type === 'item_completed' && event.thread_id === nativeSessionId)
-  if ((!boundary && !turnRecord) || !event || (event.thread_id !== undefined && event.thread_id !== nativeSessionId)) return null
+  if ((!boundary && !turnRecord) || !event || (event.thread_id !== undefined && event.thread_id !== nativeSessionId)) return undefined
   if (typeof event.turn_id !== 'string' || !event.turn_id || !Number.isSafeInteger(item.ordinal)) return null
   const state = !boundary || event.type === 'task_started' ? 'working' : 'ended'
+  if (previous?.nativeOrdinal !== undefined && Number(item.ordinal) <= previous.nativeOrdinal) return undefined
+  if (previous?.nativeTurnId) {
+    const sameTurn = event.turn_id === previous.nativeTurnId
+    // Item activity refreshes an established turn; only a real start/context opens another.
+    if (event.type === 'item_completed' && (!sameTurn || previous.state === 'ended')) return undefined
+    if (state === 'ended' && !sameTurn || state === 'working' && sameTurn && previous.state === 'ended') return undefined
+  }
   const failure = state === 'ended' && event.error != null ? codexFailure(event.error, event.turn_id) : undefined
   const observedAt = typeof item.timestamp === 'string' ? Date.parse(item.timestamp) : NaN
   return { sourceId, id: createHash('sha256').update(JSON.stringify([sourceId, item.ordinal, item.type, event.type, event.turn_id])).digest('base64url'),
@@ -133,20 +142,10 @@ export async function readCodexPromptExecutionEvidence(context: AgentProviderPro
     const lines = tail.subarray(first, completeEnd).toString('utf8').split('\n')
     let latest: AgentPromptExecutionEvidence | null = null
     for (const line of lines) {
-      const record = JSON.parse(line) as { type?: string; payload?: { type?: string; thread_id?: string } }
-      const payload = record.payload
-      const relevant = (record.type === 'turn_context' || (record.type === 'event_msg' &&
-        ['task_started', 'task_complete', 'turn_aborted', 'item_completed'].includes(payload?.type ?? ''))) &&
-        (payload?.thread_id === undefined || payload.thread_id === handle.sessionId) &&
-        (payload?.type !== 'item_completed' || payload.thread_id === handle.sessionId)
-      if (!relevant) continue
-      const evidence = codexTurnRecordEvidence(record, sourceId, handle.sessionId)
+      const evidence = codexTurnRecordEvidence(JSON.parse(line), sourceId, handle.sessionId, latest)
       // A malformed current boundary cannot resurrect a prior success.
-      if (!evidence) return null
-      if (latest && evidence.nativeOrdinal! <= latest.nativeOrdinal!) continue
-      if (latest && evidence.state === 'ended' && evidence.nativeTurnId !== latest.nativeTurnId) continue
-      if (latest?.state === 'ended' && payload?.type === 'item_completed') continue
-      latest = evidence
+      if (evidence === null) return null
+      if (evidence) latest = evidence
     }
     if (latest) return currentEvidence(latest)
     // A complete, small new transcript with no turn can prove initial idle. A

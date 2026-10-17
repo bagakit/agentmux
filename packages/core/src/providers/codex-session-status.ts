@@ -27,7 +27,8 @@ export async function observeCodexSessionStatus(context: AgentProviderSessionSta
   }
   const file = await open(handle.transcriptPath, constants.O_RDONLY | constants.O_NOFOLLOW)
   let observer: { dispose(): void } | undefined
-  let disposed = false, reading = false, queued = false, offset = 0, carry = '', latest = '', activeTurn = ''
+  let disposed = false, reading = false, queued = false, offset = 0, carry = ''
+  let latest: AgentPromptExecutionEvidence | null = null
   let decoder = new TextDecoder('utf8', { fatal: true })
   const dispose = (): void => {
     if (disposed) return
@@ -56,13 +57,14 @@ export async function observeCodexSessionStatus(context: AgentProviderSessionSta
     const emit = (evidence: AgentPromptExecutionEvidence | null, initialSnapshot = false): void => {
       if (disposed || context.signal.aborted) return
       const next = status(evidence, context)
-      if (!next || next.recordId === latest) return
-      if (activeTurn && next.state !== 'working' && next.nativeTurnId !== activeTurn) return
-      activeTurn = next.nativeTurnId; latest = next.recordId; context.onStatus({ ...next, ...(initialSnapshot ? { initialSnapshot: true as const } : {}) })
+      if (next) context.onStatus({ ...next, ...(initialSnapshot ? { initialSnapshot: true as const } : {}) })
     }
-    const initial = await readCodexPromptExecutionEvidence(context)
+    // Keep the predecessor's ordering/terminal fence even when its display is suppressed.
+    const { nativePromptPredecessor: _predecessor, ...sourceContext } = context
+    const initial = await readCodexPromptExecutionEvidence(sourceContext)
     if (!initial) throw new AgentMuxError('The current native turn status is unknown. No completion was inferred.', 'AGENT_NATIVE_STATUS_UNCONFIRMED')
     if (initial && initial.sourceId !== sourceId) throw new AgentMuxError('Native status source changed during the read.', 'AGENT_NATIVE_STATUS_SOURCE_CHANGED')
+    latest = initial
     emit(initial, true)
     offset = Number(stat.size)
     // Do not join an incomplete pre-watch suffix to an unrelated subsequent line.
@@ -101,15 +103,9 @@ export async function observeCodexSessionStatus(context: AgentProviderSessionSta
             }
             for (const line of lines) {
               if (!line) continue
-              const record = JSON.parse(line) as { type?: string; payload?: { type?: string; thread_id?: string } }
-              // Ordinary tool records are not semantic transitions; Hook activity keeps its owner.
-              if (record.type === 'turn_context' || (record.type === 'event_msg' &&
-                ['task_started', 'task_complete', 'turn_aborted'].includes(record.payload?.type ?? ''))) {
-                if (record.payload?.thread_id !== undefined && record.payload.thread_id !== handle.sessionId) continue
-                const evidence = codexTurnRecordEvidence(record, sourceId, handle.sessionId)
-                if (!evidence) throw new AgentMuxError('The appended native turn status is unknown. No completion was inferred.', 'AGENT_NATIVE_STATUS_UNCONFIRMED')
-                emit(evidence)
-              }
+              const evidence = codexTurnRecordEvidence(JSON.parse(line), sourceId, handle.sessionId, latest)
+              if (evidence === null) throw new AgentMuxError('The appended native turn status is unknown. No completion was inferred.', 'AGENT_NATIVE_STATUS_UNCONFIRMED')
+              if (evidence) { latest = evidence; emit(evidence) }
             }
           }
         } catch (error) { unavailable(error) }
