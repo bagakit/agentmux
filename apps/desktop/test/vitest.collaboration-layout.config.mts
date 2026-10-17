@@ -1,0 +1,43 @@
+import { defineConfig } from 'vitest/config'
+import { appendFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { relative } from 'node:path'
+
+const layout = 'places every original mixed member and isolated area without overlap, with room for real headings'
+const ports = 'routes real curves around same-row cards, mixed obstacles and headings with distinct role and reciprocal ports'
+const generation = 'runs the real Worker receiver and suppresses every superseded generation receipt'
+export const collaborationLayoutMutations = [
+  { name: 'isolated-members', file: 'collaboration-layout-engine.ts', before: 'for (const box of local.get(group.id)!)', after: 'for (const box of local.get(group.id)!.filter(box => input.connections.some(edge => edge.source === box.id || edge.target === box.id)))', assertion: layout },
+  { name: 'mixed-node-dimensions', file: 'collaboration-layout-engine.ts', before: 'width: node.width, height: node.height }))', after: 'width: node.width, height: 94 }))', assertion: layout },
+  { name: 'heading-space', file: 'collaboration-layout-engine.ts', before: 'box.y += padding + COLLABORATION_AREA_HEADER - extent.y', after: 'box.y += padding - extent.y', assertion: layout },
+  { name: 'original-role-port', file: 'collaboration-layout-engine.ts', before: '(outgoing ? .5 : 1.5)', after: '(outgoing ? 1.5 : .5)', assertion: ports },
+  { name: 'distinct-role-ports', file: 'collaboration-layout-engine.ts', before: 'kinds.indexOf(kind) * 2', after: '0 * 2', assertion: ports },
+  { name: 'original-endpoint-obstacles', file: 'collaboration-layout-engine.ts', before: 'selected.add(source); selected.add(target)', after: 'selected.delete(source); selected.delete(target)', assertion: ports },
+  { name: 'omitted-detour-obstacle', file: 'collaboration-layout-engine.ts', before: 'if (omitted.length) {', after: 'if (false && omitted.length) {', assertion: 'expands a detour to include previously omitted obstacles rather than trusting the first local route' },
+  { name: 'path-control-bounds', file: 'collaboration-layout-engine.ts', before: 'points, bounds: extent,', after: 'points, bounds: { ...extent, height: 0 },', assertion: ports },
+  { name: 'unrelated-world-wasm', file: 'collaboration-layout-engine.ts', before: 'new Set(obstacles.query(expand(bounds(direct), 64)).filter(box => crosses(direct, expand(box, 64))))', after: 'new Set(obstacles.byId.values())', assertion: 'does not submit unrelated fixed world members for one newly observed connection' },
+  { name: 'generation-receipts', file: 'collaboration-layout.worker.ts', before: 'active?.abort()', after: 'void active', assertion: generation },
+  { name: 'canceled-heavy-work', file: 'collaboration-layout-engine.ts', before: '      signal,\n      onPath:', after: '      signal: undefined,\n      onPath:', assertion: 'does no additional heavy work after the original generation is canceled' }
+] as const
+const selected = process.env.AGENTMUX_COLLABORATION_LAYOUT_MUTATION
+const mutation = collaborationLayoutMutations.find(item => item.name === selected)
+if (selected && !mutation) throw Error('Unknown collaboration layout mutation')
+const hash = (source: string) => createHash('sha256').update(source).digest('hex')
+let loaded = false
+export default defineConfig({ plugins: [{ name: 'collaboration-layout-source-proof', enforce: 'pre', transform(source, id) {
+  const path = relative(process.cwd(), id.split('?')[0]!)
+  if (!/^apps\/desktop\/src\/renderer\/src\/lib\/collaboration-layout(?:-engine|\.worker)\.ts$/u.test(path)) return
+  const applied = mutation && path.endsWith('/' + mutation.file)
+  let code = source
+  if (applied) {
+    if (code.split(mutation.before).length !== 2) throw Error('Unique collaboration layout mutation anchor required')
+    code = code.replace(mutation.before, mutation.after)
+    loaded = true
+  }
+  if (process.env.AGENTMUX_COLLABORATION_LAYOUT_LOADED) appendFileSync(process.env.AGENTMUX_COLLABORATION_LAYOUT_LOADED,
+    JSON.stringify({ path, originalSHA256: hash(source), effectiveSHA256: hash(code), mutant: applied ? selected : null }) + '\n')
+  if (source !== code) return { code, map: null }
+}, buildEnd() { if (selected && !loaded) throw Error('The actual collaboration layout mutation source must be loaded') } }], test: {
+  include: ['apps/desktop/test/collaboration-layout-engine.test.ts'], environment: 'node',
+  globalSetup: [], passWithNoTests: false, maxWorkers: 1, fileParallelism: false, testTimeout: 30000
+} })
