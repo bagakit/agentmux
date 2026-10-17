@@ -65,6 +65,7 @@ import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-m
 import { conversationReadingAnchor, protectsConversationWindow, restoreConversationAnchor, useSessionConversationWindow, type ConversationReading } from '../lib/session-conversation-window'
 import type { ConversationRevealRequest, RevealConversationItem } from '../lib/mailbox-message-navigation'
 import { registerConversationConsumer, conversationFrameObservation, conversationRenderedObservation, conversationInspectionError } from '../lib/conversation-consumer-observation'
+import { conversationDiagnosticFrame } from '@agentmux/client-ui/conversation-reading-diagnostics'
 import { workbenchDocumentIdentity } from '../lib/workbench-window-registry'
 import type { ConversationConsumerQuery } from '@agentmux/core/control'
 import type { ConversationConsumerSample } from '../../../shared/conversation-consumer-observation'
@@ -463,7 +464,30 @@ export function ActivityView({
   const boundaryTime = lastEarlierRecord?.completedAt ?? lastEarlierRecord?.startedAt
   const items = readingWindow.captured ?? []
   const readingEnabled = conversationReading?.enabled !== false
-  const documentVisible = useWorkbenchDocumentVisibility(useWorkbenchDocument())
+  const consumerDocument = useWorkbenchDocument()
+  const documentVisible = useWorkbenchDocumentVisibility(consumerDocument)
+  useLayoutEffect(() => {
+    const frame = readingWindow.snapshot
+    if (!frame || !feedEl?.isConnected) return
+    const location = workbenchDocumentIdentity(feedEl.ownerDocument), context = conversationReading?.consumer
+    readingWindow.noteDiagnostic({ phase: 'dom-committed', ...conversationDiagnosticFrame(frame),
+      ...(location ? { document: location } : {}), ...(context?.regionId ? { regionId: context.regionId } : {}),
+      ...(context?.presentationId ? { presentationId: context.presentationId } : {}) })
+  }, [readingWindow.snapshot, readingWindow.noteDiagnostic, feedEl, consumerDocument, conversationReading?.consumer?.regionId, conversationReading?.consumer?.presentationId])
+  useLayoutEffect(() => {
+    if (!conversationReading || conversationReading.enabled) return
+    // The layout boundary observes hiding before the reader's passive cleanup.
+    readingWindow.noteDiagnostic({ phase: 'consumer-hidden', reason: 'hidden' })
+  }, [conversationReading?.enabled, conversationReading?.consumer?.visible, conversationReading?.identity,
+    conversationReading?.reference.hostId, conversationReading?.reference.agentSessionId, documentVisible, readingWindow.noteDiagnostic])
+  useEffect(() => {
+    if (!conversationReading?.enabled) return
+    const visible = documentVisible && conversationReading.consumer?.visible !== false
+    // Reader setup runs first in the passive phase, even when its first source
+    // read never settles. Both initial gates must be recorded without a frame.
+    readingWindow.noteDiagnostic({ phase: visible ? 'consumer-visible' : 'consumer-hidden', ...(visible ? {} : { reason: 'hidden' }) })
+  }, [conversationReading?.enabled, conversationReading?.consumer?.visible, conversationReading?.identity,
+    conversationReading?.reference.hostId, conversationReading?.reference.agentSessionId, documentVisible, readingWindow.noteDiagnostic])
   const consumerId = useId()
   const inspectConsumer = useRef<((query: ConversationConsumerQuery) => ConversationConsumerSample | null) | null>(null)
   useLayoutEffect(() => {

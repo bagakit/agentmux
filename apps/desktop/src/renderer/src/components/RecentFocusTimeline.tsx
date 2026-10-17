@@ -1,5 +1,6 @@
 import { COLLECTED_REPLY_TITLE } from '@agentmux/client-ui/conversation-sources'
 import { useConversationView } from '@agentmux/client-ui/use-conversation-view'
+import { desktopConversationDiagnostics } from '../lib/conversation-diagnostic-options'
 import { FOCUS_READING_BYTES as MAX_WINDOW_BYTES } from '../lib/focus-reading-budget'
 import { TextInput } from '@agentmux/client-ui/input'
 import { TIMELINE_MARKER_HEIGHT, TIMELINE_MARKER_SIZE } from '../lib/timeline-marker-layout'
@@ -131,7 +132,8 @@ const FocusInputSource = memo(function FocusInputSource({ reference, scope, acti
   reference: SessionHistoryReference; scope: string; active: boolean; historical: boolean; pinned: ConversationRecord | undefined; onChange(part: NativeWindow): void
 }) {
   const previous = useRef<readonly ConversationRecord[]>([])
-  const view = useConversationView(api.conversation, reference, active, { identity: scope, beforeCommit: frame => {
+  const view = useConversationView(api.conversation, reference, active, { identity: scope,
+    diagnostics: desktopConversationDiagnostics('focus-preview'), beforeCommit: frame => {
     if (!pinned || !previous.current.some(record => record.id === pinned.id)) return true
     return projectConversationWindow(frame).records.some(record => record.id === pinned.id && record.event?.revision === pinned.event?.revision)
   } })
