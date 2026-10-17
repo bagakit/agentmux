@@ -75,9 +75,13 @@ reader 生命周期归原宿主；复用一个 query 实例承担 service 总在
 | delivery.core | hostId、logId，可选 authority | 已有 Core client 的原 DeliveryAttempt；路由与语义 runtime 分开 |
 | toolkit.performance-failure | hostId、executionId | 原 Toolkit get 的 latest failure；无 logId，不提供 archive/采样 |
 | mote.context.client | client route hostId、原 resource scope、prepare/open-space action；open-space 另含完整 reference | 原 client action owner 的 latest-per-scope-action 事实；无 logId、持久化或健康结论 |
+| reading.lifecycle | hostId、logId、可选原 Core instance authority，或 recent 范围 | 原 Core read／watch 的有限阶段；仅当前实例，metadata-only，原 scope 与访问路线分开 |
+| client.incident | client route hostId、logId、可选原 archive authority，或 recent 范围 | 原 client 档案的有限 Terminal／连接／探测／读取阶段；保原 producer 和原 reading ID，确认状态逐记录表达 |
 | native-recorder-failure | hostId、agentSessionId、runId | 当前缺原 producer，not-exposed/null 原引用；不冒根因已取得 |
 
 managed Agent 沿原 capability 认证，受自身 Host 路线限定，不能借 user/device 或 Runtime 私有权限读其他 Host。局部拒绝不关闭原健康 Agent。GUI 继续沿原领域消费事实，既有 message.delivery.inspect、toolkit.inspect/watch 语义和原件能力不被替换。
+
+`recent` 是有界发现，不指一条原记录，因此 `recordRef=null`；每个候选保自己的准确引用，再以其原 authority 和 route 读取。cursor 只续接原来源、namespace 和筛选范围，不跨重启猜测重用。`reading.lifecycle` 的来源仅有 instance authority，不能声明 durable；exact 的 observedAt 和 completeness 与原事件时间和覆盖缺口一致。`client.incident` 的原档案 authority 不等于当时 Renderer producer；接收时间不能覆盖内嵌 reading 的来源时间。两种目标都沿原公共入口，不提供任意 payload 或本地文件读面。
 
 Mote scope 的 host/path 来自原 action 捕获的 resource Workspace，不能用 Mote 的 physical/HomeZone/logical topic 目录替代。客户端路由和资源 Host 可以不同；读取不连接资源 Runtime。原 pending attempt 与保留 failure 的 target/time 分开，后来的发现不改写它们。该 point observation 的 recordRef/readAuthority/persistence 为 null，envelope observedAt 为 null；实际 action/failure 时刻留在 data，readAt 只表示本次读取。source absent 的 not-found/unknown 不签历史无错误。
 
