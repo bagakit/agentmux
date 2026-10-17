@@ -11,7 +11,44 @@ export function useFocusHistorySources(enabled: boolean) {
   const [documentVisible, setDocumentVisible] = useState(document.visibilityState !== 'hidden')
   const [revision, retry] = useState(0)
   const loaded = useRef(false)
-  const refresh = useCallback(() => { loaded.current = false; retry(value => value + 1) }, [])
+  const wanted = useRef(0), observed = useRef(-1), generation = useRef(0)
+  const active = useRef(false), reading = useRef(false)
+  // Invalidation bookkeeping only; the catalogue remains the source of lifecycle facts.
+  const known = useRef(new Map<string, { active: boolean; revision: number }>())
+  const refresh = useCallback(() => { wanted.current++; retry(value => value + 1) }, [])
+  const read = useCallback(function readCatalogue() {
+    if (!active.current || reading.current || observed.current >= wanted.current) return
+    const episode = generation.current, requested = wanted.current
+    const current = () => active.current && generation.current === episode
+    reading.current = true; setLoading(true)
+    void api.sessions.historySources().then(values => {
+      if (!current()) return
+      for (const source of values) {
+        const key = JSON.stringify([source.hostId, source.agentSessionId])
+        if ((known.current.get(key)?.revision ?? -1) < requested)
+          known.current.set(key, { active: source.state === 'active', revision: requested })
+      }
+      loaded.current = true; observed.current = requested; setSources(values); setError(null)
+    }).catch(cause => {
+      if (!current()) return
+      observed.current = requested; setError(presentError(cause))
+    }).finally(() => {
+      reading.current = false
+      if (current()) setLoading(false)
+      // A lifecycle event during a read belongs to a later observation, never to this result.
+      readCatalogue()
+    })
+  }, [])
+  useEffect(() => api.sessions.onEvent(event => {
+    if (event.type !== 'core') return
+    const core = event.event
+    if (core.type !== 'agent-session' && core.type !== 'run-removed') return
+    const id = core.type === 'agent-session' ? core.session.agentSessionId : core.agentSessionId
+    if (!id) return
+    const key = JSON.stringify([event.hostId, id]), isActive = core.type === 'agent-session'
+    if (isActive && known.current.get(key)?.active) return
+    refresh(); known.current.set(key, { active: isActive, revision: wanted.current })
+  }), [refresh])
   useEffect(() => {
     if (!enabled) return
     const update = () => setDocumentVisible(document.visibilityState !== 'hidden')
@@ -19,18 +56,12 @@ export function useFocusHistorySources(enabled: boolean) {
     return () => document.removeEventListener('visibilitychange', update)
   }, [enabled])
   useEffect(() => {
-    if (!enabled || !documentVisible || loaded.current) return
-    let current = true
-    setLoading(true)
-    void api.sessions.historySources().then(values => {
-      if (!current) return
-      loaded.current = true; setSources(values); setError(null)
-    }).catch(cause => {
-      if (!current) return
-      loaded.current = true; setError(presentError(cause))
-    }).finally(() => { if (current) setLoading(false) })
-    return () => { current = false }
-  }, [enabled, documentVisible, revision])
+    active.current = enabled && documentVisible
+    if (active.current) read()
+    else setLoading(false)
+    return () => { active.current = false; generation.current++ }
+  }, [enabled, documentVisible, read])
+  useEffect(() => { read() }, [revision, read])
   const available = loaded.current && !loading && error === null
   return useMemo(() => ({ sources, loading, error, refresh, available }), [sources, loading, error, refresh, available])
 }
