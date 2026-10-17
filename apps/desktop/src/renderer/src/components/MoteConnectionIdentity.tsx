@@ -11,7 +11,7 @@ import type { ConnectionRecord, ConnectionSetupEnrollmentSource } from '@agentmu
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import { api } from '../lib/api'
 import { clearMoteConnectionSaveIntent, retainMoteConnectionSaveIntent, useAppStore } from '../store'
-import { moteConnectionChoice, moteConnectionTarget } from '../lib/mote-connection-default'
+import { connectionIdentityObservation, moteConnectionChoice, moteConnectionTarget } from '../lib/mote-connection-default'
 import { SelectionField } from './SelectionField'
 import { MoteBotSetup } from './MoteBotSetup'
 import { SettingsNavigation } from './SettingsNavigation'
@@ -148,6 +148,8 @@ export function MoteConnectionPanel({ target, topicId, moteName, onRead, onSaved
   const pending = !!attempt && (!attempt.receipt || attempt.receipt.status === 'unconfirmed') || !newChoice && retained.some(item => item.phase === 'may-have-dispatched')
   const current = snapshot?.saved.values?.connection
   const currentChoice = current && snapshot && !snapshot.connectionIssue ? moteConnectionChoice(current, snapshot.connections) : null
+  const selectedRecord = snapshot?.connections.find(item => choiceKey(item.config) === selection)
+  const observation = selectedRecord ? connectionIdentityObservation(selectedRecord) : null
   const savedBotIssue = current ? snapshot?.connectionIssue ?? currentChoice?.issue : null
   useEffect(() => { if ((pending || issue || savedBotIssue) && identityOptions.current) identityOptions.current.open = true }, [pending, issue, savedBotIssue])
   return <div className="mote-connection-panel" data-mote-identity-panel={topicId}>
@@ -162,7 +164,8 @@ export function MoteConnectionPanel({ target, topicId, moteName, onRead, onSaved
           {snapshot ? <details className="mote-bot-existing" open={choosing} onToggle={event => setChoosing(event.currentTarget.open)}><summary>Choose a saved bot</summary><label htmlFor={fieldId}>Chat bot</label><SelectionField id={fieldId} label="Mote chat bot" value={selection} menuClassName="mote-connection-dialog__choices"
             disabled={busy} onValueChange={value => { edited.current = true; setSelection(value) }}
             options={[{ value: '', label: 'No default bot' }, ...snapshot.connections.map(item => ({ value: choiceKey(item.config), label: item.config.label,
-              disabled: !item.config.enabled, description: item.config.application.domain + ' · ' + item.config.application.appId }))]} />
+              disabled: !item.config.enabled, description: connectionIdentityObservation(item).label + ' · ' + item.config.application.domain + ' · ' + item.config.application.appId }))]} />
+            {observation ? <p className="mote-details__hint" data-connection-observation><strong>{observation.label}</strong><br />{observation.detail}</p> : null}
             {current ? <p className="mote-details__hint">Saved bot: {current.application.domain} · {current.application.appId}</p> : null}</details> : null}
           {loading ? <p role="status" className="mote-details__hint">Reading saved bots…</p> : null}
           {issue ? <p role="status" className="mote-details__issue">{issue}</p> : null}
