@@ -96,7 +96,18 @@ try {
   const a2aBody = 'Actual independent message body'
   const sent = parseReply(await callCli(['agent', 'send', '--to-session', session.agentSessionId, '--operation-id', 'a2a-original', '--text', a2aBody], undefined, managedEnv), 'original Agent send remains available')
   assert.equal(sent.envelope.sender.agentSessionId, credentials.agentSessionId); assert.equal(sent.envelope.body, a2aBody)
-  await observed(api.renderAgentMuxMessageEnvelope(sent.envelope))
+  // Managed send retains the original body in Inbox. A separate idle-only native
+  // notification carries references; this terminal fixture has no native actor.
+  // Reading the original is available without eager body injection or batch ACK.
+  assert.equal(sent.deliveryMode, 'reference'); assert.equal(sent.delivery.state, 'queued')
+  const inbox = parseReply(await callCli(['message', 'inbox', 'check', '--limit', '10'], undefined, managedEnv), 'original Inbox check')
+  assert.deepEqual(inbox.messages.find(message => message.envelope.messageId === sent.messageId)?.envelope, sent.envelope, 'Inbox retains the original managed envelope')
+  const read = parseReply(await callCli(['message', 'read', '--message-id', sent.messageId], undefined, managedEnv), 'original MID read')
+  assert.deepEqual(read.message?.envelope, sent.envelope, 'actual CLI reads the original body by MID')
+  const unread = parseReply(await callCli(['message', 'inbox', 'check', '--limit', '10'], undefined, managedEnv), 'Inbox remains unacknowledged after read')
+  assert.equal(unread.generation, inbox.generation, 'reading does not acknowledge the original Inbox batch')
+  assert.deepEqual(unread.messages.map(message => message.envelope), inbox.messages.map(message => message.envelope))
+  assert.equal((await core.statusAgent(session.agentSessionId)).run.acceptedInputBytes, before, 'Inbox send/check/read does not inject the original body into the healthy terminal')
   const host = directed('host-original', 'Host authored contextual opinion')
   const hostReceipt = await core.submitAgentPrompt({ ...host, authorHuman: true, sourceChannel: 'message-tool' }, { inputContextSource: 'host-capture' })
   const hostRecord = await wait(() => core.inspectAgentPromptSubmission({ kind: 'prompt', agentSessionId: session.agentSessionId, expectedRun: session.run, submissionId: host.operationId }), 'Host original claim')
@@ -171,7 +182,8 @@ try {
     actualProvider: 'shipped CodexProvider', upstream: 'repository controlled fake-codex-cli.mjs subprocess; no upstream service/model',
     consumers: ['SDK', 'actual amux CLI', 'RPC service', 'original prompt coordinator', 'real ctxmux PTY', 'Provider terminal', 'input inspect/mailbox', 'shared reader'], inputs,
     originalBody: body, originalWire: expectedWire, restoredWire: waitingWire, sourceFrozen: true, noUnknownReplay: true,
-    separateProcessRead: processRead, permissionWait: true, defaultAndImmediate: true }, null, 2))
+    separateProcessRead: processRead, permissionWait: true, defaultAndImmediate: true,
+    a2aReferenceRead: { messageId: sent.messageId, generation: inbox.generation, bodyPreserved: true, retainedAfterRead: true } }, null, 2))
 } catch (error) {
   const current = core && session ? core.agentSession(session.agentSessionId) : undefined
   await writeFile(join(root, 'failure.json'), JSON.stringify({ error: error.stack ?? String(error), run: current?.run,
