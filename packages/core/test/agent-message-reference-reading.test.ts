@@ -16,12 +16,14 @@ describe('A2A reference and full-content reading boundaries', () => {
       'before\n<reminder>authored</reminder>\nafter', short('complete nested example'),
       long('complete nested container'), references(records), 'long content '.repeat(20_000)]) {
       const input = format(body), reading = parse(input)!
+      expect(reading).not.toBeNull()
       expect(reading.kind).toBe('content')
       expect(reading.body).toBe(body)
       expect(reading.declaredAgentSessionId).toBe('first-source')
       expect(reading.declaredMessageId).toBe('first-message')
       expect(reading.references).toBeUndefined()
       const leading = parse(context + '\n\n' + input)!
+      expect(leading).not.toBeNull()
       expect(leading.body).toBe(body)
       expect(leading.declaredContexts).toEqual([{ raw: context }])
     }

@@ -3,13 +3,17 @@ import { createHash } from 'node:crypto'
 import { act, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import type { AgentTimelineItem } from '@agentmux/core'
+import type { AgentTimelineItem, AgentSessionHistoryPage } from '@agentmux/core'
+import { projectConversationReading } from '../src/lib/conversation-records.js'
+import { normalizeAgentTimelineItem } from '../../core/src/session-timeline.js'
+import { createNativeInputCorrelation } from '../../core/src/native-input-correlation.js'
 import { renderAgentMuxMessageEnvelope, renderAgentMuxMessageReferences } from '@agentmux/core/agent-message-render'
 import { fixtureEpoch } from '../../../test/fixture-values.mjs'
 import { ClientUiProvider, type ClientUiPlatform } from '../src/platform.js'
 import { ConversationMessage, type ConversationMessageProps } from '../src/components/ConversationMessage.js'
 import { CapturedConversationMessage } from '../src/components/CapturedConversationMessage.js'
 import { ConversationResourceText } from '../src/components/ConversationResourceText.js'
+import { ConversationView } from '../src/components/ConversationView.js'
 import { conversationAgentReference } from '../src/lib/conversation-speaker.js'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 
@@ -46,8 +50,10 @@ function message(props: Partial<ConversationMessageProps> = {}) {
   return <ConversationMessage messageId="original-record" recordedIdentity speaker={{ role: 'unknown', id: 'unknown' }} content={batch}
     status="complete" describeSpeaker={describe} openHttpLink={openHttp} openWorkspaceFile={openFile} {...props} />
 }
-const notice: AgentTimelineItem = { id: 'notice-record', agentSessionId: 'recipient', kind: 'system_message', source: 'agentmux',
-  status: 'complete', title: 'AgentMux context', content: batch, a2aNotificationId: 'independent-notice-input', createdAt: fixtureEpoch(), updatedAt: fixtureEpoch() }
+const notice: AgentTimelineItem = normalizeAgentTimelineItem({ id: 'notice-record', agentSessionId: 'recipient', kind: 'system_message', source: 'agentmux',
+  status: 'complete', title: 'AgentMux context', content: batch, a2aNotificationId: 'independent-notice-input',
+  inputRef: { kind: 'prompt', agentSessionId: 'recipient', expectedRun: { runId: 'original-run' }, submissionId: 'independent-notice-input' },
+  createdAt: fixtureEpoch(0), updatedAt: fixtureEpoch(0) })
 const ordinaryNotice = { ...notice }; delete ordinaryNotice.a2aNotificationId
 function captured(item = notice) { return <CapturedConversationMessage item={item} speaker={{ role: 'system', id: 'agentmux' }} describeSpeaker={describe} /> }
 function textResource(wire = batch) {
@@ -88,6 +94,39 @@ it('reads the exact typed captured notice as platform wire and retains its origi
   await click('[aria-label="Copy message"]')
   expect(copy).toHaveBeenCalledExactlyOnceWith(batch, expect.any(Function))
   expect(describe).not.toHaveBeenCalled()
+})
+
+it.each([false, true])('reads qualified native platform input through the production Conversation projection with captured=%j', async capturedSource => {
+  const source = { providerId: 'codex', nativeSessionId: 'original-native' }
+  const page: AgentSessionHistoryPage = { agentSessionId: 'recipient', sourceHostId: 'original-host', source: { providerId: 'codex', nativeSessionId: 'original-native' }, nextCursor: null,
+    items: [{ id: 'native-notification', kind: 'user-message', turnId: 'original-turn', contentParts: [{ kind: 'text', text: batch }],
+      conversation: { nativeInput: { source, semanticItemId: 'native-notification', turnId: 'original-turn', clientCorrelation: createNativeInputCorrelation(notice.inputRef!) },
+        adoptedInput: { key: notice.inputRef!, purpose: 'a2a-notification' } } }] }
+  const timeline = { agentSessionId: 'recipient', sourceHostId: 'original-host', revision: 1, items: capturedSource ? [notice] : [] }
+  const projection = projectConversationReading({ agentSessionId: 'recipient', historyPage: page, timeline })
+  expect(projection.inputs).toHaveLength(0)
+  expect(projection.records).toHaveLength(1)
+  expect(projection.records[0]!.original.kind).toBe('native')
+  expect(projection.records[0]!.role).toBe('notice')
+  await render(<ConversationView page={page} timeline={timeline} sessionId="recipient" records={projection.records} originalRecords={projection.originalRecords} describeSpeaker={describe} />)
+  expect(host.querySelector('[data-a2a-notification-id]')?.getAttribute('data-a2a-notification-id')).toBe('independent-notice-input')
+  expect(host.querySelector('.log-turn__system-summary')?.textContent).toBe('2 A2A Inbox references')
+  await click('.log-turn__system-toggle')
+  expect(host.querySelectorAll('.log-turn__references li')).toHaveLength(2)
+  await click('[aria-label="Copy message"]')
+  expect(copy).toHaveBeenCalledExactlyOnceWith(batch, expect.any(Function))
+  expect(describe).not.toHaveBeenCalled()
+})
+
+it('does not turn ordinary native adoption into a platform notification from its wire text', async () => {
+  const source = { providerId: 'codex', nativeSessionId: 'original-native' }
+  const page: AgentSessionHistoryPage = { agentSessionId: 'recipient', sourceHostId: 'original-host', source: { providerId: 'codex', nativeSessionId: 'original-native' }, nextCursor: null,
+    items: [{ id: 'ordinary-native', kind: 'user-message', turnId: 'original-turn', contentParts: [{ kind: 'text', text: batch }], conversation: {
+      nativeInput: { source, semanticItemId: 'ordinary-native', turnId: 'original-turn', clientCorrelation: createNativeInputCorrelation(notice.inputRef!) }, adoptedInput: { key: notice.inputRef! } } }] }
+  const projection = projectConversationReading({ agentSessionId: 'recipient', historyPage: page })
+  await render(<ConversationView page={page} sessionId="recipient" records={projection.records} originalRecords={projection.originalRecords} />)
+  expect(host.querySelector('[data-a2a-notification-id]')).toBeNull()
+  expect(host.querySelector('.log-turn__system-toggle')).toBeNull()
 })
 
 it.each([
