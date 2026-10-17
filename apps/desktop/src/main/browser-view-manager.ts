@@ -205,6 +205,11 @@ const BROWSER_DOCUMENT_PAGE_CALLS = new Set(BROWSER_PAGE_CAPABILITY_NAMES.filter
   !['gotoUrl', 'cdp', 'readResult', 'readDownload', 'wait'].includes(name)))
 
 
+// Pure hover and motion do not establish active document use; other native input is retained.
+const BROWSER_PASSIVE_INPUT_TYPES = new Set<Electron.InputEvent['type']>([
+  'mouseMove', 'mouseEnter', 'mouseLeave', 'pointerMove', 'pointerRawUpdate'
+])
+
 // Native input clears visual feedback only; control changes require an explicit action.
 const BROWSER_FEEDBACK_CLEAR_INPUT_TYPES = new Set([
   'mouseDown',
@@ -2976,7 +2981,7 @@ export class BrowserViewManager {
       origin: () => view.getBounds()
     })
     contents.on('input-event', (_event, input) => {
-      if (['mouseDown', 'keyDown', 'char', 'touchStart', 'touchMove'].includes(input.type)) this.markResourceRisk(entry, view, 'document-used')
+      if (!BROWSER_PASSIVE_INPUT_TYPES.has(input.type)) this.markResourceRisk(entry, view, 'document-used')
       if (this.owns(entry, view) && BROWSER_FEEDBACK_CLEAR_INPUT_TYPES.has(input.type)) void entry.feedback?.clear()
       if (!this.onNativeInput || !this.owns(entry, view) || !['mouseDown', 'mouseMove', 'mouseEnter', 'mouseLeave'].includes(input.type)) return
       const owner = this.nativeOwner(entry.id)
