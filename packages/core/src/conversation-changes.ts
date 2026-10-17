@@ -15,6 +15,7 @@ export * from './session-history-changes.js'
 export const CONVERSATION_DEFAULT_READ_BYTES = 64 * 1024
 export const CONVERSATION_MAX_READ_BYTES = 4 * 1024 * 1024
 export const CONVERSATION_MAX_UNIT_BYTES = 32 * 1024 * 1024
+export const CONVERSATION_MAX_WINDOW_RECORDS = 1200
 export type ConversationScope = { sources: readonly ConversationSourceRef[] }
 export type ConversationFrontier = ConversationRef & { scope: ConversationScope; cuts: readonly (
   | { kind: 'native'; checkpoint: NativeConversationCheckpoint }
@@ -97,7 +98,7 @@ export function consumeConversationWindowPage(page: AgentConversationReadPage, p
     if (entry.kind === 'fragment' && entry.itemId !== unit.event.id || eventIds.has(unit.event.id) || unit.records.some(record => recordIds.has(record.id))) return bad('The replacement window repeats an event or original contribution.')
     eventIds.add(unit.event.id); for (const record of unit.records) recordIds.add(record.id)
     fragment = undefined; units.push(unit); length += bytes(unit)
-    if (length > CONVERSATION_MAX_UNIT_BYTES || units.length > page.window.itemCount) return bad('The replacement window exceeds its original bounded inventory.')
+    if (recordIds.size > CONVERSATION_MAX_WINDOW_RECORDS || length > CONVERSATION_MAX_UNIT_BYTES || units.length > page.window.itemCount) return bad('The replacement window exceeds its original bounded inventory.')
   }
   if (!page.window.complete) {
     if (!page.nextCursor) return bad('An incomplete window has no exact continuation.')
@@ -263,7 +264,7 @@ function revision(value: unknown): string { const result = text(value); return /
 export function parseConversationUnit(value: unknown, ref: ConversationRef, accepted: ConversationScope): ConversationUnit {
   if (bytes(value) > CONVERSATION_MAX_UNIT_BYTES) return bad()
   const p = rpcRecord(value, ['event', 'records'], 'CONTROL_PROTOCOL_ERROR')
-  if (!Array.isArray(p.records) || !p.records.length || p.records.length > 200) return bad()
+  if (!Array.isArray(p.records) || !p.records.length || p.records.length > CONVERSATION_MAX_WINDOW_RECORDS) return bad()
   const records: ConversationSourceRecord[] = p.records.map(value => {
     const r = rpcRecord(value, ['id', 'reference', 'revision', 'order', 'original'], 'CONTROL_PROTOCOL_ERROR')
     const reference = itemRef(r.reference, ref, accepted), id = text(r.id, 131_072), version = revision(r.revision)
@@ -429,7 +430,7 @@ function basePage(value: unknown, input: ConversationTimelineReadInput, changes 
   if (input.record && (Number(w.itemCount) > 0 && !anchor || anchor && !same(anchor.record, input.record) || items.some(entry => entry.kind === 'item' && entry.item.records.some(record => !same(record.reference, input.record))))) return bad('The exact-record read returned another original record.')
   if (input.anchor && !same(anchor, input.anchor) || anchor && (changes || !same(anchor.frontier, checkpoint) || Number(w.itemCount) > 1 ||
       navigation.older !== null || navigation.newer !== null || outside.older !== null || outside.newer !== null)) return bad('The exact-anchor window changed its original read intent.')
-  const window: ConversationReadWindow = { id: text(w.id), revision: integer(w.revision, 1), itemCount: integer(w.itemCount, 0, 1200),
+  const window: ConversationReadWindow = { id: text(w.id), revision: integer(w.revision, 1), itemCount: integer(w.itemCount, 0, CONVERSATION_MAX_WINDOW_RECORDS),
     ...(anchor ? { anchor } : {}), complete: w.complete, view: w.view === null ? null : text(w.view, 131_072), replay: text(w.replay, 131_072), checkpoint,
     outside: { older: boundary(outside.older), newer: boundary(outside.newer) },
     navigation: { older: navigationCursor(navigation.older), newer: navigationCursor(navigation.newer) } }
