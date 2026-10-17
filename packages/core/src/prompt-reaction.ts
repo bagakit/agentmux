@@ -1,3 +1,5 @@
+import { formatAmuxReactionMarker, isAmuxReactionCode } from './amux-protocol-definition.js'
+
 /** A presentation binding on the existing Prompt resource, never executable SVG. */
 export const PROMPT_REACTION_ICONS = ['check', 'play', 'message-circle'] as const
 export type PromptReactionIcon = typeof PROMPT_REACTION_ICONS[number]
@@ -24,7 +26,7 @@ export function conversationReplySourceKey(source: ConversationReplySource): str
 }
 
 export function isPromptReactionCode(value: string): boolean {
-  return /^[a-z][a-z0-9-]{0,47}$/u.test(value)
+  return isAmuxReactionCode(value)
 }
 
 export function promptReactionDefinitions<T extends {
@@ -52,7 +54,7 @@ export function promptReactionMessage(definition: PromptReactionDefinition, sour
   return {
     prompt: definition.body,
     agentMuxNote: [
-      `<amux:reaction ${definition.keyword} />`,
+      formatAmuxReactionMarker(definition.keyword),
       'User quick reply snapshot:',
       `code: ${definition.keyword}`,
       `label: ${JSON.stringify(definition.label)}`,

@@ -1,9 +1,11 @@
+import { AMUX_PROTOCOL_DEFINITIONS } from './amux-protocol-definition.js'
+
 /** Plain-text sharing. Identity fields describe objects; they never authenticate a sender. */
 export type AmuxSharingKind = 'File' | 'Browser'
 
 /** Owners supply the original content; framing does not reinterpret or trim it. */
 export function formatAmuxSharing(kind: AmuxSharingKind, content: string): string {
-  return `--- amux : ${kind} ---\n${content}\n-----`
+  return `--- ${AMUX_PROTOCOL_DEFINITIONS.sharing.tag} : ${kind} ---\n${content}\n-----`
 }
 
 function shellArgument(value: string): string {
@@ -36,7 +38,7 @@ export function formatAmuxObjectLink(target: AmuxObjectLinkTarget): string {
     : target.kind === 'space' ? target.spaceId
     : target.kind === 'zone' ? target.zoneId : undefined
   if (typeof id !== 'string' || !id) throw new TypeError('An exact original Agent, Region, Tab, Space or Zone identity is required.')
-  return `amux://${target.kind}/${encodeURIComponent(id)}`
+  return `${AMUX_PROTOCOL_DEFINITIONS.link.tag}${target.kind}/${encodeURIComponent(id)}`
 }
 
 /** Canonical links carry one original identity, without executable parameters or location guesses. */
