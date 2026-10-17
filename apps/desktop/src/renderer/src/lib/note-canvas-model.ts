@@ -55,17 +55,26 @@ export function projectNoteCanvas(snapshot: NotebookGraphSnapshot, scope: NoteCa
     if (!expansion.has(id)) continue
     for (const next of adjacent.get(id) ?? []) if (!visible.has(next)) { visible.add(next); queue.push(next) }
   }
-  const incoming = new Map<string, number>(), outgoing = new Map<string, number>()
-  for (const reference of graph.references) {
-    outgoing.set(reference.source.noteId, (outgoing.get(reference.source.noteId) ?? 0) + 1)
-    if (reference.target.kind !== 'unbound') incoming.set(reference.target.noteId, (incoming.get(reference.target.noteId) ?? 0) + 1)
-  }
   const observations = new Map<string, NoteContentMetadata>(), repeated = new Set<string>()
   for (const value of graph.observations) {
     if (observations.has(value.noteId)) repeated.add(value.noteId)
     else observations.set(value.noteId, value)
   }
   for (const id of repeated) observations.delete(id)
+  const duplicateNoteIds = new Set(graph.duplicateNoteIds)
+  // A host's directly embedded shared files stay visible even when ordinary neighbors are collapsed.
+  // One pass over the pre-existing visible hosts avoids recursively expanding an entire include graph.
+  const hosts = new Set(visible)
+  for (const reference of graph.references) {
+    if (reference.mode !== 'embed' || reference.target.kind !== 'page' || !hosts.has(reference.source.noteId)) continue
+    const original = observations.get(reference.target.noteId)
+    if (original?.status === 'read' && original.kind === 'shared-block' && original.fileIdentity === 'confirmed' && !duplicateNoteIds.has(original.noteId)) visible.add(original.noteId)
+  }
+  const incoming = new Map<string, number>(), outgoing = new Map<string, number>()
+  for (const reference of graph.references) {
+    outgoing.set(reference.source.noteId, (outgoing.get(reference.source.noteId) ?? 0) + 1)
+    if (reference.target.kind !== 'unbound') incoming.set(reference.target.noteId, (incoming.get(reference.target.noteId) ?? 0) + 1)
+  }
   const notes = [...visible].map(id => {
     const page = catalog.pages[id], observation = observations.get(id)
     const shared = observation?.status === 'read' && observation.kind === 'shared-block'
