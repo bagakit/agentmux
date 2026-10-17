@@ -21,7 +21,7 @@ export type ConversationRecordProvenance = {
   /** Canonical Provider item identity; physical recordId remains independent. */
   nativeInput?: { source: AgentSessionHistorySource; semanticItemId: string; turnId: string; clientCorrelation: string }
   /** Core confirmed this native item against the original durable input claim. No sharing/control authority. */
-  adoptedInput?: { key: import('./agent-prompt-condition.js').AgentPromptInputKey }
+  adoptedInput?: { key: import('./agent-prompt-condition.js').AgentPromptInputKey; purpose?: 'a2a-notification' }
   nativeInvocationScope?: Omit<ConversationInvocation, 'callId'>
   observes?: ConversationItemRef
   invocations?: readonly { selector: ConversationSelector; invocation: ConversationInvocation }[]
@@ -135,14 +135,14 @@ const capturedRoles: Record<AgentTimelineItemKind, ConversationEvent['role']> = 
 }
 export function conversationRecordRole(record: ConversationSourceRecord): ConversationEvent['role'] {
   const { original } = record
-  if (original.kind === 'native') return original.item.questionRequest ? 'interaction'
+  if (original.kind === 'native') return original.item.conversation?.adoptedInput?.purpose === 'a2a-notification' ? 'notice' : original.item.questionRequest ? 'interaction'
     : original.item.kind === 'activity' ? 'process' : original.item.kind === 'system-message' ? 'notice' : 'message'
   const item = original.item
   if (item.kind === 'assistant_message' && item.source === 'native-hook' && recordedConversationAuthor(item).kind === 'unknown') return 'observation'
   return capturedRoles[item.kind]
 }
 export function conversationRecordAuthor(record: ConversationSourceRecord, sessionId: string): ConversationAuthor {
-  if (record.original.kind === 'native') return record.original.item.kind === 'assistant-message' ? { kind: 'agent', agentSessionId: sessionId }
+  if (record.original.kind === 'native') return record.original.item.conversation?.adoptedInput?.purpose === 'a2a-notification' ? { kind: 'system' } : record.original.item.kind === 'assistant-message' ? { kind: 'agent', agentSessionId: sessionId }
     : record.original.item.kind === 'system-message' && record.order.kind === 'native-page' ? { kind: 'system', providerId: record.order.source.providerId } : { kind: 'unknown' }
   const explicit = recordedConversationAuthor(record.original.item)
   if (explicit.kind !== 'unknown') return explicit
@@ -241,7 +241,9 @@ export function conversationEventCoalesces(records: readonly ConversationSourceR
 
 export function conversationInputKey(record: ConversationSourceRecord): string | undefined {
   const key = record.original.kind === 'native' ? record.original.item.conversation?.adoptedInput?.key
-    : record.original.item.kind === 'user_message' && record.original.item.source === 'user' ? record.original.item.inputRef : undefined
+    : record.original.item.kind === 'user_message' && record.original.item.source === 'user' ||
+      record.original.item.kind === 'system_message' && record.original.item.source === 'agentmux' && record.original.item.a2aNotificationId !== undefined
+      ? record.original.item.inputRef : undefined
   return key && record.reference && key.agentSessionId === record.reference.agentSessionId
     ? inputIdentity(record.reference.hostId, key) : undefined
 }
