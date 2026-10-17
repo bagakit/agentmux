@@ -2274,7 +2274,9 @@ export async function registerIpc(args: {
   })
   const detach = args.runtime.attach(contents)
   const rpcHttp = agentMuxRpcHttpOptions()
-  const connectorServices = await createDesktopConnections({ directory: join(homedir(), '.agentmux', 'connectors'), encryption: safeStorage,
+  const connectorServices = await createDesktopConnections({ directory: process.env.AGENTMUX_DESKTOP_USER_DATA === undefined
+    ? join(homedir(), '.agentmux', 'connectors')
+    : join(app.getPath('userData'), 'connectors'), encryption: safeStorage,
     publication: createPublicationConversationPort(() => args.runtime.rpcClients()),
     ingress: { core: createHostedIngressCorePort(() => args.runtime.rpcClients()) },
     bindings: { spatial: spatialState, checkpoint: async (reference: import("@agentmux/core/conversation").ConversationRef) => {
