@@ -26,7 +26,7 @@ type Position = { native?: string | null; capturedBefore?: number | null; captur
 type Batch = { index: number; offset: number; digests: { id: string; sha256: string }[];
   after: Position; coverage: ConversationSourceCoverage[]; end?: ConversationFrontier; more: boolean }
 type Cursor = ConversationRef & { version: 1; mode: 'inspect' | 'changes'; scope: ConversationFrontier['scope']; position: Position;
-  batch?: Pick<Batch, 'index' | 'offset'>; checkpoint?: ConversationFrontier; anchor?: ConversationVersionedAnchor; viewId?: string; viewRevision?: number; snapshotId?: string; pageIndex?: number; direction?: 'newer' }
+  batch?: Pick<Batch, 'index' | 'offset'>; checkpoint?: ConversationFrontier; anchor?: ConversationVersionedAnchor; viewId?: string; viewRevision?: number; snapshotId?: string; pageIndex?: number; direction?: 'newer'; preserveCurrent?: true }
 type HistoryPosition = { position: Position; after: Position; checkpoint: ConversationFrontier; limit: number; more: boolean;
   native?: { witness: string; first: string; last: string; count: number };
   captured?: { first: number; last: number; count: number };
@@ -157,7 +157,7 @@ export async function conversationCheckpoint(ref: ConversationRef, port: Convers
   const target = { ...ref, hostId: port.readHostId ?? ref.hostId }
   return { ...target, sourceHostId: ref.hostId, scope: found.scope, checkpoint: { ...target, sourceHostId: ref.hostId, frontier: checkpoint }, coverage: found.coverage }
 }
-function projection(ref: ConversationRef, accepted: ConversationFrontier['scope'], rows: ConversationSourceRecord[], coverage: ConversationSourceCoverage[], inputAdoption: ConversationInputAdoptionContext) {
+function projection(ref: ConversationRef, accepted: ConversationFrontier['scope'], rows: ConversationSourceRecord[], coverage: ConversationSourceCoverage[], inputAdoption: ConversationInputAdoptionContext, preserveCurrent = false) {
   const native = rows.filter(r => r.original.kind === 'native'), captured = rows.filter(r => r.original.kind === 'captured')
   const source = accepted.sources.find((s): s is Extract<ConversationSourceRef, { kind: 'native' }> => s.kind === 'native')
   const stream = accepted.sources.find((s): s is Extract<ConversationSourceRef, { kind: 'captured' }> => s.kind === 'captured')
@@ -169,7 +169,7 @@ function projection(ref: ConversationRef, accepted: ConversationFrontier['scope'
   // The original committed revision is retained; the normal form uses the same Core version hash.
   for (const row of rows) if (records.get(row.id)?.revision !== row.revision) return fail('An original record version changed during the frozen read.')
   const units = timeline.events.map(event => ({ event, records: event.recordIds.map(id => records.get(id)!) }))
-  if (units.some(unit => Buffer.byteLength(JSON.stringify(unit)) > CONVERSATION_MAX_UNIT_BYTES)) return fail('The original conversation unit exceeds its assembly bound. Its source and cut are retained.', 'AGENT_SESSION_HISTORY_BUDGET')
+  if (units.some(unit => Buffer.byteLength(JSON.stringify(unit)) > CONVERSATION_MAX_UNIT_BYTES)) return fail('The original conversation unit exceeds its assembly bound. Its source and cut are retained.', preserveCurrent ? 'AGENT_CONVERSATION_WINDOW_FULL' : 'AGENT_SESSION_HISTORY_BUDGET')
   return { units, coverage: timeline.coverage as ConversationSourceCoverage[], order: timeline.order }
 }
 function row(ref: ConversationRef, original: ConversationSourceRecord['original'], order: ConversationSourceRecord['order'], version?: string): ConversationSourceRecord {
@@ -387,6 +387,14 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
     state = { ...ref, version: 1, mode, scope: checkpoint.scope, checkpoint, position: captured?.kind === 'captured'
       ? { capturedCut: { epoch: captured.epoch, sequence: captured.sequence } } : { capturedBefore: null } }
   }
+  const requestedPreservation = mode === 'inspect' && 'preserveCurrent' in input && input.preserveCurrent === true
+  if (state.snapshotId) {
+    if (Boolean(state.preserveCurrent) !== requestedPreservation) return fail('The wire continuation changed its original window preservation policy.')
+  } else if (requestedPreservation) {
+    if (!state.viewId || state.pageIndex === undefined || state.direction || state.batch || state.anchor) return fail('Window preservation requires the original older-page adjacency.')
+    state.preserveCurrent = true
+  }
+  const preserveCurrent = state.preserveCurrent === true
   if (input.view) {
     const token = decode(input.view, ref, 'inspect')
     if (!token.viewId || !Number.isSafeInteger(token.viewRevision) || token.snapshotId || !same(token.scope, state.scope) || state.viewId && state.viewId !== token.viewId) return fail('The view belongs to another original accepted scope.')
@@ -397,7 +405,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
   try {
     state.viewId = view.id
     if (mode === 'changes' && view.anchor) return fail('This view inspects one exact original version. Reopen history explicitly to follow later changes.')
-    const requestKey = hash(JSON.stringify([mode, state.viewRevision ?? view.revision, state.checkpoint, state.position, state.anchor, state.pageIndex, state.direction]))
+    const requestKey = hash(JSON.stringify([mode, state.viewRevision ?? view.revision, state.checkpoint, state.position, state.anchor, state.pageIndex, state.direction, preserveCurrent]))
     if (!state.snapshotId) {
       const repeated = [...view.snapshots].find(([, snapshot]) => snapshot.requestKey === requestKey)
       if (repeated) { state.snapshotId = repeated[0]; state.batch = { index: 0, offset: 0 } }
@@ -475,6 +483,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
       let retainedBytes = positionBytes + [...sizes.values()].reduce((sum, size) => sum + size, 0) +
         [...heads.values()].filter(row => !sizes.has(row.id) || records.get(row.id)?.revision !== row.revision)
           .reduce((sum, row) => sum + Buffer.byteLength(JSON.stringify(row)), 0)
+      if (preserveCurrent && (retainedCount > CONVERSATION_MAX_WINDOW_RECORDS || retainedBytes > CONVERSATION_MAX_UNIT_BYTES)) return fail('This older expansion cannot retain the accepted window within its record and byte budgets. Continue explicit history navigation or retain the current live view.', 'AGENT_CONVERSATION_WINDOW_FULL')
       const removed = new Set<string>(), boundary = (unit: ConversationUnit) => {
         const record = unit.records.find(record => record.id === unit.event.anchorId) ?? unit.records[0]!
         return { record: record.reference!, revision: record.revision }
@@ -497,8 +506,9 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
       }
       rows = rows.filter(record => !removed.has(record.id))
       if (retainedCount > CONVERSATION_MAX_WINDOW_RECORDS || retainedBytes > CONVERSATION_MAX_UNIT_BYTES) return fail('This exact event contribution exceeds the temporary window assembly bound. Its original source and continuation are retained.', 'AGENT_SESSION_HISTORY_BUDGET')
-      let projected = projection(ref, state.scope, rows, loaded.batch.coverage, inputAdoption)
+      let projected = projection(ref, state.scope, rows, loaded.batch.coverage, inputAdoption, preserveCurrent)
       let unitBytes = projected.units.reduce((sum, unit) => sum + Buffer.byteLength(JSON.stringify(unit)), 0)
+      if (preserveCurrent && unitBytes > CONVERSATION_MAX_UNIT_BYTES) return fail('This older expansion cannot retain the accepted canonical contributions within its assembly budget. The original live view and continuation remain available.', 'AGENT_CONVERSATION_WINDOW_FULL')
       for (const unit of mode === 'changes' || state.direction === 'newer' ? projected.units : [...projected.units].reverse()) {
         if (unitBytes <= CONVERSATION_MAX_UNIT_BYTES) break
         if (unit.records.some(record => protectedIds.has(record.id))) continue
