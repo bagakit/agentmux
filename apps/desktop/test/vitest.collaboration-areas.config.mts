@@ -1,10 +1,8 @@
 import { defineConfig } from 'vitest/config'
 import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { relative, resolve } from 'node:path'
+import { relative } from 'node:path'
 import shared from '../scripts/fixtures/agent-information-card/vitest.owning.config.mts'
-const sourceAliases = shared.resolve?.alias
-if (!Array.isArray(sourceAliases)) throw Error('Original source aliases required')
 export const collaborationAreaMutations = [
   { name: 'selection-issue', file: 'lib/collaboration-areas.ts', before: 'issue = category ? null : selected.issue', after: 'issue = null', assertion: 'preserves an exact unconfirmed selection issue instead of silently presenting its healthy canonical area' },
   { name: 'exact-host', file: 'lib/workspace-agent-scope.ts', before: 'hostId !== undefined && session.control.hostId !== hostId || ', after: '', assertion: 'keeps original Host ownership when a collaborator SID also has a presentation on another Host' },
@@ -17,7 +15,7 @@ const selected = process.env.AGENTMUX_COLLABORATION_AREA_MUTATION
 const mutation = collaborationAreaMutations.find(value => value.name === selected)
 if (selected && !mutation) throw Error('Unknown area mutation')
 const hash = (value: string) => createHash('sha256').update(value).digest('hex')
-export default defineConfig({ ...shared, resolve: { ...shared.resolve, alias: [{ find: /^@agentmux\/identity$/, replacement: resolve(import.meta.dirname, '../../../packages/identity/src/index.ts') }, ...sourceAliases] }, plugins: [...shared.plugins ?? [], { name: 'collaboration-area-source-proof', enforce: 'pre', transform(source, id) {
+export default defineConfig({ ...shared, plugins: [...shared.plugins ?? [], { name: 'collaboration-area-source-proof', enforce: 'pre', transform(source, id) {
   const path = relative(process.cwd(), id.split('?')[0]!)
   if (!path.startsWith('apps/desktop/src/') && !path.startsWith('packages/')) return
   let code = source
