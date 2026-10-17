@@ -293,6 +293,23 @@ it('keeps a successful original list independent of a failed OS observation reso
   expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 })
 
+it('latest event reads recover the original failed directory observer without closing healthy capability', async () => {
+  const f = await fixture()
+  await f.client.listMessageEvents({ participantSessionId: 'reader', latest: true })
+  await vi.waitFor(() => expect(f.events.some(event => event.type === 'agent-message-observation' && event.state === 'available')).toBe(true))
+  const directory = vi.mocked(watch).mock.calls.findIndex(args => args[0] === f.root)
+  expect(directory).toBeGreaterThanOrEqual(0)
+  const watcher = vi.mocked(watch).mock.results[directory]!.value as FSWatcher
+  watcher.emit('error', Object.assign(new Error('Private directory observation interrupted'), { code: 'EACCES' }))
+  expect(f.events.at(-1)).toMatchObject({ type: 'agent-message-observation', state: 'unavailable', code: 'EACCES' })
+  const before = f.events.length
+  const page = await f.client.listMessageEvents({ participantSessionId: 'reader', latest: true })
+  expect(page.events).toEqual([])
+  await vi.waitFor(() => expect(f.events.slice(before).some(event => event.type === 'agent-message-observation' && event.state === 'available')).toBe(true))
+  expect(vi.mocked(watcher.close)).toHaveBeenCalled()
+  expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
 it('an observation schema failure leaves the original read and independent writer available', async () => {
   const f = await fixture(); await writer(f.queue.path, 'append', 'retained-before-schema-error')
   vi.spyOn(Queue.prototype, 'messageChanges').mockRejectedValue(new Error('Private observation schema unavailable'))

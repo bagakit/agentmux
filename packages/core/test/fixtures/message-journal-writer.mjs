@@ -28,6 +28,16 @@ else if (mode === 'rollback') {
   await other.listMessages({ participantSessionId: 'reader', direction: 'incoming', limit: 1 }, async () => {})
   await rename(path, path + '.original'); await rename(path + '.replacement', path)
 } else if (mode === 'restore') await rename(path + '.original', path)
+else if (mode === 'dispatch-open' || mode === 'dispatch-report') {
+  const source = (await queue.readByMessageId(id)).envelope
+  if (mode === 'dispatch-open') await queue.openDispatch({ sourceMessageId: id, callerAgentSessionId: source.senderSessionId }, async () => {})
+  else {
+    const reply = await queue.append({ ...source, messageId: id + '-report', operationId: id + '-report-operation', replyTo: id,
+      sender: source.recipient, senderSessionId: source.recipientSessionId, senderRunId: source.recipientRunId,
+      recipient: source.sender, recipientSessionId: source.senderSessionId, recipientRunId: source.senderRunId })
+    await queue.recordDispatchEvent({ sourceMessageId: id, replyMessageId: reply.messageId, callerAgentSessionId: source.recipientSessionId, kind: 'worker_done' }, async () => {})
+  }
+}
 else throw new Error('Unknown private message writer mode')
 // Reading this exact file proves the helper only operated its supplied private journal.
 process.stdout.write(JSON.stringify({ mode, path, bytes: (await readFile(path)).length }) + '\n')
