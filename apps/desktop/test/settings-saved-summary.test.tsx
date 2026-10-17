@@ -11,8 +11,9 @@ type Kind = typeof kinds[number]
 
 function pane(kind: Kind, saved: boolean, onSave: (value: boolean, expected: boolean) => Promise<void>) {
   return kind === 'copy'
-    ? <GeneralSettingsPane copyPathsAsAbsolute={saved} onSave={onSave} />
-    : <BrowserSettingsPane active={false} browser={{ ...composerConfig.browser, agentAutomation: saved }} onSave={onSave} onForget={async () => {}} />
+    ? <GeneralSettingsPane copyPathsAsAbsolute={saved} onSave={(value, expected) => onSave(value.copyPathsAsAbsolute, expected.copyPathsAsAbsolute)} />
+    : <BrowserSettingsPane active={false} browser={{ ...composerConfig.browser, agentAutomation: saved }}
+      onSave={(value, expected) => onSave(value.agentAutomation, expected.agentAutomation)} onForget={async () => {}} />
 }
 
 function controls(kind: Kind) {
