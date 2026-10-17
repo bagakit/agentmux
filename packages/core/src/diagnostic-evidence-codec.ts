@@ -2,17 +2,19 @@ import { parseReadingDiagnosticRecord } from './reading-diagnostic.js'
 import { parseReadingDiagnosticTarget, parseReadingDiagnosticFindResult, parseReadingDiagnosticSourceRead } from './reading-diagnostic-query.js'
 import { parsePerformanceSceneEvidence } from './performance-scene-evidence.js'
 import { parseClientIncidentTarget, parseClientIncidentRecord, parseClientIncidentPage } from './client-incident.js'
+import { relatedClientIncidentEvidence } from './client-incident-evidence.js'
 import { isDeepStrictEqual } from 'node:util'
 import { parseMoteContextEvidenceTarget, parseMoteContextEvidence } from './mote-context-observation.js'
 import { parseToolkitPerformanceFailure } from './toolkit-performance-failure.js'
 import { toolkitFailureEvidenceCode, TOOLKIT_FAILURE_EVIDENCE_SIGNALS } from './toolkit-failure-evidence-reader.js'
-import { diagnosticCauseCode, DELIVERY_EVIDENCE_STAGES } from './delivery-evidence-reader.js'
+import { diagnosticCauseCode, DELIVERY_EVIDENCE_STAGES, relatedDeliveryEvidence } from './delivery-evidence-reader.js'
 import { DIAGNOSTIC_EVIDENCE_DEFAULT_BUDGET, DIAGNOSTIC_EVIDENCE_AVAILABILITIES,
   DIAGNOSTIC_EVIDENCE_ISSUE_CODES, DIAGNOSTIC_EVIDENCE_RELATION_KINDS, DIAGNOSTIC_EVIDENCE_BASIS_KINDS } from '@agentmux/diagnostic-evidence'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseDeliveryAttempt, parseDeliveryInputObservation, validateDeliveryLogId } from './delivery-attempt.js'
-import type { AgentMuxDiagnosticEvidenceInspectParams, AgentMuxDiagnosticEvidenceResult, AgentMuxDiagnosticEvidenceTarget } from './diagnostic-evidence.js'
+import type { AgentMuxDiagnosticEvidenceInspectParams, AgentMuxDiagnosticEvidenceResult, AgentMuxDiagnosticEvidenceTarget,
+  AgentMuxDiagnosticEvidenceRead } from './diagnostic-evidence.js'
 
 const bad = (code = 'CONTROL_PROTOCOL_ERROR'): never => { throw new AgentMuxError('Diagnostic evidence does not satisfy its public contract.', code) }
 const member = (v: unknown, values: readonly unknown[]) => { if (!values.includes(v)) bad() }
@@ -190,8 +192,21 @@ export function parseDiagnosticEvidenceResult(value: unknown, request: unknown):
         }
       } else if (r.data !== null || r.recordRef !== null) bad()
     })
-    const reads = p.reads as Array<{ target: AgentMuxDiagnosticEvidenceTarget }>
+    const reads = p.reads as AgentMuxDiagnosticEvidenceRead[]
     if (params.target ? !reads[0] || !isDeepStrictEqual(reads[0].target, params.target) : reads.length) bad()
+    if (params.target?.domain === 'client.incident') {
+      const declared = [{ target: params.target as AgentMuxDiagnosticEvidenceTarget, depth: 0 }]
+      const consumed: AgentMuxDiagnosticEvidenceTarget[] = []
+      for (const read of reads) {
+        const original = declared.find(candidate => isDeepStrictEqual(candidate.target, read.target))
+        if (!original || consumed.some(target => isDeepStrictEqual(target, read.target))) return bad()
+        consumed.push(read.target)
+        if (params.includeRelated !== false && original.depth < limits.maxDepth && read.availability === 'found') {
+          declared.push(...[...relatedClientIncidentEvidence(read), ...relatedDeliveryEvidence(read)]
+            .map(target => ({ target, depth: original.depth + 1 })))
+        }
+      }
+    }
     array(p.relations, limits.maxReads * 2, item => {
       const r = object(item, ['from', 'to', 'declaredBy', 'kind', 'verification', 'basis']); ref(r.from); ref(r.to); ref(r.declaredBy)
       member(r.kind, DIAGNOSTIC_EVIDENCE_RELATION_KINDS); member(r.verification, ['declared', 'target-matched', 'owner-confirmed', 'unverifiable', 'conflict'])
