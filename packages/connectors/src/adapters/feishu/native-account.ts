@@ -17,6 +17,9 @@ const LANDING = 'https://ask.feishu.cn/'
 const CONSOLE = 'https://open.feishu.cn/app'
 const CONSOLE_HOSTS = ['open.feishu.cn', 'open.larkoffice.com']
 const CROSS_LOGIN_HOSTS = ['accounts.feishu.cn', 'ask.feishu.cn']
+const CONSOLE_FLOW_HOSTS = [...CROSS_LOGIN_HOSTS, ...CONSOLE_HOSTS]
+// Match Fetch's finite redirect observation budget; this is not a platform login limit.
+const redirectLimit = (phase: unknown) => phase === 'console' ? 20 : 8
 type Phase = 'poll' | 'cross-login' | 'landing' | 'console' | 'account' | 'expired'
 /** Private issuer facts only. The caller owns the intent, actor and any application binding. */
 export type NativeAccountState = {
@@ -26,24 +29,29 @@ export type NativeAccountState = {
 }
 export type NativeAccountInitialState = { version: 1; flowKey: string; token: string; setCookies: string[] }
 type AuthenticationDiagnostic = Extract<ConnectionEnrollmentDiagnostic, { stage: 'authentication' }>
+type RedirectReason = NonNullable<AuthenticationDiagnostic['redirectReason']>
 type NativeAccountUnknown = { kind: 'unknown'; diagnostic: AuthenticationDiagnostic }
 type NativeAccountChallenge = { kind: 'challenge'; challenge: ConnectionSetupChallenge; state: NativeAccountInitialState } | NativeAccountUnknown
 type NativeAccountProgress = { kind: 'progress'; stage: 'waiting' | 'scanned' | 'handoff' | 'account' | 'expired'; challenge: ConnectionSetupChallenge | null; account: ConnectionSetupAccount | null; state: NativeAccountState } | NativeAccountUnknown
-const unconfirmed = (step: NonNullable<AuthenticationDiagnostic['step']>, failure: NonNullable<AuthenticationDiagnostic['failure']>, httpStatus?: number, nativeCode?: number, boundary?: AuthenticationDiagnostic['boundary']): NativeAccountUnknown => ({ kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed', step, failure, ...(httpStatus === undefined ? {} : { httpStatus }), ...(nativeCode === undefined ? {} : { nativeCode }), ...(boundary === undefined ? {} : { boundary }) } })
+const unconfirmed = (step: NonNullable<AuthenticationDiagnostic['step']>, failure: NonNullable<AuthenticationDiagnostic['failure']>, httpStatus?: number, nativeCode?: number, boundary?: AuthenticationDiagnostic['boundary'], redirectReason?: RedirectReason): NativeAccountUnknown => ({ kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed', step, failure, ...(httpStatus === undefined ? {} : { httpStatus }), ...(nativeCode === undefined ? {} : { nativeCode }), ...(boundary === undefined ? {} : { boundary }), ...(redirectReason === undefined || failure !== 'redirect-unconfirmed' ? {} : { redirectReason }) } })
 const uncached = (endpoint: string) => endpoint + `?_r${10000 + Math.floor(Math.random() * 80000)}=${Date.now()}`
 type Ast = Node & Record<string, unknown>
 const record = (v: unknown): Record<string, unknown> | null => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null
 const text = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && !/[\u0000-\u001f\u007f]/u.test(v)
 const opaque = (v: unknown): v is string => text(v) && !/\s/u.test(v)
-function url(value: string, hosts: readonly string[]): URL {
-  const u = new URL(value)
-  if (u.protocol !== 'https:' || u.username || u.password || u.port || u.hash || !hosts.includes(u.hostname)) throw new Error('Unqualified issuer URL')
-  return u
+class NativeRedirectError extends Error {
+  constructor(readonly reason: RedirectReason) { super('Unqualified issuer redirect') }
 }
-function consoleUrl(value: string): URL {
-  const result = url(value, CONSOLE_HOSTS)
-  if (result.pathname !== '/app' || result.search) throw new Error('Unqualified console bootstrap page')
-  return result
+function url(value: string, hosts: readonly string[], normalizeFragment = false, base?: URL): URL {
+  let u: URL
+  try { u = new URL(value, base) } catch { throw new NativeRedirectError('invalid-url') }
+  if (u.protocol !== 'https:') throw new NativeRedirectError('unsupported-scheme')
+  if (u.username || u.password) throw new NativeRedirectError('url-credentials')
+  if (u.port) throw new NativeRedirectError('unexpected-port')
+  if (normalizeFragment) u.hash = ''
+  else if (u.hash) throw new NativeRedirectError('unexpected-fragment')
+  if (!hosts.includes(u.hostname)) throw new NativeRedirectError('unexpected-host')
+  return u
 }
 function jar(): CookieJar { return new CookieJar(undefined, { rejectPublicSuffixes: true, prefixSecurity: 'strict', allowSpecialUseDomain: false, allowSecureOnLocal: false }) }
 function serialize(cookies: CookieJar): SerializedCookieJar {
@@ -61,7 +69,7 @@ export function readNativeAccountState(snapshot: unknown): { state: NativeAccoun
     for (const cookie of p.setCookies) cookies.setCookieSync(cookie, INIT, { ignoreError: true })
     return { state: { version: 2, flowKey: p.flowKey, token: p.token, cookieJar: serialize(cookies), phase: 'poll', hops: 0 }, cookies }
   }
-  if (p.version !== 2 || !['poll', 'cross-login', 'landing', 'console', 'account', 'expired'].includes(String(p.phase)) || !Number.isSafeInteger(p.hops) || Number(p.hops) < 0 || Number(p.hops) > 8) throw new Error('Unknown authentication snapshot')
+  if (p.version !== 2 || !['poll', 'cross-login', 'landing', 'console', 'account', 'expired'].includes(String(p.phase)) || !Number.isSafeInteger(p.hops) || Number(p.hops) < 0 || Number(p.hops) > redirectLimit(p.phase)) throw new Error('Unknown authentication snapshot')
   const original = p as unknown as NativeAccountState
   const state: NativeAccountState = {
     version: 2, flowKey: original.flowKey, token: original.token, cookieJar: original.cookieJar, phase: original.phase, hops: original.hops,
@@ -263,15 +271,14 @@ export async function readNativeAccountResponse(response: Response): Promise<str
 export async function advanceFeishuNativeAccount(snapshot: unknown, signal?: AbortSignal): Promise<NativeAccountProgress> {
   let step: NonNullable<AuthenticationDiagnostic['step']> = 'account', failure: NonNullable<AuthenticationDiagnostic['failure']> = 'invalid-state', httpStatus: number | undefined
   let boundary: AuthenticationDiagnostic['boundary'] = 'saved-state'
-  const failed = (reason = failure, nativeCode?: number) => unconfirmed(step, reason, httpStatus, nativeCode, boundary)
+  const failed = (reason = failure, nativeCode?: number, redirectReason?: RedirectReason) => unconfirmed(step, reason, httpStatus, nativeCode, boundary, redirectReason)
   try {
     const { state, cookies } = readNativeAccountState(snapshot)
     if (['account', 'expired'].includes(state.phase)) return failed()
     step = state.phase as typeof step
     failure = 'redirect-unconfirmed'; boundary = 'request-target'
-    const hosts = state.phase === 'poll' ? ['accounts.feishu.cn'] : state.phase === 'cross-login' ? CROSS_LOGIN_HOSTS : state.phase === 'landing' ? ['ask.feishu.cn'] : CONSOLE_HOSTS
-    const target = url(state.phase === 'poll' ? uncached(POLL) : state.url ?? '', hosts)
-    if (state.phase === 'console') consoleUrl(target.href)
+    const hosts = state.phase === 'poll' ? ['accounts.feishu.cn'] : state.phase === 'cross-login' ? CROSS_LOGIN_HOSTS : state.phase === 'landing' ? ['ask.feishu.cn'] : CONSOLE_FLOW_HOSTS
+    const target = url(state.phase === 'poll' ? uncached(POLL) : state.url ?? '', hosts, state.phase === 'console')
     const headers: Record<string, string> = state.phase === 'poll' ? { ...FEISHU_QR_HEADERS, 'x-flow-key': state.flowKey } : { accept: 'text/html', 'user-agent': FEISHU_BROWSER_USER_AGENT }
     if (state.referer) headers.referer = state.referer
     boundary = 'saved-state'
@@ -284,13 +291,13 @@ export async function advanceFeishuNativeAccount(snapshot: unknown, signal?: Abo
     boundary = 'cookie-update'
     for (const value of response.headers.getSetCookie()) cookies.setCookieSync(value, target.href, { ignoreError: true })
     let stage: 'waiting' | 'scanned' | 'handoff' | 'account' | 'expired' = 'handoff'
-    if (response.status >= 300 && response.status < 400) {
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
       failure = 'redirect-unconfirmed'; boundary = 'handoff'
-      if (state.phase === 'poll' || ++state.hops > 8) return failed()
-      const location = response.headers.get('location'); if (!location) return failed()
-      state.url = url(new URL(location, target).href, hosts).href
+      if (state.phase === 'poll') return failed(failure, undefined, 'unexpected-redirect')
+      if (++state.hops > redirectLimit(state.phase)) return failed(failure, undefined, 'redirect-limit')
+      const location = response.headers.get('location'); if (!location) return failed(failure, undefined, 'missing-location')
+      state.url = url(location, hosts, state.phase === 'console', target).href
       state.referer = target.href
-      if (state.phase === 'console') consoleUrl(state.url)
     } else {
       boundary = undefined
       if (!response.ok) return failed('http-status')
@@ -326,6 +333,7 @@ export async function advanceFeishuNativeAccount(snapshot: unknown, signal?: Abo
       else if (state.phase === 'landing') { state.phase = 'console'; state.url = CONSOLE; state.referer = target.href }
       else {
         boundary = 'bootstrap'
+        if (!CONSOLE_HOSTS.includes(target.hostname)) return failed('redirect-unconfirmed', undefined, 'unexpected-final-host')
         if (response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() !== 'text/html') return failed()
         failure = 'bootstrap-unconfirmed'
         const identity = bootstrap(await readNativeAccountResponse(response)); state.account = identity.account; state.csrf = identity.csrf; state.consoleOrigin = target.origin; state.phase = 'account'; stage = 'account'
@@ -335,5 +343,5 @@ export async function advanceFeishuNativeAccount(snapshot: unknown, signal?: Abo
     state.cookieJar = serialize(cookies)
     const challenge = state.phase === 'poll' ? { qrPayload: JSON.stringify({ qrlogin: { token: state.token } }), expiresAt: null, nextPollAt: Date.now() + 1500 } : null
     return { kind: 'progress', stage, challenge, account: stage === 'account' ? state.account! : null, state }
-  } catch { return failed() }
+  } catch (error) { return failed(failure, undefined, error instanceof NativeRedirectError ? error.reason : undefined) }
 }
