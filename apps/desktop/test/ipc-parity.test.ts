@@ -27,6 +27,7 @@ const IPC_SOURCE = readFileSync(IPC_TS, 'utf8')
 const PRELOAD_SOURCE = readFileSync(PRELOAD_TS, 'utf8')
 const DEVICE_SOURCE = readFileSync(new URL('../src/main/device-management-ipc.ts', import.meta.url), 'utf8')
 const TOOLKIT_SOURCE = readFileSync(new URL('../src/main/toolkit-ipc.ts', import.meta.url), 'utf8')
+const BROWSER_RESOURCE_SOURCE = readFileSync(new URL('../src/main/browser-resource-ipc.ts', import.meta.url), 'utf8')
 
 function parse(source: string, name: string): ts.SourceFile {
   return ts.createSourceFile(name, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
@@ -65,7 +66,9 @@ function registrations(source = IPC_SOURCE, fileName = 'ipc.ts'): Registration[]
   }
   ts.forEachChild(ast, walk)
   return [...out, ...deviceManagementIpcSource(source, DEVICE_SOURCE).registrations,
-    ...toolkitIpcSource(source, TOOLKIT_SOURCE).registrations]
+    ...toolkitIpcSource(source, TOOLKIT_SOURCE).registrations,
+    ...(source.includes('registerBrowserResourceIpc({ handle,')
+      ? registrations(BROWSER_RESOURCE_SOURCE, 'browser-resource-ipc.ts') : [])]
 }
 
 /**

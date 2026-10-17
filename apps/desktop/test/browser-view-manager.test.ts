@@ -17,6 +17,10 @@ function png(width = 2, height = 3): Buffer {
   return value
 }
 
+function release(manager: BrowserViewManager, id: string) {
+  return manager.release(id, manager.targets().find(target => target.id === id)?.navigationId ?? 'missing-source')
+}
+
 const fakeElectron = vi.hoisted(() => {
   type Listener = (...args: any[]) => void
 
@@ -123,6 +127,8 @@ const fakeElectron = vi.hoisted(() => {
     getTitle() { return this.title }
     isLoading() { return this.loading }
     isDestroyed() { return this.destroyed }
+    isBeingCaptured() { return false }
+    isCurrentlyAudible() { return false }
     reload() {
       this.loading = true
       this.emitDetails('did-start-navigation', { url: this.url, isSameDocument: false, isMainFrame: true })
@@ -298,7 +304,7 @@ describe('BrowserViewManager', () => {
     expect(await manager.create(first.id, 'https://ignored.example/', 'workspace-a', undefined, 'private')).toMatchObject({ id: first.id, url: first.url, mode: 'private' })
     await expect(manager.create(first.id, 'about:blank', 'workspace-a', undefined, 'normal')).rejects.toThrow('cannot change mode')
     await expect(manager.switchProfile(first.id, 'work')).rejects.toThrow('private Browser')
-    await manager.release(first.id)
+    await release(manager, first.id)
     expect(storage.clearStorageData).not.toHaveBeenCalled()
     await manager.restore(first.id, { workspaceId: 'workspace-a', profileId: null, mode: 'private' })
     expect(f.children.at(-1)!.partition).toBe(partition)
@@ -458,7 +464,9 @@ describe('BrowserViewManager', () => {
       nativeDetach(view)
     })
     fixture.sent.length = 0
-    await expect(manager.release(current.id)).rejects.toThrow('candidate detach blocked')
+    await expect(release(manager, current.id)).resolves.toMatchObject({status:'retained',reasons:['profile-switch']})
+    expect(close).not.toHaveBeenCalled()
+    expect(() => manager.close(current.id)).toThrow('candidate detach blocked')
     expect((await switching).message).toContain('candidate detach blocked')
     expect(close).toHaveBeenCalledTimes(1)
     expect(candidate.webContents.isDestroyed()).toBe(true)
@@ -467,7 +475,8 @@ describe('BrowserViewManager', () => {
     expect(await manager.create(current.id, 'https://stale.example/')).toMatchObject({ id: current.id, profileId: 'default', url: current.url })
     expect(fixture.sent).toEqual([])
     detach.mockImplementation(nativeDetach)
-    await manager.release(current.id)
+    await manager.navigate(current.id, current.url)
+    await release(manager, current.id)
     expect(fixture.children).toEqual([])
     expect(manager.resourceOwnerCounts()).toEqual({ browserViews: 0, releasedBrowserViews: 1 })
     expect(await manager.restore(current.id)).toMatchObject({ id: current.id, profileId: 'default', url: current.url })
@@ -573,14 +582,17 @@ describe('BrowserViewManager', () => {
     const switching = manager.switchProfile(current.id, 'work').catch(error => error as Error)
     const candidate = fixture.children[1]!
     const close = vi.spyOn(candidate.webContents, 'close').mockImplementation(() => {})
-    await expect(manager.release(current.id)).rejects.toThrow('not confirmed')
+    await expect(release(manager, current.id)).resolves.toMatchObject({status:'retained',reasons:['profile-switch']})
+    expect(close).not.toHaveBeenCalled()
+    expect(() => manager.close(current.id)).toThrow('not confirmed')
     expect((await switching).message).toContain('not confirmed')
     expect(candidate.webContents.isDestroyed()).toBe(false)
     expect(manager.usesProfile('work')).toBe(true)
     expect(original.webContents.isDestroyed()).toBe(false)
     expect(close).toHaveBeenCalledTimes(1)
     close.mockRestore()
-    await manager.release(current.id)
+    await manager.navigate(current.id, current.url)
+    await release(manager, current.id)
     expect(candidate.webContents.isDestroyed()).toBe(true)
     manager.close(current.id)
   })
@@ -652,8 +664,7 @@ describe('BrowserViewManager', () => {
     const fixture = fakeWindow()
     const manager = browserManager(fixture.window)
     try {
-      await manager.create('browser-ensure', 'https://initial.example/')
-      await manager.switchProfile('browser-ensure', 'work')
+      await manager.create('browser-ensure', 'https://initial.example/', null, 'work')
       const current = await manager.navigate('browser-ensure', 'https://current.example/page')
       const view = fixture.children[0]!
       const load = vi.spyOn(view.webContents, 'loadURL')
@@ -663,7 +674,7 @@ describe('BrowserViewManager', () => {
       })
       expect(fixture.children).toEqual([view])
       expect(load).not.toHaveBeenCalled()
-      await manager.release('browser-ensure')
+      await release(manager, 'browser-ensure')
       const restored = await manager.create('browser-ensure', 'https://stale.example/')
       expect(restored).toMatchObject({ id: 'browser-ensure', profileId: 'work', url: 'https://current.example/page' })
       expect(fixture.children).toHaveLength(1)
@@ -700,14 +711,15 @@ describe('BrowserViewManager', () => {
       const before = useAppStore.getState()
       const persistedBefore = useAppStore.persist.getOptions().partialize!(before)
       expect(Object.keys(before.tabs[tab.id]!.regions)).toEqual(['browser-active-region', 'browser-released-region', 'dirty-sibling'])
-      await manager.release('browser-released')
+      await release(manager, 'browser-released')
+      const afterRelease = useAppStore.getState()
       expect(manager.resourceOwnerCounts()).toEqual({ browserViews: 1, releasedBrowserViews: 1 })
       fixture.sent.length = 0
       manager.dispose()
       expect(manager.resourceOwnerCounts()).toEqual({ browserViews: 0, releasedBrowserViews: 0 })
       expect(fixture.children).toEqual([])
       expect(fixture.sent).toEqual([])
-      expect(useAppStore.getState().tabs).toBe(before.tabs)
+      expect(useAppStore.getState().tabs).toBe(afterRelease.tabs)
       expect(useAppStore.getState().layouts).toBe(before.layouts)
       expect(useAppStore.persist.getOptions().partialize!(useAppStore.getState())).toEqual(persistedBefore)
       await manager.create(active.id, active.url)
@@ -749,7 +761,7 @@ describe('BrowserViewManager', () => {
     views[1]!.webContents.mainFrame.framesInSubtree = [{ osProcessId: 100, detached: false }]
     expect(manager.resourceOwnerCounts()).toEqual({ browserViews: 2, releasedBrowserViews: 0 })
     expect(manager.resourceProcessIds()).toEqual([100, 101])
-    await manager.release('owner-a')
+    await release(manager, 'owner-a')
     expect(manager.resourceOwnerCounts()).toEqual({ browserViews: 1, releasedBrowserViews: 1 })
     expect(manager.resourceProcessIds()).toEqual([100])
     manager.close('owner-a')
@@ -1277,16 +1289,18 @@ describe('BrowserViewManager', () => {
     const view = fixture.children[0]!
     manager.setViewport('browser-release', 'mobile')
     manager.setBounds('browser-release', { x: 2, y: 3, width: 400, height: 500 })
+    manager.setBounds('browser-release', null)
     fixture.sent.length = 0
     const messagesBeforeRelease = fixture.messages.length
 
-    await manager.release('browser-release')
+    await release(manager, 'browser-release')
 
     expect(fixture.children).toEqual([])
     expect(view.webContents.isDestroyed()).toBe(true)
     expect(manager.usesProfile('default')).toBe(true)
     // A budget release is not a user close: no closed event may remove the Region projection.
-    expect(fixture.sent).toEqual([])
+    expect(fixture.sent).toContainEqual({type:'released',id:created.id,navigationId:created.navigationId})
+    expect(fixture.sent.some(event=>event.type==='closed')).toBe(false)
     const coverage = { type: 'native-coverage-changed', browserId: created.id, coverage: null }
     expect(fixture.messages.slice(messagesBeforeRelease)).toContainEqual({ channel: BROWSER_PRESENTATION_EVENT_CHANNEL, value: coverage })
     expect(fixture.presentationEvents.at(-1)).toEqual(coverage)
@@ -1329,7 +1343,7 @@ describe('BrowserViewManager', () => {
       isSameDocument: false,
       isMainFrame: true
     })
-    await manager.release('browser-release-loading')
+    await release(manager, 'browser-release-loading')
     finishNavigation()
 
     await expect(manager.restore('browser-release-loading', {
@@ -1347,7 +1361,7 @@ describe('BrowserViewManager', () => {
     const fixture = fakeWindow()
     const manager = browserManager(fixture.window)
     await manager.create('browser-release-failure', 'https://example.com')
-    await manager.release('browser-release-failure')
+    await release(manager, 'browser-release-failure')
     await expect(manager.restore('browser-release-failure', {
       profileId: 'unknown',
       viewport: 'responsive'
@@ -2023,7 +2037,7 @@ describe('BrowserViewManager healthy page during failed candidate cleanup', () =
     expect(detach).toHaveBeenCalledTimes(2)
     expect(close).toHaveBeenCalledTimes(2)
     expect(record.pendingSwitch).toBe(pending)
-    await expect(manager.release(current.id)).rejects.toThrow('healthy page candidate close blocked')
+    await expect(release(manager, current.id)).resolves.toMatchObject({status:'retained',reasons:['profile-switch']})
     expect(() => manager.close(current.id)).toThrow('healthy page candidate close blocked')
     const views = fakeElectron.FakeWebContentsView.instances.length
     await expect(manager.switchProfile(current.id, 'default')).rejects.toThrow('healthy page candidate close blocked')
@@ -2108,7 +2122,10 @@ it('native chrome demand follows successful physical Browser owner bounds and re
   manager.setBounds('chrome-demand-page', null)
   expect(changes.mock.calls.at(-1)?.[0]).toEqual({ revision: 3, bounds: [] })
   manager.setBounds('chrome-demand-page', bounds)
-  manager.release('chrome-demand-page')
+  expect(await release(manager, 'chrome-demand-page')).toMatchObject({status:'retained',reasons:['visible']})
+  expect(manager.nativeBrowserVisibility().bounds).toEqual([bounds])
+  manager.setBounds('chrome-demand-page', null)
+  await release(manager, 'chrome-demand-page')
   expect(changes.mock.calls.at(-1)?.[0].bounds).toEqual([])
   expect(manager.nativeBrowserVisibility().bounds).toEqual([])
   manager.dispose()
@@ -2132,7 +2149,7 @@ describe('reported Browser favicon ownership', () => {
     contents.emit('page-favicon-updated', ['https://cdn.example/icon.png'])
     await vi.waitFor(() => expect(fixture.sent.at(-1)).toMatchObject({ browser: { faviconDataUrl: expect.stringMatching(/^data:image\/png;base64,/) } }))
     expect(contents.session.fetch.mock.calls.at(-1)![0]).toBe('https://cdn.example/icon.png')
-    await manager.release('icon')
+    await release(manager, 'icon')
   })
 
   it('rejects a late icon after navigation while keeping the current Browser usable', async () => {
@@ -2149,7 +2166,7 @@ describe('reported Browser favicon ownership', () => {
     await new Promise(resolve => setTimeout(resolve, 0))
     const current = await manager.create('late-icon', 'about:blank')
     expect(current.url).toBe('https://page.example/current'); expect(current.error).toBeNull(); expect(current.faviconDataUrl).toBeUndefined()
-    await manager.release('late-icon')
+    await release(manager, 'late-icon')
   })
 
   it('retains candidate Profile favicon events and ignores replaced or released native owners', async () => {
@@ -2171,7 +2188,9 @@ describe('reported Browser favicon ownership', () => {
     candidate.session.fetch.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
     candidate.emit('page-favicon-updated', ['https://page.example/release.svg'])
     const signal = candidate.session.fetch.mock.calls.at(-1)![1]!.signal!
-    await manager.release('profile-icon')
+    expect(await release(manager, 'profile-icon')).toMatchObject({status:'unknown',reasons:['document-unconfirmed']})
+    expect(signal.aborted).toBe(false)
+    manager.close('profile-icon')
     const sent = fixture.sent.length
     expect(signal.aborted).toBe(true)
     finish(new Response('<svg/>', { headers: { 'content-type': 'image/svg+xml' } }))

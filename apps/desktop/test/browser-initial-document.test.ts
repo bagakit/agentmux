@@ -13,8 +13,10 @@ const native = vi.hoisted(() => {
     setPermissionCheckHandler = vi.fn()
     setPermissionRequestHandler = vi.fn()
     setDevicePermissionHandler = vi.fn()
-    on = vi.fn()
-    removeListener = vi.fn()
+    readonly listeners = new Map<string, Set<(...args: any[]) => void>>()
+    on = vi.fn((event: string, fn: (...args: any[]) => void) => { const set=this.listeners.get(event)??new Set(); set.add(fn); this.listeners.set(event,set) })
+    removeListener = vi.fn((event: string, fn: (...args: any[]) => void) => this.listeners.get(event)?.delete(fn))
+    emit(event: string, ...args: any[]) { for (const fn of this.listeners.get(event)??[]) fn(...args) }
   }
   class Contents {
     static beforeLoad: ((contents: Contents, url: string) => Promise<void>) | undefined
@@ -41,6 +43,8 @@ const native = vi.hoisted(() => {
     getTitle = () => 'Original Browser'
     isLoading = () => false
     isLoadingMainFrame = () => false
+    isBeingCaptured = () => false
+    isCurrentlyAudible = () => false
     isDestroyed = () => this.dead
     on(event: string, listener: (...args: any[]) => void) {
       const set = this.listeners.get(event) ?? new Set()
@@ -70,10 +74,11 @@ const native = vi.hoisted(() => {
       this.emit('did-finish-load'); this.emit('did-stop-loading')
     }
     reload() { void this.loadURL(this.url) }
-    close() { this.dead = true; this.emit('destroyed') }
+    close = vi.fn((_options?: {waitForBeforeUnload?:boolean}) => { this.dead = true; this.emit('destroyed') })
   }
   class View {
     readonly webContents = new Contents()
+    constructor() { this.webContents.url=''; this.webContents.mainFrame.url='' }
     visible = false
     bounds = { x: 0, y: 0, width: 0, height: 0 }
     setVisible(value: boolean) { this.visible = value }
@@ -479,4 +484,94 @@ describe('the original initial Browser document',()=>{
     expect(f.views[0]!.webContents.capturePage).not.toHaveBeenCalled();load.resolve();expect((await pending).source.url).toBe(url);expect(f.views[0]!.webContents.capturePage).toHaveBeenCalledOnce()
   })
 
+})
+
+
+describe('safe native Browser release', () => {
+  async function quiet() {
+    const f=fixture(); await f.manager.create('original-browser',url,'workspace')
+    await vi.waitFor(()=>expect(f.entry().resourceDocumentConfirmed).toBe(true))
+    return {...f, contents:f.views[0]!.webContents, nav:()=>f.entry().navigationId}
+  }
+  it('commits only native destruction, then restores original identity and viewport',async()=>{
+    const f=await quiet(); const nav=f.nav(), entry=f.entry()
+    await f.manager.setViewport('original-browser','tablet')
+    const closing=deferred();f.contents.close.mockImplementation(()=>{void closing.promise.then(()=>{f.contents.dead=true;f.contents.emit('destroyed')})})
+    const pending=f.manager.release('original-browser',nav)
+    expect(f.entry()).toBe(entry);expect(f.views).toHaveLength(1);expect(f.contents.dead).toBe(false)
+    expect(Reflect.get(f.manager,'releasedEntries').size).toBe(0)
+    closing.resolve();expect(await pending).toMatchObject({status:'released',navigationId:nav})
+    expect(f.entry()).toBeUndefined();expect(f.contents.close).toHaveBeenCalledWith({waitForBeforeUnload:true})
+    const restored=await f.manager.restore('original-browser',{workspaceId:'workspace'})
+    expect(restored).toMatchObject({id:'original-browser',profileId:'original-profile',viewport:'tablet',url})
+    expect(restored.navigationId).not.toBe(nav)
+    expect(await f.manager.release('original-browser',nav)).toMatchObject({status:'retained',reasons:['source-changed']})
+  })
+  it.each(['visible','run','selection','profile','capture','debugger','media'] as const)('retains %s before touching any owner',async kind=>{
+    const f=await quiet();const entry=f.entry(),cancel=vi.spyOn(f.manager as any,'cancelPendingSwitch'),revoke=vi.spyOn(f.manager as any,'revokePresentationCapture')
+    if(kind==='visible')f.manager.setBounds('original-browser',{x:0,y:0,width:400,height:400})
+    if(kind==='run')entry.runInFlight=true
+    if(kind==='selection')entry.selectionOperation=Symbol('picker')
+    if(kind==='profile')entry.pendingSwitch={token:entry.switchRevision}
+    if(kind==='capture')f.contents.isBeingCaptured=()=>true
+    if(kind==='debugger')Reflect.set(f.contents,'debugger',{isAttached:()=>true})
+    if(kind==='media')f.contents.isCurrentlyAudible=()=>true
+    const receipt=await f.manager.release('original-browser',f.nav())
+    expect(receipt.status).toBe('retained');expect(f.contents.close).not.toHaveBeenCalled();expect(cancel).not.toHaveBeenCalled();expect(revoke).not.toHaveBeenCalled();expect(f.entry()).toBe(entry)
+    // Restore fixture-only owner injections before normal owner disposal.
+    entry.pendingSwitch=null;entry.selectionOperation=null;entry.runInFlight=false
+  })
+  it.each(['mouseDown','keyDown','touchStart'])('keeps native %s risk across same-document, failed and history navigation',async type=>{
+    const f=await quiet();f.contents.emit('input-event',{}, {type})
+    for(const same of [true,false]){f.contents.emit('did-start-navigation',{isMainFrame:true,isSameDocument:same,url});f.contents.emit('did-navigate',{},url)}
+    expect(await f.manager.release('original-browser',f.nav())).toMatchObject({status:'retained',reasons:['document-used']})
+    expect(f.contents.close).not.toHaveBeenCalled()
+  })
+  it.each(['media','download'])('uses native %s source and retains it after activity ends',async kind=>{
+    const f=await quiet()
+    if(kind==='media')f.contents.emit('media-started-playing')
+    else f.contents.session.emit('will-download',{}, {},f.contents)
+    expect(await f.manager.release('original-browser',f.nav())).toMatchObject({status:'retained',reasons:[kind]})
+    expect(f.contents.close).not.toHaveBeenCalled()
+  })
+  it('preserves a vetoed owner and does not reissue an unknown native close',async()=>{
+    vi.useFakeTimers();const f=await quiet(),nav=f.nav()
+    f.contents.close.mockImplementation(()=>f.contents.emit('will-prevent-unload'))
+    expect(await f.manager.release('original-browser',nav)).toMatchObject({status:'retained',reasons:['beforeunload']})
+    expect(f.entry()).toBeDefined();expect(f.contents.dead).toBe(false)
+    expect(await f.manager.release('original-browser',nav)).toMatchObject({status:'retained'})
+    expect(f.contents.close).toHaveBeenCalledTimes(1)
+  })
+  it('keeps delayed or throwing close unknown with exact original source and late destruction authoritative',async()=>{
+    vi.useFakeTimers();const f=await quiet(),nav=f.nav()
+    f.contents.close.mockImplementation(()=>{})
+    const first=f.manager.release('original-browser',nav)
+    await vi.advanceTimersByTimeAsync(1001)
+    expect(await first).toMatchObject({status:'unknown',navigationId:nav})
+    expect(await f.manager.release('original-browser',nav)).toMatchObject({status:'unknown'})
+    expect(f.contents.close).toHaveBeenCalledTimes(1);expect(f.entry()).toBeDefined()
+    f.contents.dead=true;f.contents.emit('destroyed');expect(f.entry()).toBeUndefined()
+  })
+  it('does not destroy a screenshot consumer before its actual read completes',async()=>{
+    const f=await quiet(),read=deferred()
+    f.contents.capturePage.mockImplementation(async()=>{await read.promise;return{isEmpty:()=>false,getSize:()=>({width:1,height:1}),toPNG:()=>Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aCq8AAAAASUVORK5CYII=','base64')}})
+    const pending=f.manager.captureScreenshot('original-browser')
+    expect(await f.manager.release('original-browser',f.nav())).toMatchObject({status:'retained',reasons:['operation']})
+    read.resolve();await pending
+    expect(await f.manager.release('original-browser',f.nav())).toMatchObject({status:'released'})
+  })
+})
+
+it('observes late native veto after a close reader expired, without a second close',async()=>{
+  vi.useFakeTimers();const f=fixture();await f.manager.create('original-browser',url,'workspace');await vi.advanceTimersByTimeAsync(0)
+  const contents=f.views[0]!.webContents,nav=f.entry().navigationId
+  contents.close.mockImplementation(()=>{})
+  const waiting=f.manager.release('original-browser',nav);await vi.advanceTimersByTimeAsync(1001)
+  expect(await waiting).toMatchObject({status:'unknown'})
+  await expect(f.manager.navigate('original-browser',url+'/later')).rejects.toThrow('closing')
+  expect(contents.loads).toEqual([url])
+  contents.emit('will-prevent-unload')
+  expect(await f.manager.release('original-browser',nav)).toMatchObject({status:'retained',reasons:['beforeunload']})
+  expect(await f.manager.navigate('original-browser',url+'/later')).toMatchObject({id:'original-browser'})
+  expect(contents.close).toHaveBeenCalledTimes(1)
 })
