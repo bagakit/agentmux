@@ -164,7 +164,8 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
   if (!config) return null
   const currentSection = settingsModules.find((candidate) => candidate.id === active)
   const section = searching && showResults ? { title: 'Search results', description: '' } : active === 'overview' ? { title: 'Overview', description: '' } : currentSection!
-  const groupTitle = searching && showResults ? 'Settings' : currentSection ? SETTINGS_GROUPS.find(group => group.id === currentSection.group)!.title : 'Settings'
+  const currentGroup = currentSection && SETTINGS_GROUPS.find(group => group.id === currentSection.group)
+  const groupTitle = searching && showResults || !currentGroup || 'standalone' in currentGroup ? 'Settings' : currentGroup.title
   const overviewGroups = settingsNavGroups('')
 
   return (
@@ -190,7 +191,7 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
               <DropdownMenu.RadioGroup value={showResults ? '' : active} onValueChange={(value) => chooseSection(value as SettingsPageId)}>
                 {!query.trim() ? <DropdownMenu.RadioItem value="overview" className="settings-section-menu__item" data-settings-target="overview"><span><DropdownMenu.ItemIndicator><ThemeStatusSelectedIcon size={13} /></DropdownMenu.ItemIndicator></span>Overview</DropdownMenu.RadioItem> : null}
                 {navGroups.map((group) => <Fragment key={group.id}>
-                  <DropdownMenu.Label className="settings-section-menu__label">{group.title}</DropdownMenu.Label>
+                  {'standalone' in group ? null : <DropdownMenu.Label className="settings-section-menu__label">{group.title}</DropdownMenu.Label>}
                   {group.items.map((item) => <DropdownMenu.RadioItem key={item.id} value={item.id} className="settings-section-menu__item">
                     <span><DropdownMenu.ItemIndicator><ThemeStatusSelectedIcon size={13} /></DropdownMenu.ItemIndicator></span>{item.title}
                   </DropdownMenu.RadioItem>)}

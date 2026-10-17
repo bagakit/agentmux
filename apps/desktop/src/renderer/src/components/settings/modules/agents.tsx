@@ -20,7 +20,7 @@ async function saveExecutors(executors: Record<string, AgentExecutorConfig>, exp
 
 export const agentsSettingsModule = {
   id: 'agents',
-  group: 'resources',
+  group: 'agents',
   title: 'Agents',
   overviewShortcut: 2,
   description: 'Reusable executors for your next agent session.',

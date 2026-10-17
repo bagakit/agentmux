@@ -24,8 +24,8 @@
 .settings-sidebar > header { display: flex; align-items: center; padding: var(--sp-4) var(--sp-4) var(--sp-5); }
 .settings-sidebar__identity { display: flex; align-items: center; gap: var(--sp-3); min-height: 28px; padding-inline: var(--sp-3); }
 .settings-sidebar__identity strong { font-size: var(--fs-title); font-weight: 600; letter-spacing: -.015em; }
-.settings-nav-section { margin-top: var(--sp-3); }
-.settings-nav-group { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); min-height: 32px; padding: var(--sp-2) var(--sp-3); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font-size: var(--fs-meta); font-weight: 600; line-height: 1.5; text-align: left; cursor: pointer; }
+.settings-nav-section { margin-top: var(--sp-2); }
+.settings-nav-group { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); min-height: 28px; padding: var(--sp-1) var(--sp-3); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); font-size: var(--fs-meta); font-weight: 600; line-height: 1.5; text-align: left; cursor: pointer; }
 .settings-nav-group:hover { color: var(--text); background: var(--surface-2); }
 .settings-nav-group:is(p) { margin: 0; cursor: default; background: transparent; }
 .settings-nav-group > svg { flex: 0 0 auto; color: var(--text-3); transition: transform var(--dur-fast); }
@@ -40,6 +40,7 @@
 .settings-sidebar nav { margin-top: var(--sp-4); min-height: 0; flex: 1; padding: var(--sp-2) var(--sp-4) var(--sp-6); overflow: auto; scrollbar-gutter: stable; }
 .settings-sidebar nav button[data-settings-target] { width: 100%; min-height: 28px; display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); border: 0; border-radius: var(--radius-sm); color: var(--text-2); background: transparent; text-align: left; cursor: pointer; }
 .settings-sidebar nav .settings-nav-items button[data-settings-target] { padding-left: var(--sp-5); }
+.settings-sidebar nav .settings-nav-section[data-standalone] button[data-settings-target] { padding-left: var(--sp-3); }
 .settings-sidebar nav button[data-settings-target]:hover { color: var(--text); background: var(--surface-2); }
 .settings-sidebar nav button[data-settings-target].selected { color: var(--text); background: var(--surface-2); box-shadow: var(--hl); }
 .settings-sidebar nav button[data-settings-target].selected > svg { color: var(--green); }
