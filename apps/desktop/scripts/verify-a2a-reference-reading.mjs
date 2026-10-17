@@ -16,7 +16,9 @@ const sources = [
   ...['ConversationMessage', 'ConversationInputText', 'ConversationResourceText', 'CapturedConversationMessage', 'ConversationView'].map(name => `packages/client-ui/src/components/${name}.tsx`),
   'packages/client-ui/src/lib/conversation-speaker.ts', 'packages/client-ui/src/styles/conversation-message.css',
   'packages/client-ui/test/a2a-reference-reading.test.tsx', 'packages/client-ui/test/conversation-leading-context.test.tsx',
-  'apps/desktop/src/renderer/src/components/MailboxA2A.tsx', 'apps/desktop/test/mailbox-a2a.test.tsx', 'apps/desktop/test/input-mailbox-body-boundary.test.tsx'
+  'apps/desktop/src/renderer/src/components/MailboxA2A.tsx', 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
+  'packages/client-ui/src/components/InputMailboxRecords.tsx',
+  'apps/desktop/test/mailbox-a2a.test.tsx', 'apps/desktop/test/input-mailbox-body-boundary.test.tsx', 'apps/desktop/test/session-mailbox-author-boundary.test.tsx'
 ]
 const json = async path => JSON.parse(await readFile(path, 'utf8'))
 const local = path => { assert.ok(!isAbsolute(path) && !path.split('/').includes('..')); return join(root, path) }

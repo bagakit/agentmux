@@ -35,5 +35,10 @@ export const readingMutations = [
   { label: 'resource-part-boundary-removed', path: 'packages/client-ui/src/components/ConversationResourceText.tsx', test: reading,
     before: ' || partIndex !== 0', after: '' },
   { label: 'reference-inbox-shown-as-body-delivery', path: 'apps/desktop/src/renderer/src/components/MailboxA2A.tsx', test: 'apps/desktop/test/mailbox-a2a.test.tsx',
-    before: "if (message.deliveryMode !== 'reference') return a2aDeliveryLabel(message.delivery)", after: 'if (true) return a2aDeliveryLabel(message.delivery)' }
+    before: "if (message.deliveryMode !== 'reference') return a2aDeliveryLabel(message.delivery)", after: 'if (true) return a2aDeliveryLabel(message.delivery)' },
+  { label: 'platform-input-producer-disconnected', path: 'packages/client-ui/src/components/InputMailboxRecords.tsx', test: 'apps/desktop/test/session-mailbox-author-boundary.test.tsx',
+    before: "const isNotification = key.kind === 'prompt' && inputKey?.kind === 'prompt' &&", after: "const isNotification = false && key.kind === 'prompt' && inputKey?.kind === 'prompt' &&" },
+  { label: 'platform-input-included-in-user-messages', path: 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx', test: 'apps/desktop/test/session-mailbox-author-boundary.test.tsx',
+    before: "items: inputMailbox.items.filter(item => { const { role } = inputMailboxPresentation(item).speaker; return role !== 'agent' && role !== 'system' }),",
+    after: "items: inputMailbox.items.filter(item => { const { role } = inputMailboxPresentation(item).speaker; return role !== 'agent' })," }
 ]
