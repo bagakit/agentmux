@@ -171,6 +171,16 @@ app.whenReady().then(async () => {
       sameScope(await facts()); await frame('space-all-areas')
     })
     await check('fold-internal-original-relations', async () => {
+      await click('.collaboration-sources summary')
+      await read(`(()=>{const section=[...document.querySelectorAll('.collaboration-sources section')].find(e=>e.querySelector('strong')?.textContent==='fixture-ui');const button=[...section.querySelectorAll('button')].find(e=>e.textContent==='Earlier events');if(!button)throw Error('Original older source page required');button.setAttribute('data-capture-earlier','');button.scrollIntoView({block:'center'})})()`)
+      const earlierBefore = sourceReads(await facts()).length
+      await click('[data-capture-earlier]')
+      await until('original history page loaded', () => read('document.querySelector(".collaboration-dialog__footer")?.textContent.includes("6 connections")&&!document.querySelector(".collaboration-dialog__footer")?.textContent.includes("Reading…")'))
+      const older = sourceReads(await facts()).slice(earlierBefore)
+      assert.equal(older.length, 1); assert.equal(older[0].participant, 'fixture-ui')
+      assert.equal(older[0].options.beforeSequence, 6); assert.equal(older[0].options.throughSequence, 9)
+      assert.equal(older[0].options.incarnation, 'fixture-collaboration-journal')
+      await frame('space-history-loaded')
       const before = sourceReads(await facts()).length
       await click('.collaboration-area__heading')
       await until('internal original relation badge', () => read('Boolean(document.querySelector(".collaboration-area__internal"))'))
