@@ -4363,7 +4363,7 @@ function gitNavigationTarget(state: AppState) {
   const tabId = reference?.tabId ?? (layout ? findGroup(layout, layout.activeGroupId)?.activeTabId : undefined)
   const tab = tabId ? state.tabs[tabId] : undefined
   const surface = tab?.regions[reference?.regionId ?? tab.layout.activeRegionId]
-  return surface?.kind === 'git' ? JSON.stringify([surface.regionId, surface.scope.hostId, surface.scope.repoPath, surface.scope.workspacePath,
+  return surface?.kind === 'git' ? JSON.stringify([surface.regionId, surface.workspaceId, surface.scope.hostId, surface.scope.repoPath, surface.scope.workspacePath,
     surface.selection?.commitOid, surface.selection?.parentOid, surface.history ? [surface.history.reference, surface.history.focusOid] : null,
     surface.file ? [surface.file.path, surface.file.origPath] : null]) : null
 }
