@@ -3,17 +3,15 @@ import type { SetupPermissionPlan } from '../../connection-setup-adapter.js'
 
 const messages = ['im:message:send_as_bot', 'im:message:readonly', 'im:message.group_msg'] as const
 const groups = ['im:chat:create', 'im:chat:read', 'im:chat.members:read', 'im:chat.members:write_only'] as const
-const identity = ['application:application:patch', 'application:application:self_manage'] as const
 const record = (value: unknown): Record<string, unknown> | null => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
 /** Lossless local support, not an assertion about every native scope ID representation. */
 export const supportedScopeId = (value: unknown): value is string | number => typeof value === 'string' && value.length > 0 || typeof value === 'number' && Number.isSafeInteger(value)
 
 /** Requirements belong to these actual adapter consumers, not a global permission catalog. */
-export function reviewFeishuPermissions(catalogState: string, appliedState: string, purpose: ConnectionSetupPermissionPurpose): SetupPermissionPlan {
+export function reviewFeishuPermissions(catalogState: string, appliedState: string, _purpose: ConnectionSetupPermissionPurpose): SetupPermissionPlan {
   const required = [
     ...messages.map(name => ({ name, group: 'messages' as const })),
-    ...groups.map(name => ({ name, group: 'groups' as const })),
-    ...(purpose === 'mote-profile-sync' ? identity.map(name => ({ name, group: 'identity' as const })) : [])
+    ...groups.map(name => ({ name, group: 'groups' as const }))
   ]
   const parse = (value: string): Record<string, unknown> | null => { try { return record(JSON.parse(value)) } catch { return null } }
   const catalog = parse(catalogState)?.scopes, applied = parse(appliedState)?.scopes
