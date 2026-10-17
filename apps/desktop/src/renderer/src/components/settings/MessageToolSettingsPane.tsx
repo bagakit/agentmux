@@ -43,7 +43,7 @@ export function MessageToolSettingsPane({ initialLayout, completion, onSave, onS
         {MESSAGE_TOOL_INITIAL_LAYOUT_IDS.map(layout => <label key={layout} data-selected={draft.value === layout}>
           <input type="radio" name={layoutGroup} value={layout} checked={draft.value === layout}
             onChange={() => draft.setValue(layout)} />
-          <span><strong>{layout === 'one-line' ? 'One line' : 'Two lines'}</strong><small>{layout === 'one-line' ? 'Keep tools compact beside the input' : 'Show a separate tool row below the input'}</small></span>
+          <span className="message-tool-layout-option"><strong>{layout === 'one-line' ? 'One line' : 'Two lines'}</strong><small>{layout === 'one-line' ? 'Keep tools compact beside the input' : 'Show a separate tool row below the input'}</small><span className="message-tool-layout-preview" data-layout={layout} aria-hidden="true"><span className="message-tool-layout-preview__input">Message…</span><span className="message-tool-layout-preview__tools">/ &nbsp; $ &nbsp; @ <span>↵</span></span></span></span>
         </label>)}
       </fieldset>
       <p className="settings-workflows__note">Applies to newly opened inputs. Your current layout and drafts stay as you left them.</p>
