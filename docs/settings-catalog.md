@@ -103,11 +103,11 @@ Prompt 仍是同一可复用资源库；Goals、快捷回复及状态动作保�
 
 ## Conversation Channels
 
-本节按[已确认的分类](design/behavior/settings-and-observation.md#设置页的信息架构)列出入口范围：InApp Conversation 是 App 内对话模式，Mobile 设备管理归 Remote。可编辑偏好与只读参考分别沿下表的原 owner，不由导航名称产生新字段或控制资格。
+本节按[已确认的分类](design/behavior/settings-and-observation.md#设置页的信息架构)列出入口范围：InApp 是 App 内对话模式，Mobile 设备管理归 Remote。可编辑偏好与只读参考分别沿下表的原 owner，不由导航名称产生新字段或控制资格。
 
 | 页面 | 可修改的内容与管理入口 | CLI 范围 | 原 owner |
 | --- | --- | --- | --- |
-| InApp Conversation | App 内对话模式说明与原配置入口：Input & Mailbox、Appearance 可编辑共享偏好，Keyboard shortcuts 与 amux Protocols 是只读参考。Show Activity／Show Terminal 仍在原 Agent 输入工具栏，作用于准确 Session；没有独立的全局 InApp 偏好。 | 逐会话查询与切换沿 `agent view`；共享偏好沿原 settings scalar，参考目录没有 setter，不新增 InApp RPC／CLI。 | [同一 Session 的对话模式](design/behavior/conversation-mode.md#范围与唯一归属)、[原工具栏](../apps/desktop/src/renderer/src/components/AgentComposerTools.tsx)、[有效显示偏好](../apps/desktop/src/renderer/src/lib/session-presentation.ts)、[公共显示操作](../apps/desktop/src/renderer/src/lib/workface-agent-view.ts) |
+| InApp | App 内对话模式说明与原配置入口：Input & Mailbox、Appearance 可编辑共享偏好，Keyboard shortcuts 与 amux Protocols 是只读参考。Show Activity／Show Terminal 仍在原 Agent 输入工具栏，作用于准确 Session；没有独立的全局 InApp 偏好。 | 逐会话查询与切换沿 `agent view`；共享偏好沿原 settings scalar，参考目录没有 setter，不新增 InApp RPC／CLI。 | [同一 Session 的对话模式](design/behavior/conversation-mode.md#范围与唯一归属)、[原工具栏](../apps/desktop/src/renderer/src/components/AgentComposerTools.tsx)、[有效显示偏好](../apps/desktop/src/renderer/src/lib/session-presentation.ts)、[公共显示操作](../apps/desktop/src/renderer/src/lib/workface-agent-view.ts) |
 | Lark | 整个服务的自动双向收发开关、每个机器人应用的配置与原请求查询；原 Region 与 Agent 更多菜单消费同一 service policy。 | `connection service get / configure --input FILE\|- / inspect --operation-id ID`；原应用与接入管理沿 `connection`、`connection enrollment`。 | [设置模块](../apps/desktop/src/renderer/src/components/settings/modules/lark.tsx)、[总开关](../apps/desktop/src/renderer/src/components/settings/ConnectorServiceControl.tsx)、[原 ConnectionHost](../packages/connectors/src/connection-host.ts)、[服务合同](../packages/core/src/connection-service-contract.ts) |
 
 纠正后的 UI 导航为 `inapp-conversation`、`lark` 和 Remote 的 `mobile`；目录与全部真实入口同步更新，不提供旧 UI 路由 aliases。产品分组不合并 Session 显示偏好、设备与应用的身份、权限或持久化；公共 `agent.view`、`device.*`、`connection.*`、原操作与配置键保持各自合同。Lark 页的外部自动收发开关不关闭 App 内或手机对话，页内继续准确辨认 Feishu／Lark 平台。

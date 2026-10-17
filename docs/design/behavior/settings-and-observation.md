@@ -255,7 +255,7 @@ Prompt 的当前对象、未提交修改与只读使用示意应在同一编辑�
 
 远程管理的产品范围、拓扑、Host 连接配置与测试、来源核验和维护入口由 [Remote 管理 PRD](remote-management.md) 持有；本节只持有通用设置导航、草稿与保存，以及 Agent 配置和设备模块的相邻规则。
 
-- 设置结构优化必须落到真实页面。日常 Preferences 在前（Appearance、Notifications、General），Browser 基础设置与 Agent 操作呈现归独立的 [Browser use](#browser-use-与-agent-操作呈现) 组，Message Tool 独立归组（输入与 Mailbox、Prompts），资源配置随后（Agents、Workspaces），环境工作台与 Mobile 设备管理归 Remote，Conversation Channels 仅提供 InApp Conversation 与 Lark 两个子项，分别面向 App 内对话模式和外部对话应用；原能力全部保留，Copied paths 在 General 内与本地数据／诊断分层，原单字段草稿、expected 和保存范围不扩大。统一底栏入口进入 Overview，Workspaces 从资源导航进入；不新增第二齿轮，显式分区与 Executor ID 仍指向原精确对象；不保留独立 Copy Paths 页面或另造兼容路由。搜索仍能定位路径、`~`／absolute、字号、通知、日志、恢复、Provider 与设备接入。诊断或只读说明不进入偏好保存，不自动触发资源检测或更改健康 Run。
+- 设置结构优化必须落到真实页面。日常 Preferences 在前（Appearance、Notifications、General），Browser 基础设置与 Agent 操作呈现归独立的 [Browser use](#browser-use-与-agent-操作呈现) 组，Message Tool 独立归组（输入与 Mailbox、Prompts），资源配置随后（Agents、Workspaces），环境工作台与 Mobile 设备管理归 Remote，Conversation Channels 仅提供 InApp 与 Lark 两个子项，分别面向 App 内对话模式和外部对话应用；原能力全部保留，Copied paths 在 General 内与本地数据／诊断分层，原单字段草稿、expected 和保存范围不扩大。统一底栏入口进入 Overview，Workspaces 从资源导航进入；不新增第二齿轮，显式分区与 Executor ID 仍指向原精确对象；不保留独立 Copy Paths 页面或另造兼容路由。搜索仍能定位路径、`~`／absolute、字号、通知、日志、恢复、Provider 与设备接入。诊断或只读说明不进入偏好保存，不自动触发资源检测或更改健康 Run。
 
 - 用户要求「继续，直到设置界面质量彻底满意」。设置作为辅助界面，第一眼必须是当前对象和动作；Workspace 与 Executor 可按名字、路径或身份检索，大量资源不靠逐条扫读。Executor 常用身份与外观优先，高级启动配置按需进入；已有 Provider 与 Executor ID 保持不可修改，新 Executor 创建后直接进入编辑。改变分组或检查结果不能丢失展开、输入或焦点。
 - 设置保存仍经既有公开 API，启动配置的说明应明确针对后续启动，不能冒充已改变健康 Run。高级权限动作保持显式选择，不自动批准；所有分区保留原功能、草稿、错误反馈和 status bar。
@@ -274,7 +274,7 @@ Prompt 的当前对象、未提交修改与只读使用示意应在同一编辑�
 
 - Executor 是启动模板，Session/Run 是独立对象。仍被 retained Session 或已准入启动引用的模板不能删除，界面与 CLI 都具名说明引用，配置不变且不停止、暂停或重建 Agent；引用范围不能只数可见格子或 connected 会话。引用事实读失败，只拒绝这一次危险删除或重绑并说明未知，普通设置和健康输入继续。已缺模板的同 ID 显式重建必须与现 Session 的 Provider 事实一致，只修改配置而不自动执行；冲突事实不能猜一个。已准入启动在完成前同样受引用完整性保护，不因尚未出现 Session 就被删掉依赖；不保存第二份模板或永久删除身份表来掩盖原 context 缺失。
 
-- InApp Conversation 作为[App 内对话模式](conversation-mode.md#范围与唯一归属)的配置入口，说明原 Agent 输入工具栏的 Show Activity／Show Terminal 逐会话切换，并可进入原 Input & Mailbox、Appearance 与 Keyboard shortcuts。现有切换保持原 Session 的显示偏好与作用范围，不引入全局模式开关；共享输入、外观、快捷键、Prompts 与 Continuity 保留原配置和保存 owner，不复制表单或因归组整体迁入。只读快捷键和 amux Protocols 参考明确只读，入口不承诺新增可写字段。
+- InApp 作为[App 内对话模式](conversation-mode.md#范围与唯一归属)的配置入口，说明原 Agent 输入工具栏的 Show Activity／Show Terminal 逐会话切换，并可进入原 Input & Mailbox、Appearance 与 Keyboard shortcuts。现有切换保持原 Session 的显示偏好与作用范围，不引入全局模式开关；共享输入、外观、快捷键、Prompts 与 Continuity 保留原配置和保存 owner，不复制表单或因归组整体迁入。只读快捷键和 amux Protocols 参考明确只读，入口不承诺新增可写字段。
 - Remote 的 Mobile 沿原设备模块管理手机／浏览器接入与设备授权，仅在可见时读取；离开后结束界面观察，返回再读取当前事实。不以移动入口状态推断 Agent 或整体 App 是否可用。设备模块管理原 Host 的接入与授权，不冒充每个 SSH Host 的授权端点，也不因导航自动邀请、批准、撤销或扩大权限；撤销明确针对该设备原访问权限，范围不限于聊天。连接链接、设备身份与操作归属沿[《手机版 Relay 连接》](public-control.md#手机版-relay-连接)。
 - 外部对话应用的首次接入、已有机器人配置与扫码原操作恢复见[外部对话应用接入](#外部对话应用接入)；环境、手机与机器人应用继续各有准确对象与授权边界。
 
@@ -297,7 +297,7 @@ Prompt 的当前对象、未提交修改与只读使用示意应在同一编辑�
 
 ### 外部对话应用接入
 
-Settings 的 Conversation Channels 仅提供 InApp Conversation 与 Lark；两项与 Remote 的 Mobile 分别沿[设置页的信息架构](#设置页的信息架构)定位，不以设备连接代替 App 内对话模式。Lark 管理外部对话应用、机器人身份与群关系，页内保留准确 Feishu／Lark 平台及实际适配器能力。分组不建立统一 Channel Runtime、配置库或传输协议：设备继续由原 Host Authority 持有，应用与凭据继续由原 Connection owner 持有。产品入口变化保全已保存身份、原请求、现有接收与群绑定；打开设置或发现适配器不自动注册、建群、授权或启动 Agent。
+Settings 的 Conversation Channels 仅提供 InApp 与 Lark；两项与 Remote 的 Mobile 分别沿[设置页的信息架构](#设置页的信息架构)定位，不以设备连接代替 App 内对话模式。Lark 管理外部对话应用、机器人身份与群关系，页内保留准确 Feishu／Lark 平台及实际适配器能力。分组不建立统一 Channel Runtime、配置库或传输协议：设备继续由原 Host Authority 持有，应用与凭据继续由原 Connection owner 持有。产品入口变化保全已保存身份、原请求、现有接收与群绑定；打开设置或发现适配器不自动注册、建群、授权或启动 Agent。
 
 Lark 页的外部对话自动同步总开关由原 Connection 服务持有，与每个机器人应用的启用偏好分开。关闭后在原准入边界停止新的自动收发，并整体撤下 Agent 菜单中的 Connector 贡献；不是单纯隐藏界面，也不批量改写各应用配置。已保存机器人、凭据、群绑定、共享起点、成员授权、投递进度与未决原请求保留，已在途施效和回执按原操作核实，不能冒作已取消或未发送。重开只恢复仍满足原应用、Binding 与授权条件的能力，不误启原本暂停的机器人，不重建群或换 ID 重放未知操作。
 
