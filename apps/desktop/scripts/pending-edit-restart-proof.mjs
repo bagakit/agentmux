@@ -140,7 +140,7 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
     }
     const directories = ['apps/desktop/src', 'apps/desktop/browser-extension', 'apps/desktop/scripts', 'apps/desktop/brand', 'apps/desktop/native', 'apps/desktop/resources', 'apps/host/src',
       'packages/core/src', 'packages/core/scripts', 'packages/core/bin', 'packages/core/vendor',
-      'packages/demand/src', 'packages/demand/bin', 'packages/relay/src', 'packages/client-ui/src', 'packages/layout/src', 'patches', ...(demandCollaboration || inactiveWindow ? ['packages/git/src', 'packages/identity/src'] : []),
+      'packages/demand/src', 'packages/demand/bin', 'packages/relay/src', 'packages/client-ui/src', 'packages/client-ui/scripts', 'packages/layout/src', 'patches', ...(demandCollaboration || inactiveWindow ? ['packages/git/src', 'packages/identity/src'] : []),
       ...(demandCollaboration ? ['packages/core/test/fixtures'] : []), ...(inactiveWindow ? ['packages/core/native', 'packages/diagnostic-evidence/src', 'packages/connectors/src', 'apps/desktop/vendor/drawio/v32.4.1'] : [])]
     for (const directory of directories) {
       if (!requestedSourceRef) {
