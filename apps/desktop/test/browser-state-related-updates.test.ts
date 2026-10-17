@@ -126,11 +126,38 @@ describe('Browser updated projection preserves unrelated work surfaces', () => {
     const { state, updated } = fixture('right')
     let projected = state
     const set = (update: (current: typeof state) => typeof state) => { projected = update(state) }
-    const apply = new Function('set', 'reduceBrowserEvent', `return function(event) ${body!.getText(file)}`)(set, reduceBrowserEvent)
+    const parameters = methods[0]!.parameters.map(parameter => parameter.getText(file)).join(', ')
+    const apply = new Function('set', 'reduceBrowserEvent', `return function(${parameters}) ${body!.getText(file)}`)(set, reduceBrowserEvent)
     apply({ type: 'updated', browser: updated })
     expect(projected.tabs.mixed.regions.primary).toMatchObject({ title: 'Updated' })
     expect(projected.tabs['unrelated-tab']).toBe(state.tabs['unrelated-tab'])
     expect(projected.tabs['agent-tab']).toBe(state.tabs['agent-tab'])
     expect(projected.layouts).toBe(state.layouts)
   })
+})
+
+
+it('confirmed Browser entity closure removes all Group and display placements of its emptied Tab', () => {
+  const { state } = fixture('right')
+  const closedTabId = 'related-tab', group = state.layouts.workspace.groups[0]!
+  const mirror = { ...group, id: 'mirror-group' }
+  const workspace = { ...state.layouts.workspace,
+    root: { type: 'split' as const, direction: 'vertical' as const, ratio: 0.5,
+      first: state.layouts.workspace.root, second: { type: 'leaf' as const, groupId: mirror.id } },
+    groups: [...state.layouts.workspace.groups, mirror] }
+  const display = createWorkspaceLayout('display-group', [closedTabId, 'agent-tab'])
+  const unrelated = createWorkspaceLayout('untouched-group', ['agent-tab'])
+  const original = { ...state, layouts: { workspace, display, unrelated } }
+  const next = reduceBrowserEvent(original, { type: 'closed', id: 'related' })
+  expect(next.tabs[closedTabId]).toBeUndefined()
+  for (const layout of Object.values(next.layouts)) for (const placement of layout.groups) {
+    expect(placement.tabOrder).not.toContain(closedTabId)
+    expect(placement.recentTabIds).not.toContain(closedTabId)
+    expect(placement.activeTabId).not.toBe(closedTabId)
+  }
+  expect(next.tabs.mixed!.regions['agent-mixed']).toBe(state.tabs.mixed.regions['agent-mixed'])
+  expect(next.tabs['agent-tab']).toBe(state.tabs['agent-tab'])
+  expect(next.layouts.unrelated).toBe(unrelated)
+  expect(original.layouts.workspace.groups.at(-1)!.tabOrder).toContain(closedTabId)
+  expect(original.layouts.display.groups[0]!.tabOrder).toContain(closedTabId)
 })
