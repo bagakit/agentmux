@@ -114,7 +114,7 @@ type BrowserEntry = {
   faviconDataUrl?: string | undefined
   faviconUrl?: string | undefined
   faviconRequest?: AbortController | undefined
-  recoveryPreviewJob?: { controller: AbortController; navigationId: string } | undefined
+  recoveryPreviewJob?: AbortController | undefined
   recoveryPreviewNavigation?: string | undefined
   recoveryPreviewRetired?: true
   selectionRevision: number
@@ -3055,10 +3055,7 @@ export class BrowserViewManager {
   }
 
   private cancelRecoveryPreview(entry: BrowserEntry): void {
-    const job = entry.recoveryPreviewJob
-    if (!job) return
-    job.controller.abort()
-    if (entry.recoveryPreviewNavigation === job.navigationId) entry.recoveryPreviewNavigation = undefined
+    entry.recoveryPreviewJob?.abort()
   }
 
   /** A single small historical appearance at load/show edges; never an operation or keepalive. */
@@ -3072,9 +3069,7 @@ export class BrowserViewManager {
     const scope = this.recoveryPreviewScope(entry.id)
     if (!scope) return
     const navigationId = entry.navigationId, storage = entry.storage, controller = new AbortController()
-    const job = { controller, navigationId }
-    entry.recoveryPreviewJob = job
-    entry.recoveryPreviewNavigation = navigationId
+    entry.recoveryPreviewJob = controller
     void (async () => {
       try {
         const frame = contents.mainFrame, processId = frame.processId, frameToken = frame.frameToken
@@ -3101,11 +3096,12 @@ export class BrowserViewManager {
         const result = await store.record(scope, { scope, url, title, navigationId, capturedAt,
           image: { width, height, dataUrl: BROWSER_RECOVERY_PREVIEW_JPEG_PREFIX + bytes.toString('base64') }
         }, current, controller.signal)
+        if (result.status === 'recorded') entry.recoveryPreviewNavigation = navigationId
         if (result.warning) console.warn(result.warning)
       } catch (error) {
         if (!controller.signal.aborted) console.warn('Browser preview could not be captured. The original page remains available.', error)
       } finally {
-        if (entry.recoveryPreviewJob === job) entry.recoveryPreviewJob = undefined
+        if (entry.recoveryPreviewJob === controller) entry.recoveryPreviewJob = undefined
         // A replacement document may have become visible while the old capture was in flight.
         if (this.owns(entry, entry.view) && (entry.navigationId !== navigationId || controller.signal.aborted)) this.sampleRecoveryPreview(entry, entry.view)
       }
