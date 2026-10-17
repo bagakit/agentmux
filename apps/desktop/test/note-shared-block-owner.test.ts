@@ -16,6 +16,7 @@ import { NoteFileWriter } from '../src/main/note-file-writer'
 import { FileReadOwner } from '../src/main/file-read-owner'
 import { NoteSharedUndoOwner } from '../src/main/note-shared-undo-owner'
 import { NoteSharedFileDeleteOwner } from '../src/main/note-shared-file-delete-owner'
+import { noteShareRange, noteShareSiblingRange } from '../src/shared/note-share-range'
 import { NoteSharedBlockOwner } from '../src/main/note-shared-block-owner'
 import { noteKnowledge, resolveNoteBlock } from '@agentmux/client-ui/note/note-knowledge'
 import { newNoteDocument, readNoteDocument, serializeNoteDocument } from '../src/shared/note-document'
@@ -448,4 +449,112 @@ it('retains shared knowledge when an exact physical Workspace alias has a later 
 it('retains the shared source when its original source host now declares a different Note identity',async()=>{
  const f=await fixture();await f.port.share(f.params,{actor:person});const path=join(f.directory,'source.note.md'),current=readNoteDocument(await readFile(path,'utf8'));if(current.status!=='valid')throw Error('fixture');current.note.noteId='different-current-note';await writeFile(path,serializeNoteDocument(current.note));const native=vi.spyOn(f.files,'deleteExact')
  expect(await f.port.undoShare(await removal(f),{actor:person})).toMatchObject({status:'committed',collections:[{source:null,deletion:null,retainedReason:{code:'source-changed'}}]});expect(native).not.toHaveBeenCalled();const observed=readNoteDocument(await readFile(path,'utf8'));expect(observed).toMatchObject({status:'valid',note:{noteId:'different-current-note'}});if(observed.status==='valid')expect(observed.note.content.content![0]).toMatchObject({type:'noteInclude',attrs:{noteId:'shared-note'}});expect(await readFile(join(f.directory,'block-shared.note.md'),'utf8')).toContain('One original knowledge source')
+})
+
+async function sectionFixture() {
+  const f = await fixture(), source = readNoteDocument(f.source.content)
+  if (source.status !== 'valid') throw Error('Source must parse')
+  const paragraph = (blockId: string, text: string) => ({ type: 'paragraph', attrs: { blockId }, content: [{ type: 'text', text }] })
+  const heading = (blockId: string, level: number, text: string) => ({ type: 'heading', attrs: { blockId, level }, content: [{ type: 'text', text }] })
+  source.note.content.content = [paragraph('before-section', 'Keep the introduction'), heading('section-root', 2, 'Research section'), paragraph('section-body', 'Evidence under the section'),
+    heading('subsection', 3, 'Supporting detail'), { type: 'bulletList', content: [{ type: 'listItem', attrs: { blockId: 'evidence-item' }, content: [paragraph('item-body', 'Nested evidence remains addressable')] }] },
+    heading('next-section', 2, 'Next independent section'), paragraph('after-section', 'Keep the next section intact')]
+  const written = await f.writer.write(f.workspace, { path: f.source.path, expectedRevision: f.source.expectedRevision, content: serializeNoteDocument(source.note) }, { actor: author })
+  if (written.status !== 'written') throw Error('Section original must save')
+  const canonical = await readFile(join(f.directory, f.source.path), 'utf8')
+  Object.assign(f.source, { content: canonical, baseContent: canonical, expectedRevision: written.revision })
+  f.params.promotions[0]!.source = f.source
+  f.params.promotions[0]!.sourceBlockId = 'section-root'
+  return { ...f, originalSectionNote: readNoteDocument(canonical) }
+}
+
+it('shares a complete heading section through public CLI, forwards every moved anchor and safely restores all roots on undo', async () => {
+  const f = await sectionFixture()
+  const server = new AgentMuxControlServer({ socketPath: join(f.root, 'section.sock'), files: f.port, coreClients: () => [] })
+  await server.start(); dispose.push(() => server.stop())
+  const response = await runCompiledObjectCli(['file', 'share', '--input', '-'], objectCliEnvironment(f.root, { AGENTMUX_RPC_ENDPOINT: 'unix:' + server.path }), JSON.stringify(f.params))
+  expect(response.code, response.stderr + response.stdout).toBe(0)
+  expect(parseFileShareResult(JSON.parse(response.stdout).result, f.params).status).toBe('committed')
+  const source = await f.writer.read(f.workspace, f.source.path), shared = await f.writer.read(f.workspace, 'block-shared.note.md')
+  if (source.status !== 'read' || shared.status !== 'read') throw Error('Both exact originals must read')
+  const parsedSource = readNoteDocument(source.document.content), parsedShared = readNoteDocument(shared.document.content)
+  expect(parsedShared).toMatchObject({ status: 'valid', note: { content: { content: [{ type: 'heading', attrs: { blockId: 'section-root', level: 2 } }, { type: 'paragraph' }, { type: 'heading', attrs: { level: 3 } }, { type: 'bulletList' }] } } })
+  if (parsedSource.status !== 'valid') throw Error('Source must parse')
+  expect(parsedSource.note.content.content!.map(node => node.attrs?.blockId)).toEqual(['before-section', 'section-root', 'next-section', 'after-section'])
+  expect(parsedSource.note.content.content![1]).toMatchObject({ type: 'noteInclude', attrs: { forwardedBlockIds: ['section-body', 'subsection', 'evidence-item', 'item-body'] } })
+  expect(shared.document.content).not.toContain('Keep the introduction')
+  expect(shared.document.content).not.toContain('Next independent section')
+  const knowledge = noteKnowledge([{ location: { workspaceId: f.workspace.id, path: f.source.path }, document: source.document }, { location: { workspaceId: f.workspace.id, path: 'block-shared.note.md' }, document: shared.document }], 'complete')
+  for (const blockId of ['section-body', 'subsection', 'evidence-item', 'item-body']) expect(resolveNoteBlock(knowledge, { noteId: 'source-note', blockId })).toMatchObject({ status: 'resolved', source: { note: { noteId: 'shared-note' } }, block: { blockId } })
+  const undone = await f.port.undoShare(await removal(f), { actor: person })
+  expect(undone, JSON.stringify(undone)).toMatchObject({ status: 'committed', collections: [{ source: { result: { status: 'written' } }, deletion: { result: { status: 'deleted' } } }] })
+  const restoredContent = await readFile(join(f.directory, f.source.path), 'utf8')
+  expect(restoredContent).toBe(f.source.content)
+  expect(readNoteDocument(restoredContent)).toEqual(f.originalSectionNote)
+  expect(await readdir(f.directory)).not.toContain('block-shared.note.md')
+})
+
+it('compares the complete same-page section before saving and preserves later edits outside its range', async () => {
+  const f = await sectionFixture(), source = readNoteDocument(f.source.content)
+  if (source.status !== 'valid') throw Error('Source must parse')
+  source.note.content.content![2]!.content![0]!.text = 'A later changed section paragraph'
+  source.note.content.content!.push(f.include())
+  f.params.destination = { ...f.source, operationId: 'same-section-save', content: serializeNoteDocument(source.note) }
+  expect(await f.port.share(f.params, { actor: person })).toMatchObject({ status: 'error', code: 'NOTE_SHARE_SOURCE_CHANGED' })
+  expect(await readdir(f.directory)).not.toContain('block-shared.note.md')
+  expect(await readFile(join(f.directory, f.source.path), 'utf8')).toBe(f.source.content)
+  source.note.content.content![2]!.content![0]!.text = 'Evidence under the section'
+  source.note.content.content![6]!.content![0]!.text = 'A later independent paragraph remains'
+  f.params.destination.content = serializeNoteDocument(source.note)
+  const writes = vi.spyOn(f.files, 'write'), saved = await f.port.share(f.params, { actor: person })
+  expect(saved.status, JSON.stringify(saved)).toBe('committed')
+  expect(writes.mock.calls.filter(([, request]) => request.path === f.source.path)).toHaveLength(1)
+  const current = await readFile(join(f.directory, f.source.path), 'utf8')
+  expect(current).toContain('A later independent paragraph remains')
+  expect(current.match(/::note-include/gu)).toHaveLength(2)
+  expect(current).not.toContain('Evidence under the section')
+})
+
+it('rejects self-inclusion anywhere inside the selected heading section before creating its Markdown', async () => {
+  const f = await sectionFixture(), source = readNoteDocument(f.source.content)
+  if (source.status !== 'valid') throw Error('Source must parse')
+  source.note.content.content!.splice(4, 0, f.include('nested-cycle', 'nested-cycle-block'))
+  f.params.promotions[0]!.source = { ...f.source, content: serializeNoteDocument(source.note) }
+  expect(await f.port.share(f.params, { actor: person })).toMatchObject({ status: 'error', code: 'NOTE_SHARE_CYCLE' })
+  expect(await readdir(f.directory)).not.toContain('block-shared.note.md')
+  expect(await readFile(join(f.directory, f.source.path), 'utf8')).toBe(f.source.content)
+})
+
+it('limits heading ranges to their own sibling container and stops at equal or higher levels', () => {
+  const heading = (blockId: string, level: number) => ({ type: 'heading', attrs: { blockId, level } })
+  const parent = { type: 'blockquote', content: [heading('local-heading', 2), { type: 'paragraph' }, heading('lower-heading', 3), { type: 'paragraph' }, heading('higher-heading', 1), { type: 'paragraph' }] }
+  const content: import('../src/shared/note-document').NoteDocument['content'] = { type: 'doc', content: [parent, { type: 'paragraph', attrs: { blockId: 'outside' } }] }
+  expect(noteShareSiblingRange(parent, 0)).toEqual(parent.content.slice(0, 4))
+  expect(noteShareRange(content, 'local-heading')).toMatchObject({ parent, index: 0, count: 4 })
+  expect(noteShareSiblingRange(parent, 2)).toEqual(parent.content.slice(2, 4))
+  expect(noteShareSiblingRange(parent, 4)).toEqual(parent.content.slice(4))
+  expect(noteShareRange(content, 'outside')?.count).toBe(1)
+  expect(noteShareSiblingRange(parent, 100)).toEqual([])
+  content.content!.push({ type: 'paragraph', attrs: { blockId: 'local-heading' } })
+  expect(noteShareRange(content, 'local-heading')).toBeNull()
+})
+
+it('extracts and restores a nested heading section without crossing its quote container or higher heading boundary', async () => {
+  const f = await sectionFixture(), original = readNoteDocument(f.source.content)
+  if (original.status !== 'valid') throw Error('Source must parse')
+  original.note.content.content![5]!.attrs!.level = 1
+  original.note.content.content = [{ type: 'blockquote', content: original.note.content.content! }, { type: 'paragraph', attrs: { blockId: 'outer-context' }, content: [{ type: 'text', text: 'Outside the quote container' }] }]
+  const written = await f.writer.write(f.workspace, { path: f.source.path, content: serializeNoteDocument(original.note), expectedRevision: f.source.expectedRevision }, { actor: author })
+  if (written.status !== 'written') throw Error('Nested source must save')
+  const content = await readFile(join(f.directory, f.source.path), 'utf8')
+  Object.assign(f.source, { content, baseContent: content, expectedRevision: written.revision })
+  expect((await f.port.share(f.params, { actor: person })).status).toBe('committed')
+  const source = readNoteDocument(await readFile(join(f.directory, f.source.path), 'utf8'))
+  expect(source).toMatchObject({ status: 'valid', note: { content: { content: [{ type: 'blockquote', content: [{ type: 'paragraph' }, { type: 'noteInclude' }, { type: 'heading', attrs: { level: 1 } }, { type: 'paragraph' }] }, { type: 'paragraph', attrs: { blockId: 'outer-context' } }] } } })
+  const shared = await readFile(join(f.directory, 'block-shared.note.md'), 'utf8')
+  expect(shared).toContain('Nested evidence remains addressable')
+  expect(shared).not.toContain('Outside the quote container')
+  expect(shared).not.toContain('Next independent section')
+  expect((await f.port.undoShare(await removal(f), { actor: person })).status).toBe('committed')
+  expect(await readFile(join(f.directory, f.source.path), 'utf8')).toBe(content)
 })
