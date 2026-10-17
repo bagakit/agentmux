@@ -11,7 +11,7 @@ vi.mock('@agentmux/core/agent-message-render', async importOriginal => {
   const original = await importOriginal<typeof import('@agentmux/core/agent-message-render')>()
   const entry = {
     id: 'catalog-extension-probe', title: 'New Core contribution', description: 'A catalog-extension-probe declaration.',
-    syntax: '<amux:catalog-probe state="sample" />', form: 'marker',
+    form: 'marker',
     examples: [{ label: 'Added format', wire: '<amux:catalog-probe state="sample" />' }]
   } as unknown as import('@agentmux/core/agent-message-render').AgentMuxProtocolCatalogEntry
   return { ...original, AGENTMUX_PROTOCOL_CATALOG: [...original.AGENTMUX_PROTOCOL_CATALOG, entry] }
@@ -93,6 +93,8 @@ it('all current examples render on demand without user-history reads, input, nav
     const row = await toggle(entry.id, true)
     expect(row.querySelectorAll('[data-protocol-example]')).toHaveLength(entry.examples.length)
     expect(row.querySelectorAll('.log-turn')).toHaveLength(entry.examples.length)
+    expect(Array.from(row.querySelectorAll('.amux-protocols__wire > pre'), node => node.textContent))
+      .toEqual(entry.examples.map(example => example.wire))
   }
   const objectExample = connected('[data-protocol-example="link"]')
   expect(objectExample.textContent).toContain('amux://agent/SID')
@@ -109,7 +111,7 @@ it('local settings skill derives every format from the same Core contributions a
   expect(skill).toContain('Settings → Message Tool → amux Protocols')
   for (const entry of AGENTMUX_PROTOCOL_CATALOG) {
     expect(skill).toContain(entry.title)
-    expect(skill).toContain(entry.syntax.replaceAll('\n', ' '))
+    expect(skill).toContain(`(${entry.id}, ${entry.form})`)
     expect(skill).toContain(entry.description)
   }
 })
