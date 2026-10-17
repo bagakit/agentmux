@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import type { AgentSessionHistoryPage, AgentSessionHistorySource, AgentTimelineSnapshot } from '@agentmux/core'
 import { useConversationView, type ConversationViewOperation } from '@agentmux/client-ui/use-conversation-view'
 import { projectConversationWindow } from '@agentmux/client-ui/conversation-records'
+import { CONVERSATION_MAX_WINDOW_RECORDS } from '@agentmux/core/conversation'
 import { api } from './api'
 import type { SessionHistoryReference } from '../../../shared/contracts'
 import { nativeBindingKey, type AgentNativeSourceFacts } from '../../../shared/agent-native-source'
@@ -40,6 +41,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
   const key = reading ? JSON.stringify([reading.reference.hostId, reading.reference.agentSessionId, reading.identity]) : ''
   const bindingKey = reading?.nativeSourceFacts ? nativeBindingKey(reading.nativeSourceFacts) : ''
   const acceptedBinding = useRef({ key, bindingKey })
+  const coverageDemand = useRef({ key, duration: coverageDuration, remaining: 2 })
   const view = useConversationView(api.conversation, reading?.reference, reading?.enabled === true, {
     ...(reading ? { identity: reading.identity } : {}),
     beforeCommit: (snapshot, operation, displayedFrame, replayingHeldIntent) => {
@@ -47,6 +49,8 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
       const currentIntent = replayingHeldIntent ? admissionIntent.current
         : operation === 'changes' || operation === 'reopen' || operation === 'resume' ? 'live' : intent.current
       admissionIntent.current = currentIntent
+      // The accepted current page is the first page of this explicit batch.
+      if (!replayingHeldIntent && operation === 'latest') coverageDemand.current.remaining = 2
       if (beforeCapturedCommit?.(next.captured, displayedFrame ? projectConversationWindow(displayedFrame).captured : undefined) === false) return false
       if (page && !beforeCommit(page, currentIntent, displayed.current ?? undefined, { current: displayed.current,
         ...(boundary.current ? { recordBoundary: { beforeRecordId: boundary.current } } : {}) })) return false
@@ -75,21 +79,28 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
   }, [view.held, view.acceptHeld, reading?.enabled])
   // A time-range selection admits bounded complete Core pages. No raw records or
   // Provider positions are accumulated by this presentation.
-  const coverageDemand = useRef(false)
-  useEffect(() => { coverageDemand.current = true }, [key, coverageDuration])
   useEffect(() => {
-    if (view.error) { coverageDemand.current = false; return }
-    if (!coverageDemand.current || !reading?.enabled || view.loading || view.held || !page || !view.hasMore || bindingChanged) return
+    const previous = coverageDemand.current
+    coverageDemand.current = { key, duration: coverageDuration, remaining: previous.key !== key ? 2
+      : coverageDuration > previous.duration ? 3 : coverageDuration < previous.duration ? 0 : previous.remaining }
+  }, [key, coverageDuration])
+  useEffect(() => {
+    if (view.error || view.held || !reading?.enabled || bindingChanged) { coverageDemand.current.remaining = 0; return }
+    if (!coverageDemand.current.remaining || view.loading || !page) return
+    if (!view.hasMore) { coverageDemand.current.remaining = 0; return }
     const times = page.items.flatMap(item => item.startedAt === undefined ? [] : [item.startedAt])
-    if (coverageDuration !== Infinity && (!times.length || Math.max(...times) - Math.min(...times) >= coverageDuration)) { coverageDemand.current = false; return }
+    if (coverageDuration !== Infinity && (!times.length || Math.max(...times) - Math.min(...times) >= coverageDuration)) { coverageDemand.current.remaining = 0; return }
     const count = view.snapshot?.units.reduce((total, unit) => total + unit.records.length, 0) ?? 0
-    if (count >= 1200 || view.snapshot?.window.outside.newer) {
-      coverageDemand.current = false; return
+    const sources = view.snapshot?.scope.sources.filter(source => source.kind === 'native' || source.kind === 'captured').length ?? 1
+    const limit = Math.min(100, Math.floor((CONVERSATION_MAX_WINDOW_RECORDS - count) / Math.max(1, sources)))
+    if (limit <= 0 || view.snapshot?.window.outside.newer) {
+      coverageDemand.current.remaining = 0; return
     }
-    intent.current = 'coverage'; void view.earlier()
+    coverageDemand.current.remaining--
+    intent.current = 'coverage'; void view.earlier(limit)
   }, [page, view.loading, view.held, view.hasMore, view.error, reading?.enabled, bindingChanged, coverageDuration])
   const selectSource = (source?: AgentSessionHistorySource) => {
-    intent.current = 'current'; boundary.current = null; coverageDemand.current = false
+    intent.current = 'current'; boundary.current = null; coverageDemand.current.remaining = 0
     if (source) void view.selectSource(source); else void view.refresh()
   }
   const automaticReadError = intent.current === 'coverage' && view.errorOperation === 'older' ? view.error : null
@@ -98,13 +109,13 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
   const expiredHistorical = view.historical && (view.error as { code?: string } | null)?.code === 'AGENT_CONVERSATION_VIEW_EXPIRED'
   return { page, projection, snapshot: view.snapshot, readActivity: { sourceRead: view.sourceRead, loading: view.loading }, inspect: view.inspect, capturedSnapshot: projection?.captured,
     captured: projection?.captured.items ?? null, capturedLoading: view.loading, capturedHasMore: view.hasMore,
-    readCapturedEarlier: () => { coverageDemand.current = false; void navigate('older') },
+    readCapturedEarlier: () => { coverageDemand.current.remaining = 0; void navigate('older') },
     historical: view.historical || previousSource || bindingChanged, hasEarlierNavigation: Boolean(boundary.current) || previousSource,
     previousSource, coverageLoading: view.loading && view.operation === 'older' && intent.current === 'coverage', loading: view.loading, error, automaticReadError,
     held: view.held, loadingEarlier: view.loading && view.operation === 'older' && intent.current === 'earlier',
     historyBoundary: boundary.current && page?.items.some(item => item.id === boundary.current) ? { beforeRecordId: boundary.current } : null,
     currentOutside, newerOutside: currentOutside, hasNewer: view.hasNewer, hasMore: view.hasMore,
-    readEarlier: () => { coverageDemand.current = false; void navigate('older') }, readNewer: () => { coverageDemand.current = false; void navigate('newer') },
+    readEarlier: () => { coverageDemand.current.remaining = 0; void navigate('older') }, readNewer: () => { coverageDemand.current.remaining = 0; void navigate('newer') },
     retryLabel: expiredHistorical ? 'Read current records' : 'Retry',
     retry: () => {
       if (expiredHistorical) {
@@ -112,6 +123,6 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
         selectSource(original?.kind === 'native' ? { providerId: original.providerId, nativeSessionId: original.nativeSessionId } : undefined)
       } else void view.retry()
     }, showLatestAutomatically: () => { if (view.held) view.acceptHeld(); else if (!view.historical && view.newerAvailable) void navigate('changes') },
-    showCurrent: () => { coverageDemand.current = false; void navigate('latest') },
+    showCurrent: () => { coverageDemand.current.remaining = 0; void navigate('latest') },
     showCurrentSource: () => selectSource(currentSource), showPreviousSource: () => selectSource(handleSource(reading?.nativeSourceFacts?.nativeConfirmation?.previousNativeHandle)) }
 }
