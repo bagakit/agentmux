@@ -9,11 +9,13 @@ import type { AgentInformationPreview } from '../src/renderer/src/lib/agent-info
 import { useAppStore } from '../src/renderer/src/store'
 import { agentCardConversationFixture, waitForAgentCardReading } from './helpers/agent-card-conversation-fixture'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
+import { fixtureEpoch } from '../../../test/fixture-values.mjs'
 
 const dom = composerDOM(), agent = composerSession('protected-input-agent'), source = { providerId: 'codex', nativeSessionId: 'original-input-source' }
 const workspace = composerConfig.workspaces[0]!
 const captured = [1, 2, 3].map(index => ({ id: 'captured-' + index, agentSessionId: agent.id, kind: 'user_message' as const,
-  source: 'user' as const, title: 'Original input', status: 'complete' as const, content: 'Original captured input ' + index, createdAt: index, updatedAt: index }))
+  source: 'user' as const, title: 'Original input', status: 'complete' as const, content: 'Original captured input ' + index,
+  createdAt: fixtureEpoch(0, 0, index), updatedAt: fixtureEpoch(0, 0, index) }))
 const timeline = { agentSessionId: agent.id, revision: 1, items: captured }
 const native = (text = 'Original in-flight native input') => ({ agentSessionId: agent.id, source, nextCursor: null,
   items: [{ id: 'native-original', kind: 'user-message' as const, contentParts: [{ kind: 'text' as const, text }] }] })
@@ -67,7 +69,8 @@ it('settles the original batch once, parks the accepted view and preserves DOM, 
   for (let index = 0; index < 3; index++) {
     await act(async () => {
       useAppStore.setState({ timelines: { [agent.id]: { ...timeline, revision: index + 2,
-        items: [...captured, { ...captured[0]!, id: 'later-' + index, content: 'Later captured request ' + index, createdAt: 10 + index, updatedAt: 10 + index }] } } })
+        items: [...captured, { ...captured[0]!, id: 'later-' + index, content: 'Later captured request ' + index,
+          createdAt: fixtureEpoch(0, 0, 10 + index), updatedAt: fixtureEpoch(0, 0, 10 + index) }] } } })
       await conversation.sync({ hostId: 'local', agentSessionId: agent.id })
       notify({ kind: 'invalidated', agentSessionId: agent.id, source })
     })
