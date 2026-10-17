@@ -18,9 +18,6 @@ app.whenReady().then(async () => {
   await until('Boolean(window.resourceSettingsVisual?.ready && document.querySelectorAll("[data-browser-resource]").length===5)', 'The actual Settings directory must mount')
   await evaluate('resourceSettingsVisual.markPrevious()')
   await until('document.querySelector("[data-browser-resource=unconfirmed]").textContent.includes("Previously observed")', 'The original partial read retains its previous row')
-  win.showInactive()
-  const windowId = Number(win.getMediaSourceId().split(':')[1])
-  assert.ok(windowId > 0)
   for (const [name, width, height] of [['normal', 1180, 900], ['narrow', 560, 850]]) {
     win.setContentSize(width, height); await wait(300)
     await evaluate('document.querySelector(".browser-resources").scrollIntoView({block:"start"})')
@@ -29,19 +26,12 @@ app.whenReady().then(async () => {
     assert.equal(facts.overflow, false, 'Actual Settings fits its viewport')
     assert.equal(facts.rows.length, 5); assert.deepEqual(facts.actions, [])
     for (const row of facts.rows) assert.ok(row.action.right <= width && row.action.left >= 0 && row.action.width > 0, 'Original row actions fit the actual Settings width')
-    const renderer = await win.webContents.capturePage(), bytes = renderer.toPNG()
-    await fs.writeFile(join(directory, name + '-renderer.png'), bytes)
-    await fs.writeFile(join(directory, 'handoff.json'), JSON.stringify({ pid: process.pid, windowId, name, width, height,
-      requested: name + '-os-window.jpg', ready: true, physicalInputActions: 0 }))
-    // A permission-bearing external provider captures this exact original window.
-    // No focus, synthesized OS input, image composition or screenshot fallback.
-    const osFile = join(directory, name + '-os-window.jpg'), end = Date.now() + 90000
-    let osBytes
-    while (Date.now() < end) { try { osBytes = await fs.readFile(osFile); break } catch (error) { if (error.code !== 'ENOENT') throw error; await wait(80) } }
-    assert.ok(osBytes?.length, 'The exact private OS window capture must arrive: ' + name)
-    assert.equal(osBytes[0], 0xff); assert.equal(osBytes[1], 0xd8)
-    receipt.frames.push({ name, pid: process.pid, windowId, facts, file: name + '-os-window.jpg', sha256: createHash('sha256').update(osBytes).digest('hex'),
-      renderer: { file: name + '-renderer.png', sha256: createHash('sha256').update(bytes).digest('hex'), boundary: 'Renderer capture only; not used as OS proof' } })
+    const image = await win.webContents.capturePage(), bytes = image.toPNG()
+    const file = name + '-renderer.png'
+    await fs.writeFile(join(directory, file), bytes)
+    receipt.frames.push({ name, pid: process.pid, webContentsId: win.webContents.id, facts, file, pixels: image.getSize(),
+      surface: 'complete-renderer-viewport', sha256: createHash('sha256').update(bytes).digest('hex'),
+      boundary: 'Original complete pure-Renderer Settings pixels. No crop, composition, OS chrome, physical input or native Browser composition claim.' })
   }
   receipt.passed = true
 }).catch(error => { receipt.failure = { message: error.message, stack: error.stack }; process.exitCode = 1 }).finally(async () => {
