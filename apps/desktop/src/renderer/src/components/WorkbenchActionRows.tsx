@@ -1,11 +1,30 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
-import { Fragment, useEffect, useId, useRef, useState, type HTMLAttributes, type ReactNode } from 'react'
+import { Fragment, useEffect, useId, useRef, useState, type HTMLAttributes, type KeyboardEvent, type ReactNode } from 'react'
+import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { WindowOverlayPortal } from './WindowOverlayHost'
 
 type Hint = { label: string; row: string; anchor: HTMLElement }
 export type WorkbenchActionRowItemProps = Pick<HTMLAttributes<HTMLElement>,
   'aria-describedby' | 'onFocus' | 'onBlur' | 'onPointerMove'>
+
+/** Lateral navigation stays within the painted row; its edges retain Radix menu behavior. */
+export function moveAlongWorkbenchActionRow(event: KeyboardEvent<HTMLDivElement>) {
+  if (isImeOwnedKeyboardEvent(event.nativeEvent)) { event.stopPropagation(); return }
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+  const current = event.currentTarget, row = current.closest('.workbench-menu-row__actions')
+  if (!row) return
+  const top = current.getBoundingClientRect().top
+  const items = [...row.querySelectorAll<HTMLElement>('[role="menuitem"]')].filter(item =>
+    !item.hasAttribute('data-disabled') && Math.abs(item.getBoundingClientRect().top - top) < 1)
+  const rtl = current.ownerDocument.defaultView?.getComputedStyle(row).direction === 'rtl'
+  const backwards = (event.key === 'ArrowLeft') !== rtl
+  const next = items[items.indexOf(current) + (backwards ? -1 : 1)]
+  if (!next) return
+  event.preventDefault()
+  event.stopPropagation()
+  next.focus()
+}
 
 /** Shared alignment and descriptions; each consumer keeps its original actions and input semantics. */
 export function WorkbenchActionRows<T extends { label: string }>({ rows, itemKey, renderItem,
