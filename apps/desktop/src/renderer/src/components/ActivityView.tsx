@@ -946,10 +946,12 @@ export function ActivityView({
     })
   }
 
-  const hasUserMessages = Boolean(userMessages && userMessages.length > 0)
+  const hasUserMessages = Boolean((conversationReading ? readingWindow.projection?.inputs : userMessages)?.length)
   const hasNativeRecords = nativeHistoryPage?.agentSessionId === sessionId && nativeHistoryPage.items.length > 0
   const hasItems = unifiedItems.length > 0
-  const readPending = readingEnabled && Boolean(readingWindow.loading || userMessageRead?.loading)
+  const readPending = readingEnabled && Boolean(readingWindow.loading || !conversationReading && userMessageRead?.loading)
+  const hasAcceptedFrame = Boolean(conversationReading && readingWindow.snapshot)
+  const initialReadPending = readPending && !hasAcceptedFrame
   const earlierReadPending = readingWindow.loadingEarlier || readingWindow.coverageLoading
   const hasReadContent = hasUserMessages || hasNativeRecords || hasItems || ruler.items.length > 0
   const readingIssues: ConversationReadIssue[] = []
@@ -970,7 +972,7 @@ export function ActivityView({
   const readingServiceScope = JSON.stringify(['conversation-reading', executionHostId, sessionId, conversationReading?.identity])
   const fullReadFailure = Boolean(conversationReading && !hasReadContent && readingIssues.length)
   const emptyReadStatus = fullReadFailure ? <ConversationReadFailure scope={readingServiceScope} issues={readingIssues}
-    full visible={readingEnabled} /> : !hasReadContent && !earlierReadPending && (readPending || emptyReadFailed) ? (
+    full visible={readingEnabled} /> : !hasReadContent && !earlierReadPending && (initialReadPending || emptyReadFailed) ? (
     <FullPageLoadingSurface className="activity-feed__empty-reading" scope="region"
       phase={emptyReadFailed ? 'failed' : 'loading'} eyebrow="Conversation reading"
       title={emptyReadFailed ? 'Reading interrupted' : 'Reading conversation…'} detail="">
@@ -1100,7 +1102,7 @@ export function ActivityView({
         <ConversationCoverage coverage={conversationCoverage} onLocate={revealLoadedRecord} />
         {fileReferenceNotice}
         {renderReadingHeader(findTrigger)}
-        {!emptyReadStatus && !readPending && !readingWindow.error && !userMessageRead?.error ? <div className="activity-feed__empty">
+        {!emptyReadStatus && (!readPending || hasAcceptedFrame) && !readingWindow.error && !userMessageRead?.error ? <div className="activity-feed__empty">
           {userMessageRead?.hasMore ? 'No inputs in the recent conversation window.' : 'No structured activity yet. Terminal remains available.'}
         </div> : null}
       </div>
