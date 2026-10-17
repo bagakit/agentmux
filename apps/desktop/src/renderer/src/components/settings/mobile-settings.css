@@ -1,0 +1,26 @@
+.device-management[data-device-view='settings'] { border: 0; padding-top: 0; container: mobile-settings / inline-size; }
+.device-management[data-device-view='settings'] .device-management__connection { padding: var(--sp-6); border: 1px solid var(--line-soft); border-radius: var(--radius-lg); background: var(--surface-1); gap: var(--sp-4); }
+.device-management__intro { display: flex; align-items: flex-start; gap: var(--sp-5); min-width: 0; }
+.device-management__intro > div { min-width: 0; }
+.device-management__phone { display: grid; place-items: center; flex: none; width: 52px; height: 60px; border: 1px solid var(--line-soft); border-radius: var(--radius-lg); background: var(--surface-0); color: var(--text-2); }
+.device-management[data-device-view='settings'] h3 { margin: 0; color: var(--text); font-size: var(--fs-title); font-weight: 550; line-height: 1.4; }
+.device-management__intro .settings-group-note { max-width: 64ch; margin: var(--sp-2) 0 0; line-height: 1.65; }
+.device-management[data-device-view='settings'] .device-management__devices { margin-top: var(--sp-7); padding-top: 0; border: 0; }
+.device-management__devices > .settings-pane-toolbar { align-items: flex-start; }
+.device-management__devices > .settings-pane-toolbar > div { flex: 1; min-width: 0; }
+.device-management__count { margin: var(--sp-2) 0 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.device-management[data-device-view='settings'] .device-management__records { margin-top: var(--sp-5); border-block: 1px solid var(--line-soft); padding-block: var(--sp-3); }
+.device-management[data-device-view='settings'] .device-management__records > summary { padding-block: var(--sp-2); color: var(--text-2); }
+.device-management__read-issue { margin-top: var(--sp-4); padding: var(--sp-4) var(--sp-5); border-radius: var(--radius); background: var(--surface-1); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; overflow-wrap: anywhere; }
+.device-management__read-issue > strong { color: var(--text-2); font-weight: 500; }
+.device-management__read-issue p { margin: var(--sp-1) 0; }
+.device-management__read-issue details { margin-top: var(--sp-2); }
+.device-management[data-device-view='settings'] summary { cursor: pointer; }
+.device-management[data-device-view='settings'] summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; border-radius: var(--radius-sm); }
+.device-management[data-device-view='settings'] .device-management__record > summary { flex-wrap: wrap; row-gap: var(--sp-2); padding-block: var(--sp-4); }
+.device-management[data-device-view='settings'] .device-management__record > summary strong { overflow-wrap: anywhere; }
+@container mobile-settings (width < 420px) {
+  .device-management[data-device-view='settings'] .device-management__connection { padding: var(--sp-4); }
+  .device-management__intro { gap: var(--sp-3); }
+  .device-management__phone { width: 40px; height: 48px; }
+}
