@@ -153,7 +153,9 @@ it.each([batch, renderAgentMuxMessageEnvelope({ sender: { kind: 'agent-session',
 
 it('keeps the original reference nodes and selected Range on status-only updates', async () => {
   await render(message())
-  const original = host.querySelector('.log-turn__references li code')!, range = document.createRange()
+  const original = host.querySelector('.log-turn__references li code')!
+  expect(original).not.toBeNull()
+  const range = document.createRange()
   range.selectNodeContents(original); window.getSelection()!.addRange(range)
   const selected = window.getSelection()!.toString(), anchor = window.getSelection()!.anchorNode
   await render(message({ status: 'streaming' }))
