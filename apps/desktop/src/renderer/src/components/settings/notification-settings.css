@@ -1,0 +1,10 @@
+.settings-notifications .notification-preview { margin: 0; padding: 0; gap: var(--sp-4); border-radius: 0; background: transparent; box-shadow: none; }
+.settings-notifications .notification-preview figcaption { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--sp-3); color: var(--text-3); font-size: var(--fs-meta); }
+.notification-preview__sample { display: grid; gap: var(--sp-3); padding: var(--sp-6); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-1); }
+.notification-preview__chrome > span { margin-left: auto; text-transform: none; letter-spacing: normal; }
+.notification-preview__context { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.settings-notifications .notification-preview__dwell > i { animation: none; }
+.settings-notifications .notification-dwell__description { font-size: var(--fs-meta); line-height: 1.5; }
+.settings-notifications .notification-sound-toggle { padding-inline: 0; }
+@media (max-width: 560px) { .notification-preview__sample { padding: var(--sp-5); } .settings-notifications .notification-dwell__ticks { gap: var(--sp-2); } }
+@media (prefers-reduced-motion: reduce) { .settings-notifications .notification-preview__dwell > i { transition: none; } }

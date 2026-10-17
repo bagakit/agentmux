@@ -1,3 +1,4 @@
+import './notification-settings.css'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import type { CSSProperties } from 'react'
 import type { AppConfig, NotificationModeId } from '../../../../shared/contracts'
@@ -56,16 +57,19 @@ export function NotificationSettingsPane({ notifications, onSave }: {
   }
 
   return (
-    <div className="settings-pane-stack">
-      <p className="settings-lead">Get a notification when an agent finishes, needs your attention or runs into trouble while you are elsewhere.</p>
-      <figure className="notification-preview" aria-label="Notification preview">
-        <div className="notification-preview__chrome"><b>AgentMux</b><time>now</time></div>
+    <div className="settings-pane-stack settings-notifications">
+      <figure className="notification-preview" aria-label="Notification preview" data-notification-mode={mode}>
+        <figcaption><span>Example notification</span><span>{modeDraft.dirty || soundDraft.dirty ? 'Unsaved preview' : 'Saved settings'}</span></figcaption>
+        <div className="notification-preview__sample">
+        <div className="notification-preview__chrome"><b>AgentMux</b><span>{mode === 'off' ? 'Notifications off' : active.label}</span></div>
         <div className="notification-preview__title">
           <span className="status status--waiting" aria-hidden="true"><span className="status__dot" /></span>
           Review Codex — Needs you
         </div>
         <p className="notification-preview__body">Review Codex: Ready for your call on the migration plan.</p>
         <div className="notification-preview__dwell" data-persist={persist ? 'true' : undefined} style={{ '--dwell-fill': dwellFill } as CSSProperties}><i /></div>
+        </div>
+        <p className="notification-preview__context">{mode === 'off' ? 'No banners are shown. The example stays here to help you choose a duration.' : 'When an agent finishes, needs you or runs into trouble while you are elsewhere.'}</p>
       </figure>
       <section className="settings-group" data-settings-field="notification-dwell">
         <header><span>How long it stays</span><small>{active.label}</small></header>
