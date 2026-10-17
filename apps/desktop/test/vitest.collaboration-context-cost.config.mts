@@ -4,9 +4,9 @@ import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import shared from './vitest.collaboration-space-product.config.mts'
 export const collaborationContextMutation = {
-  name: 'unscoped-context', file: 'components/AgentCollaborationDialog.tsx',
-  before: ' || !wanted.has(collaborationSubjectKey(session.control))', after: '',
-  assertion: 'builds production contexts only for the focused Agent and recorded peers as unrelated Sessions grow'
+  name: 'unscoped-context', file: 'components/AgentCollaborationMap.tsx',
+  before: 'rows = [...wanted].flatMap', after: 'rows = [...catalog.sessions.keys()].flatMap',
+  assertion: 'keeps the full map world while bounding production contexts and reads to the visible and selected Agents'
 } as const
 const selected = process.env.AGENTMUX_COLLABORATION_CONTEXT_MUTATION
 if (selected && selected !== collaborationContextMutation.name) throw Error('Unknown context mutation')
