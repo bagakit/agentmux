@@ -211,7 +211,7 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
     </section> : null}
     {view === 'mote' && moteSelection ? <section className="connector-mote-detail" data-connector-mote-detail>
       <button type="button" className="connector-back small-button" onClick={library}>All identities</button>
-      <header><h3>Identity for {moteSelection.origin.moteName}</h3><p>Use this identity for new group conversations with this Mote.</p></header>
+      <header><h3>Bot for {moteSelection.origin.moteName}</h3><p>This bot represents your Mote in group conversations.</p></header>
       <MoteConnectionPanel key={JSON.stringify([moteSelection.origin.target, moteSelection.origin.topicId])} {...moteSelection.origin} createOnOpen={moteSelection.create} inSettings onContinueSetup={continueMoteSetup}
         onRead={() => {}} onCreateIntentConsumed={() => setMoteSelection(current => current?.origin === moteSelection.origin ? { ...current, create: false } : current)} onManageConnection={record => { edit(record); setView('saved') }} />
       {continuation ? <p role="status" className="connector-check-feedback">{management.catalog?.issue || (management.catalog?.value && !canContinueEnrollment ? 'The saved sign-in cannot be handed off here. Open this bot’s management to continue; the original setup is kept.' : 'Reading this bot’s setup options…')}</p> : null}

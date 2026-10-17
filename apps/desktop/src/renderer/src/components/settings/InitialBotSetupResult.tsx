@@ -10,11 +10,7 @@ export const initialSetupStageLabels: Record<ConnectionSetupInitialProgress['sta
 /** A projection of the original Setup owner, never a client-side configuration driver. */
 export function InitialBotSetupResult({ progress }: { progress: ConnectionSetupInitialProgress | null }) {
   return <section className="mote-bot-next" aria-label="Configuration and publication" data-initial-setup-stage={progress?.stage ?? 'pending'} data-state={progress?.state ?? 'pending'}>
-    <strong>{progress?.state === 'complete' ? 'Configuration and first publication confirmed'
-      : progress?.state === 'approval-required' ? 'Waiting for platform approval'
-      : progress?.state === 'attention' ? 'This setup needs attention'
-      : 'Configuring and publishing this bot'}</strong>
-    <p>{progress?.state === 'complete' ? 'The original version is approved. Message delivery is checked separately.' : progress ? initialSetupStageLabels[progress.stage] + (progress.state === 'attention' ? ' is not confirmed. Your original application and earlier results are kept.' : progress.state === 'approval-required' ? ' is still required. The original version is kept.' : ' is the current step.') : 'The original setup is kept while its progress is read.'}</p>
+    <p>{progress?.state === 'complete' ? 'The original version is approved. Message delivery is checked separately.' : progress?.state === 'approval-required' ? 'Your version has been submitted. Check its status after the platform finishes its review.' : progress ? initialSetupStageLabels[progress.stage] + (progress.state === 'attention' ? ' is not confirmed. Earlier completed steps are kept; check this step to continue.' : ' is the current step.') : 'Reading the saved configuration progress…'}</p>
     {progress?.versionId ? <details className="bot-profile-details"><summary>Original version</summary><code>{progress.versionId}</code></details> : null}
   </section>
 }
