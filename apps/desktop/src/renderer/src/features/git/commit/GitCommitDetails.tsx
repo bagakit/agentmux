@@ -1,6 +1,7 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { GitCommitDetailsResult, GitCommitSnapshot } from '../../../../../shared/git-contracts'
-import { commitAuthorInitials, presentCommitMessage, summarizeCommitChanges } from './commit-presentation'
+import { presentCommitMessage, summarizeCommitChanges } from './commit-presentation'
+import { GitAuthorAvatar } from './GitAuthorAvatar'
 
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 
@@ -43,17 +44,13 @@ export function GitCommitDetails({ regionId, selection, result, loading, error, 
           {message.breaking && <span className="git-workbench__message-breaking" title="Marked by ! in the commit subject">Breaking change</span>}
         </div>}
       </header>
-      {message.body && <pre className="git-workbench__message-body">{message.body}</pre>}
-      <details className="git-workbench__raw-message" key={result.commit.oid}>
+      <details className="git-workbench__raw-message" key={result.commit.oid} open>
         <summary>Full commit message</summary>
         <pre className="git-workbench__message">{result.commit.message || '(No commit message)'}</pre>
       </details>
       <dl className="git-workbench__metadata">
         <dt>Author</dt><dd className="git-workbench__identity">
-          <span className="git-workbench__author-initials" role="img"
-            aria-label="Local author initials, not a verified photo or identity" title="Generated locally from the recorded author name; not a verified photo or identity">
-            {commitAuthorInitials(result.commit.author)}
-          </span>
+          <GitAuthorAvatar author={result.commit.author} email={result.commit.authorEmail} />
           <span><span className="git-workbench__person">{result.commit.author || 'Unknown author'}</span><span className="git-workbench__identity-time"><CommitTime value={result.commit.authoredAt} /></span></span>
         </dd>
         {showCommitted && <><dt>Committed</dt><dd>

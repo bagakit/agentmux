@@ -954,10 +954,10 @@ export class GitRepository {
     if (type.stdout.trim() !== 'commit') throw new Error('The selected object is not a commit')
     const result = await this.comparisonGit(host, repoPath,
       ['show', '--no-patch', '--no-notes', '--no-show-signature', '--encoding=UTF-8',
-        '--format=format:%H%x00%P%x00%an%x00%at%x00%cn%x00%ct%x00%s%x00%B', '--end-of-options', oid, '--'],
+        '--format=format:%H%x00%P%x00%an%x00%at%x00%cn%x00%ct%x00%s%x00%ae%x00%B', '--end-of-options', oid, '--'],
       'Could not read the full commit message')
     const fields = result.stdout.split('\0')
-    if (fields.length !== 8 || fields[0] !== oid) throw new Error('Git returned invalid commit details')
+    if (fields.length !== 9 || fields[0] !== oid) throw new Error('Git returned invalid commit details')
     // Pretty-format %P rewrites parents at shallow boundaries. The commit object retains the truth.
     const object = await this.comparisonGit(host, repoPath, ['cat-file', 'commit', oid], 'Could not read the commit parents')
     const end = object.stdout.indexOf('\n\n')
@@ -969,7 +969,7 @@ export class GitRepository {
       return Number.isSafeInteger(seconds) && Math.abs(seconds * 1000) <= 8.64e15 ? seconds * 1000 : null
     }
     return { oid, parents, author: fields[2]!, authoredAt: timestamp(fields[3]!),
-      committer: fields[4]!, committedAt: timestamp(fields[5]!), subject: fields[6]!, message: fields[7]! }
+      committer: fields[4]!, committedAt: timestamp(fields[5]!), subject: fields[6]!, authorEmail: fields[7]!, message: fields[8]! }
   }
 
   private commitOid(value: string): string {

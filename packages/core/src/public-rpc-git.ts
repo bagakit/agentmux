@@ -154,9 +154,9 @@ export function parseGitOpenParams(value: unknown, code = 'INVALID_CONTROL_REQUE
 }
 function commit(value: unknown, code: string, details = false): Record<string, unknown> {
   const p = rpcRecord(value, ['oid', 'parents', 'subject', 'author', 'authoredAt', 'refs',
-    ...(details ? ['message', 'committer', 'committedAt'] : [])], code)
+    ...(details ? ['message', 'committer', 'committedAt', 'authorEmail'] : [])], code)
   oid(p.oid, code); array(p.parents, code, item => oid(item, code))
-  for (const key of ['subject', 'author', ...(details ? ['message', 'committer'] : [])]) text(p[key], code)
+  for (const key of ['subject', 'author', ...(details ? ['message', 'committer', 'authorEmail'] : [])]) text(p[key], code)
   for (const key of ['authoredAt', ...(details ? ['committedAt'] : [])]) {
     if (p[key] !== null && (typeof p[key] !== 'number' || !Number.isFinite(p[key]))) invalid('Git commit time is invalid.', code)
   }
