@@ -20,7 +20,7 @@ beforeEach(() => { native = async request => {
   return { code: 0, data: { name: 'Team group', chat_status: 'normal', chat_mode: 'group', membership_approval: 'approval_required' } }
 } })
 async function ready(text: string) { await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('[role="dialog"]')?.textContent).toContain(text) }, { timeout: 6000 }) }
-async function disclose(name: string) { const details = [...document.querySelectorAll('details')].find(node => node.querySelector('summary')?.textContent === name)!; expect(details, name).toBeDefined(); if (!details.open) await act(async () => details.querySelector('summary')!.click()); expect(details.open).toBe(true) }
+async function disclose(name: string) { if (document.querySelector('section[aria-label="' + name + '"]')) return; const details = [...document.querySelectorAll('details')].find(node => node.querySelector('summary')?.textContent === name)!; expect(details, name).toBeDefined(); if (!details.open) await act(async () => details.querySelector('summary')!.click()); expect(details.open).toBe(true) }
 async function chooseGroup(id: string) {
   await vi.waitFor(async () => { await act(async () => {}); expect(f.calls.some(call => call.method === 'connection.room.ls' && call.result)).toBe(true) })
   const trigger = document.querySelector<HTMLElement>('[aria-label="Existing group"]')!
@@ -37,7 +37,7 @@ it('the original Agent menu selects an actual default-Host SDK room, confirms th
   expect(document.querySelector('[aria-label="Agent and group conversation"] [aria-label="Existing group"]')?.getAttribute('data-value')).toBe('oc_other')
   expect(f.calls.filter(call => call.method === 'connection.bind' || call.method === 'connection.grant')).toHaveLength(0)
   expect(f.platformCalls.some(call => call.url?.endsWith('/chats/oc_other/members'))).toBe(true)
-  await consent(); await f.button('Connect group'); await ready('Sharing on')
+  await consent(); await f.button('Connect group'); await ready('Group saved')
   const binding = (await f.services.connections.bindings!.list({})).bindings[0]!
   expect(binding).toMatchObject({ connectionId: f.config.connectionId, externalConversationId: 'oc_other', scope: { publication: 'future-native-user-facing' } })
   await disclose('People in this group'); await f.button('Choose')
@@ -64,7 +64,7 @@ it('the Composer names its exact default-Host audience and keeps that audience a
     return await originalNative(request)
   }
   await f.mount(); const editor = document.querySelector<HTMLElement>('[data-workbench-region-id="original-region"] [role="textbox"]')!
-  await f.menu('Bind existing group chat'); await chooseGroup('oc_other'); await consent(); await f.button('Connect group'); await ready('Sharing on'); await f.button('Close')
+  await f.menu('Bind existing group chat'); await chooseGroup('oc_other'); await consent(); await f.button('Connect group'); await ready('Group saved'); await f.button('Close')
   await vi.waitFor(async () => { await act(async () => {}); expect([...document.querySelectorAll('.connector-sharing__group')].every(node => node.textContent?.includes('Design review'))).toBe(true); expect(document.querySelectorAll('.connector-sharing__group')).toHaveLength(2) })
   const binding = (await f.services.connections.bindings!.list({})).bindings[0]!, counts = f.calls.length
   await act(async () => useAppStore.setState(state => ({ sessions: [...state.sessions, ...Array.from({ length: 250 }, (_, index) => composerSession('unrelated-name-' + index))] })))
@@ -107,7 +107,7 @@ it('an unavailable directory preserves the explicit exact-ID path and healthy or
   await f.fill('Existing group ID', 'oc_exact'); await ready('Group members are not confirmed')
   expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain('Original person')
   expect(f.calls.some(call => call.method === 'connection.grant' || call.method === 'connection.room.link.create')).toBe(false)
-  await consent(); await f.button('Connect group'); await ready('Sharing on')
+  await consent(); await f.button('Connect group'); await ready('Group saved')
   expect((await f.services.connections.bindings!.list({})).bindings[0]?.externalConversationId).toBe('oc_exact')
   await f.original.unchanged()
 }, 25_000)

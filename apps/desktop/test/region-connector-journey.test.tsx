@@ -10,7 +10,7 @@ import { useAppStore } from '../src/renderer/src/store'
 
 const f = connectorJourneyFixture()
 async function ready(text: string) { await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('[role="dialog"]')?.textContent).toContain(text) }, { timeout: 6000 }) }
-async function consent() { const box = document.querySelector<HTMLInputElement>('.agent-connector-check input')!; expect(box).not.toBeNull(); await act(async () => box.click()) }
+async function consent() { await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.getAttribute('aria-busy')).toBe('false')); const box = document.querySelector<HTMLInputElement>('.agent-connector-check input')!; expect(box).not.toBeNull(); await act(async () => box.click()) }
 
 it('the original Agent menu creates a dedicated group through actual IPC/Core/Host, then independently confirms sharing and reuses the same Binding in another Region', async () => {
   await f.mount(); expect(f.original.create).not.toHaveBeenCalled()
@@ -32,7 +32,7 @@ it('the original Agent menu creates a dedicated group through actual IPC/Core/Ho
   expect(f.original.create).toHaveBeenCalledTimes(1); expect(f.original.addMembers).toHaveBeenCalledTimes(1)
   expect((await f.services.connections.bindings!.list({})).bindings).toHaveLength(0)
   expect(document.querySelector('[role="dialog"]')?.textContent).toContain('existing private context')
-  await consent(); await f.button('Connect group'); await ready('Sharing on')
+  await consent(); await f.button('Connect group'); await ready('Group saved')
   const [binding] = (await f.services.connections.bindings!.list({})).bindings
   for (const label of ['Change connected group', 'Manage member access', 'Connection details']) {
     const section = [...document.querySelectorAll('details')].find(node => node.querySelector('summary')?.textContent === label)!
@@ -44,8 +44,8 @@ it('the original Agent menu creates a dedicated group through actual IPC/Core/Ho
   expect(access.textContent).toBe('No members approved to use this Agent'); expect(access.closest('details')).toBeNull()
   expect(binding).toMatchObject({ executionHostId: 'local', agentSessionId: 'original-agent', externalConversationId: 'created-room', scope: { input: 'mentions-and-replies' } })
   expect((await f.services.connections.bindings!.inspect({ bindingId: binding!.bindingId })).grants).toHaveLength(0)
-  await f.button('Close'); await f.menu('Create group chat', 'other-region'); await ready('Sharing on')
-  expect(document.querySelector('[aria-label="Group connection status"]')?.textContent).toContain('Sharing on')
+  await f.button('Close'); await f.menu('Create group chat', 'other-region'); await ready('Group saved')
+  expect(document.querySelector('[aria-label="Group connection status"]')?.textContent).toContain('Group saved')
   expect([...document.querySelectorAll('button')].some(node => node.textContent === 'Create group')).toBe(false)
   expect(f.original.create).toHaveBeenCalledTimes(1)
   expect(f.calls.filter(call => call.method === 'connection.room.create')).toHaveLength(1)
@@ -99,7 +99,7 @@ it('binding response loss keeps the known group and converges by inspecting its 
   await f.mount(); await f.menu('Create group chat'); await f.button('Create group'); await ready('Group created')
   await consent(); await f.button('Connect group'); await ready('Setup is not confirmed')
   const original = Object.values(useAppStore.getState().connectorRoomIntents).find(intent => intent.method === 'connection.bind')!
-  expect(original).toBeDefined(); await f.button('Close'); await f.menu('Shared group details'); await ready('Sharing on')
+  expect(original).toBeDefined(); await f.button('Close'); await f.menu('Shared group details'); await ready('Group saved')
   await act(async () => await vi.waitFor(() => expect(useAppStore.getState().connectorRoomIntents[original.input.operationId]).toBeUndefined()))
   expect(f.original.create).toHaveBeenCalledTimes(1)
   expect((await f.services.connections.bindings!.list({})).bindings).toHaveLength(1)
@@ -117,7 +117,7 @@ it('an exact Region occupant change refuses only this room effect and preserves 
 
 it('the original Region context menu binds an existing group and keeps actor approval, relink and pause with the same public owner', async () => {
   await f.mount(); await f.menu('Bind existing group chat', 'original-region', true)
-  await f.fill('Existing group ID', 'existing-original-group'); await consent(); await f.button('Connect group'); await ready('Sharing on')
+  await f.fill('Existing group ID', 'existing-original-group'); await consent(); await f.button('Connect group'); await ready('Group saved')
   let binding = (await f.services.connections.bindings!.list({})).bindings[0]!
   await f.fill('Member access ID type', 'account_id'); await f.fill('Member access ID', 'exact-member')
   for (const label of ['Send requests', 'Answer questions']) {
@@ -125,7 +125,7 @@ it('the original Region context menu binds an existing group and keeps actor app
     expect(box).toBeDefined(); await act(async () => box.click())
   }
   await f.button('Approve this member')
-  await ready('exact-member: active')
+  await ready('1 member approved to use this Agent')
   expect(document.querySelector('[aria-label="Group member access"]')?.textContent).toBe('1 member approved to use this Agent')
   expect((await f.cli(['binding', 'inspect', '--binding', binding.bindingId])).grants).toMatchObject([{ actor: { idType: 'account_id', userId: 'exact-member' }, capabilities: ['input', 'answer'] }])
   await act(async () => [...document.querySelectorAll('details')].find(node => node.querySelector('summary')?.textContent === 'Change connected group')!.querySelector('summary')!.click())
@@ -135,7 +135,7 @@ it('the original Region context menu binds an existing group and keeps actor app
   expect([...document.querySelectorAll('details')].some(node => node.querySelector('summary')?.textContent === 'Manage member access')).toBe(false)
   expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Your current group stays connected until you confirm this change.')
   await consent(); await f.button('Change group')
-  await ready('Sharing on'); await ready('No members approved')
+  await ready('Group saved'); await ready('No members approved')
   expect(document.querySelector('.agent-connector-pairing__group')?.textContent).toContain('another-exact-group')
   binding = (await f.services.connections.bindings!.list({})).bindings[0]!
   expect(binding.revision).toBe(2)
@@ -143,17 +143,17 @@ it('the original Region context menu binds an existing group and keeps actor app
   await f.button('Pause sharing'); await ready('Sharing paused')
   expect((await f.cli(['binding', 'inspect', '--binding', binding.bindingId])).binding).toMatchObject({ state: 'paused', externalConversationId: 'another-exact-group' })
   await act(async () => [...document.querySelectorAll('details')].find(node => node.querySelector('summary')?.textContent === 'Change connected group')!.querySelector('summary')!.click())
-  await consent(); await f.button('Resume sharing'); await ready('Sharing on')
+  await consent(); await f.button('Resume sharing'); await ready('Group saved')
   expect((await f.cli(['binding', 'inspect', '--binding', binding.bindingId])).binding).toMatchObject({ state: 'active', revision: 4, externalConversationId: 'another-exact-group' })
   await act(async () => [...document.querySelectorAll('details')].find(node => node.querySelector('summary')?.textContent === 'Change connected group')!.querySelector('summary')!.click())
-  await consent(); await f.button('Reconnect group'); await ready('Sharing on')
+  await consent(); await f.button('Reconnect group'); await ready('Group saved')
   expect((await f.cli(['binding', 'inspect', '--binding', binding.bindingId])).binding).toMatchObject({ state: 'active', revision: 5, externalConversationId: 'another-exact-group' })
   expect(f.original.create).not.toHaveBeenCalled(); expect(f.original.addMembers).not.toHaveBeenCalled()
   expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep the original draft 中'); await f.original.unchanged()
 }, 25_000)
 
 it('a lost group-change response keeps the proposed audience unconfirmed until the exact original Binding receipt is observed', async () => {
-  await f.mount(); await f.menu('Bind existing group chat'); await f.fill('Existing group ID', 'existing-original-group'); await consent(); await f.button('Connect group'); await ready('Sharing on')
+  await f.mount(); await f.menu('Bind existing group chat'); await f.fill('Existing group ID', 'existing-original-group'); await consent(); await f.button('Connect group'); await ready('Group saved')
   const original = (await f.services.connections.bindings!.list({})).bindings[0]!
   let observedOriginal = false, heldRefresh = false, release!: () => void
   const continueReading = new Promise<void>(resolve => { release = resolve })
@@ -187,7 +187,7 @@ it('a lost group-change response keeps the proposed audience unconfirmed until t
   expect(f.calls.filter(call => call.method === 'connection.binding.relink')).toHaveLength(1)
   expect((f.calls.filter(call => call.method === 'connection.room.get').at(-1)?.input as { externalConversationId: string }).externalConversationId).toBe('proposed-exact-group')
   try {
-    await f.button('Check status'); await vi.waitFor(() => expect(heldRefresh).toBe(true)); await ready('Sharing on')
+    await f.button('Check status'); await vi.waitFor(() => expect(heldRefresh).toBe(true)); await ready('Group saved')
     expect(document.querySelector('.agent-connector-pairing__group')?.textContent, 'the exact inspect.current snapshot replaces the old revision before a later list read can finish').toContain('proposed-exact-group')
   } finally { release() }
   await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('[role="dialog"]')?.getAttribute('aria-busy')).toBe('false') })

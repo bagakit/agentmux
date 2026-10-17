@@ -36,7 +36,7 @@ describe('the original member access owner', () => {
   async function open() {
     await f.mount(); await f.menu('Bind existing group chat'); await f.fill('Existing group ID', 'oc_original')
     await act(async () => document.querySelector<HTMLInputElement>('.agent-connector-check input')!.click())
-    await f.button('Connect group'); await ready('Sharing on'); await disclosure('Manage member access')
+    await f.button('Connect group'); await ready('Group saved'); await disclosure('Manage member access')
     await f.fill('Member access ID type', 'open_id'); await f.fill('Member access ID', 'ou_original')
   }
   it('starts remote permission off, explicitly shares decision context for one member and revokes only that capability through trusted IPC/public CLI', async () => {

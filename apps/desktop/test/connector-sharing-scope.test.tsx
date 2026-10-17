@@ -29,9 +29,9 @@ async function openExisting() { await f.mount(); await f.menu('Bind existing gro
 
 it('existing reply-only consent is not expanded by opening details and a broader scope requires explicit new confirmation at the same original audience', async () => {
   await openExisting(); expect(document.querySelector('[aria-label="Group sharing content"]')?.getAttribute('data-value')).toBe('future-native-user-facing')
-  await consent(); await f.button('Connect group'); await ready('Sharing on')
+  await consent(); await f.button('Connect group'); await ready('Group saved')
   const original = (await f.services.connections.bindings!.list({})).bindings[0]!
-  await f.button('Close'); await f.menu('Shared group details'); await ready('Sharing on')
+  await f.button('Close'); await f.menu('Shared group details'); await ready('Group saved')
   expect((await f.cli(['binding', 'inspect', '--binding', original.bindingId])).binding.scope.publication).toBe('future-native-user-facing')
   const change = [...document.querySelectorAll('details')].find(node => node.querySelector('summary')?.textContent === 'Change connected group')!
   await act(async () => change.querySelector('summary')!.click())
@@ -52,7 +52,7 @@ it('existing reply-only consent is not expanded by opening details and a broader
 }, 25_000)
 
 it('the original default PublicationHost content gap remains readable beside its confirmed SDK delivery and inspects that exact effect without retrying', async () => {
-  await openExisting(); await select('Group sharing content', 'future-shared-conversation'); await consent(); await f.button('Connect group'); await ready('Sharing on')
+  await openExisting(); await select('Group sharing content', 'future-shared-conversation'); await consent(); await f.button('Connect group'); await ready('Group saved')
   const binding = (await f.services.connections.bindings!.list({})).bindings[0]!, metadata = await readFile(f.original.storePath)
   await appendFile(f.original.transcript, row('qualified-speech', 'assistant'))
   await vi.waitFor(() => expect(f.services.publication!.store.list(binding)[0]?.state).toBe('confirmed'), { timeout: 6000 })
