@@ -17,7 +17,7 @@ const native = (id: string, time: number | undefined, text = id, kind: 'assistan
 })
 const captured = (id: string, time: number, content = id, kind: 'user_message' | 'assistant_message' | 'tool_call' = 'user_message'): AgentTimelineItem => ({
   id, agentSessionId: sid, kind, source: kind === 'user_message' ? 'user' : 'native-hook', createdAt: time, updatedAt: time,
-  content, title: id, status: 'complete', ...(kind === 'user_message' ? { authorHuman: true } : kind === 'tool_call' ? { toolName: 'Read', toolInput: content } : {})
+  content, title: id, status: 'complete', ...(kind === 'user_message' ? { authorHuman: true, publicContent: 'confirmed' } : kind === 'tool_call' ? { toolName: 'Read', toolInput: content } : {})
 })
 let root: Root, host: HTMLDivElement
 let items: AgentTimelineItem[], page: AgentSessionHistoryPage
@@ -31,8 +31,18 @@ beforeEach(() => {
   host = document.createElement('div'); document.body.append(host); root = createClientUiRoot(host)
 })
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); getSelection()?.removeAllRanges(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
-async function render(nativePage: AgentSessionHistoryPage | null = page, routeHostId = 'local') { await act(async () => root.render(<ActivityView sessionId={sid} executionHostId={routeHostId} capability="complete-events"
-  items={items} timelineSnapshot={{agentSessionId:sid,sourceHostId:'local',revision:1,items}} nativeHistoryPage={nativePage} />)) }
+// These cases inspect original body order and Range, after the reader opens each
+// submitted original. Default compact send rows are covered by submission presentation.
+async function openCapturedInputs() {
+  for (const original of host.querySelectorAll<HTMLDetailsElement>('.conversation-submission-record > .message-disclosure:not([open])')) {
+    await act(async () => { original.open = true; original.dispatchEvent(new Event('toggle')) })
+  }
+}
+async function render(nativePage: AgentSessionHistoryPage | null = page, routeHostId = 'local') {
+  await act(async () => root.render(<ActivityView sessionId={sid} executionHostId={routeHostId} capability="complete-events"
+    items={items} timelineSnapshot={{agentSessionId:sid,sourceHostId:'local',revision:1,items}} nativeHistoryPage={nativePage} />))
+  await openCapturedInputs()
+}
 function bodies() { return [...host.querySelectorAll('.log-turn__body')].map(node => node.textContent) }
 
 it.each(['codex', 'claude'])('keeps complete captured bodies with null, empty and nonempty %s native pages', async providerId => {
@@ -131,6 +141,7 @@ it('keeps an expanded native process Range mounted while a captured input would 
   expect(host.textContent).toContain('保留选区')
   expect(host.querySelector('[data-message-id="new-input"]')).toBeNull()
   await act(async () => { getSelection()!.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) })
+  await openCapturedInputs()
   expect(host.querySelectorAll('[data-native-record-ids]')).toHaveLength(2)
   expect(bodies()).toContain('new-input')
   expect(host.querySelector('[data-native-step-id="process-b"] .wf-tool-row')?.getAttribute('aria-expanded')).toBe('true')
