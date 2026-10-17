@@ -38,7 +38,7 @@ async function compileRenderer() {
   const { build } = await import(pathToFileURL(require.resolve('vite')).href)
   await build({ configFile: false, logLevel: 'error', root: fixture, worker: { format: 'es' },
     define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, esbuild: { jsx: 'automatic' },
-    resolve: { alias: aliases, conditions: ['browser', 'import', 'production', 'default'], dedupe: ['react', 'react-dom'] },
+    resolve: { alias: [...aliases, { find: '@agentmux/identity', replacement: join(root, 'packages/identity/src/index.ts') }], conditions: ['browser', 'import', 'production', 'default'], dedupe: ['react', 'react-dom'] },
     build: { outDir: compiled, emptyOutDir: true, target: 'esnext', minify: false },
     plugins: [{ name: 'collaboration-source-and-unrelated-paint', enforce: 'pre', async transform(source, id) {
       if (!id.startsWith(root + sep) || id.includes('/node_modules/') || id.includes('?') || !/\.(tsx?|css|mjs)$/.test(id)) return
