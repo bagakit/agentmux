@@ -474,6 +474,8 @@ export type BrowserToolbarConfig = {
 export type BrowserConfig = {
   /** Absence keeps automatic memory release enabled; manual safe actions are independent. */
   automaticMemoryRelease?: boolean
+  /** Optional presentation-only preferences; absence uses shared effective defaults. */
+  agentControl?: Partial<import('./browser-agent-control').BrowserAgentControlPreferences>
   /** Optional start-page presentation consumed by a caller that opts into it. */
   startPage?: Partial<import('./browser-start-page').BrowserStartPageConfig>
   /**

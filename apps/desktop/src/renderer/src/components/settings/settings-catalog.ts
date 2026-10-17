@@ -6,6 +6,7 @@ import type { SettingsPageId } from './settings-modules'
 
 export const SETTINGS_GROUPS = [
   { id: 'preferences', title: 'Preferences', overviewColumn: 'left' },
+  { id: 'browser-use', title: 'Browser use', overviewColumn: 'left' },
   { id: 'message-tool', title: 'Message Tool', overviewColumn: 'left' },
   { id: 'remote', title: 'Remote', overviewColumn: 'left' },
   { id: 'conversation-channels', title: 'Conversation Channels', overviewColumn: 'left' },

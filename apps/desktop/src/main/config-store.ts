@@ -40,6 +40,7 @@ import { FOCUS_RECENT_ACTIVITY_HOURS, FOCUS_REPLY_LINES, FOCUS_PREVIEW_TRIGGERS,
 import { NOTE_CONTENT_WIDTHS, validNoteFontSize } from '../shared/notes-preferences.js'
 import { GOALS_VIEW_IDS } from '../shared/goals-preferences.js'
 import { BROWSER_START_PAGE_TITLE_LIMIT, BROWSER_START_PAGE_SUBTITLE_LIMIT, validBrowserStartPageText, validBrowserStartPageImage } from '../shared/browser-start-page.js'
+import { BROWSER_AGENT_CONTROL_LIMITS as EFFECT_LIMITS, BROWSER_AGENT_GLOW_BLENDS, BROWSER_AGENT_GLOW_ANIMATIONS, validBrowserAgentGlowColor } from '../shared/browser-agent-control.js'
 
 export const toolkitToolSchema = z.unknown().transform((value, context) => {
   try {
@@ -166,6 +167,24 @@ const appearanceSchema = z.object({
     .transform((value) => (value === undefined ? undefined : clampTerminalFontSize(value)))
 }).strict()
 const browserSchema = z.object({
+  agentControl: z.object({
+    showCursor: z.boolean().optional(),
+    showCursorLabel: z.boolean().optional(),
+    showDiscussion: z.boolean().optional(),
+    pointerTween: z.boolean().optional(),
+    pointerDurationMs: z.number().int().min(EFFECT_LIMITS.pointerDurationMs.min).max(EFFECT_LIMITS.pointerDurationMs.max).optional(),
+    clickRipple: z.boolean().optional(),
+    clickDurationMs: z.number().int().min(EFFECT_LIMITS.clickDurationMs.min).max(EFFECT_LIMITS.clickDurationMs.max).optional(),
+    clickRadius: z.number().int().min(EFFECT_LIMITS.clickRadius.min).max(EFFECT_LIMITS.clickRadius.max).optional(),
+    glowEnabled: z.boolean().optional(),
+    glowColor: z.string().refine(validBrowserAgentGlowColor).optional(),
+    glowBlend: z.enum(BROWSER_AGENT_GLOW_BLENDS).optional(),
+    glowAnimation: z.enum(BROWSER_AGENT_GLOW_ANIMATIONS).optional(),
+    glowWidth: z.number().int().min(EFFECT_LIMITS.glowWidth.min).max(EFFECT_LIMITS.glowWidth.max).optional(),
+    glowSoftness: z.number().int().min(EFFECT_LIMITS.glowSoftness.min).max(EFFECT_LIMITS.glowSoftness.max).optional(),
+    glowOpacity: z.number().min(EFFECT_LIMITS.glowOpacity.min).max(EFFECT_LIMITS.glowOpacity.max).optional(),
+    glowDurationMs: z.number().int().min(EFFECT_LIMITS.glowDurationMs.min).max(EFFECT_LIMITS.glowDurationMs.max).optional()
+  }).strict().optional(),
   startPage: z.object({
     title: z.string().refine(value => validBrowserStartPageText(value, BROWSER_START_PAGE_TITLE_LIMIT)).optional(),
     subtitle: z.string().refine(value => validBrowserStartPageText(value, BROWSER_START_PAGE_SUBTITLE_LIMIT)).optional(),
