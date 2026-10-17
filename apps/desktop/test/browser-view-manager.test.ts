@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { BrowserRecoveryPreviewStore } from '../src/main/browser-recovery-preview.js'
 
 function png(width = 2, height = 3): Buffer {
   const value = Buffer.alloc(33)
@@ -221,14 +222,14 @@ const profiles: BrowserProfileResolver = {
 const privateLedgerRoots: string[] = []
 afterEach(() => { for (const path of privateLedgerRoots.splice(0)) rmSync(path, { recursive: true, force: true }) })
 
-function browserManager(window: ReturnType<typeof fakeWindow>['window']): BrowserViewManager {
+function browserManager(window: ReturnType<typeof fakeWindow>['window'], recoveryPreviews?: BrowserRecoveryPreviewStore): BrowserViewManager {
   // ref 账本指向一个临时路径：本文件判的是 view 生命周期，不判持久化。给真路径会让这些用例
   // 往用户的 userData 里写文件。
   const root = mkdtempSync(join(tmpdir(), 'agentmux-bvm-'))
   privateLedgerRoots.push(root)
   return new BrowserViewManager(window as never, profiles, new BrowserRefLedgerStore(
     join(root, 'ref-ledger.json')
-  ), appLinkHost())
+  ), appLinkHost(), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, recoveryPreviews)
 }
 
 /**
@@ -2366,4 +2367,77 @@ it('keeps a later native favicon when an earlier reload declaration check return
     await new Promise(resolve => setTimeout(resolve, 0))
     expect((await manager.create('late-declaration-icon', 'about:blank')).faviconDataUrl).toBe(later)
   } finally { manager.close('late-declaration-icon') }
+})
+
+describe('Browser recovery preview producer', () => {
+  const image = () => ({ isEmpty: () => false, getSize: () => ({ width: 1600, height: 1000 }),
+    resize: vi.fn(() => ({ toJPEG: vi.fn(() => Buffer.from([0xff, 0xd8, 0xff, 0xd9])) })) })
+  function setup() {
+    const root = mkdtempSync(join(tmpdir(), 'amx-preview-source-')); privateLedgerRoots.push(root)
+    const store = new BrowserRecoveryPreviewStore(join(root, 'previews'))
+    const record = vi.spyOn(store, 'record'), fixture = fakeWindow(), manager = browserManager(fixture.window, store)
+    return { store, record, fixture, manager }
+  }
+  const bounds = { x: 1, y: 2, width: 800, height: 500 }
+
+  it('samples only the related visible loaded document once, with a bounded native image and original scope', async () => {
+    const { store, record, fixture, manager } = setup()
+    try {
+      const browser = await manager.create('appearance', 'https://preview.invalid/original', 'workspace', 'personal')
+      const contents = fixture.children[0]!.webContents, pixels = image()
+      contents.capturePageImpl = async () => pixels as never
+      expect(contents.capturePage).not.toHaveBeenCalled()
+      manager.setBounds(browser.id, bounds)
+      await vi.waitFor(() => expect(record).toHaveBeenCalledOnce())
+      await store.flush()
+      expect(pixels.resize).toHaveBeenCalledExactlyOnceWith({ width: 480, height: 300, quality: 'good' })
+      const scope = manager.recoveryPreviewScope(browser.id)!
+      expect(scope).toEqual({ browserId: browser.id, workspaceId: 'workspace', mode: 'normal', profileId: 'personal' })
+      expect(await store.read(scope)).toMatchObject({ status: 'available', preview: {
+        url: 'https://preview.invalid/original', title: 'preview.invalid', navigationId: browser.navigationId,
+        image: { width: 480, height: 300 }
+      } })
+      contents.emit('did-stop-loading'); manager.setBounds(browser.id, { ...bounds, x: 10 })
+      expect(contents.capturePage).toHaveBeenCalledOnce()
+      manager.setBounds(browser.id, null)
+      expect(manager.recoveryPreviewScope(browser.id)).toEqual(scope)
+      await manager.release(browser.id, browser.navigationId)
+      expect(manager.recoveryPreviewScope(browser.id)).toEqual(scope)
+      expect(await store.read(scope)).toMatchObject({ status: 'available' })
+    } finally { manager.dispose(); await store.dispose() }
+  })
+
+  it.each(['navigation', 'frame', 'hidden', 'close'] as const)('does not publish stale pixels after %s changes during native capture', async change => {
+    const { store, record, fixture, manager } = setup()
+    const browser = await manager.create('stale-appearance', 'https://preview.invalid/old', 'workspace', 'personal')
+    const contents = fixture.children[0]!.webContents
+    let finish!: (value: never) => void
+    contents.capturePageImpl = () => new Promise(resolve => { finish = resolve })
+    manager.setBounds(browser.id, bounds)
+    expect(contents.capturePage).toHaveBeenCalledOnce()
+    const scope = manager.recoveryPreviewScope(browser.id)!
+    if (change === 'navigation') {
+      contents.loading = true
+      contents.emitDetails('did-start-navigation', { url: 'https://preview.invalid/later', isMainFrame: true, isSameDocument: false })
+    } else if (change === 'frame') (contents.mainFrame as any).frameToken = 'replacement-document'
+    else if (change === 'hidden') manager.setBounds(browser.id, null)
+    else await manager.close(browser.id)
+    finish(image() as never)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(record).not.toHaveBeenCalled()
+    expect(await store.read(scope)).toEqual({ status: 'missing' })
+    manager.dispose(); await store.dispose()
+  })
+
+  it('keeps native capture failure local while the original Browser and retry remain usable', async () => {
+    const { store, fixture, manager } = setup(), log = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const browser = await manager.create('capture-unavailable', 'https://preview.invalid/page')
+      fixture.children[0]!.webContents.capturePageImpl = async () => { throw new Error('Fixture compositor unavailable') }
+      manager.setBounds(browser.id, bounds)
+      await vi.waitFor(() => expect(log).toHaveBeenCalled())
+      expect(manager.targets().find(target => target.id === browser.id)).toMatchObject({ status: 'ready' })
+      expect((await manager.reload(browser.id)).error).toBeNull()
+    } finally { manager.dispose(); await store.dispose(); log.mockRestore() }
+  })
 })
