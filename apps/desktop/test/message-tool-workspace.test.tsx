@@ -221,6 +221,55 @@ it('keeps the three message paths distinct from Automation and retains its unsav
   expect(dom.draft()).toBe('Keep my draft')
 })
 
+it('stops the calendar display clock when Automation is hidden while retaining both unsaved forms', async () => {
+  const started = vi.spyOn(globalThis, 'setInterval'), cleared = vi.spyOn(globalThis, 'clearInterval')
+  const displayClocks = () => started.mock.calls.flatMap(([, delay], index) => delay === 1000 ? [started.mock.results[index]!.value] : [])
+  const activeClocks = () => displayClocks().filter(timer => !cleared.mock.calls.some(([stopped]) => stopped === timer))
+  const disposed = vi.fn(), observer = vi.spyOn(api.schedule, 'onChanged').mockReturnValue(disposed)
+  vi.spyOn(api.schedule, 'list').mockResolvedValue({ schedules: [], executionScope: 'connected-host' })
+  const create = vi.spyOn(api.schedule, 'create'), startProgress = vi.spyOn(api.continuousProgress, 'create')
+  await open()
+  expect(activeClocks()).toHaveLength(0)
+  await click(panel().querySelector('[aria-label="Automation"]'))
+  expect(activeClocks()).toHaveLength(1)
+  const firstClock = activeClocks()[0], subscriptions = observer.mock.calls.length
+  expect(subscriptions).toBe(1)
+  const intervalDetails = panel().querySelector<HTMLDetailsElement>('[data-progress-details="interval"]')!
+  const calendarDetails = panel().querySelector<HTMLDetailsElement>('.schedule-create')!
+  await act(async () => {
+    for (const details of [intervalDetails, calendarDetails]) { details.open = true; details.dispatchEvent(new Event('toggle')) }
+  })
+  const interval = intervalDetails.querySelector<HTMLInputElement>('input[type="number"]')!
+  const message = calendarDetails.querySelector<HTMLTextAreaElement>('[aria-label="Arranged message"]')!
+  await type(interval, '23'); await type(message, 'Retain this unsaved calendar message')
+  const retained = () => {
+    expect(panel().querySelector('[data-progress-details="interval"] input[type="number"]')).toBe(interval)
+    expect(panel().querySelector('[aria-label="Arranged message"]')).toBe(message)
+    expect(interval.value).toBe('23'); expect(message.value).toBe('Retain this unsaved calendar message')
+    expect(intervalDetails.open).toBe(true); expect(calendarDetails.open).toBe(true)
+  }
+  await click(panel().querySelector('[aria-label="Back to messages"]'))
+  expect(cleared).toHaveBeenCalledWith(firstClock)
+  expect(activeClocks()).toHaveLength(0); retained()
+  await click(panel().querySelector('[aria-label="Automation"]'))
+  expect(activeClocks()).toHaveLength(1); retained()
+  const reopenedClock = activeClocks()[0]
+  const toggle = async (state: string) => {
+    const event = new Event('toggle'); Object.defineProperty(event, 'newState', { value: state })
+    await act(async () => panel().dispatchEvent(event)); await flush()
+  }
+  await toggle('closed')
+  expect(cleared).toHaveBeenCalledWith(reopenedClock)
+  expect(activeClocks()).toHaveLength(0); retained()
+  await toggle('open')
+  expect(activeClocks()).toHaveLength(0)
+  await click(panel().querySelector('[aria-label="Automation"]'))
+  expect(activeClocks()).toHaveLength(1); retained()
+  expect(observer).toHaveBeenCalledTimes(subscriptions); expect(disposed).not.toHaveBeenCalled()
+  expect(create).not.toHaveBeenCalled(); expect(startProgress).not.toHaveBeenCalled()
+  expect(dom.draft()).toBe('Keep my draft')
+})
+
 it('lets IME own Escape and returns ordinary mailbox Escape to its original trigger', async () => {
   const hide = vi.fn(function (this: HTMLElement) { const event = new Event('toggle'); Object.defineProperty(event, 'newState', { value: 'closed' }); this.dispatchEvent(event) })
   Object.defineProperty(HTMLElement.prototype, 'hidePopover', { configurable: true, value: hide })

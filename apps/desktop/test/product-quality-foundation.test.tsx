@@ -51,11 +51,11 @@ it('mounts persistent truthful three-fact summary and explicit complete details 
   const input = document.createElement('textarea'); document.body.append(input); input.focus()
   try {
     await act(async () => root.render(<ServiceWindowNotice {...{ notice, summary }} />))
-    const body = container.querySelector('.service-window__body')!
+    const body = container.querySelector('.surface-state__heading')!
     expect(body.textContent).toContain(summary.step)
     expect(body.textContent).toContain(summary.mode)
     expect(body.textContent).toContain(summary.restore)
-    const details = container.querySelector<HTMLDetailsElement>('.service-window__details')
+    const details = container.querySelector<HTMLDetailsElement>('.surface-state__details')
     expect(details).not.toBeNull()
     expect(details!.open).toBe(false)
     expect(details!.textContent).toContain(notice.notice.step)
@@ -96,7 +96,7 @@ it('keeps each original Terminal capability distinct, unknown honest and complet
     viewportSync={notice} continuation={notice} />))
   const notices = [...container.querySelectorAll('.service-window')]
   expect(notices).toHaveLength(4)
-  expect(notices.map(n => n.querySelector('.service-window__step')!.textContent)).toEqual([
+  expect(notices.map(n => n.querySelector('.surface-state__title')!.textContent)).toEqual([
     notice.notice.step, unknown.notice.step, notice.notice.step, notice.notice.step
   ])
   expect(notices[1]!.querySelector('.service-window__mode')!.textContent).toBe(unknown.notice.mode)
@@ -104,7 +104,7 @@ it('keeps each original Terminal capability distinct, unknown honest and complet
   expect(notices.map(n => n.getAttribute('role'))).toEqual(['status', 'status', 'status', 'status'])
   expect(container.querySelectorAll('.service-disclosure__trigger')).toHaveLength(1)
   expect(container.querySelectorAll('.service-disclosure__close')).toHaveLength(2)
-  expect(container.querySelectorAll('.service-window__details')).toHaveLength(0)
+  expect(container.querySelectorAll('.surface-state__details')).toHaveLength(0)
   await act(async () => container.querySelector<HTMLButtonElement>('.service-disclosure > .service-disclosure__close')!.click())
   expect(container.querySelector('.service-disclosure__summary')).toBeNull()
   expect(container.querySelector('.service-disclosure__trigger')).not.toBeNull()
@@ -125,7 +125,7 @@ it('keeps the real Progress form mounted through page switching and mailbox clos
   expect(container.querySelectorAll('.composer__mailbox')).toHaveLength(1)
   expect(container.querySelector('.composer > .continuous-progress-control')).toBeNull()
   await openProgress()
-  const form = container.querySelector<HTMLFormElement>('.continuous-progress-control form')!
+  const form = container.querySelector<HTMLFormElement>('[data-progress-details="interval"] form')!
   expect(form).not.toBeNull()
   const textarea = form.querySelector<HTMLTextAreaElement>('textarea')!
   await act(async () => {
@@ -134,7 +134,7 @@ it('keeps the real Progress form mounted through page switching and mailbox clos
     container.querySelector<HTMLButtonElement>('[aria-label="Back to messages"]')!.click()
   })
   await mailboxToggle('closed'); await openProgress()
-  expect(container.querySelector('.continuous-progress-control form')).toBe(form)
+  expect(container.querySelector('[data-progress-details="interval"] form')).toBe(form)
   expect(textarea.value).toBe('Kept continuation draft')
   expect(observe).toHaveBeenCalledTimes(1)
   expect(list).toHaveBeenCalledTimes(1)
@@ -148,7 +148,7 @@ it('global and lifecycle consumers retain their complete three facts, polite ARI
     displacedAgentSessionIds: [], error: null, errorNoticeContext: undefined })
   await act(async () => root.render(<GlobalSystemNotices />))
   const global = container.querySelector('.service-window')!
-  expect(global.querySelector('.service-window__step')!.textContent).toBe('Local shell environment is incomplete')
+  expect(global.querySelector('.surface-state__title')!.textContent).toBe('Local shell environment is incomplete')
   expect(global.querySelector('.service-window__mode')!.textContent).toBe('Original shell cause')
   expect(global.querySelector('.service-window__restore')!.textContent).toContain('Check your shell startup scripts')
   expect(global.getAttribute('aria-live')).toBe('polite')
@@ -158,10 +158,10 @@ it('global and lifecycle consumers retain their complete three facts, polite ARI
   await act(async () => root.render(<AgentLifecycleFeedback owner={{ subject: session.control }} retry={retry} />))
   const expected = agentLifecycleFailureNotice(failure, 'Original lifecycle cause')
   const local = container.querySelector('.service-window')!
-  expect(local.querySelector('.service-window__step')!.textContent).toBe(expected.notice.step)
+  expect(local.querySelector('.surface-state__title')!.textContent).toBe(expected.notice.step)
   expect(local.querySelector('.service-window__mode')!.textContent).toContain('current availability is not confirmed')
   expect(local.querySelector('.service-window__mode')!.textContent).toContain('last observed running')
-  const original = local.querySelector('.service-window__body')!
+  const original = local.querySelector('.surface-state__heading')!
   expect(original.textContent).toContain(expected.notice.step)
   expect(original.textContent).toContain(expected.notice.mode)
   expect(original.textContent).toContain(expected.notice.restore)

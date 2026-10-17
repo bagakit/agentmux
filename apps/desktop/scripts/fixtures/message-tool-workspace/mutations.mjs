@@ -15,6 +15,8 @@ export const mutations = [
     before: 'presented={progressVisible || progressPresented}', after: 'presented={progressVisible}' },
   { name: 'automation-reading-discarded', file: 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
     before: 'setSelection(origin?.selection ?? null)', after: 'setSelection(null)' },
+  { name: 'automation-visibility-disconnected', file: 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
+    before: 'presented={progressVisible || progressPresented} visible={progressVisible}', after: 'presented={progressVisible || progressPresented}' },
   { name: 'filtered-queue-neighbors-lost', file: 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
     before: 'queued={pending} query={query}', after: 'queued={pending.filter(entry => !query || entry.text.includes(query))} query={query}' }
 ]
