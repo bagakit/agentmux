@@ -139,6 +139,12 @@ Retain that complete input: changing name on the same operationId conflicts. Nei
 the saved Mote source. Sync still uses the saved Mote name and does not accept name. Saved identity,
 application creation, profile write and Mote default save retain separate original receipts.
 
+For original request evidence use connection enrollment/setup inspect --operation-id ID --request-trace.
+This separate local selection returns bounded ordered journal steps and next; copy that cursor with
+--trace-cursor on the same original operation. It does not load QR/account/secret material or retry.
+network:null means HTTP details were not recorded. Enrollment claimed/settled describe its journal,
+not live dispatch or request success. Do not combine trace selection with private inspection/configuration views.
+
 Begin with connection ls/inspect; configuration, a successful test, an enabled
 binding, ingress and actual outgoing delivery are distinct facts. Keep the exact connection,
 binding and source identities rather than matching human labels or assuming transport trust.
