@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { mkdtemp, mkdir, readFile, realpath, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -12,7 +12,7 @@ const coreEntry = process.env.AGENTMUX_TEST_REFERENCE_CORE ?? new URL('../dist/i
 const core = await import(/* @vite-ignore */ coreEntry) as typeof import('../src/index.js')
 const { WebSocket } = createRequire(import.meta.url)('ws') as typeof import('ws')
 const cleanups: Array<() => Promise<void>> = []
-afterEach(async () => { const errors = []; for (const cleanup of cleanups.splice(0).reverse()) try { await cleanup() } catch (error) { errors.push(error) }; vi.unstubAllEnvs(); if (errors.length) throw new AggregateError(errors, 'Exact private Runtime cleanup failed') })
+afterEach(async () => { vi.restoreAllMocks(); const errors = []; for (const cleanup of cleanups.splice(0).reverse()) try { await cleanup() } catch (error) { errors.push(error) }; vi.unstubAllEnvs(); if (errors.length) throw new AggregateError(errors, 'Exact private Runtime cleanup failed') })
 async function eventually<T>(read: () => Promise<T>, accept: (value: T) => boolean) {
   let value!: T
   const origin = new Error('Unconfirmed private fixture condition: ' + read.toString()).stack
@@ -57,7 +57,7 @@ async function fixture(lostAcknowledgement = false) {
   const provider = core.defineAgentProvider({ catalog: { id: 'proof-reference-native', label: 'Private reference queue protocol', executable: process.execPath,
     expectedProcess: 'node', promptDelivery: 'positional-argv', readySignal: { kind: 'foreground-process', expectedProcess: 'node' }, hookStrategy: { kind: 'none' },
     resumeStrategy: { kind: 'provider-native', locator: 'session-id' }, acpStrategy: { kind: 'none' }, capabilities: { terminal: true, timeline: 'unavailable', permission: 'none', providerResume: true, replyCorrelation: 'none' } },
-    buildArgs: (_prompt, args) => [...args], buildResumeArgs: (_nativeId, _prompt, args) => [...args], hook: { rules: [] },
+    buildArgs: (_prompt, args) => [...args], buildResumeArgs: (_nativeId, _transcript, _prompt, args) => [...args], hook: { rules: [] },
     async prepareManagedLaunch(plan, lifecycleOperationId) {
       const token = randomBytes(32).toString('hex'), actorId = randomUUID(); tokens.set(actorId, token)
       return { plan: { ...plan, env: { ...plan.env, REFERENCE_ACTOR_TOKEN: token } }, nativeActor: { protocolId: 'reference-private-v1', actorId, lifecycleOperationId, token, launch: { command: plan.command, args: plan.args } } }
@@ -116,12 +116,13 @@ async function fixture(lostAcknowledgement = false) {
   cleanups.push(() => server.stop())
   const sender = await identity('sender'), recipient = await identity('recipient'), recipientStored = (await store.readMetadata('recipient'))!
   const control = await connection(recipient.endpoint, recipientStored.nativeActor!.token); cleanups.push(async () => control.dispose())
-  const cliEnvironment = { ...env, AGENTMUX_RPC_ENDPOINT: 'unix://' + server.path, AGENTMUX_AGENT_SESSION_ID: 'sender', AGENTMUX_AGENT_CAPABILITY: sender.capability }
+  const userEnvironment = { ...env, AGENTMUX_RPC_ENDPOINT: 'unix://' + server.path }
+  const cliEnvironment = { ...userEnvironment, AGENTMUX_AGENT_SESSION_ID: 'sender', AGENTMUX_AGENT_CAPABILITY: sender.capability }
   const cli = async (args: string[]) => { const result = await runCompiledObjectCli(args, cliEnvironment); expect(result.code, result.stdout + result.stderr).toBe(0); return JSON.parse(result.stdout).result }
   const requests = async () => (await readFile(join(root, 'recipient-requests.jsonl'), 'utf8').catch(() => '')).split('\n').filter(Boolean).map(line => JSON.parse(line))
-  return { root, store, cli, requests, control, events, session: sessions[1]!, identity,
+  return { root, store, cli, managedCli: (args: string[]) => runCompiledObjectCli(args, cliEnvironment), humanCli: (args: string[]) => runCompiledObjectCli(args, userEnvironment), requests, control, events, session: sessions[1]!, identity,
     get client() { return client }, queue: new core.DurableAgentMuxMessageQueue(join(root, 'messages.ndjson')),
-    async reopen() { await client.dispose(); client = new core.AgentMuxClient({ store: new core.AgentMuxFileAgentSessionStore(store.path), providers: [provider] }); await client.connect() } }
+    async reopen(beforeConnect?: (value: typeof client) => void) { await client.dispose(); client = new core.AgentMuxClient({ store: new core.AgentMuxFileAgentSessionStore(store.path), providers: [provider] }); client.onEvent(event => { if (event.type === 'agent-error') events.push(event) }); beforeConnect?.(client); await client.connect() } }
 }
 async function stopPid(pid: number) {
   const alive = () => { try { process.kill(pid, 0); return true } catch (error: any) { if (error.code === 'ESRCH') return false; throw error } }
@@ -177,14 +178,23 @@ describe('A2A references through actual private Runtime and public CLI', () => {
     await h.control.call('proof/complete')
     const original = await eventually(() => h.client.readMessage({ messageId: 'unknown-original' }), value => value?.notification?.state === 'unconfirmed')
     const requests = await h.requests(); expect(requests).toHaveLength(1)
-    await h.reopen(); await h.control.call('proof/complete')
+    const observed: Array<Awaited<ReturnType<typeof h.queue.prepareNotification>>> = []
+    await h.reopen(client => {
+      // Observe the actual restored journal call; retain every original decision.
+      const queue = (client as unknown as { messageQueue: typeof h.queue }).messageQueue
+      const prepare = queue.prepareNotification.bind(queue)
+      vi.spyOn(queue, 'prepareNotification').mockImplementation(async input => { const notice = await prepare(input); observed.push(notice); return notice })
+    })
+    await eventually(async () => observed, notices => notices.some(notice => notice?.notificationId === original?.notification?.notificationId))
+    expect(observed.length).toBeGreaterThan(0)
     const retained = await h.client.readMessage({ messageId: 'unknown-original' })
     expect(retained?.notification?.key).toEqual(original?.notification?.key); expect(retained?.notification?.state).toBe('unconfirmed'); expect(await h.requests()).toHaveLength(1)
     await h.cli(['agent', 'send', '--to-session', 'recipient', '--message-id', 'independent-new', '--text', 'A distinct later original request'])
-    await h.control.call('proof/working'); await h.control.call('proof/complete')
-    const independent = await eventually(() => h.client.readMessage({ messageId: 'independent-new' }), value => value?.notification?.state === 'unconfirmed')
+    // No additional turn, completion or input-byte change creates this opportunity.
+    const independent = await eventually(() => h.client.readMessage({ messageId: 'independent-new' }), value => value?.notification?.state === 'unconfirmed').catch(async error => { throw new Error(String(error) + '\n' + JSON.stringify({ status: await h.client.statusAgent('recipient'), original: await h.client.readMessage({ messageId: 'independent-new' }), notices: observed, requests: await h.requests(), errors: h.events })) })
     expect(independent?.notification?.key).not.toEqual(original?.notification?.key)
     const bothRequests = await h.requests(); expect(bothRequests).toHaveLength(2)
+    expect(bothRequests[1].nativeStatus).toEqual(bothRequests[0].nativeStatus)
     expect(bothRequests[1].params.input[0].text).toContain('msg-id="independent-new"')
     expect(bothRequests[1].params.input[0].text).not.toContain('msg-id="unknown-original"')
     expect((await h.client.readMessage({ messageId: 'unknown-original' }))?.notification?.key).toEqual(original?.notification?.key)
@@ -194,4 +204,83 @@ describe('A2A references through actual private Runtime and public CLI', () => {
     expect(after.run.runId).toBe(before.run.runId); expect(after.run.pid).toBe(before.run.pid); expect(after.run.acceptedInputBytes).toBeGreaterThan(before.run.acceptedInputBytes)
     expect(await eventually(() => readFile(join(h.root, 'recipient-terminal.bytes'), 'utf8').catch(() => ''), value => value.includes('Original manual input remains usable'))).toContain('Original manual input remains usable')
   }, 45_000)
+
+  it('refuses an ordinary prompt ACK as proof of a distinct user notification', async () => {
+    const h = await fixture(), operationId = 'ordinary-ack', prompt = 'Original user prompt owns its input key'
+    await h.cli(['agent', 'send', '--to-session', 'recipient', '--message-id', 'needs-explicit-notice', '--text', 'An original Inbox request'])
+    await h.client.submitAgentPrompt({ agentSessionId: 'recipient', operationId, expectedRun: h.session.run,
+      admissionIntent: { kind: 'manual-actor' }, execution: 'immediate', prompt, authorHuman: true })
+    const key = { kind: 'prompt' as const, agentSessionId: 'recipient', expectedRun: h.session.run, submissionId: operationId }
+    const original = await eventually(() => h.client.inspectAgentPromptSubmission(key), value => value?.admission?.acknowledged === true || value?.terminalPromptSubmission?.submit.acknowledged === true)
+    expect(await eventually(() => readFile(join(h.root, 'recipient-terminal.bytes'), 'utf8').catch(() => ''), value => value.includes(prompt))).toContain(prompt)
+    const refused = await h.humanCli(['message', 'notify', '--host', 'local', '--message-id', 'needs-explicit-notice', '--operation-id', operationId])
+    expect(refused.code).not.toBe(0)
+    expect(refused.stdout + refused.stderr).toContain('AGENT_PROMPT_OPERATION_CONFLICT')
+    expect(await h.client.inspectAgentPromptSubmission(key)).toEqual(original)
+    expect(await h.queue.readNotification(operationId)).toBeNull()
+    expect((await h.client.readMessage({ messageId: 'needs-explicit-notice' }))?.notification).toEqual({ state: 'pending' })
+    expect(await h.requests()).toEqual([])
+  }, 45_000)
+
+  it('reserves pending notification keys while preserving distinct human input', async () => {
+    const h = await fixture(), notificationId = 'reserved-notice'
+    await h.cli(['agent', 'send', '--to-session', 'recipient', '--message-id', 'reserved-original', '--text', 'Keep the selected original Inbox body'])
+    // A durable user action interrupted before dispatch owns this exact input key.
+    const notice = await h.queue.prepareNotification({ notificationId, agentSessionId: 'recipient', condition: { expectedRun: h.session.run, afterSubmissionId: null }, messageIds: ['reserved-original'] })
+    expect(notice?.state).toBe('pending')
+    const before = await h.client.statusAgent('recipient')
+    await expect(h.client.submitAgentPrompt({ agentSessionId: 'recipient', operationId: notificationId, expectedRun: h.session.run,
+      admissionIntent: { kind: 'manual-actor' }, execution: 'immediate', prompt: 'Unrelated input must not take the notice key', authorHuman: true })).rejects.toMatchObject({ code: 'AGENT_PROMPT_OPERATION_CONFLICT' })
+    expect(await h.queue.readNotification(notificationId)).toEqual(notice)
+    expect(await h.client.inspectAgentPromptSubmission(notice!.key)).toBeNull()
+    expect((await h.client.statusAgent('recipient')).run.acceptedInputBytes).toBe(before.run.acceptedInputBytes)
+    const prompt = 'A distinct user input remains available'
+    await h.client.submitAgentPrompt({ agentSessionId: 'recipient', operationId: 'independent-user-input', expectedRun: h.session.run,
+      admissionIntent: { kind: 'manual-actor' }, execution: 'immediate', prompt, authorHuman: true })
+    expect(await eventually(() => readFile(join(h.root, 'recipient-terminal.bytes'), 'utf8').catch(() => ''), value => value.includes(prompt))).toContain(prompt)
+    expect(await h.queue.readNotification(notificationId)).toEqual(notice)
+    expect(await h.requests()).toEqual([])
+  }, 45_000)
+
+
+  it('submits trusted user reference notifications through flags and JSON without granting managed steer', async () => {
+    const h = await fixture(), originals = ['user-single', 'user-batch-left', 'user-batch-right']
+    for (const id of originals) await h.cli(['agent', 'send', '--to-session', 'recipient', '--message-id', id, '--text', 'Private original body ' + id])
+    const batch = await h.queue.check({ consumerId: 'recipient', readerRun: h.session.run, limit: 3 }, async () => {})
+    const before = await h.client.statusAgent('recipient')
+    const singleArgs = ['message', 'notify', '--host', 'local', '--message-id', originals[0]!, '--operation-id', 'user-single-notice']
+    const single = await h.humanCli(singleArgs)
+    expect(single.code, single.stdout + single.stderr).toBe(0)
+    const singleResult = JSON.parse(single.stdout).result
+    expect(singleResult.notification).toMatchObject({ notificationId: 'user-single-notice', messageIds: [originals[0]], mode: 'steer', state: 'submitted' })
+    const inputPath = join(h.root, 'user-notification.json')
+    await writeFile(inputPath, JSON.stringify({ hostId: 'local', operationId: 'user-batch-notice', messageIds: originals.slice(1) }))
+    const batchArgs = ['message', 'notify', '--input', inputPath], merged = await h.humanCli(batchArgs)
+    expect(merged.code, merged.stdout + merged.stderr).toBe(0)
+    const mergedResult = JSON.parse(merged.stdout).result
+    expect(mergedResult.notification).toMatchObject({ notificationId: 'user-batch-notice', messageIds: originals.slice(1), mode: 'steer', state: 'submitted' })
+    for (const result of [singleResult, mergedResult]) {
+      const { notification, input } = result
+      expect(input.admission.intent.prompt).toBe(notification.wire)
+      expect(input.admission.intent.message).toEqual({ a2aNotificationId: notification.notificationId, systemContext: notification.wire })
+      expect(input.admission.acknowledged || input.terminalPromptSubmission?.submit.acknowledged).toBe(true)
+      expect(notification.wire).toContain('read-via="message --skill"'); expect(notification.wire).not.toContain('Private original body')
+    }
+    const written = await eventually(() => readFile(join(h.root, 'recipient-terminal.bytes'), 'utf8').catch(() => ''), value => value.includes(mergedResult.notification.wire))
+    for (const result of [singleResult, mergedResult]) expect(written.split(result.notification.wire)).toHaveLength(2)
+    const accepted = await h.client.statusAgent('recipient')
+    expect(accepted.run.acceptedInputBytes).toBeGreaterThan(before.run.acceptedInputBytes)
+    expect((await h.humanCli(singleArgs)).code).toBe(0); expect((await h.humanCli(batchArgs)).code).toBe(0)
+    expect((await h.client.statusAgent('recipient')).run.acceptedInputBytes).toBe(accepted.run.acceptedInputBytes)
+    expect(await readFile(join(h.root, 'recipient-terminal.bytes'), 'utf8')).toBe(written)
+    const refused = await h.managedCli(singleArgs)
+    expect(refused.code).not.toBe(0); expect(refused.stdout + refused.stderr).toContain('PERMISSION_DENIED')
+    expect(await h.requests()).toEqual([])
+    const retained = await h.queue.check({ consumerId: 'recipient', readerRun: h.session.run, limit: 3 }, async () => {})
+    expect(retained.generation).toBe(batch.generation); expect(retained.readerRun).toEqual(batch.readerRun)
+    expect(retained.messages.map(message => message.envelope)).toEqual(batch.messages.map(message => message.envelope))
+    for (const id of originals) expect(await h.client.readMessage({ messageId: id })).toMatchObject({ envelope: { body: 'Private original body ' + id }, delivery: { state: 'queued' }, notification: { state: 'submitted' } })
+    expect((await h.queue.readJournal()).some(record => record.kind === 'consumer-ack')).toBe(false)
+  }, 45_000)
+
 })
