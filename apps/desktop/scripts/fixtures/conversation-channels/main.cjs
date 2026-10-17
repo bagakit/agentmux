@@ -25,7 +25,7 @@ app.whenReady().then(async () => {
       if (narrow) {
         await click('[aria-label="Settings section"]')
         await until('document.querySelector("[role=menu]")')
-        await click('js:[...document.querySelectorAll("[role=menuitemradio]")].find(node=>node.getAttribute("data-state")!=="disabled"&&node.textContent.trim()===' + JSON.stringify({ 'inapp-conversation': 'InApp Conversation', mobile: 'Mobile', lark: 'Lark' }[id]) + ')')
+        await click('js:[...document.querySelectorAll("[role=menuitemradio]")].find(node=>node.getAttribute("data-state")!=="disabled"&&node.textContent.trim()===' + JSON.stringify({ 'inapp-conversation': 'InApp', mobile: 'Mobile', lark: 'Lark' }[id]) + ')')
       } else await click('nav [data-settings-target="' + id + '"]')
       await until('document.querySelector("[data-settings-pane=' + id + ']:not([hidden])")')
     }
