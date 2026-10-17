@@ -28,7 +28,7 @@ function fixedCommit(message = 'feat(core)!: Read fixed commit details\n\nKeep t
   return {
     kind: 'ready', snapshot: { ...scope, commitOid, parentOid: firstParent },
     commit: { oid: commitOid, parents: [firstParent, secondParent], subject: 'Not a substitute for the full message', message,
-      author: 'Ada Example', committer: 'Commit Robot', authoredAt: fixtureTime(-60_000), committedAt: fixtureTime(), refs: [] },
+      author: 'Ada Example', authorEmail: '', committer: 'Commit Robot', authoredAt: fixtureTime(-60_000), committedAt: fixtureTime(), refs: [] },
     entries: [
       { path: 'src/added.ts', origPath: null, change: 'added' },
       { path: 'src/another.ts', origPath: null, change: 'added' },
@@ -79,14 +79,12 @@ it('mounts the real details with a clean subject, restrained format, unchanged b
   await renderDetails(fixedCommit(message))
   expect(host.querySelector('h2')?.textContent).toBe('Read fixed commit details')
   expect([...host.querySelectorAll('.git-workbench__message-format > span')].map(item => item.textContent)).toEqual(['feat', 'core', 'Breaking change'])
-  expect(host.querySelector('.git-workbench__message-body')?.textContent).toBe(message.slice(message.indexOf('\n') + 1))
+  expect(host.querySelector('.git-workbench__message-body')).toBeNull()
   const raw = host.querySelector<HTMLPreElement>('.git-workbench__message')!
   const disclosure = host.querySelector<HTMLDetailsElement>('.git-workbench__raw-message')!
   expect(raw.textContent).toBe(message)
-  expect(disclosure.open).toBe(false)
-  expect(disclosure.querySelector('summary')?.textContent).toBe('Full commit message')
-  await act(async () => disclosure.querySelector('summary')!.click())
   expect(disclosure.open).toBe(true)
+  expect(disclosure.querySelector('summary')?.textContent).toBe('Full commit message')
   const range = document.createRange(); range.selectNodeContents(raw)
   window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range)
   expect(window.getSelection()!.toString()).toBe(message)
@@ -133,7 +131,7 @@ it('leaves a footer-only breaking declaration readable without inventing a subje
   const message = 'fix(core): Keep compatibility\n\nBREAKING CHANGE: follow the migration notes.\n'
   await renderDetails(fixedCommit(message))
   expect(host.querySelector('.git-workbench__message-breaking')).toBeNull()
-  expect(host.querySelector('.git-workbench__message-body')?.textContent).toContain('BREAKING CHANGE: follow the migration notes.')
+  expect(host.querySelector('.git-workbench__message')?.textContent).toContain('BREAKING CHANGE: follow the migration notes.')
   expect(host.querySelector('.git-workbench__message')?.textContent).toBe(message)
 })
 
@@ -145,7 +143,7 @@ it('keeps a missing first line distinct from an empty message and resets raw dis
   const empty = fixedCommit(''); empty.commit.oid = 'd'.repeat(40); empty.snapshot.commitOid = empty.commit.oid
   await renderDetails(empty)
   expect(host.querySelector('h2')?.textContent).toBe('(No commit message)')
-  expect(host.querySelector<HTMLDetailsElement>('details')!.open).toBe(false)
+  expect(host.querySelector<HTMLDetailsElement>('details')!.open).toBe(true)
 })
 
 it('shows recorded author and committer differences, real timestamps and every reference without identity or network lookup', async () => {
