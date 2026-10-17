@@ -1808,6 +1808,7 @@ export type AgentMuxDesktopApi = {
     decision(id: string, input: Omit<import('@agentmux/demand').DemandDecision, 'id' | 'createdAt'>): Promise<import('@agentmux/demand').DemandReceipt>
   }
   ui: {
+    readLoadedIdentity(): Promise<import('./client-observation').DesktopLoadedIdentity>
     /** Original Main appearance captured once before this document's first paint. */
     initialTheme: import('./theme-bootstrap').ThemeBootstrap | null
     nativeBrowserVisibility(document?: import('./workbench-windows').WorkbenchWindowDocument): Promise<import('./native-overlay').NativeBrowserVisibility>

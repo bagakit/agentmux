@@ -364,6 +364,7 @@ const api: AgentMuxPreloadApi = {
     decision: (id, input) => ipcRenderer.invoke('demands:decision', id, input)
   },
   ui: {
+    readLoadedIdentity: () => ipcRenderer.invoke('ui:readLoadedIdentity'),
     initialTheme,
     workbenchWindows: {
       ready: () => ipcRenderer.invoke('ui:workbenchWindowsReady'),

@@ -88,6 +88,8 @@ export const desktopClientObservationSchema = z.object({
 }).strict()
 export type DesktopPackageIdentity = z.infer<typeof desktopPackageIdentitySchema>
 export type DesktopLoadedRenderer = z.infer<typeof desktopLoadedRendererSchema>
+/** Loaded artifact facts only; no workbench, filesystem or serving Runtime observation. */
+export type DesktopLoadedIdentity = { package: DesktopPackageIdentity | null; renderer: DesktopLoadedRenderer | null }
 export type DesktopWorkbenchObservation = z.infer<typeof desktopWorkbenchObservationSchema>
 export type DesktopWorkbenchStorageObservation = z.infer<typeof desktopWorkbenchStorageObservationSchema>
 export type DesktopClientObservation = z.infer<typeof desktopClientObservationSchema>
