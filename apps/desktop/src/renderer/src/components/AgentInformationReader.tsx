@@ -96,7 +96,7 @@ const HeldReading = memo(function HeldReading({ request, enabled, available, fol
         {copyReply ? <ReadingCopy text={reply.reading?.text ?? reply.text} label={reply.source === 'Saved conversation excerpt' ? 'Copy saved excerpt' : reply.reading?.truncated === false ? 'Copy current reply' : 'Copy reply excerpt'} identity={JSON.stringify([context.runId, request.sourceKey])} /> : null}
       </small>
       <ReadingBody reading={context.recap.reading ?? { text: context.recap.text, truncated: true }} active={enabled} />
-    </section> : !context.detailIsRecap && context.detailKind !== 'service' ? <p className="focus-context-hover__activity">{context.detail}</p> : null}
+    </section> : !context.detailIsRecap && context.detailKind !== 'service' && context.detailKind !== 'observation' ? <p className="focus-context-hover__activity">{context.detail}</p> : null}
     {context.kind === 'agent' ? <AgentInputRecap request={request} enabled={enabled} available={available} follow={follow} /> : null}
   </>
 })
