@@ -38,6 +38,7 @@ import { mailboxMessages, mailboxMessageKey as messageKey, isMailboxUserMessage 
 
 const ThemeObjectNotificationsIcon = semanticIconComponent('object.notifications')
 const ThemeActionRepeatIcon = semanticIconComponent('action.repeat')
+const ThemeObjectAutomationIcon = semanticIconComponent('object.automation')
 const ThemeActionPauseIcon = semanticIconComponent('action.pause')
 const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
 const ThemeObjectMailIcon = semanticIconComponent('object.mail')
@@ -629,7 +630,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       </div>
       {progressSession && folder !== 'progress' ? <button ref={automationEntry} type="button" className="composer-mailbox__automation" aria-label="Automation"
         aria-describedby={`${id}-automation-status`} onClick={openAutomation}>
-        <ThemeActionRepeatIcon size={14} aria-hidden="true" /><span>Automation</span>
+        <ThemeObjectAutomationIcon size={14} aria-hidden="true" /><span>Automation</span>
         <span id={`${id}-automation-status`} className="composer-mailbox__automation-status" data-status={progressStatus}>
           {progressStatus === 'active' ? 'Running' : progressStatus === 'paused' ? 'Paused' : progressStatus === 'inactive' ? 'Not enabled' : 'Status unknown'}</span>
         <span aria-hidden="true">›</span>

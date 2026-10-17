@@ -6,6 +6,7 @@ export const SEMANTIC_ICON_CATALOG = {
   'action.fork-conversation': { label: 'Fork current conversation', glyph: 'git-fork' },
   'object.relationships': { label: 'Note relationships', glyph: 'topology-nodes' },
   'object.collaboration': { label: 'Recorded Agent collaboration', glyph: 'message-history' },
+  'object.automation': { label: 'Automation', glyph: 'workflow' },
   'action.move-to-draft': { label: 'Move queued message to draft', glyph: 'draft-return' },
   'navigation.space': { label: 'Space workbench', glyph: 'layers' },
   'navigation.focus': { label: 'Focus workface', glyph: 'focus' },
