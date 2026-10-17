@@ -16,7 +16,8 @@ import type { NoteInlineLinkAttributes, NoteLinkTarget } from '@agentmux/core/no
 import { bindNoteWikiLink, noteInlineLinkContent, noteWikiTextTokens } from '@agentmux/client-ui/note/note-wikilinks'
 import { useNoteWikiCompletion } from './NoteWikiCompletion'
 import { serializeNoteDocument, type NoteInclude, type NoteBlockReference, type NoteBlockTarget, type NoteDocument } from '../../../shared/note-document'
-import { noteProvenanceAttributes } from '@agentmux/client-ui/note/note-provenance'
+import { NoteBlockAuthors } from '@agentmux/client-ui/components/NoteBlockAuthors'
+import { useAppStore } from '../store'
 import { noteBacklinks, resolveNoteBlock, type NoteKnowledge, type NoteSource } from '../lib/note-knowledge'
 import { useNoteSourceTitle } from '../lib/note-source-name'
 import { MONACO_THEME_ID } from '../lib/monaco-theme'
@@ -84,7 +85,7 @@ function NoteReferenceView({ node }: NodeViewProps) {
   const cycle = context.trail.includes(key)
   const writtenSources = context.knowledge.sources.filter(source => source.note.noteId === reference.target.noteId)
   const navigationSource = writtenSources.length === 1 ? writtenSources[0]! : resolution.status === 'resolved' ? resolution.source : undefined
-  return <NodeViewWrapper className={`note-reference note-reference--${reference.mode}`} contentEditable={false} {...noteProvenanceAttributes(node.attrs.provenance)}>
+  return <NodeViewWrapper className={`note-reference note-reference--${reference.mode}`} contentEditable={false}>
     <div className="note-reference__source"><ThemeObjectLinkIcon size={13} /><span>{reference.mode === 'embed' ? 'Embedded block' : 'Block reference'}</span>
       {resolution.status === 'resolved' ? <button type="button" className="note-text-button" title={`${(navigationSource ?? resolution.source).location.workspaceId} · ${(navigationSource ?? resolution.source).location.path} · ${reference.target.blockId}`} aria-label={`Open original block in ${(navigationSource ?? resolution.source).location.workspaceId} · ${(navigationSource ?? resolution.source).location.path} · ${reference.target.blockId}`}
         onClick={() => context.onOpen(navigationSource ?? resolution.source, reference.target.blockId)}>{context.sourceName(navigationSource ?? resolution.source) ?? (navigationSource ?? resolution.source).location.path}<ThemeObjectLinkIcon size={12} /></button> : null}
@@ -99,6 +100,7 @@ function NoteReferenceView({ node }: NodeViewProps) {
 
 export function ReadOnlyBlock({ content }: { content: JSONContent }) {
   const ownerDocument = useWorkbenchDocument()
+  const agentNames = useAppStore(state => state.agentNames)
   // A list item requires its schema container even when its subtree is the requested projection.
   const doc = useMemo(() => content.type === 'doc' ? content : ({ type: 'doc', content: [content.type === 'listItem' ? { type: 'bulletList', content: [content] } : content] }), [content])
   const context = useContext(ReferenceContext), openLink = useRef(context?.onOpenLink); openLink.current = context?.onOpenLink
@@ -112,7 +114,7 @@ export function ReadOnlyBlock({ content }: { content: JSONContent }) {
     return () => { sync.destroy(); if (snapshot.current === sync) snapshot.current = null }
   }, [editor])
   useEffect(() => { snapshot.current?.update(doc) }, [editor, doc])
-  return <>{issue && <p role="status">{issue} <button type="button" onClick={() => snapshot.current?.retry()}>Retry incoming update</button></p>}<EditorContent editor={editor} /></>
+  return <>{issue && <p role="status">{issue} <button type="button" onClick={() => snapshot.current?.retry()}>Retry incoming update</button></p>}<EditorContent editor={editor} /><NoteBlockAuthors editor={editor} agentNames={agentNames} /></>
 }
 
 export type NoteEditorHandle = { onNavigationReady?: (listener: () => void) => () => void; editor: Editor; focusBlock: (blockId: string, focus?: boolean, reveal?: boolean) => boolean; bindLink: (link: NoteLinkOpenRequest, target: NoteLinkTarget) => boolean }
@@ -124,6 +126,7 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
   onKeepDisplayedDraft?: ((displayedRaw: string, incomingRaw: string) => void) | undefined
 }) {
   const ownerDocument = useWorkbenchDocument()
+  const agentNames = useAppStore(state => state.agentNames)
   const shared = useContext(NoteSharedContext), sharedRef = useRef(shared); sharedRef.current = shared
   const [beside, setBeside] = useState<{ position: number; top: number } | null>(null)
   const [copyFeedback, setCopyFeedback] = useState<{ position: number; message: string; accepted: boolean } | null>(null)
@@ -395,7 +398,7 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
         void shared.copyBlock(editor, position).then(() => setCopyFeedback({ position, accepted: true, message: 'Copied · paste to share' })).catch(error => { const message = error instanceof Error ? error.message : String(error); setCopyFeedback({ position, accepted: false, message }); props.current.onIssue(message) })
       }}>{copyFeedback?.accepted ? <ThemeStatusCopiedIcon size={13} /> : <ThemeObjectLinkIcon size={13} />}</button>}
       {copyFeedback && <span className="note-block-copy-feedback" role="status" data-failed={!copyFeedback.accepted || undefined} style={{ top: beside?.top ?? 0 }}>{copyFeedback.message}</span>}
-      <EditorContent editor={editor} />
+      <EditorContent editor={editor} /><NoteBlockAuthors editor={editor} agentNames={agentNames} />
     </div>
     {wiki.popup}
     {showBacklinks ? <details className="note-backlinks"><summary>Backlinks{selected && backlinks.length ? ` · ${backlinks.length}` : ''}<span>{knowledge.scope === 'complete' ? 'Confirmed scope' : 'Partial scope'}</span></summary>

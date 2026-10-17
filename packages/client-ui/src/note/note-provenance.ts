@@ -49,16 +49,3 @@ export function attributeNoteBlocks(before: NoteDocument | null, candidate: Note
   })
   return next
 }
-
-export function noteProvenanceDescription(value: unknown): string {
-  const provenance = readNoteBlockProvenance(value)
-  const describe = (entry: NoteBlockAuthorship | null | undefined) => entry
-    ? `${entry.actor.kind === 'agent' ? 'Agent ' : entry.actor.kind === 'device' ? 'Person on device ' : 'Person '}${entry.actor.id} · ${new Date(entry.at).toLocaleString()}` : 'Unknown'
-  return `Created: ${describe(provenance?.created)}\nLast edited: ${describe(provenance?.lastEdited)}`
-}
-
-export function noteProvenanceAttributes(value: unknown): Record<string, string> {
-  const provenance = readNoteBlockProvenance(value)
-  const agents = [...new Set([provenance?.created?.actor, provenance?.lastEdited?.actor].filter(actor => actor?.kind === 'agent').map(actor => actor!.id))]
-  return provenance ? { title: noteProvenanceDescription(provenance), ...(agents.length ? { 'data-note-agent-author': agents.map(id => 'Agent ' + id).join(' · ') } : {}) } : {}
-}

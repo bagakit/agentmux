@@ -1,7 +1,6 @@
 import { Extension, Mark, Node, getSchema } from '@tiptap/core'
 import UniqueID from '@tiptap/extension-unique-id'
 import StarterKit from '@tiptap/starter-kit'
-import { noteProvenanceAttributes } from './note-provenance.js'
 
 export const NOTE_BLOCK_TYPES = ['paragraph', 'heading', 'codeBlock', 'listItem', 'blockquote', 'horizontalRule', 'blockReference', 'noteInclude'] as const
 
@@ -11,7 +10,7 @@ const BlockIdentity = Extension.create({
     return [{ types: [...NOTE_BLOCK_TYPES], attributes: { blockId: { default: null,
       parseHTML: element => element.getAttribute('data-block-id'),
       renderHTML: attrs => attrs.blockId ? { 'data-block-id': attrs.blockId } : {}
-    }, provenance: { default: null, parseHTML: () => null, renderHTML: attrs => noteProvenanceAttributes(attrs.provenance) } } }]
+    }, provenance: { default: null, parseHTML: () => null, renderHTML: () => ({}) } } }]
   }
 })
 
