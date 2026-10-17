@@ -4,7 +4,7 @@ import { readFileSync, existsSync, appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 const root = resolve(import.meta.dirname, '../../..')
 const sources: Record<string, string> = process.env.AGENTMUX_PERFORMANCE_SOURCES ? JSON.parse(readFileSync(process.env.AGENTMUX_PERFORMANCE_SOURCES, 'utf8')) : {}
-const aliases = ['core', 'relay', 'demand', 'client-ui', 'identity'].flatMap(pkg => {
+const aliases = ['core', 'relay', 'demand', 'client-ui', 'identity', 'diagnostic-evidence'].flatMap(pkg => {
  const manifest = JSON.parse(readFileSync(resolve(root, `packages/${pkg}/package.json`), 'utf8'))
  return Object.entries(manifest.exports).flatMap(([key, value]) => {
   const target = typeof value === 'string' ? value : (value as { types?: string; import?: string }).types ?? (value as { import?: string }).import
