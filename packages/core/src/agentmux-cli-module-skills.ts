@@ -37,6 +37,9 @@ Load only the journey needed now:
 - Create an Agent: amux agent open --help for configured Executor discovery and opening workflow.
 - Saved native conversations or resume: amux agent native --help.
 - Original output, input mailbox, history or conversation: use that agent action's --help.
+- Authorized unmanaged prompt intake: agent input submit preserves the original prompt key;
+  Browser context is declared data. It cannot establish Human authorship or Host capture.
+  Managed Agents must use agent send; public prompt intake cannot bypass A2A attribution.
 - Recovery or lifecycle: use the exact action's --help; interrupt, stop, resume and reopen differ.
 Before opening or rearranging a workface, read amux space --skill for placement and focus.
 Readers keep their original source/cursor and release only their reader, not the Agent;

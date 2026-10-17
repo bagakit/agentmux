@@ -72,6 +72,7 @@ import { DurableAgentMuxMessageQueue, readRoutedInputMailbox, appendGlobalMessag
   recordGlobalMessageDeliveryIssue } from './agent-global-message-queue.js'
 import { assertAgentMessageRouteIntent, type AgentMessageRoute } from './agent-message-route.js'
 import { agentPromptCondition, validateAgentPromptCondition, validateAgentPromptInputKey, validateAgentPromptAdmissionIntent } from './agent-prompt-condition.js'
+import { AGENT_INPUT_SUBMIT_FIELDS, parseAgentInputSubmit } from './agent-input-submit.js'
 import { parseAgentInputMailboxRead } from './agent-input-mailbox.js'
 import { validateAgentInputControlId, validateAgentInputWaitRef, type AgentInputSubmissionReceipt, type AgentInputCallContext } from './agent-input-wait.js'
 import { diagnoseAgentMux } from './doctor.js'
@@ -101,7 +102,7 @@ export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   'restartAgent' | 'inspectAgentRestart' | 'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentSessions' | 'readAgentSessionHistory' | 'readAgentConversation' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
   'ensureAgentContinuity' | 'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
   'inspectAgentInteractionOperation' | 'respondAgentInteraction' | 'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'notifyMessages' | 'inspectAgentPromptSubmission' | 'startDiscussion' | 'checkDeliveries' |
-  'readAgentInputMailbox' | 'inspectAgentInput' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' |
+  'submitAgentPrompt' | 'readAgentInputMailbox' | 'inspectAgentInput' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readMessage' | 'listMessages' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' | 'readHostNativeAgentHistory' | 'readHostNativeAgentHistoryResource' |
   'readDeliveryAttempt' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'listHostExecutors' | 'configureHostExecutor'> & {
@@ -267,6 +268,7 @@ const NATIVE_FIELDS = {
   'agent.reopen': ['agentSessionId', 'expectedRetiredAt', 'operationId', 'args', 'env', 'commandOverride', 'launchOptions', 'cols', 'rows'], 'agent.reopen.check': ['agentSessionId', 'expectedRetiredAt', 'operationId'], 'agent.role.ls': ['workspacePath'],
   'agent.role.register': ['role', 'providerId'], 'agent.role.resolve': ['role', 'workspacePath'],
   'agent.input.ls': ['hostId', 'agentSessionId', 'limit', 'cursor', 'maxBytes'],
+  'agent.input.submit': AGENT_INPUT_SUBMIT_FIELDS,
   'agent.input.inspect': ['key', 'kind', 'originalControlOperationId'],
   'agent.input.stop': ['ref', 'cancelOperationId'], 'agent.input.rejoin': ['ref'],
   'agent.send': ['target', 'text', 'messageId', 'threadId', 'correlationId', 'replyTo', 'operationId', 'execution', 'expectedRun', 'sourceChannel', 'admissionIntent'],
@@ -1716,6 +1718,24 @@ export class AgentMuxRpcService {
               kind: p.kind as Parameters<AgentMuxClient['recordDispatchEvent']>[0]['kind'] })
         } break
       }
+      case 'agent.input.submit': {
+        if (context.caller !== undefined) throw new AgentMuxError('Managed Agents must use agent.send for cross-Session input; agent.input.submit cannot impersonate a local prompt author.', 'MANAGED_AGENT_PROMPT_FORBIDDEN')
+        if (!context.principal || !['user', 'device'].includes(context.principal.kind)) throw new AgentMuxError('Prompt intake requires its transport-approved local user or device. No input was submitted.', 'CONTROL_PERMISSION_DENIED')
+        const input = parseAgentInputSubmit(p), scope = await this.owner(input.agentSessionId)
+        if (scope.agentSessionId !== input.agentSessionId) throw new AgentMuxError('Prompt intake requires the exact original Session ID.', 'INVALID_AGENT_PROMPT')
+        if (scope.client.forwardRpc) return await scope.client.forwardRpc('agent.input.submit', input, await this.inputForwardContext(context)) as AgentMuxRpcResult<M>
+        if (scope.hostId === 'local' && this.ports.callOriginalCore) return await this.ports.callOriginalCore(scope.hostId, 'agent.input.submit', input, await this.inputForwardContext(context)) as AgentMuxRpcResult<M>
+        const device = this.ports.operationSource?.(context)
+        const receipt = await scope.client.submitAgentPrompt({ ...input, sourceChannel: context.transport === 'unix' ? 'cli' : 'api',
+          ...(device ? { sourceDevice: normalizeOperationDevice(device) } : {}) }, this.inputCallContext(context))
+        const key = { kind: 'prompt' as const, agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, submissionId: input.operationId }
+        const observed = await scope.client.inspectAgentInput({ key }) ?? receipt
+        // One receipt owns its observed admission. Independent reads can straddle
+        // dispatch and would produce an internally contradictory public packet.
+        const record = observed ? observed.admission : await scope.client.inspectAgentPromptSubmission(key)
+        result = { key, record, ...(observed ? { input: observed } : {}) }
+        break
+      }
       case 'agent.input.ls': {
         const hostId = rpcString(p.hostId, 'Original input Host ID')
         if (caller && caller.hostId !== hostId || !caller && (!context.principal || !['user', 'device'].includes(context.principal.kind))) {
@@ -1765,8 +1785,8 @@ export class AgentMuxRpcService {
         })()
         if (caller && caller.client !== client) throw new AgentMuxError('Input inspection cannot cross semantic owners.', 'CONTROL_PERMISSION_DENIED')
         if (client.forwardRpc) return await client.forwardRpc('agent.input.inspect', { key }, context) as AgentMuxRpcResult<M>
-        const original = await client.inspectAgentPromptSubmission(key)
         const input = await client.inspectAgentInput({ key }, caller ? { agentSessionId: caller.agentSessionId, capability: caller.capability } : undefined)
+        const original = input ? input.admission : await client.inspectAgentPromptSubmission(key)
         if (!input && caller && caller.agentSessionId !== key.agentSessionId && original?.admission?.intent?.message?.authorAgentSessionId !== caller.agentSessionId) throw new AgentMuxError('Only an original input participant can inspect its claim.', 'CONTROL_PERMISSION_DENIED')
         result = { record: original, ...(input ? { input } : {}) }; break
       }

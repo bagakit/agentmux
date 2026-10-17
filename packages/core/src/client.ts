@@ -69,6 +69,7 @@ import { judgeReconnectFlap, shouldClearFlapLedger } from './ctxmux-reconnect-bu
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { composeAgentLaunchPrompt, composeAgentPrompt, composeAgentResumePrompt } from './agent-outbound-message.js'
+import { parseBrowserInputContext, parseBrowserInputContextSource } from './browser-input-context.js'
 import { hashAgentCapability, issueAgentCapability, resolveCapabilityAuthor, type AgentCapabilityBinding } from './agent-capability.js'
 import { planDiscussion } from './agent-discussion.js'
 import { agentSpawnContext, type AgentMuxSpawnCreator } from './agent-spawn.js'
@@ -372,6 +373,7 @@ type AgentMuxAgentResumeOperationInput = Omit<AgentMuxAgentResumeInput, 'prompt'
 }
 
 type AgentMuxAgentPromptContent = {
+  inputContext?: import('./browser-input-context.js').BrowserInputContext
   /** Explicit choice for this message only: the previous turn may still be running. */
   allowUncertainTurn?: boolean
   execution?: import('./types.js').AgentPromptExecution
@@ -405,7 +407,7 @@ export type AgentMuxAgentPromptInput = AgentMuxAgentPromptContent & (
 
 /** Explicit manual answer to an exact Provider-owned asynchronous question record. */
 export type AgentMuxSessionQuestionReplyInput = AgentPromptCondition & Omit<AgentMuxAgentPromptContent,
-  'prompt' | 'agentMuxNote' | 'execution' | 'expectedCompletionId' | 'expectedInputByte' | 'expectedFutureIntent'> & {
+  'prompt' | 'agentMuxNote' | 'inputContext' | 'execution' | 'expectedCompletionId' | 'expectedInputByte' | 'expectedFutureIntent'> & {
   source: AgentSessionHistorySource
   turnId: string
   recordId: string
@@ -1022,7 +1024,7 @@ export class AgentMuxClient {
         const updated = await this.updateExactAgentSession(session.agentSessionId, session.run, change)
         this.publishSession(updated); return updated
       },
-      perform: (input, intentOperationId) => this.performAgentContinuity(input, intentOperationId),
+      perform: (input, intentOperationId, inputContextSource) => this.performAgentContinuity(input, intentOperationId, inputContextSource),
       failed: (agentSessionId, error, run) => this.publisher.publish({ type: 'agent-error', agentSessionId,
         code: 'AGENT_CONTINUITY_OBSERVATION_UNCONFIRMED', message: `Original recovery observation is unconfirmed. The Session, Run and input are retained. ${error instanceof Error ? error.message : String(error)}`,
         evidence: { source: 'agentmux', observedAt: Date.now(), ...(run ? { run } : {}) } })
@@ -4896,12 +4898,14 @@ export class AgentMuxClient {
   // a worse answer to "why did my recovery not happen". Guarded by the concurrency tests in
   // agent-session-continuity.test.ts; deleting this makes them red on the reason, not on the count.
   async ensureAgentContinuity(
-    input: AgentMuxAgentContinuityInput
+    input: AgentMuxAgentContinuityInput, context?: Pick<AgentInputCallContext, 'inputContextSource'>
   ): Promise<AgentMuxAgentContinuityResult> {
+    input = { ...input, expectedRun: { ...input.expectedRun }, ...(input.input ? { input: { ...input.input,
+      ...(input.input.inputContext === undefined ? {} : { inputContext: parseBrowserInputContext(input.input.inputContext) }) } } : {}) }
     this.requireConnected()
     safeId(input.agentSessionId, 'Agent Session id')
     safeId(input.operationId, 'Agent continuity operation id')
-    const result = await this.continuitySupervisor.run(input)
+    const result = await this.continuitySupervisor.run(input, context?.inputContextSource === undefined ? undefined : parseBrowserInputContextSource(context.inputContextSource))
     if (result.kind === 'resumed' || result.kind === 'reattachable') this.continuityInputs.track(this.registry.get(input.agentSessionId))
     return result
   }
@@ -5863,7 +5867,7 @@ export class AgentMuxClient {
     return restored
   }
 
-  private async performAgentContinuity(input: AgentMuxAgentContinuityInput, intentOperationId?: string): Promise<AgentMuxAgentContinuityResult> {
+  private async performAgentContinuity(input: AgentMuxAgentContinuityInput, intentOperationId?: string, inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource): Promise<AgentMuxAgentContinuityResult> {
     // A different public Core owner may already have frozen or completed this
     // same operation. Admit only this exact current binding, never a registry catalog.
     const epoch = this.connectionEpoch
@@ -5918,9 +5922,9 @@ export class AgentMuxClient {
     if (intentOperationId && prior?.intentOperationId !== intentOperationId) throw new AgentMuxError('The original supervised attempt changed.', 'AGENT_CONTINUITY_SUPERSEDED')
     if (input.input) {
       if (input.trigger !== 'input' || typeof input.input.prompt !== 'string' ||
-          !composeAgentPrompt(input.input.prompt, input.input.agentMuxNote).text.trim()) throw new AgentMuxError('A new continuity input needs its original input trigger and nonempty content.', 'INVALID_AGENT_PROMPT')
+          !composeAgentPrompt(input.input.prompt, input.input.agentMuxNote, input.input.inputContext).text.trim()) throw new AgentMuxError('A new continuity input needs its original input trigger and nonempty content.', 'INVALID_AGENT_PROMPT')
       safeId(input.input.submissionId, 'Original continuity input id')
-      assertAgentPromptSize(composeAgentPrompt(input.input.prompt, input.input.agentMuxNote).text)
+      assertAgentPromptSize(composeAgentPrompt(input.input.prompt, input.input.agentMuxNote, input.input.inputContext).text)
       if (prior && (!prior.launchInput || !isDeepStrictEqual(prior.launchInput.input, input.input))) throw new AgentMuxError(
         'This original recovery operation has another frozen input. Its original body and Run are kept.', 'AGENT_PROMPT_OPERATION_CONFLICT')
     }
@@ -5959,7 +5963,7 @@ export class AgentMuxClient {
     // Freeze a new authored input even when Runtime/provider observation has not
     // succeeded yet. A retry reads this same request rather than inventing one.
     if (!prior && input.input && current) receipt.launchInput = prepareContinuityLaunchInput(receipt,
-      this.providers.get(current.providerId).catalog, agentLifecycleOperationIdentity('resume', input.agentSessionId, input.operationId), input.input)!
+      this.providers.get(current.providerId).catalog, agentLifecycleOperationIdentity('resume', input.agentSessionId, input.operationId), input.input, inputContextSource)!
     receipt.observedAt = now
     delete receipt.nextActionAt
     const originalLaunch = (value: AgentMuxStoredAgentSession) => {
@@ -6154,7 +6158,7 @@ export class AgentMuxClient {
         if (!prior?.recoveryInputs) receipt.recoveryInputs = { reminder: '',
           continuation: receipt.trigger !== 'input' && receipt.interruptedWorking && policy.continuationEnabled ? DEFAULT_AGENT_CONTINUITY_CONTINUATION : '' }
         const launchInput = prior?.launchInput ?? prepareContinuityLaunchInput(receipt, catalog!,
-          agentLifecycleOperationIdentity('resume', input.agentSessionId, input.operationId), input.input)
+          agentLifecycleOperationIdentity('resume', input.agentSessionId, input.operationId), input.input, inputContextSource)
         if (launchInput) receipt.launchInput = launchInput
         const originalPrompt = receipt.launchInput?.prompt ?? ''
         const { plan } = this.buildResumePlan(current, input, originalPrompt || undefined)
@@ -6332,7 +6336,8 @@ export class AgentMuxClient {
   async submitAgentPrompt(input: AgentMuxAgentPromptInput, context?: AgentInputCallContext): Promise<void | AgentInputSubmissionReceipt> {
     context?.requestSignal?.throwIfAborted()
     const authority = this.inputCallAuthority(undefined, context)
-    input = { ...input, expectedRun: { ...input.expectedRun },
+    if ('inputContextSource' in input || 'promptWire' in input) throw new AgentMuxError('Input producer facts come from the original Host, not prompt arguments.', 'INVALID_AGENT_PROMPT')
+    input = { ...input, ...(input.inputContext === undefined ? {} : { inputContext: parseBrowserInputContext(input.inputContext) }), expectedRun: { ...input.expectedRun },
       ...(input.admissionIntent ? { admissionIntent: { ...input.admissionIntent } } : {}) } as AgentMuxAgentPromptInput
     if ('authorAgentSessionId' in input) throw new AgentMuxError('Agent authors must use submitAgentMessage.', 'MESSAGE_ENVELOPE_REQUIRED')
     const launched = await this.inspectAgentPromptSubmission({ kind: 'prompt', agentSessionId: input.agentSessionId,
@@ -6349,6 +6354,10 @@ export class AgentMuxClient {
       if (saved || !await this.inspectAgentPromptSubmission(key)) {
         const intent: AgentInputJournalIntent = { key, admissionIntent: validateAgentPromptAdmissionIntent({ ...input.admissionIntent, expectedRun: input.expectedRun }) as AgentInputJournalIntent['admissionIntent'], execution: 'immediate',
           environment: this.inputSavedEnvironment(session), source: { kind: 'prompt', prompt: input.prompt,
+            ...(input.inputContext === undefined ? {} : { inputContext: input.inputContext,
+              inputContextSource: authority?.inputContextSource ?? 'caller-declared',
+              promptWire: saved?.intent.source.kind === 'prompt' && saved.intent.source.promptWire !== undefined
+                ? saved.intent.source.promptWire : composeAgentPrompt(input.prompt, input.agentMuxNote, input.inputContext).text }),
             ...(input.agentMuxNote === undefined ? {} : { agentMuxNote: input.agentMuxNote }),
             ...(input.authorHuman === undefined ? {} : { authorHuman: input.authorHuman }),
             sourceChannel: normalizeMessageChannel(input.sourceChannel ?? 'api'),
@@ -6381,7 +6390,7 @@ export class AgentMuxClient {
     validateAgentPromptAdmissionIntent({ ...input.admissionIntent, expectedRun: input.expectedRun })
     safeId(input.operationId, 'Agent prompt operation id')
     if (typeof input.prompt !== 'string' || !input.prompt.trim() && !input.agentMuxNote?.trim()) throw new AgentMuxError('Agent prompt cannot be empty.', 'INVALID_AGENT_PROMPT')
-    assertAgentPromptSize(composeAgentPrompt(input.prompt, input.agentMuxNote).text)
+    assertAgentPromptSize(composeAgentPrompt(input.prompt, input.agentMuxNote, input.inputContext).text)
   }
 
   private inputSavedEnvironment(session: Pick<AgentMuxAgentSession, 'providerId' | 'executorId' | 'nativeHandle' | 'nativeBinding'>): AgentInputSavedEnvironment {
@@ -6543,9 +6552,10 @@ export class AgentMuxClient {
   }> {
     const source = intent.source
     if (source.kind === 'prompt') {
-      const { kind: _producer, ...content } = source
+      const { kind: _producer, promptWire: _wire, inputContextSource, ...content } = source
       return { input: { ...content, agentSessionId: intent.key.agentSessionId, expectedRun: intent.key.expectedRun,
-        operationId: agentPromptInputId(intent.key), admissionIntent: (() => { const { expectedRun: _run, ...target } = intent.admissionIntent; return target })(), execution: 'immediate' } }
+        operationId: agentPromptInputId(intent.key), admissionIntent: (() => { const { expectedRun: _run, ...target } = intent.admissionIntent; return target })(), execution: 'immediate' },
+        ...(inputContextSource ? { authority: { inputContextSource, assertCurrent: async () => {} } } : {}) }
     }
     const original = await this.messageQueue.readByOperationId(source.originalControlOperationId)
     if (!original) throw new AgentMuxError('Original message input is unknown.', 'AGENT_INPUT_NOT_FOUND')
@@ -6578,11 +6588,12 @@ export class AgentMuxClient {
   private inputCallAuthority(authority?: import('./prompt-submission.js').AgentPromptInputAuthority,
     context?: AgentInputCallContext): import('./prompt-submission.js').AgentPromptInputAuthority | undefined {
     const assertCurrent = context?.assertCurrent
-    if (!assertCurrent) return authority
+    const inputContextSource = authority?.inputContextSource ?? (context?.inputContextSource === undefined ? undefined : parseBrowserInputContextSource(context.inputContextSource))
+    if (!assertCurrent && inputContextSource === undefined) return authority
     return { ...authority, assertCurrent: async () => {
       await authority?.assertCurrent()
-      await assertCurrent()
-    } }
+      await assertCurrent?.()
+    }, ...(inputContextSource === undefined ? {} : { inputContextSource }) }
   }
 
   private async acceptInputWaiting(ref: AgentInputWaitRef, input: AgentMuxAgentPromptInput, producer: 'prompt' | 'message',
@@ -6914,19 +6925,24 @@ export class AgentMuxClient {
     }
     if (!content.trim() && !input.agentMuxNote?.trim()) throw new AgentMuxError('Agent prompt cannot be empty.', 'INVALID_AGENT_PROMPT')
     // Producer facts come from explicit input, never by parsing the user's string.
+    const inputContext = input.inputContext === undefined ? undefined : parseBrowserInputContext(input.inputContext)
     if (platformNotification && (platformNotification.key.submissionId !== input.operationId || platformNotification.key.agentSessionId !== input.agentSessionId ||
         !isDeepStrictEqual(platformNotification.key.expectedRun, input.expectedRun) || input.authorHuman !== undefined || authorAgentSessionId !== undefined ||
-        input.agentMuxNote !== undefined || !isDeepStrictEqual(await this.messageQueue.readNotification(input.operationId), platformNotification))) throw new AgentMuxError(
+        input.agentMuxNote !== undefined || inputContext !== undefined || !isDeepStrictEqual(await this.messageQueue.readNotification(input.operationId), platformNotification))) throw new AgentMuxError(
       'The original platform notification input is not confirmed.', 'INVALID_A2A_NOTIFICATION')
-    const composed = platformNotification ? { text: platformNotification.wire, systemContext: platformNotification.wire } : composeAgentPrompt(content, input.agentMuxNote)
+    const composed = platformNotification ? { text: platformNotification.wire, systemContext: platformNotification.wire } : composeAgentPrompt(content, input.agentMuxNote, inputContext)
     // A message's authored envelope was already checked against the immutable
     // journal. Resume its original Input recipe; a newer formatter or reminder
     // cannot change bytes or producer facts after a possibly applied claim.
-    const frozen = producer === 'message' || input.agentMuxNote || platformNotification ? (await this.inspectAgentPromptSubmission({
+    const frozen = producer === 'message' || input.agentMuxNote || inputContext || platformNotification ? (await this.inspectAgentPromptSubmission({
       agentSessionId: input.agentSessionId, expectedRun: input.expectedRun,
       ...(producer === 'message' ? { kind: 'message', messageId: input.operationId } : { kind: 'prompt', submissionId: input.operationId })
     }))?.admission?.intent : undefined
+    const waiting = producer === 'prompt' && input.admissionIntent !== undefined ? await this.messageQueue.inspectInput({ key: {
+      kind: 'prompt', agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, submissionId: input.operationId } }) : undefined
+    const waitingSource = waiting?.intent.source.kind === 'prompt' ? waiting.intent.source : undefined
     const authored: AgentPromptMessageContent = platformNotification ? { systemContext: platformNotification.wire, a2aNotificationId: platformNotification.notificationId } : {
+      ...(inputContext ? { inputContext, inputContextSource: waitingSource?.inputContextSource ?? authority?.inputContextSource ?? 'caller-declared' } : {}),
       ...(questionReply ? { questionReply: structuredClone(questionReply) } : {}),
       ...(content.trim() ? { userContent: content } : {}),
       ...(composed.systemContext ? { systemContext: composed.systemContext } : {}),
@@ -6937,7 +6953,7 @@ export class AgentMuxClient {
     // Ordinary prompt retries must still submit the same explicit body, note
     // and provenance. A text envelope never supplies those producer facts.
     const retainWire = frozen && (producer === 'message' || isDeepStrictEqual(frozen.message, authored))
-    const outbound = retainWire ? frozen.prompt : composed.text
+    const outbound = retainWire ? frozen.prompt : waitingSource?.promptWire ?? composed.text
     const message = producer === 'message' && frozen?.message ? frozen.message : authored
     assertAgentPromptSize(outbound)
     const operationId = safeId(input.operationId, 'Agent prompt operation id')
@@ -8577,6 +8593,7 @@ export class AgentMuxClient {
       'AgentMux context', message.systemContext, now, 'agentmux', { status, ...(message.a2aNotificationId ? { a2aNotificationId: message.a2aNotificationId, ...(inputRef ? { inputRef } : {}) } : {}) })
     if (message.userContent) await this.recordMessageAfterSideEffect(session, `prompt:${operationId}`,
       title, message.userContent, now, 'user', { status, publicContent: 'confirmed', ...(inputRef ? { inputRef } : {}),
+        ...(message.inputContext ? { inputContext: message.inputContext, inputContextSource: message.inputContextSource } : {}),
         ...(message.authorAgentSessionId ? { authorAgentSessionId: message.authorAgentSessionId } : {}),
         ...(message.authorHuman ? { authorHuman: true } : {}),
         ...(message.authorExternal ? { authorExternal: message.authorExternal } : {}),
@@ -8600,7 +8617,8 @@ export class AgentMuxClient {
     content: string,
     observedAt: number,
     source: 'user' | 'agentmux',
-    delivery: { a2aNotificationId?: string; sourceDevice?: import('./types.js').AgentOperationDevice; sourceChannel?: import('./types.js').AgentMessageChannel; authorAgentSessionId?: string; authorHuman?: boolean; authorExternal?: import('./external-author.js').AgentExternalMessageAuthor; status?: 'complete' | 'failed'; publicContent?: 'confirmed'; inputRef?: AgentPromptInputKey } = {}
+    delivery: { a2aNotificationId?: string; sourceDevice?: import('./types.js').AgentOperationDevice; sourceChannel?: import('./types.js').AgentMessageChannel; authorAgentSessionId?: string; authorHuman?: boolean; authorExternal?: import('./external-author.js').AgentExternalMessageAuthor; status?: 'complete' | 'failed'; publicContent?: 'confirmed'; inputRef?: AgentPromptInputKey;
+      inputContext?: import('./browser-input-context.js').BrowserInputContext; inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource } = {}
   ): Promise<void> {
     const mutation: AgentTimelineMutation = {
       type: 'append',
@@ -8616,6 +8634,7 @@ export class AgentMuxClient {
         title,
         content,
         ...(source === 'agentmux' && delivery.a2aNotificationId ? { a2aNotificationId: delivery.a2aNotificationId } : {}),
+        ...(source === 'user' && delivery.inputContext ? { inputContext: delivery.inputContext, ...(delivery.inputContextSource ? { inputContextSource: delivery.inputContextSource } : {}) } : {}),
         ...(source === 'user' && delivery.publicContent ? { publicContent: delivery.publicContent } : {}),
         ...((source === 'user' || delivery.a2aNotificationId !== undefined) && delivery.inputRef ? { inputRef: delivery.inputRef } : {}),
         ...(delivery.sourceDevice ? { sourceDevice: delivery.sourceDevice } : {}),

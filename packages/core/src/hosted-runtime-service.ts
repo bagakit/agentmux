@@ -252,6 +252,7 @@ export class AgentMuxHostedRuntimeService {
       invocation.args[0] = parseAgentInputMailboxRead(invocation.args[0])
     }
     const continuityControl = invocation.method === 'controlAgentContinuity'
+    if (invocation.method === 'ensureAgentContinuity' && invocation.args.length !== 1) throw new AgentMuxError('Capture producer context is supplied only by the original Host, never by recovery wire arguments.', 'INVALID_CONTROL_REQUEST')
     if (continuityControl && invocation.args.length !== 1) throw new AgentMuxError('Recovery control accepts one exact packet; authority is supplied by the original Host.', 'INVALID_CONTROL_REQUEST')
     if (invocation.method === 'notifyMessages' && (context.caller || !context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError(
       'Immediate Inbox notification requires an explicit trusted user/device action.', 'CONTROL_PERMISSION_DENIED')

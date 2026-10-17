@@ -15,7 +15,7 @@ type Dependencies = {
   frontend?(session: AgentMuxStoredAgentSession): Promise<AgentTerminalFrontend | undefined>
   watch(run: CtxmuxAdapterRun, changed: (error?: AgentMuxError) => void): Promise<() => Promise<void>>
   update(session: AgentMuxStoredAgentSession, change: (current: AgentMuxStoredAgentSession) => AgentMuxStoredAgentSession): Promise<AgentMuxStoredAgentSession>
-  perform(input: AgentMuxAgentContinuityInput, intentOperationId?: string): Promise<AgentMuxAgentContinuityResult>
+  perform(input: AgentMuxAgentContinuityInput, intentOperationId?: string, inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource): Promise<AgentMuxAgentContinuityResult>
   failed(id: string, error: unknown, run?: AgentMuxRunRef): void
 }
 const sameRun = (a: AgentMuxRunRef, b: AgentMuxRunRef) => a.runId === b.runId
@@ -65,8 +65,8 @@ export class AgentSessionContinuitySupervisor {
     finally { if (this.tails.get(id) === tail) this.tails.delete(id) }
   }
 
-  async run(input: AgentMuxAgentContinuityInput): Promise<AgentMuxAgentContinuityResult> {
-    return await this.serialize(input.agentSessionId, () => this.deps.perform(input))
+  async run(input: AgentMuxAgentContinuityInput, inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource): Promise<AgentMuxAgentContinuityResult> {
+    return await this.serialize(input.agentSessionId, () => this.deps.perform(input, undefined, inputContextSource))
   }
 
   /** A fresh automatic observer joins the original current intent, never resets its budget or cancellation. */

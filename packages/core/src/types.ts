@@ -1114,6 +1114,8 @@ export type AgentSessionUserMessageAuthor =
   | { kind: 'unknown' }
 
 export type AgentSessionUserMessage = {
+  inputContext?: import('./browser-input-context.js').BrowserInputContext
+  inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource
   id: string
   rawId: string
   agentSessionId: string
@@ -1286,6 +1288,8 @@ export type AgentMuxAgentCreationFact = {
 export type AgentPromptMessageContent = {
   /** Original Core notification input identity; the encoded text does not establish this fact. */
   a2aNotificationId?: string
+  inputContext?: import('./browser-input-context.js').BrowserInputContext
+  inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource
   /** Original question identity frozen with this input; independent of encoded native text. */
   questionReply?: { source: AgentSessionHistorySource; turnId: string; recordId: string; questionIds: string[] }
   userContent?: string
@@ -1939,6 +1943,8 @@ export type AgentWorkHistoryProjection = {
 }
 
 export type AgentTimelineItem = {
+  inputContext?: import('./browser-input-context.js').BrowserInputContext
+  inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource
   id: string
   /** Original Core notification identity, distinct from the referenced A2A messages. */
   a2aNotificationId?: string

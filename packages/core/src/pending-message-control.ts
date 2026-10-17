@@ -1,11 +1,14 @@
 import type { AgentPromptPreparationRetryProgress } from './prompt-preparation.js'
 import { validateDeliveryLogId } from './delivery-attempt.js'
 import { AgentMuxError } from './errors.js'
+import { browserInputContextFields } from './browser-input-context.js'
 import { rpcRecord } from './rpc-data.js'
 import { validateAgentInputWaitRef, type AgentInputSubmissionReceipt, type AgentInputWaitRef, type AgentInputWaitStopReceipt } from './agent-input-wait.js'
 
 /** Client-owned intent, including archived records; this is not the Core envelope delivery queue. */
 export type AgentMuxPendingMessage = {
+  inputContext?: import('./browser-input-context.js').BrowserInputContext
+  inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource
   pendingId: string
   text: string
   runId: string | null
@@ -47,7 +50,8 @@ export function isPendingMessageOperation(value: unknown): value is PendingMessa
 
 /** Validate the business result before a transport carries it to any client. */
 export function parsePendingMessage(value: unknown): AgentMuxPendingMessage {
-  const source = rpcRecord(value, ['pendingId', 'text', 'runId', 'enqueuedAt', 'status', 'phase', 'editable', 'delivery', 'errorCode', 'error', 'logId', 'preparationWait', 'inputWait', 'archived'])
+  const source = rpcRecord(value, ['pendingId', 'text', 'runId', 'enqueuedAt', 'status', 'phase', 'editable', 'delivery', 'errorCode', 'error', 'logId', 'preparationWait', 'inputWait', 'archived', 'inputContext', 'inputContextSource'])
+  browserInputContextFields(source)
   const identifier = (input: unknown): input is string => typeof input === 'string' && Boolean(input.trim()) && !/[\0\r\n]/u.test(input)
   if (!identifier(source.pendingId) || typeof source.text !== 'string' || source.text.includes('\0') ||
       source.runId !== null && !identifier(source.runId) ||

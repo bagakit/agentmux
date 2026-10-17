@@ -144,3 +144,7 @@ export { forwardConversationInput, forwardConversationPage, readRoutedConversati
 
 export * from './application-access.js'
 export * from './application-access-owner.js'
+export { parseBrowserInputContext, parseBrowserInputContextSource, browserInputContextFields, browserInputContextJson } from './browser-input-context.js'
+export type { BrowserInputContext, BrowserInputContextSource, BrowserInputSelection, BrowserInputSelectionSource, BrowserInputImageReference } from './browser-input-context.js'
+export { parseAgentInputSubmit } from './agent-input-submit.js'
+export type { AgentInputSubmit, AgentInputSubmitResult } from './agent-input-submit.js'

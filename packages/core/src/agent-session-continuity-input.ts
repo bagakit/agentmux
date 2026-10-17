@@ -13,6 +13,7 @@ import type { CtxmuxAdapterRun } from './ctxmux-run-adapter.js'
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { composeAgentPrompt, composeAgentResumePrompt } from './agent-outbound-message.js'
+import { parseBrowserInputContext, type BrowserInputContextSource } from './browser-input-context.js'
 import { observePromptInput } from './prompt-submission.js'
 
 const digest = (text: string) => createHash('sha256').update(text).digest('base64url')
@@ -27,16 +28,18 @@ function recoveryReminder(operation: AgentMuxContinuityOperation): string {
 
 /** Freeze the original text before starting. A not-yet-created Run is never named in its body. */
 export function prepareContinuityLaunchInput(operation: AgentMuxContinuityOperation, catalog: AgentCatalogEntry,
-  lifecycleOperationId: string, fresh?: AgentMuxContinuityInputRequest): AgentMuxContinuityLaunchInput | undefined {
+  lifecycleOperationId: string, fresh?: AgentMuxContinuityInputRequest, inputContextSource: BrowserInputContextSource = 'caller-declared'): AgentMuxContinuityLaunchInput | undefined {
   // A later attempt restores context only; omitting fresh input alone would synthesize the old automatic task again.
   if (operation.intentOperationId) return
   // Automatic continuation is admitted after the original resume commits, never as launch argv.
   const input = fresh
   if (!input) return
-  const composed = composeAgentResumePrompt(input.prompt, input.agentMuxNote)
+  const inputContext = input.inputContext === undefined ? undefined : parseBrowserInputContext(input.inputContext)
+  const composed = composeAgentResumePrompt(input.prompt, input.agentMuxNote, inputContext)
   if (!composed.text.trim()) return
   return { input: structuredClone(input), prompt: composed.text, digest: digest(composed.text),
     message: { ...(input.prompt.trim() ? { userContent: input.prompt } : {}), ...(composed.systemContext ? { systemContext: composed.systemContext } : {}),
+      ...(inputContext ? { inputContext, inputContextSource } : {}),
       ...(input.authorHuman === true ? { authorHuman: true as const } : {}), sourceChannel: normalizeMessageChannel(input.sourceChannel ?? 'api'),
       ...(input.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(input.sourceDevice) }) },
     delivery: catalog.promptDelivery === 'post-launch-only' ? 'post-launch' : 'launch', lifecycleOperationId, state: 'prepared' }

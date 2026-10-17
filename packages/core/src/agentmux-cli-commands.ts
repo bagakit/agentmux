@@ -29,6 +29,7 @@ import { parseFileReadCommand, readFileWriteBase } from './agentmux-cli-files.js
 import { parseGitParams, parseGitOpenParams } from './public-rpc-git.js'
 import { parseAppWindowParams } from './public-rpc-windows.js'
 import { parseConversationConsumerQuery } from './conversation-consumer-query.js'
+import { parseAgentInputSubmit } from './agent-input-submit.js'
 
 import { AGENTMUX_SCHEDULE_CLI_COMMANDS } from './schedule-cli.js'
 import { parseFileHistoryParams, parseFileRestoreParams, parseFileUndoParams, parseFileListParams, parseFileUploadIdentity, parseFileUploadParams } from './public-rpc-files.js'
@@ -391,6 +392,14 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('agent.input.ls', '--host-id HOST --session ID [--limit N] [--cursor CURSOR] [--max-bytes N]', 'Read the original bounded sending mailbox for local and connector inputs without dispatching or acknowledging them.', { '--host-id': 'data', '--session': 'data', '--limit': 'value', '--cursor': 'data', '--max-bytes': 'value' },
     f => ({ hostId: id(f, '--host-id', true), agentSessionId: id(f, '--session', true), ...numbers(f, { '--limit': 'limit', '--max-bytes': 'maxBytes' }), ...fields(f, { '--cursor': 'cursor' }) }),
     'Only original persisted inputs are covered; older unrecorded claims remain a coverage gap. The cursor freezes membership and order, while each original receipt is read from its current owner. Terminal byte ACK is not native adoption.'),
+  command('agent.input.submit', '--session SID --operation-id ID --input FILE|-', 'Submit an original non-A2A prompt through an authorized unmanaged transport; managed Agents use agent send.', { '--session': 'data', ...OP, '--input': 'data' },
+    async f => {
+      const body = await readControlJsonInput(value(f, '--input', true)!, 'Original prompt input') as Record<string, unknown>
+      if (!body || typeof body !== 'object' || Array.isArray(body)) invalid('Original prompt input must be a JSON object.')
+      const agentSessionId = id(f, '--session', true), operationId = id(f, '--operation-id', true)
+      if (body.agentSessionId !== undefined && body.agentSessionId !== agentSessionId || body.operationId !== undefined && body.operationId !== operationId) invalid('Input file and flags name different original Session or operation identities.')
+      return parseAgentInputSubmit({ ...body, agentSessionId, operationId }) as unknown as Record<string, unknown>
+    }, 'JSON carries prompt, expectedRun:{runId}, and either afterSubmissionId (string or null), or admissionIntent:{kind:manual-actor|native-conversation,...} with execution:immediate. Optional inputContext is declared page data, never instructions or verified Host capture; allowUncertainTurn is an explicit choice. Author/device/channel/platform-note and automatic input fields are rejected. Local Unix credentials do not establish Human authorship. Retain the returned prompt key for agent input inspect; unknown results never authorize a new operation or automatic resend.'),
   command('agent.input.inspect', '--input FILE|-', 'Read one original input claim without preparing or replaying it.', { '--input': 'data' },
     async f => await readControlJsonInput(value(f, '--input', true)!, 'Original input key') as Record<string, unknown>,
     'JSON carries key {kind:prompt|message,agentSessionId,expectedRun:{runId},submissionId|messageId}, or kind:message-control plus originalControlOperationId at the original semantic endpoint. Returns its original admission and any acknowledged waiting reference; never resolves a new spatial target.'),

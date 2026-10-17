@@ -146,7 +146,7 @@ export async function observePromptInput<T>(signal: AbortSignal, read: () => Pro
 
 function promptMessageIdentity(message: AgentPromptMessageContent | undefined): string {
   return JSON.stringify(message === undefined ? null : [message.userContent, message.systemContext,
-    message.authorAgentSessionId, message.authorHuman === true, message.sourceDevice, message.sourceChannel, message.authorExternal, message.questionReply, message.a2aNotificationId])
+    message.authorAgentSessionId, message.authorHuman === true, message.sourceDevice, message.sourceChannel, message.authorExternal, message.questionReply, message.a2aNotificationId, message.inputContext, message.inputContextSource])
 }
 
 /**
@@ -208,6 +208,8 @@ type PromptSubmissionDeps = {
 
 /** Invocation-local authenticated author; never persisted as a reusable grant. */
 export type AgentPromptInputAuthority = Readonly<{
+  /** Producer attribution only; it never grants dispatch or Browser control. */
+  inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource
   /** Only Core-authenticated Agent authors contribute the atomic metadata binding. */
   binding?: Readonly<AgentCapabilityBinding>
   /** Structured attribution from the trusted Host context; never supplied by prompt text. */

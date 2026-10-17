@@ -537,6 +537,24 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'agent.role.register': case 'agent.role.resolve': { record(p, ['binding']); const binding = role(p.binding)
         if (binding.role !== input.role || input.workspacePath !== undefined && binding.workspacePath !== input.workspacePath ||
           method === 'agent.role.register' && credentials && binding.agentSessionId !== credentials.agentSessionId) fail(); break }
+      case 'agent.input.submit': {
+        record(p, ['key', 'record', 'input'])
+        const key = validateAgentPromptInputKey(p.key)
+        if (key.kind !== 'prompt' || key.agentSessionId !== input.agentSessionId || key.submissionId !== input.operationId || !isDeepStrictEqual(key.expectedRun, input.expectedRun)) fail()
+        if (key.kind !== 'prompt') return fail()
+        const observed = p.input === undefined || p.input === null ? null : inputReceipt(p.input)
+        if (observed && (!isDeepStrictEqual(observed.key, key) || !isDeepStrictEqual(observed.admission, p.record))) fail()
+        if (p.record !== null) {
+          const original = parsePromptSubmissionRecord(p.record), message = original.admission?.intent?.message ?? original.launch?.message
+          if (original.agentSessionId !== key.agentSessionId || !isDeepStrictEqual(original.run, key.expectedRun) ||
+              (original.admission?.submissionId ?? original.launch?.input.submissionId) !== key.submissionId ||
+              original.admission?.inputKey && !isDeepStrictEqual(original.admission.inputKey, key) ||
+              !message || message.userContent !== input.prompt || !isDeepStrictEqual(message.inputContext, input.inputContext) ||
+              message.authorHuman !== undefined || message.authorAgentSessionId !== undefined || message.authorExternal !== undefined ||
+              message.systemContext !== undefined || message.inputContextSource !== (input.inputContext === undefined ? undefined : 'caller-declared')) fail()
+        }
+        break
+      }
       case 'agent.input.ls': {
         record(p, ['hostId', 'agentSessionId', 'queueId', 'cut', 'budgetBytes', 'items', 'nextCursor', 'coverage'])
         if (p.hostId !== input.hostId) fail()
