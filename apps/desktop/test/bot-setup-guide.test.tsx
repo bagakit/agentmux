@@ -25,3 +25,16 @@ it('does not infer completed steps from the current number or from an existing a
   expect(container.querySelector('[data-step="3"]')?.textContent).not.toContain('Create bot')
   expect(container.querySelector('[data-step="4"]')?.textContent).toContain('Needs attention')
 })
+
+it('renders explicit completion without promoting the ready label or a waiting step into evidence', async () => {
+  await act(async () => root.render(<BotSetupGuide stage="ready" currentStep={null} />))
+  expect(container.querySelector('[aria-current="step"]')).toBeNull()
+  expect(container.querySelectorAll('[data-state="recorded"]')).toHaveLength(0)
+  await act(async () => root.render(<BotSetupGuide stage="attention" currentStep={4} confirmedSteps={[1, 2, 3]} currentStatus="Waiting for platform approval" />))
+  expect(container.querySelector('[data-step="4"]')?.getAttribute('data-state')).toBe('attention')
+  expect(container.querySelector('[aria-current="step"]')?.textContent).toContain('Waiting for platform approval')
+  await act(async () => root.render(<BotSetupGuide stage="ready" currentStep={null} confirmedSteps={[1, 2, 3, 4]} />))
+  expect(container.querySelectorAll('[data-state="recorded"]')).toHaveLength(4)
+  expect(container.querySelector('[aria-current="step"]')).toBeNull()
+  expect(container.querySelector('button,input,[aria-live]')).toBeNull()
+})
