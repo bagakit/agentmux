@@ -199,7 +199,11 @@ An existing bot profile uses the finite goal {kind: profile-update, desired: {na
 PNG bytes stay private; public history contains only avatarSha256. Empty description explicitly
 clears the primary locale while preserving other localized descriptions. The original Console
 session, upload, full profile write, fresh readback and publication keep separate receipts. Observe
-profileUpdate stages and copy only its offered continue-profile-update or local ACK action. A
+profileUpdate stages and copy only its offered actions. Ordinary continue-profile-update fills
+missing current publication sources; refresh-publication-checks reads the five publication subjects
+and returns without writing, even if checks become ready. A separate offered action alone can
+publish. Plain inspect exposes the original candidate/review at publication-create; explicit
+configuration selectors keep their selected result. Local ACK recovery remains independent. A
 profile operation never creates another application. The existing published include/exclude
 ranges are retained. Other pending changes require explicit review through the returned
 publicationDraft and the original create-application-version action. Inspect remains local;
