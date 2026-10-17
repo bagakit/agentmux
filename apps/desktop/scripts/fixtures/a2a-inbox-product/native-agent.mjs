@@ -25,10 +25,17 @@ if (args.includes('app-server')) {
   const token = process.env.AGENTMUX_CODEX_ACTOR_TOKEN
   assert.ok(token); assert.equal(args[args.indexOf('--ws-token-sha256') + 1], createHash('sha256').update(token).digest('hex'))
   const fd = openSync(nativePath, 'a+', 0o600)
-  if (readFileSync(nativePath).length === 0) writeSync(fd, JSON.stringify({ type: 'session_meta', payload: {
-    id: nativeId, cwd: process.cwd(), source: 'vscode', thread_source: 'user', history_mode: 'paginated'
-  } }) + '\n')
   const append = payload => writeSync(fd, JSON.stringify({ timestamp: new Date().toISOString(), type: 'event_msg', payload }) + '\n')
+  if (readFileSync(nativePath).length === 0) {
+    writeSync(fd, JSON.stringify({ type: 'session_meta', payload: {
+      id: nativeId, cwd: process.cwd(), source: 'vscode', thread_source: 'user', history_mode: 'paginated'
+    } }) + '\n')
+    // A completed original protocol turn supplies the initial idle opportunity.
+    // No user/body input or hand-written Core state is used to manufacture it.
+    const turnId = 'initial-' + nativeId
+    append({ type: 'task_started', thread_id: nativeId, turn_id: turnId })
+    append({ type: 'task_complete', thread_id: nativeId, turn_id: turnId })
+  }
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 })
   server.on('connection', (socket, request) => {
     if (request.headers.authorization !== 'Bearer ' + token) { socket.close(1008); return }
