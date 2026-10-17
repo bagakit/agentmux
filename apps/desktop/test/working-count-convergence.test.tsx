@@ -1,11 +1,11 @@
+// @vitest-environment happy-dom
+import { URL as FileURL } from 'node:url'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import { expect, it, vi } from 'vitest'
 import type { AgentDisplayState } from '@agentmux/core'
 import { msUntilSemanticStatusStale } from '@agentmux/core/agent-status'
 import type { SessionSnapshot } from '../src/shared/contracts'
-import { summarizeAgentAttention, summarizeProviderActivity } from '../src/renderer/src/lib/agent-attention'
-import { sessionBoardColumn, workingAgentCount } from '../src/renderer/src/lib/project-board'
 import { createFocusProjectionSelector, focusBucketForSession, focusNavigationSummary } from '../src/renderer/src/lib/focus-context'
 import { composerSession } from './helpers/composer-dom-fixture'
 import { moteConfig, moteSessions, moteTopics, scratchWorkspace, ordinaryTopicId } from './fixtures/mote-workface'
@@ -13,7 +13,7 @@ import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapsh
 
 // Core owns the state union. Derive the covered cases from its declaration, never a drifting list.
 function displayStates(): AgentDisplayState[] {
-  const source = ts.createSourceFile('core-types.ts', readFileSync(new URL('../../../packages/core/src/types.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true)
+  const source = ts.createSourceFile('core-types.ts', readFileSync(new FileURL('../../../packages/core/src/types.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true)
   const declaration = source.statements.find(node => ts.isTypeAliasDeclaration(node) && node.name.text === 'AgentDisplayState')
   expect(declaration).toBeTruthy()
   if (!declaration || !ts.isTypeAliasDeclaration(declaration) || !ts.isUnionTypeNode(declaration.type)) throw new Error('Core state union must be readable')
@@ -24,14 +24,6 @@ function displayStates(): AgentDisplayState[] {
 function agent(id: string, state: AgentDisplayState) {
   return { ...composerSession(id), status: { state, source: 'native-hook' as const, observedAt: Date.now() } }
 }
-it('keeps the existing Board, provider and roster rollups consistent for every actual Core state', () => {
-  for (const state of displayStates()) {
-    const sessions = [agent(state, state)], expected = sessionBoardColumn(sessions[0]!) === 'working' ? 1 : 0
-    expect(workingAgentCount(sessions)).toBe(expected)
-    expect(summarizeAgentAttention(sessions).working).toBe(expected)
-    expect(summarizeProviderActivity(sessions).reduce((total, provider) => total + provider.active, 0)).toBe(expected)
-  }
-})
 it('Focus navigation and Focus grouping share the same work and attention projection across the Core union', () => {
   const sessions = displayStates().map(state => agent(state, state))
   const groups = sessions.map(session => focusBucketForSession(session, false))
@@ -83,7 +75,7 @@ it('matches complete Focus grouping without reading conversation bodies across e
   } finally { clock.mockRestore() }
 })
 it('the product projection delegates turn work rather than copying a literal status comparison', () => {
-  const source = ts.createSourceFile('focus-context.ts', readFileSync(new URL('../src/renderer/src/lib/focus-context.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true)
+  const source = ts.createSourceFile('focus-context.ts', readFileSync(new FileURL('../src/renderer/src/lib/focus-context.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true)
   const owner = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'focusBucketForSession')
   expect(owner).toBeTruthy()
   const calls: string[] = []

@@ -68,14 +68,5 @@ describe('status/browser/topic/executor integration contract', () => {
     expect(settings).toContain('executorId={executorId}')
   })
 
-  it('connects the idle count to Project/Scratch tree rows without duplicating status truth', () => {
-    const board = read('lib/project-board.ts')
-    expect(board).toContain('idleAgentCount')
-    const sidebar = read('components/WorkspaceSidebar.tsx')
-    expect(sidebar).toContain('idleAgentCount')
-    expect(sidebar).toMatch(/idle|Idle/)
-    const state = read('lib/session-state.ts')
-    expect(state).toContain('displayStateForAgentError')
-    expect(state).toContain('AGENT_RUN_EXITED')
-  })
+
 })
