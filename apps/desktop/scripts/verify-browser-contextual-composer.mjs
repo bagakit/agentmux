@@ -134,9 +134,7 @@ for (const name of await readdir(join(root, 'packages'))) {
     const target = typeof spec === 'string' ? spec : spec.import
     if (!target?.startsWith('./dist/')) continue
     const source = resolve(dirname(manifest), target.replace(/^\.\/dist\/(?:src\/)?/u, './src/').replace(/\.js$/u, '.ts'))
-    const name = key === '.' ? pkg.name : pkg.name + key.slice(1)
-    try { await stat(source); aliases[name] = source }
-    catch { if (coreBuild && pkg.name === '@agentmux/core') aliases[name] = resolve(dirname(manifest), target) }
+    try { await stat(source); aliases[key === '.' ? pkg.name : pkg.name + key.slice(1)] = source } catch {}
   }
 }
 async function workspaceSource(name) {
@@ -212,6 +210,7 @@ async function native(label, mutation) {
     for (const file of new Set([...Object.keys(main.metafile.inputs), ...Object.keys(listener.metafile.inputs)])) await bind(resolve(root, file))
     for (const file of ['apps/desktop/src/main/ipc.ts', 'apps/desktop/src/main/runtime-controller.ts', 'apps/host/src/input-context-capture-reader.ts', 'packages/core/src/hosted-runtime-service.ts']) assert.ok(main.metafile.inputs[file], 'Actual Main/Host owner is in the product bundle: ' + file)
     const preload = await build({ absWorkingDir: root, bundle: true, platform: 'browser', format: 'cjs',
+      alias: aliases,
       conditions: ['module', 'browser', 'production'], mainFields: ['browser', 'module', 'jsnext:main', 'jsnext', 'main'],
       external: ['electron'], metafile: true, logLevel: 'warning', entryPoints: ['apps/desktop/src/preload/index.ts'], outfile: join(directory, 'preload.cjs') })
     assert.ok(Object.values(preload.metafile.outputs).every(result => result.imports.every(input => input.path === 'electron')), 'Sandboxed production preload only requires Electron')
