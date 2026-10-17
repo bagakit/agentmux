@@ -44,6 +44,8 @@ export type ConnectionEnrollmentDiagnostic =
       stage: 'response'
       code: 'http-status' | 'platform-error' | 'invalid-json' | 'invalid-response'
       httpStatus?: number
+      /** Original finite platform code; diagnostic only, never an effect acknowledgement. */
+      nativeCode?: number
     }
   | {
       stage: 'challenge'
