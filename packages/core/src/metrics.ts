@@ -13,7 +13,7 @@ import type { RendererTraceInput, RendererTraceResult } from './renderer-trace.j
 import type { RendererV8ProfileInput, RendererV8ProfileResult } from './renderer-v8-profile.js'
 import { readInputObservation } from './performance-diagnostics.js'
 import type { ClientPerformanceDiagnostics, InputPerformanceSnapshot } from './performance-diagnostics.js'
-import { RENDERER_TIMING_KINDS, type RendererPerformanceSnapshot } from './renderer-performance.js'
+import { RENDERER_SESSION_EVENT_TYPES, RENDERER_TIMING_KINDS, type RendererPerformanceSnapshot } from './renderer-performance.js'
 export * from './renderer-performance.js'
 import { AgentMuxError } from './errors.js'
 import type { AgentMuxRuntimeResourceSnapshot } from './types.js'
@@ -225,7 +225,9 @@ const slowEventsParser: Parser = value => {
 }
 const performanceParser = record({ startedAt: number, observedAt: number, recording: literal('bounded-lifetime'),
   selectorTiming: literal('counts-only'), writeTiming: literal('parser-callback-wall'),
-  consumers: record({ composer: visibilityParser, sessionPane: visibilityParser }), sessionEvents: timingParser,
+  consumers: record({ composer: visibilityParser, sessionPane: visibilityParser }),
+  sessionEvents: record({ count, totalMs: number, maxMs: number,
+    byType: record(Object.fromEntries(Object.keys(RENDERER_SESSION_EVENT_TYPES).map(kind => [kind, timingParser]))) }),
   inputRequestDetails: inputPerformanceParser,
   inputRequests: record(Object.fromEntries(['user', 'protocol', 'paste'].map(kind => [kind, record({ started: count, completed: count, failed: count, pending: count, wall: timingParser })]))),
   overlay: record({ triggers: record({ initial: count, demand: count, mutation: count, resize: count, scroll: count, toggle: count, font: count, collect: count }),
