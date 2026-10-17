@@ -4,6 +4,7 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import type { AgentMuxRpcResult } from '@agentmux/core'
 import { fixtureEpoch } from '../../../test/fixture-values.mjs'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
+import { installCollaborationCanvasGeometry } from './helpers/collaboration-canvas-dom'
 import { AgentCollaborationDialog } from '../src/renderer/src/components/AgentCollaborationDialog'
 import { api } from '../src/renderer/src/lib/api'
 import * as contextOwner from '../src/renderer/src/lib/focus-context'
@@ -13,6 +14,7 @@ const dom = composerDOM({ agentInformation: true })
 const subject = { hostId: 'local', agentSessionId: 'scoped-task' }, task = composerSession(subject.agentSessionId), peer = composerSession('recorded-peer')
 const unrelated = Array.from({ length: 240 }, (_, index) => composerSession('unrelated-' + index))
 beforeEach(() => {
+  installCollaborationCanvasGeometry()
   useAppStore.setState({ config: composerConfig, sessions: [task, ...unrelated, peer], tabs: {}, layouts: {}, timelines: {},
     scratchTopicSnapshots: {}, spaceZoneBindings: {}, spatialRequests: {}, topicCategories: [], projectGroups: [],
     agentNames: { [task.id]: 'Scoped task', [peer.id]: 'Recorded peer' }, agentComposerDrafts: { [task.id]: 'Original unsent task' } })
@@ -42,8 +44,7 @@ it('builds production contexts only for the focused Agent and recorded peers as 
   expect(api.sessions.messageEvents).toHaveBeenCalledExactlyOnceWith(subject, { latest: true, limit: 50 })
   heavy.mockClear()
   await act(async () => useAppStore.setState({ sessions: [task, ...unrelated, ...Array.from({ length: 240 }, (_, index) => composerSession('other-unrelated-' + index)), peer] }))
-  expect(heavy).toHaveBeenCalled()
-  expect([...new Set(heavy.mock.calls.map(([session]) => session.id))].sort()).toEqual([task.id, peer.id].sort())
+  expect(heavy).not.toHaveBeenCalled()
   expect(graph().querySelectorAll('.focus-context')).toHaveLength(2)
   expect(graph().textContent).toContain('1 connections')
   expect(api.sessions.messageEvents).toHaveBeenCalledTimes(1)
