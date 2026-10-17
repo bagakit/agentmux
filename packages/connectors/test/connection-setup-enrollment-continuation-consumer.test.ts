@@ -98,7 +98,7 @@ it('saved creation hands its original account to the same Setup with zero HTTP, 
   expect(f.calls.slice(before.length)).toEqual(['/developers/v1/robot/' + APP])
   expect((await f.sdk.call('connection.enrollment.inspect', { operationId: f.enrollment.operation!.operationId })).operation).toEqual(f.enrollment.operation)
   const list = await f.sdk.call('connection.setup.ls', { connectionId: f.input.connectionId })
-  expect(list.support).toEqual({ connectionRevision: f.saved.revision, capabilities: ['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation'] })
+  expect(list.support).toEqual({ connectionRevision: f.saved.revision, capabilities: ['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation', 'initial-setup'] })
   expect(await f.cli<ConnectionSetupListing>(['ls', '--connection', f.input.connectionId])).toEqual(list)
   for (const value of [USER, TENANT, 'continuation-private']) expect(JSON.stringify(list)).not.toContain(value)
 }, 20_000)
