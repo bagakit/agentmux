@@ -195,7 +195,7 @@ export const ConversationView = memo(function ConversationView({
       const a2aNotificationId = adopted?.purpose === 'a2a-notification' && adopted.key.kind === 'prompt' ? adopted.key.submissionId : undefined
       const described = speaker && item.kind !== 'system-message' && !a2aNotificationId ? describeSpeaker?.(speaker) : undefined
       const body = <ConversationMessage sources={record.sources} {...(record.event ? { conversationEvent: record.event } : {})} messageId={messageIdForRecord?.(item) ?? user?.id ?? recordId} conversationSessionId={sessionId}
-          {...(collaboration ? { compact: true, recordedIdentity: true,
+          {...(collaboration ? { compact: true, recordedIdentity: true, nativeCollaboration: collaboration,
             messageDetails: <dl className="conversation-input-details__facts">
               <dt>原生来源</dt><dd>{collaboration.source.providerId} · <code>{collaboration.source.nativeSessionId}</code></dd>
               <dt>原生发送者</dt><dd>{collaboration.sender ?? '未记录'}</dd>
