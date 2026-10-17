@@ -148,12 +148,9 @@ async function run() {
       if (process.env.AGENTMUX_CONTEXTUAL_CAPTURE_HANDOFF === '1' && name.includes('-fixed-')) return
       if (receipt.nativeCaptureAvailability?.status === 'unknown') return
       const foreground = process.env.AGENTMUX_CONTEXTUAL_FOREGROUND === '1'
-      if (foreground) {
-        window!.show(); app.focus({ steal: true }); window!.focus()
-        await until(() => window!.isFocused(), 'the exact authorized native capture window')
-        await settled()
-        assert.equal(window!.isFocused(), true, 'The exact private window must retain foreground for actual native capture')
-      }
+      // The initial handoff establishes this window. Capturing must not refocus its parent
+      // while the actual native Chrome overlay owns a menu or an editor.
+      const focus = { parentFocused: window!.isFocused(), focusedWindowId: BrowserWindow.getFocusedWindow()?.id ?? null }
       const sourceId = window!.getMediaSourceId(), match = /^window:(\d+):\d+$/u.exec(sourceId)
       assert.ok(match, 'Electron must return its exact native window media source identity')
       const native = JSON.parse(execFileSync(join(directory, 'native-window'), [match[1]!, String(process.pid)], { encoding: 'utf8' }))
@@ -163,7 +160,7 @@ async function run() {
       }
       assert.equal(native.layer, 0)
       const fileStem = name + '-os-window', file = fileStem + '.png'
-      ;(receipt.nativeCaptureAttempts ??= []).push({ native, sourceId, fileStem })
+      ;(receipt.nativeCaptureAttempts ??= []).push({ native, sourceId, fileStem, focus })
       if (process.env.AGENTMUX_CONTEXTUAL_CAPTURE_HANDOFF === '1') {
         // Retry the exact native route in this unlocked window; a prior locked failure
         // cannot establish that its OS capture is permanently unavailable.
