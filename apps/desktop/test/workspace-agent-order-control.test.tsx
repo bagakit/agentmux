@@ -7,6 +7,12 @@ import { api } from '../src/renderer/src/lib/api'
 import { EMPTY_WORKSPACE_AGENT_ORDER, executeWorkspaceAgentOrder, orderedWorkspaceAgents, restoreWorkspaceAgentOrder, workspaceAgentOrderKey } from '../src/renderer/src/lib/workspace-agent-order'
 import { prepareRendererUpdate, restorePersistedUiState, useAppStore } from '../src/renderer/src/store'
 import { agent, config, neighborSid, protectedFacts, startWorkfaceFixture, targetSid } from './helpers/workface-control-fixture'
+import { directoryIdentity, homeZoneId, workspaceZoneId } from '../src/shared/space-addresses'
+import { scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
+import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
+import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
+import type { ScratchTopicSnapshot } from '../src/shared/contracts'
 
 const original = useAppStore.getState()
 let fixture: Awaited<ReturnType<typeof startWorkfaceFixture>>
@@ -27,6 +33,34 @@ async function order(input?: unknown, code = 0, displayWorkspaceId = 'resource')
 }
 
 describe('Workspace Agent list preference through actual compiled public CLI and Store', () => {
+  it('admits exact external Zone members through the original public Workspace order owner without moving or stopping them', async () => {
+    const scratch = { ...config.workspaces[0]!, id: '__scratch__', name: 'Topics', path: config.workspaces[0]!.path + '/scratch' }
+    const id = 'launcher:original-mote', directoryPath = scratchTopicDirectoryName(id), path = scratch.path + '/' + directoryPath
+    const spaceId = directoryIdentity('local', path), zoneId = homeZoneId(spaceId)
+    const topic: ScratchTopicSnapshot = { id, title: 'Original Mote', summary: '', kind: 'mote', directoryPath,
+      physicalDirectoryPath: path, identityDirectoryPath: path, confirmedDirectoryPaths: [path], topicPath: directoryPath + '/topic.md',
+      collaborators: [], soul: { path: 'SOUL.md', content: 'Original identity', version: 'original' } }
+    const own = { ...agent('mote-own'), workspacePath: path }
+    const resource = config.workspaces[0]!, resourceSpace = directoryIdentity(resource.hostId, resource.path)
+    const resourceZone = workspaceZoneId(resourceSpace, resource.id)
+    useAppStore.setState(state => ({ config: { ...config, workspaces: [...config.workspaces, scratch] }, sessions: [...state.sessions, own],
+      spaceZoneBindings: {
+        [zoneId]: { spaceId, workspaceId: scratch.id, topicId: id, contentKind: 'mote', directoryPath: path },
+        [resourceZone]: { spaceId: resourceSpace, workspaceId: resource.id, directoryPath: resource.path, relations: { [spaceId]: true } }
+      }, scratchTopicSnapshots: { [scratch.id]: { scope: scratchTopicsScope(scratch), revision: 1, topics: [topic], error: null, reading: false } } }))
+    vi.spyOn(api.spatial, 'read').mockResolvedValue({ schemaVersion: 1, revision: 2, graph: desktopSpatialGraph(useAppStore.getState(), [topic]) })
+    await initializeSpatialControlFixture([topic])
+    fixture.snapshot.mockClear()
+    for (const call of fixture.lifecycle) call.mockClear()
+    const before = protectedFacts()
+    const original = await order(undefined, 0, scratch.id)
+    expect(original.effectiveOrder).toEqual([reference('mote-own'), reference(targetSid), reference(neighborSid)])
+    const reordered = [reference(neighborSid), reference('mote-own'), reference(targetSid)]
+    expect(await order({ order: reordered }, 0, scratch.id)).toMatchObject({ outcome: 'changed', storedOrder: reordered, effectiveOrder: reordered })
+    expect(protectedFacts()).toEqual(before)
+    fixture.noLifecycle()
+  })
+
   it('reads creation order without writing and activity or replacement Runs never reorder the exact Sessions', async () => {
     const before = protectedFacts()
     expect(await order()).toMatchObject({ displayWorkspaceId: 'resource', storedOrder: [], effectiveOrder: [reference(targetSid), reference(neighborSid)],
