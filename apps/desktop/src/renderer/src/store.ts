@@ -11536,10 +11536,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (session?.kind === 'agent' && session.id === control.agentSessionId &&
         session.control.hostId === control.hostId && session.control.agentSessionId === control.agentSessionId) {
       set(state => {
-        const current = state.sessions.find(item => item.id === session.id)
-        if (current?.kind !== 'agent' || current.control.hostId !== control.hostId ||
-            current.control.run.runId !== control.run.runId && current.control.run.runId !== session.control.run.runId) return state
-        return projectRecoveredSession(state, session.id, session)
+        // Canonical receipts update their original Host-qualified presentations without re-keying workfaces.
+        return { sessions: state.sessions.map(current => current.kind === 'agent' &&
+          current.control.hostId === control.hostId && current.control.agentSessionId === control.agentSessionId &&
+          (current.control.run.runId === control.run.runId || current.control.run.runId === session.control.run.runId)
+          ? retainTimelineObservation(current, { ...session, id: current.id, hostId: current.hostId }) : current) }
       })
     }
     return result

@@ -890,7 +890,7 @@ function WorkbenchRegionContent({
     })
     const surveyBrowser = surface.kind === 'browser' &&
       (target ? target.surface === 'survey' : browserPresentation.surface === 'survey' || browserPresentation.survey === true)
-    return <RegionContextMenu connector={connector}
+    return <RegionContextMenu connector={connector} tabId={tab.id}
       onOpenWindow={browserPresentation.reference ? () => void openWorkbenchWindow({ kind: 'region', displayWorkspaceId: browserPresentation.reference!.displayWorkspaceId, groupId: browserPresentation.reference!.groupId, tabId: tab.id, regionId: node.regionId }) : undefined}
       regionId={node.regionId}
       // 只有承载 Agent 的一格才有语义身份可寻址。这个判定跟 Tab 级的唯一 Agent 判定同源
