@@ -462,7 +462,7 @@ describe('native shield presentation ownership through the real manager', () => 
     const operation = await f.manager.runScript('browser-one', 'original delayed-close operation', undefined, undefined, 'cleanup-before-restore')
     expect(operation.outcome.kind).toBe('completed')
     expect(retired.webContents.isDestroyed()).toBe(false)
-    expect(retired.getVisible()).toBe(true)
+    expect(retired.getVisible()).toBe(false) // Cleanup uncertainty must not leave a false control edge on screen.
     expect(f.children).not.toContain(retired)
     const original = f.manager.nativeOwner('browser-one')!.view
     original.webContents.close()
