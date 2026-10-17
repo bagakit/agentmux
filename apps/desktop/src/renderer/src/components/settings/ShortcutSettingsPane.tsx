@@ -186,7 +186,7 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
         </button>)}
       </div>
       <div className="settings-pane-toolbar prompt-workbench__toolbar">
-        <span className="settings-resource-count">{visible.length} of {drafts.length} {drafts.length === 1 ? 'prompt' : 'prompts'}</span>
+        <span className="settings-resource-count">{visible.length === drafts.length ? drafts.length : `${visible.length} of ${drafts.length}`} {drafts.length === 1 ? 'prompt' : 'prompts'}</span>
         <button type="button" className="small-button" onClick={add}><ThemeActionCreatePromptIcon size={13} /> Add prompt</button>
         {PROMPT_REACTION_STARTERS.some(starter => !drafts.some(candidate => candidate.id === starter.id || candidate.keyword === starter.keyword)) ?
           <button type="button" className="small-button" onClick={addReactionStarters}><ThemeActionAddQuickRepliesIcon size={13} /> Add quick replies</button> : null}
@@ -249,7 +249,7 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
       {problems.length ? <div className="prompt-validation" role="status"><strong>Check {problemsById.size} {problemsById.size === 1 ? 'prompt' : 'prompts'} before saving</strong>{problems.map((problem) => <button type="button" key={`${problem.id}-${problem.field}`} onClick={() => open(problem.id)}>{promptName(resource.value[problem.id]!)} · {problem.field}: {problem.message}</button>)}</div> : null}
       {recentDelete ? <div className="prompt-pending-delete" role="status"><span>Recently removed “{promptName(recentDelete.prompt)}”.</span><button type="button" className="small-button" onClick={undoDelete}>Undo</button></div> : null}
       <footer className="prompt-save-footer">
-        <p className="prompt-save-summary" role="status">Save prompts updates the whole library. {changedCount} changed · {deletedCount} pending {deletedCount === 1 ? 'deletion' : 'deletions'}.</p>
+        <p className="prompt-save-summary" role="status">Saves the whole prompt library.{resource.dirty ? <> {changedCount} changed{deletedCount ? ` · ${deletedCount} pending ${deletedCount === 1 ? 'deletion' : 'deletions'}` : ''}.</> : null}</p>
         <SettingsSaveBar save={saveState} dirty={resource.dirty} disabled={problems.length > 0} label="Save prompts" onSave={() => void save()} />
       </footer>
     </div>
