@@ -2658,7 +2658,8 @@ export class BrowserViewManager {
             beforeAction(step)
             action = await feedback?.begin(name, name === 'pressKey' ? args[1] : undefined)
             beforeAction(step)
-          } else await feedback?.clear(BROWSER_WAIT_PAGE_CALLS.has(name) ? 'invalidate' : 'replace')
+          } else if (BROWSER_WAIT_PAGE_CALLS.has(name)) await feedback?.clear()
+          else await feedback?.observe()
           if (BROWSER_DOCUMENT_PAGE_CALLS.has(name)) requireCurrentDocumentOperation()
           value = await dispatch(name, args, { beforeAction: () => beforeAction(step),
             ...(feedback && action !== undefined && (name === 'click' || name === 'download') ? {
@@ -3165,7 +3166,7 @@ export class BrowserViewManager {
     })
     contents.on('input-event', (_event, input) => {
       if (!BROWSER_PASSIVE_INPUT_TYPES.has(input.type)) this.markResourceRisk(entry, view, 'document-used')
-      if (this.owns(entry, view) && BROWSER_FEEDBACK_CLEAR_INPUT_TYPES.has(input.type)) void entry.feedback?.clear()
+      if (this.owns(entry, view) && !this.agentOwnsInput(entry) && BROWSER_FEEDBACK_CLEAR_INPUT_TYPES.has(input.type)) void entry.feedback?.clear()
       if (!this.onNativeInput || !this.owns(entry, view) || !['mouseDown', 'mouseMove', 'mouseEnter', 'mouseLeave'].includes(input.type)) return
       const owner = this.nativeOwner(entry.id)
       if (owner) this.onNativeInput(owner, { type: 'pointer', event: input as Electron.MouseInputEvent })
