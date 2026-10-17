@@ -55,6 +55,8 @@ export type ConnectionEnrollmentDiagnostic =
       failure?: 'transport-unconfirmed' | 'http-status' | 'platform-error' | 'invalid-response' | 'redirect-unconfirmed' | 'bootstrap-unconfirmed' | 'invalid-state'
       /** Exact failed protocol boundary; never raw native values or authority to retry. */
       boundary?: 'saved-state' | 'request-target' | 'response-target' | 'cookie-update' | 'json' | 'envelope' | 'transition' | 'handoff' | 'bootstrap' | 'snapshot'
+      /** Finite native qualification result, only for redirect-unconfirmed; never a URL or authority to follow. */
+      redirectReason?: 'missing-location' | 'redirect-limit' | 'invalid-url' | 'unsupported-scheme' | 'url-credentials' | 'unexpected-port' | 'unexpected-fragment' | 'unexpected-host' | 'unexpected-redirect' | 'unexpected-final-host'
       httpStatus?: number
       nativeCode?: number
     }
