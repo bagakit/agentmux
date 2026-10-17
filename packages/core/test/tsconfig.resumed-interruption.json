@@ -1,0 +1,4 @@
+{
+  "extends": "./tsconfig.resumed-turn-interruption.json",
+  "include": ["session-resumed-interruption.test.ts", "session-resumed-interruption.config.mts"]
+}
