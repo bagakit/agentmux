@@ -16,7 +16,7 @@ import { keepPmoTeamsTopicFloatingPreview, leavePmoTeamsTopicFloatingPreview, pi
 import { moteTargetStatus, usePmoTeamsTopicTarget } from '../lib/pmo-teams-topic-target'
 import { pmoFocusSessionId } from '../lib/agent-focus'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
-import { sessionPresentationById } from '../lib/session-presentation'
+import { agentSessionPresentationIndex, sessionPresentationById } from '../lib/session-presentation'
 import { useAppStore } from '../store'
 import { WorkspaceWorkbench } from './WorkspaceWorkbench'
 import { MoteWorkface } from './MoteWorkface'
@@ -58,7 +58,8 @@ function OriginalAgentConversation({ floating, target, projectionState, visible,
   visible: boolean; onSelect(reference: WorkbenchProjectionSelection): void
 }) {
   const agent = floating.agentTarget!
-  const session = useAppStore(state => state.sessions.find(item => item.kind === 'agent' && item.control.agentSessionId === agent.agentSessionId && (!agent.hostId || item.control.hostId === agent.hostId)))
+  const session = useAppStore(state => agent.agentSessionId ? agentSessionPresentationIndex(state.sessions).get(agent.agentSessionId)?.find(item =>
+    item.control.agentSessionId === agent.agentSessionId && (!agent.hostId || item.control.hostId === agent.hostId)) : undefined)
   const tabs = useAppStore(state => state.tabs)
   const choices = useMemo(() => {
     const catalog = projectionState?.catalog
