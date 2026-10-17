@@ -71,7 +71,7 @@ export async function nativeProcessFiles(processId: number, signal: AbortSignal,
   let file: Record<string, string> = {}
   const finish = (): void => {
     if (!Object.keys(file).length) return
-    if (file.t === 'REG' && /^\d+$/u.test(file.f ?? '')) {
+    if (file.t === 'REG' && (/^\d+$/u.test(file.f ?? '') || scope === 'process' && file.f === 'txt')) {
       const path = normalizeNativeTranscriptPath(file.n)
       if (!path || !/^\d+$/u.test(file.i ?? '') || !/^(?:0x)?[0-9a-f]+$/iu.test(file.D ?? '') ||
         !Number.isSafeInteger(pid) || pid <= 0 || !Number.isSafeInteger(pgid) || pgid <= 0 ||
@@ -97,6 +97,28 @@ export async function nativeProcessFiles(processId: number, signal: AbortSignal,
   finish()
   signal.throwIfAborted()
   return files
+}
+
+/** Kernel executable identity, joined to this exact process's mapped file object.
+ * An argv name, wrapper command or a replaced path cannot identify its binary. */
+export async function nativeProcessExecutable(processId: number, signal: AbortSignal): Promise<Pick<NativeProcessFile, 'path' | 'device' | 'inode'>> {
+  const birth = await nativeProcessBirth(processId, signal)
+  const helper = fileURLToPath(new URL('../dist/native-socket-peer-darwin', import.meta.url))
+  const result = await runProcess(helper, ['--process-executable', String(processId)], { signal, timeoutMs: 2_000, maxOutputBytes: 32 * 1024 })
+  if (result.exitCode !== 0 || result.stderr) throw unavailable('The original native executable is unconfirmed.')
+  let value: unknown
+  try { value = JSON.parse(result.stdout) } catch { throw unavailable('The original native executable receipt is incomplete.') }
+  const receipt = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+  if (receipt.type !== 'native-process-executable' || receipt.schema !== 1 || receipt.pid !== processId || receipt.uid !== process.getuid?.() ||
+      typeof receipt.pathHex !== 'string' || !/^(?:[0-9a-f]{2})+$/u.test(receipt.pathHex)) throw unavailable('The executable receipt does not belong to the original process.')
+  let path: string
+  try { path = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.from(receipt.pathHex, 'hex')) } catch { throw unavailable('The native executable path is unconfirmed.') }
+  if (!path.startsWith('/') || path.includes('\0')) throw unavailable('The native executable path is invalid.')
+  const candidates = (await nativeProcessFiles(processId, signal, 'process')).filter(file => file.descriptor === 'txt' && file.path === path)
+  const unique = [...new Map(candidates.map(file => [JSON.stringify([file.path, String(file.device), String(file.inode)]), file])).values()]
+  if (unique.length !== 1 || await nativeProcessBirth(processId, signal) !== birth) throw unavailable('The original mapped executable changed.')
+  const file = unique[0]!
+  return { path: file.path, device: file.device, inode: file.inode }
 }
 
 /** Ephemeral original process identity; never a persisted Session or Native actor ID.
