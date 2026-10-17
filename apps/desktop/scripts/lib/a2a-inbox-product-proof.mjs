@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, readdir, realpath, symlink, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { isDeepStrictEqual, promisify } from 'node:util'
 import { pathToFileURL } from 'node:url'
@@ -66,7 +67,7 @@ export async function runA2aReferenceReadingProductProof({ root, evidence }) {
   const sourceCommit = (await exec('git', ['rev-parse', 'HEAD'], { cwd: root })).stdout.trim()
   const changes = (await exec('git', ['diff', sourceCommit, '--name-only', '--', ...owns], { cwd: root })).stdout.trim()
   assert.equal(changes, '', 'Commit the integrated product candidate before its private proof; no product overlay is accepted')
-  const privateRoot = await realpath(await mkdtemp('/tmp/amx-a2-'))
+  const privateRoot = await realpath(await mkdtemp(join(tmpdir(), 'amx-a2-')))
   const product = { schema: 'agentmux.a2a-reference-product-proof.v1', prepared: false, passed: false, sourceRoot: root, sourceCommit,
     privateRoot, receiptPath: join(evidence, 'receipt.json'), sources: {}, loaded: {}, compilerInputs: {}, compiled: {}, fixtures: {}, frames: [], cleanup: {},
     boundary: 'Actual complete Desktop/Main/preload/Renderer, public CLI, private ctxmux and authenticated synthetic native actor. Original Inbox body and typed independent reference notice. No live model, user Runtime, installed App, vendor idle-race or physical Mobile claim.' }
