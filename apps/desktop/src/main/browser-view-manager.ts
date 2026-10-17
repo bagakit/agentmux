@@ -2,6 +2,9 @@ import type { WorkbenchWindowDocument } from '../shared/workbench-windows.js'
 import type { BrowserInputFrameCapture } from '../shared/browser-input-context-capture.js'
 import { BROWSER_FAVICON_TIMEOUT_MS, readBrowserFavicon } from './browser-favicon.js'
 import type { BrowserColdDescriptor } from './browser-cold-descriptor.js'
+import type { BrowserRecoveryPreviewStore } from './browser-recovery-preview.js'
+import { BROWSER_RECOVERY_PREVIEW_JPEG_PREFIX, BROWSER_RECOVERY_PREVIEW_MAX_WIDTH, BROWSER_RECOVERY_PREVIEW_MAX_HEIGHT,
+  BROWSER_RECOVERY_PREVIEW_MAX_IMAGE_BYTES, type BrowserRecoveryPreviewScope } from '../shared/browser-recovery-preview.js'
 import { readScreenshotViewport, screenshotSource, SCREENSHOT_VIEWPORT_SCRIPT } from './browser-screenshot-source.js'
 import { evaluateBrowserOutcomeCriteria } from './browser-outcome-criteria.js'
 import { parseBrowserStructuredOutputRequest } from './browser-structured-output.js'
@@ -111,6 +114,9 @@ type BrowserEntry = {
   faviconDataUrl?: string | undefined
   faviconUrl?: string | undefined
   faviconRequest?: AbortController | undefined
+  recoveryPreviewJob?: { controller: AbortController; navigationId: string } | undefined
+  recoveryPreviewNavigation?: string | undefined
+  recoveryPreviewRetired?: true
   selectionRevision: number
   selectionOperation: number | symbol | null
   annotationRevision: number
@@ -353,6 +359,15 @@ export class BrowserViewManager {
     return this.entries.get(id) === entry && entry.view === view ? target : null
   }
 
+  /** Historical appearance can be read for an existing or released owner without acquiring it. */
+  recoveryPreviewScope(id: string): BrowserRecoveryPreviewScope | null {
+    const entry = this.entries.get(id) ?? this.releasedEntries.get(id)
+    if (!entry || ('cleanupOnly' in entry && entry.cleanupOnly)) return null
+    return entry.storage.mode === 'private'
+      ? { browserId: id, workspaceId: entry.workspaceId, mode: 'private', profileId: null }
+      : { browserId: id, workspaceId: entry.workspaceId, mode: 'normal', profileId: entry.storage.profileId }
+  }
+
   /** Freeze one existing Main-owned page observation without navigating, restoring or focusing it. */
   inputContext(id: string, hostId: string): import('@agentmux/core/browser-input-context').BrowserInputContext | null {
     const entry = this.entries.get(id)
@@ -442,7 +457,7 @@ export class BrowserViewManager {
   async returnWindow(window: BrowserWindow): Promise<void> {
     for (const entry of this.entries.values()) {
       for (const id of [...entry.presentationLeaseIds]) { const lease = this.presentationLeases.get(id); if (lease?.window === window) this.removePresentationLease(lease) }
-      if (this.windowForView(entry.view) === window) { this.placeView(entry.view, this.window); entry.view.setVisible(false); entry.visible = false }
+      if (this.windowForView(entry.view) === window) { this.cancelRecoveryPreview(entry); this.placeView(entry.view, this.window); entry.view.setVisible(false); entry.visible = false }
       this.synchronizeInputShield(entry)
       this.publishNativeCoverage(entry)
       const candidate = entry.pendingSwitch?.view
@@ -488,7 +503,8 @@ export class BrowserViewManager {
     private readonly taskAssets?: BrowserTaskAssets,
     private readonly downloads?: BrowserDownloads,
     private readonly uploads?: BrowserUploads,
-    private readonly feedbackPreferences: () => BrowserAgentControlPreferences = () => DEFAULT_BROWSER_AGENT_CONTROL
+    private readonly feedbackPreferences: () => BrowserAgentControlPreferences = () => DEFAULT_BROWSER_AGENT_CONTROL,
+    private readonly recoveryPreviews?: BrowserRecoveryPreviewStore
   ) {
     this.unsubscribeTaskAssets = taskAssets?.subscribe(browserId => {
       if (!this.entries.has(browserId)) return
@@ -1477,6 +1493,8 @@ export class BrowserViewManager {
       void entry.feedback?.hide()
       this.revokePresentationCapture(entry, 'source-replaced')
       this.clearFavicon(entry)
+      const previousPreviewScope = this.recoveryPreviewScope(id)
+      this.cancelRecoveryPreview(entry)
       entry.view = candidate
       // Candidate preparation predates current-owner input/media observation. Do not inherit
       // another WC's quiet proof; this page remains usable, but is not an automatic discard target.
@@ -1494,6 +1512,8 @@ export class BrowserViewManager {
       if (!authoritativeView.webContents.isDestroyed()) authoritativeView.webContents.close()
       this.synchronizeVisiblePage(entry, candidate)
       this.updateFavicon(entry, candidate)
+      if (previousPreviewScope) void this.recoveryPreviews?.remove(previousPreviewScope)
+      this.sampleRecoveryPreview(entry, candidate)
       this.emit(entry)
       return this.snapshot(entry)
     } finally {
@@ -2989,6 +3009,7 @@ export class BrowserViewManager {
       if (bounds === null) {
         const wasVisible = entry.visible
         entry.visible = false
+        this.cancelRecoveryPreview(entry)
         void entry.feedback?.hide()
         entry.view.setVisible(false)
         if (wasVisible) { this.notifyNativeVisibility(this.windowForView(entry.view)); this.emit(entry) }
@@ -3016,7 +3037,7 @@ export class BrowserViewManager {
       entry.view.setBounds(entry.bounds)
       if (sizeChanged && entry.viewport !== 'responsive') this.applyViewport(entry)
       entry.view.setVisible(true)
-      if (becomingVisible) { this.synchronizeVisiblePage(entry, entry.view); this.emit(entry) }
+      if (becomingVisible) { this.synchronizeVisiblePage(entry, entry.view); this.sampleRecoveryPreview(entry, entry.view); this.emit(entry) }
       if (hostChanged) this.notifyNativeVisibility(previousWindow)
       if (becomingVisible || boundsChanged || hostChanged) this.notifyNativeVisibility(nativeWindow)
     } finally { this.synchronizeInputShield(entry); this.publishNativeCoverage(entry) }
@@ -3033,9 +3054,72 @@ export class BrowserViewManager {
     view.webContents.setBackgroundThrottling(view.webContents.getBackgroundThrottling())
   }
 
+  private cancelRecoveryPreview(entry: BrowserEntry): void {
+    const job = entry.recoveryPreviewJob
+    if (!job) return
+    job.controller.abort()
+    if (entry.recoveryPreviewNavigation === job.navigationId) entry.recoveryPreviewNavigation = undefined
+  }
+
+  /** A single small historical appearance at load/show edges; never an operation or keepalive. */
+  private sampleRecoveryPreview(entry: BrowserEntry, view: WebContentsView): void {
+    const store = this.recoveryPreviews
+    if (!store || this.presentationDisposed || entry.recoveryPreviewRetired || !this.owns(entry, view) || !entry.visible || !entry.bounds || entry.error ||
+      view.webContents.isDestroyed() || view.webContents.isLoading() || entry.recoveryPreviewJob ||
+      entry.recoveryPreviewNavigation === entry.navigationId) return
+    const contents = view.webContents, url = contents.getURL()
+    if (!url || url === 'about:blank') return
+    const scope = this.recoveryPreviewScope(entry.id)
+    if (!scope) return
+    const navigationId = entry.navigationId, storage = entry.storage, controller = new AbortController()
+    const job = { controller, navigationId }
+    entry.recoveryPreviewJob = job
+    entry.recoveryPreviewNavigation = navigationId
+    void (async () => {
+      try {
+        const frame = contents.mainFrame, processId = frame.processId, frameToken = frame.frameToken
+        const title = contents.getTitle(), capturedAt = Date.now()
+        const current = (): boolean => {
+          try {
+            return !controller.signal.aborted && this.owns(entry, view) && entry.storage === storage &&
+              entry.navigationId === navigationId && entry.visible && !entry.error && !contents.isDestroyed() &&
+              contents.getURL() === url && contents.mainFrame.processId === processId && contents.mainFrame.frameToken === frameToken
+          } catch { return false } // An unknown source only cancels this optional preview.
+        }
+        if (!current()) return
+        const pixels = await contents.capturePage()
+        if (!current()) return
+        const size = pixels.getSize()
+        if (pixels.isEmpty() || size.width <= 0 || size.height <= 0) return
+        const scale = Math.min(1, BROWSER_RECOVERY_PREVIEW_MAX_WIDTH / size.width, BROWSER_RECOVERY_PREVIEW_MAX_HEIGHT / size.height)
+        const width = Math.max(1, Math.round(size.width * scale)), height = Math.max(1, Math.round(size.height * scale))
+        const thumbnail = pixels.resize({ width, height, quality: 'good' }), bytes = thumbnail.toJPEG(55)
+        if (bytes.length > BROWSER_RECOVERY_PREVIEW_MAX_IMAGE_BYTES) {
+          console.warn('Browser preview exceeded its image budget. The original page remains available.')
+          return
+        }
+        const result = await store.record(scope, { scope, url, title, navigationId, capturedAt,
+          image: { width, height, dataUrl: BROWSER_RECOVERY_PREVIEW_JPEG_PREFIX + bytes.toString('base64') }
+        }, current, controller.signal)
+        if (result.warning) console.warn(result.warning)
+      } catch (error) {
+        if (!controller.signal.aborted) console.warn('Browser preview could not be captured. The original page remains available.', error)
+      } finally {
+        if (entry.recoveryPreviewJob === job) entry.recoveryPreviewJob = undefined
+        // A replacement document may have become visible while the old capture was in flight.
+        if (this.owns(entry, entry.view) && (entry.navigationId !== navigationId || controller.signal.aborted)) this.sampleRecoveryPreview(entry, entry.view)
+      }
+    })()
+  }
+
   close(id: string): void | Promise<void> {
+    const previewScope = this.recoveryPreviewScope(id)
+    const entry = this.entries.get(id)
+    if (entry) { entry.recoveryPreviewRetired = true; this.cancelRecoveryPreview(entry) }
     const storage = this.entries.get(id)?.storage ?? this.releasedEntries.get(id)?.storage
     if (storage?.mode === 'private') return this.closePrivateOwner(id, storage)
+    // Ordered behind any publication already in progress, independent of native teardown success.
+    if (previewScope) void this.recoveryPreviews?.remove(previewScope)
     if (!this.destroyOwner(id)) return
     this.send({ type: 'closed', id })
   }
@@ -3043,6 +3127,9 @@ export class BrowserViewManager {
   private async closePrivateOwner(id: string, storage: Extract<BrowserStorage, { mode: 'private' }>, notify = true): Promise<void> {
     const failures: unknown[] = []
     const entry = this.entries.get(id)
+    const previewScope = this.recoveryPreviewScope(id)
+    if (entry) { entry.recoveryPreviewRetired = true; this.cancelRecoveryPreview(entry) }
+    if (previewScope) void this.recoveryPreviews?.remove(previewScope)
     try { this.destroyOwner(id) } catch (error) { failures.push(error) }
     // A failed native teardown must still retire this incarnation. Late popup callbacks compare
     // this exact storage object; a newly created Browser with the same id remains independent.
@@ -3099,6 +3186,7 @@ export class BrowserViewManager {
   /** Native teardown has no authority to retire the Renderer Region. */
   private destroyOwner(id: string): boolean {
     const entry = this.entries.get(id)
+    if (entry) this.cancelRecoveryPreview(entry)
     if (!entry) {
       const released = this.releasedEntries.get(id)
       if (!released) return false
@@ -3161,6 +3249,7 @@ export class BrowserViewManager {
     for (const unsubscribe of this.webAuthnSessions.values()) unsubscribe()
     this.webAuthnSessions.clear()
     void this.uploads?.dispose().catch(error => console.warn('Browser upload staging cleanup failed during disposal:', error))
+    void this.recoveryPreviews?.dispose().catch(error => console.warn('Browser preview cleanup failed during disposal:', error))
   }
 
   /** Staging IO never blocks a healthy Browser; only this document's selected files are released. */
@@ -3267,6 +3356,7 @@ export class BrowserViewManager {
     contents.on('did-start-navigation', (details) => {
       if (details.isMainFrame && !details.isSameDocument && this.faviconUrls.get(view)?.documentUrl !== details.url) this.faviconUrls.delete(view)
       if (!details.isMainFrame || !this.owns(entry, view)) return
+      this.cancelRecoveryPreview(entry)
       let requestedUrl: string
       try {
         requestedUrl = assertAllowedBrowserUrl(details.url)
@@ -3322,6 +3412,7 @@ export class BrowserViewManager {
       // did-finish-load can still report isLoading() === true; synchronize only once
       // Electron's public loading state has settled, retaining the current page policy.
       this.synchronizeVisiblePage(entry, view)
+      this.sampleRecoveryPreview(entry, view)
       this.emit(entry)
     })
     contents.on('did-navigate', (_event, url) => {
@@ -3339,6 +3430,7 @@ export class BrowserViewManager {
       const reported = this.faviconUrls.get(view)
       if (reported) this.faviconUrls.set(view, { ...reported, documentUrl: url })
       entry.requestedUrl = url
+      this.sampleRecoveryPreview(entry, view)
       this.emit(entry)
     })
     contents.on('page-favicon-updated', (_event, urls) => {
@@ -3351,17 +3443,20 @@ export class BrowserViewManager {
     })
     contents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
       if (!isMainFrame || errorCode === -3 || !this.owns(entry, view)) return
+      this.cancelRecoveryPreview(entry)
       entry.requestedUrl = validatedURL || entry.requestedUrl
       entry.error = `${errorDescription} (${errorCode})`
       this.emit(entry)
     })
     contents.on('render-process-gone', (_event, details) => {
       if (!this.owns(entry, view)) return
+      this.cancelRecoveryPreview(entry)
       this.revokePresentationCapture(entry, 'source-replaced')
       entry.error = `Browser renderer stopped: ${details.reason}`
       this.emit(entry)
     })
     contents.once('destroyed', () => {
+      if (entry.view === view) this.cancelRecoveryPreview(entry)
       const attempt = entry.releaseAttempt
       if (attempt?.view === view) attempt.settle('released', [])
       if (this.owns(entry, view)) this.clearFavicon(entry)
