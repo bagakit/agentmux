@@ -36,7 +36,7 @@ it('the original menu and default Host keep joining visible after an empty-invit
   const join = document.querySelector('[aria-label="Joining this group"]')!
   expect(join.closest('details'), 'the original join next action remains outside collapsed details after bind').toBeNull()
   expect(join.textContent).toContain('Your own membership is not verified')
-  expect(document.querySelector('[aria-label="Group member access"]')?.textContent).toContain('No members approved')
+  await vi.waitFor(() => expect(document.querySelector('[aria-label="Group member access"]')?.textContent).toContain('No members approved'))
   expect((await f.services.connections.bindings!.inspect({ bindingId: binding.bindingId })).grants).toEqual([])
   const creation = f.calls.find(call => call.method === 'connection.room.create')!
   expect(creation.input).toMatchObject({ members: [] })
@@ -72,13 +72,25 @@ it('an unknown join of the original saved group survives remount and checks the 
   expect(kept).toBeDefined()
   await f.button('Close'); await f.menu('Shared group details'); await ready('Join link result not confirmed')
   expect(document.querySelector('[aria-label="Joining this group"]')?.closest('details')).toBeNull()
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  vi.mocked(api.connections.call).mockImplementation(async (method, input) => {
+    if (method === 'connection.room.link.inspect' && 'operationId' in input && input.operationId === kept.input.operationId) await held
+    return await f.forward(method, input) as never
+  })
   await f.button('Check link status')
+  const progress = document.querySelector('[data-connector-request-pending]')
+  expect(progress?.textContent ?? '').toContain('Working on this group request')
+  expect(progress?.querySelector('svg')).not.toBeNull()
+  expect(document.querySelector('[aria-label="Joining this group"]')?.textContent).toContain('Join link result not confirmed')
+  release()
+  await vi.waitFor(() => expect(document.querySelector('[data-connector-request-pending]')).toBeNull())
   await vi.waitFor(() => expect(f.calls.filter(call => call.method === 'connection.room.link.inspect').some(call => (call.input as { operationId: string }).operationId === kept.input.operationId)).toBe(true))
   expect(f.calls.filter(call => call.method === 'connection.room.link.create')).toHaveLength(1)
   expect(f.calls.filter(call => call.method === 'connection.room.create')).toHaveLength(1)
   expect(f.calls.filter(call => call.method === 'connection.grant')).toHaveLength(0)
   expect(f.platformCalls.filter(call => call.url?.endsWith('/link'))).toHaveLength(1)
-  expect(document.querySelector('[aria-label="Group member access"]')?.textContent).toContain('No members approved')
+  await vi.waitFor(() => expect(document.querySelector('[aria-label="Group member access"]')?.textContent).toContain('No members approved'))
   expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain('Generate a new join link')
   expect((await f.cli(['room', 'link', 'inspect', '--operation-id', kept.input.operationId])).operation.state).toBe('unknown')
   await f.original.unchanged()
