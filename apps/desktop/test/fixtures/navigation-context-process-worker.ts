@@ -123,9 +123,7 @@ flushSync(() => root.render(createElement(FloatingConsumer)))
 await prepareRendererUpdate()
 const state = useAppStore.getState()
 const catalog = spatialCatalog(state, fixture.moteTopics)
-const moteTabId = floatingOwner.pmoTeamsTopicFloatingTargetTabId(floating, state.tabs,
-  state.layouts[fixture.scratchWorkspace.id], state.agentFocus.pmo.sessionId)
-const mote = moteWorkbenchProjection(catalog, moteTabId ? state.tabs[moteTabId] : undefined, floating, () => {}, state.layouts)
+const mote = moteWorkbenchProjection(catalog, state.tabs, floating, () => {}, state.layouts)
 const focus = mainFocusPresentation(state.workbenchSpaceSelection, state.tabs, catalog, () => {})
 const survey = state.surveyZoneSelection!
 const surveyProjection = resolveWorkbenchZone(survey.zoneId, catalog, state.layouts, state.tabs, 'survey-workbench', survey.selection, () => {})

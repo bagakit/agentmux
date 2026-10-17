@@ -10,7 +10,7 @@ import type { AgentTimelineSnapshot } from '@agentmux/core'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { api } from '../src/renderer/src/lib/api'
-import { pmoTeamsTopicFloatingTargetTabId, requestAgentConversationFloatingOpen, requestPmoTeamsTopicFloatingClose, requestPmoTeamsTopicFloatingOpen, usePmoTeamsTopicFloatingState } from '../src/renderer/src/lib/pmo-teams-topic-floating'
+import { requestAgentConversationFloatingOpen, requestPmoTeamsTopicFloatingClose, requestPmoTeamsTopicFloatingOpen, usePmoTeamsTopicFloatingState } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 import { usePmoTeamsTopicTarget } from '../src/renderer/src/lib/pmo-teams-topic-target'
 import { addWorkbenchRegion, createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { MAX_AGENT_STEER_QUEUE_ENTRIES, useAppStore } from '../src/renderer/src/store'
@@ -71,8 +71,7 @@ const currentReference = { displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId: 'm
 function Floating() {
   const [floating, setFloating] = usePmoTeamsTopicFloatingState()
   const state = useAppStore()
-  const tabId = pmoTeamsTopicFloatingTargetTabId(floating, state.tabs, state.layouts[SCRATCH_WORKSPACE_ID], state.agentFocus.pmo.sessionId)
-  const projectionState = moteWorkbenchProjection(spatialCatalog(state, [topic]), tabId ? state.tabs[tabId] : undefined,
+  const projectionState = moteWorkbenchProjection(spatialCatalog(state, [topic]), state.tabs,
     floating, reference => setFloating({ targetTabId: reference.tabId, reference }), state.layouts)
   return createElement(PmoTeamsTopicFloatingPanel, { floating, setFloating, projectionState })
 }

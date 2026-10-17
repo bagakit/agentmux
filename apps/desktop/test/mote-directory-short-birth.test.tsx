@@ -34,7 +34,7 @@ beforeEach(() => { vi.stubGlobal('crypto', webcrypto); useAppStore.setState(init
 afterEach(()=>{useAppStore.setState(initial,true); vi.restoreAllMocks(); vi.unstubAllGlobals()})
 function surfaces() { const state = useAppStore.getState(), choice=state.workbenchSpaceSelection!, tab=state.tabs[choice.tabId!]!, catalog=spatialCatalog(state,[])
   const reference={displayWorkspaceId:scratch.id,groupId:choice.groupId!,tabId:tab.id,regionId:choice.regionId!}
-  const float=moteWorkbenchProjection(catalog,tab,{open:true,preview:false,targetTabId:tab.id,targetTopicId:tab.topicId!,reference},vi.fn(),state.layouts)
+  const float=moteWorkbenchProjection(catalog,state.tabs,{open:true,preview:false,targetTabId:tab.id,targetTopicId:tab.topicId!,reference},vi.fn(),state.layouts)
   return {state,choice,tab,catalog,reference,float,space:workbenchObjectLayout(state,scratch.id)} }
 it('birth allocates one original Tab/Region/draft before await and both exact shared presentations remain operable through failed ACK', async()=>{
   const pending=deferred<ScratchTopicSnapshot>(); vi.spyOn(api.scratch,'ensureMote').mockReturnValue(pending.promise)
@@ -92,15 +92,15 @@ it('invalid Group stays unknown while a retired Region and consistent duplicate 
   const job=useAppStore.getState().createScratchTopic('mote',{prompt:'Keep'}),born=surfaces()
   for(const reference of [{...born.reference,groupId:'missing'}]) {
     const raw={open:true,preview:false,targetTabId:born.tab.id,targetTopicId:born.tab.topicId!,reference}
-    expect(moteWorkbenchProjection(born.catalog,born.tab,raw,vi.fn(),born.state.layouts).projection).toBeNull()
+    expect(moteWorkbenchProjection(born.catalog,born.state.tabs,raw,vi.fn(),born.state.layouts).projection).toBeNull()
     expect(raw.reference).toBe(reference)
   }
   const lateReference={...born.reference,regionId:'retired'}
-  const late=moteWorkbenchProjection(born.catalog,born.tab,{open:true,preview:false,targetTabId:born.tab.id,reference:lateReference},vi.fn(),born.state.layouts)
+  const late=moteWorkbenchProjection(born.catalog,born.state.tabs,{open:true,preview:false,targetTabId:born.tab.id,reference:lateReference},vi.fn(),born.state.layouts)
   expect(late.projection?.selection).toEqual([lateReference]);expect(late.issueKind).toBe('parent-available');expect(lateReference.regionId).toBe('retired')
   expect(projectWorkbenchProjection(born.state.layouts[scratch.id],born.state.tabs,late.projection!).selection).toEqual([lateReference])
   const duplicate={...born.catalog,locations:[...born.catalog.locations,{...born.catalog.locations[0]!}]}
-  const repeated=moteWorkbenchProjection(duplicate,born.tab,{open:true,preview:false,targetTabId:born.tab.id,reference:born.reference},vi.fn(),born.state.layouts)
+  const repeated=moteWorkbenchProjection(duplicate,born.state.tabs,{open:true,preview:false,targetTabId:born.tab.id,reference:born.reference},vi.fn(),born.state.layouts)
   expect(repeated.projection?.selection).toEqual([born.reference]);expect(repeated.issue).toBeNull();expect(repeated.catalog).toBe(duplicate)
   pending.reject(new Error('Keep')); await expect(job).rejects.toThrow('Keep')
 })
