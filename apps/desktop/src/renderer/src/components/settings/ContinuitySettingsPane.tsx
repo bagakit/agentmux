@@ -1,6 +1,6 @@
 import { DEFAULT_AGENT_CONTINUITY_POLICY, normalizeAgentContinuityPolicy, type AgentMuxContinuityPolicy } from '@agentmux/core/agent-session-continuity'
 import { TextInput } from '@agentmux/client-ui/input'
-import { useId, type ReactNode } from 'react'
+import { useId, useState, type ReactNode } from 'react'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraftRecord } from './use-setting-draft'
 import { executionSettings, type ExecutionSettings } from './continuity-settings-fields'
@@ -23,6 +23,59 @@ function milliseconds(value: string): number {
   const parsed = Number(BigInt(whole) * 1000n + BigInt(fraction.padEnd(3, '0')))
   return Number.isSafeInteger(parsed) ? parsed : NaN
 }
+const durationUnits = { seconds: 1000, minutes: 60_000, hours: 3_600_000 } as const
+type DurationUnit = keyof typeof durationUnits
+function initialDurationUnit(value: number): DurationUnit {
+  return value >= durationUnits.hours && value % durationUnits.hours === 0 ? 'hours'
+    : value >= durationUnits.minutes && value % durationUnits.minutes === 0 ? 'minutes' : 'seconds'
+}
+function displayDuration(value: number, unit: DurationUnit): { text: string; approximate: boolean } {
+  if (!Number.isSafeInteger(value) || value < 0) return { text: '', approximate: false }
+  const divisor = BigInt(durationUnits[unit]), precision = 1_000_000_000n
+  const scaled = BigInt(value) * precision
+  const approximate = scaled % divisor !== 0n
+  const digits = (scaled + divisor / 2n) / divisor
+  const fraction = String(digits % precision).padStart(9, '0').replace(/0+$/, '')
+  return { text: `${digits / precision}${fraction ? `.${fraction}` : ''}`, approximate }
+}
+function parseDuration(text: string, unit: DurationUnit): number {
+  if (!/^\d+(\.\d{1,9})?$/.test(text)) return NaN
+  const [whole = '0', fraction = ''] = text.split('.')
+  const scale = 10n ** BigInt(fraction.length)
+  const numerator = (BigInt(whole) * scale + BigInt(fraction || '0')) * BigInt(durationUnits[unit])
+  if (numerator % scale !== 0n) return NaN
+  const value = Number(numerator / scale)
+  return Number.isSafeInteger(value) ? value : NaN
+}
+function DurationSettingInput({ id, label, value, onChange }: { id: string; label: string; value: string; onChange(value: string): void }) {
+  const canonical = milliseconds(value)
+  const [unit, setUnit] = useState<DurationUnit>(() => initialDurationUnit(canonical))
+  const [entry, setEntry] = useState<{ canonical: string; text: string; unit: DurationUnit } | null>(null)
+  const display = displayDuration(canonical, unit)
+  const authored = entry?.canonical === value && entry.unit === unit
+  const text = authored ? entry.text : display.text
+  const approximate = !authored && display.approximate
+  const valid = Number.isSafeInteger(canonical)
+  return <div className="continuity-duration">
+    <div className="continuity-number continuity-duration-editor">
+      <TextInput id={id} aria-label={label} aria-describedby={`${id}-value`} inputMode="decimal" value={text} aria-invalid={!valid}
+        onChange={event => {
+          const parsed = parseDuration(event.target.value, unit)
+          const next = Number.isSafeInteger(parsed) ? seconds(parsed) : `invalid:${unit}:${event.target.value}`
+          setEntry({ canonical: next, text: event.target.value, unit })
+          onChange(next)
+        }} />
+      <select aria-label={`${label} unit`} value={unit} onChange={event => {
+        const next = event.target.value as DurationUnit
+        setUnit(next)
+        setEntry(valid ? null : { canonical: value, text, unit: next })
+      }}>{Object.keys(durationUnits).map(value => <option key={value} value={value}>{value}</option>)}</select>
+    </div>
+    <output id={`${id}-value`} className="continuity-duration-summary" htmlFor={id}>
+      {valid ? approximate ? `≈ ${text} ${unit} · Exact: ${value} seconds` : readableDuration(canonical) : 'Use a duration with whole millisecond precision'}
+    </output>
+  </div>
+}
 function editValue(policy: AgentMuxContinuityPolicy) {
   return { ...executionSettings(policy), activeRecoveryDelayMs: seconds(policy.activeRecoveryDelayMs), confirmedIdleWindowMs: seconds(policy.confirmedIdleWindowMs),
     recheckIntervalMs: seconds(policy.recheckIntervalMs), recheckMaxAttempts: String(policy.recheckMaxAttempts),
@@ -44,15 +97,14 @@ export function ContinuitySettingsPane({ preferences, onSave }: {
   const source = (key: keyof AgentMuxContinuityPolicy) => Object.hasOwn(preferences ?? {}, key) ? 'Custom saved value' : 'Built-in default'
   const duration = (key: 'activeRecoveryDelayMs' | 'confirmedIdleWindowMs' | 'recheckIntervalMs' | 'retryInitialDelayMs' | 'retryMaxDelayMs', label: string, hint: ReactNode) => <div className="continuity-setting-row" data-settings-field={key}>
     <label htmlFor={`${id}-${key}`}><strong>{label}</strong><small>{hint}</small></label>
-    <div className="continuity-duration"><div className="continuity-number"><TextInput id={`${id}-${key}`} aria-label={label} inputMode="decimal" value={draft.value[key]}
-      aria-invalid={!Number.isSafeInteger(milliseconds(draft.value[key]))} onChange={event => draft.setField(key, event.target.value)} /><span>{milliseconds(draft.value[key]) === 1000 ? 'second' : 'seconds'}</span></div>{milliseconds(draft.value[key]) >= 60_000 && <output className="continuity-duration-summary" htmlFor={`${id}-${key}`}>{readableDuration(milliseconds(draft.value[key]))}</output>}</div>
+    <DurationSettingInput id={`${id}-${key}`} label={label} value={draft.value[key]} onChange={value => draft.setField(key, value)} />
   </div>
   let valid = true
   try { policyValue(draft.value) } catch { valid = false }
   async function save() {
     const submitted = draft.beginSave()
     submitted.finish(await saveState.run(async () => {
-      if (!valid) throw new Error('Use nonnegative durations with up to three decimal places in seconds, and whole-number counts. Values must fit a safe integer in milliseconds, and the maximum retry base delay must be at least the initial retry base delay.')
+      if (!valid) throw new Error('Use nonnegative durations with whole millisecond precision, and whole-number counts. Values must fit a safe integer in milliseconds, and the maximum retry base delay must be at least the initial retry base delay.')
       await onSave(policyValue(submitted.value), policyValue(submitted.expected))
     }))
   }
@@ -107,7 +159,7 @@ export function ContinuitySettingsPane({ preferences, onSave }: {
       </dl>
     </details>
     <p className="continuity-hint">Saving preferences starts no Agent and sends no message.</p>
-    {!valid && <p className="settings-inline-error" role="alert">Enter nonnegative seconds (up to millisecond precision) and whole-number counts within the safe integer range. The maximum retry base delay must be at least the initial retry base delay.</p>}
+    {!valid && <p className="settings-inline-error" role="alert">Enter nonnegative durations with whole millisecond precision and whole-number counts within the safe integer range. The maximum retry base delay must be at least the initial retry base delay.</p>}
     <SettingsSaveBar save={saveState} dirty={draft.dirty} label="Save recovery preferences" onSave={() => void save()} disabled={!valid} />
   </div>
 }
