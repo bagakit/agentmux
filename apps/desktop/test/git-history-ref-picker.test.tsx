@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 import { fixturePath as _tailFixturePath, fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { act, useState } from 'react'
+import { GRAPHITE_THEME, mountThemeRuntime, previewTheme } from '@agentmux/client-ui/theme'
+import { semanticIconHref } from '@agentmux/client-ui/icons'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { mkdtemp, realpath, rm, writeFile, readFile } from 'node:fs/promises'
@@ -266,3 +268,38 @@ it('directly reads an old main tip from hundreds of actual Git refs through the 
   expect(await git('symbolic-ref', '--short', 'HEAD')).toBe('main')
   expect(await readFile(join(path, 'kept-untracked.txt'), 'utf8')).toBe('Original user evidence')
 }, 20_000)
+
+
+it('themes only the original selected reference mark and retains its portal, row and exact selection action', async () => {
+  const release = mountThemeRuntime(window, { themeId: 'graphite', appAppearance: 'light' })
+  try {
+    const originalRefs = refs.filter(ref => ['refs/heads/origin/main', 'refs/remotes/origin/main', 'HEAD'].includes(ref.name))
+    const { changed, submitted } = await mount({ reference: 'refs/heads/origin/main', targetRefs: originalRefs })
+    await open()
+    const originalPopup = popup()!, originalInput = search(), options = choices()
+    expect(options).toHaveLength(4)
+    const selected = options.find(option => option.dataset.value === 'refs/heads/origin/main')!, other = options.find(option => option.dataset.value === 'refs/remotes/origin/main')!
+    const svg = selected.querySelector<SVGSVGElement>('svg[data-semantic-icon="status.selected"]')!
+    expect(svg, 'the original selected reference uses the Selected role').not.toBeNull()
+    expect(svg.getAttribute('width')).toBe('12'); expect(svg.querySelector('use')!.getAttribute('href')).toBe(semanticIconHref('status.selected'))
+    expect(selected.getAttribute('aria-selected')).toBe('true'); expect(other.getAttribute('aria-selected')).toBe('false')
+    expect(options.filter(option => option.querySelector('[data-semantic-icon="status.selected"]'))).toEqual([selected])
+    const theme = { ...structuredClone(GRAPHITE_THEME), id: 'custom.history-selection', name: 'Independent reference selection', icons: {
+      'status.selected': { kind: 'paths' as const, paths: [{ d: 'M3 12L12 3L21 12L12 21Z' }] },
+      'navigation.back': { kind: 'paths' as const, paths: [{ d: 'M4 4H20V20H4Z' }] }
+    } }
+    await act(async () => { expect(previewTheme(theme).applied).toBe(true) })
+    expect(popup()).toBe(originalPopup); expect(search()).toBe(originalInput); expect(choices()).toEqual(options)
+    expect(selected.querySelector('svg[data-semantic-icon="status.selected"]')).toBe(svg)
+    expect(document.getElementById(semanticIconHref('status.selected').slice(1))!.querySelector('path')!.getAttribute('d')).toBe(theme.icons['status.selected'].paths[0]!.d)
+    expect(document.getElementById(semanticIconHref('navigation.back').slice(1))!.querySelector('path')!.getAttribute('d')).toBe(theme.icons['navigation.back'].paths[0]!.d)
+    expect(options.filter(option => option.querySelector('[data-semantic-icon="status.selected"]'))).toEqual([selected])
+    expect(svg.closest('[data-icon-animation]')).toBeNull(); expect(document.activeElement).toBe(originalInput)
+    expect(changed).not.toHaveBeenCalled(); expect(submitted).not.toHaveBeenCalled()
+    await act(async () => other.click())
+    expect(changed).toHaveBeenCalledExactlyOnceWith('refs/remotes/origin/main'); expect(submitted).not.toHaveBeenCalled()
+    expect(popup()).toBeNull(); expect(document.activeElement).toBe(trigger()); expect(trigger().dataset.value).toBe('refs/remotes/origin/main')
+    await open()
+    expect(choices().filter(option => option.querySelector('[data-semantic-icon="status.selected"]')).map(option => option.dataset.value)).toEqual(['refs/remotes/origin/main'])
+  } finally { release() }
+})

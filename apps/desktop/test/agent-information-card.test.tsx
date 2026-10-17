@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
+import { GRAPHITE_THEME, mountThemeRuntime, previewTheme } from '@agentmux/client-ui/theme'
+import { semanticIconHref } from '@agentmux/client-ui/icons'
 import { beforeEach, expect, it, vi } from 'vitest'
 import type { AgentMuxRpcResult, AgentSessionHistoryPage } from '@agentmux/core'
 import { fixtureEpoch } from '../../../test/fixture-values.mjs'
@@ -60,7 +62,7 @@ beforeEach(async () => {
 it.each(['focus', 'workspace'] as const)('%s consumes shared usage, exact Goal and original message relationships only on disclosure', async surface => {
   await mount(); expect(api.sessions.historyPage).not.toHaveBeenCalled(); expect(api.sessions.dispatches).not.toHaveBeenCalled()
   expect(card(surface).querySelector('button')).toBeNull()
-  await open(surface); expect(panel().querySelector('[title="75% context remaining"]')).not.toBeNull(); expect(panel().textContent).toContain('540k tokens')
+  await open(surface); expect(panel().querySelector('[title="75% context remaining"]')).not.toBeNull(); expect(panel().textContent).toContain('540k native Session tokens')
   expect(api.sessions.dispatches).not.toHaveBeenCalled()
   await disclose('Usage'); expect(panel().querySelector('[data-agent-usage-scope="native-session"]')!.textContent).toContain('540k')
   expect(panel().querySelector('[data-agent-usage-scope="response"]')!.textContent).toContain('1.5k')
@@ -115,7 +117,7 @@ it('keeps canonical same-SID usage isolated by exact Host and Run in the reusabl
   await dom.render(<WorkspaceAgentRow context={context} selected={false} selecting={false} disabled={false} onToggle={() => {}} onOpen={() => { throw Error('Reading must not navigate') }} />)
   await act(async () => dom.container.querySelector<HTMLButtonElement>('.focus-context')!.focus())
   await waitForAgentCardReading(() => { expect(panel()).not.toBeNull(); expect(panel().querySelector('[data-hover-input-id]')).not.toBeNull() })
-  expect(panel().textContent).toContain('90k tokens'); expect(panel().textContent).not.toContain('540k')
+  expect(panel().textContent).toContain('90k native Session tokens'); expect(panel().textContent).not.toContain('540k')
 })
 
 it('keeps a recorded peer SID without borrowing another Host display name', async () => {
@@ -138,4 +140,40 @@ it('reads a presentation alias through its original canonical control without op
   await act(async () => dom.container.querySelector<HTMLButtonElement>('.focus-context')!.focus())
   await waitForAgentCardReading(() => expect(api.sessions.historyPage).toHaveBeenCalledExactlyOnceWith(alias.control, expect.objectContaining({ limit: 100 })))
   expect(panel().querySelector('[data-hover-input-id]')).not.toBeNull(); expect(api.ui.openObjectLink).not.toHaveBeenCalled()
+})
+
+
+it('themes the original reader return control independently while preserving its reading tree, selection and focus', async () => {
+  const release = mountThemeRuntime(window, { themeId: 'graphite', appAppearance: 'light' })
+  try {
+    await mount(); await open('workspace')
+    const reader = panel().querySelector<HTMLElement>('.agent-information-reader__reading')!, surface = reader.querySelector<HTMLElement>('[data-agent-input-reading]') ?? reader
+    const original = panel().querySelector<HTMLElement>('[data-hover-input-id]')!
+    expect(original).not.toBeNull(); expect(original.textContent).toContain('Declared text is not authenticated communication.')
+    const range = document.createRange(); range.selectNodeContents(original)
+    window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range)
+    const selection = window.getSelection()!.toString(), historyReads = vi.mocked(api.sessions.historyPage).mock.calls.length
+    reader.scrollTop = 23
+    await disclose('Usage')
+    const back = panel().querySelector<HTMLButtonElement>('[aria-label="Back to original content"]')!, svg = back.querySelector<SVGSVGElement>('svg[data-semantic-icon="navigation.back"]')!
+    expect(svg, 'the actual metadata return control uses the Back role').not.toBeNull()
+    expect(svg.querySelector('use')!.getAttribute('href')).toBe(semanticIconHref('navigation.back'))
+    expect(svg.getAttribute('width')).toBe('13'); expect(document.activeElement).toBe(back)
+    const theme = { ...structuredClone(GRAPHITE_THEME), id: 'custom.reader-return', name: 'Independent reader return', icons: {
+      'navigation.back': { kind: 'paths' as const, paths: [{ d: 'M4 4H20V20H4Z' }] },
+      'status.selected': { kind: 'paths' as const, paths: [{ d: 'M3 12L12 3L21 12L12 21Z' }] }
+    } }
+    await act(async () => { expect(previewTheme(theme).applied).toBe(true) })
+    expect(panel().querySelector('[aria-label="Back to original content"]')).toBe(back); expect(back.querySelector('svg')).toBe(svg)
+    expect(document.getElementById(semanticIconHref('navigation.back').slice(1))!.querySelector('path')!.getAttribute('d')).toBe(theme.icons['navigation.back'].paths[0]!.d)
+    expect(document.getElementById(semanticIconHref('status.selected').slice(1))!.querySelector('path')!.getAttribute('d')).toBe(theme.icons['status.selected'].paths[0]!.d)
+    expect(svg.closest('[data-icon-animation]')).toBeNull(); expect(document.activeElement).toBe(back)
+    expect(panel().querySelector('[data-hover-input-id]')).toBe(original)
+    await act(async () => back.click())
+    expect(panel().querySelector('.agent-information-reader__metadata')).toBeNull()
+    expect(panel().querySelector('.agent-information-reader__reading')).toBe(reader); expect(panel().querySelector('[data-hover-input-id]')).toBe(original)
+    expect(reader.scrollTop).toBe(23); expect(window.getSelection()!.toString()).toBe(selection); expect(document.activeElement).toBe(surface)
+    expect(api.sessions.historyPage).toHaveBeenCalledTimes(historyReads); expect(api.ui.openObjectLink).not.toHaveBeenCalled()
+    expect(useAppStore.getState().agentComposerDrafts[sid]).toBe('Original draft'); expect(useAppStore.getState().agentFocus.execution.sessionId).toBeNull()
+  } finally { release() }
 })
