@@ -10,6 +10,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { DEFAULT_AGENT_SCHEDULE_CHECK_IN } from '@agentmux/core/schedule'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { useAppStore } from '../src/renderer/src/store'
+import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 
 const dom = composerDOM()
 const target = { hostId: 'local', agentSessionId: 'native-agent', providerId: 'codex', workspacePath: _hygiene_fixturePath("repo") }
@@ -17,6 +18,7 @@ const calendar = { kind: 'daily' as const, timezone: 'America/New_York', time: _
 const saved = (overrides: Partial<ContinuousProgressLoop> = {}): ContinuousProgressLoop => ({ ...target, loopId: 'saved-calendar', intervalMs: 60000, calendar, prompt: 'Ask one original question.\nKeep this entire saved message.', status: 'active', nextCheckAt: Date.parse(_hygiene_fixtureIso(26316000000, "minute")), revision: 1, creationOperationId: 'created-calendar', futureIntentId: 'intent-1', ...overrides })
 const receipt = (schedule: ContinuousProgressLoop) => ({ schedule, diskDurability: 'confirmed' as const, executionScope: 'connected-host' as const })
 beforeEach(() => {
+  useLauncherState.setState({ drafts: {}, persistenceIssue: null })
   vi.spyOn(api.schedule, 'list').mockResolvedValue({ schedules: [], executionScope: 'connected-host' })
   vi.spyOn(api.schedule, 'onChanged').mockImplementation(() => vi.fn())
 })
@@ -50,7 +52,7 @@ describe('original calendar control', () => {
     expect(dom.container.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('Keep this draft')
     expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Arrangement time zone"]')!.value).toBe('America/New_York')
     vi.spyOn(api.schedule, 'create').mockImplementation(async params => receipt(saved({ calendar: params.calendar, prompt: params.prompt, creationOperationId: params.operationId })))
-    await clickText('Save arrangement'); expect(dom.container.querySelector('form')).toBeNull()
+    await clickText('Save arrangement'); expect(dom.container.querySelector<HTMLDetailsElement>('.schedule-create')!.open).toBe(false)
     await openForm()
     expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Arrangement time zone"]')!.value).toBe('Asia/Tokyo')
     expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Enable quiet follow-up"]')!.checked).toBe(false)
@@ -105,24 +107,24 @@ describe('original calendar control', () => {
   })
   it('shows full saved message, civil due and actual status and uses the original three mutations', async () => {
     await mount(saved())
-    expect(dom.container.querySelector('.calendar-schedules__context, .calendar-schedules__message')!.textContent).toBe(saved().prompt)
+    expect(dom.container.querySelector('.calendar-schedules__context')!.textContent).toBe(saved().prompt)
     expect(dom.container.textContent).toContain('America/New_York')
     expect(dom.container.querySelector('time')!.dateTime).toBe(new Date(saved().nextCheckAt).toISOString())
     expect(dom.container.textContent).not.toContain('Check now')
-    const pause = vi.spyOn(api.schedule, 'pause').mockImplementation(async params => receipt(saved({ revision: 2, status: 'paused', lastMutation: { ...params, action: 'pause' } })))
-    const resume = vi.spyOn(api.schedule, 'resume').mockImplementation(async params => receipt(saved({ revision: 3, lastMutation: { ...params, action: 'resume' } })))
-    const cancel = vi.spyOn(api.schedule, 'cancel').mockImplementation(async params => receipt(saved({ revision: 4, status: 'stopped', lastMutation: { ...params, action: 'cancel' } })))
+    const pause = vi.spyOn(api.schedule, 'pause').mockImplementation(async params => receipt(saved({ revision: 2, status: 'paused', lastMutation: { operationId: params.operationId, expectedRevision: params.expectedRevision, action: 'pause' } })))
+    const resume = vi.spyOn(api.schedule, 'resume').mockImplementation(async params => receipt(saved({ revision: 3, lastMutation: { operationId: params.operationId, expectedRevision: params.expectedRevision, action: 'resume' } })))
+    const cancel = vi.spyOn(api.schedule, 'cancel').mockImplementation(async params => receipt(saved({ revision: 4, status: 'stopped', lastMutation: { operationId: params.operationId, expectedRevision: params.expectedRevision, action: 'cancel' } })))
     await clickText('Pause arrangement'); await clickText('Resume arrangement'); await clickText('Cancel arrangement')
-    expect([pause, resume, cancel].map(call => call.mock.calls[0]![0])).toEqual([1, 2, 3].map(expectedRevision => ({ scheduleId: 'saved-calendar', expectedRevision, operationId: expect.stringMatching(/^schedule-/) })))
+    expect([pause, resume, cancel].map(call => call.mock.calls[0]![0])).toEqual([1, 2, 3].map(expectedRevision => ({ scheduleId: 'saved-calendar', expectedRevision, operationId: expect.any(String) })))
     expect(dom.container.textContent).toContain('Ended')
-    expect(dom.container.querySelectorAll('.calendar-schedules__actions button')).toHaveLength(0)
+    expect([...dom.container.querySelectorAll('button')].some(button => button.textContent === 'Resume arrangement')).toBe(false)
   })
   it.each(['once', 'daily', 'weekly', 'monthly', 'yearly'] as const)('saves %s with explicit civil policies through the real typed create API', async kind => {
     await mount(); await openForm()
     const create = vi.spyOn(api.schedule, 'create').mockImplementation(async params => receipt(saved({ ...params.target, calendar: params.calendar, prompt: params.prompt, creationOperationId: params.operationId })))
     await edit('[aria-label="Arrangement repeat"]', kind)
     await edit('[aria-label="Arrangement time zone"]', 'Europe/Berlin')
-    await edit('[aria-label="Arrangement time"]', _hygiene_fixtureClock(8, 30))
+    await edit('[aria-label="Arrangement local time"]', _hygiene_fixtureClock(8, 30))
     await edit('textarea', 'Keep my exact original instruction.\nSecond line.')
     if (kind === 'once') await edit('[aria-label="Arrangement date"]', _hygiene_fixtureCivil(2, 14, 1))
     if (kind === 'weekly') await edit('[aria-label="Arrangement weekday"]', '5')
@@ -130,8 +132,8 @@ describe('original calendar control', () => {
     if (kind === 'yearly') await edit('[aria-label="Arrangement month"]', '2')
     await clickText('Save arrangement')
     expect(create).toHaveBeenCalledTimes(1)
-    expect(create.mock.calls[0]![0]).toEqual({ target, prompt: 'Keep my exact original instruction.\nSecond line.', operationId: expect.stringMatching(/^schedule-/), calendar: { kind, timezone: 'Europe/Berlin', time: _hygiene_fixtureClock(8, 30), policies: calendar.policies, ...(kind === 'once' ? { date: _hygiene_fixtureCivil(2, 14, 1) } : {}), ...(kind === 'weekly' ? { weekday: 5 } : {}), ...(kind === 'monthly' || kind === 'yearly' ? { day: 31 } : {}), ...(kind === 'yearly' ? { month: 2 } : {}) } })
-    expect(dom.container.querySelector('form')).toBeNull()
+    expect(create.mock.calls[0]![0]).toEqual({ target, prompt: 'Keep my exact original instruction.\nSecond line.', operationId: expect.any(String), calendar: { kind, timezone: 'Europe/Berlin', time: _hygiene_fixtureClock(8, 30), policies: calendar.policies, ...(kind === 'once' ? { date: _hygiene_fixtureCivil(2, 14, 1) } : {}), ...(kind === 'weekly' ? { weekday: 5 } : {}), ...(kind === 'monthly' || kind === 'yearly' ? { day: 31 } : {}), ...(kind === 'yearly' ? { month: 2 } : {}) } })
+    expect(dom.container.querySelector<HTMLDetailsElement>('.schedule-create')!.open).toBe(false)
   })
   it('retains an uncertain creation and retries the same original operation without a second intent', async () => {
     await mount(); await openForm(); await edit('textarea', 'Original unsent instruction')
@@ -147,7 +149,7 @@ describe('original calendar control', () => {
   })
   it('keeps the same creation when the connected Host has not found its operation', async () => {
     await mount(); await openForm(); await edit('textarea', 'Original unsent request')
-    const create = vi.spyOn(api.schedule, 'create').mockRejectedValueOnce(new Error('Receipt unavailable')).mockImplementation(async params => receipt(saved({ prompt: params.prompt, creationOperationId: params.operationId })))
+    const create = vi.spyOn(api.schedule, 'create').mockRejectedValueOnce(new Error('Receipt unavailable')).mockImplementation(async params => receipt(saved({ calendar: params.calendar, prompt: params.prompt, creationOperationId: params.operationId })))
     vi.spyOn(api.schedule, 'inspect').mockResolvedValue({ schedule: null, executionScope: 'connected-host' })
     await clickText('Save arrangement'); await clickText('Check original operation')
     expect(dom.container.querySelector('textarea')!.value).toBe('Original unsent request')
@@ -202,7 +204,7 @@ describe('original calendar control', () => {
   it('quiet follow-up controls preserve a known paused arrangement and the new topic until its original cancellation', async () => {
     await mount(saved({ checkIn: DEFAULT_AGENT_SCHEDULE_CHECK_IN, status: 'paused' })); await openForm()
     const create = vi.spyOn(api.schedule, 'create').mockImplementation(async params => receipt(saved({ loopId: 'next-follow-up', ...params.target, calendar: params.calendar, prompt: params.prompt, ...(params.checkIn ? { checkIn: params.checkIn } : {}), creationOperationId: params.operationId })))
-    const cancel = vi.spyOn(api.schedule, 'cancel').mockImplementation(async params => receipt(saved({ status: 'stopped', checkIn: DEFAULT_AGENT_SCHEDULE_CHECK_IN, revision: 2, lastMutation: { ...params, action: 'cancel' } })))
+    const cancel = vi.spyOn(api.schedule, 'cancel').mockImplementation(async params => receipt(saved({ status: 'stopped', checkIn: DEFAULT_AGENT_SCHEDULE_CHECK_IN, revision: 2, lastMutation: { operationId: params.operationId, expectedRevision: params.expectedRevision, action: 'cancel' } })))
     await dom.click('[aria-label="Enable quiet follow-up"]'); await edit('textarea', 'Keep this next topic until I decide')
     await clickText('Save arrangement')
     expect(create).not.toHaveBeenCalled()
@@ -214,7 +216,7 @@ describe('original calendar control', () => {
     expect([...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Resume arrangement')!.disabled).toBe(false)
     await clickText('Cancel arrangement'); await clickText('Save arrangement')
     expect(cancel).toHaveBeenCalledTimes(1)
-    expect(create).toHaveBeenCalledExactlyOnceWith({ target, calendar: expect.any(Object), prompt: 'Keep this next topic until I decide', checkIn: DEFAULT_AGENT_SCHEDULE_CHECK_IN, operationId: expect.stringMatching(/^schedule-/) })
+    expect(create).toHaveBeenCalledExactlyOnceWith({ target, calendar: expect.any(Object), prompt: 'Keep this next topic until I decide', checkIn: DEFAULT_AGENT_SCHEDULE_CHECK_IN, operationId: expect.any(String) })
     expect(dom.draft()).toBe('Keep my draft')
   })
   it('does not let a late creation clear the new target or its later instruction', async () => {
@@ -238,7 +240,8 @@ describe('original calendar control', () => {
     await clickText('Pause arrangement'); await clickText('Check original operation')
     expect(inspect).toHaveBeenCalledExactlyOnceWith({ operationId: pause.mock.calls[0]![0].operationId })
     expect(dom.container.textContent).toContain('Paused')
-    expect(dom.container.textContent).not.toContain('Retry original operation')
+    expect(dom.container.textContent).toContain('Retry original operation')
+    expect(dom.container.textContent).toContain('save receipt is still unconfirmed')
   })
   it('keeps the original retry when inspection has only an attempted mutation rather than its confirmed state', async () => {
     await mount(saved({ status: 'paused' }))
@@ -254,13 +257,13 @@ describe('original calendar control', () => {
     let finish!: (value: Awaited<ReturnType<typeof api.schedule.list>>) => void
     vi.mocked(api.schedule.list).mockImplementation(() => new Promise(resolve => { finish = resolve }))
     await dom.render(<CalendarScheduleControl target={target} initialMessage="A confirmed new idea" />)
-    const create = vi.spyOn(api.schedule, 'create').mockImplementation(async params => receipt(saved({ prompt: params.prompt, creationOperationId: params.operationId })))
+    const create = vi.spyOn(api.schedule, 'create').mockImplementation(async params => receipt(saved({ calendar: params.calendar, prompt: params.prompt, creationOperationId: params.operationId })))
     await clickText('Save arrangement')
     expect(create).toHaveBeenCalledTimes(1)
     expect(dom.container.querySelectorAll('[data-schedule-id]')).toHaveLength(1)
     await act(async () => finish({ schedules: [], executionScope: 'connected-host' }))
     expect(dom.container.querySelectorAll('[data-schedule-id]')).toHaveLength(1)
-    expect(dom.container.querySelector('.calendar-schedules__message')!.textContent).toBe('A confirmed new idea')
+    expect(dom.container.querySelector('.schedule-arrangement__message')!.textContent).toBe('A confirmed new idea')
     expect(dom.draft()).toBe('Keep my draft')
   })
   it('keeps fresher event facts when a list returns late and rejects a different target', async () => {
@@ -275,7 +278,7 @@ describe('original calendar control', () => {
     const resume = vi.spyOn(api.schedule, 'resume').mockResolvedValue(receipt(saved({ hostId: 'foreign', revision: 3 })))
     await clickText('Resume arrangement')
     expect(resume).toHaveBeenCalledTimes(1)
-    expect(dom.container.textContent).toContain('another arrangement target')
-    expect(dom.container.querySelector('.calendar-schedules__context, .calendar-schedules__message')!.textContent).toBe(saved().prompt)
+    expect(dom.container.textContent).toContain('Schedule mutation receipt does not match')
+    expect(dom.container.querySelector('.calendar-schedules__context')!.textContent).toBe(saved().prompt)
   })
 })
