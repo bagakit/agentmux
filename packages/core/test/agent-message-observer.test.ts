@@ -14,7 +14,7 @@ import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { connectHostedAgentMux } from '../src/hosted-client.js'
-import { hostedTestOwner } from './helpers/hosted-runtime-port.js'
+import { hostedTestOwner, hostedTestFence } from './helpers/hosted-runtime-port.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { messageObservationQuery } from '../src/agent-message-journal.js'
 
@@ -67,6 +67,144 @@ it('onEvent alone never initializes or scans an unused message journal', async (
   expect(read).not.toHaveBeenCalled(); expect(f.events).toEqual([])
 })
 
+it('selected registrations activate without mailbox reads and the last release closes watches despite an unconditional Host listener', async () => {
+  const f = await fixture(), selected: AgentMuxClientEvent[] = []
+  const first = f.client.onEvent(event => { selected.push(event) }, { observeMessages: true })
+  closes.push(first)
+  await vi.waitFor(() => expect(selected.some(event => event.type === 'agent-message-observation' && event.state === 'available')).toBe(true))
+  const second: AgentMuxClientEvent[] = [], release = f.client.onEvent(event => { second.push(event) }, { observeMessages: true }); closes.push(release)
+  await vi.waitFor(() => expect(second.some(event => event.type === 'agent-message-observation' && event.state === 'available')).toBe(true))
+  await writer(f.queue.path, 'append', 'selected-without-read')
+  await vi.waitFor(() => expect(changed(selected, 'selected-without-read')).toHaveLength(1))
+  expect(changed(second, 'selected-without-read')).toHaveLength(1)
+  first()
+  expect(vi.mocked(watch).mock.results.some(result => result.type === 'return' && vi.mocked(result.value.close).mock.calls.length === 0)).toBe(true)
+  release()
+  expect(vi.mocked(watch).mock.results.every(result => result.type !== 'return' || vi.mocked(result.value.close).mock.calls.length > 0)).toBe(true)
+  expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('Hosted event leases release message observation after an actual mailbox read while their permanent service remains alive', async () => {
+  const f = await fixture(), list = vi.spyOn(f.client, 'listMessages')
+  const service = new AgentMuxHostedRuntimeService(f.client, f.store.path, () => hostedTestOwner(f.client)); closes.push(() => service.dispose())
+  const first = await service.subscribe('runtime.events', { consumerId: 'first-message-reader', fence: hostedTestFence }, () => {}); closes.push(() => first.dispose()); await first.start?.()
+  await vi.waitFor(() => expect(f.events.some(event => event.type === 'agent-message-observation' && event.state === 'available')).toBe(true))
+  const count = vi.mocked(watch).mock.calls.length
+  const second = await service.subscribe('runtime.events', { consumerId: 'second-message-reader', fence: hostedTestFence }, () => {}); closes.push(() => second.dispose()); await second.start?.()
+  await f.client.listMessages({ participantSessionId: 'reader', direction: 'incoming', limit: 1 })
+  // Remove the fixture's genuine legacy consumer. Only the permanent Host
+  // listener and selected leases remain, exactly like the product after close.
+  f.release()
+  await first.dispose()
+  expect(vi.mocked(watch).mock.results.some(result => result.type === 'return' && vi.mocked(result.value.close).mock.calls.length === 0)).toBe(true)
+  await second.dispose()
+  expect(vi.mocked(watch).mock.results.every(result => result.type !== 'return' || vi.mocked(result.value.close).mock.calls.length > 0)).toBe(true)
+  expect(vi.mocked(watch).mock.calls.length).toBe(count)
+  expect(list).toHaveBeenCalledOnce(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('an initially unavailable selected current cut recovers at the original source without replaying prior mail', async () => {
+  const f = await fixture(), selected: AgentMuxClientEvent[] = [], read = Queue.prototype.messageChanges
+  let unavailable = true
+  vi.spyOn(Queue.prototype, 'messageChanges').mockImplementation(async function (this: SourceQueue, after, signal) {
+    if (!after && unavailable) throw new Error('Private current cut temporarily unavailable')
+    return read.call(this, after, signal)
+  })
+  closes.push(f.client.onEvent(event => { selected.push(event) }, { observeMessages: true }))
+  await vi.waitFor(() => expect(selected.some(event => event.type === 'agent-message-observation' && event.state === 'unavailable')).toBe(true))
+  unavailable = false
+  await writer(f.queue.path, 'append', 'before-selected-recovery-cut')
+  await f.read()
+  await vi.waitFor(() => expect(selected.some(event => event.type === 'agent-message-observation' && event.state === 'available')).toBe(true))
+  expect(changed(selected, 'before-selected-recovery-cut')).toEqual([])
+  await writer(f.queue.path, 'append', 'after-selected-recovery-cut')
+  await vi.waitFor(() => expect(changed(selected, 'after-selected-recovery-cut')).toHaveLength(1))
+  expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('a late registration cut failure is local and a later source event restores only its own future boundary', async () => {
+  const f = await fixture(), healthy: AgentMuxClientEvent[] = [], late: AgentMuxClientEvent[] = [], excluded: AgentMuxClientEvent[] = []
+  closes.push(f.client.onEvent(event => { healthy.push(event) }, { observeMessages: true }))
+  closes.push(f.client.onEvent(event => { excluded.push(event) }, { observeMessages: false }))
+  await vi.waitFor(() => expect(healthy.some(event => event.type === 'agent-message-observation' && event.state === 'available')).toBe(true))
+  const read = Queue.prototype.messageChanges; let failCut = true
+  vi.spyOn(Queue.prototype, 'messageChanges').mockImplementation(async function (this: SourceQueue, after, signal) {
+    if (!after && failCut) throw new Error('Private late-reader current cut unavailable')
+    return read.call(this, after, signal)
+  })
+  closes.push(f.client.onEvent(event => { late.push(event) }, { observeMessages: true }))
+  await vi.waitFor(() => expect(late.some(event => event.type === 'agent-message-observation' && event.state === 'unavailable')).toBe(true))
+  expect(healthy.filter(event => event.type === 'agent-message-observation' && event.state === 'unavailable')).toEqual([])
+  failCut = false
+  await writer(f.queue.path, 'append', 'establish-late-reader-boundary')
+  await vi.waitFor(() => expect(late.some(event => event.type === 'agent-message-observation' && event.state === 'available')).toBe(true))
+  expect(changed(late, 'establish-late-reader-boundary')).toEqual([])
+  expect(changed(healthy, 'establish-late-reader-boundary')).toHaveLength(1)
+  await writer(f.queue.path, 'append', 'after-late-reader-recovered')
+  await vi.waitFor(() => expect(changed(late, 'after-late-reader-recovered')).toHaveLength(1))
+  expect(changed(healthy, 'after-late-reader-recovered')).toHaveLength(1)
+  expect(excluded).toEqual([])
+})
+
+it('an asynchronously misbehaving selected reader releases only its own registration', async () => {
+  const f = await fixture(), healthy: AgentMuxClientEvent[] = [], error = vi.fn()
+  const release = f.client.onEvent(event => { healthy.push(event) }, { observeMessages: true }); closes.push(release)
+  await vi.waitFor(() => expect(healthy.some(event => event.type === 'agent-message-observation' && event.state === 'available')).toBe(true))
+  closes.push(f.client.onEvent((() => Promise.resolve()) as never, { observeMessages: true, onError: error }))
+  await vi.waitFor(() => expect(error).toHaveBeenCalledOnce())
+  await writer(f.queue.path, 'append', 'healthy-selected-reader')
+  await vi.waitFor(() => expect(changed(healthy, 'healthy-selected-reader')).toHaveLength(1))
+  release()
+  expect(vi.mocked(watch).mock.results.every(result => result.type !== 'return' || vi.mocked(result.value.close).mock.calls.length > 0)).toBe(true)
+})
+
+it('a late selected reader excludes an older shared delta without resetting the first reader cut', async () => {
+  const f = await fixture(), first: AgentMuxClientEvent[] = [], second: AgentMuxClientEvent[] = []
+  closes.push(f.client.onEvent(event => { first.push(event) }, { observeMessages: true }))
+  await vi.waitFor(() => expect(first.some(event => event.type === 'agent-message-observation' && event.state === 'available')).toBe(true))
+  const original = Queue.prototype.messageChanges
+  let resume!: () => void, held = false, secondCutRead = false
+  const gate = new Promise<void>(resolve => { resume = resolve })
+  vi.spyOn(Queue.prototype, 'messageChanges').mockImplementation(async function (this: SourceQueue, after, signal) {
+    if (after && !held) { held = true; await gate }
+    const result = await original.call(this, after, signal)
+    if (!after) secondCutRead = true
+    return result
+  })
+  await writer(f.queue.path, 'append', 'before-second-cut')
+  await vi.waitFor(() => expect(held).toBe(true))
+  closes.push(f.client.onEvent(event => { second.push(event) }, { observeMessages: true }))
+  // The second current-cut read shares the mutex but not the first reader's cursor.
+  await vi.waitFor(() => expect(secondCutRead).toBe(true)); resume()
+  await vi.waitFor(() => expect(changed(first, 'before-second-cut')).toHaveLength(1))
+  await vi.waitFor(() => expect(second.some(event => event.type === 'agent-message-observation' && event.state === 'available')).toBe(true))
+  expect(changed(second, 'before-second-cut')).toEqual([])
+  await writer(f.queue.path, 'append', 'after-both-cuts')
+  await vi.waitFor(() => expect(changed(second, 'after-both-cuts')).toHaveLength(1))
+  expect(changed(first, 'after-both-cuts')).toHaveLength(1)
+})
+
+it('unavailable catch-up carries live false and later creations carry live true', async () => {
+  const f = await fixture(), events: AgentMuxClientEvent[] = []
+  closes.push(f.client.onEvent(event => { events.push(event) }, { observeMessages: true }))
+  await vi.waitFor(() => expect(events.some(event => event.type === 'agent-message-observation' && event.state === 'available')).toBe(true))
+  const original = Queue.prototype.messageChanges; let unavailable = true
+  vi.spyOn(Queue.prototype, 'messageChanges').mockImplementation(async function (this: SourceQueue, after, signal) {
+    if (after && unavailable) throw new Error('Private observation unavailable')
+    return original.call(this, after, signal)
+  })
+  await writer(f.queue.path, 'append', 'during-observation-failure')
+  await vi.waitFor(() => expect(events.some(event => event.type === 'agent-message-observation' && event.state === 'unavailable')).toBe(true))
+  unavailable = false
+  await f.read()
+  await vi.waitFor(() => expect(changed(events, 'during-observation-failure')).toHaveLength(1))
+  expect(changed(events, 'during-observation-failure')[0]).toMatchObject({ live: false, recordKind: 'message' })
+  await vi.waitFor(() => expect(events.filter(event => event.type === 'agent-message-observation' && event.state === 'available').length).toBeGreaterThanOrEqual(2))
+  await writer(f.queue.path, 'append', 'after-observation-recovery')
+  await vi.waitFor(() => expect(changed(events, 'after-observation-recovery')).toHaveLength(1))
+  expect(changed(events, 'after-observation-recovery')[0]).toMatchObject({ live: true })
+})
+
 it('an actual pre-observation writer populates only future positions and the real delta plan uses range/point lookups', async () => {
   const f = await fixture()
   await writer(f.queue.path, 'append', 'before-observation')
@@ -96,9 +234,10 @@ it('observes committed cross-process firstsave and delivery metadata without Run
   expect(changed(f.events, 'historical')).toHaveLength(0)
   await writer(f.queue.path, 'append', 'new-undelivered')
   await vi.waitFor(() => expect(changed(f.events, 'new-undelivered')).toHaveLength(1))
-  expect(changed(f.events, 'new-undelivered')[0]).toEqual({ type: 'agent-message-changed', sequence: 2, messageId: 'new-undelivered', senderSessionId: 'sender', recipientSessionId: 'reader' })
+  expect(changed(f.events, 'new-undelivered')[0]).toEqual({ type: 'agent-message-changed', sequence: 2, messageSequence: 2, recordKind: 'message', live: true, messageId: 'new-undelivered', senderSessionId: 'sender', recipientSessionId: 'reader' })
   await writer(f.queue.path, 'delivery', 'new-undelivered')
   await vi.waitFor(() => expect(changed(f.events, 'new-undelivered')).toHaveLength(2))
+  expect(changed(f.events, 'new-undelivered')[1]).toMatchObject({ sequence: 3, messageSequence: 2, recordKind: 'delivery' })
   expect(JSON.stringify(f.events)).not.toContain('Original private body')
   expect((await f.queue.readByMessageId('new-undelivered'))!.envelope.recipientRunId).toBeNull()
   expect((await f.queue.readJournal()).some(record => record.kind === 'consumer-check' || record.kind === 'consumer-ack')).toBe(false)
