@@ -556,12 +556,20 @@ export function removeTabsFromLayouts(
   layouts: Record<string, WorkspaceLayout>,
   tabIds: readonly string[]
 ): Record<string, WorkspaceLayout> {
+  if (tabIds.length === 0) return layouts
   let next = layouts
-  for (const tabId of tabIds) {
-    next = Object.fromEntries(Object.entries(next).map(([workspaceId, layout]) => {
-      const tabGroupId = tabGroupForTab(layout, tabId)
-      return [workspaceId, tabGroupId ? removeTab(layout, tabGroupId, tabId) : layout]
-    }))
+  const removed = new Set(tabIds)
+  for (const [workspaceId, layout] of Object.entries(layouts)) {
+    let updated = layout
+    for (const group of layout.groups) {
+      for (const tabId of group.tabOrder) {
+        if (removed.has(tabId)) updated = removeTab(updated, group.id, tabId)
+      }
+    }
+    if (updated !== layout) {
+      if (next === layouts) next = { ...layouts }
+      next[workspaceId] = updated
+    }
   }
   return next
 }

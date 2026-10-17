@@ -1,8 +1,8 @@
 import type { BrowserEvent } from '../../../shared/contracts'
 import { browserViewportsEqual } from '../../../shared/browser-viewport'
-import { removeTab, type WorkspaceLayout } from '@agentmux/layout'
+import type { WorkspaceLayout } from '@agentmux/layout'
 import {
-  tabGroupForTab,
+  removeTabsFromLayouts,
   removeWorkbenchRegion,
   workbenchSurfaces,
   type BrowserWorkbenchSurface,
@@ -80,11 +80,7 @@ export function reduceBrowserEvent(
         continue
       }
       delete tabs[tab.id]
-      const layout = layouts[tab.workspaceId]
-      const groupId = tabGroupForTab(layout, tab.id)
-      if (layout && groupId) {
-        layouts = { ...layouts, [tab.workspaceId]: removeTab(layout, groupId, tab.id) }
-      }
+      layouts = removeTabsFromLayouts(layouts, [tab.id])
     }
   }
   if (!changed) return state
