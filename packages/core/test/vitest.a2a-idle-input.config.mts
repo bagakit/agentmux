@@ -13,6 +13,7 @@ const mutations: Record<string, [string, string, string]> = {
   'edited-notification-is-adopted': ['native-input-adoption.ts', "item.contentParts.length === 1 && item.contentParts[0]?.kind === 'text' && item.contentParts[0].text === intent.prompt", 'true'],
   'native-queue-receipt-is-unchecked': ['providers/codex-native-input.ts', "if (typeof queued?.id !== 'string' || !queued.id || queued.clientUserMessageId !== frozen.clientCorrelation ||\n                !isDeepStrictEqual(queued.input, input)) throw unavailable()", 'void queued'],
   'notification-identity-is-not-restored': ['prompt-submission-record.ts', "...(message.a2aNotificationId === undefined ? {} : { a2aNotificationId: string(message.a2aNotificationId, 'original A2A notification identity') }),", ''],
+  'independent-idle-notification-is-blocked': ['prompt-submission.ts', ' && !independentIdleNotification)) {', ')) {'],
 }
 export default defineConfig({ root, plugins: [{ name: 'original-workspace-source', enforce: 'pre', resolveId(id) {
   const match = id.match(/^@agentmux\/([^/]+)(.*)$/u)

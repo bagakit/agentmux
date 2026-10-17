@@ -8,6 +8,8 @@ import { confirmNativeInputAdoption as sourceConfirmAdoption } from '../src/nati
 import type { AgentNativePromptInputPlan, AgentPromptMessageContent, AgentPromptSubmissionRecord, AgentSessionHistoryItem } from '../src/types.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { fixtureEpoch } from './helpers/fixture-values.js'
+import { nativeInputCorrelationKey } from '../src/native-input-correlation.js'
+import type { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
 
 const entry = process.env.AGENTMUX_TEST_RPC_CORE_ENTRY
 const compiled = entry ? await import(entry) : null
@@ -25,7 +27,7 @@ const actor = { protocolId: 'original-protocol', actorId: 'original-actor', life
 
 async function fixture(outcome: 'admitted' | 'unknown' = 'admitted') {
   const h = await rpcOwnerFixture(); closes.push(h.close)
-  const inner = h.client as unknown as { promptSubmission: SourceCoordinator }
+  const inner = h.client as unknown as { promptSubmission: SourceCoordinator; messageQueue: DurableAgentMuxMessageQueue }
   const deps = Reflect.get(inner.promptSubmission, 'deps') as ConstructorParameters<typeof AgentPromptSubmissionCoordinator>[0]
   const original = (await h.store.readMetadata('recipient'))!
   await h.store.compareAndSwapMetadata(original, { ...original, nativeActor: actor, updatedAt: fixtureEpoch(0, 1),
@@ -38,12 +40,14 @@ async function fixture(outcome: 'admitted' | 'unknown' = 'admitted') {
   const key = { kind: 'prompt' as const, agentSessionId: original.agentSessionId, expectedRun: original.run, submissionId: id }
   const message: AgentPromptMessageContent = { a2aNotificationId: id, systemContext: wire }
   const send = vi.fn(async (_prompt: string, plan: AgentNativePromptInputPlan) => {
+    const sentKey = nativeInputCorrelationKey(plan.clientCorrelation!)
+    if (sentKey?.kind !== 'prompt') throw new Error('The original typed notification correlation is missing')
     // A different Store instance reads the original committed claim before any native effect.
-    const persisted = await new AgentMuxFileAgentSessionStore(h.store.path).readPromptAdmission('recipient', original.run, id)
+    const persisted = await new AgentMuxFileAgentSessionStore(h.store.path).readPromptAdmission('recipient', original.run, sentKey.submissionId)
     expect(persisted?.admission?.intent?.plan).toEqual(plan)
-    expect(persisted?.admission?.inputKey).toEqual(key)
-    expect(persisted?.admission?.intent?.message).toEqual(message)
-    if (outcome === 'unknown') throw new Error('Original queue ACK was lost after acceptance')
+    expect(persisted?.admission?.inputKey).toEqual(sentKey)
+    expect(persisted?.admission?.intent?.message).toEqual({ a2aNotificationId: sentKey.submissionId, systemContext: _prompt })
+    if (outcome === 'unknown' && sentKey.submissionId === id) throw new Error('Original queue ACK was lost after acceptance')
     return { outcome: 'admitted' as const, queuedSubmissionId: 'original-native-queue-item' }
   })
   let beforePrepare: (() => Promise<void>) | undefined
@@ -55,12 +59,37 @@ async function fixture(outcome: 'admitted' | 'unknown' = 'admitted') {
   const provider = { ...new AgentProviderRegistry().get('codex'), prepareNativeInput: prepare }
   const coordinator = new AgentPromptSubmissionCoordinator({ ...deps, providers: new AgentProviderRegistry([provider]) })
   const session = h.client.agentSession('recipient'), condition = agentPromptCondition(session), completionId = agentTurnCompletionIdentity(session)!
+  const appendReference = (messageId: string) => inner.messageQueue.append({ messageId, operationId: 'operation-' + messageId, createdAt: fixtureEpoch(0, 1),
+    sender: { kind: 'agent-session', agentSessionId: 'peer' }, recipient: { kind: 'agent-session', agentSessionId: 'recipient' },
+    senderSessionId: 'peer', senderRunId: 'peer-run', recipientSessionId: 'recipient', recipientRunId: original.run.runId,
+    threadId: 'original-thread', correlationId: 'correlation-' + messageId, replyTo: null, workspaceId: null, body: 'Original Inbox body stays outside notification input' }, { deliveryMode: 'reference' })
+  await appendReference('original-message')
+  expect((await inner.messageQueue.prepareNotification({ notificationId: id, agentSessionId: 'recipient', condition,
+    idle: { completionId, inputByte: 0 } }))?.wire).toBe(wire)
   const control: AgentPromptInputControl = { idleOnly: { completionId, inputByte: 0 } }
   const submit = (changed: { message?: AgentPromptMessageContent; control?: AgentPromptInputControl } = {}) => coordinator.submitInputPlan(
     session, run(), id, wire, { kind: 'single-phase', data: wire + '\r' }, condition, completionId, undefined, false, undefined, 0,
     changed.message ?? message, 'default', undefined, undefined, undefined, key, changed.control ?? control)
+  const submitIndependent = async (idleOnly: boolean) => {
+    const current = (await h.store.readMetadata('recipient'))!
+    await h.store.compareAndSwapMetadata(current, { ...current, updatedAt: Math.max(current.updatedAt, fixtureEpoch(0, 3)),
+      semanticStatus: { state: 'done', source: 'native-transcript', observedAt: fixtureEpoch(0, 3) } })
+    const latest = await deps.registry.refresh('recipient', original.run), nextId = 'independent-notification'
+    const nextWire = wire.replace('original-message', 'independent-message'), completion = agentTurnCompletionIdentity(latest)!
+    const nextKey = { ...key, submissionId: nextId }
+    if (idleOnly) {
+      await appendReference('independent-message')
+      expect((await inner.messageQueue.prepareNotification({ notificationId: nextId, agentSessionId: 'recipient', condition: agentPromptCondition(latest),
+        idle: { completionId: completion, inputByte: 0 } }))?.wire).toBe(nextWire)
+    }
+    return coordinator.submitInputPlan(h.client.agentSession('recipient'), run(), nextId, nextWire,
+      { kind: 'single-phase', data: nextWire + '\r' }, agentPromptCondition(latest), completion, undefined, false, undefined, 0,
+      idleOnly ? { a2aNotificationId: nextId, systemContext: nextWire } : { userContent: nextWire }, 'default', undefined, undefined, undefined,
+      nextKey, idleOnly ? { idleOnly: { completionId: completion, inputByte: 0 } } : undefined)
+  }
   return { ...h, key, message, prepare, send, submit, beforePrepare: (callback: () => Promise<void>) => { beforePrepare = callback },
-    changeByte: () => { inputByte++ }, read: () => h.store.readPromptAdmission('recipient', original.run, id) }
+    changeByte: () => { inputByte++ }, submitIndependent, queue: inner.messageQueue,
+    read: () => h.store.readPromptAdmission('recipient', original.run, id) }
 }
 
 it('persists one independent notification input before native idle-queue admission; retry is receipt-only', async () => {
@@ -86,6 +115,52 @@ it('keeps lost queue ACK and original correlation unknown without a second nativ
   expect(f.send).toHaveBeenCalledTimes(1)
 })
 
+it.each([true, false])('an independent input can pass an unknown Native predecessor only as a typed idle notification (idleOnly=%s)', async idleOnly => {
+  const f = await fixture('unknown')
+  await expect(f.submit()).rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
+  const old = await f.read()
+  if (idleOnly) await expect(f.submitIndependent(true)).resolves.toMatchObject({ a2aNotificationId: 'independent-notification' })
+  else await expect(f.submitIndependent(false)).rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
+  expect(await f.read()).toEqual(old)
+  expect(f.send).toHaveBeenCalledTimes(idleOnly ? 2 : 1)
+  expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('does not let the independent idle notice bypass its exact source after an unknown Native input', async () => {
+  const f = await fixture('unknown'); await expect(f.submit()).rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
+  const old = await f.read()
+  f.beforePrepare(async () => {
+    const current = (await f.store.readMetadata('recipient'))!
+    await f.store.compareAndSwapMetadata(current, { ...current, nativeHandle: { kind: 'provider', providerId: source.providerId, sessionId: 'foreign-source' } })
+  })
+  await expect(f.submitIndependent(true)).rejects.toMatchObject({ code: 'AGENT_PROMPT_CONDITION_CHANGED' })
+  expect(await f.read()).toEqual(old); expect(f.send).toHaveBeenCalledTimes(1)
+  expect(await f.store.readPromptAdmission('recipient', f.key.expectedRun, 'independent-notification')).toBeNull()
+})
+
+it('a normal controlled manual prompt cannot take the exact key of a pending platform notice', async () => {
+  const f = await fixture()
+  await expect(f.client.submitAgentPrompt({ agentSessionId: 'recipient', operationId: id, expectedRun: f.key.expectedRun,
+    admissionIntent: { kind: 'manual-actor' }, execution: 'immediate', prompt: 'Unrelated original human input', authorHuman: true }))
+    .rejects.toMatchObject({ code: 'AGENT_PROMPT_OPERATION_CONFLICT' })
+  expect(await f.read()).toBeNull(); expect(f.inner.kernel.input).not.toHaveBeenCalled()
+  expect((await f.queue.readNotification(id))?.state).toBe('pending')
+})
+
+it('an acknowledged ordinary prompt cannot sign for a different notification using the same operation ID', async () => {
+  const f = await fixture(), operationId = 'original-human-prompt'
+  await f.client.submitAgentPrompt({ agentSessionId: 'recipient', operationId, expectedRun: f.key.expectedRun,
+    admissionIntent: { kind: 'manual-actor' }, execution: 'immediate', prompt: 'Original unrelated human message', authorHuman: true })
+  const key = { ...f.key, submissionId: operationId }
+  await expect.poll(async () => (await f.client.inspectAgentPromptSubmission(key))?.admission?.acknowledged).toBe(true)
+  const original = await f.client.inspectAgentPromptSubmission(key)
+  await expect(f.client.notifyMessages({ operationId, messageIds: ['original-message'] }))
+    .rejects.toMatchObject({ code: 'AGENT_PROMPT_OPERATION_CONFLICT' })
+  expect(await f.client.inspectAgentPromptSubmission(key)).toEqual(original)
+  expect(await f.queue.readNotification(operationId)).toBeNull()
+  expect((await f.queue.readByMessageId('original-message'))?.notification).toMatchObject({ state: 'pending', notificationId: id })
+})
+
 it('treats typed notification identity as immutable original input content', async () => {
   const f = await fixture(); await f.submit()
   await expect(f.submit({ message: { ...f.message, a2aNotificationId: 'foreign-notification' }, control: {} }))
@@ -107,7 +182,9 @@ it.each(['completion', 'input-byte'] as const)('rechecks the original %s before 
 })
 
 it.each(['admitted', 'unknown'] as const)('joins exact original notification wire after native %s; edits remain readable without adoption', async outcome => {
-  const f = await fixture(outcome); await f.submit().catch(() => {})
+  const f = await fixture(outcome)
+  if (outcome === 'unknown') await expect(f.submit()).rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
+  else await expect(f.submit()).resolves.toEqual(f.message)
   const record = (await f.read())!
   const plan = record.admission!.transport === 'native' ? record.admission!.native.plan : undefined
   expect(plan).toBeDefined()
