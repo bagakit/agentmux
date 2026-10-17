@@ -36,7 +36,7 @@ async function fixture(outcome: 'admitted' | 'unknown' = 'admitted') {
   await deps.registry.refresh('recipient', original.run)
   let inputByte = 0
   const run = () => ({ ...h.run(original.run.runId), acceptedInputBytes: inputByte, pid: 1234 })
-  h.inner.kernel.status = vi.fn(async () => run())
+  h.inner.kernel.status = vi.fn(async (runId: string) => runId === original.run.runId ? run() : h.run(runId))
   const key = { kind: 'prompt' as const, agentSessionId: original.agentSessionId, expectedRun: original.run, submissionId: id }
   const message: AgentPromptMessageContent = { a2aNotificationId: id, systemContext: wire }
   const send = vi.fn(async (_prompt: string, plan: AgentNativePromptInputPlan) => {
@@ -84,8 +84,16 @@ async function fixture(outcome: 'admitted' | 'unknown' = 'admitted') {
       idleOnly ? { a2aNotificationId: nextId, systemContext: nextWire } : { userContent: nextWire }, 'default', undefined, undefined, undefined,
       nextKey, idleOnly ? { idleOnly: { completionId: completion, inputByte: 0 } } : undefined)
   }
+  const submitOrdinary = async (agentSessionId: string, controlled: boolean) => {
+    const current = h.client.agentSession(agentSessionId), prompt = 'Original unrelated human input'
+    return controlled ? h.client.submitAgentPrompt({ agentSessionId, operationId: id, expectedRun: current.run,
+      admissionIntent: { kind: 'manual-actor' }, execution: 'immediate', prompt, authorHuman: true })
+      : coordinator.submitInputPlan(current, h.run(current.run.runId), id, prompt, { kind: 'single-phase', data: prompt + '\r' },
+        { kind: 'manual-actor', expectedRun: current.run }, undefined, undefined, false, undefined, undefined,
+        { userContent: prompt, authorHuman: true }, 'immediate')
+  }
   return { ...h, key, message, prepare, send, submit, beforePrepare: (callback: () => Promise<void>) => { beforePrepare = callback },
-    changeByte: () => { inputByte++ }, submitIndependent, queue: inner.messageQueue,
+    changeByte: () => { inputByte++ }, submitIndependent, submitOrdinary, queue: inner.messageQueue,
     read: () => h.store.readPromptAdmission('recipient', original.run, id) }
 }
 
@@ -144,13 +152,34 @@ it('does not let the independent idle notice bypass its exact source after an un
   expect(await f.store.readPromptAdmission('recipient', f.key.expectedRun, 'independent-notification')).toBeNull()
 })
 
-it('a normal controlled manual prompt cannot take the exact key of a pending platform notice', async () => {
+it.each([true, false])('a normal manual prompt cannot take the exact key of a pending platform notice (controlled=%s)', async controlled => {
   const f = await fixture()
-  await expect(f.client.submitAgentPrompt({ agentSessionId: 'recipient', operationId: id, expectedRun: f.key.expectedRun,
-    admissionIntent: { kind: 'manual-actor' }, execution: 'immediate', prompt: 'Unrelated original human input', authorHuman: true }))
-    .rejects.toMatchObject({ code: 'AGENT_PROMPT_OPERATION_CONFLICT' })
+  await expect(f.submitOrdinary('recipient', controlled))
+    .rejects.toMatchObject({ code: controlled ? 'AGENT_PROMPT_OPERATION_CONFLICT' : 'A2A_NOTIFICATION_CONFLICT' })
   expect(await f.read()).toBeNull(); expect(f.inner.kernel.input).not.toHaveBeenCalled()
   expect((await f.queue.readNotification(id))?.state).toBe('pending')
+})
+
+it.each([true, false])('an unrelated Session can use the same operation string as a notice without borrowing its key (controlled=%s)', async controlled => {
+  const f = await fixture(), other = f.client.agentSession('caller')
+  await expect(f.submitOrdinary('caller', controlled).then(() => true)).resolves.toBe(true)
+  const key = { ...f.key, agentSessionId: other.agentSessionId, expectedRun: other.run }
+  await expect.poll(async () => {
+    const original = await f.client.inspectAgentPromptSubmission(key)
+    return original?.admission?.acknowledged === true || original?.terminalPromptSubmission?.submit.acknowledged === true
+  }, { timeout: 5_000 }).toBe(true)
+  expect((await f.client.inspectAgentPromptSubmission(key))?.admission?.intent?.message).toMatchObject({ userContent: 'Original unrelated human input', authorHuman: true })
+  expect(f.inner.kernel.input).toHaveBeenCalledWith(other.run.runId, expect.objectContaining({ data: expect.stringContaining('Original unrelated human input') }))
+  expect(f.inner.kernel.input).not.toHaveBeenCalledWith(f.key.expectedRun.runId, expect.anything())
+  expect(await f.read()).toBeNull(); expect((await f.queue.readNotification(id))?.key).toEqual(f.key)
+  expect(f.send).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('a private notification producer cannot use an unrelated Session key with the same notice ID', async () => {
+  const f = await fixture(), other = f.client.agentSession('caller'), claim = vi.fn(async () => 'unrelated-effect')
+  await expect(f.queue.withUncontrolledInputClaim({ ...f.key, agentSessionId: other.agentSessionId, expectedRun: other.run }, claim, undefined, id))
+    .rejects.toMatchObject({ code: 'A2A_NOTIFICATION_CONFLICT' })
+  expect(claim).not.toHaveBeenCalled(); expect(await f.read()).toBeNull(); expect((await f.queue.readNotification(id))?.key).toEqual(f.key)
 })
 
 it('an acknowledged ordinary prompt cannot sign for a different notification using the same operation ID', async () => {
@@ -158,7 +187,10 @@ it('an acknowledged ordinary prompt cannot sign for a different notification usi
   await f.client.submitAgentPrompt({ agentSessionId: 'recipient', operationId, expectedRun: f.key.expectedRun,
     admissionIntent: { kind: 'manual-actor' }, execution: 'immediate', prompt: 'Original unrelated human message', authorHuman: true })
   const key = { ...f.key, submissionId: operationId }
-  await expect.poll(async () => (await f.client.inspectAgentPromptSubmission(key))?.admission?.acknowledged).toBe(true)
+  await expect.poll(async () => {
+    const original = await f.client.inspectAgentPromptSubmission(key)
+    return original?.admission?.acknowledged === true || original?.terminalPromptSubmission?.submit.acknowledged === true
+  }, { timeout: 5_000 }).toBe(true)
   const original = await f.client.inspectAgentPromptSubmission(key)
   await expect(f.client.notifyMessages({ operationId, messageIds: ['original-message'] }))
     .rejects.toMatchObject({ code: 'AGENT_PROMPT_OPERATION_CONFLICT' })

@@ -15,6 +15,8 @@ const mutations: Record<string, [string, string, string]> = {
   'notification-identity-is-not-restored': ['prompt-submission-record.ts', "...(message.a2aNotificationId === undefined ? {} : { a2aNotificationId: string(message.a2aNotificationId, 'original A2A notification identity') }),", ''],
   'independent-idle-notification-is-blocked': ['prompt-submission.ts', ' && !independentIdleNotification)) {', ')) {'],
   'independent-idle-completion-is-consumed': ['prompt-submission.ts', 'completionId === expectedCompletionId && !independentIdleNotification)', 'completionId === expectedCompletionId)'],
+  'controlled-notice-reservation-spills-to-other-key': ['agent-global-message-queue.ts', "key.kind === 'prompt' && isDeepStrictEqual(this.notification(key.submissionId)?.key, key)", "key.kind === 'prompt' && this.notification(key.submissionId)"],
+  'uncontrolled-notice-reservation-spills-to-other-key': ['agent-global-message-queue.ts', 'if (expectedNotificationId === undefined ? sameNotificationKey :', 'if (expectedNotificationId === undefined ? notice !== undefined :'],
 }
 export default defineConfig({ root, plugins: [{ name: 'original-workspace-source', enforce: 'pre', resolveId(id) {
   const match = id.match(/^@agentmux\/([^/]+)(.*)$/u)
