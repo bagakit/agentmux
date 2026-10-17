@@ -428,6 +428,8 @@ const mockApi: AgentMuxDesktopApi = {
     onChange: listener => { mockNotebookListeners.add(listener); return () => mockNotebookListeners.delete(listener) }
   },
   git: {
+    worktrees: async input => ({ kind: 'unavailable', ...input.expectedResource, checkedAt: Date.now(),
+      reason: 'Git worktree observation requires the desktop Host. Existing Zones remain available.' }),
     projectIdentity: async (workspaceId) => {
       const workspace = mockConfig.workspaces.find(item => item.id === workspaceId)
       if (!workspace) throw new Error(`Unknown workspace: ${workspaceId}`)

@@ -498,6 +498,9 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     if (split !== undefined && !isSplitDirection(split)) invalid('--split must be left, right, up or down.')
     return { ...operation(f), path: value(f, '--path', true), ...selector(f), ...(split === undefined ? {} : { split }), focus: focus(f) }
   }, 'Without --tab/--region/--split, open in a new Tab. A Region destination requires the exact existing Tab, anchor Region, Display Workspace and Group together. The returned placement names the actual File Region, which may differ from the anchor. --focus controls navigation independently; its default is background. ' + SAVE_NOTICE),
+  command('git.worktrees', '--workspace ID --host ID --workspace-path PATH', 'Observe actual main and linked worktrees and their current branches without changing checkout.',
+    GIT_TARGET, f => parseGitParams('git.worktrees', gitTarget(f)) as unknown as Record<string, unknown>,
+    'Use the exact registered Workspace, Host and path from app snapshot. Returns full worktree paths, main/linked/bare relationships, current branches and detached HEAD, or explicit non-Git/unavailable observation. No Zone creation, fetch, Git write or Agent cwd change occurs. Refresh with the same exact target after external changes; saved registration labels are not current Git facts.'),
   command('git.worktree.close', '--workspace ID --host ID --workspace-path PATH --operation-id ID [--discard-changes]', 'Close an exact worktree and gather its original Tabs into the default project workspace.',
     { ...GIT_TARGET, ...OP, '--discard-changes': 'boolean' }, f => parseGitParams('git.worktree.close', { ...gitTarget(f), operationId: id(f, '--operation-id', true),
       ...(f.booleans.has('--discard-changes') ? { discardChanges: true } : {}) }) as unknown as Record<string, unknown>,

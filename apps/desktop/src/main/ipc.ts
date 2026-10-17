@@ -400,6 +400,7 @@ export async function registerIpc(args: {
     }
   })
   const git = new GitService((id) => args.runtime.executionHost(id))
+  const publicGit = new GitPublicControl({ config: () => config, git, worktrees, closeWorktree: input => worktreeCloseout.publicClose(input) })
   // `git` is handed in rather than let GhService build its own: the PR readiness read asks git and gh
   // about the same repository in one breath, and two separately-constructed services could resolve a
   // workspace's host differently.
@@ -882,6 +883,7 @@ export async function registerIpc(args: {
   handle('git:commitDiff', async (workspaceId: string, descriptor: import('../shared/git-contracts').GitCommitDiffDescriptor) =>
     await git.commitDiff(workspaceId, descriptor, config))
   handle('git:projectIdentity', async (workspaceId: string) => await git.projectIdentity(workspaceId, config))
+  handle('git:worktrees', async (input: import('../shared/git-contracts').GitWorktreesTarget) => await publicGit.call('git.worktrees', input))
   handle('git:history', async (workspaceId: string, input: import('../shared/git-contracts').GitHistoryInput) =>
     await git.history(workspaceId, input, config))
   handle('git:compareBranches', async (workspaceId: string, input: GitBranchCompareInput) =>
@@ -2335,7 +2337,7 @@ export async function registerIpc(args: {
     nameHistory: query => desktopNameHistory(spatialState, demands, query),
     spatialState,
     files: publicFiles,
-    git: new GitPublicControl({ config: () => config, git, closeWorktree: input => worktreeCloseout.publicClose(input) }),
+    git: publicGit,
     fileUploads: new FileUploadOwner(join(homedir(), '.agentmux', 'attachments')),
     topics: topicKnowledge,
     moteAvatars,

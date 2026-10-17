@@ -1645,7 +1645,7 @@ export type AgentMuxDesktopApi = {
   }
   /** Fixed-size synchronous V8-isolate observation; no process dump or object scan. */
   readRendererMemory(): import('@agentmux/core/control').RendererMemorySnapshot
-  git: import('./git-contracts').GitProjectIdentityApi
+  git: import('./git-contracts').GitProjectIdentityApi & import('./git-contracts').GitWorktreesApi
   landmarks: import('@agentmux/core/conversation').ConversationLandmarkApi
   notebooks: import('@agentmux/core/notebook-catalog').NotebookApi & import('./notebook-observation').NotebookObservationApi
   notesStorage: import('@agentmux/core/notebook-store').NotesStorageApi
@@ -2189,7 +2189,7 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
    * before calling it — `workspaceRelativeGitPath` in the renderer does that, and returns null for the
    * changes a subfolder workspace cannot show at all.
    */
-  git: import('./git-contracts').GitProjectIdentityApi & GitBranchComparisonApi & GitHistoryApi & GitCommitApi & {
+  git: import('./git-contracts').GitProjectIdentityApi & import('./git-contracts').GitWorktreesApi & GitBranchComparisonApi & GitHistoryApi & GitCommitApi & {
     status(workspaceId: string): Promise<GitStatusResult>
     stage(workspaceId: string, repoPath: string): Promise<void>
     commit(workspaceId: string, message: string): Promise<void>

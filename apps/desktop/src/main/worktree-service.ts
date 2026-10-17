@@ -25,6 +25,7 @@ import {
   parseOrphanCommitCount
 } from '../shared/lane-orphan-commits.js'
 import { findWorkspaceByLocation } from './workspace-location.js'
+import type { GitWorktreeEntry, GitWorktreesResult } from '@agentmux/git/types'
 
 type ConfigWriter = {
   save(value: AppConfig, expected: AppConfig): Promise<AppConfig>
@@ -70,7 +71,7 @@ export type KeepOneOfFanOutResult = {
   outcomes: FanOutTeardownOutcome[]
 }
 
-type GitWorktree = { path: string; branch: string | null }
+type GitWorktree = GitWorktreeEntry
 type GitBranchesSnapshot = Extract<WorkspaceBranchesSnapshot, { kind: 'git-repository' }>
 
 // Every git invocation in this service shares the main process's non-interactive environment (see
@@ -178,9 +179,13 @@ export function parseGitWorktreePorcelain(output: string): GitWorktree[] {
     const token = rawToken.replace(/^\n+/, '')
     if (token.startsWith('worktree ')) {
       if (current) worktrees.push(current)
-      current = { path: token.slice('worktree '.length), branch: null }
+      current = { path: token.slice('worktree '.length), branch: null, kind: worktrees.length === 0 ? 'main' : 'linked', detached: false, aliases: [] }
     } else if (current && token.startsWith('branch refs/heads/')) {
       current.branch = token.slice('branch refs/heads/'.length)
+    } else if (current && token === 'detached') {
+      current.detached = true
+    } else if (current && token === 'bare') {
+      current.kind = 'bare'
     }
   }
   if (current) worktrees.push(current)
@@ -196,6 +201,63 @@ export class WorktreeService {
     private readonly hostFor: (id: string) => ExecutionHost,
     private readonly configWriter: ConfigWriter
   ) {}
+
+  async observe(workspaceId: string, config: AppConfig): Promise<GitWorktreesResult> {
+    const workspace = this.workspace(config, workspaceId)
+    const target = { hostId: workspace.hostId, workspacePath: workspace.path }
+    try {
+      const host = this.hostFor(workspace.hostId)
+      // Resolve the actual directory each time; saved repoPath/branch are registration history.
+      const repoPath = await this.resolveRepoPath(host, workspace.path)
+      if (repoPath === null) return { kind: 'not-a-git-repository', ...target, checkedAt: Date.now() }
+      const result = await host.run('git', ['-C', repoPath, 'worktree', 'list', '--porcelain', '-z'], GIT_ENUMERATION_OPTIONS)
+      this.assertGit(result, 'Could not observe Git worktrees')
+      const worktrees = parseGitWorktreePorcelain(result.stdout)
+      // Validation belongs only to this observation; unrelated existing worktree operations retain their contract.
+      if (!worktrees.length || new Set(worktrees.map(item => item.path)).size !== worktrees.length ||
+        worktrees.some(item => !(item.path.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(item.path) || item.path.startsWith('\\\\')) ||
+          (item.kind === 'bare' ? item.branch !== null || item.detached : item.detached ? item.branch !== null : !item.branch))) {
+        throw new Error('Git returned invalid worktree records')
+      }
+      const warnings: string[] = []
+      // Registration selects a bounded candidate set only. The original Host proves each alias;
+      // neither a saved repoPath nor a lexical prefix can establish actual Git membership.
+      const project = workspace.repoPath ?? workspace.path
+      const candidates = [...new Set(config.workspaces.filter(value => value.hostId === workspace.hostId &&
+        (value.id === workspace.id || (value.repoPath ?? value.path) === project)).map(value => value.path))]
+      try {
+        const paths = [...worktrees.map(value => value.path), ...candidates]
+        const aliases = await host.run('node', ['-e',
+          'const fs=require("node:fs");process.stdout.write(JSON.stringify(JSON.parse(process.argv[1]).map(path=>{try{return {path,canonicalPath:fs.realpathSync(path)}}catch{return {path,canonicalPath:null}}})))',
+          JSON.stringify(paths)], { ...GIT_DISCOVERY_OPTIONS, env: { ...GIT_NONINTERACTIVE_ENV, NODE_OPTIONS: undefined, NODE_PATH: undefined } })
+        this.assertGit(aliases, 'Directory alias observation is unavailable')
+        const values: unknown = JSON.parse(aliases.stdout)
+        if (!Array.isArray(values) || values.length !== paths.length || values.some((value, index) => !value || value.path !== paths[index] ||
+          value.canonicalPath !== null && typeof value.canonicalPath !== 'string')) throw new Error('Invalid directory alias observation')
+        // Resolve both native and registered spellings on the same Host: no slash replacement,
+        // POSIX filename guessing, or Windows drive/case assumptions in the client.
+        const records = values as { path: string; canonicalPath: string | null }[]
+        const byPath = new Map<string, GitWorktree>(), ambiguous = new Set<string>()
+        records.slice(0, worktrees.length).forEach((value, index) => {
+          if (value.canonicalPath === null) return
+          if (byPath.has(value.canonicalPath)) ambiguous.add(value.canonicalPath)
+          byPath.set(value.canonicalPath, worktrees[index]!)
+        })
+        for (const value of records.slice(worktrees.length)) {
+          if (value.canonicalPath === null) { warnings.push(`Directory alias is unconfirmed: ${value.path}. Refresh to retry.`); continue }
+          if (ambiguous.has(value.canonicalPath)) { warnings.push(`Directory alias is ambiguous: ${value.path}. Refresh to retry.`); continue }
+          const match = byPath.get(value.canonicalPath)
+          if (match && value.path !== match.path) match.aliases.push(value.path)
+        }
+      } catch (error) {
+        warnings.push(`Directory aliases unavailable. Canonical Git worktrees remain readable. Refresh to retry: ${gitFailureError({ exitCode: 1, stdout: '', stderr: error instanceof Error ? error.message : String(error) }, 'Alias observation failed').message}`)
+      }
+      return { kind: 'ready', ...target, repoPath, checkedAt: Date.now(), worktrees, warnings }
+    } catch (error) {
+      const reason = gitFailureError({ exitCode: 1, stdout: '', stderr: error instanceof Error ? error.message : String(error) }, 'Git worktree observation is unavailable').message
+      return { kind: 'unavailable', ...target, checkedAt: Date.now(), reason }
+    }
+  }
 
   async isRegistered(workspace: WorkspaceRecord): Promise<boolean> {
     if (!workspace.repoPath) throw new Error('The original repository path is unavailable.')
