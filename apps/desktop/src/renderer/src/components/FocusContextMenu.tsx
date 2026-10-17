@@ -16,7 +16,7 @@ const ThemeActionStopIcon = semanticIconComponent('action.stop')
 const ThemeActionRestartIcon = semanticIconComponent('action.restart-session')
 
 
-/** A Context card knows its semantic SID, not which of its Regions to address. */
+/** The original card carries both its presentation address and canonical execution control. */
 export function FocusContextMenu({ open, context, children, onOpenChange, onRename, onRestoreFocus }: {
   open: boolean; context: FocusContext; children: ReactNode; onOpenChange(open: boolean): void; onRename(): void; onRestoreFocus(): void
 }) {
@@ -27,9 +27,13 @@ export function FocusContextMenu({ open, context, children, onOpenChange, onRena
   const origin = useRef<HTMLElement | null>(null)
   const stop = useFocusStopAgent(active)
   const restart = useSessionRestart(active)
-  const actions = agentRosterMenuActions({ sessionId, writeClipboardText: async text => {
+  const actions = context.control ? agentRosterMenuActions({ sessionId: context.control.agentSessionId, writeClipboardText: async text => {
     await copyTextToClipboard(text, error => useAppStore.getState().reportError(error))
-  } })
+  } }) : [{ key: 'copy-session' as const, label: 'Copy Agent Link' as const, onSelect: async () => {
+    useAppStore.getState().reportError(new Error('The original canonical Agent identity is not confirmed. No Agent link was copied.'), {
+      kind: 'indeterminate', summary: 'The original work surface and draft are kept. Refresh this Agent’s identity, then retry Copy Agent Link.'
+    })
+  } }]
   return <><ContextMenu.Root modal={false} open={open} onOpenChange={open => { if (open) actionOwnsFocus.current = false; onOpenChange(open) }}>
     <ContextMenu.Trigger asChild onContextMenu={event => { origin.current = event.currentTarget }} onKeyDown={event => {
       if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return
@@ -53,8 +57,8 @@ export function FocusContextMenu({ open, context, children, onOpenChange, onRena
         <ContextMenu.Separator className="tab-context-menu__separator" />
         {actions.filter(action => action.key === 'copy-session').map((action, index) => <RegionMenuEntryView key={action.key} entry={{ kind: 'action', action }} index={index} Item={ContextMenu.Item} Separator={ContextMenu.Separator} />)}
         <ContextMenu.Separator className="tab-context-menu__separator" />
-        <ContextMenu.Item className="tab-context-menu__item" onSelect={() => { actionOwnsFocus.current = true; onRestoreFocus(); restart.requestRestart(sessionId, context.name, origin.current) }}><ThemeActionRestartIcon size={14} /><span>Restart Session…</span></ContextMenu.Item>
-        <ContextMenu.Item className="tab-context-menu__item" onSelect={() => { actionOwnsFocus.current = true; onRestoreFocus(); stop.requestStop(sessionId, context.name, origin.current) }}><ThemeActionStopIcon size={14} /><span>Stop Agent</span></ContextMenu.Item>
+        <ContextMenu.Item className="tab-context-menu__item" onSelect={() => { actionOwnsFocus.current = true; onRestoreFocus(); restart.requestRestart(context, context.name, origin.current) }}><ThemeActionRestartIcon size={14} /><span>Restart Session…</span></ContextMenu.Item>
+        <ContextMenu.Item className="tab-context-menu__item" onSelect={() => { actionOwnsFocus.current = true; onRestoreFocus(); stop.requestStop(context, context.name, origin.current) }}><ThemeActionStopIcon size={14} /><span>Stop Agent</span></ContextMenu.Item>
       </ContextMenu.Content>
     </DocumentOverlayPortal> : null}
   </ContextMenu.Root>{active ? <>{restart.dialog}{stop.dialog}</> : null}</>

@@ -2,8 +2,8 @@ import * as ContextMenu from '@radix-ui/react-context-menu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { createContext, useContext, useId, useRef, type ReactNode } from 'react'
 import { useSessionRestart } from './SessionRestart'
-import { useAppStore } from '../store'
-import { sessionPresentationById } from '../lib/session-presentation'
+import { agentRegionExecution, useAppStore } from '../store'
+import { agentSessionPresentationIndex } from '../lib/session-presentation'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { formatRegionAddress, formatSessionAddress } from '../lib/agent-address'
 import type { RegionSwapMenuEntry, WorkbenchSplitMenuEntry } from '../lib/workbench-tab-actions'
@@ -193,6 +193,7 @@ export function RegionMenuEntryView({ entry, index, Item, Separator, Group = Con
 export function RegionContextMenu({
   children,
   regionId,
+  tabId,
   agentSessionId,
   writeClipboardText,
   splitMenu,
@@ -205,6 +206,7 @@ export function RegionContextMenu({
   connector?: RegionConnectorControls
   onOpenWindow?: (() => void) | undefined
   regionId: string
+  tabId: string
   agentSessionId: string | null
   writeClipboardText(text: string): Promise<void>
     splitMenu: readonly WorkbenchSplitMenuEntry[]
@@ -214,16 +216,24 @@ export function RegionContextMenu({
   const active = useWorkbenchPresentationActive()
   const restart = useSessionRestart(active)
   const origin = useRef<HTMLElement | null>(null)
-  const name = useAppStore(state => agentSessionId ? sessionPresentationById(state.sessions).get(agentSessionId)?.label ?? agentSessionId : null)
+  const target = useAppStore(state => {
+    if (!agentSessionId) return undefined
+    const execution = agentRegionExecution({ tabId, regionId, agentSessionId })
+    if (!execution) return undefined
+    const matches = (agentSessionPresentationIndex(state.sessions).get(agentSessionId) ?? []).filter(session =>
+      session.control.agentSessionId === agentSessionId && session.hostId === execution.hostId && session.control.hostId === execution.hostId)
+    return matches.length === 1 ? matches[0] : undefined
+  })
+  const name = target?.label ?? agentSessionId
   const base = createRegionCopyModel({
     regionId,
-    agentSessionId,
+    agentSessionId: target?.control.agentSessionId ?? null,
     writeClipboardText,
     splitMenu,
     swapMenu,
     promote
   })
-  const model = { ...base, entries: [...base.entries, ...(agentSessionId ? [{ kind: 'separator' as const }, { kind: 'restart' as const, onSelect: () => restart.requestRestart(agentSessionId, name ?? agentSessionId, origin.current) }] : []), ...(onOpenWindow ? [{ kind: 'window' as const, onSelect: onOpenWindow }] : []), ...(connector.group ? [{ kind: 'connector-group' as const, group: connector.group }] : [])] }
+  const model = { ...base, entries: [...base.entries, ...(agentSessionId ? [{ kind: 'separator' as const }, { kind: 'restart' as const, onSelect: () => restart.requestRestart(target, name ?? agentSessionId, origin.current) }] : []), ...(onOpenWindow ? [{ kind: 'window' as const, onSelect: onOpenWindow }] : []), ...(connector.group ? [{ kind: 'connector-group' as const, group: connector.group }] : [])] }
   // 让位不在这里接线：原生视图的让位由 App 的那一个 MutationObserver 按 Radix 的 DOM 协议
   // （portal 到 React 根之外 + data-state=open）统一观察，见 lib/native-overlay-regions.ts。
   // 这个菜单——#544 那个被浏览器盖住的——正是"逐个接线会漏"的证据本身。
