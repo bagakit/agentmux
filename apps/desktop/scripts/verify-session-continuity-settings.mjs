@@ -18,6 +18,9 @@ const relative = {
   authored: 'apps/desktop/src/shared/config-edit.ts',
   adapter: 'apps/desktop/src/renderer/src/components/settings/modules/continuity.tsx',
   pane: 'apps/desktop/src/renderer/src/components/settings/ContinuitySettingsPane.tsx',
+  continuationPane: 'apps/desktop/src/renderer/src/components/settings/ContinuationSettingsPane.tsx',
+  saveAdapter: 'apps/desktop/src/renderer/src/components/settings/save-continuity-settings.ts',
+  fields: 'apps/desktop/src/renderer/src/components/settings/continuity-settings-fields.ts',
   schema: 'apps/desktop/src/main/config-store.ts',
   settingsEntry: 'apps/desktop/src/main/settings/modules/continuity.ts',
   policy: 'packages/core/src/agent-session-continuity.ts',
@@ -33,15 +36,15 @@ const uiFile = 'apps/desktop/test/session-continuity-settings.test.tsx', control
 const mutants = [
   { id: 'fallback-default', file: relative.policy, source: replace(sources.policy, 'activeInterruptionFallback: false', 'activeInterruptionFallback: true'), test: 'public RPC discovers the editable Core policy and keeps absent effective defaults absent', suite: controlFile },
   { id: 'fallback-scalar', file: relative.settingsEntry, source: replace(sources.settingsEntry, "  booleanSetting('continuity.activeInterruptionFallback', defaults.activeInterruptionFallback,\n    config => normalizeAgentContinuityPolicy(config.continuity).activeInterruptionFallback, write('activeInterruptionFallback')),\n", ''), test: 'public RPC discovers the editable Core policy and keeps absent effective defaults absent', suite: controlFile },
-  { id: 'fallback-editor-binding', file: relative.pane, source: replace(sources.pane, "draft.setField('activeInterruptionFallback', event.target.checked)", "draft.setField('activeInterruptionFallback', false)"), test: 'unsupported-only active fallback is opt in and preserves retained input while continuation stays independent', suite: uiFile },
+  { id: 'fallback-editor-binding', file: relative.continuationPane, source: replace(sources.continuationPane, "draft.setField('activeInterruptionFallback', event.target.checked)", "draft.setField('activeInterruptionFallback', false)"), test: 'unsupported-only active fallback is opt in and preserves retained input while continuation stays independent', suite: uiFile },
   { id: 'retry-scalar', file: relative.settingsEntry, source: replace(sources.settingsEntry, "  numberSetting('retryInitialDelayMs'),\n", ''), test: 'public RPC discovers the editable Core policy and keeps absent effective defaults absent', suite: controlFile },
   { id: 'retry-complete-schema', file: relative.schema, source: replace(sources.schema, "try { normalizeAgentContinuityPolicy(authored as AppConfig['continuity']) }", 'try { void authored }'), test: 'retry settings reject invalid complete policies and preserve unrelated authored data', suite: controlFile },
   { id: 'retry-editor-binding', file: relative.pane, source: replace(sources.pane, 'retryInitialDelayMs: milliseconds(value.retryInitialDelayMs)', 'retryInitialDelayMs: milliseconds(value.retryMaxDelayMs)'), test: 'retry choices are discoverable, strictly authored and separate from rechecks without Session side effects', suite: uiFile },
   { id: 'registration', file: relative.registration, source: replace(sources.registration, '  continuitySettingsModule,\n', ''), test: 'the registered continuity module reaches Overview, search, narrow navigation and the real writable editor', suite: uiFile },
   { id: 'main-wiring', file: relative.main, source: replace(sources.main, '  ...continuitySettings,\n', ''), test: 'public RPC discovers the editable Core policy and keeps absent effective defaults absent', suite: controlFile },
   { id: 'authored-first-write', file: relative.authored, source: replace(sources.authored, " || path === 'continuity'", ''), test: 'concurrent first authored fields merge without materializing untouched defaults and conflicts keep disk intact', suite: controlFile },
-  { id: 'expected-baseline', file: relative.adapter, source: replace(sources.adapter, '...current.continuity, ...expected', '...current.continuity, ...value'), test: 'the registered continuity module reaches Overview, search, narrow navigation and the real writable editor', suite: uiFile },
-  { id: 'fixed-preview', file: relative.pane, source: replace(sources.pane, '{DEFAULT_AGENT_CONTINUITY_CONTINUATION}', '{draft.value.continuationPrompt}'), test: 'unsupported-only active fallback is opt in and preserves retained input while continuation stays independent', suite: uiFile },
+  { id: 'expected-baseline', file: relative.saveAdapter, source: replace(sources.saveAdapter, '...current.continuity, ...expected', '...current.continuity, ...value'), test: 'the registered continuity module reaches Overview, search, narrow navigation and the real writable editor', suite: uiFile },
+  { id: 'fixed-preview', file: relative.continuationPane, source: replace(sources.continuationPane, '{DEFAULT_AGENT_CONTINUITY_CONTINUATION}', '{"Wrong continuation"}'), test: 'unsupported-only active fallback is opt in and preserves retained input while continuation stays independent', suite: uiFile },
   { id: 'strict-schema', file: relative.schema, source: replace(sources.schema, "continuationPrompt: z.string().optional().describe('Retained historical recovery input; not an editable setting')\n    }).strict().optional()", "continuationPrompt: z.string().optional().describe('Retained historical recovery input; not an editable setting')\n    }).optional()"), test: 'all declared scalar types persist through the original owner with strict target and schema validation', suite: controlFile }
 ]
 const sourceIdentity = Object.fromEntries(Object.entries(relative).map(([key, file]) => [file, digest(sources[key])]))
@@ -77,14 +80,14 @@ async function run(id, mutation = '') {
   })
   const log = Buffer.concat(output).toString(); await fs.writeFile(path.join(directory, `${id}.log`), log)
   const result = JSON.parse(await fs.readFile(report, 'utf8')), capture = JSON.parse(await fs.readFile(captured, 'utf8'))
-  assert.equal(result.testResults.length, 2); assert.equal(result.numTotalTests, 12)
+  assert.equal(result.testResults.length, 2); assert.equal(result.numTotalTests, 14)
   for (const suite of result.testResults) { assert.ok(suite.assertionResults.length > 0); assert.equal(suite.message, '', 'No setup/runtime errors may qualify') }
   const assertions = result.testResults.flatMap(suite => suite.assertionResults)
   assert.equal(assertions.length, result.numTotalTests, 'Every declared case must exist in the fresh raw report')
   assert.equal(assertions.filter(test => test.status === 'passed').length, result.numPassedTests)
   assert.equal(assertions.filter(test => test.status === 'failed').length, result.numFailedTests)
   assert.doesNotMatch(log, /Unhandled Errors|Unhandled Rejection|Uncaught Exception/)
-  if (!mutation) { assert.equal(exitCode, 0, log); assert.equal(result.numPassedTests, 12) }
+  if (!mutation) { assert.equal(exitCode, 0, log); assert.equal(result.numPassedTests, 14) }
   else {
     const mutant = mutants.find(m => m.id === mutation)
     assert.equal(exitCode, 1, 'Owning mutant must reach a business assertion: ' + mutation)
@@ -113,6 +116,7 @@ if (!args.includes('--visual-only') && !deliveryOnly) {
   for (const mutant of mutants) await run(mutant.id, mutant.id)
 }
 if (args.includes('--test-only')) {
+  for (const [file, sha] of Object.entries(sourceIdentity)) assert.equal(digest(await fs.readFile(path.join(root, file))), sha, 'Candidate source drift: ' + file)
   await fs.writeFile(path.join(directory, 'receipt.json'), JSON.stringify({ completed: true, sourceIdentity, runs, callers, native: 'not-requested', independentVisualReview: 'pending' }, null, 2))
   console.log(JSON.stringify({ completed: true, directory, mutations: Math.max(0, runs.length - 1), independentVisualReview: 'pending' })); process.exit(0)
 }

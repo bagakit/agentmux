@@ -41,6 +41,7 @@ async function reviewedProof(directory) {
     for (const [file, record] of Object.entries(receipt.source)) assert.equal(hash(await fs.readFile(path.join(root, file))), record.sha256)
     for (const record of receipt.assets) assert.equal(hash(await fs.readFile(path.join(root, record.file))), record.sha256)
     assert.deepEqual(await files(path.join(directory, 'compiled')), receipt.compiled)
+    if (receipt.coreCompiled) assert.deepEqual(await files(path.join(directory, receipt.coreDirectory ?? 'core')), receipt.coreCompiled)
     assert.equal(hash(await fs.readFile(path.join(directory, 'owner.mjs'))), receipt.ownerCompiled.sha256)
     for (const record of [...receipt.png, ...receipt.raw]) assert.equal(hash(await fs.readFile(path.join(directory, record.file))), record.sha256)
     return receipt
@@ -95,10 +96,35 @@ export async function qualify(directory, materialsOnly = false, preview = false,
         for (const [filename, source] of sources) await bind(filename, source)
       } }] } }, build: { target: 'esnext', outDir: path.join(directory, 'compiled'), emptyOutDir: true, minify: false, rollupOptions: { onwarn(warning, report) { if (warning.code !== 'MODULE_LEVEL_DIRECTIVE') report(warning) } } } })
     const viteRequire = createRequire(viteFile)
-    const { build: bundle } = await import(pathToFileURL(viteRequire.resolve('esbuild')).href)
-    const exports = JSON.parse(await fs.readFile(path.join(root, 'packages/core/package.json'), 'utf8')).exports
-    const core = Object.fromEntries(Object.entries(exports).map(([key, value]) => ['@agentmux/core' + (key === '.' ? '' : key.slice(1)), path.join(root, 'packages/core', value.import.replace('./dist/', './src/').replace(/\.js$/, '.ts'))]))
-    await bundle({ entryPoints: [path.join(fixture, 'owner-entry.ts')], outfile: path.join(directory, 'owner.mjs'), platform: 'node', format: 'esm', banner: { js: "import { createRequire as proofCreateRequire } from 'node:module'; const require = proofCreateRequire(import.meta.url);" }, bundle: true, external: ['electron'], alias: core, plugins: [{ name: 'bind-main-owner-source', setup(api) {
+    const { build: bundle, transform } = await import(pathToFileURL(viteRequire.resolve('esbuild')).href)
+    // Keep Core's native ESM boundaries. Bundling its cyclic RPC/Provider graph can
+    // synthesize an invalid async initializer around the managed CLI entry point.
+    // Compile fresh private sources instead of borrowing or rebuilding shared dist.
+    receipt.coreDirectory = `core-${path.basename(privateRoot)}`
+    const coreRoot = path.join(directory, receipt.coreDirectory), corePackagePath = path.join(root, 'packages/core/package.json')
+    const corePackage = await fs.readFile(corePackagePath); await bind(corePackagePath, corePackage)
+    await fs.mkdir(coreRoot); await fs.writeFile(path.join(coreRoot, 'package.json'), corePackage)
+    const exports = JSON.parse(corePackage).exports
+    const core = Object.fromEntries(Object.entries(exports).map(([key, value]) => ['@agentmux/core' + (key === '.' ? '' : key.slice(1)), path.join(coreRoot, value.import)]))
+    async function compileCore(sourceDirectory, destination) {
+      await fs.mkdir(destination, { recursive: true })
+      for (const entry of await fs.readdir(sourceDirectory, { withFileTypes: true })) {
+        const source = path.join(sourceDirectory, entry.name), target = path.join(destination, entry.name)
+        if (entry.isDirectory()) { await compileCore(source, target); continue }
+        if (!/\.(ts|json)$/.test(entry.name) || entry.name.endsWith('.d.ts')) continue
+        const original = await fs.readFile(source), bytes = Buffer.from(await consumedSource(source, original.toString()))
+        await bind(source, bytes)
+        if (entry.name.endsWith('.json')) await fs.writeFile(target, bytes)
+        else await fs.writeFile(target.replace(/\.ts$/, '.js'), (await transform(bytes.toString(), { loader: 'ts', format: 'esm', target: 'esnext', sourcefile: source })).code)
+      }
+    }
+    await compileCore(path.join(root, 'packages/core/src'), path.join(coreRoot, 'dist'))
+    receipt.coreCompiled = await files(coreRoot)
+    await bundle({ entryPoints: [path.join(fixture, 'owner-entry.ts')], outfile: path.join(directory, 'owner.mjs'), platform: 'node', format: 'esm', banner: { js: "import { createRequire as proofCreateRequire } from 'node:module'; const require = proofCreateRequire(import.meta.url);" }, bundle: true, external: ['electron'], plugins: [{ name: 'bind-main-owner-source', setup(api) {
+      api.onResolve({ filter: /^@agentmux\/core(?:\/|$)/ }, event => {
+        assert.ok(core[event.path], 'Explicit public Core export: ' + event.path)
+        return { path: core[event.path], external: true }
+      })
       api.onLoad({ filter: /\.[cm]?[jt]s$/ }, async event => {
         if (!event.path.startsWith(root + '/') || event.path.includes('/node_modules/')) return
         const contents = await fs.readFile(event.path, 'utf8'); await bind(event.path, contents)

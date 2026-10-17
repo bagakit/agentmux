@@ -1,8 +1,5 @@
-import { defineConfig } from 'vitest/config'
-import overviewConfig from '../settings-overview/vitest.config.mts'
-
-export default defineConfig({ ...overviewConfig, test: { ...overviewConfig.test, include: [
+import base from '../settings-overview/vitest.config.mts'
+export default { ...base, test: { ...base.test, include: [
   'apps/desktop/test/settings-message-tool.test.tsx',
-  'apps/desktop/test/message-tool-initial-layout.test.tsx',
-  'apps/desktop/test/settings-draft-conflict.test.tsx'
-] } })
+  'apps/desktop/test/settings-modules-control.test.ts'
+] } }
