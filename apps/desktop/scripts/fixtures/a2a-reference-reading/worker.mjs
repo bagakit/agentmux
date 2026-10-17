@@ -65,10 +65,12 @@ await runPrivateA2aProductScenario(async ({ client, first, sessions, facts, exec
   await first.cdp.evaluate(`${notification}.scrollIntoView({block:'center'})`)
   await activate(first.cdp, `${notification}.querySelector('.log-turn__system-toggle')`)
   await waitFor('actual static reference list', () => first.cdp.evaluate(`${notification}.querySelectorAll('.log-turn__references li').length===1`))
-  const rendered = await first.cdp.evaluate(`(()=>{const n=${notification};return{text:n.textContent,author:n.querySelector('.log-turn__who')?.textContent,
+  const rendered = await first.cdp.evaluate(`(()=>{const n=${notification};return{text:n.textContent,title:n.querySelector('.log-turn__system-title')?.textContent,
+    role:n.dataset.speakerRole,eventRole:n.dataset.conversationRole,eventAuthor:JSON.parse(n.dataset.conversationAuthor),notificationId:n.dataset.a2aNotificationId,
     refs:[...n.querySelectorAll('.log-turn__references li')].map(row=>row.textContent),hint:n.querySelector('.log-turn__references-hint')?.textContent,
     actionable:n.querySelectorAll('.log-turn__references a,.log-turn__references button').length}})()`)
-  assert.equal(rendered.author, 'AgentMux'); assert.equal(rendered.actionable, 0)
+  assert.ok(rendered.title); assert.equal(rendered.role, 'system'); assert.equal(rendered.eventRole, 'notice')
+  assert.equal(rendered.eventAuthor.kind, 'system'); assert.equal(rendered.notificationId, key.submissionId); assert.equal(rendered.actionable, 0)
   assert.ok(rendered.refs[0].includes(messageId)); assert.ok(rendered.hint.includes('message --skill'))
   assert.ok(!rendered.text.includes('authored-example-message'))
   await activate(first.cdp, `${notification}.querySelector('[aria-label="Copy message"]')`)
