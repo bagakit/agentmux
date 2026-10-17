@@ -392,3 +392,81 @@ it.each(['begin', 'authentication'] as const)('keeps a preclaimed unknown %s acr
   } finally { durable.close() }
   replacement.kill('SIGKILL'); await once(replacement, 'exit')
 }, 30_000)
+
+it('reads bounded original Enrollment trace through SDK and compiled CLI without secrets, replay or invented HTTP', async () => {
+  const f = await fixture(), configured = await create(f), operationId = f.input.operationId
+  expect(configured.operation!.configuration).toBe('configured')
+  const before = f.services.database!.prepare('SELECT total_changes() AS count').get()
+  const resolve = vi.spyOn(DesktopConnectorSecrets.prototype, 'resolve'), store = vi.spyOn(f.services.secrets, 'store')
+  f.encryption.isEncryptionAvailable = () => false
+  const first = result(await f.cli(['enrollment', 'inspect', '--operation-id', operationId, '--request-trace', '--trace-limit', '2']))
+  expect(first.challenge).toBeNull(); expect(first.account).toBeNull(); expect(first.actions).toEqual([])
+  expect(first.requestTrace.entries.map((entry: any) => entry.action)).toEqual(['initialize', 'authentication'])
+  expect(first.requestTrace.next).toEqual(expect.any(String))
+  const second = await f.sdk.call('connection.enrollment.inspect', { operationId, requestTrace: { cursor: first.requestTrace.next, limit: 2 } })
+  expect(second.requestTrace!.entries.map(entry => entry.action)).toEqual(['upload', 'create'])
+  const third = result(await f.cli(['enrollment', 'inspect', '--operation-id', operationId, '--request-trace', '--trace-cursor', second.requestTrace!.next!, '--trace-limit', '2']))
+  expect(third.requestTrace.entries.map((entry: any) => entry.action)).toEqual(['credential'])
+  expect(third.requestTrace.next).toBeNull()
+  const entries = [...first.requestTrace.entries, ...second.requestTrace!.entries, ...third.requestTrace.entries]
+  expect(entries.map(entry => entry.sequence)).toEqual([1, 2, 3, 4, 5])
+  expect(entries.map(entry => ({ kind: entry.kind, request: entry.request, secureStorage: entry.secureStorage, network: entry.network, subject: entry.subject, effect: entry.effect }))).toEqual(Array.from({ length: 5 }, () => ({ kind: 'enrollment-request', request: 'settled', secureStorage: null, network: null, subject: null, effect: null })))
+  const steps = f.services.database!.prepare('SELECT attempt_id FROM connection_enrollment_attempt WHERE operation_id=? ORDER BY rowid').all(operationId)
+  expect(entries.map(entry => entry.stepId)).toEqual(steps.map(step => step.attempt_id))
+  expect(JSON.stringify([first.requestTrace, second.requestTrace, third.requestTrace])).not.toMatch(/original-user|original-tenant|private|credentialRef|cookie|qrPayload|data:image|verify\.example|Original bot/u)
+  expect(resolve).not.toHaveBeenCalled(); expect(store).not.toHaveBeenCalled()
+  expect(f.services.database!.prepare('SELECT total_changes() AS count').get()).toEqual(before)
+  expect(f.begin).toHaveBeenCalledTimes(1); expect(f.authentication).toHaveBeenCalledTimes(1); expect(f.create).toHaveBeenCalledTimes(1); expect(f.credential).toHaveBeenCalledTimes(1)
+  await f.closeOwner(); await f.reopen()
+  const reopenedResolve = vi.spyOn(DesktopConnectorSecrets.prototype, 'resolve')
+  const restored = await f.sdk.call('connection.enrollment.inspect', { operationId, requestTrace: { cursor: first.requestTrace.next, limit: 2 } })
+  expect(restored.requestTrace).toEqual(second.requestTrace)
+  expect(reopenedResolve).not.toHaveBeenCalled()
+}, 30_000)
+
+it('scopes trace cursors to the exact Enrollment operation and actor while original unknown steps remain readable', async () => {
+  const f = await fixture({ advance: async () => ({ kind: 'unknown', diagnostic: { stage: 'adapter', code: 'receipt-unconfirmed' } }) })
+  const pending = await f.sdk.call('connection.enrollment.begin', f.input)
+  const unknown = await advance(f, pending, 'continue-authentication')
+  expect(unknown.operation!.authentication!.stage).toBe('unknown')
+  const first = await f.sdk.call('connection.enrollment.inspect', { operationId: f.input.operationId, requestTrace: { limit: 1 } })
+  expect(first.requestTrace!.entries.map(entry => entry.action)).toEqual(['initialize'])
+  const last = await f.sdk.call('connection.enrollment.inspect', { operationId: f.input.operationId, requestTrace: { cursor: first.requestTrace!.next!, limit: 1 } })
+  expect(last.requestTrace!.entries.map(entry => ({ action: entry.action, request: entry.request, network: entry.network }))).toEqual([{ action: 'authentication', request: 'claimed', network: null }])
+  f.services.database!.prepare('INSERT INTO connection_enrollment_attempt VALUES(?,?,?,?,?)').run('orphan-step', 'missing-parent', 'begin', 'unattributed-owner', 'settled')
+  const orphan = await f.sdk.call('connection.enrollment.inspect', { operationId: 'missing-parent', requestTrace: {} })
+  expect(orphan.operation).toBeNull(); expect(orphan.requestTrace!.entries).toEqual([])
+  const other = { ...f.input, operationId: 'another-trace-operation', connectionId: 'another-trace-connection' }
+  await f.sdk.call('connection.enrollment.begin', other)
+  await expect(f.sdk.call('connection.enrollment.inspect', { operationId: other.operationId, requestTrace: { cursor: first.requestTrace!.next! } })).rejects.toMatchObject({ code: 'INVALID_CONNECTION_REQUEST_TRACE' })
+  const service = new AgentMuxRpcService({ connections: f.services.connections }); clean.push(() => service.dispose())
+  await expect(service.call('connection.enrollment.inspect', { operationId: f.input.operationId, requestTrace: {} }, { principal: { kind: 'device', id: 'foreign-actor' } })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  expect((await f.sdk.call('connection.enrollment.inspect', { operationId: f.input.operationId, requestTrace: {} })).requestTrace!.entries).toHaveLength(2)
+  expect(f.authentication).toHaveBeenCalledTimes(1)
+  const help = await f.cli(['enrollment', 'inspect', '--help'])
+  expect(help.code).toBe(0); expect(help.stdout).toContain('--request-trace'); expect(help.stdout).toContain('HTTP details were not recorded')
+  expect((await f.cli(['enrollment', 'inspect', '--operation-id', f.input.operationId, '--trace-limit', '1'])).code).not.toBe(0)
+}, 30_000)
+
+it('strict trace replies preserve operation scope, order, bounds and secret-free selection', async () => {
+  const f = await fixture(); await create(f)
+  const input = { operationId: f.input.operationId, requestTrace: { limit: 2 } }
+  const view = await f.sdk.call('connection.enrollment.inspect', input), trace = view.requestTrace!
+  expect(trace.entries).toHaveLength(2)
+  const variants = [
+    { ...view, requestTrace: undefined },
+    { ...view, requestTrace: { ...trace, operationId: 'foreign-operation' } },
+    { ...view, requestTrace: { ...trace, entries: [...trace.entries].reverse() } },
+    { ...view, requestTrace: { ...trace, entries: [trace.entries[0], trace.entries[0]] } },
+    { ...view, requestTrace: { ...trace, entries: [{ ...trace.entries[0], network: { httpStatus: 200 } }, trace.entries[1]] } },
+    { ...view, requestTrace: { ...trace, entries: [{ ...trace.entries[0], cookie: 'private-cookie' }, trace.entries[1]] } },
+    { ...view, account: { userId: 'private-user', tenantId: 'private-tenant' } }
+  ]
+  for (const value of variants) expect(() => parseConnectionEnrollmentResult('connection.enrollment.inspect', value, input)).toThrow()
+  expect(() => parseConnectionEnrollmentResult('connection.enrollment.inspect', view, { operationId: input.operationId })).toThrow()
+  expect(() => parseConnectionEnrollmentResult('connection.enrollment.inspect', view, { ...input, requestTrace: { limit: 1 } })).toThrow()
+  const owner = f.services.connections.enrollment!, inspect = owner.inspect.bind(owner)
+  vi.spyOn(owner, 'inspect').mockImplementation(async (value, context) => { const result = await inspect(value, context); if (value.requestTrace) delete result.requestTrace; return result })
+  await expect(f.sdk.call('connection.enrollment.inspect', input)).rejects.toMatchObject({ code: 'INVALID_CONNECTION_ENROLLMENT_DATA' })
+  expect((await f.cli(['enrollment', 'inspect', '--operation-id', input.operationId, '--request-trace'])).code).not.toBe(0)
+}, 30_000)

@@ -573,3 +573,19 @@ it.each(['accepted', 'unknown'] as const)('persists Cookie continuation from an 
   expect(effect(await f.sdk.call('connection.setup.advance', input))).toEqual(effect(observed))
   expect(writes).toBe(1)
 })
+
+it('projects original read subjects and finite effect receipts in one ordered Setup trace without private snapshots', async () => {
+  const f = await fixture(), fetch = vi.fn(nativeRoute().route); vi.stubGlobal('fetch', fetch)
+  await confirmed(f)
+  const source = selected(await botRead(f)), accepted = await f.sdk.call('connection.setup.advance', action(await inspect(f), 'enable-messaging')), written = effect(accepted)
+  const calls = fetch.mock.calls.length, before = changes(f), resolve = vi.spyOn(DesktopConnectorSecrets.prototype, 'resolve'), store = vi.spyOn(DesktopConnectorSecrets.prototype, 'store')
+  f.encryption.isEncryptionAvailable = () => false
+  const view = result(await f.cli(['setup', 'inspect', '--operation-id', f.input.operationId, '--request-trace']))
+  const entries = view.requestTrace!.entries
+  expect(entries.filter(entry => entry.kind === 'application-inspection').map(entry => ({ stepId: entry.stepId, action: entry.action, subject: entry.subject, effect: entry.effect, request: entry.request }))).toEqual([{ stepId: source.stepId, action: 'read-application', subject: 'bot-settings', effect: null, request: 'confirmed' }])
+  expect(entries.filter(entry => entry.kind === 'application-configuration')).toEqual([{ stepId: written.stepId, sequence: written.input.expectedRevision+1, kind: 'application-configuration', action: 'configure-application', subject: null, effect: 'enable-messaging', request: 'confirmed', secureStorage: 'stored', network: null }])
+  expect(entries.at(-1)!.stepId).toBe(written.stepId)
+  assertPrivateFree(entries)
+  expect(view.continuation).toBeUndefined(); expect(view.applicationConfiguration).toBeUndefined()
+  expect(resolve).not.toHaveBeenCalled(); expect(store).not.toHaveBeenCalled(); expect(fetch).toHaveBeenCalledTimes(calls); expect(changes(f)).toEqual(before)
+}, 45_000)
