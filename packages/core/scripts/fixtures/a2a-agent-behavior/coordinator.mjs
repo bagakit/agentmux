@@ -107,7 +107,6 @@ try {
   assert.equal(selected.length, minimumOnly ? 1 : 5, 'The real behavior scenario set must be nonempty and complete')
   receipt.expectedScenarioNames = selected.map(value => value.name)
   receipt.boundary = 'Real Codex exec through an explicit private verification Provider, actual Core lifecycle/journal and public HTTP RPC/CLI. Native TUI startup is not claimed; finite samples do not guarantee universal model behavior.'
-  const deliveredPeerWire = []
   for (const [index, scenario] of selected.entries()) {
     const caseName = String(index + 1) + '-' + scenario.name
     const plan = { authHome, home: environment.HOME, workspace, cli: config.cli, userContext: scenario.userContext,
@@ -145,7 +144,7 @@ try {
     const incomingPage = await client.listMessages({ participantSessionId: modelSession.agentSessionId, direction: 'incoming', limit: 20 })
     const outgoing = await Promise.all(outgoingPage.messages.map(value => client.readMessage({ messageId: value.envelope.messageId })))
     const incoming = await Promise.all(incomingPage.messages.map(value => client.readMessage({ messageId: value.envelope.messageId })))
-    const processReceipt = JSON.parse(await readFile(plan.processReceipt, 'utf8')), peerInput = await readFile(peerBytes, 'utf8').catch(() => '')
+    const processReceipt = JSON.parse(await readFile(plan.processReceipt, 'utf8')), peerInput = await readFile(peerBytes, 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error })
     const originalWork = await readFile(join(workspace, 'unrelated-result.txt'), 'utf8').catch(() => null)
     Object.assign(outcome, { modelRun, originalIncoming: incoming, originalOutgoing: outgoing, finalText, actualCommands: commands, nativeCollaboration: collab })
     // Save observations before the behavior oracle. A failed sample retains its
@@ -181,13 +180,16 @@ try {
       assert.equal(original.envelope.senderSessionId, modelSession.agentSessionId)
       assert.equal(original.envelope.senderRunId, modelSession.run.runId)
       assert.equal(original.envelope.recipientSessionId, peerSession.agentSessionId)
-      assert.equal(original.delivery.state, 'delivered')
+      assert.equal(original.deliveryMode, 'reference')
+      assert.equal(original.delivery.state, 'queued')
       assert.ok(commands.some(item => item.exit_code === 0 && /agent\s+send/u.test(item.command ?? '') && item.aggregated_output?.includes(original.envelope.messageId)), 'No actual public CLI success matches the journal MID')
-      deliveredPeerWire.push(renderAgentMuxMessageEnvelope(original.envelope) + '\r')
     }
-    assert.equal(peerInput, deliveredPeerWire.join(''), 'Private peer bytes contain a write outside the original Core journal or lost original wire bytes')
+    assert.equal(peerInput, '', 'Default reference intake wrote terminal bytes to the private peer')
     const peerStatus = await client.statusAgent(peerSession.agentSessionId)
     assert.equal(peerStatus.run.runId, peerSession.run.runId)
+    assert.equal(peerStatus.run.acceptedInputBytes, 0, 'The Inbox-only private peer received terminal input')
+    outcome.peerInputAudit = { messageIds: outgoing.map(original => original.envelope.messageId), peerRunId: peerStatus.run.runId,
+      acceptedInputBytes: peerStatus.run.acceptedInputBytes, terminalBytes: Buffer.byteLength(peerInput) }
     assert.equal((await client.listRuns()).find(run => run.runId === peerSession.run.runId)?.state, 'running', 'The original independent peer was operated or replaced')
     assert.deepEqual((await client.readAgentSessions()).map(session => session.agentSessionId).sort(), [peerSession.agentSessionId, ...models.map(value => value.session.agentSessionId)].sort(), 'Model created or replaced an independent Core Session')
     try {
