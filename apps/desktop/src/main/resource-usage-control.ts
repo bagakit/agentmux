@@ -21,6 +21,7 @@ export function createResourceMetricsPort(args: {
   scene?: { owner: PerformanceSceneOwner; currentTarget(): RendererV8ProfileTarget | null; loaded(): RendererSceneLoaded }
   profiler?: { capture: NonNullable<AgentMuxMetricsPort['captureProfile']>; dispose(): void }
   memory?: { inspect: NonNullable<AgentMuxMetricsPort['inspectMemory']>; dispose(): void }
+  animations?: { inspect: NonNullable<AgentMuxMetricsPort['inspectAnimations']>; dispose(): void }
   tracer?: { capture: NonNullable<AgentMuxMetricsPort['captureTrace']>; dispose(): void }
 }): AgentMuxMetricsPort & { dispose(): void } {
   const consumers = new Set<() => void>()
@@ -42,6 +43,10 @@ export function createResourceMetricsPort(args: {
       if (disposed) throw new AgentMuxError('Metrics Main owner was disposed.', 'CONTROL_UNAVAILABLE')
       return args.memory!.inspect(input, signal)
     }) satisfies NonNullable<AgentMuxMetricsPort['inspectMemory']> } : {}),
+    ...(args.animations ? { inspectAnimations: (async (input, signal) => {
+      if (disposed) throw new AgentMuxError('Metrics Main owner was disposed.', 'CONTROL_UNAVAILABLE')
+      return args.animations!.inspect(input, signal)
+    }) satisfies NonNullable<AgentMuxMetricsPort['inspectAnimations']> } : {}),
     ...(args.tracer ? { captureTrace: (async (input, signal) => {
       if (disposed) throw new AgentMuxError('Metrics Main owner was disposed.', 'CONTROL_UNAVAILABLE')
       return args.tracer!.capture(input, signal)
@@ -97,6 +102,7 @@ export function createResourceMetricsPort(args: {
       args.allocations?.dispose()
       args.profiler?.dispose()
       args.memory?.dispose()
+      args.animations?.dispose()
       args.tracer?.dispose()
       for (const close of [...consumers]) close()
     }
