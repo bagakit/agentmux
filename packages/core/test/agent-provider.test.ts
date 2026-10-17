@@ -190,7 +190,7 @@ describe('built-in agent providers', () => {
     })
     expect(plan).toEqual({
       command: 'codex',
-      args: ['--model', 'demo', '--dangerously-bypass-hook-trust', 'fix "quoted"\ntext'],
+      args: ['--model', 'demo', '--dangerously-bypass-hook-trust', '--', 'fix "quoted"\ntext'],
       env: {}
     })
   })
@@ -218,7 +218,7 @@ describe('built-in agent providers', () => {
       commandOverride: fixturePath("opt/tools/codex")
     })
     expect(plan.command).toBe(fixturePath("opt/tools/codex"))
-    expect(plan.args).toEqual(['--dangerously-bypass-hook-trust', ("$(touch " + (fixturePath("tmp/not-executed)")))])
+    expect(plan.args).toEqual(['--dangerously-bypass-hook-trust', '--', ("$(touch " + (fixturePath("tmp/not-executed)")))])
   })
 
   it('launches Grok with the argv separator that guards flag-looking prompts', () => {
@@ -472,7 +472,7 @@ describe('built-in agent providers', () => {
       env: {}
     })).toEqual({
       command: 'codex',
-      args: ['resume', 'native-1', '--dangerously-bypass-hook-trust', 'continue now', '--model', 'demo'],
+      args: ['--model', 'demo', '--dangerously-bypass-hook-trust', 'resume', 'native-1', '--', 'continue now'],
       env: {}
     })
     expect(() => providers.get('pi').buildResumeLaunch({
@@ -499,7 +499,7 @@ describe('built-in agent providers', () => {
       env: {}
     })).toEqual({
       command: 'codex',
-      args: ['resume', 'native-1', '--dangerously-bypass-hook-trust', '--model', 'demo'],
+      args: ['--model', 'demo', '--dangerously-bypass-hook-trust', 'resume', 'native-1'],
       env: {}
     })
     expect(providers.get('claude').buildResumeLaunch({
@@ -532,8 +532,7 @@ describe('built-in agent providers', () => {
   it('carries the resolved launch posture into resume argv without breaking the positional prompt', () => {
     // The create path appends `resolveLaunchArgv(selection)` after the caller args; resume must do the
     // same so a narrowed sandbox / permission-mode survives the stop/resume boundary rather than
-    // reverting to the Provider's default. buildResumeArgs orders these differently per provider — codex
-    // places args AFTER the positional prompt, claude BEFORE — and both must stay CLI-valid.
+    // reverting to the Provider's default. Each Provider retains its native option and prompt syntax.
     const codex = providers.get('codex')
     const codexPosture = codex.resolveLaunchArgv({ sandbox: 'read-only', approval: 'never' })
     expect(codexPosture).toEqual(['--sandbox', 'read-only', '--ask-for-approval', 'never'])
@@ -545,11 +544,9 @@ describe('built-in agent providers', () => {
       env: {}
     })).toEqual({
       command: 'codex',
-      // Option flags intermix after the positional prompt; clap accepts option/positional intermixing,
-      // and `resume now` remains a single positional token.
       args: [
-        'resume', 'native-1', '--dangerously-bypass-hook-trust',
-        'resume now', '--sandbox', 'read-only', '--ask-for-approval', 'never'
+        '--sandbox', 'read-only', '--ask-for-approval', 'never',
+        '--dangerously-bypass-hook-trust', 'resume', 'native-1', '--', 'resume now'
       ],
       env: {}
     })
