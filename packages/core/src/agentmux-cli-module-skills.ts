@@ -132,7 +132,10 @@ These two finite effects have separate receipts; event delivery does not configu
 must name that same Agent Session, never another Agent. Global service/configuration, external
 actor grants and existing human/device bot operations require their original trusted operator.
 For saved Mote identity use space mote connection create/sync/advance/inspect/ls through the same
-owner; exact Mote sources stay on the authenticated Agent Host and Workspace. Saved identity,
+owner; exact Mote sources stay on the authenticated Agent Host and Workspace. Create --input
+accepts optional name to freeze an explicit bot name; omit name to use the exact saved Mote name.
+Retain that complete input: changing name on the same operationId conflicts. Neither choice edits
+the saved Mote source. Sync still uses the saved Mote name and does not accept name. Saved identity,
 application creation, profile write and Mote default save retain separate original receipts.
 
 Begin with connection ls/inspect; configuration, a successful test, an enabled
