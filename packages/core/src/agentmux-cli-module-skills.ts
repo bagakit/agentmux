@@ -557,13 +557,27 @@ Read amux notebook --help for exact links, graph edits and original Note history
 matching leaf help before changing the original catalog or content.`
   },
   schedule: {
-    summary: 'Explicit scheduled-task discovery and lifecycle',
+    summary: 'Civil-time arrangements, one-shot countdowns and original lifecycle',
     roles: 'Authorized scheduling operators',
     when: 'Inspect, create, pause, resume or cancel a scheduled task',
     guide: `The scheduler owns schedule identity, timing, lifecycle and original run references.
 Reading this module creates no schedule or periodic Loop. Begin with schedule list/inspect
-and retain the exact schedule ID, current revision and requested trigger. Create only when
-the user has explicitly authorized scheduled work, within that scope and original target.
+and retain the exact schedule ID, current revision and requested trigger. Create within the
+user's authorization and original target. A finite own-task check may support already-authorized
+work; it does not authorize recurring greetings, external actions or a background reflection loop.
+
+Use schedule create --data <FILE|-> with the exact target {hostId,agentSessionId,providerId,
+workspacePath}, original prompt and operationId. Choose exactly one timing form:
+- calendar: an explicit civil-time once/daily/weekly/monthly/yearly rule with its timezone and policies.
+- afterMs: a positive safe integer in milliseconds, for example 90000 for 90 seconds or 300000 for
+  five minutes. This is a one-shot countdown, not a recurring interval. It cannot enable checkIn.
+
+Read amux schedule create --help for the complete current schema. The first creation of the original
+operation fixes nextCheckAt as its absolute deadline. Repeating the same operationId, restarting the owner
+or pausing and resuming keeps that deadline. Pause suspends delivery, not time; resuming an overdue
+countdown processes the original occurrence. One confirmed input delivery ends a countdown.
+The connected Host must be running; App exit, sleep or offline delivery is not promised. Busy
+Agents, user input and permission waits keep the original occurrence pending.
 
 Inspect the current help for supported triggers and complete input. Pause/resume/cancel
 change the exact schedule; they do not stop unrelated healthy Agents or accept its results.

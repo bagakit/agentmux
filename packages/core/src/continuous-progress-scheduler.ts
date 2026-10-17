@@ -1,6 +1,6 @@
 import { mintObjectId } from './object-id.js'
 import type { AgentPromptCondition } from './agent-prompt-condition.js'
-import type { AgentScheduleCalendar, AgentScheduleCheckInPolicy, AgentScheduleCheckInState } from './agent-schedule.js'
+import { parseAgentScheduleTiming, type AgentScheduleCalendar, type AgentScheduleCheckInPolicy, type AgentScheduleCheckInState, type AgentScheduleTiming } from './agent-schedule.js'
 
 export type ContinuousProgressTarget = {
   hostId: string
@@ -17,6 +17,7 @@ export type ContinuousProgressLoop = ContinuousProgressTarget & {
   taskSource?: ContinuousProgressTaskSource
   loopId: string
   calendar?: AgentScheduleCalendar
+  afterMs?: number
   checkIn?: AgentScheduleCheckInPolicy
   checkInState?: AgentScheduleCheckInState
   revision?: number
@@ -47,6 +48,11 @@ export type ContinuousProgressLoop = ContinuousProgressTarget & {
   lastDecision?: string
 }
 
+/** Distinguish saved future messages from completion-driven Goal/interval loops. */
+export function isAgentSchedule(loop: Pick<ContinuousProgressLoop, 'calendar' | 'afterMs'>): boolean {
+  return loop.calendar !== undefined || loop.afterMs !== undefined
+}
+
 export type ContinuousProgressSchedulerOptions = {
   now?: () => number
   id?: () => string
@@ -72,7 +78,7 @@ export class ContinuousProgressScheduler {
   create(input: ContinuousProgressTarget & { intervalMs: number; prompt: string; taskSource?: ContinuousProgressTaskSource; operationId?: string; initialDelivery?: ContinuousProgressLoop['initialDelivery'] }): ContinuousProgressLoop {
     if (!input.hostId || !input.agentSessionId || !input.providerId || !input.workspacePath || !input.prompt.trim()) throw new Error('Continuous progress needs an exact target and a nonempty prompt.')
     if (!Number.isFinite(input.intervalMs) || input.intervalMs <= 0) throw new Error('Loop interval must be positive.')
-    if ([...this.loops.values()].some((loop) => !loop.calendar && loop.hostId === input.hostId && loop.agentSessionId === input.agentSessionId && loop.status !== 'stopped')) {
+    if ([...this.loops.values()].some((loop) => !isAgentSchedule(loop) && loop.hostId === input.hostId && loop.agentSessionId === input.agentSessionId && loop.status !== 'stopped')) {
       throw new Error(`A loop already exists for Agent ${input.agentSessionId}.`)
     }
     const now = this.now()
@@ -83,11 +89,12 @@ export class ContinuousProgressScheduler {
 
   requestCheck(loopId: string): ContinuousProgressLoop { return this.update(loopId, { nextCheckAt: this.now() }) }
 
-  createCalendar(input: ContinuousProgressTarget & { calendar: AgentScheduleCalendar; prompt: string; nextDue: number; operationId: string; checkIn?: AgentScheduleCheckInPolicy }): ContinuousProgressLoop {
-    if (!input.hostId || !input.agentSessionId || !input.providerId || !input.workspacePath || !input.prompt.trim() || !Number.isSafeInteger(input.nextDue)) throw new Error('An exact calendar target, message and next occurrence are required.')
+  createSchedule(input: ContinuousProgressTarget & AgentScheduleTiming & { prompt: string; nextDue: number; operationId: string }): ContinuousProgressLoop {
+    if (!input.hostId || !input.agentSessionId || !input.providerId || !input.workspacePath || !input.prompt.trim() || (!Number.isSafeInteger(input.nextDue) || input.nextDue < 0)) throw new Error('An exact schedule target, message and next occurrence are required.')
+    const timing = parseAgentScheduleTiming({ calendar: input.calendar, afterMs: input.afterMs, checkIn: input.checkIn })
     const loopId = this.id()
     const loop: ContinuousProgressLoop = { loopId, hostId: input.hostId, agentSessionId: input.agentSessionId, providerId: input.providerId, workspacePath: input.workspacePath,
-      calendar: structuredClone(input.calendar), ...(input.checkIn ? { checkIn: structuredClone(input.checkIn) } : {}), revision: 1, creationOperationId: input.operationId, futureIntentId: `${loopId}-1`, intervalMs: 1000, prompt: input.prompt, nextCheckAt: input.nextDue, status: 'active' }
+      ...timing, revision: 1, creationOperationId: input.operationId, futureIntentId: `${loopId}-1`, intervalMs: 1000, prompt: input.prompt, nextCheckAt: input.nextDue, status: 'active' }
     this.loops.set(loopId, loop)
     return structuredClone(loop)
   }
@@ -95,7 +102,7 @@ export class ContinuousProgressScheduler {
   pause(loopId: string): ContinuousProgressLoop { return this.update(loopId, { status: 'paused' }) }
   resume(loopId: string): ContinuousProgressLoop {
     const loop = this.require(loopId)
-    return this.update(loopId, { status: 'active', nextCheckAt: loop.calendar ? loop.nextCheckAt : this.now() + loop.intervalMs })
+    return this.update(loopId, { status: 'active', nextCheckAt: isAgentSchedule(loop) ? loop.nextCheckAt : this.now() + loop.intervalMs })
   }
   stop(loopId: string): ContinuousProgressLoop { return this.update(loopId, { status: 'stopped' }) }
 
@@ -117,7 +124,7 @@ export class ContinuousProgressScheduler {
     const loop = this.require(loopId)
     if (loop.status !== 'active' || loop.nextCheckAt > now) return null
     const tickId = this.id()
-    const nextCheckAt = loop.calendar ? loop.nextCheckAt : now + loop.intervalMs
+    const nextCheckAt = isAgentSchedule(loop) ? loop.nextCheckAt : now + loop.intervalMs
     const updated = { ...loop, lastTickId: tickId, lastTickAt: now, nextCheckAt }
     this.loops.set(loopId, updated)
     return { loop: { ...updated }, tickId }
@@ -139,7 +146,7 @@ export class ContinuousProgressScheduler {
 export function parseGoalContinuationLoop(value: unknown): ContinuousProgressLoop {
   const loop = value as ContinuousProgressLoop | null
   const validId = (v: unknown): v is string => typeof v === 'string' && !!v.trim() && !/[\0\r\n]/u.test(v)
-  if (!loop || typeof loop !== 'object' || Array.isArray(loop) || Object.hasOwn(loop, 'calendar') ||
+  if (!loop || typeof loop !== 'object' || Array.isArray(loop) || (Object.hasOwn(loop, 'calendar') || Object.hasOwn(loop, 'afterMs')) ||
       ![loop.loopId, loop.hostId, loop.agentSessionId, loop.providerId, loop.workspacePath, loop.creationOperationId].every(validId) ||
       !Number.isSafeInteger(loop.revision) || loop.revision! < 1 || !Number.isFinite(loop.intervalMs) || loop.intervalMs <= 0 ||
       !Number.isFinite(loop.nextCheckAt) || typeof loop.prompt !== 'string' || !loop.prompt.trim() || !['active', 'paused', 'stopped'].includes(loop.status) ||

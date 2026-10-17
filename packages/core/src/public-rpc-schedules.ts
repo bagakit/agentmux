@@ -1,15 +1,15 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
-import { parseAgentScheduleCalendar, parseAgentScheduleCheckIn, type AgentScheduleCalendar, type AgentScheduleCheckInPolicy } from './agent-schedule.js'
+import { parseAgentScheduleCalendar, parseAgentScheduleCheckIn, parseAgentScheduleAfterMs, parseAgentScheduleTiming, type AgentScheduleTiming } from './agent-schedule.js'
 import { validateAgentPromptCondition } from './agent-prompt-condition.js'
-import type { ContinuousProgressLoop, ContinuousProgressTarget } from './continuous-progress-scheduler.js'
+import { isAgentSchedule, type ContinuousProgressLoop, type ContinuousProgressTarget } from './continuous-progress-scheduler.js'
 import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
 
 export type ScheduleMutation = { scheduleId: string; expectedRevision: number; operationId: string }
 export type ScheduleParamsMap = {
   'schedule.list': { target?: ContinuousProgressTarget }
   'schedule.inspect': { scheduleId?: string; operationId?: string }
-  'schedule.create': { target: ContinuousProgressTarget; calendar: AgentScheduleCalendar; prompt: string; operationId: string; checkIn?: AgentScheduleCheckInPolicy }
+  'schedule.create': { target: ContinuousProgressTarget; prompt: string; operationId: string } & AgentScheduleTiming
   'schedule.pause': ScheduleMutation
   'schedule.resume': ScheduleMutation
   'schedule.cancel': ScheduleMutation
@@ -49,24 +49,28 @@ export function parseScheduleTarget(value: unknown, code = 'INVALID_CONTROL_REQU
 export function parseScheduleRpcParams<M extends ScheduleMethod>(method: M, value: unknown): ScheduleParamsMap[M] {
   const code = 'INVALID_CONTROL_REQUEST'
   const p = rpcRecord(value, method === 'schedule.list' ? ['target'] : method === 'schedule.inspect' ? ['scheduleId','operationId'] :
-    method === 'schedule.create' ? ['target','calendar','prompt','operationId','checkIn'] : ['scheduleId','expectedRevision','operationId'], code)
+    method === 'schedule.create' ? ['target','calendar','afterMs','prompt','operationId','checkIn'] : ['scheduleId','expectedRevision','operationId'], code)
   if (method === 'schedule.list') { if (p.target !== undefined) parseScheduleTarget(p.target) }
   else if (method === 'schedule.inspect') {
     if ((p.scheduleId !== undefined) === (p.operationId !== undefined)) invalid('Inspect requires exactly one schedule ID or original operation ID.', code)
     string(p.scheduleId ?? p.operationId, code)
   } else if (method === 'schedule.create') {
-    parseScheduleTarget(p.target); parseAgentScheduleCalendar(p.calendar); string(p.prompt, code, 64 * 1024); string(p.operationId, code)
-    if (p.checkIn !== undefined) parseAgentScheduleCheckIn(p.checkIn)
+    parseScheduleTarget(p.target); string(p.prompt, code, 64 * 1024); string(p.operationId, code)
+    parseAgentScheduleTiming({ calendar: p.calendar, afterMs: p.afterMs, checkIn: p.checkIn }, code)
   } else { string(p.scheduleId, code); string(p.operationId, code); integer(p.expectedRevision, code, 1) }
   return p as ScheduleParamsMap[M]
 }
 export function parseScheduleRecord(value: unknown): ContinuousProgressLoop {
   const code = 'CONTROL_PROTOCOL_ERROR'
-  const p = rpcRecord(value, ['loopId','hostId','agentSessionId','providerId','workspacePath','calendar','checkIn','checkInState','revision','creationOperationId','lastMutation','futureIntentId','lastOccurrenceAt','intervalMs','prompt','nextCheckAt','status','pendingCompletion','lastCompletionId','lastTickId','lastOutcome','lastTickAt','lastDecision','taskSource'], code)
+  const p = rpcRecord(value, ['loopId','hostId','agentSessionId','providerId','workspacePath','calendar','afterMs','checkIn','checkInState','revision','creationOperationId','lastMutation','futureIntentId','lastOccurrenceAt','intervalMs','prompt','nextCheckAt','status','pendingCompletion','lastCompletionId','lastTickId','lastOutcome','lastTickAt','lastDecision','taskSource'], code)
   parseScheduleTarget({ hostId: p.hostId, agentSessionId: p.agentSessionId, providerId: p.providerId, workspacePath: p.workspacePath }, code)
   string(p.loopId, code); string(p.prompt, code, 64 * 1024); integer(p.intervalMs, code, 1); integer(p.nextCheckAt, code)
   if (!['active','paused','stopped'].includes(p.status as string)) invalid('Schedule state is invalid.', code)
   if (p.calendar !== undefined) parseAgentScheduleCalendar(p.calendar, code)
+  if (p.afterMs !== undefined) {
+    parseAgentScheduleAfterMs(p.afterMs, code)
+    if (p.calendar !== undefined || p.checkIn !== undefined) invalid('A relative schedule cannot also have calendar or quiet follow-up timing.', code)
+  }
   if (p.checkIn !== undefined) parseAgentScheduleCheckIn(p.checkIn, code)
   if (p.checkInState !== undefined) {
     if (p.checkIn === undefined) invalid('Quiet follow-up state requires its saved policy.', code)
@@ -116,14 +120,14 @@ export function validateScheduleRpcResult<M extends ScheduleMethod>(method: M, v
   if (method !== 'schedule.list' && method !== 'schedule.inspect' && p.diskDurability !== 'confirmed') invalid('Schedule persistence is unconfirmed.', code)
   const records = method === 'schedule.list' ? p.schedules as ContinuousProgressLoop[] : p.schedule === null ? [] : [p.schedule as ContinuousProgressLoop]
   for (const schedule of records) {
-    if (!schedule.calendar || !schedule.revision || !schedule.futureIntentId || !schedule.creationOperationId) invalid('Calendar arrangement identity or admission is unconfirmed.', code)
+    if (!isAgentSchedule(schedule) || !schedule.revision || !schedule.futureIntentId || !schedule.creationOperationId) invalid('Schedule identity or admission is unconfirmed.', code)
     if (params) {
       if (method === 'schedule.list') {
         const target = (params as ScheduleParamsMap['schedule.list']).target
         if (target && ['hostId','agentSessionId','providerId','workspacePath'].some(key => schedule[key as keyof ContinuousProgressTarget] !== target[key as keyof ContinuousProgressTarget])) invalid('Schedule list returned another target.', code)
       } else if (method === 'schedule.create') {
         const request = params as ScheduleParamsMap['schedule.create']
-        if (schedule.creationOperationId !== request.operationId || schedule.prompt !== request.prompt || JSON.stringify(schedule.calendar) !== JSON.stringify(request.calendar) || JSON.stringify(schedule.checkIn) !== JSON.stringify(request.checkIn) ||
+        if (schedule.creationOperationId !== request.operationId || schedule.prompt !== request.prompt || JSON.stringify(schedule.calendar) !== JSON.stringify(request.calendar) || schedule.afterMs !== request.afterMs || JSON.stringify(schedule.checkIn) !== JSON.stringify(request.checkIn) ||
             ['hostId','agentSessionId','providerId','workspacePath'].some(key => schedule[key as keyof ContinuousProgressTarget] !== request.target[key as keyof ContinuousProgressTarget])) invalid('Schedule receipt belongs to different intent or target.', code)
       } else if (method === 'schedule.inspect') {
         const request = params as ScheduleParamsMap['schedule.inspect']
