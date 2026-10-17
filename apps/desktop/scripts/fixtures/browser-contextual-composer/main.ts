@@ -46,6 +46,7 @@ async function run() {
   const attachment = await core.reattachAgent(session.agentSessionId, 0)
   for (const event of attachment.attachment.replay) output.push(event.data)
   await until(() => core.agentSession(session.agentSessionId).terminalPromptReadiness?.readyThroughByte !== undefined, 'real CodexProvider prompt readiness')
+  const initialAcceptedInputBytes = (await core.statusAgent(session.agentSessionId)).run.acceptedInputBytes
   const captureReader = createDesktopInputContextCaptureReader({ desktopSocketPath: desktopBusinessSocketPath(), captureHostId: 'local', executionHostId: 'local' })
   const identity = { runtimeId: randomUUID(), ownerInstanceId: randomUUID(), protocolVersion: 2, processId: process.pid, availability: 'connected' as const }
   hosted = new AgentMuxHostedRuntimeService(core, join(directory, 'sessions.json'), () => ({ ...identity, ctxmux: core.runtimeIdentity() }), undefined, undefined, captureReader)
@@ -394,7 +395,8 @@ async function run() {
   receipt.cases.push({ name: 'native-live-trace-viewport-and-original-dock-footprint', passed: true })
   if (captureOnly) {
     assert.equal(receipt.ipc.some((call: any) => call.channel === 'sessions:submitPrompt'), false, 'Capture-only cannot submit or replay an opinion')
-    assert.equal((await core.statusAgent(session.agentSessionId)).run.acceptedInputBytes, 0)
+    receipt.captureOnly = { submittedOpinions: 0, nativeOpinionQualified: false,
+      transportBytes: { before: initialAcceptedInputBytes, after: (await core.statusAgent(session.agentSessionId)).run.acceptedInputBytes } }
     assert.equal(receipt.frames.filter((frame: any) => frame.surface === 'os-native-window').length, 13,
       'Capture-only must retain every actual native window, including the original menu')
     receipt.captureQualified = true
