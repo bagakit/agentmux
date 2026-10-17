@@ -123,10 +123,23 @@ describe('local progressive AgentMux module skills', () => {
     expect((await readdir(root, { recursive: true })).sort()).toEqual(originalFiles)
   }, 30_000)
 
-  it('actual Note help and Files skill agree on first-use shared Markdown and both read-only inspection modes', async () => {
-    const note = await run(['--endpoint', endpoint, 'notebook', '--help'])
-    const file = await run(['--endpoint', endpoint, 'file', '--skill'])
-    expect(note.code, note.stderr).toBe(0); expect(file.code, file.stderr).toBe(0)
+  it('actual Note discovery exposes safe editing before detailed shared-file contracts', async () => {
+    const [entry, note, file] = await Promise.all([
+      run(['--endpoint', endpoint, 'notebook', '--skill']),
+      run(['--endpoint', endpoint, 'notebook', '--help']),
+      run(['--endpoint', endpoint, 'file', '--skill'])
+    ])
+    for (const result of [entry, note, file]) expect(result.code, result.stderr).toBe(0)
+    const path = entry.stdout.replace(/\s+/gu, ' ')
+    for (const step of ['notebook inspect --note NOTE_ID --content', 'notebook graph --note NOTE_ID',
+      'file read --help and file write --help', 'exact base body and original operation ID',
+      'No page needs to be open or Space activated', 'Confirm the body write',
+      'keep the original request, operation/event IDs and drafts', 'never automatically resend a write']) expect(path).toContain(step)
+    expect(path).toContain('A shared include points to one independent Markdown file')
+    expect(path).toContain('partial results do not prove missing links')
+    expect(entry.stdout).not.toContain('::note-include')
+    expect(note.stdout.indexOf('## Edit an authorized Note')).toBeGreaterThan(-1)
+    expect(note.stdout.indexOf('## Edit an authorized Note')).toBeLessThan(note.stdout.indexOf('A minimal Note body is:'))
     for (const contract of ['::note-include', 'kind: shared-block', 'Copy/hover never creates an entity', 'forwardedBlockIds', 'mode:"request"', 'mode:"shared"', 'An absent whole batch stays unknown']) expect(note.stdout).toContain(contract)
     expect(note.stdout).not.toContain('A block stays inside its original file when referenced')
     expect(file.stdout).toContain('amux file share --help')
