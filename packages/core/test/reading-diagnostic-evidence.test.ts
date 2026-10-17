@@ -1,10 +1,12 @@
 import { join } from 'node:path'
-import { afterEach, expect, it } from 'vitest'
+import { writeFile } from 'node:fs/promises'
+import { afterEach, expect, it, vi } from 'vitest'
 import { DiagnosticEvidenceQuery } from '@agentmux/diagnostic-evidence'
-import { AgentMuxRpcService } from '../src/public-rpc-service.js'
+import { AgentMuxRpcService, type AgentMuxRpcServiceOptions } from '../src/public-rpc-service.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
-import { parseDiagnosticEvidenceResult } from '../src/diagnostic-evidence-codec.js'
+import { parseDiagnosticEvidenceParams, parseDiagnosticEvidenceResult } from '../src/diagnostic-evidence-codec.js'
+import { DeliveryAttemptStore } from '../src/delivery-attempt-store.js'
 import type { AgentMuxDiagnosticEvidenceResult } from '../src/diagnostic-evidence.js'
 import { parseReadingDiagnosticSourceRead, type ReadingDiagnosticFindResult } from '../src/reading-diagnostic-query.js'
 import { CoreReadingDiagnosticSource } from '../src/reading-diagnostic-source.js'
@@ -12,7 +14,7 @@ import { jsonl, nativeHistoryFixture } from './fixtures/native-history-session.j
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 
 const releases: Array<() => Promise<void>> = []
-afterEach(async () => { for (const close of releases.splice(0).reverse()) await close() })
+afterEach(async () => { for (const close of releases.splice(0).reverse()) await close(); vi.restoreAllMocks() })
 const reference = { hostId: 'local', agentSessionId: 'reading-evidence-agent' }
 const recent = { domain: 'reading.lifecycle' as const, hostId: 'local', recent: { agentSessionId: reference.agentSessionId } }
 async function fixture() {
@@ -124,4 +126,62 @@ it('keeps actual recorder loss partial at both the original Hosted codec and agg
   expect(() => parseDiagnosticEvidenceResult(report, { target })).not.toThrow()
   const forged = wireCopy(report); forged.reads[0]!.completeness = 'complete'
   expect(() => parseDiagnosticEvidenceResult(reseal(forged), { target })).toThrow()
+})
+
+it('keeps all nine injected capabilities and both domains within the complete wire budget without starting collection', async () => {
+  const pending = fixture()
+  await expect(pending).resolves.toHaveProperty('target.domain', 'reading.lifecycle')
+  const f = await pending
+  // Seed the actual Client's owner-local recorder, without creating a conversation Reader.
+  const source = (f.client as unknown as { originalReadingDiagnosticSource(): CoreReadingDiagnosticSource }).originalReadingDiagnosticSource()
+  for (let index = 0; index < 32; index++) {
+    const attempt = source.begin(reference)!
+    attempt.recorder.record({ phase: 'source-read-completed' }); attempt.recorder.flush('progress'); attempt.end()
+  }
+  const targets = []
+  for (const length of [64, 128, 192, 256, 384, 512]) {
+    const attempt = source.begin(reference)!, id = 'm'.repeat(length)
+    attempt.recorder.record({ phase: 'source-read-completed', windowId: id, attemptId: id, watchId: id })
+    attempt.recorder.flush('progress'); attempt.end()
+    targets.push({ domain: 'reading.lifecycle' as const, hostId: 'local', logId: source.find({ ...reference, limit: 1 }).records[0]!.reference.logId })
+  }
+  expect(Buffer.byteLength(JSON.stringify(source.find(reference)))).toBeGreaterThan(4096)
+  expect(Buffer.byteLength(JSON.stringify(source.read(targets.at(-1)!)))).toBeGreaterThan(2048)
+  const retained = source.find(reference).coverage.retainedRecords
+  const unusedOwner = vi.fn(async (): Promise<never> => { throw Error('An unrelated diagnostic owner must not be read') })
+  const store = new DeliveryAttemptStore(join(f.root, 'unused-diagnostic-journal')), deliveryRead = vi.spyOn(store, 'read')
+  const businessRead = vi.spyOn(f.client, 'readAgentConversation'), businessWatch = vi.spyOn(f.client, 'observeConversation')
+  const ports = { coreClients: () => [{ hostId: 'local', client: f.client }], deliveryAttempts: { hostId: 'local', store },
+    toolkit: { execute: unusedOwner, subscribe: unusedOwner }, metrics: { inspectScene: unusedOwner, subscribe: unusedOwner },
+    moteContext: { hostId: 'local', read: unusedOwner }, clientIncidents: { hostId: 'local', read: unusedOwner },
+  } satisfies AgentMuxRpcServiceOptions
+  const socketPath = join(f.root, 'joint.sock'), server = new AgentMuxControlServer({ socketPath, ...ports })
+  await server.start(); releases.push(() => server.stop())
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } }); releases.push(() => rpc.dispose())
+  const discovering = rpc.call('system.diagnostics.inspect', {})
+  await expect(discovering).resolves.toHaveProperty('capabilities.length', 9)
+  const discovery = await discovering
+  expect(discovery.capabilities.map(item => `${item.domain}:${item.target}`).sort()).toEqual([
+    'reading.lifecycle:reading-lifecycle', 'delivery.client:log-id', 'delivery.core:log-id', 'toolkit.performance-failure:execution-id',
+    'performance.scene:capture-id', 'mote.context.client:mote-context', 'client.incident:log-id', 'client.incident:recent', 'native-recorder-failure:session-run',
+  ].sort())
+  for (const target of [recent, f.target, { domain: 'client.incident', hostId: 'local', recent: {} }, { domain: 'client.incident', hostId: 'local', logId: f.target.logId }]) {
+    expect(() => parseDiagnosticEvidenceParams({ target })).not.toThrow()
+    expect(parseDiagnosticEvidenceParams({ target }).target).toEqual(target)
+  }
+  const cases = []
+  for (const target of [recent, ...targets]) {
+    const request = { target, budget: { maxBytes: 4096 } }
+    const result = await rpc.call('system.diagnostics.inspect', request), bytes = Buffer.byteLength(JSON.stringify(result))
+    expect(bytes).toBeLessThanOrEqual(4096); expect(result.budget.usedBytes).toBe(bytes)
+    expect(() => parseDiagnosticEvidenceResult(result, request)).not.toThrow()
+    cases.push({ availability: result.reads[0]!.availability, issue: result.reads[0]!.issue?.code ?? null, bytes })
+  }
+  expect(cases.some(item => item.availability === 'found')).toBe(true)
+  expect(cases.some(item => item.issue === 'DIAGNOSTIC_EVIDENCE_QUERY_BUDGET')).toBe(true)
+  expect(source.find(reference).coverage.retainedRecords).toBe(retained)
+  expect(unusedOwner).not.toHaveBeenCalled(); expect(deliveryRead).not.toHaveBeenCalled()
+  expect(businessRead).not.toHaveBeenCalled(); expect(businessWatch).not.toHaveBeenCalled()
+  expect(f.controls.every(control => control.mock.calls.length === 0)).toBe(true)
+  if (process.env.READING_BUDGET_RECEIPT) await writeFile(process.env.READING_BUDGET_RECEIPT, JSON.stringify({ capabilities: discovery.capabilities.length, cases }, null, 2))
 })
