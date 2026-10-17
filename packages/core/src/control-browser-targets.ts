@@ -1,4 +1,4 @@
-import type { AgentMuxBrowserTarget, AgentMuxBrowserResource, AgentMuxBrowserReleaseReceipt, AgentMuxBrowserRetention } from './browser-targets.js'
+import type { AgentMuxBrowserTarget, AgentMuxBrowserTargetsResult, AgentMuxBrowserResource, AgentMuxBrowserReleaseReceipt, AgentMuxBrowserRetention } from './browser-targets.js'
 import { BROWSER_PAGE_CAPABILITY_NAMES } from './browser-page-capability.js'
 import { AgentMuxError } from './errors.js'
 
@@ -10,32 +10,40 @@ function text(value: unknown, limit: number, empty = false): string {
   return value
 }
 /** Discovery facts carry no pairing secret, profile or credential store. */
-export function parseBrowserTargetsResult(value: unknown): { targets: AgentMuxBrowserTarget[]; warning?: string } {
+export function parseBrowserTargetsResult(value: unknown): AgentMuxBrowserTargetsResult {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new AgentMuxError('Browser target discovery is invalid.', 'CONTROL_PROTOCOL_ERROR')
-  const input = value as Record<string, unknown>
+  const input = value as Record<string, unknown>, coverage = input.coverage
+  if (coverage !== 'complete' && coverage !== 'partial') throw new AgentMuxError('Browser target discovery coverage is invalid.', 'CONTROL_PROTOCOL_ERROR')
   if (!Array.isArray(input.targets)) throw new AgentMuxError('Browser target discovery is invalid.', 'CONTROL_PROTOCOL_ERROR')
   const ids = new Set<string>()
   const targets = input.targets.map(raw => {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new AgentMuxError('Browser target is invalid.', 'CONTROL_PROTOCOL_ERROR')
-    const row = raw as Record<string, unknown>
-    const id = text(row.id, 200)
-    if (ids.has(id) || !sources.has(String(row.source)) || !statuses.has(String(row.status))) throw new AgentMuxError('Browser target identity or status is invalid.', 'CONTROL_PROTOCOL_ERROR')
-    ids.add(id)
-    if (!Array.isArray(row.capabilities) || row.capabilities.length > capabilities.size || row.capabilities.some(item => typeof item !== 'string' || !capabilities.has(item))) throw new AgentMuxError('Browser target capabilities are invalid.', 'CONTROL_PROTOCOL_ERROR')
-    if (row.cdpMethods !== undefined && (!Array.isArray(row.cdpMethods) || row.cdpMethods.length > 128 || row.cdpMethods.some(item => typeof item !== 'string' || !/^[A-Z][A-Za-z]+\.[A-Za-z]+$/.test(item)))) throw new AgentMuxError('Browser target CDP subset is invalid.', 'CONTROL_PROTOCOL_ERROR')
-    const workspaceId = row.source === 'embedded' && row.workspaceId === null ? null : text(row.workspaceId, 200)
-    if (row.mode !== undefined && row.mode !== 'normal' && row.mode !== 'private') throw new AgentMuxError('Browser target mode is invalid.', 'CONTROL_PROTOCOL_ERROR')
-    if (row.navigationId === undefined && (row.source !== 'embedded' || row.status !== 'unavailable' || row.capabilities.length !== 0 || row.cdpMethods !== undefined)) throw new AgentMuxError('A live Browser target requires its actual navigation identity.', 'CONTROL_PROTOCOL_ERROR')
-    if (row.resource !== undefined && row.source !== 'embedded') throw new AgentMuxError('External Browser resource management is unavailable.', 'CONTROL_PROTOCOL_ERROR')
-    return { id, workspaceId, source: row.source as AgentMuxBrowserTarget['source'],
-      ...(row.mode === undefined ? {} : { mode: row.mode as 'normal' | 'private' }),
-      status: row.status as AgentMuxBrowserTarget['status'], url: text(row.url, 8192, true), title: text(row.title, 512, true),
-      ...(row.navigationId === undefined ? {} : { navigationId: text(row.navigationId, 200) }), capabilities: [...row.capabilities] as string[],
-      ...(row.cdpMethods === undefined ? {} : { cdpMethods: [...row.cdpMethods as string[]] }),
-      ...(row.resource === undefined ? {} : { resource: parseBrowserResource(row.resource) }),
-      ...(row.warning === undefined ? {} : { warning: text(row.warning, 2000) }) }
+    const target = parseBrowserTarget(raw)
+    if (ids.has(target.id)) throw new AgentMuxError('Browser target identity or status is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    ids.add(target.id)
+    return target
   })
-  return { targets, ...(input.warning === undefined ? {} : { warning: text(input.warning, 2000) }) }
+  return { targets, coverage, ...(input.warning === undefined ? {} : { warning: text(input.warning, 2000) }) }
+}
+
+/** A single exact owner result is not a complete discovery catalog. */
+export function parseBrowserTarget(raw: unknown): AgentMuxBrowserTarget {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new AgentMuxError('Browser target is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  const row = raw as Record<string, unknown>
+  const id = text(row.id, 200)
+  if (!sources.has(String(row.source)) || !statuses.has(String(row.status))) throw new AgentMuxError('Browser target identity or status is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  if (!Array.isArray(row.capabilities) || row.capabilities.length > capabilities.size || row.capabilities.some(item => typeof item !== 'string' || !capabilities.has(item))) throw new AgentMuxError('Browser target capabilities are invalid.', 'CONTROL_PROTOCOL_ERROR')
+  if (row.cdpMethods !== undefined && (!Array.isArray(row.cdpMethods) || row.cdpMethods.length > 128 || row.cdpMethods.some(item => typeof item !== 'string' || !/^[A-Z][A-Za-z]+\.[A-Za-z]+$/.test(item)))) throw new AgentMuxError('Browser target CDP subset is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  const workspaceId = row.source === 'embedded' && row.workspaceId === null ? null : text(row.workspaceId, 200)
+  if (row.mode !== undefined && row.mode !== 'normal' && row.mode !== 'private') throw new AgentMuxError('Browser target mode is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  if (row.navigationId === undefined && (row.source !== 'embedded' || row.status !== 'unavailable' || row.capabilities.length !== 0 || row.cdpMethods !== undefined)) throw new AgentMuxError('A live Browser target requires its actual navigation identity.', 'CONTROL_PROTOCOL_ERROR')
+  if (row.resource !== undefined && row.source !== 'embedded') throw new AgentMuxError('External Browser resource management is unavailable.', 'CONTROL_PROTOCOL_ERROR')
+  return { id, workspaceId, source: row.source as AgentMuxBrowserTarget['source'],
+    ...(row.mode === undefined ? {} : { mode: row.mode as 'normal' | 'private' }),
+    status: row.status as AgentMuxBrowserTarget['status'], url: text(row.url, 8192, true), title: text(row.title, 512, true),
+    ...(row.navigationId === undefined ? {} : { navigationId: text(row.navigationId, 200) }), capabilities: [...row.capabilities] as string[],
+    ...(row.cdpMethods === undefined ? {} : { cdpMethods: [...row.cdpMethods as string[]] }),
+    ...(row.resource === undefined ? {} : { resource: parseBrowserResource(row.resource) }),
+    ...(row.warning === undefined ? {} : { warning: text(row.warning, 2000) }) }
 }
 
 const reasons = new Set(['visible', 'presentation', 'operation', 'loading', 'profile-switch', 'selection', 'media', 'download', 'upload', 'debugger', 'document-used', 'document-unconfirmed', 'source-changed', 'close-unconfirmed', 'beforeunload', 'owner-unavailable'])

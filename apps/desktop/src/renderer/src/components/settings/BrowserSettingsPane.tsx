@@ -16,8 +16,9 @@ import { ExternalBrowserConnections } from './ExternalBrowserConnections'
  * 只做一个开关，不做权限分级：`BrowserConfig.agentAutomation` 本身就是总开关，开了就是全套页面
  * 能力可用。在这里摆一排分项开关，会造出一份与主进程实际检查不符的第二事实源。
  */
-export function BrowserSettingsPane({ browser, onSave, onForget }: {
+export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
   browser: BrowserConfig
+  active: boolean
   onSave: (enabled: boolean, expected: boolean) => Promise<void>
   onForget: (scheme: string, expected: AppLinkSchemeChoice) => Promise<void>
 }) {
@@ -47,7 +48,7 @@ export function BrowserSettingsPane({ browser, onSave, onForget }: {
         </label>
       </section>
       <AppLinkSchemes browser={browser} onForget={onForget} />
-      <ExternalBrowserConnections />
+      <ExternalBrowserConnections active={active} />
       <RetainedBrowserUploads />
       <SettingsSaveBar save={saveState} dirty={draft.dirty} label="Save browser" onSave={() => void save()} />
     </div>

@@ -27,7 +27,7 @@ export const browserSettingsModule = {
     { id: 'agent-automation', title: 'Agent automation', keywords: 'browser script page permission enable disable' },
   ],
   savedSummary: (config) => config.browser.agentAutomation === true ? 'Automation on' : 'Automation off',
-  Pane({ config }) {
-    return <BrowserSettingsPane browser={config.browser} onSave={saveBrowser} onForget={api.browser.forgetAppLinkScheme} />
+  Pane({ config, active }) {
+    return <BrowserSettingsPane active={active} browser={config.browser} onSave={saveBrowser} onForget={api.browser.forgetAppLinkScheme} />
   }
 } as const satisfies SettingsModule

@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises'
 import { WebSocketServer, WebSocket } from 'ws'
 import { z } from 'zod'
 import { BROWSER_PAGE_CAPABILITY_NAMES, durableWriteFile } from '@agentmux/core'
-import type { AgentMuxBrowserTarget, AgentMuxExternalBrowserPairing } from '@agentmux/core'
+import type { AgentMuxBrowserTarget, AgentMuxBrowserTargetsResult, AgentMuxExternalBrowserPairing } from '@agentmux/core'
 import { EXTERNAL_BROWSER_PROTOCOL, MAX_BRIDGE_BYTES, EXTERNAL_CDP_METHODS, isShareUrl, isTabScopedCommand } from '../../browser-extension/protocol.js'
 
 const id = z.string().min(1).max(200)
@@ -60,19 +60,24 @@ export class ExternalBrowserBridge {
   private starting: Promise<void> | null = null
   private disposed = false
   private persistenceWarning: string | undefined
+  private loadMembership: AgentMuxBrowserTargetsResult['coverage'] = 'partial'
   constructor(private readonly path: string, private readonly changed: () => void = () => {},
     private readonly documentEnded: (browserId: string, navigationId: string) => void = () => {}) {
     this.readyPromise = this.load()
   }
   async ready(): Promise<void> { await this.readyPromise }
+  /** Completeness of the original load, independent of later save failures or connectivity. */
+  get membershipCoverage(): AgentMuxBrowserTargetsResult['coverage'] { return this.loadMembership }
   private async load(): Promise<void> {
     try {
       const parsed = documentSchema.parse(JSON.parse(await readFile(this.path, 'utf8')))
       for (const row of parsed.targets) this.targets.set(row.id, { ...row,
         status: row.status === 'ready' ? 'disconnected' : row.status,
         ...(row.status === 'ready' ? { warning: 'Client restarted. Reconnect the original shared tab; actions are not replayed.' } : {}), connection: null })
+      this.loadMembership = 'complete'
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') this.persistenceWarning = 'Shared-tab metadata could not be read. Existing work remains; share the original tab explicitly.'
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') this.loadMembership = 'complete'
+      else this.persistenceWarning = 'Shared-tab metadata could not be read. Existing work remains; share the original tab explicitly.'
     }
   }
   async createPairing(workspaceId: string): Promise<AgentMuxExternalBrowserPairing> {

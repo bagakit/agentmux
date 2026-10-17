@@ -13,7 +13,7 @@ import type { AgentExecutorId, AgentProviderId, AgentExecutableObservation } fro
 import type { WorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import type { AgentPromptCondition } from './agent-prompt-condition.js'
 import type { AgentMuxBrowserCompletion } from './browser-completion-facts.js'
-import type { AgentMuxBrowserMode, AgentMuxBrowserTarget } from './browser-targets.js'
+import type { AgentMuxBrowserMode, AgentMuxBrowserTargetsResult } from './browser-targets.js'
 import type { BrowserDefaultPayload, BrowserDefaultResult } from './browser-default.js'
 export * from './browser-default.js'
 import type { AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult } from './space-control.js'
@@ -811,7 +811,7 @@ export type AgentMuxControlResult =
       // 收窄全部失效。receipt 侧改名，wire 侧的字段名不动（那是协议，见 control-host 的读取点）。
       runOperation: AgentMuxControlBrowserOperation
     }
-  | { operation: 'browser.targets'; targets: AgentMuxBrowserTarget[]; warning?: string }
+  | ({ operation: 'browser.targets' } & AgentMuxBrowserTargetsResult)
   | { operation: 'browser.history'; operations: AgentMuxControlBrowserOperation[] }
   | {
       operation: 'browser.replay'

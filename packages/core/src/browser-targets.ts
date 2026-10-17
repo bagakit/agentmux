@@ -19,6 +19,13 @@ export type AgentMuxBrowserTarget = {
   warning?: string
 }
 
+/** Coverage describes membership of this query, not native readiness or process observation. */
+export type AgentMuxBrowserTargetsResult = {
+  targets: AgentMuxBrowserTarget[]
+  coverage: 'complete' | 'partial'
+  warning?: string
+}
+
 /** Only the person-facing Desktop API supplies a pairing secret. Never a Control result. */
 export type AgentMuxExternalBrowserPairing = { link: string; expiresAt: number }
 

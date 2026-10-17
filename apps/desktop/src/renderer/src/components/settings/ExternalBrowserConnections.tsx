@@ -13,32 +13,43 @@ const ThemeActionUnlinkIcon = semanticIconComponent('action.unlink')
 
 
 /** Person-only connection controls. Pairing never shares a tab or changes a workbench. */
-export function ExternalBrowserConnections() {
+export function ExternalBrowserConnections({ active }: { active: boolean }) {
   const workspaceId = useAppStore(state => state.activeWorkspaceId)
   const [targets, setTargets] = useState<AgentMuxBrowserTarget[]>([])
+  const [observedIds, setObservedIds] = useState<ReadonlySet<string>>(new Set())
   const [pairing, setPairing] = useState<AgentMuxExternalBrowserPairing | null>(null)
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   useEffect(() => {
-    let current = true
     setPairing(null)
+    setTargets([]); setObservedIds(new Set())
+  }, [workspaceId])
+  useEffect(() => {
+    if (!active) return
+    let current = true, readSequence = 0
     const read = async (): Promise<void> => {
+      const sequence = ++readSequence
       try {
         const result = await api.browser.listTargets(workspaceId ?? undefined)
-        if (current) { setTargets(result.targets.filter(row => row.source === 'external')); setNotice(result.warning ?? '') }
-      } catch (error) { if (current) setNotice(presentError(error)) }
+        if (current && sequence === readSequence) {
+          const observed = result.targets.filter(row => row.source === 'external')
+          setTargets(previous => result.coverage === 'complete' ? observed : [...new Map([...previous, ...observed].map(row => [row.id, row])).values()])
+          setObservedIds(new Set(observed.map(row => row.id)))
+          setNotice(result.coverage === 'partial' ? [result.warning, 'This query is partial. Pages not observed here keep their last known entry.'].filter(Boolean).join(' ') : result.warning ?? '')
+        }
+      } catch (error) { if (current && sequence === readSequence) { setObservedIds(new Set()); setNotice(presentError(error)) } }
     }
     const release = api.browser.onTargetsChanged(() => { void read() })
     void read()
     return () => { current = false; release() }
-  }, [workspaceId])
+  }, [workspaceId, active])
   async function perform(action: () => Promise<void>): Promise<void> {
     setBusy(true)
     try { await action() } catch (error) { setNotice(presentError(error)) }
     finally { setBusy(false) }
   }
   return <section className="settings-group external-browser-connections">
-    <header><span>Share an external tab</span><small>{targets.filter(row => row.status === 'ready').length} available</small></header>
+    <header><span>Share an external tab</span><small>{targets.filter(row => observedIds.has(row.id) && row.status === 'ready').length} ready in latest query</small></header>
     <p className="settings-group-note">Keep your page in its own browser. Load the AgentMux extension, connect it here, then choose <strong>Share this tab</strong> in the extension. Other tabs stay outside the connection.</p>
     <div className="external-browser-connections__actions">
       <button className="small-button" disabled={busy} onClick={() => void perform(() => api.browser.revealExternalExtension())}><ThemeObjectFolderOpenIcon size={13} /> Extension folder</button>
@@ -55,7 +66,7 @@ export function ExternalBrowserConnections() {
       <button className="small-button" disabled={busy} onClick={() => void perform(async () => { if (Date.now() >= pairing.expiresAt) { setPairing(null); setNotice('This connection link expired. Create another connection link.'); return } await api.ui.writeClipboardText(pairing.link); setNotice('Connection link copied. Paste it in the AgentMux extension.') })}><ThemeActionCopyIcon size={13} /> Copy</button>
     </div> : null}
     {targets.length ? <ul className="external-browser-connections__targets">{targets.map(row => <li key={row.id}>
-      <div><strong>{row.title || 'Shared tab'}</strong><small>{row.status} · {row.id}</small>{row.warning ? <p>{row.warning}</p> : null}</div>
+      <div><strong>{row.title || 'Shared tab'}</strong><small>{observedIds.has(row.id) ? row.status : 'Previously observed'} · {row.id}</small>{row.warning ? <p>{row.warning}</p> : null}</div>
       {row.status !== 'revoked' && row.status !== 'closed' ? <button className="small-button" disabled={busy} onClick={() => void perform(() => api.browser.stopSharingExternal(row.id))}><ThemeActionUnlinkIcon size={13} /> Stop sharing</button> : null}
     </li>)}</ul> : null}
     {notice ? <p className="settings-group-note" role="status">{notice}</p> : null}
