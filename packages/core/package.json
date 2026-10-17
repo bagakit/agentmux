@@ -258,6 +258,14 @@
       "types": "./dist/toolkit-result-document.d.ts",
       "import": "./dist/toolkit-result-document.js"
     },
+    "./reading-diagnostic": {
+      "types": "./dist/reading-diagnostic.d.ts",
+      "import": "./dist/reading-diagnostic.js"
+    },
+    "./reading-diagnostic-recorder": {
+      "types": "./dist/reading-diagnostic-recorder.d.ts",
+      "import": "./dist/reading-diagnostic-recorder.js"
+    },
     "./diagnostic-evidence": {
       "types": "./dist/diagnostic-evidence.d.ts",
       "import": "./dist/diagnostic-evidence.js"
