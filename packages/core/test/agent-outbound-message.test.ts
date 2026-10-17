@@ -242,8 +242,8 @@ describe('四条路径的接线守护：真的都改成调用同一出口', () =
     const submission = clientSlice('private async submitPromptInternal(', 'private async performPromptSubmission(')
     expect(submission).toContain('await this.performPromptSubmission(')
     const submit = clientSlice('private async performPromptSubmission(', 'private async recordInitialMessageDelivery(')
-    expect(submit).toContain('composeAgentPrompt(content, input.agentMuxNote)')
-    expect(submit).toContain('const outbound = retainWire ? frozen.prompt : composed.text')
+    expect(submit).toContain('composeAgentPrompt(content, input.agentMuxNote, inputContext)')
+    expect(submit).toContain('const outbound = retainWire ? frozen.prompt : waitingSource?.promptWire ?? composed.text')
     // 出口的产物 outbound 才是喂给 provider/记录的东西——不是原始 content。
     expect(submit).toContain('const ordinaryPlan = provider.planPromptInput(outbound,')
     expect(submit).toMatch(/this\.promptSubmission\.submitInputPlan\(current,\s*run,\s*operationId,\s*outbound,\s*ordinaryPlan(?:,|\))/)
