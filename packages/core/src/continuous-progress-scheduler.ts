@@ -74,7 +74,12 @@ export class ContinuousProgressScheduler {
     this.loops = new Map(records.map((record) => [record.loopId, structuredClone(record)]))
   }
 
-  list(): ContinuousProgressLoop[] { return [...this.loops.values()].map((loop) => structuredClone(loop)) }
+  list(target?: Readonly<Partial<ContinuousProgressTarget>>): ContinuousProgressLoop[] {
+    const records = [...this.loops.values()]
+    const selected = target ? records.filter(loop =>
+      (['hostId', 'agentSessionId', 'providerId', 'workspacePath'] as const).every(key => target[key] === undefined || loop[key] === target[key])) : records
+    return selected.map(loop => structuredClone(loop))
+  }
 
   create(input: ContinuousProgressTarget & { intervalMs: number; prompt: string; taskSource?: ContinuousProgressTaskSource; operationId?: string; initialDelivery?: ContinuousProgressLoop['initialDelivery'] }): ContinuousProgressLoop {
     if (!input.hostId || !input.agentSessionId || !input.providerId || !input.workspacePath || !input.prompt.trim()) throw new Error('Continuous progress needs an exact target and a nonempty prompt.')
