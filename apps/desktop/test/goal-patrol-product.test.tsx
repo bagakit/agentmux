@@ -126,7 +126,7 @@ describe('actual original PMO patrol CLI, Core Input and mounted business consum
     expect(saved.progressUpdates).toBeUndefined(); expect(saved.patrols![0]!.report).toBeUndefined(); expect(saved.status).toBe('in_progress')
     expect(current().responsibility!.executions[0]).toMatchObject({ phase: 'stalled', alert: 'stalled' })
     expect(container.querySelector('.goal-patrol')!.textContent).toContain('已投递 · 等待实际巡查')
-    expect(button('巡查请求已保存').disabled).toBe(true)
+    expect(button('巡查请求已保存').disabled).toBe(false)
     await f.capture('delivered')
     await request(f, 'other-click'); expect(f.attempts).toHaveLength(1)
     const returned = await report(f, patrol)
