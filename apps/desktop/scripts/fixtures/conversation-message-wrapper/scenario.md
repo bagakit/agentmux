@@ -1,6 +1,6 @@
 # A2A common reading qualification
 
-Owning behavior: [Conversation declarations and original reading](../../../../../docs/design/behavior/conversation-mode.md#完整前导声明上下文的同记录阅读), [A2A envelope](../../../../../docs/design/behavior/agent-capabilities-and-messaging.md#a2a-身份信封与持久化全局消息队列). Presentation: [common conversation](../../../../../docs/design/presentation/conversation-mode.md).
+Owning behavior: [Conversation declarations and original reading](../../../../../docs/design/behavior/conversation-mode.md#完整前导声明上下文的同记录阅读), [A2A envelope](../../../../../docs/design/behavior/a2a-collaboration.md#a2a-身份信封与持久化全局消息队列). Presentation: [common conversation](../../../../../docs/design/presentation/conversation-mode.md).
 
 Run `node apps/desktop/scripts/verify-conversation-message-wrapper.mjs --prepare` from this candidate. It runs nonempty owning tests, five in-memory source mutations, related declaration/long-text/Copy regressions, restored tests and shared UI types, then builds original Desktop/Mobile/shared components and CSS for an isolated Electron reading scene. It writes a versioned receipt and full PNGs under `.tmp/a2a-conversation-wrapper/run-*`.
 

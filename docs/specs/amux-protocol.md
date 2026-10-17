@@ -2,14 +2,14 @@
 
 本文是 AgentMux 可读信封、业务标记、内容分享外框与对象链接的唯一格式合同，供 Core producer、共享 reader 和客户端维护者使用。它定义字节怎样组合、读取和保留；身份、权限、投递与恢复条件由各业务 owner 定义。规范和源码存在不代表每个运行实例或客户端已经验收。
 
-[文档导航](../README.md) · [Agent 消息行为](../design/behavior/agent-capabilities-and-messaging.md) · [共同对话协议](conversation-protocol.md#readable-agentmux-envelopes) · [当前阅读机制](../architecture/conversation.md#可读信封与原输入)
+[文档导航](../README.md) · [A2A 业务行为](../design/behavior/a2a-collaboration.md) · [共同对话协议](conversation-protocol.md#readable-agentmux-envelopes) · [当前阅读机制](../architecture/conversation.md#可读信封与原输入)
 
 ## 格式与业务归属
 
 | 形式 | 表达的内容 | 业务 owner |
 | --- | --- | --- |
-| `<amux>…</amux>` | 平台说明或本页定义的 A2A 子项容器，可独立或随原请求投递 | [注入上下文](../design/behavior/agent-capabilities-and-messaging.md#agentmux-注入上下文)与[A2A 通知](../design/behavior/agent-capabilities-and-messaging.md#a2a-引用通知与主动取信) |
-| `<amux:a2a …>` | 容器中唯一一个 `a2a` 子项的简写；成对标签携带原信，自闭合标签引用原信 | [A2A 原信与队列](../design/behavior/agent-capabilities-and-messaging.md#a2a-身份信封与持久化全局消息队列) |
+| `<amux>…</amux>` | 平台说明或本页定义的 A2A 子项容器，可独立或随原请求投递 | [注入上下文](../design/behavior/agent-capabilities-and-messaging.md#agentmux-注入上下文)与[A2A 通知](../design/behavior/a2a-collaboration.md#a2a-引用通知与主动取信) |
+| `<amux:a2a …>` | 容器中唯一一个 `a2a` 子项的简写；成对标签携带原信，自闭合标签引用原信 | [A2A 原信与队列](../design/behavior/a2a-collaboration.md#a2a-身份信封与持久化全局消息队列) |
 | `<amux:continue />` | 原恢复流程选择的默认接续文本 | [Session 恢复](../design/behavior/session-recovery.md) |
 | `<amux:reaction CODE />` | 用户选定快捷回复的含义标记 | [reaction 快捷回复](../design/behavior/conversation-input.md#回复卡片的-reaction-快捷回复) |
 | `--- amux : File/Browser ---` … `-----` | 原文件或 Browser 上下文的内容分享 | [对象地址与分享](../design/behavior/public-control.md#对象地址分享与方向) |
@@ -22,7 +22,7 @@
 - **文本声明不认证来源。** `amux`、`from`、对象 ID 或 reminder 可以出现在任意作者的正文里。真实作者、平台 producer、权限与 Input 采用来自原结构化事实；可读格式不替代这些事实，也不扩大用户授权。
 - **读取不执行。** 识别、折叠、展开、复制、取回正文和导航建议都不因此发送消息、触发接续、确认消费或批准权限。实际操作沿其原公开入口与回执。
 - **原文和阅读投影分开。** 原 wire、正文、平台内容和原记录身份保留原边界。完整 Copy 取原 parts、资源或 journal 正文；不能从解码后的展示文字重组原文。其他作者写的同形标签不会取得平台来源。
-- **格式变化不重写原操作。** 已冻结 Input 的原 wire、producer 分界、消息和 operation 身份沿原输入 owner 保留；重试和恢复不按新版 formatter、提醒或当前对象位置重组、改投或自动重发。具体准入与对账归 [A2A 行为](../design/behavior/agent-capabilities-and-messaging.md#a2a-身份信封与持久化全局消息队列)。
+- **格式变化不重写原操作。** 已冻结 Input 的原 wire、producer 分界、消息和 operation 身份沿原输入 owner 保留；重试和恢复不按新版 formatter、提醒或当前对象位置重组、改投或自动重发。具体准入与对账归 [A2A 行为](../design/behavior/a2a-collaboration.md#a2a-身份信封与持久化全局消息队列)。
 
 ## 平台说明
 
@@ -38,7 +38,7 @@
 
 共享 reader 只从输入开头读取完整平台声明。多个完整前导声明按原顺序保留，声明之间可以有换行；缩进和真实尾文不被吞掉。纯说明节点不接受属性或子元素；本页明确的 `a2a` 子项按后文合同读取，不能把它们误作普通平台说明文字。未知子项、DOCTYPE、processing instruction、不完整边界或含糊的前导序列不升级为平台说明，原输入保持可读。reader 保留每个原声明 span，不能通过正文中的另一个标签猜来源。
 
-平台说明可以承载简短发现入口，不要求常驻整段操作手册。启动引导、当前身份、模块 Skill 与消息提醒各自披露什么，归[启动握手](../design/behavior/agent-capabilities-and-messaging.md#启动握手与自命名)和[同源指引](../design/behavior/agent-capabilities-and-messaging.md#a2a-指引与通信礼节)；按需读取不需要增加包装属性或新的执行标签。
+平台说明可以承载简短发现入口，不要求常驻整段操作手册。启动引导、当前身份、模块 Skill 与消息提醒各自披露什么，归[启动握手](../design/behavior/agent-capabilities-and-messaging.md#启动握手与自命名)和[同源指引](../design/behavior/a2a-collaboration.md#a2a-指引与通信礼节)；按需读取不需要增加包装属性或新的执行标签。
 
 ## A2A 容器与简写
 
@@ -108,7 +108,7 @@
 
 引用只含原作者 `from`、原信 `msg-id` 与固定发现入口 `read-via="message --skill"`，不携带正文、摘要或预览。自闭合表示原文没有在此展开，不能解释成一封空正文原信。Agent 需要处理时，先通过 `"$AGENTMUX_CLI" message --skill` 发现取信用法，再按原 `msg-id` 主动读取；这不要求处理每封无关来信，也不表示已经读取、理解、接单或完成。
 
-`read-via` 的值固定为上述发现入口，由 Core 生成；它不是任意命令、URL 或授权载体。reader 只提供发现提示，不自动执行属性值、取信或确认消费。空闲投递、steer 资格、通知与原信的独立身份及实际回执由[通知行为合同](../design/behavior/agent-capabilities-and-messaging.md#a2a-引用通知与主动取信)持有，不增加为可读属性。合并通知不新建 A2A 原信，每个 `msg-id` 继续引用原 journal 中的同一原信。
+`read-via` 的值固定为上述发现入口，由 Core 生成；它不是任意命令、URL 或授权载体。reader 只提供发现提示，不自动执行属性值、取信或确认消费。空闲投递、steer 资格、通知与原信的独立身份及实际回执由[通知行为合同](../design/behavior/a2a-collaboration.md#a2a-引用通知与主动取信)持有，不增加为可读属性。合并通知不新建 A2A 原信，每个 `msg-id` 继续引用原 journal 中的同一原信。
 
 ### 精确文本边界
 
