@@ -1630,6 +1630,10 @@ export type HostCreationTrustSnapshot = {
 export type ThemeFileExportResult = { status: 'saved'; path: string } | { status: 'cancelled' } | { status: 'download-requested' }
 
 export type AgentMuxDesktopApi = {
+  clientIncidents: {
+    open(): Promise<{ token: string } | null>
+    report(token: string, report: import('@agentmux/core').AgentMuxClientIncidentReport): Promise<{ accepted: boolean; logId?: string }>
+  }
   conversation: import('./conversation-read').ConversationReadApi
   performance: {
     inspectAnimations(input: import('@agentmux/core/control').RendererAnimationsInput): Promise<import('@agentmux/core/control').RendererAnimationsResult>

@@ -100,6 +100,10 @@ const initialTheme: ThemeBootstrap | null = process.isMainFrame ? (() => {
 projectInitialTheme(initialTheme)
 
 const api: AgentMuxPreloadApi = {
+  clientIncidents: {
+    open: () => ipcRenderer.invoke('clientIncidents:open'),
+    report: (token, report) => ipcRenderer.invoke('clientIncidents:report', token, report)
+  },
   conversation: createPreloadConversationRead(ipcRenderer),
   performance: {
     inspectAnimations: input => ipcRenderer.invoke('metrics:inspectAnimations', input),
