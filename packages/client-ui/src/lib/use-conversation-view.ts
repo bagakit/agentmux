@@ -8,7 +8,7 @@ export type ConversationViewClient = Pick<AgentMuxClient, 'readAgentConversation
 export type ConversationViewOperation = 'latest' | 'older' | 'newer' | 'changes' | 'resume' | 'reopen'
 type Operation = ConversationViewOperation
 export type ConversationSourceRead = { reference: ConversationRef; nativeSource: NonNullable<ConversationTimelineReadInput['nativeSource']> }
-type Selection = Pick<ConversationTimelineReadInput, 'nativeSource' | 'anchor' | 'limit'>
+type Selection = Pick<ConversationTimelineReadInput, 'nativeSource' | 'anchor' | 'limit' | 'preserveCurrent'>
 type PendingFrame = { snapshot: ConversationWindowSnapshot; historical: boolean; operation: Operation; selection: Selection }
 type ViewState = { snapshot: ConversationWindowSnapshot | null; loading: boolean; operation: Operation | null; sourceRead: ConversationSourceRead | null; error: Error | null; errorOperation: Operation | null; sourceError: Error | null; observationError: Error | null; held: boolean; historical: boolean; newerAvailable: boolean }
 const empty = (): ViewState => ({ snapshot: null, loading: false, operation: null, sourceRead: null, error: null, errorOperation: null, sourceError: null, observationError: null, held: false, historical: false, newerAvailable: false })
@@ -253,7 +253,9 @@ export function useConversationView(client: ConversationViewClient | null, refer
     }
   }, [client, key])
 
-  const earlier = useCallback(async (limit?: number) => { await operation.current('older', limit === undefined ? {} : { limit }); return owner.current?.snapshot ?? null }, [])
+  const earlier = useCallback(async (limit?: number, options: Pick<ConversationTimelineReadInput, 'preserveCurrent'> = {}) => {
+    await operation.current('older', { ...options, ...(limit === undefined ? {} : { limit }) }); return owner.current?.snapshot ?? null
+  }, [])
   const newer = useCallback(async () => { await operation.current('newer'); return owner.current?.snapshot ?? null }, [])
   const selectSource = useCallback((nativeSource: NonNullable<ConversationTimelineReadInput['nativeSource']>) => operation.current('latest', { nativeSource }), [])
   const reveal = useCallback((anchor: NonNullable<ConversationTimelineReadInput['anchor']>) => operation.current('latest', { anchor }), [])

@@ -11,25 +11,25 @@ import { AgentReadingBody, AgentReadingThumbnail } from './AgentReadingBody'
 import { markWindowOverlayDismissal } from './WindowOverlayHost'
 import { AgentInputEntry, inputPresentation } from './AgentInputEntry'
 
-type InputReading = Pick<ReturnType<typeof useSessionUserMessages>, 'messages' | 'loading' | 'error' | 'observationError' | 'sourceChanged' | 'windowFrozen' | 'windowIncomplete'>
+type InputReading = Pick<ReturnType<typeof useSessionUserMessages>, 'messages' | 'loading' | 'error' | 'observationError' | 'sourceChanged' | 'windowFrozen' | 'windowIncomplete' | 'hasMore'>
 function inputReading(reader: ReturnType<typeof useSessionUserMessages>, limit: number): InputReading {
   const messages = reader.messages.slice(-limit)
   return { messages, loading: reader.loading, error: reader.error, observationError: reader.observationError,
-    sourceChanged: reader.sourceChanged, windowFrozen: reader.windowFrozen, windowIncomplete: reader.windowIncomplete }
+    sourceChanged: reader.sourceChanged, windowFrozen: reader.windowFrozen, windowIncomplete: reader.windowIncomplete, hasMore: reader.hasMore }
 }
 
 /** The original reader supplies facts; a pin retains only the presented inputs. */
 export function AgentInputRecap({ request, enabled, available, follow = false }: { request: PreviewRequest; enabled: boolean; available: boolean; follow?: boolean }) {
   const [limit] = useState(() => resolveFocusRecentInputs(useAppStore.getState().config?.focus?.recentInputs))
   const [paused, setPaused] = useState(false), [frozen, setFrozen] = useState<InputReading | null>(null)
-  const reader = useSessionUserMessages(request.control, { enabled: enabled && !paused })
+  const reader = useSessionUserMessages(request.control, { enabled: enabled && !paused, initialInputs: limit })
   const region = useRef<HTMLElement>(null), held = useRef<InputReading | null>(null)
   const reflow = useRef<{ container: HTMLElement; anchor: ReturnType<typeof captureReadingAnchor> } | null>(null)
   const current = inputReading(reader, limit)
   useLayoutEffect(() => {
     // An initial placeholder is not a reading cut. Empty and captured-only
     // results qualify through the same complete accepted frame as native inputs.
-    const accepted = Boolean(reader.conversation.snapshot) && !reader.loading
+    const accepted = Boolean(reader.conversation.snapshot) && (!reader.loading || reader.messages.length > 0)
     if (enabled && (!request.pinned || follow) && !frozen && accepted) held.current = current
     if (request.pinned && !follow && !frozen && (held.current || accepted)) setFrozen(held.current ?? current)
   })
@@ -37,7 +37,12 @@ export function AgentInputRecap({ request, enabled, available, follow = false }:
     if (!enabled || !frozen || follow || paused || reader.loading || !(reader.conversation.snapshot || reader.error || reader.observationError)) return
     // A protected bookmark keeps the presented cut, including its selected input.
     // Let the original batch settle, then park this same view until explicit follow.
-    if (request.bookmark) { setPaused(true); return }
+    if (request.bookmark) {
+      // Protect original input objects, not the temporary loading indicator or a
+      // superseded service observation from before this same batch settled.
+      setFrozen({ ...frozen, loading: false, error: current.error, observationError: current.observationError, sourceChanged: current.sourceChanged })
+      setPaused(true); return
+    }
     // Keep every already presented input. Only the original in-flight native batch
     // may fill unused slots; later captured requests cannot evict selected text.
     const messages = retainConversationInputs(frozen.messages, reader.messages.filter(message => message.source.kind === 'native'), limit)
@@ -75,7 +80,7 @@ export function AgentInputRecap({ request, enabled, available, follow = false }:
   const messages = snapshot.messages.slice(-limit)
   const notice = !request.control || snapshot.error || snapshot.observationError ? 'Recent message reading unavailable'
     : snapshot.sourceChanged ? 'Message source changed' : snapshot.windowFrozen ? 'Reading window paused'
-      : snapshot.windowIncomplete ? 'Reading window incomplete' : null
+      : snapshot.windowIncomplete && !snapshot.hasMore ? 'Reading window incomplete' : null
   return <section ref={region} className="focus-context-hover__inputs agent-input-recall" aria-label="Recent user messages"
     onKeyDown={event => {
       if (event.key === 'Escape' && inspected) { event.preventDefault(); event.stopPropagation(); markWindowOverlayDismissal(event.nativeEvent); closeInput() }
@@ -89,7 +94,12 @@ export function AgentInputRecap({ request, enabled, available, follow = false }:
           <AgentReadingThumbnail reading={meta.reading} active={enabled && !inspected} control={request.control} sourceKey={request.sourceKey} input={message} />
         </AgentInputEntry>
       </li>
-    })}</ol> : <p className="focus-context-hover__coverage">{snapshot.loading ? enabled ? 'Loading recent messages…' : 'Reading paused' : notice ? 'Recorded inputs unavailable' : 'No inputs in the current reading window'}</p>}
+    })}</ol> : <p className="focus-context-hover__coverage">{snapshot.loading ? enabled ? 'Loading recent messages…' : 'Reading paused' : notice ? 'Recorded inputs unavailable' : snapshot.hasMore ? 'No inputs in this range' : 'No inputs in the current reading window'}</p>}
+    {enabled && !inspected && snapshot.hasMore && messages.length < limit && !snapshot.loading ? frozen
+      ? <small className="focus-context-hover__coverage">Earlier inputs in History</small>
+      : <button type="button" className="agent-input-recall__earlier" aria-label="Load earlier inputs" onClick={() => { void reader.loadEarlier() }}>
+        <SemanticIcon name="navigation.back" size={12} />Read earlier
+      </button> : null}
     {notice ? <p className="focus-context-hover__notice">{notice} · Open the Agent to read History.</p> : null}
     {inspected ? <div ref={original} id={request.id + '-input'} className="agent-input-recall__inspection">
       <OriginalInput inspected={inspected} request={request} active={enabled} onClose={() => closeInput()} />
