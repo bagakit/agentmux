@@ -1,5 +1,5 @@
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
-import { WorkspaceCollaboration } from './WorkspaceCollaboration'
+import { WorkspaceCollaboration, WorkspaceCollaborationScope } from './WorkspaceCollaboration'
 import { WorkspaceAgentRow } from './WorkspaceAgentRow'
 import { createFocusContextIdentitySelector, focusContextIdentityKey } from '../lib/focus-context-identity'
 import { createFocusGoalLinksSelector, focusGoalCardKey } from '../lib/focus-goal-links'
@@ -62,7 +62,10 @@ const WORKSPACE_TOOL_META: Record<WorkspaceTool, Omit<ToolDefinition<WorkspaceTo
 const AGENT_GROUP_LABELS: Record<FocusBucket, string> = { attention: 'Needs You', working: 'Working', results: 'Results', idle: 'Idle / Unknown' }
 const NO_AGENT_ORDER: readonly string[] = []
 
-export const WorkspaceAgentsTool = memo(function WorkspaceAgentsTool({
+export const WorkspaceAgentsTool = memo(function WorkspaceAgentsTool(props: Parameters<typeof WorkspaceAgentsContent>[0]) {
+  return <WorkspaceCollaborationScope workspaceId={props.workspace.id}><WorkspaceAgentsContent {...props} /></WorkspaceCollaborationScope>
+})
+const WorkspaceAgentsContent = memo(function WorkspaceAgentsContent({
   workspace,
   sessions,
   onOpen
@@ -147,7 +150,7 @@ export const WorkspaceAgentsTool = memo(function WorkspaceAgentsTool({
             <span title={`${count} Agents · ${manualOrder.length ? 'Manual order' : 'Startup order'} · Drag or use the move handle keyboard controls to reorder`} aria-label={`${count} Agents · ${manualOrder.length ? 'Manual order' : 'Startup order'}`}>{count}</span>
           </div>}
           <div className="workspace-agents-tool__actions" role="group" aria-label={selecting ? 'Selected Agent actions' : 'Agent list actions'}>
-            {!selecting ? <WorkspaceCollaboration workspaceId={workspace.id} /> : null}
+            {!selecting ? <WorkspaceCollaboration /> : null}
             {!selecting ? <button type="button" className="workspace-agents-tool__focus" aria-label="去 Focus 中查看" title="View in Focus" onClick={() => openFocus('agents')}><ThemeActionOpenExternalIcon size={15} aria-hidden="true" /></button> : null}
             {selecting ? <>
               <button type="button" aria-label="Select visible Agents" title="Select visible Agents" disabled={close.busy} onClick={() => setSelected(previous => new Set([...previous, ...visible.map(workspaceAgentOrderKey)]))}><SemanticIcon name="object.criteria" size={15} /></button>
