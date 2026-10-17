@@ -52,6 +52,48 @@ async function fixture(props: Partial<ComponentProps<typeof SessionMailbox>> = {
   return { panel, native, render, open, folder }
 }
 
+it.each([1, 128])('does not visit %i unrelated Sessions when the original control is supplied', async count => {
+  const sessions = [...Array.from({ length: count }, (_, index) => composerSession(`unrelated-${index}`)), session]
+  let visits = 0
+  vi.spyOn(sessions, 'find').mockImplementation(predicate => {
+    for (const [index, item] of sessions.entries()) {
+      visits++
+      if (predicate(item, index, sessions)) return item
+    }
+    return undefined
+  })
+  useAppStore.setState({ sessions })
+  const h = await fixture()
+  const measured: Record<string, number> = {}
+  for (const visible of [true, false]) {
+    await h.render(visible)
+    visits = 0
+    await act(async () => {
+      for (let index = 0; index < 10; index++) useAppStore.setState({
+        agentNames: { [`unrelated-${index % count}`]: `Updated ${index}` }
+      })
+    })
+    measured[String(visible)] = visits
+  }
+  expect(measured, 'supplied control needs no fallback Session visits').toEqual({ true: 0, false: 0 })
+})
+
+it.each(['host', 'run'] as const)('keeps the original fallback control and its %s changes when no control is supplied', async changed => {
+  journal.set([journalMessage({ id: 'fallback', body: 'Original fallback body' })])
+  const timeline = { agentSessionId: session.id, revision: 1, items: [] }
+  const h = await fixture({ control: undefined, timeline })
+  expect(journal.list).toHaveBeenCalledWith({ hostId: session.control.hostId, agentSessionId: session.id }, { direction: 'incoming', limit: 25 })
+  await h.open(); await dom.click('[data-record-key="a2a:fallback"]')
+  expect(h.panel.textContent).toContain('Original fallback body')
+  await h.render(false); await h.native.flush()
+  const control = { ...session.control, ...(changed === 'host' ? { hostId: 'other-host' } : { run: { runId: 'other-run' } }) }
+  await act(async () => useAppStore.setState({ sessions: [{ ...session, control }] }))
+  await h.render(true); await h.native.flush()
+  expect(h.native.isOpen()).toBe(false)
+  expect(h.panel.querySelector('.log-turn__body')).toBeNull()
+  expect(journal.list).toHaveBeenLastCalledWith({ hostId: control.hostId, agentSessionId: session.id }, { direction: 'incoming', limit: 25 })
+})
+
 it('keeps the original pending count when the same controlled input is read from the Core journal', async () => {
   const key = { kind: 'prompt' as const, agentSessionId: session.id, expectedRun: session.control.run, submissionId: 'waiting-input' }
   const item: AgentInputMailboxItem = { kind: 'controlled', sequence: 1, recordedAt: _tailFixtureEpoch(0, 0, 1),
