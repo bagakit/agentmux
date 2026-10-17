@@ -2437,6 +2437,12 @@ describe('Browser recovery preview producer', () => {
       manager.setBounds(browser.id, bounds)
       await vi.waitFor(() => expect(log).toHaveBeenCalled())
       expect(manager.targets().find(target => target.id === browser.id)).toMatchObject({ status: 'ready' })
+      const contents = fixture.children[0]!.webContents
+      contents.capturePageImpl = async () => image() as never
+      manager.setBounds(browser.id, null); manager.setBounds(browser.id, bounds)
+      await vi.waitFor(() => expect(contents.capturePage).toHaveBeenCalledTimes(2))
+      await store.flush()
+      expect(await store.read(manager.recoveryPreviewScope(browser.id)!)).toMatchObject({ status: 'available' })
       expect((await manager.reload(browser.id)).error).toBeNull()
     } finally { manager.dispose(); await store.dispose(); log.mockRestore() }
   })
