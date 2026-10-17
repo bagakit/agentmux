@@ -16,7 +16,7 @@ import { sessionServiceNotices } from '../src/renderer/src/lib/session-service-n
 import { createWorkbenchTab, initialWorkbenchRegionId } from '../src/renderer/src/lib/workbench-tabs'
 import { reduceAgentMembershipSnapshot } from '../src/renderer/src/lib/session-state'
 
-function composerSession(...args: Parameters<typeof processSession>) {
+function composerSession(...args: Parameters<typeof processSession>): ReturnType<typeof processSession> {
   const original = processSession(...args)
   return { ...original, status: { state: 'done' as const, source: 'native-hook' as const, observedAt: _tailFixtureEpoch(0, 0, 1) } }
 }
@@ -295,8 +295,8 @@ it('orders mixed recorded and captured history by original time, keeping equal/m
     { ...delivered('tie-b'), createdAt: _reshape_fixtureEpoch(0, 0, 30) }, { ...delivered('in-old', 'peer'), createdAt: _reshape_fixtureEpoch(0, 0, 10) },
     { ...delivered('in-new', 'peer'), createdAt: _reshape_fixtureEpoch(0, 0, 50) }]
   let userMessages = [native('missing-a'), native('native-new', _reshape_fixtureEpoch(0, 0, 40)), native('native-tie', _reshape_fixtureEpoch(0, 0, 30)), native('missing-b')]
-  const queued = [{ id: 'q-a', text: 'First intention', status: 'queued' as const, enqueuedAt: _reshape_fixtureEpoch(0, 0, 999) },
-    { id: 'q-b', text: 'Second intention', status: 'queued' as const, enqueuedAt: _reshape_fixtureEpoch(0, 0, 1) }]
+  const queued = [{ id: 'q-a', text: 'First intention', status: 'queued' as const, deliverable: false, enqueuedAt: _reshape_fixtureEpoch(0, 0, 999) },
+    { id: 'q-b', text: 'Second intention', status: 'queued' as const, deliverable: false, enqueuedAt: _reshape_fixtureEpoch(0, 0, 1) }]
   const system = { available: true, notices: [], unread: [], acknowledge: vi.fn() }
   const render = () => dom.render(<SessionMailbox system={system} queued={queued}
     timeline={{ agentSessionId: 'agent-1', revision: 1, items }} userMessages={userMessages} />)
@@ -315,7 +315,7 @@ it('orders mixed recorded and captured history by original time, keeping equal/m
 
 it('uses the selected System owner time, keeps unknown times last, and never makes a time-only update unread', async () => {
   const current = session()
-  current.terminalPromptDelivery.observedAt = 30
+  current.terminalPromptDelivery.observedAt = _tailFixtureEpoch(0, 0, 30)
   current.terminalCapability = { state: 'unknown', mode: 'degraded', reason: 'handshake-timeout', run: current.control.run, observedAt: _reshape_fixtureEpoch(0, 0, 20) }
   current.terminalOutputChannel = { state: 'severed', mode: 'degraded', reason: 'reattach-failed', run: current.control.run, observedAt: _reshape_fixtureEpoch(0, 0, 1000) }
   current.status = { ...current.status, state: 'disconnected', observedAt: _reshape_fixtureEpoch(0, 0, 2000) }
@@ -336,9 +336,10 @@ it('uses the selected System owner time, keeps unknown times last, and never mak
   expect(unread()).toBe('false')
   await toggle('open'); await folder('system')
   expect(steps()).toEqual(['Checking terminal capabilities didn’t complete', 'Screen confirmation from retained terminal output didn’t complete', 'Activity not confirmed', 'The original message delivery is still unconfirmed'])
-  const output = { ...current, terminalCapability: undefined }
+  const { terminalCapability: _capability, ...output } = current
   expect(sessionServiceNotices(output).map(item => [item.id, item.observedAt])).toEqual([['activity-observation', undefined], ['connection', _tailFixtureEpoch(0, 0, 1000)], ['delivery', _tailFixtureEpoch(0, 0, 30)]])
-  expect(sessionServiceNotices({ ...output, terminalOutputChannel: undefined }).map(item => [item.id, item.observedAt])).toEqual([['activity-observation', undefined], ['connection', _tailFixtureEpoch(0, 0, 2000)], ['delivery', _tailFixtureEpoch(0, 0, 30)]])
+  const { terminalOutputChannel: _channel, ...withoutChannel } = output
+  expect(sessionServiceNotices(withoutChannel).map(item => [item.id, item.observedAt])).toEqual([['activity-observation', undefined], ['connection', _tailFixtureEpoch(0, 0, 2000)], ['delivery', _tailFixtureEpoch(0, 0, 30)]])
 })
 
 it('uses one right Session mailbox, clears Notices attention on read and keeps the Core fact', async () => {
@@ -374,7 +375,7 @@ it('prioritizes unread on opening but never switches an open User Messages for n
   useAppStore.setState({ sessions: [composerSession()], agentSteerQueues: { 'agent-1': [
     { operationId: 'q', runId: 'run-agent-1', text: 'pending', status: 'queued' }
   ] } })
-  const send = vi.spyOn(useAppStore.getState(), 'sendQueuedAgentSteer').mockResolvedValue()
+  const send = vi.spyOn(useAppStore.getState(), 'sendQueuedAgentSteer').mockResolvedValue('submitted')
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   await toggle('open')
   expect(mailbox().querySelector('[role="tab"][aria-selected="true"]')?.id).toMatch(/-user-tab$/)
@@ -394,7 +395,7 @@ it('coalesces repetitions but marks changed causes and a recurrence after recove
   await toggle('closed')
   const repeated = session()
   repeated.terminalPromptDelivery.submissionId = 'submission-2'
-  repeated.terminalPromptDelivery.observedAt = 2
+  repeated.terminalPromptDelivery.observedAt = _tailFixtureEpoch(0, 0, 2)
   await act(async () => useAppStore.setState({ sessions: [repeated] }))
   expect(unread()).toBe('false')
   await act(async () => useAppStore.setState({ sessions: [{ ...repeated,
@@ -431,7 +432,7 @@ it('shows ordered User Messages and wires retry, exact Copy and archive without 
     status: 'deferred' as const, error: 'Input confirmation pending. Diagnostic: private-cursor=123' },
   { operationId: 'queued-2', runId: 'run-agent-1', text: 'Second exact words', status: 'queued' as const }]
   useAppStore.setState({ agentSteerQueues: { 'agent-1': queued } })
-  const send = vi.spyOn(useAppStore.getState(), 'sendQueuedAgentSteer').mockResolvedValue()
+  const send = vi.spyOn(useAppStore.getState(), 'sendQueuedAgentSteer').mockResolvedValue('submitted')
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue()
   vi.spyOn(useAppStore.getState(), 'flushAgentSteerQueue').mockResolvedValue()
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
@@ -603,7 +604,7 @@ it.each(['copy', 'retry'] as const)('keeps a User Messages %s failure in this ma
   useAppStore.setState({ sessions: [composerSession()], agentSteerQueues: { 'agent-1': [queued] } })
   const action = kind === 'copy'
     ? vi.spyOn(api.ui, 'writeClipboardText').mockRejectedValueOnce(new Error('Clipboard unavailable')).mockResolvedValueOnce()
-    : vi.spyOn(useAppStore.getState(), 'sendQueuedAgentSteer').mockRejectedValueOnce(new Error('Retry unavailable')).mockResolvedValueOnce()
+    : vi.spyOn(useAppStore.getState(), 'sendQueuedAgentSteer').mockRejectedValueOnce(new Error('Retry unavailable')).mockResolvedValueOnce('submitted')
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   await toggle('open')
   const clickAction = async () => {
