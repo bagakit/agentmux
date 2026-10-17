@@ -22,6 +22,8 @@ export default defineConfig({
   test: { globals: false, passWithNoTests: false, fileParallelism: false, include: [
     'packages/core/test/agent-message-reference-reading.test.ts',
     'packages/core/test/agent-message-render.test.ts',
-    'packages/core/test/agent-message-leading-context.test.ts'
+    'packages/core/test/agent-message-leading-context.test.ts',
+    'packages/client-ui/test/a2a-reference-reading.test.tsx',
+    'packages/client-ui/test/conversation-leading-context.test.tsx'
   ] }
 })
