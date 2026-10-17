@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { clearGoalAgentCreationDraft, clearGoalAgentSelectionDraft, retainGoalAgentCreationDraft, retainGoalAgentSelectionDraft, useAppStore } from '../store'
 import { api } from '../lib/api'
-import type { DemandProjection } from '../lib/global-demand-board'
+import type { DemandRecord } from '../lib/global-demand-board'
 import { goalAgentRows, goalCreationDraftKey, type GoalAgentCreationDraft, type GoalAgentSelectionDraft, type GoalAgentRole, type GoalAgentRow } from '../lib/goal-agent-selection'
 import { projectWorkspaces, workspaceProjectId } from '../lib/workspace-projects'
 import { moteDefaultExecutor } from '../lib/mote-quick-preferences'
@@ -32,7 +32,7 @@ export function GoalAgentFace({ row }: { row: GoalAgentRow }) {
 }
 
 /** One editor for explicit business relationships; creation uses the original spatial/Core owner. */
-export function GoalAgentPicker({ demand, role, onSave, onClose }: { demand: DemandProjection; role: GoalAgentRole; onSave: GoalRelationSave; onClose(): void }) {
+export function GoalAgentPicker({ demand, role, onSave, onClose }: { demand: DemandRecord; role: GoalAgentRole; onSave: GoalRelationSave; onClose(): void }) {
   const document = useWorkbenchDocument()
   const state = useAppStore(useShallow(state => ({ sessions: state.sessions, config: state.config, agentNames: state.agentNames,
     timelines: state.timelines, scratchTopicSnapshots: state.scratchTopicSnapshots })))
@@ -148,7 +148,7 @@ export function GoalAgentPicker({ demand, role, onSave, onClose }: { demand: Dem
     <DocumentOverlayPortal component={Dialog.Portal}><Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content className="confirmation-dialog dialog-surface goal-agent-picker" aria-busy={busy} onOpenAutoFocus={event => { event.preventDefault(); previousFocus.current = document.activeElement?.nodeType === 1 ? document.activeElement as HTMLElement : null; openedContent.current = (event.target as Node | null)?.nodeType === 1 ? event.target as Element : null; search.current?.focus() }} onCloseAutoFocus={event => { event.preventDefault(); const original = previousFocus.current, active = document.activeElement; if (original?.isConnected && (active === document.body || active === original || !active?.isConnected || openedContent.current?.contains(active))) original.focus({ preventScroll: true }) }} onEscapeKeyDown={event => { if (busy) event.preventDefault() }} onInteractOutside={event => { if (busy) event.preventDefault() }}>
         <header className="confirmation-dialog__heading"><Dialog.Title className="confirmation-dialog__title">{labels[role]}</Dialog.Title><Dialog.Close className="icon-button" aria-label="Close Agent picker" disabled={busy}><ThemeActionCloseIcon size={15} /></Dialog.Close></header>
-        <Dialog.Description className="confirmation-dialog__description">{demand.title}<br />{role === 'assignees' ? 'Choose who advances this Goal. Their related history is retained.' : role === 'related' ? 'Keep the conversations involved in this Goal. Responsibilities are edited separately.' : 'Choose one assignee for the next Loop. This selection does not start it.'}</Dialog.Description>
+        <Dialog.Description className="confirmation-dialog__description">{demand.title}<br />{role === 'assignees' ? 'Choose who advances this Goal. Their related history is retained.' : role === 'related' ? 'Keep the conversations involved in this Goal. Responsibilities are edited separately.' : '从负责人中选择此 Goal 的 Supervisor；需要其他 Agent 时，先在负责人中添加。保存不会启动执行或发送巡查。'}</Dialog.Description>
         {role !== 'supervisor' ? <div className="goal-agent-picker__modes">{(['existing', 'mote', 'agent'] as const).map(value => <button key={value} type="button" className="goals-button" aria-pressed={mode === value} disabled={busy} onClick={() => { setMode(value); setIssue(null); if (value === 'mote' && scratch) void useAppStore.getState().refreshScratchTopics(scratch.id) }}>{value === 'existing' ? 'Existing Agents' : value === 'mote' ? 'Mote · new Session' : 'New Agent'}</button>)}</div> : null}
         <form onSubmit={event => { event.preventDefault(); void save() }}>
           {mode === 'existing' ? <>
