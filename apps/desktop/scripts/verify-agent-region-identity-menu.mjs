@@ -21,6 +21,8 @@ const messageFeedbackOwning=process.argv.includes('--message-feedback-owning')
 const mailboxMotionOwning=process.argv.includes('--mailbox-motion-owning')
 const mailboxHoverMutation=process.argv.includes('--mailbox-hover-mutation')
 const composerToolbarOwning=process.argv.includes('--composer-toolbar-owning')
+const mailboxLayoutOwning=process.argv.includes('--mailbox-layout-owning')
+assert.ok(!mailboxLayoutOwning||visualOnly,'Mailbox layout uses only the private visual fixture')
 assert.ok(!composerToolbarOwning||visualOnly,'Composer toolbar uses only the private visual fixture')
 assert.ok(!mailboxHoverMutation||visualOnly,'Mailbox hover mutation stays in the private visual compilation')
 assert.ok(!progressLayoutOwning||visualOnly,'Progress layout owning uses only the private visual fixture')
@@ -38,18 +40,25 @@ async function compiled(directory){
   for(const entry of entries){if(!entry.isFile())continue;const path=join(entry.parentPath,entry.name);files[path.slice(directory.length+1)]=hash(await readFile(path))}
   assert.ok(Object.keys(files).length>0,'The actual private renderer outputs are nonempty');return files
 }
-async function renderer(label,probe='complete',unreadableProgressActions=false,focusMutation=false){
+async function renderer(label,probe='complete',unreadableProgressActions=false,focusMutation=false,mailboxMutation=''){
   const directory=join(evidence,label), outDir=join(privateRoot,label);await mkdir(directory,{recursive:true})
   const xtermFile=require.resolve('@xterm/xterm'), wrapper=join(privateRoot,'record-xterm.mjs')
   await writeFile(wrapper,`import xterm from ${JSON.stringify(xtermFile)};
     export class Terminal extends xterm.Terminal { constructor(...args){super(...args);const entries=globalThis.identityTerminals??=[];this.probeIdentity={id:entries.length,terminal:this,disposed:false};entries.push(this.probeIdentity)}
       dispose(){this.probeIdentity.disposed=true;return super.dispose()} }
   `)
-  const cssPath=composerToolbarOwning?join(repository,'packages/client-ui/src/styles/composer.css'):join(desktop,'src/renderer/src/styles',terminalLoadingOwning?'terminal.css':'agent.css'),cssBefore=await readFile(cssPath)
+  const cssPath=composerToolbarOwning||mailboxLayoutOwning?join(repository,'packages/client-ui/src/styles/composer.css'):join(desktop,'src/renderer/src/styles',terminalLoadingOwning?'terminal.css':'agent.css'),cssBefore=await readFile(cssPath)
   const loadedSourceInputs={},importedStyleInputs={},progressCssMutations=[],sourceMutations=[]
   await build({configFile:false,root:fixture,base:'./',logLevel:'error',worker:{format:'es'},resolve:{alias:[{find:/^@xterm\/xterm$/,replacement:wrapper}]},
     plugins:[{name:'record-private-renderer-inputs',enforce:'pre',async transform(source,id){
       if((id.startsWith(join(desktop,'src')+'/')||id.startsWith(join(repository,'packages/client-ui/src')+'/')||id.startsWith(fixture+'/'))&&!id.includes('?'))loadedSourceInputs[id.slice(repository.length+1)]=hash(source)
+      if(mailboxMutation==='compact'&&id===join(desktop,'src/renderer/src/components/SessionMailbox.tsx')){
+        const anchor=/<InputMailboxRecords\s+compact(?=\s)/g
+        assert.equal([...source.matchAll(anchor)].length,1,'The actual Desktop journal compact consumer is unique')
+        const altered=source.replace(anchor,'<InputMailboxRecords ')
+        sourceMutations.push({path:id.slice(repository.length+1),original:hash(source),mutated:hash(altered),productionWritten:false})
+        return altered
+      }
       if(focusMutation&&id===join(repository,'packages/client-ui/src/components/AgentComposer.tsx')){
         const anchor='onFocusCapture={(event) => {'
         assert.equal(source.split(anchor).length,2,'The actual Composer scroll handler is unique')
@@ -69,6 +78,16 @@ async function renderer(label,probe='complete',unreadableProgressActions=false,f
       for(const file of this.getWatchFiles())if((file.startsWith(join(desktop,'src')+'/')||file.startsWith(join(repository,'packages/client-ui/src')+'/'))&&file.endsWith('.css'))importedStyleInputs[file.slice(repository.length+1)]=hash(await readFile(file))
     }}],
     css:{postcss:{plugins:[{postcssPlugin:'private-progress-controls',async Once(sheet){
+      if(mailboxMutation==='navigation'){
+        const owners=[]
+        sheet.walkRules('.composer-mailbox__folders',rule=>{if(rule.source?.input.file===cssPath)owners.push(rule)})
+        if(!owners.length)return
+        assert.equal(owners.length,1,'Actual imported Mailbox navigation rule is unique')
+        owners[0].append({prop:'display',value:'flex'},{prop:'flex-wrap',value:'wrap'})
+        sheet.append({selector:'.composer-mailbox__folders > button',nodes:[{prop:'flex',value:'1 1 calc(50% - var(--sp-1))'}]})
+        progressCssMutations.push({path:cssPath.slice(repository.length+1),restoredOriginalLayout:'two-column flex navigation',productionWritten:false})
+        return
+      }
       if(!unreadableProgressActions)return
       if(composerToolbarOwning){
         const queries=[]
@@ -95,9 +114,14 @@ async function renderer(label,probe='complete',unreadableProgressActions=false,f
   const cssKey=cssPath.slice(repository.length+1),cssAfter=await readFile(cssPath)
   assert.equal(importedStyleInputs[cssKey],hash(cssBefore),'The compiled renderer watches the exact owner CSS')
   assert.equal(hash(cssAfter),hash(cssBefore),'The owner CSS stays unchanged through compilation')
-  assert.equal(progressCssMutations.length,unreadableProgressActions?1:0,'Requested actual Progress CSS mutation is applied exactly once')
-  assert.equal(sourceMutations.length,focusMutation?1:0)
-  await writeFile(join(directory,'compiled.json'),JSON.stringify({compiledFiles,terminalWrapperSha256,loadedSourceInputs,importedStyleInputs,progressCssMutations,sourceMutations,ownerCss:{path:cssKey,before:hash(cssBefore),after:hash(cssAfter)}},null,2))
+  assert.equal(progressCssMutations.length,unreadableProgressActions||mailboxMutation==='navigation'?1:0,'Requested actual CSS mutation is applied exactly once')
+  assert.equal(sourceMutations.length,focusMutation||mailboxMutation==='compact'?1:0)
+  const harnessInputs={}
+  if(mailboxLayoutOwning)for(const name of ['main.cjs','mailbox-layout.cjs']){
+    const source=await readFile(join(fixture,name));harnessInputs[name]=hash(source)
+    await writeFile(join(directory,`driver-${name}`),source)
+  }
+  await writeFile(join(directory,'compiled.json'),JSON.stringify({compiledFiles,terminalWrapperSha256,loadedSourceInputs,importedStyleInputs,progressCssMutations,sourceMutations,harnessInputs,ownerCss:{path:cssKey,before:hash(cssBefore),after:hash(cssAfter)}},null,2))
   const env={...process.env};delete env.ELECTRON_RUN_AS_NODE
   const log=[]
   const outcome=await runProbeProcess(require('electron'),[join(fixture,'main.cjs'),join(outDir,'index.html'),privateRoot,directory,probe],{
@@ -105,6 +129,7 @@ async function renderer(label,probe='complete',unreadableProgressActions=false,f
   await writeFile(join(directory,'process.log'),log.join('\n'))
   const rendered=JSON.parse(await readFile(join(directory,'render.json'),'utf8'))
   assert.equal(outcome.timedOut,false);assert.equal(outcome.interruption,null)
+  if(mailboxLayoutOwning)await rm(outDir,{recursive:true})
   return{outcome,rendered,directory,compiledFiles,terminalWrapperSha256}
 }
 async function mutation(label,file,from,to,probe,message){
@@ -166,8 +191,15 @@ try{
   await mkdir(evidence,{recursive:true});result.sourceCommit=(await exec('git',['rev-parse','HEAD'],{cwd:repository})).stdout.trim()
   if(!visualOnly)result.sourceBefore=await sources()
   const swapOnly=process.argv.includes('--swap-render-only')
-  result.render=await renderer('fixed',visualOnly?(composerToolbarOwning?'composer-toolbar-owning':mailboxMotionOwning?'mailbox-motion-owning':messageFeedbackOwning?'message-feedback-owning':terminalLoadingOwning?'terminal-loading-owning':progressLayoutOwning?'composer-layout-owning':'composer-visual'):swapOnly?'swap-full':'complete');assert.equal(result.render.outcome.exitCode,0,JSON.stringify(result.render.rendered.failure));assert.equal(result.render.rendered.passed,true)
+  result.render=await renderer('fixed',visualOnly?(mailboxLayoutOwning?'mailbox-layout-owning':composerToolbarOwning?'composer-toolbar-owning':mailboxMotionOwning?'mailbox-motion-owning':messageFeedbackOwning?'message-feedback-owning':terminalLoadingOwning?'terminal-loading-owning':progressLayoutOwning?'composer-layout-owning':'composer-visual'):swapOnly?'swap-full':'complete');assert.equal(result.render.outcome.exitCode,0,JSON.stringify(result.render.rendered.failure));assert.equal(result.render.rendered.passed,true)
   if(visualOnly){
+    if(mailboxLayoutOwning){
+      const navigationRed=await renderer('mailbox-navigation-red','mailbox-layout-owning',false,false,'navigation')
+      assert.equal(navigationRed.outcome.exitCode,1);assert.equal(navigationRed.rendered.failure.name,'AssertionError');assert.match(navigationRed.rendered.failure.message,/Mailbox navigation uses the original regular grid/)
+      const compactRed=await renderer('mailbox-compact-red','mailbox-layout-owning',false,false,'compact')
+      assert.equal(compactRed.outcome.exitCode,1);assert.equal(compactRed.rendered.failure.name,'AssertionError');assert.match(compactRed.rendered.failure.message,/Desktop input journal consumes the shared compact record frame/)
+      result.mutations.push({label:'mailbox-original-flex-navigation',red:navigationRed,productionWritten:false},{label:'mailbox-desktop-compact-consumer-removed',red:compactRed,productionWritten:false})
+    }
     if(composerToolbarOwning){
       const red=await renderer('toolbar-wrap-red','composer-toolbar-owning',true)
       assert.equal(red.outcome.exitCode,1);assert.equal(red.rendered.failure.name,'AssertionError');assert.match(red.rendered.failure.message,/Left tools and Session controls share one toolbar row/)

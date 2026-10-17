@@ -8,6 +8,7 @@ const mailboxProof = require('./mailbox.cjs')
 const messageFeedbackProof = require('./message-feedback.cjs')
 const mailboxMotionProof = require('./mailbox-motion.cjs')
 const composerToolbarProof = require('./composer-toolbar.cjs')
+const mailboxLayoutProof = require('./mailbox-layout.cjs')
 const [html, privateRoot, evidence, probe = 'complete'] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
@@ -348,7 +349,8 @@ app.whenReady().then(async()=>{
     result.consoleErrors=[];win.webContents.on('console-message',details=>{if(details.level==='error')result.consoleErrors.push(details.message)})
     await win.loadFile(html);win.webContents.debugger.attach('1.3');await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
     await waitFor('Boolean(window.identityMenu)')
-    if(probe==='composer-toolbar-owning')await composerToolbarProof({win,evaluate,waitFor,visible,painted,click,key,seed,capture,result,surface})
+    if(probe==='mailbox-layout-owning')await mailboxLayoutProof({win,evaluate,waitFor,visible,painted,click,key,seed,capture,result,surface})
+    else if(probe==='composer-toolbar-owning')await composerToolbarProof({win,evaluate,waitFor,visible,painted,click,key,seed,capture,result,surface})
     else if(probe==='mailbox-motion-owning')await mailboxMotionProof({win,evaluate,waitFor,visible,painted,click,key,seed,capture,result,surface})
     else if(probe==='message-feedback-owning')await messageFeedbackProof({win,evaluate,waitFor,visible,painted,click,key,seed,capture,result,surface})
     else if(probe==='terminal-loading-owning')await terminalLoadingVisual()
@@ -386,9 +388,15 @@ app.whenReady().then(async()=>{
       result.swap=await swapProof({win,evaluate,waitFor,painted,open,close,click,point,key,geometry,capture,probe,report:value=>result.swap=value})
     }
     result.passed=true
-  }catch(error){result.failure={name:error.name,message:error.message,stack:error.stack,stage:result.stage}}
+  }catch(error){result.failure={name:error.name,message:error.message,stack:error.stack,stage:result.stage}
+    if(probe==='mailbox-layout-owning')try{result.mailboxLayoutDiagnostics=await evaluate(`(() => {const p=${surface}.querySelector('.composer-mailbox');return {journal:identityMenu.mailboxLayoutFacts(),open:p?.matches(':popover-open'),state:p?.dataset.state,text:p?.textContent.slice(0,5000)}})()`)}catch(diagnosticError){result.mailboxLayoutDiagnostics={error:diagnosticError.message}}
+  }
   finally{
-    if(win&&!win.isDestroyed())result.mailboxInputs??=await evaluate('window.identityMenu?.mailboxInputs?.()??[]')
-    await fs.writeFile(path.join(evidence,'render.json'),JSON.stringify(result,null,2));win?.destroy();app.exit(result.passed?0:1)
+    try{
+      if(win&&!win.isDestroyed())result.mailboxInputs??=await evaluate('window.identityMenu?.mailboxInputs?.()??[]')
+      if(result.failure)console.error(JSON.stringify({fixtureFailure:result.failure}))
+      await fs.writeFile(path.join(evidence,'render.json'),JSON.stringify(result,null,2))
+    }catch(error){result.passed=false;console.error(JSON.stringify({fixtureFailure:result.failure,receiptWriteFailure:{name:error.name,message:error.message}}))}
+    finally{win?.destroy();app.exit(result.passed?0:1)}
   }
 })
