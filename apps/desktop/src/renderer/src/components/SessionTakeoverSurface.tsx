@@ -15,8 +15,9 @@ const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 
 
 /** A local workface transition. The underlying Session and editor stay mounted. */
-export function SessionTakeoverSurface({ source, active, onClose }: {
+export function SessionTakeoverSurface({ source, active, onClose, returnTrigger }: {
   source: TakeoverSource
+  returnTrigger?: HTMLButtonElement | null
   active: boolean
   onClose(): void
 }) {
@@ -70,7 +71,7 @@ export function SessionTakeoverSurface({ source, active, onClose }: {
     const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null
     const recoveryTrigger = focused?.isConnected && focused.dataset.takeoverSessionId === source.agentSessionId &&
       focused.dataset.takeoverRegionId === source.origin.regionId ? focused : null
-    const previous = recoveryTrigger ?? originalHeader?.querySelector<HTMLElement>('.agent-region-header__more') ?? focused
+    const previous = returnTrigger ?? recoveryTrigger ?? originalHeader?.querySelector<HTMLElement>('.agent-region-header__more') ?? focused
     returnFocus.current = previous
     const held = Array.from(parent?.children ?? []).filter((item): item is HTMLElement => item instanceof HTMLElement && item !== node)
       .map(item => ({ item, inert: item.inert }))

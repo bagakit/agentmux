@@ -134,7 +134,7 @@ export function SessionPane({
   useObservedConsumerCommit('sessionPane', observationVisible)
   const consumerScope = useMemo(() => ({ sessionIds: [sessionId], navigation: visible && !readOnly }), [sessionId, visible, readOnly])
   const projectionPolicy = sessionRegionProjectionPolicy(readOnly)
-  const [takeoverSelection, setTakeoverSelection] = useState<string | null>(null)
+  const [takeoverSelection, setTakeoverSelection] = useState<{ key: string; displayId: string | null; origin: OpenHttpLinkOrigin; trigger: HTMLButtonElement | null } | null>(null)
   const primaryPresentation = useWorkbenchBrowserPresentation()
   const primaryReference = primaryPresentation.reference
   const mailboxOrigin = primaryReference ? { ...linkOrigin, workspaceId: primaryReference.displayWorkspaceId,
@@ -242,6 +242,8 @@ export function SessionPane({
   }
   if (viewMode !== 'terminal') activityLifetime.current.opened = true
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [presentationHistory, setPresentationHistory] = useState<{ displayId: string; trigger: HTMLButtonElement | null } | null>(null)
+  useEffect(() => { setPresentationHistory(null) }, [activitySourceKey, viewMode])
   const openTerminal = (): void => {
     useAppStore.getState().setViewMode(sessionId, 'terminal')
     setHistoryOpen(false)
@@ -316,7 +318,7 @@ export function SessionPane({
   })
   // One fact/observation owner, with demand from every actually visible reading stage.
   const activityDemand = !pendingAgentRestore &&
-    (visible && (viewMode !== 'terminal' || historyOpen) || viewMode !== 'terminal' && presentations.some(target => target.visible !== false) || !!incomingReveal && observationVisible)
+    (visible && (viewMode !== 'terminal' || historyOpen) || presentations.some(target => target.visible !== false && (viewMode !== 'terminal' || presentationHistory?.displayId === workbenchSessionStageHostId(target, linkOrigin.regionId!))) || !!incomingReveal && observationVisible)
   const {
     messages: userMessages,
     nativeHistoryPage,
@@ -620,22 +622,26 @@ export function SessionPane({
     session?.status.continuityConflict
   )
   const takeoverOriginal = takeoverExecution(sessionId, historyCatalogue.sources)
-  const takeoverKey = JSON.stringify([sessionId, takeoverOriginal?.hostId, takeoverOriginal?.cwd,
-    linkOrigin.workspaceId, linkOrigin.tabGroupId, linkOrigin.tabId, linkOrigin.regionId])
+  const takeoverKey = JSON.stringify([activitySourceKey, takeoverOriginal?.hostId, takeoverOriginal?.cwd])
   useEffect(() => {
-    if (takeoverSelection !== null && takeoverSelection !== takeoverKey) setTakeoverSelection(null)
+    if (takeoverSelection !== null && takeoverSelection.key !== takeoverKey) setTakeoverSelection(null)
   }, [takeoverKey, takeoverSelection])
-  const onTakeOver = surfaceKind === 'agent' && projectionPolicy.allowsRecovery && linkOrigin.tabId && linkOrigin.regionId
-    ? () => setTakeoverSelection(takeoverKey) : undefined
-  const takeoverSurface = takeoverSelection === takeoverKey ? <SessionTakeoverSurface key={takeoverKey} active={visible}
-    onClose={() => setTakeoverSelection(null)} source={{
+  const takeOverAt = (origin: OpenHttpLinkOrigin, displayId: string | null = null) => surfaceKind === 'agent' && projectionPolicy.allowsRecovery && origin.tabId && origin.regionId
+    ? (trigger?: HTMLButtonElement) => setTakeoverSelection({ key: takeoverKey, displayId, origin, trigger: trigger ?? null }) : undefined
+  const onTakeOver = takeOverAt(mailboxOrigin)
+  const takeoverAt = (origin: OpenHttpLinkOrigin, active: boolean, displayId: string | null = null) => takeoverSelection?.key === takeoverKey && takeoverSelection.displayId === displayId &&
+    JSON.stringify(takeoverSelection.origin) === JSON.stringify(origin) ? <SessionTakeoverSurface key={takeoverKey} active={active}
+    returnTrigger={takeoverSelection.trigger} onClose={() => setTakeoverSelection(null)} source={{
     agentSessionId: sessionId, hostId: takeoverOriginal?.hostId, cwd: takeoverOriginal?.cwd,
     label: agentInputIdentity ?? userName ?? tabName ?? session?.label ?? sessionId,
-    executorId: takeoverOriginal?.executorId, origin: linkOrigin,
+    executorId: takeoverOriginal?.executorId, origin,
     diagnostic: JSON.stringify({ status: session?.status ?? null, processState: session?.processState ?? 'unobserved',
       interruptionReason: session?.interruptionReason, projectionFailures: pendingLaunch?.projectionFailures ?? [],
       recovery: recoveryCandidate ?? null, pendingRequest: pendingLaunch?.request ?? null }, null, 2)
   }} /> : null
+  const takeoverSurface = takeoverAt(mailboxOrigin, visible)
+  const presentationOrigin = (target: WorkbenchViewTarget): OpenHttpLinkOrigin => ({ ...linkOrigin,
+    workspaceId: target.reference!.displayWorkspaceId, tabGroupId: target.reference!.groupId, tabId: target.reference!.tabId })
   const recoveryActionSource: RecoverySource | null = unobservedReference ? unobservedReference.source : executionHostId && sourceWorkspaceId && linkOrigin.tabId && linkOrigin.regionId ? {
     hostId: executionHostId, agentSessionId: sessionId, workspaceId: sourceWorkspaceId,
     tabId: linkOrigin.tabId, regionId: linkOrigin.regionId, displayWorkspaceId: linkOrigin.workspaceId,
@@ -653,18 +659,20 @@ export function SessionPane({
     finally { if (observationActive.current) setRefreshing(false) }
   }
 
-  const unobservedActions = projectionPolicy.allowsRecovery && unobservedIdentity ? <>
+  const unobservedActionsAt = (origin = mailboxOrigin, displayId: string | null = null) => projectionPolicy.allowsRecovery && unobservedIdentity ? <>
     {unobservedReadError || unobservedReference?.issue ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
       step: unobservedReadError ?? unobservedReference!.issue!,
       mode: 'The original Region and drafts are retained. Current Session facts are not confirmed.',
       restore: 'Re-read this original owner. This action does not start a Run or send input.'
     } }} /> : null}
-    {recoveryActionSource ? <SessionRecoveryActions source={recoveryActionSource} onTakeOver={onTakeOver} restoring={refreshing}
+    {recoveryActionSource ? <SessionRecoveryActions source={recoveryActionSource} onTakeOver={takeOverAt(origin, displayId)} restoring={refreshing}
       workingLabel="Reading…" restoreLabel="Check original" restoreIcon="action.refresh" onRestore={() => void refreshUnobserved()} />
       : <button type="button" className="small-button" disabled={refreshing} onClick={() => void refreshUnobserved()}>
         <ThemeActionRefreshIcon size={12} /> {refreshing ? 'Reading…' : 'Check original identity'}
       </button>}
   </> : null
+
+  const unobservedActions = unobservedActionsAt()
 
   async function recover(): Promise<void> {
     if (recovering) return
@@ -757,17 +765,29 @@ export function SessionPane({
       : pendingLaunch ? executionHostProjection(pendingLaunch.request?.hostId, pendingLaunch.request?.workspacePath, configuredExecutionHost)
       : retainedHistory?.state === 'retired' ? executionHostProjection(retainedHistory.hostId, retainedHistory.history?.workspacePath, configuredExecutionHost)
         : executionHostProjection(recoveryCandidate?.hostId, recoveryCandidate?.workspacePath, configuredExecutionHost)
-  const preSnapshotHeader = (name = agentInputIdentity ?? (session?.kind === 'terminal' ? session.label : surfaceKind === 'terminal' ? 'Terminal' : agentDisplayName({ userName,
+  const sessionHeader = ({ name = agentInputIdentity ?? (session?.kind === 'terminal' ? session.label : surfaceKind === 'terminal' ? 'Terminal' : agentDisplayName({ userName,
     firstPrompt: pendingLaunch?.request?.prompt, fallbackLabel: recoveryCandidate?.label ?? nameMetadata?.label ?? 'Agent · name unconfirmed',
-    providerLabel: connectingExecutor?.label ?? (nameMetadata ? agentProviderLabel(nameMetadata.providerId) : 'Agent') })), executorLabel = agentInputExecutor ?? connectingExecutor?.label ?? 'Executor unknown') =>
+    providerLabel: connectingExecutor?.label ?? (nameMetadata ? agentProviderLabel(nameMetadata.providerId) : 'Agent') })),
+    executorLabel = agentInputExecutor ?? connectingExecutor?.label ?? 'Executor unknown', origin = mailboxOrigin,
+    portalTargetId = headerPortalTargetId, displayId = null, onHistory, resultReview }: {
+    name?: string; executorLabel?: string; origin?: OpenHttpLinkOrigin; portalTargetId?: string | null
+    displayId?: string | null; onHistory?: ((trigger?: HTMLButtonElement) => void) | undefined; resultReview?: ReactNode
+  } = {}) =>
     <AgentRegionHeader name={name} executorLabel={surfaceKind === 'terminal' ? 'Shell' : executorLabel}
       sessionId={sessionId} sessionKind={surfaceKind} executionHost={preSnapshotHost}
-      regionId={linkOrigin.regionId} readOnly={readOnly} portalTargetId={headerPortalTargetId} onHistory={undefined} onTakeOver={onTakeOver}
-      currentConversationActions={currentConversationActions}
+      regionId={origin.regionId} readOnly={readOnly} portalTargetId={portalTargetId} onHistory={onHistory} onTakeOver={takeOverAt(origin, displayId)}
+      currentConversationActions={currentConversationActions(origin)} resultReview={resultReview}
+      onRefreshObservation={session?.kind === 'agent' && observationMounted ? () => void refresh(true) : undefined} refreshing={refreshing}
       nativeSession={session?.kind === 'agent' ? session : recoveryCandidate ? {
         id: recoveryCandidate.agentSessionId, ...projectNativeSourceFacts(recoveryCandidate),
         control: { kind: 'agent', hostId: recoveryCandidate.hostId, agentSessionId: recoveryCandidate.agentSessionId, run: recoveryCandidate.run }
       } : undefined} />
+  const presentationHeader = (target: WorkbenchViewTarget, history = false) => {
+    const displayId = workbenchSessionStageHostId(target, linkOrigin.regionId!)
+    return sessionHeader({ origin: presentationOrigin(target), portalTargetId: target.headerPortalTargetId ?? null, displayId,
+      onHistory: history && presentationHistory?.displayId !== displayId
+        ? trigger => setPresentationHistory({ displayId, trigger: trigger ?? null }) : undefined })
+  }
   const launchFailures = pendingLaunch?.projectionFailures ?? []
   const launchNotice = (
     <div className={acceptedLaunch && launchFailures.length > 0 ? 'agent-launch-notice' : 'service-disclosure-home'}>
@@ -798,6 +818,8 @@ export function SessionPane({
     {surfaceKind === 'agent' && renderPresentationFrame ? presentations.map(target => <SessionActivityPresentation
       key={JSON.stringify([activitySourceKey, target.hostId, target.reference!.displayWorkspaceId, target.reference!.groupId, target.reference!.tabId, linkOrigin.regionId])}
       target={target} regionId={linkOrigin.regionId!} sourceKey={activitySourceKey}
+      header={presentationHeader(target)}
+      takeoverSurface={takeoverAt(presentationOrigin(target), target.visible !== false, workbenchSessionStageHostId(target, linkOrigin.regionId!))}
       sessionId={sessionId} name={agentInputIdentity ?? userName ?? tabName ?? sessionId}
       executorLabel={agentInputExecutor ?? connectingExecutor?.label ?? 'Executor unknown'}
       executionHost={preSnapshotHost} eligible={false} recovery={content(target)}
@@ -815,8 +837,8 @@ export function SessionPane({
         detail="Creation is confirmed. Current process and input availability are not yet confirmed."
         actions={unobservedActions} supplement={launchNotice}
         details={{ summary: 'Original reference', content: <dl><dt>Session ID</dt><dd>{acceptedLaunch.agentSessionId}</dd></dl> }} />
-    return retainPresentations(() => acceptedSurface, <section className="agent-surface" data-agent-surface-mode="unconfirmed">
-      {preSnapshotHeader()}
+    return retainPresentations(target => cloneElement(acceptedSurface, { actions: unobservedActionsAt(presentationOrigin(target), workbenchSessionStageHostId(target, linkOrigin.regionId!)) }), <section className="agent-surface" data-agent-surface-mode="unconfirmed">
+      {sessionHeader()}
       {takeoverSurface}
       <div className="agent-body">{acceptedSurface}</div>
       {!readOnly ? <AgentSessionComposer reading={mailboxReading} key={sessionId} sessionId={sessionId} visible={visible} disabled {...(tabName ? { tabName } : {})} /> : null}
@@ -833,7 +855,7 @@ export function SessionPane({
     const executorLabel = metadata ? connectingExecutor?.label ?? metadata.executorId : null
     const identityLabel = providerLabel && executorLabel && providerLabel.toLowerCase() !== executorLabel.toLowerCase()
       ? `${providerLabel} · ${executorLabel}` : providerLabel
-    const resumeAction = projectionPolicy.allowsRecovery && recoveryActionSource ? <SessionRecoveryActions source={recoveryActionSource} onTakeOver={onTakeOver}
+    const resumeActionAt = (origin = mailboxOrigin, displayId: string | null = null) => projectionPolicy.allowsRecovery && recoveryActionSource ? <SessionRecoveryActions source={recoveryActionSource} onTakeOver={takeOverAt(origin, displayId)}
       restoring={recovering} restoreIcon={continuationUnconfirmed ? 'action.refresh' : 'action.resume-session'} workingLabel={continuationUnconfirmed ? 'Checking…' : 'Restoring…'} restoreLabel={continuationUnconfirmed ? 'Check original restore' : 'Restore original'} onRestore={() => void reopenRetained()} /> : null
     const reopenCause = retainedReopenError ?? (pendingReopen
       ? pendingReopen.operationId ? 'Core retains the original continue operation. Its result is not yet confirmed.'
@@ -855,16 +877,16 @@ export function SessionPane({
             enabled: visible && !parked, opened: true, readCaptured: true }}
           renderRecordActions={renderConversationLandmarkAction}
           renderReadingTools={(active, revealLoaded) => <ConversationLandmarkList reference={reference} active={active} reveal={revealLoaded}/>}
-          readingAction={resumeAction} readingNotice={reopenNotice ?? <div className="activity-feed__read-notice" role="status">
+          readingAction={resumeActionAt()} readingNotice={reopenNotice ?? <div className="activity-feed__read-notice" role="status">
             {metadata ? `${identityLabel}. This Session is closed; its original conversation remains readable.`
               : 'Core confirmed this Session was closed. Its saved identity is retained.'}</div>}
           workspaceRoot={metadata?.workspacePath ?? ''} homeDir={fileContext.homeDir}
           readPastedImage={readPastedImage} readHistoryResource={readHistoryResource} openWorkspaceFile={openWorkspaceFile}
           openHttpLink={onProseLinkClick} describeSpeaker={describeSpeaker} />
-    return retainPresentations(target => cloneElement(retainedConversation, { conversationReading: {
+    return retainPresentations(target => cloneElement(retainedConversation, { readingAction: resumeActionAt(presentationOrigin(target), workbenchSessionStageHostId(target, linkOrigin.regionId!)), conversationReading: {
       ...retainedConversation.props.conversationReading, enabled: target.visible !== false && !parked
     } }), <section ref={surfaceRef} className="agent-surface" data-agent-surface-mode="retained-history">
-      {preSnapshotHeader(label, executorLabel ?? providerLabel ?? 'Executor unknown')}
+      {sessionHeader({ name: label, executorLabel: executorLabel ?? providerLabel ?? 'Executor unknown' })}
       {takeoverSurface}
       <div className="agent-body" data-observation-surface="workflow"><div className="agent-terminal-stage">
         {retainedConversation}
@@ -887,9 +909,9 @@ export function SessionPane({
           actions={unobservedActions}
           visible={visible && !parked}
         />
-    return retainPresentations(() => cloneElement(connectingSurface, { visible: false }),
+    return retainPresentations(target => cloneElement(connectingSurface, { visible: false, actions: unobservedActionsAt(presentationOrigin(target), workbenchSessionStageHostId(target, linkOrigin.regionId!)) }),
       <section className="agent-surface" data-agent-surface-mode="connecting">
-          {preSnapshotHeader()}
+          {sessionHeader()}
           {takeoverSurface}
           {connectingSurface}
         {surfaceKind === 'agent' && !pendingLaunch && historyCatalogue.error ? <ServiceWindowNotice notice={{
@@ -944,13 +966,13 @@ export function SessionPane({
   }
 
   // The history notice and the underlying Session share one Core-reasoned action.
-  const agentRecoveryControls = !projectionPolicy.allowsRecovery ? (
+  const agentRecoveryControlsAt = (origin = mailboxOrigin, displayId: string | null = null) => !projectionPolicy.allowsRecovery ? (
     <span>Open this Session in its Project to restore it.</span>
   ) : detachedFrontendNotice ? (
     <button type="button" className="small-button" disabled={recovering || refreshing} onClick={() => void recover()}>
       <ThemeActionResumeSessionIcon size={12} /> {recovering ? 'Reconnecting…' : 'Resume'}
     </button>
-  ) : recoveryActionSource ? <SessionRecoveryActions source={recoveryActionSource} onTakeOver={onTakeOver} restoring={recovering || refreshing}
+  ) : recoveryActionSource ? <SessionRecoveryActions source={recoveryActionSource} onTakeOver={takeOverAt(origin, displayId)} restoring={recovering || refreshing}
     workingLabel={refreshing ? 'Re-reading…' : 'Restoring…'}
     restoreIcon={continuityNotice && continuityRefreshEnabled(continuityNotice) ? 'action.refresh' : continuityNotice?.remedy.kind === 'wait' ? 'status.waiting' : 'action.resume-session'}
     restoreDisabled={continuityNotice ? !(continuityRetryEnabled(continuityNotice) || continuityRefreshEnabled(continuityNotice)) : false}
@@ -982,10 +1004,11 @@ export function SessionPane({
     actions={projectionPolicy.allowsRecovery ? <button type="button" className="small-button" disabled={refreshing}
       onClick={() => void refreshOriginal()}><ThemeActionRefreshIcon size={12} /> {refreshing ? 'Checking…' : 'Refresh observation'}</button> : undefined}
   /> : null
-  const agentRecoveryAction = <>{agentRecoveryControls}{needsSessionSurface ? <button type="button" className="small-button"
+  const agentRecoveryActionAt = (origin = mailboxOrigin, displayId: string | null = null) => <>{agentRecoveryControlsAt(origin, displayId)}{needsSessionSurface ? <button type="button" className="small-button"
     onClick={() => { setRetainedOutputKey(readingRetainedOutput ? null : activitySourceKey); setHistoryOpen(false); useAppStore.getState().setViewMode(sessionId, 'terminal') }}>
     {readingRetainedOutput ? 'Back to recovery' : 'Read original output'}
   </button> : null}</>
+  const agentRecoveryAction = agentRecoveryActionAt()
   const coreRestorePresentation = session.kind === 'agent' ? agentContinuityPresentation(session) : null
   const frontendOperation = session.kind === 'agent' && failedFrontend
     ? session.continuityOperations?.[frontendRecoveryIntent.current?.operationId ?? ''] ?? session.continuity : undefined
@@ -1082,10 +1105,15 @@ export function SessionPane({
     {session.kind === 'agent' && renderPresentationFrame ? presentations.map(target => <SessionActivityPresentation
       key={JSON.stringify([activitySourceKey, target.hostId, target.reference!.displayWorkspaceId, target.reference!.groupId, target.reference!.tabId, linkOrigin.regionId])}
       target={target} regionId={linkOrigin.regionId!} sourceKey={activitySourceKey}
+      header={presentationHeader(target, true)}
+      historyOpen={presentationHistory?.displayId === workbenchSessionStageHostId(target, linkOrigin.regionId!)}
+      historyReturnTrigger={presentationHistory?.trigger} onCloseHistory={() => setPresentationHistory(null)}
+      historyReturnLabel={viewMode === 'terminal' ? 'Session' : 'Activity'}
+      takeoverSurface={takeoverAt(presentationOrigin(target), target.visible !== false, workbenchSessionStageHostId(target, linkOrigin.regionId!))}
       sessionId={session.id} name={agentInputIdentity!} executorLabel={agentInputExecutor!}
       executionHost={regionExecutionHost(session, configuredExecutionHost)}
-      activity={{ ...activityProps, renderReadingTools: active => <ConversationLandmarkList reference={session.control} active={active} reveal={reference => revealConversationItem(reference, target)}/>, revealRequest: revealRequest?.displayId === workbenchSessionStageHostId(target, linkOrigin.regionId!) ? revealRequest : null }} eligible={viewMode !== 'terminal' && !pendingAgentRestore}
-      recovery={pendingAgentRestore ? cloneElement(restoreSurface, { supplement: null }) : undefined}
+      activity={{ ...activityProps, renderReadingTools: active => <ConversationLandmarkList reference={session.control} active={active} reveal={reference => revealConversationItem(reference, target)}/>, revealRequest: revealRequest?.displayId === workbenchSessionStageHostId(target, linkOrigin.regionId!) ? revealRequest : null }} eligible={presentationHistory?.displayId === workbenchSessionStageHostId(target, linkOrigin.regionId!) || viewMode !== 'terminal' && !pendingAgentRestore}
+      recovery={pendingAgentRestore ? cloneElement(restoreSurface, { supplement: null, actions: agentRecoveryActionAt(presentationOrigin(target), workbenchSessionStageHostId(target, linkOrigin.regionId!)) }) : undefined}
       readOnly={readOnly} resourceOrigin={linkOrigin}
       {...(hasAgentComposer ? { onAnnotate: annotateMessage } : {})}
       renderFrame={renderPresentationFrame} selectRegion={() => onPresentationSelected?.(target)}
@@ -1097,20 +1125,10 @@ export function SessionPane({
       className="agent-surface"
       data-agent-surface-mode={session.kind === 'agent' ? viewMode : 'terminal'}
     >
-      <AgentRegionHeader
-        name={session.kind === 'agent' ? agentInputIdentity! : session.label}
-        executorLabel={session.kind === 'agent' ? agentInputExecutor! : 'Shell'} sessionId={session.id}
-        sessionKind={session.kind} executionHost={regionExecutionHost(session, configuredExecutionHost)}
-        regionId={linkOrigin.regionId} readOnly={readOnly}
-        {...(session.kind === 'agent' ? { nativeSession: session } : {})}
-        currentConversationActions={currentConversationActions}
-        onTakeOver={onTakeOver}
-        portalTargetId={headerPortalTargetId}
-        onHistory={session.kind === 'agent' && !historyOpen && !inlineHistory ? () => openHistory() : undefined}
-        onRefreshObservation={session.kind === 'agent' && observationMounted ? () => void refresh(true) : undefined}
-        refreshing={refreshing}
-        resultReview={session.kind === 'agent' && !hasAgentComposer ? resultReview : null}
-      />
+      {sessionHeader({
+        onHistory: session.kind === 'agent' && !historyOpen && !inlineHistory ? () => openHistory() : undefined,
+        resultReview: session.kind === 'agent' && !hasAgentComposer ? resultReview : null
+      })}
       {takeoverSurface}
       {launchNotice}
       {session.kind === 'agent' ? <ContinuitySupervisionNotice key={activitySourceKey} session={session} readOnly={!projectionPolicy.allowsRecovery} /> : null}
