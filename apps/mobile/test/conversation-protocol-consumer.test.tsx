@@ -635,6 +635,54 @@ it('authenticated Mobile reads confirmed source labels from the original Core ev
   expect(f.writes).toHaveLength(0);expect(f.submit).not.toHaveBeenCalled();expect(f.reply).not.toHaveBeenCalled()
 })
 
+it('authenticated Mobile admits new neighbors around a selected captured version and holds only its replacement body', async () => {
+  const f = await authenticatedFixture()
+  const original: AgentTimelineItem = { id: 'mobile-selected-captured', agentSessionId: sid, kind: 'assistant_message',
+    source: 'native-hook', status: 'complete', title: 'Original captured answer', content: 'Original mobile captured words stay selected.',
+    createdAt: _historyTailFixtureEpoch(0, 0, 1), updatedAt: _historyTailFixtureEpoch(0, 0, 1) }
+  await f.store.applyTimelineMutation({ type: 'append', agentSessionId: sid, item: original })
+  const frames: import('@agentmux/core/conversation').ConversationChangesPage[] = [], readChanges = f.core.readConversationChanges.bind(f.core)
+  vi.spyOn(f.core, 'readConversationChanges').mockImplementation(async (...args) => {
+    const page = await readChanges(...args); if (page.window.complete) frames.push(page); return page
+  })
+  const view = await mount(f.surface()), bodyNode = () => view.element.querySelector<HTMLElement>('[data-message-id="mobile-selected-captured"] .log-turn__body')
+  const disclosure = () => view.element.querySelector<HTMLButtonElement>('[data-captured-reply-observation="mobile-selected-captured"] .conversation-reply-observation__toggle')
+  await vi.waitFor(() => expect(disclosure(), view.element.textContent ?? '').not.toBeNull())
+  await click(disclosure()!)
+  await vi.waitFor(() => { expect(bodyNode()?.textContent).toBe(original.content); expect(frames.length).toBeGreaterThan(0) })
+  await paste(view.element, 'Unsent original mobile draft')
+  const body = bodyNode()!, text = body.querySelector('p')!.firstChild!, range = document.createRange(), selection = window.getSelection()!
+  range.selectNodeContents(text); selection.removeAllRanges(); selection.addRange(range)
+  closes.push(async () => { selection.removeAllRanges() })
+  const publish = async (item: AgentTimelineItem) => Reflect.get(f.core, 'persistAndPublishTimeline').call(f.core,
+    { type: 'upsert', agentSessionId: sid, item }, { source: 'agentmux', observedAt: item.updatedAt }, 'local')
+  await act(async () => publish({ ...original, id: 'mobile-captured-neighbor', content: 'A new independent mobile neighbor.',
+    createdAt: _historyTailFixtureEpoch(0, 0, 2), updatedAt: _historyTailFixtureEpoch(0, 0, 2) }))
+  await vi.waitFor(() => expect(view.element.textContent, 'An unchanged selected version must not hold an unrelated neighbor').toContain('A new independent mobile neighbor.'))
+  expect(bodyNode()).toBe(body); expect(text.isConnected).toBe(true)
+  expect(selection.getRangeAt(0)).toBe(range); expect(range.toString()).toBe(original.content)
+  const changed = { ...original, content: 'A later body for the same mobile captured record.', updatedAt: _historyTailFixtureEpoch(0, 0, 3) }
+  await act(async () => publish(changed))
+  await vi.waitFor(async () => {
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
+    expect(frames.some(frame => frame.items.some(entry => entry.kind === 'item' && entry.item.records.some(record =>
+      record.original.kind === 'captured' && record.original.item.id === original.id && record.original.item.content === changed.content))),
+    'The authenticated Core frame must contain the replacement before DOM protection is asserted').toBe(true)
+  })
+  expect(bodyNode()).toBe(body); expect(body.textContent, 'The selected original version stays readable').toBe(original.content)
+  expect(view.element.textContent).not.toContain(changed.content); expect(text.isConnected).toBe(true)
+  expect(selection.getRangeAt(0)).toBe(range); expect(range.toString()).toBe(original.content)
+  await act(async () => { selection.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) })
+  await vi.waitFor(() => expect(bodyNode()?.textContent, 'Clearing the original Range admits the pending replacement').toBe(changed.content))
+  expect(view.element.querySelectorAll('[data-message-id="mobile-selected-captured"]')).toHaveLength(1)
+  expect(disclosure()?.getAttribute('aria-expanded')).toBe('true')
+  expect(view.element.textContent).toContain('A new independent mobile neighbor.')
+  expect(editor(view.element).textContent).toBe('Unsent original mobile draft')
+  expect(f.client.agentSession(sid).run.runId).toBe(RUN_ID)
+  expect(f.authenticated.length).toBeGreaterThan(0); expect(new Set(f.authenticated)).toEqual(new Set([f.device.deviceId]))
+  expect(f.writes).toHaveLength(0); expect(f.submit).not.toHaveBeenCalled(); expect(f.reply).not.toHaveBeenCalled(); expect(f.openTerminal).not.toHaveBeenCalled()
+})
+
 it('authenticated Mobile shows submission activity only for the original exact source read and settles its canonical card', async () => {
   const body = 'Original shared submission stays distinct from equal native content.'
   const row = (id: string) => ({ type: 'user', uuid: id, sessionId: 'native-main', message: { role: 'user', content: body } })

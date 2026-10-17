@@ -7,6 +7,7 @@ import { ConversationView } from '@agentmux/client-ui/components/ConversationVie
 import { canReplaceCapturedWindow } from '@agentmux/client-ui/captured-conversation-page'
 import { conversationPagePortFixture } from './helpers/conversation-page-port-fixture'
 import { createClientUiRoot } from './helpers/client-ui-render'
+import { AgentMuxError } from '../../../packages/core/src/errors'
 import { api } from '../src/renderer/src/lib/api'
 import type { AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
 const closes: Array<() => unknown | Promise<unknown>> = []
@@ -87,4 +88,19 @@ it('captured admission compares the displayed original version even when its sou
   expect(canReplaceCapturedWindow(host, previous, false, previous)).toBe(true)
   expect(canReplaceCapturedWindow(host, next, false, previous), 'Same identity does not certify unchanged selected content').toBe(false)
   window.getSelection()!.removeAllRanges(); expect(canReplaceCapturedWindow(host, next, false, previous)).toBe(true)
+})
+
+it('a held source failure remains an operation service error while displayed coverage stays with its accepted body', async () => {
+  const x = await fixture(), accepted = x.view().snapshot!
+  x.hold(true)
+  vi.mocked(x.f.client.readSessionHistoryChanges).mockRejectedValueOnce(new AgentMuxError('Exact native read temporarily unavailable.', 'AGENT_SESSION_HISTORY_UNAVAILABLE'))
+  await act(async () => { await x.view().changes() })
+  expect(x.view().held).toBe(true); expect(x.view().snapshot).toBe(accepted)
+  expect(x.view().snapshot!.coverage).toEqual(accepted.coverage)
+  expect(x.view().error, 'An accurately failed current read needs a service action even while its frame is held').toBeTruthy()
+  expect(x.view().error!.message).toContain('Exact native read temporarily unavailable')
+  expect(x.view().observationError).toBeNull(); expect(x.host.textContent).toContain('Original selected body')
+  x.hold(false); await act(async () => x.view().acceptHeld())
+  expect(x.view().snapshot!.coverage.find(source => source.source.kind === 'native')!.current).toBe('unavailable')
+  expect(x.view().error).toBeTruthy()
 })

@@ -11,6 +11,7 @@ export default defineConfig({ ...base, cacheDir: '.cache/conversation-reading-tr
     if (!owners.includes(path)) return
     const mutation = process.env.AGENTMUX_TRANSACTION_MUTATION
     const edits: Record<string, [string, string, string]> = {
+      'hide-held-failure': [owners[0]!, 'current.held && sourceError ? { error: sourceError, errorOperation: kind }', 'false ? { error: sourceError, errorOperation: kind }'],
       'mixed-metadata': [owners[0]!, '            newerAvailable: kind ===', '            historical: current.historical, newerAvailable: kind ==='],
       'lose-held-intent': [owners[0]!, 'beforeCommit.current?.(frame.snapshot, frame.operation,', "beforeCommit.current?.(frame.snapshot, 'changes',"],
       'resume-overwrites-intent': [owners[0]!, "(kind === 'resume' || kind === 'changes') && current.pending?.snapshot.window.id", "kind === 'changes' && current.pending?.snapshot.window.id"],
