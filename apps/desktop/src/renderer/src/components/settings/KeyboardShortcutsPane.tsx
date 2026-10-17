@@ -26,11 +26,12 @@ function searchableChord(row: CheatSheetRow): string {
 
 export function KeyboardShortcutsPane({ group: groupId }: { group?: CheatSheetGroupId } = {}) {
   const [query, setQuery] = useState('')
+  const [selectedGroup, setSelectedGroup] = useState<CheatSheetGroupId | null>(null)
   const search = useRef<HTMLInputElement>(null)
   const isMac = isMacPlatform()
   const groups = useMemo(() => buildCheatSheet(isMac).filter(group => !groupId || group.id === groupId), [isMac, groupId])
   const terms = query.trim().toLowerCase().split(/[+\s]+/).filter(Boolean)
-  const visible = groups.map(group => ({ ...group, rows: group.rows.filter(row => {
+  const visible = groups.filter(group => groupId || !selectedGroup || group.id === selectedGroup).map(group => ({ ...group, rows: group.rows.filter(row => {
     const text = `${row.label} ${row.description ?? ''} ${searchableChord(row)} ${group.title}`.toLowerCase()
     return terms.every(term => text.includes(term))
   }) })).filter(group => group.rows.length > 0)
@@ -43,10 +44,14 @@ export function KeyboardShortcutsPane({ group: groupId }: { group?: CheatSheetGr
       <label className="keyboard-shortcuts__search"><ThemeActionSearchIcon size={14} aria-hidden="true" /><TextInput ref={search} aria-label="Find a command or shortcut" value={query} onChange={event => setQuery(event.target.value)} placeholder="Find a command or shortcut" />{query ? <button type="button" aria-label="Clear shortcut search" onClick={clearSearch}><ThemeActionClearIcon size={13} /></button> : null}</label>
       <span className="keyboard-shortcuts__count" role="status">{count} {count === 1 ? 'binding' : 'bindings'}</span>
     </div>
+    {!groupId ? <div className="keyboard-shortcuts__contexts" aria-label="Shortcut context">
+      <button type="button" aria-pressed={selectedGroup === null} onClick={() => setSelectedGroup(null)}>All contexts</button>
+      {groups.map(group => <button key={group.id} type="button" aria-pressed={selectedGroup === group.id} onClick={() => setSelectedGroup(group.id)}>{group.title}</button>)}
+    </div> : null}
     {count === 0 ? <div className="keyboard-shortcuts__empty"><p>No shortcuts match “{query}”.</p><button type="button" className="small-button" onClick={clearSearch}>Clear search</button></div> : null}
     {visible.map(group => <section key={group.id} className="keyboard-shortcuts__group" data-shortcut-group={group.id}>
       {!groupId ? <header><h3>{group.title}</h3><p>{scopeDescription(bindingById(group.rows[0]!.id)!)}</p></header> : null}
-      <ul>{group.rows.map(row => <li key={row.id} data-binding-id={row.id}>
+      <ul>{group.rows.map(row => <li key={row.id} data-binding-id={row.id} data-tab-selection={row.id.startsWith('workbench.select-tab.') || undefined}>
         <span className="keyboard-shortcuts__label">{row.label}{row.description ? <small>{row.description}</small> : null}</span><span className="keyboard-shortcuts__chord">{row.keys.map((token, index) => <kbd key={index}>{token}</kbd>)}</span>
       </li>)}</ul>
     </section>)}
