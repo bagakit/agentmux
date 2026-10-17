@@ -811,7 +811,13 @@ an executing-owner process restart. Explicit `renew` abandons the current
 authentication and requests a new challenge inside the same intent. The old init,
 step receipts and encrypted snapshots remain retained; renewal never creates an
 application. Private cookies are selected anew by a mature CookieJar for each
-qualified HTTPS destination. The supported console encodings are direct literal
+qualified HTTPS destination. The Console redirect chain admits the exact
+`accounts.larkoffice.com` and `login.feishu.cn` HTTPS issuers in addition to the
+original account, landing and Console hosts. Their scoped cookies and previous
+hop remain available when the original encrypted snapshot is reopened. These
+issuers are transit sources only: account bootstrap is accepted only at
+`https://open.feishu.cn` or `https://open.larkoffice.com`; the initial cross-login
+entry hosts remain unchanged. The supported console encodings are direct literal
 assignments and the observed anonymous, synchronous, zero-argument literal
 initializer. Both are parsed without executing page JavaScript; arbitrary
 programs, missing stable IDs, inert or conflicting responses stay unknown. The
