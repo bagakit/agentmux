@@ -828,7 +828,7 @@ async function relaunchInstalledApplication(appPath) {
 }
 
 // Tab/Region arrays are registries. Layout arrays retain their presentation order.
-function workbenchIdentity(workbench) {
+function workbenchIdentity(workbench, { expectedAfterRestart = false } = {}) {
   return { activeWorkspaceId: workbench.activeWorkspaceId, mainSurface: workbench.mainSurface, focus: workbench.focus,
     layouts: workbench.layouts, tabs: workbench.tabs.map(tab => ({ ...tab, regions: tab.regions.map(region => {
       if (region.kind === 'agent' || region.kind === 'terminal') {
@@ -837,7 +837,8 @@ function workbenchIdentity(workbench) {
       }
       if (region.kind === 'browser') {
         const { loading, error, navigationId, nativeOwner, title, ...descriptor } = region
-        return descriptor
+        // Private pages retain their placement, but their URL must not survive restart.
+        return expectedAfterRestart && descriptor.mode === 'private' ? { ...descriptor, url: 'about:blank' } : descriptor
       }
       return region
     }).sort((a, b) => a.regionId < b.regionId ? -1 : a.regionId > b.regionId ? 1 : 0) }))
@@ -856,7 +857,7 @@ async function qualifyUi(appPath, before = null, { outgoing = false } = {}) {
     assert(observation.main.renderer.identity.shell === bundled.identity.shell && observation.main.renderer.identity.ctxmux === bundled.identity.ctxmux,
       'The loaded Renderer does not belong to this application contract.')
     if (before) {
-      assert(isDeepStrictEqual(workbenchIdentity(observation.workbench), workbenchIdentity(before.workbench)),
+      assert(isDeepStrictEqual(workbenchIdentity(observation.workbench), workbenchIdentity(before.workbench, { expectedAfterRestart: true })),
         'The original workbench, Region descriptors or focus have not been restored.')
       for (const tab of before.workbench.tabs) for (const region of tab.regions) {
         const restored = observation.workbench.tabs.find(candidate => candidate.id === tab.id)?.regions.find(candidate => candidate.regionId === region.regionId)
