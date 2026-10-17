@@ -17,7 +17,7 @@ export function SettingsSidebarNavigation({ groups, selected, activeGroup, navig
   navigationKey: object
   onOpen: (id: string) => void
 }) {
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(['preferences', 'resources', ...(activeGroup ? [activeGroup] : [])]))
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(groups.map(group => group.id)))
   const previousNavigation = useRef({ activeGroup, navigationKey, searching })
   useLayoutEffect(() => {
     const previous = previousNavigation.current
@@ -35,9 +35,10 @@ export function SettingsSidebarNavigation({ groups, selected, activeGroup, navig
       <OverviewIcon size={15} /><span><strong>Overview</strong></span>
     </button> : null}
     {groups.map(group => {
-      const open = searching || expanded.has(group.id)
-      return <div key={group.id} className="settings-nav-section" data-settings-group={group.id}>
-        {searching ? <p className="settings-nav-group">{group.title}</p> : <button type="button" className="settings-nav-group" data-settings-group-toggle={group.id} aria-expanded={open} aria-controls={`settings-nav-${group.id}`} title={group.description}
+      const standalone = 'standalone' in group && group.standalone
+      const open = standalone || searching || expanded.has(group.id)
+      return <div key={group.id} className="settings-nav-section" data-settings-group={group.id} data-standalone={standalone || undefined}>
+        {standalone ? null : searching ? <p className="settings-nav-group">{group.title}</p> : <button type="button" className="settings-nav-group" data-settings-group-toggle={group.id} aria-expanded={open} aria-controls={`settings-nav-${group.id}`} title={group.description}
           onClick={() => setExpanded(current => { const next = new Set(current); if (next.has(group.id)) next.delete(group.id); else next.add(group.id); return next })}>
           <span>{group.title}</span><DisclosureIcon size={12} aria-hidden="true" />
         </button>}

@@ -8,10 +8,10 @@ export const SETTINGS_GROUPS = [
   { id: 'preferences', title: 'Preferences', description: 'Your profile and everyday defaults.' },
   { id: 'browser-use', title: 'Browser use', description: 'Browsing and Agent interaction.' },
   { id: 'message-tool', title: 'Message Tool', description: 'Input, collaboration and reusable instructions.' },
-  { id: 'remote', title: 'Remote', description: 'Execution environments and device access.' },
+  { id: 'remote', title: 'Remote', description: 'Hosts and device access.' },
   { id: 'conversation-channels', title: 'Conversation Channels', description: 'Conversations in the app and beyond.' },
   { id: 'toolkit', title: 'Mods', description: 'Tools that extend your workspace.' },
-  { id: 'resources', title: 'Resources', description: 'Reusable Agent configurations.' },
+  { id: 'agents', title: 'Agents', description: 'Reusable Agent configurations.', standalone: true },
   { id: 'work', title: 'Work', description: 'Spaces for doing, exploring and keeping.' },
   { id: 'mote', title: 'Mote', description: 'Your personal collaborators.' }
 ] as const

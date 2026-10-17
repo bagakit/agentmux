@@ -17,11 +17,11 @@ async function saveHosts(hosts: HostConfig[], workspaces: WorkspaceRecord[], exp
 export const hostsSettingsModule = {
   id: 'hosts',
   group: 'remote',
-  title: 'Environments',
-  description: 'Your environments, work, and runtime observations.',
+  title: 'Hosts',
+  description: 'Local and SSH hosts, projects, and connections.',
   icon: ThemeObjectHostIcon,
   keywords: 'topology monitor runtime host hosts ssh remote hostname user port key test connection apps access trust permission environment project folder workspace worktree register open',
-  savedSummary: (config) => `${config.hosts.length} ${config.hosts.length === 1 ? 'environment' : 'environments'}`,
+  savedSummary: (config) => `${config.hosts.length} ${config.hosts.length === 1 ? 'host' : 'hosts'}`,
   Pane({ config, active, onClose, navigationRequest }) {
     return <HostSettingsPane config={config} onSave={saveHosts} active={active} onClose={onClose} navigationRequest={navigationRequest} />
   }
