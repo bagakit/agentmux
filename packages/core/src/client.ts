@@ -2563,17 +2563,27 @@ export class AgentMuxClient {
         coverage: cut.coverage.filter(value => scope.sources.some(source => isDeepStrictEqual(source, value.source))) }, input)
       const source = opening.scope.sources.find(s => s.kind === 'native')
       if (source?.kind === 'native') {
+        const checkpointCoverage = opening.coverage
+        const unavailable = (code: string, message: string) => {
+          // The opening includes failures that happened before it was returned.
+          // Keep other sources and their checkpoint coverage intact.
+          opening = { ...opening!, coverage: checkpointCoverage.map(value => isDeepStrictEqual(value.source, source)
+            ? { ...value, current: code.includes('UNSUPPORTED') ? 'unsupported' : 'unavailable', gaps: [...value.gaps, { code, message }] } : value) }
+          emit({ ...ref, sourceHostId: ref.hostId, source, kind: 'unavailable', code, message })
+        }
         try {
           native = await this.observeSessionHistory(input.agentSessionId, observation => {
             if (observation.source && (observation.source.providerId !== source.providerId || observation.source.nativeSessionId !== source.nativeSessionId)) return
-            emit({ ...ref, sourceHostId: ref.hostId, source, kind: observation.kind, ...(observation.kind === 'unavailable' ? { code: observation.code, message: observation.message } : {}) })
+            if (observation.kind === 'unavailable') unavailable(observation.code, observation.message)
+            else emit({ ...ref, sourceHostId: ref.hostId, source, kind: observation.kind })
           }, { signal: controller.signal, ...(owner.port.descriptor.history?.nativeHandle?.kind === 'provider' &&
             source.nativeSessionId === owner.port.descriptor.history.previousNativeHandle?.sessionId ? { nativeSource: 'previous' as const } : {}) })
-          nativeEnded = () => emit({ ...ref, sourceHostId: ref.hostId, source, kind: 'unavailable', code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED', message: 'The original native observation ended; its scope is retained and captured changes remain readable.' })
+          nativeEnded = () => unavailable('AGENT_SESSION_HISTORY_SOURCE_CHANGED', 'The original native observation ended; its scope is retained and captured changes remain readable.')
           native.closed?.addEventListener('abort', nativeEnded, { once: true })
+          if (native.closed?.aborted) nativeEnded()
         } catch (error) {
           controller.signal.throwIfAborted()
-          emit({ ...ref, sourceHostId: ref.hostId, source, kind: 'unavailable', code: error instanceof AgentMuxError ? error.code : 'AGENT_SESSION_HISTORY_OBSERVATION_UNAVAILABLE', message: error instanceof Error ? error.message : 'Native observation is unavailable; explicit reading remains available.' })
+          unavailable(error instanceof AgentMuxError ? error.code : 'AGENT_SESSION_HISTORY_OBSERVATION_UNAVAILABLE', error instanceof Error ? error.message : 'Native observation is unavailable; explicit reading remains available.')
         }
       }
       if (pendingCaptured) captured()
