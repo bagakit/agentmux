@@ -4,8 +4,8 @@ import type { CliResult } from './object-cli-rpc.js'
 
 /** Execute the real CLI parser and transport from source, without a dist artifact.
  * This deliberately does not qualify the compiled or installed launcher. */
-export async function runSourceObjectCli(args: readonly string[], env: NodeJS.ProcessEnv, stdin = '', timeoutMs = 15_000): Promise<CliResult> {
-  const loader = new URL('../../../../apps/desktop/scripts/fixtures/performance-failure-evidence/source-loader.mjs', import.meta.url)
+export async function runSourceObjectCli(args: readonly string[], env: NodeJS.ProcessEnv, stdin = '', timeoutMs = 15_000, sourceLoader?: URL): Promise<CliResult> {
+  const loader = sourceLoader ?? new URL('../../../../apps/desktop/scripts/fixtures/performance-failure-evidence/source-loader.mjs', import.meta.url)
   const entry = fileURLToPath(new URL('../../src/agentmux.ts', import.meta.url))
   const registration = `import { register } from 'node:module'; register(${JSON.stringify(loader.href)}, ${JSON.stringify(import.meta.url)});`
   return await new Promise<CliResult>((resolve, reject) => {

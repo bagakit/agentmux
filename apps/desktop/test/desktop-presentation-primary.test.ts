@@ -6,7 +6,7 @@ import { workbenchRegionProjectionSlotId, type WorkbenchProjectionSelection } fr
 import type { WorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 
 const reference: WorkbenchProjectionSelection = { displayWorkspaceId: 'display', groupId: 'group', tabId: 'tab', regionId: 'region' }
-const selection: AgentMuxDesktopSelection = { surface: 'space', mainSurface: 'workbench', goalId: null,
+const selection: AgentMuxDesktopSelection = { surface: 'space', mainSurface: 'workbench', spaceView: 'workbench', goalId: null,
   space: { workspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId,
     regionId: reference.regionId, spaceId: 'space', zoneId: 'zone', topicId: null } }
 const tab: WorkbenchTab = { id: 'tab', workspaceId: 'resource', titleRegionId: 'region',
@@ -23,7 +23,7 @@ beforeEach(() => {
   panel = document.createElement('aside'); panel.setAttribute('data-pmo-teams-topic-floating', '')
   document.body.append(main, panel)
   dispose = installDesktopPresentationOwner(() => ({ loading: false, overlays: { settings: false, quickSwitcher: false },
-    floating: { state: 'pinned', topicId: 'topic', tabId: 'tab' } }))
+    floating: { state: 'pinned', topicId: 'topic', tabId: 'tab', regionId: 'region' } }))
 })
 afterEach(() => { dispose(); main.remove(); panel.remove(); vi.restoreAllMocks() })
 
