@@ -17,7 +17,7 @@ export const AGENTMUX_HOSTED_METHODS = [
   'createTerminal', 'attachTerminal', 'refreshRunAttachment', 'readRunReplay',
   'removeTerminal', 'releaseRunAttachment', 'writeTerminal', 'resizeTerminal', 'signalTerminal', 'stopTerminal',
   'createAgent', 'createAgentWithDelivery', 'resolveAgentCreationSessionId', 'inspectAgentCreation', 'reattachAgent', 'ensureAgentContinuity', 'controlAgentContinuity',
-  'restartAgent', 'inspectAgentRestart', 'resumeAgent', 'reopenAgent', 'reconcileAgentReopen', 'respawnAgent', 'writeAgent', 'pasteAgent', 'submitAgentPrompt', 'submitAgentMessage', 'saveAgentFuturePromptIntent', 'replySessionQuestion',
+  'restartAgent', 'inspectAgentRestart', 'resumeAgent', 'reopenAgent', 'reconcileAgentReopen', 'respawnAgent', 'writeAgent', 'pasteAgent', 'submitAgentPrompt', 'submitAgentMessage', 'notifyMessages', 'saveAgentFuturePromptIntent', 'replySessionQuestion',
   'respondAgentInteraction', 'inspectAgentInteractionOperation', 'setAgentPosture', 'resizeAgent', 'signalAgent', 'stopAgent',
   'authorizeAgentCaller', 'authorizeRetainedAgentCaller', 'authorizeAgentMessage', 'checkDeliveries', 'ackDeliveryBatch',
   'answerAsk', 'cancelAsk', 'startDiscussion', 'handOff', 'openDispatch', 'recordDispatchEvent', 'showDispatch', 'readMessage', 'listMessages', 'readDispatch', 'listDispatches'
@@ -35,7 +35,7 @@ export const AGENTMUX_HOSTED_RUNTIME_METHODS = [
 export type AgentMuxHostedMethod = typeof AGENTMUX_HOSTED_METHODS[number]
 type HostedArguments<M extends AgentMuxHostedMethod> = M extends 'trustCreationSource'
   ? [input: Parameters<AgentMuxClient['trustCreationSource']>[0]]
-  : M extends 'readAgentInputMailbox' | 'controlAgentContinuity' | 'submitAgentPrompt' | 'submitAgentMessage' | 'rejoinAgentInputWaiting' | 'respondAgentInteraction'
+  : M extends 'readAgentInputMailbox' | 'controlAgentContinuity' | 'submitAgentPrompt' | 'submitAgentMessage' | 'notifyMessages' | 'rejoinAgentInputWaiting' | 'respondAgentInteraction'
     ? [input: Parameters<AgentMuxClient[M]>[0]] : Parameters<AgentMuxClient[M]>
 export type AgentMuxHostedInvocation = { [M in AgentMuxHostedMethod]: {
   method: M; args: HostedArguments<M>

@@ -248,7 +248,15 @@ export class AgentMuxHostedRuntimeService {
     }
     const continuityControl = invocation.method === 'controlAgentContinuity'
     if (continuityControl && invocation.args.length !== 1) throw new AgentMuxError('Recovery control accepts one exact packet; authority is supplied by the original Host.', 'INVALID_CONTROL_REQUEST')
-    const controlledInput = invocation.method === 'submitAgentPrompt' || invocation.method === 'submitAgentMessage' || invocation.method === 'rejoinAgentInputWaiting' || invocation.method === 'respondAgentInteraction'
+    if (invocation.method === 'notifyMessages' && (context.caller || !context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError(
+      'Immediate Inbox notification requires an explicit trusted user/device action.', 'CONTROL_PERMISSION_DENIED')
+    let messageIntake = false
+    if (invocation.method === 'submitAgentMessage' && invocation.args[0]?.envelope?.sender?.kind === 'agent-session' &&
+        (invocation.args[0].execution ?? 'default') === 'default' && invocation.args[0].admissionIntent === undefined) {
+      const retained = await this.client.readMessage({ messageId: invocation.args[0].envelope.messageId })
+      messageIntake = retained === null || retained.deliveryMode === 'reference'
+    }
+    const controlledInput = invocation.method === 'submitAgentPrompt' || invocation.method === 'submitAgentMessage' || invocation.method === 'notifyMessages' || invocation.method === 'rejoinAgentInputWaiting' || invocation.method === 'respondAgentInteraction'
     if (controlledInput && invocation.args.length !== 1) throw new AgentMuxError('Input call context is supplied only by the original Host, never by wire arguments.', 'INVALID_CONTROL_REQUEST')
     const attachment = invocation.method === 'reattachAgent' || invocation.method === 'attachTerminal' || invocation.method === 'refreshRunAttachment'
     // Direct attachment invocations borrow an existing exact event destination;
@@ -256,7 +264,7 @@ export class AgentMuxHostedRuntimeService {
     const original = this.consumers.get(id)
     context.signal?.throwIfAborted()
     if (RUNTIME_METHODS.has(invocation.method)) await observe(this.client.connectRuntime(), context.signal)
-    else if (!OFFLINE_METHODS.has(invocation.method) && !(
+    else if (!messageIntake && invocation.method !== 'notifyMessages' && !OFFLINE_METHODS.has(invocation.method) && !(
       (invocation.method === 'submitAgentPrompt' || invocation.method === 'submitAgentMessage') &&
       ['manual-actor', 'native-conversation'].includes((invocation.args[0] as { admissionIntent?: { kind?: string } } | undefined)?.admissionIntent?.kind ?? ''))) await observe(this.client.connect(), context.signal)
     context.signal?.throwIfAborted(); this.assertFence(p.fence)
