@@ -228,15 +228,18 @@ export class WorktreeService {
       try {
         const paths = [...worktrees.map(value => value.path), ...candidates]
         const aliases = await host.run('node', ['-e',
-          'const fs=require("node:fs");process.stdout.write(JSON.stringify(JSON.parse(process.argv[1]).map(path=>{try{return {path,canonicalPath:fs.realpathSync(path)}}catch{return {path,canonicalPath:null}}})))',
+          'const fs=require("node:fs");process.stdout.write(JSON.stringify(JSON.parse(process.argv[1]).map(path=>{try{return {path,canonicalPath:fs.realpathSync(path),errorCode:null}}catch(error){return {path,canonicalPath:null,errorCode:typeof error?.code==="string"?error.code:null}}})))',
           JSON.stringify(paths)], { ...GIT_DISCOVERY_OPTIONS, env: { ...GIT_NONINTERACTIVE_ENV, NODE_OPTIONS: undefined, NODE_PATH: undefined } })
         this.assertGit(aliases, 'Directory alias observation is unavailable')
         const values: unknown = JSON.parse(aliases.stdout)
         if (!Array.isArray(values) || values.length !== paths.length || values.some((value, index) => !value || value.path !== paths[index] ||
-          value.canonicalPath !== null && typeof value.canonicalPath !== 'string')) throw new Error('Invalid directory alias observation')
+          (value.canonicalPath !== null && typeof value.canonicalPath !== 'string') ||
+          (value.errorCode !== null && typeof value.errorCode !== 'string') ||
+          (value.canonicalPath !== null && value.errorCode !== null))) throw new Error('Invalid directory alias observation')
         // Resolve both native and registered spellings on the same Host: no slash replacement,
         // POSIX filename guessing, or Windows drive/case assumptions in the client.
-        const records = values as { path: string; canonicalPath: string | null }[]
+        const records = values as { path: string; canonicalPath: string | null; errorCode: string | null }[]
+        const registeredPaths = new Set(worktrees.map(value => value.path))
         const byPath = new Map<string, GitWorktree>(), ambiguous = new Set<string>()
         records.slice(0, worktrees.length).forEach((value, index) => {
           if (value.canonicalPath === null) return
@@ -244,7 +247,13 @@ export class WorktreeService {
           byPath.set(value.canonicalPath, worktrees[index]!)
         })
         for (const value of records.slice(worktrees.length)) {
-          if (value.canonicalPath === null) { warnings.push(`Directory alias is unconfirmed: ${value.path}. Refresh to retry.`); continue }
+          if (value.canonicalPath === null) {
+            // An absent optional spelling cannot add an alias. This says nothing about
+            // the saved workspace or its workface; Git-listed missing paths still warn.
+            if ((value.errorCode === 'ENOENT' || value.errorCode === 'ENOTDIR') && !registeredPaths.has(value.path)) continue
+            warnings.push(`Directory alias is unconfirmed: ${value.path}. Refresh to retry.`)
+            continue
+          }
           if (ambiguous.has(value.canonicalPath)) { warnings.push(`Directory alias is ambiguous: ${value.path}. Refresh to retry.`); continue }
           const match = byPath.get(value.canonicalPath)
           if (match && value.path !== match.path) match.aliases.push(value.path)
