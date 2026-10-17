@@ -15,10 +15,17 @@ export const fixtureCredential = 'fixture-application-credential'
 export const fixturePrivateState = 'private-signed-challenge-state'
 export function enrollmentEncryption() {
   const key = Buffer.alloc(32, 9)
-  return { isEncryptionAvailable: () => true,
+  const encryption = { isEncryptionAvailable: () => true,
     encryptString: (v: string) => { const iv = randomBytes(12), c = createCipheriv('aes-256-gcm', key, iv), body = Buffer.concat([c.update(v, 'utf8'), c.final()]); return Buffer.concat([iv, c.getAuthTag(), body]) },
     decryptString: (v: Buffer) => { const c = createDecipheriv('aes-256-gcm', key, v.subarray(0, 12)); c.setAuthTag(v.subarray(12, 28)); return Buffer.concat([c.update(v.subarray(28)), c.final()]).toString() }
   }
+  // Retain the raw fixture helpers for byte assertions and failure injection;
+  // the production owner receives only this asynchronous execution contract.
+  return Object.assign(encryption, {
+    isAsyncEncryptionAvailable: async () => encryption.isEncryptionAvailable(),
+    encryptStringAsync: async (value: string) => encryption.encryptString(value),
+    decryptStringAsync: async (value: Buffer) => ({ result: encryption.decryptString(value), shouldReEncrypt: false })
+  })
 }
 export const enrollmentAvatar = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg=='
 export async function enrollmentFixture(options: Partial<Pick<ConnectionEnrollmentAdapter, 'begin' | 'advance' | 'upload' | 'create' | 'credential'>> = {}) {
