@@ -31,7 +31,7 @@ it('discovers the exact shared semantic catalog through the actual Main owner, p
   expect(discovered).toMatchObject({ resource: 'themes', iconCatalog: catalog, issues: [] })
   if (discovered.resource !== 'themes') throw new Error('Expected a theme catalog response.')
   expect(discovered.iconCatalog).toEqual(catalog)
-  const expected = { 'object.mote': 'mote-identity', 'avatar.badge-spark': 'badge-token', 'action.fork-conversation': 'git-fork', 'object.relationships': 'topology-nodes', 'object.collaboration': 'message-history', 'action.move-to-draft': 'draft-return', 'navigation.space': 'layers', 'navigation.focus': 'focus', 'navigation.goals': 'target', 'navigation.recall': 'book-open', 'object.agent-controlled-browser': 'browser-agent', 'conversation.history-window': 'clock-3', 'action.configure-reconnect': 'clock-3', 'action.upgrade-host': 'arrow-up', 'action.arrange-graph': 'graph-arrange', 'git.pull': 'download', 'git.push': 'upload', 'git.discard-changes': 'trash-2', 'action.collect-sources': 'notebook-text' }
+  const expected = { 'object.mote': 'mote-identity', 'avatar.badge-spark': 'badge-token', 'action.fork-conversation': 'git-fork', 'object.relationships': 'topology-nodes', 'object.collaboration': 'message-history', 'action.move-to-draft': 'draft-return', 'navigation.space': 'layers', 'navigation.focus': 'focus', 'navigation.goals': 'goal-consensus', 'navigation.recall': 'book-open', 'object.agent-controlled-browser': 'browser-agent', 'conversation.history-window': 'clock-3', 'action.configure-reconnect': 'clock-3', 'action.upgrade-host': 'arrow-up', 'action.arrange-graph': 'graph-arrange', 'git.pull': 'download', 'git.push': 'upload', 'git.discard-changes': 'trash-2', 'action.collect-sources': 'notebook-text' }
   for (const [id, defaultGlyph] of Object.entries(expected)) expect(discovered.iconCatalog.icons.find(icon => icon.id === id), `public semantic discovery: ${id}`).toMatchObject({ id, defaultGlyph, label: expect.any(String), description: expect.any(String) })
   expect(discovered.iconCatalog.icons.find(icon => icon.id === 'conversation.tool-result')).toMatchObject({ id: 'conversation.tool-result', defaultGlyph: 'tool-return', label: 'Tool result' })
   expect(discovered.iconCatalog.glyphs).toEqual(expect.arrayContaining(['tool-return', 'mote-mark', 'mote-identity', 'badge-token']))
@@ -70,5 +70,7 @@ it('generates actual CLI help and skill discovery with the theme icon catalog co
   const help = await runCompiledObjectCli(['settings', 'themes', 'ls', '--help'], env)
   expect(help.code, help.stderr).toBe(0); expect(help.stdout).toContain('semantic icon catalog')
   const skill = await runCompiledObjectCli(['settings', '--skill'], env)
-  expect(skill.code, skill.stderr).toBe(0); expect(skill.stdout).toContain('iconCatalog: groups with labels/descriptions')
+  expect(skill.code, skill.stderr).toBe(0); expect(skill.stdout).toContain('Read amux settings --help')
+  const resources = await runCompiledObjectCli(['settings', '--help'], env)
+  expect(resources.code, resources.stderr).toBe(0); expect(resources.stdout).toContain('iconCatalog: groups with labels/descriptions')
 })
