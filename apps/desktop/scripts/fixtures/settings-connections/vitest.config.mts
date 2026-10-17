@@ -10,6 +10,8 @@ assert.ok(evidence, 'Explicit owned evidence directory')
 const mutant = process.env.AGENTMUX_CONNECTIONS_MUTANT ?? 'baseline'
 const base = 'apps/desktop/src/renderer/src/components/settings/'
 const edits: Record<string, { file: string; before: string; after: string }> = {
+  'link-order': { file: base + 'host-network-view.ts', before: 'policy.jumps.entries()', after: '[...policy.jumps].reverse().entries()' },
+  'link-source': { file: base + 'HostNetworkMap.tsx', before: 'addresses={observer.interfaces}', after: 'addresses={target!.sample.interfaces}' },
   'network-target': { file: base + 'HostSettingsPane.tsx', before: '<HostNetworkPanel host={host}', after: '<HostNetworkPanel host={hosts[0]!}' },
   'network-late': { file: base + 'use-host-network-observation.ts', before: '      current.signal.throwIfAborted()', after: '      /* Causal mutation: admit a cancelled late observation. */' },
   'application-save-baseline': { file: base + 'HostApplicationAccessPanel.tsx', before: '{ ...current, revision: result.revision }', after: 'current' },
