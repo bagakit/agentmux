@@ -36,17 +36,20 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
   const displayed = useRef<AgentSessionHistoryPage | null>(null)
   const boundary = useRef<string | null>(null)
   const intent = useRef<ConversationReadingIntent>('seed')
+  const admissionIntent = useRef<ConversationReadingIntent>('seed')
   const key = reading ? JSON.stringify([reading.reference.hostId, reading.reference.agentSessionId, reading.identity]) : ''
   const bindingKey = reading?.nativeSourceFacts ? nativeBindingKey(reading.nativeSourceFacts) : ''
   const acceptedBinding = useRef({ key, bindingKey })
   const view = useConversationView(api.conversation, reading?.reference, reading?.enabled === true, {
     ...(reading ? { identity: reading.identity } : {}),
-    beforeCommit: (snapshot, operation, displayedFrame) => {
+    beforeCommit: (snapshot, operation, displayedFrame, replayingHeldIntent) => {
       const next = projectConversationWindow(snapshot), page = next.historyPage
-      const currentIntent = operation === 'changes' || operation === 'reopen' ? 'live' : intent.current
+      const currentIntent = replayingHeldIntent ? admissionIntent.current
+        : operation === 'changes' || operation === 'reopen' || operation === 'resume' ? 'live' : intent.current
+      admissionIntent.current = currentIntent
+      if (beforeCapturedCommit?.(next.captured, displayedFrame ? projectConversationWindow(displayedFrame).captured : undefined) === false) return false
       if (page && !beforeCommit(page, currentIntent, displayed.current ?? undefined, { current: displayed.current,
         ...(boundary.current ? { recordBoundary: { beforeRecordId: boundary.current } } : {}) })) return false
-      if (beforeCapturedCommit?.(next.captured, displayedFrame ? projectConversationWindow(displayedFrame).captured : undefined) === false) return false
       acceptedBinding.current = { key, bindingKey }
       return true
     }
@@ -63,7 +66,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
     if (operation === 'latest') boundary.current = null
     return operation === 'older' ? view.earlier() : operation === 'newer' ? view.newer() : operation === 'changes' ? view.changes() : view.refresh()
   }
-  useEffect(() => { boundary.current = null; intent.current = 'seed' }, [key])
+  useEffect(() => { boundary.current = null; intent.current = 'seed'; admissionIntent.current = 'seed' }, [key])
   useEffect(() => {
     if (!view.held || !reading?.enabled) return
     const changed = () => view.acceptHeld()
