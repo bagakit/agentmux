@@ -5,9 +5,9 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentConversationRecord } from '@agentmux/core/conversation'
 import type { AgentTimelineSnapshot } from '@agentmux/core'
-import { projectConversationSummary } from '@agentmux/core/conversation'
+import { conversationRevision, projectConversationSummary } from '@agentmux/core/conversation'
 import { FocusNavigationButton } from '../src/renderer/src/components/FocusNavigationButton'
-import { agentContextForSession } from '../src/renderer/src/lib/focus-context'
+import { agentContextForSession, createFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
 
@@ -94,6 +94,45 @@ it('uses the same original Core records for current result and complete recap', 
   expect(result.recap?.reading).toEqual({ text: 'Original complete reply', truncated: false })
   expect(result.recap?.origin).toBe('timeline')
   expect(project).toHaveBeenCalledTimes(1)
+})
+
+it('materializes each captured summary body once in the actual Focus selector', () => {
+  let bodyReads = 0
+  const items = Array.from({ length: 40 }, (_, index) => {
+    const item = { ...timeline().items[0]!, id: `original-reply-${index}` }
+    Object.defineProperty(item, 'content', { enumerable: true, get() { bodyReads++; return `Complete original reply ${index}` } })
+    return item
+  })
+  const accepted: AgentTimelineSnapshot = { ...timeline(), items,
+    stream: { epoch: 'original-stream', sequence: items.length, revision: 1, origin: 'beginning', gaps: [],
+      positions: items.map((item, index) => ({ id: item.id, firstSequence: index + 1, sequence: index + 1, revision: conversationRevision(item) })) } }
+  const original = { ...session, status: { ...session.status, state: 'done' as const } }
+  const input = { sessions: [original], timelines: { [session.id]: accepted }, agentNames: {}, config: composerConfig, scratchTopicSnapshots: {} }
+  const select = createFocusProjectionSelector()
+  bodyReads = 0
+  const first = select(input)
+  expect(first.contexts).toHaveLength(1)
+  expect(first.contexts[0]!.recap?.reading).toEqual({ text: 'Complete original reply 39', truncated: false })
+  expect(first.contexts[0]!.runId).toBe(session.control.run.runId)
+  expect(project).toHaveBeenCalledTimes(1)
+  expect.soft(bodyReads).toBeLessThanOrEqual(items.length * 2)
+
+  bodyReads = 0
+  expect(select({ ...input, sessions: [{ ...original, latestOutputBytes: 128 }] }).contexts).toBe(first.contexts)
+  expect(bodyReads).toBe(0)
+  const renamed = select({ ...input, agentNames: { [session.id]: 'Original renamed Context' } })
+  expect(renamed.contexts[0]!.name).toBe('Original renamed Context')
+  expect(bodyReads).toBe(0)
+
+  const changed = { ...accepted, revision: 2, items: [...items.slice(0, -1), { ...items.at(-1)!, content: 'Current original reply' }],
+    stream: { ...accepted.stream!, sequence: items.length + 1, revision: 2, positions: accepted.stream!.positions.map((position, index) =>
+      index === items.length - 1 ? { ...position, revision: 'current-original-version', sequence: items.length + 1 } : position) } }
+  bodyReads = 0
+  const current = select({ ...input, timelines: { [session.id]: changed } })
+  expect(current.contexts[0]!.recap?.reading).toEqual({ text: 'Current original reply', truncated: false })
+  expect(current.contexts[0]!.runId).toBe(session.control.run.runId)
+  expect(bodyReads).toBeLessThanOrEqual((items.length - 1) * 2)
+  expect(useAppStore.getState().agentComposerDrafts[session.id]).toBe('Keep the original draft')
 })
 
 it('keeps empty and process-only accepted timelines distinct from a reply', () => {

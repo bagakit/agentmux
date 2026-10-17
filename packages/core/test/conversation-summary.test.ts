@@ -109,6 +109,25 @@ it('does no event hashing for nonempty captured summaries at both input sizes an
   expect(digest).toHaveBeenCalledTimes(2)
 })
 
+it('materializes each captured summary body once after graph selection', () => {
+  for (const count of [14, 112]) {
+    let bodyReads = 0
+    const items = Array.from({ length: count }, (_, index) => {
+      const item = captured(`body-${index}`), content = item.content!
+      Object.defineProperty(item, 'content', { enumerable: true, get() { bodyReads++; return content } })
+      return item
+    })
+    const timeline = snapshot(items)
+    bodyReads = 0 // Accepted stream revisions were established before the measured consumer.
+    const summary = projectConversationSummary({ agentSessionId: sid, timeline })
+    expect(summary).toHaveLength(count)
+    expect(summary.every((record, index) => record.content === `Complete original content body-${index}` && record.original.item === items[index])).toBe(true)
+    // One source-field presence check and one body read for each accepted event;
+    // materializing a second original-record collection exceeds this budget.
+    expect.soft(bodyReads).toBeLessThanOrEqual(count * 2)
+  }
+})
+
 it('keeps the full public event hash byte-for-byte accurate after summary materialization', () => {
   const timeline = snapshot([captured('versioned-original')])
   const before = projectConversationTimeline({ agentSessionId: sid, timeline })
