@@ -12,5 +12,5 @@ export async function desktopBotCreationPreset(name: string): Promise<Connection
   // The shared public codec validates the PNG, size and dimensions before admission.
   let binary = ''
   for (const byte of bytes) binary += String.fromCharCode(byte)
-  return { name, avatar: { pngDataUrl: 'data:image/png;base64,' + btoa(binary) } }
+  return { name, description: 'Conversations with your agents in AMUX.', avatar: { pngDataUrl: 'data:image/png;base64,' + btoa(binary) } }
 }
