@@ -47,6 +47,17 @@ if (args.includes('app-server')) {
   const actual = args.slice(remote + 4)
   log({ kind: 'frontend-start', args: actual })
   writeFileSync(root + '/frontend-' + sid + '.json', JSON.stringify({ pid: process.pid, args: actual }))
+  if (process.env.AGENTMUX_FIXTURE_FRONTEND_FAILURE === '1') {
+    const failureFile = root + '/frontend-failure-' + sid + '.json'
+    setInterval(() => {
+      if (!existsSync(failureFile)) return
+      const request = JSON.parse(readFileSync(failureFile, 'utf8'))
+      if (request.pid !== process.pid) return
+      if (![23, 31].includes(request.exitCode)) throw Error('Private fixture failure code required')
+      log({ kind: 'frontend-failure', exitCode: request.exitCode, diagnostic: request.diagnostic })
+      process.stderr.write(request.diagnostic, () => process.exit(request.exitCode))
+    }, 40)
+  }
   const hex = createHash('sha256').update(sid).digest('hex')
   process.env.AGENTMUX_FIXTURE_NATIVE_ID = [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20, 32)].join('-')
   process.argv.splice(2, process.argv.length - 2, ...actual)

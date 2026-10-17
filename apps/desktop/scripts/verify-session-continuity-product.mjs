@@ -6,11 +6,13 @@ import { constants as fsConstants } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import * as core from '../../../packages/core/dist/index.js'
-import { AgentMuxControlServer } from '../../../packages/core/dist/public-rpc-server.js'
 import { runProbeProcess, listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
+const coreInputRoot = path.resolve(process.env.AGENTMUX_PROOF_CORE_ROOT ?? new URL('../../../packages/core', import.meta.url).pathname)
+const core = await import(pathToFileURL(path.join(coreInputRoot, 'dist/index.js')).href)
+const { AgentMuxControlServer } = await import(pathToFileURL(path.join(coreInputRoot, 'dist/public-rpc-server.js')).href)
 const { AgentMuxFileAgentSessionStore, connectLocalAgentMux } = core
-const managed = process.env.AGENTMUX_MANAGED_SESSION_RECOVERY_PROOF === '1'
+const frontendStartup = process.env.AGENTMUX_FRONTEND_STARTUP_RECOVERY_PROOF === '1'
+const managed = frontendStartup || process.env.AGENTMUX_MANAGED_SESSION_RECOVERY_PROOF === '1'
 const capability = process.env.AGENTMUX_RECOVERY_CAPABILITY_PROOF === '1'
 const initialWaitSurface = process.env.AGENTMUX_CONTINUITY_INITIAL_WAIT_SURFACE === '1'
 const supervisionSurface = process.env.AGENTMUX_CONTINUITY_SUPERVISION_SURFACE === '1'
@@ -26,7 +28,7 @@ const { build } = await import(pathToFileURL(require.resolve('vite')).href)
 const electron = process.env.AGENTMUX_PROOF_ELECTRON_PATH ?? require('electron')
 const privateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agentmux-continuity-'))
 const hash = value => createHash('sha256').update(value).digest('hex')
-const receipt = { schema: managed ? 'agentmux.managed-session-recovery.v1' : initialWaitSurface ? 'agentmux.initial-continuity-supervision-surface.v1' : supervisionSurface ? 'agentmux.continuity-supervision-surface.v1' : supervision ? 'agentmux.continuity-supervision-product.v1' : capability ? 'agentmux.session-capability-recovery.v1' : 'agentmux.session-continuity.v1', passed: false, privateRoot, phases: [], inputs: null, inputsAfter: null, cleanup: null,
+const receipt = { schema: frontendStartup ? 'agentmux.frontend-startup-recovery.v1' : managed ? 'agentmux.managed-session-recovery.v1' : initialWaitSurface ? 'agentmux.initial-continuity-supervision-surface.v1' : supervisionSurface ? 'agentmux.continuity-supervision-surface.v1' : supervision ? 'agentmux.continuity-supervision-product.v1' : capability ? 'agentmux.session-capability-recovery.v1' : 'agentmux.session-continuity.v1', passed: false, privateRoot, coreInputRoot, phases: [], inputs: null, inputsAfter: null, cleanup: null,
   limitations: [supervisionSurface ? 'One private Electron generation exercises production App/Store and RuntimeController/Core controls and frames; this surface receipt does not prove process restart.' : 'Actual private Electron Main and Renderer restart exercise production App/Store and RuntimeController/Core, with a nonempty original spatial workface before hydration.',
     'The native CLI is a repository protocol fixture. It validates the exact resume identity against retained native session metadata and appends to the original conversation record; this is not upstream Provider certification.',
     'Only private Runs are deliberately ended between Electron generations; no user profile, user Agent or user configuration is accessed.',
@@ -41,9 +43,10 @@ const sourceFiles = [new URL(import.meta.url).pathname, bootstrap, path.join(des
   path.join(desktop, 'test/helpers/local-runtime-connector.ts'), path.join(desktop, 'test/helpers/client-ui-render.tsx'),
   path.join(root, 'packages/client-ui/package.json'),
   path.join(desktop, 'scripts/fixtures/terminal-wheel/xterm-instrumented.ts'), ...await files(fixture), ...await files(path.join(desktop, 'scripts/fixtures/managed-session-recovery')), ...(managed ? [path.join(desktop, 'scripts/verify-managed-session-recovery.mjs')] : []),
+  ...(frontendStartup ? [path.join(desktop, 'scripts/verify-frontend-startup-recovery-product.mjs')] : []),
   ...await files(path.join(desktop, 'src')), ...await files(path.join(root, 'packages/core/src')),
-  ...await files(path.join(root, 'packages/core/dist')), ...await files(path.join(root, 'packages/core/bin')), ...await files(path.join(root, 'packages/core/vendor/ctxmux')),
-  path.join(root, 'packages/core/package.json'), path.join(root, 'packages/core/scripts/build.mjs'),
+  ...await files(path.join(coreInputRoot, 'dist')), ...await files(path.join(coreInputRoot, 'bin')), ...await files(path.join(coreInputRoot, 'vendor/ctxmux')),
+  path.join(root, 'packages/core/package.json'), ...(coreInputRoot === path.join(root, 'packages/core') ? [] : [path.join(coreInputRoot, 'package.json')]), path.join(root, 'packages/core/scripts/build.mjs'),
   path.join(root, 'packages/core/test/fixtures/fake-codex-cli.mjs'), path.join(root, 'patches/@xterm__xterm@6.1.0-beta.303.patch'), path.join(root, 'pnpm-lock.yaml'), electron]
 const hashes = async () => Object.fromEntries(await Promise.all(sourceFiles.map(async file => [path.relative(root, file), hash(await fs.readFile(file))])))
 const clientUiRoot = path.join(root, 'packages/client-ui') + path.sep
@@ -76,12 +79,12 @@ try {
   // may rebuild its own dist while this longer process proof is running.
   const coreSnapshot = path.join(privateRoot, 'core')
   await fs.mkdir(coreSnapshot)
-  for (const name of ['dist', 'bin']) await fs.cp(path.join(root, 'packages/core', name), path.join(coreSnapshot, name), { recursive: true, mode: fsConstants.COPYFILE_FICLONE })
-  await fs.copyFile(path.join(root, 'packages/core/package.json'), path.join(coreSnapshot, 'package.json'))
-  await fs.symlink(path.join(root, 'packages/core/node_modules'), path.join(coreSnapshot, 'node_modules'))
-  await fs.symlink(path.join(root, 'packages/core/vendor'), path.join(coreSnapshot, 'vendor'))
+  for (const name of ['dist', 'bin']) await fs.cp(path.join(coreInputRoot, name), path.join(coreSnapshot, name), { recursive: true, mode: fsConstants.COPYFILE_FICLONE })
+  await fs.copyFile(path.join(coreInputRoot, 'package.json'), path.join(coreSnapshot, 'package.json'))
+  await fs.symlink(path.join(coreInputRoot, 'node_modules'), path.join(coreSnapshot, 'node_modules'))
+  await fs.symlink(path.join(coreInputRoot, 'vendor'), path.join(coreSnapshot, 'vendor'))
   for (const name of ['dist', 'bin']) for (const file of await files(path.join(coreSnapshot, name))) {
-    const key = 'packages/core/' + path.relative(coreSnapshot, file)
+    const key = path.relative(root, path.join(coreInputRoot, path.relative(coreSnapshot, file)))
     assert.equal(hash(await fs.readFile(file)), receipt.inputs[key], 'Snapshot must contain the exact original compiled Core: ' + key)
   }
   await fs.symlink(coreSnapshot, path.join(privateRoot, 'node_modules/@agentmux/core'))
@@ -151,7 +154,7 @@ try {
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   if (managed) {
     for (const name of Object.keys(env)) if (/^(AGENTMUX_|CTXMUX_|CODEX_)/u.test(name)) delete env[name]
-    Object.assign(env, { AGENTMUX_MANAGED_SESSION_RECOVERY_PROOF: '1', HOME: path.join(privateRoot, 'home'),
+    Object.assign(env, { AGENTMUX_MANAGED_SESSION_RECOVERY_PROOF: '1', ...(frontendStartup ? { AGENTMUX_FRONTEND_STARTUP_RECOVERY_PROOF: '1' } : {}), HOME: path.join(privateRoot, 'home'),
       XDG_CONFIG_HOME: path.join(privateRoot, 'home/.config'), XDG_CACHE_HOME: path.join(privateRoot, 'home/.cache'),
       XDG_DATA_HOME: path.join(privateRoot, 'home/.local/share'), CODEX_HOME: path.join(privateRoot, 'codex') })
     await fs.mkdir(env.HOME, { recursive: true })

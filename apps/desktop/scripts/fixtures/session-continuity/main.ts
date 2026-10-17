@@ -6,6 +6,7 @@ import { AgentMuxClient, AgentMuxFileAgentSessionStore, AgentMuxSpatialStateStor
 import { localRuntimeConnector } from '../../../test/helpers/local-runtime-connector'
 import { RuntimeController } from '../../../src/main/runtime-controller'
 import { verifyManagedSessionRecovery } from '../managed-session-recovery/scenario'
+import { verifyFrontendStartupRecovery } from '../managed-session-recovery/frontend-startup'
 import { verifyCapabilityRecovery } from './capability-recovery'
 import { verifySupervisionSurface } from './supervision-surface'
 import { verifyInitialWaitSurface } from './initial-wait-surface'
@@ -18,12 +19,13 @@ process.env.AGENTMUX_RUNTIME_DIRECTORY = path.join(privateRoot, 'runtime')
 process.env.AGENTMUX_STATE_DIRECTORY = path.join(privateRoot, 'runtime', 'state')
 process.env.AGENTMUX_MESSAGE_QUEUE_PATH = path.join(privateRoot, 'messages.ndjson')
 const managed = process.env.AGENTMUX_MANAGED_SESSION_RECOVERY_PROOF === '1'
+const frontendStartup = process.env.AGENTMUX_FRONTEND_STARTUP_RECOVERY_PROOF === '1'
 const capability = process.env.AGENTMUX_RECOVERY_CAPABILITY_PROOF === '1'
 const initialWaitSurface = process.env.AGENTMUX_CONTINUITY_INITIAL_WAIT_SURFACE === '1'
 const supervisionSurface = process.env.AGENTMUX_CONTINUITY_SUPERVISION_SURFACE === '1'
 const supervision = process.env.AGENTMUX_CONTINUITY_SUPERVISION_PROOF === '1' || supervisionSurface
 const executor = (mode: string) => ({ label: 'Private native continuity fixture', providerId: 'codex', command: path.join(privateRoot, 'fake-codex'), args: [],
-  env: { AGENTMUX_FAKE_READY_MODE: mode, ...(managed ? { AGENTMUX_FIXTURE_ROOT: privateRoot } : {}), AGENTMUX_FAKE_NATIVE_RECORD: '1',
+  env: { AGENTMUX_FAKE_READY_MODE: mode, ...(managed ? { AGENTMUX_FIXTURE_ROOT: privateRoot } : {}), ...(frontendStartup ? { AGENTMUX_FIXTURE_FRONTEND_FAILURE: '1' } : {}), AGENTMUX_FAKE_NATIVE_RECORD: '1',
     AGENTMUX_FAKE_NATIVE_PRESERVE: '1', AGENTMUX_FAKE_NATIVE_LAUNCH_INPUT: '1', AGENTMUX_FAKE_NATIVE_CONTEXT: 'Original continuity task: retain decision sentinel continuity-body-7f41 and the independent unsent draft.',
     CODEX_HOME: path.join(privateRoot, 'codex'), AGENTMUX_FAKE_NATIVE_RECORD_DIRECTORY: path.join(privateRoot, 'codex', 'sessions') }, injectAgentMuxGuide: false })
 const supervisedExecutor = (mode: string, failure: string) => { const value = executor(mode); return { ...value, env: { ...value.env,
@@ -31,7 +33,7 @@ const supervisedExecutor = (mode: string, failure: string) => { const value = ex
 const config = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private continuity proof' }],
   executors: { healthy: executor('before'), working: capability ? { ...executor('before'), env: { ...executor('before').env, AGENTMUX_FAKE_OMIT_HANDLE: '1' } }
     : supervision ? supervisedExecutor('working-until-resume', 'once') : executor('working-until-resume'), idle: supervision ? supervisedExecutor('before', 'always') : executor('before') },
-  ...(managed ? { continuity: { activeRecovery: 'manual' } } : capability ? { continuity: { activeRecovery: 'manual' } } : supervision ? { continuity: { ...(initialWaitSurface ? { activeRecoveryDelayMs: 300000 } : {}), retryMaxAttempts: 0, retryInitialDelayMs: 30000, retryMaxDelayMs: 30000 } } : {}),
+  ...(managed ? { continuity: { activeRecovery: 'manual', ...(frontendStartup ? { retryMaxAttempts: 0 } : {}) } } : capability ? { continuity: { activeRecovery: 'manual' } } : supervision ? { continuity: { ...(initialWaitSurface ? { activeRecoveryDelayMs: 300000 } : {}), retryMaxAttempts: 0, retryInitialDelayMs: 30000, retryMaxDelayMs: 30000 } } : {}),
   workspaces: [{ id: 'continuity-workspace', hostId: 'local', name: 'Private continuity proof', path: path.join(privateRoot, 'workspace'), kind: 'folder' }],
   appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
 const store = new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json'))
@@ -137,7 +139,8 @@ app.whenReady().then(async () => {
     await win.loadFile(html); step('renderer-loaded')
     await wait('actual App and nonempty workface', async () => await win.webContents.executeJavaScript(`window.continuityReady && !window.continuityState().loading && Object.keys(window.continuityState().tabs).length ${capability ? '>= 1' : '=== 2'}`))
     if (managed) {
-      await verifyManagedSessionRecovery({ runtime, store, spatial, win, client, ids, phase, privateRoot, evidence, result, state, wait, delay, config }); result.passed = true; return
+      const verify = frontendStartup ? verifyFrontendStartupRecovery : verifyManagedSessionRecovery
+      await verify({ runtime, store, spatial, win, client, ids, phase, privateRoot, evidence, result, state, wait, delay, config }); result.passed = true; return
     }
     if (capability) {
       await verifyCapabilityRecovery({ runtime, store, spatial, win, client, ids, phase, privateRoot, evidence, result, state, wait, delay, config })
