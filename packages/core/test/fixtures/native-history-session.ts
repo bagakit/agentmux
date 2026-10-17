@@ -9,7 +9,7 @@ import type { CtxmuxRunAdapter } from '../../src/ctxmux-run-adapter.js'
 
 /** Real built-in Provider → public Client → FileStore, with no Runtime connection or model. */
 export async function nativeHistoryFixture(
-  providerId: 'claude' | 'pi' | 'antigravity' | 'droid' | 'grok' | 'kimi',
+  providerId: 'codex' | 'claude' | 'pi' | 'antigravity' | 'droid' | 'grok' | 'kimi',
   data: string | Buffer | ((root: string) => string),
   options: { nativeSessionId?: string; relativePath?: string; agentSessionId?: string } = {}
 ) {

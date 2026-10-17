@@ -25,7 +25,8 @@ const question = { source, turnId: 'original-turn', recordId: 'original-record',
 
 function mainFixture(kind: 'local' | 'ssh', template: boolean) {
   const reached = new Error('Target operation reached')
-  const client = { connect: vi.fn(async () => {}), dispose: vi.fn(async () => {}), onEvent: () => () => {},
+  const connect = vi.fn(async () => {})
+  const client = { connect, connectRuntime: connect, dispose: vi.fn(async () => {}), onEvent: () => () => {},
     agentSession: () => session, statusAgent: vi.fn(async () => ({ session, run: session.run })),
     sessionHistorySources: vi.fn(async () => [{ agentSessionId: session.agentSessionId, hostId: 'local', state: 'retired', retiredAt: 10, history: identity }]),
     sessionHistoryPage: vi.fn(async () => { throw reached }), sessionHistoryResource: vi.fn(async () => { throw reached }),
@@ -131,7 +132,7 @@ function targetInvocation(value: unknown) {
 }
 
 it('target Core resolves private wrapper configuration for actual retained pages, observations, resource and question readers', async () => {
-  const f = await targetFixture(), id = f.stored.agentSessionId
+  const f = await targetFixture({ targetOwned: true }), id = f.stored.agentSessionId
   const result = await f.core.sessionHistoryPage(id)
   expect(result.items.map(item => item.id)).toEqual(['original-record'])
   expect(JSON.stringify(result)).not.toContain('private-target-value')
@@ -188,7 +189,7 @@ it('active target-owned history resolves its authoritative private configuration
   expect(f.start).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
 })
 
-it('legacy SDK history retains its explicit invocation configuration even when a Host owner is present', async () => {
+it('SDK history retains its explicit invocation configuration even when a Host owner is present', async () => {
   const f = await targetFixture()
   expect((await f.core.sessionHistoryPage(f.stored.agentSessionId, { commandOverride: local.command,
     args: local.args, env: local.env })).items[0]?.id).toBe('original-record')
@@ -196,7 +197,7 @@ it('legacy SDK history retains its explicit invocation configuration even when a
   expect(f.resolve).not.toHaveBeenCalled(); expect(f.start).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
 })
 
-it('a retired read-only locator preserves the explicit SDK configuration contract without inventing creation authority', async () => {
+it('a retired read-only locator retains its original Host creation authority over caller overrides', async () => {
   const f = await targetFixture({ targetOwned: true }), id = f.stored.agentSessionId
   const reservation = { kind: 'stop' as const, reservationId: 'original-stop', ownerId: 'stop-owner', ownerPid: process.pid,
     agentSessionId: id, expectedRun: f.stored.run, operationId: 'original-stop', expiresAt: Date.now() + 60_000,
@@ -204,12 +205,12 @@ it('a retired read-only locator preserves the explicit SDK configuration contrac
   await f.store.reserveLifecycle(reservation); await f.store.commitLifecycle(reservation, null)
   await f.inner.registry.load('local')
   expect((await f.core.sessionHistoryPage(id, { commandOverride: local.command, args: local.args, env: local.env })).items[0]?.id).toBe('original-record')
-  expect(f.page.mock.calls[0]![0]).toMatchObject({ command: local.command, args: local.args, env: local.env })
-  expect(f.resolve).not.toHaveBeenCalled(); expect(f.start).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
+  targetInvocation(f.page.mock.calls[0]![0])
+  expect(f.resolve).toHaveBeenCalledTimes(1); expect(f.start).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
 })
 
 it('a source change while resolving the target configuration is rejected before the Provider read', async () => {
-  const f = await targetFixture(), id = f.stored.agentSessionId
+  const f = await targetFixture({ targetOwned: true }), id = f.stored.agentSessionId
   f.resolve.mockImplementationOnce(async executorId => {
     const configuration = await f.resolveExecutor(executorId)
     await f.store.compareAndSwap(f.stored, { ...f.stored,
@@ -222,7 +223,7 @@ it('a source change while resolving the target configuration is rejected before 
 })
 
 it('a temporary native observation released during configuration resolution cannot authorize a new Provider read', async () => {
-  const f = await targetFixture({ nativeSessionId: 'retained-old' }), id = f.stored.agentSessionId
+  const f = await targetFixture({ targetOwned: true, nativeSessionId: 'retained-old' }), id = f.stored.agentSessionId
   Object.assign(f.inner.kernel, { status: async () => ({ runId: f.stored.run.runId, workspacePath: f.stored.workspacePath,
     program: '/bin/sh', args: [], pid: 99, state: { type: 'running' }, latestOutputBytes: 0, firstAvailableByte: 0,
     acceptedInputBytes: 0, nativeService: null, cols: 80, rows: 24 }) })
@@ -245,7 +246,7 @@ it('a temporary native observation released during configuration resolution cann
 })
 
 it('a conflicting target registration rejects this read before changing Provider, native identity or Run', async () => {
-  const f = await targetFixture({ providerId: 'codex' })
+  const f = await targetFixture({ targetOwned: true, providerId: 'codex' })
   await expect(f.core.sessionHistoryPage(f.stored.agentSessionId)).rejects.toMatchObject({ code: 'EXECUTOR_PROVIDER_CONFLICT' })
   expect(f.page).not.toHaveBeenCalled(); expect(f.start).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
   expect((await f.store.readMetadata(f.stored.agentSessionId))?.nativeHandle).toEqual(f.stored.nativeHandle)
