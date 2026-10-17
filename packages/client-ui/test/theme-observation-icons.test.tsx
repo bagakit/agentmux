@@ -3,7 +3,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { GRAPHITE_THEME } from '../src/theme/catalog.js'
-import { themeDocumentSchema } from '../src/theme/schema.js'
+import { parseThemeFile, serializeThemeFile, themeDocumentSchema } from '../src/theme/schema.js'
 import { ICON_GLYPHS } from '../src/theme/icon-catalog.js'
 import { SemanticIcon, semanticIconHref, createSemanticIconElement, iconShapes } from '../src/theme/icons.js'
 import { mountThemeRuntime, previewTheme } from '../src/theme/runtime.js'
@@ -44,6 +44,7 @@ describe('observation status icon meanings', () => {
     expect(iconShapes('status.interrupted')).not.toEqual(iconShapes('status.failed'))
     const custom = { ...GRAPHITE_THEME, icons: { 'status.activity-unknown': { kind: 'glyph' as const, glyph: 'x' as const } } }
     expect(themeDocumentSchema.safeParse(custom).success).toBe(true)
+    expect(parseThemeFile(serializeThemeFile(custom)).icons).toEqual(custom.icons)
     runtime()
     const host = mount(<SemanticIcon name="status.activity-unknown" size={12} animation="none" />)
     const native = createSemanticIconElement('status.activity-unknown', document, { size: 12, animation: 'none' }); host.append(native)
