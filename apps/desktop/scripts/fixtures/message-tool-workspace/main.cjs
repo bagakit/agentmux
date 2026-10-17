@@ -125,6 +125,61 @@ async function originalSurfacePreserved(original, before) {
   assert.deepEqual(after.terminal, before.terminal, 'The original terminal instance and geometry remain unchanged')
   assert.equal(after.facts.calls.filter(item => /dispatch|automation-/.test(item.action)).length, 0)
 }
+async function emptyOracle(hinted) {
+  const actual = await evaluate(`(()=>{
+    const p=${panel},n=${visiblePanel}.querySelector('.composer-mailbox__empty'),title=n.querySelector('strong'),hint=n.querySelector('p'),icon=n.querySelector('svg');
+    const r=n.getBoundingClientRect(),pr=p.getBoundingClientRect(),tr=title.getBoundingClientRect(),ir=icon.getBoundingClientRect();
+    const hs=hint&&getComputedStyle(hint),hr=hint&&hint.getBoundingClientRect(),range=hint&&document.createRange();if(range)range.selectNodeContents(hint);
+    return{height:r.height,title:title.textContent,titleFont:parseFloat(getComputedStyle(title).fontSize),titleHeight:tr.height,iconHeight:ir.height,
+      inline:Math.abs(tr.top-ir.top)<=2&&ir.right<=tr.left,contentHeight:p.querySelector('.composer-mailbox__content').getBoundingClientRect().height,
+      inside:pr.top>=0&&pr.bottom<=innerHeight&&p.scrollWidth<=p.clientWidth+1,
+      hint:hint?{text:hint.textContent,height:hr.height,font:parseFloat(hs.fontSize),lineHeight:parseFloat(hs.lineHeight),lines:new Set([...range.getClientRects()].map(r=>r.top)).size,
+        complete:hint.scrollHeight<=hint.clientHeight+1&&hint.scrollWidth<=hint.clientWidth+1&&hr.left>=r.left&&hr.right<=r.right&&hr.bottom<=r.bottom,
+        whiteSpace:hs.whiteSpace,clamp:hs.webkitLineClamp}:null}
+  })()`)
+  assert.equal(actual.titleFont, 12); assert.equal(actual.titleHeight, 18); assert.equal(actual.iconHeight, 16)
+  assert.equal(actual.inline, true, 'The icon and original-size title share the first row')
+  assert.equal(actual.inside, true, 'The content-sized mailbox stays contained')
+  densityCheck(Math.abs(actual.height - (26 + (hinted ? 2 + actual.hint.height : 0))) < 0.5,
+    'EMPTY_STATE_HEIGHT', actual.height, hinted ? '26px plus a 2px gap and the complete hint' : '26px')
+  if (hinted) {
+    assert.equal(actual.title, 'No supervised collaboration recorded')
+    assert.equal(actual.hint.text, 'This does not describe other Agent messages or execution status.')
+    assert.equal(actual.hint.font, 11); assert.equal(actual.hint.complete, true)
+    assert.equal(actual.hint.whiteSpace, 'normal'); assert.equal(actual.hint.clamp, 'none')
+    assert.ok(actual.hint.lines >= 1 && Math.abs(actual.hint.height - actual.hint.lines * actual.hint.lineHeight) < 0.5, 'The complete original hint wraps into natural text lines')
+  } else {
+    assert.equal(actual.title, 'No current notices'); assert.equal(actual.hint, null)
+    assert.equal(actual.contentHeight, actual.height, 'A plain empty view reserves no unused reading height')
+  }
+  return actual
+}
+async function emptyStates(width, theme, original, before, geometry) {
+  result.stage.action = 'empty-notices'
+  await choose('Notices')
+  await waitFor(`${visiblePanel}.querySelector('.composer-mailbox__empty strong')?.textContent==='No current notices'`)
+  const notices = await emptyOracle(false)
+  await frame(width, theme, 'empty-notices')
+  result.stage.action = 'empty-collaboration'
+  await choose('Agent messages'); await choose('Collaboration')
+  await waitFor(`${visiblePanel}.querySelector('.composer-mailbox__empty p')`)
+  const collaboration = await emptyOracle(true)
+  if (width === 320) assert.ok(collaboration.hint.lines > 1, 'The original necessary hint wraps at the narrow width')
+  assert.ok((await evaluate('messageWorkspace.facts().calls')).some(call => call.action === 'collaboration-page' &&
+    call.reference.hostId === original.hostId && call.reference.agentSessionId === original.agentSessionId), 'The original collaboration reader consumed the exact empty page')
+  await frame(width, theme, 'empty-collaboration')
+  await click(buttons('Automation'))
+  assert.equal(await evaluate(`document.activeElement===${buttons('Back to messages')}`), true)
+  await click(buttons('Back to messages'))
+  assert.equal(await evaluate(`${tab('Collaboration')}.getAttribute('aria-selected')`), 'true')
+  assert.equal(await evaluate(`document.activeElement===${buttons('Automation')}`), true)
+  assert.deepEqual(await emptyOracle(true), collaboration)
+  await key('Escape', 'Escape', 27)
+  await waitFor(`!${panel}.matches(':popover-open')`)
+  assert.equal(await evaluate(`document.activeElement===${surface}.querySelector('.composer__mailbox')`), true)
+  await originalSurfacePreserved(original, before)
+  result.scenes.push({ width, theme, geometry, notices, collaboration, automationReturn: true, keyboardClose: true, originalSurfacePreserved: true })
+}
 async function interactionStates(width, theme, original, before, geometry) {
   result.stage.action = 'ordinary-record-hover'
   const ordinary = `${visiblePanel}.querySelector('.composer-mailbox__record:has(.composer-mailbox__record-actions):not(:has(.composer-mailbox__record-status, .composer-outbox__send, [role="status"]))')`
@@ -161,7 +216,7 @@ async function interactionStates(width, theme, original, before, geometry) {
 async function scenario(width, theme, short = false) {
   result.stage = { width, theme, short, action: 'seed' }
   await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width: width * 2 + 1, height: short ? 540 : 800, deviceScaleFactor: 1, mobile: false })
-  const original = await evaluate(`messageWorkspace.seed(${JSON.stringify(theme)},${JSON.stringify(theme + '-' + width + (short ? '-short' : ''))})`)
+  const original = await evaluate(`messageWorkspace.seed(${JSON.stringify(theme)},${JSON.stringify(theme + '-' + width + (short ? '-short' : ''))},${mode === 'empty-states' || mode === 'empty-mutation'})`)
   await waitFor(`${surface}?.querySelector('.xterm') && ${editor}?.textContent.includes('尚未发送')`)
   await painted()
   await evaluate(`window.workspaceEditor=${editor}`)
@@ -171,6 +226,10 @@ async function scenario(width, theme, short = false) {
   await choose('Inputs')
   await waitFor(`${visiblePanel}.querySelectorAll('button[data-record-key]').length===5`)
   const geometry = await layout({ search: true })
+  if (mode === 'empty-states' || mode === 'empty-mutation') {
+    await emptyStates(width, theme, original, before, geometry)
+    return
+  }
   if (mode === 'interaction-states') {
     await interactionStates(width, theme, original, before, geometry)
     return
@@ -298,7 +357,9 @@ app.whenReady().then(async () => {
     win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     await waitFor('Boolean(window.messageWorkspace)')
-    if (mode === 'density') await scenario(320, 'dark', true)
+    if (mode === 'empty-mutation') await scenario(320, 'dark')
+    else if (mode === 'empty-states') for (const theme of ['dark', 'light']) for (const width of [320, 380, 440]) await scenario(width, theme)
+    else if (mode === 'density') await scenario(320, 'dark', true)
     else if (mode === 'interaction-states') await scenario(380, 'dark')
     else {
       for (const theme of ['dark', 'light']) for (const width of [640, 380, 320]) await scenario(width, theme)
