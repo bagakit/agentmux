@@ -1,9 +1,12 @@
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useState } from 'react'
 import type { AppLinkSchemeChoice, BrowserConfig } from '../../../../shared/contracts'
-import { useSettingDraft } from './use-setting-draft'
+import { useSettingDraftRecord } from './use-setting-draft'
 import { RetainedBrowserUploads } from './RetainedBrowserUploads'
 import { ExternalBrowserConnections } from './ExternalBrowserConnections'
+import { BrowserResources, useBrowserDirectory } from './BrowserResources'
+
+export type BrowserPreferences = { agentAutomation: boolean; automaticMemoryRelease: boolean }
 
 /**
  * Agent 驱动浏览器的总开关。
@@ -19,12 +22,13 @@ import { ExternalBrowserConnections } from './ExternalBrowserConnections'
 export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
   browser: BrowserConfig
   active: boolean
-  onSave: (enabled: boolean, expected: boolean) => Promise<void>
+  onSave: (value: BrowserPreferences, expected: BrowserPreferences) => Promise<void>
   onForget: (scheme: string, expected: AppLinkSchemeChoice) => Promise<void>
 }) {
-  const saved = browser.agentAutomation === true
-  const draft = useSettingDraft(saved)
+  const saved = { agentAutomation: browser.agentAutomation === true, automaticMemoryRelease: browser.automaticMemoryRelease !== false }
+  const draft = useSettingDraftRecord(saved)
   const saveState = useSettingsSave()
+  const directory = useBrowserDirectory(active)
 
   async function save(): Promise<void> {
     const submitted = draft.beginSave()
@@ -34,12 +38,12 @@ export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
   return (
     <div className="settings-pane-stack">
       <section className="settings-group" data-settings-field="agent-automation">
-        <header><span>Agent automation</span><small>Saved: {saved ? 'On' : 'Off'}</small></header>
+        <header><span>Agent automation</span><small>Saved: {saved.agentAutomation ? 'On' : 'Off'}</small></header>
         <label className="browser-automation-toggle">
           <input
             type="checkbox"
-            checked={draft.value}
-            onChange={(event) => draft.setValue(event.target.checked)}
+            checked={draft.value.agentAutomation}
+            onChange={(event) => draft.setField('agentAutomation', event.target.checked)}
           />
           <span>
             <strong>Let agents interact with browser pages</strong>
@@ -48,7 +52,10 @@ export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
         </label>
       </section>
       <AppLinkSchemes browser={browser} onForget={onForget} />
-      <ExternalBrowserConnections active={active} />
+      <BrowserResources active={active} directory={directory} automatic={draft.value.automaticMemoryRelease}
+        onAutomaticChange={enabled => draft.setField('automaticMemoryRelease', enabled)} />
+      <ExternalBrowserConnections targets={directory.rows.map(row => row.target).filter(target => target.source === 'external')}
+        observedIds={directory.observedIds} />
       <RetainedBrowserUploads />
       <SettingsSaveBar save={saveState} dirty={draft.dirty} label="Save browser" onSave={() => void save()} />
     </div>

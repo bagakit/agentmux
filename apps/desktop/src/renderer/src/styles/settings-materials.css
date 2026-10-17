@@ -69,3 +69,14 @@
 .external-browser-connections__targets small { display: block; color: var(--text-3); font-size: var(--fs-micro); }
 .external-browser-connections__targets p { margin: var(--sp-1) 0; color: var(--text-3); font-size: var(--fs-micro); }
 .external-browser-connections__targets button { flex-shrink: 0; }
+
+.browser-resources__controls { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-3); }
+.browser-resources__controls > input { min-width: 8rem; flex: 1; }
+.browser-resources__controls select { max-width: 100%; }
+.browser-resources__list { list-style: none; margin: 0; padding: 0; }
+.browser-resources__list > li { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--sp-3); padding: var(--sp-3) 0; border-top: 1px solid var(--line-soft); }
+.browser-resources__identity { min-width: 0; flex: 1 1 14rem; overflow-wrap: anywhere; }
+.browser-resources__identity strong { font-size: var(--fs-body); font-weight: 500; }
+.browser-resources__identity small { display: block; color: var(--text-3); font-size: var(--fs-micro); }
+.browser-resources__identity p { margin: var(--sp-1) 0; font-size: var(--fs-micro); }
+.browser-resources__actions { flex-shrink: 0; }
