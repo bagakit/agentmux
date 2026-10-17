@@ -26,7 +26,7 @@ export async function runA2aProof({ name, tests, regressionTests = [], mutations
       const child = spawn(process.execPath, [join(root, 'node_modules/vitest/vitest.mjs'), 'run', ...selectedTests,
         ...(testRoot === copy || freezeTests ? ['--config', join(copy, 'vitest.config.mts')] : []),
         '--maxWorkers=1', '--reporter=json', `--outputFile=${outputPath}`], {
-        cwd: freezeTests ? copy : testRoot, env: { ...process.env, ...environment({ core, dist, url: path => pathToFileURL(join(dist, path)).href }) },
+        cwd: freezeTests ? copy : testRoot, env: { ...process.env, ...environment({ label, evidence, core, dist, url: path => pathToFileURL(join(dist, path)).href }) },
         stdio: ['ignore', 'pipe', 'pipe']
       })
       let output = ''

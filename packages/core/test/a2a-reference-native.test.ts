@@ -1,12 +1,13 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile, appendFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
+const factsPath = process.env.AGENTMUX_TEST_REFERENCE_FACTS
 const cliEntry = process.env.AGENTMUX_TEST_REFERENCE_CLI
 const coreEntry = process.env.AGENTMUX_TEST_REFERENCE_CORE ?? new URL('../dist/index.js', import.meta.url).href
 const core = await import(/* @vite-ignore */ coreEntry) as typeof import('../src/index.js')
@@ -19,6 +20,9 @@ async function eventually<T>(read: () => Promise<T>, accept: (value: T) => boole
   try { await vi.waitFor(async () => { value = await read(); expect(accept(value)).toBe(true) }, { timeout: 15_000, interval: 50 }) }
   catch (error) { throw new Error(String(error) + '\n' + origin) }
   return value
+}
+async function proof(value: unknown) {
+  if (factsPath) await appendFile(factsPath, JSON.stringify(value) + '\n')
 }
 async function connection(endpoint: string, token: string) {
   const socket = new WebSocket(endpoint, { headers: { authorization: 'Bearer ' + token } })
@@ -170,6 +174,7 @@ describe('A2A references through actual private Runtime and public CLI', () => {
     expect(await h.requests()).toHaveLength(1)
     const after = await h.client.statusAgent('recipient')
     expect(after.run.runId).toBe(before.run.runId); expect(after.run.pid).toBe(before.run.pid); expect(after.run.acceptedInputBytes).toBe(before.run.acceptedInputBytes)
+    await proof({ scenario: 'idle-coalescing-and-reopen', originalIds: sent.map(receipt => receipt.messageId), original: original?.notification, before: before.run, after: after.run, wire, requests: requests.length, restoredNotification: (await h.client.readMessage({ messageId: 'original-0' }))?.notification, bodyAfterReopen: (await h.client.readMessage({ messageId: 'original-0' }))?.envelope.body, originalBody: bodies[0] })
   }, 45_000)
 
   it('isolates unknown native input from later messages and actual human terminal input', async () => {
@@ -198,6 +203,7 @@ describe('A2A references through actual private Runtime and public CLI', () => {
     expect(bothRequests[1].params.input[0].text).toContain('msg-id="independent-new"')
     expect(bothRequests[1].params.input[0].text).not.toContain('msg-id="unknown-original"')
     expect((await h.client.readMessage({ messageId: 'unknown-original' }))?.notification?.key).toEqual(original?.notification?.key)
+    await proof({ scenario: 'same-idle-unknown-and-new-mid', originalKey: original?.notification?.key, restoredKey: retained?.notification?.key, independentKey: independent?.notification?.key, oldMid: 'unknown-original', newMid: 'independent-new', requests: bothRequests.map(request => ({ nativeStatus: request.nativeStatus, wire: request.params.input[0].text })) })
     const before = await h.client.statusAgent('recipient')
     await h.client.writeAgent({ agentSessionId: 'recipient', expectedRun: h.session.run, source: 'user', data: 'Original manual input remains usable\r' })
     const after = await h.client.statusAgent('recipient')
