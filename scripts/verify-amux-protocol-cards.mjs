@@ -6,7 +6,9 @@ import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const scope = process.argv[process.argv.indexOf('--scope') + 1]
-const selections = { reader: ['drop-generic', 'allow-invalid-known', 'lose-opaque-body'], cards: [], settings: [] }
+const selections = { reader: ['drop-generic', 'allow-invalid-known', 'lose-opaque-body'],
+  cards: ['ignore-body-boundary', 'skip-resource-reader', 'skip-special-card', 'lose-question-resource-boundary'],
+  settings: ['unregister-settings', 'omit-search-target', 'eager-preview'] }
 const folder = '.tmp/amux-protocol-cards'
 const sha = value => createHash('sha256').update(value).digest('hex')
 const read = path => JSON.parse(readFileSync(resolve(root, path), 'utf8'))
@@ -28,12 +30,15 @@ if (scope === 'join') {
   console.log(JSON.stringify({ sourcePassed: true, visualApproved: true, buildPerformed: false }))
 } else {
   assert(Object.hasOwn(selections, scope), 'Use --scope reader, cards, settings or join')
+  assert(selections[scope].length > 0, 'This source slice has no implemented mutation qualification')
   mkdirSync(resolve(root, folder), { recursive: true })
   const directory = relative(root, mkdtempSync(resolve(root, `${folder}/${scope}-`)))
   const inputs = {}
   for (const file of ['scripts/verify-amux-protocol-cards.mjs', 'test/vitest.amux-protocol-cards.config.mts',
     'apps/desktop/scripts/fixtures/settings-overview/vitest.config.mts', 'packages/core/src/amux-protocol-definition.ts',
+    'vitest.setup.ts', 'packages/core/package.json', 'packages/client-ui/package.json',
     'packages/client-ui/src/styles/conversation-protocol.css', 'packages/client-ui/src/styles/conversation-message.css']) inputs[file] = sha(readFileSync(resolve(root, file)))
+  if (scope === 'settings') inputs['apps/desktop/src/renderer/src/styles/settings-amux-protocols.css'] = sha(readFileSync(resolve(root, 'apps/desktop/src/renderer/src/styles/settings-amux-protocols.css')))
 
   function run(label, mutation) {
     const report = `${directory}/${label}.json`, loaded = `${directory}/${label}.loaded.jsonl`
@@ -53,7 +58,11 @@ if (scope === 'join') {
       inputs[fact.file] = fact.sourceSHA256
     }
     const transformed = facts.filter(fact => fact.sourceSHA256 !== fact.compilerInputSHA256)
-    if (mutation) assert(result.status !== 0 && summary.numFailedTests > 0 && transformed.length > 0, `Mutation was not killed: ${mutation}`)
+    if (mutation) {
+      const failed = summary.testResults.flatMap(file => file.assertionResults).filter(test => test.status === 'failed')
+      assert(result.status !== 0 && summary.numFailedTests > 0 && transformed.length > 0 && failed.length > 0 &&
+        failed.some(test => test.failureMessages.some(message => message.includes('AssertionError'))), `Mutation lacks actual assertion RED: ${mutation}`)
+    }
     else assert(result.status === 0 && summary.numFailedTests === 0 && summary.numTotalTests > 0, 'Source consumer verification failed')
     return { report, loaded, tests: summary.numTotalTests, failed: summary.numFailedTests, transformed }
   }
@@ -64,7 +73,7 @@ if (scope === 'join') {
   current(inputs)
   const receipt = `${directory}/receipt.json`
   write(receipt, { schema: 'agentmux.amux-protocol-source-proof.v1', scope, sourcePassed: true, buildPerformed: false,
-    visualQualified: false, inputs, baseline, mutations, restored })
+    nodeVersion: process.version, visualQualified: false, inputs, baseline, mutations, restored })
   write(`${folder}/${scope}.json`, { receipt })
   console.log(JSON.stringify({ scope, sourcePassed: true, tests: baseline.tests, mutations: mutations.length, receipt, visualQualified: false }))
 }
