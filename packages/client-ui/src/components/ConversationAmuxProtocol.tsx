@@ -13,7 +13,7 @@ export function ConversationProtocolCard({ title, tag, kind, icon = 'file.code',
 }) {
   return <section className="conversation-protocol" data-protocol-kind={kind} aria-label={title}>
     <header className="conversation-protocol__header"><SemanticIcon name={icon} size={14} aria-hidden="true" />
-      <strong>{title}</strong><code>{tag}</code></header>
+      <span className="conversation-protocol__title">{title}</span><code>{tag}</code></header>
     {children}
     {raw === undefined ? null : <details className="conversation-protocol__original">
       <summary><SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />Original protocol</summary><pre>{raw}</pre>

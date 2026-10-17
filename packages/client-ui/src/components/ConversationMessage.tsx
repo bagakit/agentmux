@@ -1,5 +1,5 @@
 import type { AgentProviderId, AgentSessionHistoryContentPart, AgentSessionHistoryMessagePhase, AgentSessionHistoryQuestionAnswer, AgentSessionUserMessage, AgentSessionUserMessageSource, AgentTimelineItemStatus } from '@agentmux/core'
-import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
+import { AMUX_PROTOCOL_DEFINITIONS, parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import type { ConversationItemRef, ConversationSourceRecord } from '@agentmux/core/conversation'
 import { sessionHistoryTextForReading } from '@agentmux/core/session-user-messages'
 import { readSessionHistoryTextResource } from '@agentmux/core/session-history-content'
@@ -196,11 +196,13 @@ export function ConversationMessage({
   [speaker?.role, conversationEvent?.role, isPeerAgent, compact, messagePhase, status, openWorkspaceFile, content, workspaceRoot, homeDir])
   const firstText = parts[0]?.kind === 'text' ? sessionHistoryTextForReading(parts[0]) : undefined
   const prefix = useMemo(() => {
-    if (contentBoundary !== 'wire' || hasQuestionAnswers || !(inputMarkdown || a2aNotificationId) || firstText === undefined) return null
+    if (contentBoundary !== 'wire' || hasQuestionAnswers || firstText === undefined) return null
     const parsed = parseAgentMuxMessagePrefix(firstText)
     return a2aNotificationId && parsed?.kind !== 'references' ? null : parsed
-  }, [contentBoundary, hasQuestionAnswers, inputMarkdown, a2aNotificationId, firstText])
-  const systemSummary = a2aNotificationId && prefix?.kind === 'references' ? `${prefix.references.length} A2A Inbox reference${prefix.references.length === 1 ? '' : 's'}` : rawSystemSummary
+  }, [contentBoundary, hasQuestionAnswers, a2aNotificationId, firstText])
+  const systemSummary = prefix?.kind === 'references' ? `${prefix.references.length} A2A Inbox reference${prefix.references.length === 1 ? '' : 's'}`
+    : prefix?.protocol ? `${prefix.protocol.id ? AMUX_PROTOCOL_DEFINITIONS[prefix.protocol.id].title : 'Protocol declaration'} · ${prefix.protocol.tag}`
+    : prefix?.declaredMessageId !== undefined ? AMUX_PROTOCOL_DEFINITIONS.a2a.title : rawSystemSummary
   const isDeclaredSender = prefix !== null && prefix.sourceLabel.length > 0 && recordedSpeaker?.role === 'unknown'
   const [systemContextOpen, setSystemContextOpen] = useState(false)
   const systemContentId = useId()
@@ -477,7 +479,7 @@ export function ConversationMessage({
                 {...(openHttpLink ? { openHttpLink } : {})}
               />
             ) : part.resourceType === 'text' && readHistoryResource && nativeResourceRecord ? (
-              <ConversationResourceText sources={sources?.parts[index]} active={active} key={key} part={part} partIndex={index} record={nativeResourceRecord} readResource={readHistoryResource} workspaceRoot={workspaceRoot} homeDir={homeDir} inputMode={inputMarkdown} contentBoundary={contentBoundary} {...(a2aNotificationId ? { a2aNotificationId } : {})}
+              <ConversationResourceText sources={sources?.parts[index]} active={active} key={key} part={part} partIndex={index} record={nativeResourceRecord} readResource={readHistoryResource} workspaceRoot={workspaceRoot} homeDir={homeDir} inputMode={inputMarkdown} contentBoundary={hasQuestionAnswers ? 'body' : contentBoundary} {...(a2aNotificationId ? { a2aNotificationId } : {})}
                 inputContext={index === contextPartIndex ? inputContext : undefined} inputContextSource={inputContextSource}
                 {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
             ) : part.resourceType === 'image' && readHistoryResource && nativeResourceRecord ? (

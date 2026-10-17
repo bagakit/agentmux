@@ -1,10 +1,10 @@
-import type { AgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
+import { AMUX_PROTOCOL_DEFINITIONS, type AgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import { browserInputContextJson, type BrowserInputContext, type BrowserInputContextSource } from '@agentmux/core/browser-input-context'
 import { memo, type ComponentProps } from 'react'
 import { SemanticIcon } from '../theme/icons.js'
 import { AgentMarkdown } from './AgentMarkdown.js'
 import { ConversationBrowserContext } from './ConversationBrowserContext.js'
-import { ConversationAmuxProtocol } from './ConversationAmuxProtocol.js'
+import { ConversationAmuxProtocol, ConversationProtocolCard } from './ConversationAmuxProtocol.js'
 
 const Markdown = memo(AgentMarkdown)
 type MarkdownProps = Omit<ComponentProps<typeof AgentMarkdown>, 'content' | 'className'>
@@ -25,16 +25,8 @@ export function ConversationInputText({ text, prefix, inputContext, inputContext
   // A different wire declaration stays declared and does not borrow another observation's source.
   const recorded = inputContext ? browserInputContextJson(inputContext) : null
   const matching = prefix?.declaredContexts?.findIndex(context => context.inputContext && browserInputContextJson(context.inputContext) === recorded) ?? -1
-  return <>
-    {inputContext && matching < 0 ? <ConversationBrowserContext context={inputContext} source={inputContextSource} /> : null}
-    {prefix?.declaredContexts?.map((context, index) => context.inputContext
-      ? <ConversationBrowserContext key={index} context={context.inputContext} source={index === matching ? inputContextSource ?? 'caller-declared' : 'caller-declared'} raw={context.raw} />
-      : <details key={index} className="log-turn__declared-context">
-      <summary><SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />Declared context{prefix.declaredContexts!.length > 1 ? ` ${index + 1}` : ''}</summary>
-      <pre>{context.raw}</pre>
-    </details>)}
-    {prefix?.protocol ? <ConversationAmuxProtocol declaration={prefix.protocol} /> : prefix?.kind === 'references' ? <section className="log-turn__references" aria-label="A2A message references">
-      <p>A2A Inbox references</p>
+  const reading = prefix?.protocol ? <ConversationAmuxProtocol declaration={prefix.protocol} />
+    : prefix?.kind === 'references' ? <section className="log-turn__references" aria-label="A2A message references">
       <ul>{prefix.references.map((reference, index) => <li key={index}>
         <span>Declared source <code>{reference.declaredAgentSessionId}</code></span>
         <span>Message <code>{reference.declaredMessageId}</code></span>
@@ -45,10 +37,27 @@ export function ConversationInputText({ text, prefix, inputContext, inputContext
       : <blockquote key={index} className="log-turn__citation"><span className="log-turn__citation-from">{part.from}</span>
         {part.reference ? <code className="log-turn__citation-ref">{part.reference}</code> : null}
         <Markdown {...markdown} className="log-turn__packet-text" content={part.text} />
-      </blockquote>) : body ? <Markdown {...markdown} content={body} /> : null}
-    {prefix?.reminder ? <details className="log-turn__reminder">
+      </blockquote>) : body ? <Markdown {...markdown} content={body} /> : null
+  const reminder = prefix?.reminder ? <details className="log-turn__reminder">
       <summary title="Protocol text is a declaration, not proof of origin or a new authorization."><SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />Collaboration reminder</summary>
       <p>{prefix.reminder.text}</p>
-    </details> : null}
+    </details> : null
+  const a2a = prefix?.kind === 'references' || prefix?.declaredMessageId !== undefined
+  return <>
+    {inputContext && matching < 0 ? <ConversationBrowserContext context={inputContext} source={inputContextSource} /> : null}
+    {prefix?.declaredContexts?.map((context, index) => context.inputContext
+      ? <ConversationBrowserContext key={index} context={context.inputContext} source={index === matching ? inputContextSource ?? 'caller-declared' : 'caller-declared'} raw={context.raw} />
+      : <details key={index} className="log-turn__declared-context">
+      <summary><SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />{AMUX_PROTOCOL_DEFINITIONS.context.title}{prefix.declaredContexts!.length > 1 ? ` ${index + 1}` : ''}</summary>
+      <pre>{context.raw}</pre>
+    </details>)}
+    {a2a ? <ConversationProtocolCard title={prefix.kind === 'references' ? AMUX_PROTOCOL_DEFINITIONS['a2a-reference'].title : AMUX_PROTOCOL_DEFINITIONS.a2a.title}
+      kind={prefix.kind === 'references' ? 'a2a-reference' : 'a2a'} tag={AMUX_PROTOCOL_DEFINITIONS.a2a.tag} icon="conversation.incoming" raw={text}>
+      {prefix.kind === 'content' ? <dl className="conversation-protocol__attributes">
+        <div><dt>Declared source</dt><dd>{prefix.declaredAgentSessionId}</dd></div>
+        <div><dt>Message</dt><dd>{prefix.declaredMessageId}</dd></div>
+      </dl> : null}
+      {reading}{reminder}
+    </ConversationProtocolCard> : <>{reading}{reminder}</>}
   </>
 }
