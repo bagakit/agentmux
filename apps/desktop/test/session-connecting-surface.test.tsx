@@ -155,8 +155,8 @@ it.each(['launcher', 'control'] as const)('captures the exact %s request before 
 it('lets the shared stage own one heading and renders only meaningful connection content', async () => {
   pendingFixture()
   await dom.render(pane())
-  expect([...dom.container.querySelectorAll('h1, h2')].map(node => node.textContent)).toEqual(['Starting your agent'])
-  expect(dom.container.querySelector('.full-page-loading__heading h1')?.textContent).toBe('Starting your agent')
+  expect([...dom.container.querySelectorAll('.full-page-loading__stage > .surface-state__content > .surface-state__heading > .surface-state__title')].map(node => node.textContent)).toEqual(['Starting your agent'])
+  expect(dom.container.querySelector('.full-page-loading__stage > .surface-state__content > .surface-state__heading > .surface-state__title')?.textContent).toBe('Starting your agent')
   expect(dom.container.querySelector('.full-page-loading__detail')).toBeNull()
   expect(dom.container.querySelector('.session-connecting__feedback')).toBeNull()
   expect(dom.container.querySelector('.full-page-loading__eyebrow')).toBeNull()
