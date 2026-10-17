@@ -756,6 +756,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   settings('settings.applications.apply', '<id> --plan <planId> --operation-id <id>', 'Explicitly apply the original reviewed plan and verify the exact target application account/scopes; user only. Keep the original operation ID after unknown.', 1),
   settings('settings.applications.operation', '<operationId>', 'Query the original application operation and target verification; never repeats export/import. Unknown must not be replayed with another ID.', 1),
   settings('settings.hosts.inspect', '--host <id>', 'Read one exact Host Runtime: source-scoped identity, capabilities and retained resource facts; never starts Native or changes Sessions.'),
+  settings('settings.hosts.network', '--host <id>', 'Explicitly read one saved Host link: original owner request duration, interface addresses and current SSH configuration; does not change connections or Runs.'),
   settings('settings.hosts.update', '<id> --input <file|->', 'Repair a bound SSH Host route with complete expected and candidate records. Confirms the same Runtime; preserves Sessions and Runs. If the reply is unknown, read hosts ls before retrying.', 1),
   settings('settings.hosts.ls', '', 'List actual configured Hosts.'),
   settings('settings.hosts.test', '<id>|--input <file|->', 'Test an exact saved Host or a complete draft.', 1),
