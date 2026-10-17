@@ -11,7 +11,7 @@ export function recoveryExitSession(kind = 'recovery-failed'): Extract<SessionSn
     evidence: { kind: 'run-ended', state: 'exited', observedAt: now },
     nativeTarget: { kind: 'provider', providerId: 'codex', sessionId: 'original-conversation' },
     errorCode: 'AGENT_TERMINAL_HANDSHAKE_FAILED', error: 'The original startup request was rejected. Check the executor environment before restoring again.',
-    supervision: { phase: 'paused', activeAttemptOperationId: 'original-recovery', attemptCount: 2, attemptLimit: 3,
+    supervision: { phase: 'paused', activeAttemptOperationId: 'original-recovery', attemptCount: 2, attemptLimit: 2,
       observedAt: now, reason: 'retry-budget-exhausted', process: { run, state: 'exited', exitCode: 1, observedAt: now } }
   }
   if (kind === 'unknown-cause') delete operation.error
