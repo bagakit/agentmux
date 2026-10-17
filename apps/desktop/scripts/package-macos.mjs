@@ -1108,12 +1108,13 @@ async function main() {
     initialSource.status === '',
     `macOS packaging requires a clean source tree, found:\n${initialSource.status}`
   )
+  const electronRoot = dirname(require.resolve('electron/package.json'))
+  await run(process.execPath, [join(electronRoot, 'install.js')])
+  const electronApp = join(electronRoot, 'dist', 'Electron.app')
+  assert(await pathExists(electronApp), 'The locked Electron application is missing.')
   // Emit the client package consumed by Main and its Core dependencies before compiling Desktop.
   await run('pnpm', ['--filter', '@agentmux/client-ui...', 'build'], { cwd: repositoryRoot })
   await run('pnpm', ['build'], { cwd: desktopRoot })
-  const electronRoot = dirname(require.resolve('electron/package.json'))
-  const electronApp = join(electronRoot, 'dist', 'Electron.app')
-  assert(await pathExists(electronApp), 'The locked Electron application is missing.')
   const temporaryRoot = await mkdtemp(join(tmpdir(), 'agentmux-macos-package-'))
   try {
     const candidateRoot = join(temporaryRoot, 'candidate')
