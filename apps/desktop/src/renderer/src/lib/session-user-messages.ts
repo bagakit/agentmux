@@ -3,6 +3,7 @@ import { projectConversationWindow, type AgentConversationRecordSource } from '@
 import { useConversationView } from '@agentmux/client-ui/use-conversation-view'
 import type { AgentSessionControl } from '../../../shared/contracts'
 import { api } from './api'
+import { desktopConversationDiagnostics } from './conversation-diagnostic-options'
 
 export type AgentSessionControlInput = AgentSessionControl
 export function useSessionUserMessages(control?: AgentSessionControlInput, options?: { enabled?: boolean; initialInputs?: number }) {
@@ -11,7 +12,8 @@ export function useSessionUserMessages(control?: AgentSessionControlInput, optio
   const initial = useRef({ key, batches: 1, settled: target === 0 })
   if (initial.current.key !== key) initial.current = { key, batches: 1, settled: target === 0 }
   const demand = initial.current
-  const view = useConversationView(api.conversation, control, enabled, control ? { identity: control.run.runId } : {})
+  const view = useConversationView(api.conversation, control, enabled, { ...(control ? { identity: control.run.runId } : {}),
+    diagnostics: desktopConversationDiagnostics('input-summary', control?.run.runId) })
   const page = view.reading?.historyPage ?? null
   const messages = useMemo(() => view.reading?.inputs ?? [], [view.reading])
   // This visible consumer seeks inputs through its original canonical window.

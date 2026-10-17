@@ -7,6 +7,8 @@ import { api } from './api'
 import type { SessionHistoryReference } from '../../../shared/contracts'
 import { nativeBindingKey, type AgentNativeSourceFacts } from '../../../shared/agent-native-source'
 import { useWorkbenchDocument } from './workbench-document'
+import { desktopConversationDiagnostics } from './conversation-diagnostic-options'
+import type { ReadingDiagnosticReason } from '@agentmux/core/reading-diagnostic'
 
 export type ConversationReading = {
   reference: SessionHistoryReference
@@ -44,18 +46,26 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
   const bindingKey = reading?.nativeSourceFacts ? nativeBindingKey(reading.nativeSourceFacts) : ''
   const acceptedBinding = useRef({ key, bindingKey })
   const coverageDemand = useRef({ key, duration: coverageDuration, remaining: 2 })
+  const protectionReason = useRef<ReadingDiagnosticReason>('unknown')
   const view = useConversationView(api.conversation, reading?.reference, reading?.enabled === true, {
     ...(reading ? { identity: reading.identity } : {}),
+    diagnostics: desktopConversationDiagnostics('conversation-pane', reading?.consumer?.runId),
+    heldReason: () => protectionReason.current,
     beforeCommit: (snapshot, operation, displayedFrame, replayingHeldIntent) => {
+      protectionReason.current = 'unknown'
       const next = projectConversationWindow(snapshot), page = next.historyPage
       const currentIntent = replayingHeldIntent ? admissionIntent.current
         : operation === 'changes' || operation === 'reopen' || operation === 'resume' ? 'live' : intent.current
       admissionIntent.current = currentIntent
       // The accepted current page is the first page of this explicit batch.
       if (!replayingHeldIntent && operation === 'latest') coverageDemand.current.remaining = 2
-      if (beforeCapturedCommit?.(next.captured, displayedFrame ? projectConversationWindow(displayedFrame).captured : undefined) === false) return false
+      if (beforeCapturedCommit?.(next.captured, displayedFrame ? projectConversationWindow(displayedFrame).captured : undefined) === false) {
+        protectionReason.current = 'captured-reading-protection'; return false
+      }
       if (page && !beforeCommit(page, currentIntent, displayed.current ?? undefined, { current: displayed.current,
-        ...(boundary.current ? { recordBoundary: { beforeRecordId: boundary.current } } : {}) })) return false
+        ...(boundary.current ? { recordBoundary: { beforeRecordId: boundary.current } } : {}) })) {
+        protectionReason.current = 'native-reading-protection'; return false
+      }
       acceptedBinding.current = { key, bindingKey }
       return true
     }
@@ -109,7 +119,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
   const error = (automaticReadError ? null : view.error?.message) ?? view.observationError?.message ?? (bindingChanged ? 'Native source changed. The original window is retained; explicitly open Current source or Previous source.' : null)
   const currentOutside = Boolean(view.snapshot?.window.navigation.newer || view.newerAvailable || view.held)
   const expiredHistorical = view.historical && (view.error as { code?: string } | null)?.code === 'AGENT_CONVERSATION_VIEW_EXPIRED'
-  return { page, projection, snapshot: view.snapshot, readActivity: { sourceRead: view.sourceRead, loading: view.loading }, inspect: view.inspect, capturedSnapshot: projection?.captured,
+  return { page, projection, snapshot: view.snapshot, readActivity: { sourceRead: view.sourceRead, loading: view.loading }, inspect: view.inspect, noteDiagnostic: view.noteDiagnostic, capturedSnapshot: projection?.captured,
     captured: projection?.captured.items ?? null, capturedLoading: view.loading, capturedHasMore: view.hasMore,
     readCapturedEarlier: () => { coverageDemand.current.remaining = 0; void navigate('older') },
     historical: view.historical || previousSource || bindingChanged, hasEarlierNavigation: Boolean(boundary.current) || previousSource,
