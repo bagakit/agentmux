@@ -22,11 +22,11 @@ export async function assertAgentConnectionAccess(owner: ConnectionPort, method:
     if (original.operation) await connection(original.operation.connection.config.connectionId)
     return
   }
-  if (['connection.setup.begin', 'connection.setup.ls', 'connection.test', 'connection.profile.get', 'connection.profile.sync', 'connection.profile.ls',
+  if (['connection.setup.begin', 'connection.setup.ls', 'connection.test', 'connection.profile.get', 'connection.profile.ls',
     'connection.room.ls', 'connection.room.search', 'connection.room.get', 'connection.room.members', 'connection.room.link.create'].includes(method)) {
     await connection(p.connectionId); return
   }
-  if (method === 'connection.profile.inspect' || method === 'connection.profile.advance') {
+  if (method === 'connection.profile.inspect') {
     const original = await owner.profile?.inspect({ operationId: p.operationId as string }, { actor: { kind: 'agent', id: agentSessionId } })
     if (original?.operation) await connection(original.operation.connectionId)
     return
