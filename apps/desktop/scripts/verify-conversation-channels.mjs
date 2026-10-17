@@ -24,6 +24,7 @@ try {
   for (const mode of process.argv.includes('--capture-only') ? [] : [
     { name: 'normal' },
     { name: 'catalog', pattern: 'catalog:' },
+    { name: 'inapp', pattern: 'in-app conversation' },
     { name: 'native', pattern: 'visited Host instance and draft' },
     { name: 'lark', pattern: 'discovers Lark from Conversation Channels' },
     { name: 'restored' }
@@ -74,7 +75,7 @@ try {
   await writeFile(resolve(visual, 'capture.log'), lines.join('\n'))
   const render = JSON.parse(await readFile(resolve(visual, 'render.json'), 'utf8'))
   assert.equal(execution.exitCode, 0, JSON.stringify(render.failure)); assert.equal(render.passed, true)
-  assert.deepEqual([...render.frames].sort(), ['overview-wide.png', 'amux-wide.png', 'lark-wide.png', 'lark-original-unknown.png', 'amux-narrow.png', 'lark-narrow.png'].sort())
+  assert.deepEqual([...render.frames].sort(), ['overview-wide.png', 'inapp-wide.png', 'mobile-wide.png', 'lark-wide.png', 'lark-original-unknown.png', 'inapp-narrow.png', 'mobile-narrow.png', 'lark-narrow.png'].sort())
   receipt.render = render
   receipt.images = Object.fromEntries(await Promise.all(render.frames.map(async image => [image, sha(await readFile(resolve(visual, image)))])))
   assert.ok(Object.keys(receipt.inputs).length > 0)
