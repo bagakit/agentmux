@@ -5,7 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
-import { AgentMuxClient, AgentMuxMemoryAgentSessionStore } from '@agentmux/core'
+import { AgentMuxClient, AgentMuxMemoryAgentSessionStore, type AgentCatalogEntry } from '@agentmux/core'
 import { RuntimeController } from '../src/main/runtime-controller'
 import { displayLabel } from '@agentmux/core/spatial-graph'
 import { act } from 'react'
@@ -22,7 +22,7 @@ import { SessionTakeoverSurface } from '../src/renderer/src/components/SessionTa
 import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { agentCreationFixture } from './helpers/agent-creation-fixture'
-import type { AgentLaunchResult, AppConfig, SessionSnapshot } from '../src/shared/contracts'
+import type { AgentLaunchResult, AppConfig, SessionSnapshot, ProviderCatalogObservation } from '../src/shared/contracts'
 
 const initial = useAppStore.getState()
 let container: HTMLDivElement, root: Root, dispose: (() => void) | undefined
@@ -31,6 +31,11 @@ let nameOwner: AgentMuxSpatialStateStore, ownerDirectory: string
 const creations = new Map<string, AgentLaunchResult['created']>()
 const diagnostic = 'Original diagnostic ' + 'all retained details; '.repeat(100)
 vi.mock('electron', () => ({ app: {}, nativeImage: {} }))
+function emptyProviderCatalog(options: { observation: true }): Promise<ProviderCatalogObservation>
+function emptyProviderCatalog(): Promise<AgentCatalogEntry[]>
+async function emptyProviderCatalog(options?: { observation: true }): Promise<ProviderCatalogObservation | AgentCatalogEntry[]> {
+  return options?.observation ? { catalog: [], warnings: [] } : []
+}
 beforeEach(async () => {
   creations.clear()
   vi.stubGlobal('crypto', webcrypto)
@@ -45,7 +50,7 @@ beforeEach(async () => {
   original = { ...seed, id: 'original', executorId: 'fixture', hostId: 'local', workspacePath: _hygiene_fixturePath("repo"),
     label: 'Original Agent', control: { ...seed.control, hostId: 'local', agentSessionId: 'original' }, status: { ...seed.status, detail: diagnostic } }
   vi.spyOn(api.config, 'get').mockResolvedValue(config)
-  vi.spyOn(api.providers, 'list').mockResolvedValue([])
+  vi.spyOn(api.providers, 'list').mockImplementation(emptyProviderCatalog)
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
   vi.spyOn(api.sessions, 'snapshot').mockImplementation(async () => ({sessions:useAppStore.getState().sessions.length?useAppStore.getState().sessions:[original],timelines:{},recoveryCandidates:[]}))
   vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue(undefined)
@@ -405,4 +410,54 @@ it('a confirmed Core execution binding keeps takeover usable when history observ
   expect(useAppStore.getState().tabs['source-tab']!.regions['source-region']).toMatchObject({ sessionId: 'original' })
   expect(useAppStore.getState().agentComposerDrafts.original).toBe('Unsent draft stays with the original.')
   expect(stop).not.toHaveBeenCalled()
+})
+
+
+async function mountTakeoverExitFocus() {
+  const triggerPanel = document.createElement('div'), trigger = document.createElement('button'), later = document.createElement('input')
+  trigger.textContent = 'Invoking Agent More'; later.setAttribute('aria-label', 'Neighbor draft')
+  triggerPanel.append(trigger); document.body.append(triggerPanel, later)
+  const onClose = vi.fn()
+  await act(async () => root.render(<SessionTakeoverSurface source={source} active onClose={onClose} returnTrigger={trigger} />))
+  return { triggerPanel, trigger, later, onClose }
+}
+async function cancelTakeoverExitFocus() {
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Cancel takeover"]')!.click())
+}
+it('later deliberate focus survives takeover cancellation exit', async () => {
+  const { later, onClose } = await mountTakeoverExitFocus()
+  await cancelTakeoverExitFocus()
+  await act(async () => later.focus())
+  expect(document.activeElement).toBe(later)
+  await act(async () => new Promise(resolve => setTimeout(resolve, 200)))
+  expect(onClose).toHaveBeenCalledTimes(1)
+  expect(document.activeElement, 'Later explicit neighbor input must retain focus after exit').toBe(later)
+})
+it('normal cancellation still returns to the invoking More', async () => {
+  const { trigger, onClose } = await mountTakeoverExitFocus()
+  await cancelTakeoverExitFocus()
+  await act(async () => new Promise(resolve => setTimeout(resolve, 200)))
+  expect(onClose).toHaveBeenCalledTimes(1)
+  expect(document.activeElement).toBe(trigger)
+})
+it.each(['hidden', 'inert', 'aria-hidden'] as const)('cancellation rejects a now %s invoking trigger in both return paths', async attribute => {
+  const { triggerPanel, trigger, onClose } = await mountTakeoverExitFocus()
+  triggerPanel.setAttribute(attribute, attribute === 'aria-hidden' ? 'true' : '')
+  const attemptedFocus = vi.spyOn(trigger, 'focus')
+  await cancelTakeoverExitFocus()
+  const cleanupAttempts = attemptedFocus.mock.calls.length
+  await act(async () => new Promise(resolve => setTimeout(resolve, 200)))
+  expect(onClose).toHaveBeenCalledTimes(1)
+  expect({ cleanupAttempts, allAttempts: attemptedFocus.mock.calls.length }, 'Neither cleanup nor exit timer may focus a hidden/inert origin').toEqual({ cleanupAttempts: 0, allAttempts: 0 })
+})
+
+it.each(['disabled', 'aria-disabled'] as const)('cancellation rejects a now %s invoking button in both return paths', async attribute => {
+  const { trigger, onClose } = await mountTakeoverExitFocus()
+  trigger.setAttribute(attribute, attribute === 'aria-disabled' ? 'true' : '')
+  const attemptedFocus = vi.spyOn(trigger, 'focus')
+  await cancelTakeoverExitFocus()
+  const cleanupAttempts = attemptedFocus.mock.calls.length
+  await act(async () => new Promise(resolve => setTimeout(resolve, 200)))
+  expect(onClose).toHaveBeenCalledTimes(1)
+  expect({ cleanupAttempts, allAttempts: attemptedFocus.mock.calls.length }).toEqual({ cleanupAttempts: 0, allAttempts: 0 })
 })
