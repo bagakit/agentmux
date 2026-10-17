@@ -10,7 +10,8 @@ import { SetupApplicationInspection } from './connection-setup-inspection.js'
 import { SetupApplicationConfiguration } from './connection-setup-configuration.js'
 import type { EnrollmentSetupSnapshot } from './connection-enrollment.js'
 
-type Row = { operation: ConnectionSetupOperation; actor: ConnectionEnrollmentCallContext['actor']; privateRef: string | null }
+type InitialCompletion = { state: 'incomplete' } | { state: 'complete'; versionId: string }
+type Row = { operation: ConnectionSetupOperation; actor: ConnectionEnrollmentCallContext['actor']; privateRef: string | null; initialCompletion?: InitialCompletion }
 type PrivateEnvelope = { operationId: string; connectionId: string; attemptId: string; challenge: ConnectionSetupView['challenge']; privateState: string; source?: NonNullable<ConnectionSetupBegin['source']>; sourceAuthAttemptId?: string; localAccount?: ReturnType<typeof parseConnectionSetupAccount> }
 type Authentication = NonNullable<ConnectionSetupOperation['authentication']>
 type AuthStep = { operationId: string; input: ConnectionSetupAdvance; authentication: Authentication; privateRef: string | null }
@@ -54,15 +55,37 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
       throw failure('The original management request storage is unconfirmed. Retain its identity and inspect it after storage is available. Existing bots and Agents remain available.')
     }
   }
-  private read(operationId: string): Row | null {
+  private read(operationId: string, includeAuthentication = true): Row | null {
     return this.safe(() => {
       const row = this.connections.database.prepare('SELECT actor_json,record_json,private_ref FROM connection_setup_operation WHERE operation_id=?').get(operationId)
       if (!row) return null
-      const operation = parseConnectionSetupOperation(JSON.parse(String(row.record_json)))
-      const latest = this.authStep(operationId)
+      const { initialCompletion: savedCompletion, ...savedOperation } = JSON.parse(String(row.record_json))
+      const operation = parseConnectionSetupOperation(savedOperation)
+      const initialCompletion: InitialCompletion | undefined = savedCompletion && typeof savedCompletion === 'object' && !Array.isArray(savedCompletion)
+        && (savedCompletion.state === 'incomplete' && Object.keys(savedCompletion).length === 1
+          || savedCompletion.state === 'complete' && Object.keys(savedCompletion).length === 2 && typeof savedCompletion.versionId === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(savedCompletion.versionId)) ? savedCompletion : undefined
+      const latest = includeAuthentication ? this.authStep(operationId) : null
       if (latest) operation.authentication = latest.authentication
-      return { operation, actor: JSON.parse(String(row.actor_json)), privateRef: row.private_ref === null ? null : String(row.private_ref) }
+      return { operation, actor: JSON.parse(String(row.actor_json)), privateRef: row.private_ref === null ? null : String(row.private_ref), ...(initialCompletion ? { initialCompletion } : {}) }
     })
+  }
+  /** Safe original outcome only: no private challenge resolution or platform observation. */
+  initialSetupObservation(input: ConnectionSetupBegin, target: Pick<ConnectionSetupOperation, 'adapterId' | 'application'>): { state: 'incomplete' | 'complete' | 'unconfirmed' } {
+    const row = this.read(input.operationId, false)
+    return { state: row && row.operation.adapterId === target.adapterId && same(row.operation.application, target.application) && same(admitted(row.operation), parseConnectionSetupParams('connection.setup.begin', input)) ? row.initialCompletion?.state ?? 'unconfirmed' : 'unconfirmed' }
+  }
+  private async initialView(operationId: string, context: ConnectionEnrollmentCallContext, run = false): Promise<ConnectionSetupView> {
+    const view = await this.initial.view(operationId, context, run)
+    if (view.initialSetup?.state === 'complete' && view.initialSetup.versionId && view.operation?.initialPublication) {
+      try {
+        const row = this.read(operationId, false)
+        if (row && same(admitted(row.operation), admitted(view.operation)) && row.initialCompletion?.state !== 'complete') {
+          this.connections.database.prepare("UPDATE connection_setup_operation SET record_json=json_set(record_json,'$.initialCompletion',json(?)) WHERE operation_id=? AND json_extract(record_json,'$.revision')=? AND json_extract(record_json,'$.initialCompletion.state') IS NOT 'complete'")
+            .run(JSON.stringify({ state: 'complete', versionId: view.initialSetup.versionId }), operationId, row.operation.revision)
+        }
+      } catch { /* Keep the actual original result. A later explicit inspect can record the same derived observation. */ }
+    }
+    return view
   }
   private async authority(context: ConnectionEnrollmentCallContext, row?: Row | null): Promise<void> {
     if (!context?.actor || !['user', 'device', 'agent'].includes(context.actor.kind) || !context.actor.id || row && !sameActor(row.actor, context.actor)) throw failure('This management request belongs to its original transport-approved actor.', 'CONNECTION_SETUP_AUTHORITY_REQUIRED')
@@ -160,7 +183,7 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
   }
   private touch(row: Row): void {
     const operation = structuredClone(row.operation); delete operation.authentication; operation.revision++
-    const changed = this.connections.database.prepare("UPDATE connection_setup_operation SET record_json=? WHERE operation_id=? AND json_extract(record_json,'$.revision')=?").run(JSON.stringify(operation), operation.operationId, row.operation.revision)
+    const changed = this.connections.database.prepare("UPDATE connection_setup_operation SET record_json=json_patch(?,json_object('initialCompletion',json_extract(record_json,'$.initialCompletion'))) WHERE operation_id=? AND json_extract(record_json,'$.revision')=?").run(JSON.stringify(operation), operation.operationId, row.operation.revision)
     if (changed.changes !== 1) throw failure('The original authentication intent changed. Read that same request.', 'CONNECTION_OPERATION_CONFLICT')
   }
   private updateAuth(step: AuthStep, change: (auth: Authentication) => void, privateRef = step.privateRef): AuthStep {
@@ -223,7 +246,7 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
       return view
     }
     if (!result.operation?.initialPublication) return result
-    const projected = await this.initial.view(result.operation.operationId, context)
+    const projected = await this.initialView(result.operation.operationId, context)
     return { ...result, ...(projected.initialSetup ? { initialSetup: projected.initialSetup } : {}) }
   }
   private async advanceOriginal(value: ConnectionSetupAdvance, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView> {
@@ -331,7 +354,7 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
       operation.revision++
       parseConnectionSetupOperation(operation)
       const stored = { ...operation }; delete stored.authentication
-      const result = this.connections.database.prepare("UPDATE connection_setup_operation SET record_json=?,private_ref=? WHERE operation_id=? AND json_extract(record_json,'$.revision')=?").run(JSON.stringify(stored), privateRef, operation.operationId, row.operation.revision)
+      const result = this.connections.database.prepare("UPDATE connection_setup_operation SET record_json=json_patch(?,json_object('initialCompletion',json_extract(record_json,'$.initialCompletion'))),private_ref=? WHERE operation_id=? AND json_extract(record_json,'$.revision')=?").run(JSON.stringify(stored), privateRef, operation.operationId, row.operation.revision)
       if (result.changes !== 1) throw failure('The original management request changed. Read that same request before continuing.', 'CONNECTION_OPERATION_CONFLICT')
       return { ...row, operation, privateRef }
     })
@@ -426,19 +449,20 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
           if (current.revision !== input.expectedConnectionRevision) throw failure('The exact saved bot revision changed. Read it before admitting a new request.', 'CONNECTION_REVISION_CONFLICT')
           const operation: ConnectionSetupOperation = { ...safeInput, revision: 1, adapterId: current.config.adapterId, application: current.config.application, request: { ...(input.source ? { kind: 'enrollment-handoff' as const } : {}), state: 'not-dispatched', attemptId: null }, secureStorage: 'not-started' }
           parseConnectionSetupOperation(operation)
-          db.prepare('INSERT INTO connection_setup_operation(operation_id,connection_id,actor_json,record_json) VALUES(?,?,?,?)').run(input.operationId, input.connectionId, JSON.stringify(context.actor), JSON.stringify(operation))
-          row = { operation, actor: { kind: context.actor.kind, id: context.actor.id }, privateRef: null }
+          const initialCompletion = input.initialPublication ? { state: 'incomplete' as const } : undefined
+          db.prepare('INSERT INTO connection_setup_operation(operation_id,connection_id,actor_json,record_json) VALUES(?,?,?,?)').run(input.operationId, input.connectionId, JSON.stringify(context.actor), JSON.stringify({ ...operation, ...(initialCompletion ? { initialCompletion } : {}) }))
+          row = { operation, actor: { kind: context.actor.kind, id: context.actor.id }, privateRef: null, ...(initialCompletion ? { initialCompletion } : {}) }
         }
         db.exec('COMMIT'); return row
       } catch (error) { db.exec('ROLLBACK'); throw error }
     })
     if (input.goal.kind === 'profile-update' && !await this.profile.freeze(input, row)) return { ...await this.view(row, context), profileUpdate: { stage: 'profile-preflight', state: 'attention', actions: [] } }
     const running = this.pending.get(input.operationId)
-    if (running) { await running; if (row.operation.goal.kind === 'profile-update') return this.profile.view(input.operationId, context); return row.operation.initialPublication ? this.initial.view(input.operationId, context) : this.view(this.read(input.operationId), context) }
+    if (running) { await running; if (row.operation.goal.kind === 'profile-update') return this.profile.view(input.operationId, context); return row.operation.initialPublication ? this.initialView(input.operationId, context) : this.view(this.read(input.operationId), context) }
     const work = (async () => {
       const result = await this.run(row, context)
       if (result.operation?.goal.kind === 'profile-update') return this.profile.view(input.operationId, context, true)
-      return result.operation?.initialPublication ? this.initial.view(input.operationId, context, true) : result
+      return result.operation?.initialPublication ? this.initialView(input.operationId, context, true) : result
     })()
     this.pending.set(input.operationId, work)
     try { return await work } finally { this.pending.delete(input.operationId) }
@@ -513,7 +537,7 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
       return { ...result, ...(projected.operation?.revision === result.operation.revision && projected.profileUpdate ? { profileUpdate: projected.profileUpdate } : {}) }
     }
     if (!result.operation?.initialPublication || value.requestTrace !== undefined) return result
-    const initial = await this.initial.view(result.operation.operationId, context)
+    const initial = await this.initialView(result.operation.operationId, context)
     return { ...result, ...(initial.initialSetup ? { initialSetup: initial.initialSetup } : {}) }
   }
   private async inspectOriginal(value: ConnectionSetupInspect, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView> {

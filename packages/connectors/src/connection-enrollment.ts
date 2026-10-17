@@ -28,6 +28,8 @@ import {
   type ConnectionEnrollmentView,
   type ConnectionSetupEnrollmentSource,
   type ConnectionApplication,
+  type ConnectionConfig,
+  type ConnectionRecord,
   type ConnectionSetupAccount,
   type ConnectionSetupBegin
 } from '@agentmux/core/connections'
@@ -101,6 +103,16 @@ export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
   }
   private current(): void {
     if (this.closed) throw issue('CONNECTION_ENROLLMENT_UNAVAILABLE')
+  }
+  /** Public configuration gets only the original managed flow's safe outcome, never its private locator. */
+  initialSetupObservation(config: ConnectionConfig): ConnectionRecord['initialSetup'] {
+    const row = this.store.readByConnection(config.connectionId), original = row?.operation.configured?.connection
+    if (!row?.operation.initialPublication || !row.operation.initialSetup || row.operation.creation?.create !== 'confirmed'
+      || row.operation.adapterId !== config.adapterId || !same(row.operation.application, config.application)) return undefined
+    if (!original || original.config.adapterId !== config.adapterId || !same(original.config.application, config.application)) return { state: 'unconfirmed' }
+    const input = this.setupInput(row)
+    try { return input ? this.options.connections.initialSetupObservation(input, original.config) : { state: 'unconfirmed' } }
+    catch { return { state: 'unconfirmed' } }
   }
   ownsConnection(connectionId: string, agentSessionId: string): boolean {
     this.current()
