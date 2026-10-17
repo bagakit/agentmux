@@ -6,6 +6,7 @@ import type {
 } from './mote-preferences.js'
 import type { ConnectionEnrollmentOperation, ConnectionEnrollmentCallContext, ConnectionEnrollmentAdvanceInput } from './connection-enrollment-contract.js'
 import type { ConnectionProfileOperation } from './connection-profile-contract.js'
+import type { ConnectionSetupInitialPublication } from './connection-setup-contract.js'
 
 /** Exact saved sources. An appearance revision is required only for include-saved. */
 export type MoteConnectionSource = { target: MotePreferencesTarget; expectedTopicRevision: string; expectedAvatarRevision: string | null }
@@ -17,6 +18,8 @@ export type MoteConnectionCreate = {
   avatar: 'include-saved' | 'omit'
   /** Omit to use the exact saved Mote name; an explicit name is frozen for this creation. */
   name?: string
+  /** Explicit authority to configure and publish this new identity for its creator. */
+  initialPublication?: ConnectionSetupInitialPublication
 }
 export type MoteConnectionSync = {
   operationId: string

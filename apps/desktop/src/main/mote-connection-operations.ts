@@ -275,6 +275,7 @@ export class MoteConnectionOperations implements MoteConnectionPort {
               adapterId: (input as MoteConnectionCreate).adapterId,
               domain: (input as MoteConnectionCreate).domain,
               label: name,
+              ...((input as MoteConnectionCreate).initialPublication ? { initialPublication: (input as MoteConnectionCreate).initialPublication } : {}),
               preset: {
                 name,
                 ...(source.description === null ? {} : { description: source.description }),
