@@ -1,0 +1,11 @@
+# Space Launcher
+
+Owning presentation: [空工作面的默认呈现](../../../../../docs/design/presentation/spaces-and-layout.md#空工作面的默认呈现).
+
+Run `node apps/desktop/scripts/capture-space-launcher.mjs` from the repository root. The isolated Electron loads the production Workbench, Launcher, rich inputs, Store, theme and imported CSS. Its receipt binds compiled consumers, imported styles and full screenshots to their source hashes.
+
+Review the wide dark/light, narrow and short workfaces against the Settings reference. The environment, complete executor catalog, composer and Launch action should form a clear reading order; Mote and utility surfaces remain secondary. Short and narrow workfaces must keep every control reachable through the shared scroll owner.
+
+Trusted Chromium operations edit the real prompt, open Options, reach its name inputs and dismiss without losing the draft. They also edit and reopen Browser/Note, collapse and expand the original Terminal, and open the Mote target chooser. The fixture checks original targets and retained Terminal identity through controlled preview API facts.
+
+Independent subjective review is required; capture success does not approve aesthetics. The fixture uses an isolated profile and controlled external API seams. It does not operate the user's installed App, real Agent Sessions or native CLI, and does not prove durable Runtime recovery.
