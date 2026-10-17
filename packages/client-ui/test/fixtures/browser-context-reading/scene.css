@@ -1,0 +1,10 @@
+html, body, #root { min-height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--text); font-family: var(--font-sans); font-size: var(--fs-body); }
+button { font: inherit; }
+.reading-proof { max-width: 800px; min-height: 850px; margin: 18px auto; background: var(--surface-1); border: 1px solid var(--line-soft); border-radius: var(--radius); }
+.reading-proof__head { display: flex; align-items: center; gap: var(--sp-3); min-height: 32px; padding-inline: var(--sp-5); border-bottom: 1px solid var(--line-soft); }
+.reading-proof__head strong { font-size: var(--fs-meta); font-weight: 500; }
+.reading-proof__head > span { margin-left: auto; color: var(--text-3); font-size: var(--fs-micro); }
+.reading-proof__content { padding: var(--sp-5); }
+.reading-proof__avatar { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: var(--surface-3); color: var(--text-2); }
+@media (max-width: 400px) { .reading-proof { margin: 0; border: 0; border-radius: 0; } .reading-proof__content { padding: var(--sp-4); } }
