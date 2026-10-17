@@ -78,6 +78,23 @@ app.whenReady().then(async () => {
     await check('filter-and-source-evidence', async () => {
       await click('.collaboration-toolbar__kinds [data-kind="communication"]')
       assert.equal(await read('document.querySelector(".collaboration-toolbar__kinds [data-kind=communication]").getAttribute("aria-pressed")'), 'false'); await frame('graph-filtered')
+      const metadataCount = state => state.reads.filter(item => item.kind === 'events' || item.kind === 'spawns').length
+      const cardIds = () => read(`[...document.querySelectorAll('.collaboration-canvas [data-collaboration-agent]')].map(e=>e.dataset.collaborationAgent).sort()`)
+      const pathIds = () => read(`[...document.querySelectorAll('.collaboration-canvas .react-flow__edge-path')].map(e=>e.closest('.react-flow__edge').dataset.id).sort()`)
+      const originalCards = await cardIds(), originalPaths = await pathIds(), beforeEmpty = metadataCount(await facts())
+      assert.ok(originalCards.length > 0); assert.ok(originalPaths.length > 0)
+      for (const kind of ['creation', 'supervision']) await click('.collaboration-toolbar__kinds [data-kind="' + kind + '"]')
+      await until('empty visible relation filters', () => read(`document.querySelector('.collaboration-dialog__footer')?.textContent.trim().startsWith('0 connections') && document.querySelectorAll('.collaboration-canvas .react-flow__edge-path').length === 0 && [...document.querySelectorAll('.collaboration-toolbar__kinds button')].every(e=>e.getAttribute('aria-pressed')==='false')`))
+      const emptyCards = await cardIds()
+      assert.ok(emptyCards.length > 0 && emptyCards.every(id => originalCards.includes(id)))
+      assert.ok(await read(`Boolean(document.querySelector('.collaboration-dialog [data-session-id="fixture-ui"]'))`))
+      assert.equal(metadataCount(await facts()), beforeEmpty)
+      result.emptyFilters = { cardsBefore: originalCards.length, emptyCards: emptyCards.length, originalPaths: originalPaths.length, emptyPaths: (await pathIds()).length, readsBefore: beforeEmpty, readsAfter: metadataCount(await facts()) }
+      await intact(); await frame('graph-empty-filtered')
+      for (const kind of ['creation', 'supervision']) await click('.collaboration-toolbar__kinds [data-kind="' + kind + '"]')
+      await until('original filtered paths restored', async () => JSON.stringify(await pathIds()) === JSON.stringify(originalPaths))
+      assert.deepEqual(await cardIds(), originalCards); result.emptyFilters.restoredCards = (await cardIds()).length
+      assert.equal(metadataCount(await facts()), beforeEmpty)
       await click('.collaboration-toolbar__kinds [data-kind="communication"]')
       await click('.collaboration-inspector .collaboration-relation[data-kind="communication"]')
       await until('source evidence selected', () => read('document.querySelectorAll(".collaboration-evidence article").length>0')); await frame('graph-source')
