@@ -16,6 +16,7 @@ import { GoalDetail } from './GoalDetail'
 import { GoalResponsibilitySummary } from './GoalResponsibilitySummary'
 import { EMPTY_GOAL_ACKNOWLEDGEMENT, type GoalAcknowledgementFeedback } from './GoalAlignment'
 import { GoalsCommonActions } from './GoalsCommonActions'
+import { GlobalGoalPatrolControl } from './GlobalGoalPatrolControl'
 import { SelectionField } from './SelectionField'
 import { SurfaceModeSwitch } from './SurfaceModeSwitch'
 import { resolveGoalsPreferences } from '../../../shared/goals-preferences'
@@ -153,6 +154,7 @@ export function GlobalBoardSurface() {
         <label className="goals-search"><ThemeActionSearchIcon size={14} /><TextInput ref={searchRef} aria-label="Search goals" placeholder="Search goals…" value={query} onChange={(event) => setQuery(event.target.value)} />{query ? <button type="button" aria-label="Clear search" onClick={() => setQuery('')}><ThemeActionClearIcon size={12} /></button> : null}</label>
         <button ref={filterRef} type="button" className={`goals-button${appliedFilters.length ? ' is-active' : ''}`} aria-label="Goal filters" aria-expanded={filtersOpen} aria-controls="goals-filters" onClick={() => setFiltersOpen(!filtersOpen)}><ThemeActionAdjustIcon size={13} /><span>Filter</span>{appliedFilters.length ? <span>{appliedFilters.length}</span> : null}</button>
         <SurfaceModeSwitch value={view} onChange={setView} active ariaLabel="Goal view" options={[{ value: 'list', label: <ThemeObjectListIcon size={14} />, ariaLabel: 'List view' }, { value: 'board', label: <ThemeLayoutColumns3Icon size={14} />, ariaLabel: 'Board view' }]} />
+        <GlobalGoalPatrolControl />
         <button ref={newGoalRef} type="button" className="goals-button goals-create" aria-label="New Goal" aria-describedby="goals-create-effect" data-new-goal disabled={Boolean(creation)} onClick={createGoal}><ThemeActionCreateIcon size={14} /><span>New Goal<small id="goals-create-effect">Draft + discussion</small></span></button>
       </header>
       {filtersOpen ? <div id="goals-filters" className="goals-filters" aria-label="Filter goals">

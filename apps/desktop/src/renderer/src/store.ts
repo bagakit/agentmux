@@ -29,6 +29,7 @@ import { submitWithPreparationRetry, type PromptPreparationRetryProgress } from 
 import { moteDefaultExecutor, moteDefaultConversation, recentMoteAgentsAfterVisit, restoredRecentMoteAgents, type MoteRecentAgent } from './lib/mote-quick-preferences'
 import { showMoteConversation } from './lib/mote-conversation-mode'
 import { goalPmoOperation, type GoalPmoIntent, type GoalPmoReceipt } from '../../shared/goal-pmo-origin'
+import { executeGlobalGoalPatrol } from './lib/goal-global-patrol'
 import { initializeGoalResponsibilityObservation, refreshKnownGoalResponsibilities } from './lib/goal-delegation-work'
 import { goalCreationDraftKey, restoredGoalAgentCreationDrafts, restoredGoalAgentSelectionDrafts, type GoalAgentSelectionDraft, type GoalAgentCreationDraft } from './lib/goal-agent-selection'
 import type { DemandContentReference } from '@agentmux/demand'
@@ -775,7 +776,7 @@ export function agentSteerExecution(entry: AgentSteerQueueEntry,
 function reactionIntentKey(reaction?: AgentSteerReaction): string | undefined {
   return reaction ? JSON.stringify([reaction.code, conversationReplySourceKey(reaction.replySource)]) : undefined
 }
-type AppState = {
+export type AppState = {
   runtimeOwnershipWarnings: string[] | undefined
   runtimeEndpointWarnings: RuntimeEndpointWarning[] | undefined
   // undefined: snapshot unavailable; null: snapshot confirms no environment warning.
@@ -5532,7 +5533,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         : {})
     }))
   },
-  async executeControl(request, signal, options) {
+  async executeControl(request, signal, options): Promise<AgentMuxControlResult> {
+    if (request.operation === 'demand.patrol-all') return await executeGlobalGoalPatrol({
+      get, subscribe: (listener): (() => void) => useAppStore.subscribe(listener), list: () => api.demands.list(),
+      execute: (inner, spatialOptions) => get().executeControl(inner, signal, spatialOptions)
+    }, request)
     if (request.operation === 'space.mote.preferences.read' || request.operation === 'space.mote.preferences.save') {
       return await (await import('./lib/mote-preferences-control')).executeMotePreferencesControl(request, signal)
     }

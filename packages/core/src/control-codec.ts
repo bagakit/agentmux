@@ -559,6 +559,14 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), patch,
       ...(source.expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt: source.expectedUpdatedAt as number }), ...(source.decision === undefined ? {} : { decision: demandDecision(source.decision) }) }
   }
+  if (source.operation === 'demand.patrol-all') {
+    if (Object.keys(source).some(key => !['schemaVersion', 'requestId', 'operation', 'caller'].includes(key))) {
+      throw new AgentMuxError('Global inspection accepts only its original operation identity and caller.', 'INVALID_CONTROL_REQUEST')
+    }
+    const owner = optionalCaller(source.caller)
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation,
+      ...(owner ? { caller: owner } : {}) }
+  }
   if (source.operation === 'demand.discuss' || source.operation === 'demand.confirm' || source.operation === 'demand.accept') {
     const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, demandId: id(source.demandId, 'Goal id is invalid.', 'INVALID_CONTROL_REQUEST') }
     if (source.operation === 'demand.discuss') {
@@ -1413,6 +1421,11 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     const demand = parseDemand(result.demand)
     const receipt = object(result.receipt, 'Control demand receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demand, ...(operation === 'demand.start' && result.continuation !== undefined ? { continuation: parseGoalContinuationLoop(result.continuation) } : {}), receipt: { demandId: id(receipt.demandId, 'Control demand receipt id is invalid.', 'CONTROL_PROTOCOL_ERROR'), ...(operation === 'demand.link-session' ? { sessionId: id(receipt.sessionId, 'Control demand Session id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'demand.link-project' ? { projectId: spaceControlId(receipt.projectId, 'Control demand project id is invalid.', 'CONTROL_PROTOCOL_ERROR', true) } : {}), ...(operation === 'demand.create' ? { createdAt: finiteNumber(receipt.createdAt, 'Control demand receipt timestamp is invalid.') } : {}), ...(operation === 'demand.update' ? { updatedAt: finiteNumber(receipt.updatedAt, 'Control demand receipt timestamp is invalid.') } : {}), ...(operation === 'demand.assign' ? { assignedAt: finiteNumber(receipt.assignedAt, 'Control demand receipt timestamp is invalid.'), startRequested: receipt.startRequested === true } : {}), ...(operation === 'demand.start' ? { startedAt: finiteNumber(receipt.startedAt, 'Control demand receipt timestamp is invalid.'), sessionId: receipt.sessionId === null ? null : id(receipt.sessionId, 'Control demand Session id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'demand.handoff' ? { handedOffAt: finiteNumber(receipt.handedOffAt, 'Control demand receipt timestamp is invalid.'), sessionId: receipt.sessionId === null ? null : id(receipt.sessionId, 'Control demand Session id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'demand.delete' ? { deletedAt: finiteNumber(receipt.deletedAt, 'Control demand receipt timestamp is invalid.') } : {}) } } } as AgentMuxControlSuccessReceipt
+  }
+  if (operation === 'demand.patrol-all') {
+    const receipt = parseSpaceControlSuccessReceipt({ ...source, operation: 'agent.open' })
+    if (receipt.operation !== 'agent.open') throw new AgentMuxError('Global inspection creation receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    return { ...receipt, operation }
   }
   if (operation === 'demand.discuss' || operation === 'demand.confirm' || operation === 'demand.accept') {
     const demand = parseDemand(result.demand), r = object(result.receipt, 'Goal receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')

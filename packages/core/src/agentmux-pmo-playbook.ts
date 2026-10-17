@@ -31,6 +31,7 @@ or Grounding request alone does not authorize implementation.
 
 ${reference('goal.create')}
 ${reference('goal.inspect')}
+${reference('goal.patrol.all')}
 ${reference('goal.update')}
 ${reference('goal.decisions')}
 ${reference('goal.activity')}

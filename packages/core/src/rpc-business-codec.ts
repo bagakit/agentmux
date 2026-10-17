@@ -48,6 +48,9 @@ export function rpcControlRequest(method: keyof typeof AGENTMUX_RPC_CONTROL_METH
     throw new AgentMuxError('RPC business parameters cannot contain an internal Control envelope.', 'INVALID_CONTROL_REQUEST')
   }
   const operation = AGENTMUX_RPC_CONTROL_METHODS[method]
+  if (method === 'goal.patrol.all' && typeof source.operationId !== 'string') {
+    throw new AgentMuxError('Global inspection requires its original explicit operationId.', 'INVALID_CONTROL_REQUEST')
+  }
   if ((method === 'goal.activity.append' || method === 'goal.activity.inspect') && typeof source.operationId !== 'string') {
     throw new AgentMuxError('Goal activity append/check requires the original explicit operationId.', 'INVALID_CONTROL_REQUEST')
   }
@@ -98,7 +101,7 @@ export function rpcControlRequest(method: keyof typeof AGENTMUX_RPC_CONTROL_METH
   if (operation !== 'browser.restore' && operation !== 'browser.release' && operation.startsWith('browser.') && operationId !== undefined) body.operationId = operationId
   const usesCaller = ['inspect.region', 'inspect.tab', 'open.terminal', 'open.browser', 'send',
     'arrange', 'promote.region', 'interrupt', 'resume', 'stop', 'demand.start', 'demand.continuation-action', 'browser.run', 'browser.replay',
-    'browser.stop', 'agent.open'].includes(operation)
+    'browser.stop', 'agent.open', 'demand.patrol-all'].includes(operation)
   const input = { ...body, schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation,
     ...(caller && usesCaller ? { caller } : {}) }
   const parsed = parseAgentMuxControlRequest(input)
@@ -152,6 +155,10 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
     if (refs?.some(ref => !demand.contentRefs?.some(saved => saved.hostId === ref.hostId && saved.workspaceId === ref.workspaceId && saved.zoneId === ref.zoneId))) fail()
   }
   switch (request.operation) {
+    case 'demand.patrol-all':
+      if (actual.requestId !== request.requestId || actual.agent &&
+        (actual.agent as Record<string, unknown>).createOperationId !== request.requestId) fail()
+      break
     case 'space.mote.preferences.read': {
       const { operation: _operation, ...body } = result as Extract<AgentMuxControlResult, { operation: 'space.mote.preferences.read' }>
       parseMotePreferencesReadResult(body, request)

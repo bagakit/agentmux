@@ -58,6 +58,7 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'goal.ls': 'demand.list', 'goal.inspect': 'demand.show', 'goal.create': 'demand.create',
   'goal.update': 'demand.update', 'goal.delete': 'demand.delete', 'goal.assign': 'demand.assign',
   'goal.discuss': 'demand.discuss', 'goal.confirm': 'demand.confirm', 'goal.accept': 'demand.accept',
+  'goal.patrol.all': 'demand.patrol-all',
   'goal.start': 'demand.start', 'goal.continuation-action': 'demand.continuation-action', 'goal.handoff': 'demand.handoff',
   'goal.link-session': 'demand.link-session', 'goal.link-project': 'demand.link-project',
   'goal.decisions': 'demand.decision-log', 'goal.focus': 'focus',
