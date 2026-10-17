@@ -21,7 +21,10 @@ export const collaborationMutations = [
     before: 'createdBy ? agentSpawnContext(createdBy) : undefined', after: 'undefined' },
   { scope: 'spawn', name: 'receipt-retains-birth-run', file: 'packages/core/src/client.ts',
     before: "const creation: NonNullable<AgentMuxAgentSession['creation']> = {\n        createOperationId,\n        intentDigest,\n        ...(createdBy ? { createdBy, createdRun: runRef(run.runId) } : {}),",
-    after: "const creation: NonNullable<AgentMuxAgentSession['creation']> = {\n        createOperationId,\n        intentDigest,\n        ...(createdBy ? { createdBy } : {})," }
+    after: "const creation: NonNullable<AgentMuxAgentSession['creation']> = {\n        createOperationId,\n        intentDigest,\n        ...(createdBy ? { createdBy } : {})," },
+  { scope: 'spawn', name: 'no-prompt-product-creation-retains-caller', file: 'apps/desktop/src/renderer/src/lib/space-agent-control.ts',
+    before: "...(request.caller ? { creationCaller: { agentSessionId: request.caller.agentSessionId, capability: request.caller.capability ?? '' } } : {}),",
+    after: '...{},' }
 ]
 
 export const collaborationTests = {

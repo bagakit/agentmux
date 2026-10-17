@@ -29,7 +29,7 @@ export default defineConfig({
     if (path.startsWith(resolve(root, 'packages/core/dist') + '/'))
       throw new Error('A2A source proof cannot consume Core build output.')
     const file = relative(root, path)
-    if (!/^packages\/[^/]+\/(?:src|test)\/.*\.ts$/u.test(file)) return
+    if (!/^(?:packages\/[^/]+\/(?:src|test)|apps\/desktop\/src)\/.*\.tsx?$/u.test(file)) return
     let input = code
     if (mutation?.file === file) {
       if (code.split(mutation.before).length !== 2) throw new Error('Source mutation requires its unique original anchor: ' + mutation.name)
