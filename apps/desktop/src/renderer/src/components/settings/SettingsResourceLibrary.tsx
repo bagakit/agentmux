@@ -1,9 +1,11 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+const ScrollBackIcon = semanticIconComponent('navigation.back')
+const ScrollForwardIcon = semanticIconComponent('navigation.disclosure')
 
 
 type ResourceRow = { id: string; name: string; detail: string; mark: ReactNode; status?: ReactNode }
@@ -22,6 +24,24 @@ export function SettingsResourceLibrary({ label, items, selectedId, onSelect, qu
   const list = useRef<HTMLDivElement>(null)
   const search = useRef<HTMLInputElement>(null)
   const [focusedId, setFocusedId] = useState(selectedId)
+  const [overflow, setOverflow] = useState({ previous: false, next: false })
+  useLayoutEffect(() => {
+    const node = list.current
+    if (layout !== 'horizontal' || !node) return
+    const update = () => {
+      const previous = node.scrollLeft > 1
+      const next = node.scrollLeft + node.clientWidth < node.scrollWidth - 1
+      setOverflow(current => current.previous === previous && current.next === next ? current : { previous, next })
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(node)
+    for (const child of node.children) observer.observe(child)
+    node.addEventListener('scroll', update, { passive: true })
+    return () => { observer.disconnect(); node.removeEventListener('scroll', update) }
+  }, [layout, items])
+  const scrollable = layout === 'horizontal' && (overflow.previous || overflow.next)
+  const scrollPage = (direction: number) => list.current?.scrollBy({ left: direction * list.current.clientWidth * .75, behavior: 'instant' })
   useEffect(() => setFocusedId(selectedId), [selectedId])
   useEffect(() => {
     if (layout !== 'horizontal') return
@@ -50,6 +70,8 @@ export function SettingsResourceLibrary({ label, items, selectedId, onSelect, qu
       {onQuery ? <label className="settings-resource-search"><ThemeActionSearchIcon size={14} aria-hidden="true" />
         <TextInput ref={search} type="search" aria-label={`Filter ${label.toLowerCase()}`} placeholder={`Find ${label.toLowerCase()}…`} value={query} onChange={(event) => onQuery(event.target.value)} />
       </label> : null}
+      <div className="settings-resource-library__viewport">
+      {scrollable ? <button type="button" className="icon-button settings-resource-scroll" aria-label={`Previous ${label.toLowerCase()}`} disabled={!overflow.previous} onClick={() => scrollPage(-1)}><ScrollBackIcon size={13} /></button> : null}
       <div ref={list} className="settings-resource-library__list" role="listbox" aria-label={label} aria-orientation={layout === 'horizontal' ? 'horizontal' : 'vertical'}>
         {items.map((item, index) => <button type="button" key={item.id} role="option" aria-selected={selectedId === item.id}
           tabIndex={tabId === item.id ? 0 : -1} data-resource-row={item.id} title={`${item.name}\n${item.detail}`} className="settings-resource-row"
@@ -72,6 +94,8 @@ export function SettingsResourceLibrary({ label, items, selectedId, onSelect, qu
           <span className="settings-resource-row__status">{item.status}{selectedId === item.id ? <ThemeStatusSelectedIcon size={13} aria-hidden="true" /> : null}</span>
         </button>)}
         {items.length === 0 ? <p className="settings-resource-empty" role="status">{query.trim() ? `No ${label.toLowerCase()} match “${query}”.` : `No ${label.toLowerCase()} yet.`}</p> : null}
+      </div>
+      {scrollable ? <button type="button" className="icon-button settings-resource-scroll" aria-label={`More ${label.toLowerCase()}`} disabled={!overflow.next} onClick={() => scrollPage(1)}><ScrollForwardIcon size={13} /></button> : null}
       </div>
     </aside>
   )

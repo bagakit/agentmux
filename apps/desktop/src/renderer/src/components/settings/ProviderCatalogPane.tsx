@@ -22,7 +22,7 @@ export function ProviderCatalogPane({ entries, read, executorCounts, selectedId,
   return <section className="settings-provider-catalog" aria-label="Provider catalog">
     <header className="settings-provider-catalog__header">
       <strong>Provider</strong>
-      <span>Choose an adapter, then configure its executors.</span>
+      <span>Filter your saved executors.</span>
       <button type="button" className="icon-button" disabled={loading} aria-label={read.state === 'error' ? 'Retry providers' : 'Refresh providers'} title={read.state === 'error' ? 'Retry providers' : 'Refresh providers'} onClick={onRefresh}>
         {loading ? <ThemeStatusLoadingIcon animation="spin" size={13} /> : <ThemeActionRefreshIcon size={13} />}
       </button>
@@ -45,7 +45,7 @@ export function ProviderCatalogPane({ entries, read, executorCounts, selectedId,
         <div><dt>Permissions</dt><dd>{provider.capabilities.permission === 'respond' ? 'Permission responses' : provider.capabilities.permission === 'observe' ? 'Permission observation' : 'CLI permissions'}</dd></div>
         <div><dt>Session recovery</dt><dd>{provider.capabilities.providerResume ? 'Native resume' : 'No native resume'}</dd></div>
       </dl>
-      <p>Declared adapter capabilities. Command availability is checked separately in each environment.</p>
+      <p>Declared adapter capabilities. Command availability is checked separately in each Host.</p>
     </details> : null}
   </section>
 }

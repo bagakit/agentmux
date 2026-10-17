@@ -420,11 +420,11 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
                   <button type="button" className="small-button" aria-label={`Reset ${draft.label} avatar`} disabled={!avatar?.tint && !avatar?.badge} onClick={() => updateAvatar(id, {})}>Reset</button>
                 </div>
                 <details className="settings-launch-config" open={launchOpen[id] ?? false} onToggle={(event) => { const open = event.currentTarget.open; setLaunchOpen((current) => current[id] === open ? current : { ...current, [id]: open }) }}>
-                  <summary><span><strong>Advanced</strong><small>Environment, guide, and permissions</small></span><ThemeNavigationDownIcon size={14} /></summary>
+                  <summary><span><strong>Advanced</strong><small>Environment variables, guide, and permissions</small></span><ThemeNavigationDownIcon size={14} /></summary>
                   <div className="settings-launch-config__fields">
                     <p className="settings-group-note">Used for new sessions. Running agents keep their current configuration.</p>
                     {!config.executors[id] ? <p className="settings-group-note">Executor ID: <code>{id}</code>. Provider and ID are fixed after saving.</p> : null}
-                        <label><span>Environment <small>JSON object · values stay literal</small></span><ComposerTextarea value={draft.env} onValueChange={(value) => update(id, { env: value })} placeholder={'{"API_BASE": "https://example.test"}'} rows={3} /></label>
+                        <label><span>Environment variables <small>JSON object · values stay literal</small></span><ComposerTextarea value={draft.env} onValueChange={(value) => update(id, { env: value })} placeholder={'{"API_BASE": "https://example.test"}'} rows={3} /></label>
                     <label className="agent-guide-toggle"><input type="checkbox" checked={draft.injectAgentMuxGuide} onChange={(event) => update(id, { injectAgentMuxGuide: event.target.checked })} /><span><strong>AgentMux guide</strong><small>Help this agent use your views, tabs, and configured executors.</small></span></label>
                     {withYoloArgs(draft.providerId, []) ? <div className="settings-launch-action"><span>Skip permission prompts on future launches.</span><button type="button" className="small-button" disabled={saving} onClick={() => void enableYolo(id)}><ThemeStatusUnrestrictedIcon size={13} /> Enable YOLO</button></div> : null}
                   </div>
