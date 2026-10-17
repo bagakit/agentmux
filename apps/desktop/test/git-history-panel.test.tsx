@@ -152,14 +152,15 @@ describe('mounted GitHistoryPanel with production hook and bridge', () => {
       { ...commit(b, 'Two references', []), refs: [{ ...single, oid: b }, second] }]))
     await render()
     const rendered = [...host.querySelectorAll<HTMLElement>('.git-history-commit')]
-    expect(rendered.map(row => row.querySelectorAll('.git-history-ref').length)).toEqual([1, 2])
+    expect(rendered.map(row => row.querySelectorAll('.git-history-ref').length)).toEqual([1, 1])
+    expect(rendered[1]!.querySelector('.git-history-ref-count')?.textContent).toBe('+1')
     for (const ref of host.querySelectorAll<HTMLElement>('.git-history-ref')) {
       const style = getComputedStyle(ref)
       expect(style.maxWidth).toBe('100%')
       expect(style.flexShrink).toBe('1')
       expect(style.textOverflow).toBe('ellipsis')
     }
-    expect(Number.parseFloat(getComputedStyle(rendered[0]!.querySelector('strong')!).minWidth)).toBe(0)
+    expect(getComputedStyle(rendered[0]!.querySelector('strong')!).minWidth).not.toBe('0px')
     await act(async () => rendered[0]!.querySelector<HTMLElement>('.git-history-ref')!.focus())
     expect(document.querySelector('[data-history-detail-oid]')?.textContent).toContain(single.name)
   })
@@ -192,8 +193,8 @@ describe('mounted GitHistoryPanel with production hook and bridge', () => {
       // Disclosure is one accessible reading surface, not competing native titles.
       expect(row.querySelector('strong')?.hasAttribute('title')).toBe(false)
     }
-    expect(rendered.map(row => row.children.length)).toEqual([3, 2])
-    expect(rendered[0]!.querySelector(':scope > .git-history-refs')?.textContent).toContain('+1')
+    expect(rendered.map(row => row.children.length)).toEqual([4, 3])
+    expect(rendered[0]!.querySelector(':scope > .git-history-refs')?.textContent).toContain('+2')
     await act(async () => rendered[0]!.focus())
     const full = document.querySelector('[data-history-detail-oid]')!
     expect(full.textContent).toContain(subject)
@@ -227,7 +228,7 @@ describe('mounted GitHistoryPanel with production hook and bridge', () => {
     expect(document.querySelectorAll('[role="option"]').length).toBeLessThan(30)
     await act(async () => document.querySelector('[aria-label="Search history references"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
     expect(host.querySelector<HTMLElement>('[aria-label="History reference"]')?.title).toBe('~/project')
-    expect(host.querySelector('.git-history-refs')?.textContent).toBe('branch-0branch-1+217')
+    expect(host.querySelector('.git-history-refs')?.textContent).toBe('branch-0+218')
     await act(async () => host.querySelector<HTMLElement>('.git-history-ref-count')!.focus())
     expect(document.querySelector('[data-history-detail-oid]')?.textContent).toContain(refs[218]!.name)
     expect(host.textContent).toContain('4 commits · 1 parent beyond view')
@@ -302,15 +303,16 @@ describe('mounted GitHistoryPanel with production hook and bridge', () => {
     expect(hue(node(d))).toBe(mainHue)
     const refs = [...host.querySelectorAll('.git-history-ref')]
     const labelName = (ref: Element) => / reference (.*)\. Commit /u.exec(ref.getAttribute('aria-label') ?? '')?.[1]
-    expect(refs.map(labelName)).toEqual([side.name, main.name, head.name, tag.name, topic.name])
+    expect(refs.map(labelName)).toEqual([side.name, main.name, tag.name, topic.name])
     expect(hue(refs.find(ref => labelName(ref) === main.name) ?? null)).toBe(mainHue)
-    expect(hue(refs.find(ref => labelName(ref) === head.name) ?? null)).toBe(mainHue)
+    await act(async () => host.querySelector<HTMLElement>(`[data-history-oid="${a}"]`)!.focus())
+    expect(document.querySelector('[data-history-detail-oid]')?.textContent).toContain(head.name)
     expect(hue(refs.find(ref => labelName(ref) === topic.name) ?? null)).toBe(topicHue)
     expect(refs.find(ref => labelName(ref) === tag.name)?.hasAttribute('data-branch-ref')).toBe(false)
     expect(host.querySelectorAll('.git-history-refs')).toHaveLength(4)
     const rendered = [...host.querySelectorAll<HTMLElement>('.git-history-commit')]
     expect(rendered.map(row => row.style.height)).toEqual(['24px', '24px', '24px', '24px', '24px', '24px'])
-    expect(rendered.map(row => row.children.length)).toEqual([3, 3, 3, 2, 3, 2])
+    expect(rendered.map(row => row.children.length)).toEqual([4, 4, 4, 3, 4, 3])
     expect(rendered[3]!.querySelector('.git-history-refs')).toBeNull()
     expect(rendered[1]!.querySelector(':scope > .git-history-refs')).not.toBeNull()
     expect([...host.querySelectorAll('.git-history-node')].map(circle => Number(circle.getAttribute('cy')))).toEqual([12, 36, 60, 84, 108, 132])
