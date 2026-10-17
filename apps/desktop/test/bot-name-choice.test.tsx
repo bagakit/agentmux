@@ -57,7 +57,7 @@ it('freezes the explicit manual name through the actual Renderer, IPC, public pa
   })
   expect(await readFile(join(f.motes[0]!.directory, 'topic.md'), 'utf8')).toBe(before)
   expect(f.creationCount).toBe(0)
-  expect(document.querySelector('[data-mote-bot-code]')).not.toBeNull()
+  await vi.waitFor(() => expect(document.querySelector('[data-mote-bot-code]'), document.body.textContent).not.toBeNull())
 })
 
 it('keeps an empty manual draft editable without dispatching a new original request', async () => {
