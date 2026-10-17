@@ -41,10 +41,52 @@ describe('finite collaboration Worker engine', () => {
       { id: 'closed', name: 'Closed members', members: ['point'], folded: false }
     ], nodes: [{ id: 'point', areaId: 'closed', width: 14, height: 14 }], connections: [] }
     const boxes = await arrangeCollaboration(input), empty = boxes.find(box => box.id === 'empty')!, closed = boxes.find(box => box.id === 'closed')!, point = boxes.find(box => box.id === 'point')!
-    expect(empty).toEqual(expect.objectContaining({ kind: 'area', folded: false, height: 40 }))
+    expect(empty).toEqual(expect.objectContaining({ kind: 'area', folded: false, width: 184, height: 32 }))
     expect(contains(closed, point)).toBe(true); expect(intersects(empty, closed)).toBe(false)
     const expanded = await arrangeCollaboration({ ...input, areas: input.areas.map(area => area.id === 'empty' ? { ...area, members: ['new'] } : area), nodes: [...input.nodes, { id: 'new', areaId: 'empty', width: 250, height: 94 }] })
     expect(contains(expanded.find(box => box.id === 'empty')!, expanded.find(box => box.id === 'new')!)).toBe(true)
+  })
+
+  it('keeps occupied geometry unchanged when empty original areas are added or reordered', async () => {
+    const nodes = [{ id: 'active', areaId: 'work', width: 250, height: 94 }, { id: 'idle', areaId: 'work', width: 160, height: 44 },
+      { id: 'closed', areaId: 'isolated', width: 14, height: 14 }, { id: 'folded-member', areaId: 'folded', width: 250, height: 94 }]
+    const input: CollaborationLayoutInput = { nodes, areas: [
+      { id: 'work', name: 'Original work', members: ['active', 'idle'], folded: false },
+      { id: 'isolated', name: 'Original isolated', members: ['closed'], folded: false },
+      { id: 'folded', name: 'Original folded', members: ['folded-member'], folded: true }
+    ], connections: [edge('local', 'active', 'idle'), edge('cross', 'active', 'closed')] }
+    const original = await arrangeCollaboration(input), originalIds = new Set(original.map(box => box.id))
+    const empty = Array.from({ length: 24 }, (_, index) => ({ id: `empty-${String(index).padStart(2, '0')}`, name: 'Original empty place', members: [], folded: index === 0 }))
+    const bottom = Math.max(...original.filter(box => box.kind === 'area').map(box => box.y + box.height))
+    for (const additions of [empty, [...empty].reverse()]) {
+      measurements.length = 0
+      const boxes = await arrangeCollaboration({ ...input, areas: [additions[0]!, ...input.areas, ...additions.slice(1)] })
+      expect(boxes.filter(box => originalIds.has(box.id))).toEqual(original)
+      expect(measurements.find(item => item.engine === 'fdp')!.nodes).toEqual(input.areas.map(area => area.id))
+      const shelves = boxes.filter(box => !originalIds.has(box.id))
+      expect(shelves.map(box => box.id)).toEqual(empty.map(area => area.id))
+      expect(shelves.every(box => box.kind === 'area' && box.y > bottom && box.folded === (box.id === 'empty-00'))).toBe(true)
+      for (const [index, first] of shelves.entries()) for (const second of boxes.filter(box => box.kind === 'area' && box.id !== first.id))
+        expect(intersects(first, second), `${index}/${first.id}/${second.id}`).toBe(false)
+      expect(boxes.find(box => box.id === 'closed')).toEqual(original.find(box => box.id === 'closed'))
+      expect(boxes.filter(box => box.areaId === 'folded')).toEqual([expect.objectContaining({ id: 'folded', kind: 'area', folded: true })])
+    }
+    const emptyInput = { areas: empty, nodes: [], connections: [] }
+    measurements.length = 0
+    const emptyBoxes = await arrangeCollaboration(emptyInput)
+    expect(await arrangeCollaboration({ ...emptyInput, areas: [...empty].reverse() })).toEqual(emptyBoxes)
+    expect(measurements).toEqual([])
+    expect(emptyBoxes).toHaveLength(empty.length)
+    expect(emptyBoxes.every(box => Number.isFinite(box.x) && Number.isFinite(box.y))).toBe(true)
+    for (const [index, first] of emptyBoxes.entries()) for (const second of emptyBoxes.slice(index + 1)) expect(intersects(first, second)).toBe(false)
+  })
+
+  it('routes from the actual compact area header without inflating its original height', async () => {
+    const compact = { ...box('empty', 0, 0, 184, 32), kind: 'area' as const, areaId: 'empty' }
+    const paths = await successfulRoutes([compact, box('target', 320, 0)], [edge('compact-target', 'empty', 'target')])
+    expect(paths).toHaveLength(1)
+    expect(paths[0]!.points[0]).toEqual({ x: 184, y: 32 / 12 })
+    expect(measurements.some(item => item.engine === 'nop2')).toBe(true)
   })
 
   it('places every original mixed member and isolated area without overlap, with room for real headings', async () => {
