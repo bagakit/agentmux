@@ -1,4 +1,5 @@
 import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mjs"
+import { updateThemeSelection } from '@agentmux/client-ui/theme'
 import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from '../../../src/renderer/src/App'
@@ -11,7 +12,6 @@ import { workbenchSelectionCatalog } from '../../../src/renderer/src/lib/desktop
 import { MoteWorkfaceContext } from '../../../src/renderer/src/lib/mote-workface'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { directoryIdentity, workspaceZoneId } from '../../../src/shared/space-addresses'
-import { applyAppAppearance } from '../../../src/renderer/src/lib/app-appearance'
 import '../../../src/renderer/src/styles/index.css'
 
 const preview = await api.config.get()
@@ -35,9 +35,10 @@ window.emptyWorkbenchProof = {
     const empty = createWorkspaceLayout('original-group')
     const visibleLayout = kind === 'unknown-app' || kind === 'unknown' ? empty : layout
     useAppStore.setState({ loading: false, initialize: async () => () => {}, config: { ...config, appearance: { ...config.appearance, appAppearance: theme } }, sessions: [], timelines: {},
-      activeWorkspaceId: workspace.id, mainSurface: 'workbench', toolsOpen: kind === 'unknown-app', projectRailOpen: kind === 'unknown-app',
-      tabs: { [tab.id]: tab }, layouts: { [workspace.id]: visibleLayout }, workbenchSpaceSelection: choice,
+      activeWorkspaceId: workspace.id, mainSurface: 'workbench', toolsOpen: false, projectRailOpen: kind === 'unknown-app',
+      tabs: kind === 'empty' || kind === 'discussion' ? {} : { [tab.id]: tab }, layouts: { [workspace.id]: visibleLayout }, workbenchSpaceSelection: choice,
       prewarmTerminal: async () => {}, error: null, agentComposerDrafts: { [tab.layout.activeRegionId]: 'Original unsent draft' } })
+    if (kind === 'empty' || kind === 'discussion') useAppStore.setState({ layouts: { [workspace.id]: empty } })
     const state = useAppStore.getState()
     baseline = { tabs: state.tabs, layouts: state.layouts, drafts: state.agentComposerDrafts }
     if (kind === 'unknown-app' || kind === 'with-body') render(createElement(App, { key: ++serial }))
@@ -48,25 +49,24 @@ window.emptyWorkbenchProof = {
         projection = { entity: kind === 'region' ? { kind: 'region', regionId: tab.layout.activeRegionId } : { kind: 'tab', tabId: tab.id },
           presentationId: 'empty-proof', displayWorkspaceId: workspace.id, catalog, selection: [], onSelect: () => {} }
       }
-      if (kind === 'empty' || kind === 'discussion') useAppStore.setState({ layouts: { [workspace.id]: empty } })
       const bench = createElement(WorkspaceWorkbench, { key: ++serial, workspaceId: workspace.id, viewOwnership: 'projection', projection,
         onCreateTab: groupId => calls.push({ kind: 'create', groupId }) })
       const content = kind === 'discussion' ? createElement(MoteWorkfaceContext.Provider, { value: {
-        workspace, topic: { id: 'empty-topic', title: 'Design discussion', collaborators: [] }, rootPath: _hygiene_fixturePath("private/empty-topic"),
+        workspace, topic: { id: 'empty-topic', title: 'Design discussion', directoryPath: _hygiene_fixturePath("private/empty-topic"), collaborators: [] }, rootPath: _hygiene_fixturePath("private/empty-topic"),
         floating: false, selectTab: () => {} } }, bench) : bench
       render(createElement('div', { style: { height: '100vh', display: 'flex' } }, content))
     }
-    applyAppAppearance(theme)
+    updateThemeSelection({ appAppearance: theme })
   },
   unknownWithBody() {
     useAppStore.setState({ workbenchSpaceSelection: { ...choice, groupId: 'unconfirmed-group' } })
   },
   facts() {
-    const visible = [...document.querySelectorAll('.workbench-empty-state,.service-window')].filter(node => {
+    const visible = [...document.querySelectorAll('.workbench-empty-state,.service-window,.workspace-workbench .surface-state[role="status"]')].filter(node => {
       const r = node.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(node).visibility !== 'hidden' && !node.closest('[inert],[hidden]')
     })
     const state = useAppStore.getState()
-    return { states: visible.map(node => ({ title: node.querySelector('h1')?.textContent, text: node.textContent, busy: node.getAttribute('aria-busy'), className: node.className })),
+    return { states: visible.map(node => ({ title: node.querySelector('.surface-state__title')?.textContent, text: node.textContent, busy: node.getAttribute('aria-busy') ?? 'false', surface: node.matches('.surface-state--surface') || !!node.querySelector('.surface-state--surface'), waiting: !!node.querySelector('.full-page-loading__waiting'), className: node.className })),
       tabsKept: state.tabs === baseline.tabs, layoutsKept: state.layouts === baseline.layouts, draftsKept: state.agentComposerDrafts === baseline.drafts,
       calls: [...calls], launcher: !!document.querySelector('.launch-surface'), error: state.error }
   }
