@@ -71,6 +71,8 @@ import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { composeAgentLaunchPrompt, composeAgentPrompt, composeAgentResumePrompt } from './agent-outbound-message.js'
 import { parseBrowserInputContext, parseBrowserInputContextSource } from './browser-input-context.js'
+import { parseAgentInputContextCaptureReference, type AgentInputContextCaptureProof } from './agent-input-context-capture.js'
+import { resolveAgentInputContextCapture, type ResolvedAgentInputContextCapture } from './agent-input-context-capture-resolve.js'
 import { hashAgentCapability, issueAgentCapability, resolveCapabilityAuthor, type AgentCapabilityBinding } from './agent-capability.js'
 import { planDiscussion } from './agent-discussion.js'
 import { agentSpawnContext, type AgentMuxSpawnCreator } from './agent-spawn.js'
@@ -381,6 +383,8 @@ type AgentMuxAgentResumeOperationInput = Omit<AgentMuxAgentResumeInput, 'prompt'
 }
 
 type AgentMuxAgentPromptContent = {
+  /** Resolves only through a trusted non-wire Host reader; mutually exclusive with inputContext. */
+  inputContextCapture?: import('./agent-input-context-capture.js').AgentInputContextCaptureReference
   inputContext?: import('./browser-input-context.js').BrowserInputContext
   /** Explicit choice for this message only: the previous turn may still be running. */
   allowUncertainTurn?: boolean
@@ -415,7 +419,7 @@ export type AgentMuxAgentPromptInput = AgentMuxAgentPromptContent & (
 
 /** Explicit manual answer to an exact Provider-owned asynchronous question record. */
 export type AgentMuxSessionQuestionReplyInput = AgentPromptCondition & Omit<AgentMuxAgentPromptContent,
-  'prompt' | 'agentMuxNote' | 'inputContext' | 'execution' | 'expectedCompletionId' | 'expectedInputByte' | 'expectedFutureIntent'> & {
+  'prompt' | 'agentMuxNote' | 'inputContext' | 'inputContextCapture' | 'execution' | 'expectedCompletionId' | 'expectedInputByte' | 'expectedFutureIntent'> & {
   source: AgentSessionHistorySource
   turnId: string
   recordId: string
@@ -1032,7 +1036,7 @@ export class AgentMuxClient {
         const updated = await this.updateExactAgentSession(session.agentSessionId, session.run, change)
         this.publishSession(updated); return updated
       },
-      perform: (input, intentOperationId, inputContextSource) => this.performAgentContinuity(input, intentOperationId, inputContextSource),
+      perform: (input, intentOperationId, inputContextSource, captured) => this.performAgentContinuity(input, intentOperationId, inputContextSource, captured),
       failed: (agentSessionId, error, run) => this.publisher.publish({ type: 'agent-error', agentSessionId,
         code: 'AGENT_CONTINUITY_OBSERVATION_UNCONFIRMED', message: `Original recovery observation is unconfirmed. The Session, Run and input are retained. ${error instanceof Error ? error.message : String(error)}`,
         evidence: { source: 'agentmux', observedAt: Date.now(), ...(run ? { run } : {}) } })
@@ -4955,14 +4959,29 @@ export class AgentMuxClient {
   // a worse answer to "why did my recovery not happen". Guarded by the concurrency tests in
   // agent-session-continuity.test.ts; deleting this makes them red on the reason, not on the count.
   async ensureAgentContinuity(
-    input: AgentMuxAgentContinuityInput, context?: Pick<AgentInputCallContext, 'inputContextSource'>
+    input: AgentMuxAgentContinuityInput, context?: Pick<AgentInputCallContext, 'inputContextSource' | 'captureReader' | 'requestSignal'>
   ): Promise<AgentMuxAgentContinuityResult> {
+    if ('inputContextSource' in input || 'inputContextCaptureProof' in input || input.input &&
+        ('inputContextSource' in input.input || 'inputContextCaptureProof' in input.input || 'promptWire' in input.input)) throw new AgentMuxError('Recovery producer facts are supplied only by the original Host.', 'INVALID_INPUT_CONTEXT_CAPTURE')
+    if (input.input?.inputContextCapture !== undefined && input.input.inputContext !== undefined) throw new AgentMuxError('A recovery input retains one original capture reference.', 'INVALID_INPUT_CONTEXT_CAPTURE')
     input = { ...input, expectedRun: { ...input.expectedRun }, ...(input.input ? { input: { ...input.input,
+      ...(input.input.inputContextCapture === undefined ? {} : { inputContextCapture: parseAgentInputContextCaptureReference(input.input.inputContextCapture) }),
       ...(input.input.inputContext === undefined ? {} : { inputContext: parseBrowserInputContext(input.input.inputContext) }) } } : {}) }
     this.requireConnected()
     safeId(input.agentSessionId, 'Agent Session id')
     safeId(input.operationId, 'Agent continuity operation id')
-    const result = await this.continuitySupervisor.run(input, context?.inputContextSource === undefined ? undefined : parseBrowserInputContextSource(context.inputContextSource))
+    let captured: ResolvedAgentInputContextCapture | undefined
+    if (input.input?.inputContextCapture) {
+      const original = input.input
+      if (input.trigger !== 'input') throw new AgentMuxError('A capture reference belongs to its original authored input trigger.', 'INVALID_INPUT_CONTEXT_CAPTURE')
+      captured = await resolveAgentInputContextCapture({ reference: original.inputContextCapture!, agentSessionId: input.agentSessionId,
+        expectedRun: input.expectedRun, operationId: original.submissionId, prompt: original.prompt, ...(original.agentMuxNote === undefined ? {} : { agentMuxNote: original.agentMuxNote }) }, async () => {
+          const session = await this.store.readMetadata(input.agentSessionId)
+          const prior = session?.continuityOperations?.[input.operationId]?.launchInput
+          return prior?.message ?? await this.readCapturedPromptProducer(input.agentSessionId, input.expectedRun, original.submissionId)
+        }, context?.captureReader, context?.requestSignal)
+    }
+    const result = await this.continuitySupervisor.run(input, captured ? 'host-capture' : context?.inputContextSource === undefined ? undefined : parseBrowserInputContextSource(context.inputContextSource), captured)
     if (result.kind === 'resumed' || result.kind === 'reattachable') this.continuityInputs.track(this.registry.get(input.agentSessionId))
     return result
   }
@@ -5924,7 +5943,7 @@ export class AgentMuxClient {
     return restored
   }
 
-  private async performAgentContinuity(input: AgentMuxAgentContinuityInput, intentOperationId?: string, inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource): Promise<AgentMuxAgentContinuityResult> {
+  private async performAgentContinuity(input: AgentMuxAgentContinuityInput, intentOperationId?: string, inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource, captured?: ResolvedAgentInputContextCapture): Promise<AgentMuxAgentContinuityResult> {
     // A different public Core owner may already have frozen or completed this
     // same operation. Admit only this exact current binding, never a registry catalog.
     const epoch = this.connectionEpoch
@@ -5979,9 +5998,9 @@ export class AgentMuxClient {
     if (intentOperationId && prior?.intentOperationId !== intentOperationId) throw new AgentMuxError('The original supervised attempt changed.', 'AGENT_CONTINUITY_SUPERSEDED')
     if (input.input) {
       if (input.trigger !== 'input' || typeof input.input.prompt !== 'string' ||
-          !composeAgentPrompt(input.input.prompt, input.input.agentMuxNote, input.input.inputContext).text.trim()) throw new AgentMuxError('A new continuity input needs its original input trigger and nonempty content.', 'INVALID_AGENT_PROMPT')
+          !composeAgentPrompt(input.input.prompt, input.input.agentMuxNote, prior?.launchInput?.message.inputContext ?? captured?.inputContext ?? input.input.inputContext).text.trim()) throw new AgentMuxError('A new continuity input needs its original input trigger and nonempty content.', 'INVALID_AGENT_PROMPT')
       safeId(input.input.submissionId, 'Original continuity input id')
-      assertAgentPromptSize(composeAgentPrompt(input.input.prompt, input.input.agentMuxNote, input.input.inputContext).text)
+      assertAgentPromptSize(composeAgentPrompt(input.input.prompt, input.input.agentMuxNote, prior?.launchInput?.message.inputContext ?? captured?.inputContext ?? input.input.inputContext).text)
       if (prior && (!prior.launchInput || !isDeepStrictEqual(prior.launchInput.input, input.input))) throw new AgentMuxError(
         'This original recovery operation has another frozen input. Its original body and Run are kept.', 'AGENT_PROMPT_OPERATION_CONFLICT')
     }
@@ -6020,7 +6039,7 @@ export class AgentMuxClient {
     // Freeze a new authored input even when Runtime/provider observation has not
     // succeeded yet. A retry reads this same request rather than inventing one.
     if (!prior && input.input && current) receipt.launchInput = prepareContinuityLaunchInput(receipt,
-      this.providers.get(current.providerId).catalog, agentLifecycleOperationIdentity('resume', input.agentSessionId, input.operationId), input.input, inputContextSource)!
+      this.providers.get(current.providerId).catalog, agentLifecycleOperationIdentity('resume', input.agentSessionId, input.operationId), input.input, inputContextSource, captured)!
     receipt.observedAt = now
     delete receipt.nextActionAt
     const originalLaunch = (value: AgentMuxStoredAgentSession) => {
@@ -6215,7 +6234,7 @@ export class AgentMuxClient {
         if (!prior?.recoveryInputs) receipt.recoveryInputs = { reminder: '',
           continuation: receipt.trigger !== 'input' && receipt.interruptedWorking && policy.continuationEnabled ? DEFAULT_AGENT_CONTINUITY_CONTINUATION : '' }
         const launchInput = prior?.launchInput ?? prepareContinuityLaunchInput(receipt, catalog!,
-          agentLifecycleOperationIdentity('resume', input.agentSessionId, input.operationId), input.input, inputContextSource)
+          agentLifecycleOperationIdentity('resume', input.agentSessionId, input.operationId), input.input, inputContextSource, captured)
         if (launchInput) receipt.launchInput = launchInput
         const originalPrompt = receipt.launchInput?.prompt ?? ''
         const { plan } = this.buildResumePlan(current, input, originalPrompt || undefined)
@@ -6392,14 +6411,24 @@ export class AgentMuxClient {
 
   async submitAgentPrompt(input: AgentMuxAgentPromptInput, context?: AgentInputCallContext): Promise<void | AgentInputSubmissionReceipt> {
     context?.requestSignal?.throwIfAborted()
-    const authority = this.inputCallAuthority(undefined, context)
-    if ('inputContextSource' in input || 'promptWire' in input) throw new AgentMuxError('Input producer facts come from the original Host, not prompt arguments.', 'INVALID_AGENT_PROMPT')
-    input = { ...input, ...(input.inputContext === undefined ? {} : { inputContext: parseBrowserInputContext(input.inputContext) }), expectedRun: { ...input.expectedRun },
+    let authority = this.inputCallAuthority(undefined, context)
+    if ('inputContextSource' in input || 'inputContextCaptureProof' in input || 'promptWire' in input) throw new AgentMuxError('Input producer facts come from the original Host, not prompt arguments.', 'INVALID_AGENT_PROMPT')
+    if (input.inputContext !== undefined && input.inputContextCapture !== undefined) throw new AgentMuxError('A captured input carries its original reference, not a second page declaration.', 'INVALID_INPUT_CONTEXT_CAPTURE')
+    input = { ...input, ...(input.inputContextCapture === undefined ? {} : { inputContextCapture: parseAgentInputContextCaptureReference(input.inputContextCapture) }), ...(input.inputContext === undefined ? {} : { inputContext: parseBrowserInputContext(input.inputContext) }), expectedRun: { ...input.expectedRun },
       ...(input.admissionIntent ? { admissionIntent: { ...input.admissionIntent } } : {}) } as AgentMuxAgentPromptInput
     if ('authorAgentSessionId' in input) throw new AgentMuxError('Agent authors must use submitAgentMessage.', 'MESSAGE_ENVELOPE_REQUIRED')
     const launched = await this.inspectAgentPromptSubmission({ kind: 'prompt', agentSessionId: input.agentSessionId,
       expectedRun: input.expectedRun, submissionId: input.operationId })
     if (launched?.launch) throw new AgentMuxError('This original input was carried by its native resume launch. Inspect its original launch receipt; it will not replay through the terminal.', 'AGENT_PROMPT_LAUNCH_CARRIED')
+    if (input.inputContextCapture !== undefined) {
+      const captured = await resolveAgentInputContextCapture({ reference: input.inputContextCapture, agentSessionId: input.agentSessionId,
+        expectedRun: input.expectedRun, operationId: input.operationId, prompt: input.prompt, ...(input.agentMuxNote === undefined ? {} : { agentMuxNote: input.agentMuxNote }) },
+        () => this.readCapturedPromptProducer(input.agentSessionId, input.expectedRun, input.operationId), context?.captureReader, context?.requestSignal)
+      const { inputContextCapture: _reference, ...original } = input
+      input = { ...original, inputContext: captured.inputContext } as AgentMuxAgentPromptInput
+      authority = { ...authority, inputContextSource: 'host-capture', inputContextCaptureProof: captured.inputContextCaptureProof,
+        assertCurrent: authority?.assertCurrent ?? (async () => {}) }
+    }
     if (input.admissionIntent !== undefined) {
       this.validateControlledPrompt(input)
       const key = { kind: 'prompt' as const, agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, submissionId: input.operationId }
@@ -6413,6 +6442,7 @@ export class AgentMuxClient {
           environment: this.inputSavedEnvironment(session), source: { kind: 'prompt', prompt: input.prompt,
             ...(input.inputContext === undefined ? {} : { inputContext: input.inputContext,
               inputContextSource: authority?.inputContextSource ?? 'caller-declared',
+              ...(authority?.inputContextCaptureProof ? { inputContextCaptureProof: authority.inputContextCaptureProof } : {}),
               promptWire: saved?.intent.source.kind === 'prompt' && saved.intent.source.promptWire !== undefined
                 ? saved.intent.source.promptWire : composeAgentPrompt(input.prompt, input.agentMuxNote, input.inputContext).text }),
             ...(input.agentMuxNote === undefined ? {} : { agentMuxNote: input.agentMuxNote }),
@@ -6429,6 +6459,18 @@ export class AgentMuxClient {
     await this.submitPromptInternal(input, undefined, undefined, () => {
       if ('authorAgentSessionId' in input) throw new AgentMuxError('Agent authors must use submitAgentMessage.', 'MESSAGE_ENVELOPE_REQUIRED')
     }, authority)
+  }
+
+  private async readCapturedPromptProducer(agentSessionId: string, expectedRun: AgentMuxRunRef, operationId: string): Promise<AgentPromptMessageContent | undefined> {
+    const key = { kind: 'prompt' as const, agentSessionId, expectedRun, submissionId: operationId }
+    const claim = await this.inspectAgentPromptSubmission(key)
+    if (claim) return claim.admission?.intent?.message ?? claim.launch?.message ?? {}
+    const waiting = await this.messageQueue.inspectInput({ key })
+    if (!waiting) return undefined
+    const source = waiting.intent.source
+    return source.kind === 'prompt' ? { ...(source.inputContext ? { inputContext: source.inputContext } : {}),
+      ...(source.inputContextSource ? { inputContextSource: source.inputContextSource } : {}),
+      ...(source.inputContextCaptureProof ? { inputContextCaptureProof: source.inputContextCaptureProof } : {}) } : {}
   }
 
   /** Read the original Session owner's exact claim; this never prepares or dispatches input. */
@@ -6609,10 +6651,10 @@ export class AgentMuxClient {
   }> {
     const source = intent.source
     if (source.kind === 'prompt') {
-      const { kind: _producer, promptWire: _wire, inputContextSource, ...content } = source
+      const { kind: _producer, promptWire: _wire, inputContextSource, inputContextCaptureProof, ...content } = source
       return { input: { ...content, agentSessionId: intent.key.agentSessionId, expectedRun: intent.key.expectedRun,
         operationId: agentPromptInputId(intent.key), admissionIntent: (() => { const { expectedRun: _run, ...target } = intent.admissionIntent; return target })(), execution: 'immediate' },
-        ...(inputContextSource ? { authority: { inputContextSource, assertCurrent: async () => {} } } : {}) }
+        ...(inputContextSource ? { authority: { inputContextSource, ...(inputContextCaptureProof ? { inputContextCaptureProof } : {}), assertCurrent: async () => {} } } : {}) }
     }
     const original = await this.messageQueue.readByOperationId(source.originalControlOperationId)
     if (!original) throw new AgentMuxError('Original message input is unknown.', 'AGENT_INPUT_NOT_FOUND')
@@ -6998,8 +7040,10 @@ export class AgentMuxClient {
     const waiting = producer === 'prompt' && input.admissionIntent !== undefined ? await this.messageQueue.inspectInput({ key: {
       kind: 'prompt', agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, submissionId: input.operationId } }) : undefined
     const waitingSource = waiting?.intent.source.kind === 'prompt' ? waiting.intent.source : undefined
+    const captureProof = waitingSource?.inputContextCaptureProof ?? authority?.inputContextCaptureProof
     const authored: AgentPromptMessageContent = platformNotification ? { systemContext: platformNotification.wire, a2aNotificationId: platformNotification.notificationId } : {
-      ...(inputContext ? { inputContext, inputContextSource: waitingSource?.inputContextSource ?? authority?.inputContextSource ?? 'caller-declared' } : {}),
+      ...(inputContext ? { inputContext, inputContextSource: waitingSource?.inputContextSource ?? authority?.inputContextSource ?? 'caller-declared',
+        ...(captureProof ? { inputContextCaptureProof: captureProof } : {}) } : {}),
       ...(questionReply ? { questionReply: structuredClone(questionReply) } : {}),
       ...(content.trim() ? { userContent: content } : {}),
       ...(composed.systemContext ? { systemContext: composed.systemContext } : {}),
@@ -8650,7 +8694,7 @@ export class AgentMuxClient {
       'AgentMux context', message.systemContext, now, 'agentmux', { status, ...(message.a2aNotificationId ? { a2aNotificationId: message.a2aNotificationId, ...(inputRef ? { inputRef } : {}) } : {}) })
     if (message.userContent) await this.recordMessageAfterSideEffect(session, `prompt:${operationId}`,
       title, message.userContent, now, 'user', { status, publicContent: 'confirmed', ...(inputRef ? { inputRef } : {}),
-        ...(message.inputContext ? { inputContext: message.inputContext, inputContextSource: message.inputContextSource } : {}),
+        ...(message.inputContext ? { inputContext: message.inputContext, inputContextSource: message.inputContextSource, ...(message.inputContextCaptureProof ? { inputContextCaptureProof: message.inputContextCaptureProof } : {}) } : {}),
         ...(message.authorAgentSessionId ? { authorAgentSessionId: message.authorAgentSessionId } : {}),
         ...(message.authorHuman ? { authorHuman: true } : {}),
         ...(message.authorExternal ? { authorExternal: message.authorExternal } : {}),
@@ -8675,7 +8719,7 @@ export class AgentMuxClient {
     observedAt: number,
     source: 'user' | 'agentmux',
     delivery: { a2aNotificationId?: string; sourceDevice?: import('./types.js').AgentOperationDevice; sourceChannel?: import('./types.js').AgentMessageChannel; authorAgentSessionId?: string; authorHuman?: boolean; authorExternal?: import('./external-author.js').AgentExternalMessageAuthor; status?: 'complete' | 'failed'; publicContent?: 'confirmed'; inputRef?: AgentPromptInputKey;
-      inputContext?: import('./browser-input-context.js').BrowserInputContext; inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource } = {}
+      inputContext?: import('./browser-input-context.js').BrowserInputContext; inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource; inputContextCaptureProof?: AgentInputContextCaptureProof } = {}
   ): Promise<void> {
     const mutation: AgentTimelineMutation = {
       type: 'append',
@@ -8691,7 +8735,7 @@ export class AgentMuxClient {
         title,
         content,
         ...(source === 'agentmux' && delivery.a2aNotificationId ? { a2aNotificationId: delivery.a2aNotificationId } : {}),
-        ...(source === 'user' && delivery.inputContext ? { inputContext: delivery.inputContext, ...(delivery.inputContextSource ? { inputContextSource: delivery.inputContextSource } : {}) } : {}),
+        ...(source === 'user' && delivery.inputContext ? { inputContext: delivery.inputContext, ...(delivery.inputContextSource ? { inputContextSource: delivery.inputContextSource } : {}), ...(delivery.inputContextCaptureProof ? { inputContextCaptureProof: delivery.inputContextCaptureProof } : {}) } : {}),
         ...(source === 'user' && delivery.publicContent ? { publicContent: delivery.publicContent } : {}),
         ...((source === 'user' || delivery.a2aNotificationId !== undefined) && delivery.inputRef ? { inputRef: delivery.inputRef } : {}),
         ...(delivery.sourceDevice ? { sourceDevice: delivery.sourceDevice } : {}),

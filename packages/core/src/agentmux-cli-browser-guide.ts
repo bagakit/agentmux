@@ -7,6 +7,9 @@ export const AGENTMUX_BROWSER_TARGET_GUIDE = `First inspect the exact Tab/Region
 \`amux space inspect --tab TAB\` or \`amux space inspect --region REGION\`.
 Use \`amux browser targets\` to discover original available Browser targets.
 Discovery reports coverage=complete or coverage=partial. A partial result cannot confirm that an unreturned page was removed.
+Use \`amux browser input inspect --host-id HOST --operation-id INPUT\` to read one original captured input scene and message digest.
+HOST is its capture owner and INPUT is its original input ID, independently of Browser operation IDs.
+This historical read supplies no message body, author, current Browser grant or delivery conclusion; an Agent may read only its own recipient capture on the exact execution Host.
 A cold embedded description is unavailable without navigationId or native capabilities.
 An admitted \`amux browser run --browser ID\` restores that same original page on first use;
 discovery alone does not create a page.

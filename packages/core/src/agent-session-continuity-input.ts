@@ -28,18 +28,20 @@ function recoveryReminder(operation: AgentMuxContinuityOperation): string {
 
 /** Freeze the original text before starting. A not-yet-created Run is never named in its body. */
 export function prepareContinuityLaunchInput(operation: AgentMuxContinuityOperation, catalog: AgentCatalogEntry,
-  lifecycleOperationId: string, fresh?: AgentMuxContinuityInputRequest, inputContextSource: BrowserInputContextSource = 'caller-declared'): AgentMuxContinuityLaunchInput | undefined {
+  lifecycleOperationId: string, fresh?: AgentMuxContinuityInputRequest, inputContextSource: BrowserInputContextSource = 'caller-declared',
+  captured?: import('./agent-input-context-capture-resolve.js').ResolvedAgentInputContextCapture): AgentMuxContinuityLaunchInput | undefined {
   // A later attempt restores context only; omitting fresh input alone would synthesize the old automatic task again.
   if (operation.intentOperationId) return
   // Automatic continuation is admitted after the original resume commits, never as launch argv.
   const input = fresh
   if (!input) return
-  const inputContext = input.inputContext === undefined ? undefined : parseBrowserInputContext(input.inputContext)
+  if (input.inputContextCapture && !captured) throw new AgentMuxError('The original capture producer is unconfirmed. Retain its original input.', 'AGENT_INPUT_CONTEXT_CAPTURE_UNCONFIRMED')
+  const inputContext = captured?.inputContext ?? (input.inputContext === undefined ? undefined : parseBrowserInputContext(input.inputContext))
   const composed = composeAgentResumePrompt(input.prompt, input.agentMuxNote, inputContext)
   if (!composed.text.trim()) return
   return { input: structuredClone(input), prompt: composed.text, digest: digest(composed.text),
     message: { ...(input.prompt.trim() ? { userContent: input.prompt } : {}), ...(composed.systemContext ? { systemContext: composed.systemContext } : {}),
-      ...(inputContext ? { inputContext, inputContextSource } : {}),
+      ...(inputContext ? { inputContext, inputContextSource, ...(captured ? { inputContextCaptureProof: captured.inputContextCaptureProof } : {}) } : {}),
       ...(input.authorHuman === true ? { authorHuman: true as const } : {}), sourceChannel: normalizeMessageChannel(input.sourceChannel ?? 'api'),
       ...(input.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(input.sourceDevice) }) },
     delivery: catalog.promptDelivery === 'post-launch-only' ? 'post-launch' : 'launch', lifecycleOperationId, state: 'prepared' }

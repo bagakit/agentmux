@@ -1,5 +1,6 @@
 import { validateBroadcastIntent, parseBroadcastReceipt, type AgentMuxMessageBroadcastIntent, type AgentMuxMessageBroadcastReceipt, type AgentMuxBroadcastIssue, type AgentMuxBroadcastTargetResult } from './agent-message-broadcast.js'
 import { parseMessageEventsPage, type AgentMuxMessageEventsQuery, type AgentMuxMessageEventsPage } from './agent-message-events.js'
+import { agentInputContextCaptureProofFields } from './agent-input-context-capture.js'
 import { validateAgentMuxMessageEnvelope, messageEnvelopeString as nonEmpty, messageEnvelopeTimestamp as finiteTimestamp, type AgentMuxMessageEnvelope } from './agent-message-envelope.js'
 export { validateAgentMuxMessageEnvelope } from './agent-message-envelope.js'
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
@@ -538,6 +539,7 @@ export class DurableAgentMuxMessageQueue {
           throw new AgentMuxError('Original prompt intent is invalid.', 'INVALID_AGENT_INPUT_CONTROL')
         }
         browserInputContextFields(intent.source)
+        agentInputContextCaptureProofFields(intent.source)
         if (intent.source.promptWire !== undefined && (typeof intent.source.promptWire !== 'string' || !intent.source.promptWire.trim())) throw new AgentMuxError('Frozen original prompt wire is invalid.', 'INVALID_AGENT_INPUT_CONTROL')
         if (!composeAgentPrompt(intent.source.prompt, intent.source.agentMuxNote, intent.source.inputContext).text.trim()) throw new AgentMuxError('Original prompt intent is empty.', 'INVALID_AGENT_INPUT_CONTROL')
         if (intent.source.sourceChannel !== undefined) normalizeMessageChannel(intent.source.sourceChannel)

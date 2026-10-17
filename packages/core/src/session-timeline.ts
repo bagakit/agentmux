@@ -1,3 +1,4 @@
+import { agentInputContextCaptureProofFields } from './agent-input-context-capture.js'
 import { conversationRevision } from './conversation-timeline.js'
 import { parseAgentExternalMessageAuthor } from './external-author.js'
 import { validateAgentPromptInputKey } from './agent-prompt-condition.js'
@@ -215,7 +216,7 @@ export function normalizeAgentTimelineItem(value: unknown): AgentTimelineItem {
     createdAt,
     updatedAt,
     title: text(source.title, 'Timeline item title'),
-    ...browserInputContextFields(source),
+    ...browserInputContextFields(source), ...agentInputContextCaptureProofFields(source),
     ...optionalField(source, 'content'),
     ...(contentEligibility === undefined ? {} : { contentEligibility }),
     ...(source.publicContent === undefined ? {} : { publicContent: 'confirmed' as const }),
