@@ -1,3 +1,4 @@
+import { fixturePath as _tailFixturePath } from "../../../test/fixture-values.mjs"
 import { afterEach, expect, it } from 'vitest'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -10,7 +11,10 @@ import { AgentMuxFileAgentSessionStore } from '../dist/index.js'
 const cleanup: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
 
-it.runIf(process.platform === 'darwin')('public CLI Resume reopens only the frontend on the same live Runtime and native actor, with a fresh handshake and no old prompt', async () => {
+it.runIf(process.platform === 'darwin').each([
+  ['connection deadline', 'Error: account route request timed out\nCaused by: connection deadline exceeded'],
+  ['configuration access', "Configuration could not be loaded:\nPermission denied while reading " + _tailFixturePath("private/example/config")]
+])('public CLI Resume reopens only the frontend after %s on the same live Runtime and native actor, with the original diagnostic, a fresh handshake and no old prompt', async (_shape, diagnostic) => {
   const scope = await headlessFixture(); cleanup.push(scope.cleanup)
   const sdk = await scope.client()
   const program = join(scope.root, 'private-codex.mjs'), events = join(scope.root, 'frontend.ndjson'), detach = join(scope.root, 'detach')
@@ -42,7 +46,7 @@ if(args.includes('app-server')) {
     ready=true;process.stdout.write('\\x1b[?2026h› \\x1b[?2026l')
   }else process.stdout.write('OBSERVED:'+String(bytes))})
   setTimeout(()=>{query=true;process.stdout.write('\\x1b[?u')},reconnect?350:0)
-  setInterval(()=>{if(!reconnect&&ready&&existsSync(detach))process.exit(0)},20)
+  setInterval(()=>{if(!reconnect&&ready&&existsSync(detach))process.stderr.write(${JSON.stringify(diagnostic)}+'\\n',()=>process.exit(1))},20)
 }
 `, { mode: 0o700 })
   const original = await sdk.createAgent({ providerId: 'codex', executorId: 'codex', agentSessionId: 'managed-frontend-public',
@@ -61,6 +65,8 @@ if(args.includes('app-server')) {
   await writeFile(detach, 'exit original frontend')
   const detached = await until(() => sdk.statusAgent(original.agentSessionId), value => value.session.terminalFrontend?.state === 'detached', 'detached frontend')
   expect(detached.run).toMatchObject({ runId: before.run.runId, pid: before.run.pid, state: 'running' })
+  expect(detached.session.terminalFrontend).toMatchObject({ exitCode: 1, message: diagnostic })
+  await until(() => terminalOutput.join(''), value => value.includes(diagnostic.replaceAll('\n', '\r\n')), 'original stderr bytes remain in the terminal PTY')
   expect(detached.observation.readiness).toBe('pending')
   const laterHeartbeat = await until(async () => JSON.parse(await readFile(heartbeat, 'utf8')), value => value.at > backend.at, 'backend task continues')
   expect(laterHeartbeat.pid).toBe(backend.pid)
@@ -82,6 +88,9 @@ if(args.includes('app-server')) {
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: scope.socketPath } }); cleanup.push(() => rpc.dispose())
   const inspected = await rpc.call('agent.inspect', { target: { kind: 'agent-session', agentSessionId: original.agentSessionId } })
   expect(inspected.session.terminalFrontend).toEqual(detached.session.terminalFrontend)
+  const cliInspect = await runCompiledObjectCli(['--endpoint', `unix:${scope.socketPath}`, 'agent', 'inspect', '--session', original.agentSessionId], scope.env)
+  expect(cliInspect.code, cliInspect.stderr + cliInspect.stdout).toBe(0)
+  expect(JSON.parse(cliInspect.stdout).result.session.terminalFrontend.message).toBe(diagnostic)
   const args = ['--endpoint', `unix:${scope.socketPath}`, 'agent', 'resume', '--session', original.agentSessionId, '--operation-id', 'same-public-frontend-resume']
   const cli = await runCompiledObjectCli(args, scope.env)
   expect(cli.code, cli.stderr + cli.stdout).toBe(0)
@@ -89,6 +98,7 @@ if(args.includes('app-server')) {
     value.session.terminalHandshake.acknowledged && value.session.terminalFrontend?.state === 'attached', 'reconnected new frontend and exact handshake')
   expect(after.run).toMatchObject({ runId: before.run.runId, pid: before.run.pid, state: 'running' })
   expect(after.session.nativeHandle).toEqual(before.session.nativeHandle)
+  expect(after.session.terminalFrontend?.message).toBeUndefined()
   expect(after.session.terminalHandshake?.operationId).not.toBe(before.session.terminalHandshake?.operationId)
   expect(after.session.terminalHandshake!.outputAfterByte).toBeGreaterThan(0)
   expect((await store.readMetadata(original.agentSessionId))!.nativeActor).toEqual(originalPrivate!.nativeActor)

@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { fixturePath as _tailFixturePath } from "../../../test/fixture-values.mjs"
 import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { act } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -92,6 +93,8 @@ it.each(['codex', 'claude'])('the actual Workbench gives an exact failed %s fron
   expect(surface()?.textContent).toContain('exited with code 1')
   expect(surface()?.textContent).toContain('The backend is still running.')
   expect(surface()?.textContent).toContain('native conversation identity is not yet confirmed')
+  expect(surface()?.textContent).toContain('The cause is unknown; read the original output')
+  expect(surface()?.textContent).toContain('Check the CLI startup environment, then choose Resume or restart AgentMux.')
   expect(surface()?.textContent).not.toContain('same conversation')
   expect(surface()?.textContent).not.toContain('Raw CLI stack trace')
   expect(terminal()).toBeNull(); expect(button('Resume').disabled).toBe(false)
@@ -110,6 +113,24 @@ it.each(['codex', 'claude'])('the actual Workbench gives an exact failed %s fron
   expect(document.activeElement).toBe(editor); expect(rich.view.composing).toBe(true)
   expect(recover).not.toHaveBeenCalled(); protectedState(original)
   await act(async () => editor.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '中' })))
+})
+
+it.each([
+  ['codex', 'Error: request to account route timed out\nCaused by: connection deadline exceeded'],
+  ['claude', "Configuration could not be loaded:\nPermission denied while reading " + _tailFixturePath("private/example/config")]
+])('shows the original %s terminal diagnostic and startup remedy on the first failure surface', async (provider, diagnostic) => {
+  const original = seed({ ...failedFrontend(composerSession(sessionId).control.run), message: diagnostic }, provider)
+  const recover = vi.spyOn(api.sessions, 'recover')
+  await dom.render(<WorkspaceWorkbench workspaceId="workspace" />)
+  await until(() => expect(surface()).not.toBeNull())
+  const cause = surface()!.querySelector('.session-frontend-diagnostic pre')!
+  expect(cause.textContent).toBe(diagnostic)
+  expect(cause.closest('details')).toBeNull()
+  expect(surface()?.textContent).toContain('The backend is still running.')
+  expect(surface()?.textContent).toContain('Check the CLI startup environment, then choose Resume or restart AgentMux.')
+  expect(button('Resume').disabled).toBe(false)
+  expect(button('Read original output').disabled).toBe(false)
+  expect(recover).not.toHaveBeenCalled(); protectedState(original)
 })
 
 it('keeps the mounted original terminal reader through a live frontend failure, explicit output reading and a recovered exact frontend', async () => {
