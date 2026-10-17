@@ -260,8 +260,8 @@
 .composer-mailbox__progress { align-self: center; flex-shrink: 0; color: var(--text-2); pointer-events: none; }
 .composer__mailbox[data-progress-state='active'] .composer-mailbox__progress { color: var(--green); }
 .composer__mailbox[data-progress-state='unconfirmed'] .composer-mailbox__progress { color: var(--amber); }
-.composer-mailbox__folders { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.55fr) minmax(0, 1fr); gap: 2px; padding: 3px; margin: 0 var(--sp-3) var(--sp-3); border-radius: var(--radius-sm); background: var(--surface-1); }
-.composer-mailbox__folders > button { display: inline-flex; justify-content: center; align-items: center; gap: var(--sp-1); min-width: 0; min-height: 30px; padding: var(--sp-1); border: 0; border-radius: var(--radius-sm); font-size: var(--fs-meta); color: var(--text-3); background: transparent; cursor: pointer; }
+.composer-mailbox__folders { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.55fr) minmax(0, 1fr); gap: var(--sp-1); padding: 0; margin: 0 var(--sp-3) var(--sp-2); border-radius: var(--radius-sm); background: transparent; }
+.composer-mailbox__folders > button { display: inline-flex; justify-content: center; align-items: center; gap: var(--sp-1); min-width: 0; min-height: var(--sp-7); padding: var(--sp-1); border: 0; border-radius: var(--radius-sm); font-size: var(--fs-meta); color: var(--text-3); background: transparent; cursor: pointer; }
 .composer-mailbox__folders > button[aria-selected='true'] { background: var(--surface-3); color: var(--text); font-weight: 600; }
 .composer-mailbox__folders > button:focus-visible { outline: 1px solid var(--focus-line); }
 .composer-mailbox > [role='tabpanel'] > p { margin: var(--sp-3); color: var(--text-3); }
@@ -297,9 +297,9 @@
 .launcher-composer { margin-inline: auto; --composer-input-height: 6rem; --composer-input-max: 6rem; }
 
 .composer-mailbox__heading, .composer-mailbox__messages header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
-.composer-mailbox__heading { padding: var(--sp-3); min-width: 0; }
+.composer-mailbox__heading { min-height: 28px; padding: var(--sp-1) var(--sp-3); min-width: 0; }
 .composer-mailbox__heading > strong { flex-shrink: 0; color: var(--text); font-size: var(--fs-body); font-weight: 600; }
-.composer-mailbox__heading > .composer-tool { flex-shrink: 0; }
+.composer-mailbox__heading > .composer-tool { flex-shrink: 0; justify-content: center; width: var(--sp-7); height: var(--sp-7); padding: 0; }
 .composer-mailbox__messages { list-style: none; margin: 0; padding: 0; }
 
 /* Mailbox chrome stays outside the one reading scroll surface. */
@@ -321,18 +321,18 @@
 .composer-mailbox__record-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-1) var(--sp-2); padding: 0 var(--sp-3) var(--sp-2); }
 .composer-mailbox__record-status { flex: 1 1 8em; min-width: 0; color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
 .composer-mailbox__record-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-1); min-width: 0; margin-inline-start: auto; }
-.composer-mailbox__record-actions > .composer-tool { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; min-height: 28px; padding: 4px; }
+.composer-mailbox__record-actions > .composer-tool { display: inline-flex; align-items: center; justify-content: center; min-width: var(--sp-7); min-height: var(--sp-7); padding: var(--sp-2); }
 .composer-mailbox__record-actions > .composer-tool:hover { background: var(--surface-3); }
 .composer-mailbox__action-feedback { order: 1; flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; color: var(--text-3); font-size: var(--fs-meta); text-align: end; }
 .composer-mailbox__navigation-feedback, .composer-mailbox__pending-location { color: var(--text-3); font-size: var(--fs-meta); }
 .composer-mailbox__pending-location { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
-.composer-mailbox__row { width: 100%; display: grid; gap: var(--sp-2); padding: var(--sp-3); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text); text-align: left; font-size: var(--fs-body); cursor: pointer; }
+.composer-mailbox__row { width: 100%; display: grid; gap: var(--sp-1); padding: var(--sp-3); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text); text-align: left; font-size: var(--fs-body); cursor: pointer; }
 .composer-mailbox__row:hover { background: var(--surface-3); }
 .composer-mailbox__row:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; background: var(--surface-3); }
 .composer-mailbox__row-head { order: 2; display: flex; align-items: center; gap: var(--sp-2); min-width: 0; color: var(--text-3); }
 .composer-mailbox__row-head > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-micro); font-weight: 400; }
 .composer-mailbox__row-head > :is(.agent-avatar, .conversation-speaker-avatar, .conversation-message-avatar, .space-object-icon) { flex-shrink: 0; }
-.composer-mailbox__record-avatar { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 18px; width: 18px; height: 18px; }
+.composer-mailbox__record-avatar { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 var(--sp-6); width: var(--sp-6); height: var(--sp-6); }
 .composer-mailbox__record-avatar > * { max-width: 100%; max-height: 100%; }
 .composer-mailbox__row-head > .composer-mailbox__metadata { margin-left: auto; flex-shrink: 0; }
 .composer-mailbox__source { display: none; }
@@ -348,7 +348,7 @@
 
 .composer-mailbox__folders > button > svg { flex-shrink: 0; }
 .composer-mailbox__folder-label { min-width: 0; }
-.composer-mailbox__count { padding-inline: var(--sp-1); border-radius: var(--radius-sm); background: var(--surface-3); color: var(--text-2); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+.composer-mailbox__count { padding-inline: var(--sp-1); color: var(--text-2); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
 .composer-mailbox__empty { display: grid; justify-items: center; gap: var(--sp-3); padding: var(--sp-6) var(--sp-3); color: var(--text-3); text-align: center; }
 .composer-mailbox__empty strong { color: var(--text-2); font-size: var(--fs-body); font-weight: 500; }
 .composer-mailbox__empty p { margin: 0; }
@@ -485,17 +485,15 @@
 
 /* The same reading rows sit directly below the original query controls. */
 .composer-mailbox .input-history { gap: 0; }
-.composer-mailbox .input-history__search { padding: 0 var(--sp-3) var(--sp-2); }
-.composer-mailbox .input-history__search input { padding: 6px 8px; font-size: var(--fs-meta); }
-.composer-mailbox .input-history__coverage { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1); padding: 0 var(--sp-3) var(--sp-3); font-size: var(--fs-micro); }
+.composer-mailbox .input-history__search { align-items: center; gap: var(--sp-2); padding: 0 var(--sp-3) var(--sp-2); }
+.composer-mailbox .input-history__search input { box-sizing: border-box; height: var(--sp-7); padding: var(--sp-1) var(--sp-3); border-radius: var(--radius-sm); font-size: var(--fs-body); }
+.composer-mailbox .input-history__search > .composer-tool { flex: 0 0 var(--sp-7); justify-content: center; width: var(--sp-7); height: var(--sp-7); padding: 0; }
+.composer-mailbox .input-history__search > .composer-tool:disabled { opacity: .55; cursor: default; }
+.composer-mailbox .composer-tool:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
+.composer-mailbox .input-history__coverage { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1); padding: 0 var(--sp-3) var(--sp-2); font-size: var(--fs-micro); }
 .composer-mailbox .input-history__sources:empty { display: none; }
 .composer-mailbox .input-history__sources, .composer-mailbox .input-history__local { padding: var(--sp-2) var(--sp-3); }
 .composer-mailbox .input-history__local > summary { padding-block: var(--sp-1); }
-@media (pointer: coarse) {
-  .composer-mailbox__record-actions > .composer-tool { min-width: 44px; min-height: 44px; }
-  .composer-mailbox__folders > button { min-height: 44px; }
-
-}
 
 /* A transient result must wrap below the actions, never squeeze the recorded author. */
 .composer-mailbox__detail .log-turn__head:has(.composer-mailbox__action-feedback) > .log-turn__actions { grid-column: 1 / -1; grid-row: 2; display: flex; flex-wrap: wrap; justify-content: flex-end; min-width: 0; width: 100%; margin-inline-start: 0; }
@@ -508,9 +506,9 @@
 .composer__editor .tiptap[data-file-drop-target="true"] { box-shadow: inset 0 0 0 1px var(--green-line); }
 
 /* Message tasks stay separate from the retained automation manager. */
-.composer-mailbox__folders--secondary { display: flex; gap: var(--sp-1); margin-top: calc(-1 * var(--sp-1)); background: transparent; padding: 0; }
-.composer-mailbox__folders--secondary > button { flex: 1 1 auto; min-height: 26px; font-size: var(--fs-micro); }
-.composer-mailbox__automation { display: flex; flex: 0 0 auto; align-items: center; gap: var(--sp-2); min-width: 0; min-height: 38px; padding: var(--sp-2) var(--sp-3); border: 0; border-top: 1px solid var(--line-soft); color: var(--text-2); background: var(--surface-1); font: inherit; text-align: left; cursor: pointer; }
+.composer-mailbox__folders--secondary { display: flex; gap: var(--sp-1); background: transparent; padding: 0; }
+.composer-mailbox__folders--secondary > button { flex: 1 1 auto; min-height: var(--sp-7); font-size: var(--fs-meta); }
+.composer-mailbox__automation { display: flex; flex: 0 0 auto; align-items: center; gap: var(--sp-2); min-width: 0; min-height: 28px; padding: var(--sp-2) var(--sp-3); border: 0; border-top: 1px solid var(--line-soft); color: var(--text-2); background: transparent; font: inherit; text-align: left; cursor: pointer; }
 .composer-mailbox__automation:hover { background: var(--surface-3); }
 .composer-mailbox__automation:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -3px; }
 .composer-mailbox__automation-status { margin-inline-start: auto; color: var(--text-3); font-size: var(--fs-micro); }
@@ -528,3 +526,13 @@
 }
 
 .composer-mailbox .input-mailbox > .input-history__notice { padding: 0 var(--sp-3) var(--sp-2); }
+
+/* Touch targets stay generous after every compact desktop variant. */
+@media (pointer: coarse) {
+  .composer-mailbox__record-actions > .composer-tool,
+  .composer-mailbox__heading > .composer-tool { min-width: 44px; min-height: 44px; }
+  .composer-mailbox__folders > button,
+  .composer-mailbox__automation { min-height: 44px; }
+  .composer-mailbox .input-history__search > .composer-tool { flex-basis: 44px; min-width: 44px; min-height: 44px; }
+  .composer-mailbox .input-history__search input { height: 44px; }
+}

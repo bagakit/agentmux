@@ -67,8 +67,8 @@ export function InputHistoryList({ history, localEntries = [], onRead, onFill, o
         onChange={event => history.setDraftQuery(event.target.value)} onKeyDown={event => {
           if (event.key === 'Enter' && isImeOwnedKeyboardEvent(event)) event.preventDefault()
         }} />
-      <button type="submit" aria-label="查询当前 Agent 输入历史" title="查询当前 Agent 输入历史">{renderRecords ? <SearchIcon size={14} /> : '查询'}</button>
-      {onRefresh ? <button type="button" aria-label="Refresh inputs" title="Refresh inputs" disabled={refreshing} onClick={onRefresh}><RefreshIcon size={14} /></button> : null}
+      <button type="submit" className={renderRecords ? 'composer-tool' : undefined} aria-label="查询当前 Agent 输入历史" title="查询当前 Agent 输入历史">{renderRecords ? <SearchIcon size={14} /> : '查询'}</button>
+      {onRefresh ? <button type="button" className={renderRecords ? 'composer-tool' : undefined} aria-label="Refresh inputs" title="Refresh inputs" disabled={refreshing} onClick={onRefresh}><RefreshIcon size={14} /></button> : null}
     </form>
     <div className="input-history__coverage" role="status">{coverage ?? <>{history.loading ? '正在读取… ' : ''}
       {history.complete ? '已查完可用记录（本次读取）' : '当前为已读取范围'}{history.examined ? ` · 已检查 ${history.examined} 条` : ''}</>}</div>
