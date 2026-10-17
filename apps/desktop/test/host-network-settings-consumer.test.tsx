@@ -84,3 +84,61 @@ it('network-rejected: a whole-call failure releases reading, marks retained valu
   await act(async () => read().click()); expect(network).toHaveBeenCalledTimes(4)
   expect(dom.container.querySelector('[data-network-request]')?.textContent).not.toContain('Last confirmed')
 })
+
+async function linkScope() { await act(async () => dom.container.querySelector<HTMLButtonElement>('[aria-label="Selected link"]')!.click()) }
+function link() { return dom.container.querySelector<HTMLElement>('[data-network-map]')! }
+function linkRead() { return link().querySelector<HTMLButtonElement>('[aria-label="Read selected link"]')! }
+function consoleSample(): HostNetworkObservation {
+  const value = sample()
+  if (value.observer.state === 'available') value.observer.value.interfaces = [
+    { name: 'en0', address: '198.51.100.10', cidr: '198.51.100.10/24', family: 'IPv4', internal: false, scopeid: null },
+    { name: 'utun3', address: 'fe80::3', cidr: 'fe80::3/64', family: 'IPv6', internal: false, scopeid: 3 }
+  ]
+  if (value.ssh?.state === 'available') value.ssh.value.jumps.push({ host: '2001:db8::7', user: 'ops', port: 2222 })
+  return value
+}
+it('console-order: the original workbench projects the exact configured intermediaries without a scope-switch probe', async () => {
+  const network = vi.spyOn(api.hosts, 'network').mockResolvedValue(consoleSample())
+  await open(); await linkScope(); expect(network).not.toHaveBeenCalled()
+  expect(link().querySelector('[data-network-map-step="unknown"]')).not.toBeNull()
+  await act(async () => linkRead().click())
+  expect(network).toHaveBeenCalledOnce(); expect(network.mock.calls[0]![0]).toEqual(host)
+  expect([...link().querySelectorAll('[data-network-map-step="jump"] strong')].map(node => node.textContent), 'Configured transit order stays on its source').toEqual(['bastion.internal', '2001:db8::7'])
+  expect(link().textContent).toContain('Port SSH config'); expect(link().textContent).toContain('Port 2222')
+  expect(link().querySelector('[data-network-map-step="unknown"]')).toBeNull()
+  await act(async () => dom.container.querySelector<HTMLButtonElement>('[aria-label="Fleet map"]')!.click())
+  expect(dom.container.querySelector('[data-host-node="network-target"]')?.getAttribute('aria-pressed')).toBe('true')
+  await linkScope(); expect(network).toHaveBeenCalledOnce()
+})
+it('console-source: endpoint inventories retain their actual source and exact interface names', async () => {
+  vi.spyOn(api.hosts, 'network').mockResolvedValue(consoleSample())
+  await open(); await linkScope(); await act(async () => linkRead().click())
+  const origin = link().querySelector('[data-interface-rack="observer"]')!, target = link().querySelector('[data-interface-rack="target"]')!
+  expect(origin.textContent, 'Origin interfaces retain their exact source').toContain('utun3')
+  expect(origin.textContent).toContain('198.51.100.10/24'); expect(origin.textContent).not.toContain('2001:db8:1234:5678')
+  expect(target.textContent).toContain('eth0'); expect(target.textContent).not.toContain('utun3')
+  expect(target.textContent).toContain('2001:db8:1234:5678:abcd:ef01:2345:6789/64')
+  expect(link().textContent).toContain('presence does not confirm a VPN'); expect(origin.textContent).toContain('Observation process 123')
+})
+it('console-opaque: a custom proxy stays opaque and direct configuration has no invented intermediate', async () => {
+  const opaque = consoleSample(), direct = consoleSample()
+  if (opaque.ssh?.state === 'available') { opaque.ssh.value.proxy = 'command'; opaque.ssh.value.jumps = [] }
+  if (direct.ssh?.state === 'available') { direct.ssh.value.proxy = 'direct'; direct.ssh.value.jumps = [] }
+  vi.spyOn(api.hosts, 'network').mockResolvedValueOnce(opaque).mockResolvedValueOnce(direct)
+  await open(); await linkScope(); await act(async () => linkRead().click())
+  expect(link().querySelectorAll('[data-network-map-step="proxy"]')).toHaveLength(1)
+  expect(link().textContent).toContain('Internal path unknown'); expect(link().querySelector('[data-network-map-step="jump"]')).toBeNull()
+  await act(async () => linkRead().click())
+  expect(link().querySelectorAll('[data-network-map-step]')).toHaveLength(2)
+  expect(link().querySelector('[data-network-map-step="proxy"]')).toBeNull()
+})
+it('console-partial: stale configured intermediaries and inventories keep their original source time', async () => {
+  const original = consoleSample(), missing = { state: 'unavailable' as const, readAt: original.completedAt + 1000, code: 'UNCONFIRMED', message: 'Source read unconfirmed' }
+  vi.spyOn(api.hosts, 'network').mockResolvedValueOnce(original).mockResolvedValueOnce({ ...original, target: missing, ssh: missing, observer: missing })
+  await open(); await linkScope(); await act(async () => linkRead().click()); await act(async () => linkRead().click())
+  expect(link().textContent).toContain('Last confirmed'); expect(link().textContent).toContain('Source read unconfirmed')
+  expect(link().querySelectorAll('[data-network-map-step="jump"]')).toHaveLength(2)
+  expect(link().querySelector('[data-interface-rack="observer"]')?.textContent).toContain('utun3')
+  expect(link().querySelector('time')?.getAttribute('datetime')).toBe(new Date(original.completedAt).toISOString())
+  expect(linkRead().disabled).toBe(false)
+})

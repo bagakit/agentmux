@@ -32,8 +32,8 @@ api.hosts.check = async (host: HostConfig) => {
       'Verify this exact existing connection; no service was installed, stopped or restarted. Original diagnostic '.repeat(5) }
 }
 // Controlled public DTOs only; these are not observations of a real Host or Native process.
-const runtimeCapture = { phase: 'healthy' as 'healthy' | 'partial' | 'recovered', producerAt: Date.now() - 45_000 }
-const networkCapture = { phase: 'healthy' as 'healthy' | 'partial' }
+const runtimeCapture = { phase: 'healthy' as 'healthy' | 'partial' | 'opaque' | 'direct' | 'recovered', producerAt: Date.now() - 45_000 }
+const networkCapture = { phase: 'healthy' as 'healthy' | 'partial' | 'opaque' | 'direct' }
 api.hosts.network = async host => {
   const now = Date.now(), available = <T,>(value: T) => ({ state: 'available' as const, value, readAt: now })
   const missing = { state: 'unavailable' as const, code: 'CONTROLLED_NETWORK_UNCONFIRMED', message: 'The original owner response is temporarily unconfirmed. Existing connections and work remain available.', readAt: now }
@@ -45,10 +45,10 @@ api.hosts.network = async host => {
   ]
   calls.push({ kind: 'controlled-network-read', input: { host: structuredClone(host), phase: networkCapture.phase } })
   return { routeHostId: host.id, configuration: structuredClone(host), requestedAt: now - 34, completedAt: now,
-    observer: available({ processId: 41000, observedAt: now, interfaces: [{ name: 'en0', address: '198.51.100.12', family: 'IPv4', cidr: '198.51.100.12/24', internal: false, scopeid: null }] }),
+    observer: available({ processId: 41000, observedAt: now, interfaces: [{ name: 'en0', address: '198.51.100.12', family: 'IPv4', cidr: '198.51.100.12/24', internal: false, scopeid: null }, { name: 'utun3', address: 'fe80::3', family: 'IPv6', cidr: 'fe80::3/64', internal: false, scopeid: 3 }] }),
     target: networkCapture.phase === 'partial' ? missing : available({ requestDurationMs: 34, sample: { owner, observedAt: now - 4, interfaces } }),
     ssh: host.kind === 'local' ? null : networkCapture.phase === 'partial' ? missing : available({ hostname: host.hostname, user: host.user ?? 'builder', port: host.port ?? 22,
-      serverAliveInterval: 30, serverAliveCountMax: 3, tcpKeepAlive: 'yes', proxy: 'jump', jumps: [{ host: 'entry.internal', user: 'ops', port: 2222 }, { host: '2001:db8::7', user: null, port: null }] }) } satisfies HostNetworkObservation
+      serverAliveInterval: 30, serverAliveCountMax: 3, tcpKeepAlive: 'yes', proxy: networkCapture.phase === 'opaque' ? 'command' : networkCapture.phase === 'direct' ? 'direct' : 'jump', jumps: networkCapture.phase === 'opaque' || networkCapture.phase === 'direct' ? [] : [{ host: 'entry.internal', user: 'ops', port: 2222 }, { host: '2001:db8::7', user: null, port: null }] }) } satisfies HostNetworkObservation
 }
 api.hosts.inspect = async (host: HostConfig) => {
   const now = Date.now(), recovered = runtimeCapture.phase === 'recovered'
