@@ -18,6 +18,9 @@ const CONSOLE = 'https://open.feishu.cn/app'
 const CONSOLE_HOSTS = ['open.feishu.cn', 'open.larkoffice.com']
 const CROSS_LOGIN_HOSTS = ['accounts.feishu.cn', 'ask.feishu.cn']
 const CONSOLE_FLOW_HOSTS = [...CROSS_LOGIN_HOSTS, ...CONSOLE_HOSTS]
+export function isFeishuConsoleOrigin(value: unknown): value is string {
+  return typeof value === 'string' && CONSOLE_HOSTS.some(host => value === `https://${host}`)
+}
 // Match Fetch's finite redirect observation budget; this is not a platform login limit.
 const redirectLimit = (phase: unknown) => phase === 'console' ? 20 : 8
 type Phase = 'poll' | 'cross-login' | 'landing' | 'console' | 'account' | 'expired'
@@ -333,7 +336,7 @@ export async function advanceFeishuNativeAccount(snapshot: unknown, signal?: Abo
       else if (state.phase === 'landing') { state.phase = 'console'; state.url = CONSOLE; state.referer = target.href }
       else {
         boundary = 'bootstrap'
-        if (!CONSOLE_HOSTS.includes(target.hostname)) return failed('redirect-unconfirmed', undefined, 'unexpected-final-host')
+        if (!isFeishuConsoleOrigin(target.origin)) return failed('redirect-unconfirmed', undefined, 'unexpected-final-host')
         if (response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() !== 'text/html') return failed()
         failure = 'bootstrap-unconfirmed'
         const identity = bootstrap(await readNativeAccountResponse(response)); state.account = identity.account; state.csrf = identity.csrf; state.consoleOrigin = target.origin; state.phase = 'account'; stage = 'account'
