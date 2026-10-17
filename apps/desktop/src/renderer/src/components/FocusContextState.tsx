@@ -6,7 +6,8 @@ const ThemeStatusInputIcon = semanticIconComponent('status.needs-input')
 const ThemeStatusWorkingIcon = semanticIconComponent('status.working')
 const ThemeStatusCompletedIcon = semanticIconComponent('status.completed')
 const ThemeStatusUnknownIcon = semanticIconComponent('status.presence-unknown')
-const ThemeStatusStoppedIcon = semanticIconComponent('status.killed')
+const ThemeStatusActivityUnknownIcon = semanticIconComponent('status.activity-unknown')
+const ThemeStatusInterruptedIcon = semanticIconComponent('status.interrupted')
 const ThemeStatusDisconnectedIcon = semanticIconComponent('status.disconnected')
 const ThemeStatusIdleIcon = semanticIconComponent('status.idle')
 
@@ -18,8 +19,8 @@ export function FocusContextStateMark({ context }: { context: FocusContext }) {
     : context.bucket === 'working' ? ['working', ThemeStatusWorkingIcon]
       : context.bucket === 'results' ? ['results', ThemeStatusCompletedIcon]
         : context.runUnobserved ? ['unknown', ThemeStatusUnknownIcon]
-          : context.processState === 'interrupted' ? ['interrupted', ThemeStatusStoppedIcon]
-          : unknown ? ['unknown', ThemeStatusUnknownIcon]
+          : context.processState === 'interrupted' ? ['interrupted', ThemeStatusInterruptedIcon]
+          : unknown ? ['unknown', ThemeStatusActivityUnknownIcon]
           : context.processState !== 'running' ? ['recovery', ThemeStatusDisconnectedIcon] : ['idle', ThemeStatusIdleIcon]
   return <span className="focus-state-mark" data-focus-state-icon={kind} aria-hidden="true"><Icon size={12} strokeWidth={1.8} animation={kind === 'working' ? 'work' : 'none'} /></span>
 }

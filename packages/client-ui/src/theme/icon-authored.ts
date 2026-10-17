@@ -194,6 +194,20 @@ export const AUTHORED_ICON_DEFINITIONS = {
       motion: { kind: "still", animation: "none", description: "存活、空闲、排队、终止、未知或需要输入均不等价于正在工作。永久循环会误导，原正文/动作仍准确。", trigger: "沿原已确认状态或控件值显示；存活、排队、未知等事实不自动启用动画。" }
     }
   },
+  "activity-unconfirmed": {
+    shapes: [["path",{"d":"M8 4H6a3 3 0 0 0-3 3v3 M16 4h2a3 3 0 0 1 3 3v3 M3 14v3a3 3 0 0 0 3 3h2 M21 14v3a3 3 0 0 1-3 3h-2"}]],
+    design: {
+      rest: "同族窗口尺度的四角未闭合观测框；空心留白表示活动未确认，不借 Idle 横线或普通 presence 空圆",
+      motion: { kind: "still", animation: "none", description: "不确定或不支持报告不是加载、工作或需要输入；保完整静止四角，不旋转、闪动或补造活动。", trigger: "原调用方已将当前活动资格投影为未知或不支持报告；不表示 Run 不存在或已中断。" }
+    }
+  },
+  "process-interrupted": {
+    shapes: [["rect",{"x":"3","y":"4","width":"18","height":"16","rx":"3"}],["path",{"d":"M6.5 10h3.5 M14 14h3.5"}]],
+    design: {
+      rest: "原进程框内两段明确断开、略错位的水平轨迹；保连续性中断含义，不借 Stop 方块、暂停双线或失败叉",
+      motion: { kind: "still", animation: "none", description: "中断是原运行事实，不是正在恢复或自动重试；两段轨迹保持静止，不补造原因或进度。", trigger: "沿原 owner 已确认的 interrupted Run／进程投影；不能从观察失败或文案猜中断。" }
+    }
+  },
   "operation-wait": {
     shapes: [["path",{"d":"M6 3h12 M6 21h12 M7 3v4c0 2 3 3 5 5-2 2-5 3-5 5v4 M17 3v4c0 2-3 3-5 5 2 2 5 3 5 5v4","data-semantic-icon-part":"hourglass-frame"}],["path",{"d":"M8.5 6h7c0 2-1.75 3.5-3.5 5.25C10.25 9.5 8.5 8 8.5 6Z","fill":"currentColor","stroke":"none","data-semantic-icon-part":"hourglass-upper"}],["path",{"d":"M8.5 18h7c0-2-1.75-3.5-3.5-5.25C10.25 14.5 8.5 16 8.5 18Z","fill":"currentColor","stroke":"none","transform":"translate(0 18) scale(1 0) translate(0 -18)","data-semantic-icon-part":"hourglass-lower"}],["circle",{"cx":"12","cy":"12","r":".55","fill":"currentColor","stroke":"none","opacity":"0","data-semantic-icon-part":"hourglass-grain"}]],
     design: {
