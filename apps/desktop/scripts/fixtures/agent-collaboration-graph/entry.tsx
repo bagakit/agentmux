@@ -249,6 +249,7 @@ api.sessions.readMessage = async (subject, mid) => {
 }
 createClientUiRoot(document.getElementById('root')!).render(createElement(App))
 let originalState: ReturnType<typeof useAppStore.getState> | undefined, originalDraft: HTMLTextAreaElement | null = null, originalMap: Element | null = null
+const structuralValue = (value: unknown) => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item)
 Object.assign(window, { graphCapture: {
   ready: true, reads, controls, census, beginMeasurement, endMeasurement,
   async publicControl(request: Parameters<NonNullable<typeof admittedControl>>[0]) {
@@ -295,6 +296,10 @@ Object.assign(window, { graphCapture: {
   },
   facts() { const state = useAppStore.getState(); return { loading: state.loading, ids: state.sessions.map(session => session.id),
     sameTabs: state.tabs === originalState?.tabs, sameLayouts: state.layouts === originalState?.layouts,
+    layoutsPreserved: structuralValue(state.layouts) === structuralValue(originalState?.layouts),
+    selectionPreserved: structuralValue(state.workbenchSpaceSelection) === structuralValue(originalState?.workbenchSpaceSelection),
+    ...(structuralValue(state.layouts) === structuralValue(originalState?.layouts) ? {} : { layoutDifference: { before: originalState?.layouts, after: state.layouts } }),
+    ...(structuralValue(state.workbenchSpaceSelection) === structuralValue(originalState?.workbenchSpaceSelection) ? {} : { selectionDifference: { before: originalState?.workbenchSpaceSelection, after: state.workbenchSpaceSelection } }),
     sameDrafts: state.agentComposerDrafts === originalState?.agentComposerDrafts, sameFocus: state.agentFocus === originalState?.agentFocus,
     sameSelection: state.workbenchSpaceSelection === originalState?.workbenchSpaceSelection,
     draftMounted: originalDraft?.isConnected, sameDraft: originalDraft === document.querySelector('[data-fixture-session="fixture-ui"] textarea'),
