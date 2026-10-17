@@ -29,7 +29,7 @@ import {
 import { composeScreenshot } from './browser-screenshot/compose'
 import { formatScreenshotContext } from './browser-screenshot/context'
 import { ComposerTextarea } from '@agentmux/client-ui/input'
-import { BrowserOperationHistory, BrowserOperationStatus, BrowserOperationWarning, BrowserOperationTimeline, BrowserReplayPreview } from './BrowserOperationSurface'
+import { BrowserOperationHistory, BrowserOperatorPresence, BrowserOperationWarning, BrowserOperationTimeline, BrowserReplayPreview } from './BrowserOperationSurface'
 import { BrowserStartPage } from './BrowserStartPage'
 import type { BrowserStartPageConfig } from '../../../shared/browser-start-page'
 import { BrowserAddressInput, type BrowserAddressInputHandle } from './BrowserAddressInput'
@@ -617,13 +617,14 @@ function BrowserPaneContent({
   // 事：同一个 `activeRun.stop`、同一份四分类结局、同一条幂等规则（停一个已经结束的操作是成功并
   // 答出它的终局）。各走一条的后果不是"两种写法"，是两套语义各自漂移——而漂移时两边看起来都对。
   //
-  // 协议按 **operationId** 寻址而不是 browserId，这正是它比旧 IPC 强的地方：一条操作的寿命长于任何
-  // 一条连接，也长于这张 Tab。所以这里从 activity 投影里取那条操作的 id；投影里没有操作时按钮本身
-  // 不会出现（BrowserOperationStatus 没有 current operation 就不提供 Stop），所以这不是一个
-  // 需要兜底的状态——真的没有就什么也不做，而不是随便停一个。
+  // Current Main control names the exact active operation even while its activity details are
+  // loading. Retained activity is only the explicit Stop fallback when no Agent owner is current.
   async function stopBrowserOperation(): Promise<void> {
-    const operationId = tab.activity?.operation?.id
-    if (!operationId) return
+    const operationId = tab.control?.owner === 'agent' ? tab.control.activeOperationId : tab.activity?.operation?.id
+    if (!operationId) {
+      reportError('The current Browser operation identity is unconfirmed. The original page is kept; retry Take control when its Main control details reconnect.', { kind: 'process-degraded' })
+      return
+    }
     try {
       await executeControl({
         schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
@@ -1133,8 +1134,9 @@ function BrowserPaneContent({
             onSubmit={navigateAddress} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })}
           />
         </label>}
-        <BrowserOperationStatus
+        <BrowserOperatorPresence
           activity={browserActivity}
+          control={tab.control}
           browserId={tab.browserId}
           {...(tab.taskAssets ? { taskAssets: tab.taskAssets } : {})}
           onOpenTaskRun={(assetId, version) => { setSelectedTaskAssetId(assetId); setTaskAssetReview({ assetId, version }); openOperationTimeline(key) }}

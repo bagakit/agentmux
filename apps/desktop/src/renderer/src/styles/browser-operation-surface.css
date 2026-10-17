@@ -1,5 +1,7 @@
 /* Browser operation controls stay local; the host owns native page/trace-rail geometry. */
 .browser-operation-status { flex: none; display: inline-flex; }
+.browser-operation-status__face { position: relative; display: inline-flex; }
+.browser-operation-status__phase { position: absolute; right: -4px; bottom: -4px; display: inline-flex; border-radius: 50%; background: var(--surface-1); pointer-events: none; }
 .browser-operation-status__trigger { width: 27px; height: 27px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; cursor: pointer; }
 .browser-operation-status__trigger:hover, .browser-operation-status__trigger[data-state="open"] { color: var(--text); background: var(--surface-3); }
 .browser-operation-status__trigger:focus-visible { outline: 2px solid var(--green-line); outline-offset: -2px; }

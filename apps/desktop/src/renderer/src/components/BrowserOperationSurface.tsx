@@ -1,5 +1,6 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useId, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
+import type { AgentMuxBrowserControl, AgentProviderId } from '@agentmux/core'
 import type {
   BrowserActivityState,
   BrowserOperation,
@@ -7,10 +8,16 @@ import type {
   BrowserOperationStep,
   BrowserReplayPlan
 } from '../../../shared/browser-operation'
-import type { BrowserScriptRunReport } from '../../../shared/contracts'
+import type { AgentAvatarAppearance, BrowserScriptRunReport } from '../../../shared/contracts'
 import type { BrowserTaskAssetState } from '../../../shared/browser-task-assets'
 import { SemanticIcon } from './semantic-icons'
 import * as DropdownMenu from './HoverDropdownMenu'
+import { ResolvedAgentAvatar } from './AgentAvatar'
+import { useAppStore } from '../store'
+import { useWorkbenchDocument } from '../lib/workbench-document'
+import { browserOperatorSession } from '../lib/browser-operator-identity'
+import { prepareBrowserOperatorAvatar, readBrowserOperatorAvatar, type BrowserOperatorAvatarInput } from '../lib/browser-operator-avatar'
+import { api } from '../lib/api'
 
 const ThemeObjectHistoryIcon = semanticIconComponent('object.history')
 const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
@@ -27,20 +34,12 @@ const ThemeStatusCompletedIcon = semanticIconComponent('status.completed')
 const ThemeStatusFailedIcon = semanticIconComponent('status.failed')
 
 
-/** One toolbar disclosure owns Browser operation state and its optional actions. */
-export function BrowserOperationStatus({
-  activity,
-  browserId,
-  taskAssets,
-  onOpenTaskRun,
-  onTakeControl,
-  onReturnControl,
-  onStop,
-  onOpenTimeline,
-  onOpenChange
-}: {
+type BrowserOperationStatusProps = {
   activity: BrowserActivityState
   browserId?: string
+  control?: AgentMuxBrowserControl | undefined
+  operatorProviderId?: AgentProviderId | undefined
+  operatorAppearance?: AgentAvatarAppearance | undefined
   taskAssets?: BrowserTaskAssetState
   onOpenTaskRun?: (assetId: string, version: number) => void
   onTakeControl?: () => void
@@ -48,8 +47,69 @@ export function BrowserOperationStatus({
   onStop?: () => void
   onOpenTimeline?: () => void
   onOpenChange?: (open: boolean) => void
-}) {
+}
+
+function controlsOperation(operation: BrowserOperation | null, control: AgentMuxBrowserControl | undefined, browserId?: string): boolean {
+  return Boolean(operation && (browserId === undefined || operation.browserId === browserId) &&
+    control?.owner === 'agent' && control.activeOperationId === operation.id)
+}
+
+/** The actual BrowserPane consumer starts cosmetic work only after Main publishes its operation. */
+export function BrowserOperatorPresence(props: Omit<BrowserOperationStatusProps, 'operatorProviderId' | 'operatorAppearance'> & { browserId: string }) {
+  const document = useWorkbenchDocument()
+  const operation = props.activity.operation
+  const session = useAppStore(state => operation ? browserOperatorSession(operation.operator.id, state.sessions) : undefined)
+  const appearance = useAppStore(state => session ? state.config?.executors[session.executorId]?.avatar ??
+    state.config?.appearance.agentAvatars?.[session.executorId] : undefined)
+  const reportError = useAppStore(state => state.reportError)
+  const control = props.control
+  const live = controlsOperation(operation, control, props.browserId) && Boolean(operation && ['preparing', 'running', 'waiting'].includes(operation.phase))
+  useEffect(() => {
+    if (!live || !operation || !session || session.control.agentSessionId !== operation.operator.id) return
+    let current = true
+    const target = { browserId: props.browserId, operationId: operation.id, operatorId: operation.operator.id }
+    const style = document.defaultView?.getComputedStyle(document.documentElement)
+    const input: BrowserOperatorAvatarInput = { document, providerId: session.providerId, appearance,
+      colors: { mark: style?.getPropertyValue('--text-2').trim() ?? '', enamel: style?.getPropertyValue('--surface-0').trim() ?? '',
+        badge: style?.getPropertyValue('--text').trim() ?? '', badgeBackground: style?.getPropertyValue('--surface-1').trim() ?? '' } }
+    const send = (png: string) => {
+      if (current) void api.browser.setOperatorAvatar({ ...target, png }).catch(error => {
+        if (current) reportError(error, { kind: 'process-degraded' })
+      })
+    }
+    const ready = readBrowserOperatorAvatar(input)
+    if (ready) send(ready.dataUrl)
+    else void prepareBrowserOperatorAvatar(input).then(result => {
+      if (!current) return
+      if (result.status === 'ready') send(result.avatar.dataUrl)
+      else reportError(result.message, { kind: 'process-degraded' })
+    })
+    return () => { current = false }
+    // Freeze the original appearance for this accepted operation. Step/config updates do not
+    // restart decoding or cancel its first image; exact owner changes and unmount do cancel it.
+  }, [props.browserId, operation?.id, operation?.operator.id, live, document, session?.id])
+  return <BrowserOperationStatus {...props} operatorProviderId={session?.providerId} operatorAppearance={appearance} />
+}
+
+/** One toolbar disclosure owns Browser operation state and its optional actions. */
+export function BrowserOperationStatus({
+  activity,
+  browserId,
+  control: currentControl,
+  operatorProviderId,
+  operatorAppearance,
+  taskAssets,
+  onOpenTaskRun,
+  onTakeControl,
+  onReturnControl,
+  onStop,
+  onOpenTimeline,
+  onOpenChange
+}: BrowserOperationStatusProps) {
   const operation = activity.operation
+  const control = currentControl
+  const controlled = controlsOperation(operation, control, browserId)
+  const currentDetails = control?.owner !== 'agent' || Boolean(operation && controlled)
   const terminal = operation && ['completed', 'failed', 'stopped', 'indeterminate'].includes(operation.phase)
   // A cursor is a workflow fact, not the completed Journal action or the editor's selected version.
   // An explicitly continued older cursor remains selected by Main, regardless of timestamp order.
@@ -59,30 +119,37 @@ export function BrowserOperationStatus({
   const taskRun = latestRun && taskVersion && (latestRun.status === 'waiting-human' || latestRun.status === 'ready') &&
     (operation ? terminal && operation.browserId === browserId &&
       (latestRun.operationIds.at(-1) === operation.id || (latestRun.operationIds.length === 0 && operation.startedAt < latestRun.startedAt))
-      : activity.control === 'human') ? latestRun : null
-  const phase = taskRun ? taskRun.status === 'waiting-human' ? 'human' : 'waiting' : operation
-    ? !terminal && activity.control === 'human' ? 'human' : operation.phase
-    : activity.control === 'agent' ? 'unknown' : 'idle'
+      : control?.owner === 'human') ? latestRun : null
+  const phase = !currentDetails ? 'unknown' : taskRun ? taskRun.status === 'waiting-human' ? 'human' : 'waiting' : operation
+    ? !terminal && control?.owner === 'human' ? 'human' : operation.phase
+    : control?.owner === 'human' ? 'idle' : 'unknown'
   const label = taskRun ? taskRun.status === 'waiting-human' ? 'Waiting for human checkpoint' : 'Task ready to continue'
-    : phase === 'unknown' ? 'Agent control active · Activity details are loading'
+    : phase === 'unknown' ? control?.owner === 'agent' ? 'Agent control active · Activity details are loading' : 'Browser control is unconfirmed · Activity details are loading'
     : phase === 'idle' ? 'You have control' : phaseLabel(phase)
   const checkpoint = taskVersion?.steps.find(step => step.id === taskRun?.pendingCheckpointId)
-  const target = taskRun ? [`v${taskRun.version}`, checkpoint?.label,
+  const target = !currentDetails ? null : taskRun ? [taskVersion!.name, `v${taskRun.version}`, checkpoint?.label,
     taskRun.nextStep < taskVersion!.steps.length ? `Next step ${taskRun.nextStep + 1}` : 'Review final checkpoint'].filter(Boolean).join(' · ')
     : operation ? currentTarget(operation) ?? operation.summary : null
-  const identity = taskRun ? taskVersion!.name : operation?.operator.name
+  const identity = currentDetails ? operation?.operator.name : undefined
   const description = [identity, label, target].filter(Boolean).join(' · ')
-  const canStop = Boolean(operation && !terminal)
-  const canTakeControl = canStop && activity.control === 'agent'
-  const canReturnControl = activity.control === 'human'
+  const canStop = Boolean(operation && (!terminal || controlled))
+  const canTakeControl = control?.owner === 'agent'
+  const canReturnControl = control?.owner === 'human'
+  const providerId = currentDetails ? operatorProviderId ?? operation?.operator.providerId : undefined
+  const phaseGlyph = phase === 'idle' ? <ThemeObjectHistoryIcon size={14} aria-hidden="true" />
+    : phase === 'unknown' ? <ThemeStatusWarningIcon size={14} aria-hidden="true" />
+    : <PhaseGlyph phase={phase} current={Boolean(controlled && !terminal)} />
   return (
-    <span className="browser-operation-status" data-phase={phase} data-control={activity.control} data-operation-id={operation?.id}
+    <span className="browser-operation-status" data-phase={phase} data-control={control?.owner ?? 'unknown'} data-operation-id={operation?.id}
       data-task-run-id={taskRun?.id} data-task-version={taskRun?.version}>
       <DropdownMenu.Root {...(onOpenChange ? { onOpenChange } : {})}>
         <DropdownMenu.Trigger asChild>
           <button type="button" className="browser-operation-status__trigger" aria-label={`Browser activity: ${description}`} title={description}>
-            {phase === 'idle' ? <ThemeObjectHistoryIcon size={14} aria-hidden="true" />
-              : phase === 'unknown' ? <ThemeStatusWarningIcon size={14} aria-hidden="true" /> : <PhaseGlyph phase={phase} current={Boolean(operation && !terminal && activity.control === 'agent')} />}
+            {operation && providerId ? <span className="browser-operation-status__face">
+              <ResolvedAgentAvatar label={operation.operator.name} providerId={providerId} appearance={operatorAppearance} />
+              <span className="browser-operation-status__phase">{phaseGlyph}</span>
+            </span>
+              : phaseGlyph}
           </button>
         </DropdownMenu.Trigger>
         <DropdownMenu.Portal>
@@ -100,6 +167,10 @@ export function BrowserOperationStatus({
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
+      {canTakeControl && onTakeControl ? <button type="button" className="browser-operation-status__trigger"
+        aria-label="Take control of Browser" title="Take control of Browser" onClick={() => onTakeControl()}>
+        <ThemeActionPanIcon size={14} aria-hidden="true" />
+      </button> : null}
     </span>
   )
 }

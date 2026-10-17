@@ -1,5 +1,12 @@
 import type { SessionSnapshot } from '../../../shared/contracts'
 import type { BrowserOperator } from '../../../shared/browser-operation'
+import { agentSessionPresentationIndex } from './session-presentation'
+
+/** No Host is implied by the focused page or by a Browser's execution location. */
+export function browserOperatorSession(agentSessionId: string, sessions: readonly SessionSnapshot[]) {
+  const candidates = agentSessionPresentationIndex(sessions).get(agentSessionId)
+  return candidates?.length === 1 ? candidates[0] : undefined
+}
 
 /**
  * 谁在操作这个浏览器——从真实的 Session 事实解析，而不是拿 id 拼一个名字出来。
@@ -18,10 +25,10 @@ export function browserOperatorForSession(
   agentSessionId: string,
   sessions: readonly SessionSnapshot[]
 ): BrowserOperator {
-  const session = sessions.find((candidate) => candidate.id === agentSessionId)
-  if (!session || session.kind !== 'agent') return { id: agentSessionId, name: agentSessionId }
+  const session = browserOperatorSession(agentSessionId, sessions)
+  if (!session) return { id: agentSessionId, name: agentSessionId }
   return {
-    id: agentSessionId,
+    id: session.control.agentSessionId,
     name: session.label,
     // 条件展开而不是 `providerId: session.providerId`：这个字段是可选的，写成必给会在
     // 值为 undefined 时留下一个"在场但为空"的键，而下游 `providerId ? <Icon/> : null`
