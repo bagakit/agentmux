@@ -1,3 +1,4 @@
+import { isAgentActivityStatusSource } from '@agentmux/core/agent-status'
 import { observeAgentSession } from './agent-observation'
 import { isNeedsYouState } from './attention-vocabulary'
 import type {
@@ -143,13 +144,14 @@ export function agentActivityCounts(sessions: readonly SessionSnapshot[], now = 
     if (failed) counts.error++
     // Requests and errors remain actionable facts even when activity is unconfirmed.
     if (needsYou || failed) continue
+    // A confirmed turn outcome survives later loss of current Run/activity observation.
+    const completed = session.status.state === 'done' && !session.currentActivity && isAgentActivityStatusSource(session.status.source)
+    if (completed) counts.completed++
     if (session.runUnobserved || session.processState !== 'running') { counts.unknown++; continue }
     const observation = observeAgentSession(session, now)
     if (observation.semantic === 'active') counts.working++
     else if (observation.semantic === 'idle') {
-      // A newer native activity observation is separate from an old main-turn result.
-      if (session.status.state === 'done' && !session.currentActivity) counts.completed++
-      else counts.idle++
+      if (!completed) counts.idle++
     } else counts.unknown++
   }
   return counts
