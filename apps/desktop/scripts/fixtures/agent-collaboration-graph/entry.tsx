@@ -3,7 +3,7 @@ import { createClientUiRoot } from '../../../test/helpers/client-ui-render'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { conversationRevision, parseConversationReadPage, projectConversationTimeline, type ConversationTimelineReadInput } from '@agentmux/core/conversation'
 import { parseMessageEventsPage } from '../../../../../packages/core/src/agent-message-events'
-import type { AgentMuxMessageEvent, AgentMuxSpawnRecord, AgentTimelineSnapshot } from '@agentmux/core'
+import type { AgentMuxAgentSession, AgentSessionHistoryDescriptor, AgentMuxMessageEvent, AgentMuxSpawnRecord, AgentTimelineSnapshot } from '@agentmux/core'
 import type { RuntimeEvent, SessionSnapshot, ScratchTopicSnapshot, WorkspaceRecord } from '../../../src/shared/contracts'
 import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../../../src/shared/scratch-topics'
 import { directoryIdentity, homeZoneId, workspaceZoneId } from '../../../src/shared/space-addresses'
@@ -13,10 +13,77 @@ import { useAppStore } from '../../../src/renderer/src/store'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { desktopSpatialGraph } from '../../../src/renderer/src/lib/desktop-spatial-state'
 import { fixturePath } from '../../lib/fixture-values.mjs'
+import type { CollaborationLayoutRequest, CollaborationLayoutResponse } from '../../../src/renderer/src/lib/collaboration-layout-engine'
 import '../../../src/renderer/src/styles/index.css'
+
+// Transparent instrumentation: actual browser Workers and original context code execute.
+const nativeWorkers: Array<{ input?: { nodes: number; connections: number; ids: string[]; sizes: Record<string, number> }; boxes?: { agents: number; ids: string[] }; complete?: boolean; terminated?: boolean; observerMS: number }> = []
+const OriginalWorker = window.Worker
+class ObservedWorker extends OriginalWorker {
+  private readonly sample: typeof nativeWorkers[number] = { observerMS: 0 }
+  constructor(...args: ConstructorParameters<typeof OriginalWorker>) {
+    super(...args); nativeWorkers.push(this.sample)
+    this.addEventListener('message', (event: MessageEvent<CollaborationLayoutResponse>) => {
+      const start = performance.now()
+      if (event.data?.type === 'boxes' && Array.isArray(event.data.boxes)) this.sample.boxes = { agents: event.data.boxes.filter(box => box.kind === 'agent').length, ids: event.data.boxes.filter(box => box.kind === 'agent').map(box => box.id) }
+      if (event.data?.type === 'complete') this.sample.complete = true
+      this.sample.observerMS += performance.now() - start
+    })
+  }
+  override postMessage(message: unknown, transfer: Transferable[]): void
+  override postMessage(message: unknown, options?: StructuredSerializeOptions): void
+  override postMessage(message: unknown, options?: Transferable[] | StructuredSerializeOptions): void {
+    const start = performance.now(), request = message as CollaborationLayoutRequest
+    if (request?.type === 'arrange' && Array.isArray(request.input?.nodes) && Array.isArray(request.input?.connections)) {
+      const sizes: Record<string, number> = {}
+      for (const node of request.input.nodes) { const size = `${node.width}x${node.height}`; sizes[size] = (sizes[size] ?? 0) + 1 }
+      this.sample.input = { nodes: request.input.nodes.length, connections: request.input.connections.length, ids: request.input.nodes.map(node => node.id), sizes }
+    }
+    this.sample.observerMS += performance.now() - start
+    if (Array.isArray(options)) super.postMessage(message, options); else super.postMessage(message, options)
+  }
+  override terminate() { this.sample.terminated = true; super.terminate() }
+}
+window.Worker = ObservedWorker
+const instrumentation = () => (globalThis as typeof globalThis & { __collaborationCaptureMetrics?: { contextCalls: number; contextIds: Record<string, number>; contextCounterMS: number } }).__collaborationCaptureMetrics ?? { contextCalls: 0, contextIds: {}, contextCounterMS: 0 }
+let measurement: { label: string; start: number; frames: number[]; longTasks: Array<{ start: number; duration: number }>; observer?: PerformanceObserver; frame: number; previous: number; before: ReturnType<typeof counters>; overheadMS: number } | undefined
+function census() {
+  const start = performance.now(), map = document.querySelector('.collaboration-map'), canvas = map?.querySelector('.collaboration-canvas'), bounds = canvas?.getBoundingClientRect()
+  const nodes = [...map?.querySelectorAll<HTMLElement>('[data-collaboration-agent]') ?? []]
+  return { nodes: nodes.length, fullCards: map?.querySelectorAll('.focus-context[data-session-id]').length ?? 0, marks: map?.querySelectorAll('.collaboration-agent__mark').length ?? 0,
+    onscreen: nodes.filter(node => { const rect = node.getBoundingClientRect(); return bounds && rect.right > bounds.left && rect.left < bounds.right && rect.bottom > bounds.top && rect.top < bounds.bottom }).length,
+    matrix: map?.querySelector('.react-flow__viewport')?.getAttribute('style'), samplingMS: performance.now() - start }
+}
+function counters() { const counts = instrumentation(); return { contextCounterMS: counts.contextCounterMS, workerObserverMS: nativeWorkers.reduce((total, sample) => total + sample.observerMS, 0), contextCalls: counts.contextCalls, contextIds: { ...counts.contextIds }, events: reads.filter(read => read.kind === 'events').length, bodies: reads.filter(read => read.kind === 'body').length, workers: nativeWorkers.length } }
+function beginMeasurement(label: string) {
+  if (measurement) throw Error('One finite measurement at a time')
+  const sample = measurement = { label, start: performance.now(), frames: [], longTasks: [], frame: 0, previous: 0, before: counters(), overheadMS: 0 } as NonNullable<typeof measurement>
+  const loop = (at: number) => { if (measurement !== sample) return; const start = performance.now(); if (sample.previous) sample.frames.push(at - sample.previous); sample.previous = at; sample.frame = requestAnimationFrame(loop); sample.overheadMS += performance.now() - start }
+  sample.frame = requestAnimationFrame(loop)
+  if (PerformanceObserver.supportedEntryTypes.includes('longtask')) { sample.observer = new PerformanceObserver(list => { const start = performance.now(); for (const entry of list.getEntries()) sample.longTasks.push({ start: entry.startTime, duration: entry.duration }); sample.overheadMS += performance.now() - start }); sample.observer.observe({ type: 'longtask', buffered: false }) }
+}
+function endMeasurement() {
+  if (!measurement) throw Error('No native measurement is active')
+  const sample = measurement; measurement = undefined; cancelAnimationFrame(sample.frame)
+  for (const entry of sample.observer?.takeRecords() ?? []) sample.longTasks.push({ start: entry.startTime, duration: entry.duration })
+  sample.observer?.disconnect()
+  const after = counters(), gaps = [...sample.frames].sort((a, b) => a - b), dom = census()
+  return { label: sample.label, elapsedMS: performance.now() - sample.start, frameCount: gaps.length, tailFrameGapMS: sample.previous ? performance.now() - sample.previous : null, frameGapMS: { max: Math.max(0, ...gaps), p95: gaps[Math.floor(gaps.length * .95)] ?? null, over50: gaps.filter(gap => gap > 50).length }, longTaskSupported: PerformanceObserver.supportedEntryTypes.includes('longtask'), longTasks: sample.longTasks,
+    observerOverheadMS: sample.overheadMS, contextCounterOverheadMS: after.contextCounterMS - sample.before.contextCounterMS, workerObserverOverheadMS: after.workerObserverMS - sample.before.workerObserverMS, boundaryCensusMS: dom.samplingMS, before: sample.before, after, contextDelta: after.contextCalls - sample.before.contextCalls,
+    builtContextIds: Object.keys(after.contextIds).filter(id => after.contextIds[id]! > (sample.before.contextIds[id] ?? 0)), eventReadsDelta: after.events - sample.before.events, dom }
+}
 
 // All controlled values enter at the platform boundary. Product Store actions,
 // App initialization, Graph, card intent and the sole Reader host stay original.
+// Forward public requests to the exact callback admitted by original App initialization.
+const originalControlRegistration = api.control.onRequest.bind(api.control)
+let admittedControl: Parameters<typeof api.control.onRequest>[0] | undefined
+const publicRequests: Array<{ id: string; operation: string }> = [], publicSignals = new Map<string, AbortController>()
+api.control.onRequest = listener => {
+  admittedControl = listener
+  const dispose = originalControlRegistration(listener)
+  return () => { if (admittedControl === listener) admittedControl = undefined; dispose() }
+}
 const originalConfig = await api.config.get(), originalSnapshot = await api.sessions.snapshot()
 const base = originalSnapshot.sessions.find((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => session.kind === 'agent')
 if (!base || !originalConfig.workspaces[0]) throw Error('Nonempty typed platform samples required')
@@ -27,6 +94,8 @@ const projects: WorkspaceRecord[] = [
   { ...originalConfig.workspaces[0], id: SCRATCH_WORKSPACE_ID, hostId, name: 'Topics', path: fixturePath('private/graph/topics'), kind: 'folder' as const }
 ]
 const scratch = projects[2]!
+const background = Array.from({ length: 8 }, (_, index): WorkspaceRecord => ({ id: 'fixture-background-' + index, hostId, name: 'Independent work ' + (index + 1), path: fixturePath('private/graph/independent/' + index), kind: 'folder' }))
+projects.push(...background)
 const category = { categoryId: '11111111-1111-4111-8111-111111111111', hostId,
   spaceId: directoryIdentity(hostId, fixturePath('private/graph/categories/quality')), directoryPath: fixturePath('private/graph/categories/quality'), title: 'Product quality', revision: null }
 const topics: ScratchTopicSnapshot[] = [
@@ -48,12 +117,27 @@ const identities = [
   ['fixture-ui', 'Conversation renderer', 'codex', 0], ['fixture-core', 'A2A delivery', 'claude', 0],
   ['fixture-review', 'Read model review', 'gemini', 1], ['fixture-design', 'Interaction design', 'codex', 1]
 ] as const
-const { pendingInteraction: _pending, ...plainBase } = base
-const sessions: SessionSnapshot[] = identities.map(([id, label, providerId], index) => ({ ...plainBase,
+const { pendingInteraction: _pending, currentActivity: _activity, semanticStatus: _semantic, runUnobserved: _unobserved, ...plainBase } = base
+let sessions: SessionSnapshot[] = identities.map(([id, label, providerId], index) => ({ ...plainBase,
   id, label, providerId, executorId: providerId, hostId, workspacePath: index < 2 ? projects[index]!.path : topics[index - 2]!.physicalDirectoryPath!,
   processState: 'running', status: { state: index === 2 ? 'done' : 'working', source: 'native-hook', observedAt: now },
+  nativeSessionId: 'native-' + id, nativeHandle: { kind: 'provider', providerId, sessionId: 'native-' + id },
+  semanticStatus: { state: index === 2 ? 'done' : 'working', source: 'native-hook', observedAt: now, stateEnteredAt: now - 30000, currentActivityRevision: 1 },
+  currentActivity: { state: index === 2 ? 'idle' : 'active', source: 'native-hook', run: { runId: 'fixture-run-' + id }, nativeSessionId: 'native-' + id, nativeTurnId: 'turn-' + id, sourceId: 'source-' + id, sequence: 1, hookReceiptId: 'receipt-' + id, observedAt: now },
   control: { ...base.control, hostId, agentSessionId: id, run: { runId: 'fixture-run-' + id } }
 }))
+const originalSessions = sessions
+const extraSessions: SessionSnapshot[] = Array.from({ length: 472 }, (_, index) => {
+  const id = 'fixture-isolated-' + String(index).padStart(3, '0'), activity = index % 4, run = { runId: 'fixture-run-' + id }
+  const native = { source: 'native-hook' as const, run, nativeSessionId: 'native-' + id, nativeTurnId: 'turn-' + id, sourceId: 'source-' + id, sequence: 1, hookReceiptId: 'receipt-' + id, observedAt: now }
+  return { ...plainBase, id, label: ['Investigating source', 'Waiting for next task', 'Retained result', 'Activity unconfirmed'][activity] + ' ' + String(index).padStart(3, '0'), providerId: 'codex', executorId: 'codex', hostId,
+    workspacePath: background[Math.floor(index / 4) % background.length]!.path, createdAt: now - (index + 1) * 1000, updatedAt: now, agentSessionUpdatedAt: now,
+    control: { kind: 'agent', hostId, agentSessionId: id, run }, nativeSessionId: native.nativeSessionId, nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: native.nativeSessionId },
+    processState: activity === 2 ? 'exited' : 'running', status: { state: activity === 0 ? 'working' : activity === 2 ? 'done' : 'running', source: 'native-hook', observedAt: now },
+    ...(activity !== 3 ? { semanticStatus: { state: activity === 0 ? 'working' as const : 'done' as const, source: 'native-hook' as const, observedAt: now, stateEnteredAt: now - (index + 1) * 3600000, currentActivityRevision: 1 } } : {}),
+    ...(activity !== 2 ? { currentActivity: { ...native, state: activity === 0 ? 'active' as const : activity === 1 ? 'idle' as const : 'unknown' as const } } : {}) }
+})
+const retired: AgentSessionHistoryDescriptor[] = Array.from({ length: 4 }, (_, index) => ({ agentSessionId: 'fixture-retired-' + index, hostId, state: 'retired', retiredAt: now - (index + 1) * 86400000, history: { providerId: 'codex', executorId: 'codex', workspacePath: projects[0]!.path, createdAt: now - (index + 3) * 86400000 } }))
 const timelines: Record<string, AgentTimelineSnapshot> = Object.fromEntries(identities.map(([id, label]) => {
   const items: AgentTimelineSnapshot['items'] = [
     { id: id + '-input', agentSessionId: id, kind: 'user_message', source: 'user', status: 'complete', title: 'User message', content: 'Keep the original Session and inspect its recorded relationships.', authorHuman: true, createdAt: now - 40000, updatedAt: now - 40000 },
@@ -70,15 +154,16 @@ const tabs = Object.fromEntries(sessions.map((session, at) => {
   const tab = { ...createWorkbenchTab('tab-' + session.id, { regionId: 'region-' + session.id, workspaceId: workspace.id, kind: 'agent', phase: 'attached', sessionId: session.id }, session.label),
     ...(topic ? { topicId: topic.id, space: { ...address(topic), spaceId: topic.kind === 'topic' ? category.spaceId : address(topic).spaceId } } : {}) }
   return [tab.id, tab] }))
-const layouts = Object.fromEntries(projects.map((project, area) => [project.id, createWorkspaceLayout('group-' + area, sessions.filter((_, at) => area === 2 ? at >= 2 : at === area).map(session => 'tab-' + session.id))]))
+const layouts = Object.fromEntries(projects.map((project, area) => [project.id, createWorkspaceLayout('group-' + area, sessions.filter((_, at) => area === 2 ? at >= 2 : area < 2 && at === area).map(session => 'tab-' + session.id))]))
 // Feed the original spatial API before App's real initialize reads it. Execution
 // Host/cwd live in its region facts, rather than in a mocked resolver or action.
 const initialSpatial = await api.spatial.read()
 await api.spatial.commit({ expectedRevision: initialSpatial?.revision ?? 0,
   graph: desktopSpatialGraph({ ...useAppStore.getState(), config, sessions, tabs, layouts, spaceZoneBindings: bindings, topicCategories: [category] }, topics) })
 api.config.get = async () => structuredClone(config)
-api.sessions.snapshot = async () => ({ sessions: structuredClone(sessions), timelines: structuredClone(timelines), recoveryCandidates: [] })
-api.sessions.timeline = async control => structuredClone(timelines[control.agentSessionId]!)
+api.sessions.snapshot = async () => { reads.push({ kind: 'snapshot' }); return { sessions: structuredClone(sessions), timelines: structuredClone(timelines), recoveryCandidates: [] } }
+api.sessions.timeline = async control => structuredClone(originalTimeline(control.agentSessionId))
+api.sessions.historySources = async () => { reads.push({ kind: 'history-sources' }); return [...sessions.filter(session => session.kind === 'agent').map(session => ({ hostId: session.control.hostId, agentSessionId: session.control.agentSessionId, state: 'active' as const })), ...structuredClone(retired)] }
 api.scratch.listTopics = async () => structuredClone(topics)
 api.workspaces.listBranches = async id => ({ kind: 'not-a-git-repository', hostId, workspacePath: projects.find(project => project.id === id)?.path ?? projects[0]!.path })
 const listeners = new Set<(event: RuntimeEvent) => void>()
@@ -88,9 +173,14 @@ for (const name of ['launchAgent', 'stop', 'resume', 'write', 'interrupt', 'subm
   const original = api.sessions[name]
   Object.assign(api.sessions, { [name]: (...args: never[]) => { controls.push(name); return (original as (...args: never[]) => unknown)(...args) } })
 }
+function originalTimeline(id: string): AgentTimelineSnapshot {
+  const value = timelines[id]
+  if (value) return value
+  if (!sessions.some(session => session.id === id)) throw Error('Unknown private conversation participant')
+  return { agentSessionId: id, sourceHostId: hostId, revision: 0, items: [], stream: { epoch: 'fixture-empty-' + id, revision: 0, sequence: 0, origin: 'beginning', gaps: [], positions: [] } }
+}
 function conversation(input: ConversationTimelineReadInput) {
-  const timeline = timelines[input.agentSessionId]
-  if (!timeline) throw Error('Unknown private conversation participant')
+  const timeline = originalTimeline(input.agentSessionId)
   const projected = projectConversationTimeline({ agentSessionId: input.agentSessionId, executionHostId: hostId, timeline })
   const checkpoint = { hostId, agentSessionId: input.agentSessionId, sourceHostId: hostId,
     frontier: { hostId, agentSessionId: input.agentSessionId, scope: projected.scope,
@@ -122,7 +212,7 @@ const events: AgentMuxMessageEvent[] = [
 let failEvents = false
 api.sessions.messageEvents = async (subject, options = {}) => {
   reads.push({ kind: 'events', participant: subject.agentSessionId, options: structuredClone(options) })
-  if (failEvents) throw Error('The original fixture message source is temporarily unavailable. Existing work is retained.')
+  if (failEvents && subject.agentSessionId === 'fixture-core') throw Error('The original fixture message source is temporarily unavailable. Existing work is retained.')
   queueMicrotask(() => { for (const listener of listeners) listener({ type: 'core', hostId, event: { type: 'agent-message-observation', state: 'available' } }) })
   const throughSequence = options.throughSequence ?? events.at(-1)!.sequence
   let selected = events.filter(event => event.sequence <= throughSequence && event.messages.some(message => (message.senderSessionId === subject.agentSessionId || message.recipientSessionId === subject.agentSessionId) && (!options.messageId || options.messageId === message.messageId)))
@@ -158,9 +248,38 @@ api.sessions.readMessage = async (subject, mid) => {
       senderRunId: 'fixture-run-' + ref.senderSessionId, recipientRunId: null, workspaceId: null, correlationId: mid }, delivery: { state: 'delivered', at: now - 6000 } } }
 }
 createClientUiRoot(document.getElementById('root')!).render(createElement(App))
-let originalState: ReturnType<typeof useAppStore.getState> | undefined, originalDraft: HTMLTextAreaElement | null = null
+let originalState: ReturnType<typeof useAppStore.getState> | undefined, originalDraft: HTMLTextAreaElement | null = null, originalMap: Element | null = null
 Object.assign(window, { graphCapture: {
-  ready: true, reads, controls,
+  ready: true, reads, controls, census, beginMeasurement, endMeasurement,
+  async publicControl(request: Parameters<NonNullable<typeof admittedControl>>[0]) {
+    if (!admittedControl || request.operation !== 'focus' && request.operation !== 'inspect.client') throw Error('Original public callback unavailable for this finite scene')
+    const controller = new AbortController(); publicSignals.set(request.requestId, controller)
+    publicRequests.push({ id: request.requestId, operation: request.operation })
+    try { return await admittedControl(request, controller.signal) } finally { publicSignals.delete(request.requestId) }
+  },
+  cancelPublicControl(requestId: string) { publicSignals.get(requestId)?.abort() },
+
+  rememberMap() { originalMap = document.querySelector('.collaboration-map') },
+  workerSamples() { return structuredClone(nativeWorkers) },
+  grow(total: 240 | 480) {
+    const start = performance.now()
+    if (total !== 240 && total !== 480) throw Error('Use one declared finite size')
+    const added = extraSessions.slice(0, total - originalSessions.length - retired.length)
+    sessions = [...originalSessions, ...added]
+    for (let index = 0; index + 1 < added.length; index += 12) {
+      const messageId = 'fixture-sparse-' + index
+      if (refs.some(ref => ref.messageId === messageId)) continue
+      const ref = reference(messageId, added[index]!.id, added[index + 1]!.id)
+      refs.push(ref); events.push({ sequence: events.at(-1)!.sequence + 1, kind: 'message', at: now - 3000, messages: [ref] })
+    }
+    const latest = added.at(-1)
+    if (!latest || latest.kind !== 'agent') throw Error('Nonempty original Agent membership sample required')
+    const session: AgentMuxAgentSession = { kind: 'agent', agentSessionId: latest.control.agentSessionId, providerId: latest.providerId, executorId: latest.executorId, hostId,
+      workspacePath: latest.workspacePath, run: latest.control.run, retiredRuns: [], createdAt: latest.createdAt, updatedAt: latest.agentSessionUpdatedAt,
+      ...(latest.semanticStatus ? { semanticStatus: latest.semanticStatus } : {}), ...(latest.currentActivity ? { currentActivity: latest.currentActivity } : {}), ...(latest.nativeHandle ? { nativeHandle: latest.nativeHandle } : {}) }
+    for (const listener of listeners) listener({ type: 'core', hostId, event: { type: 'agent-session', session } })
+    return { expectedWorldAgents: sessions.length + retired.length, expectedAgentKeys: [...sessions.map(session => JSON.stringify([session.hostId, session.kind === 'agent' ? session.control.agentSessionId : session.id])), ...retired.map(source => JSON.stringify([source.hostId, source.agentSessionId]))], snapshotMembers: sessions.length, retiredMembers: retired.length, unassociatedMembers: added.filter(session => !refs.some(ref => ref.senderSessionId === session.id || ref.recipientSessionId === session.id)).length, nativeActivityCounts: { active: sessions.filter(session => session.kind === 'agent' && session.currentActivity?.state === 'active').length, idle: sessions.filter(session => session.kind === 'agent' && session.currentActivity?.state === 'idle').length, unknown: sessions.filter(session => session.kind === 'agent' && session.currentActivity?.state === 'unknown').length, exited: sessions.filter(session => session.processState === 'exited').length }, fixtureMutationMS: performance.now() - start }
+  },
   prepare() {
     useAppStore.setState({ activeWorkspaceId: projects[0]!.id, mainSurface: 'workbench', toolsOpen: false, projectRailOpen: false,
       agentNames: Object.fromEntries(identities.map(([id, name]) => [id, name])), agentComposerDrafts: { 'fixture-ui': 'Original unsent reply · retain this exact draft.' } })
@@ -168,18 +287,6 @@ Object.assign(window, { graphCapture: {
   },
   remember() { originalState = useAppStore.getState(); originalDraft = document.querySelector('[data-fixture-session="fixture-ui"] textarea'); originalDraft?.setSelectionRange(4, 12) },
   appearance(appAppearance: 'dark' | 'light') { useAppStore.setState(state => ({ config: state.config ? { ...state.config, appearance: { ...state.config.appearance, appAppearance } } : null })) },
-  surface(surface: 'workbench' | 'agents') { useAppStore.getState().setMainSurface(surface) },
-  async area(kind: 'project' | 'topic' | 'mote' | 'linked-mote' | 'category') {
-    const target = kind === 'project' ? { kind: 'space' as const, spaceId: projectSpace, zoneId: workspaceZoneId(projectSpace, projects[0]!.id), displayWorkspaceId: projects[0]!.id, groupId: 'group-0', tabId: 'tab-fixture-ui', regionId: 'region-fixture-ui' }
-      : kind === 'category' ? { kind: 'space' as const, spaceId: category.spaceId }
-      : kind === 'linked-mote' ? { kind: 'space' as const, spaceId: moteAddress.spaceId, zoneId: worktreeZone, displayWorkspaceId: projects[1]!.id, groupId: 'group-1', tabId: 'tab-fixture-core', regionId: 'region-fixture-core' }
-      : { kind: 'space' as const, spaceId: kind === 'topic' ? category.spaceId : moteAddress.spaceId, zoneId: kind === 'topic' ? topicAddress.zoneId : moteAddress.zoneId,
-        displayWorkspaceId: scratch.id, groupId: 'group-2', tabId: kind === 'topic' ? 'tab-fixture-review' : 'tab-fixture-design', regionId: kind === 'topic' ? 'region-fixture-review' : 'region-fixture-design' }
-    const outcome = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: 'fixture-area-' + crypto.randomUUID(), operation: 'focus', target, inputPolicy: 'preserve' })
-    if (outcome.operation !== 'focus' || outcome.navigation.state === 'rejected') throw Error('Original area navigation did not apply: ' + JSON.stringify(outcome))
-    useAppStore.getState().setWorkspaceTool('agents')
-    return outcome.navigation.selection
-  },
   fail(value: boolean) { failEvents = value },
   live(live = true) {
     const sequence = events.at(-1)!.sequence + 1, mid = 'fixture-live-' + sequence, ref = reference(mid, 'fixture-core', 'fixture-ui')
@@ -191,8 +298,10 @@ Object.assign(window, { graphCapture: {
     sameDrafts: state.agentComposerDrafts === originalState?.agentComposerDrafts, sameFocus: state.agentFocus === originalState?.agentFocus,
     sameSelection: state.workbenchSpaceSelection === originalState?.workbenchSpaceSelection,
     draftMounted: originalDraft?.isConnected, sameDraft: originalDraft === document.querySelector('[data-fixture-session="fixture-ui"] textarea'),
-    draft: originalDraft?.value, range: [originalDraft?.selectionStart, originalDraft?.selectionEnd], reads: [...reads], controls: [...controls],
+    draft: originalDraft?.value, storedDraft: state.agentComposerDrafts['fixture-ui'], range: [originalDraft?.selectionStart, originalDraft?.selectionEnd], reads: [...reads], controls: [...controls],
     selectedSession: state.agentFocus.execution.sessionId, originalRun: sessions[0]!.control.run.runId,
+    sameMap: originalMap === document.querySelector('.collaboration-map'), census: census(),
     activeWorkspaceId: state.activeWorkspaceId, choice: structuredClone(state.workbenchSpaceSelection),
-    graph: Boolean(document.querySelector('.collaboration-dialog')), readers: document.querySelectorAll('[data-agent-reading-host]').length } }
+    documentHidden: document.hidden, visibilityState: document.visibilityState,
+    publicAdmissionReady: Boolean(admittedControl), publicRequests: [...publicRequests], spaceView: state.spaceView, mapTarget: state.collaborationMapTarget, graph: Boolean(document.querySelector('.collaboration-map:not([hidden])')), instrumentation: structuredClone(instrumentation()), readers: document.querySelectorAll('[data-agent-reading-host]').length } }
 } })
