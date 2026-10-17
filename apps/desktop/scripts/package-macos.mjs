@@ -1,3 +1,4 @@
+import { constants as fsConstants } from 'node:fs'
 import { writeEmbeddedCoreCli } from './embedded-core-cli.mjs'
 import { updateRoute } from '../src/shared/update-policy.ts'
 import { hashRuntimeArtifact } from './update-identity.mjs'
@@ -200,9 +201,9 @@ export async function copyRuntimeApplication(appPath, source) {
   const resources = join(appPath, 'Contents', 'Resources')
   const appResources = join(resources, 'app')
   await mkdir(join(appResources, 'node_modules', '@agentmux'), { recursive: true })
-  await cp(join(desktopRoot, 'out'), join(appResources, 'out'), { recursive: true })
-  await cp(join(desktopRoot, 'resources'), join(appResources, 'resources'), { recursive: true })
-  await cp(join(desktopRoot, 'browser-extension'), join(appResources, 'browser-extension'), { recursive: true })
+  await cp(join(desktopRoot, 'out'), join(appResources, 'out'), { recursive: true, mode: fsConstants.COPYFILE_FICLONE })
+  await cp(join(desktopRoot, 'resources'), join(appResources, 'resources'), { recursive: true, mode: fsConstants.COPYFILE_FICLONE })
+  await cp(join(desktopRoot, 'browser-extension'), join(appResources, 'browser-extension'), { recursive: true, mode: fsConstants.COPYFILE_FICLONE })
   await cp(join(repositoryRoot, 'THIRD_PARTY_NOTICES.md'), join(appResources, 'THIRD_PARTY_NOTICES.md'))
   await writeFile(join(appResources, 'package.json'), `${JSON.stringify({
     name: 'agentmux-desktop',
@@ -225,9 +226,9 @@ export async function copyRuntimeApplication(appPath, source) {
 
   const coreRuntime = join(appResources, 'node_modules', '@agentmux', 'core')
   await mkdir(coreRuntime, { recursive: true })
-  await cp(join(coreRoot, 'dist'), join(coreRuntime, 'dist'), { recursive: true })
-  await cp(join(coreRoot, 'vendor'), join(coreRuntime, 'vendor'), { recursive: true })
-  await cp(join(coreRoot, 'bin'), join(coreRuntime, 'bin'), { recursive: true })
+  await cp(join(coreRoot, 'dist'), join(coreRuntime, 'dist'), { recursive: true, mode: fsConstants.COPYFILE_FICLONE })
+  await cp(join(coreRoot, 'vendor'), join(coreRuntime, 'vendor'), { recursive: true, mode: fsConstants.COPYFILE_FICLONE })
+  await cp(join(coreRoot, 'bin'), join(coreRuntime, 'bin'), { recursive: true, mode: fsConstants.COPYFILE_FICLONE })
   await mkdir(join(coreRuntime, 'src'), { recursive: true })
   await cp(join(coreRoot, 'src', 'ctxmux-artifact-contract.json'), join(coreRuntime, 'src', 'ctxmux-artifact-contract.json'))
   await writeFile(join(coreRuntime, 'release.json'), JSON.stringify({ sourceCommit: source.commit, sourceTree: source.tree }) + '\n')
@@ -255,7 +256,7 @@ export async function copyRuntimeApplication(appPath, source) {
   const demandRuntime = join(appResources, 'node_modules', '@agentmux', 'demand')
   const demandManifest = JSON.parse(await readFile(join(demandRoot, 'package.json'), 'utf8'))
   await mkdir(demandRuntime, { recursive: true })
-  await cp(join(demandRoot, 'dist'), join(demandRuntime, 'dist'), { recursive: true })
+  await cp(join(demandRoot, 'dist'), join(demandRuntime, 'dist'), { recursive: true, mode: fsConstants.COPYFILE_FICLONE })
   await writeFile(join(demandRuntime, 'package.json'), `${JSON.stringify({
     name: demandManifest.name,
     version: demandManifest.version,
@@ -282,7 +283,7 @@ export async function copyRuntimeApplication(appPath, source) {
   await materializeDependency(coreRoot, '@agentmux/relay', join(appResources, 'node_modules', '@agentmux', 'relay'))
   const outBin = join(appResources, 'out', 'bin')
   await mkdir(outBin, { recursive: true })
-  await cp(join(coreRoot, 'bin'), outBin, { recursive: true })
+  await cp(join(coreRoot, 'bin'), outBin, { recursive: true, mode: fsConstants.COPYFILE_FICLONE })
   await writeEmbeddedCoreCli(join(outBin, 'amux'), join(appPath, 'Contents', 'MacOS', PRODUCT_NAME), join(coreRuntime, 'dist', 'agentmux.js'))
   await symlink('amux', join(outBin, 'agentmux'))
   await Promise.all([
@@ -312,7 +313,7 @@ async function materializeDependency(sourcePackage, packageName, destination) {
   for (const entry of await readdir(source, { withFileTypes: true })) {
     if (entry.name === 'node_modules') continue
     await cp(join(source, entry.name), join(destination, entry.name), {
-      recursive: entry.isDirectory()
+      recursive: entry.isDirectory(), mode: fsConstants.COPYFILE_FICLONE
     })
   }
   await materializeDependencies(
