@@ -211,7 +211,7 @@ it('a fork records its authenticated creator separately from its original native
   await h.store.compareAndSwapMetadata(before, { ...before, providerId: 'claude', executorId: 'private-executor', nativeHandle: native })
   const kernel = h.inner.kernel as unknown as { status(runId: string): Promise<CtxmuxAdapterRun> }
   vi.spyOn(kernel, 'status').mockImplementation(async runId => ({ ...h.run(runId),
-    state: runId === 'run-unrelated' ? { type: 'exited', code: 0 } : { type: 'running' } }))
+    state: runId === 'run-unrelated' ? { type: 'exited', code: 0, signal: null } : { type: 'running' } }))
   const forkSource = { agentSessionId: 'unrelated', expectedRun: { runId: 'run-unrelated' }, expectedNativeHandle: native }
   const result = await h.create({ forkSource })
   expect(result.session.forkedFrom).toEqual(forkSource)
