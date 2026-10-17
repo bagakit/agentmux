@@ -11,7 +11,7 @@ const run = promisify(execFile), sha = bytes => createHash('sha256').update(byte
 
 /** Source-bound owning proof; actual Electron image review remains independent. */
 export async function verifyMoteCalendar() {
-  const parent = join(root, ".local/state/mote-calendar"); await mkdir(parent, { recursive: true })
+  const parent = join(root, '.local/state/mote-calendar'); await mkdir(parent, { recursive: true })
   const directory = await mkdtemp(join(parent, 'renderer-proof-'))
   const config = join(root, 'apps/desktop/scripts/fixtures/mote-calendar/vitest.config.mts')
   const component = name => 'apps/desktop/src/renderer/src/components/' + name + '.tsx'
@@ -54,7 +54,11 @@ export async function verifyMoteCalendar() {
   const runs = [await test('baseline')], mutations = []
   const changes = [
     { file: component('MoteCalendar'), name: 'countdown-visibility', from: "source.records.filter(record => showEnded || record.status !== 'stopped')", to: "source.records.filter(record => !!record.calendar && (showEnded || record.status !== 'stopped'))", filter: 'actual Mote Renderer list and original control' },
-    { file: component('ScheduleOperationNotice'), name: 'same-operation-retry', from: 'operation.perform(operation.pending)', to: 'operation.perform({ ...operation.pending, params: { ...operation.pending.params, operationId: crypto.randomUUID() } })', filter: 'retains an uncertain creation|recovers a lost ack' }
+    { file: component('ScheduleOperationNotice'), name: 'same-operation-retry', from: 'operation.perform(operation.pending)', to: 'operation.perform({ ...operation.pending, params: { ...operation.pending.params, operationId: crypto.randomUUID() } })', filter: 'retains an uncertain creation|recovers a lost ack' },
+    { file: component('MoteCalendar'), name: 'week-projection', from: "active && mode !== 'upcoming'", to: "active && mode === 'month'", filter: 'Week projects only seven civil days' },
+    { file: component('ScheduleCreateForm'), name: 'draft-preservation', from: "...(pristine ? { timing: 'calendar'", to: "...(true ? { timing: 'calendar'", filter: 'date shortcuts keep edited timing' },
+    { file: component('ScheduleCreateForm'), name: 'chosen-target', from: ' && targetFields.every(key => value.target?.[key] === baseline.target?.[key])', to: '', filter: 'a date shortcut preserves an explicitly chosen discussion' },
+    { file: component('ScheduleCreateForm'), name: 'confirmed-save-feedback', from: "if (request.action === 'create') setSavedArrangement({ key: draftKey, record })", to: '', filter: 'Week projects only seven civil days' }
   ]
   for (const change of changes) {
     const original = await readFile(join(root, change.file), 'utf8'); assert.equal(original.split(change.from).length, 2)

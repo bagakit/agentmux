@@ -3,6 +3,8 @@ import { fixtureEpoch as _batchFixtureEpoch } from "../../../test/fixture-values
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ContinuousProgressLoop } from '@agentmux/core'
+import { DateTime } from 'luxon'
+import * as scheduleCalendar from '@agentmux/core/schedule-calendar'
 import { MoteCalendar, moteScheduleQueries } from '../src/renderer/src/components/MoteCalendar'
 import { MoteDetailsPanel } from '../src/renderer/src/components/MoteDetailsPanel'
 import { CalendarScheduleControl } from '../src/renderer/src/components/CalendarScheduleControl'
@@ -11,7 +13,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { createScheduleRpcFixture } from './helpers/schedule-rpc-fixture'
-import { seedMoteWorkface, defaultAgent, neighborAgent, defaultTab, scratchWorkspace, moteTopics } from './fixtures/mote-workface'
+import { seedMoteWorkface, defaultAgent, neighborAgent, defaultTab, neighborTab, scratchWorkspace, moteTopics } from './fixtures/mote-workface'
 import { scratchTopicDirectoryName } from '../src/shared/scratch-topics'
 import type { MoteWorkfaceScope } from '../src/renderer/src/lib/mote-workface'
 
@@ -86,7 +88,7 @@ describe('Mote calendar original schedule consumer', () => {
   })
   it('Month selects a real original countdown day with keyboard and distinguishes plan from acceptance', async () => {
     const { afterMs: _, ...calendar } = saved('daily')
-    await owner([saved('countdown'), { ...calendar, calendar: { kind: 'daily', timezone: 'UTC', time: (new Date(_batchFixtureEpoch(0, 36300)).toISOString().slice(11, 16)), policies: { gap: 'skip', fold: 'earlier', monthEnd: 'clamp', overdue: 'latest' } }, lastOccurrenceAt: now - 86400000 }])
+    await owner([saved('countdown'), { ...calendar, nextCheckAt: now + 300000, calendar: { kind: 'daily', timezone: 'UTC', time: (new Date(_batchFixtureEpoch(0, 36300)).toISOString().slice(11, 16)), policies: { gap: 'skip', fold: 'earlier', monthEnd: 'clamp', overdue: 'latest' } }, lastOccurrenceAt: now - 86400000 }])
     await dom.render(<MoteCalendar scope={scope} reference={reference} active />)
     await vi.waitFor(() => expect(dom.container.querySelectorAll('[data-schedule-id]')).toHaveLength(2))
     await button('Month')
@@ -228,5 +230,127 @@ describe('Mote calendar original schedule consumer', () => {
     const date = second.querySelector<HTMLButtonElement>(("[data-mote-date=\"" + (new Date(_batchFixtureEpoch(20748, 0, 0)).toISOString().slice(0, 10)) + "\"]"))!
     await act(async () => { date.focus(); date.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })) })
     await vi.waitFor(() => expect(document.activeElement).toBe(second.querySelector(("[data-mote-date=\"" + (new Date(_batchFixtureEpoch(20749, 0, 0)).toISOString().slice(0, 10)) + "\"]"))))
+  })
+  it('starts in Month and opens shared original details from bounded calendar previews', async () => {
+    await owner(Array.from({ length: 5 }, (_, index) => saved('preview-' + index, { nextCheckAt: now + (index + 1) * 60000, prompt: 'Original full message ' + index + '\nExact request context' })))
+    await dom.render(<MoteCalendar scope={scope} reference={reference} active />)
+    await vi.waitFor(() => expect(dom.container.querySelectorAll('.mote-calendar__point')).toHaveLength(2))
+    expect(dom.container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Month')
+    expect(dom.container.querySelectorAll('.mote-calendar__cell')).toHaveLength(35)
+    await button('+3 more')
+    expect(dom.container.querySelectorAll('[aria-label="Selected day arrangements"] [data-schedule-id]')).toHaveLength(5)
+    const point = dom.container.querySelector<HTMLButtonElement>('[data-calendar-schedule-id="preview-1"]')!
+    expect(point.textContent).toContain((new Date(_batchFixtureEpoch(0, 36120)).toISOString().slice(11, 16)))
+    await act(async () => point.click())
+    await vi.waitFor(() => expect(dom.container.querySelector<HTMLDetailsElement>('[data-schedule-id="preview-1"] details')?.open).toBe(true))
+    expect(dom.container.querySelector('[data-schedule-id="preview-1"]')?.textContent).toContain('Exact request context')
+    expect(api.schedule.create).not.toHaveBeenCalled()
+  })
+  it('Week projects only seven civil days and a time shortcut creates through the original public owner', async () => {
+    const today = DateTime.fromMillis(now, { zone: 'UTC' }), tomorrow = today.plus({ days: 1 })
+    await owner([saved('early', { nextCheckAt: today.set({ hour: 8, minute: 15 }).toMillis() }), saved('later', { nextCheckAt: today.set({ hour: 17, minute: 45 }).toMillis() }), saved('outside', { nextCheckAt: today.plus({ weeks: 1 }).toMillis() })])
+    await dom.render(<MoteCalendar scope={scope} reference={reference} active />)
+    await button('Week')
+    await vi.waitFor(() => expect(dom.container.querySelectorAll('.mote-calendar__point--week')).toHaveLength(2))
+    expect(dom.container.querySelectorAll('[data-mote-date]')).toHaveLength(7)
+    expect([...dom.container.querySelectorAll('.mote-calendar__point--week time')].map(item => item.textContent)).toEqual([(new Date(_batchFixtureEpoch(0, 29700)).toISOString().slice(11, 16)), (new Date(_batchFixtureEpoch(0, 63900)).toISOString().slice(11, 16))])
+    expect(dom.container.querySelector('.mote-calendar__week-timeline [data-calendar-schedule-id="outside"]')).toBeNull()
+    const slot = [...dom.container.querySelectorAll<HTMLButtonElement>('.mote-calendar__slot')].find(item => item.getAttribute('aria-label') === 'Prepare arrangement ' + tomorrow.toFormat('cccc, LLLL d') + (" at " + new Date(_batchFixtureEpoch(0, 50400)).toISOString().slice(11, 16)))!
+    await act(async () => slot.click())
+    expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Arrangement date"]')!.value).toBe(tomorrow.toISODate())
+    expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Arrangement local time"]')!.value).toBe((new Date(_batchFixtureEpoch(0, 50400)).toISOString().slice(11, 16)))
+    expect(api.schedule.create).not.toHaveBeenCalled()
+    await edit('Arranged message', 'A point in my original discussion'); await button('Save arrangement')
+    await vi.waitFor(() => expect(api.schedule.create).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(api.schedule.create).mock.calls[0]![0]).toMatchObject({ target, prompt: 'A point in my original discussion', calendar: { kind: 'once', date: tomorrow.toISODate(), time: (new Date(_batchFixtureEpoch(0, 50400)).toISOString().slice(11, 16)), timezone: 'UTC' } })
+    await vi.waitFor(async () => expect(await fixture!.store.load()).toHaveLength(4))
+    await vi.waitFor(() => expect(dom.container.querySelector('.schedule-create__confirmation')?.textContent).toContain('Arrangement saved.'))
+    const created = (await fixture!.store.load()).find(item => item.prompt === 'A point in my original discussion')!
+    await button('View arrangement')
+    expect(dom.container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Upcoming')
+    await vi.waitFor(() => expect(dom.container.querySelector<HTMLDetailsElement>('[data-schedule-id="' + created.loopId + '"] details')?.open).toBe(true))
+  })
+  it('date shortcuts keep edited timing, message and a pending original creation intact', async () => {
+    await owner([])
+    const today = DateTime.fromMillis(now, { zone: 'UTC' }), firstDate = today.plus({ days: 1 }).toISODate()!, nextDate = today.plus({ days: 2 }).toISODate()!
+    const create = vi.mocked(api.schedule.create).mockImplementationOnce(async params => { await fixture!.rpc.call('schedule.create', params); throw new Error('Original creation acknowledgment unavailable') })
+    await dom.render(<MoteCalendar scope={scope} reference={reference} active />)
+    await act(async () => dom.container.querySelector<HTMLButtonElement>('[data-mote-date="' + firstDate + '"]')!.click())
+    await button('New arrangement')
+    expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Arrangement date"]')!.value).toBe(firstDate)
+    await edit('Arrangement local time', (new Date(_batchFixtureEpoch(0, 48000)).toISOString().slice(11, 16)))
+    await act(async () => dom.container.querySelector<HTMLButtonElement>('[data-mote-date="' + nextDate + '"]')!.click())
+    await button('New arrangement')
+    expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Arrangement date"]')!.value).toBe(firstDate)
+    expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Arrangement local time"]')!.value).toBe((new Date(_batchFixtureEpoch(0, 48000)).toISOString().slice(11, 16)))
+    await edit('Arranged message', 'Keep this exact arrangement draft'); await button('Save arrangement')
+    await vi.waitFor(() => expect(dom.container.textContent).toContain('acknowledgment unavailable'))
+    expect(dom.container.querySelector('.schedule-create__confirmation')).toBeNull()
+    const original = create.mock.calls[0]![0], pending = Object.values(useLauncherState.getState().drafts).find(draft => draft.schedule?.pending)?.schedule?.pending
+    await button('Today'); await button('New arrangement')
+    expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Arrangement date"]')!.value).toBe(firstDate)
+    expect(dom.container.querySelector<HTMLTextAreaElement>('[aria-label="Arranged message"]')!.value).toBe('Keep this exact arrangement draft')
+    expect(Object.values(useLauncherState.getState().drafts).find(draft => draft.schedule?.pending)?.schedule?.pending).toEqual(pending)
+    expect(create).toHaveBeenCalledTimes(1)
+    await button('Check original operation')
+    await vi.waitFor(() => expect(dom.container.textContent).toContain('save receipt is still unconfirmed'))
+    expect(dom.container.querySelector('.schedule-create__confirmation')).toBeNull()
+    await button('Retry original operation')
+    await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(2))
+    expect(create.mock.calls.map(call => call[0])).toEqual([original, original])
+  })
+  it('hidden and unrelated work neither projects occurrences nor starts presentation clocks', async () => {
+    await owner([saved('countdown')])
+    const projection = vi.spyOn(scheduleCalendar, 'projectScheduleOccurrences'), intervals = vi.spyOn(globalThis, 'setInterval'), clearing = vi.spyOn(globalThis, 'clearInterval')
+    await dom.render(<MoteCalendar scope={scope} reference={reference} active={false} />)
+    expect(projection).not.toHaveBeenCalled()
+    expect(intervals.mock.calls.filter(call => call[1] === 1000)).toHaveLength(0)
+    await dom.render(<MoteCalendar scope={scope} reference={reference} active />)
+    await vi.waitFor(() => expect(dom.container.querySelector('[data-schedule-id="countdown"]')).not.toBeNull())
+    const projected = projection.mock.calls.length, subscribed = vi.mocked(api.schedule.onChanged).mock.calls.length
+    const presentationClocks = intervals.mock.calls.flatMap((call, index) => call[1] === 1000 ? [intervals.mock.results[index]!.value] : [])
+    expect(projected).toBeGreaterThan(0); expect(presentationClocks).toHaveLength(1)
+    await act(async () => useAppStore.setState({ sessions: [...useAppStore.getState().sessions, { ...neighborAgent, id: 'unrelated-presentation' }] }))
+    expect(projection).toHaveBeenCalledTimes(projected)
+    await dom.render(<MoteCalendar scope={scope} reference={reference} active={false} />)
+    expect(projection).toHaveBeenCalledTimes(projected)
+    expect(api.schedule.onChanged).toHaveBeenCalledTimes(subscribed)
+    expect(clearing).toHaveBeenCalledWith(presentationClocks[0])
+  })
+  it('Week restores its user scroll across view changes and hidden re-entry', async () => {
+    await owner([saved('countdown')])
+    await dom.render(<MoteCalendar scope={scope} reference={reference} active />)
+    await button('Week')
+    await vi.waitFor(() => expect(dom.container.querySelector('.mote-calendar__point--week')).not.toBeNull())
+    const scroller = dom.container.querySelector<HTMLDivElement>('.mote-calendar__week-scroll')!
+    await act(async () => { scroller.scrollTop = 190; scroller.dispatchEvent(new Event('scroll')) })
+    await button('Month'); await button('Week')
+    expect(dom.container.querySelector<HTMLDivElement>('.mote-calendar__week-scroll')!.scrollTop).toBe(190)
+    await dom.render(<MoteCalendar scope={scope} reference={reference} active={false} />)
+    dom.container.querySelector<HTMLDivElement>('.mote-calendar__week-scroll')!.scrollTop = 0
+    await dom.render(<MoteCalendar scope={scope} reference={reference} active />)
+    expect(dom.container.querySelector<HTMLDivElement>('.mote-calendar__week-scroll')!.scrollTop).toBe(190)
+  })
+  it.each([false, true])('a date shortcut preserves an explicitly chosen discussion before any message or timing edit (remount=%s)', async remount => {
+    await owner([])
+    await dom.render(<MoteCalendar scope={scope} reference={reference} active />)
+    await openForm()
+    const otherReference = { ...reference, tabId: neighborTab.id, regionId: 'neighbor-region' }
+    await dom.render(<MoteCalendar scope={scope} reference={otherReference} active />)
+    await button('Use selected discussion')
+    expect(dom.container.querySelector<HTMLTextAreaElement>('[aria-label="Arranged message"]')!.value).toBe('')
+    if (remount) { await dom.render(<div />); await dom.render(<MoteCalendar scope={scope} reference={otherReference} active />) }
+    await dom.render(<MoteCalendar scope={scope} reference={reference} active />)
+    const date = DateTime.fromMillis(now, { zone: 'UTC' }).plus({ days: 1 }).toISODate()!
+    await act(async () => dom.container.querySelector<HTMLButtonElement>('[data-mote-date="' + date + '"]')!.click())
+    await button('New arrangement')
+    expect(dom.container.querySelector('.schedule-create')?.textContent).toContain('Original discussion · ' + neighborAgent.control.agentSessionId)
+    await edit('Arrangement timing', 'afterMs')
+    await edit('Arranged message', 'Keep my explicit original discussion'); await button('Save arrangement')
+    await vi.waitFor(() => expect(api.schedule.create).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(api.schedule.create).mock.calls[0]![0].target).toEqual({ hostId: neighborAgent.hostId, providerId: neighborAgent.providerId,
+      workspacePath: neighborAgent.workspacePath, agentSessionId: neighborAgent.control.agentSessionId })
+    await vi.waitFor(async () => expect(await fixture!.store.load()).toHaveLength(1))
+    expect((await fixture!.store.load())[0]?.agentSessionId).toBe(neighborAgent.control.agentSessionId)
   })
 })
