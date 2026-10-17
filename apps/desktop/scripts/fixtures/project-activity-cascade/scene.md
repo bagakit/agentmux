@@ -15,6 +15,16 @@ The wide scene also checks one readable root summary, two-line Zone choices,
 the absence of repeated compact metrics, direct single-group entry and explicit
 repeated-Agent position cues. Activity cards retain one shared reading target;
 the shared Reader still exposes every confirmed original position.
+At narrow widths hover keeps the group list in place. Click, Enter or Right
+opens one group's Agents in the same menu owner, and Back returns without
+reentering under a stationary pointer. Native keyboard checks return to the
+original group and exact Agent row before dismissing the root. Viewport changes
+retain the entered reading group and external typing target; widening waits for
+Back before restoring the cascade choices.
+Pointer entry remains free of an unintended Reader after the hover intent delay;
+native movement onto an Agent still opens the shared Reader. Narrow geometry
+requires room on both sides of the menu. Screenshots wait for finite surface
+animations to finish naturally, preserving the product's actual motion.
 
 It does not operate the user's application or Runtime, create real Provider
 processes, prove Session restart, or certify visual quality. Saved PNGs require
@@ -28,3 +38,8 @@ working tree. The same Reader interaction assertion must then fail; restore the
 ordinary compiled scene and run again for Green. Dependency freshness remains
 the repository's original workspace guard; this bounded scene does not rerun a
 full repository qualification.
+
+`--mutation narrow-reader-escape` makes the actual narrow menu process an Escape
+already owned by the shared Reader. The native assertion requiring the first
+Escape to return to the exact Agent row must fail, before the root returns to
+its group choices. Both mutations change private compiled bytes only.
