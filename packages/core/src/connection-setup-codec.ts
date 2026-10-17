@@ -288,7 +288,7 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
     }
     return { operations, next: p.next === null ? null : text(p.next), support } as ConnectionSetupResultMap[M]
   }
-  const p = object(value, ['operation', 'challenge', 'reason', 'continuation', 'receipt', 'applicationInspection', 'applicationConfiguration', 'requestTrace', 'initialSetup', 'profileUpdate']), operation = p.operation === null ? null : parseConnectionSetupOperation(p.operation), challenge = p.challenge === null ? null : parseConnectionSetupChallenge(p.challenge)
+  const p = object(value, ['operation', 'challenge', 'challengeSource', 'reason', 'continuation', 'receipt', 'applicationInspection', 'applicationConfiguration', 'requestTrace', 'initialSetup', 'profileUpdate']), operation = p.operation === null ? null : parseConnectionSetupOperation(p.operation), challenge = p.challenge === null ? null : parseConnectionSetupChallenge(p.challenge)
   if (operation && operation.operationId !== (input as { operationId: string }).operationId || !operation && (method === 'connection.setup.begin' || challenge !== null)) fail()
   if (method === 'connection.setup.begin' && operation) {
     // Select the admitted fields explicitly: summaries also contain safe result fields.
@@ -298,7 +298,7 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
   }
   const challengeRequest = operation?.authentication?.request ?? operation?.request.state
   const challengeStorage = operation?.authentication?.secureStorage ?? operation?.secureStorage
-  if (challenge && (challengeRequest !== 'confirmed' || challengeStorage !== 'stored')) fail()
+  if (challenge && p.challengeSource === undefined && (challengeRequest !== 'confirmed' || challengeStorage !== 'stored')) fail()
   if (challenge && operation?.request.kind === 'enrollment-handoff' && !operation.authentication) fail()
   const result: ConnectionSetupView = { operation, challenge, ...(p.reason === undefined ? {} : { reason: choice(p.reason, ['connection-revised', 'challenge-unavailable']) }) }
   if (p.profileUpdate !== undefined) {
@@ -327,6 +327,16 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
     result.continuation = { stage: stage(c.stage), account: c.account === null ? null : parseConnectionSetupAccount(c.account), actions }
     if (result.continuation.account && !['account', 'confirmed'].includes(result.continuation.stage) || ['account', 'confirmed'].includes(result.continuation.stage) && !result.continuation.account) fail()
     if (operation && !operation.authentication && operation.request.kind === 'enrollment-handoff' && result.continuation.account && (result.continuation.stage !== 'account' || operation.request.state !== 'confirmed' || operation.secureStorage !== 'stored')) fail()
+  }
+  if (p.challengeSource !== undefined) {
+    const source = object(p.challengeSource, ['attemptId', 'stepId']), auth = operation?.authentication, continuation = result.continuation
+    const attemptId = id(source.attemptId), stepId = id(source.stepId)
+    if (!challenge || !auth || !continuation || !['waiting', 'scanned'].includes(continuation.stage) || continuation.actions.length || result.reason || attemptId !== auth.attemptId) fail()
+    // A source is only live presentation: the pending step keeps its own request and storage facts.
+    const nativePending = auth!.request === 'dispatching' && auth!.secureStorage === 'not-started' && auth!.stage === 'handoff' && stepId !== auth!.stepId
+    const storagePending = auth!.request === 'confirmed' && auth!.secureStorage === 'storing' && auth!.stage === continuation!.stage && stepId === auth!.stepId
+    if (!nativePending && !storagePending) fail()
+    result.challengeSource = { attemptId, stepId }
   }
   if (p.receipt !== undefined) {
     if (method !== 'connection.setup.advance' || !operation) fail()

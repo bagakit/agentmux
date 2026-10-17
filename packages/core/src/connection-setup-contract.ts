@@ -170,6 +170,8 @@ export type ConnectionSetupView = {
   requestTrace?: ConnectionRequestTrace
   operation: ConnectionSetupOperation | null
   challenge: ConnectionSetupChallenge | null
+  /** Exact live display source only; never authenticates the pending step or authorizes an action. */
+  challengeSource?: { attemptId: string; stepId: string }
   reason?: 'connection-revised' | 'challenge-unavailable'
   /** Original actor only. Account identity is never ordinary discovery/history data. */
   continuation?: { stage: ConnectionSetupAuthenticationStage; account: ConnectionSetupAccount | null; actions: ConnectionSetupAuthenticationAction[] }
