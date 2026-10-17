@@ -2,6 +2,12 @@
 
 本指南面向开发受控 UI 的作者。产品约束归[语义图标呈现 SSOT](../design/presentation/shared-rules.md#语义图标密度与性能)，本文说明当前实现入口与操作步骤。Provider、项目等身份资产沿原身份 owner，不当作通用图标替换。
 
+## 在设置中定制
+
+打开 **Settings → Appearance → Customize selected theme → Semantic icons**；也可在设置搜索 `icons` 或 `图标` 定位主题设置。按含义搜索并选择图标，使用 **Choose a drawing** 更换库中字形，或在 **Custom path asset** 输入有界路径；**Restore default drawing** 只还原当前语义项。线宽、端点和连接方式沿同一主题编辑。
+
+勾选 **Preview in this window** 后，草稿通过原主题运行时应用到当前窗口的真实控件；编辑区的静态小尺寸样本便于比较图形。关闭预览或放弃草稿恢复当前已保存主题，只有 **Save custom copy / Save theme** 才写入原主题配置。图标资产随完整主题文件导入导出，不另存一份图标配置。主题修改不改动控件的动作、可访问名称和命中区；品牌与 Provider 标记及用户头像仍归各自身份 owner。
+
 ## 先按含义选择
 
 在仓库根目录运行：
