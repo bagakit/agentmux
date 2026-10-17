@@ -14,6 +14,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { RuntimeEvent, SessionSnapshot } from '../src/shared/contracts'
 import { TerminalView } from '../src/renderer/src/components/TerminalView'
 import { terminalResourceOwnerCounts } from '../src/renderer/src/lib/terminal-resource-owners'
+import * as terminalResourceOwners from '../src/renderer/src/lib/terminal-resource-owners'
 
 type FixtureTerminal = HeadlessTerminal & {
   refresh: ReturnType<typeof vi.fn>
@@ -426,6 +427,107 @@ it('records a throwing WebGL dispose without swallowing its original error or re
   } finally {
     await act(async () => root?.unmount()); root = null
     clock.mockRestore()
+  }
+})
+
+it.each(['webgl', 'xterm', 'both', 'undefined', 'later owners'] as const)(
+  'finishes mounted TerminalView teardown in order and preserves its first thrown value: %s', async failureKind => {
+    const calls: string[] = [], failure = failureKind === 'undefined' ? undefined : new Error('Original controlled disposal failure')
+    const registerTerminal = rendererPerformance.registerTerminal
+    const acquireOwners = terminalResourceOwners.acquireTerminalResourceOwners
+    const reader = vi.spyOn(rendererPerformance, 'registerTerminal').mockImplementation(read => {
+      const release = registerTerminal(read)
+      return () => {
+        calls.push('reader-release'); release()
+        if (failureKind === 'later owners') throw new Error('Later reader release failure')
+      }
+    })
+    const owners = vi.spyOn(terminalResourceOwners, 'acquireTerminalResourceOwners').mockImplementation(input => {
+      const owner = acquireOwners(input)
+      return { ...owner, release() {
+        calls.push('counts-release'); owner.release()
+        if (failureKind === 'later owners') throw new Error('Later count release failure')
+      } }
+    })
+    const observation = vi.spyOn(rendererPerformance, 'terminalCleanup')
+    try {
+      await render(true)
+      const terminal = fixture.terminals[0]!, gpu = fixture.webgl[0]!, dispose = terminal.dispose.getMockImplementation()!
+      terminal.input('HEALTHY_BEFORE_EFFECT_EXIT', true)
+      expect(fixture.write).toHaveBeenCalledWith(session.control, 'HEALTHY_BEFORE_EFFECT_EXIT', 'terminal-protocol', expect.anything())
+      gpu.disposed.mockImplementationOnce(() => {
+        calls.push('webgl')
+        if (failureKind !== 'xterm') throw failure
+      })
+      fixture.unsubscribe.mockImplementationOnce(() => { calls.push('unsubscribe') })
+      fixture.detach.mockImplementationOnce(async attachment => { calls.push(`detach:${attachment}`) })
+      terminal.dispose.mockImplementationOnce(() => {
+        calls.push('xterm'); dispose()
+        if (failureKind === 'xterm') throw failure
+        if (failureKind === 'both' || failureKind === 'undefined' || failureKind === 'later owners') throw new Error('Later xterm failure')
+      })
+      let caught: unknown, threw = false
+      try { await act(async () => root!.unmount()) } catch (error) { threw = true; caught = error }
+      root = null
+      cleanupSample(`effect-teardown-${failureKind}`, { threw, caughtOriginal: caught === failure, calls,
+        observation: observation.mock.calls, terminals: rendererPerformance.snapshot().terminals, owners: terminalResourceOwnerCounts() })
+      expect(threw).toBe(true)
+      expect(caught).toBe(failure)
+      expect(calls).toEqual(['webgl', 'unsubscribe', 'detach:attachment-retained', 'xterm', 'reader-release', 'counts-release'])
+      expect(gpu.disposed).toHaveBeenCalledOnce(); expect(gpu.contextLossDisposed).toHaveBeenCalledOnce()
+      expect(terminal.dispose).toHaveBeenCalledOnce(); expect(fixture.unsubscribe).toHaveBeenCalledOnce()
+      expect(fixture.detach).toHaveBeenCalledExactlyOnceWith('attachment-retained')
+      expect(observation.mock.calls.map(([, context]) => ({ operation: context.operation, outcome: context.outcome, runId: context.runId }))).toEqual([
+        { operation: 'webgl-dispose', outcome: failureKind === 'xterm' ? 'returned' : 'threw', runId: session.control.run.runId },
+        { operation: 'xterm-dispose', outcome: failureKind === 'webgl' ? 'returned' : 'threw', runId: session.control.run.runId }
+      ])
+      expect(rendererPerformance.snapshot().terminals).toEqual([])
+      expect(terminalResourceOwnerCounts()).toEqual({ terminalViews: 0, terminalAddons: 0, terminalListeners: 0 })
+    } finally {
+      await act(async () => root?.unmount()); root = null
+      reader.mockRestore(); owners.mockRestore(); observation.mockRestore()
+      fixture.unsubscribe.mockReset()
+    }
+  }
+)
+
+it('releases the exact retiring owners when Run replacement encounters a native disposal failure', async () => {
+  const observation = vi.spyOn(rendererPerformance, 'terminalCleanup')
+  try {
+    await render(true)
+    const first = fixture.terminals[0]!, gpu = fixture.webgl[0]!, dispose = first.dispose.getMockImplementation()!
+    const failure = new Error('Original retiring WebGL failure')
+    gpu.disposed.mockImplementationOnce(() => { throw failure })
+    first.dispose.mockImplementationOnce(() => { dispose(); throw new Error('Later retiring xterm failure') })
+    const next: SessionSnapshot = { ...session, control: { kind: 'terminal', hostId: 'local', runId: 'replacement-run', run: { runId: 'replacement-run' } } }
+    let caught: unknown
+    try {
+      await act(async () => root!.render(<WorkbenchPresentationContext.Provider value={{ active: true, retainedRegionId: null, reference, surface: 'space' }}>
+        <TerminalView session={next} themeId="graphite" interactiveResize={false} visible autoFocus={false} linkOrigin={linkOrigin} />
+      </WorkbenchPresentationContext.Provider>))
+    } catch (error) { caught = error }
+    expect(caught).toBe(failure)
+    // React propagates the original effect error and retires its replacement tree.
+    // Both generations must release their own readers and count owners; only the
+    // original generation reached attachment before React retired the tree.
+    expect(fixture.terminals).toHaveLength(2)
+    expect(fixture.terminals.map(terminal => terminal.dispose.mock.calls.length)).toEqual([1, 1])
+    expect(fixture.attach).toHaveBeenCalledExactlyOnceWith(session.control, 0)
+    expect(fixture.detach.mock.calls).toEqual([['attachment-retained']])
+    expect(fixture.unsubscribe).toHaveBeenCalledTimes(2)
+    const retired = observation.mock.calls.map(([, context]) => context).filter(context => context.runId === session.control.run.runId)
+    expect(retired).toMatchObject([
+      { operation: 'webgl-dispose', outcome: 'threw', sessionId: session.id, regionId: linkOrigin.regionId },
+      { operation: 'xterm-dispose', outcome: 'threw', sessionId: session.id, regionId: linkOrigin.regionId }
+    ])
+    expect(retired[0]!.instanceId).toBe(retired[1]!.instanceId)
+    expect(rendererPerformance.snapshot().terminals).toEqual([])
+    expect(terminalResourceOwnerCounts()).toEqual({ terminalViews: 0, terminalAddons: 0, terminalListeners: 0 })
+    cleanupSample('effect-run-replacement-failure', { caughtOriginal: caught === failure, retired,
+      attachments: fixture.detach.mock.calls, terminals: rendererPerformance.snapshot().terminals, owners: terminalResourceOwnerCounts() })
+  } finally {
+    await act(async () => root?.unmount()); root = null
+    observation.mockRestore()
   }
 })
 
