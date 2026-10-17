@@ -1,3 +1,4 @@
+import { readConnectionRequestTrace } from './connection-request-trace.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { AgentMuxError } from '@agentmux/core'
 import { parseConnectionSetupAccount, parseConnectionSetupAuthentication, parseConnectionSetupChallenge, parseConnectionSetupOperation, parseConnectionSetupParams, type ConnectionEnrollmentCallContext, type ConnectionSetupAdvance, type ConnectionSetupAuthenticationAction, type ConnectionSetupBegin, type ConnectionSetupInspect, type ConnectionSetupListing, type ConnectionSetupOperation, type ConnectionSetupPort, type ConnectionSetupView } from '@agentmux/core/connections'
@@ -451,6 +452,7 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
   async inspect(value: ConnectionSetupInspect, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView> {
     const input = parseConnectionSetupParams('connection.setup.inspect', value), row = this.read(input.operationId)
     await this.authority(context, row)
+    if (input.requestTrace !== undefined) return { operation: row ? this.summary(row) : null, challenge: null, requestTrace: this.safe(() => readConnectionRequestTrace(this.connections.database, 'setup', input.operationId, context.actor, input.requestTrace!, row !== null)) }
     let view = await this.view(row, context)
     if (row && input.applicationInspection) view = await this.inspection.attach(view, row, context, input.applicationInspection)
     return row && input.applicationConfiguration ? this.configuration.attach(view, row, context, input.applicationConfiguration) : view

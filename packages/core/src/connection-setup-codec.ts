@@ -1,3 +1,4 @@
+import { parseConnectionRequestTrace, parseConnectionRequestTraceSelector } from './connection-request-trace.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { CONNECTION_SETUP_READ_ACTIONS, connectionSetupPublicationSubjects, connectionSetupConfigurationSubject, connectionSetupPermissionActionPurpose, type ConnectionSetupReadSubject, type ConnectionSetupReadSummary, type ConnectionSetupPermissionReview, type ConnectionSetupMessageReceptionReview, type ConnectionSetupPublicationDraft, type ConnectionSetupPublicationReview, type ConnectionSetupPublicationEffect } from './connection-setup-contract.js'
@@ -59,8 +60,12 @@ export function parseConnectionSetupParams<M extends ConnectionSetupMethod>(meth
     return { operationId: id(p.operationId), expectedRevision: integer(p.expectedRevision), decision: { actionId, value: choice(d.value, ['continue', 'confirm', 'renew']) }, ...(p.versionId === undefined ? {} : { versionId: id(p.versionId) }), ...(p.publicationDraft === undefined ? {} : { publicationDraft: parseConnectionSetupPublicationDraft(p.publicationDraft) }) } as ConnectionSetupParamsMap[M]
   }
   if (method === 'connection.setup.ls') { const p = object(value, ['connectionId', 'cursor', 'limit']); return { connectionId: id(p.connectionId), ...(p.cursor === undefined ? {} : { cursor: text(p.cursor) }), ...(p.limit === undefined ? {} : { limit: integer(p.limit, 1, 100) }) } as ConnectionSetupParamsMap[M] }
-  const p = object(value, ['operationId', 'applicationInspection', 'applicationConfiguration'])
+  const p = object(value, ['operationId', 'applicationInspection', 'applicationConfiguration', 'requestTrace'])
   const result: ConnectionSetupParamsMap['connection.setup.inspect'] = { operationId: id(p.operationId) }
+  if (p.requestTrace !== undefined) {
+    if (p.applicationInspection !== undefined || p.applicationConfiguration !== undefined) fail()
+    result.requestTrace = parseConnectionRequestTraceSelector(p.requestTrace)
+  }
   if (p.applicationInspection !== undefined) {
     const s = object(p.applicationInspection, ['selectedStepId', 'cursor', 'limit', 'versionId'])
     result.applicationInspection = { ...(s.versionId === undefined ? {} : { versionId: id(s.versionId) }), ...(s.selectedStepId === undefined ? {} : { selectedStepId: id(s.selectedStepId) }), ...(s.cursor === undefined ? {} : { cursor: text(s.cursor) }), ...(s.limit === undefined ? {} : { limit: integer(s.limit, 1, 100) }) }
@@ -228,7 +233,7 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
     }
     return { operations, next: p.next === null ? null : text(p.next), support } as ConnectionSetupResultMap[M]
   }
-  const p = object(value, ['operation', 'challenge', 'reason', 'continuation', 'receipt', 'applicationInspection', 'applicationConfiguration']), operation = p.operation === null ? null : parseConnectionSetupOperation(p.operation), challenge = p.challenge === null ? null : parseConnectionSetupChallenge(p.challenge)
+  const p = object(value, ['operation', 'challenge', 'reason', 'continuation', 'receipt', 'applicationInspection', 'applicationConfiguration', 'requestTrace']), operation = p.operation === null ? null : parseConnectionSetupOperation(p.operation), challenge = p.challenge === null ? null : parseConnectionSetupChallenge(p.challenge)
   if (operation && operation.operationId !== (input as { operationId: string }).operationId || !operation && (method === 'connection.setup.begin' || challenge !== null)) fail()
   if (method === 'connection.setup.begin' && operation) {
     // Select the admitted fields explicitly: summaries also contain safe result fields.
@@ -240,6 +245,12 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
   if (challenge && (challengeRequest !== 'confirmed' || challengeStorage !== 'stored')) fail()
   if (challenge && operation?.request.kind === 'enrollment-handoff' && !operation.authentication) fail()
   const result: ConnectionSetupView = { operation, challenge, ...(p.reason === undefined ? {} : { reason: choice(p.reason, ['connection-revised', 'challenge-unavailable']) }) }
+  const traceSelector = method === 'connection.setup.inspect' ? (input as ConnectionSetupParamsMap['connection.setup.inspect']).requestTrace : undefined
+  if ((traceSelector !== undefined) !== (p.requestTrace !== undefined)) fail()
+  if (p.requestTrace !== undefined) {
+    if (challenge || p.continuation !== undefined || p.applicationInspection !== undefined || p.applicationConfiguration !== undefined || p.receipt !== undefined) fail()
+    result.requestTrace = parseConnectionRequestTrace(p.requestTrace, (input as { operationId: string }).operationId, traceSelector)
+  }
   if (method === 'connection.setup.inspect' && operation && (input as ConnectionSetupParamsMap['connection.setup.inspect']).applicationInspection && p.applicationInspection === undefined) fail()
   if (method === 'connection.setup.inspect' && operation && (input as ConnectionSetupParamsMap['connection.setup.inspect']).applicationConfiguration && p.applicationConfiguration === undefined) fail()
   if (p.continuation !== undefined) {

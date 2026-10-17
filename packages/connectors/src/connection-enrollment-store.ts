@@ -53,6 +53,7 @@ export class ConnectionEnrollmentStore {
     host.database.exec(
       'CREATE TABLE IF NOT EXISTS connection_enrollment (sequence INTEGER PRIMARY KEY AUTOINCREMENT, operation_id TEXT UNIQUE NOT NULL, connection_id TEXT UNIQUE NOT NULL, record_json TEXT NOT NULL); CREATE TABLE IF NOT EXISTS connection_enrollment_attempt (attempt_id TEXT PRIMARY KEY, operation_id TEXT NOT NULL, kind TEXT NOT NULL, owner TEXT NOT NULL, state TEXT NOT NULL); CREATE TABLE IF NOT EXISTS connection_enrollment_decision (action_id TEXT PRIMARY KEY, operation_id TEXT NOT NULL, record_json TEXT NOT NULL);'
     )
+    host.database.exec('CREATE INDEX IF NOT EXISTS connection_enrollment_attempt_by_operation ON connection_enrollment_attempt(operation_id)')
   }
   safe<T>(call: () => T): T {
     try {

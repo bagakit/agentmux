@@ -1,3 +1,4 @@
+import type { ConnectionRequestTrace, ConnectionRequestTraceSelector } from './connection-request-trace.js'
 import type { ConnectionApplication, ConnectionOperation } from './connections-contract.js'
 export type ConnectionEnrollmentReason =
   | 'adapter-unavailable'
@@ -147,6 +148,8 @@ export type ConnectionEnrollmentReceipt = ConnectionEnrollmentAction & {
 export type ConnectionEnrollmentOperationInput = {
   operationId: string
 }
+/** Trace selection is a local, secret-free projection, separate from active confirmation material. */
+export type ConnectionEnrollmentInspect = ConnectionEnrollmentOperationInput & { requestTrace?: ConnectionRequestTraceSelector }
 export type ConnectionEnrollmentAdvanceInput = ConnectionEnrollmentOperationInput & {
   ownRevision: number
   decision: {
@@ -159,6 +162,7 @@ export type ConnectionEnrollmentView = {
   challenge: ConnectionEnrollmentChallenge | null
   account: ConnectionEnrollmentAccount | null
   actions: ConnectionEnrollmentAction[]
+  requestTrace?: ConnectionRequestTrace
   receipt?: ConnectionEnrollmentReceipt
 }
 export type ConnectionEnrollmentListInput = {
@@ -189,7 +193,7 @@ export interface ConnectionEnrollmentPort {
     context: ConnectionEnrollmentCallContext
   ): Promise<ConnectionEnrollmentView>
   inspect(
-    input: ConnectionEnrollmentOperationInput,
+    input: ConnectionEnrollmentInspect,
     context: ConnectionEnrollmentCallContext
   ): Promise<ConnectionEnrollmentView>
   list(input: ConnectionEnrollmentListInput, context?: ConnectionEnrollmentCallContext): Promise<ConnectionEnrollmentListResult>
@@ -197,7 +201,7 @@ export interface ConnectionEnrollmentPort {
 export type ConnectionEnrollmentParamsMap = {
   'connection.enrollment.begin': ConnectionEnrollmentBeginInput
   'connection.enrollment.advance': ConnectionEnrollmentAdvanceInput
-  'connection.enrollment.inspect': ConnectionEnrollmentOperationInput
+  'connection.enrollment.inspect': ConnectionEnrollmentInspect
   'connection.enrollment.ls': ConnectionEnrollmentListInput
 }
 export type ConnectionEnrollmentResultMap = {

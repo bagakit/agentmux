@@ -1,3 +1,4 @@
+import type { ConnectionRequestTrace, ConnectionRequestTraceSelector } from './connection-request-trace.js'
 import type { ConnectionApplication } from './connections-contract.js'
 import type { ConnectionEnrollmentCallContext } from './connection-enrollment-contract.js'
 
@@ -7,7 +8,7 @@ export type ConnectionSetupEnrollmentSource = { kind: 'enrollment'; operationId:
 export type ConnectionSetupBegin = { operationId: string; connectionId: string; expectedConnectionRevision: number; goal: ConnectionSetupGoal; source?: ConnectionSetupEnrollmentSource }
 export type ConnectionSetupInput = { operationId: string }
 /** Local child selection only. It never requests the platform or repairs a secure ACK. */
-export type ConnectionSetupInspect = ConnectionSetupInput & { applicationInspection?: { selectedStepId?: string; cursor?: string; limit?: number; versionId?: string }; applicationConfiguration?: ConnectionSetupConfigurationSelector }
+export type ConnectionSetupInspect = ConnectionSetupInput & { requestTrace?: ConnectionRequestTraceSelector; applicationInspection?: { selectedStepId?: string; cursor?: string; limit?: number; versionId?: string }; applicationConfiguration?: ConnectionSetupConfigurationSelector }
 export type ConnectionSetupAdvance = ConnectionSetupInput & { expectedRevision: number; decision: { actionId: string; value: 'continue' | 'confirm' | 'renew' }; versionId?: string; publicationDraft?: ConnectionSetupPublicationDraft }
 export type ConnectionSetupList = { connectionId: string; cursor?: string; limit?: number }
 /** Local implementation discovery for this exact revision, never platform authority or readiness. */
@@ -145,6 +146,7 @@ export type ConnectionSetupOperation = ConnectionSetupBegin & {
 /** Active confirmation material; never a URL or evidence of login, grants or setup completion. */
 export type ConnectionSetupChallenge = { qrPayload: string; expiresAt: number | null; nextPollAt: number }
 export type ConnectionSetupView = {
+  requestTrace?: ConnectionRequestTrace
   operation: ConnectionSetupOperation | null
   challenge: ConnectionSetupChallenge | null
   reason?: 'connection-revised' | 'challenge-unavailable'
