@@ -100,7 +100,7 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMu
 export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   'restartAgent' | 'inspectAgentRestart' | 'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentSessions' | 'readAgentSessionHistory' | 'readAgentConversation' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
   'ensureAgentContinuity' | 'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
-  'inspectAgentInteractionOperation' | 'respondAgentInteraction' | 'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'inspectAgentPromptSubmission' | 'startDiscussion' | 'checkDeliveries' |
+  'inspectAgentInteractionOperation' | 'respondAgentInteraction' | 'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'notifyMessages' | 'inspectAgentPromptSubmission' | 'startDiscussion' | 'checkDeliveries' |
   'readAgentInputMailbox' | 'inspectAgentInput' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readMessage' | 'listMessages' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' | 'readHostNativeAgentHistory' | 'readHostNativeAgentHistoryResource' |
@@ -275,6 +275,7 @@ const NATIVE_FIELDS = {
   'system.diagnostics.inspect': ['target', 'includeRaw', 'includeRelated', 'budget'],
   'message.delivery.inspect': ['logId', 'hostId'], 'message.delivery.report': ['hostId', 'record'],
   'message.inbox.check': ['limit'], 'message.inbox.ack': ['generation', 'readerRun'],
+  'message.notify': ['operationId', 'messageIds', 'hostId'],
   'message.read': ['operationId', 'messageId', 'hostId'],
   'message.ls': ['hostId', 'participantSessionId', 'direction', 'beforeSequence', 'limit'],
   'message.dispatch.open': ['sourceMessageId'], 'message.dispatch.inspect': ['sourceMessageId'],
@@ -1643,6 +1644,19 @@ export class AgentMuxRpcService {
           toAgentSessionId: (await this.owner(rpcString(p.toAgentSessionId, 'Recipient Session ID'))).agentSessionId,
           taskId: rpcString(p.taskId, 'Task ID') }); break
       }
+      case 'message.notify': {
+        if (caller || !context.principal || !['user', 'device'].includes(context.principal.kind)) throw new AgentMuxError(
+          'Only an explicit trusted user/device action may immediately notify existing Inbox messages. Managed senders keep the ordinary Inbox path.', 'CONTROL_PERMISSION_DENIED')
+        const hostId = rpcString(p.hostId, 'Original message Host ID')
+        const scopes = (await this.clients()).filter(scope => scope.hostId === hostId)
+        if (scopes.length !== 1) throw new AgentMuxError('The original message Host is unavailable or ambiguous.', 'CONTROL_UNAVAILABLE')
+        const owner = scopes[0]!
+        if (owner.client.forwardRpc) { result = { ...await owner.client.forwardRpc('message.notify', { ...p, hostId: 'local' } as AgentMuxRpcParams<'message.notify'>, await this.inputForwardContext(context)), hostId }; break }
+        if (!Array.isArray(p.messageIds)) throw new AgentMuxError('Select original Inbox message IDs.', 'INVALID_A2A_NOTIFICATION')
+        result = { ...await owner.client.notifyMessages({ operationId: rpcString(p.operationId, 'Notification operation ID'),
+          messageIds: p.messageIds.map(id => rpcString(id, 'Original message ID')) }, this.inputCallContext(context)), hostId }
+        break
+      }
       case 'message.read': case 'message.ls': case 'message.dispatch.read': case 'message.dispatch.ls': {
         if (!caller && (!context.principal || !['user', 'device'].includes(context.principal.kind) || !context.principal.id.trim())) throw new AgentMuxError(
           'Message reading requires an authenticated Agent participant or a transport-approved user/device. Original communication and Runs are retained.', 'CONTROL_PERMISSION_DENIED')
@@ -2040,11 +2054,15 @@ export class AgentMuxRpcService {
     if (expectedRun && !original && durable.run.runId !== expectedRun.runId) throw new AgentMuxError(
       'Expected Run does not match the current retained recipient Run. No new message was saved or submitted.', 'MESSAGE_RECIPIENT_MISMATCH')
     const terminalManual = p.execution === 'immediate'
+    const referenceIntake = Boolean(caller && (!original || original.deliveryMode === 'reference'))
+    if (referenceIntake && terminalManual) throw new AgentMuxError(
+      'A managed sender cannot authorize steer. Send the original body to the Inbox normally; explicit user notification is a separate action.',
+      'CONTROL_PERMISSION_DENIED', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
     const directIntent = addressed ?? { kind: 'manual-actor' as const, expectedRun: { ...durable.run } }
     if (original?.admissionIntent && addressed && !isDeepStrictEqual(original.admissionIntent, addressed)) throw new AgentMuxError('The original native target cannot be changed by a retry.', 'AGENT_PROMPT_OPERATION_CONFLICT')
     // A new direct producer saves its exact durable target before requiring a
     // Runtime connection. Catalog selects a contract, never Native readiness.
-    const recipient = terminalManual ? durable : await recipientOwner.client.refreshAgentSession(recipientId, durable.run)
+    const recipient = terminalManual || referenceIntake ? durable : await recipientOwner.client.refreshAgentSession(recipientId, durable.run)
     const queuePath = (caller?.client ?? recipientOwner.client).agentMessageQueuePath()
     if (original && queuePath !== local[0]!.client.agentMessageQueuePath()) throw new AgentMuxError('The original journal route changed; no input will follow another owner.', 'CONTROL_UNAVAILABLE')
     const envelope = { operationId, createdAt: Date.now(),
@@ -2060,6 +2078,14 @@ export class AgentMuxRpcService {
     // This direct producer has no caller after-condition. Only a new explicit
     // immediate current-terminal message gets manual actor intent before its first save.
     // The journal returns an existing record unchanged, including missing tags.
+    if (referenceIntake) {
+      await recipientOwner.client.submitAgentMessage({ agentSessionId: recipientId,
+        envelope: { ...envelope, messageId, schema: 'agentmux.a2a.v1' }, execution: 'default', sourceChannel,
+        ...(sourceDevice ? { sourceDevice } : {}), caller: { agentSessionId: caller!.agentSessionId, capability: caller!.capability } }, this.inputCallContext(context))
+      const { input: _internal, ...saved } = await appendGlobalMessage({ ...envelope, messageId, execution: 'default', sourceChannel,
+        ...(sourceDevice ? { sourceDevice } : {}) }, queuePath)
+      return saved
+    }
     const historical = terminalManual ? await recipientOwner.client.inspectAgentPromptSubmission({ kind: 'message', agentSessionId: recipientId,
       expectedRun: recipient.run, messageId }) : null
     if (terminalManual && !original && !historical) {

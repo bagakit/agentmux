@@ -289,7 +289,7 @@ Read amux goal create --help only when creating or promoting a Goal; that leaf o
 exact scope, confirmation and source contract.`
   },
   message: {
-    summary: 'Authenticated messages, pending input, inbox and original dispatch reports',
+    summary: 'Original Inbox messages, reference notifications, input and dispatch reports',
     roles: 'Agents communicating across independent Sessions',
     when: 'Browse original A2A messages, inspect delivery, manage pending input or report through an original dispatch',
     guide: `Core owns authenticated messages, ordered delivery, inbox generations and original
@@ -301,7 +301,7 @@ Use message inbox check only for explicit batch consumption, and read the exact 
 dispatch before replying. Keep operationId, messageId, source message, thread and reply
 identities. Pending drafts, queued input, delivery and business reports are different states.
 
-Use agent send for a new authorized cross-Session message; message read/delivery inspect and
+Use agent send for a new authorized cross-Session Inbox message; message read/delivery inspect and
 dispatch inspect/read reconcile the original exchange. Pending edit/send/stop/archive/restore
 operate one retained pending item, not a new message. Inbox acknowledgement records reading
 of its exact generation and reader Run; it does not report work or complete a Goal. Dispatch

@@ -1,3 +1,4 @@
+import { isMessageNotificationInput, validateMessageNotification } from './agent-message-notification.js'
 import { parseTerminalFrontend } from './agent-terminal-frontend.js'
 import { noteContentInCatalogScope } from './notebook-observation.js'
 import { parseFileShareParams, parseFileShareResult, parseFileShareInspectParams, parseFileShareInspectResult, parseFileShareUndoParams, parseFileShareUndoResult } from './public-rpc-file-share.js'
@@ -196,9 +197,24 @@ function delivery(value: unknown): void {
   const p = record(value, ['state', 'at', 'reason']); if (!isAgentDeliveryState(p.state)) fail(); count(p.at)
   if (p.reason !== undefined) text(p.reason)
 }
+function notificationStatus(value: unknown, envelope: ReturnType<typeof validateAgentMuxMessageEnvelope>): void {
+  const p = record(value)
+  if (p.deliveryMode === undefined) { if (p.notification !== undefined) fail(); return }
+  if (p.deliveryMode !== 'reference' || envelope.sender.kind !== 'agent-session' || envelope.recipient.kind !== 'agent-session' || !envelope.recipientRunId) fail()
+  const status = record(p.notification, ['state', 'notificationId', 'key', 'reason'])
+  member(status.state, ['pending', 'submitted', 'unconfirmed'])
+  if ((status.notificationId === undefined) !== (status.key === undefined) || status.state !== 'pending' && status.key === undefined) fail()
+  if (status.key !== undefined) {
+    const key = validateAgentPromptInputKey(status.key); string(status.notificationId)
+    if (key.kind !== 'prompt' || key.submissionId !== status.notificationId || key.submissionId === envelope.messageId ||
+        key.agentSessionId !== envelope.recipientSessionId || key.expectedRun.runId !== envelope.recipientRunId) fail()
+  }
+  if (status.reason !== undefined) text(status.reason)
+}
 function message(value: unknown): ReturnType<typeof validateAgentMuxMessageEnvelope> {
   const p = record(value); count(p.sequence); delivery(p.delivery)
   const envelope = validateAgentMuxMessageEnvelope(p.envelope)
+  notificationStatus(p, envelope)
   if (p.promptCondition !== undefined && p.promptCondition !== null) validateAgentPromptCondition(p.promptCondition)
   return envelope
 }
@@ -557,7 +573,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         break
       }
       case 'agent.send': {
-        record(p, ['queueId', 'receiptId', 'messageId', 'sequence', 'envelope', 'delivery', 'promptCondition', 'agentSessionId', 'sourceChannel', 'sourceDevice', 'admissionIntent', 'inputReceipt'])
+        record(p, ['queueId', 'receiptId', 'messageId', 'sequence', 'envelope', 'delivery', 'deliveryMode', 'notification', 'promptCondition', 'agentSessionId', 'sourceChannel', 'sourceDevice', 'admissionIntent', 'inputReceipt'])
         if (p.sourceChannel !== undefined) normalizeMessageChannel(p.sourceChannel)
         if (p.sourceDevice !== undefined) normalizeOperationDevice(p.sourceDevice)
         const envelope = message(p)
@@ -600,11 +616,23 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         break
       }
       case 'message.dispatch.open': case 'message.dispatch.inspect': case 'message.dispatch.report': dispatch(p, input); break
+      case 'message.notify': {
+        record(p, ['hostId', 'notification', 'input'])
+        if (p.hostId !== input.hostId) fail()
+        const raw = record(p.notification, ['notificationId', 'key', 'messageIds', 'wire', 'condition', 'mode', 'idle', 'state', 'reason'])
+        const notice = validateMessageNotification(raw as unknown as import('./agent-message-notification.js').AgentMuxMessageNotification)
+        if (notice.mode !== 'steer' || notice.notificationId !== input.operationId || !isDeepStrictEqual(notice.messageIds, input.messageIds)) fail()
+        if (p.input !== null) {
+          const receipt = parsePromptSubmissionRecord(p.input)
+          if (!isMessageNotificationInput(notice, receipt)) fail()
+        }
+        break
+      }
       case 'message.read': {
         record(p, ['hostId', 'message']); string(p.hostId)
         if (input.hostId !== undefined && p.hostId !== input.hostId) fail()
         if (p.message !== null) {
-          const original = record(p.message, ['sequence', 'envelope', 'delivery', 'promptCondition', 'execution', 'admissionIntent', 'sourceChannel', 'sourceDevice'])
+          const original = record(p.message, ['sequence', 'envelope', 'delivery', 'deliveryMode', 'notification', 'promptCondition', 'execution', 'admissionIntent', 'sourceChannel', 'sourceDevice'])
           const envelope = message(original)
           if ((input.messageId === undefined ? envelope.operationId !== input.operationId : envelope.messageId !== input.messageId) || credentials && envelope.senderSessionId !== credentials.agentSessionId &&
             envelope.recipientSessionId !== credentials.agentSessionId) fail()
@@ -625,7 +653,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         let previous = before as number
         const seen = new Set<string>()
         array(p.messages, item => {
-          const entry = record(item, ['sequence', 'envelope', 'delivery', 'bodyPreview', 'bodyBytes'])
+          const entry = record(item, ['sequence', 'envelope', 'delivery', 'deliveryMode', 'notification', 'bodyPreview', 'bodyBytes'])
           count(entry.sequence); count(entry.bodyBytes); text(entry.bodyPreview); delivery(entry.delivery)
           if (entry.sequence === 0 || (entry.sequence as number) >= previous || (entry.bodyPreview as string).length > 240) fail()
           previous = entry.sequence as number
@@ -633,6 +661,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
             'threadId', 'correlationId', 'replyTo', 'workspaceId', 'senderSessionId', 'senderRunId', 'recipientSessionId', 'recipientRunId'])
           record(metadata.sender, ['kind', 'agentSessionId']); record(metadata.recipient, ['kind', 'agentSessionId'])
           const envelope = validateAgentMuxMessageEnvelope({ ...metadata, body: '' })
+          notificationStatus(entry, envelope)
           if (envelope.sender.kind !== 'agent-session' || envelope.recipient.kind !== 'agent-session' ||
             envelope.sender.agentSessionId !== envelope.senderSessionId || envelope.recipient.agentSessionId !== envelope.recipientSessionId ||
             envelope[p.direction === 'incoming' ? 'recipientSessionId' : 'senderSessionId'] !== p.participantSessionId || seen.has(envelope.messageId)) fail()
