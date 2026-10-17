@@ -118,6 +118,6 @@ export function MobileConnectionResult({ active, close }: { active: boolean; clo
         <button type="button" className="small-button" disabled={reading.pending} onClick={() => void reading.check()}><ThemeActionRefreshIcon size={13} /> Check previous request</button>
       </details> : null}
     </div>
-    <footer className="performance-actions phone-connection__footer"><button type="button" onClick={() => { close(); navigation?.open('devices') }}><ThemeObjectPhoneIcon size={14} /> Manage devices</button><button type="button" aria-label="Phone connection settings" title="Phone connection settings" onClick={() => { close(); navigation?.openToolkit(MOBILE_CONNECTION_TOOL_ID) }}><ThemeObjectSettingsIcon size={14} /></button></footer>
+    <footer className="performance-actions phone-connection__footer"><button type="button" onClick={() => { close(); navigation?.open('amux-conversation') }}><ThemeObjectPhoneIcon size={14} /> Manage devices</button><button type="button" aria-label="Phone connection settings" title="Phone connection settings" onClick={() => { close(); navigation?.openToolkit(MOBILE_CONNECTION_TOOL_ID) }}><ThemeObjectSettingsIcon size={14} /></button></footer>
   </>
 }

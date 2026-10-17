@@ -10,11 +10,11 @@ import { api } from '../../lib/api'
 import type { MoteWorkfaceScope } from '../../lib/mote-workface'
 import { useAppStore } from '../../store'
 import { SpaceObjectIcon } from '../SpaceObjectIcon'
-import type { MoteConnectorSettingsOrigin } from '../SettingsNavigation'
+import type { MoteLarkSettingsOrigin } from '../SettingsNavigation'
 
 function MoteIdentityCard({ scope, records, recordsIssue, onOpen }: {
   scope: MoteWorkfaceScope; records: ConnectionRecord[]; recordsIssue: string
-  onOpen(origin: MoteConnectorSettingsOrigin, create: boolean): void
+  onOpen(origin: MoteLarkSettingsOrigin, create: boolean): void
 }) {
   const bindings = useAppStore(state => state.spaceZoneBindings)
   const target = moteConnectionTarget(scope, bindings), identity = JSON.stringify(target)
@@ -55,7 +55,7 @@ function MoteIdentityCard({ scope, records, recordsIssue, onOpen }: {
 
 /** The original directory and preferences are read only while this library is visible. */
 export function MoteIdentityCards({ records, recordsIssue, onOpen }: {
-  records: ConnectionRecord[]; recordsIssue: string; onOpen(origin: MoteConnectorSettingsOrigin, create: boolean): void
+  records: ConnectionRecord[]; recordsIssue: string; onOpen(origin: MoteLarkSettingsOrigin, create: boolean): void
 }) {
   const workspace = useAppStore(state => state.config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID))
   const { topics, reading, error } = useScratchTopics(workspace?.id ?? null)

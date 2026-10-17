@@ -1,5 +1,5 @@
 /* The connector is a focused task canvas using the shared Graphite / Mint system. */
-.connector-mod { max-width: 920px; }
+.lark-settings { max-width: 920px; }
 .connector-onboarding { container-name: connector; }
 .connector-mote-detail { gap: var(--sp-5); }
 .connector-mote-detail > header { padding-block: var(--sp-2) var(--sp-3); }
@@ -58,7 +58,7 @@
 .connector-mote-card__identity strong { font-size: var(--fs-title); }
 .connector-mote-card__actions .primary-button { min-height: 34px; }
 .connector-saved-identities { padding-top: var(--sp-5); }
-.connector-mod > .connector-service-control { margin-top: var(--sp-6); padding-top: var(--sp-5); }
+.lark-settings > .connector-service-control { margin-top: var(--sp-6); padding-top: var(--sp-5); }
 .connector-service-control__heading h3 { font-size: var(--fs-body); font-weight: 550; }
 .connector-service-control__heading .settings-group-note { font-size: var(--fs-meta); }
 .connector-service-control__setting { font-size: var(--fs-meta); }

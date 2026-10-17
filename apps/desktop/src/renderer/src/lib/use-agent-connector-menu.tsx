@@ -48,15 +48,15 @@ export function useAgentConnectorMenu(regionId: string, sessionId: string | null
   }
   const available = service?.enabled === true && botEnabled
   return { onOpen, dialogOpen: dialog !== null, group: !sessionId || service?.enabled === false ? null : {
-    label: 'Agent Conversation Connector',
+    label: 'Lark',
     entries: [
       ...(available ? [{ label: 'Create group chat', onSelect: () => open('create') }, { label: 'Bind existing group chat', onSelect: () => open('existing') }, { label: 'Shared group details', onSelect: () => open('details') }] : []),
-      ...(settings ? [{ label: !service ? 'Connector settings' : available ? 'Chat application settings' : 'Enable a chat application', onSelect: () => {
+      ...(settings ? [{ label: !service ? 'Lark settings' : available ? 'Chat application settings' : 'Enable a chat application', onSelect: () => {
         const session = sessionId ? sessionPresentationById(useAppStore.getState().sessions).get(sessionId) : undefined
-        if (session?.kind === 'agent') settings.openConnector({ sessionId: session.id, hostId: session.control.hostId, agentSessionId: session.control.agentSessionId })
-        else settings.open('chat-connections')
+        if (session?.kind === 'agent') settings.openLark({ sessionId: session.id, hostId: session.control.hostId, agentSessionId: session.control.agentSessionId })
+        else settings.open('lark')
       } }] : [])
     ],
-    issue: [!service ? 'Connector service state is not confirmed. Open Connector settings to check it.' : '', observed?.issue ? `Current service check unconfirmed; keeping the last confirmed policy. ${observed.issue}` : '', issue].filter(Boolean).join(' ')
+    issue: [!service ? 'External chat sync is not confirmed. Open Lark settings to check it.' : '', observed?.issue ? `Current service check unconfirmed; keeping the last confirmed policy. ${observed.issue}` : '', issue].filter(Boolean).join(' ')
   }, dialog: dialog ? <AgentConnectorDialog key={JSON.stringify(dialog.original.target)} {...dialog} returnFocus={() => returned.current} onClose={() => setDialog(null)} /> : null }
 }

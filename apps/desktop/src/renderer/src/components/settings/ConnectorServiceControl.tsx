@@ -66,7 +66,7 @@ export function ConnectorServiceControl({ active }: { active: boolean }) {
       const receipt = await source('connection.service.configure', input)
       observeRequest(input.operationId, { receipt, issue: '' })
       observeConnectorService(receipt.service, source)
-      if (generation === selection.current) { setDraft(null); setBaseline(null); setNeedsCurrent(false); setNotice('Connector service saved. Each application keeps its own enabled preference.') }
+      if (generation === selection.current) { setDraft(null); setBaseline(null); setNeedsCurrent(false); setNotice('External chat sync saved. Each application keeps its own enabled preference.') }
     } catch (error) {
       observeRequest(input.operationId, { issue: presentError(error) })
       if (generation === selection.current) setNotice('The save reply is unconfirmed. Check the original request below. Its confirmed receipts are kept separately from current service reads.')
@@ -85,7 +85,7 @@ export function ConnectorServiceControl({ active }: { active: boolean }) {
 
   if (!active) return null
   return <section className="settings-group connector-service-control" aria-label="Connector service" data-connector-service>
-    <div className="connector-service-control__heading"><div><h3>Automatic chat sync</h3><p className="settings-group-note">Send and receive messages for connected Agents.</p></div><div className="connector-service-control__setting"><span role="status" data-connector-service-state={state ? state.enabled ? 'on' : 'off' : 'unconfirmed'}>{state ? `${issue ? 'Last confirmed: ' : ''}${state.enabled ? 'On' : 'Off'}` : 'State not confirmed'}</span>{state ? <label className="connector-enabled"><input type="checkbox" aria-label="Enable Agent Conversation Connector" checked={draft ?? state.enabled} onChange={event => {
+    <div className="connector-service-control__heading"><div><h3>Automatic chat sync</h3><p className="settings-group-note">Send and receive messages through your Feishu and Lark bots.</p></div><div className="connector-service-control__setting"><span role="status" data-connector-service-state={state ? state.enabled ? 'on' : 'off' : 'unconfirmed'}>{state ? `${issue ? 'Last confirmed: ' : ''}${state.enabled ? 'On' : 'Off'}` : 'State not confirmed'}</span>{state ? <label className="connector-enabled"><input type="checkbox" aria-label="Enable external chat sync" checked={draft ?? state.enabled} onChange={event => {
       ++selection.current; if (!needsCurrent) setBaseline({ state, source: api.connections.call }); setDraft(event.target.checked); setNotice('')
     }} /><span>Enable</span></label> : null}<button className="small-button connector-service-control__refresh" onClick={checkCurrent}>Refresh status</button></div></div>
     {draft !== null ? <div className="connector-editor-actions"><span className="settings-group-note">Unsaved change</span><button data-connector-service-save className="primary-button" disabled={busy || !baseline || needsCurrent || baseline.source !== api.connections.call} onClick={() => void save()}>{busy ? 'Saving…' : 'Save changes'}</button>{needsCurrent ? <button className="small-button" onClick={() => void newChoice()}>Review latest setting</button> : null}</div> : null}
