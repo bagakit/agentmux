@@ -195,6 +195,38 @@ it.each(['', 'Updated by the original page'])('actual installation preserves rec
   expect(browser().title).toBe(title)
 })
 
+it.each(['https://example.invalid/private', 'about:blank'])('actual installation accepts private Browser restart from %s into the same empty page', async url => {
+  const f = await fixture()
+  Object.assign(io.before!.workbench.tabs[1]!.regions[0]!, { mode: 'private', profileId: null, url })
+  Object.assign(browser(), { mode: 'private', profileId: null, url: 'about:blank', title: 'Private page' })
+  const original = structuredClone(io.before), expected = structuredClone(io.after)
+  const result = await install(f)
+  expect(result.ui.status).toBe('committed')
+  expect(result.ui.observation).toEqual(expected)
+  expect(io.before).toEqual(original); expect(io.after).toEqual(expected); expect(io.cutovers).toBe(1)
+})
+
+it.each(['retained URL', 'different URL', 'mode', 'Profile', 'Browser identity', 'normal URL', 'unspecified mode URL'] as const)(
+  'actual installation rejects changed private Browser restart %s without rewriting observations', async field => {
+    const f = await fixture(), originalBrowser = io.before!.workbench.tabs[1]!.regions[0]! as ReturnType<typeof browser>
+    Object.assign(originalBrowser, { mode: 'private', profileId: null })
+    Object.assign(browser(), { mode: 'private', profileId: null, url: 'about:blank' })
+    if (field === 'retained URL') browser().url = originalBrowser.url
+    if (field === 'different URL') browser().url = 'https://example.invalid/other-private'
+    if (field === 'mode') browser().mode = 'normal'
+    if (field === 'Profile') browser().profileId = 'foreign-profile'
+    if (field === 'Browser identity') browser().browserId = 'replacement-browser'
+    if (field === 'normal URL') { originalBrowser.mode = 'normal'; browser().mode = 'normal' }
+    if (field === 'unspecified mode URL') { delete originalBrowser.mode; delete browser().mode }
+    const before = structuredClone(io.before), expected = structuredClone(io.after)
+    const error = await install(f).catch(error => error)
+    expect(error.message).toBe('The original workbench, Region descriptors or focus have not been restored.')
+    expect(error.transaction.ui.status).toBe('unknown')
+    expect(error.transaction.ui.continuity).toEqual({ before, after: expected })
+    expect(io.before).toEqual(before); expect(io.after).toEqual(expected); expect(io.cutovers).toBe(1)
+  }
+)
+
 it('actual installation preserves an original unconfirmed Browser without requiring it to open', async () => {
   const f = await fixture()
   const originalBrowser = io.before!.workbench.tabs[1]!.regions[0]!
