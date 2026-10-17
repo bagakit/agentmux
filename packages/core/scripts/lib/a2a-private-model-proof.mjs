@@ -149,7 +149,9 @@ export async function launchPrivateA2aProof({ repository, sourceInputs,
     }
     await writeFile(join(evidence, 'launcher.json'), redact(JSON.stringify(launcher, null, 2) + '\n'), { mode: 0o600 })
   }
-  process.stdout.write(JSON.stringify({ passed: launcher.passed, provisional: minimumOnly, completeFeatureCoverage: launcher.passed && launcher.completeFeatureCoverage === true, receipt: join(evidence, 'receipt.json'), launcher: join(evidence, 'launcher.json') }) + '\n')
+  const result = { passed: launcher.passed, provisional: minimumOnly, completeFeatureCoverage: launcher.passed && launcher.completeFeatureCoverage === true, receipt: join(evidence, 'receipt.json'), launcher: join(evidence, 'launcher.json') }
+  process.stdout.write(JSON.stringify(result) + '\n')
   if (!launcher.passed) process.exitCode = 1
+  return result
 
 }
