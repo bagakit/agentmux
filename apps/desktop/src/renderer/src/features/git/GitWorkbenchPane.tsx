@@ -1,14 +1,11 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, type ReactNode, type RefObject } from 'react'
+import { memo, useEffect, type ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { WorkspaceRecord } from '../../../../shared/contracts'
-import type { GitCommitSnapshot } from '../../../../shared/git-contracts'
 import type { GitWorkbenchSurface } from '../../lib/workbench-tabs'
 import { detectLanguage } from '../../lib/language-detect'
 import { useMonacoTheme } from '../../hooks/useMonacoTheme'
 import { useAppStore } from '../../store'
 import { EditorReleasedState } from '../../components/EditorReleasedState'
-import { GitHistoryPanel, type GitHistoryViewportState } from './history/GitHistoryPanel'
-import { useGitHistory, type GitHistoryWindow } from './history/useGitHistory'
 import { useGitHistoryReader, useSharedGitHistory } from './history/GitHistoryContext'
 import { GitCommitDetails } from './commit/GitCommitDetails'
 import { useGitCommitDetails } from './commit/useGitCommitDetails'
@@ -16,7 +13,6 @@ import { GitDiffCanvas } from './diff/GitDiffCanvas'
 
 const ThemeGitCommitIcon = semanticIconComponent('git.commit')
 const ThemeObjectHistoryIcon = semanticIconComponent('object.history')
-const ThemeLayoutCloseLeftIcon = semanticIconComponent('layout.close-left')
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
@@ -35,7 +31,7 @@ export const GitWorkbenchPane = memo(function GitWorkbenchPane({ surface, visibl
 type ViewProps = { surface: GitWorkbenchSurface; workspace: WorkspaceRecord; visible: boolean; released: boolean }
 function Header({ surface, workspace, children }: Pick<ViewProps, 'surface' | 'workspace'> & { children?: ReactNode }) {
   return <header className="git-workbench__header"><ThemeGitCommitIcon size={15} />
-    <strong>{surface.history ? 'Repository history' : surface.selection ? `Commit ${surface.selection.commitOid.slice(0, 8)}` : 'Commit details'}</strong>
+    <strong>{surface.selection ? `Commit ${surface.selection.commitOid.slice(0, 8)}` : 'Repository review'}</strong>
     <span title={surface.scope.repoPath}>{workspace.name}</span><span className="git-workbench__readonly">Read only</span>{children}
   </header>
 }
@@ -54,67 +50,22 @@ function CommitView(props: ViewProps) {
 }
 function RepositoryReader(props: ViewProps) {
   const shared = useSharedGitHistory(props.workspace)
-  const local = useGitHistory(props.workspace, props.visible && !shared)
-  const localViewport = useRef<GitHistoryViewportState | null>(null)
-  const history = shared?.history ?? local
-  const viewportState = shared?.viewportState ?? localViewport
-  // This Region remains mounted when the sidebar moves to another Workspace. Transfer only
-  // completed facts for the exact resource; an in-flight read remains owned by its source.
-  const previous = useRef<{ shared: boolean; window: GitHistoryWindow | null; viewport: RefObject<GitHistoryViewportState | null> } | null>(null)
-  const changingOwner = previous.current && previous.current.shared !== Boolean(shared) ? previous.current : null
-  const savedPosition = changingOwner?.viewport.current
-  useLayoutEffect(() => {
-    if (changingOwner) {
-      if (changingOwner.window) history.adoptWindow(changingOwner.window)
-      viewportState.current = savedPosition ? { ...savedPosition } : null
-    }
-    previous.current = { shared: Boolean(shared), window: history.captureWindow(), viewport: viewportState }
-  })
-  useGitHistoryReader(shared, props.surface.regionId, props.workspace, 'repository', props.visible)
-  return <RepositoryView {...props} history={history} viewportState={viewportState} />
-}
-function RepositoryView({ history, viewportState, ...props }: ViewProps & {
-  history: ReturnType<typeof useGitHistory>; viewportState: RefObject<GitHistoryViewportState | null>
-}) {
   const { surface, workspace, visible } = props
-  const selectCommit = useAppStore(state => state.selectGitCommit)
+  const openHistory = useAppStore(state => state.openGitHistory)
   const selectReference = useAppStore(state => state.selectGitHistoryReference)
-  const showDetails = useAppStore(state => state.showGitCommitDetails)
-  const select = useCallback((snapshot: GitCommitSnapshot) => selectCommit(surface.regionId, snapshot), [surface.regionId, selectCommit])
-  // Apply the durable initial range before the reader's enabled effect. Later changes stay owned
-  // by the same reading window, and are only projected back into this Region for restoration.
-  const initialRange = useRef<{ regionId: string; desired: string | null; applied: boolean } | null>(null)
-  useLayoutEffect(() => {
-    if (!visible || initialRange.current?.regionId === surface.regionId) return
-    initialRange.current = { regionId: surface.regionId, desired: surface.history?.reference ?? null, applied: false }
-    if (surface.history && history.reference !== surface.history.reference) history.selectReference(surface.history.reference)
-  }, [visible, surface.regionId, surface.history?.reference, history.selectReference])
+  const history = shared?.history
+  useGitHistoryReader(shared, surface.regionId, workspace, 'repository', visible, surface.history?.reference ?? null)
   useEffect(() => {
-    const initial = initialRange.current
-    if (!history.result && !history.error || !visible || initial?.regionId !== surface.regionId || !initial.applied && history.reference !== initial.desired) return
-    initial.applied = true
-    selectReference(surface.regionId, history.reference)
-  }, [visible, surface.regionId, history.reference, history.result, history.error, selectReference])
-  const ready = history.result?.kind === 'ready' ? history.result : null
-  const foreign = Boolean(ready && (ready.snapshot.hostId !== surface.scope.hostId || ready.snapshot.repoPath !== surface.scope.repoPath))
-  const focusOid = surface.history?.focusOid
-  const found = Boolean(focusOid && ready?.commits.some(commit => commit.oid === focusOid))
-  return <section className="git-workbench" data-git-workbench-region={surface.regionId} aria-label="Git repository history">
+    if (history?.repository?.hostId === surface.scope.hostId && history.repository.repoPath === surface.scope.repoPath) {
+      selectReference(surface.regionId, history.reference)
+    }
+  }, [history?.repository?.hostId, history?.repository?.repoPath, history?.reference, surface.regionId, surface.scope.hostId, surface.scope.repoPath, selectReference])
+  return <section className="git-workbench" data-git-workbench-region={surface.regionId} aria-label="Git repository review">
     <Header surface={surface} workspace={workspace}>
-      <button className="small-button" aria-label="Move history to sidebar" onClick={() => showDetails(surface.regionId)}><ThemeLayoutCloseLeftIcon size={13} /><span>To sidebar</span></button>
+      <button className="small-button" aria-label="View repository history" onClick={() => openHistory(workspace.id, surface.scope, history ? history.reference : surface.history?.reference)}><ThemeObjectHistoryIcon size={13} /><span>History</span></button>
+      {surface.selection && <button className="small-button" aria-label="Locate commit in history" onClick={() => openHistory(workspace.id, surface.scope, history ? history.reference : surface.history?.reference, { ...surface.scope, ...surface.selection! })}>Locate in history</button>}
     </Header>
-    {focusOid && !found && <div className="git-workbench__locating" role="status">
-      <span>{foreign ? 'The repository changed; the saved commit is retained.' : history.error ? 'Locating paused. Retry history to continue.' : ready && !ready.nextCursor ? 'This commit is outside the current history range.' : 'This commit has not been loaded in the current range.'}</span>
-      {!foreign && ready?.nextCursor && <button className="small-button" disabled={history.loading} onClick={() => void history.loadMore()}>Read next history page</button>}
-    </div>}
-    <div className="git-workbench__body">
-      <aside className="git-workbench__history" aria-label="Repository history">
-        {foreign ? <div className="git-history-error" role="alert"><span>The repository changed. The saved scope and commit are retained.</span><button onClick={() => void history.refresh()}>Retry history</button></div>
-          : <GitHistoryPanel workspace={workspace} history={history} onSelectCommit={select} viewportState={viewportState}
-            {...(surface.selection ? { selectedOid: surface.selection.commitOid } : {})} {...(found && focusOid ? { revealOid: focusOid } : {})} />}
-      </aside>
-      <CommitReview {...props} />
-    </div>
+    <CommitReview {...props} />
   </section>
 }
 function CommitReview({ surface, workspace, visible, released }: ViewProps) {

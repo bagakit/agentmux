@@ -106,7 +106,7 @@ import { clampFocusTimelineHeight, FOCUS_TIMELINE_HEIGHT_DEFAULT } from './lib/f
 import { clampFocusTimelineNameWidth, FOCUS_TIMELINE_NAME_WIDTH_DEFAULT } from './lib/focus-timeline-name-width'
 import { DEFAULT_FOCUS_RULER, restoreFocusRuler, sameFocusRuler, type FocusRulerPreferences } from './lib/focus-timeline-ruler'
 import { readTerminalViewObservation } from './lib/terminal-view-observation'
-import type { GitDiffDescriptor, GitCommitSnapshot } from '../../shared/git-contracts'
+import type { GitDiffDescriptor, GitCommitSnapshot, GitHistoryResult, GitCommitDetailsResult } from '../../shared/git-contracts'
 import { confirmedSteerDelivery, reconcileDeliveredSteers } from './lib/steer-queue-delivery'
 import { browserOperatorForSession } from './lib/browser-operator-identity'
 import { clampProjectRailWidth, PROJECT_RAIL_DEFAULT_WIDTH } from './lib/project-rail-width'
@@ -1201,7 +1201,6 @@ type AppState = {
   openGitWorkbench(workspaceId: string, snapshot: GitCommitSnapshot): { tabId: string; regionId: string }
   openGitHistory(workspaceId: string, scope: Pick<GitCommitSnapshot, 'hostId' | 'repoPath'>, reference?: string | null, locate?: GitCommitSnapshot): { tabId: string; regionId: string }
   selectGitHistoryReference(regionId: string, reference: string | null): void
-  showGitCommitDetails(regionId: string): void
   selectGitFile(regionId: string, file: { path: string; origPath: string | null } | null): void
   selectGitCommit(regionId: string, snapshot: GitCommitSnapshot): void
   loadBranchDiff(regionId: string): Promise<void>
@@ -4357,6 +4356,16 @@ export function fileNavigationSelection(state: AppState): string {
     state.agentFocus.execution.sessionId, state.agentFocus.execution.reference, state.agentFocus.pmo.sessionId, state.workbenchSpaceSelection, state.surveyZoneSelection])
 }
 
+function gitNavigationTarget(state: AppState) {
+  if (state.mainSurface !== 'workbench') return null
+  const reference = mainRegionReference(state.workbenchSpaceSelection)
+  const layout = state.activeWorkspaceId ? state.layouts[state.activeWorkspaceId] : undefined
+  const tabId = reference?.tabId ?? (layout ? findGroup(layout, layout.activeGroupId)?.activeTabId : undefined)
+  const tab = tabId ? state.tabs[tabId] : undefined
+  const surface = tab?.regions[reference?.regionId ?? tab.layout.activeRegionId]
+  return surface?.kind === 'git' ? surface : null
+}
+
 async function openGoalPmo(demandId: string, prompt?: string, userRequest?: string, options?: { creationOperationId?: string | undefined; onReceipt?: ((receipt: GoalPmoReceipt) => void) | undefined }): Promise<string> {
   const get = useAppStore.getState
   const set = useAppStore.setState
@@ -5505,10 +5514,28 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       const lookup = gitBridge()
       if (!lookup.available) throw Object.assign(new Error(lookup.reason), { code: 'CONTROL_FAILED' })
-      const details = request.oid === undefined
-        ? await lookup.bridge.history(request.workspaceId, { limit: 1 })
-        : await lookup.bridge.commitDetails(request.workspaceId, { oid: request.oid,
-            ...(request.parentOid ? { parentOid: request.parentOid } : {}) })
+      const navigation = get()
+      const originalNavigation = fileNavigationSelection(navigation)
+      const originalGitTarget = gitNavigationTarget(navigation)
+      let navigationChanged = false
+      const stopObservingNavigation = useAppStore.subscribe(next => {
+        if (navigationChanged) return
+        if (next.workspaceTool !== navigation.workspaceTool || next.workspaceGitView !== navigation.workspaceGitView || next.toolsOpen !== navigation.toolsOpen) {
+          navigationChanged = true
+        } else if (next.mainSurface !== navigation.mainSurface || next.activeWorkspaceId !== navigation.activeWorkspaceId ||
+          next.layouts !== navigation.layouts || next.tabs !== navigation.tabs || next.workbenchSpaceSelection !== navigation.workbenchSpaceSelection ||
+          next.agentFocus !== navigation.agentFocus || next.surveyZoneSelection !== navigation.surveyZoneSelection ||
+          next.recallNotebookId !== navigation.recallNotebookId || next.recallNoteId !== navigation.recallNoteId || next.recallZoneSelection !== navigation.recallZoneSelection) {
+          navigationChanged = fileNavigationSelection(next) !== originalNavigation || gitNavigationTarget(next) !== originalGitTarget
+        }
+      })
+      let details: GitHistoryResult | GitCommitDetailsResult
+      try {
+        details = request.oid === undefined
+          ? await lookup.bridge.history(request.workspaceId, { limit: 1 })
+          : await lookup.bridge.commitDetails(request.workspaceId, { oid: request.oid,
+              ...(request.parentOid ? { parentOid: request.parentOid } : {}) })
+      } finally { stopObservingNavigation() }
       if (signal?.aborted) throw Object.assign(new Error('The Git open request was cancelled; the original workface is retained.'), { code: 'CONTROL_CANCELLED' })
       const current = get().config?.workspaces.find(workspace => workspace.id === request.workspaceId)
       if (!current || current.hostId !== original!.hostId || current.path !== original!.path) refuse('The Git workspace resource changed while reading.')
@@ -5519,6 +5546,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         : details.snapshot as GitCommitSnapshot
       if (request.oid !== undefined && (!('commitOid' in snapshot) || snapshot.commitOid !== request.oid ||
           request.parentOid !== undefined && snapshot.parentOid !== request.parentOid)) refuse('The Git owner returned a different immutable commit target.')
+      if (navigationChanged) throw Object.assign(new Error('Git was read, but later navigation replaced this presentation request. The current workface is retained; open the original Git target again when ready.'), { code: 'CONTROL_CANCELLED' })
       const presentation = request.oid === undefined ? get().openGitHistory(request.workspaceId, snapshot)
         : get().openGitWorkbench(request.workspaceId, snapshot as GitCommitSnapshot)
       await saveWorkbenchSelection(true)
@@ -7258,7 +7286,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     return openGitReading(workspaceId, { kind: 'commit', snapshot })
   },
   openGitHistory(workspaceId, scope, reference, locate) {
-    return openGitReading(workspaceId, { kind: 'history', scope, ...(reference !== undefined ? { reference } : {}), ...(locate ? { locate } : {}) })
+    const opened = openGitReading(workspaceId, { kind: 'history', scope, ...(reference !== undefined ? { reference } : {}), ...(locate ? { locate } : {}) })
+    set({ workspaceTool: 'git', workspaceGitView: 'history', toolsOpen: true })
+    return opened
   },
   selectGitHistoryReference(regionId, reference) {
     const found = findWorkbenchRegion(get().tabs, regionId)
@@ -7266,12 +7296,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const { tab, surface } = found
     set(current => ({ tabs: { ...current.tabs, [tab.id]: { ...tab, regions: { ...tab.regions,
       [regionId]: { ...surface, history: { ...surface.history!, reference } } } } } }))
-  },
-  showGitCommitDetails(regionId) {
-    const found = findWorkbenchRegion(get().tabs, regionId)
-    if (found?.surface.kind !== 'git' || !found.surface.history) return
-    const { tab, surface } = found, { history: _history, ...details } = surface
-    set(current => ({ tabs: { ...current.tabs, [tab.id]: { ...tab, regions: { ...tab.regions, [regionId]: details } } } }))
   },
   selectGitFile(regionId, file) {
     const found = findWorkbenchRegion(get().tabs, regionId)
