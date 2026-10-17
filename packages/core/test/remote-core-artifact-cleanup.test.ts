@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath } from './helpers/fixture-values.js'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
@@ -56,23 +57,23 @@ async function fixture() {
   await put(join(packageRoot, 'vendor', 'ctxmux', 'linux-x64', 'bin', 'ctxmuxd'), native)
   const contractPath = join(packageRoot, 'dist', 'ctxmux-artifact-contract.json')
   const contract = { protocol: 1, manifests: { 'linux-x64': sha(manifestBytes) }, sources: { 'linux-x64': manifest.source } }
+  await put(join(packageRoot, 'src', 'ctxmux-artifact-contract.json'), JSON.stringify(contract))
   await put(contractPath, JSON.stringify({ ...contract, protocol: 999 }))
   const retainedHost = { ...host, id: 'retained-host', hostname: 'retained.invalid', runtimeId: 'retained-runtime' }
   const markers = {
     [join(stateDirectory, 'candidate-existing', 'retained.txt')]: 'original-state\n',
     [join(stateDirectory, 'unrelated', 'retained.txt')]: 'original-state\n',
     [join(stateDirectory, 'operations', 'retained-operation.json')]: JSON.stringify({ receipt: {
-      input: retainedHost, operationId: 'retained-operation', status: 'completed', stage: 'completed', updatedAt: 1, detail: 'Original completed update',
+      input: retainedHost, operationId: 'retained-operation', status: 'completed', stage: 'completed', updatedAt: _tailFixtureEpoch(0, 0, 1), detail: 'Original completed update',
       expected: { targetDigest: remoteCoreUpgradeTargetDigest(retainedHost), runtimeId: 'retained-runtime', ownerInstanceId: 'retained-owner',
         processId: 101, startTicks: '1', candidateDigest: 'retained-digest', nativeInstanceId: 'retained-native', nativeProcessId: 102, nativeStartTicks: '2' }
     } })
   }
   for (const [path, text] of Object.entries(markers)) await put(path, text)
-  const maintenance = vi.fn(async () => { throw new Error('Private remote observation unavailable') })
   const executionHost = vi.fn(() => { throw new Error('No private remote process may be started') })
-  const manager = new RemoteCoreUpgradeManager({ stateDirectory, packageRoot, maintenance, executionHost })
+  const manager = new RemoteCoreUpgradeManager({ stateDirectory, packageRoot, executionHost })
   vi.mocked(rm).mockClear(); vi.mocked(mkdtemp).mockClear()
-  return { root, packageRoot, stateDirectory, contractPath, contract, markers, manager, maintenance, executionHost }
+  return { root, packageRoot, stateDirectory, contractPath, contract, markers, manager, executionHost }
 }
 async function preserved(markers: Record<string, string>) {
   for (const [path, text] of Object.entries(markers)) expect(await readFile(path, 'utf8')).toBe(text)
@@ -88,13 +89,15 @@ it('removes only actual partial candidates across explicit failures, then retain
     await expect(readFile(join(partials[attempt].directory, 'core', 'dist', 'agentmux.js'))).rejects.toMatchObject({ code: 'ENOENT' })
     expect(await readdir(f.stateDirectory)).toEqual(expect.arrayContaining(['candidate-existing', 'operations', 'unrelated']))
     expect((await readdir(f.stateDirectory)).filter(name => name.startsWith('candidate-'))).toEqual(['candidate-existing'])
-    expect(f.maintenance).not.toHaveBeenCalled(); expect(f.executionHost).not.toHaveBeenCalled()
+    expect(f.executionHost).not.toHaveBeenCalled()
     await preserved(f.markers)
   }
   expect(partials[0].directory).not.toBe(partials[1].directory)
   await writeFile(f.contractPath, JSON.stringify(f.contract))
   const check = await f.manager.check(host)
-  expect(check).toMatchObject({ eligible: false, reason: 'unverified', detail: 'Private remote observation unavailable',
+  expect(f.executionHost).toHaveBeenCalledTimes(1)
+  expect(f.executionHost).toHaveBeenNthCalledWith(1, host)
+  expect(check).toMatchObject({ eligible: false, reason: 'unverified', detail: 'No private remote process may be started',
     candidate: { sourceCommit: 'private-source', protocolVersion: 1 } })
   const successful = (await readdir(f.stateDirectory)).filter(name => name.startsWith('candidate-') && name !== 'candidate-existing')
   expect(successful).toHaveLength(1)
@@ -104,7 +107,9 @@ it('removes only actual partial candidates across explicit failures, then retain
   expect(vi.mocked(createPortableCoreArtifact)).toHaveBeenCalledTimes(3)
   expect(vi.mocked(mkdtemp)).toHaveBeenCalledTimes(3)
   expect(vi.mocked(rm).mock.calls.map(([path]) => path)).toEqual(partials.map(value => value.directory))
-  expect(f.executionHost).not.toHaveBeenCalled()
+  expect(f.executionHost).toHaveBeenCalledTimes(2)
+  expect(f.executionHost).toHaveBeenNthCalledWith(1, host)
+  expect(f.executionHost).toHaveBeenNthCalledWith(2, host)
   await preserved(f.markers)
 })
 
@@ -114,7 +119,7 @@ it('never cleans a directory when exclusive child creation failed', async () => 
   await expect(f.manager.check(host)).rejects.toBe(error)
   expect(vi.mocked(rm)).not.toHaveBeenCalled()
   expect(vi.mocked(createPortableCoreArtifact)).not.toHaveBeenCalled()
-  expect(f.maintenance).not.toHaveBeenCalled(); expect(f.executionHost).not.toHaveBeenCalled()
+  expect(f.executionHost).not.toHaveBeenCalled()
   await preserved(f.markers)
 })
 
@@ -136,7 +141,7 @@ it('reports assembly and cleanup failure together through the existing RPC error
     assembly: { code: 'CORE_ARTIFACT_UNAVAILABLE', message: (partials[0].error as Error).message },
     cleanup: { message: 'private cleanup denied' } })
   expect(await readFile(join(partials[0].directory, 'core', 'dist', 'agentmux.js'), 'utf8')).toBe(runtime)
-  expect(f.maintenance).not.toHaveBeenCalled(); expect(f.executionHost).not.toHaveBeenCalled()
+  expect(f.executionHost).not.toHaveBeenCalled()
   await preserved(f.markers)
 })
 
@@ -144,11 +149,11 @@ it('leaves externally supplied artifact paths and their failures with the caller
   const f = await fixture(), external = join(f.root, 'external-artifact', 'retained.txt')
   await put(external, 'original-state\n')
   const error = new Error('external assembly failed'), artifact = vi.fn(async () => { throw error })
-  const manager = new RemoteCoreUpgradeManager({ stateDirectory: f.stateDirectory, artifact, maintenance: f.maintenance })
+  const manager = new RemoteCoreUpgradeManager({ stateDirectory: f.stateDirectory, artifact, executionHost: f.executionHost })
   await expect(manager.check(host)).rejects.toBe(error)
   await expect(manager.check(host)).rejects.toBe(error)
   expect(artifact).toHaveBeenCalledTimes(2)
   expect(vi.mocked(mkdtemp)).not.toHaveBeenCalled(); expect(vi.mocked(rm)).not.toHaveBeenCalled()
-  expect(vi.mocked(createPortableCoreArtifact)).not.toHaveBeenCalled(); expect(f.maintenance).not.toHaveBeenCalled()
+  expect(vi.mocked(createPortableCoreArtifact)).not.toHaveBeenCalled(); expect(f.executionHost).not.toHaveBeenCalled()
   await preserved({ ...f.markers, [external]: 'original-state\n' })
 })
