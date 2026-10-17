@@ -204,6 +204,7 @@ it('keeps the three message paths distinct from Automation and retains its unsav
   await click(panel().querySelector('[id$="-agents-tab"]'))
   expect(labels()).toEqual(['Inputs', 'Agent messages', 'Notices', 'Received', 'Sent', 'Collaboration'])
   await click(panel().querySelector('[id$="-outbox-tab"]'))
+  expect(panel().querySelector('[aria-label="Automation"] > svg')?.getAttribute('data-semantic-icon')).toBe('object.automation')
   await click(panel().querySelector('[aria-label="Automation"]'))
   expect(panel().querySelector('[role="tablist"]')).toBeNull()
   expect(panel().textContent).toContain('Calendar source unavailable')
@@ -223,6 +224,31 @@ it('keeps the three message paths distinct from Automation and retains its unsav
   expect(observer).toHaveBeenCalledTimes(count)
   expect(create).not.toHaveBeenCalled(); expect(action).not.toHaveBeenCalled()
   expect(dom.draft()).toBe('Keep my draft')
+})
+
+it('keeps the static Automation object distinct from its observed progress status', async () => {
+  const observer = vi.spyOn(api.continuousProgress, 'onChanged').mockReturnValue(() => {})
+  vi.spyOn(api.schedule, 'list').mockResolvedValue({ schedules: [], executionScope: 'connected-host' })
+  await open()
+  const entry = panel().querySelector<HTMLButtonElement>('[aria-label="Automation"]')!
+  const icon = entry.querySelector('svg')!
+  expect(icon.getAttribute('data-semantic-icon')).toBe('object.automation')
+  expect(icon.getAttribute('width')).toBe('14'); expect(icon.getAttribute('height')).toBe('14')
+  expect(icon.getAttribute('aria-hidden')).toBe('true'); expect(entry.querySelector('[data-icon-animation]')).toBeNull()
+  const status = document.getElementById(entry.getAttribute('aria-describedby')!)!
+  expect(status.textContent).toBe('Not enabled')
+  for (const [state, semantic, label] of [['active', 'action.repeat', 'Running'], ['paused', 'action.pause', 'Paused'], ['unconfirmed', 'status.unknown', 'Status unknown']] as const) {
+    await act(async () => observer.mock.calls.at(-1)![0]({ loopId: 'observed-loop', hostId: session.hostId, agentSessionId: session.id,
+      providerId: session.providerId, workspacePath: session.workspacePath, intervalMs: 60_000, prompt: 'Keep the original task.', nextCheckAt: 60_000,
+      status: state === 'active' ? 'active' : 'paused', ...(state === 'unconfirmed' ? { lastOutcome: 'unknown' as const } : {}) }))
+    await flush()
+    expect(entry.querySelector('svg')).toBe(icon)
+    expect(status.textContent).toBe(label); expect(status.getAttribute('data-status')).toBe(state)
+    const progress = dom.container.querySelector('.composer__mailbox .composer-mailbox__progress')!
+    expect(progress.getAttribute('data-semantic-icon')).toBe(semantic)
+    expect(progress.getAttribute('width')).toBe('10'); expect(progress.getAttribute('height')).toBe('10')
+  }
+  expect(dom.draft()).toBe('Keep my draft'); expect(api.sessions.submitPrompt).not.toHaveBeenCalled()
 })
 
 it('stops the calendar display clock when Automation is hidden while retaining both unsaved forms', async () => {
