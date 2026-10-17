@@ -21,7 +21,7 @@ const requestLabels: Record<string, string> = { 'not-dispatched': 'Not sent', cl
 const storageLabels: Record<string, string> = { 'not-started': 'Not started', storing: 'Saving', stored: 'Saved', unknown: 'Unconfirmed' }
 
 /** A disposable reader of the exact public journal. Opening never advances the original operation. */
-export function ConnectionRequestTrace({ source, revision }: { source: ConnectionTraceSource | null; revision?: number | string | undefined }) {
+export function ConnectionRequestTrace({ source, revision, title = 'Request trace' }: { source: ConnectionTraceSource | null; revision?: number | string | undefined; title?: string | undefined }) {
   const key = source ? JSON.stringify([source.kind, source.operationId]) : ''
   const [open, setOpen] = useState(false), [reading, setReading] = useState<{ key: string; page: RequestTracePage | null; issue: string; busy: boolean }>({ key, page: null, issue: '', busy: false })
   const [copied, setCopied] = useState(''), epoch = useRef(0)
@@ -45,7 +45,7 @@ export function ConnectionRequestTrace({ source, revision }: { source: Connectio
   useEffect(() => { setCopied(''); if (open && source) void load(); return () => { epoch.current++ } }, [key, open, revision])
   const page = visible?.page
   return <details className="connector-request-trace" data-request-trace open={open} onToggle={event => setOpen(event.currentTarget.open)}>
-    <summary><strong>Request trace</strong><span>{visible?.busy ? 'Reading…' : page ? page.entries.length + (page.next ? '+' : '') + ' steps' : source ? 'Original request' : 'No request yet'}</span></summary>
+    <summary><strong>{title}</strong><span>{visible?.busy ? 'Reading…' : page ? page.entries.length + (page.next ? '+' : '') + ' steps' : source ? 'Original request' : 'No request yet'}</span></summary>
     <div className="connector-request-trace__body">
       <p>Original operation-step receipts. HTTP request details were not recorded. No cookies, secrets, sign-in codes or account details are included.</p>
       {source ? <><div className="connector-request-trace__actions"><button className="small-button" disabled={visible?.busy} onClick={() => void load()}>Refresh trace</button><button className="small-button" disabled={!page} onClick={async () => { try { await api.ui.writeClipboardText(JSON.stringify({ operationId: page!.operationId, entries: page!.entries, next: page!.next }, null, 2)); setCopied('Sanitized trace copied.') } catch { setCopied('Could not copy. The original trace remains available here.') } }}>Copy diagnosis</button></div><p className="connector-request-trace__feedback" role="status">{visible?.issue || copied}</p>

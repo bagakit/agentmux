@@ -18,6 +18,7 @@ import { topicPublicCopy } from '../../../shared/scratch-topics'
 import { api } from './api'
 import { retainMoteBotRequest, useAppStore } from '../store'
 import type { MoteBotRequest } from './mote-bot-request'
+import { initialBotPublication } from './bot-creation-preset'
 
 export type SavedMoteBotProfile = {
   name: string
@@ -74,6 +75,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
   const identity = JSON.stringify(target),
     historySource = JSON.stringify([identity, topicId]),
     lifetime = useRef(0),
+    enrollmentRead = useRef(0),
     occurrences = useRef(new Map<string, number>())
   const writing = useRef(new Set<string>()),
     draft = useRef(0),
@@ -89,6 +91,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
   const [loading, setLoading] = useState(false),
     [historyRead, setHistoryRead] = useState<string | null>(null),
     [driving, setDriving] = useState(false)
+  const [progressIssue, setProgressIssue] = useState<{ id: string; text: string } | null>(null)
   const [enrollmentView, setEnrollmentView] = useState<{
     parentId: string
     value: ConnectionEnrollmentView
@@ -228,11 +231,12 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
       if (token === lifetime.current && order === occurrences.current.get(id)) {
         accept(result)
         if (result.enrollmentOperationId) {
+          const observation = ++enrollmentRead.current
           const view = await api.connections.call('connection.enrollment.inspect', {
             operationId: result.enrollmentOperationId
           })
           if (token === lifetime.current && order === occurrences.current.get(id) && selection.current === id) {
-            setEnrollmentView({ parentId: id, value: view })
+            if (observation === enrollmentRead.current) setEnrollmentView({ parentId: id, value: view })
             setDriving(request.action === 'create' && result.issue !== 'child-unconfirmed' &&
               view.actions.some(action => action.kind === 'continue-authentication'))
           }
@@ -279,6 +283,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
           adapterId: capability.adapterId,
           domain: capability.domain,
           avatar: includeAvatar ? 'include-saved' : 'omit',
+          initialPublication: initialBotPublication,
           ...(name === undefined ? {} : { name: name.trim() })
         }
       })
@@ -337,11 +342,12 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
       if (token === lifetime.current && order === occurrences.current.get(id)) {
         if (operation) accept(operation)
         if (operation?.enrollmentOperationId) {
+          const observation = ++enrollmentRead.current
           const view = await api.connections.call('connection.enrollment.inspect', {
             operationId: operation.enrollmentOperationId
           })
           if (token === lifetime.current && order === occurrences.current.get(id) && selection.current === id) {
-            setEnrollmentView({ parentId: id, value: view })
+            if (observation === enrollmentRead.current) setEnrollmentView({ parentId: id, value: view })
             setDriving(advance && !!action && ['continue-authentication', 'renew-authentication'].includes(action.kind) &&
               operation.issue !== 'child-unconfirmed' &&
               view.actions.some(item => item.kind === 'continue-authentication'))
@@ -372,6 +378,25 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     }, view.challenge ? Math.max(0, view.challenge.nextPollAt - Date.now()) : 0)
     return () => clearTimeout(timer)
   }, [driving, selectedId, busy, enrollmentView])
+  const selectedOperation = operations.find(item => item.operationId === selectedId) ?? null
+  const observing = !!selectedId && busy.includes(selectedId) && selectedOperation?.enrollment?.authentication?.stage === 'confirmed', childId = selectedOperation?.enrollmentOperationId
+  useEffect(() => {
+    if (!observing || !selectedId || !childId) { setProgressIssue(null); return }
+    let current = true, timer: ReturnType<typeof setTimeout>
+    const token = lifetime.current, parentId = selectedId
+    async function observe() {
+      try {
+        const observation = ++enrollmentRead.current
+        const value = await api.connections.call('connection.enrollment.inspect', { operationId: childId! })
+        if (observation === enrollmentRead.current && current && token === lifetime.current && selection.current === parentId && writing.current.has(parentId)) { setEnrollmentView({ parentId, value }); setProgressIssue(null) }
+      } catch {
+        if (current && token === lifetime.current && selection.current === parentId && writing.current.has(parentId)) setProgressIssue({ id: parentId, text: 'The request is still pending here. Its latest progress could not be read; earlier results are kept.' })
+      }
+      if (current) timer = setTimeout(() => void observe(), 1000)
+    }
+    void observe()
+    return () => { current = false; clearTimeout(timer) }
+  }, [observing, selectedId, childId])
   return {
     profile,
     capabilities,
@@ -379,13 +404,14 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     requests,
     selectedId,
     enrollmentView: enrollmentView?.parentId === selectedId ? enrollmentView.value : null,
-    operation: operations.find((item) => item.operationId === selectedId) ?? null,
+    operation: selectedOperation,
     issue: message.text,
     issueKind: message.kind,
     busy,
     loading,
     historyReady: historyRead === historySource,
     driving,
+    progressIssue: progressIssue?.id === selectedId ? progressIssue.text : '',
     next,
     list,
     refreshSource,

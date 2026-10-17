@@ -18,9 +18,10 @@ import { api } from '../../lib/api'
 import { SelectionField } from '../SelectionField'
 import { ConnectionSetupResult } from './ConnectionSetupResult'
 import { BrandIcon } from '../BrandIcon'
-import { desktopBotCreationPreset, generatedBotName } from '../../lib/bot-creation-preset'
+import { desktopBotCreationPreset, generatedBotName, initialBotPublication } from '../../lib/bot-creation-preset'
 import { ConnectionRequestTrace } from './ConnectionRequestTrace'
 import { BotSetupGuide, type BotSetupGuideStage } from './BotSetupGuide'
+import { InitialBotSetupResult, initialSetupStageLabels } from './InitialBotSetupResult'
 
 const BotIcon = semanticIconComponent('object.conversations')
 const BackIcon = semanticIconComponent('navigation.back')
@@ -45,7 +46,8 @@ const actionLabel: Record<ConnectionEnrollmentActionKind, string> = {
   'renew-authentication': 'Get a new sign-in code',
   create: 'Create this bot',
   'read-credential': 'Read this application’s credential',
-  'recover-local': 'Check saved progress'
+  'recover-local': 'Check saved progress',
+  'continue-setup': 'Continue original setup'
 }
 
 /** A bounded reading window. The Host owns every durable attempt and its recovery. */
@@ -58,6 +60,7 @@ export function useBotEnrollment(active: boolean) {
   const [capabilities, setCapabilities] = useState<ConnectionEnrollmentCapability[]>([])
   const [next, setNext] = useState<string | null>(null)
   const [catalogState, setCatalogState] = useState<'initial' | 'reading' | 'ready' | 'unconfirmed'>('initial')
+  const [progressIssue, setProgressIssue] = useState<{ id: string; text: string } | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [issuer, setIssuer] = useState(''),
     [label, setLabel] = useState(generatedBotName)
@@ -72,6 +75,7 @@ export function useBotEnrollment(active: boolean) {
   const [pendingWrites, setPendingWrites] = useState<string[]>([])
   const selection = useRef<string | null>(null),
     selectionEpoch = useRef(0)
+  const observationEpoch = useRef(0)
   const epoch = useRef(0),
     listRead = useRef(0),
     writing = useRef(new Set<string>()),
@@ -143,8 +147,7 @@ export function useBotEnrollment(active: boolean) {
       selection.current === id &&
       occurrence === selectionEpoch.current &&
       (!observed || observed.revision === value.operation?.revision)
-    )
-      setPrivateView(value)
+    ) { observationEpoch.current++; setPrivateView(value) }
     return observed
   }
   const begin = async (issuer: ConnectionEnrollmentCapability, label: string, preset?: ConnectionEnrollmentPreset) => {
@@ -160,7 +163,7 @@ export function useBotEnrollment(active: boolean) {
     try {
       const frozen = preset ?? await desktopBotCreationPreset(name)
       if (current !== epoch.current || intent !== draft.current) return
-      input = { operationId: crypto.randomUUID(), connectionId: crypto.randomUUID(), adapterId: issuer.adapterId, domain: issuer.domain, label: name, preset: frozen }
+      input = { operationId: crypto.randomUUID(), connectionId: crypto.randomUUID(), adapterId: issuer.adapterId, domain: issuer.domain, label: name, preset: frozen, initialPublication: initialBotPublication }
       occurrence = ++selectionEpoch.current
       currentInput.current = input
       startWrite(input.operationId)
@@ -257,6 +260,26 @@ export function useBotEnrollment(active: boolean) {
       ? privateView
       : null
   useEffect(() => {
+    if (!active || !busy || !selectedId) { setProgressIssue(null); return }
+    let current = true, timer: ReturnType<typeof setTimeout>
+    const id = selectedId, token = epoch.current
+    async function observe() {
+      try {
+        const observation = ++observationEpoch.current
+        const value = await api.connections.call('connection.enrollment.inspect', { operationId: id })
+        if (observation === observationEpoch.current && current && token === epoch.current && selection.current === id && writing.current.has(id)) {
+          if (value.operation) { accept(value.operation); setPrivateView(value); setProgressIssue(null) }
+          else setProgressIssue({ id, text: 'The original request is pending here, but its progress is not available yet. Earlier results are kept.' })
+        }
+      } catch {
+        if (current && token === epoch.current && selection.current === id && writing.current.has(id)) setProgressIssue({ id, text: 'The request is still pending here. Its latest progress could not be read; earlier results are kept.' })
+      }
+      if (current) timer = setTimeout(() => void observe(), 1000)
+    }
+    void observe()
+    return () => { current = false; clearTimeout(timer) }
+  }, [active, busy, selectedId])
+  useEffect(() => {
     if (!active || !driving || busy || !view) return
     const action = view.actions.find(item => item.kind === 'continue-authentication')
     if (!action) return
@@ -311,7 +334,8 @@ export function useBotEnrollment(active: boolean) {
       setLabel(generatedBotName())
       setIssue('')
     },
-    operation: selectedOperation
+    progressIssue: progressIssue?.id === selectedId ? progressIssue.text : '',
+    operation: view?.operation ?? selectedOperation
   }
 }
 
@@ -338,6 +362,7 @@ const diagnosticCopy: Record<ConnectionEnrollmentDiagnostic['code'], string> = {
 }
 
 function setupHeading(operation: ConnectionEnrollmentOperation | null, view: ConnectionEnrollmentView | null, started: boolean, preparing: boolean, platform: string, busy: boolean) {
+  if (operation?.configured && operation.initialPublication && operation.initialSetup?.progress?.state !== 'complete') return { title: operation.initialSetup?.progress?.state === 'approval-required' ? 'Waiting for platform approval' : operation.initialSetup?.progress?.state === 'attention' ? 'Check the original configuration' : 'Configuring your bot', summary: 'Your bot is saved. Configuration and first publication continue on this same application.' }
   if (operation?.configured) return { title: 'Bot saved in AgentMux', summary: 'Check its connection here, then choose a group from your Agent’s menu.' }
   if (preparing && !operation) return { title: 'Getting your sign-in code', summary: 'Preparing this bot’s image and requesting a sign-in code. You can leave and return to this setup.' }
   if (!started) return { title: 'Create a bot for your Agents', summary: 'Sign in, check the account and enterprise, then create your bot here.' }
@@ -369,7 +394,7 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved, onContinue 
   const unfinished = submitted && !enrollment.operations.find(item => item.operationId === submitted.operationId)?.configured
   const history = enrollment.operations.map(item => ({ operationId: item.operationId, label: item.label, domain: item.domain }))
   for (const input of enrollment.submissions) if (!history.some(item => item.operationId === input.operationId)) history.unshift(input)
-  const order: ConnectionEnrollmentActionKind[] = ['confirm-account', 'create', 'read-credential', 'continue-authentication', 'renew-authentication', 'recover-local']
+  const order: ConnectionEnrollmentActionKind[] = ['continue-setup', 'confirm-account', 'create', 'read-credential', 'continue-authentication', 'renew-authentication', 'recover-local']
   const recover = view?.actions.find(action => action.kind === 'recover-local')
   const primary = (['secure-storage', 'journal'].includes(operation?.diagnostic?.stage ?? '') && !view?.actions.some(action => action.kind === 'read-credential') ? recover : undefined)
     ?? order.map(kind => view?.actions.find(action => action.kind === kind)).find(Boolean)
@@ -377,7 +402,8 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved, onContinue 
   const renew = view?.actions.find(action => action.kind === 'renew-authentication' && action.actionId !== primary?.actionId)
   const stage = saved ? 'saved' : operation?.application ? 'saving' : operation?.authentication?.stage ?? (current ? 'original' : 'start')
   const creationUnconfirmed = operation?.creation && [operation.creation.upload, operation.creation.create].some(state => state === 'unknown' || state === 'dispatching')
-  const guideStage: BotSetupGuideStage = saved ? 'ready'
+  const initialSetup = operation?.initialSetup, initialProgress = initialSetup?.progress
+  const guideStage: BotSetupGuideStage = saved ? operation?.initialPublication && initialProgress?.state !== 'complete' ? initialProgress?.state === 'attention' ? 'attention' : 'connect' : 'ready'
     : operation?.application ? 'connect'
     : creationUnconfirmed ? 'attention'
     : enrollment.preparing ? 'scan'
@@ -394,11 +420,11 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved, onContinue 
   </div>
   return <section className="connector-setup connector-enrollment" data-bot-enrollment data-enrollment-operation={selectedId ?? undefined} data-enrollment-stage={stage}>
     {current ? <button className="connector-back connector-enrollment__text-action" onClick={() => { enrollment.select(null); void enrollment.read() }}><BackIcon size={13} />All bot setups</button> : null}
-    <BotSetupGuide stage={guideStage} currentStatus={operation?.application && !saved ? 'Created · saving' : undefined} confirmedSteps={[...(current || label.trim() ? [1] : []), ...(operation?.authentication?.stage === 'confirmed' ? [2] : []), ...(operation?.application ? [3] : [])]} currentStep={!current ? 1 : saved ? 4 : operation?.application || creationUnconfirmed || stage === 'confirmed' ? 3 : 2} title={enrollment.preparing ? 'Preparing your sign-in' : undefined} description={saved ? 'Continue with this saved identity. Your original setup is kept here.' : enrollment.preparing ? 'Preparing a sign-in code for this bot. You can return to this same setup.' : stage === 'scanned' ? 'Confirm the sign-in on your phone, then return to this same setup.' : stage === 'handoff' ? 'Your sign-in is being checked. Stay with this original setup.' : guideStage === 'connect' ? 'The bot has been created. Finish saving this same identity securely.' : undefined} />
+    <BotSetupGuide stage={guideStage} currentStatus={initialProgress ? initialProgress.state === 'complete' ? 'Confirmed' : initialSetupStageLabels[initialProgress.stage] : operation?.application && !saved ? 'Created · saving' : undefined} confirmedSteps={[...(current || label.trim() ? [1] : []), ...(operation?.authentication?.stage === 'confirmed' ? [2] : []), ...(operation?.application ? [3] : [])]} currentStep={!current ? 1 : saved ? 4 : operation?.application || creationUnconfirmed || stage === 'confirmed' ? 3 : 2} title={enrollment.preparing ? 'Preparing your sign-in' : undefined} description={saved ? operation?.initialPublication ? 'This bot keeps its original application while configuration and first publication continue.' : 'Continue with this saved identity. Your original setup is kept here.' : enrollment.preparing ? 'Preparing a sign-in code for this bot. You can return to this same setup.' : stage === 'scanned' ? 'Confirm the sign-in on your phone, then return to this same setup.' : stage === 'handoff' ? 'Your sign-in is being checked. Stay with this original setup.' : guideStage === 'connect' ? 'The bot has been created. Finish saving this same identity securely.' : undefined} />
     <header className="connector-enrollment__heading">
       {current ? <p className="connector-enrollment__identity"><strong>{current.label}</strong><span>{platform}</span></p> : null}
       <h3 className="connector-editor-title">{heading.title}</h3>
-      <p className="connector-enrollment__summary">{saved && onContinue ? 'Continue with your saved sign-in. You’ll confirm the management account before reviewing this bot.' : heading.summary}</p>
+      <p className="connector-enrollment__summary">{saved && operation?.initialPublication ? 'Configuration and first publication use this original application and your confirmed account.' : saved && onContinue ? 'Continue with your saved sign-in. You’ll confirm the management account before reviewing this bot.' : heading.summary}</p>
       {operation?.diagnostic ? <p className="connector-enrollment__diagnosis" data-enrollment-diagnosis>{diagnosticCopy[operation.diagnostic.code]}</p> : null}
     </header>
     {!current ? <>
@@ -423,11 +449,14 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved, onContinue 
       {primary?.kind === 'create' ? <div className="connector-enrollment__creation">{identity}<p>Creates one bot, gets its credentials and saves it securely here. Message setup and publishing come next.</p></div> : null}
       {saved ? onContinue ? <details className="connector-optional"><summary>Connection status and checks</summary><ConnectionSetupResult record={saved} /></details> : <ConnectionSetupResult record={saved} /> : null}
       <div className="connector-enrollment__action" aria-busy={!!busy}>
-        {saved ? <>{onContinue ? <button data-enrollment-continue className="primary-button" onClick={() => onContinue(saved)}>Continue bot setup</button> : null}<button data-enrollment-saved className="small-button" onClick={() => onSaved(saved)}>Manage bot</button></> : primary ? <button data-enrollment-advance data-enrollment-action={primary.kind} className="primary-button" disabled={!!busy} onClick={() => void enrollment.advance(primary)}>{busy ? primary.kind === 'create' ? 'Creating your bot…' : 'Checking…' : primary.kind === 'confirm-account' ? 'Use this account' : primary.kind === 'read-credential' ? 'Finish saving this bot' : actionLabel[primary.kind]}</button> : <button data-enrollment-inspect className="primary-button" onClick={() => void enrollment.inspect()}>Check original setup</button>}
-        {enrollment.driving && view && !enrollment.issue ? <p role="status" className="settings-group-note">{view.challenge ? 'Waiting for your phone confirmation…' : 'Continuing this sign-in…'}</p> : null}
+        {saved ? <>{primary?.kind === 'continue-setup' ? <button className="primary-button" disabled={!!busy} onClick={() => void enrollment.advance(primary)}>Continue original setup</button> : null}{onContinue && !operation?.initialPublication ? <button data-enrollment-continue className="primary-button" onClick={() => onContinue(saved)}>Continue bot setup</button> : null}<button data-enrollment-saved className="small-button" onClick={() => onSaved(saved)}>Manage bot</button></> : primary ? <button data-enrollment-advance data-enrollment-action={primary.kind} className="primary-button" disabled={!!busy} onClick={() => void enrollment.advance(primary)}>{busy ? primary.kind === 'create' ? 'Creating your bot…' : 'Checking…' : primary.kind === 'confirm-account' ? 'Use this account' : primary.kind === 'read-credential' ? 'Finish saving this bot' : primary.kind === 'create' && operation?.initialPublication ? 'Create, configure & publish' : actionLabel[primary.kind]}</button> : <button data-enrollment-inspect className="primary-button" onClick={() => void enrollment.inspect()}>Check original setup</button>}
+        {operation?.authentication?.stage === 'confirmed' && !saved && operation.initialPublication ? <p className="settings-group-note">Creates this bot with the chosen public details, configures conversations and publishes its first version for your account only. Platform approval may still be required.</p> : null}
+      {saved && operation?.initialPublication ? <InitialBotSetupResult progress={initialProgress ?? null} /> : null}
+      {enrollment.progressIssue ? <p role="status" className="settings-group-note">{enrollment.progressIssue}</p> : null}
+      {enrollment.driving && view && !enrollment.issue ? <p role="status" className="settings-group-note">{view.challenge ? 'Waiting for your phone confirmation…' : 'Continuing this sign-in…'}</p> : null}
         {feedback}
       </div>
-      {!saved ? <div className="connector-enrollment__alternative"><button data-enrollment-existing className="connector-enrollment__text-action" onClick={onExisting}>Connect an existing bot</button></div> : onContinue ? <div className="connector-next-step"><CheckIcon size={18} /><div><strong>Next, review this bot’s setup</strong><p>Confirm the management account before reviewing its settings. Configuration and publishing are separate steps.</p></div></div> : <div className="connector-next-step"><CheckIcon size={18} /><div><strong>Next, choose an Agent and a group</strong><p>Open an Agent’s menu → Create group or Connect existing group. Choose the audience and what to share there.</p></div></div>}
+      {!saved ? <div className="connector-enrollment__alternative"><button data-enrollment-existing className="connector-enrollment__text-action" onClick={onExisting}>Connect an existing bot</button></div> : onContinue && !operation?.initialPublication ? <div className="connector-next-step"><CheckIcon size={18} /><div><strong>Next, review this bot’s setup</strong><p>Confirm the management account before reviewing its settings. Configuration and publishing are separate steps.</p></div></div> : operation?.initialPublication && initialProgress?.state !== 'complete' ? null : <div className="connector-next-step"><CheckIcon size={18} /><div><strong>Next, choose an Agent and a group</strong><p>Open an Agent’s menu → Create group or Connect existing group. Choose the audience and what to share there.</p></div></div>}
       {renew ? <details className="connector-optional"><summary>Use another sign-in</summary><p className="settings-group-note">Sign in again for this same {operation?.application ? 'bot' : 'setup'}. The original result is kept; signing in does not create a bot.</p><button data-enrollment-renew className="small-button" disabled={!!busy} onClick={() => void enrollment.advance(renew)}>Show a new sign-in code</button></details> : null}
       <details className="connector-diagnostics"><summary>{saved ? 'Original setup details' : 'Technical details'}</summary>
         {enrollment.issueDetail ? <p className="connector-enrollment__technical" data-enrollment-error-detail>{enrollment.issueDetail}</p> : null}
@@ -439,7 +468,8 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved, onContinue 
     </>}
     {!current && enrollment.issueDetail ? <details className="connector-diagnostics"><summary>Setup service details</summary><p className="connector-enrollment__technical">{enrollment.issueDetail}</p></details> : null}
     {history.length ? <details className="connector-enrollment__history"><summary>Previous bot setups</summary>{history.map(item => <button key={item.operationId} data-enrollment-history={item.operationId} className="connector-enrollment__previous" onClick={() => enrollment.select(item.operationId)}><strong>{item.label}</strong><span>{item.domain}</span></button>)}{enrollment.next ? <button className="small-button" onClick={() => void enrollment.read(enrollment.next!)}>More setups</button> : null}</details> : null}
-    <ConnectionRequestTrace source={selectedId ? { kind: 'enrollment', operationId: selectedId } : null} revision={operation?.revision} />
+    <ConnectionRequestTrace source={selectedId ? { kind: 'enrollment', operationId: selectedId } : null} revision={operation?.revision} title={initialSetup ? "Sign-in & creation requests" : undefined} />
+    {saved && initialSetup ? <ConnectionRequestTrace source={{ kind: 'setup', operationId: initialSetup.operationId }} revision={JSON.stringify(initialProgress)} title="Configuration & publication requests" /> : null}
     {current || unfinished ? <details className="connector-optional"><summary>Set up another bot</summary><p className="settings-group-note">Opens a separate setup. Every original request is kept; opening this form does not create a bot.</p><button data-enrollment-another className="small-button" onClick={enrollment.startAnother}>Open another setup</button></details> : null}
   </section>
 }
