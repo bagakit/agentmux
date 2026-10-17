@@ -5,6 +5,9 @@ import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import type { ConnectionRecord, RoomGetResult, RoomListResult, RoomMembersResult, RoomSummary } from '@agentmux/core/connections'
 import { api } from '../lib/api'
 import { SelectionField } from './SelectionField'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
+
+const LoadingIcon = semanticIconComponent('status.loading')
 
 type Connection = Pick<ConnectionRecord, 'revision' | 'config'>
 const scopeOf = (connection: Connection) => ({ connectionId: connection.config.connectionId, expectedConnectionRevision: connection.revision })
@@ -75,10 +78,11 @@ export function useConnectorRoomFacts(connection: Connection | undefined, extern
   return { ...(read?.identity === identity ? read : { room: null, people: null, issue: '' }), pending, refresh }
 }
 
-export function ConnectorRoomPeople({ facts, onSelect }: { facts: ReturnType<typeof useConnectorRoomFacts>; onSelect?: ((idType: string, userId: string) => void) | undefined }) {
+export function ConnectorRoomPeople({ facts, onSelect, prominent = false }: { facts: ReturnType<typeof useConnectorRoomFacts>; onSelect?: ((idType: string, userId: string) => void) | undefined; prominent?: boolean }) {
   const people = facts.people
-  return <details className="agent-connector-disclosure"><summary>People in this group</summary><div className="agent-connector-fields">
-    <p className="agent-connector-note">Your own membership is not verified here. Joining the group and permission to use this Agent are separate.</p>
+  const body = <div className="agent-connector-fields">
+    <p className="agent-connector-note">{onSelect ? 'Choose an exact person to approve how they can use this Agent. Joining alone does not grant access.' : 'Your own membership is not verified here. Joining the group and permission to use this Agent are separate.'}</p>
+    {facts.pending ? <p className="agent-connector-note" role="status"><LoadingIcon size={14} animation="spin" /> Reading this group…</p> : null}
     {people?.observation.state === 'ready' ? people.members.length ? people.members.map(member => <div className="agent-connector-person" key={JSON.stringify([member.idType, member.userId])}>
       <span><strong>{member.name ?? member.userId}</strong><small>{member.idType} · {member.userId}</small></span>
       {onSelect ? <button className="small-button" onClick={() => onSelect(member.idType, member.userId)}>Choose</button> : null}
@@ -86,5 +90,7 @@ export function ConnectorRoomPeople({ facts, onSelect }: { facts: ReturnType<typ
     {facts.issue ? <p role="status" className="surface-inline-error">{facts.issue}</p> : null}
     {people?.next ? <button className="agent-connector-text-action" disabled={facts.pending} onClick={() => void facts.refresh(people.next!)}>More people</button> : null}
     <button className="agent-connector-text-action" disabled={facts.pending} onClick={() => void facts.refresh()}>Check group and members</button>
-  </div></details>
+  </div>
+  return prominent ? <section className="agent-connector-fields" aria-label="People in this group" aria-busy={facts.pending}><h3>People in this group</h3>{body}</section>
+    : <details className="agent-connector-disclosure" aria-busy={facts.pending}><summary>People in this group</summary>{body}</details>
 }
