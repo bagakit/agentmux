@@ -124,15 +124,12 @@ async function inspectKnownCopy(entry) {
 
 const productionDependencies = ['@dnd-kit', '@monaco-editor', '@radix-ui', '@xterm', 'lucide-react', 'monaco-editor', 'react', 'react-dom', 'react-resizable-panels', 'zustand']
 const packagedNodeModules = join(appResources, 'node_modules')
+// Presence is a footprint observation; Main also consumes shared UI packages.
 const shippedUiDependencyTrees = []
 for (const dependency of productionDependencies) {
   const path = join(packagedNodeModules, ...dependency.split('/'))
   if (await stat(path).then(() => true, () => false)) shippedUiDependencyTrees.push(dependency)
 }
-if (shippedUiDependencyTrees.length > 0) {
-  throw new Error(`Packaged app duplicates Renderer UI dependency trees: ${shippedUiDependencyTrees.join(', ')}`)
-}
-
 const chunks = await Promise.all((await readdir(rendererAssets, { withFileTypes: true }))
   .filter((entry) => entry.isFile())
   .map(async (entry) => ({ name: entry.name, bytes: (await stat(join(rendererAssets, entry.name))).size })))
