@@ -170,3 +170,34 @@ it('strict public intent requires an enrollment source and binds the same begin 
   expect(() => parseConnectionSetupResult('connection.setup.begin', input, { operation: { ...operation, initialPublication: { ...input.initialPublication!, notes: 'Different' } }, challenge: null })).toThrow()
   expect(() => parseConnectionSetupResult('connection.setup.begin', input, { operation, challenge: null, initialSetup: { stage: 'messaging', state: 'complete', versionId: VERSION } })).toThrow()
 })
+
+it.each([
+  ['/event/update/', 'event', 'add-message-reception', 'message-reception', false],
+  ['/callback/update/', 'callback', 'add-card-actions', 'card-actions', false],
+  ['/event/update/', 'event', 'add-message-reception', 'message-reception', true],
+  ['/callback/update/', 'callback', 'add-card-actions', 'card-actions', true]
+] as const)('original %s (%s, %s, %s, readback=%s) stays visible', async (nativePath, readKind, effect, stage, readback) => {
+  const f = await fixture('cards'), native = globalThis.fetch
+  let release!: () => void, entered!: () => void, writerStarted = false
+  const blocked = new Promise<void>(done => { release = done }), started = new Promise<void>(done => { entered = done })
+  vi.stubGlobal('fetch', async (url: string | URL | Request, init?: RequestInit) => {
+    const path = new URL(String(url)).pathname
+    if (path.includes(nativePath)) {
+      writerStarted = true
+      if (!readback) { entered(); await blocked }
+    }
+    if (readback && writerStarted && path === '/developers/v1/' + readKind + '/' + APP) { entered(); await blocked }
+    return native(url, init)
+  })
+  const pending = f.sdk.call('connection.setup.begin', f.input)
+  try {
+    await started
+    const count = f.requests.length
+    const view = await f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId })
+    const child = await f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId, applicationConfiguration: { effect } })
+    expect(child.applicationConfiguration?.selected?.request).toBe(readback ? 'confirmed' : 'dispatching')
+    expect(view.initialSetup).toEqual({ stage, state: 'running' })
+    expect(f.requests).toHaveLength(count)
+  } finally { release(); await pending }
+  expect(f.requests.filter(request => request.path.includes(nativePath))).toHaveLength(1)
+}, 30_000)
