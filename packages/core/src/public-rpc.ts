@@ -151,7 +151,7 @@ export type AgentMuxRpcGoalFilters = {
   status?: string; since?: number; limit?: number
 }
 /** Route identity belongs to the selected service; native Session facts stay unchanged. */
-export type AgentMuxRpcAgentObservation = Awaited<ReturnType<AgentMuxClient['statusAgent']>> & { routeHostId: string }
+export type AgentMuxRpcAgentObservation = import('./agent-discovery.js').AgentDiscoveryObservation
 export type AgentMuxRpcAgentInspection = {
   routeHostId: string
   session: ReturnType<AgentMuxClient['agentSession']>
@@ -209,7 +209,7 @@ type NativeParams = ApplicationAccessParameterMap & MoteConnectionParamsMap & Go
   'name.history': import('./display-label.js').AgentMuxNameHistoryQuery
   'name.confirm': { operationId: string }
   whoami: Record<string, never>
-  'agent.ls': { agentSessionId?: string; executorId?: string; status?: string; since?: number; limit?: number }
+  'agent.ls': import('./agent-discovery.js').AgentDiscoveryFilters
   'agent.inspect': { target: AgentMuxRpcSessionTarget }
   'agent.continuity.control': import('./agent-session-continuity-control.js').AgentMuxContinuityControlInput
   'agent.restart': import('./agent-session-restart.js').AgentMuxAgentRestartIdentity
@@ -285,8 +285,7 @@ type NativeResult = ApplicationAccessResultMap & MoteConnectionResultMap & GoalD
   'name.confirm': { state: import('./spatial-state.js').AgentMuxSpatialState }
   whoami: { session: ReturnType<AgentMuxClient['agentSession']>; status: Awaited<ReturnType<AgentMuxClient['statusAgent']>> | null;
     view: import('./agent-self-context.js').SelfViewOutcome; unavailable: AgentMuxRpcUnavailable[] }
-  'agent.ls': { sessions: AgentMuxRpcAgentObservation[];
-    errors: Array<{ agentSessionId: string | null; hostId: string; code: string; message: string }> }
+  'agent.ls': import('./agent-discovery.js').AgentDiscoveryPage
   'agent.inspect': AgentMuxRpcAgentInspection
   'agent.continuity.control': import('./agent-session-continuity-control.js').AgentMuxContinuityControlResult
   'agent.restart': { session: Awaited<ReturnType<AgentMuxClient['restartAgent']>> }
