@@ -21,11 +21,10 @@ import { isScratchWorkspaceId } from '../../../shared/contracts'
 import {
   contentSlotPresentation,
   resolveWorkspaceTools,
-  createWorkspaceAgentSessionsSelector,
-  workspaceAgentSessions,
   type WorkspaceTool
 } from '../lib/surface-tool-dock'
-import { orderedWorkspaceAgents, workspaceAgentOrderKey } from '../lib/workspace-agent-order'
+import { mergeWorkspaceAgentSubsetOrder, orderedWorkspaceAgents, workspaceAgentOrderKey } from '../lib/workspace-agent-order'
+import { createWorkspaceAgentListSelector, workspaceAgentListMembers } from '../lib/workspace-agent-scope'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { formatSessionAddress } from '../lib/agent-address'
 import { useWorkspaceAgentClose } from './WorkspaceAgentSelection'
@@ -71,11 +70,23 @@ const WorkspaceAgentsContent = memo(function WorkspaceAgentsContent({
   onOpen
 }: {
   workspace: WorkspaceRecord
-  sessions: readonly SessionSnapshot[]
+  sessions?: readonly SessionSnapshot[]
+  onOpen(sessionId: string): void
+}) {
+  const project = useMemo(() => createWorkspaceAgentListSelector(agentRegionExecution), [])
+  const select = useCallback((state: ReturnType<typeof useAppStore.getState>) => project(state, workspace, sessions), [project, workspace, sessions])
+  const list = useAppStore(select)
+  return <WorkspaceAgentListView key={list.key} workspace={workspace} list={list} onOpen={onOpen} />
+})
+
+type WorkspaceAgentList = ReturnType<ReturnType<typeof createWorkspaceAgentListSelector>>
+const WorkspaceAgentListView = memo(function WorkspaceAgentListView({ workspace, list, onOpen }: {
+  workspace: WorkspaceRecord
+  list: WorkspaceAgentList
   onOpen(sessionId: string): void
 }) {
   const topics = useAppStore(useShallow(state => scratchTopicsForConfig(state.config, state.scratchTopicSnapshots)))
-  const scoped = useMemo(() => workspaceAgentSessions(sessions, workspace, topics), [sessions, workspace, topics])
+  const scoped = list.sessions
   const timelines = useAppStore(useShallow(state => Object.fromEntries(scoped.map(session => [session.id, state.timelines[session.id]]))))
   const names = useAppStore(useShallow(state => Object.fromEntries(scoped.map(session => [session.id, state.agentNames[session.id]]))))
   const manualOrder = useAppStore(state => Object.hasOwn(state.workspaceAgentOrder, workspace.id) ? state.workspaceAgentOrder[workspace.id]! : NO_AGENT_ORDER)
@@ -126,7 +137,10 @@ const WorkspaceAgentsContent = memo(function WorkspaceAgentsContent({
     if (from < 0 || to < 0) return
     setSaving(true)
     try {
-      const result = await setOrder(workspace.id, arrayMove(keys, from, to))
+      const state = useAppStore.getState()
+      const members = workspaceAgentListMembers(state, workspace, agentRegionExecution)
+      const order = state.workspaceAgentOrder[workspace.id] ?? NO_AGENT_ORDER
+      const result = await setOrder(workspace.id, mergeWorkspaceAgentSubsetOrder(members, order, keys, arrayMove(keys, from, to)))
       setNotice(result.issues.map(issue => issue.message).join(' · '))
     } catch (error) { setNotice(`Order save unconfirmed. ${error instanceof Error ? error.message : String(error)}`) }
     finally { setSaving(false) }
@@ -146,7 +160,7 @@ const WorkspaceAgentsContent = memo(function WorkspaceAgentsContent({
             <strong>{chosen.length} selected</strong>
             {hiddenSelected || unavailableSelected ? <small>{hiddenSelected ? `${hiddenSelected} hidden by filter` : ''}{hiddenSelected && unavailableSelected ? ' · ' : ''}{unavailableSelected ? `${unavailableSelected} original selection unavailable` : ''}</small> : null}
           </span> : <div className="workspace-agents-tool__identity">
-            <strong title={workspace.name}>{workspace.name}</strong>
+            <strong title={list.title}>{list.title}</strong>
             <span title={`${count} Agents · ${manualOrder.length ? 'Manual order' : 'Startup order'} · Drag or use the move handle keyboard controls to reorder`} aria-label={`${count} Agents · ${manualOrder.length ? 'Manual order' : 'Startup order'}`}>{count}</span>
           </div>}
           <div className="workspace-agents-tool__actions" role="group" aria-label={selecting ? 'Selected Agent actions' : 'Agent list actions'}>
@@ -170,13 +184,13 @@ const WorkspaceAgentsContent = memo(function WorkspaceAgentsContent({
             <b>{contexts.filter(context => context.bucket === bucket).length}</b>
           </button>)}
         </div>
-        {notice ? <p className="workspace-agents-tool__notice" role="status">{notice}</p> : null}
+        {list.issue || notice ? <p className="workspace-agents-tool__notice" role="status">{[list.issue, notice].filter(Boolean).join(' · ')}</p> : null}
       </div>
       <div className="workspace-agents-tool__scroll">
         {count === 0 ? (
           <div className="workspace-agents-tool__empty">
             <ThemeObjectAgentIcon size={18} />
-            <strong>No Agents in this workspace</strong>
+            <strong>No Agents here</strong>
             <span>Use + to start an Agent. Choose “Keep Session” on close to leave it running here.</span>
           </div>
         ) : <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={event => { void reorder(event) }}>
@@ -199,15 +213,6 @@ const WorkspaceAgentsContent = memo(function WorkspaceAgentsContent({
     </section>
   )
 })
-
-function ConnectedWorkspaceAgentsTool({ workspace, onOpen }: {
-  workspace: WorkspaceRecord
-  onOpen(sessionId: string): void
-}) {
-  const selectMembers = useMemo(createWorkspaceAgentSessionsSelector, [])
-  const sessions = useAppStore(state => selectMembers(state.sessions, workspace, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots)))
-  return <WorkspaceAgentsTool workspace={workspace} sessions={sessions} onOpen={onOpen} />
-}
 
 function WorkspaceGitSlot({ workspace, visible }: { workspace: WorkspaceRecord; visible: boolean }) {
   const context = useWorkspaceZoneContext(workspace)
@@ -319,7 +324,7 @@ export function SurfaceToolDock({
           </div>
         ) : null}
         {visible && effectiveWorkspaceTool === 'agents' && workspace ? (
-          <ConnectedWorkspaceAgentsTool
+          <WorkspaceAgentsTool
             key={workspace.id}
             workspace={workspace}
             onOpen={(sessionId) => selectSession(sessionId, activePaneId)}
