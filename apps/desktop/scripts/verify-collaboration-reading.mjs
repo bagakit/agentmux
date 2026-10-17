@@ -57,7 +57,7 @@ const allGroups = [
     mutations: Object.entries(collaborationReadingMutations).map(([name, value]) => ({ name, path: renderer + 'lib/' + value.file,
       before: value.from, after: value.to, assertion: value.assertion })) },
   { name: 'product', config: productConfig,
-    tests: ['apps/desktop/test/collaboration-focus-product.test.tsx', 'apps/desktop/test/collaboration-product-reading.test.tsx'], minimumCases: 20,
+    tests: ['apps/desktop/test/collaboration-focus-product.test.tsx', 'apps/desktop/test/collaboration-product-reading.test.tsx'], minimumCases: 21,
     loadedKey: 'AGENTMUX_COLLABORATION_PRODUCT_LOADED', mutantKey: 'AGENTMUX_COLLABORATION_PRODUCT_MUTATION',
     requiredSources: ['components/GlobalFocusSurface.tsx', 'components/FocusToolbar.tsx', 'components/AgentCollaborationMap.tsx',
       'components/AgentCollaborationGraph.tsx', 'components/FocusContextCardBody.tsx', 'components/FocusContextRow.tsx',
@@ -171,7 +171,7 @@ async function pool(jobs) {
 }
 
 try {
-  assert.equal(allGroups[0].mutations.length, 16); assert.equal(allGroups[1].mutations.length, 11); assert.equal(allGroups[2].mutations.length, 1); assert.equal(allGroups[3].mutations.length, 8)
+  assert.equal(allGroups[0].mutations.length, 16); assert.equal(allGroups[1].mutations.length, 12); assert.equal(allGroups[2].mutations.length, 1); assert.equal(allGroups[3].mutations.length, 8)
   assert.equal(allGroups[4].mutations.length, 5)
   const baseline = await pool(groups.map(group => async () => run(group, 'baseline')))
   receipt.runs.push(...baseline)

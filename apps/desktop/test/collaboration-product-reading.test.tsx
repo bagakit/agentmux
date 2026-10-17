@@ -2,6 +2,7 @@
 import { act } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
 import type { AgentMuxMessageEvent, AgentMuxRpcResult, DurableAgentMuxMessage } from '@agentmux/core'
+import { projectRunProcessStatus } from '@agentmux/core/run-status'
 import type { RuntimeEvent, SessionHistoryReference } from '../src/shared/contracts'
 import { fixtureEpoch } from '../../../test/fixture-values.mjs'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
@@ -15,6 +16,7 @@ import { AgentCollaborationMap } from '../src/renderer/src/components/AgentColla
 import type { CollaborationMapTarget } from '../src/renderer/src/lib/collaboration-map-navigation'
 import { useCollaborationReading } from '../src/renderer/src/lib/use-collaboration-reading'
 import * as collaborationReading from '../src/renderer/src/lib/use-collaboration-reading'
+import { collaborationAgentPresentation } from '../src/renderer/src/lib/collaboration-map-presentation'
 
 const dom = composerDOM({ agentInformation: true }), workspace = composerConfig.workspaces[0]!
 const sessions = ['agent-a', 'agent-b', 'agent-c', 'agent-d'].map(id => ({ ...composerSession(id),
@@ -280,6 +282,35 @@ it('keeps the original Map body mounted while real reading demand leaves and ret
   expect(metadataA().filter(([, options]) => options?.latest)).toHaveLength(1)
   expect(bodyNode()).toBe(body); expect(api.sessions.readMessage).toHaveBeenCalledTimes(1)
   expect(useAppStore.getState().agentComposerDrafts['agent-a']).toBe('Original A draft')
+})
+
+it('keeps a confirmed exited Agent a closed map point while preserving its original error and Focus attention', async () => {
+  const exited = { ...sessions[0]!, processState: 'exited' as const,
+    status: projectRunProcessStatus({ state: 'exited', source: 'run-process', observedAt: fixtureEpoch(2), exitCode: 17, exitSignal: 'SIGSEGV' }) }
+  const runningError = { ...sessions[1]!, status: { state: 'error' as const, source: 'native-hook' as const, observedAt: fixtureEpoch(2) } }
+  const unobserved = { ...sessions[2]!, processState: 'exited' as const, runUnobserved: true as const,
+    status: projectRunProcessStatus({ state: 'exited', source: 'run-process', observedAt: fixtureEpoch(1), exitCode: 0 }) }
+  useAppStore.setState({ sessions: [exited, runningError, unobserved, sessions[3]!] })
+  await render()
+  const closedPoint = () => graph().querySelector<HTMLButtonElement>('.collaboration-agent__mark[data-tier="closed"][data-session-id="agent-a"]')
+  await settleCollaborationCanvas(() => expect(closedPoint()).not.toBeNull())
+  expect(graph().querySelector('.focus-context[data-session-id="agent-a"]')).toBeNull()
+  expect(focusContext.focusBucketForSession(exited, false)).toBe('attention')
+  expect(collaborationAgentPresentation(runningError).tier).toBe('active')
+  expect(collaborationAgentPresentation(unobserved).tier).toBe('unknown')
+  const control = exited.control
+  for (let index = 0; index < 4; ++index) await act(async () => graph().querySelector<HTMLButtonElement>('[aria-label="Zoom out"]')!.click())
+  await settleCollaborationCanvas(() => expect(closedPoint()?.closest('.collaboration-agent')?.classList.contains('collaboration-agent--overview')).toBe(true))
+  expect(graph().querySelector('.focus-context[data-session-id="agent-a"]')).toBeNull()
+  await act(async () => closedPoint()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+  await settleCollaborationCanvas(() => expect(document.querySelector('.agent-information-reader')).not.toBeNull())
+  expect(agentInformationPreview.get()).toMatchObject({ context: { id: 'agent-a', hostId: 'local', runId: 'run-agent-a', state: 'error', processState: 'exited', bucket: 'attention' } })
+  expect(document.querySelector('.agent-information-reader')?.textContent).toContain('SIGSEGV')
+  expect(useAppStore.getState().sessions[0]!.status).toEqual(exited.status)
+  expect(useAppStore.getState().sessions[0]!.control).toBe(control)
+  expect(graph().querySelectorAll('.collaboration-edge').length).toBeGreaterThan(0)
+  expect(useAppStore.getState().agentComposerDrafts['agent-a']).toBe('Original A draft')
+  expect(api.sessions.readMessage).not.toHaveBeenCalled(); expect(api.sessions.dispatch).not.toHaveBeenCalled()
 })
 
 it('opens the shared reader for a retired map point without inventing a live Session or control', async () => {
