@@ -259,7 +259,8 @@ it.each(['entry', 'content'] as const)('pins the hover preview through %s intera
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   const control = mailbox().querySelector('.continuous-progress-control')!
   expect(control).not.toBeNull()
-  expect(control.children).toHaveLength(0)
+  expect(control.querySelector<HTMLElement>('.calendar-schedules')?.hidden).toBe(true)
+  expect(control.querySelector('[data-progress-details="interval"]')).toBeNull()
   const methods = popoverMethods()
   vi.useFakeTimers()
   await pointer(trigger(), 'pointerover')
@@ -271,7 +272,8 @@ it.each(['entry', 'content'] as const)('pins the hover preview through %s intera
     await pointer(mailbox().querySelector('[aria-label="Automation"]')!, 'pointerdown')
   }
   await folder('progress')
-  const form = control.querySelector('form')!
+  expect(control.querySelector<HTMLElement>('.calendar-schedules')?.hidden).toBe(false)
+  const form = control.querySelector('[data-progress-details="interval"] form')!
   expect(form).not.toBeNull()
   if (surface === 'content') {
     const input = form.querySelector<HTMLInputElement>('input[type="number"]')!
@@ -287,9 +289,11 @@ it.each(['entry', 'content'] as const)('pins the hover preview through %s intera
   expect(mailbox().dataset.state).toBe('open')
   await act(async () => mailbox().dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Escape' })))
   expect(mailbox().dataset.state).toBe('closed')
+  expect(control.querySelector<HTMLElement>('.calendar-schedules')?.hidden).toBe(true)
   expect(document.activeElement).toBe(trigger())
   await pointer(trigger(), 'pointerover'); await folder('progress')
-  expect(mailbox().querySelector('.continuous-progress-control form')).toBe(form)
+  expect(control.querySelector<HTMLElement>('.calendar-schedules')?.hidden).toBe(false)
+  expect(mailbox().querySelector('[data-progress-details="interval"] form')).toBe(form)
   if (surface === 'content') expect(form.querySelector<HTMLInputElement>('input[type="number"]')!.value).toBe('17')
   expect(list).toHaveBeenCalledTimes(1)
   expect(observe).toHaveBeenCalledTimes(1)
@@ -720,7 +724,8 @@ it('projects loop status without adding unread or pending mail, switching pages,
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   const control = mailbox().querySelector('.continuous-progress-control')!
   expect(control).not.toBeNull()
-  expect(control.children).toHaveLength(0)
+  expect(control.querySelector<HTMLElement>('.calendar-schedules')?.hidden).toBe(true)
+  expect(control.querySelector('[data-progress-details="interval"]')).toBeNull()
   expect(trigger().getAttribute('data-progress-state')).toBe('unconfirmed')
   expect(trigger().getAttribute('aria-label')).toContain('0 unread')
   expect(trigger().getAttribute('aria-label')).toContain('Inputs 1 pending')
@@ -738,12 +743,14 @@ it('projects loop status without adding unread or pending mail, switching pages,
     await act(async () => scheduleChanged(schedule))
     expect(trigger().dataset.progressState).toBe(schedule.lastOutcome === 'unknown' ? 'unconfirmed' : schedule.status)
     expect(mailbox().dataset.state).toBe('closed')
-    expect(control.children).toHaveLength(0)
+    expect(control.querySelector<HTMLElement>('.calendar-schedules')?.hidden).toBe(true)
+    expect(control.querySelector('[data-progress-details="interval"]')).toBeNull()
   }
   await act(async () => scheduleChanged({ ...calendar, status: 'stopped' }))
   await act(async () => changed(progressLoop()))
   expect(trigger().dataset.progressState).toBe('active')
-  expect(control.children).toHaveLength(0)
+  expect(control.querySelector<HTMLElement>('.calendar-schedules')?.hidden).toBe(true)
+  expect(control.querySelector('[data-progress-details="interval"]')).toBeNull()
   await toggle('open')
   expect(mailbox().querySelector('[aria-selected="true"]')?.getAttribute('aria-label')).toBe('Inputs: 1 pending')
   for (const loop of [progressLoop(), progressLoop('paused'), { ...progressLoop('paused'), lastOutcome: 'unknown' as const }]) {
@@ -753,9 +760,11 @@ it('projects loop status without adding unread or pending mail, switching pages,
     expect(unread()).toBe('false')
     expect(trigger().textContent).toBe('')
     expect(mailbox().querySelector('[id$="-user-tab"] .composer-mailbox__count')!.textContent).toBe('1')
-    expect(control.children).toHaveLength(0)
+    expect(control.querySelector<HTMLElement>('.calendar-schedules')?.hidden).toBe(true)
+    expect(control.querySelector('[data-progress-details="interval"]')).toBeNull()
   }
   await folder('progress')
+  expect(control.querySelector<HTMLElement>('.calendar-schedules')?.hidden).toBe(false)
   expect(control.querySelector('[data-progress-details="interval"] > summary')?.textContent).toContain('Unconfirmed')
   await act(async () => changed({ ...progressLoop(), workspacePath: _hygiene_fixturePath("unrelated") }))
   expect(trigger().getAttribute('data-progress-state')).toBe('unconfirmed')
@@ -781,9 +790,11 @@ it('retains every progress field and unconfirmed composition through page, close
   const mainQueues = structuredClone(useAppStore.getState().agentSteerQueues)
   const control = mailbox().querySelector('.continuous-progress-control')!
   expect(control).not.toBeNull()
-  expect(control.children).toHaveLength(0)
+  expect(control.querySelector<HTMLElement>('.calendar-schedules')?.hidden).toBe(true)
+  expect(control.querySelector('[data-progress-details="interval"]')).toBeNull()
   await toggle('open'); await folder('progress')
-  const form = mailbox().querySelector<HTMLFormElement>('.continuous-progress-control form')!
+  expect(control.querySelector<HTMLElement>('.calendar-schedules')?.hidden).toBe(false)
+  const form = mailbox().querySelector<HTMLFormElement>('[data-progress-details="interval"] form')!
   expect(form).not.toBeNull()
   await act(async () => form.querySelector<HTMLInputElement>('[type="checkbox"]')!.click())
   const fields = [form.querySelector<HTMLInputElement>('[type="number"]')!,
@@ -806,7 +817,7 @@ it('retains every progress field and unconfirmed composition through page, close
   function recordForm(stage: string) {
     if (process.env.AGENTMUX_RETAINED_TAB_SAMPLES) appendFileSync(process.env.AGENTMUX_RETAINED_TAB_SAMPLES,
       JSON.stringify({ phase: 'progress-form-retained', stage,
-        formSame: control.querySelector('form') === form, textareaSame: control.querySelector('textarea') === textarea,
+        formSame: control.querySelector('[data-progress-details="interval"] form') === form, textareaSame: control.querySelector('[data-progress-details="interval"] textarea') === textarea,
         fieldValues: fields.map(field => field.value), prompt: textarea.value,
         selection: [textarea.selectionStart, textarea.selectionEnd, textarea.selectionDirection],
         loopLists: list.mock.calls.length, loopObservers: observe.mock.calls.length,
@@ -814,22 +825,24 @@ it('retains every progress field and unconfirmed composition through page, close
   }
   await folder('inbox'); await toggle('closed'); await toggle('open'); await folder('progress')
   recordForm('page-close')
-  expect(control.querySelector('form')).toBe(form)
+  expect(control.querySelector('[data-progress-details="interval"] form')).toBe(form)
   const replacement = session()
   replacement.control = { ...replacement.control, run: { runId: 'run-replacement' } }
   await act(async () => useAppStore.setState({ sessions: [replacement] }))
   recordForm('same-target-run')
-  expect(mailbox().querySelector('.continuous-progress-control form')).toBe(form)
+  expect(mailbox().querySelector('[data-progress-details="interval"] form')).toBe(form)
   await toggle('closed')
   await dom.render(<AgentSessionComposer sessionId="agent-1" visible={false} />)
   recordForm('hidden')
   expect(mailbox().querySelector('.continuous-progress-control')).toBe(control)
-  expect(control.querySelector('form')).toBe(form)
+  expect(control.querySelector<HTMLElement>('.calendar-schedules')?.hidden).toBe(true)
+  expect(control.querySelector('[data-progress-details="interval"] form')).toBe(form)
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   await toggle('open'); await folder('progress')
   for (let index = 0; index < 3; index++) await dom.click('.composer-tool--mode')
   recordForm('complete')
-  expect(mailbox().querySelector('.continuous-progress-control form')).toBe(form)
+  expect(control.querySelector<HTMLElement>('.calendar-schedules')?.hidden).toBe(false)
+  expect(mailbox().querySelector('[data-progress-details="interval"] form')).toBe(form)
   expect(form.querySelector('textarea')).toBe(textarea)
   expect(textarea.value).toBe('未确认续行候选')
   expect([textarea.selectionStart, textarea.selectionEnd, textarea.selectionDirection]).toEqual(selection)

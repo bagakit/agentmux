@@ -193,7 +193,7 @@ it('mounts the existing Composer leaf and real create/pause/resume/check/stop ro
   const progress = mailbox.querySelector<HTMLButtonElement>('[aria-label="Automation"]')!; expect(progress).not.toBeNull()
   await act(async () => progress.click())
   const page = mailbox.querySelector<HTMLElement>('[role="region"][aria-label="Automation settings"]')!; expect(page.hidden).toBe(false)
-  const form = page.querySelector('form'); expect(form).not.toBeNull()
+  const form = page.querySelector('[data-progress-details="interval"] form'); expect(form).not.toBeNull()
   const textarea = form!.querySelector<HTMLTextAreaElement>('textarea')!
   await act(async () => {
     textarea.focus()
@@ -273,8 +273,8 @@ it('saved defaults reach both original Composer creation routes and durable task
 it('keeps an unconfirmed continuation composition through an independent loop notification and submits only the final text', async () => {
   const existing = await create()
   const stopped = await api.continuousProgress.action(target(), existing.loopId, 'stop')
-  await vi.waitFor(() => expect(container.querySelector('.continuous-progress-control form')).not.toBeNull())
-  const form = container.querySelector<HTMLFormElement>('.continuous-progress-control form')!
+  await vi.waitFor(() => expect(container.querySelector('[data-progress-details="interval"] form')).not.toBeNull())
+  const form = container.querySelector<HTMLFormElement>('[data-progress-details="interval"] form')!
   const textarea = form.querySelector<HTMLTextAreaElement>('textarea')!
   expect(textarea).not.toBeNull()
   const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
@@ -358,7 +358,7 @@ it('keeps a late create result on its original workspace while the same Session 
   const originalSave = store.save.bind(store)
   const save = vi.spyOn(store, 'save').mockImplementationOnce(async loops => { await blocked; await originalSave(loops) })
   try {
-  const form = container.querySelector('form')!
+  const form = container.querySelector('[data-progress-details="interval"] form')!
   const textarea = form.querySelector<HTMLTextAreaElement>('textarea')!
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, 'original target prompt')
@@ -372,7 +372,7 @@ it('keeps a late create result on its original workspace while the same Session 
     useAppStore.setState({ sessions: [other] })
     root.render(<AgentSessionComposer sessionId={other.id} />)
   })
-  const next = container.querySelector('form')!
+  const next = container.querySelector('[data-progress-details="interval"] form')!
   const nextText = next.querySelector<HTMLTextAreaElement>('textarea')!
   expect(nextText.value).toBe('')
   await act(async () => {
@@ -394,7 +394,7 @@ it('binds an explicit real Tracker through the mounted leaf and IPC, keeping don
   const sourceRoot = join(directory, 'private-tracker'); await mkdir(sourceRoot)
   const tracker = await privateTracker(sourceRoot), binding = await tracker.create('mounted-source')
   await tracker.run('start-task', '--feature', binding.ownerId, '--task', 'T-001')
-  const form = container.querySelector('form')!; expect(form).not.toBeNull()
+  const form = container.querySelector('[data-progress-details="interval"] form')!; expect(form).not.toBeNull()
   const checkbox = form.querySelector<HTMLInputElement>('input[type="checkbox"]')!; expect(checkbox).not.toBeNull()
   await act(async () => checkbox.click())
   async function type(selector: string, value: string) {
