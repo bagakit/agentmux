@@ -86,7 +86,7 @@ async function fixture() {
       storage: { userData: root, sessionData: root, directory: root, localStorage: 'present', detail: null }, runtimes: [] },
     workbench: { loading: false, startupProgress: { step: 'layout' }, startupAgentAvailability: null, activeWorkspaceId: 'workspace', mainSurface: 'workbench',
       focus: { executionSessionId: 'agent-session', pmoSessionId: null },
-      desktop: { selection: { surface: 'space', mainSurface: 'workbench', space: null, goalId: null },
+      desktop: { selection: { surface: 'space', mainSurface: 'workbench', focusView: null, space: null, goalId: null },
         presentation: { provenance: 'observed', state: 'main-visible', tabId: 'tab-a', regionId: 'agent', blockers: [] },
         input: { provenance: 'observed', scope: 'main', ownerKind: 'terminal', tabId: 'tab-a', regionId: 'agent', sessionId: 'agent-session', connected: true, visible: true, inert: false },
         floating: { provenance: 'observed', state: 'closed', topicId: null, tabId: null, regionId: null, sessionId: null, presentation: 'hidden' },
@@ -138,6 +138,37 @@ it.each([
   expect(io.before).toEqual(original)
   expect(io.cutovers).toBe(1)
   expect(() => parseDesktopClientObservation(original), 'The current public producer stays strict').toThrow()
+})
+
+it.each(['legacy', 'opaque'] as const)('actual installation preserves %s auxiliary desktop observations without using them as identity', async shape => {
+  const f = await fixture()
+  const { focusView: _focusView, ...selection } = io.before!.workbench.desktop.selection
+  const desktop = shape === 'legacy' ? { ...io.before!.workbench.desktop, selection: { ...selection, spaceView: null } }
+    : { provenance: 'unavailable', detail: ['selection', { input: 'unknown' }] }
+  Object.assign(io.before!.workbench, { desktop })
+  Object.assign(after(), { desktop: { detail: 'independent-new-observation' } })
+  const original = structuredClone(io.before), expected = structuredClone(io.after)
+  const outcome = await install(f).then(result => ({ result, error: null }), error => ({ result: null, error: String(error) }))
+  expect(outcome.error, 'Unconsumed desktop detail must not gate the original identity').toBeNull()
+  expect(outcome.result?.ui.status).toBe('committed')
+  expect(outcome.result?.ui.observation).toEqual(expected)
+  expect(io.before).toEqual(original); expect(io.cutovers).toBe(1)
+  expect(() => parseDesktopClientObservation(original), 'The current public producer stays strict').toThrow()
+})
+
+it.each(['storage', 'focus', 'layout', 'Run'] as const)('actual installation keeps required %s strict beside opaque desktop observation', async field => {
+  const f = await fixture()
+  Object.assign(io.before!.workbench, { desktop: { provenance: 'unknown' } })
+  if (field === 'storage') Object.assign(io.before!.main.storage!, { localStorage: 'unqualified' })
+  if (field === 'focus') Object.assign(io.before!.workbench.focus, { executionSessionId: 14 })
+  if (field === 'layout') Object.assign(io.before!.workbench.layouts.workspace!.root, { type: 'other' })
+  if (field === 'Run') {
+    const region = io.before!.workbench.tabs[0]!.regions[0] as ReturnType<typeof agent>
+    region.control!.run.runId = ''
+  }
+  const error = await install(f).catch(error => error)
+  expect(error.transaction.ui.status).toBe('not-started')
+  expect(io.pid).toBe(201); expect(io.cutovers).toBe(0)
 })
 
 it('actual installation admits registry insertion changes and object keys without reordering presentation', async () => {
