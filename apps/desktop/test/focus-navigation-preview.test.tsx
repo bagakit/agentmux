@@ -54,7 +54,7 @@ it('prioritizes real attention over execution MRU and uses the standard read-onl
 })
 it.each(['working', 'waiting', 'error', 'unknown', 'unsupported', 'interrupted', 'unobserved', 'disconnected'] as const)('keeps the actual footer %s mark identical to the shared Agent card mark', async kind => {
   const base = agent(kind, kind === 'waiting' ? 'waiting' : kind === 'error' ? 'error' : kind === 'disconnected' ? 'disconnected' : kind === 'working' || kind === 'interrupted' ? 'working' : 'running')
-  const session = { ...base, ...(kind === 'unsupported' ? { capabilities: { ...base.capabilities, timeline: 'unavailable' as const } } : {}), ...(kind === 'interrupted' || kind === 'unobserved' || kind === 'disconnected' ? { processState: 'interrupted' as const } : {}), ...(kind === 'unobserved' ? { runUnobserved: true } : {}) }
+  const session = { ...base, ...(kind === 'unsupported' ? { capabilities: { ...base.capabilities, timeline: 'unavailable' as const } } : {}), ...(kind === 'interrupted' || kind === 'unobserved' || kind === 'disconnected' ? { processState: 'interrupted' as const } : {}), ...(kind === 'unobserved' ? { runUnobserved: true as const } : {}) }
   await act(async () => useAppStore.setState({ sessions: [session], timelines: {} })); await hover()
   const context = agentContextForSession(session, undefined, kind, composerConfig.workspaces[0], null)
   await act(async () => root.render(<><SurfaceSwitch /><div data-card-reference><FocusContextStateMark context={context} /></div></>))
