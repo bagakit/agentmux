@@ -302,3 +302,6 @@
   .terminal-theme-grid { grid-template-columns: 1fr; }
 }
 .terminal-context-source { display: contents; }
+
+/* Text operations stay recognizable before the contextual Agent actions. */
+.terminal-menu-tools__text { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-1); }

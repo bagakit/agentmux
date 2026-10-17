@@ -10,7 +10,9 @@ export function AgentMenuSubmenu(props: { label: string; icon: ReactNode; childr
 }
 
 /** Reorganize existing entries by their typed scope, without owning actions or control facts. */
-export function AgentRegionMenuActions({ entries, details }: { entries: readonly RegionMenuEntry[]; details: ReactNode }) {
+export function AgentRegionMenuActions({ entries, controls, conversation }: {
+  entries: readonly RegionMenuEntry[]; controls: ReactNode; conversation: ReactNode
+}) {
   const DropdownMenu = useContext(WorkbenchMenuScope)
   function render(entry: RegionMenuEntry, index: number) {
     return <RegionMenuEntryView key={index} entry={entry} index={index}
@@ -21,6 +23,12 @@ export function AgentRegionMenuActions({ entries, details }: { entries: readonly
   const connectors = entries.filter(entry => entry.kind === 'connector-group')
   const lifecycle = entries.filter(entry => entry.kind === 'restart' || entry.kind === 'stop')
   return <>
+    {controls || lifecycle.length > 0 ? <><DropdownMenu.Group aria-label="Agent controls">
+      {controls}
+      {lifecycle.map(render)}
+    </DropdownMenu.Group>
+    <DropdownMenu.Separator className="tab-context-menu__separator" /></> : null}
+    <DropdownMenu.Group aria-label="Conversation">{conversation}</DropdownMenu.Group>
     {workspace.length > 0 ? <>
       <DropdownMenu.Separator className="tab-context-menu__separator" />
       <DropdownMenu.Group aria-label="Workspace">
@@ -31,7 +39,5 @@ export function AgentRegionMenuActions({ entries, details }: { entries: readonly
     <DropdownMenu.Separator className="tab-context-menu__separator" />
     <RegionCopyLinkRow entries={entries} Item={DropdownMenu.Item} Group={DropdownMenu.Group} Label={DropdownMenu.Label} />
     {connectors.map(render)}
-    {details}
-    {lifecycle.length > 0 ? <><DropdownMenu.Separator className="tab-context-menu__separator" />{lifecycle.map(render)}</> : null}
   </>
 }

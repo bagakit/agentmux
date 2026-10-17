@@ -42,7 +42,13 @@ export function TerminalMenuTools(props: TerminalMenuToolProps) {
       aria-label={action.name} aria-description={action.label} textValue={action.name} disabled={action.disabled ?? false}
       onSelect={action.onSelect} onKeyDown={moveAlongWorkbenchActionRow}>{action.icon}</Menu.Item>} />
   return <div data-terminal-menu-tools="">
-    {renderRow('terminal-text', 'Text', text)}
+    <Menu.Group aria-label="Text" className="terminal-menu-tools__text workbench-menu-row__actions">
+      {text.map(action => <Menu.Item key={action.name} className="tab-context-menu__item"
+        aria-label={action.name} aria-description={action.label} title={action.label} textValue={action.name}
+        disabled={action.disabled ?? false} onSelect={action.onSelect} onKeyDown={moveAlongWorkbenchActionRow}>
+        {action.icon}<span>{action.name}</span>
+      </Menu.Item>)}
+    </Menu.Group>
     {hint ? <Menu.Label className="tab-context-menu__hint" role="note">{hint}</Menu.Label> : null}
     {renderRow('terminal-output', 'Output', output)}
     {props.historyBoundary ? <Menu.Label className="tab-context-menu__hint" role="note">{props.historyBoundary}</Menu.Label> : null}
