@@ -1,0 +1,15 @@
+.settings-recall { container-type: inline-size; }
+.settings-recall__reading { display: grid; grid-template-columns: minmax(220px, .85fr) minmax(0, 1.15fr); gap: var(--sp-6); align-items: start; }
+.settings-recall__controls { min-width: 0; }
+.settings-recall .settings-reading-size { margin-top: 0; }
+.settings-recall .settings-reading-width { grid-template-columns: minmax(0, 1fr); margin-bottom: 0; }
+.settings-recall .settings-reading-preview { min-height: 220px; padding: var(--sp-5); box-sizing: border-box; background: var(--surface-1); }
+.settings-recall .settings-reading-preview > div { max-width: 26ch; }
+.settings-recall .settings-reading-preview[data-width='wide'] > div { max-width: none; }
+.settings-recall .settings-reading-preview > div > span { display: block; margin-bottom: var(--sp-3); }
+.settings-recall .settings-reading-preview h3 { font-weight: 550; }
+.settings-recall [data-settings-field='notes-storage'] > header { align-items: start; flex-wrap: wrap; }
+.settings-recall [data-settings-field='notes-storage'] > header small { max-width: 100%; overflow-wrap: anywhere; }
+.settings-recall .settings-notes-directory input { font-size: var(--fs-body); }
+.settings-recall__storage-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+@container (max-width: 620px) { .settings-recall__reading { grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); } .settings-recall .settings-reading-width { grid-template-columns: repeat(2, minmax(0, 1fr)); } .settings-recall .settings-reading-preview { min-height: 0; } }

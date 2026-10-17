@@ -4,6 +4,7 @@ import { NOTE_CONTENT_WIDTHS, NOTE_FONT_SIZE_MIN, NOTE_FONT_SIZE_MAX, resolveNot
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraftRecord } from './use-setting-draft'
 import '../../styles/settings-workflows.css'
+import '../../styles/settings-recall.css'
 import { useAppStore } from '../../store'
 import { api } from '../../lib/api'
 import type { NotesStorageSnapshot } from '@agentmux/core/notebook-store'
@@ -37,20 +38,10 @@ export function NotesSettingsPane({ preferences, onSave, onOpenNotes }: {
         { fontSize: Number(submitted.expected.fontSize), contentWidth: submitted.expected.contentWidth })
     }))
   }
-  return <div className="settings-pane-stack">
-    <section className="settings-group" data-settings-field="notes-storage"><header><span>Storage</span><small>{storage?.directory ?? 'Reading the saved directory…'}</small></header>
-      <label className="settings-reading-size settings-notes-directory"><span><strong>Notes directory</strong><small>Move your notebook directory and stored notes together.</small></span>
-        <TextInput aria-label="Notes directory" value={directory} disabled={moving || !!intent} onChange={event => setDirectory(event.target.value)} /></label>
-      <div className="settings-workflows__inline-action"><button type="button" className="small-button" disabled={!storage || moving || (!intent && directory.trim() === storage.directory)} onClick={() => void moveDirectory()}>{moving ? 'Moving…' : intent ? 'Retry original move' : 'Move notes'}</button></div>
-      <button type="button" className="small-button" disabled={moving} onClick={() => { void useAppStore.getState().refreshNotesStorage().then(() => api.notesStorage.inspect()).then(value => { setStorage(value); setDirectoryIssue(null); if (!directory) setDirectory(value.directory) }).catch(error => setDirectoryIssue(String(error))) }}>Refresh directory</button>
-      {directoryIssue && <p role="alert" className="settings-workflows__note">{directoryIssue}</p>}
-      {!!storage?.conversionIssues?.length && <div className="settings-workflows__note" role="status"><p>Some original Notes still need conversion. Other local Notes remain available.</p>
-        <ul>{storage.conversionIssues.map((issue, index) => <li key={index}><strong>{issue.noteId ?? 'Original resource not confirmed'}</strong>{issue.resource ? <code>{issue.resource.hostId} · {issue.resource.workspaceId} / {issue.resource.path}</code> : null}<p>{issue.message}</p></li>)}</ul>
-        <button type="button" className="small-button" disabled={moving} onClick={() => void changeStorage(storage.operation ?? { operationId: crypto.randomUUID(), expectedDirectory: storage.directory, directory: storage.directory })}>Retry original Note conversion</button>
-      </div>}
-    </section>
+  return <div className="settings-pane-stack settings-recall">
     <section className="settings-group">
       <header><span>Reading</span><small>Saved: {saved.fontSize} px · {saved.contentWidth === 'wide' ? 'Wide' : 'Standard'}</small></header>
+      <div className="settings-recall__reading"><div className="settings-recall__controls">
       <div className="settings-reading-size" data-settings-field="notes-font-size">
         <label htmlFor={fontId}><strong>Body text size</strong><small>Applies to Notes and embedded note text.</small></label>
         <div><TextInput id={fontId} type="text" inputMode="numeric" aria-label="Notes body text size" value={draft.value.fontSize}
@@ -64,15 +55,27 @@ export function NotesSettingsPane({ preferences, onSave, onOpenNotes }: {
           <span><strong>{width === 'standard' ? 'Standard' : 'Wide'}</strong><small>{width === 'standard' ? 'A focused reading column' : 'Use the available space'}</small></span>
         </label>)}
       </fieldset>
-      <div className="settings-reading-preview" data-width={draft.value.contentWidth} aria-label="Notes reading preview">
-        <div style={{ fontSize: valid ? fontSize : saved.fontSize }}><span>Reading preview</span><h3>A place to think clearly</h3>
-          <p>Keep the ideas worth returning to. Your notes stay editable, connected to their sources, and easy to read at your own pace.</p>
-        </div>
       </div>
+      <div className="settings-reading-preview" data-width={draft.value.contentWidth} aria-label="Notes reading preview">
+        <div style={{ fontSize: valid ? fontSize : saved.fontSize }}><span>Reading preview</span><h3>Keep the useful details</h3>
+          <p>Capture a finding, add its source, and return to it when the work needs it. Reading preferences change the presentation; your original note stays editable.</p>
+        </div>
+      </div></div>
     </section>
     <div className="settings-workflows__inline-action"><p className="settings-workflows__note">Organize notebooks, pages and sources in Recall.</p>
       <button type="button" className="small-button" onClick={onOpenNotes}>Open Recall</button>
     </div>
+    <section className="settings-group" data-settings-field="notes-storage"><header><span>Notebook storage</span><small>{storage?.directory ?? (directoryIssue ? 'Directory unavailable' : 'Reading the saved directory…')}</small></header>
+      <label className="settings-reading-size settings-notes-directory"><span><strong>Notes directory</strong><small>Move your notebook directory and stored notes together.</small></span>
+        <TextInput aria-label="Notes directory" value={directory} disabled={moving || !!intent} onChange={event => setDirectory(event.target.value)} /></label>
+      <div className="settings-recall__storage-actions"><button type="button" className="small-button" disabled={!storage || moving || (!intent && directory.trim() === storage.directory)} onClick={() => void moveDirectory()}>{moving ? 'Moving…' : intent ? 'Retry original move' : 'Move notes'}</button>
+      <button type="button" className="small-button" disabled={moving} onClick={() => { void useAppStore.getState().refreshNotesStorage().then(() => api.notesStorage.inspect()).then(value => { setStorage(value); setDirectoryIssue(null); if (!directory) setDirectory(value.directory) }).catch(error => setDirectoryIssue(String(error))) }}>Refresh directory</button></div>
+      {directoryIssue && <p role="alert" className="settings-workflows__note">{directoryIssue}</p>}
+      {!!storage?.conversionIssues?.length && <div className="settings-workflows__note" role="status"><p>Some original Notes still need conversion. Other local Notes remain available.</p>
+        <ul>{storage.conversionIssues.map((issue, index) => <li key={index}><strong>{issue.noteId ?? 'Original resource not confirmed'}</strong>{issue.resource ? <code>{issue.resource.hostId} · {issue.resource.workspaceId} / {issue.resource.path}</code> : null}<p>{issue.message}</p></li>)}</ul>
+        <button type="button" className="small-button" disabled={moving} onClick={() => void changeStorage(storage.operation ?? { operationId: crypto.randomUUID(), expectedDirectory: storage.directory, directory: storage.directory })}>Retry original Note conversion</button>
+      </div>}
+    </section>
     <SettingsSaveBar save={saveState} dirty={draft.dirty} onSave={() => void save()} />
   </div>
 }
