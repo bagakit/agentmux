@@ -1,3 +1,7 @@
+import type { ReadingDiagnosticRecord, ReadingDiagnosticReason } from './reading-diagnostic.js'
+import { CoreReadingDiagnosticSource } from './reading-diagnostic-source.js'
+import { unavailableDiagnosticEvidence } from '@agentmux/diagnostic-evidence'
+import type { ReadingDiagnosticExactTarget, ReadingDiagnosticFindParams, ReadingDiagnosticFindResult } from './reading-diagnostic-query.js'
 import { runAgentMessageBroadcast, type AgentMuxMessageBroadcastInput, type AgentMuxMessageBroadcastReceipt } from './agent-message-broadcast.js'
 import { AgentMuxMessageNotifications } from './agent-message-notifications.js'
 import type { AgentMuxMessageNotification } from './agent-message-notification.js'
@@ -939,6 +943,10 @@ export class AgentMuxClient {
   private readonly providerReads = new Set<AbortController>()
   private readonly resumedInterruptionReads = new Map<string, Promise<AgentMuxStoredAgentSession>>()
   private readonly conversationReadState = new ConversationReaderState()
+  private readingDiagnosticSource: CoreReadingDiagnosticSource | undefined
+  private originalReadingDiagnosticSource(): CoreReadingDiagnosticSource | undefined {
+    try { return this.readingDiagnosticSource ??= new CoreReadingDiagnosticSource() } catch { return undefined }
+  }
   /** Consumer-owned read-only resources; never occupy Provider page slots or Run lifecycle locks. */
   private readonly historyObservationControllers = new Map<string, Set<NativeHistoryObservationResource>>()
   private readonly historyObservationPool = new SessionHistoryObservationPool()
@@ -2508,13 +2516,42 @@ export class AgentMuxClient {
     return descriptor ? { ...page, hostId: input.hostId } : page
   }
 
+  /** Only this Core instance is covered; inspection never creates a Reader or connects Runtime. */
+  async readReadingDiagnostic(target: ReadingDiagnosticExactTarget) {
+    const source = this.originalReadingDiagnosticSource()
+    return source ? source.read(target) : unavailableDiagnosticEvidence<ReadingDiagnosticExactTarget, ReadingDiagnosticRecord>(target, 'DIAGNOSTIC_EVIDENCE_SOURCE_UNAVAILABLE')
+  }
+  async findReadingDiagnostics(query: ReadingDiagnosticFindParams): Promise<ReadingDiagnosticFindResult> {
+    const source = this.originalReadingDiagnosticSource()
+    return source ? source.find(query) : { query, availability: 'unavailable', authority: null, records: [], nextCursor: null,
+      coverage: { retainedRecords: null, evictedRecords: null, rejectedRecords: null, examinedRecords: 0, complete: false }, issue: 'source-unavailable' }
+  }
+  private async observeConversationRead<T extends { sourceHostId: string; window?: { id: string; revision: number; itemCount: number } }>(
+    input: ConversationRef, operation: 'latest' | 'changes' | undefined, read: () => Promise<T>): Promise<T> {
+    const diagnostic = this.originalReadingDiagnosticSource()?.begin(input)
+    diagnostic?.recorder.record({ phase: 'source-read-started', ...(operation ? { operation } : {}) }); diagnostic?.recorder.flush('progress')
+    try {
+      const page = await read()
+      diagnostic?.recorder.record({ phase: 'source-read-completed', ...(operation ? { operation } : {}), sourceHostId: page.sourceHostId,
+        ...(page.window ? { windowId: page.window.id, windowRevision: page.window.revision, itemCount: page.window.itemCount } : {}) })
+      diagnostic?.recorder.record({ phase: 'consumer-ended' }); diagnostic?.recorder.flush('progress')
+      return page
+    } catch (error) {
+      diagnostic?.recorder.record({ phase: 'source-read-failed', ...(operation ? { operation } : {}), reason: readingDiagnosticFailureReason(error) })
+      diagnostic?.recorder.record({ phase: 'consumer-ended' }); diagnostic?.recorder.flush('failure')
+      throw error
+    } finally { diagnostic?.end() }
+  }
+
   /** One source-qualified timeline over the original native and captured owners. */
   async readAgentConversation(input: ConversationTimelineReadInput, options: ConversationReadOptions = {}): Promise<AgentConversationReadPage> {
-    const owner = await this.conversationReader(input, options)
-    if (input.anchor) { parseConversationCheckpoint(input.anchor.frontier, input); parseConversationFrontier(input.anchor.frontier.frontier, owner.reference) }
-    const anchor = input.anchor ? { ...input.anchor, frontier: { ...input.anchor.frontier, ...owner.reference } } : undefined
-    const page = await readUnifiedConversation({ ...input, ...owner.reference, ...(anchor ? { anchor } : {}) }, owner.port)
-    return { ...page, hostId: input.hostId }
+    return this.observeConversationRead(input, input.cursor || input.record || input.anchor || input.view ? undefined : 'latest', async () => {
+      const owner = await this.conversationReader(input, options)
+      if (input.anchor) { parseConversationCheckpoint(input.anchor.frontier, input); parseConversationFrontier(input.anchor.frontier.frontier, owner.reference) }
+      const anchor = input.anchor ? { ...input.anchor, frontier: { ...input.anchor.frontier, ...owner.reference } } : undefined
+      const page = await readUnifiedConversation({ ...input, ...owner.reference, ...(anchor ? { anchor } : {}) }, owner.port)
+      return { ...page, hostId: input.hostId }
+    })
   }
 
   async conversationCheckpoint(input: ConversationRef, options: ConversationReadOptions = {}): Promise<ConversationCheckpointPage> {
@@ -2524,11 +2561,13 @@ export class AgentMuxClient {
   }
 
   async readConversationChanges(input: ConversationChangesInput, options: ConversationReadOptions = {}): Promise<ConversationChangesPage> {
-    const owner = await this.conversationReader(input, options)
-    parseConversationCheckpoint(input.checkpoint, input)
-    parseConversationFrontier(input.checkpoint.frontier, owner.reference)
-    const page = await readUnifiedChanges({ ...input, ...owner.reference, checkpoint: { ...input.checkpoint, ...owner.reference } }, owner.port)
-    return { ...page, hostId: input.hostId, checkpoint: { ...page.checkpoint, hostId: input.hostId } }
+    return this.observeConversationRead(input, 'changes', async () => {
+      const owner = await this.conversationReader(input, options)
+      parseConversationCheckpoint(input.checkpoint, input)
+      parseConversationFrontier(input.checkpoint.frontier, owner.reference)
+      const page = await readUnifiedChanges({ ...input, ...owner.reference, checkpoint: { ...input.checkpoint, ...owner.reference } }, owner.port)
+      return { ...page, hostId: input.hostId, checkpoint: { ...page.checkpoint, hostId: input.hostId } }
+    })
   }
 
   /** Release only this temporary read view; original records, cuts and Runs are unchanged. */
@@ -2614,14 +2653,39 @@ export class AgentMuxClient {
   /** Notifications only wake authoritative reads. Each native/captured source keeps its original scope. */
   async observeConversation(input: ConversationWatchInput, listener: (value: ConversationObservation) => void, options: ConversationReadOptions = {}): Promise<ConversationObservationHandle> {
     input = parseConversationWatchInput(input)
-    const owner = await this.conversationReader(input, options), ref = owner.reference
+    let diagnostic = this.originalReadingDiagnosticSource()?.begin(input)
+    diagnostic?.recorder.record({ phase: 'source-watch-opening' }); diagnostic?.recorder.flush('progress')
+    const cancelledOpening = () => {
+      diagnostic?.recorder.record({ phase: 'source-watch-unavailable', reason: 'cancelled' }); diagnostic?.recorder.flush('failure')
+      diagnostic?.recorder.record({ phase: 'source-watch-closed', reason: 'cancelled' }); diagnostic?.recorder.record({ phase: 'consumer-ended', reason: 'cancelled' })
+      diagnostic?.recorder.flush('release'); diagnostic?.end(); diagnostic = undefined
+    }
+    options.signal?.addEventListener('abort', cancelledOpening, { once: true })
+    if (options.signal?.aborted) cancelledOpening()
+    let owner: Awaited<ReturnType<AgentMuxClient['conversationReader']>>
+    try { owner = await this.conversationReader(input, options) }
+    catch (error) {
+      diagnostic?.recorder.record({ phase: 'source-watch-unavailable', reason: readingDiagnosticFailureReason(error) }); diagnostic?.recorder.flush('failure')
+      diagnostic?.recorder.record({ phase: 'source-watch-closed', reason: 'disposed' }); diagnostic?.recorder.record({ phase: 'consumer-ended', reason: 'disposed' })
+      diagnostic?.recorder.flush('release'); diagnostic?.end()
+      throw error
+    } finally { options.signal?.removeEventListener('abort', cancelledOpening) }
+    const ref = owner.reference
     const controller = new AbortController(), resources = this.historyObservationControllers.get(input.agentSessionId) ?? new Set<NativeHistoryObservationResource>()
     const resource: NativeHistoryObservationResource = { controller, binding: null }
     resources.add(resource); this.historyObservationControllers.set(input.agentSessionId, resources)
     let native: AgentSessionHistoryObservationHandle | undefined, opening: import('./conversation-changes.js').ConversationWatchOpening | undefined
     let pendingCaptured = false, unsubscribe = () => {}, nativeEnded = () => {}, releaseView = () => {}, disposed = false
+    let publishedInvalidation = false
     const emit = (value: ConversationObservation): void => {
       if (!opening || controller.signal.aborted) return
+      diagnostic?.recorder.record({ phase: value.kind === 'invalidated' ? 'source-invalidated' : 'source-watch-unavailable', sourceHostId: ref.hostId,
+        sourceKind: value.source.kind, ...(value.source.kind === 'native' ? { nativeSource: { providerId: value.source.providerId, nativeSessionId: value.source.nativeSessionId } } : {}),
+        ...(value.kind === 'unavailable' ? { reason: readingDiagnosticFailureReason({ code: value.code }) } : {}) })
+      if (value.kind === 'unavailable' || !publishedInvalidation) {
+        diagnostic?.recorder.flush(value.kind === 'unavailable' ? 'failure' : 'progress')
+        if (value.kind === 'invalidated') publishedInvalidation = true
+      }
       try { listener(parseConversationObservation({ ...value, hostId: input.hostId }, opening)) } catch { /* Read callbacks cannot gate the original Agent. */ }
     }
     const captured = () => {
@@ -2632,6 +2696,9 @@ export class AgentMuxClient {
     const dispose = () => {
       if (disposed) return
       disposed = true; unsubscribe(); native?.closed?.removeEventListener('abort', nativeEnded); native?.dispose(); releaseView()
+      diagnostic?.recorder.record({ phase: 'source-watch-closed', reason: 'disposed', sourceHostId: ref.hostId })
+      diagnostic?.recorder.record({ phase: 'consumer-ended', reason: 'disposed' })
+      diagnostic?.recorder.flush('release'); diagnostic?.end()
       options.signal?.removeEventListener('abort', dispose); resources.delete(resource)
       if (!resources.size) this.historyObservationControllers.delete(input.agentSessionId)
       if (!controller.signal.aborted) controller.abort(new AgentMuxError('This conversation reader was released.', 'AGENT_SESSION_HISTORY_CANCELLED'))
@@ -2672,6 +2739,7 @@ export class AgentMuxClient {
       }
       if (pendingCaptured) captured()
       controller.signal.throwIfAborted()
+      diagnostic?.recorder.record({ phase: 'source-watch-opened', sourceHostId: ref.hostId }); diagnostic?.recorder.flush('progress')
       return { ...opening, hostId: input.hostId, closed: controller.signal, dispose }
     } catch (error) { dispose(); throw error }
   }
@@ -10629,4 +10697,19 @@ export class AgentMuxClient {
     })
   }
 
+}
+
+/** Stable original codes only; arbitrary error text never enters diagnostic metadata. */
+function readingDiagnosticFailureReason(error: unknown): ReadingDiagnosticReason {
+  let code: unknown
+  try { const own = error && typeof error === 'object' ? Object.getOwnPropertyDescriptor(error, 'code') : undefined; code = own && 'value' in own ? own.value : undefined } catch { return 'unknown' }
+  switch (code) {
+    case 'AGENT_SESSION_HISTORY_CANCELLED': case 'CONTROL_CANCELLED': return 'cancelled'
+    case 'AGENT_SESSION_HISTORY_SOURCE_CHANGED': return 'source-changed'
+    case 'AGENT_SESSION_HISTORY_OBSERVATION_TIMEOUT': case 'AGENT_SESSION_HISTORY_TIMEOUT': return 'deadline'
+    case 'AGENT_SESSION_HISTORY_BUDGET': case 'AGENT_CONVERSATION_WINDOW_FULL': return 'budget'
+    case 'CONTROL_PROTOCOL_ERROR': return 'protocol'
+    case 'AGENT_SESSION_HISTORY_OBSERVATION_UNAVAILABLE': case 'AGENT_SESSION_HISTORY_OBSERVATION_UNSUPPORTED': return 'source-unavailable'
+    default: return 'unknown'
+  }
 }

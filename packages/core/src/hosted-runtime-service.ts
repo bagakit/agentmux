@@ -21,7 +21,7 @@ const OFFLINE_METHODS = new Set<AgentMuxHostedMethod>([
   'listNativeAgentSessions', 'listHostNativeAgentSessions', 'readNativeAgentHistory', 'readHostNativeAgentHistory', 'readNativeAgentHistoryResource', 'readHostNativeAgentHistoryResource',
   'clientPerformanceDiagnostics', 'respondAgentInteraction', 'inspectAgentInteractionOperation', 'replySessionQuestion',
   'listHostExecutors', 'configureHostExecutor', 'listAgentSpawns',
-  'readDeliveryAttempt', 'inspectAgentPromptSubmission', 'inspectAgentInput', 'readAgentInputMailbox', 'stopAgentInputWaiting', 'rejoinAgentInputWaiting', 'resolveAgentCreationSessionId', 'inspectAgentCreation', 'attestAgentCreation',
+  'readDeliveryAttempt', 'readReadingDiagnostic', 'findReadingDiagnostics', 'inspectAgentPromptSubmission', 'inspectAgentInput', 'readAgentInputMailbox', 'stopAgentInputWaiting', 'rejoinAgentInputWaiting', 'resolveAgentCreationSessionId', 'inspectAgentCreation', 'attestAgentCreation',
   'readAgentSession', 'readAgentSessions', 'readAgentFuturePromptIntent', 'listAgentFuturePromptIntents', 'sessionTimeline', 'readAgentSessionHistory', 'readAgentConversation', 'releaseConversationView', 'sessionHistoryCheckpoint', 'readSessionHistoryChanges', 'conversationCheckpoint', 'readConversationChanges', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
   'checkDeliveries', 'ackDeliveryBatch',
   'authorizeAgentCaller', 'authorizeRetainedAgentCaller', 'authorizeAgentMessage', 'handOff', 'readMessage', 'listMessages', 'listMessageEvents', 'inspectMessageBroadcast', 'broadcastMessages', 'readDispatch', 'listDispatches'
