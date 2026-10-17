@@ -107,7 +107,8 @@ it('exposes generic bounded startup output and real code through public create, 
   expect(failure.message.length).toBeLessThan(4300); expect(input).not.toHaveBeenCalled()
   expect(attach).toHaveBeenCalledTimes(1); expect((await store.load() as AgentMuxStoredAgentSession[]).map(item => item.agentSessionId)).toEqual(['original', 'new-session'])
   expect(client.agentSession('new-session')).toMatchObject({ run: newRunRef(), creation: { failure: { code: 'AGENT_TERMINAL_HANDSHAKE_FAILED' } } })
-  const states = events.filter(event => event.type === 'process-state' && event.agentSessionId === 'new-session')
+  const states = events.filter((event): event is Extract<AgentMuxClientEvent, { type: 'process-state' }> =>
+    event.type === 'process-state' && event.agentSessionId === 'new-session')
   expect(states.at(-1)).toMatchObject({ state: 'exited', exitCode: 1 })
   expect(states.slice(1).some(event => event.state === 'running')).toBe(false)
 })
@@ -146,8 +147,8 @@ it('preserves a confirmed fatal exit after recovering an applied commit acknowle
     await commit(...args)
     throw new Error('Commit acknowledgement unavailable')
   })
-  const result = await client.ensureAgentContinuity({ agentSessionId: old.agentSessionId, expectedRun: old.run, operationId: 'resume-after-commit', trigger: 'manual' })
-  expect(result.kind).toBe('pending')
+  await expect(client.ensureAgentContinuity({ agentSessionId: old.agentSessionId, expectedRun: old.run, operationId: 'resume-after-commit', trigger: 'manual' }))
+    .rejects.toMatchObject({ code: 'AGENT_TERMINAL_HANDSHAKE_FAILED', message: expect.stringContaining('missing platform dependency') })
   expect((await store.readMetadata(old.agentSessionId))?.continuity?.error).toContain('missing platform dependency')
   expect((await store.readMetadata(old.agentSessionId))?.run).toEqual(old.run)
   expect(events.filter(event => event.type === 'process-state').at(-1)).toMatchObject({ run: old.run, state: 'exited' })
@@ -162,4 +163,48 @@ it('retains the typed original direct-resume fatal operation without starting or
   await expect(client.resumeAgent(request)).rejects.toMatchObject({ code: 'AGENT_TERMINAL_HANDSHAKE_FAILED' })
   expect(inner.kernel.start).toHaveBeenCalledTimes(1); expect(input).not.toHaveBeenCalled()
   expect(client.agentSession(old.agentSessionId).run).toEqual(old.run)
+})
+
+it.each(['manual', 'input'] as const)('keeps a confirmed %s recovery failure terminal across original operation reads', async trigger => {
+  const request = { agentSessionId: old.agentSessionId, expectedRun: old.run, operationId: 'failed-recovery', trigger,
+    ...(trigger === 'input' ? { input: { submissionId: 'original-task', prompt: 'Keep this original task' } } : {}) }
+  const failure = { code: 'AGENT_TERMINAL_HANDSHAKE_FAILED', message: expect.stringContaining('missing platform dependency') }
+  await expect(client.ensureAgentContinuity(request)).rejects.toMatchObject(failure)
+  const saved = (await store.readMetadata(old.agentSessionId))!
+  expect(saved).toMatchObject({ run: old.run, nativeHandle: old.nativeHandle, retiredRuns: [newRunRef()],
+    continuity: { kind: 'unavailable', reason: 'process-exited', errorCode: failure.code, error: failure.message,
+      previousRun: old.run, newRun: newRunRef(), nativeTarget: old.nativeHandle } })
+  for (let i = 0; i < 2; i++) await expect(client.ensureAgentContinuity(request)).rejects.toMatchObject(failure)
+  expect(await store.readMetadata(old.agentSessionId)).toEqual(saved)
+  expect(inner.kernel.start).toHaveBeenCalledOnce(); expect(attach).toHaveBeenCalledOnce()
+  expect(input).not.toHaveBeenCalled()
+})
+
+it('keeps a failed rollback unconfirmed with its actual successor instead of claiming the original Run was restored', async () => {
+  const cas = store.compareAndSwapMetadata.bind(store)
+  vi.spyOn(store, 'compareAndSwapMetadata').mockImplementation(async (expected, next, ...rest) => {
+    if (expected?.run.runId === newRun.runId && next?.run.runId === oldRun.runId) throw new Error('rollback Store rejected')
+    return cas(expected, next, ...rest)
+  })
+  await expect(client.ensureAgentContinuity({ agentSessionId: old.agentSessionId, expectedRun: old.run,
+    operationId: 'unconfirmed-rollback', trigger: 'manual' })).resolves.toMatchObject({ kind: 'pending', reason: 'operation-unconfirmed' })
+  expect((await store.readMetadata(old.agentSessionId))!.run).toEqual(newRunRef())
+  expect(inner.kernel.start).toHaveBeenCalledOnce(); expect(input).not.toHaveBeenCalled()
+})
+
+it('preserves cleanup failures as the cause of the original confirmed recovery failure', async () => {
+  const create = inner.hookServer.createBinding.bind(inner.hookServer)
+  vi.spyOn(inner.hookServer, 'createBinding').mockImplementation((...args: unknown[]) => {
+    const binding = create(...args)
+    vi.spyOn(binding, 'close').mockRejectedValueOnce(new Error('original hook cleanup unconfirmed'))
+    return binding
+  })
+  let failure: any
+  try { await client.ensureAgentContinuity({ agentSessionId: old.agentSessionId, expectedRun: old.run,
+    operationId: 'failed-with-cleanup', trigger: 'manual' }) } catch (error) { failure = error }
+  expect(failure).toMatchObject({ code: 'AGENT_TERMINAL_HANDSHAKE_FAILED', message: expect.stringContaining('missing platform dependency') })
+  expect(failure.cause).toBeInstanceOf(AggregateError)
+  expect(failure.cause.errors).toEqual([expect.objectContaining({ code: failure.code }),
+    expect.objectContaining({ message: 'original hook cleanup unconfirmed' })])
+  expect((await store.readMetadata(old.agentSessionId))!.run).toEqual(old.run)
 })
