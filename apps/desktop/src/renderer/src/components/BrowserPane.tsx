@@ -62,6 +62,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { BrowserWorkbenchSurface, WorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 import { BrowserPresentationStage, useBrowserPresentationCapture, type WorkbenchBrowserPresentation } from './BrowserPresentationStage'
+import { resolveBrowserAgentControl } from '../../../shared/browser-agent-control'
 import { WorkbenchPresentationContext, useWorkbenchBrowserPresentation, workbenchBrowserWindowTarget, type WorkbenchViewTarget } from '../lib/workbench-presentation'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { sameWorkbenchProjectionSelection, type WorkbenchProjection, type WorkbenchProjectionSelection } from '../lib/workbench-projection'
@@ -276,6 +277,7 @@ function BrowserPaneContent({
   sourcePresentations.current = { primary: primaryPresentation, targets: presentations }
   const discussion = useBrowserContextualComposer(tab.browserId, tab.activity?.operation ?? null, visible, tab.navigationId)
   const toolbar = useAppStore((state) => state.config?.browser.toolbar)
+  const agentAppearance = useAppStore(state => state.config?.browser.agentControl)
   const toolsOpen = useAppStore((state) => state.toolsOpen)
   // Selection comes from the owning surface, never the first rendered occurrence.
   const selectedPresentationId = useAppStore(state => windowPresentation?.occurrence.presentationId ?? selectedBrowserPresentationId(presentations, state))
@@ -1358,6 +1360,7 @@ function BrowserPaneContent({
       }} actions={annotationSync.retryAvailable ? <button type="button" className="small-button" onClick={annotationSync.retry}>Retry annotations</button> : null} />
       <div className="browser-body">
       {presentation && !connectionUnavailable && !__AGENTMUX_WEB_PREVIEW__ ? <BrowserPresentationStage browserId={tab.browserId} navigationId={tab.navigationId} presentation={presentation}
+        control={tab.control} preferences={resolveBrowserAgentControl(agentAppearance)}
         inputSelected={presentation.occurrence.presentationId === selectedPresentationId}
         onInputSelected={() => onPresentationInputSelected?.(presentation.target)}
         blocked={blocked} media={media} stageRef={presentation.stageHostId === presentations[0]?.stageHostId ? stageRef : undefined}>{stageContent}</BrowserPresentationStage>

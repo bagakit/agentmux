@@ -1,6 +1,7 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useId, useState } from 'react'
 import type { AgentMuxBrowserControl, AgentProviderId } from '@agentmux/core'
+import { BROWSER_PAGE_CAPABILITIES } from '@agentmux/core/browser-page-capability'
 import type {
   BrowserActivityState,
   BrowserOperation,
@@ -123,33 +124,43 @@ export function BrowserOperationStatus({
   const phase = !currentDetails ? 'unknown' : taskRun ? taskRun.status === 'waiting-human' ? 'human' : 'waiting' : operation
     ? !terminal && control?.owner === 'human' ? 'human' : operation.phase
     : control?.owner === 'human' ? 'idle' : 'unknown'
+  const step = controlled && !terminal && operation ? lastRunningStep(operation) : undefined
+  const effect = step ? BROWSER_PAGE_CAPABILITIES.find(capability => capability.name === step.method)?.effect : undefined
+  const action = phase !== 'running' ? null : step?.method === 'js' ? { label: 'Running script', short: 'Script', icon: 'object.source-code' as const }
+    : step?.method === 'cdp' ? { label: 'Running browser command', short: 'Command', icon: 'object.source-code' as const }
+      : effect === 'observe' ? { label: 'Observing page', short: 'Observing', icon: 'action.inspect' as const }
+        : effect === 'navigate' ? { label: 'Navigating page', short: 'Navigating', icon: 'object.browser' as const } : null
   const label = taskRun ? taskRun.status === 'waiting-human' ? 'Waiting for human checkpoint' : 'Task ready to continue'
     : phase === 'unknown' ? control?.owner === 'agent' ? 'Agent control active · Activity details are loading' : 'Browser control is unconfirmed · Activity details are loading'
-    : phase === 'idle' ? 'You have control' : phaseLabel(phase)
+    : phase === 'idle' ? 'You have control' : action?.label ?? phaseLabel(phase)
   const checkpoint = taskVersion?.steps.find(step => step.id === taskRun?.pendingCheckpointId)
   const target = !currentDetails ? null : taskRun ? [taskVersion!.name, `v${taskRun.version}`, checkpoint?.label,
     taskRun.nextStep < taskVersion!.steps.length ? `Next step ${taskRun.nextStep + 1}` : 'Review final checkpoint'].filter(Boolean).join(' · ')
     : operation ? currentTarget(operation) ?? operation.summary : null
   const identity = currentDetails ? operation?.operator.name : undefined
-  const description = [identity, label, target].filter(Boolean).join(' · ')
+  const description = [identity, label, terminal && control?.owner === 'human' ? 'You have control' : null, target].filter(Boolean).join(' · ')
+  const cue = action?.short ?? (phase === 'running' ? 'Operating' : phase === 'waiting' ? 'Waiting' : phase === 'preparing' ? 'Preparing'
+    : phase === 'human' ? 'Your turn' : phase === 'completed' ? 'Done' : phase === 'failed' ? 'Failed' : phase === 'stopped' ? 'Stopped'
+      : phase === 'indeterminate' ? 'Review' : phase === 'unknown' ? control?.owner === 'agent' ? 'Agent control' : 'Unconfirmed' : null)
   const canStop = Boolean(operation && (!terminal || controlled))
   const canTakeControl = control?.owner === 'agent'
   const canReturnControl = control?.owner === 'human'
   const providerId = currentDetails ? operatorProviderId ?? operation?.operator.providerId : undefined
   const phaseGlyph = phase === 'idle' ? <ThemeObjectHistoryIcon size={14} aria-hidden="true" />
     : phase === 'unknown' ? <ThemeStatusWarningIcon size={14} aria-hidden="true" />
-    : <PhaseGlyph phase={phase} current={Boolean(controlled && !terminal)} />
+    : action ? <SemanticIcon name={action.icon} size={13} /> : <PhaseGlyph phase={phase} current={Boolean(controlled && !terminal)} />
   return (
     <span className="browser-operation-status" data-phase={phase} data-control={control?.owner ?? 'unknown'} data-operation-id={operation?.id}
       data-task-run-id={taskRun?.id} data-task-version={taskRun?.version}>
       <DropdownMenu.Root {...(onOpenChange ? { onOpenChange } : {})}>
         <DropdownMenu.Trigger asChild>
-          <button type="button" className="browser-operation-status__trigger" aria-label={`Browser activity: ${description}`} title={description}>
+          <button type="button" className={`browser-operation-status__trigger${cue ? ' browser-operation-status__trigger--presence' : ''}`} aria-label={`Browser activity: ${description}`} title={description}>
             {operation && providerId ? <span className="browser-operation-status__face">
               <ResolvedAgentAvatar label={operation.operator.name} providerId={providerId} appearance={operatorAppearance} />
               <span className="browser-operation-status__phase">{phaseGlyph}</span>
             </span>
               : phaseGlyph}
+            {cue ? <span className="browser-operation-status__cue">{cue}</span> : null}
           </button>
         </DropdownMenu.Trigger>
         <DropdownMenu.Portal>
@@ -386,6 +397,14 @@ export function formatClock(value: number): string {
   const date = new Date(value)
   if (!Number.isFinite(date.getTime())) return '—'
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+function lastRunningStep(operation: BrowserOperation): BrowserOperationStep | undefined {
+  for (let index = operation.steps.length - 1; index >= 0; index--) {
+    const step = operation.steps[index]!
+    if (step.status === 'running') return step
+  }
+  return undefined
 }
 
 function currentTarget(operation: BrowserOperation): string | null {

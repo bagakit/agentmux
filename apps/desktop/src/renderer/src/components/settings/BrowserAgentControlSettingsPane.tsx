@@ -48,7 +48,7 @@ export function BrowserAgentControlSettingsPane({ preferences, active, onSave }:
         </section>
         <section className="settings-group">
           <header><span>Inner glow</span></header>
-          {toggle('glowEnabled', 'Highlight page edges')}
+          {toggle('glowEnabled', 'Highlight page edges', 'A steady fine edge marks agent control. The soft inner glow can blend and animate.')}
           <div className="browser-agent-control__pair">
             <label className="browser-agent-control__color" data-settings-field="glowColor"><span>Color</span><span><input aria-label="Glow color" type="color" value={value.glowColor} onChange={event => draft.setField('glowColor', event.target.value)} /><code>{value.glowColor.toUpperCase()}</code></span></label>
             <label data-settings-field="glowBlend"><span>Blend</span><select aria-label="Glow blend" value={value.glowBlend} onChange={event => draft.setField('glowBlend', event.target.value as BrowserAgentControlPreferences['glowBlend'])}>{BROWSER_AGENT_GLOW_BLENDS.map(blend => <option key={blend} value={blend}>{blend[0]!.toUpperCase() + blend.slice(1)}</option>)}</select></label>
