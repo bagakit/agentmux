@@ -6,7 +6,7 @@ import { workbenchRegionProjectionSlotId, type WorkbenchProjectionSelection } fr
 import type { WorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 
 const reference: WorkbenchProjectionSelection = { displayWorkspaceId: 'display', groupId: 'group', tabId: 'tab', regionId: 'region' }
-const selection: AgentMuxDesktopSelection = { surface: 'space', mainSurface: 'workbench', spaceView: 'workbench', goalId: null,
+const selection: AgentMuxDesktopSelection = { surface: 'space', mainSurface: 'workbench', focusView: null, goalId: null,
   space: { workspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId,
     regionId: reference.regionId, spaceId: 'space', zoneId: 'zone', topicId: null } }
 const tab: WorkbenchTab = { id: 'tab', workspaceId: 'resource', titleRegionId: 'region',

@@ -28,6 +28,8 @@ import { readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingOpen, usePm
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
 import { installNativePopover } from './fixtures/mote-workface'
+import { installCollaborationCanvasGeometry } from './helpers/collaboration-canvas-dom'
+import { installCollaborationLayoutLoopback } from './helpers/collaboration-layout-loopback'
 import { workbenchProjectionSlotId, workbenchRegionProjectionSlotId } from '../src/renderer/src/lib/workbench-projection'
 import { workbenchDisplayReferenceMatches } from '../src/renderer/src/lib/workbench-resource-display'
 import { moteWorkbenchProjection } from '../src/renderer/src/lib/mote-workbench-projection'
@@ -172,6 +174,75 @@ afterEach(async () => {
 })
 
 describe('actual Desktop navigation and content-free observation owners', () => {
+  it('retains Focus List and Map owners, exact original workface and input across actual App navigation', async () => {
+    installCollaborationCanvasGeometry(); installCollaborationLayoutLoopback()
+    vi.spyOn(api.sessions, 'historySources').mockResolvedValue([])
+    await control({ kind: 'space', regionId: 'source-region' })
+    const original = useAppStore.getState(), originalLayouts = structuredClone(original.layouts)
+    const originalChoice = structuredClone(original.workbenchSpaceSelection)
+    const toolsPreference = original.toolsOpen
+    await act(async () => useAppStore.getState().focusExecutionSession(null, undefined, { navigate: false }))
+    const first = await control({ kind: 'surface', surface: 'focus', view: 'list' })
+    expect(first.navigation.selection).toMatchObject({ surface: 'focus', focusView: 'list' })
+    const list = container.querySelector<HTMLElement>('[data-desktop-focus-view="list"]')!
+    expect(list.hidden).toBe(false)
+    expect(list.querySelector('[data-surface-tools-toggle]')).toBeNull()
+    expect(useAppStore.getState().toolsOpen).toBe(toolsPreference)
+    const switcher = list.querySelector<HTMLElement>('[aria-label="Focus view"]')!
+    expect([...switcher.querySelectorAll('button')].map(button => button.textContent)).toEqual(['List', 'Map'])
+    expect(switcher.querySelector('[aria-label="List"]')?.getAttribute('aria-pressed')).toBe('true')
+    const entered = await control({ kind: 'surface', surface: 'focus', view: 'map' })
+    expect(entered.presentation).toMatchObject({ state: 'main-visible', tabId: null, regionId: null })
+    const map = container.querySelector<HTMLElement>('[data-desktop-focus-view="map"]')!
+    expect(map.hidden).toBe(false); expect(list.hidden).toBe(true)
+    expect(map.querySelector('[data-surface-tools-toggle]')).toBeNull()
+    expect(useAppStore.getState().toolsOpen).toBe(toolsPreference)
+    const target = useAppStore.getState().collaborationMapTarget
+    expect(target).not.toBeNull()
+    await control({ kind: 'surface', surface: 'focus', view: 'list' })
+    expect(map.hidden).toBe(true); expect(list.hidden).toBe(false)
+    await control({ kind: 'surface', surface: 'focus', view: 'map' })
+    expect(container.querySelector('[data-desktop-focus-view="map"]')).toBe(map)
+    expect(useAppStore.getState().collaborationMapTarget).toBe(target)
+    await control({ kind: 'surface', surface: 'space' })
+    expect(map.hidden).toBe(true); expect(useAppStore.getState().focusView).toBe('map')
+    await control({ kind: 'surface', surface: 'focus' })
+    expect(map.hidden).toBe(false); expect(list.hidden).toBe(true)
+    const current = useAppStore.getState()
+    expect(current.tabs).toBe(original.tabs)
+    expect(current.layouts).toEqual(originalLayouts)
+    expect(current.workbenchSpaceSelection).toEqual(originalChoice)
+    expect(current.agentComposerDrafts).toBe(original.agentComposerDrafts)
+    expect(document.activeElement).toBe(outside)
+    expect([outside.value, outside.selectionStart, outside.selectionEnd]).toEqual(['Keep user input', 2, 5])
+    expect(container.querySelectorAll('[data-agent-reading-host]').length).toBeLessThanOrEqual(1)
+    // A secondary Space action must replace a previous Focus intent with the current exact area.
+    const unrelated = { kind: 'focus' as const, subject: { hostId: 'unrelated-host', agentSessionId: 'unrelated-agent' }, name: 'Other work' }
+    await act(async () => useAppStore.getState().openCollaborationMap(unrelated))
+    await control({ kind: 'surface', surface: 'space' })
+    await act(async () => { useAppStore.getState().setWorkspaceTool('agents'); useAppStore.setState({ toolsOpen: true }) })
+    await settle()
+    const locate = container.querySelector<HTMLButtonElement>('.surface-tool-dock:not([hidden]) [aria-label="Locate Space in Focus map"]')
+    expect(locate).not.toBeNull()
+    await act(async () => locate!.click()); await settle()
+    expect(useAppStore.getState().mainSurface).toBe('agents')
+    expect(useAppStore.getState().focusView).toBe('map')
+    expect(container.querySelector('[data-desktop-focus-view="map"]')).toBe(map)
+    const located = useAppStore.getState().collaborationMapTarget
+    expect(located).not.toBe(unrelated)
+    expect(located).toMatchObject({ kind: 'focus', subject: { hostId: source.control.hostId, agentSessionId: source.control.agentSessionId } })
+    expect(useAppStore.getState().workbenchSpaceSelection).toEqual(originalChoice)
+    expect(useAppStore.getState().agentComposerDrafts).toBe(original.agentComposerDrafts)
+    await control({ kind: 'space', zoneId: workspaceZoneId(directoryIdentity('local', _hygiene_fixturePath("empty")), 'empty') })
+    const areaChoice = structuredClone(useAppStore.getState().workbenchSpaceSelection)
+    expect(areaChoice).toMatchObject({ workspaceId: 'empty', tabId: null, regionId: null })
+    const locateArea = container.querySelector<HTMLButtonElement>('.surface-tool-dock:not([hidden]) [aria-label="Locate Space in Focus map"]')
+    expect(locateArea).not.toBeNull()
+    await act(async () => locateArea!.click()); await settle()
+    expect(useAppStore.getState().collaborationMapTarget).toMatchObject({ kind: 'space', workspaceId: 'empty', choice: areaChoice })
+    expect(container.querySelector('[data-desktop-focus-view="map"]')).toBe(map)
+  })
+
   it('reads presentation for cold requests and adds no readers, observers or Runtime subscriptions for unrelated output facts', async () => {
     const presentation = await import('../src/renderer/src/lib/desktop-presentation')
     const read = vi.spyOn(presentation, 'readDesktopPresentation')
