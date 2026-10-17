@@ -50,4 +50,6 @@ export const generalSettings = [
   enumSetting('projectRailDensity', PROJECT_RAIL_DENSITY_IDS, PROJECT_RAIL_DENSITY_DEFAULT,
     (config) => config.projectRailDensity ?? PROJECT_RAIL_DENSITY_DEFAULT,
     (config, projectRailDensity) => ({ ...config, projectRailDensity })),
+  booleanSetting('gitHistoryShowTime', true, config => config.gitHistoryShowTime !== false,
+    (config, gitHistoryShowTime) => ({ ...config, gitHistoryShowTime })),
 ] satisfies readonly ScalarSetting[]

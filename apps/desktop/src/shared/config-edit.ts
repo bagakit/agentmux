@@ -45,6 +45,7 @@ function effective(path: string, value: unknown): unknown {
   if (path === 'goals.showFinished') return value ?? resolveGoalsPreferences(undefined).showFinished
   if (path === 'goals.requesterAsSupervisor') return value ?? resolveGoalsPreferences(undefined).requesterAsSupervisor
   if (path === 'projectRailDensity') return value ?? PROJECT_RAIL_DENSITY_DEFAULT
+  if (path === 'gitHistoryShowTime') return value ?? true
   if (path === 'messageToolCompletion') return resolveComposerInputConfig(value as ComposerInputConfig | undefined)
   if (path.startsWith('messageToolCompletion.')) return value === undefined ? DEFAULT_COMPOSER_INPUT_CONFIG[path.slice('messageToolCompletion.'.length) as keyof ComposerInputConfig] : value
   if (path === 'messageToolInitialLayout') return value ?? MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT

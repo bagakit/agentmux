@@ -8,6 +8,7 @@ import { usePathDisplay } from '../../../hooks/usePathDisplay'
 import { speakerColorHue } from '../../../lib/conversation-avatar-color'
 import { useGitHistoryDetails } from './GitHistoryDetails'
 import { GitHistoryRefPicker } from './GitHistoryRefPicker'
+import { useAppStore } from '../../../store'
 
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 
@@ -15,6 +16,14 @@ const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 const ROW_HEIGHT = 24
 const LANE_WIDTH = 14
 const x = (lane: number) => 10 + lane * LANE_WIDTH
+const rowTimeFormat = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+
+function CommitTime({ authoredAt }: { authoredAt: number | null }) {
+  const date = authoredAt === null ? null : new Date(authoredAt)
+  return date && Number.isFinite(date.getTime())
+    ? <time className="git-history-time" dateTime={date.toISOString()} title={date.toLocaleString()}>{rowTimeFormat.format(date)}</time>
+    : <span className="git-history-time" title="Author time was not recorded">Time unknown</span>
+}
 
 /** Only the loaded topological window. An unresolved parent stays an explicit continuation. */
 function historyGraph(commits: GitHistoryCommit[], refs: GitHistoryRef[]) {
@@ -76,6 +85,7 @@ export function GitHistoryPanel({ workspace, history, onSelectCommit, selectedOi
   viewportState?: RefObject<GitHistoryViewportState | null>
 }) {
   const displayPath = usePathDisplay()
+  const showTime = useAppStore(state => state.config?.gitHistoryShowTime !== false)
   const ready = history.result?.kind === 'ready' ? history.result : null
   const graph = useMemo(() => historyGraph(ready?.commits ?? [], ready?.snapshot.refs ?? []), [ready?.commits, ready?.snapshot.refs])
   // A page keeps its pinned roots and timestamp. Moving labels do not define reading position.
@@ -115,7 +125,7 @@ export function GitHistoryPanel({ workspace, history, onSelectCommit, selectedOi
     resize.observe(view)
     return () => { active = false; intersection?.disconnect(); resize.disconnect() }
   }, [history.enabled, history.loading, history.error, ready?.nextCursor, readAhead])
-  return <section className="git-history-panel" aria-label="Git history" aria-busy={history.loading}>
+  return <section className="git-history-panel" aria-label="Git history" aria-busy={history.loading} data-show-time={showTime}>
     <div className="git-history-controls">
       <GitHistoryRefPicker key={JSON.stringify([workspace.id, workspace.hostId, workspace.path])}
         refs={history.refs} reference={history.reference} onSelect={history.selectReference} enabled={history.enabled} scope={scope}
@@ -131,17 +141,18 @@ export function GitHistoryPanel({ workspace, history, onSelectCommit, selectedOi
     {ready && ready.commits.length === 0 && <div className="branches-empty"><strong>No commits yet</strong></div>}
     {ready && ready.commits.length > 0 && <HistoryViewport graph={graph} history={history} {...(selectedOid ? { selectedOid } : {})}
       {...(revealOid ? { revealOid } : {})} scope={scope} position={position} scrollHost={scrollHost} footer={footer}
-      select={select} previewEvents={details.triggerEvents} closePreview={details.close} readAhead={readAhead} />}
+      select={select} previewEvents={details.triggerEvents} closePreview={details.close} readAhead={readAhead} showTime={showTime} />}
     {details.preview}
   </section>
 }
 
 /** Hover state stays above this memo boundary; only the viewport owns row/SVG generation. */
 const HistoryViewport = memo(function HistoryViewport({ graph, history, selectedOid, revealOid, scope, position, scrollHost, footer,
-  select, previewEvents, closePreview, readAhead }: {
+  select, previewEvents, closePreview, readAhead, showTime }: {
   graph: Graph; history: History; selectedOid?: string; revealOid?: string; scope: string
   position: RefObject<GitHistoryViewportState | null>; scrollHost: RefObject<HTMLDivElement | null>; footer: RefObject<HTMLDivElement | null>
   select: (commit: GitHistoryCommit) => void; previewEvents: PreviewEvents; closePreview: () => void; readAhead: () => void
+  showTime: boolean
 }) {
   const previousScrollTop = useRef(0)
   const pendingFocus = useRef<number | null>(null)
@@ -235,12 +246,13 @@ const HistoryViewport = memo(function HistoryViewport({ graph, history, selected
               if (target) { pendingFocus.current = null; target.focus({ preventScroll: true }) }
             }}>
             <strong>{commit.subject || '(No commit message)'}</strong>
-            {commit.refs.length > 0 && <div className="git-history-refs">{commit.refs.slice(0, 2).map(ref => {
+            {commit.refs.length > 0 && <div className="git-history-refs">{commit.refs.slice(0, showTime ? 1 : 2).map(ref => {
               const guide = ref.kind === 'local' || ref.kind === 'remote' ? ref.name : ref.kind === 'head' ? graph.guides.get(commit.oid) : undefined
               return <span key={ref.name} className={`git-history-ref git-history-ref--${ref.kind}`}
                 {...previewEvents(commit, ref)} data-branch-ref={guide} style={branchStyle(guide)}>{referenceLabel(ref)}</span>
-            })}{commit.refs.length > 2 && <span className="git-history-ref-count" {...previewEvents(commit)}>+{commit.refs.length - 2}</span>}</div>}
+            })}{commit.refs.length > (showTime ? 1 : 2) && <span className="git-history-ref-count" {...previewEvents(commit)}>+{commit.refs.length - (showTime ? 1 : 2)}</span>}</div>}
             <code className="git-history-hash">{commit.oid.slice(0, 7)}</code>
+            {showTime && <CommitTime authoredAt={commit.authoredAt} />}
           </li>
         })}
       </ol>
