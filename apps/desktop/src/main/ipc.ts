@@ -213,7 +213,7 @@ import { readPastedImage } from './pasted-image-read.js'
 import { ConfigStore } from './config-store.js'
 import { ConfigOwner } from './config-owner.js'
 import { resolveBrowserAgentControl } from '../shared/browser-agent-control.js'
-import { registerThemeBootstrap } from './theme-bootstrap.js'
+import { registerThemeBootstrap, themeBootstrap } from './theme-bootstrap.js'
 import { resolveTheme } from '@agentmux/client-ui/theme'
 import { executeSettingsControl } from './settings-control.js'
 import { checkSettingsHost, executeSettingsHostsControl } from './settings-hosts-control.js'
@@ -443,7 +443,8 @@ export async function registerIpc(args: {
   }, browserOperationJournal, browserEvidence, browserResults, browserDemonstrations,
   new BrowserTaskAssets(new BrowserTaskAssetFileStore(join(app.getPath('userData'), BROWSER_TASK_ASSETS_FILE)), { nameAudit }),
   new BrowserDownloads(join(app.getPath('userData'), 'browser-downloads'), files, id => workspace(config, id)),
-  browserUploads, () => resolveBrowserAgentControl(configOwner.current.browser.agentControl), browserRecoveryPreviews)
+  browserUploads, () => resolveBrowserAgentControl(configOwner.current.browser.agentControl), browserRecoveryPreviews,
+  { readTheme: () => themeBootstrap(configOwner.current.appearance, nativeTheme.shouldUseDarkColors) })
   const disposeBrowserFeedbackPreferences = configOwner.subscribe((saved, previous) => {
     if (JSON.stringify(saved.browser.agentControl) !== JSON.stringify(previous.browser.agentControl)) browsers.refreshAgentFeedback()
   })

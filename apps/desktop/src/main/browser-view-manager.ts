@@ -3,6 +3,7 @@ import type { BrowserInputFrameCapture } from '../shared/browser-input-context-c
 import { BROWSER_FAVICON_TIMEOUT_MS, readBrowserFavicon } from './browser-favicon.js'
 import type { BrowserColdDescriptor } from './browser-cold-descriptor.js'
 import type { BrowserRecoveryPreviewStore } from './browser-recovery-preview.js'
+import { BrowserPopupWindows, type BrowserPopupHost } from './browser-popup-windows.js'
 import { BROWSER_RECOVERY_PREVIEW_JPEG_PREFIX, BROWSER_RECOVERY_PREVIEW_MAX_WIDTH, BROWSER_RECOVERY_PREVIEW_MAX_HEIGHT,
   BROWSER_RECOVERY_PREVIEW_MAX_IMAGE_BYTES, type BrowserRecoveryPreviewScope } from '../shared/browser-recovery-preview.js'
 import { readScreenshotViewport, screenshotSource, SCREENSHOT_VIEWPORT_SCRIPT } from './browser-screenshot-source.js'
@@ -341,6 +342,7 @@ export function normalizeBrowserUrl(value: string): string {
 }
 
 export class BrowserViewManager {
+  private readonly popupWindows: BrowserPopupWindows
   /** Window Chrome listens to the current native owner without a second Browser/input registry. */
   onNativeVisibilityChange: ((visibility: import('../shared/native-overlay.js').NativeBrowserVisibility, window?: BrowserWindow) => void) | undefined
   private nativeVisibilityRevision = 0
@@ -504,8 +506,17 @@ export class BrowserViewManager {
     private readonly downloads?: BrowserDownloads,
     private readonly uploads?: BrowserUploads,
     private readonly feedbackPreferences: () => BrowserAgentControlPreferences = () => DEFAULT_BROWSER_AGENT_CONTROL,
-    private readonly recoveryPreviews?: BrowserRecoveryPreviewStore
+    private readonly recoveryPreviews?: BrowserRecoveryPreviewStore,
+    popupOptions: Partial<Pick<BrowserPopupHost, 'rendererUrl' | 'preloadPath' | 'readTheme' | 'confirmLeave'>> = {}
   ) {
+    this.popupWindows = new BrowserPopupWindows({
+      appLinks,
+      normalizeAddress: normalizeBrowserUrl,
+      rendererUrl: popupOptions.rendererUrl ?? (() => new URL('browser-popup.html', this.window.webContents.getURL()).href),
+      preloadPath: popupOptions.preloadPath ?? fileURLToPath(new URL('../preload/browser-popup.cjs', import.meta.url)),
+      readTheme: popupOptions.readTheme ?? (() => ({ status: 'unavailable', message: 'The original window theme is unavailable. Page navigation remains usable.' })),
+      ...(popupOptions.confirmLeave ? { confirmLeave: popupOptions.confirmLeave } : {})
+    })
     this.unsubscribeTaskAssets = taskAssets?.subscribe(browserId => {
       if (!this.entries.has(browserId)) return
       void this.getTaskAssets(browserId).catch(() => {})
@@ -3176,7 +3187,6 @@ export class BrowserViewManager {
     }
     storage.windows.add(child)
     child.once('closed', () => storage.windows.delete(child))
-    child.webContents.on('did-create-window', popup => this.trackPrivatePopup(id, storage, popup))
   }
 
   /** Native teardown has no authority to retire the Renderer Region. */
@@ -3242,6 +3252,7 @@ export class BrowserViewManager {
     // Retire private incarnations before the existing normal teardown, whose synchronous error
     // contract is preserved. A normal native failure cannot strand a later private consumer.
     for (const id of [...this.entries.keys(), ...this.releasedEntries.keys()]) this.destroyOwner(id)
+    this.popupWindows.dispose()
     for (const unsubscribe of this.webAuthnSessions.values()) unsubscribe()
     this.webAuthnSessions.clear()
     void this.uploads?.dispose().catch(error => console.warn('Browser upload staging cleanup failed during disposal:', error))
@@ -3260,10 +3271,6 @@ export class BrowserViewManager {
   private attach(entry: BrowserEntry, view: WebContentsView): void {
     this.browserIdsByView.set(view, entry.id)
     const contents = view.webContents
-    if (entry.storage.mode === 'private') {
-      const storage = entry.storage
-      contents.on('did-create-window', child => this.trackPrivatePopup(entry.id, storage, child))
-    }
     installTextEditContextMenu(contents, () => this.windowForView(view), {
       isCurrent: () => this.nativeOwner(entry.id)?.view === view && !this.agentOwnsInput(entry),
       origin: () => view.getBounds()
@@ -3317,16 +3324,23 @@ export class BrowserViewManager {
     // An external app's device-authorize iframe uses exactly that path.
     contents.on('will-frame-navigate', guardNavigation)
     contents.on('will-redirect', guardNavigation)
-    // 弹窗那条路。`649df3a2` 把整个 handler 删掉是为了保住原生 popup 语义，而缺席的代价是应用链接的
-    // `window.open` 会真的开出一个装着 `customapp:` 的窗口，没人管。这里回装，但只截应用链接——回调体就是
-    // 一次转发，判定与副作用都在 `browserWindowOpenOutcome` 里（照 window-security.ts 那两个实测存活
-    // 的变异：回调体里有语句就能改）。
-    contents.setWindowOpenHandler(({ url }) =>
-      browserWindowOpenOutcome(url, (target, scheme) => {
+    // Application schemes keep their original handoff. For native website windows,
+    // Electron finishes the original request using its complete child-creation options.
+    contents.setWindowOpenHandler(({ url }) => {
+      const outcome = browserWindowOpenOutcome(url, (target, scheme) => {
         if (!this.owns(entry, view)) return
         void this.handOffAppLink(entry, target, scheme)
       })
-    )
+      if (outcome.action === 'deny') return outcome
+      const storage = entry.storage
+      return { action: 'allow', createWindow: options => this.popupWindows.create(options, {
+        mode: storage.mode,
+        onCreated: child => {
+          if (this.owns(entry, view)) this.markResourceRisk(entry, view, 'document-used')
+          if (storage.mode === 'private') this.trackPrivatePopup(entry.id, storage, child)
+        }
+      }) }
+    })
     contents.on('devtools-opened', () => this.emitRetentionChange(entry))
     contents.on('devtools-closed', () => this.emitRetentionChange(entry))
     contents.on('media-started-playing', () => this.markResourceRisk(entry, view, 'media'))
@@ -3546,6 +3560,8 @@ export class BrowserViewManager {
   }
 
   private webAuthnOwner(contents: WebContents): BrowserWebAuthnOwner | null {
+    const popup = this.popupWindows.find(contents)
+    if (popup) return popup
     const entry = [...this.entries.values()].find(candidate => candidate.view.webContents === contents)
     if (!entry) return null
     const view = entry.view

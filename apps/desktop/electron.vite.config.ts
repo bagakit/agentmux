@@ -27,8 +27,8 @@ export default defineConfig({
       // Sandboxed preload can load Electron, but not external workspace packages.
       externalizeDeps: false,
       rollupOptions: {
-        input: resolve(import.meta.dirname, 'src/preload/index.ts'),
-        output: { format: 'cjs', entryFileNames: 'index.cjs' }
+        input: { index: resolve(import.meta.dirname, 'src/preload/index.ts'), 'browser-popup': resolve(import.meta.dirname, 'src/preload/browser-popup.ts') },
+        output: { format: 'cjs', entryFileNames: '[name].cjs' }
       }
     }
   },
@@ -37,7 +37,7 @@ export default defineConfig({
     resolve: { alias: { ...radixOverlayAliases, ...noteParsingAliases }, dedupe: ['react', 'react-dom'] },
     worker: { format: 'es' },
     plugins: [react(), pdfjsViewerAssets(), fileDiagramAssets(import.meta.dirname)],
-    build: { rollupOptions: { input: { index: resolve(import.meta.dirname, 'src/renderer/index.html'), 'workbench-window': resolve(import.meta.dirname, 'src/renderer/workbench-window.html'), 'file-diagram': resolve(import.meta.dirname, 'src/renderer/file-diagram/index.html') } } },
+    build: { rollupOptions: { input: { index: resolve(import.meta.dirname, 'src/renderer/index.html'), 'workbench-window': resolve(import.meta.dirname, 'src/renderer/workbench-window.html'), 'browser-popup': resolve(import.meta.dirname, 'src/renderer/browser-popup.html'), 'file-diagram': resolve(import.meta.dirname, 'src/renderer/file-diagram/index.html') } } },
     define: { __AGENTMUX_WEB_PREVIEW__: 'false' }
   }
 })
