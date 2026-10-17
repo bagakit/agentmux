@@ -140,6 +140,34 @@ function zeroB(phase: string) {
   expect.soft(current.paneCommit[b] ?? 0, 'Unchanged B Pane commits').toBe(0)
   expect.soft(current.composerCommit[b] ?? 0, 'Unchanged B Composer commits').toBe(0)
 }
+function initialProgressCost(extraIds: readonly string[]) {
+  const controls = [...dom.container.querySelectorAll('.continuous-progress-control')]
+  const extras = extraIds.map(id => {
+    const node = dom.container.querySelector('[data-workbench-region-id="region-' + id + '"]')
+    const control = node?.querySelector('.continuous-progress-control') ?? null
+    return { id, nodeFound: node !== null, elements: node ? 1 + node.querySelectorAll('*').length : null,
+      progressRoot: control !== null, progressDescendants: control?.querySelectorAll('*').length ?? null,
+      prosemirror: node?.querySelectorAll('.ProseMirror').length ?? null,
+      activity: node?.querySelectorAll('.activity-feed').length ?? null,
+      terminal: node?.querySelector('[data-original-terminal]') ?? null }
+  })
+  if (process.env.AGENTMUX_RETAINED_TAB_SAMPLES) appendFileSync(process.env.AGENTMUX_RETAINED_TAB_SAMPLES,
+    JSON.stringify({ phase: 'initial-progress-cost', extraCount: extraIds.length,
+      totalElements: dom.container.querySelectorAll('*').length, controls: controls.length,
+      controlDescendants: controls.map(control => control.querySelectorAll('*').length),
+      extras: extras.map(({ terminal, ...row }) => ({ ...row, controlledTerminal: terminal !== null })) }) + '\n')
+  expect(controls.length, 'Original Progress controllers remain mounted').toBeGreaterThan(0)
+  for (const control of controls) expect(control.querySelectorAll('*'), 'Unopened Progress has no pure details DOM').toHaveLength(0)
+  for (const row of extras) {
+    expect(row.nodeFound, row.id).toBe(true)
+    expect(row.progressRoot, row.id).toBe(true)
+    expect(row.progressDescendants, row.id).toBe(0)
+    expect(row.prosemirror, row.id).toBe(0)
+    expect(row.activity, row.id).toBe(0)
+    expect(row.terminal, row.id).not.toBeNull()
+  }
+  return extras
+}
 async function prepare(kind: 'browser' | 'agent') {
   const original = fixture(kind)
   await dom.render(<WorkspaceWorkbench workspaceId="workspace" visible />); await settle()
@@ -165,6 +193,7 @@ it.each([0, 24])('switches actual App surfaces without rendering unchanged retai
     viewModes: { ...state.viewModes, ...Object.fromEntries(extraIds.map(id => [id, 'terminal' as const])) } }))
   await dom.render(<App />); await settle()
   await waitForAgentCardReading(() => expect(region('region-b').querySelector('.activity-feed')!.textContent).toContain('Original B reading'))
+  const initial = initialProgressCost(extraIds)
   await dom.click('button[data-workbench-tab-id="tab-a"]'); await settle()
   expect(useAppStore.getState().workbenchSpaceSelection?.tabId).toBe('tab-a')
   const original = preserveB()
@@ -179,6 +208,7 @@ it.each([0, 24])('switches actual App surfaces without rendering unchanged retai
     expect(counts().paneCommit[id] ?? 0, id).toBe(0)
     expect(counts().composerRender[id] ?? 0, id).toBe(0)
     expect(counts().composerCommit[id] ?? 0, id).toBe(0)
+    expect(region('region-' + id).querySelector('[data-original-terminal]'), id).toBe(initial.find(row => row.id === id)!.terminal)
   }
   reset()
   await dom.click('button[aria-label="Space: show terminal and file workbench"]'); await settle()
@@ -190,6 +220,7 @@ it.each([0, 24])('switches actual App surfaces without rendering unchanged retai
     expect(counts().paneCommit[id] ?? 0, id).toBe(0)
     expect(counts().composerRender[id] ?? 0, id).toBe(0)
     expect(counts().composerCommit[id] ?? 0, id).toBe(0)
+    expect(region('region-' + id).querySelector('[data-original-terminal]'), id).toBe(initial.find(row => row.id === id)!.terminal)
   }
 })
 
