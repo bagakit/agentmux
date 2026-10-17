@@ -4,7 +4,7 @@ import { rpcRecord } from './rpc-data.js'
 import { projectConversationTimeline, conversationRecordId, conversationRevision, conversationSourceKey, conversationInputAdoptionEdges,
   type ConversationSourceRecord, type ConversationSourceRef, type ConversationSourceCoverage, type ConversationInputAdoptionContext } from './conversation-timeline.js'
 import { parseConversationTimelineReadInput, parseConversationChangesInput, parseConversationFrontier, parseConversationReadPage, parseConversationChangesPage,
-  CONVERSATION_DEFAULT_READ_BYTES, CONVERSATION_MAX_UNIT_BYTES, type ConversationTimelineReadInput, type ConversationChangesInput, type ConversationFrontier,
+  CONVERSATION_DEFAULT_READ_BYTES, CONVERSATION_MAX_UNIT_BYTES, CONVERSATION_MAX_WINDOW_RECORDS, type ConversationTimelineReadInput, type ConversationChangesInput, type ConversationFrontier,
   type ConversationCheckpointPage, type AgentConversationReadPage, type ConversationChangesPage, type ConversationUnit, type ConversationUnitEntry, type ConversationVersionedAnchor, type ConversationReadWindow } from './conversation-changes.js'
 import type { NativeConversationCheckpoint, NativeConversationChangesPage } from './session-history-changes.js'
 import type { ConversationRef, ConversationItemRef } from './conversation.js'
@@ -36,7 +36,6 @@ type Snapshot = { rows: ConversationSourceRecord[]; batch: Batch; units: Convers
   order: ReturnType<typeof projection>['order']; revision: number; checkpoint: ConversationFrontier; committed: boolean; requestKey: string; outside: ConversationReadWindow['outside']; history: HistoryPosition[]; anchor?: ConversationReadWindow['anchor']; inputAdoption: ConversationInputAdoptionContext }
 type ReadingView = ConversationRef & { id: string; scope: ConversationFrontier['scope']; revision: number; rows: ConversationSourceRecord[];
   checkpoint: ConversationFrontier; snapshots: Map<string, Snapshot>; observers: number; readers: number; outside: ConversationReadWindow['outside']; history: HistoryPosition[]; anchor?: ConversationReadWindow['anchor']; inputAdoption: ConversationInputAdoptionContext }
-const MAX_VIEW_RECORDS = 1200
 const MAX_UNOBSERVED_VIEWS = 16
 /** Temporary state of this original Reader. Durable originals remain in their original owners. */
 export class ConversationReaderState {
@@ -436,7 +435,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
       const witnesses = knownInputs.witnesses
       // Retain only bounded identity witnesses in this original temporary view. An
       // overflow preserves known counterevidence and makes adoption unknown, never first-wins.
-      const inputAdoption: ConversationInputAdoptionContext = knownInputs.unconfirmed || witnesses.length > MAX_VIEW_RECORDS || Buffer.byteLength(JSON.stringify(witnesses)) > CONVERSATION_MAX_UNIT_BYTES
+      const inputAdoption: ConversationInputAdoptionContext = knownInputs.unconfirmed || witnesses.length > CONVERSATION_MAX_WINDOW_RECORDS || Buffer.byteLength(JSON.stringify(witnesses)) > CONVERSATION_MAX_UNIT_BYTES
         ? { ...view.inputAdoption, unconfirmed: true } : { witnesses }
       // Bound the temporary accepted window before duplicating bodies into a projection.
       // Whole existing event groups leave the window; their original owners and exact
@@ -469,11 +468,11 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
       }
       const candidates = previous ? mode === 'changes' || state.direction === 'newer' ? [...previous.units].reverse() : previous.units : []
       for (const unit of candidates) {
-        if (retainedCount <= MAX_VIEW_RECORDS && retainedBytes <= CONVERSATION_MAX_UNIT_BYTES) break
+        if (retainedCount <= CONVERSATION_MAX_WINDOW_RECORDS && retainedBytes <= CONVERSATION_MAX_UNIT_BYTES) break
         if (!unit.records.some(record => protectedIds.has(record.id))) evict(unit)
       }
       rows = rows.filter(record => !removed.has(record.id))
-      if (retainedCount > MAX_VIEW_RECORDS || retainedBytes > CONVERSATION_MAX_UNIT_BYTES) return fail('This exact event contribution exceeds the temporary window assembly bound. Its original source and continuation are retained.', 'AGENT_SESSION_HISTORY_BUDGET')
+      if (retainedCount > CONVERSATION_MAX_WINDOW_RECORDS || retainedBytes > CONVERSATION_MAX_UNIT_BYTES) return fail('This exact event contribution exceeds the temporary window assembly bound. Its original source and continuation are retained.', 'AGENT_SESSION_HISTORY_BUDGET')
       let projected = projection(ref, state.scope, rows, loaded.batch.coverage, inputAdoption)
       let unitBytes = projected.units.reduce((sum, unit) => sum + Buffer.byteLength(JSON.stringify(unit)), 0)
       for (const unit of mode === 'changes' || state.direction === 'newer' ? projected.units : [...projected.units].reverse()) {
