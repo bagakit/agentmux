@@ -1,15 +1,17 @@
 import { useLayoutEffect, useMemo, useRef, type ReactNode } from 'react'
 import { allocateFocusLaneColumns, type FocusLaneCounts, type FocusLaneLayout, type FocusLaneMetrics } from '../lib/focus-lane-layout'
+import type { FocusReplyLines } from '../../../shared/focus-preferences'
 
 /** Local, disposable presentation state; Session facts and card order stay with the caller. */
-export function FocusLaneGroups({ counts, metrics, children }: {
+export function FocusLaneGroups({ counts, metrics, replyLines = 2, children }: {
   counts: FocusLaneCounts; metrics: FocusLaneMetrics; children(layout: FocusLaneLayout): ReactNode
+  replyLines?: FocusReplyLines
 }) {
   const previous = useRef<FocusLaneLayout | undefined>(undefined)
   const pressedSession = useRef<string | undefined>(undefined)
   const [attention, working, results, idle] = counts
   const { width, padding, gap, cardGap } = metrics
-  const layout = useMemo(() => allocateFocusLaneColumns([attention, working, results, idle], { width, padding, gap, cardGap }, previous.current), [attention, working, results, idle, width, padding, gap, cardGap])
+  const layout = useMemo(() => allocateFocusLaneColumns([attention, working, results, idle], { width, padding, gap, cardGap, replyLines }, previous.current), [attention, working, results, idle, width, padding, gap, cardGap, replyLines])
   useLayoutEffect(() => { previous.current = layout }, [layout])
   return <div className="focus-project-lanes__groups" data-focus-card-slots={layout.slots} data-focus-max-rows={layout.maxRows}
     onPointerDownCapture={event => {

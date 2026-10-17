@@ -4,20 +4,22 @@ import type { FocusContext } from '../lib/focus-context'
 import { focusContextIdentityKey, type FocusContextIdentity } from '../lib/focus-context-identity'
 import { focusGoalCardKey, type FocusGoalLinks } from '../lib/focus-goal-links'
 import { FocusContextCardBody } from './FocusContextCardBody'
+import type { FocusReplyLines } from '../../../shared/focus-preferences'
+import { focusCardTrackHeight } from '../lib/focus-lane-layout'
 
-const CARD_HEIGHT = 52
-const VIEWPORT_MARGIN = CARD_HEIGHT * 2
 const contextKey = (context: FocusContext) => JSON.stringify([context.hostId, context.id])
 
 /** Slots stay in the natural CSS grid. Actual intersection controls only a
  * body's first creation; visited bodies retain their original React parent. */
-export function FocusContextCards({ contexts, columns, scrollRef, visible, layoutReady = true, selectedId, goalLinks, identities, onSelect }: {
+export function FocusContextCards({ contexts, columns, scrollRef, visible, layoutReady = true, replyLines = 2, selectedId, goalLinks, identities, onSelect }: {
   contexts: readonly FocusContext[]; columns: number; scrollRef: RefObject<HTMLDivElement | null>; visible: boolean
   layoutReady?: boolean
+  replyLines?: FocusReplyLines
   selectedId: string | null; goalLinks: ReadonlyMap<string, FocusGoalLinks>; identities: ReadonlyMap<string, FocusContextIdentity>
   onSelect(id: string): void
 }) {
   const grid = useRef<HTMLDivElement>(null)
+  const cardHeight = focusCardTrackHeight(replyLines), viewportMargin = cardHeight * 2
   const visited = useRef(new Set<string>())
   const [, render] = useReducer(value => value + 1, 0)
   useLayoutEffect(() => {
@@ -35,7 +37,7 @@ export function FocusContextCards({ contexts, columns, scrollRef, visible, layou
     const viewport = rows?.getBoundingClientRect()
     const usable = layoutReady && rows && viewport && rows.clientHeight > 0 && rows.clientWidth > 0 && typeof IntersectionObserver !== 'undefined'
     const bounds = usable ? element.getBoundingClientRect() : null
-    const overlaps = !usable || !bounds || (bounds.bottom >= viewport.top - VIEWPORT_MARGIN && bounds.top <= viewport.bottom + VIEWPORT_MARGIN
+    const overlaps = !usable || !bounds || (bounds.bottom >= viewport.top - viewportMargin && bounds.top <= viewport.bottom + viewportMargin
       && bounds.right >= viewport.left && bounds.left <= viewport.right)
     let changed = false
     // First real viewport, columns and order are resolved before paint, not
@@ -46,8 +48,8 @@ export function FocusContextCards({ contexts, columns, scrollRef, visible, layou
       const rect = usable ? slot.getBoundingClientRect() : null
       // Natural grid order is row-major. Once below the overscan boundary,
       // every later slot is below it too; IO owns their future intersection.
-      if (rect && rect.top > viewport!.bottom + VIEWPORT_MARGIN) break
-      if (!usable || !rect || (rect.bottom >= viewport.top - VIEWPORT_MARGIN && rect.top <= viewport.bottom + VIEWPORT_MARGIN
+      if (rect && rect.top > viewport!.bottom + viewportMargin) break
+      if (!usable || !rect || (rect.bottom >= viewport.top - viewportMargin && rect.top <= viewport.bottom + viewportMargin
         && rect.right >= viewport.left && rect.left <= viewport.right)) {
         visited.current.add(key); changed = true
       }
@@ -66,10 +68,10 @@ export function FocusContextCards({ contexts, columns, scrollRef, visible, layou
         observer.unobserve(entry.target)
       }
       if (added) flushSync(render)
-    }, { root: rows, rootMargin: `${VIEWPORT_MARGIN}px 0px` })
+    }, { root: rows, rootMargin: `${viewportMargin}px 0px` })
     for (const slot of slots) if (!visited.current.has(slot.dataset.focusCardKey!)) observer.observe(slot)
     return () => { active = false; observer.disconnect() }
-  }, [visible, layoutReady, columns, contexts, scrollRef])
+  }, [visible, layoutReady, columns, contexts, scrollRef, viewportMargin])
 
   function reveal(context: FocusContext, slot: HTMLDivElement) {
     flushSync(() => { visited.current.add(contextKey(context)); render() })
@@ -80,7 +82,7 @@ export function FocusContextCards({ contexts, columns, scrollRef, visible, layou
   }
   return <div ref={grid} className="focus-context-group__cards">{contexts.map(context => {
     const full = visited.current.has(contextKey(context))
-    return <div className="focus-context-card" style={{ display: 'grid', minHeight: CARD_HEIGHT }} key={contextKey(context)}
+    return <div className="focus-context-card" style={{ display: 'grid', minHeight: cardHeight }} key={contextKey(context)}
       data-focus-card-key={contextKey(context)} data-focus-card-body={full ? 'mounted' : 'pending'}>
       {full ? <FocusContextCardBody context={context} goalLinks={goalLinks.get(focusGoalCardKey(context.hostId, context.id))}
         identity={identities.get(focusContextIdentityKey(context.hostId, context.id))} selected={selectedId === context.id} onSelect={onSelect} />

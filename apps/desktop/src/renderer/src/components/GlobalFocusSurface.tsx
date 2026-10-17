@@ -18,7 +18,8 @@ import { FocusLaneGroups } from './FocusLaneGroups'
 import { useFocusProjectOrder } from '../lib/use-focus-project-order'
 import { focusLaneOrigins } from '../lib/focus-lane-origin'
 import { readSurveyPresentation } from '../lib/mobile-presentation'
-import type { FocusLaneCounts, FocusLaneMetrics } from '../lib/focus-lane-layout'
+import { focusCardTrackHeight, type FocusLaneCounts, type FocusLaneMetrics } from '../lib/focus-lane-layout'
+import { resolveFocusReplyLines } from '../../../shared/focus-preferences'
 import { FocusToolbar } from './FocusToolbar'
 import { FocusHistorySearch } from './FocusHistorySearch'
 import { useFocusHistorySearch } from '../lib/use-focus-history-search'
@@ -111,6 +112,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     return { name: topic && !topic.readError ? topic.title || 'Mote' : 'Mote', icon: key ? state.spaceObjectIcons[key] ?? null : null, avatarWorkspaceId: target?.avatarTarget?.workspaceId, avatarTopicId: target?.avatarTarget?.topicId, avatarObjectKey: key }
   }))
   const config = useAppStore((state) => state.config)
+  const replyLines = resolveFocusReplyLines(config?.focus?.replyLines)
   const topicSnapshots = useAppStore(state => state.scratchTopicSnapshots)
   const tabs = useAppStore((state) => state.tabs)
   const layouts = useAppStore(state => state.layouts)
@@ -304,7 +306,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
           <Icon size={12} aria-hidden="true" />
         </span>
       })}
-    </div></div>{counts.some(count => count > 0) ? <FocusLaneGroups counts={counts} metrics={laneMetrics}>{layout =>
+    </div></div>{counts.some(count => count > 0) ? <FocusLaneGroups counts={counts} metrics={laneMetrics} replyLines={replyLines}>{layout =>
       buckets.map((bucket, index) => {
         const meta = bucketMeta[bucket], grouped = groups[bucket]
         if (grouped.length === 0) return null
@@ -312,12 +314,12 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
         const label = neutral?.label ?? meta.label
         return <section className="focus-context-group global-agents-group" aria-label={label} data-bucket={bucket} data-focus-sparse={sparse || undefined} style={{ gridRow: layout.rowByBucket[index]! + 1, '--focus-group-offset': `${layout.columnStart[index]}px`, '--focus-card-columns': layout.columns[index], '--focus-group-width': `${layout.widths[index]}px` } as CSSProperties} key={bucket}>
           {!sparse ? groupHeader(bucket) : null}
-            <FocusContextCards contexts={grouped} columns={layout.columns[index]!} layoutReady={laneMetrics.measured} scrollRef={boardRowsRef} visible={visible && documentActive} selectedId={shownSessionId} goalLinks={goalLinks} identities={contextIdentities} onSelect={focusExecutionSession} />
+            <FocusContextCards contexts={grouped} columns={layout.columns[index]!} layoutReady={laneMetrics.measured} replyLines={replyLines} scrollRef={boardRowsRef} visible={visible && documentActive} selectedId={shownSessionId} goalLinks={goalLinks} identities={contextIdentities} onSelect={focusExecutionSession} />
         </section>
       })
     }</FocusLaneGroups> : null}</>
   }
-  return <section className={`global-board-surface global-focus-surface ${showWorkspace ? 'global-board-surface--session-open' : ''}`} aria-label="Focus" hidden={!surfaceVisible} inert={!visible} aria-hidden={!surfaceVisible} style={{ display: surfaceVisible ? undefined : 'none', '--focus-workspace-width': `calc(${workspaceRatio * 100}% - 6px)` } as CSSProperties}>
+  return <section className={`global-board-surface global-focus-surface ${showWorkspace ? 'global-board-surface--session-open' : ''}`} aria-label="Focus" data-focus-reply-lines={replyLines} hidden={!surfaceVisible} inert={!visible} aria-hidden={!surfaceVisible} style={{ display: surfaceVisible ? undefined : 'none', '--focus-workspace-width': `calc(${workspaceRatio * 100}% - 6px)`, '--focus-reply-lines': replyLines, '--focus-card-track-height': `${focusCardTrackHeight(replyLines)}px` } as CSSProperties}>
     <FocusToolbar active={visible} selectedId={shownSessionId} selected={selected} tab={selectedTab} reference={projection?.selection.length === 1 ? projection.selection[0] : undefined} onReview={() => setRequestId(shownSessionId)} onCloseWorkspace={closeWorkspace} regionOnly={regionOnly} onToggleRegion={projection ? onToggleRegion : undefined}>
       <div className={`focus-filters${isMacPlatform() ? ' focus-filters--mac' : ''}`}>
         <div className="global-board-toolbar__controls">
