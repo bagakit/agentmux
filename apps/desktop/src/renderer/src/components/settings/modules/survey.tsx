@@ -23,8 +23,8 @@ export const surveySettingsModule = {
   ],
   savedSummary: config => config.browser.startPage?.title ?? 'AMUX - Survey',
   Pane({ config, onClose, active }) {
-    return <><DefaultBrowserSetting active={active} /><BrowserStartPageSettings config={config.browser.startPage} onSave={saveStartPage}
-      onOpen={() => { onClose(); useAppStore.getState().setMainSurface('survey') }} /></>
+    return <BrowserStartPageSettings config={config.browser.startPage} onSave={saveStartPage}
+      onOpen={() => { onClose(); useAppStore.getState().setMainSurface('survey') }}><DefaultBrowserSetting active={active} /></BrowserStartPageSettings>
   }
 } as const satisfies SettingsModule
 
