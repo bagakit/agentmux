@@ -218,9 +218,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
   const ProgressIcon = progressStatus === 'active' ? ThemeActionRepeatIcon : progressStatus === 'paused' ? ThemeActionPauseIcon : ThemeStatusUnknownIcon
 
   const storeSession = useAppStore((state) =>
-    state.sessions.find(
-      (s) => s.id === (propControl?.agentSessionId ?? timeline?.agentSessionId)
-    )
+    propControl ? undefined : state.sessions.find((s) => s.id === timeline?.agentSessionId)
   )
   const effectiveControl: AgentSessionControl | undefined =
     propControl ?? (storeSession?.kind === 'agent' ? storeSession.control : undefined)
