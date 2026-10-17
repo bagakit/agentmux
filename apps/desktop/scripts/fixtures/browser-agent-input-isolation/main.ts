@@ -396,6 +396,51 @@ async function run() {
   receipt.cases.push({ name: 'actual-gui-takeover-return-and-stop-fence', passed: true })
   chrome.dispose()
   manager.setBounds('page', null)
+  manager.setBounds('page', originalBounds)
+  let partiallyAdmitted: WebContentsView | undefined, closePartiallyAdmitted: (() => void) | undefined
+  const addPartial = win.contentView.addChildView.bind(win.contentView), removePartial = win.contentView.removeChildView.bind(win.contentView)
+  win.contentView.addChildView = (view, index) => {
+    addPartial(view, index)
+    partiallyAdmitted = view as WebContentsView
+    closePartiallyAdmitted = partiallyAdmitted.webContents.close.bind(partiallyAdmitted.webContents)
+    partiallyAdmitted.setVisible = () => { throw new Error('Private partial native preparation fault') }
+    partiallyAdmitted.webContents.close = () => { throw new Error('Private partial native close fault') }
+  }
+  win.contentView.removeChildView = view => { if (view === partiallyAdmitted) throw new Error('Private partial native detach fault'); removePartial(view) }
+  const partialProgram = await cli(['browser', 'run', '--browser', 'page', '--operation-id', 'native-partial-admission'], 'return await js("++proof.next")')
+  assert.equal(partialProgram.code, 0, 'Partial native preparation failure cannot close a healthy Agent program')
+  assert.equal(manager.nativeOwner('page')?.inputShield, partiallyAdmitted, 'Native initialization failure must retain its published cleanup identity')
+  assert.equal(manager.targets()[0]!.control!.inputIsolation, 'unconfirmed')
+  assert.ok(win.contentView.children.includes(partiallyAdmitted!))
+  win.contentView.addChildView = addPartial; win.contentView.removeChildView = removePartial
+  partiallyAdmitted!.webContents.close = closePartiallyAdmitted!
+  manager.returnControl('page')
+  assert.equal(win.contentView.children.includes(partiallyAdmitted!), false)
+  await waitFor(() => manager.targets()[0]!.control!.inputIsolation === 'inactive', 'original partial-admission surface destruction confirmation')
+  receipt.cases.push({ name: 'partially-admitted-native-surface-retains-owner-before-fallible-setup', passed: true })
+
+  const pendingClose = cli(['browser', 'run', '--browser', 'page', '--operation-id', 'native-close-unconfirmed'], 'await js("new Promise(resolve => globalThis.finishPendingClose = resolve)"); return "healthy"')
+  await waitFor(() => contents.executeJavaScript('typeof finishPendingClose === "function"'), 'program before native close acknowledgement')
+  const pendingSurface = manager.nativeOwner('page')!.inputShield!, pendingContents = pendingSurface.webContents
+  const closePending = pendingContents.close.bind(pendingContents)
+  let closeRequests = 0
+  pendingContents.close = () => { ++closeRequests }
+  await contents.executeJavaScript('finishPendingClose()'); assert.equal((await pendingClose).code, 0)
+  assert.equal(manager.nativeOwner('page')?.inputShield, pendingSurface, 'A close return cannot sign off an undestroyed native input surface')
+  assert.equal(manager.targets()[0]!.control!.inputIsolation, 'unconfirmed')
+  assert.ok(resourceTargets()[0]?.resource?.processes?.some(process => process.pid === pendingContents.getOSProcessId()))
+  manager.returnControl('page')
+  assert.equal(closeRequests, 1, 'Cleanup observation cannot automatically resend a close awaiting native destruction')
+  assert.equal(manager.targets()[0]!.control!.inputIsolation, 'unconfirmed')
+  // Complete this fixture's exact native fault source; product retries only observe
+  // the original close until the cached WebContents confirms destruction.
+  closePending()
+  await waitFor(() => pendingContents.isDestroyed(), 'original native destruction completion')
+  manager.returnControl('page')
+  assert.equal(manager.nativeOwner('page')?.inputShield, undefined)
+  assert.equal(manager.targets()[0]!.control!.inputIsolation, 'inactive')
+  receipt.cases.push({ name: 'native-close-return-retains-reference-until-real-destruction', passed: true })
+  manager.setBounds('page', null)
   await manager.create('retired-page', url, 'workspace')
   manager.setBounds('retired-page', originalBounds)
   const retiredPage = manager.nativeOwner('retired-page')!.view, retiredPageContents = retiredPage.webContents
@@ -473,7 +518,7 @@ async function run() {
   assert.equal(resourceTargets().find(target => target.id === 'retired-page')?.resource?.state, 'unknown')
   win.contentView.removeChildView = removeClosed; closedContents.close = closeClosed
   await manager.close('retired-page')
-  assert.equal(resourceTargets().some(target => target.id === 'retired-page'), false)
+  await waitFor(() => !resourceTargets().some(target => target.id === 'retired-page'), 'explicitly closed native cleanup receives its real destruction confirmation')
   assert.equal(contents.isDestroyed(), false, 'Another original healthy Browser remains available')
   assert.ok(manager.targets().some(target => target.id === 'page'))
   receipt.cases.push({ name: 'explicit-close-retains-cleanup-only-without-reviving-page', passed: true })
