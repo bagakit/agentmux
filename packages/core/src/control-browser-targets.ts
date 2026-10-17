@@ -13,7 +13,7 @@ function text(value: unknown, limit: number, empty = false): string {
 export function parseBrowserTargetsResult(value: unknown): { targets: AgentMuxBrowserTarget[]; warning?: string } {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new AgentMuxError('Browser target discovery is invalid.', 'CONTROL_PROTOCOL_ERROR')
   const input = value as Record<string, unknown>
-  if (!Array.isArray(input.targets) || input.targets.length > 256) throw new AgentMuxError('Browser target discovery exceeds its bound.', 'CONTROL_PROTOCOL_ERROR')
+  if (!Array.isArray(input.targets)) throw new AgentMuxError('Browser target discovery is invalid.', 'CONTROL_PROTOCOL_ERROR')
   const ids = new Set<string>()
   const targets = input.targets.map(raw => {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new AgentMuxError('Browser target is invalid.', 'CONTROL_PROTOCOL_ERROR')
@@ -56,13 +56,13 @@ export function parseBrowserReleaseReceipt(value: unknown): AgentMuxBrowserRelea
 }
 function parseBrowserResource(value: unknown): AgentMuxBrowserResource {
   const row = record(value)
-  if (!['live', 'released', 'cold', 'unknown'].includes(String(row.state)) || !Array.isArray(row.locations) || row.locations.length > 256) throw new AgentMuxError('Browser resource state or positions are invalid.', 'CONTROL_PROTOCOL_ERROR')
+  if (!['live', 'released', 'cold', 'unknown'].includes(String(row.state)) || !Array.isArray(row.locations)) throw new AgentMuxError('Browser resource state or positions are invalid.', 'CONTROL_PROTOCOL_ERROR')
   const locations = row.locations.map(value => {
     const location = record(value)
     return { workspaceId: location.workspaceId === null ? null : text(location.workspaceId, 200), tabId: text(location.tabId, 200), regionId: text(location.regionId, 200) }
   })
   if (new Set(locations.map(location => location.regionId)).size !== locations.length) throw new AgentMuxError('Browser positions are duplicated.', 'CONTROL_PROTOCOL_ERROR')
-  if (row.processes !== null && (!Array.isArray(row.processes) || row.processes.length > 256)) throw new AgentMuxError('Browser process ownership is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  if (row.processes !== null && !Array.isArray(row.processes)) throw new AgentMuxError('Browser process ownership is invalid.', 'CONTROL_PROTOCOL_ERROR')
   const processes = row.processes === null ? null : (row.processes as unknown[]).map(value => {
     const process = record(value)
     if (!Number.isSafeInteger(process.pid) || (process.pid as number) <= 0 || typeof process.creationTime !== 'number' || !Number.isFinite(process.creationTime) || process.creationTime <= 0) throw new AgentMuxError('Browser process identity is invalid.', 'CONTROL_PROTOCOL_ERROR')
