@@ -76,6 +76,7 @@ it('opens the real Space graph from a captured area without retargeting it when 
 
 it('observes an original Host and SID once across overlapping areas without writing membership or task state', async () => {
   const state = useAppStore.getState(), snapshot = state.scratchTopicSnapshots[scratchWorkspace.id]!
+  if (snapshot.topics === null) throw Error('Original seeded Topic snapshot required')
   const topics = snapshot.topics.map(topic => topic.id === customMoteId ? { ...topic, collaborators: [defaultAgent, neighborAgent].map(session => ({ fileName: session.id + '.md', sessionId: session.id, providerId: session.providerId })) } : topic)
   useAppStore.setState({ scratchTopicSnapshots: { ...state.scratchTopicSnapshots, [scratchWorkspace.id]: { ...snapshot, topics } } })
   await render()
