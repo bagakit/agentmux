@@ -9213,21 +9213,26 @@ export class AgentMuxClient {
               const savedHook = saved.hookReceipt
               if (this.hookTurnPhases.get(session.run.runId) === 'in-turn' && savedHook?.nativeTurnId && savedHook.nativeTurnId !== observation.nativeTurnId &&
                 (observation.nativeObservedAt === undefined || observation.nativeObservedAt <= savedHook.observedAt)) return saved
-              if (saved.semanticStatus?.nativeTurnId === observation.nativeTurnId &&
+              const sameState = saved.semanticStatus?.nativeTurnId === observation.nativeTurnId &&
                 saved.semanticStatus.state === observation.state &&
-                JSON.stringify(saved.semanticStatus.failure) === JSON.stringify(observation.failure)) return saved
+                JSON.stringify(saved.semanticStatus.failure) === JSON.stringify(observation.failure)
+              if (sameState && (observation.state !== 'working' || observation.nativeObservedAt === undefined ||
+                observation.nativeObservedAt <= saved.semanticStatus!.observedAt)) return saved
+              if (observation.state === 'working' && saved.semanticStatus?.source === 'native-hook' &&
+                (observation.nativeObservedAt === undefined || observation.nativeObservedAt <= saved.semanticStatus.observedAt)) return saved
               // Reading retained records never renews the native activity clock, including idle ends.
               if (observation.initialSnapshot && observation.state === 'working' && (observation.nativeObservedAt === undefined ||
                 observation.nativeObservedAt <= (saved.semanticStatus?.observedAt ?? 0))) return saved
               publishedState = ended ? observeSubagentMainEnd(saved.run.runId, observation.state) : observation.state
               const status = transitionAgentSemanticStatus(saved.semanticStatus, {
                 state: publishedState === 'unknown' ? 'running' : publishedState,
-                source: 'native-transcript', observedAt: observation.initialSnapshot ? observation.nativeObservedAt ?? 0 :
+                source: 'native-transcript', observedAt: observation.initialSnapshot || observation.state === 'working' ? observation.nativeObservedAt ?? 0 :
                   Math.max(Date.now(), (saved.semanticStatus?.observedAt ?? 0) + 1),
                 nativeTurnId: observation.nativeTurnId,
                 ...(observation.failure ? { failure: structuredClone(observation.failure),
                   detail: `[${observation.failure.code}] ${observation.failure.message}` } : {})
               })
+              if (observation.state === 'working' && observation.nativeObservedAt === undefined) delete status.stateEnteredAt
               displayAccepted = true
               return { ...saved, semanticStatus: status, updatedAt: Math.max(saved.updatedAt, status.observedAt),
                 ...(acceptsAgentActivityState(saved.activityCommit, saved.run, status) ? {
