@@ -13,6 +13,7 @@ vi.mock('../src/renderer/src/monaco', () => ({}))
 vi.mock('@monaco-editor/react', () => ({ default: ({ value }: { value: string }) => <textarea aria-label="Original file source" value={value} readOnly /> }))
 import { NoteFileSurfaceView } from '../src/renderer/src/components/NoteFileSurfaceView'
 import { FileSurfaceView } from '../src/renderer/src/components/FileSurfaceView'
+import { EditorPane } from '../src/renderer/src/components/EditorPane'
 import { WorkbenchPresentationContext } from '../src/renderer/src/lib/workbench-presentation'
 import { createWorkbenchTab, documentKey } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
@@ -37,20 +38,35 @@ beforeEach(async () => {
  reason = read.document.noteProvenance.reason
  useNotebookLibrary.setState({ state: null, issue: null })
  useAppStore.setState({ config: { ...composerConfig, workspaces: [workspace] }, tabs: { [tab.id]: tab }, layouts: { workspace: createWorkspaceLayout('original-group', [tab.id]) },
-  documents: { [key]: read.document }, dirtyDocuments: {}, savingDocuments: {}, documentIssues: {}, documentGenerations: {}, documentObservationGenerations: {}, documentRevealTargets: {}, noteBlockSelections: {}, noteDirectorySources: {}, workspaceFileRevisions: {}, editorRegionModes: {}, mainSurface: 'recall' })
+  documents: { [key]: read.document }, dirtyDocuments: {}, savingDocuments: {}, documentIssues: {}, documentGenerations: {}, documentObservationGenerations: {}, documentRevealTargets: {}, noteBlockSelections: {}, noteDirectorySources: {}, workspaceFileRevisions: {}, editorRegionModes: { [surface.regionId]: 'preview' }, mainSurface: 'recall' })
  vi.spyOn(api.files, 'read').mockImplementation(async(id,requested)=>{expect(id).toBe('workspace');expect(requested).toBe(path);return writer.read(workspace,requested)})
  vi.spyOn(api.files, 'write').mockRejectedValue(new Error('Checking attribution must never write'))
  vi.spyOn(api.files, 'observe').mockResolvedValue();vi.spyOn(api.files, 'unobserve').mockResolvedValue()
+ vi.spyOn(api.notesStorage, 'inspect').mockResolvedValue({ directory: rootPath, catalogPath: join(rootPath, 'notebooks.sqlite'), resourceChanges: [], directoryChanges: [], operation: null, conversionIssues: [] })
+ vi.spyOn(api.notesStorage, 'onChange').mockImplementation(() => () => {})
 })
 afterEach(async()=>{await files.dispose();await rm(rootPath,{recursive:true,force:true})})
 const presentation={active:true,survey:false,retainedRegionId:surface.regionId,tabHostId:'original-host',reference:{displayWorkspaceId:'workspace',groupId:'original-group',tabId:tab.id,regionId:surface.regionId}}
-const notices=()=>[...dom.container.querySelectorAll<HTMLElement>('[role="status"]')].filter(node=>node.textContent?.includes('Block authorship is unconfirmed:'))
+const notices=()=>[...dom.container.querySelectorAll<HTMLElement>('[role="status"]')].filter(node=>node.textContent?.startsWith('Block authorship '))
 const editor=()=>(dom.container.querySelector('.note-block-content') as HTMLElement&{editor:Editor}).editor
+async function openRecovery() {
+ const summary=dom.container.querySelector('.note-recovery-summary')!
+ expect(summary.textContent).toContain('Authorship unconfirmed')
+ await act(async()=>summary.querySelector<HTMLButtonElement>('button')!.click())
+ expect(dom.container.querySelector('[role="dialog"]')!.textContent).toContain('Drafts & recovery')
+}
 it('keeps the actual read attribution reason and original creator visible in Recall, checks the original owner and preserves later rich input',async()=>{
- await dom.render(<WorkbenchPresentationContext.Provider value={presentation}><NoteFileSurfaceView tabId={tab.id} surface={surface}/></WorkbenchPresentationContext.Provider>)
+ await dom.render(<WorkbenchPresentationContext.Provider value={presentation}><EditorPane tabId={tab.id} surface={surface} preview={<NoteFileSurfaceView tabId={tab.id} surface={surface}/>}/></WorkbenchPresentationContext.Provider>)
+ expect(notices()).toHaveLength(0)
+ const originalEditor=editor()
+ await act(async()=>dom.container.querySelector<HTMLButtonElement>('[data-author-block="original-block"]')!.click())
+ const authors=document.querySelector('[role="dialog"][aria-label="Block authors"]')!
+ expect(authors).not.toBeNull()
+ expect(authors.querySelector('dd code')!.textContent).toBe('agent · original-creator')
+ expect(authors.textContent).toContain('Last edited byAuthor unconfirmed')
+ await act(async()=>authors.querySelector<HTMLButtonElement>('[aria-label="Close block authors"]')!.click())
+ await openRecovery()
  expect(notices()).toHaveLength(1);expect(notices()[0]!.textContent).toContain(reason)
- const originalEditor=editor(),block=dom.container.querySelector<HTMLElement>('[data-block-id="original-block"]')!
- expect(block.title).toContain('Created: Agent original-creator');expect(block.title).toContain('Last edited: Unknown')
  expect(api.files.read).not.toHaveBeenCalled()
  const check=[...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Check original file')!
  expect(check).toBeDefined();expect(check.disabled).toBe(false)
@@ -74,14 +90,15 @@ it('shows one attribution notice through the actual File preview and Source rout
  await act(async()=>{useAppStore.setState(state=>({documents:{...state.documents,[key]:{...state.documents[key]!,noteWriteAttribution:{status:'unconfirmed',reason:'Original metadata recording is pending'}}}}))})
  await dom.render(<WorkbenchPresentationContext.Provider value={presentation}><FileSurfaceView tabId={tab.id} surface={surface}/></WorkbenchPresentationContext.Provider>)
  await vi.waitFor(async()=>{await act(async()=>{});expect(dom.container.querySelector('.note-block-content')).not.toBeNull()})
- expect(notices()).toHaveLength(1);expect(notices()[0]!.textContent).toContain('The Note was saved.');expect(notices()[0]!.textContent).toContain('Original metadata recording is pending')
+ await openRecovery()
+ expect(notices()).toHaveLength(1);expect(notices()[0]!.textContent).toContain('last confirmed save');expect(notices()[0]!.textContent).toContain('Original metadata recording is pending')
  expect(notices()[0]!.textContent).not.toContain(reason)
  const originalWriteAttribution=useAppStore.getState().documents[key]!.noteWriteAttribution
- await act(async()=>{[...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Check original file')!.click();await vi.waitFor(()=>expect(useAppStore.getState().documentObservationGenerations[key]).toBe(1))})
+ await act(async()=>useAppStore.getState().refreshDocument('workspace',path))
  expect(api.files.read).toHaveBeenCalledExactlyOnceWith('workspace',path)
  expect(useAppStore.getState().documents[key]!.noteWriteAttribution).toBe(originalWriteAttribution)
  expect(notices()).toHaveLength(1);expect(notices()[0]!.textContent).toContain('Original metadata recording is pending')
- await act(async()=>[...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent?.trim()==='Source')!.click())
+ await act(async()=>dom.container.querySelector<HTMLButtonElement>('[aria-label="Show source"]')!.click())
  await vi.waitFor(async()=>{await act(async()=>{});expect(dom.container.querySelector('textarea[aria-label="Original file source"]')).not.toBeNull()})
  expect(notices()).toHaveLength(1);expect(notices()[0]!.textContent).toContain('Original metadata recording is pending')
  expect(api.files.read).toHaveBeenCalledExactlyOnceWith('workspace',path);expect(api.files.write).not.toHaveBeenCalled()
