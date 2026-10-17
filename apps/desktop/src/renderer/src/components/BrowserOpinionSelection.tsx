@@ -3,6 +3,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { ConversationImage } from '@agentmux/client-ui/components/ConversationImage'
 import type { BrowserInputFrameResult, BrowserInputSelectionPrepare, BrowserInputSelectionReceipt } from '../../../shared/browser-input-context-capture'
 import type { BrowserOpinionSource } from '../lib/browser-opinion-draft'
+import { browserOpinionSelection } from '../lib/browser-opinion-draft'
 import { api } from '../lib/api'
 import { composeScreenshot, screenshotCropGeometry } from './browser-screenshot/compose'
 import { ImageAnnotationEditor } from './image-annotation/ImageAnnotationEditor'
@@ -47,6 +48,7 @@ export function useBrowserOpinionSelection({ source, visible, locked, document, 
   }
   function attach(original: BrowserOpinionSource, receipt: BrowserInputSelectionReceipt, token: number) {
     if (token !== ticket.current || !same(original) || current.current?.selectionPreparation?.operationId !== receipt.operationId) return
+    browserOpinionSelection({ ...current.current, selection: receipt })
     const { selectionPreparation: _preparing, ...retained } = current.current
     change({ ...retained, selection: receipt })
     setFrame(null); prepared.current = null; setFailure(null)
@@ -89,7 +91,9 @@ export function useBrowserOpinionSelection({ source, visible, locked, document, 
     } catch (error) { if (token === ticket.current && same(original)) setFailure(presentError(error)) }
     finally { if (token === ticket.current) setBusy(false) }
   }
-  const attachment = source?.selection?.scene.inputContext.selection?.attachment
+  let selected: BrowserInputSelectionReceipt | undefined, invalidSelection: string | undefined
+  try { if (source) selected = browserOpinionSelection(source) } catch (error) { invalidSelection = presentError(error) }
+  const attachment = selected?.scene.inputContext.selection?.attachment
   const imageKey = attachment ? JSON.stringify(attachment) : ''
   const readImage = useMemo(() => () => attachment ? api.browser.readSelectionImage(attachment) : Promise.resolve(null), [imageKey, document])
   return {
@@ -97,12 +101,15 @@ export function useBrowserOpinionSelection({ source, visible, locked, document, 
     controls: <div className="browser-opinion-selection">
       {attachment ? <div className="browser-opinion-selection__attachment">
         <ConversationImage key={imageKey} path={attachment.path} text="Processed Browser image" label="Processed Browser image" readImage={readImage} active={visible} />
-        <span>Processed image · {attachment.width} × {attachment.height}<small>Captured at step {source?.selection?.scene.inputContext.selection?.source.stepSequence ?? 'unknown'} · {source?.selection?.scene.inputContext.selection?.source.association === 'unknown' ? 'Source association unknown' : 'Observed during'}</small></span>
+        <span>Processed image · {attachment.width} × {attachment.height}<small>Captured at step {selected?.scene.inputContext.selection?.source.stepSequence ?? 'unknown'} · {selected?.scene.inputContext.selection?.source.association === 'unknown' ? 'Source association unknown' : 'Observed during'}</small></span>
         <button className="small-button" type="button" disabled={locked || busy} onClick={() => {
           if (current.current) { const { selection: _selection, ...retained } = current.current; change(retained) }
         }}>Remove image</button>
       </div> : null}
-      {source?.selection?.scene.diskDurability === 'unconfirmed' ? <p className="browser-contextual-composer__notice" role="status">Image saved. Its capture details are not yet confirmed on disk. Your text is kept.</p> : null}
+      {selected?.scene.diskDurability === 'unconfirmed' ? <p className="browser-contextual-composer__notice" role="status">Image saved. Its capture details are not yet confirmed on disk. Your text is kept.</p> : null}
+      {invalidSelection ? <p className="browser-contextual-composer__notice" role="status">{invalidSelection}<button className="small-button" type="button" disabled={locked || busy} onClick={() => {
+        if (current.current) { const { selection: _selection, ...retained } = current.current; change(retained) }
+      }}>Remove image</button></p> : null}
       <div className="browser-opinion-selection__actions">
         <button className="small-button" type="button" disabled={!source?.scene || locked || busy} onClick={() => void capture()}>{busy && !frame ? 'Reading image…' : attachment ? 'Replace image…' : 'Mark captured image…'}</button>
         {source?.selectionPreparation ? <button className="small-button" type="button" disabled={locked || busy} onClick={() => void inspect()}>Check original image</button> : null}
