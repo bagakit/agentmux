@@ -181,6 +181,15 @@ const tabSwitchParser = record({ id: count,
   mode: v => { if (!['unknown', 'terminal', 'activity', 'other'].includes(v as string)) invalid() },
   terminal: nullable(record({ sessionId: identity, runId: identity, readySinceAt: nullable(number),
     visible: boolean, revealed: boolean, liveReady: boolean, acceptsInput: boolean, readOnly: boolean, replaying: boolean })) })
+const surfaceSwitchParser = record({ id: count, source: literal('footer-click'),
+  from: v => { if (!['space', 'focus', 'goals', 'survey', 'recall'].includes(v as string)) invalid() },
+  to: v => { if (!['space', 'focus', 'goals', 'survey', 'recall'].includes(v as string)) invalid() },
+  handlerAt: number, handlerStartMonoMs: number, eventAtMonoMs: nullable(number), inputDelayMs: nullable(number),
+  actionEndedMs: nullable(number), actionResult: nullable(v => { if (!['returned', 'threw'].includes(v as string)) invalid() }),
+  selectedMs: nullable(number), selectedSource: nullable(v => { if (!['layout-effect', 'already-committed-handler'].includes(v as string)) invalid() }),
+  frameMs: nullable(number), elapsedMs: number,
+  pendingStage: nullable(v => { if (!['selection', 'presentation', 'frame'].includes(v as string)) invalid() }),
+  state: v => { if (!['pending', 'observed', 'superseded'].includes(v as string)) invalid() } })
 const timingKinds = RENDERER_TIMING_KINDS
 const timingKind: Parser = v => { if (!timingKinds.includes(v as typeof timingKinds[number])) invalid() }
 const timingKindRecord = (parse: Parser): Parser => record(Object.fromEntries(timingKinds.map(kind => [kind, parse])))
@@ -229,6 +238,7 @@ const performanceParser = record({ startedAt: number, observedAt: number, record
     replaying: boolean, inFlightWrites: count, queuedItems: count, queuedBytes: count, pendingItems: count, pendingBytes: count,
     cols: count, rows: count, normalLines: count, alternateLines: count, interaction: terminalInteractionParser })), omittedTerminals: count, unavailableTerminals: count,
   tabSwitches: boundedArray(16, tabSwitchParser), tabSwitchesOmitted: count,
+  surfaceSwitches: boundedArray(16, surfaceSwitchParser), surfaceSwitchesOmitted: count,
   slowEvents: slowEventsParser, slowEventsOmitted: timingKindRecord(count),
   timingEpochs: record({ durationMs: literal(10000), basis: literal('monotonic-occurrence-start'),
     recordingSinceMonoMs: number, observedMonoMs: number, current: timingEpochParser, previous: nullable(timingEpochParser),

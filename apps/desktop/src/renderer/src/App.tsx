@@ -38,6 +38,7 @@ import { pmoTeamsTopicFloatingViewTargets, pmoTeamsTopicFloatingTargetTabId, pmo
 import { desktopSurface } from './lib/desktop-focus-navigation'
 import { focusTimelineCurrentReference } from './lib/focus-timeline-current'
 import { installDesktopPresentationOwner, desktopPresentationCommitted, type DesktopAppPresentationOwner } from './lib/desktop-presentation'
+import { surfaceSwitchObservation } from './lib/surface-switch-observation'
 import { SCRATCH_WORKSPACE_ID } from '../../shared/scratch-topics'
 import { ProjectRail } from './components/ProjectRail'
 import { SurfaceToolDock } from './components/SurfaceToolDock'
@@ -138,6 +139,11 @@ function DesktopApp() {
     floating: null })
   useLayoutEffect(() => installDesktopPresentationOwner(() => presentationRef.current), [])
   useLayoutEffect(() => {
+    const observe = () => surfaceSwitchObservation.observe()
+    document.addEventListener('visibilitychange', observe)
+    return () => { document.removeEventListener('visibilitychange', observe); surfaceSwitchObservation.ownerDeparted() }
+  }, [])
+  useLayoutEffect(() => {
     const floating = readPmoTeamsTopicFloatingState()
     presentationRef.current = { loading,
       overlays: { settings: settingsOpen, quickSwitcher: quickSwitchOpen },
@@ -146,6 +152,7 @@ function DesktopApp() {
         tabId: pmoTeamsTopicFloatingTargetTabId(floating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId) ?? null,
         regionId: floating.reference?.regionId ?? null } : null }
     desktopPresentationCommitted()
+    surfaceSwitchObservation.committed(desktopSurface[mainSurface], !loading && !settingsOpen && !quickSwitchOpen)
   })
   const recallSelection = useAppStore(state => state.recallZoneSelection)
   const surveySelection = useAppStore((state) => state.surveyZoneSelection)

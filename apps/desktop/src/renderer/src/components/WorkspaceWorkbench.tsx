@@ -8,7 +8,8 @@ import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { motePinnedTab, moteTabOrder, useMoteDefaultConversation } from '../lib/mote-quick-preferences'
 import { layoutForLogicalRegionFocus, logicalRegionId } from '../lib/region-focus'
-import { tabSwitchEventTimestamp, tabSwitchObservation } from '../lib/tab-switch-observation'
+import { tabSwitchObservation } from '../lib/tab-switch-observation'
+import { trustedRendererEventTimestamp } from '../lib/renderer-event-clock'
 import { workbenchProjectionTabReference } from '../lib/workbench-projection'
 import { projectedNameRevision } from '../lib/name-authority'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
@@ -455,7 +456,7 @@ function SortableWorkbenchTab({
             const selectedSurface = tab.regions[switchTarget.regionId]
             const mode = selectedSurface?.kind === 'agent' ? effectiveSessionViewMode(useAppStore.getState(), selectedSurface.sessionId)
               : selectedSurface?.kind === 'terminal' ? 'terminal' : selectedSurface ? 'other' : 'unknown'
-            const observationId = tabSwitchObservation.begin(switchTarget, mode, tabSwitchEventTimestamp(event.nativeEvent, window), handlerStartMonoMs)
+            const observationId = tabSwitchObservation.begin(switchTarget, mode, trustedRendererEventTimestamp(event.nativeEvent, window), handlerStartMonoMs)
             let actionResult: 'returned' | 'threw' = 'threw'
             try {
               if (projection) selectWorkbenchProjectionTab(projection, group.id, tab)
