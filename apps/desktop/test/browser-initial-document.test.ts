@@ -547,11 +547,20 @@ describe('safe native Browser release', () => {
     // Restore fixture-only owner injections before normal owner disposal.
     entry.pendingSwitch=null;entry.selectionOperation=null;entry.runInFlight=false
   })
-  it.each(['mouseDown','keyDown','touchStart'])('keeps native %s risk across same-document, failed and history navigation',async type=>{
+  it.each(['mouseDown','keyDown','touchStart','mouseWheel','pointerDown','rawKeyDown','gestureTap','gestureScrollBegin','gestureScrollUpdate'])('keeps native %s risk across same-document, failed and history navigation',async type=>{
     const f=await quiet();f.contents.emit('input-event',{}, {type})
     for(const same of [true,false]){f.contents.emit('did-start-navigation',{isMainFrame:true,isSameDocument:same,url});f.contents.emit('did-navigate',{},url)}
     expect(await f.manager.release('original-browser',f.nav())).toMatchObject({status:'retained',reasons:['document-used']})
     expect(f.contents.close).not.toHaveBeenCalled()
+  })
+  it.each(['mouseMove', 'mouseEnter', 'mouseLeave', 'pointerMove', 'pointerRawUpdate'])('does not turn passive native %s into document use', async type => {
+    const f = await quiet(), original = f.entry().view, nav = f.nav()
+    f.contents.emit('input-event', {}, { type })
+    expect([...f.entry().resourceRisk]).toEqual([])
+    expect(await f.manager.release('original-browser', nav)).toEqual({ browserId: 'original-browser', navigationId: nav, status: 'released', reasons: [] })
+    expect(f.contents.close).toHaveBeenCalledExactlyOnceWith({ waitForBeforeUnload: true })
+    expect(original.webContents.isDestroyed()).toBe(true); expect(f.entry()).toBeUndefined()
+    expect(f.manager.resourceOwnerCounts()).toEqual({ browserViews: 0, releasedBrowserViews: 1 })
   })
   it.each(['media','download'])('uses native %s source and retains it after activity ends',async kind=>{
     const f=await quiet()
