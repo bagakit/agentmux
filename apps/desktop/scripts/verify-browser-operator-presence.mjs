@@ -7,6 +7,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { fixturePath } from './lib/fixture-values.mjs'
 import { runProbeProcess, stopProbeProcesses } from './probe-process.mjs'
+import { verifyQualifiedPresence } from './lib/browser-operator-presence-qualified.mjs'
 
 const root = resolve(import.meta.dirname, '../../..'), require = createRequire(join(root, 'apps/desktop/package.json'))
 const baselineOnly = process.argv.includes('--baseline')
@@ -14,11 +15,25 @@ const osCapture = process.argv.includes('--os-capture')
 const receiptIndex = process.argv.indexOf('--receipt')
 const rendererIndex = process.argv.indexOf('--renderer-receipt')
 const proofIndex = process.argv.indexOf('--native-proof')
-assert.ok(process.argv.slice(2).every((arg, index, args) => ['--baseline', '--receipt', '--renderer-receipt', '--os-capture', '--native-proof'].includes(arg) || index > 0 && ['--receipt', '--renderer-receipt', '--native-proof'].includes(args[index - 1])))
+const qualifiedIndex = process.argv.indexOf('--qualified-proof')
+const qualifiedArgument = qualifiedIndex < 0 ? undefined : process.argv[qualifiedIndex + 1]
+const qualifiedEnvironment = process.env.AGENTMUX_BROWSER_PRESENCE_QUALIFIED_PROOF
+assert.ok(qualifiedIndex < 0 || qualifiedArgument && !qualifiedArgument.startsWith('--'), 'qualified-proof needs an explicit input artifact')
+assert.ok(qualifiedEnvironment === undefined || qualifiedEnvironment.trim().length > 0, 'The qualified proof environment input cannot be empty')
+assert.ok(!qualifiedArgument || !qualifiedEnvironment || resolve(qualifiedArgument) === resolve(qualifiedEnvironment), 'CLI and environment must select the same exact proof')
+const qualifiedProof = qualifiedArgument ?? qualifiedEnvironment
+assert.ok(process.argv.slice(2).every((arg, index, args) => ['--baseline', '--receipt', '--renderer-receipt', '--os-capture', '--native-proof', '--qualified-proof'].includes(arg) || index > 0 && ['--receipt', '--renderer-receipt', '--native-proof', '--qualified-proof'].includes(args[index - 1])))
 assert.ok(!baselineOnly || rendererIndex < 0, 'The baseline diagnostic qualifies only its original native Main consumer')
 assert.ok(!osCapture || !baselineOnly && rendererIndex < 0 && proofIndex >= 0 && process.platform === 'darwin', 'OS capture joins an explicit existing source proof on macOS')
 assert.ok(osCapture || proofIndex < 0, 'The native proof join belongs to OS capture only')
-const receiptPath = resolve(receiptIndex < 0 ? join(root, '.tmp/browser-agent-collaboration/operator-presence-proof/receipt.json') : process.argv[receiptIndex + 1])
+assert.ok(!qualifiedProof || !baselineOnly && !osCapture && rendererIndex < 0 && proofIndex < 0, 'A qualified proof join never launches a new observation')
+const receiptPath = resolve(receiptIndex < 0 ? qualifiedProof
+  ? join(root, '.tmp/browser-agent-collaboration/operator-presence-qualified-proof', randomUUID(), 'receipt.json')
+  : join(root, '.tmp/browser-agent-collaboration/operator-presence-proof/receipt.json') : process.argv[receiptIndex + 1])
+if (qualifiedProof) {
+  const result = await verifyQualifiedPresence({ root, input: resolve(qualifiedProof), receiptPath })
+  process.exit(result.passed ? 0 : 1)
+}
 const out = join(dirname(receiptPath), 'attempt-' + randomUUID())
 await mkdir(out, { recursive: true })
 const temporary = await realpath(await mkdtemp(fixturePath('tmp/amx-operator-presence-')))
