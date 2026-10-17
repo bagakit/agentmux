@@ -5,6 +5,11 @@
 .browser-resources__overview span, .browser-resources__overview > small { color: var(--text-3); font-size: var(--fs-micro); }
 .browser-resources__controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-3); }
 .browser-resources__controls > input { min-width: 8rem; flex: 1; }
+.browser-resources__controls > input, .browser-resources__controls select {
+  box-sizing: border-box; min-height: 30px; padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--surface-1); color: var(--text); font: inherit; font-size: var(--fs-meta);
+}
 .browser-resources__controls select { max-width: 100%; }
 .browser-resources .small-button { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); white-space: nowrap; }
 .browser-resources__selection { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); margin-bottom: var(--sp-2); background: var(--surface-3); border-radius: var(--radius-sm); font-size: var(--fs-meta); }
