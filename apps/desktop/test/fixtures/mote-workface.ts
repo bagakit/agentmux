@@ -6,7 +6,6 @@ import { createWorkbenchTab } from '../../src/renderer/src/lib/workbench-tabs'
 import { scratchTopicsScope } from '../../src/renderer/src/lib/scratch-topic-snapshots'
 import { moteWorkbenchProjection } from '../../src/renderer/src/lib/mote-workbench-projection'
 import { spatialCatalog } from '../../src/renderer/src/lib/space-agent-control'
-import { pmoTeamsTopicFloatingTargetTabId } from '../../src/renderer/src/lib/pmo-teams-topic-floating'
 import { useAppStore } from '../../src/renderer/src/store'
 
 export const savedMoteKey = 'agentmux.leader-topic-floating.v1'
@@ -89,6 +88,5 @@ export function installNativePopover(): () => void {
 export function fixtureMoteProjection(floating: import('../../src/renderer/src/lib/pmo-teams-topic-floating').PmoTeamsTopicFloatingState,
   onSelect: import('../../src/renderer/src/lib/workbench-projection').WorkbenchProjection['onSelect']) {
   const state = useAppStore.getState()
-  const id = pmoTeamsTopicFloatingTargetTabId(floating, state.tabs, state.layouts[SCRATCH_WORKSPACE_ID], state.agentFocus.pmo.sessionId)
-  return moteWorkbenchProjection(spatialCatalog(state, moteTopics), id ? state.tabs[id] : undefined, floating, onSelect, state.layouts)
+  return moteWorkbenchProjection(spatialCatalog(state, moteTopics), state.tabs, floating, onSelect, state.layouts)
 }

@@ -129,8 +129,8 @@ function Scene() {
   // Consume the same resolved target entity as App, including a File selected after Save.
   const floatingTabId = pmoTeamsTopicFloatingTargetTabId(floating, state.tabs, state.layouts[SCRATCH_WORKSPACE_ID], state.agentFocus.pmo.sessionId)
   const selectReference = (reference: {displayWorkspaceId: string; groupId: string; tabId: string; regionId: string}) => setFloating({targetTabId: reference.tabId, reference})
-  const projection = moteWorkbenchProjection(catalog, floatingTabId ? state.tabs[floatingTabId] : undefined, floating, selectReference, state.layouts)
-  const wrongOriginalAgentProjection = floatingTabId !== tab.id ? moteWorkbenchProjection(catalog, state.tabs[tab.id], floating, selectReference, state.layouts) : null
+  const projection = moteWorkbenchProjection(catalog, state.tabs, floating, selectReference, state.layouts)
+  const wrongOriginalAgentProjection = floatingTabId !== tab.id ? moteWorkbenchProjection(catalog, { ...state.tabs, ...(floatingTabId ? { [floatingTabId]: { ...tab, id: floatingTabId } } : {}) }, floating, selectReference, state.layouts) : null
   const targets = pmoTeamsTopicFloatingViewTargets(floating, state.tabs, state.layouts[workspace.id], state.agentFocus.pmo.sessionId, projection.projection)
   const [epoch, setEpoch] = useState(0)
   const scope = useMoteWorkfaceScope(workspace.id)!

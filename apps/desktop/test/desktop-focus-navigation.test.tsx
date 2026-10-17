@@ -765,7 +765,7 @@ describe('actual Desktop navigation and content-free observation owners', () => 
     const placementFacts = (phase: string) => {
       const state = useAppStore.getState(), currentTab = state.tabs[tab.id]!, held = readPmoTeamsTopicFloatingState()!
       const catalog = spatialCatalog(state, [topic, empty]), activeReference = held.reference && { ...held.reference, regionId: currentTab.layout.activeRegionId }
-      const projected = moteWorkbenchProjection(catalog, currentTab, held, () => {}, state.layouts)
+      const projected = moteWorkbenchProjection(catalog, state.tabs, held, () => {}, state.layouts)
       process.stdout.write('split-mote-placement-facts ' + JSON.stringify({ phase, heldSource,
       targetTabId: held.targetTabId, targetTopicId: held.targetTopicId, actualTabTopicId: currentTab.topicId,
       currentActiveRegionId: currentTab.layout.activeRegionId, tabEntities: catalog.tabs.filter(entity => entity.tabId === tab.id),
@@ -889,7 +889,7 @@ describe('actual Desktop navigation and content-free observation owners', () => 
     const observed = kind === 'conflicting-location' ? { ...catalog, locations: [...catalog.locations, { ...exact[0]!, zoneId: 'unconfirmed-other-zone' }] }
       : kind === 'existing-region-unobserved' ? { ...catalog, locations: catalog.locations.filter(location => location.regionId !== original.regionId) } : catalog
     const reference = kind === 'bad-parent' ? { ...original, groupId: 'unconfirmed-parent' } : original
-    const result = moteWorkbenchProjection(observed, currentTab, { ...floating, reference }, () => {}, before.layouts)
+    const result = moteWorkbenchProjection(observed, { ...before.tabs, [currentTab.id]: currentTab }, { ...floating, reference }, () => {}, before.layouts)
     expect(result.projection).toBeNull(); expect(result.retainedTabId).toBe(tab.id); expect(result.issue).toBeTruthy()
     expect(readPmoTeamsTopicFloatingState()).toBe(floating); expect(floating.reference).toBe(original)
     expect(useAppStore.getState()).toBe(before)

@@ -32,7 +32,7 @@ function Conversation() {
   const [floating] = usePmoTeamsTopicFloatingState(), target = usePmoTeamsTopicTarget(floating)
   const tabs = useAppStore(state => state.tabs), layouts = useAppStore(state => state.layouts)
   const catalog = spatialCatalog(useAppStore.getState(), moteTopics)
-  const projected = moteWorkbenchProjection(catalog, target.tab, floating, () => {}, layouts)
+  const projected = moteWorkbenchProjection(catalog, tabs, floating, () => {}, layouts)
   const views = pmoTeamsTopicFloatingViewTargets(floating, tabs, layouts[scratchWorkspace.id], null, projected.projection)
   return createElement('output', { 'data-original-conversation': true, 'data-open': String(floating.open),
     'data-agent': floating.agentTarget?.agentSessionId ?? '', 'data-tab': target.tabId ?? '', 'data-session': target.session?.id ?? '',

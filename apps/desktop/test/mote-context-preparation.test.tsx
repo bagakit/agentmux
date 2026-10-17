@@ -74,7 +74,7 @@ it('confirmed metadata preparation does not turn a still-unobserved display plac
   vi.spyOn(api.scratch, 'readTopic').mockResolvedValue(topic)
   await expect(before.openScratchTopic(topic.id, SCRATCH_WORKSPACE_ID, { reveal: false, tabId: original.id })).resolves.toBe(true)
   const after = useAppStore.getState(), floating = { open: true, preview: false, targetTopicId: topic.id, targetTabId: original.id, reference }
-  const resolved = moteWorkbenchProjection(spatialCatalog(after, [topic]), original, floating, vi.fn(), after.layouts)
+  const resolved = moteWorkbenchProjection(spatialCatalog(after, [topic]), after.tabs, floating, vi.fn(), after.layouts)
   expect(resolved.issueKind).toBe('location'); expect(resolved.projection).toBeNull(); expect(floating.reference).toBe(reference)
   expect(after.tabs).toBe(before.tabs); expect(after.layouts).toBe(before.layouts); expect(after.agentComposerDrafts).toBe(before.agentComposerDrafts)
   expect(after.workbenchSpaceSelection).toBe(before.workbenchSpaceSelection); expect(api.sessions.stop).not.toHaveBeenCalled()
@@ -150,7 +150,7 @@ function sharedParent() {
 it('the real projector retains an unknown Region parent with several Space bindings and keeps every catalog fact', () => {
   const { state, original, catalog, reference, floating } = sharedParent()
   expect(catalog.locations.filter(location => location.tabId === original.id)).toHaveLength(2)
-  const resolved = moteWorkbenchProjection(catalog, original, floating, vi.fn(), state.layouts)
+  const resolved = moteWorkbenchProjection(catalog, state.tabs, floating, vi.fn(), state.layouts)
   expect(resolved.issueKind).toBe('parent-available'); expect(resolved.catalog).toBe(catalog); expect(resolved.projection?.catalog).toBe(catalog)
   expect(resolved.projection?.selection).toEqual([reference])
   const composed = projectWorkbenchProjection(state.layouts[reference.displayWorkspaceId], state.tabs, resolved.projection!)
@@ -162,25 +162,25 @@ it('the real projector retains an unknown Region parent with several Space bindi
 it('consistent duplicate bindings of one exact location stay quiet, while Agent identity remains an independent guard', () => {
   const { state, original, catalog, reference, floating } = sharedParent()
   const exact = { ...reference, regionId: original.layout.activeRegionId }
-  const resolved = moteWorkbenchProjection(catalog, original, { ...floating, reference: exact }, vi.fn(), state.layouts)
+  const resolved = moteWorkbenchProjection(catalog, state.tabs, { ...floating, reference: exact }, vi.fn(), state.layouts)
   expect(resolved.issue).toBeNull(); expect(resolved.issueKind).toBeNull(); expect(resolved.choices).toEqual([exact])
   expect(resolved.projection?.catalog).toBe(catalog)
   const differentAgent = { ...floating, reference: exact, targetAgent: { hostId: 'local', sessionId: 'different-agent', presentationSessionId: 'different-agent' } }
-  const guarded = moteWorkbenchProjection(catalog, original, differentAgent, vi.fn(), state.layouts)
+  const guarded = moteWorkbenchProjection(catalog, state.tabs, differentAgent, vi.fn(), state.layouts)
   expect(guarded.projection).toBeNull(); expect(guarded.issueKind).toBe('identity'); expect(guarded.issue).toContain('last visited Agent')
   expect(differentAgent.reference).toBe(exact); expect(differentAgent.targetAgent.sessionId).toBe('different-agent')
 })
 
 it.each(['zone', 'resource', 'binding', 'tab-facts', 'zone-facts', 'region-membership'] as const)('conflicting %s metadata cannot be swallowed as a repeated physical parent', variant => {
   const { state, original, catalog, reference, floating } = sharedParent()
-  const resolved = moteWorkbenchProjection(catalog, original, floating, vi.fn(), state.layouts)
+  const resolved = moteWorkbenchProjection(catalog, state.tabs, floating, vi.fn(), state.layouts)
   const broken = variant === 'tab-facts' ? { ...catalog, tabs: [...catalog.tabs, { ...catalog.tabs[0]! }] }
     : variant === 'zone-facts' ? { ...catalog, zones: [...catalog.zones, { ...catalog.zones.find(zone => zone.zoneId === catalog.tabs[0]!.zoneId)! }] }
     : variant === 'region-membership' ? { ...catalog, tabs: catalog.tabs.map(tab => ({ ...tab, regionIds: [] })) }
     : { ...catalog, locations: catalog.locations.map((location, index) => index !== 1 ? location : {
       ...location, ...(variant === 'zone' ? { zoneId: 'unconfirmed-other-zone' }
         : variant === 'resource' ? { workspaceId: 'project' } : { spaceId: 'unconfirmed-other-space' }) }) }
-  const unconfirmed = moteWorkbenchProjection(broken, original, floating, vi.fn(), state.layouts)
+  const unconfirmed = moteWorkbenchProjection(broken, state.tabs, floating, vi.fn(), state.layouts)
   expect(unconfirmed.projection).toBeNull(); expect(unconfirmed.issueKind).toBe('location')
   expect(unconfirmed.catalog).toBe(broken); expect(unconfirmed.retainedTabId).toBe(original.id); expect(floating.reference).toBe(reference)
   const composed = projectWorkbenchProjection(state.layouts[reference.displayWorkspaceId], state.tabs, { ...resolved.projection!, catalog: broken })

@@ -37,7 +37,7 @@ const dispose=await useAppStore.getState().initialize()
 const root=createClientUiRoot(document.getElementById('root'));root.render(createElement(App))
 const state=()=>useAppStore.getState()
 function facts(){const s=state(),tab=s.tabs[firstTabId],choice=s.workbenchSpaceSelection,topics=Object.values(s.scratchTopicSnapshots).flatMap(x=>x.topics??[])
- const catalog=spatialCatalog(s,topics),float=tab?moteWorkbenchProjection(catalog,tab,{...readPmoTeamsTopicFloatingState(),targetTabId:tab.id,targetTopicId:tab.topicId},()=>{},s.layouts):null
+ const catalog=spatialCatalog(s,topics),float=tab?moteWorkbenchProjection(catalog,s.tabs,{...readPmoTeamsTopicFloatingState(),targetTabId:tab.id,targetTopicId:tab.topicId},()=>{},s.layouts):null
  return{ready:!!s.config,phase,tabId:firstTabId,topicId:tab?.topicId,regionId:tab?.layout.activeRegionId,space:tab?.space??null,preparation:tab?.topicPreparation??null,
  draft:tab?s.agentComposerDrafts[tab.layout.activeRegionId]:null,regionKeys:tab?Object.keys(tab.regions):[],selection:choice,spaceProjection:workbenchObjectLayout(s,SCRATCH_WORKSPACE_ID).confirmed,floatEntity:float?.projection?.entity??null,
  snapshots:topics.map(x=>({id:x.id,readError:x.readError??null,physical:x.physicalDirectoryPath??null})),directoryWarning:s.scratchTopicSnapshots[SCRATCH_WORKSPACE_ID]?.error??null,
