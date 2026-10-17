@@ -23,7 +23,7 @@ function sourceReadError(snapshot: ConversationWindowSnapshot): Error | null {
 /** Presentation lifetime for the original public Reader. The client retains only
  * complete accepted frames and transport assembly; Core owns source pages/joins. */
 export function useConversationView(client: ConversationViewClient | null, reference: ConversationRef | undefined, active: boolean,
-  options: { identity?: string; beforeCommit?(snapshot: ConversationWindowSnapshot, operation: Operation, displayed: ConversationWindowSnapshot | null): boolean } = {}) {
+  options: { identity?: string; beforeCommit?(snapshot: ConversationWindowSnapshot, operation: Operation, displayed: ConversationWindowSnapshot | null, replayingHeldIntent: boolean): boolean } = {}) {
   const key = reference ? JSON.stringify([reference.hostId, reference.agentSessionId, options.identity]) : ''
   const [state, setState] = useState<ViewState>(empty)
   const snapshot = state.snapshot && reference && state.snapshot.hostId === reference.hostId && state.snapshot.agentSessionId === reference.agentSessionId ? state.snapshot : null
@@ -196,7 +196,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
           // navigation intent. Explicit navigation starts its own transaction.
           const original = (kind === 'resume' || kind === 'changes') && current.pending?.snapshot.window.id === complete.window.id ? current.pending : null
           const frame: PendingFrame = { snapshot: complete, historical: current.historical, operation: original?.operation ?? kind, selection: original?.selection ?? selection }
-          current.held = beforeCommit.current?.(complete, frame.operation, committed.current.snapshot) === false
+          current.held = beforeCommit.current?.(complete, frame.operation, committed.current.snapshot, Boolean(original)) === false
           current.pending = current.held ? frame : null
           retained.current = { client, key, snapshot: complete, historical: current.historical, pending: current.pending }
           const sourceError = sourceReadError(complete)
@@ -280,7 +280,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
   const acceptHeld = useCallback(() => {
     const current = owner.current
     const frame = current?.pending
-    if (!current?.held || !frame || beforeCommit.current?.(frame.snapshot, frame.operation, committed.current.snapshot) === false) return
+    if (!current?.held || !frame || beforeCommit.current?.(frame.snapshot, frame.operation, committed.current.snapshot, true) === false) return
     current.held = false; current.pending = null
     if (retained.current?.key === current.key) retained.current.pending = null
     setState(value => ({ ...value, snapshot: frame.snapshot, historical: frame.historical, sourceError: sourceReadError(frame.snapshot), held: false,
