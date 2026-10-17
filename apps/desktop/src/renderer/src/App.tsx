@@ -1,3 +1,4 @@
+import { AgentCollaborationMap } from './components/AgentCollaborationMap'
 import { workbenchDocuments, subscribeWorkbenchWindows, workbenchDocumentIdentity } from './lib/workbench-window-registry'
 import { useWorkbenchWindows, WorkbenchWindowNotices, focusWorkbenchWindow } from './lib/workbench-windows'
 import { GitHistoryProvider } from './features/git/history/GitHistoryContext'
@@ -134,6 +135,11 @@ function DesktopApp() {
   const agentFocus = useAppStore((state) => state.agentFocus)
 
   const mainSurface = useAppStore((state) => state.mainSurface)
+  const spaceView = useAppStore(state => state.spaceView)
+  const mapTarget = useAppStore(state => state.collaborationMapTarget)
+  const mapVisible = mainSurface === 'workbench' && spaceView === 'map' && !settingsOpen
+  const [mapVisited, setMapVisited] = useState(spaceView === 'map')
+  useEffect(() => { if (mapVisible) setMapVisited(true) }, [mapVisible])
   const presentationRef = useRef<DesktopAppPresentationOwner>({ loading: true,
     overlays: { settings: false, quickSwitcher: false },
     floating: null })
@@ -343,8 +349,8 @@ function DesktopApp() {
     const held = reference?.displayWorkspaceId === activeWorkspaceId ? reference : retainedSpatialFocus?.displayWorkspaceId === activeWorkspaceId ? retainedSpatialFocus : null
     const displayed = layoutForLogicalRegionFocus(layout, tabs, held)
     const targets = ordinaryWorkbenchViewTargets(displayed, tabs, activeWorkspaceId, undefined, held)
-    return Object.fromEntries(Object.entries(targets).map(([id, occurrences]) => [id, occurrences.map(target => ({ ...target, visible: target.visible !== false && mainSurface === 'workbench' && !settingsOpen }))]))
-  }, [activeWorkspaceId, ordinaryObject.layout, tabs, mainSurface, settingsOpen, retainedSpatialFocus, workbenchSpaceSelection]))
+    return Object.fromEntries(Object.entries(targets).map(([id, occurrences]) => [id, occurrences.map(target => ({ ...target, visible: target.visible !== false && mainSurface === 'workbench' && spaceView === 'workbench' && !settingsOpen }))]))
+  }, [activeWorkspaceId, ordinaryObject.layout, tabs, mainSurface, spaceView, settingsOpen, retainedSpatialFocus, workbenchSpaceSelection]))
   const viewTargets = useMemo<WorkbenchViewTargets>(() => {
     const targets: Record<string, readonly WorkbenchViewTarget[]> = { ...ordinaryTargets }
     const append = (tabId: string, target: WorkbenchViewTarget) => { targets[tabId] = [...targets[tabId] ?? [], target] }
@@ -463,7 +469,7 @@ function DesktopApp() {
   const mountedWorkspaces = config?.workspaces.filter((candidate) => (
     fileEditingProbe || candidate.id === activeWorkspaceId || resourceWorkspaces.has(candidate.id) || candidate.id === focusTab?.workspaceId || candidate.id === surveyCatalog?.zones.find(zone => zone.zoneId === surveySelection?.zoneId)?.workspaceId || layouts[candidate.id]?.groups.some((group) => group.tabOrder.length > 0)
   )) ?? []
-  const toolsAvailable = mainSurface === 'workbench' && Boolean(workspace)
+  const toolsAvailable = mainSurface === 'workbench' && spaceView === 'workbench' && Boolean(workspace)
   const toolsVisible = toolsAvailable && toolsOpen
   const toolDockMinimumWidth = getToolDockMinimumWidth(projectRailOpen)
   const toolDockMaximumWidth = compactSidebars ? Math.max(toolDockMinimumWidth, Math.min(TOOL_DOCK_MAX_WIDTH, windowWidth - 320)) : TOOL_DOCK_MAX_WIDTH
@@ -471,7 +477,7 @@ function DesktopApp() {
   // MERGE：workbench + workspace 时顶行下沉进 pane（root tabbar / chromeline），
   // 主区不再占用独立 topbar 行；Board 与欢迎页仍走顶栏。
   const mergedTopRow = mainSurface === 'agents' || mainSurface === 'survey' || mainSurface === 'recall' || (mainSurface === 'workbench' && Boolean(workspace))
-  const workbenchVisible = mainSurface === 'workbench' && !settingsOpen
+  const workbenchVisible = mainSurface === 'workbench' && spaceView === 'workbench' && !settingsOpen
   const terminalParkingMeasurement = typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).has('agentmux-resource-probe')
   const { containerRef, isResizing, onResizeStart, onResizeReset } = useSidebarResize<HTMLDivElement>({
@@ -633,7 +639,7 @@ function DesktopApp() {
                 />
               </div>
             <section className="workspace-main-surface" data-desktop-surface={desktopSurface[mainSurface]}>
-              {!workspace && mainSurface === 'workbench' ? (
+              {!workspace && mainSurface === 'workbench' && spaceView === 'workbench' ? (
                 <section className="welcome">
                   <span className="brand-mark brand-mark--large"><BrandIcon size={34} /></span>
                   <div className="eyebrow">Terminal-first agent workbench</div>
@@ -647,6 +653,7 @@ function DesktopApp() {
               {recallVisited || mainSurface === 'recall' ? <GlobalRecallSurface onSelectReference={selectRecallReference} visible={recallVisible} catalog={surveyCatalog} projection={recallProjection} selection={recallCurrentSelection} viewTargets={viewTargets} /> : null}
               {mainSurface === 'agents' || focusVisited ? <GlobalFocusSurface visible={focusVisible} workspaceOpen={focusView !== 'closed' && Boolean(workbenchSpaceSelection || focusView === 'unconfirmed')} onCloseWorkspace={() => setFocusView('closed')} onSelectContext={selectFocusContext} onSelectLocation={focusView === 'unconfirmed' ? undefined : selectFocusReference} regionOnly={focusRegionOnly} onToggleRegion={() => setFocusView(value => value === 'region' ? 'tab' : 'region')} presentation={focusPresentation} currentReference={timelineCurrentReference} directoryIssue={spatialDirectory.issue} viewTargets={viewTargets} /> : null}
               {mainSurface === 'board' ? <GlobalBoardSurface /> : null}
+              {mapVisited || mapVisible ? <AgentCollaborationMap request={mapTarget} active={mapVisible} onClose={() => useAppStore.getState().setSpaceView('workbench')} onOpen={(context, reference) => { useAppStore.getState().setSpaceView('workbench'); useAppStore.getState().focusExecutionSession(context.id, reference) }} /> : null}
               {config && mountedWorkspaces.length > 0 ? (
                 <div
                   className={`workspace-workbench-registry ${workbenchVisible || focusTab ? '' : 'workspace-workbench-registry--parked'}`}
@@ -664,6 +671,7 @@ function DesktopApp() {
                         data-workspace-id={candidate.id}
                         data-desktop-zone-id={workbenchSpaceSelection?.workspaceId === candidate.id ? workbenchSpaceSelection.zoneId : undefined}
                         data-visible={mounted ? 'true' : 'false'}
+                        data-desktop-space-view="workbench"
                         aria-hidden={!mounted}
                         inert={!mounted}
                       >

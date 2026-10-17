@@ -1,5 +1,5 @@
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
-import { WorkspaceCollaboration, WorkspaceCollaborationScope } from './WorkspaceCollaboration'
+import { WorkspaceCollaboration } from './WorkspaceCollaboration'
 import { WorkspaceAgentRow } from './WorkspaceAgentRow'
 import { createFocusContextIdentitySelector, focusContextIdentityKey } from '../lib/focus-context-identity'
 import { createFocusGoalLinksSelector, focusGoalCardKey } from '../lib/focus-goal-links'
@@ -62,7 +62,7 @@ const AGENT_GROUP_LABELS: Record<FocusBucket, string> = { attention: 'Needs You'
 const NO_AGENT_ORDER: readonly string[] = []
 
 export const WorkspaceAgentsTool = memo(function WorkspaceAgentsTool(props: Parameters<typeof WorkspaceAgentsContent>[0]) {
-  return <WorkspaceCollaborationScope workspaceId={props.workspace.id}><WorkspaceAgentsContent {...props} /></WorkspaceCollaborationScope>
+  return <WorkspaceAgentsContent {...props} />
 })
 const WorkspaceAgentsContent = memo(function WorkspaceAgentsContent({
   workspace,

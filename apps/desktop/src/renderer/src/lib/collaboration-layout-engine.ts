@@ -53,6 +53,18 @@ function bounds(points: readonly CollaborationLayoutPoint[]): CollaborationLayou
   }
   return { x: left, y: top, width: right - left, height: bottom - top }
 }
+function cubicPath(points: readonly CollaborationLayoutPoint[]) {
+  const commands = [`M ${points[0]!.x} ${points[0]!.y}`]
+  for (let index = 1; index < points.length; index += 3) commands.push(`C ${points.slice(index, index + 3).map(point => `${point.x} ${point.y}`).join(' ')}`)
+  return commands.join(' ')
+}
+/** Translate a completed projection without invoking WASM or changing its original identity or role. */
+export function translateCollaborationPath(path: CollaborationPath, offset: CollaborationLayoutPoint): CollaborationPath {
+  if (!offset.x && !offset.y) return path
+  const points = path.points.map(point => ({ x: point.x + offset.x, y: point.y + offset.y }))
+  return { ...path, path: cubicPath(points), points, labelX: path.labelX + offset.x, labelY: path.labelY + offset.y,
+    bounds: { ...path.bounds, x: path.bounds.x + offset.x, y: path.bounds.y + offset.y } }
+}
 function fixedNodes(nodes: readonly { id: string; width: number; height: number }[]) {
   return nodes.map(node => ({ name: node.id, attributes: { width: node.width / 72, height: node.height / 72 } }))
 }
@@ -220,10 +232,8 @@ function route(viz: Viz, obstacles: Obstacles, connection: CollaborationLayoutCo
       for (let index = 0; index < points.length - 1; index += 3) if (crosses(points.slice(index, index + 4), inside))
         throw Error(`Connection routing crosses original ${box.kind === 'area' ? 'area heading' : 'card'} ${box.id}. Its source remains readable; retry the same connection.`)
     }
-    const commands = [`M ${points[0]!.x} ${points[0]!.y}`]
-    for (let index = 1; index < points.length; index += 3) commands.push(`C ${points.slice(index, index + 3).map(point => `${point.x} ${point.y}`).join(' ')}`)
     const middle = Math.floor((points.length - 1) / 6) * 3, segment = points.slice(middle, middle + 4)
-    return { id: connection.id, path: commands.join(' '), points, bounds: extent,
+    return { id: connection.id, path: cubicPath(points), points, bounds: extent,
       sourceHandle: `${connection.kind}-out-${forward ? 'right' : 'left'}`, targetHandle: `${connection.kind}-in-${forward ? 'left' : 'right'}`,
       labelX: (segment[0]!.x + 3 * segment[1]!.x + 3 * segment[2]!.x + segment[3]!.x) / 8,
       labelY: (segment[0]!.y + 3 * segment[1]!.y + 3 * segment[2]!.y + segment[3]!.y) / 8 }

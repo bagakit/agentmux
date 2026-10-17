@@ -27,7 +27,7 @@ const ThemeLayoutRegionIcon = semanticIconComponent('layout.grid-4')
 const ThemeObjectTabIcon = semanticIconComponent('object.tab')
 const ThemeObjectInboxIcon = semanticIconComponent('object.inbox')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
-const ThemeObjectCollaborationIcon = semanticIconComponent('object.collaboration')
+const ThemeObjectCollaborationIcon = semanticIconComponent('action.locate')
 const ThemeObjectConversationIcon = semanticIconComponent('object.conversation')
 const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
@@ -52,7 +52,7 @@ export function FocusToolbar({ active = true, children, selectedId, selected, ta
 }) {
   return <header className="focus-toolbar">
     <div className="focus-toolbar__filters">{children}</div>
-    {onOpenCollaboration ? <button type="button" className="icon-button" aria-label="Open Agent collaboration graph" title="Agent collaboration" onClick={onOpenCollaboration}><ThemeObjectCollaborationIcon size={15} /></button> : null}
+    {onOpenCollaboration ? <button type="button" className="icon-button" aria-label="Locate Agent in map" title="Locate in map" onClick={onOpenCollaboration}><ThemeObjectCollaborationIcon size={15} /></button> : null}
     {(tab || selectedId) ? <FocusToolbarContext active={active} key={JSON.stringify([selectedId, tab?.id])} selectedId={selectedId} selected={selected} tab={tab} reference={reference} onReview={onReview} onCloseWorkspace={onCloseWorkspace} regionOnly={regionOnly} onToggleRegion={onToggleRegion} /> : null}
   </header>
 }
