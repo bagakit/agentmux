@@ -25,7 +25,7 @@ app.whenReady().then(async () => {
       if (narrow) {
         await click('[aria-label="Settings section"]')
         await until('document.querySelector("[role=menu]")')
-        await click('js:[...document.querySelectorAll("[role=menuitemradio]")].find(node=>node.getAttribute("data-state")!=="disabled"&&node.textContent.trim()===' + JSON.stringify(id === 'amux-conversation' ? 'Amux Conversation' : 'Lark') + ')')
+        await click('js:[...document.querySelectorAll("[role=menuitemradio]")].find(node=>node.getAttribute("data-state")!=="disabled"&&node.textContent.trim()===' + JSON.stringify({ 'inapp-conversation': 'InApp Conversation', mobile: 'Mobile', lark: 'Lark' }[id]) + ')')
       } else await click('nav [data-settings-target="' + id + '"]')
       await until('document.querySelector("[data-settings-pane=' + id + ']:not([hidden])")')
     }
@@ -35,11 +35,20 @@ app.whenReady().then(async () => {
     for (const width of [1380, 520]) {
       win.setContentSize(width, 940); await until('innerWidth===' + width)
       const narrow = width === 520
-      await navigate('amux-conversation', narrow)
+      const beforeInApp = await read('window.conversationChannelsProof.calls.filter(call=>call.method.startsWith("device.")).length')
+      await navigate('inapp-conversation', narrow)
+      assert.equal(await read('window.conversationChannelsProof.calls.filter(call=>call.method.startsWith("device.")).length'), beforeInApp, 'InApp navigation does not observe devices')
+      if (!narrow) {
+        await click('js:[...document.querySelectorAll("[data-settings-pane=inapp-conversation] button")].find(node=>node.textContent==="Open Input & Mailbox")')
+        await until('document.querySelector("[data-settings-pane=message-tool]:not([hidden]) [data-message-tool-settings]")')
+        await navigate('inapp-conversation', false)
+      }
+      await capture('inapp-' + (narrow ? 'narrow' : 'wide'))
+      await navigate('mobile', narrow)
       await until('window.conversationChannelsProof.calls.some(call=>call.method==="device.ls")')
       assert.equal(await read('window.conversationChannelsProof.calls.some(call=>call.method==="device.link")'), width !== 1380)
-      if (width === 1380) await click('js:[...document.querySelectorAll("[data-settings-pane=amux-conversation] button")].find(node=>node.textContent.includes("Copy connection link"))')
-      await capture('amux-' + (narrow ? 'narrow' : 'wide'))
+      if (width === 1380) await click('js:[...document.querySelectorAll("[data-settings-pane=mobile] button")].find(node=>node.textContent.includes("Copy connection link"))')
+      await capture('mobile-' + (narrow ? 'narrow' : 'wide'))
       await navigate('lark', narrow)
       await until('document.querySelector("[data-connection=preview-bot]")')
       await capture('lark-' + (narrow ? 'narrow' : 'wide'))

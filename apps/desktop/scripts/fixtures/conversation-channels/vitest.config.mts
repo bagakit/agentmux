@@ -11,8 +11,9 @@ assert.ok(evidence, 'Explicit private evidence directory')
 const mutant = process.env.AGENTMUX_CHANNELS_MUTANT ?? 'baseline'
 const settings = 'apps/desktop/src/renderer/src/components/settings/'
 const edits: Record<string, { file: string; before: string; after: string }> = {
-  catalog: { file: settings + 'modules/amux-conversation.tsx', before: "group: 'conversation-channels'", after: "group: 'resources'" },
-  native: { file: settings + 'modules/amux-conversation.tsx', before: '<DeviceManagementSettings active={active} />', after: '<DeviceManagementSettings active={false} />' },
+  catalog: { file: settings + 'modules/inapp-conversation.tsx', before: "group: 'conversation-channels'", after: "group: 'resources'" },
+  inapp: { file: settings + 'modules/inapp-conversation.tsx', before: "onNavigate('message-tool')", after: "onNavigate('mobile')" },
+  native: { file: settings + 'modules/mobile.tsx', before: '<DeviceManagementSettings active={active} />', after: '<DeviceManagementSettings active={false} />' },
   lark: { file: settings + 'modules/lark.tsx', before: '<ConnectorServiceControl active={active} />', after: '' }
 }
 assert.ok(mutant === 'baseline' || edits[mutant], 'Known loaded-source mutation')
