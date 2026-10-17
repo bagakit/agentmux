@@ -13,18 +13,24 @@ export function BrowserTraceReadingHost({ mode, open, held, visible, anchor, onR
   // An old closed reader must never create new flow space merely because an Agent starts.
   if (mode === 'docked' && (open || !held) && reserved !== open) setReserved(open)
   useLayoutEffect(() => {
-    const source = anchor(), surface = panel.current
-    if (mode !== 'floating' || !open || !visible || !source || !surface) return
+    if (mode !== 'floating' || !open || !visible) return
     let disposed = false
-    const toolbar = source.querySelector<HTMLElement>('.browser-toolbar') ?? source
-    const position = async () => {
-      const result = await computePosition(toolbar, surface, { strategy: 'fixed', placement: 'bottom-end', middleware: [offset(6), shift({ padding: 8 }), size({ padding: 8,
-        apply({ availableWidth, availableHeight }) { Object.assign(surface.style, { width: `${Math.min(360, availableWidth)}px`, maxHeight: `${Math.min(520, availableHeight)}px` }) }
-      })] })
-      if (!disposed) Object.assign(surface.style, { left: `${result.x}px`, top: `${result.y}px`, visibility: 'visible' })
-    }
-    const stop = autoUpdate(toolbar, surface, () => { void position() })
-    return () => { disposed = true; stop() }
+    let stop: (() => void) | undefined
+    // An enclosing surface's callback ref is attached after child layout effects.
+    // Read that exact anchor after this commit, without waiting for another Agent update.
+    queueMicrotask(() => {
+      const source = anchor(), surface = panel.current
+      if (disposed || !source?.isConnected || !surface?.isConnected) return
+      const toolbar = source.querySelector<HTMLElement>('.browser-toolbar') ?? source
+      const position = async () => {
+        const result = await computePosition(toolbar, surface, { strategy: 'fixed', placement: 'bottom-end', middleware: [offset(6), shift({ padding: 8 }), size({ padding: 8,
+          apply({ availableWidth, availableHeight }) { Object.assign(surface.style, { width: `${Math.min(360, availableWidth)}px`, maxHeight: `${Math.min(520, availableHeight)}px` }) }
+        })] })
+        if (!disposed) Object.assign(surface.style, { left: `${result.x}px`, top: `${result.y}px`, visibility: 'visible' })
+      }
+      stop = autoUpdate(toolbar, surface, () => { void position() })
+    })
+    return () => { disposed = true; stop?.() }
   }, [mode, open, visible, anchor])
   if (mode === 'docked') return open || held && reserved ? <aside className="browser-trace-rail" aria-label="Browser activity trace">
     {open ? children : <div className="browser-trace-held"><span>Page size is held for this Browser operation.</span><button type="button" className="small-button" onClick={onReopen}>Reopen trace</button></div>}
