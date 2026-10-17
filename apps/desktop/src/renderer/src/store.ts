@@ -10,6 +10,7 @@ import { currentContinuitySupervision } from './lib/continuity-supervision'
 import { conversationLandmarkIntentKey, type ConversationLandmarkIntents } from './lib/conversation-landmark-intent'
 import { parseConversationLandmarkWrite, type ConversationLandmarkWrite } from '@agentmux/core/conversation'
 import { restoredMoteBotRequests, type MoteBotRequest } from './lib/mote-bot-request'
+import { botTaskSelectionKey, restoredBotTaskSelections, type BotTaskScope, type BotTaskSelections } from './lib/bot-task-selection'
 import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { noteHistoryRevision } from '@agentmux/core/note-history'
 import { readNoteMarkdownHeader } from '@agentmux/core/note-format'
@@ -883,6 +884,7 @@ export type AppState = {
   /** Current policy is an endpoint-scoped observation, never a durable preference or receipt. */
   connectorServiceObservation: ConnectorServiceObservation | null
   moteBotRequests: Record<string, MoteBotRequest>
+  botTaskSelections: BotTaskSelections
   moteConnectionSaveIntents: Record<string, MoteConnectionSaveIntent>
   agentComposerDrafts: Record<string, string>
   browserOpinionDrafts: Record<string, BrowserOpinionDraft>
@@ -3520,6 +3522,7 @@ type PersistedAppState = {
   conversationLandmarkIntents?: ConversationLandmarkIntents
   connectorServiceIntents?: Record<string, ConnectorServiceIntent>
   moteBotRequests?: Record<string, MoteBotRequest>
+  botTaskSelections?: BotTaskSelections
   moteConnectionSaveIntents?: Record<string, MoteConnectionSaveIntent>
   agentComposerDrafts?: Record<string, string>
   browserOpinionDrafts?: Record<string, BrowserOpinionDraft>
@@ -3781,6 +3784,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     conversationLandmarkIntents: state.conversationLandmarkIntents,
     connectorServiceIntents: state.connectorServiceIntents,
     moteBotRequests: state.moteBotRequests,
+    botTaskSelections: state.botTaskSelections,
     moteConnectionSaveIntents: state.moteConnectionSaveIntents,
     agentComposerDrafts: state.agentComposerDrafts,
     browserOpinionDrafts: state.browserOpinionDrafts,
@@ -4167,6 +4171,16 @@ export async function retainMoteBotRequest(request: MoteBotRequest): Promise<Age
     throw new Error('The original Mote bot request cannot be replaced.')
   useAppStore.setState(state => ({ moteBotRequests: { ...state.moteBotRequests, [parsed.input.operationId]: parsed } }))
   return await saveWorkbenchSelection(false)
+}
+/** Remember only which original task to read; selection never dispatches its input. */
+export function setBotTaskSelection(scope: BotTaskScope, operationId: string | null): void {
+  const key = botTaskSelectionKey(scope), current = useAppStore.getState().botTaskSelections
+  if (current[key] === operationId || operationId === null && !Object.hasOwn(current, key)) return
+  const selections = { ...current }
+  if (operationId === null) delete selections[key]
+  else selections[key] = operationId
+  useAppStore.setState({ botTaskSelections: selections })
+  void saveWorkbenchSelection(false)
 }
 /** Retain the exact submitted file input; this is neither a preference nor an effect journal. */
 export async function retainMoteConnectionSaveIntent(intent: MoteConnectionSaveIntent): Promise<AgentMuxSpatialSave> {
@@ -4674,6 +4688,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   connectorServiceIntents: {},
   connectorServiceObservation: null,
   moteBotRequests: {},
+  botTaskSelections: {},
   moteConnectionSaveIntents: {},
   retainedSpatialFocus: null,
   config: null,
@@ -12080,6 +12095,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     state.spaceObjectIcons = restoreSpaceIconOverrides(Object.hasOwn(current.config?.appearance ?? {}, 'spaceObjectIcons')
       ? current.config!.appearance.spaceObjectIcons : retainedSpaceIconHandoff)
+    state.botTaskSelections = restoredBotTaskSelections(state.botTaskSelections)
     return { ...state, workspaceAgentOrder: restoreWorkspaceAgentOrder(state.workspaceAgentOrder), moteBotRequests: restoredMoteBotRequests(state.moteBotRequests), connectorRoomIntents: restoredConnectorRoomIntents(state.connectorRoomIntents), connectorServiceIntents: restoredConnectorServiceIntents(state.connectorServiceIntents), moteConnectionSaveIntents: restoredMoteConnectionSaveIntents(state.moteConnectionSaveIntents), noteCanvasLayouts: restoreNoteCanvasLayouts(state.noteCanvasLayouts), recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
       agentComposerHistoryNavigation: {}, surveyZoneSelection: restoredSurveyZoneSelection(state.surveyZoneSelection), recallZoneSelection: restoredSurveyZoneSelection(state.recallZoneSelection) }
   },
