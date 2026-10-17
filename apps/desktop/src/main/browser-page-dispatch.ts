@@ -178,7 +178,7 @@ export function renderBrowserSnapshotText(snapshot: BrowserPageSnapshot, observa
  * 返回的闭包就是 `runBrowserScript` 的 `onPageCall`——**这是那两个模块唯一的生产调用点**，
  * 也是 T-010 验收里那条零调用者 grep 要看到的答案。
  */
-type BrowserPageActionScope = { feedback?: BrowserPageContext['actionFeedback']; beforeAction?: BrowserPageContext['beforeAction']; recordTarget?: BrowserPageContext['recordTarget'] }
+type BrowserPageActionScope = { feedback?: BrowserPageContext['actionFeedback']; beforeAction?: BrowserPageContext['beforeAction']; recordTarget?: BrowserPageContext['recordTarget']; dispatched?(): void | Promise<void> }
 
 export function createBrowserPageDispatch(
   context: BrowserPageContext
@@ -356,6 +356,9 @@ export function createBrowserPageDispatch(
     if (response.exceptionDetails) {
       throw new Error(`The page threw while acting on ${ref}: ${pageAuthoredText(response.exceptionDetails.text)}`)
     }
+    // This is an observation of the original acknowledged dispatch, including a
+    // download trigger. Its animation cannot delay or replace the action result.
+    try { void Promise.resolve(scope?.dispatched?.()).catch(() => {}) } catch { /* Decoration only. */ }
     return response.result?.value
   }
 

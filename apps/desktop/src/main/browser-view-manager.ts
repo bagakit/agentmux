@@ -39,6 +39,7 @@ import { browserViewportSize, cloneBrowserViewport, isBrowserViewport } from '..
 import { resolveBrowserAddress } from '../shared/browser-address.js'
 import type { BrowserInputHistoryScope } from '../shared/browser-input-history.js'
 import { showBrowserOperationFeedback, type BrowserOperationFeedback } from './browser-operation-feedback.js'
+import { validateBrowserOperatorAvatarPng } from './browser-operator-avatar.js'
 import { DEFAULT_BROWSER_AGENT_CONTROL, type BrowserAgentControlPreferences } from '../shared/browser-agent-control.js'
 import { installTextEditContextMenu } from './text-edit-context-menu.js'
 import { BrowserCdpSession } from './browser-cdp-session.js'
@@ -2623,6 +2624,9 @@ export class BrowserViewManager {
           } else await feedback?.clear(BROWSER_WAIT_PAGE_CALLS.has(name) ? 'invalidate' : 'replace')
           if (BROWSER_DOCUMENT_PAGE_CALLS.has(name)) requireCurrentDocumentOperation()
           value = await dispatch(name, args, { beforeAction: () => beforeAction(step),
+            ...(feedback && action !== undefined && (name === 'click' || name === 'download') ? {
+              dispatched: () => feedback.clickConfirmed(action)
+            } : {}),
             ...(feedback && action !== undefined && entry.visible ? { feedback: async (node: BrowserPageSnapshot['nodes'][number], send: typeof session.sendCommand) => {
               beforeAction(step)
               await feedback.showTarget(node, send, action)
@@ -3625,7 +3629,23 @@ export class BrowserViewManager {
 
   /** Saved presentation changes wake only live Browser feedback; input ownership is unchanged. */
   refreshAgentFeedback(): void {
-    for (const entry of this.entries.values()) if (entry.visible && entry.activeRun) void entry.feedback?.synchronizeControl()
+    for (const entry of this.entries.values()) if (entry.visible && entry.activeRun) void entry.feedback?.refreshPreferences()
+  }
+
+  /** Trusted presentation bytes for an already-live owner; never acquires or restores a Browser. */
+  setOperatorAvatar(input: { browserId: string; operationId: string; operatorId: string; png: string }): boolean {
+    if (!input || typeof input.browserId !== 'string' || typeof input.operationId !== 'string' ||
+      typeof input.operatorId !== 'string' || typeof input.png !== 'string') return false
+    const entry = this.entries.get(input.browserId)
+    if (!entry || !entry.visible || !this.agentOwnsInput(entry) || !entry.feedback ||
+      entry.activeRun?.operationId !== input.operationId || entry.activity.operation?.id !== input.operationId ||
+      entry.activity.operation.operator.id !== input.operatorId || entry.view.webContents.isDestroyed()) return false
+    const view = entry.view, feedback = entry.feedback, navigationId = entry.navigationId, revision = entry.controlRevision
+    const png = validateBrowserOperatorAvatarPng(input.png)
+    if (!png || this.entries.get(input.browserId) !== entry || entry.view !== view || entry.feedback !== feedback ||
+      entry.navigationId !== navigationId || entry.controlRevision !== revision || !entry.visible ||
+      !this.agentOwnsInput(entry) || entry.activeRun?.operationId !== input.operationId || view.webContents.isDestroyed()) return false
+    return feedback.setAvatar(png)
   }
 
   private requireHumanInput(entry: BrowserEntry): void {

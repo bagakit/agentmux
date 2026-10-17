@@ -3,7 +3,7 @@ import type { WebContents } from 'electron'
 import type { BrowserPageNode } from '../shared/contracts.js'
 import type { BrowserCdpSender } from './browser-page-snapshot.js'
 import { BROWSER_OPERATION_FEEDBACK_WORLD_NAME } from '../../browser-extension/protocol.js'
-import { DEFAULT_BROWSER_AGENT_CONTROL, type BrowserAgentControlPreferences } from '../shared/browser-agent-control.js'
+import { browserAgentEffectsCss, DEFAULT_BROWSER_AGENT_CONTROL, type BrowserAgentControlPreferences } from '../shared/browser-agent-control.js'
 import { buildBrowserControlFeedbackScript } from './browser-control-feedback.js'
 export { BROWSER_OPERATION_FEEDBACK_WORLD_NAME }
 
@@ -16,9 +16,10 @@ const ACTION_LABELS: Record<string, string> = {
 }
 
 type FeedbackPayload = {
-  revision: number; operationId: string; navigationId: string; phase: 'running' | 'completed' | 'clear'
+  revision: number; operationId: string; navigationId: string; phase: 'running' | 'completed' | 'clear' | 'click' | 'appearance' | 'preferences'
   kind: 'page' | 'target'; token: string; label: string; method: string; keyLabel: string
   deadline: number; completedMs: number; moveMs: number; clearReason: 'replace' | 'invalidate'
+  preferences: BrowserAgentControlPreferences; css: string; avatarPng?: string
 }
 
 /** Runs only in our isolated world; no HTML strings, page-authored labels or input values. */
@@ -29,6 +30,13 @@ function applyFeedback(payload: FeedbackPayload, target?: Element): boolean {
   if (previous && payload.phase !== 'running' && (previous.operationId !== payload.operationId || previous.navigationId !== payload.navigationId || previous.token !== payload.token)) return false
   if (previous && previous.revision >= payload.revision) return false
   if (payload.phase !== 'clear' && Date.now() > payload.deadline) return false
+  if (payload.phase === 'appearance' || payload.phase === 'preferences' || payload.phase === 'click') {
+    if (!previous || !previous.host || !['running', 'completed'].includes(previous.phase)) return false
+    previous.revision = payload.revision
+    if (payload.phase === 'click') previous.click(payload)
+    else previous.decorate(payload)
+    return true // Never rebuild an expired cue, replay an action, retween or restart its deadline.
+  }
   const viewport = () => [innerWidth, innerHeight, scrollX, scrollY,
     window.visualViewport?.width ?? innerWidth, window.visualViewport?.height ?? innerHeight,
     window.visualViewport?.offsetLeft ?? 0, window.visualViewport?.offsetTop ?? 0, window.visualViewport?.scale ?? 1]
@@ -89,29 +97,39 @@ function applyFeedback(payload: FeedbackPayload, target?: Element): boolean {
   globals[key] = state // A single local history fact carries no old target, owner, permissions or visible cue.
   let timer: ReturnType<typeof setTimeout> | undefined
   let animation: Animation | undefined
+  let labelAnimation: Animation | undefined
+  let rippleTimer: ReturnType<typeof setTimeout> | undefined
+  let rippleHost: HTMLElement | null = null
   let pointer: HTMLElement | null = null
+  let label: HTMLElement | null = null
+  let labelText: HTMLElement | null = null
+  let preferences = payload.preferences
   let visibleTarget = target ?? null
   const media = matchMedia('(prefers-reduced-motion: reduce)')
-  const placeLabel = () => {
-    const label = state.shadow?.querySelector('.label') as HTMLElement | null
-    if (!label || !state.point) return
-    const r = label.getBoundingClientRect(), p = state.point
+  const labelPosition = (p: { x: number; y: number }) => {
+    const r = label!.getBoundingClientRect()
     const x = Math.max(6, Math.min(p.x + 15, innerWidth - r.width - 6))
     const below = p.y + 21
     const y = Math.max(6, Math.min(below + r.height > innerHeight - 6 ? p.y - r.height - 4 : below, innerHeight - r.height - 6))
-    label.style.transform = `translate(${x}px,${y}px)`
+    return `translate(${x}px,${y}px)`
   }
-  state.hide = (reason: 'replace' | 'invalidate') => {
+  const placeLabel = () => { if (label && state.point) label.style.transform = labelPosition(state.point) }
+  const stopMotion = () => { animation?.cancel(); labelAnimation?.cancel(); animation = labelAnimation = undefined }
+  const removeRipple = () => { clearTimeout(rippleTimer); rippleHost?.remove(); rippleHost = null }
+  state.hide = (reason: 'replace' | 'invalidate', retainRipple = false) => {
     if (globals[key] !== state) return
-    if (reason === 'replace' && pointer && state.point) {
+    if (reason === 'replace' && pointer && preferences.showCursor && state.point) {
       const current = visibleTarget && rectOf(visibleTarget)
       const r = pointer.getBoundingClientRect()
       state.history = current && anchor && equal(anchor, current) && equal(displayViewport, viewport()) && Number.isFinite(r.left) && Number.isFinite(r.top)
         ? { point: { x: r.left, y: r.top }, navigationId: state.navigationId, viewport: displayViewport } : null
     }
+    if (reason === 'replace' && pointer && !preferences.showCursor) state.history = null
     if (reason === 'invalidate') state.history = null
-    clearTimeout(timer); animation?.cancel(); animation = undefined
+    clearTimeout(timer); stopMotion()
+    if (!retainRipple) removeRipple()
     state.host?.remove(); state.host = null; state.shadow = null; pointer = null; visibleTarget = null
+    label = labelText = null
     state.point = null; state.phase = 'clear'; state.clearReason = reason; state.expiresAt = 0
   }
   const invalidate = () => {
@@ -135,9 +153,9 @@ function applyFeedback(payload: FeedbackPayload, target?: Element): boolean {
   }
   const onHuman = (event: Event) => { if (event.isTrusted) invalidate() }
   const onVisibility = () => { if (document.hidden) invalidate() }
-  const onMotion = () => { if (media.matches) { animation?.cancel(); animation = undefined } }
+  const onMotion = () => { if (media.matches) stopMotion() }
   state.cleanup = () => {
-    clearTimeout(timer); animation?.cancel()
+    clearTimeout(timer); stopMotion(); removeRipple()
     window.removeEventListener('message', onClear)
     document.removeEventListener('pointerdown', onHuman, true)
     document.removeEventListener('keydown', onHuman, true)
@@ -153,14 +171,12 @@ function applyFeedback(payload: FeedbackPayload, target?: Element): boolean {
   state.complete = (completed: FeedbackPayload) => {
     if (globals[key] !== state || state.phase !== 'running') return
     state.phase = 'completed'; state.host?.setAttribute('data-phase', 'completed')
-    state.shadow?.querySelector('.glow')?.remove()
     state.shadow?.querySelector('.executor')?.classList.remove('executing')
     pointer?.classList.add('complete')
-    const label = state.shadow?.querySelector('.label') as HTMLElement | null
-    if (label) { label.classList.add('complete'); label.textContent = completed.label; placeLabel() }
+    if (label && labelText) { label.classList.add('complete'); labelText.textContent = completed.label; placeLabel() }
     if (!pointer && !state.shadow?.querySelector('.executor')) { state.hide('replace'); state.phase = 'completed'; return }
     state.expiresAt = Date.now() + completed.completedMs
-    timer = setTimeout(() => state.hide('replace'), completed.completedMs)
+    timer = setTimeout(() => state.hide('replace', true), completed.completedMs)
   }
   // These listeners remain while the single invisible history fact is valid; none poll or wake unrelated documents.
   window.addEventListener('message', onClear)
@@ -180,39 +196,81 @@ function applyFeedback(payload: FeedbackPayload, target?: Element): boolean {
   host.setAttribute('data-agentmux-browser-operation-feedback', '')
   host.setAttribute('data-operation-id', payload.operationId); host.setAttribute('data-navigation-id', payload.navigationId)
   host.setAttribute('data-phase', payload.phase); host.setAttribute('data-kind', payload.kind); host.setAttribute('aria-hidden', 'true')
-  for (const [name, value] of Object.entries({ position: 'fixed', inset: '0', 'z-index': '2147483645',
-    'pointer-events': 'none', cursor: 'default', 'user-select': 'none', contain: 'layout style paint', overflow: 'hidden' })) {
+  for (const [name, value] of Object.entries({ all: 'initial', display: 'block', background: 'transparent', opacity: '1',
+    visibility: 'visible', transform: 'none', filter: 'none', margin: '0', padding: '0', border: '0', 'content-visibility': 'visible',
+    position: 'fixed', inset: '0', 'z-index': '2147483645', 'pointer-events': 'none', cursor: 'default',
+    'user-select': 'none', contain: 'layout style paint', overflow: 'hidden' })) {
     host.style.setProperty(name, value, 'important')
   }
   const shadow = host.attachShadow({ mode: 'closed' })
   const sheet = new CSSStyleSheet()
-  sheet.replaceSync(`:host,*{pointer-events:none;cursor:default;box-sizing:border-box}.glow{position:absolute;inset:0;background:radial-gradient(ellipse at 50% 100%,rgba(120,221,160,.065),transparent 65%);box-shadow:inset 0 -10px 35px -24px rgba(120,221,160,.55)}.pointer{position:absolute;left:0;top:0;width:18px;height:22px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.4))}.pointer.hover svg{animation:float 1600ms ease-in-out infinite}.label{position:absolute;left:0;top:0;max-width:144px;padding:3px 6px;border-radius:5px;background:rgba(20,29,24,.92);color:#cbf3d8;font:500 10px/1.35 -apple-system,BlinkMacSystemFont,sans-serif;white-space:normal;overflow-wrap:anywhere}.label.complete{color:#c1cbc5}.complete{opacity:.85}.executor{position:absolute;right:12px;bottom:12px;padding:3px 5px;border-radius:5px;background:rgba(20,29,24,.92);color:#78dda0;font:600 15px/1 monospace}.executor.executing{animation:execute 900ms ease-in-out infinite}@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.5px)}}@keyframes execute{0%,100%{transform:scale(1);opacity:.65}50%{transform:scale(1.08);opacity:1}}@media (prefers-reduced-motion: reduce){.pointer.hover svg,.executor.executing{animation:none}}`)
+  const localCss = `:host,*{pointer-events:none;cursor:default;box-sizing:border-box}:host::before,:host::after{content:none!important;display:none!important;pointer-events:none!important}.pointer{width:18px;height:22px;transition:none}.pointer.hover svg{animation:float 1600ms ease-in-out infinite}.label{left:0;top:0;max-width:144px;white-space:normal;overflow-wrap:anywhere;transition:none}.label.complete{color:#c1cbc5}.amux-browser-agent-avatar{background:transparent}.amux-browser-agent-avatar img{width:100%;height:100%;object-fit:contain}.complete{opacity:.85}.executor{position:absolute;right:12px;bottom:12px;padding:3px 5px;border-radius:5px;background:#17231f;color:var(--amux-agent-color);font:600 15px/1 monospace}.executor.executing{animation:execute 900ms ease-in-out infinite}@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.5px)}}@keyframes execute{0%,100%{transform:scale(1);opacity:.65}50%{transform:scale(1.08);opacity:1}}@media (prefers-reduced-motion: reduce){.pointer.hover svg,.executor.executing{animation:none}}`
+  const updateStyle = (next: FeedbackPayload) => {
+    preferences = next.preferences
+    sheet.replaceSync(next.css + localCss + `.label{display:${preferences.showCursor && preferences.showCursorLabel ? 'flex' : 'none'}}`)
+  }
+  updateStyle(payload)
   shadow.adoptedStyleSheets = [sheet]
   state.host = host; state.shadow = shadow
+  const effects = document.createElement('div'); effects.className = 'amux-browser-agent-effects'; shadow.appendChild(effects)
   if (payload.kind === 'page') {
-    const glow = document.createElement('div'); glow.className = 'glow'; shadow.appendChild(glow)
     if (payload.method === 'js' || payload.method === 'cdp') {
-      const executor = document.createElement('span'); executor.className = 'executor executing'; executor.textContent = '‹/›'; shadow.appendChild(executor)
+      const executor = document.createElement('span'); executor.className = 'executor executing'; executor.textContent = '‹/›'; effects.appendChild(executor)
     }
   }
   if (point && payload.kind === 'target') {
-    pointer = document.createElement('span'); pointer.className = payload.method === 'hover' ? 'pointer hover' : 'pointer'
+    pointer = document.createElement('span'); pointer.className = `amux-browser-agent-pointer pointer${payload.method === 'hover' ? ' hover' : ''}`
     pointer.style.transform = `translate(${point.x}px,${point.y}px)`
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
     svg.setAttribute('width', '18'); svg.setAttribute('height', '22'); svg.setAttribute('viewBox', '0 0 18 22')
+    svg.setAttribute('class', 'amux-browser-agent-arrow')
     const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'path')
     arrow.setAttribute('d', 'M1 1L1 17L5.5 13L9 21L12 19.5L8.5 12L15 12Z')
-    arrow.setAttribute('fill', '#78dda0'); arrow.setAttribute('stroke', '#16251c'); arrow.setAttribute('stroke-width', '1')
     svg.appendChild(arrow); pointer.appendChild(svg)
-    const label = document.createElement('span'); label.className = 'label'; label.textContent = payload.label
+    label = document.createElement('span'); label.className = 'amux-browser-agent-label label'
+    labelText = document.createElement('span'); labelText.className = 'amux-browser-agent-label-text'; labelText.textContent = payload.label
+    label.appendChild(labelText)
     label.style.maxWidth = `${Math.max(1, Math.min(144, innerWidth - 12))}px`
-    shadow.appendChild(pointer); shadow.appendChild(label)
+    effects.appendChild(pointer); effects.appendChild(label)
   }
+  state.decorate = (next: FeedbackPayload) => {
+    if (globals[key] !== state || !state.host) return
+    if (next.phase === 'preferences') {
+      updateStyle(next); stopMotion(); removeRipple(); placeLabel()
+    }
+    if (!label || !next.avatarPng || label.querySelector('img')) return
+    const image = document.createElement('img'); image.alt = ''; image.decoding = 'async'
+    image.onload = () => {
+      if (globals[key] !== state || !state.host || !label || label.querySelector('img')) return
+      const avatar = document.createElement('span'); avatar.className = 'amux-browser-agent-avatar'
+      avatar.appendChild(image); label.prepend(avatar); stopMotion(); placeLabel()
+    }
+    image.src = next.avatarPng // Main validated, bounded PNG bytes; no page or caller URL.
+  }
+  state.click = (next: FeedbackPayload) => {
+    if (globals[key] !== state || !state.host || !state.point || !preferences.clickRipple) return
+    removeRipple()
+    rippleHost = host.cloneNode(false) as HTMLElement
+    rippleHost.removeAttribute('data-agentmux-browser-operation-feedback')
+    rippleHost.setAttribute('data-agentmux-browser-click-feedback', '')
+    const rippleShadow = rippleHost.attachShadow({ mode: 'closed' }); rippleShadow.adoptedStyleSheets = [sheet]
+    const effects = document.createElement('div'); effects.className = 'amux-browser-agent-effects'
+    const ripple = document.createElement('span'); ripple.className = 'amux-browser-agent-ripple'
+    ripple.style.left = `${state.point.x}px`; ripple.style.top = `${state.point.y}px`
+    effects.appendChild(ripple); rippleShadow.appendChild(effects); root.appendChild(rippleHost)
+    rippleTimer = setTimeout(removeRipple, next.preferences.clickDurationMs)
+  }
+  state.decorate(payload)
   root.appendChild(host); placeLabel()
-  if (point && pointer && history && !media.matches && (history.point.x !== point.x || history.point.y !== point.y)) {
+  if (point && pointer && history && preferences.showCursor && preferences.pointerTween && payload.moveMs > 0 && !media.matches && (history.point.x !== point.x || history.point.y !== point.y)) {
     // The action never awaits the browser's local animation or its finished promise.
     animation = pointer.animate([{ transform: `translate(${history.point.x}px,${history.point.y}px)` },
       { transform: `translate(${point.x}px,${point.y}px)` }], { duration: payload.moveMs, easing: 'cubic-bezier(0.2,0.8,0.2,1)' })
+    if (label && preferences.showCursorLabel) {
+      labelAnimation = label.animate([{ transform: labelPosition(history.point) }, { transform: labelPosition(point) }],
+        { duration: payload.moveMs, easing: 'cubic-bezier(0.2,0.8,0.2,1)' })
+      labelAnimation.startTime = animation.startTime
+    }
   }
   if (payload.kind === 'target') window.top?.postMessage({ channel: 'agentmux-feedback', type: 'register',
     token: payload.token, operationId: payload.operationId, navigationId: payload.navigationId }, '*')
@@ -253,6 +311,8 @@ export class BrowserOperationFeedback {
   private controlSignature = ''
   private controlMayExist = false
   private controlRequest = 0
+  private avatarPng: string | undefined
+  private clickedAction = -1
   constructor(private readonly input: FeedbackInput) {}
   private async controlScript(code: string, active: boolean): Promise<boolean> {
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -285,6 +345,22 @@ export class BrowserOperationFeedback {
     if (!ok) { this.controlSignature = ''; this.warnControl() }
     if (ok && !active) this.controlMayExist = false
   }
+  async refreshPreferences(): Promise<void> {
+    await this.synchronizeControl()
+    if (!this.current() || this.mode === 'clear') return
+    await this.patch('preferences')
+  }
+  /** Private Main-validated artwork, frozen once for this actual operation. */
+  setAvatar(png: string): boolean {
+    if (this.avatarPng) return false
+    this.avatarPng = png
+    if (this.current() && this.mode !== 'clear') void this.patch('appearance')
+    return true
+  }
+  private async patch(phase: 'appearance' | 'preferences'): Promise<void> {
+    const payload = this.payload(phase, 'page', Date.now() + DISPLAY_BUDGET_MS)
+    await this.bounded(Promise.all([this.page(payload), ...(this.target ? [this.document(this.target, { ...payload, kind: 'target' })] : [])]), this.generation)
+  }
   async hide(reason: FeedbackPayload['clearReason'] = 'invalidate'): Promise<void> {
     await Promise.all([this.clear(reason), this.hideControl()])
   }
@@ -302,20 +378,23 @@ export class BrowserOperationFeedback {
   private current(): boolean { return this.input.isCurrent() && this.input.navigationId() === this.navigationId }
   private payload(phase: FeedbackPayload['phase'], kind: FeedbackPayload['kind'], deadline: number): FeedbackPayload {
     const action = this.method === 'pressKey' ? `Key ${this.keyLabel}` : ACTION_LABELS[this.method] ?? 'Operate'
+    const preferences = this.input.preferences?.() ?? DEFAULT_BROWSER_AGENT_CONTROL
     return { revision: this.input.nextRevision(), operationId: this.input.operationId,
-      navigationId: this.navigationId, phase, kind, token: this.token, deadline, completedMs: COMPLETED_CUE_MS, moveMs: 180, method: this.method, keyLabel: this.keyLabel, clearReason: 'invalidate',
-      label: phase === 'completed' ? `${action} complete` : `${this.input.operatorName.slice(0, 64)} · ${action}` }
+      navigationId: this.navigationId, phase, kind, token: this.token, deadline, completedMs: COMPLETED_CUE_MS,
+      moveMs: preferences.pointerTween ? preferences.pointerDurationMs : 0, preferences, css: browserAgentEffectsCss(preferences),
+      ...(this.avatarPng ? { avatarPng: this.avatarPng } : {}), method: this.method, keyLabel: this.keyLabel, clearReason: 'invalidate',
+      label: `${this.input.operatorName.slice(0, 64)} · ${action}${phase === 'completed' ? ' complete' : ''}` }
   }
   private async page(payload: FeedbackPayload): Promise<unknown> {
     if (this.input.contents.isDestroyed()) return false
     const result = await this.input.contents.executeJavaScriptInIsolatedWorld(BROWSER_OPERATION_FEEDBACK_WORLD_ID,
       [{ code: buildBrowserOperationFeedbackScript(payload) }])
-    if (result === false && payload.phase !== 'clear') throw new Error('Page feedback was unavailable')
+    if (result === false && ['running', 'completed'].includes(payload.phase)) throw new Error('Page feedback was unavailable')
     return result
   }
   private async document(context: TargetContext, payload: FeedbackPayload): Promise<unknown> {
     const response = await context.send('Runtime.evaluate', { contextId: context.id, expression: buildBrowserOperationFeedbackScript(payload), returnByValue: true }) as { exceptionDetails?: unknown; result?: { value?: unknown } }
-    if (response.exceptionDetails || (response.result?.value === false && payload.phase !== 'clear')) throw new Error('Document feedback was unavailable')
+    if (response.exceptionDetails || (response.result?.value === false && ['running', 'completed'].includes(payload.phase))) throw new Error('Document feedback was unavailable')
     return response
   }
   private async bounded(work: Promise<unknown>, generation: number): Promise<void> {
@@ -380,6 +459,13 @@ export class BrowserOperationFeedback {
     const generation = ++this.generation, deadline = Date.now() + DISPLAY_BUDGET_MS
     await this.bounded(Promise.all([this.page(this.payload('completed', 'page', deadline)),
       ...(this.target ? [this.document(this.target, this.payload('completed', 'target', deadline))] : [])]), generation)
+  }
+  /** Called only after the original target dispatch was acknowledged, never from a plan or hover. */
+  async clickConfirmed(action: number): Promise<void> {
+    if (action !== this.generation || action === this.clickedAction || this.mode !== 'running' || !this.current() ||
+      !this.target || !['click', 'download'].includes(this.method)) return
+    this.clickedAction = action
+    await this.bounded(this.document(this.target, this.payload('click', 'target', Date.now() + DISPLAY_BUDGET_MS)), action)
   }
   async end(completed: boolean): Promise<void> {
     if (completed) await this.completeAction()
