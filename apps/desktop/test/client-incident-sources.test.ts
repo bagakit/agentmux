@@ -60,12 +60,13 @@ async function records(archive: ClientIncidentArchive) {
     logId: item.recordRef.logId! }, bounds())).data as AgentMuxClientIncidentRecord))
 }
 async function fixture(startupFailure = false) {
+  const objectCli = process.env.AGENTMUX_TEST_OBJECT_CLI ?? join(process.cwd(), 'packages/core/bin/amux')
   const root = await mkdtemp(join(tmpdir(), 'amx-incident-sources-')); ipc.root = root
   cleanups.push(async () => { await rm(root, { recursive: true, force: true }) })
   for (const name of Object.keys(process.env).filter(name => name.startsWith('AGENTMUX_') || name.startsWith('CTXMUX_'))) vi.stubEnv(name, undefined)
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(root, 'runtime'))
   vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'state'))
-  vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', join(process.cwd(), 'packages/core/bin/amux'))
+  vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', objectCli)
   const config: AppConfig = { ...structuredClone(DEFAULT_CONFIG), hosts: [...structuredClone(DEFAULT_CONFIG.hosts),
     { id: 'healthy-host', kind: 'ssh', label: 'Healthy', hostname: 'healthy.invalid' }], executors: {
     observed: { label: 'Observed', providerId: 'codex', command: 'authored-provider', args: [], env: { PRIVATE_TOKEN: 'private-env' }, injectAgentMuxGuide: false }
@@ -236,6 +237,74 @@ it('preserves thrown identity and refuses to infer retry scope across a differen
   expect(all.filter(item => item.report.kind === 'connection-recovered')).toHaveLength(0)
   expect(detect).toHaveBeenCalledTimes(2)
 })
+
+it.each(['thrown-accessor', 'thrown-proxy', 'cause-accessor', 'cause-code-accessor', 'cause-proxy'] as const)(
+  'retains the original refresh failure and recovery when %s cannot supply a diagnostic code', async failure => {
+    const root = await mkdtemp(join(tmpdir(), 'amx-incident-code-')); cleanups.push(async () => { await rm(root, { recursive: true, force: true }) })
+    const archive = new ClientIncidentArchive(join(root, 'archive')); await archive.flush()
+    const config = structuredClone(DEFAULT_CONFIG), executorId = Object.keys(config.executors)[0]!, owner = {}
+    const codeGetter = vi.fn(() => { throw Error('private-code-accessor') })
+    const causeGetter = vi.fn(() => { throw Error('private-cause-accessor') })
+    const inaccessible = failure.endsWith('proxy') ? new Proxy({}, {
+      getOwnPropertyDescriptor: () => { throw Error('private-code-proxy') }
+    }) : Object.defineProperty(new Error('private-original-body'), 'code', { get: codeGetter })
+    const result = { input: { executorId, providerId: 'codex', command: 'authored-provider', host: config.hosts[0]! },
+      availability: 'check-failed' as const, executable: 'authored-provider', cause: inaccessible }
+    if (failure === 'cause-accessor') Object.defineProperty(result, 'cause', { get: causeGetter })
+    const healthy = { input: result.input, availability: 'available' as const, executable: 'authored-provider' }
+    const detect = vi.fn(async (): Promise<unknown> => healthy)
+    if (failure.startsWith('thrown-')) detect.mockRejectedValueOnce(inaccessible)
+    else detect.mockResolvedValueOnce(result)
+    const runtime = { detect, executionHost: () => owner, observeCoreEvents: () => () => {} }
+    const diagnostic = new ClientIncidentRuntimeOwner(runtime as never, archive, { kind: 'main', appInstanceId: archive.appInstanceId,
+      producerInstanceId: archive.appInstanceId, windowId: null, documentGeneration: null, buildId: null })
+    cleanups.push(async () => diagnostic.dispose())
+    const configOwner = new ConfigOwner({ read: () => config, save: async value => value, publish: () => {} })
+    if (failure.startsWith('thrown-')) await expect(refreshSettingsExecutor(executorId, 'local', configOwner, diagnostic)).rejects.toBe(inaccessible)
+    else expect(await refreshSettingsExecutor(executorId, 'local', configOwner, diagnostic)).toBe(result)
+    expect(codeGetter).not.toHaveBeenCalled(); expect(causeGetter).not.toHaveBeenCalled()
+    const first = await records(archive)
+    expect(first).toHaveLength(1)
+    expect(first[0]!.report).toMatchObject({ kind: 'capability-probe-failed', stage: 'probe-failed', code: null,
+      metadata: { executorId, probeAvailability: 'check-failed' } })
+    expect(await refreshSettingsExecutor(executorId, 'local', configOwner, diagnostic)).toBe(healthy)
+    const all = await records(archive), recovered = all.find(item => item.report.kind === 'capability-probe-recovered')!
+    expect(all).toHaveLength(3)
+    expect(recovered.report).toMatchObject({ kind: 'capability-probe-recovered', code: null, metadata: { probeAvailability: 'available' } })
+    expect(detect).toHaveBeenCalledTimes(2)
+    expect(JSON.stringify(all)).not.toContain('private-')
+  }
+)
+
+it.each(['subscribe-accessor', 'release-accessor', 'subscribe-proxy', 'release-proxy'] as const)(
+  'retains an unavailable observation after %s without changing the original check', async failure => {
+    const root = await mkdtemp(join(tmpdir(), 'amx-incident-observer-code-')); cleanups.push(async () => { await rm(root, { recursive: true, force: true }) })
+    const archive = new ClientIncidentArchive(join(root, 'archive')); await archive.flush()
+    const config = structuredClone(DEFAULT_CONFIG), executorId = Object.keys(config.executors)[0]!
+    const getter = vi.fn(() => { throw Error('private-observer-code') })
+    const original = failure.endsWith('proxy') ? new Proxy({}, {
+      getOwnPropertyDescriptor: () => { throw Error('private-observer-proxy') }
+    }) : Object.defineProperty(new Error('private-observer-body'), 'code', { get: getter })
+    const result = { input: { executorId, providerId: 'codex', command: 'authored-provider', host: config.hosts[0]! },
+      availability: 'available' as const, executable: 'authored-provider' }
+    const detect = vi.fn(async () => result)
+    const runtime = { detect, executionHost: () => ({}), observeCoreEvents: () => {
+      if (failure.startsWith('subscribe-')) throw original
+      return () => { throw original }
+    } }
+    const diagnostic = new ClientIncidentRuntimeOwner(runtime as never, archive, { kind: 'main', appInstanceId: archive.appInstanceId,
+      producerInstanceId: archive.appInstanceId, windowId: null, documentGeneration: null, buildId: null })
+    expect(await diagnostic.detect(executorId, 'local', config)).toBe(result)
+    expect(() => diagnostic.dispose()).not.toThrow()
+    expect(getter).not.toHaveBeenCalled()
+    expect(detect).toHaveBeenCalledExactlyOnceWith(executorId, 'local', config)
+    const all = await records(archive)
+    expect(all).toHaveLength(1)
+    expect(all[0]!.report).toMatchObject({ stage: 'observation-unavailable', code: null,
+      metadata: { disposed: failure.startsWith('release-') } })
+    expect(JSON.stringify(all)).not.toContain('private-')
+  }
+)
 
 it.each(['subscribe', 'release', 'admission'] as const)('isolates diagnostic %s failure from the existing business operation', async failure => {
   const root = await mkdtemp(join(tmpdir(), 'amx-incident-isolation-')); cleanups.push(async () => { await rm(root, { recursive: true, force: true }) })
