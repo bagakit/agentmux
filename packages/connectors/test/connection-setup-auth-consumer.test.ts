@@ -11,6 +11,7 @@ import { AgentMuxControlServer, AgentMuxRpcService, connectAgentMuxRpc } from '@
 import type { ConnectionConfig, ConnectionSetupAdvance, ConnectionSetupBegin, ConnectionSetupView } from '@agentmux/core/connections'
 import { objectCliEnvironment, runCompiledObjectCli, type CliResult } from '../../core/test/helpers/object-cli-rpc.js'
 import { enrollmentEncryption } from './fixtures/connection-enrollment.js'
+import { ProfileConnectionSetup } from '../dist/connection-setup-profile.js'
 
 const TOKEN = 'fixture-auth-original-token', FLOW = 'fixture-auth-original-flow'
 const SESSION = 'fixture-auth-private-session', CSRF = 'fixture-auth-private-csrf'
@@ -21,6 +22,16 @@ const clean: Array<() => void | Promise<void>> = []
 afterEach(async () => { vi.restoreAllMocks(); vi.unstubAllGlobals(); for (const close of clean.splice(0).reverse()) await close() })
 function result<T = ConnectionSetupView>(output: CliResult): T { expect(output.code, output.stdout + output.stderr).toBe(0); return JSON.parse(output.stdout).result }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r }); return { promise, resolve } }
+function pauseNextProfileProjection() {
+  const entered = deferred<void>(), release = deferred<void>(), original = ProfileConnectionSetup.prototype.view
+  let held = false
+  vi.spyOn(ProfileConnectionSetup.prototype, 'view').mockImplementation(async function(this: ProfileConnectionSetup, ...args) {
+    // Delay only this real second projection; its input and resulting view remain untouched.
+    if (args[2] && !held) { held = true; entered.resolve(); await release.promise }
+    return original.apply(this, args)
+  })
+  return { entered, release }
+}
 function qrResponse(token = TOKEN) {
   return Response.json({ code: 0, data: { step_info: { token } } }, { headers: [
     ['x-flow-key', FLOW],
@@ -492,6 +503,98 @@ it('reads the current original challenge when its authentication revision advanc
     expect(observed.continuation).toEqual(scanned.continuation)
     expect(requests).toHaveBeenCalledTimes(3)
   } finally { release.resolve(); await reading }
+}, 20_000)
+
+it.each(['pending', 'expired'] as const)('keeps the profile advance challenge and its source together when the original poll becomes %s between projections', async stage => {
+  const f = await fixture({ goal: { kind: 'profile-update', desired: { name: 'AMUX identity' }, publication: { notes: 'Save the original bot identity.' } } })
+  const pollEntered = deferred<void>(), response = deferred<Response>()
+  let polls = 0
+  const requests = vi.fn(async (url: string | URL | Request) => {
+    if (new URL(String(url)).pathname.endsWith('/init')) return qrResponse()
+    if (++polls === 1) return polling(2)
+    pollEntered.resolve(); return await response.promise
+  }); vi.stubGlobal('fetch', requests)
+  const initial = await f.sdk.call('connection.setup.begin', f.input), firstInput = advanceInput(initial)
+  let projection: ReturnType<typeof pauseNextProfileProjection> | undefined
+  const pending: Array<Promise<ConnectionSetupView>> = []
+  try {
+    let observed: ConnectionSetupView
+    if (stage === 'pending') {
+      projection = pauseNextProfileProjection()
+      const first = f.sdk.call('connection.setup.advance', firstInput); pending.push(first)
+      await projection.entered.promise
+      const scanned = await inspect(f), next = advance(f, scanned); pending.push(next)
+      await pollEntered.promise
+      projection.release.resolve()
+      await expect(first).resolves.toMatchObject({ operation: { authentication: { request: 'dispatching' } } })
+      observed = await first
+      expect(observed.operation?.authentication?.request).toBe('dispatching')
+      expect(observed.challenge?.qrPayload).toBe(initial.challenge!.qrPayload)
+      expect(observed.challengeSource).toEqual({ attemptId: scanned.operation!.authentication!.attemptId, stepId: scanned.operation!.authentication!.stepId })
+    } else {
+      const scanned = await f.sdk.call('connection.setup.advance', firstInput), next = advance(f, scanned); pending.push(next)
+      await pollEntered.promise
+      projection = pauseNextProfileProjection()
+      const duplicate = f.sdk.call('connection.setup.advance', firstInput); pending.push(duplicate)
+      await projection.entered.promise
+      response.resolve(polling(5)); await next
+      projection.release.resolve()
+      await expect(duplicate).resolves.toMatchObject({ challenge: null })
+      observed = await duplicate
+      expect(observed.operation?.authentication?.stage).toBe('expired')
+      expect(observed.challenge).toBeNull()
+      expect(observed.challengeSource).toBeUndefined()
+    }
+    expect(observed.receipt?.actionId).toBe(firstInput.decision.actionId)
+    expect(requests).toHaveBeenCalledTimes(3)
+  } finally {
+    projection?.release.resolve(); response.resolve(polling(5)); await Promise.allSettled(pending)
+  }
+}, 20_000)
+
+it.each(['renewed', 'revised'] as const)('replaces the complete profile display after the original operation is %s between projections', async target => {
+  const f = await fixture({ goal: { kind: 'profile-update', desired: { name: 'AMUX identity' }, publication: { notes: 'Save the original bot identity.' } } })
+  const pollEntered = deferred<void>(), response = deferred<Response>()
+  let inits = 0, polls = 0
+  const requests = vi.fn(async (url: string | URL | Request) => {
+    if (new URL(String(url)).pathname.endsWith('/init')) return qrResponse(++inits === 1 ? TOKEN : 'fixture-next-attempt-token')
+    if (++polls === 1) {
+      if (target === 'renewed') throw new TypeError('Fixture original poll result unavailable')
+      return polling(2)
+    }
+    pollEntered.resolve(); return await response.promise
+  }); vi.stubGlobal('fetch', requests)
+  const initial = await f.sdk.call('connection.setup.begin', f.input), input = advanceInput(initial), projection = pauseNextProfileProjection()
+  const original = f.sdk.call('connection.setup.advance', input), pending = [original]
+  await projection.entered.promise
+  try {
+    if (target === 'renewed') {
+      const unknown = await inspect(f)
+      expect(unknown.reason).toBe('challenge-unavailable')
+      const renewed = await advance(f, unknown, 'renew'), next = advance(f, renewed); pending.push(next)
+      await pollEntered.promise
+      projection.release.resolve()
+      await expect(original).resolves.toMatchObject({ operation: { authentication: { request: 'dispatching' } } })
+      const observed = await original
+      expect(observed.reason).toBeUndefined()
+      expect(observed.continuation).toEqual({ stage: 'waiting', account: null, actions: [] })
+      expect(observed.challenge?.qrPayload).toBe(renewed.challenge!.qrPayload)
+      expect(observed.challengeSource?.attemptId).toBe(renewed.operation!.authentication!.attemptId)
+      expect(observed.receipt).toMatchObject({ actionId: input.decision.actionId, state: 'unknown' })
+      expect(requests).toHaveBeenCalledTimes(4)
+    } else {
+      await f.sdk.call('connection.configure', { operationId: 'revised-profile-target', expectedRevision: 1, connection: { ...f.config, label: 'Revised saved bot' } })
+      projection.release.resolve()
+      await expect(original).resolves.toMatchObject({ challenge: null, reason: 'connection-revised' })
+      const observed = await original
+      expect(observed.continuation).toBeUndefined()
+      expect(observed.challengeSource).toBeUndefined()
+      expect(observed.receipt).toMatchObject({ actionId: input.decision.actionId, state: 'confirmed' })
+      expect(requests).toHaveBeenCalledTimes(2)
+    }
+  } finally {
+    projection.release.resolve(); response.resolve(polling(5)); await Promise.allSettled(pending)
+  }
 }, 20_000)
 
 it('concurrent original actions share the durable native claim and a changed decision cannot borrow its authority', async () => {
