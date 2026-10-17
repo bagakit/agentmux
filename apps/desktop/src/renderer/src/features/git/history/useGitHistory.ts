@@ -17,8 +17,9 @@ type HistoryState = {
 export function useGitHistory(workspace: Pick<WorkspaceRecord, 'id' | 'hostId' | 'path'>, visible: boolean) {
   const workspaceId = workspace.id
   const key = JSON.stringify([workspace.id, workspace.hostId, workspace.path])
-  const [selection, setSelection] = useState({ key, reference: null as string | null })
+  const [selection, setSelection] = useState({ key, reference: null as string | null, intent: false })
   const reference = selection.key === key ? selection.reference : null
+  const referenceIntent = selection.key === key && selection.intent
   const [documentVisible, setDocumentVisible] = useState(document.visibilityState !== 'hidden')
   const [state, setState] = useState<HistoryState | null>(null)
   const latest = useRef(state)
@@ -94,12 +95,15 @@ export function useGitHistory(workspace: Pick<WorkspaceRecord, 'id' | 'hostId' |
   const selectReference = useCallback((value: string | null) => {
     if (scope.current.key !== key) return
     selectionIntent.current = key
-    if (scope.current.reference === value) return
+    if (scope.current.reference === value) {
+      setSelection(current => current.key === key && current.intent ? current : { key, reference: value, intent: true })
+      return
+    }
     generation.current += 1
     busy.current = false
     // A durable range can be selected during layout, before the old enabled effect runs.
     scope.current = { ...scope.current, reference: value }
-    setSelection({ key, reference: value })
+    setSelection({ key, reference: value, intent: true })
   }, [key])
   const restoreReference = useCallback((value: string | null) => {
     if (scope.current.key !== key || selectionIntent.current === key || latest.current?.key === key) return
@@ -112,7 +116,7 @@ export function useGitHistory(workspace: Pick<WorkspaceRecord, 'id' | 'hostId' |
     result: owned?.result ?? null, loading: owned?.loading ?? enabled, error: owned?.error ?? null,
     refs: state?.key === key ? state.refs : [],
     repository: state?.key === key ? state.repository : null,
-    reference, enabled,
+    reference, referenceIntent, enabled,
     selectReference, restoreReference, refresh, loadMore
-  }), [owned, state, key, reference, enabled, selectReference, restoreReference, refresh, loadMore])
+  }), [owned, state, key, reference, referenceIntent, enabled, selectReference, restoreReference, refresh, loadMore])
 }

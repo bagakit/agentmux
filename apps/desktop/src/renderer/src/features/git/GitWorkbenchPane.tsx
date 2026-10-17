@@ -56,10 +56,10 @@ function RepositoryReader(props: ViewProps) {
   const history = shared?.history
   useGitHistoryReader(shared, surface.regionId, workspace, 'repository', visible, surface.history?.reference ?? null)
   useEffect(() => {
-    if (history?.repository?.hostId === surface.scope.hostId && history.repository.repoPath === surface.scope.repoPath) {
+    if (history?.referenceIntent && history.repository?.hostId === surface.scope.hostId && history.repository.repoPath === surface.scope.repoPath) {
       selectReference(surface.regionId, history.reference)
     }
-  }, [history?.repository?.hostId, history?.repository?.repoPath, history?.reference, surface.regionId, surface.scope.hostId, surface.scope.repoPath, selectReference])
+  }, [history?.referenceIntent, history?.repository?.hostId, history?.repository?.repoPath, history?.reference, surface.regionId, surface.scope.hostId, surface.scope.repoPath, selectReference])
   return <section className="git-workbench" data-git-workbench-region={surface.regionId} aria-label="Git repository review">
     <Header surface={surface} workspace={workspace}>
       <button className="small-button" aria-label="View repository history" onClick={() => openHistory(workspace.id, surface.scope, history ? history.reference : surface.history?.reference)}><ThemeObjectHistoryIcon size={13} /><span>History</span></button>
