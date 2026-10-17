@@ -1,0 +1,9 @@
+# Mote Calendar Renderer capture
+
+Owning behavior: [Motes and coordination](../../../../../docs/design/behavior/motes-and-coordination.md). Owning presentation: [Motes and coordination](../../../../../docs/design/presentation/motes-and-coordination.md). Capture contract: [Independent visual review](../../../../../docs/guides/agent-visual-e2e-review.md).
+
+Run `node apps/desktop/scripts/fixtures/mote-calendar/capture.mjs` from this worktree after the product Calendar source is ready. It bundles current product source privately, mounts the original `MoteFilesTool`, `MoteProfilePopover`, `MoteDetailsPanel`, `AgentSessionComposer`, `DesktopClientUiProvider`, CSS and theme/icon runtime, then operates real controls with native Electron mouse/keyboard events.
+
+Only the outer Space shell, static discussion prose, two exact synthetic Session references, filesystem replies and typed schedule API replies are controlled. A 480px Space pane, 332px narrow viewport and original constrained popover do not replace product component CSS. Schedule list checks exact Mote physical scope; all create/mutation/inspect replies stay in memory. This proves Renderer presentation/interaction against controlled data, not Main/RPC persistence, actual scheduler timing, Provider/model behavior, installed Desktop, or runtime recovery.
+
+Every child starts after clearing inherited `AGENTMUX_*`, `CTXMUX_*` and `ELECTRON_RUN_AS_NODE`; its Runtime, state, store, queue and Electron userData paths are unique to that capture. No preload, user journal, user schedule, real Session/Run or model is opened. Compiled output is removed after source/PNG/log/operation hashes are written. Receipts are `captureOnly: true`; capture success is not aesthetic approval. Another agent must open every complete PNG and review the exact candidate.
