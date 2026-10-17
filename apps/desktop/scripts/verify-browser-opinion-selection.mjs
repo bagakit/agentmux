@@ -12,14 +12,18 @@ const file = args.length ? resolve(root, args[1]) : join(directory, 'receipt.jso
 const composer = 'apps/desktop/src/renderer/src/components/BrowserContextualComposer.tsx'
 const selection = 'apps/desktop/src/renderer/src/components/BrowserOpinionSelection.tsx'
 const editor = 'apps/desktop/src/renderer/src/components/image-annotation/ImageAnnotationEditor.tsx'
+const draft = 'apps/desktop/src/renderer/src/lib/browser-opinion-draft.ts'
 const tests = ['apps/desktop/test/browser-opinion-selection.test.tsx', 'apps/desktop/test/image-annotation-owner-document.test.tsx']
 const hash = value => createHash('sha256').update(value).digest('hex')
 const mutations = [
-  { id: 'derived-scene', file: composer, before: '(original.selection?.scene ?? original.scene!).reference', after: 'original.scene!.reference', assertion: 'explicitly reads the original prepared image and freezes its derived scene through the real opinion queue' },
+  { id: 'derived-scene', file: composer, before: '(image?.scene ?? original.scene!).reference', after: 'original.scene!.reference', assertion: 'explicitly reads the original prepared image and freezes its derived scene through the real opinion queue' },
   { id: 'text-only-image', file: composer, before: 'const capture = intent.context ?', after: 'const capture = original.selection || intent.context ?', assertion: 'explicit text-only sending excludes a retained processed image and its context' },
   { id: 'late-selection', file: selection, before: 'function cancel() { ++ticket.current; setFrame(null); setBusy(false); prepared.current = null }', after: 'function cancel() { setFrame(null); setBusy(false); prepared.current = null }', assertion: 'does not attach a late original query after close' },
   { id: 'late-frame', file: selection, before: 'if (token === ticket.current && same(original)) setFrame(captured)', after: 'if (same(original)) setFrame(captured)', assertion: 'ignores a late frame after hiding and never treats opening a frame as image attachment' },
-  { id: 'editor-document', file: editor, before: "ownerWindow.addEventListener('keydown', onKeyDown)", after: "window.addEventListener('keydown', onKeyDown)", assertion: 'uses the actual image document for keyboard ownership and exposes the host attachment action' }
+  { id: 'editor-document', file: editor, before: "ownerWindow.addEventListener('keydown', onKeyDown)", after: "window.addEventListener('keydown', onKeyDown)", assertion: 'uses the actual image document for keyboard ownership and exposes the host attachment action' },
+  { id: 'damaged-image-plain', file: composer, before: 'try { image = includeContext && original.scene ? browserOpinionSelection(original) : undefined }',
+    after: 'try { image = includeContext && original.selection?.scene ? original.selection : undefined }', assertion: 'keeps a malformed saved image explicit until removal (missing-scene)' },
+  { id: 'original-text-observation', file: draft, before: 'JSON.stringify(base) !== JSON.stringify(textContext)', after: 'false', assertion: 'refuses an original selection query that belongs to a different text observation' }
 ]
 const receipt = { schema: 'agentmux.browser-opinion-selection.proof.v1', passed: false,
   candidate: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), sources: {}, runs: [], sharedTreeMutations: 0,
@@ -27,7 +31,7 @@ const receipt = { schema: 'agentmux.browser-opinion-selection.proof.v1', passed:
 async function save() { await mkdir(dirname(file), { recursive: true }); await writeFile(file, JSON.stringify(receipt, null, 2) + '\n') }
 const consumed = new Map()
 try {
-  const inputs = [composer, selection, editor, ...tests, 'apps/desktop/scripts/verify-browser-opinion-selection.mjs',
+  const inputs = [composer, selection, editor, draft, ...tests, 'apps/desktop/scripts/verify-browser-opinion-selection.mjs',
     'apps/desktop/test/browser-opinion-selection.config.mts', 'packages/client-ui/package.json', 'packages/core/package.json']
   for (const input of inputs) receipt.sources[input] = hash(await readFile(join(root, input)))
   for (const mutation of mutations) assert.equal((await readFile(join(root, mutation.file), 'utf8')).split(mutation.before).length, 2, 'Unique production anchor: ' + mutation.id)
@@ -58,11 +62,11 @@ export default {...base,resolve:{...base.resolve,alias:[...plan.aliases.map(item
     const run = { label, ...outcome, timedOut, assertions: 0, failures: 0, report: relative(root, reportFile) }; receipt.runs.push(run)
     assert.equal(timedOut, false); assert.equal(outcome.signal, null)
     const report = JSON.parse(await readFile(reportFile, 'utf8'))
-    assert.equal(report.testResults.length, 2); assert.equal(report.numTotalTests, 9); assert.equal(report.numPendingTests, 0)
+    assert.equal(report.testResults.length, 2); assert.equal(report.numTotalTests, 14); assert.equal(report.numPendingTests, 0)
     assert.equal(report.numRuntimeErrorTestSuites ?? 0, 0); assert.ok(report.testResults.every(suite => suite.message === ''), 'Setup errors are not AssertionRED')
     assert.doesNotMatch(log, /Unhandled Errors|Unhandled Rejection|Uncaught Exception/)
     const assertions = report.testResults.flatMap(suite => suite.assertionResults)
-    assert.equal(assertions.length, 9)
+    assert.equal(assertions.length, 14)
     const loaded = new Map((await readFile(loadsFile, 'utf8')).trim().split('\n').map(line => { const item = JSON.parse(line); return [item.file, item] }))
     for (const input of [composer, selection, editor, ...tests]) assert.ok(loaded.has(input), 'Actual consumer loaded: ' + input)
     for (const [input, value] of loaded) {

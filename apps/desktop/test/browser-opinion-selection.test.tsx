@@ -141,3 +141,40 @@ it('ignores a late frame after hiding and never treats opening a frame as image 
   expect(useAppStore.getState().browserOpinionDrafts[operation.browserId]!.original!.selection).toBeUndefined()
   await click('Queue opinion'); expect(vi.mocked(api.browser.freezeInputContext).mock.calls[0]![0].scene).toEqual(scene.reference)
 })
+
+it.each(['missing-scene', 'foreign-text', 'artifact-mismatch'])('keeps a malformed saved image explicit until removal (%s)', async kind => {
+  restored(true)
+  const original = useAppStore.getState().browserOpinionDrafts[operation.browserId]!.original!
+  if (kind === 'missing-scene') delete (original.selection as Partial<BrowserInputSelectionReceipt>).scene
+  else if (kind === 'foreign-text') original.selection!.scene.inputContext.page.url = 'https://example.invalid/another-observation'
+  else original.selection!.artifact.sha256 = 'b'.repeat(64)
+  await dom.render(<Harness />); await click('Discuss'); await click('Queue opinion')
+  expect(api.browser.freezeInputContext).not.toHaveBeenCalled()
+  expect(useAppStore.getState().agentSteerQueues['agent-1']).toBeUndefined()
+  expect(document.querySelector('.browser-opinion-selection')?.textContent).toContain('Saved image details cannot be confirmed')
+  expect(useAppStore.getState().browserOpinionDrafts[operation.browserId]!.original!.selection).toBeDefined()
+  await click('Remove image'); await click('Queue opinion')
+  expect(vi.mocked(api.browser.freezeInputContext).mock.calls[0]![0].scene).toEqual(scene.reference)
+})
+
+it('allows explicit text-only sending while retaining a damaged image reference for inspection', async () => {
+  restored(true)
+  const original = useAppStore.getState().browserOpinionDrafts[operation.browserId]!.original!
+  delete (original.selection as Partial<BrowserInputSelectionReceipt>).scene
+  await dom.render(<Harness />); await click('Discuss')
+  await act(async () => document.querySelector<HTMLInputElement>('.browser-contextual-composer__source input')!.click())
+  await click('Queue text only')
+  expect(api.browser.freezeInputContext).not.toHaveBeenCalled()
+  expect(useAppStore.getState().agentSteerQueues['agent-1']![0]!.browserInput).toBeUndefined()
+  expect(useAppStore.getState().browserOpinionDrafts[operation.browserId]!.original!.selection).toBeDefined()
+})
+
+it('refuses an original selection query that belongs to a different text observation', async () => {
+  restored()
+  const foreign = structuredClone(receipt); foreign.scene.inputContext.capturedAt++
+  vi.mocked(api.browser.readInputSelection).mockResolvedValue({ operationId: receipt.operationId, state: 'prepared', receipt: foreign })
+  await dom.render(<Harness />); await click('Discuss'); await click('Check original image')
+  expect(useAppStore.getState().browserOpinionDrafts[operation.browserId]!.original!.selection).toBeUndefined()
+  expect(document.querySelector('.browser-opinion-selection')?.textContent).toContain('Saved image details cannot be confirmed')
+  expect(api.browser.freezeInputContext).not.toHaveBeenCalled()
+})
