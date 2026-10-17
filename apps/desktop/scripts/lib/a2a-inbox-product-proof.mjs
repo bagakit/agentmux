@@ -345,7 +345,8 @@ export async function verifyA2aReferenceReadingProductProof(product, { root }) {
     && record.original.item.conversation?.adoptedInput?.purpose === 'a2a-notification'))
   assert.ok(noticeUnits[0].item.records.some(record => record.original.kind === 'captured'
     && record.original.item.a2aNotificationId === r.key.submissionId))
-  assert.equal(r.rendered.author, 'AgentMux'); assert.equal(r.rendered.actionable, 0)
+  assert.ok(r.rendered.title); assert.equal(r.rendered.role, 'system'); assert.equal(r.rendered.eventRole, 'notice')
+  assert.equal(r.rendered.eventAuthor.kind, 'system'); assert.equal(r.rendered.notificationId, r.key.submissionId); assert.equal(r.rendered.actionable, 0)
   assert.equal(r.rendered.refs.length, 1); assert.ok(r.rendered.refs[0].includes(r.messageId)); assert.ok(r.rendered.hint.includes('message --skill'))
   assert.equal(r.copiedWire.text, r.wire); assert.equal(r.copiedBody.text, envelope.body)
   assert.equal(r.copiedWire.port, 'electron.clipboard.writeText'); assert.equal(r.copiedBody.port, 'electron.clipboard.writeText')
