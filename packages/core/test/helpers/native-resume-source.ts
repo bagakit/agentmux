@@ -14,6 +14,7 @@ const mutants: Record<string, [string, string, string]> = {
   'create-only': ['codex-native-input.ts', "context.kind === 'fork'", "context.kind !== 'create'"],
   'keep-policy-argv': ['codex-native-input.ts', 'args.filter((_, i) => !removed.has(i))', '[...args]'],
   'forget-resume-policy': ['codex-managed-run.ts', '{ ...expected, excludeTurns: true }', '{ threadId: expected.threadId, excludeTurns: true }'],
+  'forget-resume-hook-flag': ['codex-managed-run.ts', "...(plan.frontendArgs.includes('--dangerously-bypass-hook-trust') ? { config: { bypass_hook_trust: true } } : {})", ''],
   'accept-wrong-policy': ['codex-managed-run.ts', 'expected.sandbox !== undefined && resumed.sandbox?.type !== sandboxType ||', ''],
   'forget-native-target': ['codex-managed-run.ts', 'resumed?.thread?.id !== expected.threadId', 'false'],
   'skip-resume-before-tui': ['codex-managed-run.ts', 'if (plan.resume) {', 'if (false) {']

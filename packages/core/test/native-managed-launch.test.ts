@@ -157,6 +157,7 @@ import NativeWebSocket from ${JSON.stringify(createRequire(import.meta.url).reso
 const { WebSocketServer } = NativeWebSocket
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 const args=process.argv.slice(2), log=${JSON.stringify(log)}, marker=${JSON.stringify(marker)}, gate=${JSON.stringify(gate)}, connection=${JSON.stringify(connection)}
+if(args.includes('--version')) {console.log('codex-cli 0.163.0');process.exit(0)}
 if(args.includes('app-server')) {
   setInterval(()=>writeFileSync(marker+'.heartbeat',String(Date.now())),20)
   const server=new WebSocketServer({port:0,host:'127.0.0.1'})
@@ -229,6 +230,32 @@ it.runIf(process.platform === 'darwin')('starts the real child TUI only after au
   expect(actual.requests.filter((row: { method: string }) => row.method !== 'initialized').map((row: { method: string }) => row.method)).toEqual(['initialize', 'thread/resume'])
   expect(actual.requests.find((row: { method: string }) => row.method === 'thread/resume').params).toEqual({ ...f.plan.resume, cwd: f.root, excludeTurns: true })
   expect(actual.args.slice(4)).toEqual(f.plan.args)
+})
+
+it.runIf(process.platform === 'darwin').each([
+  { flag: true, prompt: 'Original continuation prompt' },
+  { flag: false, prompt: 'Original continuation prompt' },
+  { flag: false, prompt: '--dangerously-bypass-hook-trust' }
+])('preserves only the original parsed Hook switch on the first real native resume: %j', async ({ flag, prompt }) => {
+  const f = await nativeLifecycleFixture()
+  const original = { command: f.plan.command, args: ['resume', f.plan.resume!.threadId,
+    ...(flag ? ['--dangerously-bypass-hook-trust'] : []), prompt,
+    '--sandbox', 'read-only', '--ask-for-approval', 'on-request', '--model', 'original-model', '-C', f.root], env: {} }
+  const prepared = await prepareCodexManagedLaunch(original, 'original-lifecycle', { kind: 'resume', prompt })
+  expect(prepared.nativeActor).toBeDefined()
+  f.plan = JSON.parse(prepared.plan.args[1]!)
+  await writeFile(f.gate, 'ready')
+  const running = await runNativeLifecycle(f)
+  await expect.poll(() => readFile(f.marker, 'utf8').then(() => true, () => false), { timeout: 10_000 }).toBe(true)
+  running.stop()
+  await expect(running.completed).resolves.toEqual({ exitCode: 1, stderr: '' })
+  const actual = JSON.parse(await readFile(f.marker, 'utf8'))
+  const resume = actual.requests.filter((row: { method: string }) => row.method === 'thread/resume')
+  expect(resume).toHaveLength(1)
+  expect(resume[0].params).toEqual({ ...f.plan.resume, excludeTurns: true,
+    ...(flag ? { config: { bypass_hook_trust: true } } : {}) })
+  expect(actual.args.slice(4)).toEqual(f.plan.args)
+  expect(original.args).toContain(prompt)
 })
 
 it.runIf(process.platform === 'darwin').each(['wrong-policy', 'wrong-thread', 'not-direct'] as const)('keeps the continuation out of TUI on an actual native %s response', async response => {
