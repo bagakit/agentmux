@@ -100,7 +100,11 @@ async function run() {
   const focusPrivateWindow = async () => {
     try { await waitFor(() => { if (!win.isFocused()) { app.focus({ steal: true }); win.focus() }; return win.isFocused() }, 'exact private window focus before native input') }
     catch (error) {
+      let native: unknown
+      try { native = nativeWindowInput.focusState(win.getNativeWindowHandle()) }
+      catch (observationError) { native = { unavailable: true, message: String(observationError) } }
       receipt.focusFailure = { window: win.isFocused(), visible: win.isVisible(), focusable: win.isFocusable(),
+        native, privatePid: process.pid,
         focusedWindow: BrowserWindow.getFocusedWindow()?.id, focusedContents: webContents.getFocusedWebContents()?.id,
         renderer: { id: win.webContents.id, focused: win.webContents.isFocused() }, page: { id: contents.id, focused: contents.isFocused() },
         children: page.children.map((child: any) => ({ focused: child.webContents?.isFocused(), id: child.webContents?.id, window: child.webContents ? BrowserWindow.fromWebContents(child.webContents)?.id : null })) }
