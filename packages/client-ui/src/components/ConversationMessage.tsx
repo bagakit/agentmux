@@ -1,4 +1,4 @@
-import type { AgentProviderId, AgentSessionHistoryContentPart, AgentSessionHistoryMessagePhase, AgentSessionHistoryQuestionAnswer, AgentSessionUserMessage, AgentSessionUserMessageSource, AgentTimelineItemStatus } from '@agentmux/core'
+import type { AgentProviderId, AgentSessionHistoryContentPart, AgentSessionHistoryCollaboration, AgentSessionHistoryMessagePhase, AgentSessionHistoryQuestionAnswer, AgentSessionUserMessage, AgentSessionUserMessageSource, AgentTimelineItemStatus } from '@agentmux/core'
 import { AMUX_PROTOCOL_DEFINITIONS, parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import type { ConversationItemRef, ConversationSourceRecord } from '@agentmux/core/conversation'
 import { sessionHistoryTextForReading } from '@agentmux/core/session-user-messages'
@@ -23,6 +23,8 @@ import { conversationMessageSourceKey } from '../lib/conversation-message-locati
 import { conversationFiles } from '../lib/conversation-files.js'
 import { ConversationFiles } from './ConversationFiles.js'
 import { ConversationQuestionReply } from './ConversationQuestionReply.js'
+import { conversationReplyPreview } from '../lib/conversation-reply-preview.js'
+import { ConversationToolPayload } from './ConversationToolPayload.js'
 import { ConversationMessageDisclosure } from './ConversationMessageDisclosure.js'
 import type { ConversationTraceDisclosure } from '../lib/conversation-trace-disclosure.js'
 
@@ -49,6 +51,8 @@ export type ConversationMessageProps = {
   detailsOnlyMetadata?: boolean
   /** A Provider-recorded public message phase; never inferred from the text. */
   messagePhase?: AgentSessionHistoryMessagePhase
+  /** Native actors remain source-scoped; the parent avatar is presentation only. */
+  nativeCollaboration?: Extract<AgentSessionHistoryCollaboration, { kind: 'message' }>
   recordedIdentity?: boolean
   messageDetails?: ReactNode
   /** The owning conversation supplies the same original reader for an exact submission contribution. */
@@ -157,7 +161,7 @@ function partHasRenderableContent(part: AgentSessionHistoryContentPart): boolean
 /** A readable message, shared by Activity, native history and Gallery. The host owns identity
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
-  active = true, compact = false, continuation = false, expandedContent = false, detailsOnlyMetadata = false, recordTitle, messagePhase, recordedIdentity = false, messageDetails, renderSubmissionOriginal, messageActions, located = false, copyText, onCopy,
+  active = true, compact = false, continuation = false, expandedContent = false, detailsOnlyMetadata = false, recordTitle, messagePhase, recordedIdentity = false, nativeCollaboration, messageDetails, renderSubmissionOriginal, messageActions, located = false, copyText, onCopy,
   speaker: recordedSpeaker, conversationEvent, sources, conversationSessionId, itemRef, inputSource, publicContent, inputContext, inputContextSource, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, contentBoundary = 'wire', a2aNotificationId, questionAnswers, questionDiagnostic, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
   openWorkspaceFile, readPastedImage, readHistoryResource, nativeResourceRecord, openHttpLink, onContinue, onSelectAnnotation, expandedTraces: controlledTraces, onToggleTrace: controlledToggle, traceDisclosure
 }: ConversationMessageProps) {
@@ -178,6 +182,22 @@ export function ConversationMessage({
   const discloseBody = (body: ReactNode) => discloseHuman
     ? <ConversationMessageDisclosure key={JSON.stringify([messageId, recordSourceKey, humanText])} preview={humanText.slice(0, 160).trimEnd()} reveal={located}>{body}</ConversationMessageDisclosure>
     : body
+  const [collaborationOpen, setCollaborationOpen] = useState(located)
+  const [collaborationPresented, setCollaborationPresented] = useState(located)
+  const collaborationContentId = useId()
+  useEffect(() => { setCollaborationOpen(located); setCollaborationPresented(located) }, [readingIdentity])
+  useEffect(() => { if (located) { setCollaborationOpen(true); setCollaborationPresented(true) } }, [located])
+  const collaborationPreview = useMemo(() => nativeCollaboration ? conversationReplyPreview(parts.flatMap(part => part.kind === 'text'
+    ? [sessionHistoryTextForReading(part)] : []).join('\n\n')).slice(0, 180) : '', [content, Boolean(nativeCollaboration)])
+  const parentAvatarSpeaker: ConversationSpeaker | undefined = nativeCollaboration && conversationSessionId
+    ? { role: 'agent', id: conversationSessionId } : undefined
+  const parentAvatar = parentAvatarSpeaker ? describeSpeaker?.(parentAvatarSpeaker) : undefined
+  const collaborationHasResources = nativeCollaboration && parts.some(part => part.kind === 'resource')
+  const collaborationOriginal = nativeCollaboration ? <details className="log-turn__collaboration-original">
+    <summary>{collaborationHasResources ? '原始记录与资源引用' : '原始记录'}</summary>
+    {collaborationHasResources ? <p>此处保留已加载记录与资源引用。使用消息的复制按钮可按需读取并复制完整原文。</p> : null}
+    <ConversationToolPayload text={parts.map(partText).join('\n\n')} identity={readingIdentity} sourceIdentity={readingIdentity} copyLabel={collaborationHasResources ? "Copy recorded parts and references" : "Copy original record"} />
+  </details> : null
   const hasQuestionAnswers = Boolean(questionAnswers?.length)
   const firstTextIndex = parts.findIndex(part => part.kind === 'text')
   const contextPartIndex = parts.findIndex(part => part.kind === 'text' || part.kind === 'resource' && part.resourceType === 'text')
@@ -373,6 +393,7 @@ export function ConversationMessage({
     <div
       className="log-turn"
       data-compact={compact || undefined}
+      data-native-collaboration={nativeCollaboration ? true : undefined}
       data-conversation-event-id={conversationEvent?.id}
       data-conversation-event-revision={conversationEvent?.revision}
       data-conversation-role={conversationEvent?.role}
@@ -395,11 +416,19 @@ export function ConversationMessage({
       data-message-bubble={messagePhase !== 'progress' && !compact && !isTraceOnly && (speaker?.role === 'agent' || speaker?.role === 'human' || speaker?.role === 'external') ? 'true' : undefined}
     >
       <span className="log-turn__node" aria-hidden="true">
-        {avatarSpeaker ? described?.avatar ?? platform.renderMessageAvatar({ speaker: avatarSpeaker, name: recordedUnknown ? displayName : agentReference ? senderName : isDeclaredSender ? prefix.sourceLabel : displayName, project: described?.project, providerId: displayProvider }) : platform.renderIcon('neutral', 12)}
+        {parentAvatarSpeaker ? parentAvatar?.avatar ?? platform.renderMessageAvatar({ speaker: parentAvatarSpeaker, name: parentAvatar?.name ?? 'Agent', providerId: parentAvatar?.providerId ?? providerId, project: parentAvatar?.project }) : avatarSpeaker ? described?.avatar ?? platform.renderMessageAvatar({ speaker: avatarSpeaker, name: recordedUnknown ? displayName : agentReference ? senderName : isDeclaredSender ? prefix.sourceLabel : displayName, project: described?.project, providerId: displayProvider }) : platform.renderIcon('neutral', 12)}
       </span>
       <div className="log-turn__head">
         <div className="log-turn__title">
-          {isSystemContext ? <button type="button" className="log-turn__system-toggle"
+          {nativeCollaboration ? <button type="button" className="log-turn__collaboration-toggle"
+            aria-label={`${collaborationOpen ? '收起' : '展开'} Subagent ${nativeCollaboration.sender ?? '路径未记录'}`}
+            aria-expanded={collaborationOpen} aria-controls={collaborationContentId}
+            onClick={() => { setCollaborationOpen(open => !open); setCollaborationPresented(true) }}>
+            <SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />
+            <span className="log-turn__collaboration-label">Subagent</span>
+            <code className="log-turn__collaboration-path" title={nativeCollaboration.sender}>{nativeCollaboration.sender ?? '路径未记录'}</code>
+            {nativeCollaboration.recipient ? <span className="log-turn__collaboration-recipient" title={`接收者 ${nativeCollaboration.recipient}`}>→ {nativeCollaboration.recipient}</span> : null}
+          </button> : isSystemContext ? <button type="button" className="log-turn__system-toggle"
             aria-label={systemContextOpen ? '收起系统记录' : '展开系统记录'}
             aria-expanded={systemContextOpen} aria-controls={hasContent ? systemContentId : undefined}
             disabled={!hasContent} onClick={() => setSystemContextOpen(open => !open)}>
@@ -411,7 +440,7 @@ export function ConversationMessage({
             {!detailsOnlyMetadata ? senderIdentity : null}
           </span>}
           {isPeerAgent && !detailsOnlyMetadata ? <span className="log-turn__sender-kind">Agent</span> : null}
-          {recordTitle && !isSystemContext ? <span className="log-turn__sender-kind">{recordTitle}</span> : null}
+          {recordTitle && !isSystemContext && !nativeCollaboration ? <span className="log-turn__sender-kind">{recordTitle}</span> : null}
           {hasQuestionAnswers ? <span className="log-turn__sender-kind">问题答复</span> : null}
           {status === 'streaming' ? (
             <span className="log-row__chip" role="status"><SemanticIcon name="status.streaming" size={12} />Streaming</span>
@@ -436,12 +465,27 @@ export function ConversationMessage({
             <SemanticIcon name="action.copy" size={13} />{copyState === 'copied' ? <span>Copied</span> : null}{copyState === 'failed' ? <span>Retry</span> : null}
           </button> : null}
         </span> : null}
-        {isIncoming || speaker?.role === 'agent' || isSystemContext || messageDetails || recordedIdentity || detailsOnlyMetadata ? <ConversationInputDetails messageId={messageId} source={inputSource} publicContent={publicContent} executionHostId={executionHostId} speaker={recordedSpeaker}
-          declaredAgentSessionId={prefix?.declaredAgentSessionId} sourceDeclaration={isDeclaredSender ? prefix.sourceLabel : undefined} describeSpeaker={describeSpeaker} recordedIdentity={recordedIdentity}>{detailsOnlyMetadata ? <>{senderIdentity}{metadata}</> : continuation ? metadata : null}{messageDetails}</ConversationInputDetails> : null}
+        {isIncoming || speaker?.role === 'agent' || isSystemContext || messageDetails || recordedIdentity || detailsOnlyMetadata || nativeCollaboration ? <ConversationInputDetails messageId={messageId} source={inputSource} publicContent={publicContent} executionHostId={executionHostId} speaker={recordedSpeaker}
+          declaredAgentSessionId={prefix?.declaredAgentSessionId} sourceDeclaration={isDeclaredSender ? prefix.sourceLabel : undefined} describeSpeaker={describeSpeaker} recordedIdentity={recordedIdentity}>{detailsOnlyMetadata ? <>{senderIdentity}{metadata}</> : continuation ? metadata : null}{nativeCollaboration && !sources?.submissions?.length && !located ? metadata : null}{messageDetails}{collaborationOriginal}</ConversationInputDetails> : null}
       </div>
-      {!detailsOnlyMetadata && !continuation ? metadata : null}
-      {sources && detailsOnlyMetadata ? <div className="log-turn__meta"><ConversationSourceLabels sources={sources.main} observation={sources.collectedReply} /></div> : null}
-      {hasContent && (!isSystemContext || systemContextOpen) ? discloseBody(
+      {(!nativeCollaboration || sources?.submissions?.length || located) && !detailsOnlyMetadata && !continuation ? metadata : null}
+      {sources && detailsOnlyMetadata && !nativeCollaboration ? <div className="log-turn__meta"><ConversationSourceLabels sources={sources.main} observation={sources.collectedReply} /></div> : null}
+      {nativeCollaboration && !collaborationOpen ? <button type="button" className="log-turn__collaboration-preview"
+        aria-label="展开协作消息正文" onClick={() => { setCollaborationOpen(true); setCollaborationPresented(true) }}>
+        {collaborationPreview || (collaborationHasResources ? '包含按需读取的内容 · 展开查看' : '暂无可读正文 · 原始内容已保留')}
+      </button> : null}
+      {nativeCollaboration ? <div id={collaborationContentId} className="log-turn__collaboration-content" hidden={!collaborationOpen} inert={!collaborationOpen}>
+        {collaborationPresented || collaborationOpen ? <>
+          {!collaborationPreview && parts.every(part => part.kind === 'text') ? <p className="log-turn__collaboration-empty">原生记录未提供可读正文，可在消息详情中查看原始内容。</p> : null}
+          {renderBody()}
+        </> : null}
+      </div> : renderBody()}
+      {questionDiagnostic ? <p className="agent-interaction__error" role="status" data-question-reply-diagnostic={questionDiagnostic.code}>{questionDiagnostic.message}</p> : null}
+      {onContinue ? <button type="button" className="log-turn__continue" onClick={onContinue}>Continue from here</button> : null}
+    </div>
+  )
+  function renderBody(): ReactNode {
+    return hasContent && (!isSystemContext || systemContextOpen) ? discloseBody(
         <div ref={bodyRef} id={isSystemContext ? systemContentId : undefined} className="log-turn__body"
           onMouseUp={canAnnotate ? captureSelection : undefined} onKeyUp={canAnnotate ? captureSelection : undefined}>
           {hasQuestionAnswers && firstTextIndex < 0 ? <ConversationQuestionReply visible={active} answers={questionAnswers!}
@@ -497,9 +541,6 @@ export function ConversationMessage({
           })}
           {files.length > 0 && openWorkspaceFile ? <ConversationFiles files={files} openFile={openWorkspaceFile} /> : null}
         </div>
-      ) : null}
-      {questionDiagnostic ? <p className="agent-interaction__error" role="status" data-question-reply-diagnostic={questionDiagnostic.code}>{questionDiagnostic.message}</p> : null}
-      {onContinue ? <button type="button" className="log-turn__continue" onClick={onContinue}>Continue from here</button> : null}
-    </div>
-  )
+      ) : null
+  }
 }
