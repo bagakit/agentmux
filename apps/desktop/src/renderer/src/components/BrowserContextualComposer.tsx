@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { autoUpdate, computePosition, offset, shift, size } from '@floating-ui/dom'
+import { observeBrowserReader } from '../lib/browser-reader-position'
 import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -41,6 +41,7 @@ export function useBrowserContextualComposer(browserId: string, operation: Brows
   const [submitted, setSubmitted] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const anchor = useRef<HTMLButtonElement | null>(null)
+  const anchorPane = useRef<HTMLElement | null>(null)
   const buttonRef = useRef<HTMLButtonElement | null>(null)
   const panel = useRef<HTMLElement | null>(null)
   const editor = useRef<HTMLTextAreaElement | null>(null)
@@ -58,8 +59,9 @@ export function useBrowserContextualComposer(browserId: string, operation: Brows
     if (panel.current?.contains(panel.current.ownerDocument.activeElement)) anchor.current?.focus({ preventScroll: true })
   }
 
-  async function show(button: HTMLButtonElement, comment?: OriginalOpinion['comment'], focus = true) {
+  async function show(button: HTMLButtonElement, comment?: OriginalOpinion['comment'], focus = true, pane?: HTMLElement) {
     anchor.current = button
+    anchorPane.current = pane ?? button.closest<HTMLElement>('.browser-surface')
     if (focus) {
       pendingFocus.current = { button, previous: button.ownerDocument.activeElement }
       requestFocus(value => value + 1)
@@ -119,15 +121,7 @@ export function useBrowserContextualComposer(browserId: string, operation: Brows
   useLayoutEffect(() => {
     const button = anchor.current, surface = panel.current
     if (!open || !visible || !button || !surface) return
-    let disposed = false
-    const position = async () => {
-      const result = await computePosition(button, surface, { strategy: 'fixed', placement: 'bottom-end', middleware: [offset(8), shift({ padding: 8 }), size({ padding: 8,
-        apply({ availableWidth, availableHeight }) { Object.assign(surface.style, { width: `${Math.min(360, availableWidth)}px`, maxHeight: `${Math.max(80, availableHeight)}px` }) }
-      })] })
-      if (!disposed) Object.assign(surface.style, { left: `${result.x}px`, top: `${result.y}px`, visibility: 'visible' })
-    }
-    const stop = autoUpdate(button, surface, () => { void position() })
-    return () => { disposed = true; stop() }
+    return observeBrowserReader({ pane: anchorPane.current, anchor: button, surface, maximumHeight: Infinity, gap: 8 })
   }, [open, visible, original !== null, focusRevision])
 
   async function send() {
@@ -189,6 +183,6 @@ export function useBrowserContextualComposer(browserId: string, operation: Brows
       }}>New opinion</button> : null}<button type="button" className="primary-button" disabled={busy || !original || !text.trim()} onClick={() => void send()}><SendIcon size={12} />{busy ? 'Queueing…' : includeContext && source ? 'Queue opinion' : 'Queue text only'}</button></footer>
     </section>
   </WindowOverlayPortal> : null
-  return { dialog, buttonRef, open: (button: HTMLButtonElement, comment?: OriginalOpinion['comment']) => { void show(button, comment) },
+  return { dialog, buttonRef, open: (button: HTMLButtonElement, comment?: OriginalOpinion['comment'], pane?: HTMLElement) => { void show(button, comment, true, pane) },
     button: <MessageIcon size={14} /> }
 }

@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { autoUpdate, computePosition, offset, shift, size } from '@floating-ui/dom'
+import { observeBrowserReader } from '../lib/browser-reader-position'
 import { getWindowOverlayHost, WindowOverlayPortal } from './WindowOverlayHost'
 
 /** Keep the original flow footprint until Main confirms no operation needs its viewport. */
@@ -22,13 +22,7 @@ export function BrowserTraceReadingHost({ mode, open, held, visible, anchor, onR
       const source = anchor(), surface = panel.current
       if (disposed || !source?.isConnected || !surface?.isConnected) return
       const toolbar = source.querySelector<HTMLElement>('.browser-toolbar') ?? source
-      const position = async () => {
-        const result = await computePosition(toolbar, surface, { strategy: 'fixed', placement: 'bottom-end', middleware: [offset(6), shift({ padding: 8 }), size({ padding: 8,
-          apply({ availableWidth, availableHeight }) { Object.assign(surface.style, { width: `${Math.min(360, availableWidth)}px`, maxHeight: `${Math.min(520, availableHeight)}px` }) }
-        })] })
-        if (!disposed) Object.assign(surface.style, { left: `${result.x}px`, top: `${result.y}px`, visibility: 'visible' })
-      }
-      stop = autoUpdate(toolbar, surface, () => { void position() })
+      stop = observeBrowserReader({ pane: source, anchor: toolbar, surface, maximumHeight: 520, gap: 6 })
     })
     return () => { disposed = true; stop?.() }
   }, [mode, open, visible, anchor])
