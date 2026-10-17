@@ -35,8 +35,7 @@ function openActivityAgent(session: AgentSession, location?: AgentMuxSpaceLocati
       state.reportError(new Error('The original Agent or its display identity is not uniquely confirmed. Its Session and readable activity are kept; choose a confirmed position when available.'), { kind: 'indeterminate' })
       return false
     }
-    state.selectSession(session.id)
-    return true
+    return state.selectSession(session.id)
   }
   const surface = state.tabs[location.tabId]?.regions[location.regionId]
   const execution = agentRegionExecution({ ...location, agentSessionId: session.id })
