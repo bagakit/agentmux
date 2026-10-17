@@ -5,9 +5,18 @@ import type { ActivityView } from '../components/ActivityView'
 type Activity = ReactElement<ComponentProps<typeof ActivityView>>
 type Controls = Pick<Activity['props'], 'conversationReading' | 'activitySemantic'>
 
+function sameReadingControls(previous: Controls['conversationReading'], current: Controls['conversationReading']): boolean {
+  if (previous === current) return true
+  if (!previous || !current) return false
+  // Hosts rebuild these flat placement facts; sources and callbacks still compare by identity.
+  const { consumer: previousConsumer, ...previousControls } = previous
+  const { consumer: currentConsumer, ...currentControls } = current
+  return shallow(previousConsumer, currentConsumer) && shallow(previousControls, currentControls)
+}
+
 /** Keep the retained body stable without freezing its live reading controls. */
 export function retainActivityControls(content: Activity, controls: Controls): Activity {
   if (content.props.activitySemantic === controls.activitySemantic &&
-    shallow(content.props.conversationReading, controls.conversationReading)) return content
+    sameReadingControls(content.props.conversationReading, controls.conversationReading)) return content
   return cloneElement(content, controls)
 }
