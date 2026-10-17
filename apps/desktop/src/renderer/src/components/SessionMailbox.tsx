@@ -358,7 +358,8 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
     inputHistory.history.messages.filter(message => message.author.kind !== 'agent'), effectiveControl?.hostId) : sent,
     [inputHistory?.history.messages, sent, mailboxSessionId, effectiveControl?.hostId])
   const selectedMessage = wanted && folder === 'user' ? historyMessages.find(item => messageKey(item) === wanted) : undefined
-  const detail = Boolean(selectedNotice || selectedMessage || (folder === 'inbox' || folder === 'outbox') && wanted?.startsWith('a2a:'))
+  const selectedJournal = wanted && folder === 'user' ? userInputMailbox.items.find(item => inputMailboxItemKey(inputMailboxHost, item) === wanted) : undefined
+  const detail = Boolean(selectedNotice || selectedMessage || selectedJournal || (folder === 'inbox' || folder === 'outbox') && wanted?.startsWith('a2a:'))
   function queueRecordProps() {
     return { sessionId: mailboxSessionId, selectedId: selectedQueue?.id ?? null, reading, pendingInteraction,
       onSelect: (key: string) => { focusAfter.current = null; setSelection({ scope, folder: 'user', key: `queue:${key}` }) },
@@ -366,7 +367,8 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       ...(inputHistory && inputHistory.canFill !== false ? { onFill: inputHistory.fillText } : {}) }
   }
   function renderPending() {
-    return <ComposerOutbox {...queueRecordProps()} queued={pending} hideHeading
+    const query = inputHistory?.history.query ?? ''
+    return <ComposerOutbox {...queueRecordProps()} queued={pending.filter(entry => !query || entry.text.includes(query))} hideHeading
       onCancelPreparation={onCancelQueuedPreparation} {...(onMoveQueued ? { onMove: onMoveQueued } : {})} onMoveToDraft={onMoveQueuedToDraft}
       {...(onEditQueued ? { onEdit: onEditQueued } : {})} sendImmediately={sendImmediately} {...(onSendQueued ? { onSend: onSendQueued } : {})} />
   }
@@ -545,7 +547,8 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       })}
       <div id={`${id}-user`} role="tabpanel" aria-labelledby={`${id}-user-tab`} aria-busy={Boolean(inputHistory?.history.loading || inputMailbox.loading)} hidden={folder !== 'user'}>
         {readingMounted && folder === 'user' ? <>
-          <InputMailboxRecords compact mailbox={userInputMailbox} hostId={inputMailboxHost} reading={reading} onCopy={onCopyQueued}
+          <InputMailboxRecords compact refreshInParent={Boolean(inputHistory)} coverageInParent={Boolean(inputHistory)}
+            query={inputHistory?.history.query ?? ''} selection={{ key: selectedJournal ? wanted : null, onOpen: selectRecord }} mailbox={userInputMailbox} hostId={inputMailboxHost} reading={reading} onCopy={onCopyQueued}
             renderLocal={item => {
               const original = journalLocal.get(inputMailboxItemKey(inputMailboxHost,item))
               if (!original) return null
@@ -553,21 +556,27 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
                 ...(item.kind === 'controlled' && item.receipt ? { inputReceipt: item.receipt } : {})}]} selectedId={original.id} rowsOnly
                 onCancelPreparation={onCancelQueuedPreparation} onMoveToDraft={onMoveQueuedToDraft}
                 {...(onEditQueued ? { onEdit: onEditQueued } : {})} {...(onSendQueued ? { onSend: onSendQueued } : {})} /></ol>
-            }} renderRecords={journalRecords => <>
-          {selectedMessage ? <MessageHistory mailboxOrigin={mailboxOrigin} items={historyMessages} selectedKey={wanted}
+            }} renderRecords={(journalRecords, journalDetail) => <>
+          {journalDetail ?? (selectedMessage ? <MessageHistory mailboxOrigin={mailboxOrigin} items={historyMessages} selectedKey={wanted}
             onOpen={selectRecord} onCopy={onCopyQueued} reading={reading} sessionId={mailboxSessionId} renderNavigation={renderNavigation}
             historyResourceReader={historyResourceReader} /> : <>
             {observationError ? <SourceNotice title="Automatic native updates are unavailable" message={observationError.message} action="Refresh source" onAction={() => void refresh()} /> : null}
             {windowFrozen ? <SourceNotice title="The native source changed" message="This reading window is kept." action="Read latest records" onAction={() => void refresh()} /> : null}
             {inputHistory ? <InputHistoryList history={{ ...inputHistory.history, messages: inputHistory.history.messages.filter(message => message.author.kind !== 'agent') }}
               localEntries={inputHistory.localEntries} onCopy={inputHistory.copy} {...(inputHistory.canFill !== false ? { onFill: inputHistory.fill, onFillLocal: inputHistory.fillLocal } : {})}
+              onRefresh={() => { void inputMailbox.refresh(); inputHistory.history.search(inputHistory.history.query) }}
+              refreshing={inputMailbox.loading || inputHistory.history.loading}
+              coverage={<>{inputMailbox.loading || inputHistory.history.loading ? 'Reading inputs…' : 'Loaded inputs'} · Earlier journal coverage unconfirmed
+                <details className="composer-mailbox__coverage-details"><summary>Sources</summary>
+                  <span>Journal: {userInputMailbox.items.length} loaded. {inputHistory.history.complete ? 'Available history checked for this read.' : 'History is a partial reading window.'}{inputHistory.history.examined ? ` Examined ${inputHistory.history.examined} history records.` : ''}</span>
+                </details></>}
               beforeRecords={renderPending()}
               renderRecords={() => renderRecorded(historyMessages,journalRecords)} /> : <>
               {historyError && !historyError.message.includes('unavailable in the web preview') ? <SourceNotice title="Failed to read native conversation history" message={historyError.message} action="Retry" onAction={() => void refresh()} /> : null}
               {renderPending()}{renderRecorded(sent,journalRecords)}
               {hasMore ? <div className="composer-mailbox__boundary"><button type="button" className="composer-tool" onClick={() => void loadEarlier()}>Load earlier messages</button></div> : null}
             </>}
-          </>}
+          </>)}
           </>} />
         </> : null}
       </div>
