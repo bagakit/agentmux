@@ -831,6 +831,39 @@ below; confirming a management login does not authorize creation. Web creation
 is offered only for adapter-declared domains. Existing saved and manual
 connections remain usable independently.
 
+## Original request evidence
+
+Use `connection enrollment inspect --operation-id ID --request-trace` or
+`connection setup inspect --operation-id ID --request-trace` for the same
+actor-owned operation. SDK callers pass `requestTrace: { limit?, cursor? }` to
+the existing inspect method. This selection returns `requestTrace` and the safe
+operation summary, with no active challenge, account, continuation or write
+choices. Setup trace selection is separate from its private inspection and
+configuration selectors. Ordinary inspection omits `requestTrace`; omission
+does not report an empty history.
+
+The projection reads existing attempt, authentication, inspection and effect
+journals in the original Connection database. Entries carry original step IDs,
+stable sequence, finite action/subject/effect, request and secure-storage
+receipts. Pages ascend through original attempt row IDs or Setup claim
+revisions; `--trace-limit` bounds a page and `--trace-cursor` resumes that same
+operation and actor. Appending a step does not shift older pages. Recovery
+updates the original step rather than inventing a new request.
+
+These are journal receipts, not an HTTP request log. `network: null` explicitly
+means method, host, route, HTTP status and native code were not recorded here.
+Enrollment `claimed` and `settled` report the original journal state; neither
+certifies a live dispatcher or successful HTTP response. Original unknown
+inspection/effect receipts retain that status. No account, Cookie, QR/token,
+secret, query value, raw response or private path belongs in the trace.
+Copy only the trace projection when sharing it for diagnosis.
+
+Trace selection performs no platform requests, credential resolution,
+checkpoint repair or write replay, including when the original operation is
+unknown, encryption is unavailable or its adapter is absent after restart.
+It is an independent local observation and cannot approve or repair creation,
+permissions, publication, current application state or message delivery.
+
 ## Application enrollment
 
 The original `connection.enrollment.begin/advance/inspect/ls` service owns one
