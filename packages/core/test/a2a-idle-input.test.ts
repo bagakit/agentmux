@@ -1,0 +1,132 @@
+import { afterEach, expect, it, vi } from 'vitest'
+import { AgentProviderRegistry, type AgentProvider } from '../src/agent-provider.js'
+import { AgentPromptSubmissionCoordinator as SourceCoordinator, type AgentPromptInputControl } from '../src/prompt-submission.js'
+import { agentPromptCondition } from '../src/agent-prompt-condition.js'
+import { agentTurnCompletionIdentity } from '../src/agent-session-identity.js'
+import { AgentMuxFileAgentSessionStore as SourceStore } from '../src/agent-session-store.js'
+import { confirmNativeInputAdoption as sourceConfirmAdoption } from '../src/native-input-adoption.js'
+import type { AgentNativePromptInputPlan, AgentPromptMessageContent, AgentPromptSubmissionRecord, AgentSessionHistoryItem } from '../src/types.js'
+import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
+import { fixtureEpoch } from './helpers/fixture-values.js'
+
+const entry = process.env.AGENTMUX_TEST_RPC_CORE_ENTRY
+const compiled = entry ? await import(entry) : null
+const AgentMuxFileAgentSessionStore: typeof SourceStore = compiled?.AgentMuxFileAgentSessionStore ?? SourceStore
+const AgentPromptSubmissionCoordinator: typeof SourceCoordinator = entry
+  ? (await import(new URL('./prompt-submission.js', entry).href)).AgentPromptSubmissionCoordinator : SourceCoordinator
+const confirmNativeInputAdoption: typeof sourceConfirmAdoption = entry
+  ? (await import(new URL('./native-input-adoption.js', entry).href)).confirmNativeInputAdoption : sourceConfirmAdoption
+
+const closes: Array<() => Promise<unknown>> = []
+afterEach(async () => { for (const close of closes.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
+const id = 'original-notification', wire = '<amux:a2a from="peer" msg-id="original-message" read-via="message --skill" />'
+const source = { providerId: 'codex', nativeSessionId: 'original-native-thread' }
+const actor = { protocolId: 'original-protocol', actorId: 'original-actor', lifecycleOperationId: 'original-lifecycle', token: 'a'.repeat(64), launch: { command: 'codex', args: [] } }
+
+async function fixture(outcome: 'admitted' | 'unknown' = 'admitted') {
+  const h = await rpcOwnerFixture(); closes.push(h.close)
+  const inner = h.client as unknown as { promptSubmission: SourceCoordinator }
+  const deps = Reflect.get(inner.promptSubmission, 'deps') as ConstructorParameters<typeof AgentPromptSubmissionCoordinator>[0]
+  const original = (await h.store.readMetadata('recipient'))!
+  await h.store.compareAndSwapMetadata(original, { ...original, nativeActor: actor, updatedAt: fixtureEpoch(0, 1),
+    nativeHandle: { kind: 'provider', providerId: source.providerId, sessionId: source.nativeSessionId },
+    semanticStatus: { state: 'done', source: 'native-hook', observedAt: fixtureEpoch(0, 1) } })
+  await deps.registry.refresh('recipient', original.run)
+  let inputByte = 0
+  const run = () => ({ ...h.run(original.run.runId), acceptedInputBytes: inputByte, pid: 1234 })
+  h.inner.kernel.status = vi.fn(async () => run())
+  const key = { kind: 'prompt' as const, agentSessionId: original.agentSessionId, expectedRun: original.run, submissionId: id }
+  const message: AgentPromptMessageContent = { a2aNotificationId: id, systemContext: wire }
+  const send = vi.fn(async (_prompt: string, plan: AgentNativePromptInputPlan) => {
+    // A different Store instance reads the original committed claim before any native effect.
+    const persisted = await new AgentMuxFileAgentSessionStore(h.store.path).readPromptAdmission('recipient', original.run, id)
+    expect(persisted?.admission?.intent?.plan).toEqual(plan)
+    expect(persisted?.admission?.inputKey).toEqual(key)
+    expect(persisted?.admission?.intent?.message).toEqual(message)
+    if (outcome === 'unknown') throw new Error('Original queue ACK was lost after acceptance')
+    return { outcome: 'admitted' as const, queuedSubmissionId: 'original-native-queue-item' }
+  })
+  let beforePrepare: (() => Promise<void>) | undefined
+  const prepare = vi.fn<NonNullable<AgentProvider['prepareNativeInput']>>(async (_context, selected) => {
+    await beforePrepare?.()
+    return { plan: { kind: 'native-rpc', protocolId: actor.protocolId, sourceId: JSON.stringify([selected.providerId, selected.nativeSessionId]),
+      actorId: actor.actorId, threadId: selected.nativeSessionId, operation: selected.idleOnly ? 'queue-idle' : 'start-or-steer' }, send, dispose: vi.fn() }
+  })
+  const provider = { ...new AgentProviderRegistry().get('codex'), prepareNativeInput: prepare }
+  const coordinator = new AgentPromptSubmissionCoordinator({ ...deps, providers: new AgentProviderRegistry([provider]) })
+  const session = h.client.agentSession('recipient'), condition = agentPromptCondition(session), completionId = agentTurnCompletionIdentity(session)!
+  const control: AgentPromptInputControl = { idleOnly: { completionId, inputByte: 0 } }
+  const submit = (changed: { message?: AgentPromptMessageContent; control?: AgentPromptInputControl } = {}) => coordinator.submitInputPlan(
+    session, run(), id, wire, { kind: 'single-phase', data: wire + '\r' }, condition, completionId, undefined, false, undefined, 0,
+    changed.message ?? message, 'default', undefined, undefined, undefined, key, changed.control ?? control)
+  return { ...h, key, message, prepare, send, submit, beforePrepare: (callback: () => Promise<void>) => { beforePrepare = callback },
+    changeByte: () => { inputByte++ }, read: () => h.store.readPromptAdmission('recipient', original.run, id) }
+}
+
+it('persists one independent notification input before native idle-queue admission; retry is receipt-only', async () => {
+  const f = await fixture()
+  await expect(f.submit()).resolves.toEqual(f.message)
+  expect(f.prepare).toHaveBeenCalledWith(expect.anything(), { ...source, idleOnly: true })
+  const record = await f.read()
+  expect(record?.admission).toMatchObject({ inputKey: f.key, completionId: expect.any(String), acknowledged: true,
+    native: { plan: { operation: 'queue-idle' }, outcome: 'admitted', queuedSubmissionId: 'original-native-queue-item' }, intent: { message: f.message } })
+  expect(record?.admission?.native).not.toHaveProperty('turnId')
+  await expect(f.submit()).resolves.toEqual(f.message)
+  expect(f.send).toHaveBeenCalledTimes(1)
+  expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('keeps lost queue ACK and original correlation unknown without a second native add', async () => {
+  const f = await fixture('unknown')
+  await expect(f.submit()).rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
+  const original = await f.read()
+  await expect(f.submit()).rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
+  expect(await f.read()).toEqual(original)
+  expect(original?.admission).toMatchObject({ acknowledged: false, native: { outcome: 'unknown', plan: { operation: 'queue-idle', clientCorrelation: expect.any(String) } } })
+  expect(f.send).toHaveBeenCalledTimes(1)
+})
+
+it('treats typed notification identity as immutable original input content', async () => {
+  const f = await fixture(); await f.submit()
+  await expect(f.submit({ message: { ...f.message, a2aNotificationId: 'foreign-notification' }, control: {} }))
+    .rejects.toMatchObject({ code: 'AGENT_PROMPT_OPERATION_CONFLICT' })
+  expect(f.send).toHaveBeenCalledTimes(1)
+})
+
+it.each(['completion', 'input-byte'] as const)('rechecks the original %s before the native idle-queue effect', async changed => {
+  const f = await fixture()
+  f.beforePrepare(async () => {
+    if (changed === 'input-byte') f.changeByte()
+    else {
+      const current = (await f.store.readMetadata('recipient'))!
+      await f.store.compareAndSwapMetadata(current, { ...current, updatedAt: Math.max(current.updatedAt, fixtureEpoch(0, 2)), semanticStatus: { state: 'working', source: 'native-hook', observedAt: fixtureEpoch(0, 2) } })
+    }
+  })
+  await expect(f.submit()).rejects.toMatchObject({ code: changed === 'input-byte' ? 'AGENT_PROMPT_INPUT_UNCONFIRMED' : 'AGENT_COMPLETION_CHANGED' })
+  expect(f.send).not.toHaveBeenCalled(); expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it.each(['admitted', 'unknown'] as const)('joins exact original notification wire after native %s; edits remain readable without adoption', async outcome => {
+  const f = await fixture(outcome); await f.submit().catch(() => {})
+  const record = (await f.read())!
+  const plan = record.admission!.transport === 'native' ? record.admission!.native.plan : undefined
+  expect(plan).toBeDefined()
+  const item: AgentSessionHistoryItem = { id: 'original-native-record', turnId: 'native-idle-turn', kind: 'user-message', contentParts: [{ kind: 'text', text: wire }],
+    conversation: { nativeInput: { source, semanticItemId: 'original-semantic-item', turnId: 'native-idle-turn', clientCorrelation: plan!.clientCorrelation! } } }
+  const adopt = (value: AgentSessionHistoryItem, original: AgentPromptSubmissionRecord = record) => confirmNativeInputAdoption(value,
+    { hostId: 'local', agentSessionId: 'recipient' }, source, async () => original)
+  expect((await adopt(item)).conversation?.adoptedInput).toEqual({ key: f.key, purpose: 'a2a-notification' })
+  for (const edited of [{ ...item, contentParts: [{ kind: 'text' as const, text: wire + ' manual edit' }] },
+    { ...item, contentParts: [...item.contentParts, { kind: 'text' as const, text: 'another part' }] }]) {
+    const result = await adopt(edited)
+    expect(result.conversation?.adoptedInput).toBeUndefined(); expect(result.contentParts).toEqual(edited.contentParts)
+  }
+  const manual = structuredClone(record), admission = manual.admission
+  if (admission?.transport !== 'native' || !admission.intent) throw new Error('The original native claim is missing')
+  const manualPlan = { ...admission.native.plan, operation: 'start-or-steer' as const }
+  admission.acknowledged = true
+  admission.native = { plan: manualPlan, outcome: 'admitted', turnId: item.turnId! }
+  admission.intent = { ...admission.intent, plan: manualPlan, execution: 'immediate',
+    admissionIntent: { kind: 'native-conversation', source, expectedRun: f.key.expectedRun }, message: { userContent: wire, authorHuman: true } }
+  expect((await adopt(item, manual)).conversation?.adoptedInput).toEqual({ key: f.key })
+})
