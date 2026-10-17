@@ -6,6 +6,7 @@ import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraftRecord } from './use-setting-draft'
 import { FocusSettingsPreview, type FocusPreviewScene } from './FocusSettingsPreview'
 import '../../styles/settings-focus.css'
+import '../../styles/settings-workview-layout.css'
 
 export type FocusSettingsValues = Required<FocusPreferences>
 function Choices<T extends string | number>({ id, legend, value, options, onChange }: {
@@ -33,7 +34,7 @@ export function FocusSettingsPane({ preferences, active = true, onSave }: {
     for (const key of Object.keys(defaults) as (keyof FocusSettingsValues)[]) draft.setField(key, defaults[key])
   }
   return <div className="settings-pane-stack focus-settings" data-active={active}>
-    <div className="focus-settings__intro"><p>Make room for the work you want to see.</p><button type="button" className="small-button" onClick={reset}>Restore defaults</button></div>
+    <div className="focus-settings__intro"><p>Preview your choices before saving.</p><button type="button" className="small-button" onClick={reset}>Restore defaults</button></div>
     <div className="focus-settings__workspace">
       <div className="focus-settings__controls">
         <section className="settings-group"><header><span>Project scanning</span></header>
