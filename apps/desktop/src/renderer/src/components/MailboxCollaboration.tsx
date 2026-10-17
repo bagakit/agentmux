@@ -146,7 +146,7 @@ export function MailboxCollaboration({ control, active, reading, onCopy }: {
     <div className="mailbox-collaboration__heading"><strong>Supervised collaboration</strong><button type="button" className="composer-tool" aria-busy={loadingList || loadingDetail}
       onClick={refresh}>Refresh records</button></div>
     <details className="mailbox-collaboration__help"><summary><SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />About these records</summary>
-      <p className="mailbox-collaboration__hint">Original supervised messages only. Other Agent messages remain in Inbox and Outbox. Search covers the loaded list; load more records to extend it.</p>
+      <p className="mailbox-collaboration__hint">Original supervised messages only. Other Agent messages remain in Received and Sent. Search covers the loaded list; load more records to extend it.</p>
     </details>
     {listIssue ? <MailboxSourceNotice title="Collaboration list is unconfirmed" message={listIssue.message} action="Retry collaboration list" onAction={() => void loadPage(listIssue.cursor, listIssue.pages, listIssue.extend)} /> : null}
     {selected ? <><div className="mailbox-collaboration__actions"><button ref={back} type="button" className="composer-tool" onClick={leave}>Back to collaboration</button>

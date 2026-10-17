@@ -1,4 +1,4 @@
-.mailbox-collaboration { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; font-size: var(--fs-meta); overflow-wrap: anywhere; }
+.mailbox-collaboration { display: flex; flex-direction: column; gap: var(--sp-3); padding: 0 var(--sp-3) var(--sp-3); min-width: 0; font-size: var(--fs-meta); overflow-wrap: anywhere; }
 .mailbox-collaboration__heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2); }
 .mailbox-collaboration p, .mailbox-collaboration h3 { margin: var(--sp-2) 0; }
 .mailbox-collaboration h3 { font-size: var(--fs-meta); font-weight: 620; }
@@ -19,3 +19,5 @@
 .mailbox-collaboration__help > summary:hover { color: var(--text); background: var(--surface-3); }
 .mailbox-collaboration__help > summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
 .mailbox-collaboration__help[open] > summary > svg { transform: rotate(90deg); }
+
+.mailbox-collaboration > .composer-mailbox__messages { margin-inline: calc(-1 * var(--sp-3)); }

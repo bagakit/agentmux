@@ -3,10 +3,11 @@ import type { ReactNode } from 'react'
 type MailboxTab<Key extends string> = { key: Key; label: string; description: string; icon: ReactNode; count: number }
 
 /** Available pages and counts belong to the host; this component only arranges navigation. */
-export function MailboxNavigation<Key extends string>({ id, items, selected, onSelect }: {
+export function MailboxNavigation<Key extends string>({ id, items, selected, onSelect, secondary = false, label = 'Mailbox folders' }: {
+  secondary?: boolean; label?: string
   id: string; items: readonly MailboxTab<Key>[]; selected: Key; onSelect(key: Key): void
 }) {
-  return <div className="composer-mailbox__folders" role="tablist" aria-label="Mailbox folders">
+  return <div className={secondary ? "composer-mailbox__folders composer-mailbox__folders--secondary" : "composer-mailbox__folders"} role="tablist" aria-label={label}>
     {items.map((item, index) => <button key={item.key} type="button" title={item.description} aria-label={item.description}
       id={`${id}-${item.key}-tab`} role="tab" aria-controls={`${id}-${item.key}`} aria-selected={selected === item.key}
       tabIndex={selected === item.key ? 0 : -1} onClick={() => onSelect(item.key)}

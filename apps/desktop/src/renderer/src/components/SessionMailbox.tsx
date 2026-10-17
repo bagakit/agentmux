@@ -22,7 +22,7 @@ import { serviceNoticeFingerprint, useReadReceipts, type useServiceNotices } fro
 import { useSessionUserMessages } from '../lib/session-user-messages'
 import { useSessionMessages } from '../lib/use-session-messages'
 import { MailboxA2A } from './MailboxA2A'
-import { MailboxNavigation } from './MailboxNavigation'
+import { MailboxWorkspaceNavigation, isAgentMessageFolder, type MailboxFolder as Folder, type AgentMessageFolder } from './MailboxWorkspaceNavigation'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import type { AgentSessionControl } from '../../../shared/contracts'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
@@ -36,8 +36,6 @@ import type { ConversationSpeaker } from '@agentmux/client-ui/conversation-speak
 import type { RevealMailboxMessage } from '../lib/mailbox-message-navigation'
 import { mailboxMessages, mailboxMessageKey as messageKey, isMailboxUserMessage as isUserMessage, type MailboxDisplayItem } from '../lib/session-mailbox-messages'
 
-const ThemeObjectInboxIcon = semanticIconComponent('object.inbox')
-const ThemeActionSendIcon = semanticIconComponent('action.send')
 const ThemeObjectNotificationsIcon = semanticIconComponent('object.notifications')
 const ThemeActionRepeatIcon = semanticIconComponent('action.repeat')
 const ThemeActionPauseIcon = semanticIconComponent('action.pause')
@@ -48,8 +46,7 @@ const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
 const RevealIcon = semanticIconComponent('action.open-external')
 
 
-type Folder = 'inbox' | 'outbox' | 'user' | 'system' | 'progress' | 'collaboration'
-const FOLDERS: readonly Folder[] = ['inbox', 'outbox', 'user', 'system']
+type MailboxSelection = { scope: string; folder: Folder; key: string }
 
 function latestFirst(a: number | undefined, b: number | undefined) {
   if (a === undefined) return b === undefined ? 0 : 1
@@ -207,13 +204,16 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
     return () => document.removeEventListener('keydown', dismissPreview, true)
   }, [open, visible, document])
   const [folder, setFolder] = useState<Folder>('inbox')
+  const agentFolder = useRef<AgentMessageFolder>('inbox')
+  const automationEntry = useRef<HTMLButtonElement>(null)
+  const automationReturn = useRef<{ scope: string; folder: Folder; scroll: number; selection: MailboxSelection | null } | null>(null)
+  const automationFocus = useRef<'back' | 'entry' | null>(null)
   const progressVisible = open && visible && folder === 'progress'
   const [progressPresented, setProgressPresented] = useState(false)
   useEffect(() => { if (progressVisible) setProgressPresented(true) }, [progressVisible])
   useEffect(() => { onHistoryVisible?.(open && visible && folder === 'user'); return () => onHistoryVisible?.(false) },
     [open, visible, folder, onHistoryVisible])
-  const folderLabels = { inbox: 'A2A Inbox', outbox: 'A2A Outbox', user: 'User Messages', system: 'Notices', progress: 'Progress', collaboration: 'Collaboration' }
-  const folderIcons = { inbox: ThemeObjectInboxIcon, outbox: ThemeActionSendIcon, user: ThemeObjectMailIcon, system: ThemeObjectNotificationsIcon, progress: ThemeActionRepeatIcon, collaboration: ThemeObjectMailIcon }
+  const folderLabels = { inbox: 'Received', outbox: 'Sent', user: 'Inputs', system: 'Notices', progress: 'Automation', collaboration: 'Collaboration' }
   const progressTarget = progressSession ? JSON.stringify([progressSession.hostId, progressSession.id, progressSession.providerId, progressSession.workspacePath]) : ''
   const [progress, setProgress] = useState<{ target: string; status: ContinuousProgressStatus }>()
   const onProgressStatus = useCallback((status: ContinuousProgressStatus) => setProgress({ target: progressTarget, status }), [progressTarget])
@@ -226,7 +226,6 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
   )
   const effectiveControl: AgentSessionControl | undefined =
     propControl ?? (storeSession?.kind === 'agent' ? storeSession.control : undefined)
-  const folders: readonly Folder[] = [...FOLDERS, ...(effectiveControl ? ['collaboration' as const] : []), ...(progressSession ? ['progress' as const] : [])]
 
   const scope = JSON.stringify([effectiveControl?.hostId, effectiveControl?.agentSessionId, effectiveControl?.run.runId, timeline?.agentSessionId])
   const previousScope = useRef(scope)
@@ -255,7 +254,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       item.original.inputRef.messageId === messageId && item.original.inputRef.agentSessionId === mailboxSessionId && item.original.agentSessionId === mailboxSessionId)
     return record ? renderReveal(record, `a2a:${messageId}`) : null
   }
-  const [selection, setSelection] = useState<{ scope: string; folder: Folder; key: string } | null>(null)
+  const [selection, setSelection] = useState<MailboxSelection | null>(null)
   const body = useRef<HTMLDivElement>(null)
   const explicitUserReveal = useRef<{ scope: string; operationId: string } | null>(null)
   const back = useRef<HTMLButtonElement>(null)
@@ -272,8 +271,20 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
     setSelection(null)
   }
   function chooseFolder(next: Folder) {
+    if (isAgentMessageFolder(next)) agentFolder.current = next
     focusAfter.current = null; setSelection(null); setFolder(next)
     if (body.current) body.current.scrollTop = 0
+  }
+  function openAutomation(event: MouseEvent<HTMLButtonElement>) {
+    automationReturn.current = { scope, folder, selection, scroll: body.current?.scrollTop ?? 0 }
+    automationFocus.current = document.activeElement === event.currentTarget ? 'back' : null
+    chooseFolder('progress')
+  }
+  function returnToMessages() {
+    const origin = automationReturn.current?.scope === scope ? automationReturn.current : null
+    automationFocus.current = 'entry'
+    chooseFolder(origin?.folder ?? 'user')
+    setSelection(origin?.selection ?? null)
   }
 
   const {
@@ -388,9 +399,10 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       previousScope.current = scope
       const ownedFocus = document.activeElement === document.body && lastReadingFocus.current && !lastReadingFocus.current.isConnected
       positions.current = {}; lastReadingFocus.current = null; focusAfter.current = null
+      agentFolder.current = 'inbox'; automationReturn.current = null; automationFocus.current = null
       if (body.current) body.current.scrollTop = 0
       if (selection) setSelection(null)
-      if (ownedFocus) document.getElementById(`${id}-${folder}-tab`)?.focus({ preventScroll: true })
+      if (ownedFocus) (document.getElementById(`${id}-${folder}-tab`) ?? popover.current?.querySelector<HTMLButtonElement>('[aria-label="Back to messages"]'))?.focus({ preventScroll: true })
       return
     }
     if (selection && !detail && !selectedQueue) {
@@ -409,6 +421,15 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       const row = saved ? Array.from(body.current?.querySelectorAll<HTMLButtonElement>('button[data-record-key]') ?? []).find(row => row.dataset.recordKey === saved.key) : null
       ;(row ?? document.getElementById(`${id}-${folder}-tab`))?.focus({ preventScroll: true })
     }
+    if (folder === 'progress' && automationFocus.current === 'back') {
+      automationFocus.current = null
+      popover.current?.querySelector<HTMLButtonElement>('[aria-label="Back to messages"]')?.focus({ preventScroll: true })
+    }
+    if (folder !== 'progress' && automationFocus.current === 'entry') {
+      automationFocus.current = null
+      if (body.current) body.current.scrollTop = automationReturn.current?.scope === scope ? automationReturn.current.scroll : 0
+      automationEntry.current?.focus({ preventScroll: true })
+    }
   }, [open, detail, selectedQueue, selection, scope, folder, id])
   useLayoutEffect(() => {
     if (!open || !visible) return
@@ -419,8 +440,8 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       const c = editor.getBoundingClientRect(), r = region.getBoundingClientRect()
       if (c.width <= 0) return
       // The native CSS anchor is the whole editor; bound only this open surface to its actual available space.
-      panel.style.maxWidth = `${Math.max(1, Math.min(380, r.width - 12))}px`
-      panel.style.maxHeight = `${Math.max(1, Math.min(480, c.top - 12))}px`
+      panel.style.maxWidth = `${Math.max(1, Math.min(440, r.width - 12))}px`
+      panel.style.maxHeight = `${Math.max(1, Math.min(560, c.top - 12))}px`
     }
     measure()
     const observer = new window.ResizeObserver(measure); observer.observe(editor); observer.observe(region)
@@ -466,7 +487,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       .find(node => node.dataset.recordKey === `queue:${intent.operationId}`)
     row?.closest<HTMLElement>('li[data-operation-id]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   }, [open, folder, scope, selection])
-  const mailboxLabel = `Mailbox: A2A Inbox ${unread} unread in loaded messages, User Messages ${pendingCount} pending, Notices ${system.unread.length} need attention${progressSession ? `. ${progressLabel}` : ''}`
+  const mailboxLabel = `Mailbox: Agent messages ${unread} unread in loaded messages, Inputs ${pendingCount} pending, Notices ${system.unread.length} need attention${progressSession ? `. ${progressLabel}` : ''}`
   function showUserMessages(operationId: string) {
     motion.captureSource(Array.from(dock.current?.querySelectorAll<HTMLElement>('[data-operation-id]') ?? []).find(node => node.dataset.operationId === operationId))
     explicitUserReveal.current = { scope, operationId }
@@ -490,7 +511,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
         <span className="composer-mailbox__unread">{unread > 99 ? '99+' : unread}</span>
       </span> : null}
     </button>
-    <div ref={popover} id={id} popover="auto" className="composer-mailbox" aria-label="Mailbox"
+    <div ref={popover} id={id} popover="auto" className="composer-mailbox" aria-label="Mailbox" data-view={folder === 'progress' ? 'automation' : 'messages'}
       data-state={open && visible ? 'open' : 'closed'} inert={!open || !visible}
       onBeforeToggle={event => {
         if (event.target !== event.currentTarget) return
@@ -521,17 +542,17 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
         setOpen(opening)
         motion.afterToggle(event.newState)
       }}>
-      <div className="composer-mailbox__heading"><strong>Messages</strong><span className="composer-mailbox__subject" title={mailboxSessionId}>{mailboxSessionId ? reading?.describeSpeaker?.({ role: 'agent', id: mailboxSessionId }, 18)?.name || mailboxSessionId : 'Agent unknown'}</span>
+      <div className="composer-mailbox__heading">
+        {folder === 'progress' ? <button type="button" className="composer-tool" aria-label="Back to messages" title="Back to messages"
+          onClick={returnToMessages}><ThemeNavigationBackIcon size={15} /></button> : null}
+        <strong>{folder === 'progress' ? 'Automation' : 'Messages'}</strong><span className="composer-mailbox__subject" title={mailboxSessionId}>{mailboxSessionId ? reading?.describeSpeaker?.({ role: 'agent', id: mailboxSessionId }, 18)?.name || mailboxSessionId : 'Agent unknown'}</span>
         <button type="button" className="composer-tool" aria-label="Close mailbox" popoverTarget={id} popoverTargetAction="hide"
           onClick={() => trigger.current!.focus({ preventScroll: true })}><ThemeActionCloseIcon size={14} /></button></div>
-      <MailboxNavigation id={id} selected={folder} onSelect={chooseFolder} items={folders.map(name => {
-        const Icon = name === 'progress' ? ProgressIcon : folderIcons[name]
-        const count = name === 'inbox' ? receipts.unread.length : name === 'system' ? system.unread.length : name === 'user' ? pendingCount : 0
-        const description = name === 'collaboration' ? 'Supervised collaboration' : name === 'progress' ? progressLabel : name === 'outbox' ? folderLabels[name] : `${folderLabels[name]}: ${count} ${name === 'user' ? 'pending' : name === 'inbox' ? 'unread in loaded messages' : 'unread'}`
-        return { key: name, label: folderLabels[name], description, icon: <Icon size={13} aria-hidden="true" />, count }
-      })} />
+      {folder !== 'progress' ? <MailboxWorkspaceNavigation id={id} folder={folder} agentFolder={agentFolder.current}
+        onSelect={chooseFolder} unread={unread} pending={pendingCount} notices={system.unread.length} collaboration={Boolean(effectiveControl)} /> : null}
       {detail ? <div className="composer-mailbox__back"><button ref={back} type="button" className="composer-tool" aria-label={`Back to ${folderLabels[folder]}`} title={`Back to ${folderLabels[folder]}`} onClick={leaveRecord}><ThemeNavigationBackIcon size={14} aria-hidden="true" /><span>{folderLabels[folder]}</span></button></div> : null}
       <div ref={body} className="composer-mailbox__content" onFocusCapture={event => { lastReadingFocus.current = event.target }}>
+      <div id={`${id}-agents`} role="tabpanel" aria-labelledby={`${id}-agents-tab`} hidden={!isAgentMessageFolder(folder)}>
       {(['inbox', 'outbox'] as const).map(name => {
         const window = name === 'inbox' ? incomingWindow : outgoingWindow
         return <div key={name} id={`${id}-${name}`} role="tabpanel" aria-labelledby={`${id}-${name}-tab`} hidden={folder !== name}>
@@ -545,6 +566,10 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
             : <MailboxEmpty title="The original Agent and Host are not yet known" /> : null}
         </div>
       })}
+      {effectiveControl ? <div id={`${id}-collaboration`} role="tabpanel" aria-labelledby={`${id}-collaboration-tab`} hidden={folder !== 'collaboration'}>
+        {readingMounted && folder === 'collaboration' ? <MailboxCollaboration key={scope} control={effectiveControl} active={open && visible} reading={reading} onCopy={onCopyQueued} /> : null}
+      </div> : null}
+      </div>
       <div id={`${id}-user`} role="tabpanel" aria-labelledby={`${id}-user-tab`} aria-busy={Boolean(inputHistory?.history.loading || inputMailbox.loading)} hidden={folder !== 'user'}>
         {readingMounted && folder === 'user' ? <>
           <InputMailboxRecords compact refreshInParent={Boolean(inputHistory)} coverageInParent={Boolean(inputHistory)}
@@ -568,9 +593,9 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
               localEntries={inputHistory.localEntries} onCopy={inputHistory.copy} {...(inputHistory.canFill !== false ? { onFill: inputHistory.fill, onFillLocal: inputHistory.fillLocal } : {})}
               onRefresh={() => { void inputMailbox.refresh(); inputHistory.history.refresh() }}
               refreshing={inputMailbox.loading || inputHistory.history.loading}
-              coverage={<>{inputMailbox.loading || inputHistory.history.loading ? 'Reading inputs…' : 'Loaded inputs'} · Earlier journal coverage unconfirmed
+              coverage={<>{inputMailbox.loading || inputHistory.history.loading ? 'Reading inputs…' : 'Loaded inputs'} · Partial history
                 <details className="composer-mailbox__coverage-details"><summary>Sources</summary>
-                  <span>Journal: {userInputMailbox.items.length} loaded. {inputHistory.history.complete ? 'Available history checked for this read.' : 'History is a partial reading window.'}{inputHistory.history.examined ? ` Examined ${inputHistory.history.examined} history records.` : ''}</span>
+                  <span>Journal: {userInputMailbox.items.length} loaded; earlier coverage unconfirmed. {inputHistory.history.complete ? 'Available history checked for this read.' : 'History is a partial reading window.'}{inputHistory.history.examined ? ` Examined ${inputHistory.history.examined} history records.` : ''}</span>
                 </details></>}
               beforeRecords={renderPending()}
               renderRecords={() => renderRecorded(historyMessages,journalRecords)} /> : <>
@@ -586,7 +611,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
         {readingMounted && folder === 'system' ? selectedNotice ? <article className="composer-mailbox__detail composer-notice" data-kind={selectedNotice.notice.kind}>
           <div className="composer-notice__body">{noticePresentation?.id === selectedNotice.id ? noticePresentation.content : <><ServiceWindowNotice notice={selectedNotice.notice} />
             <MailboxTime value={selectedNotice.observedAt} complete />
-            {selectedNotice.id === 'queue' ? <button type="button" className="composer-tool" onClick={() => chooseFolder('user')}>View User Messages</button> : null}
+            {selectedNotice.id === 'queue' ? <button type="button" className="composer-tool" onClick={() => chooseFolder('user')}>View Inputs</button> : null}
             {selectedNotice.action ? <button type="button" className="composer-tool" onClick={selectedNotice.action.run}>{selectedNotice.action.label}</button> : null}</>}
           </div>
         </article> : notices.length ? <ol className="composer-mailbox__messages" aria-label="Current service notices">
@@ -598,13 +623,17 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
             onOpen={selectRecord} /></li>)}
         </ol> : <MailboxEmpty title={system.available ? 'No current notices' : 'Waiting for Session status'} /> : null}
       </div>
-      {progressSession ? <div id={`${id}-progress`} role="tabpanel" aria-labelledby={`${id}-progress-tab`} hidden={folder !== 'progress'}>
+      {progressSession ? <div id={`${id}-progress`} role="region" aria-label="Automation settings" hidden={folder !== 'progress'}>
         <ContinuousProgressControl session={progressSession} onStatusChange={onProgressStatus} presented={progressVisible || progressPresented} />
       </div> : null}
-      {effectiveControl ? <div id={`${id}-collaboration`} role="tabpanel" aria-labelledby={`${id}-collaboration-tab`} hidden={folder !== 'collaboration'}>
-        {readingMounted && folder === 'collaboration' ? <MailboxCollaboration key={scope} control={effectiveControl} active={open && visible} reading={reading} onCopy={onCopyQueued} /> : null}
-      </div> : null}
       </div>
+      {progressSession && folder !== 'progress' ? <button ref={automationEntry} type="button" className="composer-mailbox__automation" aria-label="Automation"
+        aria-describedby={`${id}-automation-status`} onClick={openAutomation}>
+        <ThemeActionRepeatIcon size={14} aria-hidden="true" /><span>Automation</span>
+        <span id={`${id}-automation-status`} className="composer-mailbox__automation-status" data-status={progressStatus}>
+          {progressStatus === 'active' ? 'Running' : progressStatus === 'paused' ? 'Paused' : progressStatus === 'inactive' ? 'Not enabled' : 'Status unknown'}</span>
+        <span aria-hidden="true">›</span>
+      </button> : null}
     </div>
     <ModalAttachmentDismissal active={Boolean(open && visible && popover.current && getModalOverlayContainer(popover.current))} targetRef={popover}
       onOwnerRemoved={() => popover.current?.hidePopover()}

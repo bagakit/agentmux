@@ -90,12 +90,8 @@ export function ContinuousProgressControl({ session, onStatusChange, presented =
     <CalendarScheduleControl target={target} onStatusChange={setCalendarStatus} presented={presented} />
     {presented ? <>
     <details className="continuous-progress-control__details" data-progress-details="interval" onToggle={event => event.stopPropagation()}>
-      <summary>Continuous progress</summary>
+      <summary>Continuous progress <span>{status === 'unconfirmed' ? 'Unconfirmed' : displayed?.status === 'stopped' ? 'Stopped' : status === 'inactive' ? 'Not enabled' : status === 'active' ? 'Active' : 'Paused'}</span></summary>
       <div className="continuous-progress-control__detail-body">
-    <header className="continuous-progress-control__heading">
-      <h3>Continuous progress</h3>
-      <span>{status === 'unconfirmed' ? 'Unconfirmed' : displayed?.status === 'stopped' ? 'Stopped' : status === 'inactive' ? 'Not enabled' : status === 'active' ? 'Active' : 'Paused'}</span>
-    </header>
     {status === 'unconfirmed' ? <p className="continuous-progress-control__notice" role="status">Automatic progress is unconfirmed. {observedTarget !== target && !error ? 'Waiting for loop status. ' : ''}Manual input follows terminal readiness.{error ? ` ${error}` : ''}</p> : null}
     {displayed ? <ContinuousProgressPanel loop={{ loopId: displayed.loopId, providerLabel: agentProviderLabel(session.providerId),
       executionState: session.status.state, loopState: displayed.status,
