@@ -37,22 +37,23 @@ export function GitCommitDetails({ regionId, selection, result, loading, error, 
     {selection && !result && !error && <div className="pane-state"><span>Reading commit…</span></div>}
     {result && <>
       <header className="git-workbench__message-header">
-        <h2 className="git-workbench__message-heading">{message.heading || (result.commit.message ? '(No subject)' : '(No commit message)')}</h2>
+        <pre className="git-workbench__message"><span className="git-workbench__message-heading" role="heading" aria-level={2}>{message.firstLine}</span>{message.remainder}</pre>
+        {!result.commit.message && <p className="git-workbench__empty">No commit message</p>}
         {message.type && <div className="git-workbench__message-format" aria-label="Commit message format">
           <span>{message.type}</span>
           {message.scope && <span aria-label={'Scope: ' + message.scope}>{message.scope}</span>}
           {message.breaking && <span className="git-workbench__message-breaking" title="Marked by ! in the commit subject">Breaking change</span>}
         </div>}
       </header>
-      <details className="git-workbench__raw-message" key={result.commit.oid} open>
-        <summary>Full commit message</summary>
-        <pre className="git-workbench__message">{result.commit.message || '(No commit message)'}</pre>
-      </details>
-      <dl className="git-workbench__metadata">
+      <dl className="git-workbench__author">
         <dt>Author</dt><dd className="git-workbench__identity">
           <GitAuthorAvatar author={result.commit.author} email={result.commit.authorEmail} />
           <span><span className="git-workbench__person">{result.commit.author || 'Unknown author'}</span><span className="git-workbench__identity-time"><CommitTime value={result.commit.authoredAt} /></span></span>
         </dd>
+      </dl>
+      <details className="git-workbench__commit-info" key={result.commit.oid}>
+        <summary>Commit information</summary>
+        <dl className="git-workbench__metadata">
         {showCommitted && <><dt>Committed</dt><dd>
           {differentCommitter && <span className="git-workbench__person">{result.commit.committer || 'Unknown committer'}</span>}
           <span className="git-workbench__identity-time"><CommitTime value={result.commit.committedAt} /></span>
@@ -65,7 +66,8 @@ export function GitCommitDetails({ regionId, selection, result, loading, error, 
             <small>{reference.kind}</small><span>{reference.name}</span>
           </span>)}
         </dd></>}
-      </dl>
+        </dl>
+      </details>
       <div className="git-workbench__comparison">
         <label htmlFor={'git-parent-' + regionId}>Compare with</label>
         {result.commit.parents.length ? <select id={'git-parent-' + regionId} aria-label="Comparison parent" value={result.snapshot.parentOid ?? ''}
@@ -83,7 +85,11 @@ export function GitCommitDetails({ regionId, selection, result, loading, error, 
         <button aria-label={'Open diff for ' + file.path} aria-pressed={selectedPath === file.path}
           title={file.origPath ? file.origPath + ' → ' + file.path : file.path} onClick={() => onSelectFile(file)}>
           <span className={'git-workbench__change git-workbench__change--' + file.change} title={file.change}>{file.change === 'type-changed' ? 'T' : file.change[0]!.toUpperCase()}</span>
-          <span>{file.origPath && <small>{file.origPath} → </small>}{file.path}</span>
+          <span className="git-workbench__file-path">
+            <span className="git-workbench__file-name">{file.path.slice(file.path.lastIndexOf('/') + 1)}</span>
+            {file.path.includes('/') && <small>{file.path.slice(0, file.path.lastIndexOf('/') + 1)}</small>}
+            {file.origPath && <small className="git-workbench__file-origin">{file.origPath} → {file.path}</small>}
+          </span>
         </button>
       </li>)}</ul>
     </>}

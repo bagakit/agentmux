@@ -213,7 +213,8 @@ const HistoryViewport = memo(function HistoryViewport({ graph, history, selected
                 style={branchStyle(graph.guides.get(commit.parents[0] === parent ? commit.oid : parent))}
                 d={`M ${x(lane)} ${middle} C ${x(lane)} ${bottom - ROW_HEIGHT / 4}, ${x(afterIndexes.get(parent)!)} ${bottom - ROW_HEIGHT / 4}, ${x(afterIndexes.get(parent)!)} ${bottom}`} />)}
               <circle className="git-history-node" data-commit-oid={commit.oid} data-branch-ref={graph.guides.get(commit.oid)}
-                style={branchStyle(graph.guides.get(commit.oid))} cx={x(lane)} cy={middle} r={3} {...previewEvents(commit)} />
+                data-selected={selectedOid === commit.oid ? 'true' : undefined}
+                style={branchStyle(graph.guides.get(commit.oid))} cx={x(lane)} cy={middle} r={selectedOid === commit.oid ? 4.5 : 3.5} {...previewEvents(commit)} />
             </g>
           })}
           {atEnd && graph.pending.map((oid, lane) => <path key={oid} className="git-history-continuation" data-unloaded-parent={oid}
