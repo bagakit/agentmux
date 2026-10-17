@@ -122,7 +122,9 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
     }
     if (plan.resume) {
       // Resolve CLI-relative cwd here, inside the original Run, never in the Core service process.
-      const expected = { ...plan.resume, ...(plan.resume.cwd === undefined ? {} : { cwd: resolve(plan.resume.cwd) }) }
+      const expected = { ...plan.resume, ...(plan.resume.cwd === undefined ? {} : { cwd: resolve(plan.resume.cwd) }),
+        // The first native resume owns this option; a later TUI resume joins its loaded thread.
+        ...(plan.frontendArgs.includes('--dangerously-bypass-hook-trust') ? { config: { bypass_hook_trust: true } } : {}) }
       let resumed: any
       try {
         resumeConnection = await connectCodexNativeActor(endpoint, token, new AbortController().signal, 'agentmux_managed_resume')
