@@ -34,3 +34,22 @@
 .browser-trace-rail .browser-rsi-history__list { max-height: min(160px, 24vh); overflow-y: auto; }
 .browser-trace-rail[data-compact-reader="true"] .browser-rsi-history__list { max-height: 64px; }
 .browser-trace-held { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: var(--sp-3); font-size: var(--fs-micro); color: var(--text-3); }
+
+.browser-opinion-selection { display: grid; gap: var(--sp-2); min-width: 0; }
+.browser-opinion-selection__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.browser-opinion-selection__attachment { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.browser-opinion-selection__attachment > span { min-width: 0; font-size: var(--fs-micro); overflow-wrap: anywhere; }
+.browser-opinion-selection__attachment small { display: block; color: var(--text-3); }
+.browser-opinion-selection__attachment .md-conversation-image__thumb { max-width: 64px; max-height: 56px; }
+.browser-opinion-selection__editor {
+  position: fixed; z-index: var(--layer-popover); right: 16px; bottom: 16px;
+  width: min(900px, calc(100vw - 32px)); height: min(680px, calc(100vh - 80px));
+  display: flex; flex-direction: column; overflow: hidden; min-width: 0;
+  background: var(--surface-2); color: var(--text-2); border: 1px solid var(--line);
+  border-radius: var(--radius-lg); box-shadow: var(--elev-2); pointer-events: auto;
+}
+.browser-opinion-selection__editor > .image-annotation-editor { flex: 1; min-height: 0; }
+.browser-opinion-selection__provenance { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); padding: var(--sp-3) var(--sp-4); font: var(--fs-meta)/1.5 var(--font-sans); }
+.browser-opinion-selection__provenance > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browser-opinion-selection__provenance small { color: var(--text-3); font-size: var(--fs-micro); }
+.browser-opinion-selection__recovery { display: flex; flex-wrap: wrap; gap: var(--sp-2); padding: var(--sp-2) var(--sp-4); font-size: var(--fs-micro); overflow-wrap: anywhere; }

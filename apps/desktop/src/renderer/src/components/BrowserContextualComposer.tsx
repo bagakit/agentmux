@@ -12,6 +12,7 @@ import { agentSessionPresentationIndex } from '../lib/session-presentation'
 import type { BrowserOpinionSource as OriginalOpinion, BrowserOpinionAttempt } from '../lib/browser-opinion-draft'
 import { useAppStore } from '../store'
 import { getWindowOverlayHost, WindowOverlayPortal } from './WindowOverlayHost'
+import { useBrowserOpinionSelection } from './BrowserOpinionSelection'
 
 const MessageIcon = semanticIconComponent('object.conversation')
 const CloseIcon = semanticIconComponent('action.close')
@@ -52,6 +53,8 @@ export function useBrowserContextualComposer(browserId: string, operation: Brows
   const composing = useRef<HTMLTextAreaElement | null>(null)
   const lastAutomatic = useRef<string | null>(null)
   const pending = useRef<BrowserOpinionAttempt | null>(saved.current?.pending ?? null)
+  const selection = useBrowserOpinionSelection({ source: original, visible: open && visible, locked: busy || pending.current !== null,
+    document: anchor.current?.ownerDocument, onChange: next => { currentOriginal.current = next; setOriginal(next) } })
 
   function close() {
     composing.current = null; pendingFocus.current = null
@@ -125,7 +128,7 @@ export function useBrowserContextualComposer(browserId: string, operation: Brows
   }, [open, visible, original !== null, focusRevision])
 
   async function send() {
-    if (busy || composing.current !== null && composing.current === editor.current || !original || !text.trim()) return
+    if (busy || selection.busy || composing.current !== null && composing.current === editor.current || !original || !text.trim()) return
     // Once freeze starts, only this exact original intent can retry an unknown result.
     const note = original.comment ? 'The user selected this historical Browser step as reference data, separately from the observed page: ' +
       JSON.stringify(original.comment).replace(/</gu, '\\u003c').replace(/>/gu, '\\u003e').replace(/&/gu, '\\u0026') : undefined
@@ -138,7 +141,7 @@ export function useBrowserContextualComposer(browserId: string, operation: Brows
     setBusy(true); setFailure(null)
     try {
       await useAppStore.getState().saveBrowserOpinionDraft(browserId, { original, text: intent.text, includeContext: intent.context, pending: intent }, true)
-      const capture = intent.context ? await api.browser.freezeInputContext({ scene: original.scene!.reference, control: original.control,
+      const capture = intent.context ? await api.browser.freezeInputContext({ scene: (original.selection?.scene ?? original.scene!).reference, control: original.control,
         operationId: intent.operationId, prompt: intent.text, ...(intent.note ? { agentMuxNote: intent.note } : {}) }) : undefined
       const state = useAppStore.getState()
       const accepted = state.enqueueAgentSteer(original.control.agentSessionId, intent.text, error => setFailure(presentError(error)), intent.operationId,
@@ -168,6 +171,8 @@ export function useBrowserContextualComposer(browserId: string, operation: Brows
       {changed ? <p className="browser-contextual-composer__notice">The Browser has moved on. This draft still addresses the original Agent and captured page.</p> : null}
       <ComposerTextarea ref={editor} aria-label="Opinion for Browser operator" placeholder="What should the Agent notice?" value={text} onValueChange={setText} readOnly={pending.current !== null}
         onKeyDown={event => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !isImeOwnedKeyboardEvent(event)) { event.preventDefault(); void send() } }} />
+      {selection.controls}
+      {!includeContext && original?.selection ? <p className="browser-contextual-composer__notice">The image is kept in this draft. Text-only sending excludes it.</p> : null}
       {failure ? <div className="browser-contextual-composer__failure" role="alert"><p>{failure}</p>
         {pending.current && !busy ? <button type="button" className="small-button" onClick={() => {
           const attempt = pending.current
@@ -180,9 +185,9 @@ export function useBrowserContextualComposer(browserId: string, operation: Brows
       <footer><small>Ctrl / ⌘ Enter</small>{!text.trim() && !busy && !pending.current && original ? <button type="button" className="small-button" onClick={() => {
         ++request.current; currentOriginal.current = null; setOriginal(null); setSubmitted(null); setIncludeContext(true);
         if (anchor.current) void show(anchor.current, undefined, true, anchorPane.current ?? undefined)
-      }}>New opinion</button> : null}<button type="button" className="primary-button" disabled={busy || !original || !text.trim()} onClick={() => void send()}><SendIcon size={12} />{busy ? 'Queueing…' : includeContext && source ? 'Queue opinion' : 'Queue text only'}</button></footer>
+      }}>New opinion</button> : null}<button type="button" className="primary-button" disabled={busy || selection.busy || !original || !text.trim()} onClick={() => void send()}><SendIcon size={12} />{busy ? 'Queueing…' : includeContext && source ? 'Queue opinion' : 'Queue text only'}</button></footer>
     </section>
   </WindowOverlayPortal> : null
-  return { dialog, buttonRef, open: (button: HTMLButtonElement, comment?: OriginalOpinion['comment'], pane?: HTMLElement) => { void show(button, comment, true, pane) },
+  return { dialog: <>{dialog}{selection.editor}</>, buttonRef, open: (button: HTMLButtonElement, comment?: OriginalOpinion['comment'], pane?: HTMLElement) => { void show(button, comment, true, pane) },
     button: <MessageIcon size={14} /> }
 }
