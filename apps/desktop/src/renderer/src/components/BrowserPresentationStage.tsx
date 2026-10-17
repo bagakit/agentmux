@@ -314,7 +314,7 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
     if (!node || !stream) { setPlayback({ stream: null, phase: 'idle' }); return }
     let cancelled = false, playing = false, frameDelivered = false
     let frameRequest: number | null = null
-    if (nativeCovered) {
+    if (nativeCovered || !presentation.visible || blocked) {
       // A paused MediaStream video can still receive and convert every frame.
       // Retain one local frame, then release only this redundant receiver.
       if (node.srcObject === stream && node.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && node.videoWidth > 0 && node.videoHeight > 0) {
@@ -364,7 +364,7 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
     })
     return () => { cancelled = true; node.removeEventListener('loadeddata', frame); node.removeEventListener('playing', frame)
       if (frameRequest !== null) node.cancelVideoFrameCallback(frameRequest) }
-  }, [media.stream, playbackRevision, nativeCovered])
+  }, [media.stream, playbackRevision, nativeCovered, presentation.visible, blocked])
   const press = useRef<Promise<BrowserPresentationActivationReceipt> | null>(null)
   const point = (event: PointerEvent<HTMLDivElement>) => {
     const stage = element.current, frame = video.current
