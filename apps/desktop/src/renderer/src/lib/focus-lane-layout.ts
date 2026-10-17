@@ -1,5 +1,7 @@
+import type { FocusReplyLines } from '../../../shared/focus-preferences'
+
 export type FocusLaneCounts = readonly [number, number, number, number]
-export type FocusLaneMetrics = { width: number; padding: number; gap: number; cardGap: number }
+export type FocusLaneMetrics = { width: number; padding: number; gap: number; cardGap: number; replyLines?: FocusReplyLines }
 export type FocusLaneLayout = {
   columns: readonly number[]; widths: readonly number[]
   /** Logical row and leading CSS-pixel offset; empty buckets have row -1. */
@@ -8,9 +10,8 @@ export type FocusLaneLayout = {
 }
 type PreviousLayout = Pick<FocusLaneLayout, 'columns' | 'rowByBucket'>
 
-// Comparison budgets, not measured equal-height content: original slots are
-// 52px with compact 24px state headings. Real service cards may be taller.
-const CARD_TRACK = 52
+/** Shared comparison/placeholder budget. Real service cards may be taller. */
+export function focusCardTrackHeight(lines: FocusReplyLines = 2): number { return 24 + lines * 14 }
 const GROUP_HEADING = 24
 const MIN_CARD_WIDTH = 180
 const MAX_CARD_WIDTH = 320
@@ -66,7 +67,7 @@ export function allocateFocusLaneColumns(counts: FocusLaneCounts, metrics: Focus
         start += widths[index]! + metrics.gap
       }
       maxRows = Math.max(maxRows, low)
-      cost += GROUP_HEADING + low * CARD_TRACK + Math.max(0, low - 1) * metrics.cardGap
+      cost += GROUP_HEADING + low * focusCardTrackHeight(metrics.replyLines) + Math.max(0, low - 1) * metrics.cardGap
     }
     if (!valid) continue
     const keepsRows = (placement: readonly number[]) => previous?.rowByBucket.length === 4
