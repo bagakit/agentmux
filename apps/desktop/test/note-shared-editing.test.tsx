@@ -738,3 +738,40 @@ it('keeps a shared file owned by another live IME composition before its text be
     expect(vi.mocked(api.files.shareUndoPublic).mock.calls.at(-1)![0].preserveNoteIds).toContain(original.note.noteId)
   } finally { await act(async () => source.view.dom.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }))) }
 })
+
+it('previews and shares a whole heading section with distinct source and reference editors', async () => {
+  const f = await fixture(), key = documentKey(f.workspace.id, 'source.note.md')
+  const source = newNoteDocument('', 'source', 'unused')
+  source.content.content = [
+    { type: 'heading', attrs: { level: 2, blockId: 'section' }, content: [{ type: 'text', text: 'Shared chapter' }] },
+    { type: 'paragraph', attrs: { blockId: 'chapter-body' }, content: [{ type: 'text', text: 'The complete chapter body' }] },
+    { type: 'heading', attrs: { level: 3, blockId: 'subsection' }, content: [{ type: 'text', text: 'Nested heading' }] },
+    { type: 'paragraph', attrs: { blockId: 'nested-body' }, content: [{ type: 'text', text: 'Nested chapter content' }] },
+    { type: 'heading', attrs: { level: 2, blockId: 'next-section' }, content: [{ type: 'text', text: 'Next chapter stays outside' }] },
+    { type: 'paragraph', attrs: { blockId: 'next-body' }, content: [{ type: 'text', text: 'Outside chapter prose' }] },
+  ]
+  const saved = await f.writer.write(f.workspace, { path: 'source.note.md', content: serializeNoteDocument(source), expectedRevision: f.documents[key]!.revision })
+  expect(saved.status).toBe('written')
+  const read = await f.writer.read(f.workspace, 'source.note.md'); if (read.status !== 'read') throw Error('Original must read')
+  useAppStore.setState(state => ({ documents: { ...state.documents, [key]: read.document } }))
+  await f.mount(); await f.paste(await f.copy())
+  await vi.waitFor(() => {
+    const pending = dom.container.querySelector('[data-test-note="destination-region"] .note-shared-block')!
+    expect(pending.textContent).toContain('Nested chapter content')
+    expect(pending.textContent).not.toContain('Next chapter stays outside')
+  })
+  await act(async () => { await f.save() })
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-shared-block .note-block-content')).toHaveLength(2), { timeout: 4000 })
+  expect(f.rich(0).getJSON().content!.map(node => node.type)).toEqual(['noteInclude', 'heading', 'paragraph'])
+  const sourceFrame = dom.container.querySelector('[data-test-note="source-region"] [data-shared-role="source"]')
+  const referenceFrame = dom.container.querySelector('[data-test-note="destination-region"] [data-shared-role="reference"]')
+  expect(sourceFrame?.getAttribute('aria-label')).toBe('Shared source')
+  expect(referenceFrame?.getAttribute('aria-label')).toBe('Shared reference')
+  expect(sourceFrame?.querySelector('button')?.getAttribute('title')).toContain('edits update all uses')
+  expect(f.rich(0, true).getText()).toContain('Nested chapter content')
+  expect(f.rich(1, true).getText()).toContain('The complete chapter body')
+  expect(f.rich(1, true).getText()).not.toContain('Outside chapter prose')
+  await act(async () => f.rich(0, true).commands.insertContentAt(1, 'Together '))
+  await vi.waitFor(() => expect(f.rich(1, true).getText()).toContain('Together Shared chapter'))
+  expect(f.rich(0).getText()).toContain('Outside chapter prose')
+})
