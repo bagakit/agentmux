@@ -99,10 +99,10 @@ export function parseDesktopClientObservation(value: unknown): DesktopClientObse
   return desktopClientObservationSchema.parse(value)
 }
 
-// Check-detail payloads are observations, not installation or Run-preservation authority.
+// Auxiliary payloads are observations, not installation or Run-preservation authority.
 // Retain them verbatim; all facts used by the installer keep their original strict schema.
 const desktopInstallObservationSchema = desktopClientObservationSchema.extend({
-  workbench: desktopWorkbenchObservationSchema.extend({ startupAgentAvailability: z.unknown().optional() })
+  workbench: desktopWorkbenchObservationSchema.extend({ startupAgentAvailability: z.unknown().optional(), desktop: z.unknown() })
 })
 export function parseDesktopClientObservationForInstall(value: unknown) {
   return desktopInstallObservationSchema.parse(value)
