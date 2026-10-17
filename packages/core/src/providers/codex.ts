@@ -203,11 +203,7 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
         usage: { kind: 'native-transcript', transcriptFormat: 'codex-rollout' }
       }
     }),
-    buildArgs: (prompt, args) => [
-      ...args,
-      ...(args.includes('--dangerously-bypass-hook-trust') ? [] : ['--dangerously-bypass-hook-trust']),
-      ...(prompt ? [prompt] : [])
-    ],
+    buildArgs: (prompt, args) => codexInvocation(args, [], prompt),
     terminalHandshake: { query: '\u001b[?u', response: '\u001b[?0u' },
     terminalPromptRender: { frameStart: '\u001b[?2026h', activeComposer: '›', frameEnd: '\u001b[?2026l' },
     inspectPromptExecution: inspectCodexPromptExecution,
@@ -235,17 +231,15 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
     observeSessionHistory: observeNativeJsonlHistory,
     inspectHookActivation: inspectCodexHookActivation,
     launchOptions: CODEX_LAUNCH_OPTIONS,
-    buildForkArgs: (sessionId, _transcriptPath, prompt, args) => [
-      'fork', sessionId,
-      ...(args.includes('--dangerously-bypass-hook-trust') ? [] : ['--dangerously-bypass-hook-trust']),
-      ...(prompt ? [prompt] : []),
-      ...args
-    ],
-    buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
-      'resume', sessionId,
-      ...(args.includes('--dangerously-bypass-hook-trust') ? [] : ['--dangerously-bypass-hook-trust']),
-      ...(prompt ? [prompt] : []),
-      ...args
-    ]
+    buildForkArgs: (sessionId, _transcriptPath, prompt, args) => codexInvocation(args, ['fork', sessionId], prompt),
+    buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => codexInvocation(args, ['resume', sessionId], prompt)
   })
+}
+
+/** Keep the configured launcher intact. Native root options also apply to resume/fork. */
+function codexInvocation(args: readonly string[], action: readonly string[], prompt?: string): string[] {
+  return [...args,
+    ...(args.includes('--dangerously-bypass-hook-trust') ? [] : ['--dangerously-bypass-hook-trust']),
+    ...action,
+    ...(prompt ? ['--', prompt] : [])]
 }
