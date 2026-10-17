@@ -51,11 +51,17 @@ if (splitTab.layout.root.type !== 'split') throw new Error('Original private wor
 const tab = { ...splitTab, layout: { ...splitTab.layout, root: { ...splitTab.layout.root, ratio: 0.6 },
   activeRegionId: 'private-retained-region' } }
 const clipboard: string[] = [], controls: unknown[] = []
+const restarts: { control: unknown; operationId: string; observeOnly: boolean }[] = []
 let failedAgent: string | null = null
 api.ui.writeClipboardText = async text => { clipboard.push(text) }
 api.sessions.stop = async control => {
   if (control.kind !== 'agent') throw new Error('Only the original private Agent stop target is configured')
   controls.push(structuredClone(control)); if (control.agentSessionId === failedAgent) throw new Error('Original gamma stop receipt unavailable')
+}
+api.sessions.restart = async (control, operationId, observeOnly = false) => {
+  restarts.push({ control: structuredClone(control), operationId, observeOnly })
+  return { agentSessionId: control.agentSessionId, operationId, expectedRun: control.run, previousRun: control.run,
+    phase: 'unconfirmed', canRetry: false, observedAt: Date.now(), detail: 'Private original restart receipt is unconfirmed. Check the same operation.' }
 }
 api.sessions.refresh = async control => {
   if (control.kind !== 'agent') throw new Error('Only the original private Agent observation is configured')
@@ -134,13 +140,27 @@ const scene = {
   ready: true, phase, seedCount: phase === 'seed' ? 1 : 0, workspaceId: workspace.id, originalOrder,
   showSpace() { useAppStore.getState().setMainSurface('workbench') },
   flush: () => prepareRendererUpdate('quit'),
+  addHostCollision() {
+    const original = sessions.find(session => session.id === 'gamma')!
+    const otherHost = { ...original, hostId: 'other-host', workspacePath: fixturePath('private/other-host'),
+      control: { ...original.control, hostId: 'other-host', run: { runId: 'other-host-original-gamma' } } }
+    useAppStore.setState(state => ({ sessions: [otherHost, ...state.sessions] }))
+  },
+  clearSingleOperations() {
+    clipboard.length = 0; controls.length = 0; restarts.length = 0
+    useAppStore.setState(state => ({ sessions: state.sessions.filter(session => session.hostId !== 'other-host') }))
+  },
+  retainedReply(exited: boolean) {
+    useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === 'delta'
+      ? { ...session, processState: exited ? 'exited' : 'running', status: { ...session.status, state: 'done' } } : session) }))
+  },
   failAgent(id: string | null) { failedAgent = sessions.find(session => session.id === id)?.control.agentSessionId ?? null },
   changeRun(id: string) { useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === id && session.kind === 'agent' ? { ...session, control: { ...session.control, run: { runId: `changed-original-${id}` } } } : session) })) },
   churn() { for (let index = 0; index < 100; index++) useAppStore.setState(state => ({ sessions: state.sessions.map(session => ({ ...session, latestOutputBytes: session.latestOutputBytes + 1, updatedAt: now + index, status: { ...session.status, observedAt: now + index } })) })) },
   facts() { const state = useAppStore.getState(); return {
     order: [...document.querySelectorAll<HTMLElement>('.workspace-agent-list-item')].map(node => node.dataset.agentKey),
     cards: [...document.querySelectorAll<HTMLElement>('.workspace-agent-list-item button.focus-context')].map(node => ({ id: node.dataset.sessionId, state: node.dataset.state, text: node.textContent })),
-    preference: state.workspaceAgentOrder, clipboard: [...clipboard], controls: structuredClone(controls),
+    preference: state.workspaceAgentOrder, clipboard: [...clipboard], controls: structuredClone(controls), restarts: structuredClone(restarts),
     sessions: state.sessions.map(session => ({ id: session.id, control: session.control })),
     tabs: state.tabs, layouts: state.layouts, drafts: state.agentComposerDrafts,
     originalWorkface: state.tabs === original.tabs && state.layouts === original.layouts,

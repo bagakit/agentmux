@@ -187,7 +187,7 @@ it('typeahead uses the full icon name and Space executes it once', async () => {
 
 it('the Region context menu progressively names exact swap targets and dispatches only the chosen one', async () => {
   const first = vi.fn(), second = vi.fn()
-  await render(<RegionContextMenu regionId="clicked-region" agentSessionId={null} writeClipboardText={vi.fn()}
+  await render(<RegionContextMenu tabId="clicked-tab" regionId="clicked-region" agentSessionId={null} writeClipboardText={vi.fn()}
     splitMenu={workbenchSplitMenuEntries({ regionCount: 3, split: vi.fn(), arrange: vi.fn() })}
     swapMenu={[{ targetRegionId: 'other-a', label: 'Swap with Terminal 1', onSelect: first },
       { targetRegionId: 'other-b', label: 'Swap with Terminal 2', onSelect: second }]}>
@@ -207,7 +207,7 @@ it('the Region context menu progressively names exact swap targets and dispatche
 
 it('the original Header More keeps hover input focus across its Dropdown Sub Portal', async () => {
   const swapAction = vi.fn()
-  await render(<RegionContextMenu regionId="clicked-region" agentSessionId={null} writeClipboardText={vi.fn()}
+  await render(<RegionContextMenu tabId="clicked-tab" regionId="clicked-region" agentSessionId={null} writeClipboardText={vi.fn()}
     splitMenu={workbenchSplitMenuEntries({ regionCount: 2, split: vi.fn(), arrange: vi.fn() })}
     swapMenu={[{ targetRegionId: 'other', label: 'Swap with Other', onSelect: swapAction },
       { targetRegionId: 'last', label: 'Swap with Last', onSelect: vi.fn() }]}>
