@@ -136,7 +136,8 @@ export function TerminalContextMenu({
     if (openSource !== source) return
     const invocation = gesture.current
     if (!invocation || invocation.identity !== contextSource.identity || invocation.instance !== contextSource.instance()
-      || element.current?.closest('[hidden], [inert], [aria-hidden="true"]')) {
+      // Radix hides the invoking surface from assistive technology while this modal menu owns focus.
+      || element.current?.closest('[hidden], [inert]')) {
       clearContextSource?.(source)
       return
     }
@@ -151,6 +152,10 @@ export function TerminalContextMenu({
       pendingPointer: pointer, identity: contextSource.identity, instance: contextSource.instance(), sample: null, origin: null }
     setContextSource?.(source)
   }
+  function cancelPendingPointer() {
+    // source.read consumes the gesture before the opening render can commit.
+    if (gesture.current?.pendingPointer) clearContextSource?.(source)
+  }
   const isMac = isMacPlatform()
   // 键位不在这里算：三个走注册表、paste 走原生 Edit→Paste 的和弦，理由与来源都在 lib 那一层。
   const chords = terminalMenuChords(isMac)
@@ -162,10 +167,10 @@ export function TerminalContextMenu({
   if (setContextSource) return <div ref={element} className="terminal-context-source"
     onPointerDownCapture={event => {
       if (event.button === 2 || event.ctrlKey || event.pointerType !== 'mouse') register(event, true)
-    }} onPointerCancel={() => { if (openSource !== source) clearContextSource?.(source) }}
-    onPointerUp={() => { if (openSource !== source) clearContextSource?.(source) }}
+    }} onPointerCancel={cancelPendingPointer}
+    onPointerUp={cancelPendingPointer}
     onPointerMove={event => {
-      if (event.pointerType !== 'mouse' && openSource !== source) clearContextSource?.(source)
+      if (event.pointerType !== 'mouse') cancelPendingPointer()
     }} onContextMenuCapture={event => { register(keyboardRequest.current ? null : event, false, !keyboardRequest.current) }}
     onKeyDownCapture={event => {
       if (!event.currentTarget.contains(event.target as Node) || isImeOwnedKeyboardEvent(event.nativeEvent)
