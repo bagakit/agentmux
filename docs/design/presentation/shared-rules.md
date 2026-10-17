@@ -284,7 +284,7 @@ Executor 头像的装饰徽标使用独立语义项与适合 6／8px 的简单�
 
 macOS Dock 的系统徽标只显示当前待用户处理数，零时不显示；使用平台原生样式，不增加窗口内第二个同义控件。事实与更新行为归交互合同[《跨会话注意力与系统通知》](../behavior/settings-and-observation.md#跨会话注意力与系统通知)。
 
-消息与 Agent 地址的具体可读性约束见交互合同[《A2A 消息要让人一眼看懂》](../behavior/agent-capabilities-and-messaging.md#a2a-消息要让人一眼看懂)；本层只要求工作面优先显示紧凑地址，不常驻铺开机器回执或完整 ID。
+消息与 Agent 地址的具体可读性约束见交互合同[《A2A 消息要让人一眼看懂》](../behavior/a2a-collaboration.md#a2a-消息要让人一眼看懂)；本层只要求工作面优先显示紧凑地址，不常驻铺开机器回执或完整 ID。
 
 ## 密度预算
 
