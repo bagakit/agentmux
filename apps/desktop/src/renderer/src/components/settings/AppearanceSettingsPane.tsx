@@ -1,3 +1,4 @@
+import './appearance-settings.css'
 import { ThemeLibrary } from './ThemeLibrary'
 import { ThemeEditor } from './ThemeEditor'
 import { DEFAULT_THEME_ID, getThemeCatalog, type ThemeCatalogItem } from '@agentmux/client-ui/theme'
@@ -36,6 +37,7 @@ export function AppearanceSettingsPane({ appearance, onSave, active = true }: {
   const [editingTheme, setEditingTheme] = useState<ThemeCatalogItem | null>(null)
   const theme = useSettingDraft(appearance.themeId ?? DEFAULT_THEME_ID)
   const catalog = getThemeCatalog(appearance.customThemes)
+  const selectedTheme = catalog.items.find(item => item.id === theme.value)
   const app = useSettingDraft<AppAppearanceId>(appearance.appAppearance ?? APP_APPEARANCE_DEFAULT)
   const terminal = useSettingDraft<TerminalThemeId>(appearance.terminalTheme)
   const font = useSettingDraft(String(appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT))
@@ -86,7 +88,7 @@ export function AppearanceSettingsPane({ appearance, onSave, active = true }: {
   }
 
   return (
-    <div className="settings-pane-stack" data-theme-editing={editingTheme ? '' : undefined}>
+    <div className="settings-pane-stack settings-appearance" data-theme-editing={editingTheme ? '' : undefined}>
       <section className="settings-group" data-settings-field="workspace-theme">
         <header><span>Workspace theme</span><small>{catalog.items.length} themes</small></header>
         <div className="settings-theme-grid" role="radiogroup" aria-label="Workspace theme">
@@ -98,18 +100,19 @@ export function AppearanceSettingsPane({ appearance, onSave, active = true }: {
                 <i style={{ background: item.value.variants[mode].colors.surface2 }} /><b style={{ color: item.value.variants[mode].colors.action }}>Aa</b><em style={{ background: item.value.variants[mode].colors.surface1 }} />
               </span>)}
             </span>
-            <span><strong>{item.value.name}</strong><small>{item.value.description}</small><small className="settings-theme-choice__identity" title={item.id}>{item.readonly ? 'Built-in · ' : 'Custom · '}{item.id}</small></span>
+            <span className="settings-appearance__theme-name"><strong>{item.value.name}</strong><small>{item.readonly ? 'Built-in' : 'Custom'}</small></span>
             {theme.value === item.id ? <SemanticIcon name="status.selected" className="settings-theme-choice__check" size={13} /> : null}
           </label>)}
         </div>
+        {selectedTheme ? <div className="settings-appearance__selection" data-theme-description={selectedTheme.id}><p>{selectedTheme.value.description}</p><code>{selectedTheme.id}</code></div> : null}
         {catalog.issues.map(issue => <p className="settings-error" key={issue.id}><strong>{issue.id}</strong> — {issue.message}</p>)}
         {!catalog.items.some(item => item.id === theme.value) ? <p className="settings-error">Selected theme “{theme.value}” is unavailable. Its data is retained; choose a theme to restore the selection.</p> : null}
-        <ThemeLibrary selected={catalog.items.find(item => item.id === theme.value)} appearance={appearance} active={active} editing={editingTheme !== null} onSave={onSave} onCustomize={() => {
+        <ThemeLibrary selected={selectedTheme} appearance={appearance} active={active} editing={editingTheme !== null} onSave={onSave} onCustomize={() => {
           if (editingTheme) { document.querySelector<HTMLElement>('.theme-editor')?.scrollIntoView({ block: 'start' }); return }
           const selected = catalog.items.find(item => item.id === theme.value)
           if (selected) setEditingTheme(selected)
         }} />
-        <p className="settings-hint">Customize selected theme to edit colors, typography, and semantic icons. Enable “Preview in this window” in the editor to try changes on actual controls before saving. Each theme includes dark and light surfaces; application appearance chooses the brightness, and your terminal palette stays independent.</p>
+        <details className="settings-appearance__help"><summary>Theme editing and previews</summary><p className="settings-hint">Customize selected theme to edit colors, typography, and semantic icons. Enable “Preview in this window” in the editor to try changes on actual controls before saving. Each theme includes dark and light surfaces; application appearance chooses the brightness, and your terminal palette stays independent.</p></details>
       </section>
       {editingTheme ? <ThemeEditor key={editingTheme.id} item={editingTheme} appearance={appearance} active={active} onSave={onSave} onClose={() => setEditingTheme(null)} /> : null}
       <section className="settings-group" data-settings-field="app-appearance">
