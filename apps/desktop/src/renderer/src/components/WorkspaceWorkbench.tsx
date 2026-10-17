@@ -178,21 +178,21 @@ function SortableWorkbenchTab({
   const agentNames = useWorkbenchTabRecord('agentNames', tab)
   const timelines = useWorkbenchTabRecord('timelines', tab)
   const dirtyDocuments = useAppStore((state) => state.dirtyDocuments)
-  const activateTab = useAppStore((state) => state.activateTab)
-  const closeTab = useAppStore((state) => state.closeTab)
-  const renameTab = useAppStore((state) => state.renameTab)
-  const renameAgent = useAppStore((state) => state.renameAgent)
-  const moveTabToNewGroup = useAppStore((state) => state.moveTabToNewGroup)
-  const arrangeTabRegions = useAppStore((state) => state.arrangeTabRegions)
+  const activateTab = useAppStore.getState().activateTab
+  const closeTab = useAppStore.getState().closeTab
+  const renameTab = useAppStore.getState().renameTab
+  const renameAgent = useAppStore.getState().renameAgent
+  const moveTabToNewGroup = useAppStore.getState().moveTabToNewGroup
+  const arrangeTabRegions = useAppStore.getState().arrangeTabRegions
   const config = useAppStore((state) => state.config)
   const localHome = useAppStore((state) => state.localHome)
-  const moveSessionViewToWorkspace = useAppStore((state) => state.moveSessionViewToWorkspace)
+  const moveSessionViewToWorkspace = useAppStore.getState().moveSessionViewToWorkspace
   // 键盘 Cmd+W 在单 Region Tab 上关整张 Tab 的意图：窗口监听够不着这里的确认流，所以它只投一个意图，
   // 由目标 Tab（intent 的 tabId 命中自己）跑既有的 requestTabsClose——与鼠标点 X 同一条路，含未保存/在跑
   // Agent 的确认。跑完清掉意图。
   const closeTabRequest = useAppStore((state) => state.closeTabRequest)
-  const clearCloseTabRequest = useAppStore((state) => state.clearCloseTabRequest)
-  const reportError = useAppStore((state) => state.reportError)
+  const clearCloseTabRequest = useAppStore.getState().clearCloseTabRequest
+  const reportError = useAppStore.getState().reportError
   const surface = titleWorkbenchSurface(tab)
   const session = isSessionSurface(surface)
     ? sessions.find((item) => item.id === surface.sessionId)
@@ -783,17 +783,17 @@ function WorkbenchRegionContent({
     return tab.topicId ? scratchTopicsForWorkspace(state.scratchTopicSnapshots, resource)?.find(item => item.id === tab.topicId) : undefined
   })
   const actualDefaults = useMoteDefaultConversation(actualTopic, tab.workspaceId, surfaceVisible)
-  const focusRegion = useAppStore((state) => state.focusRegion)
+  const focusRegion = useAppStore.getState().focusRegion
   const retainedRegionId = useWorkbenchRetainedRegionId()
-  const closeRegion = useAppStore((state) => state.closeRegion)
-  const splitRegion = useAppStore((state) => state.splitRegion)
-  const arrangeTabRegions = useAppStore((state) => state.arrangeTabRegions)
-  const swapRegions = useAppStore((state) => state.swapRegions)
-  const promoteRegionToTab = useAppStore((state) => state.promoteRegionToTab)
+  const closeRegion = useAppStore.getState().closeRegion
+  const splitRegion = useAppStore.getState().splitRegion
+  const arrangeTabRegions = useAppStore.getState().arrangeTabRegions
+  const swapRegions = useAppStore.getState().swapRegions
+  const promoteRegionToTab = useAppStore.getState().promoteRegionToTab
   const dirtyDocuments = useAppStore((state) => state.dirtyDocuments)
   const closeRegionRequest = useAppStore((state) => state.closeRegionRequest)
-  const clearCloseRegionRequest = useAppStore((state) => state.clearCloseRegionRequest)
-  const reportError = useAppStore((state) => state.reportError)
+  const clearCloseRegionRequest = useAppStore.getState().clearCloseRegionRequest
+  const reportError = useAppStore.getState().reportError
   const [confirmingClose, setConfirmingClose] = useState(false)
   const surface = tab.regions[node.regionId]
   const connector = useAgentConnectorMenu(node.regionId, surface ? addressableAgentSessionId(surface) : null, tab.id)
@@ -1029,7 +1029,7 @@ function WorkbenchRegionBranch({
   surfaceVisible: boolean
   onDragging: (active: boolean) => void
 }) {
-  const updateRegionSplitRatio = useAppStore((state) => state.updateRegionSplitRatio)
+  const updateRegionSplitRatio = useAppStore.getState().updateRegionSplitRatio
   const [dragging, setDragging] = useState(false)
   useEffect(() => () => { if (dragging) onDragging(false) }, [dragging, onDragging])
   const commitRef = useRef((ratio: number) => (
@@ -1139,11 +1139,11 @@ function PaneGroup({
   const tabsById = useAppStore(useShallow((state) => projection
     ? Object.fromEntries(group.tabOrder.flatMap(id => state.tabs[id] ? [[id, state.tabs[id]!]] : []))
     : workbenchDisplayTabs(state.tabs, workspaceId, allLayout)))
-  const focusTabGroup = useAppStore((state) => state.focusTabGroup)
-  const activateTab = useAppStore((state) => state.activateTab)
-  const splitRegion = useAppStore((state) => state.splitRegion)
-  const arrangeTabRegions = useAppStore((state) => state.arrangeTabRegions)
-  const stopSession = useAppStore((state) => state.stopSession)
+  const focusTabGroup = useAppStore.getState().focusTabGroup
+  const activateTab = useAppStore.getState().activateTab
+  const splitRegion = useAppStore.getState().splitRegion
+  const arrangeTabRegions = useAppStore.getState().arrangeTabRegions
+  const stopSession = useAppStore.getState().stopSession
   const [pendingStopSessionId, setPendingStopSessionId] = useState<string | null>(null)
   const [stopping, setStopping] = useState(false)
   const { setNodeRef, isOver } = useDroppable({
@@ -1444,7 +1444,7 @@ function SplitBranch({
   recoveryNotice?: ReactNode
 }) {
   const projection = useContext(WorkbenchProjectionContext)
-  const updateSplitRatio = useAppStore((state) => state.updateSplitRatio)
+  const updateSplitRatio = useAppStore.getState().updateSplitRatio
   const [dragging, setDragging] = useState(false)
   const terminalResizeSuspended = interactiveResize || dragging
   const commitRef = useRef((ratio: number) => updateSplitRatio(workspaceId, nodePath, ratio))
@@ -1834,9 +1834,9 @@ export function WorkspaceWorkbench({
   const bodyViewHostPrefix = retainUnplacedTab ? lastConfirmedBody.current?.viewHostPrefix ?? effectiveViewHostPrefix : effectiveViewHostPrefix
   const bodyDisplayWorkspaceId = retainUnplacedTab ? lastConfirmedBody.current?.displayWorkspaceId ?? workspaceId : workspaceId
   const showReferenceBody = retainUnplacedTab && !lastConfirmedBody.current
-  const moveTab = useAppStore((state) => state.moveTab)
-  const openLauncher = useAppStore((state) => state.openLauncher)
-  const moveTabToNewGroup = useAppStore((state) => state.moveTabToNewGroup)
+  const moveTab = useAppStore.getState().moveTab
+  const openLauncher = useAppStore.getState().openLauncher
+  const moveTabToNewGroup = useAppStore.getState().moveTabToNewGroup
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const [activeDrag, setActiveDrag] = useState<DragTabData | null>(null)
   const [splitTarget, setSplitTarget] = useState<SplitTarget | null>(null)
