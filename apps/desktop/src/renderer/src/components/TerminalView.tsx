@@ -976,7 +976,7 @@ export function TerminalView({
     const pending: RuntimeEvent[] = []
     let pendingBytes = 0
     let latestObservedOutputBytes = session.latestOutputBytes
-    const incidentDispatcher = clientIncidentDispatcher(root.ownerDocument)
+    const incidentDispatcher = clientIncidentDispatcher()
     incidents = createClientIncidentRecorder({
       hostId: session.control.hostId, agentSessionId: session.kind === 'agent' ? session.id : null,
       runId: session.control.run.runId, regionId: () => linkOriginRef.current.regionId ?? null,
