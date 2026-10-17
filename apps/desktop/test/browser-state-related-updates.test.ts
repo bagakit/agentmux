@@ -9,7 +9,7 @@ import { addWorkbenchRegion, createWorkbenchTab, type BrowserWorkbenchSurface } 
 
 function browser(regionId: string, browserId: string): BrowserWorkbenchSurface {
   return {
-    regionId, browserId, id: browserId, kind: 'browser', workspaceId: 'workspace',
+    regionId, browserId, id: browserId, kind: 'browser', mode: 'normal', workspaceId: 'workspace',
     navigationId: `navigation-${browserId}`, url: 'https://example.test/original', title: 'Original',
     profileId: 'original-profile', driving: false, appLinkPrompt: null,
     loading: false, canGoBack: false, canGoForward: false, viewport: 'responsive', error: null
@@ -34,7 +34,7 @@ function fixture(direction: SplitDirection) {
   layout = moveTabToNewGroup(layout, 'unrelated-tab', 'group', 'group', direction, 'other-group')
   const state = { tabs, layouts: { workspace: layout } }
   const updated: BrowserSnapshot = {
-    id: 'related', navigationId: 'navigation-new', url: 'https://example.test/updated', title: 'Updated',
+    id: 'related', mode: 'normal', navigationId: 'navigation-new', url: 'https://example.test/updated', title: 'Updated',
     profileId: 'selected-profile', driving: true, appLinkPrompt: null,
     loading: true, canGoBack: true, canGoForward: false, viewport: 'responsive', error: null
   }
