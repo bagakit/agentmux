@@ -98,6 +98,7 @@ function applyFeedback(payload: FeedbackPayload, target?: Element): boolean {
   let timer: ReturnType<typeof setTimeout> | undefined
   let animation: Animation | undefined
   let labelAnimation: Animation | undefined
+  let motionOrigin: { x: number; y: number } | null = null
   let rippleTimer: ReturnType<typeof setTimeout> | undefined
   let rippleHost: HTMLElement | null = null
   let pointer: HTMLElement | null = null
@@ -236,14 +237,24 @@ function applyFeedback(payload: FeedbackPayload, target?: Element): boolean {
   state.decorate = (next: FeedbackPayload) => {
     if (globals[key] !== state || !state.host) return
     if (next.phase === 'preferences') {
-      updateStyle(next); stopMotion(); removeRipple(); placeLabel()
+      updateStyle(next)
+      if (!preferences.showCursor || !preferences.pointerTween || media.matches) stopMotion()
+      else if (!preferences.showCursorLabel) { labelAnimation?.cancel(); labelAnimation = undefined }
+      if (!preferences.clickRipple) removeRipple()
+      placeLabel()
     }
     if (!label || !next.avatarPng || label.querySelector('img')) return
     const image = document.createElement('img'); image.alt = ''; image.decoding = 'async'
     image.onload = () => {
       if (globals[key] !== state || !state.host || !label || label.querySelector('img')) return
       const avatar = document.createElement('span'); avatar.className = 'amux-browser-agent-avatar'
-      avatar.appendChild(image); label.prepend(avatar); stopMotion(); placeLabel()
+      avatar.appendChild(image); label.prepend(avatar); placeLabel()
+      // Reflow the label on its original clock. Loading a face must not cancel
+      // the arrow, recreate a move or restart the remaining animation budget.
+      const effect = labelAnimation?.effect as KeyframeEffect | null | undefined
+      if (effect && motionOrigin && state.point) effect.setKeyframes([
+        { transform: labelPosition(motionOrigin) }, { transform: labelPosition(state.point) }
+      ])
     }
     image.src = next.avatarPng // Main validated, bounded PNG bytes; no page or caller URL.
   }
@@ -263,6 +274,7 @@ function applyFeedback(payload: FeedbackPayload, target?: Element): boolean {
   state.decorate(payload)
   root.appendChild(host); placeLabel()
   if (point && pointer && history && preferences.showCursor && preferences.pointerTween && payload.moveMs > 0 && !media.matches && (history.point.x !== point.x || history.point.y !== point.y)) {
+    motionOrigin = history.point
     // The action never awaits the browser's local animation or its finished promise.
     animation = pointer.animate([{ transform: `translate(${history.point.x}px,${history.point.y}px)` },
       { transform: `translate(${point.x}px,${point.y}px)` }], { duration: payload.moveMs, easing: 'cubic-bezier(0.2,0.8,0.2,1)' })
