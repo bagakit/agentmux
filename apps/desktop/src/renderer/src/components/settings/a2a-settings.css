@@ -1,2 +1,7 @@
 [data-a2a-settings] .settings-reading-width { grid-template-columns: minmax(0, 1fr); }
 [data-a2a-settings] .settings-reading-width small { font-size: var(--fs-meta); }
+
+.a2a-settings__scope { margin: 0; max-width: 70ch; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
+.a2a-settings__global { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); margin-top: var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.a2a-settings__global button { flex: none; }
+@media (max-width: 560px) { .a2a-settings__global { align-items: flex-start; flex-direction: column; gap: var(--sp-2); } }

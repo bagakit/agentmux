@@ -10,8 +10,9 @@ const choices = {
   notify: ['Notify', 'Show a standard banner even when global notifications are off. Keep the global duration when enabled and always use its sound preference.']
 } as const
 
-export function A2ASettingsPane({ notifications, onSave }: {
+export function A2ASettingsPane({ notifications, onSave, onOpenNotifications }: {
   notifications: A2ANotificationPreference
+  onOpenNotifications?: () => void
   onSave(value: A2ANotificationPreference, expected: A2ANotificationPreference): Promise<void>
 }) {
   const draft = useSettingDraft(notifications), save = useSettingsSave(), group = useId()
@@ -20,7 +21,7 @@ export function A2ASettingsPane({ notifications, onSave }: {
     submitted.finish(await save.run(() => onSave(submitted.value, submitted.expected)))
   }
   return <div className="settings-pane-stack" data-a2a-settings>
-    <p className="settings-lead">Choose how incoming Agent messages get your attention while their recipient is in the background.</p>
+    <p className="a2a-settings__scope">Choose how Agent messages notify you when the receiving Agent is in the background.</p>
     <section className="settings-group" data-settings-field="a2a-notifications">
       <header><span>Incoming message notifications</span><small>Saved: {choices[notifications][0]}</small></header>
       <fieldset className="settings-reading-width">
@@ -30,8 +31,9 @@ export function A2ASettingsPane({ notifications, onSave }: {
           <span><strong>{choices[value][0]}</strong><small>{choices[value][1]}</small></span>
         </label>)}
       </fieldset>
+      {onOpenNotifications && <div className="a2a-settings__global"><span>Review global banner duration and sound.</span><button type="button" className="small-button" onClick={onOpenNotifications}>Open Notifications</button></div>}
     </section>
-    <p className="settings-footnote">Agents still receive message references at a confirmed idle opportunity and read original messages by ID. A banner does not mark a message read or accepted.</p>
+    <p className="a2a-settings__scope">Agents still receive message references at a confirmed idle opportunity and read original messages by ID. A banner does not mark a message read or accepted.</p>
     <SettingsSaveBar save={save} dirty={draft.dirty} label="Save A2A notifications" onSave={() => void persist()} />
   </div>
 }
