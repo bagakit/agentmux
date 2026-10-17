@@ -111,26 +111,22 @@ Surface、文字与状态 token 的唯一基础规则见[《主题与样式 SSOT
 
 ## 紧凑状态与输入工具行
 - 全窗 running／error 摘要沿[Focus 唯一入口](focus-context.md#中断恢复与导航)使用紧凑状态图形与计数，状态栏不再重复 Agent 汇总；局部 Activity 与非 Agent 的资源、系统通知保持各自入口。
-- Activity 菜单减少行高和留白，在有限宽度内优先 provider、活动摘要、idle 时长。
+- Activity 的共享 Agent 行、状态汇总与宽窄窗口层级沿[共享卡片呈现](focus-context.md#卡片预览与状态)，本页不另定义菜单密度。
 - Composer 展开/收起按钮属于底部工具行的第一个控件，与其他快捷操作共享基线和间距。
 - 一键 YOLO 使用单个低噪声的语义按钮，和 Executor 的其他启动设置放在同一层级；当前权限姿态仍以启动参数和 Provider 回执为准。
 
 ## Activity 工作线聚合与错误告示
-- Activity 弹层默认按 Topic / Branch / Worktree 分组；一组只占一条紧凑的 context 行，头像簇重叠排列并固定在右缘，避免逐 Agent 平铺造成纵向噪音。分组行保留 28–32px 高度、8–12px 横向内距和单行摘要；展开明细才进入逐 Agent 视图。
-- 聚合行的视觉顺序固定为“context 类型与名称 → 最近摘要 → 最紧要状态 → Provider 头像簇”。类型短标签（`Topic` / `Branch` / `Worktree` / `Unassigned`）与必要的路径/Host 元信息让悬停内容可读；头像只承载身份与参与者数量，状态颜色只承载最紧要状态；不重复渲染 `N agents`、`Current` 等可由头像或选中态直接读出的标签。
-- 聚合行正文点击直接定位该组最需处理的 Agent；折叠/展开使用独立的小命中区，不让用户为了导航先逐个猜 Agent，也不把展开动作误解成发送或停止。
-- 未分组 Agent 使用独立的“未分组”分区，不伪造 Topic 名称；跨 Host 的同名工作线不得合并。分组标题是分类标签，不做成可选中的 Project 行。
+- Activity 的组织标题、准确数量、Agent 内容及位置线索统一见[共享卡片呈现](focus-context.md#卡片预览与状态)；成员、空间身份和选择语义沿[Activity 活跃入口与空间级联](../behavior/focus-context.md#activity-活跃入口与空间级联)。
 - transient 错误使用靠近窗口边缘但不覆盖内容的 notice surface（优先顶部或侧边的保留槽），最小 32px 高，带关闭按钮与 `aria-label`；关闭按钮命中区不小于 24px。错误文字允许换行但不得把 Terminal/Activity 内容推离视口，重新查看入口放在状态或诊断面。
 - Service Window Notice 使用持久、非模态、可收起和复查的服务窗语汇；收起与事实保留的行为统一见交互合同[《我们的流程坏了，不等于 Agent 坏了》](../behavior/session-recovery.md#我们的流程坏了不等于-agent-坏了)，轻量控件统一见[《服务提醒与结果信息的轻量控件》](#服务提醒与结果信息的轻量控件)。
 - 完成与 error 判定可信度、流程诊断的作用域和健康输入边界，唯一行为来源见交互文档[《完成与 error 判定可信度》](../behavior/session-recovery.md#完成与-error-判定可信度)；本节沿用既有服务窗语汇，不另建状态颜色或错误严重度规则。
 
 ## Activity 展开密度
 
-- 单 Agent 的时长复用现有聚合摘要行的次级文字，不重复 `1 working`，不增加展开按钮或新行。完成数量使用既有 completed 图标与短数字，保持中性低对比；它保证完成后仍可查看 Activity，不制造彩点或待处理强调。
+- 单 Agent 的时长使用原次级文字，不重复 `1 working`，不增加展开按钮或新行。完成数量使用既有 completed 图标与短数字，保持中性低对比；它保证完成后仍可查看 Activity，不制造彩点或待处理强调。
 - 状态持续时间留在现有明细行的次级文字中：`working 4m · ctx 48%`、`waiting 4m`、`4m idle`、`error for 4m`。真实起点未知使用 `start time unknown`；最后活动只用 `last active 4m` 表达，不与状态时长混称。无需新增常驻行、卡片、控件或改变终端几何。行为唯一来源见交互合同[《Agent 已经这样多久了》](../behavior/agent-capabilities-and-messaging.md#agent-已经这样多久了)。
 
-- 聚合行保持一行高；展开明细只保留新增信息，不重复标题、数量和状态。无新增信息的分组不显示空箭头。
-- 明细使用紧凑单行摘要，Provider 图标和处理动作优先，减少空白与重复标签。
+- 菜单层级、Agent 行的名称与正文预算沿[共享卡片呈现](focus-context.md#卡片预览与状态)，不在此另设单行摘要或固定分组行高。
 
 ## 通知关闭状态
 
@@ -143,7 +139,7 @@ Surface、文字与状态 token 的唯一基础规则见[《主题与样式 SSOT
 
 ## Activity Agent 明细与 Agents 单入口
 
-- Agent 明细采用紧凑两行：第一行 Project/Workspace 与 Provider 图标，第二行状态、最近活动、时长；统计信息用短徽标，不堆叠大数字。
+- Agent 明细沿[共享卡片呈现](focus-context.md#卡片预览与状态)的身份、名称、状态和进展层级，不再以 Project／Workspace 元信息替代任务主层。
 - 全窗注意力明细沿[Focus 的唯一入口与来源](../behavior/settings-and-observation.md#跨会话注意力与系统通知)展开，不在状态栏或右侧再显示一份 roster；原非 Agent 的状态栏功能继续沿各自 owner。
 
 ## CPU/Memory 面板密度
