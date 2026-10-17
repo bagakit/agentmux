@@ -34,7 +34,7 @@ export const inappConversationSettingsModule = {
       <section className="settings-group" data-settings-field="references">
         <header><span>References</span></header>
         <p className="settings-group-note">Read the existing keyboard bindings and supported message formats.</p>
-        <div className="settings-pane-toolbar">
+        <div className="settings-workflows__inline-action">
           <button type="button" className="small-button" onClick={() => onNavigate('keyboard-shortcuts')}>Open Keyboard shortcuts</button>
           <button type="button" className="small-button" onClick={() => onNavigate('amux-protocols')}>Open amux Protocols</button>
         </div>
