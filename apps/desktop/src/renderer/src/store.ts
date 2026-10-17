@@ -4175,10 +4175,11 @@ export async function retainMoteBotRequest(request: MoteBotRequest): Promise<Age
 /** Remember only which original task to read; selection never dispatches its input. */
 export function setBotTaskSelection(scope: BotTaskScope, operationId: string | null): void {
   const key = botTaskSelectionKey(scope), current = useAppStore.getState().botTaskSelections
-  if (current[key] === operationId || operationId === null && !Object.hasOwn(current, key)) return
+  if ((current[key] === operationId || operationId === null && !Object.hasOwn(current, key)) && (scope.kind !== 'management' || operationId === null || current.management === key)) return
   const selections = { ...current }
   if (operationId === null) delete selections[key]
   else selections[key] = operationId
+  if (scope.kind === 'management' && operationId !== null) selections.management = key
   useAppStore.setState({ botTaskSelections: selections })
   void saveWorkbenchSelection(false)
 }

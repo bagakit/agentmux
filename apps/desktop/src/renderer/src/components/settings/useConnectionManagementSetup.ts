@@ -4,6 +4,8 @@ import type { ConnectionRecord, ConnectionSetupAction, ConnectionSetupPublicatio
 import { connectionSetupDecisionForAction } from '@agentmux/core/connections'
 import { connectionManagementTask } from './connection-management-task'
 import { api } from '../../lib/api'
+import { setBotTaskSelection, useAppStore } from '../../store'
+import { botTaskSelectionKey, managementTaskScope } from '../../lib/bot-task-selection'
 
 type Source = typeof api.connections.call
 type Submission = { key: string; source: Source; input: ConnectionSetupBegin }
@@ -20,6 +22,9 @@ const inputOf = (operation: ConnectionSetupOperation): ConnectionSetupBegin => {
 /** The mounted Settings task retains safe submissions; private readings and timers are disposable. */
 export function useConnectionManagementSetup(record: ConnectionRecord | null, active: boolean, opened: boolean) {
   const key = scope(record), source = api.connections.call
+  const locatorScope = record ? managementTaskScope(record) : null
+  const locatorKey = locatorScope ? botTaskSelectionKey(locatorScope) : ''
+  const selectedId = useAppStore(state => state.botTaskSelections[locatorKey] ?? null)
   const [catalog, setCatalog] = useState<Catalog | null>(null), [reading, setReading] = useState<Reading | null>(null)
   const [publication, setPublication] = useState<{ key: string; source: Source; id: string; fields: PublicationForm } | null>(null)
   const [submissions, setSubmissions] = useState<Submission[]>([])
@@ -45,7 +50,9 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
   const originals = (visibleCatalog?.value?.operations ?? []).filter(operation => operation.goal.kind === 'agent-conversation')
   const local = submissions.filter(item => item.input.connectionId === record?.config.connectionId && item.source === source)
   const choices = [...originals.map(operation => ({ input: inputOf(operation), operation })), ...local.filter(item => !originals.some(o => o.operationId === item.input.operationId)).map(item => ({ input: item.input, operation: null }))]
-  const busy = (visible?.pending ?? false) || guidedCheck
+  const restoring = active && opened && !!selectedId && !visible
+  const busy = (visible?.pending ?? false) || guidedCheck || restoring
+  const activityLabel = guidedCheck ? 'Checking bot settings…' : visible?.actionKind === 'confirm-account' ? 'Saving your account confirmation…' : visible?.actionKind ? 'Continuing this original setup…' : 'Reading the original saved result…'
   // User-authored fields survive an observation failure; no previous authority or private view does.
   const publicationForm = publication?.key === key && publication.source === source && publication.id === visible?.id ? publication.fields : emptyPublicationForm
   function editPublicationForm(change: Partial<PublicationForm>) {
@@ -81,6 +88,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
     const request = ++occurrence.current
     const intent = requestedConfiguration ?? (visible?.id === id && visible.value?.continuation?.stage === 'confirmed' ? configurationSelector : undefined)
     selection.current = id; setDriving(run)
+    if (locatorScope) setBotTaskSelection(locatorScope, id)
     setReading(previous => previous?.key === key && previous.source === source && previous.id === id
       ? { ...previous, issue: '', absent: false, pending: true, actionKind, intent } : { key, source, id, value: null, issue: '', absent: false, pending: true, actionKind, intent })
     const accepts = () => currentSource() && context.current.opened && selection.current === id && request === occurrence.current
@@ -139,7 +147,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
     requestedHandoff.current = submission
   }
   function inspectOriginal(selectors: Omit<ConnectionSetupInspect, 'operationId'> = {}, originalOperationId?: string) {
-    const id = originalOperationId ?? visible?.id
+    const id = originalOperationId ?? selectedId
     const intent = selectors.applicationConfiguration ?? (view?.continuation?.stage === 'confirmed' || visible?.intent ? configurationSelector : undefined)
     if (id) void perform(id, () => source('connection.setup.inspect', {
       operationId: id, applicationInspection: {}, applicationConfiguration: configurationSelector, ...selectors
@@ -258,25 +266,29 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
     const input = operation && matches(operation) ? inputOf(operation) : local.find(item => item.key === key && item.input.operationId === visible?.id)?.input
     if (input) void perform(input.operationId, () => source('connection.setup.begin', input), true)
   }
-  function another() {
+  function clearSelection(fresh: boolean) {
     checkOwner.current = null; setGuidedCheck(false)
     occurrence.current++; selection.current = null; draft.current = null; submittedActions.current.clear()
-    setReading(null); setPublication(null); setDriving(false); setFresh(true)
+    if (locatorScope) setBotTaskSelection(locatorScope, null)
+    setReading(null); setPublication(null); setDriving(false); setFresh(fresh)
   }
+  const another = () => clearSelection(true)
+  const chooseOriginalRequest = () => clearSelection(false)
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; occurrence.current++; listOccurrence.current++ } }, [])
   useEffect(() => {
-    checkOwner.current = null; setGuidedCheck(false)
-    occurrence.current++; listOccurrence.current++; selection.current = null; draft.current = null
-    if (!active || requestedHandoff.current?.key !== key || requestedHandoff.current?.source !== source) requestedHandoff.current = null
-    setReading(null); setPublication(null); setDriving(false); setListing(false); setFresh(false); submittedActions.current.clear()
+    listOccurrence.current++; setListing(false)
     if (active && record) void list()
   }, [key, source, active])
   useEffect(() => {
     checkOwner.current = null; setGuidedCheck(false)
-    occurrence.current++; selection.current = null; setReading(null); setPublication(null); setDriving(false); setFresh(false); submittedActions.current.clear()
-    if (!opened) requestedHandoff.current = null
-  }, [opened])
+    occurrence.current++; selection.current = null; draft.current = null
+    setReading(null); setPublication(null); setDriving(false); setFresh(false); submittedActions.current.clear()
+    if (!active || !opened) { requestedHandoff.current = null; return }
+    if (requestedHandoff.current?.key === key && requestedHandoff.current.source === source) return
+    const id = useAppStore.getState().botTaskSelections[locatorKey]
+    if (id) void perform(id, () => source('connection.setup.inspect', { operationId: id, applicationInspection: {}, applicationConfiguration: { effect: 'enable-messaging' } }), false)
+  }, [key, source, active, opened])
   useEffect(() => {
     const submission = requestedHandoff.current
     if (!active || !opened || !submission || submission.key !== key || submission.source !== source) return
@@ -304,7 +316,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
     return () => { cancelled = true; clearTimeout(timer) }
   }, [active, opened, driving, busy, key, source, view])
 
-  return { task: connectionManagementTask(view), guidedCheck, checkGuidedSettings, checkPublicationStatus, returnToGuided, inspectOriginalConfiguration, publicationForm, editPublicationForm, supported, catalog: visibleCatalog, listing, choices, reading: visible, view, observedView, busy, driving, fresh, revised, list, start, handoff, choose, inspect, inspectOriginal, advance, reviewPermissions, reviewMessageReception, reviewPublication, continueOriginal, another }
+  return { selectedId, activityLabel, chooseOriginalRequest, canContinueOriginal: !!operation && matches(operation) || !!chosenInput, task: connectionManagementTask(view), guidedCheck, checkGuidedSettings, checkPublicationStatus, returnToGuided, inspectOriginalConfiguration, publicationForm, editPublicationForm, supported, catalog: visibleCatalog, listing, choices, reading: visible, view, observedView, busy, driving, fresh, revised, list, start, handoff, choose, inspect, inspectOriginal, advance, reviewPermissions, reviewMessageReception, reviewPublication, continueOriginal, another }
 }
 
 export type ConnectionManagementModel = ReturnType<typeof useConnectionManagementSetup>
