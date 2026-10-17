@@ -1811,26 +1811,36 @@ export function TerminalView({
       viewport.dispose()
       renderReady?.dispose()
       if (webglVisibilityRef.current === synchronizeWebglVisibility) webglVisibilityRef.current = null
-      releaseWebgl()
-      oscHandlers.dispose()
-      searchCounter.dispose()
-      selection.dispose()
-      linkPreviewScroll.dispose()
-      pathLinks.dispose()
-      pasteSanitizer()
-      disposeEvents()
-      input.dispose()
-      resize.disconnect()
-      if (attachmentId !== null) {
-        void api.sessions.detach(attachmentId).catch((error) => {
-          console.warn('[terminal] Attachment release was not acknowledged', error)
-        })
-      }
-      if (pasteTargetRef.current === pasteInput) pasteTargetRef.current = null
-      releaseViewportMemoryMarker(terminal)
-      observeDisposal('xterm-dispose', () => terminal.dispose())
-      releasePerformance()
-      resourceOwners.release()
+      // A native disposal failure must remain observable after this retired view's
+      // independent attachment and diagnostic owners have been released.
+      let disposalFailure: { error: unknown } | undefined
+      try { releaseWebgl() } catch (error) { disposalFailure = { error } }
+      try {
+        oscHandlers.dispose()
+        searchCounter.dispose()
+        selection.dispose()
+        linkPreviewScroll.dispose()
+        pathLinks.dispose()
+        pasteSanitizer()
+        disposeEvents()
+        input.dispose()
+        resize.disconnect()
+        if (attachmentId !== null) {
+          void api.sessions.detach(attachmentId).catch((error) => {
+            console.warn('[terminal] Attachment release was not acknowledged', error)
+          })
+        }
+        if (pasteTargetRef.current === pasteInput) pasteTargetRef.current = null
+        releaseViewportMemoryMarker(terminal)
+        observeDisposal('xterm-dispose', () => terminal.dispose())
+      } catch (error) { disposalFailure ??= { error } }
+      try {
+        releasePerformance()
+      } catch (error) { disposalFailure ??= { error } }
+      try {
+        resourceOwners.release()
+      } catch (error) { disposalFailure ??= { error } }
+      if (disposalFailure) throw disposalFailure.error
     }
   }, [session.control.run.runId, session.id])
 
