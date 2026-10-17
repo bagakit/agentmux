@@ -43,6 +43,19 @@ function terminal(): AgentMuxClientIncidentReport {
 }
 
 describe('reading evidence in the sole client incident archive', () => {
+  it('detaches the accepted report before the caller can mutate queued metadata', async () => {
+    const owner = await archive(), report = readingClientIncident(record('held'), 0)
+    const original = structuredClone(report)
+    const receipt = owner.enqueue(report, producer())
+    expect(receipt.accepted).toBe(true)
+    report.agentSessionId = 'changed-after-admission'
+    report.reading.scope.agentSessionId = 'changed-after-admission'
+    report.reading.coverage.rejected = 1
+    await owner.flush()
+    expect(await owner.read({ domain: 'client.incident', hostId: 'local', logId: receipt.logId! }, bounds()))
+      .toMatchObject({ availability: 'found', persistence: 'confirmed', data: { report: original } })
+  })
+
   it('preserves the original ID and rejects a conflicting producer without overwriting the original', async () => {
     const owner = await archive(), original = record('held'), report = readingClientIncident(original, 0)
     expect(owner.enqueue(report, producer())).toEqual({ accepted: true, logId: original.logId })
