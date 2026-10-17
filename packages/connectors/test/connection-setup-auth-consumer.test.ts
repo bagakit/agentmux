@@ -42,7 +42,7 @@ function advanceInput(view: ConnectionSetupView, kind: 'continue' | 'confirm-acc
   return { operationId: view.operation!.operationId, expectedRevision: actions[0].expectedRevision,
     decision: { actionId: actions[0].actionId, value: kind === 'confirm-account' ? 'confirm' : kind } }
 }
-async function fixture(options: { paused?: boolean; operationId?: string } = {}) {
+async function fixture(options: { paused?: boolean; operationId?: string; goal?: ConnectionSetupBegin['goal'] } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'setup-auth-')), directory = join(root, 'connections'), socketPath = join(root, 'owner.sock'), encryption = enrollmentEncryption()
   let services: Awaited<ReturnType<typeof createDesktopConnections>>, server: AgentMuxControlServer, sdk: Awaited<ReturnType<typeof connectAgentMuxRpc>>
   const open = async () => {
@@ -56,7 +56,7 @@ async function fixture(options: { paused?: boolean; operationId?: string } = {})
   const credential = await services.secrets.store({ operationId: 'auth-saved-credential', secret: CREDENTIAL })
   const config: ConnectionConfig = { connectionId: 'auth-saved-bot', adapterId: 'feishu', application: { domain: 'open.feishu.cn', appId: 'cli_auth_saved_bot' }, label: 'Original saved bot', enabled: !options.paused, credentialRef: credential.credentialRef }
   const saved = await sdk.call('connection.configure', { operationId: 'auth-original-save', expectedRevision: null, connection: config })
-  const input: ConnectionSetupBegin = { operationId: options.operationId ?? 'auth-original-management', connectionId: config.connectionId, expectedConnectionRevision: saved.connection.revision, goal }
+  const input: ConnectionSetupBegin = { operationId: options.operationId ?? 'auth-original-management', connectionId: config.connectionId, expectedConnectionRevision: saved.connection.revision, goal: options.goal ?? goal }
   const cli = (args: string[], body?: unknown) => runCompiledObjectCli(['--endpoint', 'unix:' + socketPath, 'connection', 'setup', ...args], objectCliEnvironment(root), body === undefined ? '' : JSON.stringify(body))
   return { root, directory, encryption, config, saved, input, cli, close, reopen: open, get sdk() { return sdk }, get services() { return services } }
 }
@@ -106,7 +106,7 @@ function authenticationSnapshots(f: Fixture, operationId: string): Record<string
 }
 async function assertSafeDiscovery(f: Fixture, view: ConnectionSetupView) {
   const listed = result<{ operations: unknown[]; next: string | null }>(await f.cli(['ls', '--connection', f.input.connectionId]))
-  expect(listed).toEqual({ operations: [view.operation], next: null, support: { connectionRevision: view.operation!.expectedConnectionRevision, capabilities: ['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation', 'initial-setup'] } })
+  expect(listed).toEqual({ operations: [view.operation], next: null, support: { connectionRevision: view.operation!.expectedConnectionRevision, capabilities: ['profile-update', 'management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation', 'initial-setup'] } })
   const tables = f.services.database!.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all()
   expect(tables.length).toBeGreaterThan(0)
   const records = tables.map(table => f.services.database!.prepare('SELECT * FROM "' + String(table.name).replaceAll('"', '""') + '"').all())
@@ -363,6 +363,137 @@ it.each([null, 'qr_login_polling'] as const)('zero on %s remains an original wai
   ])
 })
 
+it.each(['waiting', 'scanned'] as const)('keeps the original %s challenge visible through public SDK and CLI inspections while its exact poll is pending', async stage => {
+  const f = await fixture(), entered = deferred<void>(), response = deferred<Response>()
+  let polls = 0
+  const requests = vi.fn(async (url: string | URL | Request) => {
+    if (new URL(String(url)).pathname.endsWith('/init')) return qrResponse()
+    if (stage === 'scanned' && ++polls === 1) return polling(2)
+    entered.resolve(); return await response.promise
+  }); vi.stubGlobal('fetch', requests)
+  let source = await f.sdk.call('connection.setup.begin', f.input)
+  if (stage === 'scanned') source = await advance(f, source)
+  expect(source.challenge).not.toBeNull()
+  const input = advanceInput(source), pending = f.sdk.call('connection.setup.advance', input)
+  await entered.promise
+  try {
+    const calls = requests.mock.calls.length, observed = await inspect(f)
+    expect(observed.operation?.authentication).toMatchObject({ request: 'dispatching', secureStorage: 'not-started', attemptId: source.operation?.authentication?.attemptId ?? source.operation!.request.attemptId })
+    expect(observed.challenge).toEqual(source.challenge)
+    expect(observed.challengeSource).toEqual({ attemptId: observed.operation!.authentication!.attemptId, stepId: source.operation?.authentication?.stepId ?? source.operation!.request.attemptId })
+    expect(observed.continuation).toEqual({ stage, account: null, actions: [] })
+    expect(result(await f.cli(['inspect', '--operation-id', f.input.operationId]))).toEqual(observed)
+    expect(await inspect(f)).toEqual(observed)
+    expect(requests).toHaveBeenCalledTimes(calls)
+  } finally { response.resolve(polling(5)); await pending }
+  const expired = await inspect(f)
+  expect(expired.challenge).toBeNull()
+  expect(expired.challengeSource).toBeUndefined()
+  expect(expired.continuation?.stage).toBe('expired')
+}, 20_000)
+
+it.each(['waiting', 'scanned', 'expired'] as const)('uses the current %s result while only its original secure ACK is pending', async stage => {
+  const f = await fixture(), entered = deferred<void>(), release = deferred<void>()
+  const requests = vi.fn(async (url: string | URL | Request) => new URL(String(url)).pathname.endsWith('/init') ? qrResponse() : polling(stage === 'waiting' ? 1 : stage === 'scanned' ? 2 : 5))
+  vi.stubGlobal('fetch', requests)
+  const source = await f.sdk.call('connection.setup.begin', f.input), originalStore = DesktopConnectorSecrets.prototype.store
+  vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementation(async function(this: DesktopConnectorSecrets, input) {
+    if (input.operationId.startsWith('connection-setup-step:')) { entered.resolve(); await release.promise }
+    return originalStore.call(this, input)
+  })
+  const pending = advance(f, source)
+  await entered.promise
+  try {
+    const calls = requests.mock.calls.length, observed = await inspect(f)
+    expect(observed.operation?.authentication).toMatchObject({ request: 'confirmed', secureStorage: 'storing', stage })
+    expect(observed.continuation).toEqual({ stage, account: null, actions: [] })
+    expect(observed.challenge?.qrPayload ?? null).toBe(stage === 'expired' ? null : source.challenge!.qrPayload)
+    expect(observed.challengeSource).toEqual(stage === 'expired' ? undefined : { attemptId: observed.operation!.authentication!.attemptId, stepId: observed.operation!.authentication!.stepId })
+    expect(requests).toHaveBeenCalledTimes(calls)
+  } finally { release.resolve(); await pending }
+  expect((await inspect(f)).continuation?.stage).toBe(stage)
+}, 20_000)
+
+it.each(['stored', 'unknown'] as const)('keeps profile progress running only for its live QR save and preserves the resulting %s ACK fact', async storage => {
+  const f = await fixture({ goal: { kind: 'profile-update', desired: { name: 'AMUX identity' }, publication: { notes: 'Save the original bot identity.' } } })
+  const entered = deferred<void>(), release = deferred<void>()
+  const requests = vi.fn(async (url: string | URL | Request) => new URL(String(url)).pathname.endsWith('/init') ? qrResponse() : polling(2))
+  vi.stubGlobal('fetch', requests)
+  const source = await f.sdk.call('connection.setup.begin', f.input), originalStore = DesktopConnectorSecrets.prototype.store
+  vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementation(async function(this: DesktopConnectorSecrets, input) {
+    if (input.operationId.startsWith('connection-setup-step:')) {
+      entered.resolve(); await release.promise
+      if (storage === 'unknown') throw new Error('Fixture secure ACK unavailable')
+    }
+    return originalStore.call(this, input)
+  })
+  const pending = advance(f, source)
+  await entered.promise
+  try {
+    const observed = await inspect(f)
+    expect(observed.operation?.authentication).toMatchObject({ request: 'confirmed', secureStorage: 'storing', stage: 'scanned' })
+    expect(observed.challenge?.qrPayload).toBe(source.challenge!.qrPayload)
+    expect(observed.challengeSource?.stepId).toBe(observed.operation!.authentication!.stepId)
+    expect(observed.profileUpdate).toEqual({ stage: 'authentication', state: 'running', actions: [] })
+  } finally { release.resolve(); await pending }
+  const observed = await inspect(f)
+  expect(observed.operation?.authentication?.secureStorage).toBe(storage)
+  expect(observed.challengeSource).toBeUndefined()
+  expect(observed.profileUpdate).toEqual({ stage: 'authentication', state: storage === 'stored' ? 'pending' : 'attention', actions: [] })
+  if (storage === 'unknown') expect(observed.challenge).toBeNull()
+  expect(requests).toHaveBeenCalledTimes(2)
+}, 20_000)
+
+it('never borrows an earlier challenge while a new attempt is being explicitly renewed', async () => {
+  const f = await fixture(), entered = deferred<void>(), response = deferred<Response>()
+  let inits = 0
+  const requests = vi.fn(async () => {
+    if (++inits === 1) return qrResponse()
+    entered.resolve(); return await response.promise
+  }); vi.stubGlobal('fetch', requests)
+  const source = await f.sdk.call('connection.setup.begin', f.input), pending = advance(f, source, 'renew')
+  await entered.promise
+  try {
+    const observed = await inspect(f)
+    expect(observed.operation?.authentication).toMatchObject({ request: 'dispatching', secureStorage: 'not-started' })
+    expect(observed.operation?.authentication?.attemptId).not.toBe(source.operation!.request.attemptId)
+    expect(observed.challenge).toBeNull()
+    expect(observed.challengeSource).toBeUndefined()
+    expect(observed.continuation).toEqual({ stage: 'handoff', account: null, actions: [] })
+    expect(requests).toHaveBeenCalledTimes(2)
+  } finally { response.resolve(qrResponse('fixture-renewed-active-code')); await pending }
+  const renewed = await inspect(f)
+  expect(renewed.challengeSource).toBeUndefined()
+  expect(renewed.challenge?.qrPayload).not.toBe(source.challenge!.qrPayload)
+  expect(renewed.continuation?.stage).toBe('waiting')
+}, 20_000)
+
+it('reads the current original challenge when its authentication revision advances during a private snapshot read', async () => {
+  const f = await fixture(), entered = deferred<void>(), release = deferred<void>()
+  let polls = 0, held = false
+  const requests = vi.fn(async (url: string | URL | Request) => new URL(String(url)).pathname.endsWith('/init') ? qrResponse() : polling(++polls === 1 ? 1 : 2))
+  vi.stubGlobal('fetch', requests)
+  const waiting = await advance(f, await f.sdk.call('connection.setup.begin', f.input))
+  const source = f.services.database!.prepare('SELECT private_ref FROM connection_setup_auth_step WHERE operation_id=? ORDER BY ordinal DESC LIMIT 1').get(f.input.operationId)!
+  const originalResolve = DesktopConnectorSecrets.prototype.resolve
+  vi.spyOn(DesktopConnectorSecrets.prototype, 'resolve').mockImplementation(async function(this: DesktopConnectorSecrets, ref) {
+    const value = await originalResolve.call(this, ref)
+    if (!held && ref === source.private_ref) { held = true; entered.resolve(); await release.promise }
+    return value
+  })
+  const reading = inspect(f)
+  await entered.promise
+  try {
+    const scanned = await advance(f, waiting)
+    release.resolve()
+    const observed = await reading
+    expect(observed.operation).toEqual(scanned.operation)
+    expect(observed.challenge).toEqual(scanned.challenge)
+    expect(observed.continuation).toEqual(scanned.continuation)
+    expect(requests).toHaveBeenCalledTimes(3)
+  } finally { release.resolve(); await reading }
+}, 20_000)
+
 it('concurrent original actions share the durable native claim and a changed decision cannot borrow its authority', async () => {
   const f = await fixture(), entered = deferred<void>(), response = deferred<Response>()
   clean.push(() => response.resolve(polling(2)))
@@ -567,11 +698,13 @@ it('a lost poll response remains the same unknown action after reopen and neithe
   const pending = await f.sdk.call('connection.setup.begin', f.input), input = advanceInput(pending)
   const unknown = await f.sdk.call('connection.setup.advance', input)
   expect(unknown.continuation).toMatchObject({ stage: 'unknown', account: null })
+  expect(unknown.challenge).toBeNull(); expect(unknown.challengeSource).toBeUndefined()
   expect(unknown.receipt).toMatchObject({ actionId: input.decision.actionId, stepId: expect.any(String), state: 'unknown' })
   expect(JSON.stringify(unknown)).not.toContain(detail)
   await f.close(); await f.reopen()
   const observed = await inspect(f)
   expect(observed.operation?.authentication).toEqual(unknown.operation?.authentication)
+  expect(observed.challenge).toBeNull(); expect(observed.challengeSource).toBeUndefined()
   expect((await f.sdk.call('connection.setup.advance', input)).receipt).toEqual(unknown.receipt)
   expect(fetch).toHaveBeenCalledTimes(2)
   expect((await f.sdk.call('connection.inspect', { operationId: 'auth-original-save' })).operation).toEqual(f.saved)
