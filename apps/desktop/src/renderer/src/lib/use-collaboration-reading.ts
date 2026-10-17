@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentMuxRpcResult, AgentMuxMessageEvent } from '@agentmux/core'
 import { api } from './api'
 import { collaborationSubjectKey, type CollaborationReading, type CollaborationSubject } from './agent-collaboration'
@@ -12,6 +12,16 @@ export type CollaborationSource = CollaborationReading & {
   spawnCreated?: Spawns; spawnCreator?: Spawns
 }
 const empty = (subject: CollaborationSubject): CollaborationSource => ({ subject, incarnation: null, events: [], spawns: [], loading: [], issues: {}, observationIssue: 'Automatic updates are unconfirmed. Refresh the original source.' })
+/** Original pages are sorted; merging copies references without decoding or sorting old rows. */
+function mergeEvents(previous: readonly AgentMuxMessageEvent[], incoming: readonly AgentMuxMessageEvent[]) {
+  if (!incoming.length) return previous
+  const result: AgentMuxMessageEvent[] = [], page = [...incoming].sort((a, b) => a.sequence - b.sequence)
+  if (!previous.length || previous[previous.length - 1]!.sequence < page[0]!.sequence) return [...previous, ...page]
+  if (page[page.length - 1]!.sequence < previous[0]!.sequence) return [...page, ...previous]
+  let old = 0, next = 0
+  while (old < previous.length && next < page.length) result.push(previous[old]!.sequence < page[next]!.sequence ? previous[old++]! : page[next++]!)
+  return [...result, ...previous.slice(old), ...page.slice(next)]
+}
 const reason = (error: unknown) => error instanceof Error ? error.message : String(error)
 type Action = 'refresh' | 'updates' | 'resume' | 'earlier' | 'created'
 export type CollaborationPulse = { id: number; startedAt: number; hostId: string; sender: string; recipient: string; kind: 'communication' | 'supervision' }
@@ -20,34 +30,50 @@ export type CollaborationPulse = { id: number; startedAt: number; hostId: string
 export function useCollaborationReading(subjects: readonly CollaborationSubject[], enabled: boolean) {
   const scope = JSON.stringify(subjects.map(collaborationSubjectKey).sort())
   const [sources, setSources] = useState<Record<string, CollaborationSource>>({})
+  const [facts, setFacts] = useState<readonly CollaborationReading[]>([])
+  const metadata = useRef(new Map<string, CollaborationReading>())
+  const eventIndexes = useRef(new Map<string, { incarnation: string; events: Map<number, AgentMuxMessageEvent> }>())
+  const spawnIndexes = useRef(new Map<string, Map<string, CollaborationReading['spawns'][number]>>())
+  const previousActive = useRef(new Set<string>())
   const [pulses, setPulses] = useState<CollaborationPulse[]>([])
+  const activity = useRef({ through: new Map<string, number>(), sequence: 0, pulses: [] as CollaborationPulse[] })
   const generation = useRef(0), state = useRef(sources), wasEnabled = useRef(false), observedThrough = useRef(new Map<string, number>())
   const runner = useRef<(key: string, action: Action) => void>(() => {})
   useEffect(() => {
     const token = ++generation.current, restarting = !wasEnabled.current
     wasEnabled.current = enabled
-    if (!enabled) return
+    if (!enabled) { activity.current.pulses = []; setPulses([]); return }
     const originals = new Map(subjects.map(subject => [collaborationSubjectKey(subject), subject]))
-    const previousSources = state.current
-    const held: Record<string, CollaborationSource> = Object.fromEntries([...originals].map(([key, subject]) => [key, state.current[key] ? { ...state.current[key]!, loading: [] } : empty(subject)]))
-    state.current = held; setSources(held); setPulses([])
-    const pending = new Set<string>(), wanted = observedThrough.current, pulseThrough = new Map<string, number>()
+    const previousSources = state.current, entering = new Set([...originals.keys()].filter(key => !previousActive.current.has(key)))
+    previousActive.current = new Set(originals.keys())
+    // Demand controls IO. Already-read windows belong to this map lifetime, including offscreen subjects.
+    const held = { ...previousSources }
+    for (const [key, source] of Object.entries(held)) if (source.loading.length) held[key] = { ...source, loading: [] }
+    for (const [key, subject] of originals) if (!held[key]) held[key] = empty(subject)
+    state.current = held; setSources(held)
+    const pending = new Set<string>(), wanted = observedThrough.current, pulseThrough = activity.current.through
     for (const key of wanted.keys()) if (!originals.has(key)) wanted.delete(key)
-    let pulseSequence = 0, pulseTimer: ReturnType<typeof setTimeout> | undefined
-    let livePulses: CollaborationPulse[] = []
+    let pulseTimer: ReturnType<typeof setTimeout> | undefined
+    let livePulses = activity.current.pulses
     const current = () => token === generation.current
     function expirePulses() {
       clearTimeout(pulseTimer)
       if (!current()) return
       livePulses = livePulses.filter(pulse => pulse.startedAt + 1800 > Date.now())
-      setPulses(livePulses)
+      activity.current.pulses = livePulses; setPulses(livePulses)
       if (livePulses.length) pulseTimer = setTimeout(expirePulses, Math.max(1, livePulses[0]!.startedAt + 1800 - Date.now()))
     }
+    expirePulses()
     function patch(key: string, update: (source: CollaborationSource) => CollaborationSource) {
       if (!current() || !state.current[key]) return
       const previous = state.current[key]!, next = update(previous)
       if (next === previous) return
       state.current = { ...state.current, [key]: next }; setSources(state.current)
+      const fact = metadata.current.get(key)
+      if (!fact || fact.incarnation !== next.incarnation || fact.events !== next.events || fact.spawns !== next.spawns) {
+        metadata.current.set(key, { subject: next.subject, incarnation: next.incarnation, events: next.events, spawns: next.spawns, changes: next.changes })
+        setFacts([...metadata.current.values()])
+      }
     }
     async function read<T>(key: string, lane: string, fetch: () => Promise<T>, apply: (source: CollaborationSource, page: T) => CollaborationSource) {
       const operation = JSON.stringify([key, lane])
@@ -59,7 +85,7 @@ export function useCollaborationReading(subjects: readonly CollaborationSubject[
       catch (error) { patch(key, source => ({ ...source, issues: { ...source.issues, [lane]: reason(error) } })) }
       finally {
         pending.delete(operation); patch(key, source => ({ ...source, loading: source.loading.filter(name => name !== lane) }))
-        if (current() && succeeded && lane === 'events' && (state.current[key]?.updates?.after ?? 0) < (wanted.get(key) ?? 0)) queueMicrotask(() => run(key, 'updates'))
+        if (current() && succeeded && lane === 'events' && (state.current[key]?.updates?.more || (state.current[key]?.updates?.after ?? 0) < (wanted.get(key) ?? 0))) queueMicrotask(() => run(key, 'updates'))
       }
     }
     function run(key: string, action: Action) {
@@ -79,9 +105,14 @@ export function useCollaborationReading(subjects: readonly CollaborationSubject[
             wanted.delete(key); pulseThrough.delete(subject.hostId); livePulses = livePulses.filter(pulse => pulse.hostId !== subject.hostId); expirePulses()
           }
           if (!latest && previous.incarnation !== page.incarnation) throw new Error('The original journal identity changed. Refresh this source to read its current window.')
-          const events = new Map<number, AgentMuxMessageEvent>((latest && previous.incarnation !== page.incarnation ? [] : previous.events).map(event => [event.sequence, event]))
-          for (const event of page.events) events.set(event.sequence, event)
-          return { ...previous, incarnation: page.incarnation, events: [...events.values()].sort((a, b) => a.sequence - b.sequence),
+          let index = eventIndexes.current.get(key)
+          const reset = previous.incarnation !== page.incarnation
+          if (!index || index.incarnation !== page.incarnation) { index = { incarnation: page.incarnation, events: new Map() }; eventIndexes.current.set(key, index) }
+          const incoming: AgentMuxMessageEvent[] = []
+          for (const event of page.events) if (!index.events.has(event.sequence)) { index.events.set(event.sequence, event); incoming.push(event) }
+          const events = mergeEvents(reset ? [] : previous.events, incoming)
+          return { ...previous, incarnation: page.incarnation, events,
+            changes: incoming.length || reset ? { previous: reset ? undefined : previous.changes, events: incoming, spawns: [] } : previous.changes,
             ...(latest ? { history: { before: page.nextBeforeSequence, through: page.throughSequence, incarnation: page.incarnation }, updates: { after: page.throughSequence, more: false } }
               : action === 'earlier' ? { history: { before: page.nextBeforeSequence, through: page.throughSequence, incarnation: page.incarnation } }
                 : { updates: { after: page.nextAfterSequence ?? page.throughSequence, more: page.nextAfterSequence !== null, ...(page.nextAfterSequence === null ? {} : { through: page.throughSequence }) } }) }
@@ -93,9 +124,13 @@ export function useCollaborationReading(subjects: readonly CollaborationSubject[
         for (const direction of action === 'created' ? ['created'] as const : ['created', 'creator'] as const) {
           jobs.push(read<Spawns>(key, direction, () => api.sessions.spawns(subject, { direction, limit: 25, ...(cursor ? { cursor } : {}) }), (previous, page) => {
             if (page.hostId !== subject.hostId || page.participantSessionId !== subject.agentSessionId || page.direction !== direction) throw new Error('The original creation source did not match.')
-            const records = new Map(previous.spawns.map(record => [record.agentSessionId, record]))
-            for (const record of page.records) records.set(record.agentSessionId, record)
-            return { ...previous, spawns: [...records.values()], [direction === 'created' ? 'spawnCreated' : 'spawnCreator']: page }
+            let records = spawnIndexes.current.get(key)
+            if (!records) { records = new Map(); spawnIndexes.current.set(key, records) }
+            const changed: CollaborationReading['spawns'][number][] = []
+            for (const record of page.records) if (JSON.stringify(records.get(record.agentSessionId)) !== JSON.stringify(record)) { records.set(record.agentSessionId, record); changed.push(record) }
+            return { ...previous, spawns: changed.length ? [...records.values()] : previous.spawns,
+              changes: changed.length ? { previous: previous.changes, events: [], spawns: changed } : previous.changes,
+              [direction === 'created' ? 'spawnCreated' : 'spawnCreator']: page }
           }))
         }
       }
@@ -103,10 +138,10 @@ export function useCollaborationReading(subjects: readonly CollaborationSubject[
     }
     runner.current = run
     // Independent slots keep a slow Host from holding completed readers behind a batch barrier.
-    const queue = [...originals.keys()].filter(key => restarting || !held[key]?.history || !held[key]?.spawnCreated || !held[key]?.spawnCreator || Boolean(previousSources[key]?.loading.length))
+    const queue = [...originals.keys()].filter(key => restarting || entering.has(key) || !held[key]?.history || !held[key]?.spawnCreated || !held[key]?.spawnCreator || Boolean(previousSources[key]?.loading.length))
     async function initialize() {
       async function worker() {
-        while (current() && queue.length) { const key = queue.shift()!; await run(key, held[key]?.history ? restarting || previousSources[key]?.loading.some(lane => lane !== 'events') ? 'resume' : 'updates' : 'refresh') }
+        while (current() && queue.length) { const key = queue.shift()!; await run(key, held[key]?.history ? restarting || entering.has(key) || !held[key]?.spawnCreated || !held[key]?.spawnCreator || previousSources[key]?.loading.some(lane => lane !== 'events') ? 'resume' : 'updates' : 'refresh') }
       }
       await Promise.all(Array.from({ length: Math.min(4, queue.length) }, worker))
     }
@@ -122,7 +157,7 @@ export function useCollaborationReading(subjects: readonly CollaborationSubject[
       for (const [key] of matching) { wanted.set(key, Math.max(wanted.get(key) ?? 0, event.sequence)); run(key, 'updates') }
       if (event.live && event.sequence > (pulseThrough.get(hostId) ?? 0) && (event.recordKind === 'message' || event.recordKind.startsWith('dispatch-'))) {
         pulseThrough.set(hostId, event.sequence)
-        const id = ++pulseSequence
+        const id = ++activity.current.sequence
         livePulses = [...livePulses.slice(-15), { id, startedAt: Date.now(), hostId, sender: event.senderSessionId, recipient: event.recipientSessionId, kind: event.recordKind === 'message' ? 'communication' : 'supervision' }]
         expirePulses()
       }
@@ -130,5 +165,7 @@ export function useCollaborationReading(subjects: readonly CollaborationSubject[
     return () => { ++generation.current; runner.current = () => {}; clearTimeout(pulseTimer); unsubscribe() }
   }, [scope, enabled])
   const act = useCallback((subject: CollaborationSubject, action: Action) => runner.current(collaborationSubjectKey(subject), action), [])
-  return { sources: Object.values(sources).filter(source => subjects.some(subject => collaborationSubjectKey(subject) === collaborationSubjectKey(source.subject))), pulses: enabled ? pulses : [], act }
+  const active = useMemo(() => new Set(subjects.map(collaborationSubjectKey)), [scope])
+  const visibleSources = useMemo(() => Object.entries(sources).filter(([key]) => active.has(key)).map(([, source]) => source), [sources, active])
+  return { sources: visibleSources, facts, pulses: enabled ? pulses : [], act }
 }
