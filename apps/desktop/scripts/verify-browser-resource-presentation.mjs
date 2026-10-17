@@ -6,11 +6,12 @@ import { dirname, join, resolve, relative } from 'node:path'
 
 const root = resolve(import.meta.dirname, '../../..')
 const args = process.argv.slice(2)
-let receiptArgument, consumerOnly = false
+let receiptArgument, consumerProofArgument = process.env.AGENTMUX_BROWSER_RESOURCE_CONSUMER_PROOF, consumerOnly = false
 for (let index = 0; index < args.length; index++) {
   if (args[index] === '--receipt' && !receiptArgument) receiptArgument = args[++index]
+  else if (args[index] === '--consumer-proof' && !consumerProofArgument) consumerProofArgument = args[++index]
   else if (args[index] === '--consumer-only' && !consumerOnly) consumerOnly = true
-  else throw new Error('Use --receipt PATH and optional --consumer-only for a bounded development diagnostic')
+  else throw new Error('Use --receipt PATH, --consumer-proof PATH to consume qualified evidence, or --consumer-only for a bounded diagnostic')
 }
 const directory = join(root, '.tmp/browser-resource-presentation', 'attempt-' + randomUUID())
 const receiptPath = receiptArgument ? resolve(receiptArgument) : join(directory, 'receipt.json')
@@ -20,7 +21,7 @@ const candidate = () => execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, 
 const sources = new Map()
 const receipt = { schema: 'agentmux.browser-resource-presentation.v1', candidate: candidate(), passed: false,
   diagnostic: consumerOnly, consumersPassed: false, sources: {}, runs: [], sharedTreeMutations: 0,
-  boundary: 'Actual SettingsPanel/Browser module/Store and production preload consume original directory, performance lease and exact release/restore APIs over controlled typed IPC facts. Original Main lifecycle ownership is unchanged. Native presentation and independent OS image approval are separate source-bound inputs; this consumer receipt alone does not qualify visuals or resource lifecycle.' }
+  boundary: 'Actual SettingsPanel/Browser module/Store and production preload consume original directory, performance lease and exact release/restore APIs over controlled typed IPC facts. Original Main lifecycle ownership is unchanged. Native presentation and independent complete Renderer image approval are separate source-bound inputs; this consumer receipt alone does not qualify visuals or resource lifecycle.' }
 const save = () => writeFile(receiptPath, JSON.stringify({ ...receipt, sources: Object.fromEntries(sources) }, null, 2))
 const config = 'apps/desktop/test/browser-resource-presentation.config.mts'
 const tests = ['apps/desktop/test/browser-resource-directory-ui.fixture.tsx']
@@ -89,10 +90,53 @@ async function run(label, mutation) {
     tests: report.numTotalTests, failedTests: report.numFailedTests, exitCode: result.code })
   await save(); console.log(label + ': ' + (mutation ? 'owning AssertionRED' : 'GREEN'))
 }
+async function consumeProof(file) {
+  const bytes = await readFile(resolve(file)), input = JSON.parse(bytes)
+  assert.equal(input.schema, 'agentmux.browser-resource-consumer-input.v1')
+  const proofBytes = await readFile(resolve(root, input.receipt.file))
+  assert.equal(hash(proofBytes), input.receipt.sha256)
+  const proof = JSON.parse(proofBytes)
+  assert.equal(proof.schema, receipt.schema); assert.equal(proof.consumersPassed, true)
+  assert.equal(proof.runs.length, 5); assert.ok(Object.keys(proof.sources).length > 0)
+  const reviewed = new Map(input.reviewedChanges.map(change => [change.file, change]))
+  const changed = []
+  for (const [name, before] of Object.entries(proof.sources)) {
+    const current = hash(await readFile(join(root, name)))
+    if (current !== before) {
+      const review = reviewed.get(name)
+      assert.ok(review?.reason?.trim(), 'Changed input needs an explicit bounded review: ' + name)
+      assert.equal(review.before, before); assert.equal(review.after, current); changed.push(name)
+    }
+    sources.set(name, current)
+  }
+  assert.deepEqual([...reviewed.keys()].sort(), changed.sort(), 'Review binds exactly the changed inputs')
+  for (const [index, run] of proof.runs.entries()) {
+    const mutation = index > 0 && index < 4 ? mutants[index - 1] : null
+    assert.equal(run.label, mutation ? 'mutant-' + mutation.id : index === 0 ? 'baseline' : 'restored')
+    assert.equal(run.result, mutation ? 'owning-AssertionRED' : 'GREEN')
+    const reportBytes = await readFile(run.report), inputBytes = await readFile(run.inputs)
+    assert.equal(hash(reportBytes), run.reportSha256); assert.equal(hash(inputBytes), run.inputsSha256)
+    const report = JSON.parse(reportBytes)
+    assert.equal(report.numTotalTests, 11); assert.equal(report.numPendingTests, 0); assert.equal(report.numTodoTests, 0)
+    const failures = report.testResults.flatMap(suite => suite.assertionResults).filter(test => test.status === 'failed')
+    assert.equal(report.success, !mutation); assert.equal(run.exitCode, mutation ? 1 : 0)
+    if (mutation) assert.ok(failures.some(test => test.fullName === mutation.expected && test.failureMessages.some(message => message.includes('AssertionError'))))
+    else { assert.equal(report.numPassedTests, 11); assert.equal(failures.length, 0) }
+    const inputs = inputBytes.toString().trim().split('\n').map(line => JSON.parse(line))
+    assert.ok(inputs.length > 0)
+    for (const loaded of inputs) assert.equal(loaded.source, proof.sources[loaded.path])
+  }
+  receipt.runs = proof.runs
+  receipt.reusedConsumerProof = { file: relative(root, resolve(file)), sha256: hash(bytes), originalCandidate: proof.candidate,
+    reviewedChanges: input.reviewedChanges, boundary: 'Original consumer and owning mutation results are retained unchanged; this invocation verifies their bytes and the explicitly reviewed source delta. No repeated product action is claimed.' }
+}
 try {
-  await run('baseline')
-  for (const mutation of mutants) await run('mutant-' + mutation.id, mutation)
-  await run('restored')
+  if (consumerProofArgument) await consumeProof(consumerProofArgument)
+  else {
+    await run('baseline')
+    for (const mutation of mutants) await run('mutant-' + mutation.id, mutation)
+    await run('restored')
+  }
   assert.equal(receipt.runs.length, 5)
   for (const [file, digest] of sources) assert.equal(hash(await readFile(join(root, file))), digest, 'The final source and tests must remain exact')
   receipt.endingCandidate = candidate()
@@ -117,7 +161,7 @@ try {
       assert.equal(hash(await readFile(file)), frame.sha256); assert.equal(reviewed.sha256, frame.sha256)
     }
     receipt.visual = { review: relative(root, reviewPath), sha256: hash(reviewBytes), nativeReceipt: relative(root, nativePath), nativeSha256: hash(nativeBytes),
-      boundary: 'Independent static normal/narrow OS image approval of actual Settings with controlled protocol data; no resource lifecycle, real machine measurement or physical input claim.' }
+      boundary: 'Independent static normal/narrow complete Renderer image approval of actual Settings with controlled protocol data; no OS chrome, native composition, resource lifecycle, real machine measurement or physical input claim.' }
     receipt.passed = true
   }
   await save()
