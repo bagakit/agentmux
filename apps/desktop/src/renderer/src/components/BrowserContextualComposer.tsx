@@ -10,6 +10,7 @@ import type { BrowserOperation } from '../../../shared/browser-operation'
 import { api } from '../lib/api'
 import { agentSessionPresentationIndex } from '../lib/session-presentation'
 import type { BrowserOpinionSource as OriginalOpinion, BrowserOpinionAttempt } from '../lib/browser-opinion-draft'
+import { browserOpinionSelection } from '../lib/browser-opinion-draft'
 import { useAppStore } from '../store'
 import { getWindowOverlayHost, WindowOverlayPortal } from './WindowOverlayHost'
 import { useBrowserOpinionSelection } from './BrowserOpinionSelection'
@@ -129,6 +130,9 @@ export function useBrowserContextualComposer(browserId: string, operation: Brows
 
   async function send() {
     if (busy || selection.busy || composing.current !== null && composing.current === editor.current || !original || !text.trim()) return
+    let image
+    try { image = includeContext && original.scene ? browserOpinionSelection(original) : undefined }
+    catch (error) { setFailure(presentError(error)); return }
     // Once freeze starts, only this exact original intent can retry an unknown result.
     const note = original.comment ? 'The user selected this historical Browser step as reference data, separately from the observed page: ' +
       JSON.stringify(original.comment).replace(/</gu, '\\u003c').replace(/>/gu, '\\u003e').replace(/&/gu, '\\u0026') : undefined
@@ -141,7 +145,7 @@ export function useBrowserContextualComposer(browserId: string, operation: Brows
     setBusy(true); setFailure(null)
     try {
       await useAppStore.getState().saveBrowserOpinionDraft(browserId, { original, text: intent.text, includeContext: intent.context, pending: intent }, true)
-      const capture = intent.context ? await api.browser.freezeInputContext({ scene: (original.selection?.scene ?? original.scene!).reference, control: original.control,
+      const capture = intent.context ? await api.browser.freezeInputContext({ scene: (image?.scene ?? original.scene!).reference, control: original.control,
         operationId: intent.operationId, prompt: intent.text, ...(intent.note ? { agentMuxNote: intent.note } : {}) }) : undefined
       const state = useAppStore.getState()
       const accepted = state.enqueueAgentSteer(original.control.agentSessionId, intent.text, error => setFailure(presentError(error)), intent.operationId,
@@ -172,7 +176,7 @@ export function useBrowserContextualComposer(browserId: string, operation: Brows
       <ComposerTextarea ref={editor} aria-label="Opinion for Browser operator" placeholder="What should the Agent notice?" value={text} onValueChange={setText} readOnly={pending.current !== null}
         onKeyDown={event => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !isImeOwnedKeyboardEvent(event)) { event.preventDefault(); void send() } }} />
       {selection.controls}
-      {!includeContext && original?.selection ? <p className="browser-contextual-composer__notice">The image is kept in this draft. Text-only sending excludes it.</p> : null}
+      {!includeContext && original && original.selection !== undefined ? <p className="browser-contextual-composer__notice">The image is kept in this draft. Text-only sending excludes it.</p> : null}
       {failure ? <div className="browser-contextual-composer__failure" role="alert"><p>{failure}</p>
         {pending.current && !busy ? <button type="button" className="small-button" onClick={() => {
           const attempt = pending.current
