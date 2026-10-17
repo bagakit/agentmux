@@ -142,7 +142,7 @@ async function calendarOwner(f: Awaited<ReturnType<typeof fixture>>) {
   managers.push(manager)
   const seed = async (prompt: string, agentMuxNote: string) => {
     const clock = new ContinuousProgressScheduler({ now: () => now, id: () => 'original-calendar' })
-    const loop = clock.createCalendar({ ...target, calendar, prompt, nextDue: nextCalendarOccurrence(calendar, now)!, operationId: 'original-creation' })
+    const loop = clock.createSchedule({ ...target, calendar, prompt, nextDue: nextCalendarOccurrence(calendar, now)!, operationId: 'original-creation' })
     await f.client.saveAgentFuturePromptIntent({ agentSessionId: target.agentSessionId, intentId: loop.futureIntentId!, operationId: loop.creationOperationId!, prompt, agentMuxNote, active: true })
     await store.save([loop])
     return loop

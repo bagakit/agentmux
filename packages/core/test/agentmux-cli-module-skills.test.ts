@@ -211,6 +211,20 @@ describe('local progressive AgentMux module skills', () => {
     expect((await readdir(root, { recursive: true })).sort()).toEqual(originalFiles)
   })
 
+  it('actual offline schedule skill explains accurate once-only countdowns through the original commands', async () => {
+    const result = await run(['--endpoint', endpoint, 'schedule', '--skill'])
+    expect(result.code, result.stderr).toBe(0)
+    for (const duty of [
+      'schedule create --data <FILE|->', 'afterMs:', '90000 for 90 seconds',
+      'It cannot enable checkIn', 'fixes nextCheckAt as its absolute deadline',
+      'keeps that deadline', 'Pause suspends delivery, not time',
+      'One confirmed input delivery ends a countdown', 'App exit, sleep or offline delivery is not promised',
+      'Inspect original schedule facts after an unknown result', 'Repeating the same operationId'
+    ]) expect(result.stdout, duty).toContain(duty)
+    expect(connections).toBe(0)
+    expect((await readdir(root, { recursive: true })).sort()).toEqual(originalFiles)
+  })
+
   it('actual compiled Topic skill explains existing structure and confirmed knowledge maintenance offline', async () => {
     const dead = `unix:${join(root, 'never-started.sock')}`
     for (const selectedEndpoint of [endpoint, dead]) {

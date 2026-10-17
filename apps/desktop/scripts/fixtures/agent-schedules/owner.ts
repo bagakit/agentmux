@@ -1,15 +1,21 @@
 import { join } from 'node:path'
 import { appendFile, readFile, writeFile } from 'node:fs/promises'
-import { AgentMuxFileAgentSessionStore, AgentProviderRegistry, defineAgentProvider, startHeadlessAgentMux, connectAgentMuxRpc, connectHostedAgentMux, type AgentMuxHostedRpcPort, type AgentMuxHostedRuntimeParameterMap } from '../../../../../packages/core/src/index.js'
-import { AgentMuxControlServer } from '../../../../../packages/core/src/public-rpc-server.js'
+import { AgentMuxFileAgentSessionStore, defineAgentProvider, startHeadlessAgentMux, connectAgentMuxRpc, connectHostedAgentMux, type AgentMuxHostedRpcPort, type AgentMuxHostedRuntimeParameterMap } from '@agentmux/core'
+import { AgentMuxControlServer } from '../../../../../packages/core/dist/public-rpc-server.js'
 import { ContinuousProgressLoopManager } from '../../../src/main/continuous-progress-loop-manager.js'
 import { ContinuousProgressLoopStore } from '../../../src/main/continuous-progress-loop-store.js'
 import { RuntimeController } from '../../../src/main/runtime-controller.js'
 import { deliverContinuousProgress } from '../../../src/main/continuous-progress-delivery.js'
 const state = process.env.AGENTMUX_STATE_DIRECTORY!, workspace = process.env.SCHEDULE_PROBE_WORKSPACE!
-const original = new AgentProviderRegistry().get('codex')
-const provider = defineAgentProvider({ catalog: { ...original.catalog, id: 'schedule-test', label: 'Schedule private test', executable: process.execPath, expectedProcess: 'node', hookStrategy: { kind: 'native', installation: 'unmanaged' } }, hook: original.hook,
-  buildArgs: (_prompt, _args) => [process.env.SCHEDULE_PROBE_AGENT!] })
+// This private process owns a small authenticated begin/finish protocol, not Codex's vetoable Stop callback.
+const provider = defineAgentProvider({ catalog: { id: 'schedule-test', label: 'Schedule private test', executable: process.execPath,
+  expectedProcess: 'node', promptDelivery: 'positional-argv', readySignal: { kind: 'foreground-process', expectedProcess: 'node' },
+  hookStrategy: { kind: 'native', installation: 'unmanaged' }, resumeStrategy: { kind: 'none' }, acpStrategy: { kind: 'none' },
+  capabilities: { terminal: true, timeline: 'complete-events', permission: 'respond', providerResume: false, replyCorrelation: 'none' } },
+  hook: { nativeHandle: { sessionIdKeys: ['session_id'] }, rules: [
+    { events: ['begin'], state: 'working', lifecycleEvent: 'turn-start' },
+    { events: ['finish'], state: 'done', lifecycleEvent: 'turn-end' }
+  ] }, buildArgs: () => [process.env.SCHEDULE_PROBE_AGENT!] })
 const store = new AgentMuxFileAgentSessionStore(join(state, 'sessions.json'))
 // The same production semantic Host and finite borrowed SDK used by Desktop.
 // Only one Core owns this Store/Run; Main is its ordinary transport consumer.

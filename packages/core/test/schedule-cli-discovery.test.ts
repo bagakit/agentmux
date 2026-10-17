@@ -17,8 +17,10 @@ const commands = AGENTMUX_CLI_COMMANDS.filter(command => command.method.startsWi
 describe('compiled schedule discovery and invocation', () => {
   it('prints one usable syntax with parser-accurate inputs in every discovery surface', async () => {
     expect(commands).toHaveLength(6)
-    const surfaces = await Promise.all([['--help'], ['schedule', '--help']].map(args => run(args)))
-    for (const surface of surfaces) expect(surface.code, surface.stderr).toBe(0)
+    const [catalog, surface] = await Promise.all([['--help'], ['schedule', '--help']].map(args => run(args)))
+    expect(catalog.code, catalog.stderr).toBe(0)
+    expect(catalog.stdout.split('\n').map(line => line.trim())).toContain('amux schedule')
+    expect(surface.code, surface.stderr).toBe(0)
     for (const command of commands) {
       let acceptsEmpty = false
       try { await command.parse([]); acceptsEmpty = true } catch (error) {
@@ -26,10 +28,8 @@ describe('compiled schedule discovery and invocation', () => {
       }
       const syntax = 'amux ' + command.method.replaceAll('.', ' ') +
         (acceptsEmpty ? ' [--data <FILE|->]' : ' --data <FILE|->')
-      for (const surface of surfaces) {
-        const lines = surface.stdout.split('\n').map(line => line.trim())
-        expect(lines.filter(line => line.startsWith('amux ' + command.method.replaceAll('.', ' ') + ' '))).toEqual([syntax])
-      }
+      const lines = surface.stdout.split('\n').map(line => line.trim())
+      expect(lines.filter(line => line.startsWith('amux ' + command.method.replaceAll('.', ' ') + ' '))).toEqual([syntax])
       const leaf = await run([...command.method.split('.'), '--help'])
       expect(leaf.code, leaf.stderr).toBe(0)
       expect(leaf.stdout.split('\n').find(line => line.startsWith('Usage: '))).toBe('Usage: ' + syntax)
@@ -50,6 +50,16 @@ describe('compiled schedule discovery and invocation', () => {
       const result = await run(command.method.split('.'))
       expect(result.code).toBe(1)
       expect(JSON.parse(result.stderr)).toMatchObject({ ok: false, error: { code: 'INVALID_CLI_ARGUMENT' } })
+    }
+    expect(await readdir(root)).toEqual([])
+  })
+
+  it('rejects invalid relative timing through the actual CLI before contacting an owner', async () => {
+    const target = { hostId: 'local', agentSessionId: 'original', providerId: 'generic', workspacePath: new URL('private/original', new URL('/', import.meta.url)).pathname }
+    for (const timing of [{ afterMs: 0 }, { afterMs: -1 }, { afterMs: 1.5 }, { afterMs: Number.MAX_SAFE_INTEGER + 1 }, { afterMs: 90000, calendar: {} }, { afterMs: 90000, checkIn: {} }]) {
+      const result = await run(['schedule', 'create', '--data', '-'], JSON.stringify({ target, prompt: 'original work', operationId: 'invalid-original', ...timing }))
+      expect(result.code).toBe(1)
+      expect(JSON.parse(result.stderr)).toMatchObject({ ok: false, error: { code: 'INVALID_CONTROL_REQUEST' } })
     }
     expect(await readdir(root)).toEqual([])
   })
@@ -76,7 +86,12 @@ describe('compiled schedule discovery and invocation', () => {
         error: { code: 'CONTROL_UNAVAILABLE', detail } })
       expect(calls).toHaveBeenNthCalledWith(2, 'schedule.inspect', params,
         expect.objectContaining({ transport: 'unix', principal: expect.objectContaining({ kind: 'user' }) }))
-      expect(calls).toHaveBeenCalledTimes(2)
+      const timer = { target: { hostId: 'local', agentSessionId: 'original', providerId: 'generic', workspacePath: new URL('private/original', new URL('/', import.meta.url)).pathname }, afterMs: 90000, prompt: 'same original work', operationId: 'same-timer' }
+      const create = await run([...endpoint, 'schedule', 'create', '--data', '-'], JSON.stringify(timer))
+      expect(create.code).toBe(1)
+      expect(JSON.parse(create.stderr)).toMatchObject({ ok: false, operation: 'schedule.create', error: { code: 'CONTROL_UNAVAILABLE', detail } })
+      expect(calls).toHaveBeenNthCalledWith(3, 'schedule.create', timer, expect.objectContaining({ transport: 'unix', principal: expect.objectContaining({ kind: 'user' }) }))
+      expect(calls).toHaveBeenCalledTimes(3)
     } finally { calls.mockRestore(); await owner.stop() }
   })
 })

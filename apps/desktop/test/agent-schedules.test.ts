@@ -7,7 +7,7 @@ import { ContinuousProgressLoopManager, type LoopTickHandler } from '../src/main
 import { ContinuousProgressLoopStore } from '../src/main/continuous-progress-loop-store.js'
 import { observeAgent, type ContinuousProgressLoop, type AgentMuxRpcCallContext, type AgentMuxPendingInteraction } from '@agentmux/core'
 import { parseAgentScheduleCalendar, type AgentScheduleCalendar } from '../../../packages/core/src/agent-schedule.js'
-import { validateScheduleRpcResult } from '../../../packages/core/src/public-rpc-schedules.js'
+import { parseScheduleRpcParams, parseScheduleRecord, validateScheduleRpcResult } from '../../../packages/core/src/public-rpc-schedules.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
 
@@ -32,7 +32,7 @@ async function owner(onTick: LoopTickHandler = async () => 'sent', save = async 
       observation: observeAgent({ process: 'running', status, timelineCapability: 'complete-events', awaitingRequest: permission, terminalCapabilityUnverified: false }, now), inputOccupied: occupied, inputByte: missing ? null : 0, tickId, now }
   }, { saveFutureIntent: async (loop, active, context) => { await save(loop, active, context); intents[loop.futureIntentId!] = { operationId: loop.creationOperationId!, prompt: loop.prompt, message: { userContent: loop.prompt }, active } }, authorizeFutureIntent: authorize })
   managers.push(manager)
-  return { manager, store, set: (values: { now?: number; occupied?: boolean; working?: boolean; permission?: boolean; missing?: boolean }) => { if (values.now !== undefined) now = values.now; if (values.occupied !== undefined) occupied = values.occupied; if (values.working !== undefined) working = values.working; if (values.permission !== undefined) permission = values.permission; if (values.missing !== undefined) missing = values.missing } }
+  return { manager, store, reload: () => new ContinuousProgressLoopStore(join(dir, 'loops.json')).load(), set: (values: { now?: number; occupied?: boolean; working?: boolean; permission?: boolean; missing?: boolean }) => { if (values.now !== undefined) now = values.now; if (values.occupied !== undefined) occupied = values.occupied; if (values.working !== undefined) working = values.working; if (values.permission !== undefined) permission = values.permission; if (values.missing !== undefined) missing = values.missing } }
 }
 
 describe('civil calendar', () => {
@@ -171,4 +171,73 @@ it.each(['pause','resume','cancel'] as const)('retries the original %s action af
   expect(attempts).toBe(2)
   expect(retried.schedule.status).toBe(action === 'resume' ? 'active' : action === 'pause' ? 'paused' : 'stopped')
   expect(retried.schedule.revision).toBe(revision + 1)
+})
+
+
+describe('one-shot relative schedule', () => {
+  it.each([90000, 300000])('freezes the original %ims deadline across duplicate creation, pause and overdue resume', async afterMs => {
+    let calls = 0
+    const h = await owner(async () => { calls++; return 'sent' })
+    const request = { target, afterMs, prompt: 'original relative work', operationId: 'relative-create' }
+    const receipt = await h.manager.call('schedule.create', request), due = receipt.schedule.nextCheckAt
+    expect(validateScheduleRpcResult('schedule.create', receipt, request)).toEqual(receipt)
+    expect(receipt.schedule).toMatchObject({ afterMs, revision: 1, status: 'active' })
+    expect(receipt.schedule.calendar).toBeUndefined()
+    h.set({ now: due - 1 }); await h.manager.checkNow(receipt.schedule.loopId); expect(calls).toBe(0)
+    await h.manager.call('schedule.pause', { scheduleId: receipt.schedule.loopId, expectedRevision: 1, operationId: 'relative-pause' })
+    h.set({ now: due + 12345 })
+    const duplicate = await h.manager.call('schedule.create', request)
+    expect(duplicate.schedule).toMatchObject({ loopId: receipt.schedule.loopId, nextCheckAt: due, status: 'paused', revision: 2 })
+    await expect(h.manager.call('schedule.create', { ...request, afterMs: afterMs + 1 })).rejects.toMatchObject({ code: 'SCHEDULE_OPERATION_CONFLICT' })
+    const resumed = await h.manager.call('schedule.resume', { scheduleId: receipt.schedule.loopId, expectedRevision: 2, operationId: 'relative-resume' })
+    expect(resumed.schedule.nextCheckAt).toBe(due)
+    expect((await h.store.load())[0]).toMatchObject({ afterMs, nextCheckAt: due, status: 'active' })
+    await h.manager.check(); expect(calls).toBe(1)
+    expect(h.manager.list()[0]).toMatchObject({ nextCheckAt: due, status: 'stopped', lastOutcome: 'sent', lastOccurrenceAt: due })
+    await h.manager.check(due + afterMs * 3); expect(calls).toBe(1)
+    await expect(h.manager.call('schedule.pause', { scheduleId: receipt.schedule.loopId, expectedRevision: 3, operationId: 'cannot-rearm-pause' })).rejects.toMatchObject({ code: 'SCHEDULE_CANCELLED' })
+    await expect(h.manager.call('schedule.resume', { scheduleId: receipt.schedule.loopId, expectedRevision: 3, operationId: 'cannot-repeat' })).rejects.toMatchObject({ code: 'SCHEDULE_CANCELLED' })
+  })
+  it.each(['occupied','working','permission','missing'] as const)('retains the original relative occurrence while %s', async blocked => {
+    let calls = 0
+    const h = await owner(async () => { calls++; return 'sent' })
+    const receipt = await h.manager.call('schedule.create', { target, afterMs: 90000, prompt: 'relative', operationId: 'relative-blocked' })
+    h.set({ now: receipt.schedule.nextCheckAt, [blocked]: true }); await h.manager.check()
+    expect(calls).toBe(0); expect(h.manager.list()[0]).toMatchObject({ status: 'active', nextCheckAt: receipt.schedule.nextCheckAt })
+    h.set({ [blocked]: false }); await h.manager.check()
+    expect(calls).toBe(1); expect(h.manager.list()[0]!.status).toBe('stopped')
+  })
+  it('reconciles an unknown initial save without restarting its delay and preserves the exact saved record on reload', async () => {
+    let saves = 0
+    const h = await owner(undefined, async () => { if (++saves === 1) throw new Error('Original future intent unknown') })
+    const request = { target, afterMs: 90000, prompt: 'relative', operationId: 'relative-unknown-create' }
+    await expect(h.manager.call('schedule.create', request)).rejects.toThrow('future intent unknown')
+    const original = (await h.store.load())[0]!
+    h.set({ now: original.nextCheckAt + 5000 })
+    const retried = await h.manager.call('schedule.create', request)
+    expect(retried.schedule).toMatchObject({ loopId: original.loopId, nextCheckAt: original.nextCheckAt, revision: 1, status: 'active' })
+    const reloaded = await h.reload()
+    expect(reloaded).toEqual(h.manager.list())
+  })
+  it('isolates relative schedules from the original calendar and completion-driven interval', async () => {
+    const h = await owner()
+    const relative = (await h.manager.call('schedule.create', { target, afterMs: 90000, prompt: 'timer', operationId: 'relative' })).schedule
+    const calendar = (await h.manager.call('schedule.create', { target, calendar: rules('daily'), prompt: 'civil', operationId: 'civil' })).schedule
+    const interval = await h.manager.create({ ...target, intervalMs: 60000, prompt: 'interval' })
+    expect((await h.manager.call('schedule.list', { target })).schedules.map(loop => loop.loopId)).toEqual([relative.loopId, calendar.loopId])
+    expect((await h.manager.call('schedule.inspect', { scheduleId: relative.loopId })).schedule).toEqual(relative)
+    await h.manager.pauseTarget(target, 'Human input')
+    expect(h.manager.list().map(loop => [loop.loopId, loop.status])).toEqual([[relative.loopId, 'active'], [calendar.loopId, 'active'], [interval.loopId, 'paused']])
+  })
+  it('rejects only invalid timing requests and unsafe computed deadlines without mutating existing arrangements', async () => {
+    const h = await owner()
+    const original = await h.manager.call('schedule.create', { target, afterMs: 90000, prompt: 'timer', operationId: 'valid' })
+    for (const timing of [{}, { afterMs: 0 }, { afterMs: -1 }, { afterMs: 1.5 }, { afterMs: Infinity }, { afterMs: Number.MAX_SAFE_INTEGER + 1 }, { afterMs: 90000, calendar: rules('daily') }, { afterMs: 90000, checkIn: {} }]) {
+      expect(() => parseScheduleRpcParams('schedule.create', { target, prompt: 'bad', operationId: 'bad', ...timing })).toThrow()
+    }
+    await expect(h.manager.call('schedule.create', { target, afterMs: Number.MAX_SAFE_INTEGER, prompt: 'overflow', operationId: 'overflow' })).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+    expect(h.manager.list()).toEqual([original.schedule])
+    expect(() => parseScheduleRecord({ ...original.schedule, calendar: rules('daily') })).toThrow()
+    expect(() => validateScheduleRpcResult('schedule.create', { ...original, schedule: { ...original.schedule, afterMs: 300000 } }, { target, afterMs: 90000, prompt: 'timer', operationId: 'valid' })).toThrow()
+  })
 })
