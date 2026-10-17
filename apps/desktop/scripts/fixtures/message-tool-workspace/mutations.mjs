@@ -1,0 +1,20 @@
+export const mutations = [
+  { name: 'journal-query-disconnected', file: 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
+    before: "query={inputHistory?.history.query ?? ''} selection=", after: "query={''} selection=" },
+  { name: 'history-refresh-disconnected', file: 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
+    before: 'void inputMailbox.refresh(); inputHistory.history.refresh()', after: 'void inputMailbox.refresh()' },
+  { name: 'journal-refresh-disconnected', file: 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
+    before: 'void inputMailbox.refresh(); inputHistory.history.refresh()', after: 'inputHistory.history.refresh()' },
+  { name: 'journal-detail-disconnected', file: 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
+    before: 'journalDetail ?? (selectedMessage ?', after: 'null ?? (selectedMessage ?' },
+  { name: 'refresh-drops-earlier-history', file: 'packages/client-ui/src/lib/use-agent-input-history.ts',
+    before: '...(cursor || retain ? old.messages : [])', after: '...(cursor ? old.messages : [])' },
+  { name: 'journal-edit-loses-selection', file: 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
+    before: 'onSelect={() => {}}', after: "onSelect={key => setSelection({ scope, folder: 'user', key: `queue:${key}` })}" },
+  { name: 'automation-form-unmounted', file: 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
+    before: 'presented={progressVisible || progressPresented}', after: 'presented={progressVisible}' },
+  { name: 'automation-reading-discarded', file: 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
+    before: 'setSelection(origin?.selection ?? null)', after: 'setSelection(null)' },
+  { name: 'filtered-queue-neighbors-lost', file: 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
+    before: 'queued={pending} query={query}', after: 'queued={pending.filter(entry => !query || entry.text.includes(query))} query={query}' }
+]
