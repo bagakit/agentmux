@@ -71,9 +71,6 @@ async function fixture(outcome: 'admitted' | 'unknown' = 'admitted') {
     session, run(), id, wire, { kind: 'single-phase', data: wire + '\r' }, condition, completionId, undefined, false, undefined, 0,
     changed.message ?? message, 'default', undefined, undefined, undefined, key, changed.control ?? control)
   const submitIndependent = async (idleOnly: boolean) => {
-    const current = (await h.store.readMetadata('recipient'))!
-    await h.store.compareAndSwapMetadata(current, { ...current, updatedAt: Math.max(current.updatedAt, fixtureEpoch(0, 3)),
-      semanticStatus: { state: 'done', source: 'native-transcript', observedAt: fixtureEpoch(0, 3) } })
     const latest = await deps.registry.refresh('recipient', original.run), nextId = 'independent-notification'
     const nextWire = wire.replace('original-message', 'independent-message'), completion = agentTurnCompletionIdentity(latest)!
     const nextKey = { ...key, submissionId: nextId }
@@ -115,14 +112,23 @@ it('keeps lost queue ACK and original correlation unknown without a second nativ
   expect(f.send).toHaveBeenCalledTimes(1)
 })
 
-it.each([true, false])('an independent input can pass an unknown Native predecessor only as a typed idle notification (idleOnly=%s)', async idleOnly => {
+it.each([true, false])('an independent input can share an unknown Native predecessor completion only as a typed idle notification (idleOnly=%s)', async idleOnly => {
   const f = await fixture('unknown')
   await expect(f.submit()).rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
-  const old = await f.read()
+  const old = await f.read(), completion = agentTurnCompletionIdentity(f.client.agentSession('recipient'))
   if (idleOnly) await expect(f.submitIndependent(true)).resolves.toMatchObject({ a2aNotificationId: 'independent-notification' })
   else await expect(f.submitIndependent(false)).rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
   expect(await f.read()).toEqual(old)
+  expect(agentTurnCompletionIdentity(f.client.agentSession('recipient'))).toBe(completion)
   expect(f.send).toHaveBeenCalledTimes(idleOnly ? 2 : 1)
+  expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('an ordinary automatic input cannot reuse a Native predecessor completion after its ACK', async () => {
+  const f = await fixture(); await f.submit()
+  const old = await f.read()
+  await expect(f.submitIndependent(false)).rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
+  expect(await f.read()).toEqual(old); expect(f.send).toHaveBeenCalledTimes(1)
   expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 })
 

@@ -14,7 +14,7 @@ const regressions = ['packages/core/test/current-terminal-prompt.test.ts', 'pack
 const mutations = ['native-queue-becomes-steer', 'native-idle-target-is-omitted', 'completion-fence-is-omitted',
   'final-input-fence-is-omitted', 'notification-identity-is-omitted', 'edited-notification-is-adopted',
   'native-queue-receipt-is-unchecked', 'notification-identity-is-not-restored',
-  'independent-idle-notification-is-blocked']
+  'independent-idle-notification-is-blocked', 'independent-idle-completion-is-consumed']
 const inputs = ['types.ts', 'agent-provider.ts', 'prompt-submission.ts', 'prompt-submission-record.ts',
   'providers/codex-native-input.ts', 'native-input-adoption.ts'].map(file => 'packages/core/src/' + file)
 inputs.push(...tests, ...regressions, config, 'packages/core/scripts/verify-a2a-idle-input.mjs')
@@ -23,7 +23,7 @@ const hashes = async () => Object.fromEntries(await Promise.all(inputs.map(async
 const receipt = { schema: 'agentmux.a2a-idle-input-owning-proof.v1', sourceOnly: true, sharedTreeMutations: 0, passed: false, cases: [] }
 
 await mkdir(evidence, { recursive: true })
-async function run(label, mutation, selected = tests, count = 18) {
+async function run(label, mutation, selected = tests, count = 19) {
   const output = join(evidence, label + '.json'), loaded = join(evidence, label + '.loaded.jsonl')
   await writeFile(loaded, '')
   const env = { ...process.env, AGENTMUX_IDLE_INPUT_LOADED: loaded }
