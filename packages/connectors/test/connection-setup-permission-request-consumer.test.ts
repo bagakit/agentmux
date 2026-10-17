@@ -111,23 +111,15 @@ it('SDK and compiled CLI review exact App rows then request only missing origina
   expect((await f.sdk.call('connection.inspect', { connectionId: f.input.connectionId })).connection).toEqual(f.saved.connection)
 }, 30_000)
 
-it('the same exact review selects seven by default and nine only with explicit Mote identity sync; no missing item dispatches nothing', async () => {
+it('offers only conversation permissions and keeps retired Mote permission selection read-only', async () => {
   const f = await fixture(); await f.read('permission-catalog'); await f.read('application-permissions')
-  const base = await f.inspect(), before = [...f.native], extended = await f.inspect('mote-profile-sync')
-  expect(base.applicationConfiguration!.effect).toBe(effect)
+  const base = await f.inspect(), before = [...f.native], retired = await f.inspect('mote-profile-sync')
   expect('review' in base.applicationConfiguration! && base.applicationConfiguration.review!.permissions.map(p => p.name)).toEqual(NAMES.slice(0, 7))
-  expect('review' in extended.applicationConfiguration! && extended.applicationConfiguration.review!.permissions.map(p => p.name)).toEqual(NAMES)
+  expect(retired.applicationConfiguration).toMatchObject({capability:'unknown',review:null,actions:[]})
   expect(f.native).toEqual(before)
-  const added = await f.sdk.call('connection.setup.advance', action(extended, effect))
-  expect(added.applicationConfiguration!.selected).toMatchObject({ purpose: 'mote-profile-sync', scopeNames: NAMES })
-  expect(f.native.at(-1)).toEqual({ path: '/developers/v1/scope/update/' + APP, body: { clientId: APP, appScopeIDs: IDS, userScopeIDs: [], scopeIds: [], operation: 'add', isDeveloperPanel: true } })
-  await f.close()
-  const empty = await fixture(); empty.applied({ scopes: IDS.map(id => ({ id, scopeIdentityType: 2 })) })
-  await empty.read('permission-catalog'); await empty.read('application-permissions')
-  const unnecessary = await empty.inspect('mote-profile-sync')
-  expect(unnecessary.applicationConfiguration).toMatchObject({ capability: 'enabled', selected: null, actions: [] })
-  expect(empty.native.filter(call => call.path.includes('/update/'))).toEqual([])
-}, 30_000)
+  await f.sdk.call('connection.setup.advance',action(base,effect))
+  expect(f.native.at(-1)).toEqual({path:'/developers/v1/scope/update/'+APP,body:{clientId:APP,appScopeIDs:IDS.slice(0,7),userScopeIDs:[],scopeIds:[],operation:'add',isDeveloperPanel:true}})
+},30000)
 
 it('an applied App row without a supported original id keeps the exact missing set unknown and offers no addition', async () => {
   const f = await fixture(); f.applied({ scopes: [{ scopeIdentityType: 2 }] })
@@ -215,23 +207,13 @@ it('an explicitly User-only catalog row sharing an App id cannot close a qualifi
   expect(view.applicationConfiguration!.actions.map(a => a.kind)).toEqual([effect])
 }, 30_000)
 
-it('a confirmed seven-item request permits an explicit same-Setup Mote addition only after a fresh applied read, never catalog-only refresh', async () => {
+it('never reopens retired SDK identity grants after fresh catalog or applied observations', async () => {
   const f = await fixture(); await f.read('permission-catalog'); await f.read('application-permissions')
-  await f.sdk.call('connection.setup.advance', action(await f.inspect(), effect))
-  f.applied({ scopes: IDS.slice(0, 7).map(id => ({ id, scopeIdentityType: 2 })) })
-  await f.read('permission-catalog')
-  expect((await f.inspect('mote-profile-sync')).applicationConfiguration).toMatchObject({ capability: 'unknown', review: null, actions: [] })
-  await f.read('application-permissions')
-  const fresh = await f.inspect('mote-profile-sync')
-  expect(fresh.applicationConfiguration!.actions.map(action => action.kind)).toEqual([effect])
-  const extended = await f.sdk.call('connection.setup.advance', action(fresh, effect))
-  expect(extended.applicationConfiguration!.selected).toMatchObject({ purpose: 'mote-profile-sync', scopeNames: NAMES.slice(7) })
-  expect(extended.applicationConfiguration!.effects).toHaveLength(2)
-  expect(f.native.filter(call => call.path.includes('/scope/update/'))).toEqual([
-    { path: '/developers/v1/scope/update/' + APP, body: { clientId: APP, appScopeIDs: IDS.slice(0, 7), userScopeIDs: [], scopeIds: [], operation: 'add', isDeveloperPanel: true } },
-    { path: '/developers/v1/scope/update/' + APP, body: { clientId: APP, appScopeIDs: IDS.slice(7), userScopeIDs: [], scopeIds: [], operation: 'add', isDeveloperPanel: true } }
-  ])
-}, 30_000)
+  await f.sdk.call('connection.setup.advance',action(await f.inspect(),effect))
+  f.applied({scopes:IDS.slice(0,7).map(id=>({id,scopeIdentityType:2}))})
+  for(const subject of ['permission-catalog','application-permissions'] as const){await f.read(subject);expect((await f.inspect('mote-profile-sync')).applicationConfiguration).toMatchObject({capability:'unknown',review:null,actions:[]})}
+  expect(f.native.filter(call=>call.path.includes('/scope/update/'))).toHaveLength(1)
+},30000)
 
 function childMessage(child: ChildProcess, kind: string): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
@@ -276,7 +258,8 @@ it.each(['native-inflight', 'stored-ack'] as const)('a true %s writer exit prese
 
 it('SDK and compiled CLI reject wrong purpose, dual-source subject or mixed-purpose offered-action wire relations', async () => {
   const f = await fixture(); await f.read('permission-catalog'); await f.read('application-permissions')
-  const extended = await f.inspect('mote-profile-sync'), extension = extended.applicationConfiguration!.actions.find(a => a.kind === effect)!
+  const offered = (await f.inspect()).applicationConfiguration!.actions.find(a => a.kind === effect)!
+  const extension = {...offered,actionId:offered.actionId.replace('setup-permissions:agent-conversation:', 'setup-permissions:mote-profile-sync:')}
   const original = await f.inspect(), path = join(f.root, 'wire.sock'), sockets = new Set<Socket>()
   let corrupt = (value: ConnectionSetupView): unknown => value
   const wire = createServer(socket => {

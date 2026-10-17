@@ -162,7 +162,7 @@ it('SDK and compiled CLI explicitly enable one exact original bot with a durable
   expect(reads.applicationInspection?.observations).toEqual([source]); expect(reads.applicationInspection?.readResult).toEqual({ subject: 'bot-settings' })
   expect(readBytes(f, source.stepId)).toEqual(bytes)
   const list = await f.sdk.call('connection.setup.ls', { connectionId: f.input.connectionId }); assertPrivateFree(list)
-  expect(list.support?.capabilities).toEqual(['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation', 'initial-setup'])
+  expect(list.support?.capabilities).toEqual(['profile-update', 'management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation', 'initial-setup'])
   expect(JSON.stringify(list)).not.toContain('sourceStepId')
   expect(await f.sdk.call('connection.service.get', {})).toEqual(off.service)
   expect((await f.sdk.call('connection.inspect', { operationId: 'configuration-original-save' })).operation).toEqual(f.saved)
