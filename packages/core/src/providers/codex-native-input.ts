@@ -28,9 +28,9 @@ function nativeServerConfig(args: readonly string[]): { serverConfig: string[]; 
     if (arg === BYPASS_PERMISSIONS) {
       if (bypass) return null
       bypass = true
-    } else if (shared.has(arg)) { const value = args[++i]; if (value === undefined) return null; result.push(arg, value); custom ||= arg === '-c' || arg === '--config' }
+    } else if (shared.has(arg)) { const value = args[++i]; if (value === undefined || value.startsWith('-')) return null; result.push(arg, value); custom ||= arg === '-c' || arg === '--config' }
     else if (valueFlags.has(arg)) {
-      if (args[++i] === undefined) return null
+      const value = args[++i]; if (value === undefined || value.startsWith('-')) return null
       permission ||= ['-s', '--sandbox', '-a', '--ask-for-approval'].includes(arg)
       custom ||= arg === '-p' || arg === '--profile'
     }
@@ -44,22 +44,20 @@ function nativeServerConfig(args: readonly string[]): { serverConfig: string[]; 
 
 /** Only explicit Core resume shapes: native policy is prepared before the TUI can carry its prompt. */
 function nativeResumePlan(args: readonly string[], prompt?: string): { args: string[]; serverConfig: string[]; frontendArgs: string[]; resume: CodexManagedResume } | null {
-  if (args[0] !== 'resume' || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/iu.test(args[1] ?? '')) return null
-  const resume: CodexManagedResume = { threadId: args[1]! }, serverConfig: string[] = [], frontendArgs: string[] = [], removed = new Set<number>()
-  let promptIndex = -1
-  if (prompt?.trim()) {
-    promptIndex = args[2] === prompt ? 2 : args[2] === '--dangerously-bypass-hook-trust' && args[3] === prompt ? 3 : -1
-    if (promptIndex < 0) return null
-  }
-  for (let i = 2; i < args.length; i++) {
-    if (i === promptIndex) continue
+  // Match only the exact footer produced by this Provider, never an option value or wrapper delimiter.
+  const actionIndex = args.length - (prompt?.trim() ? 4 : 2)
+  if (actionIndex < 0 || args[actionIndex] !== 'resume' ||
+      !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/iu.test(args[actionIndex + 1] ?? '') ||
+      prompt?.trim() && (args[actionIndex + 2] !== '--' || args[actionIndex + 3] !== prompt)) return null
+  const resume: CodexManagedResume = { threadId: args[actionIndex + 1]! }, serverConfig: string[] = [], frontendArgs: string[] = [], removed = new Set<number>()
+  for (let i = 0; i < actionIndex; i++) {
     const arg = args[i]!
     if (arg === BYPASS_PERMISSIONS) {
       if (resume.sandbox !== undefined || resume.approvalPolicy !== undefined) return null
       resume.sandbox = 'danger-full-access'; resume.approvalPolicy = 'never'; removed.add(i)
     } else if (['-s', '--sandbox', '-a', '--ask-for-approval', '-m', '--model', '-C', '--cd'].includes(arg)) {
       const valueIndex = ++i, value = args[valueIndex]
-      if (!value || valueIndex === promptIndex) return null
+      if (!value || value.startsWith('-') || valueIndex >= actionIndex) return null
       if (arg === '-s' || arg === '--sandbox') {
         if (resume.sandbox !== undefined || !['read-only', 'workspace-write', 'danger-full-access'].includes(value)) return null
         resume.sandbox = value as NonNullable<CodexManagedResume['sandbox']>; removed.add(i - 1); removed.add(i)
@@ -74,7 +72,7 @@ function nativeResumePlan(args: readonly string[], prompt?: string): { args: str
         resume.cwd = value
       }
     } else if (arg === '--enable' || arg === '--disable') {
-      const value = args[++i]; if (!value || i === promptIndex) return null
+      const value = args[++i]; if (!value || value.startsWith('-') || i >= actionIndex) return null
       serverConfig.push(arg, value)
     } else if (arg.startsWith('--enable=') || arg.startsWith('--disable=')) serverConfig.push(arg)
     else if (!['--dangerously-bypass-hook-trust', '--no-alt-screen'].includes(arg)) return null
@@ -88,7 +86,7 @@ export const prepareCodexManagedLaunch: NonNullable<AgentProvider['prepareManage
   const prepared = context.kind === 'resume' ? nativeResumePlan(plan.args, context.prompt) : undefined
   if (context.kind === 'resume' && !prepared) return { plan }
   const args = prepared?.args ?? [...plan.args]
-  const configuration = prepared ?? nativeServerConfig(context.prompt && plan.args.at(-1) === context.prompt ? plan.args.slice(0, -1) : plan.args)
+  const configuration = prepared ?? nativeServerConfig(context.prompt && plan.args.at(-2) === '--' && plan.args.at(-1) === context.prompt ? plan.args.slice(0, -2) : plan.args)
   if (!configuration) return { plan }
   const { serverConfig, frontendArgs } = configuration
   // The version is the native CLI's stable version command, not a terminal screen or readiness guess.
