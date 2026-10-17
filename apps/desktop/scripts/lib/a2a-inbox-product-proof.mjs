@@ -19,39 +19,29 @@ const owns = ['apps/desktop/src', 'apps/desktop/electron.vite.config.ts', 'apps/
   'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.base.json', 'tsconfig.shared.json', 'patches',
   'packages/core/scripts/build.mjs', 'packages/core/scripts/clean-build.mjs', 'packages/core/bin', 'packages/core/native', 'packages/client-ui/scripts',
   ...assets, ...packages.flatMap(name => ['src', 'package.json', 'tsconfig.json', 'tsconfig.build.json'].map(path => 'packages/' + name + '/' + path))]
-const inboxFixtures = ['apps/desktop/scripts/lib/a2a-inbox-product-proof.mjs',
-  'apps/desktop/scripts/fixtures/a2a-inbox-product/worker.mjs', 'apps/desktop/scripts/fixtures/a2a-inbox-product/runtime.mjs', 'apps/desktop/scripts/fixtures/a2a-inbox-product/native-agent.mjs']
-const inboxLoaded = ['apps/desktop/src/main/index.ts', 'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/main/runtime-controller.ts',
+const fixturePaths = ['apps/desktop/scripts/lib/a2a-inbox-product-proof.mjs',
+  'apps/desktop/scripts/fixtures/a2a-inbox-product/runtime.mjs', 'apps/desktop/scripts/fixtures/a2a-inbox-product/native-agent.mjs',
+  'apps/desktop/scripts/fixtures/a2a-reference-reading/worker.mjs']
+const requiredLoaded = ['apps/desktop/src/main/index.ts', 'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/main/runtime-controller.ts',
   'apps/desktop/src/preload/index.ts', 'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/renderer/src/lib/api.ts',
   'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx',
   'apps/desktop/src/renderer/src/components/SessionMailbox.tsx', 'apps/desktop/src/renderer/src/components/MailboxA2A.tsx',
   'apps/desktop/src/renderer/src/components/MailboxReading.tsx', 'packages/client-ui/src/components/ConversationMessage.tsx',
   'packages/client-ui/src/components/ConversationInputText.tsx', 'packages/client-ui/src/components/InputMailboxRecords.tsx',
-  'apps/desktop/src/main/config-store.ts', 'apps/desktop/src/renderer/src/App.tsx', 'packages/client-ui/src/theme/runtime.ts']
+  'apps/desktop/src/main/config-store.ts', 'apps/desktop/src/renderer/src/App.tsx', 'packages/client-ui/src/theme/runtime.ts',
+  'packages/client-ui/src/components/ConversationView.tsx', 'packages/client-ui/src/components/CapturedConversationMessage.tsx',
+  'packages/client-ui/src/components/ConversationResourceText.tsx']
 
-const referenceFixtures = inboxFixtures.filter(path => !path.endsWith('/worker.mjs')).concat('apps/desktop/scripts/fixtures/a2a-reference-reading/worker.mjs')
-const referenceLoaded = [...inboxLoaded, 'packages/client-ui/src/components/ConversationView.tsx',
-  'packages/client-ui/src/components/CapturedConversationMessage.tsx', 'packages/client-ui/src/components/ConversationResourceText.tsx']
-
-/** The original A2A product proof retains its existing scenario and receipt. */
-export async function runA2aInboxProductProof(input) { return await runPrivateProductProof(input, false) }
-
-/** One current reference-reading scenario uses the same complete private builder. */
-export async function runA2aReferenceReadingProductProof(input) { return await runPrivateProductProof(input, true) }
-
-async function runPrivateProductProof({ root, evidence }, referenceReading) {
-  const fixturePaths = referenceReading ? referenceFixtures : inboxFixtures
-  const requiredLoaded = referenceReading ? referenceLoaded : inboxLoaded
-  root = await realpath(root); evidence = resolve(evidence, referenceReading ? 'reference-product' : 'a2a-product'); await mkdir(evidence, { recursive: true })
+/** One complete private product build for the current A2A reference-reading contract. */
+export async function runA2aReferenceReadingProductProof({ root, evidence }) {
+  root = await realpath(root); evidence = resolve(evidence, 'reference-product'); await mkdir(evidence, { recursive: true })
   const sourceCommit = (await exec('git', ['rev-parse', 'HEAD'], { cwd: root })).stdout.trim()
   const changes = (await exec('git', ['diff', sourceCommit, '--name-only', '--', ...owns], { cwd: root })).stdout.trim()
   assert.equal(changes, '', 'Commit the integrated product candidate before its private proof; no product overlay is accepted')
   const privateRoot = await realpath(await mkdtemp('/tmp/amx-a2-'))
-  const product = { schema: referenceReading ? 'agentmux.a2a-reference-product-proof.v1' : 'agentmux.a2a-product-proof.v1', prepared: false, passed: false, sourceRoot: root, sourceCommit,
+  const product = { schema: 'agentmux.a2a-reference-product-proof.v1', prepared: false, passed: false, sourceRoot: root, sourceCommit,
     privateRoot, receiptPath: join(evidence, 'receipt.json'), sources: {}, loaded: {}, compilerInputs: {}, compiled: {}, fixtures: {}, frames: [], cleanup: {},
-    boundary: referenceReading
-      ? 'Actual complete Desktop/Main/preload/Renderer, public CLI, private ctxmux and authenticated synthetic native actor. Original Inbox body and typed independent reference notice. No live model, user Runtime, installed App, vendor idle-race or physical Mobile claim.'
-      : 'Actual complete Desktop/Main/preload/Renderer, public CLI, private ctxmux and authenticated synthetic native actor. No live model, user Runtime, installed App, new delivery mode or implicit recovery seed.' }
+    boundary: 'Actual complete Desktop/Main/preload/Renderer, public CLI, private ctxmux and authenticated synthetic native actor. Original Inbox body and typed independent reference notice. No live model, user Runtime, installed App, vendor idle-race or physical Mobile claim.' }
   const receiptPath = join(evidence, 'receipt.json')
   let failure
   const command = async (label, executable, args, cwd) => {
@@ -162,7 +152,7 @@ privateA2aClipboard.writeText = text => recordPrivateA2aClipboard(${JSON.stringi
     workerEnvironment.AGENTMUX_A2A_PROOF_BUILD = privateRoot
     workerEnvironment.AGENTMUX_A2A_PROOF_CLIPBOARD = clipboardPath
     workerEnvironment.AGENTMUX_A2A_PROOF_ELECTRON = require('electron')
-    const lines = [], workerPath = join(privateRoot, referenceReading ? 'apps/desktop/scripts/fixtures/a2a-reference-reading/worker.mjs' : 'apps/desktop/scripts/fixtures/a2a-inbox-product/worker.mjs')
+    const lines = [], workerPath = join(privateRoot, 'apps/desktop/scripts/fixtures/a2a-reference-reading/worker.mjs')
     const outcome = await runProbeProcess(process.execPath, [workerPath, evidence], { cwd: privateRoot, temporaryRoot: privateRoot, env: workerEnvironment, timeoutMs: 360_000, onLine: line => lines.push(line) })
     await writeFile(join(evidence, 'product.log'), lines.join('\n') + '\n'); assert.equal(outcome.timedOut, false); assert.equal(outcome.exitCode, 0)
     Object.assign(product, JSON.parse(await readFile(join(evidence, 'facts.json'), 'utf8')))
@@ -181,10 +171,8 @@ privateA2aClipboard.writeText = text => recordPrivateA2aClipboard(${JSON.stringi
 }
 
 /** Shared build identity and actual-image review; no scenario conclusion is inferred here. */
-async function verifyProductBuild(product, { root, referenceReading }) {
-  const fixturePaths = referenceReading ? referenceFixtures : inboxFixtures
-  const requiredLoaded = referenceReading ? referenceLoaded : inboxLoaded
-  assert.equal(product.schema, referenceReading ? 'agentmux.a2a-reference-product-proof.v1' : 'agentmux.a2a-product-proof.v1'); assert.equal(product.prepared, true)
+async function verifyProductBuild(product, { root }) {
+  assert.equal(product.schema, 'agentmux.a2a-reference-product-proof.v1'); assert.equal(product.prepared, true)
   assert.ok(product.sourceCommit && Object.keys(product.sources).length > 100)
   assert.deepEqual(Object.keys(product.fixtures).sort(), [...fixturePaths].sort())
   for (const [path, digest] of Object.entries(product.fixtures)) {
@@ -213,7 +201,7 @@ async function verifyProductBuild(product, { root, referenceReading }) {
     assert.ok(launch.pauses.at(-1).hitBreakpoints.includes(launch.breakpoint.id)); assert.equal(launch.breakpoint.url, pathToFileURL(join(product.privateRoot, 'apps/desktop/out/main/index.js')).href)
     assert.ok(Number.isInteger(launch.pid) && launch.pid > 0)
   }
-  assert.ok(product.frames.length >= (referenceReading ? 7 : 9))
+  assert.ok(product.frames.length >= 7)
   for (const frame of product.frames) { assert.ok(isAbsolute(frame.path)); assert.equal(a2aProofSha(await readFile(frame.path)), frame.sha256); assert.ok(frame.width >= 400 && frame.height >= 500) }
   const review = JSON.parse(await readFile(product.reviewPath, 'utf8'))
   assert.equal(review.schema, 'agentmux.a2a-product-visual-review.v1'); assert.equal(review.verdict, 'pass'); assert.equal(review.independent, true)
@@ -223,88 +211,9 @@ async function verifyProductBuild(product, { root, referenceReading }) {
   for (const frame of review.frames) assert.equal(frame.verdict, 'pass')
 }
 
-/** Exact artifact consumption for the three original A2A task contracts. */
-export async function verifyA2aInboxProductProof(product, { root, scope }) {
-  assert.ok(['mailbox', 'integration', 'restart'].includes(scope))
-  await verifyProductBuild(product, { root, referenceReading: false })
-  assert.deepEqual(product.homeIsolation.launches.map(launch => launch.label), ['first', 'second'])
-  for (const launch of product.homeIsolation.launches) assert.equal(launch.pid, product.restart[launch.label].pid)
-  assert.ok(product.mailbox?.pages?.every(page => ['inbox', 'outbox', 'user'].includes(page)) && product.mailbox.pages.length === 3)
-  assert.equal(product.mailbox.copyExact, true); assert.equal(product.mailbox.clipboardPort.text, product.chain.scenarios.find(item => item.kind === 'normal').body); assert.equal(product.mailbox.clipboardPort.port, 'electron.clipboard.writeText'); assert.equal(product.mailbox.humanReadDidNotAcknowledgeAgent, true)
-  const runIds = product.restart.first.runBirths.map(run => run.agentSessionId)
-  const originalIds = [product.chain.normal.senderSessionId, product.chain.scenarios.find(item => item.kind === 'normal').original.envelope.recipientSessionId,
-    product.chain.scenarios.find(item => item.kind === 'unsubmitted').original.envelope.recipientSessionId]
-  const verifyNoInputEffect = pair => {
-    assert.ok(originalIds.every(id => Object.hasOwn(pair.before, id)), 'Every original Session is observed, including the uninvolved recipient')
-    assert.ok(Object.keys(pair.before).every(id => runIds.includes(id)))
-    for (const rows of Object.values(pair.before)) assert.ok(Array.isArray(rows))
-    assert.deepEqual(pair.after, pair.before, 'Exact native turn and manual-input effects stay unchanged')
-  }
-  verifyNoInputEffect(product.mailbox.readingEffects); verifyNoInputEffect(product.mailbox.localReadingEffects)
-  assert.ok(Object.values(product.mailbox.readingEffects.before).some(rows => rows.length > 0), 'The real input-effect baseline is not vacuous')
-  for (const operation of ['message.read', 'message.inbox.check', 'nativeHistory', 'conversation']) assert.ok(product.chain.readEffects.some(read => read.operation === operation))
-  for (const read of product.chain.readEffects) verifyNoInputEffect(read)
-  verifyNoInputEffect(product.mailbox.themeMatrix.effects)
-  assert.deepEqual(product.mailbox.themeMatrix.restoredAppearance, product.mailbox.themeMatrix.originalAppearance)
-  assert.deepEqual(product.mailbox.themeMatrix.transitions.map(item => item.requested).sort(), ['dark', 'light'])
-  for (const transition of product.mailbox.themeMatrix.transitions) {
-    assert.equal(transition.committed.appAppearance, transition.requested); assert.equal(transition.rendered.appearance, transition.requested)
-    assert.ok(transition.rendered.background.length > 0)
-    for (const folder of ['inbox', 'outbox', 'user']) for (const [size, width] of [['wide', 1440], ['narrow', 750]]) {
-      const frame = product.frames.find(item => item.name === `mailbox-${folder}-${transition.requested}-${size}`)
-      assert.ok(frame); assert.equal(frame.width, width); assert.equal(frame.observed.appearance, transition.requested)
-    }
-  }
-  const normalMessage = product.chain.scenarios.find(item => item.kind === 'normal')
-  assert.equal(product.mailbox.recipientUserPage.agentSessionId, normalMessage.original.envelope.recipientSessionId)
-  assert.ok(!product.mailbox.recipientUserPage.text.includes('A2A original review')); assert.ok(!product.mailbox.recipientUserPage.keys.some(key => key.includes(normalMessage.journalMessageId)))
-  if (scope === 'integration' || scope === 'restart') {
-    assert.deepEqual(product.chain.scenarios.map(item => item.kind).sort(), ['failed', 'normal', 'unknown', 'unsubmitted'])
-    for (const item of product.chain.scenarios) {
-      assert.equal(item.cliMessageId, item.journalMessageId)
-      assert.equal(item.cli.operationId, item.original.envelope.operationId)
-      assert.equal(item.body, item.original.envelope.body); assert.ok(item.original.sequence > 0)
-    }
-    assert.equal(product.chain.normal.nativeInputCount, 1); assert.equal(product.chain.normal.conversationCount, 1)
-    assert.equal(product.chain.normal.authorSessionId, product.chain.normal.senderSessionId)
-    const normalId = product.chain.scenarios.find(item => item.kind === 'normal').journalMessageId
-    const joined = product.chain.normal.conversation.items.filter(entry => entry.kind === 'item' && entry.item.records.some(record => { const key = record.original.kind === 'native' ? record.original.item.conversation?.adoptedInput?.key : record.original.item.inputRef; return key?.kind === 'message' && key.messageId === normalId }))
-    assert.equal(joined.length, 1); assert.equal(joined[0].item.event.author.agentSessionId, product.chain.normal.senderSessionId)
-    for (const kind of ['failed', 'unknown']) assert.equal(product.chain.scenarios.find(item => item.kind === kind).claim.admission.native.outcome, kind === 'failed' ? 'not-applied' : 'unknown')
-    assert.equal(product.chain.unsubmitted.conversationCount, 0)
-    const localCli = product.chain.localCli
-    assert.equal(localCli.original.envelope.sender.kind, 'human'); assert.equal(localCli.original.envelope.senderSessionId, null); assert.equal(localCli.original.envelope.body, localCli.body)
-    assert.equal(localCli.inbox.agentSessionId, localCli.original.envelope.recipientSessionId); assert.ok(!localCli.inbox.text.includes(localCli.body)); assert.ok(!localCli.inbox.keys.some(key => key.includes(localCli.original.envelope.messageId)))
-    assert.ok(localCli.userPage.text.includes(localCli.body)); assert.equal(localCli.userPage.authorLabel, 'Author unknown'); assert.ok(!localCli.userPage.text.includes('A2A original review'))
-    assert.equal(product.chain.initial.original.envelope.recipientRunId, null); assert.equal(product.chain.initial.original.envelope.body, product.chain.initial.body)
-  }
-  if (scope === 'restart') {
-    const { first, second } = product.restart
-    assert.notEqual(first.pid, second.pid); assert.equal(first.signal, 'SIGKILL'); assert.equal(second.seedControlsAbsent, true)
-    assert.deepEqual(second.workbench, first.workbench); assert.deepEqual(second.drafts, first.drafts); assert.deepEqual(second.queue, Object.fromEntries(Object.entries(first.queue).map(([id, entries]) => [id, entries.map(({ preparationWait, ...entry }) => ({ ...entry, status: entry.status === 'restoring' ? 'restoring' : 'deferred', awaitingExplicitSend: true }))])))
-    assert.deepEqual(second.runBirths, first.runBirths); assert.deepEqual(second.messages, first.messages)
-    assert.equal(product.restart.replayCount, 0); assert.equal(product.restart.wrongRunAckRefused, true); assert.equal(product.restart.staleGenerationRefused, true)
-    assert.equal(product.restart.reboundOccupantInputCount, 0); assert.equal(product.restart.unknownReplay.nativeInputCount, 1); assert.equal(product.restart.unknownReplay.originalMessageId, product.chain.scenarios.find(item => item.kind === 'unknown').journalMessageId); assert.equal(product.restart.healthyManualInput, true)
-    for (const pair of [product.restart.routeEffects, product.restart.workfaceEditingEffects, product.restart.inputEffects, product.restart.observationReadEffects]) verifyNoInputEffect(pair)
-    const { ackReceipts, agentConsumption, unknownReplay } = product.restart
-    assert.equal(ackReceipts.wrongRun.error.code, 'MESSAGE_ACK_GENERATION_STALE')
-    assert.ok(first.runBirths.some(run => run.runId === ackReceipts.wrongReaderRun.runId)); assert.notEqual(ackReceipts.wrongReaderRun.runId, agentConsumption.originalBatch.readerRun.runId)
-    assert.equal(ackReceipts.lateGeneration.error.code, 'AGENT_DELIVERY_GENERATION_STALE')
-    assert.ok(agentConsumption.nextBatch.generation > agentConsumption.originalBatch.generation); assert.deepEqual(agentConsumption.nextBatch.readerRun, agentConsumption.originalBatch.readerRun)
-    assert.deepEqual(agentConsumption.nextBatch.messages.map(item => item.envelope.messageId).sort(), product.chain.scenarios.filter(item => ['failed', 'unknown'].includes(item.kind)).map(item => item.journalMessageId).sort())
-    assert.ok(agentConsumption.nextBatch.messages.length > 0); assert.deepEqual(agentConsumption.retainedNextBatch, agentConsumption.nextBatch)
-    const firstUnknown = product.chain.scenarios.find(item => item.kind === 'unknown').cli
-    assert.deepEqual(unknownReplay.firstReceipt, firstUnknown)
-    assert.equal(firstUnknown.ok, false); assert.equal(firstUnknown.error.code, 'AGENT_PROMPT_INPUT_UNCONFIRMED')
-    assert.equal(unknownReplay.retry.ok, false); assert.equal(unknownReplay.retry.error.code, firstUnknown.error.code)
-    assert.equal(unknownReplay.retry.operation, firstUnknown.operation); assert.equal(unknownReplay.retry.operationId, firstUnknown.operationId)
-  }
-  return { passed: true, scope, sourceCommit: product.sourceCommit, frames: product.frames.length }
-}
-
 /** This scene signs only original reference reading, never model adoption or recovery. */
 export async function verifyA2aReferenceReadingProductProof(product, { root }) {
-  await verifyProductBuild(product, { root, referenceReading: true })
+  await verifyProductBuild(product, { root })
   assert.deepEqual(product.homeIsolation.launches.map(launch => launch.label), ['first'])
   const r = product.reading
   assert.ok(r && r.boundary)
@@ -383,11 +292,4 @@ export async function verifyA2aReferenceReadingProductProof(product, { root }) {
   }
   for (const name of ['reference-user-messages', 'reference-inbox-original', 'reference-outbox']) assert.ok(product.frames.some(frame => frame.name === name))
   return { passed: true, sourceCommit: product.sourceCommit, frames: product.frames.length, messageId: r.messageId, notificationId: r.key.submissionId }
-}
-
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  assert.deepEqual(process.argv.slice(2), ['--prepare'], 'The private A2A product helper accepts only --prepare')
-  const root = resolve(import.meta.dirname, '../../../..')
-  const artifact = await runA2aInboxProductProof({ root, evidence: join(root, '.tmp/mailbox-reading-flow') })
-  console.log(JSON.stringify(artifact))
 }

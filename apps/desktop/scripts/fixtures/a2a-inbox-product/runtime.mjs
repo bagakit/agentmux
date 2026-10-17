@@ -1,14 +1,13 @@
 import assert from 'node:assert/strict'
-import { spawn, execFile } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { promisify } from 'node:util'
 
-/** The original private product lifecycle shared by the two A2A proof scenarios. */
+/** Own only the current private product lifecycle, Inspector isolation and exact cleanup. */
 export async function runPrivateA2aProductScenario(scenario) {
-const root = process.env.AGENTMUX_A2A_PROOF_BUILD, evidence = resolve(process.argv[2]), exec = promisify(execFile)
+const root = process.env.AGENTMUX_A2A_PROOF_BUILD, evidence = resolve(process.argv[2])
 assert.ok(root?.startsWith('/private/tmp/amx-a2-') || root?.startsWith('/tmp/amx-a2-'))
 assert.equal(process.env.HOME, join(root, 'home'))
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -31,7 +30,7 @@ const originalConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label
   appearance: { appAppearance: 'dark', terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
 await writeFile(join(userData, 'agentmux.config.json'), JSON.stringify(originalConfig))
 const children = new Set(), sessions = [], frames = [], cliCalls = []
-const facts = { frames, chain: { scenarios: [], cliCalls, readEffects: [] }, mailbox: {}, restart: {}, cleanup: { userRunTouched: false, processesReaped: false },
+const facts = { frames, chain: { cliCalls, readEffects: [] }, cleanup: { userRunTouched: false, processesReaped: false },
   homeIsolation: { privateHome: process.env.HOME, launches: [] },
   syntheticNativeBoundary: 'Authenticated Codex 0.163 actor-shaped fixture, exact native UserMessage/client_id persisted by that actor. No model or vendor acceptance claim.' }
 let client, daemon, rpc, failure
@@ -43,7 +42,6 @@ async function waitFor(label, read, budget = 25_000) {
   throw new Error('Private A2A product proof timed out: ' + label)
 }
 const ended = child => child.exitCode !== null || child.signalCode !== null
-async function birth(pid) { return (await exec('/bin/ps', ['-p', String(pid), '-o', 'pid=,pgid=,lstart='])).stdout.trim() }
 async function stop(child, signal = 'SIGTERM') {
   if (ended(child)) return
   assert.ok(child.pid); process.kill(-child.pid, signal)
@@ -81,25 +79,6 @@ async function cli(args, caller = null, expectSuccess = true) {
     facts.chain.readEffects.push({ operation: readOperation, args, before: readEffectsBefore, after })
   }
   return receipt
-}
-async function focusReadingTarget(place, session) {
-  const receipt = await cli(['space', 'focus', '--region', place.to.regionId, '--input', 'target', '--expect-session', session.agentSessionId])
-  assert.equal(receipt.operation, 'space.focus')
-  const { result } = receipt
-  assert.equal(result.partial, false)
-  assert.ok(['applied', 'unchanged'].includes(result.navigation.state))
-  assert.equal(result.navigation.expectedAgentSessionId, session.agentSessionId)
-  assert.equal(result.navigation.selection.space.regionId, place.to.regionId)
-  assert.equal(result.navigation.selection.space.tabId, place.to.tabId)
-  assert.equal(result.presentation.provenance, 'observed')
-  assert.ok(['main-visible', 'window', 'floating'].includes(result.presentation.state))
-  assert.equal(result.presentation.regionId, place.to.regionId); assert.equal(result.presentation.tabId, place.to.tabId)
-  assert.equal(result.input.policy, 'target'); assert.equal(result.input.outcome, 'transferred')
-  assert.equal(result.input.after.provenance, 'observed')
-  assert.equal(result.input.after.regionId, place.to.regionId); assert.equal(result.input.after.tabId, place.to.tabId)
-  assert.equal(result.input.after.sessionId, session.agentSessionId)
-  assert.equal(result.input.after.connected, true); assert.equal(result.input.after.visible, true); assert.equal(result.input.after.inert, false)
-  assert.equal(result.save.diskDurability, 'confirmed')
 }
 async function cdpConnect(url) {
   const ws = new WebSocket(url), pending = new Map(), pauses = []; let serial = 0
@@ -187,36 +166,7 @@ async function screenshot(app, name, width = 1440, height = 980) {
   const observed = await app.cdp.evaluate(`({title:document.title,appearance:document.documentElement.dataset.appearance,theme:document.documentElement.dataset.theme,regions:[...document.querySelectorAll('[data-workbench-region-id]')].filter(el=>el.getClientRects().length).map(el=>el.dataset.workbenchRegionId),text:document.body.innerText.slice(0,8000)})`)
   frames.push({ name, path, sha256: sha(bytes), width, height, observed })
 }
-async function snapshot(app, ids, messageIds) {
-  const ui = await app.cdp.evaluate(`(()=>{const s=JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state;return{workbench:{tabs:s.tabs,layouts:s.layouts,agentFocus:{execution:{sessionId:s.agentFocus?.execution?.sessionId,reference:s.agentFocus?.execution?.reference},pmo:{sessionId:s.agentFocus?.pmo?.sessionId}},activeWorkspaceId:s.activeWorkspaceId,mainSurface:s.mainSurface},drafts:s.agentComposerDrafts,queue:s.agentSteerQueues}})()`)
-  const runs = await client.listRuns(), runBirths = []
-  for (const id of ids) { const original = sessions.find(session => session.agentSessionId === id), run = runs.find(run => run.runId === original.run.runId); assert.equal(run.state, 'running'); runBirths.push({ agentSessionId: id, runId: run.runId, pid: run.pid, birth: await birth(run.pid) }) }
-  const messages = []
-  for (const id of messageIds) messages.push((await cli(['message', 'read', '--host', 'local', '--message-id', id])).result.message)
-  return { pid: app.child.pid, ...ui, runBirths, messages, seedControlsAbsent: app.seedControlsAbsent, origin: app.origin }
-}
 async function nativeRequests(session) { try { return (await readFile(join(controls, session.agentSessionId + '.requests.jsonl'), 'utf8')).split('\n').filter(Boolean).map(line => JSON.parse(line)) } catch (error) { if (error.code === 'ENOENT') return []; throw error } }
-async function history(session) {
-  const before = await inputEffects()
-  const page = await client.readAgentSessionHistory({ hostId: 'local', agentSessionId: session.agentSessionId, source: 'native', kind: 'user-message', limit: 100 })
-  const after = await inputEffects(); assert.deepEqual(after, before, 'The original native history read must produce no input effect')
-  facts.chain.readEffects.push({ operation: 'nativeHistory', agentSessionId: session.agentSessionId, before, after })
-  return page
-}
-async function conversationInput(session, messageId) {
-  const before = await inputEffects()
-  const page = await client.readAgentConversation({ hostId: 'local', agentSessionId: session.agentSessionId, limit: 100, maxBytes: 4 * 1024 * 1024 })
-  const after = await inputEffects(); assert.deepEqual(after, before, 'The original Conversation read must produce no input effect')
-  facts.chain.readEffects.push({ operation: 'conversation', agentSessionId: session.agentSessionId, before, after })
-  assert.equal(page.window.complete, true); assert.equal(page.nextCursor, null)
-  assert.ok(page.items.every(entry => entry.kind === 'item'), 'This bounded fixture produces complete source units')
-  const units = page.items.map(entry => entry.item).filter(unit => unit.records.some(record => {
-    const key = record.original.kind === 'native' ? record.original.item.conversation?.adoptedInput?.key : record.original.item.inputRef
-    return key?.kind === 'message' && key.messageId === messageId && key.agentSessionId === session.agentSessionId && key.expectedRun.runId === session.run.runId
-  }))
-  return { page, units }
-}
-const inputRequests = rows => rows.filter(row => ['turn/start', 'turn/steer', 'thread/queue/add'].includes(row.method))
 async function inputEffects() {
   return Object.fromEntries(await Promise.all(sessions.map(async session => [session.agentSessionId,
     (await nativeRequests(session)).filter(row => ['turn/start', 'turn/steer', 'thread/queue/add'].includes(row.method) || typeof row.manualInput === 'string') ])))
@@ -237,7 +187,7 @@ try {
   const executor = await client.configureHostExecutor({ executorId: 'proof', config: originalConfig.executors.proof })
   assert.equal(executor.runtimeId, owner.runtimeId); assert.equal(executor.executor.executorId, 'proof')
   facts.semanticOwner.executor = executor
-  await scenario({ root, evidence, core, client, first, sessions, facts, executable, runtime, state, userData, workspace, nativeHome, controls, cli, credential, waitFor, stop, birth, sleep, activate, region, openMailbox, screenshot, snapshot, nativeRequests, history, conversationInput, inputEffects, inputRequests, focusReadingTarget, launch })
+  await scenario({ client, first, sessions, facts, executable, workspace, nativeHome, controls, cli, credential, waitFor, activate, region, openMailbox, screenshot, nativeRequests, inputEffects })
 } catch (error) { failure = error; facts.error = { message: error.message, stack: error.stack } }
 finally {
   if (client) {
