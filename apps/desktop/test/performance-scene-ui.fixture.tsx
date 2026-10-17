@@ -4,6 +4,7 @@ import { act, useState } from 'react'
 import type { Root } from 'react-dom/client'
 import { homedir } from 'node:os'
 import { createHash } from 'node:crypto'
+import { gzipSync } from 'node:zlib'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import type { AgentMuxPreloadApi } from '../src/shared/contracts'
@@ -42,6 +43,7 @@ function material(target: RendererV8ProfileTarget, captureId = 'original-scene',
     { id: 2, selfSize: 131072, callFrame: profile.nodes[2]!.callFrame, children: [] },
   ] }, samples: [{ size: 131072, nodeId: 2, ordinal: 1 }] }
   const trace = { traceEvents: [{ pid: target.pid, tid: 1, ph: 'X', ts: 1, dur: 2000, name: 'Layout', cat: 'devtools.timeline', args: { original: true } }] }
+  const nativeGzip = gzipSync(JSON.stringify(trace))
   const timing = { requestedAt: _tailFixtureEpoch(0, 0, 100), startedAt: _tailFixtureEpoch(0, 0, 110), stoppedAt: _tailFixtureEpoch(0, 0, 2110), finishedAt: _tailFixtureEpoch(0, 0, 2120), startMonotonicMs: 10, stopMonotonicMs: 2010 }
   const sourceVerified = { before: true, after: true }, cleanup = { stopRequested: true, stopAcknowledged: true, disableAcknowledged: true, detached: 'confirmed' as const }
   const resources = (snapshot: typeof snapshots.fresh) => {
@@ -66,12 +68,13 @@ function material(target: RendererV8ProfileTarget, captureId = 'original-scene',
       policy: RENDERER_ALLOCATION_POLICY, cleanup: { ...cleanup, startRequested: true, startAcknowledged: true },
       profile: heap, profileBytes: Buffer.byteLength(JSON.stringify(heap)), sha256: hash(heap) }),
     timeline: partial ? omitted('The original Renderer source changed; no replacement was sampled.') : phase({ target, durationMs: 2000,
-      schema: 'agentmux.renderer-trace.v1', scope: 'chromium-target-related-timeline', status: 'completed', transferMode: 'ReportEvents', traceTimeUnit: 'microseconds',
+      schema: 'agentmux.renderer-trace.v2', scope: 'chromium-target-related-timeline', status: 'completed', transferMode: 'ReturnAsStream', streamFormat: 'json', streamCompression: 'gzip', traceTimeUnit: 'microseconds',
       requestedCategories: [...RENDERER_TRACE_CATEGORIES], sourceVerified,
       timing: { requestedAt: _tailFixtureEpoch(0, 0, 4200), startedAt: _tailFixtureEpoch(0, 0, 4210), endAcknowledgedAt: _tailFixtureEpoch(0, 0, 6210), completedAt: _tailFixtureEpoch(0, 0, 6220), finishedAt: _tailFixtureEpoch(0, 0, 6230), startMonotonicMs: 20, endMonotonicMs: 2020, completeMonotonicMs: 2030 },
       lifecycle: { startRequested: true, startAcknowledged: true, endRequested: true, endAcknowledged: true, tracingComplete: true, dataLossOccurred: false, detached: 'confirmed' },
+      stream: { handleReceived: true, eof: true, closeRequested: true, closeAcknowledged: true },
       bufferUsage: { observations: 1, maxFraction: 0.01, fullObserved: false }, receivedEvents: 1, receivedTraceBytes: Buffer.byteLength(JSON.stringify(trace)),
-      trace, traceBytes: Buffer.byteLength(JSON.stringify(trace)), sha256: hash(trace), issues: [] }),
+      receivedGzipBytes: nativeGzip.length, trace: { encoding: 'base64', data: nativeGzip.toString('base64'), bytes: nativeGzip.length, sha256: createHash('sha256').update(nativeGzip).digest('hex') }, traceBytes: Buffer.byteLength(JSON.stringify(trace)), sha256: hash(trace), issues: [] }),
     after: { resources: phase(resources(snapshots.refresh)), memory: phase(memory) } }
   scene.status = rendererSceneStatus(scene)
   return parseRendererSceneCaptureResult({ scene, persistence: { status: 'confirmed', phase: null, issue: null } }, { target })
@@ -247,4 +250,26 @@ it('an older inspect reply cannot erase a newer explicit scene and a wrong-targe
   await collect(); expect(sceneNode().textContent).toContain('contract is invalid')
   expect(sceneNode().textContent).toContain('Scene captured'); expect(sceneNode().textContent).not.toContain('foreign-source')
   expect(capturePort).toHaveBeenCalledTimes(2)
+})
+
+
+it('exports the retained scene timeline as the same original gzip without decoding it on inspect or open', async () => {
+  const original = material(target()), trace = original.scene.timeline.result!.trace!
+  latest = original
+  const downloads: { name: string; blob: Blob }[] = [], blobs: Blob[] = []
+  vi.stubGlobal('URL', class extends URL {
+    static createObjectURL(blob: Blob) { blobs.push(blob); return 'blob:scene-native-gzip' }
+    static revokeObjectURL() {}
+  })
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+    downloads.push({ name: this.download, blob: blobs.at(-1)! })
+  })
+  const decode = vi.spyOn(globalThis, 'atob')
+  await open()
+  expect(capturePort).not.toHaveBeenCalled(); expect(decode).not.toHaveBeenCalled()
+  await click(button('Timeline', sceneNode()))
+  expect(downloads.map(item => item.name)).toEqual(['renderer-trace.json.gz'])
+  expect(downloads[0]!.blob.type).toBe('application/gzip')
+  expect(Buffer.from(await downloads[0]!.blob.arrayBuffer())).toEqual(Buffer.from(trace.data, 'base64'))
+  expect(decode).toHaveBeenCalledOnce(); expect(capturePort).not.toHaveBeenCalled()
 })
