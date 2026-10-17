@@ -32,7 +32,6 @@ import * as FilterMenu from './HoverDropdownMenu'
 import { RecentFocusTimeline } from './RecentFocusTimeline'
 import type { RevealConversationItem } from '../lib/mailbox-message-navigation'
 import { requestPmoTeamsTopicFloatingOpen, readPmoTeamsTopicFloatingState } from '../lib/pmo-teams-topic-floating'
-import { isMacPlatform } from '../lib/host-platform'
 import { executionFocusSessionId } from '../lib/agent-focus'
 import { workbenchSelectionCatalog } from '../lib/desktop-focus-navigation'
 import { sameWorkbenchProjectionSelection } from '../lib/workbench-projection'
@@ -92,7 +91,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   directoryIssue?: string | null
   viewTargets?: WorkbenchViewTargets
 } = {}) {
-  const surfaceVisible = useAppStore(state => state.mainSurface === 'agents')
+  const surfaceVisible = useAppStore(state => state.mainSurface === 'agents' && state.focusView === 'list')
   const visible = hostVisible && surfaceVisible
   const [query, setQuery] = useState('')
   const contextSelector = useMemo(createFocusProjectionSelector, [])
@@ -316,9 +315,9 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       })
     }</FocusLaneGroups> : null}</>
   }
-  return <section className={`global-board-surface global-focus-surface ${showWorkspace ? 'global-board-surface--session-open' : ''}`} aria-label="Focus" data-focus-reply-lines={replyLines} hidden={!surfaceVisible} inert={!visible} aria-hidden={!surfaceVisible} style={{ display: surfaceVisible ? undefined : 'none', '--focus-workspace-width': `calc(${workspaceRatio * 100}% - 6px)`, '--focus-reply-lines': replyLines, '--focus-card-track-height': `${focusCardTrackHeight(replyLines)}px` } as CSSProperties}>
+  return <section className={`global-board-surface global-focus-surface ${showWorkspace ? 'global-board-surface--session-open' : ''}`} aria-label="Focus" data-desktop-focus-view="list" data-focus-reply-lines={replyLines} hidden={!surfaceVisible} inert={!visible} aria-hidden={!surfaceVisible} style={{ display: surfaceVisible ? undefined : 'none', '--focus-workspace-width': `calc(${workspaceRatio * 100}% - 6px)`, '--focus-reply-lines': replyLines, '--focus-card-track-height': `${focusCardTrackHeight(replyLines)}px` } as CSSProperties}>
     <FocusToolbar onOpenCollaboration={selected?.control ? () => useAppStore.getState().openCollaborationMap({ kind: 'focus', subject: { hostId: selected.control!.hostId, agentSessionId: selected.control!.agentSessionId }, name: selected.name }) : undefined} active={visible} selectedId={shownSessionId} selected={selected} tab={selectedTab} reference={projection?.selection.length === 1 ? projection.selection[0] : undefined} onReview={() => setRequestId(shownSessionId)} onCloseWorkspace={closeWorkspace} regionOnly={regionOnly} onToggleRegion={projection ? onToggleRegion : undefined}>
-      <div className={`focus-filters${isMacPlatform() ? ' focus-filters--mac' : ''}`}>
+      <div className="focus-filters">
         <div className="global-board-toolbar__controls">
           <label className="global-board-search"><ThemeActionSearchIcon size={13} /><TextInput ref={searchRef} aria-label="Search contexts" placeholder="Search text, IDs or amux links" title="Filter names, activity, paths and original object IDs or links. Enter searches case-sensitive text in retained conversations." onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); historySearch.start() } }} value={query} onChange={(event) => setQuery(event.target.value)} /></label>
           <button type="button" className="small-button focus-search-history-trigger" aria-label="Search retained conversation text" title="Search retained conversation text · Enter" disabled={!query.trim()} onClick={() => historySearch.start()}><ThemeActionSearchIcon size={13} /><span>History</span></button>

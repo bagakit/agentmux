@@ -412,7 +412,6 @@
 .focus-pmo-attention__identity strong { flex: 1 1 4ch; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .focus-pmo-attention__identity > span:last-child, .focus-pmo-attention > span:last-child { flex: none; white-space: nowrap; }
 
-.focus-filters--mac { padding-left: 80px; min-height: 36px; -webkit-app-region: drag; }
 .focus-filters .global-board-toolbar__controls { -webkit-app-region: no-drag; }
 
 

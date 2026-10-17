@@ -1,8 +1,8 @@
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { useAppStore } from '../store'
 
-/** Locate the original Space selection in the same map; no local dialog or reading owner. */
+/** A secondary Space action locates its exact original context in the retained Focus map. */
 export function WorkspaceCollaboration() {
-  const open = useAppStore(state => state.openCollaborationMap)
-  return <button type="button" aria-label="Locate current Agent in map" title="Locate in map" onClick={() => open()}><SemanticIcon name="action.locate" size={15} /></button>
+  const locate = useAppStore(state => state.locateSpaceInCollaborationMap)
+  return <button type="button" aria-label="Locate Space in Focus map" title="Locate current Space in Focus map" onClick={locate}><SemanticIcon name="action.locate" size={15} /></button>
 }

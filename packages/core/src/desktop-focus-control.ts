@@ -2,13 +2,13 @@ import type { AgentMuxSpaceSelector, AgentMuxSpatialIssue, AgentMuxSpatialSave }
 
 /** Client presentation facts. Core neither owns nor initializes a desktop surface. */
 export type AgentMuxDesktopSurface = 'space' | 'focus' | 'goals' | 'survey' | 'recall'
-export type AgentMuxDesktopSpaceView = 'workbench' | 'map'
+export type AgentMuxDesktopFocusView = 'list' | 'map'
 export type AgentMuxDesktopMainSurface = 'workbench' | 'agents' | 'board' | 'survey' | 'recall'
 export type AgentMuxDesktopFocusTarget =
   | ({ kind: 'space' } & AgentMuxSpaceSelector)
   | { kind: 'goal'; goalId: string }
-  | { kind: 'surface'; surface: 'space'; view?: AgentMuxDesktopSpaceView }
-  | { kind: 'surface'; surface: Exclude<AgentMuxDesktopSurface, 'space'> }
+  | { kind: 'surface'; surface: 'focus'; view?: AgentMuxDesktopFocusView }
+  | { kind: 'surface'; surface: Exclude<AgentMuxDesktopSurface, 'focus'> }
 export type AgentMuxDesktopInputPolicy = 'preserve' | 'target'
 export type AgentMuxDesktopSpaceSelection = {
   spaceId: string | null; zoneId: string | null;
@@ -19,7 +19,7 @@ export type AgentMuxDesktopSpaceSelection = {
 }
 export type AgentMuxDesktopSelection = {
   surface: AgentMuxDesktopSurface; mainSurface: AgentMuxDesktopMainSurface
-  spaceView: AgentMuxDesktopSpaceView | null
+  focusView: AgentMuxDesktopFocusView | null
   space: AgentMuxDesktopSpaceSelection | null; goalId: string | null
 }
 export type AgentMuxDesktopProvenance = 'observed' | 'unavailable' | 'unknown'

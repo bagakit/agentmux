@@ -24,16 +24,16 @@ import { AgentCollaborationGraph, COLLABORATION_LABELS, type CollaborationSelect
 import { MailboxA2A } from './MailboxA2A'
 import type { CollaborationMapTarget } from '../lib/collaboration-map-navigation'
 import { useFocusHistorySources } from '../lib/focus-history-sources'
-import { TopRowLeadingChrome } from './TopRowChrome'
+import { CollaborationMapToolbar } from './CollaborationMapToolbar'
 import { collaborationAgentPresentation, collaborationAgentName, collaborationHistoryContext } from '../lib/collaboration-map-presentation'
 
 const allKinds = ['communication', 'creation', 'supervision'] as const
 
-export function AgentCollaborationMap({ request, active = true, onClose, onOpen }: { request: CollaborationMapTarget | null; active?: boolean; onClose(): void; onOpen(context: FocusContext, reference?: WorkbenchProjectionSelection): void }) {
-  return request ? <CollaborationReadingMap request={request} visible={active} onClose={onClose} onOpen={onOpen} /> : null
+export function AgentCollaborationMap({ request, active = true, onOpen }: { request: CollaborationMapTarget | null; active?: boolean; onOpen(context: FocusContext, reference?: WorkbenchProjectionSelection): void }) {
+  return request ? <CollaborationReadingMap request={request} visible={active} onOpen={onOpen} /> : null
 }
 
-function CollaborationReadingMap({ request, visible, onClose, onOpen }: { request: CollaborationMapTarget; visible: boolean; onClose(): void; onOpen(context: FocusContext, reference?: WorkbenchProjectionSelection): void }) {
+function CollaborationReadingMap({ request, visible, onOpen }: { request: CollaborationMapTarget; visible: boolean; onOpen(context: FocusContext, reference?: WorkbenchProjectionSelection): void }) {
   const active = useWorkbenchPresentationActive(), workbenchDocument = useWorkbenchDocument()
   const [documentVisible, setDocumentVisible] = useState(!workbenchDocument.hidden)
   useEffect(() => { const update = () => setDocumentVisible(!workbenchDocument.hidden); workbenchDocument.addEventListener('visibilitychange', update); return () => workbenchDocument.removeEventListener('visibilitychange', update) }, [workbenchDocument])
@@ -55,7 +55,7 @@ function CollaborationReadingMap({ request, visible, onClose, onOpen }: { reques
   const previewTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const previewAgent = useCallback((id: string | null) => { clearTimeout(previewTimer.current); if (id) setPeeked(id); else previewTimer.current = setTimeout(() => setPeeked(null), 220) }, [])
   useEffect(() => () => clearTimeout(previewTimer.current), [])
-  const [sourcesOpen, setSourcesOpen] = useState(false), [query, setQuery] = useState('')
+  const [sourcesOpen, setSourcesOpen] = useState(false)
   const [locate, setLocate] = useState<{ token: object; agentId?: string; areaIds?: readonly string[] }>()
   const [selection, setSelection] = useState<CollaborationSelection>(subjectKey ? { kind: 'agent', id: subjectKey } : null)
   const [kinds, setKinds] = useState<ReadonlySet<CollaborationRelation['kind']>>(new Set(allKinds))
@@ -157,51 +157,60 @@ function CollaborationReadingMap({ request, visible, onClose, onOpen }: { reques
   const [navigation, setNavigation] = useState<{ context: FocusContext; locations: WorkbenchProjectionSelection[] } | null>(null)
   const open = useCallback((context: FocusContext) => {
     const locations = collaborationWorkfaces(useAppStore.getState(), context, agentRegionExecution)
-    if (locations.length === 1) { onOpen(context, locations[0]); onClose() }
+    if (locations.length === 1) { onOpen(context, locations[0]) }
     else setNavigation({ context, locations })
-  }, [onClose, onOpen])
+  }, [onOpen])
   const issues = reading.sources.reduce((count, source) => count + Object.keys(source.issues).length + Number(Boolean(source.observationIssue)), Number(Boolean(history.error)))
-  const loading = reading.sources.some(source => source.loading.length)
+  const sourceIssues = issues + Number(Boolean(scope.issue)) + areas.filter(area => area.issue).length
+  const loading = history.loading || reading.sources.some(source => source.loading.length)
   const mapPresentation = useMemo(() => ({ active: enabled, retainedRegionId: null }), [enabled])
-  const matches = query.trim() ? [...projection.agents.values()].filter(agent => collaborationAgentName(agent).toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()) || agent.sessionId.includes(query.trim())) : []
-  const locateAgent = (id: string) => { setSelection({ kind: 'agent', id }); setLocate({ token: {}, agentId: id }); setQuery('') }
-  return <WorkbenchPresentationContext.Provider value={mapPresentation}><section className="collaboration-map" data-desktop-space-view="map" aria-label="Agent map" hidden={!visible} inert={!visible}>
-      <header className="collaboration-map__header"><TopRowLeadingChrome /><div className="collaboration-map__search"><SemanticIcon name="action.search" size={14} /><input aria-label="Find Agent in map" placeholder="Find Agent" value={query} onChange={event => setQuery(event.target.value)} />{query.trim() ? <div className="collaboration-map__results" role="listbox" aria-label="Matching Agents">{matches.slice(0, 30).map(agent => <button type="button" key={agent.id} role="option" aria-selected={selection?.id === agent.id} onClick={() => locateAgent(agent.id)}>{collaborationAgentName(agent)}<small>{agent.sessionId}</small></button>)}{!matches.length ? <p>No matching Agent</p> : matches.length > 30 ? <p>Refine to find more Agents</p> : null}</div> : null}</div></header>
-      <div className="collaboration-toolbar">
-        <button type="button" className="collaboration-map__locate" onClick={() => setLocate({ token: {}, ...(subjectKey ? { agentId: subjectKey } : { areaIds: scope.current }) })}><SemanticIcon name="action.locate" size={14} /><span>{request.kind === 'focus' ? request.name : scope.title}</span></button>
-        <div className="collaboration-toolbar__kinds" role="group" aria-label="Relation types">{allKinds.map(kind => <button key={kind} type="button" className="small-button" data-kind={kind} aria-pressed={kinds.has(kind)} onClick={() => setKinds(previous => { const next = new Set(previous); if (!next.delete(kind)) next.add(kind); return next })}><span />{COLLABORATION_LABELS[kind]}</button>)}</div>
-        <button type="button" className="icon-button" aria-label="Refresh graph sources" title="Refresh graph sources" onClick={() => { history.refresh(); for (const subject of subjects) reading.act(subject, 'refresh') }}><SemanticIcon name="action.refresh" size={14} /></button>
-        <button type="button" className="small-button" aria-expanded={sourcesOpen} onClick={() => setSourcesOpen(value => !value)}>Sources{issues ? ` · ${issues}` : ''}</button>
-      </div>
-      <div className="collaboration-map__body"><AgentCollaborationGraph active={enabled} locate={locate} onVisibleAgents={reportVisible} peeked={peeked} onPreviewAgent={previewAgent} agents={projection.agents} areas={areas} relations={relations} pulses={enabled ? reading.pulses : []} selection={selection} onSelect={setSelection} onOpen={open} identities={identities} goals={goals} />
+  const locateAgent = useCallback((id: string) => { setSelection({ kind: 'agent', id }); setLocate({ token: {}, agentId: id }); setSourcesOpen(false); setNavigation(null) }, [])
+  const select = useCallback((value: CollaborationSelection) => { setSelection(value); setSourcesOpen(false); setNavigation(null) }, [])
+  const agentRelations = selectedAgent ? relations.filter(relation => relation.source === selectedAgent.id || relation.target === selectedAgent.id) : []
+  return <WorkbenchPresentationContext.Provider value={mapPresentation}><section className="collaboration-map" data-desktop-focus-view="map" aria-label="Agent map" hidden={!visible} inert={!visible}>
+      <CollaborationMapToolbar active={enabled} agents={projection.agents} selectedKinds={kinds} onToggleKind={kind => setKinds(previous => { const next = new Set(previous); if (!next.delete(kind)) next.add(kind); return next })}
+        onLocate={locateAgent} sourcesOpen={sourcesOpen} onSources={() => { setSourcesOpen(value => !value); setNavigation(null) }} issues={sourceIssues} loading={loading} connections={relations.length} participants={subjects.length}
+        onRefresh={() => { history.refresh(); for (const subject of subjects) reading.act(subject, 'refresh') }} />
+      <div className="collaboration-map__body"><div className="collaboration-map__world"><button type="button" className="collaboration-map__locate" title="Locate original context" onClick={() => setLocate({ token: {}, ...(subjectKey ? { agentId: subjectKey } : { areaIds: scope.current }) })}><SemanticIcon name="action.locate" size={14} /><span>{request.kind === 'focus' ? request.name : scope.title}</span></button><AgentCollaborationGraph active={enabled} locate={locate} onVisibleAgents={reportVisible} peeked={peeked} onPreviewAgent={previewAgent} agents={projection.agents} areas={areas} relations={relations} pulses={enabled ? reading.pulses : []} selection={selection} onSelect={select} onOpen={open} identities={identities} goals={goals} /></div>
         <aside className="collaboration-inspector" aria-label="Collaboration details" hidden={!selection && !sourcesOpen && !navigation}><button type="button" className="icon-button collaboration-inspector__close" aria-label="Close map details" onClick={() => { setSelection(null); setSourcesOpen(false); setNavigation(null) }}><SemanticIcon name="action.close" size={14} /></button>
           {scope.issue || areas.some(area => area.issue) ? <section className="collaboration-area-issues" aria-label="Area membership issues" role="status">{scope.issue ? <p>{scope.issue}</p> : null}{areas.filter(area => area.issue).map(area => <p key={area.id}><strong>{area.name}</strong> · {area.issue}</p>)}</section> : null}
           {navigation ? <section className="collaboration-navigation" aria-label="Original workface locations"><h4>{navigation.context.name}</h4>{navigation.locations.length ? <><p>Choose a workface.</p>{navigation.locations.map(location => <button key={JSON.stringify(location)} type="button" className="small-button" onClick={() => {
             const current = collaborationWorkfaces(useAppStore.getState(), navigation.context, agentRegionExecution)
             if (!current.some(value => JSON.stringify(value) === JSON.stringify(location))) { setNavigation({ context: navigation.context, locations: current }); return }
-            onOpen(navigation.context, location); onClose()
+            onOpen(navigation.context, location)
           }}>{facts.config?.workspaces.find(workspace => workspace.id === location.displayWorkspaceId)?.name ?? location.displayWorkspaceId} · {location.tabId} · {location.regionId}</button>)}</> : <p>Original workface location is unconfirmed. Its identity and reading remain available.</p>}<button type="button" className="small-button" onClick={() => open(navigation.context)}>Refresh locations</button><button type="button" className="small-button" onClick={() => setNavigation(null)}>Dismiss</button></section> : null}
-          {selectedAgent ? <><h3>{collaborationAgentName(selectedAgent)}</h3><p>{selectedAgent.provenance ?? selectedAgent.subject?.hostId} · <code>{selectedAgent.sessionId}</code></p>
-            {selectedAgent.context?.control ? <button type="button" className="small-button" onClick={() => open(selectedAgent.context!)}>Open workface <SemanticIcon name="action.open-external" size={12} /></button> : <p>Original workface is not confirmed by this record.</p>}
-            <h4>Relations</h4>{relations.filter(relation => relation.source === selectedAgent.id || relation.target === selectedAgent.id).map(relation => <RelationButton key={relation.id} relation={relation} agents={projection.agents} onSelect={setSelection} />)}
-          </> : selectedRelation ? <><h3>{COLLABORATION_LABELS[selectedRelation.kind]}</h3><p>{collaborationAgentName(projection.agents.get(selectedRelation.source))} → {collaborationAgentName(projection.agents.get(selectedRelation.target))}</p>
-            <p>{selectedRelation.evidence.length} recorded {selectedRelation.kind === 'communication' ? 'messages' : selectedRelation.kind === 'creation' ? 'creations' : 'requests'}</p>
-            {selection?.relatedIds && selection.relatedIds.length > 1 ? <div aria-label="Grouped connections">{selection.relatedIds.map(id => projection.relations.find(relation => relation.id === id)).filter((relation): relation is CollaborationRelation => Boolean(relation)).map(relation => <RelationButton key={relation.id} relation={relation} agents={projection.agents} onSelect={setSelection} />)}</div> : null}
-            <div className="collaboration-evidence">{selectedRelation.evidence.map(evidence => <Evidence key={evidence.id} evidence={evidence} active={enabled} />)}</div>
-          </> : <><h3>Relations</h3><p>Select an Agent or a connection.</p>{!relations.length && !loading ? <p>No recorded relations in the loaded window.</p> : null}</>}
-          <details className="collaboration-sources" open={sourcesOpen || issues > 0}><summary>Sources <small>{loading ? 'Reading…' : `${reading.sources.length} participants`}{issues ? ` · ${issues} issues` : ''}</small></summary>
-            {reading.sources.map(source => <Source key={collaborationSubjectKey(source.subject)} source={source} onAction={action => reading.act(source.subject, action)} />)}
-          </details>{history.error ? <p role="status">History: {history.error}<button type="button" className="small-button" onClick={history.refresh}>Retry history</button></p> : null}
+          {sourcesOpen ? <>
+            <div className="collaboration-inspector__heading"><span className="collaboration-inspector__eyebrow">Map</span><h3>Sources</h3><p>{projection.agents.size} Agents · {relations.length} connections</p></div>
+            <p>{loading ? 'Reading original records…' : `${reading.sources.length} participants observed`} · Loaded records only</p>
+            {selection ? <button type="button" className="small-button" onClick={() => setSourcesOpen(false)}><SemanticIcon name="navigation.previous" size={13} />Back to selection</button> : null}
+            <div className="collaboration-sources">{reading.sources.map(source => <Source key={collaborationSubjectKey(source.subject)} source={source} onAction={action => reading.act(source.subject, action)} />)}</div>
+            {history.error ? <p role="status">History: {history.error}<button type="button" className="small-button" onClick={history.refresh}>Retry history</button></p> : null}
+          </> : null}
+          <div hidden={sourcesOpen} inert={sourcesOpen}>{selectedAgent ? <>
+            <div className="collaboration-inspector__heading"><span className="collaboration-inspector__eyebrow">Agent</span><h3>{collaborationAgentName(selectedAgent)}</h3></div>
+            <div className="collaboration-inspector__actions"><button type="button" className="small-button" onClick={() => locateAgent(selectedAgent.id)}><SemanticIcon name="action.locate" size={13} />Locate</button>
+              {selectedAgent.context?.control ? <button type="button" className="small-button" onClick={() => open(selectedAgent.context!)}>Open workface <SemanticIcon name="action.open-external" size={12} /></button> : null}</div>
+            <details className="collaboration-identity"><summary>Identity</summary><p>{selectedAgent.provenance ?? selectedAgent.subject?.hostId} · <code>{selectedAgent.sessionId}</code></p>{!selectedAgent.context?.control ? <p>Original workface is not confirmed by this record.</p> : null}</details>
+            <h4>Relations <span>{agentRelations.length}</span></h4>{agentRelations.length ? agentRelations.map(relation => <RelationButton key={relation.id} relation={relation} agents={projection.agents} subjectId={selectedAgent.id} onSelect={select} />) : <p>No recorded relations in the loaded window.</p>}
+          </> : selectedRelation ? <>
+            <div className="collaboration-inspector__heading"><span className="collaboration-inspector__eyebrow">Relation</span><h3>{COLLABORATION_LABELS[selectedRelation.kind]}</h3></div>
+            <div className="collaboration-endpoints">{[selectedRelation.source, selectedRelation.target].map((id, index) => <button key={`${id}-${index}`} type="button" onClick={() => locateAgent(id)} title="Locate Agent in map"><small>{index ? 'To' : 'From'}</small><span>{collaborationAgentName(projection.agents.get(id))}</span><SemanticIcon name="action.locate" size={13} /></button>)}</div>
+            <p>{selectedRelation.evidence.length} recorded {selectedRelation.kind === 'communication' ? 'message' : selectedRelation.kind === 'creation' ? 'creation' : 'request'}{selectedRelation.evidence.length === 1 ? '' : 's'}</p>
+            {selection?.relatedIds && selection.relatedIds.length > 1 ? <div aria-label="Grouped connections">{selection.relatedIds.map(id => projection.relations.find(relation => relation.id === id)).filter((relation): relation is CollaborationRelation => Boolean(relation)).map(relation => <RelationButton key={relation.id} relation={relation} agents={projection.agents} onSelect={select} />)}</div> : null}
+            <div className="collaboration-evidence">{selectedRelation.evidence.map(evidence => <Evidence key={evidence.id} evidence={evidence} active={enabled && !sourcesOpen} />)}</div>
+          </> : null}</div>
         </aside>
       </div>
-      <footer className="collaboration-map__footer"><span>{relations.length} connections · Loaded records only{loading ? ' · Reading…' : ''}{issues ? ' · Some sources unavailable' : ''}</span><span>{projection.agents.size} Agents · {subjects.length} participants observed</span></footer>
     </section></WorkbenchPresentationContext.Provider>
 
 }
 
-function RelationButton({ relation, agents, onSelect }: { relation: CollaborationRelation; agents: ReturnType<typeof collaborationAgents>; onSelect(selection: CollaborationSelection): void }) {
-  const from = agents.get(relation.source), to = agents.get(relation.target)
-  return <button type="button" className="collaboration-relation" data-kind={relation.kind} onClick={() => onSelect({ kind: 'relation', id: relation.id })}><span>{collaborationAgentName(from)} → {collaborationAgentName(to)}</span><small>{COLLABORATION_LABELS[relation.kind]} · {relation.evidence.length}</small></button>
+function RelationButton({ relation, agents, subjectId, onSelect }: { relation: CollaborationRelation; agents: ReturnType<typeof collaborationAgents>; subjectId?: string; onSelect(selection: CollaborationSelection): void }) {
+  const from = agents.get(relation.source), to = agents.get(relation.target), outgoing = relation.source === subjectId
+  const title = subjectId ? collaborationAgentName(outgoing ? to : from) : `${collaborationAgentName(from)} → ${collaborationAgentName(to)}`
+  return <button type="button" className="collaboration-relation" data-kind={relation.kind} aria-label={`${collaborationAgentName(from)} → ${collaborationAgentName(to)} · ${COLLABORATION_LABELS[relation.kind]}`} onClick={() => onSelect({ kind: 'relation', id: relation.id })}>
+    <span className="collaboration-relation-key" data-kind={relation.kind} aria-hidden="true" /><span className="collaboration-relation__body"><span>{title}</span><small>{subjectId ? `${outgoing ? 'Outgoing' : 'Incoming'} · ` : ''}{COLLABORATION_LABELS[relation.kind]} · {relation.evidence.length}</small></span><SemanticIcon name="navigation.next" size={13} />
+  </button>
 }
 function Source({ source, onAction }: { source: CollaborationSource; onAction(action: 'refresh' | 'earlier' | 'updates' | 'created'): void }) {
   return <section><strong>{source.subject.agentSessionId}</strong><small>{source.subject.hostId} · {source.events.length} events · {source.spawns.length} creations</small>

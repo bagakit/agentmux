@@ -204,7 +204,7 @@ export function resolveDesktopSpaceSelection(state: DesktopSelectionState & Part
   return { ...base, workspaceId: location.displayWorkspaceId, tabId: location.tabId, groupId: location.groupId, regionId: location.regionId }
 }
 
-export function desktopSelection(state: DesktopSelectionState & { spaceView: 'workbench' | 'map' }, catalog: AgentMuxSpaceCatalog): AgentMuxDesktopSelection {
+export function desktopSelection(state: DesktopSelectionState & { focusView: 'list' | 'map' }, catalog: AgentMuxSpaceCatalog): AgentMuxDesktopSelection {
   let space = state.workbenchSpaceSelection?.workspaceId === state.activeWorkspaceId ? state.workbenchSpaceSelection : null
   if (!space && state.activeWorkspaceId) {
     const layout = state.layouts[state.activeWorkspaceId]
@@ -218,7 +218,7 @@ export function desktopSelection(state: DesktopSelectionState & { spaceView: 'wo
         regionId: state.tabs[tab.tabId]?.layout.activeRegionId ?? null, topicId: catalog.spaces.find(space => space.spaceId === spaceId)?.topicId ?? null }
     }
   }
-  return { surface: desktopSurface[state.mainSurface], mainSurface: state.mainSurface, spaceView: state.mainSurface === 'workbench' ? state.spaceView : null, space, goalId: state.selectedDemandId }
+  return { surface: desktopSurface[state.mainSurface], mainSurface: state.mainSurface, focusView: state.mainSurface === 'agents' ? state.focusView : null, space, goalId: state.selectedDemandId }
 }
 
 /** A confirmed user close follows only a confirmed member of this exact Zone.

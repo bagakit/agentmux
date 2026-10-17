@@ -135,10 +135,10 @@ function DesktopApp() {
   const agentFocus = useAppStore((state) => state.agentFocus)
 
   const mainSurface = useAppStore((state) => state.mainSurface)
-  const spaceView = useAppStore(state => state.spaceView)
+  const focusMode = useAppStore(state => state.focusView)
   const mapTarget = useAppStore(state => state.collaborationMapTarget)
-  const mapVisible = mainSurface === 'workbench' && spaceView === 'map' && !settingsOpen
-  const [mapVisited, setMapVisited] = useState(spaceView === 'map')
+  const mapVisible = mainSurface === 'agents' && focusMode === 'map' && !settingsOpen
+  const [mapVisited, setMapVisited] = useState(focusMode === 'map')
   useEffect(() => { if (mapVisible) setMapVisited(true) }, [mapVisible])
   const presentationRef = useRef<DesktopAppPresentationOwner>({ loading: true,
     overlays: { settings: false, quickSwitcher: false },
@@ -183,7 +183,7 @@ function DesktopApp() {
   }, [])
   const recallVisible = mainSurface === 'recall' && !settingsOpen
   const surveyVisible = mainSurface === 'survey' && !settingsOpen
-  const focusVisible = mainSurface === 'agents' && !settingsOpen
+  const focusVisible = mainSurface === 'agents' && focusMode === 'list' && !settingsOpen
   const [focusVisited, setFocusVisited] = useState(false)
   useEffect(() => { if (mainSurface === 'agents') setFocusVisited(true) }, [mainSurface])
   const surveyBindings = useAppStore(state => state.spaceZoneBindings)
@@ -258,28 +258,28 @@ function DesktopApp() {
     return targets
   }, [moteFloating.open, moteFloating.preview, moteFloating.targetTopicId, moteFloating.targetTabId, moteFloating.reference, moteFloating.agentTarget, moteFloating.targetAgent,
     tabs, layouts, agentFocus.pmo.sessionId, moteProjection, selectMoteReference])
-  const [focusView, setFocusView] = useState<'tab' | 'region' | 'closed' | 'unconfirmed'>('tab')
+  const [focusWorkfaceView, setFocusWorkfaceView] = useState<'tab' | 'region' | 'closed' | 'unconfirmed'>('tab')
   const selectFocusReference = useCallback<WorkbenchProjection['onSelect']>(reference => {
-    if (useAppStore.getState().selectMainRegion(reference, workbenchSpaceSelection)) setFocusView(value => value === 'region' ? 'region' : 'tab')
+    if (useAppStore.getState().selectMainRegion(reference, workbenchSpaceSelection)) setFocusWorkfaceView(value => value === 'region' ? 'region' : 'tab')
   }, [workbenchSpaceSelection])
   const selectFocusContext = useCallback((id: string, reference?: WorkbenchProjectionSelection) => {
-    setFocusView(useAppStore.getState().focusExecutionSession(id, reference) ? 'tab' : 'unconfirmed')
+    setFocusWorkfaceView(useAppStore.getState().focusExecutionSession(id, reference) ? 'tab' : 'unconfirmed')
   }, [])
-  useEffect(() => { setFocusView(value => value === 'closed' || value === 'unconfirmed' ? 'tab' : value) }, [workbenchSpaceSelection])
-  const focusRegionOnly = focusView === 'region'
+  useEffect(() => { setFocusWorkfaceView(value => value === 'closed' || value === 'unconfirmed' ? 'tab' : value) }, [workbenchSpaceSelection])
+  const focusRegionOnly = focusWorkfaceView === 'region'
   // The exact main choice survives closing only its Focus presentation.
   const mainFocus = useMemo(() => mainFocusPresentation(workbenchSpaceSelection, tabs, surveyCatalog, selectFocusReference, focusRegionOnly ? 'region' : 'tab'),
   [workbenchSpaceSelection, tabs, surveyCatalog, selectFocusReference, focusRegionOnly])
-  const focusPresentation = useMemo(() => focusView !== 'closed'
-    ? focusView === 'unconfirmed'
+  const focusPresentation = useMemo(() => focusWorkfaceView !== 'closed'
+    ? focusWorkfaceView === 'unconfirmed'
       ? executionFocusPresentation(agentFocus.execution, tabs, surveyCatalog, reference => selectFocusContext(agentFocus.execution.sessionId!, reference))
       : mainFocus
     : { projection: null, issue: null, references: [] },
-  [focusView, mainFocus, agentFocus.execution, tabs, surveyCatalog, selectFocusContext])
+  [focusWorkfaceView, mainFocus, agentFocus.execution, tabs, surveyCatalog, selectFocusContext])
   const timelineCurrentReference = useMemo(() => focusTimelineCurrentReference(workbenchSpaceSelection,
     workbenchSpaceSelection ? layouts[workbenchSpaceSelection.workspaceId] : undefined, tabs, surveyCatalog),
   [workbenchSpaceSelection, layouts, tabs, surveyCatalog])
-  const focusProjection = mainSurface === 'agents' ? focusPresentation.projection : null
+  const focusProjection = mainSurface === 'agents' && focusMode === 'list' ? focusPresentation.projection : null
   const focusTab = focusProjection?.selection.length === 1 ? tabs[focusProjection.selection[0]!.tabId] : null
   const surveyOccurrence = useRef<WorkbenchProjectionSelection | null>(null)
   const selectSurveyReference = useCallback<WorkbenchProjection['onSelect']>(reference => {
@@ -352,8 +352,8 @@ function DesktopApp() {
     const held = reference?.displayWorkspaceId === activeWorkspaceId ? reference : retainedSpatialFocus?.displayWorkspaceId === activeWorkspaceId ? retainedSpatialFocus : null
     const displayed = layoutForLogicalRegionFocus(layout, tabs, held)
     const targets = ordinaryWorkbenchViewTargets(displayed, tabs, activeWorkspaceId, undefined, held)
-    return Object.fromEntries(Object.entries(targets).map(([id, occurrences]) => [id, occurrences.map(target => ({ ...target, visible: target.visible !== false && mainSurface === 'workbench' && spaceView === 'workbench' && !settingsOpen }))]))
-  }, [activeWorkspaceId, ordinaryObject.layout, tabs, mainSurface, spaceView, settingsOpen, retainedSpatialFocus, workbenchSpaceSelection]))
+    return Object.fromEntries(Object.entries(targets).map(([id, occurrences]) => [id, occurrences.map(target => ({ ...target, visible: target.visible !== false && mainSurface === 'workbench' && !settingsOpen }))]))
+  }, [activeWorkspaceId, ordinaryObject.layout, tabs, mainSurface, settingsOpen, retainedSpatialFocus, workbenchSpaceSelection]))
   const viewTargets = useMemo<WorkbenchViewTargets>(() => {
     const targets: Record<string, readonly WorkbenchViewTarget[]> = { ...ordinaryTargets }
     const append = (tabId: string, target: WorkbenchViewTarget) => { targets[tabId] = [...targets[tabId] ?? [], target] }
@@ -382,7 +382,7 @@ function DesktopApp() {
           projection, reference, retainedRegionId: reference.regionId, onSelectRegion: regionId => selectRecallReference({ ...reference, regionId }) })
       }
     }
-    if (mainSurface === 'agents' && focusProjection && focusTab) {
+    if (focusVisible && focusProjection && focusTab) {
       const reference = focusProjection.selection[0]!
       append(focusTab.id, {
         hostId: focusProjection.entity.kind === 'region' ? workbenchRegionProjectionSlotId(`${focusProjection.presentationId}-slot`, reference) : workbenchProjectionSlotId(`${focusProjection.presentationId}-slot`, reference),
@@ -472,7 +472,7 @@ function DesktopApp() {
   const mountedWorkspaces = config?.workspaces.filter((candidate) => (
     fileEditingProbe || candidate.id === activeWorkspaceId || resourceWorkspaces.has(candidate.id) || candidate.id === focusTab?.workspaceId || candidate.id === surveyCatalog?.zones.find(zone => zone.zoneId === surveySelection?.zoneId)?.workspaceId || layouts[candidate.id]?.groups.some((group) => group.tabOrder.length > 0)
   )) ?? []
-  const toolsAvailable = mainSurface === 'workbench' && spaceView === 'workbench' && Boolean(workspace)
+  const toolsAvailable = mainSurface === 'workbench' && Boolean(workspace)
   const toolsVisible = toolsAvailable && toolsOpen
   const toolDockMinimumWidth = getToolDockMinimumWidth(projectRailOpen)
   const toolDockMaximumWidth = compactSidebars ? Math.max(toolDockMinimumWidth, Math.min(TOOL_DOCK_MAX_WIDTH, windowWidth - 320)) : TOOL_DOCK_MAX_WIDTH
@@ -480,7 +480,7 @@ function DesktopApp() {
   // MERGE：workbench + workspace 时顶行下沉进 pane（root tabbar / chromeline），
   // 主区不再占用独立 topbar 行；Board 与欢迎页仍走顶栏。
   const mergedTopRow = mainSurface === 'agents' || mainSurface === 'survey' || mainSurface === 'recall' || (mainSurface === 'workbench' && Boolean(workspace))
-  const workbenchVisible = mainSurface === 'workbench' && spaceView === 'workbench' && !settingsOpen
+  const workbenchVisible = mainSurface === 'workbench' && !settingsOpen
   const terminalParkingMeasurement = typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).has('agentmux-resource-probe')
   const { containerRef, isResizing, onResizeStart, onResizeReset } = useSidebarResize<HTMLDivElement>({
@@ -642,7 +642,7 @@ function DesktopApp() {
                 />
               </div>
             <section className="workspace-main-surface" data-desktop-surface={desktopSurface[mainSurface]}>
-              {!workspace && mainSurface === 'workbench' && spaceView === 'workbench' ? (
+              {!workspace && mainSurface === 'workbench' ? (
                 <section className="welcome">
                   <span className="brand-mark brand-mark--large"><BrandIcon size={34} /></span>
                   <div className="eyebrow">Terminal-first agent workbench</div>
@@ -654,9 +654,9 @@ function DesktopApp() {
               {surveyVisited || mainSurface === 'survey' ? <GlobalSurveySurface onSelectReference={selectSurveyReference} visible={surveyVisible} controlsCoverPage={surveyToolsOpen && narrowControls} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} catalog={surveyCatalog} projection={surveyProjection} selection={surveyCurrentSelection} viewTargets={viewTargets}
                 /> : null}
               {recallVisited || mainSurface === 'recall' ? <GlobalRecallSurface onSelectReference={selectRecallReference} visible={recallVisible} catalog={surveyCatalog} projection={recallProjection} selection={recallCurrentSelection} viewTargets={viewTargets} /> : null}
-              {mainSurface === 'agents' || focusVisited ? <GlobalFocusSurface visible={focusVisible} workspaceOpen={focusView !== 'closed' && Boolean(workbenchSpaceSelection || focusView === 'unconfirmed')} onCloseWorkspace={() => setFocusView('closed')} onSelectContext={selectFocusContext} onSelectLocation={focusView === 'unconfirmed' ? undefined : selectFocusReference} regionOnly={focusRegionOnly} onToggleRegion={() => setFocusView(value => value === 'region' ? 'tab' : 'region')} presentation={focusPresentation} currentReference={timelineCurrentReference} directoryIssue={spatialDirectory.issue} viewTargets={viewTargets} /> : null}
+              {mainSurface === 'agents' || focusVisited ? <GlobalFocusSurface visible={focusVisible} workspaceOpen={focusWorkfaceView !== 'closed' && Boolean(workbenchSpaceSelection || focusWorkfaceView === 'unconfirmed')} onCloseWorkspace={() => setFocusWorkfaceView('closed')} onSelectContext={selectFocusContext} onSelectLocation={focusWorkfaceView === 'unconfirmed' ? undefined : selectFocusReference} regionOnly={focusRegionOnly} onToggleRegion={() => setFocusWorkfaceView(value => value === 'region' ? 'tab' : 'region')} presentation={focusPresentation} currentReference={timelineCurrentReference} directoryIssue={spatialDirectory.issue} viewTargets={viewTargets} /> : null}
               {mainSurface === 'board' ? <GlobalBoardSurface /> : null}
-              {mapVisited || mapVisible ? <AgentCollaborationMap request={mapTarget} active={mapVisible} onClose={() => useAppStore.getState().setSpaceView('workbench')} onOpen={(context, reference) => { useAppStore.getState().setSpaceView('workbench'); useAppStore.getState().focusExecutionSession(context.id, reference) }} /> : null}
+              {mapVisited || mapVisible ? <AgentCollaborationMap request={mapTarget} active={mapVisible} onOpen={(context, reference) => { if (useAppStore.getState().focusExecutionSession(context.id, reference)) useAppStore.getState().setMainSurface('workbench') }} /> : null}
               {config && mountedWorkspaces.length > 0 ? (
                 <div
                   className={`workspace-workbench-registry ${workbenchVisible || focusTab ? '' : 'workspace-workbench-registry--parked'}`}
@@ -674,7 +674,6 @@ function DesktopApp() {
                         data-workspace-id={candidate.id}
                         data-desktop-zone-id={workbenchSpaceSelection?.workspaceId === candidate.id ? workbenchSpaceSelection.zoneId : undefined}
                         data-visible={mounted ? 'true' : 'false'}
-                        data-desktop-space-view="workbench"
                         aria-hidden={!mounted}
                         inert={!mounted}
                       >
