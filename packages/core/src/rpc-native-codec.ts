@@ -1,3 +1,5 @@
+import { parseBroadcastReceipt, normalizeBroadcastInput } from './agent-message-broadcast.js'
+import { parseMessageEventsPage } from './agent-message-events.js'
 import { isMessageNotificationInput, validateMessageNotification } from './agent-message-notification.js'
 import { agentDiscoveryActivity } from './agent-discovery.js'
 import { parseTerminalFrontend } from './agent-terminal-frontend.js'
@@ -678,6 +680,18 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
           credentials && envelope.senderSessionId !== credentials.agentSessionId) fail()
         break
       }
+      case 'agent.broadcast': {
+        const normalized = normalizeBroadcastInput(input as unknown as import('./agent-message-broadcast.js').AgentMuxMessageBroadcastInput)
+        const receipt = parseBroadcastReceipt(p, normalized.operationId, credentials?.agentSessionId, normalized.text)
+        if (!isDeepStrictEqual(receipt.targets.map(target => target.agentSessionId), normalized.recipientSessionIds)) fail()
+        break
+      }
+      case 'agent.broadcast.inspect': {
+        record(p, ['hostId', 'broadcast']); string(p.hostId)
+        if (input.hostId !== undefined && p.hostId !== input.hostId) fail()
+        if (p.broadcast !== null) parseBroadcastReceipt(p.broadcast, String(input.operationId), credentials?.agentSessionId)
+        break
+      }
       case 'agent.discuss': record(p, ['threadId', 'delivery', 'targetAgentSessionId', 'creation']); string(p.threadId); string(p.targetAgentSessionId); if (!isAgentDeliveryState(p.delivery)) fail();
         if (!isDeepStrictEqual(parseAgentCreationFact(p.creation), p.creation)) fail(); break
       case 'agent.spawn.ls': {
@@ -741,6 +755,14 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
           if (original.sourceChannel !== undefined) normalizeMessageChannel(original.sourceChannel)
           if (original.sourceDevice !== undefined) normalizeOperationDevice(original.sourceDevice)
         }
+        break
+      }
+      case 'message.events': {
+        const page = record(p, ['hostId', 'participantSessionId', 'afterSequence', 'throughSequence', 'incarnation', 'messageId', 'broadcastOperationId', 'events', 'nextAfterSequence'])
+        string(page.hostId)
+        if (input.hostId !== undefined && page.hostId !== input.hostId || credentials && page.participantSessionId !== credentials.agentSessionId) fail()
+        const { hostId: _hostId, ...original } = page
+        parseMessageEventsPage(original, { ...input, participantSessionId: input.participantSessionId ?? credentials?.agentSessionId } as import('./agent-message-events.js').AgentMuxMessageEventsQuery)
         break
       }
       case 'message.ls': {

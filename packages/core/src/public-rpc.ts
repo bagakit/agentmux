@@ -246,6 +246,8 @@ type NativeParams = ApplicationAccessParameterMap & MoteConnectionParamsMap & Go
     admissionIntent?: Extract<import('./agent-prompt-condition.js').AgentPromptAdmissionIntent, { kind: 'native-conversation' }>;
     execution?: AgentPromptExecution; expectedRun?: import('./types.js').AgentMuxRunRef; sourceChannel?: import('./types.js').AgentMessageChannel;
     messageId?: string; threadId?: string; correlationId?: string; replyTo?: string }
+  'agent.broadcast': import('./agent-message-broadcast.js').AgentMuxMessageBroadcastInput
+  'agent.broadcast.inspect': { operationId: string; hostId?: string }
   'agent.discuss': { executorId: string; providerId?: string; text: string; operationId: string }
   'agent.spawn.ls': import('./agent-spawn-query.js').AgentMuxSpawnQuery & { hostId: string }
   'agent.handoff': { toAgentSessionId: string; taskId: string }
@@ -257,6 +259,7 @@ type NativeParams = ApplicationAccessParameterMap & MoteConnectionParamsMap & Go
   'message.inbox.ack': { generation: number; readerRun: import('./types.js').AgentMuxRunRef }
   'message.notify': { operationId: string; messageIds: readonly string[]; hostId: string }
   'message.read': import('./agent-message-query.js').AgentMuxMessageRead & { hostId?: string }
+  'message.events': Omit<import('./agent-message-events.js').AgentMuxMessageEventsQuery, 'participantSessionId'> & { hostId?: string; participantSessionId?: string }
   'message.ls': Omit<import('./agent-message-query.js').AgentMuxMessageQuery, 'participantSessionId'> & { hostId?: string; participantSessionId?: string }
   'message.dispatch.open': { sourceMessageId: string }
   'message.dispatch.inspect': { sourceMessageId: string }
@@ -320,6 +323,8 @@ type NativeResult = ApplicationAccessResultMap & MoteConnectionResultMap & GoalD
   'agent.input.stop': import('./agent-input-wait.js').AgentInputWaitStopReceipt
   'agent.input.rejoin': import('./agent-input-wait.js').AgentInputSubmissionReceipt
   'agent.send': AgentMuxMessageReceipt & { agentSessionId?: string; inputReceipt?: import('./agent-input-wait.js').AgentInputSubmissionReceipt }
+  'agent.broadcast': import('./agent-message-broadcast.js').AgentMuxMessageBroadcastReceipt
+  'agent.broadcast.inspect': { hostId: string; broadcast: import('./agent-message-broadcast.js').AgentMuxMessageBroadcastReceipt | null }
   'agent.discuss': { threadId: string; delivery: string; targetAgentSessionId: string; creation: import('./types.js').AgentMuxAgentCreationFact }
   'agent.spawn.ls': import('./agent-spawn-query.js').AgentMuxSpawnPage & { hostId: string }
   'agent.handoff': ReturnType<AgentMuxClient['handOff']>
@@ -332,6 +337,7 @@ type NativeResult = ApplicationAccessResultMap & MoteConnectionResultMap & GoalD
   'message.notify': Awaited<ReturnType<AgentMuxClient['notifyMessages']>> & { hostId: string }
   'message.read': { hostId: string; message: Awaited<ReturnType<AgentMuxClient['readMessage']>> }
   'message.ls': import('./agent-message-query.js').AgentMuxMessagePage & { hostId: string }
+  'message.events': import('./agent-message-events.js').AgentMuxMessageEventsPage & { hostId: string }
   'message.dispatch.open': Awaited<ReturnType<AgentMuxClient['openDispatch']>>
   'message.dispatch.inspect': Awaited<ReturnType<AgentMuxClient['showDispatch']>>
   'message.dispatch.read': Awaited<ReturnType<AgentMuxClient['readDispatch']>> & { hostId: string }
@@ -382,12 +388,12 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'agent.conversation.landmark.ls': 'short', 'agent.conversation.landmark.apply': 'long',
   whoami: 'short', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.restart': 'long', 'agent.restart.inspect': 'short', 'agent.refresh': 'short', 'agent.continuity.control': 'short', 'agent.native.confirm': 'long', 'agent.native.ls': 'long', 'agent.native.history': 'long', 'agent.native.history.resource': 'long', 'agent.context': 'long', 'agent.history': 'long', 'agent.conversation.release': 'short', 'agent.conversation.inspect': 'long', 'agent.conversation.checkpoint': 'long', 'agent.conversation.changes': 'long', 'agent.conversation.watch': 'long', 'agent.history.resource': 'long', 'agent.interaction.respond': 'long', 'agent.interaction.inspect': 'short', 'agent.question.reply': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
   'agent.role.ls': 'short', 'agent.role.register': 'long', 'agent.role.resolve': 'short', 'agent.spawn.ls': 'short',
-  'agent.input.ls': 'short', 'agent.input.submit': 'long', 'agent.input.inspect': 'short', 'agent.input.stop': 'short', 'agent.input.rejoin': 'long', 'agent.send': 'long', 'agent.discuss': 'long', 'agent.handoff': 'short',
+  'agent.input.ls': 'short', 'agent.input.submit': 'long', 'agent.input.inspect': 'short', 'agent.input.stop': 'short', 'agent.input.rejoin': 'long', 'agent.send': 'long', 'agent.broadcast': 'long', 'agent.broadcast.inspect': 'short', 'agent.discuss': 'long', 'agent.handoff': 'short',
   'system.diagnostics.inspect': 'short',
   'message.delivery.inspect': 'short', 'message.delivery.report': 'long',
   'agent.output': 'long', 'message.inbox.check': 'long', 'message.inbox.ack': 'long',
   'message.dispatch.open': 'long', 'message.dispatch.inspect': 'short', 'message.dispatch.report': 'long',
-  'message.notify': 'long', 'message.read': 'short', 'message.ls': 'short', 'message.dispatch.read': 'short', 'message.dispatch.ls': 'short',
+  'message.notify': 'long', 'message.read': 'short', 'message.ls': 'short', 'message.events': 'short', 'message.dispatch.read': 'short', 'message.dispatch.ls': 'short',
   'app.search': 'long', 'app.snapshot': 'long', 'goal.activity': 'short', 'system.doctor': 'long', 'system.storage': 'short',
   'system.endpoint': 'short', 'system.subscription.cancel': 'short'
 } as const satisfies Record<keyof NativeParams, 'short' | 'long'>
