@@ -7,6 +7,9 @@ import { FocusNavigationButton } from './FocusNavigationButton'
 import { SettingsNavigation } from './SettingsNavigation'
 import { FocusNavigationPreview } from './FocusNavigationPreview'
 import { SURFACE_NAVIGATION_PLUGINS } from './SurfaceNavigation'
+import { desktopSurface } from '../lib/desktop-focus-navigation'
+import { trustedRendererEventTimestamp } from '../lib/renderer-event-clock'
+import { surfaceSwitchObservation } from '../lib/surface-switch-observation'
 import { OVERLAY_LAYER_BANDS, WindowOverlayPortal } from './WindowOverlayHost'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { usePathDisplay } from '../hooks/usePathDisplay'
@@ -259,7 +262,16 @@ export function SurfaceSwitch({ settingsOpen = false, onCloseSettings }: {
           cancelHover(); showTooltip(plugin.id, event.currentTarget)
         }}
         onBlur={(event) => { if (pointerFocus.current === event.currentTarget) pointerFocus.current = null; hideTooltip(plugin.id) }}
-        onClick={() => { pointerFocus.current = null; cancelHover(); setTooltip(null); onCloseSettings?.(); setMainSurface(plugin.surface) }}
+        onClick={(event) => {
+          const start = performance.now()
+          const observationId = surfaceSwitchObservation.begin(desktopSurface[useAppStore.getState().mainSurface], plugin.id,
+            trustedRendererEventTimestamp(event.nativeEvent, window), start)
+          let result: 'returned' | 'threw' = 'threw'
+          try {
+            pointerFocus.current = null; cancelHover(); setTooltip(null); onCloseSettings?.(); setMainSurface(plugin.surface)
+            result = 'returned'
+          } finally { surfaceSwitchObservation.actionEnded(observationId, result) }
+        }}
       >
         <Icon className="surface-navigation__icon" size={14} aria-hidden="true" />
       </NavigationButton>

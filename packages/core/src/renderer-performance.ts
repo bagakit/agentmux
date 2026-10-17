@@ -1,4 +1,5 @@
 import type { InputPerformanceSnapshot } from './performance-diagnostics.js'
+import type { AgentMuxDesktopSurface } from './desktop-focus-control.js'
 
 /** Bounded renderer flight recorder. Durations are wall time, never CPU or input ACK. */
 export type RendererWorkTiming = { count: number; totalMs: number; maxMs: number }
@@ -64,6 +65,20 @@ export type RendererTabSwitchCost = {
   state: 'pending' | 'observed' | 'superseded'; mode: 'unknown' | 'terminal' | 'activity' | 'other'
   terminal: RendererTabSwitchTerminal | null
 }
+/** Exact footer activation. This record observes presentation; it grants no input capability. */
+export type RendererSurfaceSwitchCost = {
+  id: number; source: 'footer-click'; from: AgentMuxDesktopSurface; to: AgentMuxDesktopSurface
+  handlerAt: number; handlerStartMonoMs: number; eventAtMonoMs: number | null; inputDelayMs: number | null
+  /** Synchronous action tail; returned includes a normal refusal and does not prove selection. */
+  actionEndedMs: number | null; actionResult: 'returned' | 'threw' | null
+  /** Root App layout commit, or the same target already committed before this handler. */
+  selectedMs: number | null; selectedSource: 'layout-effect' | 'already-committed-handler' | null
+  /** Two local rAF callbacks after selection, not compositor presentation, complete readable content or input ACK. */
+  frameMs: number | null
+  /** Monotonic elapsed from this handler; freezes when this occurrence ends. */
+  elapsedMs: number; pendingStage: 'selection' | 'presentation' | 'frame' | null
+  state: 'pending' | 'observed' | 'superseded'
+}
 export const RENDERER_TIMING_KINDS = ['session-event', 'terminal-write', 'long-task', 'input-delay', 'terminal-interaction', 'terminal-cleanup'] as const
 export type RendererTimingKind = typeof RENDERER_TIMING_KINDS[number]
 export type RendererTimingEpoch = {
@@ -109,6 +124,9 @@ export type RendererPerformanceSnapshot = {
   /** At most 16 recent exact-occurrence observations. Missing stages stay null. */
   tabSwitches: RendererTabSwitchCost[]
   tabSwitchesOmitted: number
+  /** At most 16 original footer occurrences; non-footer navigation is not attributed to this source. */
+  surfaceSwitches: RendererSurfaceSwitchCost[]
+  surfaceSwitchesOmitted: number
   /** Latest four and current/previous epoch peaks per kind, deduplicated by id; <=36 detached records. */
   slowEvents: RendererSlowEvent[]
   slowEventsOmitted: Record<RendererTimingKind, number>

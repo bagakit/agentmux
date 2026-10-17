@@ -1,6 +1,7 @@
 import { createInputPerformanceRecorder, readInputObservation, RENDERER_TIMING_KINDS } from '@agentmux/core/control'
 import type { RendererConsumerCost, RendererOverlayObservation, RendererPerformanceSnapshot, RendererSlowEvent, RendererTerminalCleanupContext, RendererTerminalCost, RendererTerminalWriteContext, RendererWorkTiming } from '@agentmux/core/control'
 import { tabSwitchObservation } from './tab-switch-observation'
+import { surfaceSwitchObservation } from './surface-switch-observation'
 
 const timing = (): RendererWorkTiming => ({ count: 0, totalMs: 0, maxMs: 0 })
 const consumer = (): RendererConsumerCost => ({ checks: 0, changes: 0, commits: 0 })
@@ -231,6 +232,7 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
         timingEpochs: { durationMs: 10_000, basis: 'monotonic-occurrence-start', recordingSinceMonoMs, observedMonoMs: start,
           current: copyEpoch(currentEpoch), previous: previousEpoch && copyEpoch(previousEpoch), late: { ...late }, unknown: { ...unknown } },
         tabSwitches: tabSwitchObservation.snapshot(), tabSwitchesOmitted: tabSwitchObservation.omitted(),
+        surfaceSwitches: surfaceSwitchObservation.snapshot(), surfaceSwitchesOmitted: surfaceSwitchObservation.omitted(),
         observerCost: { snapshots: { ...observerCost.snapshots }, performanceCallbacks: { ...observerCost.performanceCallbacks } }
       }
       add(observerCost.snapshots, now() - start)

@@ -1,10 +1,6 @@
 import type { RendererTabSwitchCost, RendererTabSwitchTarget, RendererTabSwitchTerminal } from '@agentmux/core/control'
 
 const key = (target: RendererTabSwitchTarget) => JSON.stringify([target.presentationId, target.displayWorkspaceId, target.groupId, target.tabId, target.regionId])
-/** Only the original Window's trusted event supplies this recorder's event clock. */
-export function tabSwitchEventTimestamp(event: Pick<MouseEvent, 'isTrusted' | 'view' | 'timeStamp'>, view: Window): number | null {
-  return event.isTrusted && event.view === view ? event.timeStamp : null
-}
 /** A local frame and an open input gate are observations, never paint or input acknowledgements. */
 export function createTabSwitchObservation(now = () => performance.now(), wall = Date.now,
   requestFrame = (callback: FrameRequestCallback) => requestAnimationFrame(callback),
