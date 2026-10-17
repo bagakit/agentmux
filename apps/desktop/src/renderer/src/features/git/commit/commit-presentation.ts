@@ -2,12 +2,11 @@ import type { GitBranchChange } from '../../../../../shared/git-contracts'
 
 export function presentCommitMessage(message: string) {
   const separator = message.indexOf('\n')
-  const firstLine = (separator < 0 ? message : message.slice(0, separator)).replace(/\r$/, '')
-  const body = separator < 0 ? '' : message.slice(separator + 1)
-  const conventional = /^([a-z][a-z0-9-]*)(?:\(([^\s()]+)\))?(!)?: (\S.*)$/u.exec(firstLine)
+  const firstLine = separator < 0 ? message : message.slice(0, separator)
+  const conventional = /^([a-z][a-z0-9-]*)(?:\(([^\s()]+)\))?(!)?: (\S.*)$/u.exec(firstLine.replace(/\r$/, ''))
   return {
-    heading: conventional?.[4] ?? firstLine,
-    body,
+    firstLine,
+    remainder: separator < 0 ? '' : message.slice(separator),
     type: conventional?.[1] ?? null,
     scope: conventional?.[2] ?? null,
     breaking: Boolean(conventional?.[3])

@@ -6,17 +6,19 @@
 .git-workbench__details { min-width: 0; min-height: 0; overflow: auto; padding: var(--sp-3) var(--sp-4); font-size: var(--fs-meta); line-height: 1.5; overscroll-behavior: contain; }
 .git-workbench__target { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); color: var(--text-3); }
 .git-workbench__target code { font-family: var(--font-mono); font-size: var(--fs-meta); }
-.git-workbench__message { margin: var(--sp-3) 0; color: var(--text); font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
-.git-workbench__message-header { margin: var(--sp-3) 0 0; }
-.git-workbench__message-heading { margin: 0; color: var(--text); font-size: var(--fs-title); font-weight: 600; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.git-workbench__message { margin: 0; color: var(--text-2); font: inherit; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.git-workbench__message-header { margin: var(--sp-3) 0 var(--sp-4); }
+.git-workbench__message-heading { color: var(--text); font-size: calc(var(--fs-title) + 2px); font-weight: 600; line-height: 1.5; }
 .git-workbench__message-format { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-1); color: var(--text-3); font: var(--fs-micro) var(--font-mono); }
 .git-workbench__message-format > span + span::before { content: '·'; margin-right: var(--sp-2); color: var(--text-3); }
 .git-workbench__message-breaking { color: var(--red-text); }
-.git-workbench__raw-message { margin: var(--sp-2) 0 var(--sp-3); }
-.git-workbench__raw-message summary { width: fit-content; max-width: 100%; color: var(--text-3); font-size: var(--fs-micro); cursor: pointer; }
-.git-workbench__raw-message summary:hover { color: var(--text); }
-.git-workbench__raw-message summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; border-radius: var(--radius-sm); }
-.git-workbench__raw-message .git-workbench__message { padding: var(--sp-2) var(--sp-3); border-left: 1px solid var(--line); font: var(--fs-meta)/1.6 var(--font-mono); }
+.git-workbench__author { margin: 0 0 var(--sp-3); }
+.git-workbench__author > dt { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.git-workbench__author > dd { margin: 0; }
+.git-workbench__commit-info { margin: var(--sp-2) 0; }
+.git-workbench__commit-info summary { width: fit-content; max-width: 100%; color: var(--text-3); font-size: var(--fs-micro); cursor: pointer; }
+.git-workbench__commit-info summary:hover { color: var(--text); }
+.git-workbench__commit-info summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; border-radius: var(--radius-sm); }
 .git-workbench__metadata { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-2) var(--sp-3); margin: var(--sp-3) 0; }
 .git-workbench__metadata dt { color: var(--text-3); }
 .git-workbench__metadata dd { min-width: 0; margin: 0; overflow-wrap: anywhere; user-select: text; }
@@ -34,24 +36,29 @@
 .git-workbench__comparison { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin: var(--sp-4) 0 var(--sp-3); }
 .git-workbench__comparison label { color: var(--text-3); }
 .git-workbench__comparison select { min-width: 0; max-width: 100%; height: 24px; border: 0; border-radius: var(--radius-sm); padding: 0 var(--sp-2); color: var(--text-2); background: var(--surface-1); font: inherit; }
-.git-workbench__files-title { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin: var(--sp-3) 0 var(--sp-1); }
+.git-workbench__files-title { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin: var(--sp-4) 0 var(--sp-2); padding-top: var(--sp-3); border-top: 1px solid var(--line); }
 .git-workbench__files-title strong { font-weight: 500; }
 .git-workbench__files-title > span, .git-workbench__empty { color: var(--text-3); }
 .git-workbench__file-summary { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); margin: 0 0 var(--sp-2); padding: 0; list-style: none; color: var(--text-3); font-size: var(--fs-micro); }
 .git-workbench__file-summary--added { color: var(--green-text); }
 .git-workbench__file-summary--deleted { color: var(--red-text); }
 .git-workbench__files { margin: 0; padding: 0; list-style: none; }
-.git-workbench__files button { width: 100%; display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-2); background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.git-workbench__files button { width: 100%; display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-2); background: transparent; font: inherit; text-align: left; cursor: pointer; }
 .git-workbench__files button:hover { background: var(--surface-1); color: var(--text); }
 .git-workbench__files button:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
 .git-workbench__files button > span:last-child { min-width: 0; overflow-wrap: anywhere; }
 .git-workbench__files small { font: inherit; color: var(--text-3); }
+.git-workbench__file-path { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--sp-2); }
+.git-workbench__file-name { color: var(--text); }
+.git-workbench__files .git-workbench__file-origin { flex-basis: 100%; font-size: var(--fs-micro); }
 .git-workbench__change { flex: 0 0 12px; font: var(--fs-micro) var(--font-mono); line-height: 20px; color: var(--text-3); }
 .git-workbench__change--added { color: var(--green-text); }
 .git-workbench__change--deleted { color: var(--red-text); }
 .git-workbench__warning { color: var(--text-3); overflow-wrap: anywhere; }
 .git-history-commit { cursor: pointer; }
-.git-history-commit[aria-current="true"] { background: var(--surface-2); }
+.git-history-commit:hover { background: var(--surface-1); }
+.git-history-commit[aria-current="true"] { background: color-mix(in srgb, var(--blue) 16%, var(--surface-1)); border-radius: var(--radius-sm); }
+.git-history-commit[aria-current="true"] > strong { font-weight: 500; }
 .git-branch-diff.editor-pane { display: flex; flex-direction: column; }
 .git-branch-diff > .editor-header { flex: none; height: 30px; }
 .git-branch-diff > .git-branch-diff__commits, .git-branch-diff > .branches-inline-error { flex: none; }
