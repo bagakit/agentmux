@@ -7,11 +7,14 @@ import type { AgentTerminalFrontendObservation } from '../agent-terminal-fronten
 import { resolve } from 'node:path'
 import { nativeProcessTcpListeners } from '../agent-native-process.js'
 import { connectCodexNativeActor } from './codex-native-rpc.js'
+import { codexDiagnosticStream, formatCodexManagedDiagnostic } from './codex-managed-diagnostics.js'
 
 export const CODEX_NATIVE_TOKEN_ENV = 'AGENTMUX_CODEX_ACTOR_TOKEN'
 export type CodexManagedResume = { threadId: string; sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access'; approvalPolicy?: 'on-request' | 'never'; model?: string; cwd?: string }
 export type CodexManagedRunPlan = { command: string; args: string[]; serverConfig: string[]; frontendArgs: string[]; resume?: CodexManagedResume }
 class ManagedNativeLaunchError extends Error {}
+const diagnosticCredentials = (): string[] => [process.env[CODEX_NATIVE_TOKEN_ENV], process.env.AGENTMUX_HOOK_TOKEN,
+  process.env.AGENTMUX_AGENT_CAPABILITY].filter((value): value is string => Boolean(value))
 
 /** Child lifecycle, exact native resume preparation and TTY inheritance; Core/ctxmux own the Run. */
 export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number> {
@@ -29,8 +32,13 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
   })
   let tui: ReturnType<typeof spawn> | undefined
   let resumeConnection: Awaited<ReturnType<typeof connectCodexNativeActor>> | undefined
-  // Drain native diagnostics without mixing server output into the terminal or public receipts.
-  server.stderr?.resume()
+  // Preserve the complete preparation diagnostic stream on this original Run, with backpressure.
+  // Exact known credentials are masked even when the native process splits their bytes.
+  const preparationDiagnostics = codexDiagnosticStream(diagnosticCredentials())
+  const preparationDiagnosticsEnded = new Promise<void>(done => preparationDiagnostics.once('end', done))
+  server.stderr?.pipe(preparationDiagnostics).pipe(process.stderr, { end: false })
+  server.stderr?.once('close', () => preparationDiagnostics.end())
+  if (!server.stderr) preparationDiagnostics.end()
   let serverError: Error | undefined
   server.once('error', error => { serverError = error })
   let frontend: AgentTerminalFrontendObservation = { frontendId: randomUUID(), state: 'starting', backendState: 'running', source: 'managed-process', observedAt: Date.now() }
@@ -143,6 +151,8 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
       }
       // Keep this original subscription alive: TUI resumes the same loaded object, without overrides.
     }
+    // The healthy TUI owns the screen. Background server logs must not corrupt its display.
+    server.stderr?.unpipe(preparationDiagnostics); preparationDiagnostics.end(); server.stderr?.resume()
     await spawnTui(endpoint, plan.args, frontend.frontendId)
     // Frontend exit is an attachment fact. Only the backend/explicit Stop ends this Run.
     const ended = await backendExit
@@ -150,11 +160,16 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
     return ended.code
   } finally {
     resumeConnection?.dispose(); stop(); await control?.close()
+    // Child exit can precede the last stderr bytes. Print the failure cause only after this tail.
+    await preparationDiagnosticsEnded
     process.removeListener('SIGTERM', stop); process.removeListener('SIGINT', stop)
   }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   try { process.exitCode = await runCodexManaged(JSON.parse(process.argv[2]!) as CodexManagedRunPlan) }
-  catch (error) { process.stderr.write((error instanceof ManagedNativeLaunchError ? error.message : 'AgentMux could not prepare the original native actor launch.') + '\n'); process.exitCode = 1 }
+  catch (error) {
+    const diagnostic = error instanceof ManagedNativeLaunchError ? error : new Error('AgentMux could not prepare the original native actor launch.', { cause: error })
+    process.stderr.write(formatCodexManagedDiagnostic(diagnostic, diagnosticCredentials()) + '\n'); process.exitCode = 1
+  }
 }
