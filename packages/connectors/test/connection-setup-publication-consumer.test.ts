@@ -399,9 +399,9 @@ it('the original Enrollment creator creates and submits the first bot version th
   expect(submitted.applicationConfiguration!.selected).toMatchObject({ request: 'confirmed', secureStorage: 'stored', sourceStepIds: { version: expect.any(String) }, submission: { outcome: 'accepted' } })
   expect(f.native.slice(before)).toEqual([
     { path: '/developers/v1/app_version/list/' + APP, body: {} },
-    { path: '/developers/v1/app_version/create/' + APP, body: { autoPublish: false, appVersion: initialDraft.version, changeLog: initialDraft.notes, pcDefaultAbility: 'bot', mobileDefaultAbility: 'bot', visibleSuggest: { departments: [], members: ['publication-user'], groups: [], isAll: 0 }, blackVisibleSuggest: { departments: [], members: [], groups: [], isAll: 0 } } },
+    { path: '/developers/v1/app_version/create/' + APP, body: { appVersion: initialDraft.version, changeLog: initialDraft.notes, pcDefaultAbility: 'bot', mobileDefaultAbility: 'bot', visibleSuggest: { departments: [], members: ['publication-user'], groups: [], isAll: 0 }, blackVisibleSuggest: { departments: [], members: [], groups: [], isAll: 0 } } },
     { path: '/developers/v1/app_version/detail/' + APP + '/' + VERSION, body: {} },
-    { path: '/developers/v1/publish/commit/' + APP + '/' + VERSION, body: { is_full_release: false } }
+    { path: '/developers/v1/publish/commit/' + APP + '/' + VERSION, body: { clientId: APP } }
   ])
 }, 30_000)
 

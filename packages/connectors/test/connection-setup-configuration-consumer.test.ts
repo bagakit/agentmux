@@ -146,7 +146,7 @@ it('SDK and compiled CLI explicitly enable one exact original bot with a durable
   expect(captured).toHaveLength(1)
   const entry = captured[0]
   expect(entry.target.href).toBe('https://open.feishu.cn/developers/v1/robot/switch/' + f.config.application.appId)
-  expect(entry.init).toMatchObject({ method: 'POST', redirect: 'manual' }); expect(JSON.parse(String(entry.init.body))).toEqual({ enable: true })
+  expect(entry.init).toMatchObject({ method: 'POST', redirect: 'manual' }); expect(JSON.parse(String(entry.init.body))).toEqual({ clientId: f.config.application.appId, enable: true })
   expect(entry.claim).toEqual({ ...receipt, request: 'dispatching', secureStorage: 'not-started' })
   const headers = new Headers(entry.init.headers)
   expect(headers.get('content-type')).toMatch(/^application\/json\b/u); expect(headers.get('x-csrf-token')).toBe(accounts[0].csrf)
@@ -261,7 +261,7 @@ it('unknown original enable cannot be replayed or replaced through renew, ordina
   expect(read.applicationInspection?.readResult).toEqual({ subject: 'event-settings', transport: 'persistent-connection' })
   expect(effect(await f.sdk.call('connection.setup.advance', input))).toEqual(uncertain)
   const writes = fetch.mock.calls.filter(([url]) => String(url).includes('/robot/switch/'))
-  expect(writes).toHaveLength(1); expect(JSON.parse(String(writes[0][1]?.body))).toEqual({ enable: true })
+  expect(writes).toHaveLength(1); expect(JSON.parse(String(writes[0][1]?.body))).toEqual({ clientId: f.config.application.appId, enable: true })
   expect((await f.sdk.call('connection.inspect', { operationId: 'configuration-original-save' })).operation).toEqual(f.saved)
 }, 60_000)
 it('an enable action keeps its exact actor, decision and revision without taking away the saved bot or authentication', async () => {
@@ -496,7 +496,7 @@ it.each(['inflight', 'vault-committed'] as const)('actual process restart preser
   const business = effects.trim().split('\n').map(line => JSON.parse(line)).filter(row => row.path.startsWith('/developers/'))
   expect(business).toEqual([
     { origin: 'https://open.feishu.cn', method: 'POST', path: '/developers/v1/robot/' + config.application.appId, body: '{}' },
-    { origin: 'https://open.feishu.cn', method: 'POST', path: '/developers/v1/robot/switch/' + config.application.appId, body: '{"enable":true}' }
+    { origin: 'https://open.feishu.cn', method: 'POST', path: '/developers/v1/robot/switch/' + config.application.appId, body: JSON.stringify({ clientId: config.application.appId, enable: true }) }
   ])
   expect(result<{ operation: unknown }>(await cli(['inspect', '--operation-id', 'configuration-child-save'])).operation).toEqual(saved)
   expect(result<{ connection: unknown }>(await cli(['inspect', '--connection', config.connectionId])).connection).toMatchObject({ config, revision: 1 })

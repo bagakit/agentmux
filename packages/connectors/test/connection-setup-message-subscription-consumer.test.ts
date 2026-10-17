@@ -90,7 +90,7 @@ it('SDK and compiled CLI add only the exact App message event while carrying the
   expect(f.native).toEqual(before)
   const input = action(offered, effect), accepted = await f.cli(['advance', '--input', '-'], input)
   expect(accepted.applicationConfiguration!.selected).toEqual({ effect, stepId: accepted.receipt!.stepId, input, request: 'confirmed', secureStorage: 'stored', sourceStepIds: { catalog: catalog.stepId, settings: settings.stepId }, transport: 'persistent-connection' })
-  expect(f.native.slice(before.length)).toEqual([{ path: '/developers/v1/event/update/' + APP, body: { events: [], appEvents: [EVENT], userEvents: [], operation: 'add', eventMode: 4 } }])
+  expect(f.native.slice(before.length)).toEqual([{ path: '/developers/v1/event/update/' + APP, body: { clientId: APP, events: [], appEvents: [EVENT], userEvents: [], operation: 'add', eventMode: 4 } }])
   expect(await f.sdk.call('connection.setup.advance', input)).toEqual(accepted)
   expect(f.native.slice(before.length)).toHaveLength(1)
   expect(accepted.applicationConfiguration!.capability).toBe('unknown')
@@ -147,8 +147,8 @@ it('an unknown original mode claim requires a fresh settings read, then permits 
   expect((await f.inspect('use-persistent-connection')).applicationConfiguration!.selected).toEqual(original)
   expect((await f.sdk.call('connection.setup.advance', switchInput)).applicationConfiguration!.selected).toEqual(original)
   expect(f.native.filter(call => call.path.includes('/switch/') || call.path.includes('/update/'))).toEqual([
-    { path: '/developers/v1/event/switch/' + APP, body: { eventMode: 4 } },
-    { path: '/developers/v1/event/update/' + APP, body: { events: [], appEvents: [EVENT], userEvents: [], operation: 'add', eventMode: 4 } }
+    { path: '/developers/v1/event/switch/' + APP, body: { clientId: APP, eventMode: 4 } },
+    { path: '/developers/v1/event/update/' + APP, body: { clientId: APP, events: [], appEvents: [EVENT], userEvents: [], operation: 'add', eventMode: 4 } }
   ])
 }, 30_000)
 
@@ -229,7 +229,7 @@ it.each(['native-inflight', 'stored-ack'] as const)('a true %s writer exit prese
   expect(resumed.applicationConfiguration!.selected).toEqual({ ...original, request: mode === 'stored-ack' ? 'confirmed' : 'unknown', secureStorage: mode === 'stored-ack' ? 'stored' : 'not-started' })
   expect((await cli(['advance', '--input', '-'], input)).applicationConfiguration!.selected).toEqual(resumed.applicationConfiguration!.selected)
   expect(await readFile(join(f.directory, 'message-writes.ndjson'), 'utf8')).toBe(native)
-  expect(native.trim().split('\n').map(line => JSON.parse(line))).toEqual([{ path: '/developers/v1/event/update/' + APP, body: { events: [], appEvents: [EVENT], userEvents: [], operation: 'add', eventMode: 4 } }])
+  expect(native.trim().split('\n').map(line => JSON.parse(line))).toEqual([{ path: '/developers/v1/event/update/' + APP, body: { clientId: APP, events: [], appEvents: [EVENT], userEvents: [], operation: 'add', eventMode: 4 } }])
 }, 30_000)
 
 

@@ -83,7 +83,7 @@ it('SDK and compiled CLI explicitly switch only the exact application event tran
   const input = action(offered, effect), accepted = await f.cli(['advance', '--input', '-'], input)
   expect(accepted.applicationConfiguration!.selected).toMatchObject({ effect, sourceStepId: source.stepId, input, request: 'confirmed', secureStorage: 'stored' })
   expect(accepted.applicationConfiguration!.capability).not.toBe('enabled')
-  expect(f.native.slice(before.length)).toEqual([{ path: '/developers/v1/event/switch/' + APP, body: { eventMode: 4 } }])
+  expect(f.native.slice(before.length)).toEqual([{ path: '/developers/v1/event/switch/' + APP, body: { clientId: APP, eventMode: 4 } }])
   expect(await f.sdk.call('connection.setup.advance', input)).toEqual(accepted)
   expect(f.native.slice(before.length)).toHaveLength(1)
   const originalRead = await f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId, applicationInspection: { selectedStepId: source.stepId } })
@@ -199,7 +199,7 @@ it.each(['native-inflight', 'stored-ack'] as const)('a true %s writer exit prese
   expect(resumed.applicationConfiguration!.selected).toEqual({ ...original, request: mode === 'stored-ack' ? 'confirmed' : 'unknown', secureStorage: mode === 'stored-ack' ? 'stored' : 'not-started' })
   expect((await cli(['advance', '--input', '-'], input)).applicationConfiguration!.selected).toEqual(resumed.applicationConfiguration!.selected)
   expect(await readFile(join(f.directory, 'event-writes.ndjson'), 'utf8')).toBe(native)
-  expect(native.trim().split('\n').map(line => JSON.parse(line))).toEqual([{ path: '/developers/v1/event/switch/' + APP, body: { eventMode: 4 } }])
+  expect(native.trim().split('\n').map(line => JSON.parse(line))).toEqual([{ path: '/developers/v1/event/switch/' + APP, body: { clientId: APP, eventMode: 4 } }])
 }, 30_000)
 
 it('SDK and compiled CLI reject wrong effect, subject or selected-child wire relations while exact selection remains local and usable', async () => {
@@ -268,6 +268,6 @@ it('a known pre-dispatch authority refusal cannot become a permanent unknown wri
     const value = await f.sdk.call('connection.setup.advance', action(available, effect))
     result = { value, error: null }
   }
-  expect(nativeWrites()).toEqual([{ path: '/developers/v1/event/switch/' + APP, body: { eventMode: 4 } }])
+  expect(nativeWrites()).toEqual([{ path: '/developers/v1/event/switch/' + APP, body: { clientId: APP, eventMode: 4 } }])
   expect(result.error).toBeNull(); expect(result.value!.applicationConfiguration!.selected!.request).toBe('confirmed')
 }, 30_000)
