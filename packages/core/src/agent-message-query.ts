@@ -18,6 +18,8 @@ export type AgentMuxMessageQuery = {
 /** Bounded original-body prefix, never a separate full-body field or reconstructed wire. */
 export type AgentMuxMessageMetadata = {
   sequence: number
+  deliveryMode?: 'reference'
+  notification?: import('./agent-message-notification.js').AgentMuxMessageNotificationStatus
   envelope: Omit<AgentMuxMessageEnvelope, 'body'>
   delivery: AgentMuxMessageDeliveryState
   bodyPreview: string

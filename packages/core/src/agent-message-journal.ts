@@ -50,6 +50,23 @@ export const messageRouteJournalSchema = `
   );
 `
 
+/** Derived positions over the same journal. Historical messages are never backfilled or reclassified. */
+export const messageNotificationJournalSchema = `
+  CREATE TABLE IF NOT EXISTS a2a_message_notifications (
+    message_id TEXT PRIMARY KEY, recipient_id TEXT NOT NULL, run_id TEXT NOT NULL,
+    message_sequence INTEGER NOT NULL UNIQUE, notification_id TEXT, submitted INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS a2a_notifications_waiting ON a2a_message_notifications(recipient_id, run_id, message_sequence)
+    WHERE submitted=0 AND notification_id IS NULL;
+  CREATE INDEX IF NOT EXISTS a2a_notifications_pending ON a2a_message_notifications(recipient_id) WHERE submitted=0;
+  CREATE TABLE IF NOT EXISTS a2a_notifications (
+    notification_id TEXT PRIMARY KEY, recipient_id TEXT NOT NULL, run_id TEXT NOT NULL,
+    original_sequence INTEGER NOT NULL UNIQUE, result_sequence INTEGER, active INTEGER NOT NULL DEFAULT 1
+  );
+  CREATE INDEX IF NOT EXISTS a2a_notification_unfinished ON a2a_notifications(recipient_id, run_id) WHERE active=1;
+  CREATE INDEX IF NOT EXISTS a2a_notification_messages ON a2a_message_notifications(notification_id);
+`
+
 /** Future sequence positions only: no history backfill, copied message or consumption state. */
 export const messageObservationJournalSchema = `
   CREATE TABLE IF NOT EXISTS message_observation_records (sequence INTEGER PRIMARY KEY);
@@ -63,19 +80,30 @@ export const messageObservationJournalSchema = `
         AND json_extract(original.json, '$.envelope.sender.kind') = 'agent-session'
         AND json_extract(original.json, '$.envelope.recipient.kind') = 'agent-session'))
     BEGIN INSERT INTO message_observation_records VALUES (NEW.sequence); END;
+  CREATE TRIGGER IF NOT EXISTS message_notification_observation_record_insert AFTER INSERT ON records
+    WHEN json_extract(NEW.json, '$.kind') IN ('a2a-notification', 'a2a-notification-result')
+    BEGIN INSERT INTO message_observation_records VALUES (NEW.sequence); END;
 `
 
 export const messageObservationQuery = `WITH changed AS (
-  SELECT position.sequence, COALESCE(json_extract(r.json, '$.envelope.messageId'), json_extract(r.json, '$.messageId')) AS message_id
+  SELECT position.sequence, COALESCE(json_extract(r.json, '$.envelope.messageId'), json_extract(r.json, '$.messageId')) AS message_id,
+    COALESCE(json_extract(r.json, '$.notification.notificationId'), json_extract(r.json, '$.notificationId')) AS notification_id
   FROM message_observation_records position JOIN records r ON r.sequence=position.sequence
-  WHERE position.sequence > ? AND position.sequence <= ? ORDER BY position.sequence LIMIT 100)
-  SELECT changed.sequence, changed.message_id,
+  WHERE position.sequence > ? AND position.sequence <= ? ORDER BY position.sequence LIMIT 100),
+  expanded AS (
+    SELECT sequence, message_id FROM changed WHERE message_id IS NOT NULL
+    UNION ALL
+    SELECT changed.sequence, reference.value AS message_id FROM changed
+      JOIN a2a_notifications n ON n.notification_id=changed.notification_id
+      JOIN records original ON original.sequence=n.original_sequence, json_each(original.json, '$.notification.messageIds') reference)
+  SELECT expanded.sequence, expanded.message_id,
     json_extract(original.json, '$.envelope.senderSessionId') AS sender_id,
     json_extract(original.json, '$.envelope.recipientSessionId') AS recipient_id,
     json_extract(original.json, '$.envelope.sender.kind') AS sender_kind,
     json_extract(original.json, '$.envelope.recipient.kind') AS recipient_kind
-  FROM changed JOIN messages m ON m.message_id=changed.message_id
-    JOIN records original ON original.sequence=m.message_sequence ORDER BY changed.sequence`
+  FROM expanded CROSS JOIN messages m ON m.message_id=expanded.message_id
+    JOIN records original ON original.sequence=m.message_sequence ORDER BY expanded.sequence`
+
 
 /** The original records remain the SSOT. These indexes select one participant's messages. */
 export const dispatchDiscoveryJournalSchema = `
