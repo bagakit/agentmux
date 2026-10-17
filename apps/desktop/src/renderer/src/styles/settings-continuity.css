@@ -51,3 +51,9 @@
 .automation-defaults { padding-top: var(--sp-5); border-top: 1px solid var(--line); }
 .automation-defaults-heading h3 { margin: 0 0 var(--sp-2); color: var(--text); font-size: var(--fs-body); font-weight: 600; }
 .automation-defaults .automation-defaults-prompt textarea { min-height: 84px; }
+
+.continuity-duration-editor { gap: var(--sp-2); }
+.continuity-duration-editor > input { width: 116px; }
+.continuity-duration-editor > select { min-width: 88px; width: auto; padding-inline: var(--sp-2); }
+.continuity-duration-summary { max-width: 32ch; overflow-wrap: anywhere; }
+@media (max-width: 620px) { .continuity-duration-editor > input { flex: 1; width: auto; } }
