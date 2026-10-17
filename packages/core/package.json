@@ -86,6 +86,10 @@
       "types": "./dist/runtime.d.ts",
       "import": "./dist/runtime.js"
     },
+    "./renderer-trace-bytes": {
+      "types": "./dist/renderer-trace-bytes.d.ts",
+      "import": "./dist/renderer-trace-bytes.js"
+    },
     "./control": {
       "types": "./dist/control.d.ts",
       "import": "./dist/control.js"
