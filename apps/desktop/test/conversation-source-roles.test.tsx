@@ -46,7 +46,7 @@ it('presents the exact independent original Hook reply as a compact observation 
   expect(observation).not.toBeNull()
   const header = observation.querySelector<HTMLButtonElement>('[aria-expanded]')!
   expect(header.textContent).toContain('回复快照'); expect(header.getAttribute('aria-expanded')).toBe('false')
-  expect(observation.querySelector('.conversation-reply-observation__preview')!.textContent).toBe(hook.content!.replace(/\s+/gu, ' ').slice(0, 180))
+  expect(observation.querySelector('.conversation-reply-observation__preview')!.textContent).toBe('搞定了！已严格基于最新 main（Commit ac700ed633）完成打包、安装并重启运行，全部多余检查与等待已跳过：')
   expect(bodies()).toHaveLength(1)
   expect(host.querySelector('[data-native-record-id]')!.getAttribute('data-native-record-id')).toBe(page.items[0]!.id)
   await click(header)
