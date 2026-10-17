@@ -7,13 +7,68 @@ import { useAppStore } from '../../../src/renderer/src/store'
 import { formatRegionAddress } from '../../../src/renderer/src/lib/agent-address'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
-import type { AgentSessionHistoryPage, AgentTimelineItem, ContinuousProgressLoop } from '@agentmux/core'
+import type { AgentSessionHistoryPage, AgentTimelineItem, ContinuousProgressLoop, DurableAgentMuxMessage, AgentMuxMessageMetadata } from '@agentmux/core'
+import type { AgentInputMailboxItem } from '@agentmux/core/agent-input-mailbox'
 
 const workspaceId = useAppStore.getState().activeWorkspaceId!
 const tabId = 'region-actions-tab', leftId = 'region-actions-target', rightId = 'region-actions-survivor'
 const names = ['Layout coordinator · investigate recovery without losing this original Agent', 'Notes researcher', 'Build reviewer']
 const original = (window as any).regionActions
 const first = useAppStore.getState().sessions[0]!
+// Exact native read ports only; the real SessionMailbox owns windows, selection and reading.
+let layoutJournal: DurableAgentMuxMessage[] | null = null
+let layoutInputs: AgentInputMailboxItem[] = []
+const layoutCalls: { action: string; reference: unknown; query?: unknown; messageId?: string }[] = []
+const layoutListeners = new Set<Parameters<typeof api.sessions.onEvent>[0]>()
+const listMessages = api.sessions.listMessages, readMessage = api.sessions.readMessage, inputMailbox = api.sessions.inputMailbox
+const onSessionEvent = api.sessions.onEvent, dispatches = api.sessions.dispatches, dispatch = api.sessions.dispatch
+api.sessions.onEvent = listener => {
+  layoutListeners.add(listener)
+  const release = onSessionEvent(listener)
+  if (layoutJournal) queueMicrotask(() => { if (layoutListeners.has(listener)) listener({ type: 'core', hostId: first.hostId,
+    event: { type: 'agent-message-observation', state: 'available' } }) })
+  return () => { layoutListeners.delete(listener); release() }
+}
+api.sessions.listMessages = async (reference, query) => {
+  if (!layoutJournal) return listMessages(reference, query)
+  layoutCalls.push({ action: 'list', reference: { ...reference }, query: { ...query } })
+  const matching = layoutJournal.filter(item => reference.hostId === first.hostId &&
+    (query.direction === 'incoming' ? item.envelope.recipientSessionId : item.envelope.senderSessionId) === reference.agentSessionId &&
+    (query.beforeSequence === undefined || item.sequence < query.beforeSequence)).sort((a, b) => b.sequence - a.sequence)
+  const selected = matching.slice(0, query.limit ?? 25)
+  return { hostId: reference.hostId, participantSessionId: reference.agentSessionId, direction: query.direction,
+    messages: selected.map(record => {
+      const { body, ...envelope } = record.envelope
+      return { sequence: record.sequence, envelope, delivery: record.delivery, deliveryMode: record.deliveryMode,
+        notification: record.notification, bodyPreview: body.slice(0, 240), bodyBytes: new TextEncoder().encode(body).byteLength } as AgentMuxMessageMetadata
+    }), nextBeforeSequence: matching.length > selected.length ? selected.at(-1)!.sequence : null }
+}
+api.sessions.readMessage = async (reference, messageId) => {
+  if (!layoutJournal) return readMessage(reference, messageId)
+  layoutCalls.push({ action: 'read', reference: { ...reference }, messageId })
+  return { hostId: reference.hostId, message: layoutJournal.find(record => reference.hostId === first.hostId &&
+    record.envelope.messageId === messageId && [record.envelope.senderSessionId, record.envelope.recipientSessionId].includes(reference.agentSessionId)) ?? null }
+}
+api.sessions.inputMailbox = async (reference, query) => {
+  if (!layoutJournal) return inputMailbox(reference, query)
+  layoutCalls.push({ action: 'input', reference: { ...reference }, query: { ...query } })
+  return { agentSessionId: reference.agentSessionId, queueId: 'private-layout-input-journal', cut: { incarnation: 'private-layout-cut', throughSequence: 2 },
+    budgetBytes: 128 * 1024, items: reference.hostId === first.hostId && reference.agentSessionId === first.id ? layoutInputs.map(item => ({ kind: 'item' as const, item })) : [],
+    nextCursor: null, coverage: { kind: 'recorded-inputs' as const, unrecorded: 'unconfirmed' as const } }
+}
+const layoutDispatch = () => ({ sourceMessageId: layoutJournal!.at(-1)!.envelope.messageId, ownerAgentSessionId: first.id,
+  workerAgentSessionId: layoutJournal!.at(-1)!.envelope.recipientSessionId!, threadId: 'private-layout-dispatch-thread',
+  openedAt: layoutJournal!.at(-1)!.envelope.createdAt, originAwaits: true, events: [] })
+api.sessions.dispatches = async (reference, query) => {
+  if (!layoutJournal) return dispatches(reference, query)
+  layoutCalls.push({ action: 'dispatch-list', reference: { ...reference }, query: { ...query } })
+  return { hostId: reference.hostId, participantSessionId: reference.agentSessionId, dispatches: [layoutDispatch()], nextSourceMessageId: null }
+}
+api.sessions.dispatch = async (reference, sourceMessageId) => {
+  if (!layoutJournal) return dispatch(reference, sourceMessageId)
+  layoutCalls.push({ action: 'dispatch-read', reference: { ...reference }, messageId: sourceMessageId })
+  return { hostId: reference.hostId, dispatch: layoutDispatch(), source: layoutJournal.at(-1)!, replies: [], identityDiagnostics: [] }
+}
 mountThemeRuntime(window, useAppStore.getState().config?.appearance ?? {})
 // Controlled API facts for the real UI: no timer, delivery or second loop manager.
 let progressLoops: ContinuousProgressLoop[] = []
@@ -146,6 +201,50 @@ const probe = {
     flushSync(() => { for (const listener of progressListeners) listener(loop) })
   },
   progressFacts() { return { reads: [...progressReads], subscribers: progressListeners.size } },
+  mailboxLayout(tag: string) {
+    const state = useAppStore.getState(), session = state.sessions.find(item => item.id === first.id)!
+    if (session.kind !== 'agent') throw new Error('Layout journal needs the exact original Agent')
+    const peer = state.sessions[1]!, base = Date.parse(new Date(_reshape_fixtureEpoch(20747, 0, 12000000)).toISOString())
+    const originalBody = (index: number) => `第${index}封：请核对当前工作区的设计与实现。先确认来源、责任与验收，再保留原始上下文推进。\n\n` +
+      '这是一段需要完整阅读的中文原文。摘要只能帮助辨认，不能代替原始消息，也不能把通知已提交理解为任务已接受。'.repeat(7) + `\n\n原文唯一尾段-${tag}-${index}-完整保留。`
+    const message = (index: number, incoming: boolean): DurableAgentMuxMessage => {
+      const sender = incoming ? peer : session, recipient = incoming ? session : peer
+      const record: DurableAgentMuxMessage = { sequence: index, envelope: { schema: 'agentmux.a2a.v1', messageId: `layout-${tag}-${incoming ? 'incoming' : 'outgoing'}-${index}`,
+        operationId: `layout-operation-${tag}-${index}`, createdAt: base + index * 60_000,
+        sender: { kind: 'agent-session', agentSessionId: sender.id }, recipient: { kind: 'agent-session', agentSessionId: recipient.id },
+        senderSessionId: sender.id, senderRunId: sender.control.run.runId, recipientSessionId: recipient.id, recipientRunId: recipient.control.run.runId,
+        threadId: `layout-thread-${tag}-${index}`, correlationId: `layout-correlation-${tag}-${index}`, replyTo: null, workspaceId, body: originalBody(index) },
+        delivery: index % 5 === 3 ? { state: 'failed', at: base + index * 60_000, reason: '原收件方投递回执未确认；保留原消息与当前 Agent。' } : { state: 'delivered', at: base + index * 60_000 } }
+      return index % 5 < 3 ? { ...record, deliveryMode: 'reference', notification: { state: (['pending', 'submitted', 'unconfirmed'] as const)[index % 5]!,
+        ...(index % 5 === 2 ? { notificationId: `layout-notice-${index}`, reason: '通知输入回执未知；原文和原消息身份仍保留。' } : {}) } } : record
+    }
+    layoutJournal = [...Array.from({ length: 27 }, (_, index) => message(index + 1, true)), ...[101, 102, 103].map(index => message(index, false))]
+    const key = { kind: 'prompt' as const, agentSessionId: session.id, expectedRun: session.control.run, submissionId: `layout-human-${tag}` }
+    const body = '<amux>作者自己写下的原始标记，不能再次解包</amux>\n\n' + originalBody(201)
+    const wire = `<amux>原平台上下文-${tag}</amux>\n\n<amux:a2a from="recorded-peer" msg-id="recorded-wire">\n${originalBody(202)}\n</amux:a2a>`
+    layoutInputs = [{ kind: 'controlled', sequence: 2, recordedAt: base + 202 * 60_000, intent: { key, execution: 'immediate',
+      admissionIntent: { kind: 'manual-actor', expectedRun: session.control.run }, source: { kind: 'prompt', prompt: body, promptWire: `原wire头-${tag}\n${body}\n原wire尾-${tag}`, authorHuman: true } }, receipt: null,
+      failure: { name: 'Error', code: 'ORIGINAL_OBSERVATION_UNKNOWN', message: '原输入回执未确认；正文与准确输入身份保留。' } },
+    { kind: 'submission', sequence: 1, recordedAt: base + 201 * 60_000, key: { ...key, submissionId: `layout-wire-${tag}` },
+      record: { agentSessionId: session.id, run: session.control.run, admission: { inputKey: { ...key, submissionId: `layout-wire-${tag}` }, submissionId: `layout-wire-${tag}`,
+        operationId: `layout-wire-operation-${tag}`, startByte: 0, endByte: new TextEncoder().encode(wire).byteLength, acknowledged: true,
+        intent: { run: session.control.run, ownerInstanceId: 'private-layout-owner', prompt: wire, plan: { kind: 'single-phase', data: wire } } } } }]
+    layoutCalls.length = 0
+    mailboxTag = `layout-${tag}`
+    flushSync(() => useAppStore.setState({ sessions: state.sessions.map(item => item.id === session.id ? { ...session,
+      terminalCapability: { state: 'unknown', mode: 'degraded', reason: 'handshake-timeout', run: session.control.run, observedAt: base } } : item),
+      agentSteerQueues: { ...state.agentSteerQueues, [session.id]: [{ operationId: `layout-pending-${tag}`, runId: session.control.run.runId,
+        text: '原待发意图：先保留草稿与准确目标，再继续核对。', status: 'deferred', error: '原投递观察未确认，尚未重新发送。', enqueuedAt: base + 203 * 60_000 }] } }))
+    for (const listener of layoutListeners) {
+      listener({ type: 'core', hostId: session.hostId, event: { type: 'agent-message-observation', state: 'available' } })
+      listener({ type: 'core', hostId: session.hostId, event: { type: 'agent-message-changed', messageId: layoutJournal[26]!.envelope.messageId,
+        sequence: 27, senderSessionId: peer.id, recipientSessionId: session.id } })
+    }
+    return { hostId: session.hostId, agentSessionId: session.id, incoming: layoutJournal[26]!.envelope.messageId,
+      body: layoutJournal[26]!.envelope.body, bodyInput: body, wireInput: wire }
+  },
+  mailboxLayoutFacts() { return { calls: [...layoutCalls], inputCopies: layoutInputs.map(item => item.kind === 'controlled' && item.intent.source.kind === 'prompt'
+    ? item.intent.source.promptWire ?? item.intent.source.prompt : item.kind === 'submission' ? item.record?.admission?.intent?.prompt : undefined) } },
   mailbox(tag: string) {
     mailboxTag = tag
     const state = useAppStore.getState(), session = state.sessions.find(session => session.id === first.id)!
