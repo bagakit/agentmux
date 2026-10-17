@@ -372,6 +372,26 @@ it('rejects foreign requester, child frame and invalid occurrence/bounds without
     { browserId: 'browser', occurrence: occurrence('A'), geometry: { visible: true, bounds: { ...geometry.bounds, width: 0 } } })).toThrow('bounds')
   expect(f.views).toEqual([f.source]); expect(f.source.webContents.dead).toBe(false)
 })
+
+it.each(['document-loading', 'frame-mismatch', 'document-url-mismatch'] as const)(
+  'explains %s without consuming the occurrence or changing the original page', async reason => {
+    const f = await fixture(), before = f.manager.target('browser')
+    const frame = reason === 'frame-mismatch' ? { ...f.frame } : f.frame
+    const loading = vi.spyOn(f.app, 'isLoadingMainFrame').mockReturnValue(reason === 'document-loading')
+    const url = f.frame.url
+    if (reason === 'document-url-mismatch') f.frame.url += '?other-document'
+    try {
+      expect(() => f.manager.registerPresentation(f.app as never, frame as never,
+        { browserId: 'browser', occurrence: occurrence('A'), geometry }))
+        .toThrow(`Untrusted Browser presentation document (${reason})`)
+      expect(f.manager.target('browser')).toEqual(before)
+      expect(f.views).toEqual([f.source])
+      expect(f.source.webContents.dead).toBe(false)
+    } finally { loading.mockRestore(); f.frame.url = url }
+    expect(f.register('A').leaseId).toBeTruthy()
+    expect(f.views).toEqual([f.source])
+  })
+
 it('arms one capture from a visible exact lease and waits for actual media acknowledgement', async () => {
   const f = await fixture(), a = f.register('A'), b = f.register('B')
   const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, a.leaseId)

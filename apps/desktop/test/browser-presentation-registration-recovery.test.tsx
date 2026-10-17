@@ -102,6 +102,30 @@ it('reconnects the retained Stage after authoritative creation updates the same 
   expect(bridge.activatePresentation.mock.calls).toEqual([['actual-lease', { kind: 'select', focus: 'preserve' }]])
 })
 
+it('keeps the exact native rejection visible and retries only the original display request', async () => {
+  const reason = 'Untrusted Browser presentation document (document-loading)'
+  bridge.registerPresentation.mockRejectedValueOnce(new Error(reason))
+  await render({ navigationId: 'original-navigation' })
+  const stage = container.querySelector('[data-native-browser-stage]')
+  const content = container.querySelector('[data-original-content]')
+  expect(container.textContent).toContain(reason)
+  expect(bridge.activatePresentation).not.toHaveBeenCalled()
+  expect(bridge.armPresentationCapture).not.toHaveBeenCalled()
+  await render()
+  expect(bridge.registerPresentation).toHaveBeenCalledTimes(1)
+  expect(container.querySelector('[data-native-browser-stage]')).toBe(stage)
+  expect(container.querySelector('[data-original-content]')).toBe(content)
+  const retry = container.querySelector<HTMLButtonElement>('.browser-presentation-notice > .small-button')
+  expect(retry?.textContent).toBe('Retry connection')
+  await act(async () => retry!.click())
+  expect(bridge.registerPresentation).toHaveBeenCalledTimes(2)
+  expect(bridge.registerPresentation.mock.calls[1]).toEqual(bridge.registerPresentation.mock.calls[0])
+  expect(container.querySelector('[role="status"]')).toBeNull()
+  expect(container.querySelector('[data-native-browser-stage]')).toBe(stage)
+  expect(container.querySelector('[data-original-content]')).toBe(content)
+  expect(bridge.activatePresentation).toHaveBeenCalledTimes(1)
+})
+
 it('consumes creation that arrived while the failed registration was still pending', async () => {
   const pending = deferred<{ leaseId: string }>()
   bridge.registerPresentation.mockReturnValueOnce(pending.promise)
