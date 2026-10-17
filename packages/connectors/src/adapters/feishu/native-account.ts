@@ -17,7 +17,7 @@ const LANDING = 'https://ask.feishu.cn/'
 const CONSOLE = 'https://open.feishu.cn/app'
 const CONSOLE_HOSTS = ['open.feishu.cn', 'open.larkoffice.com']
 const CROSS_LOGIN_HOSTS = ['accounts.feishu.cn', 'ask.feishu.cn']
-const CONSOLE_FLOW_HOSTS = [...CROSS_LOGIN_HOSTS, ...CONSOLE_HOSTS]
+const CONSOLE_FLOW_HOSTS = [...CROSS_LOGIN_HOSTS, ...CONSOLE_HOSTS, 'accounts.larkoffice.com', 'login.feishu.cn']
 export function isFeishuConsoleOrigin(value: unknown): value is string {
   return typeof value === 'string' && CONSOLE_HOSTS.some(host => value === `https://${host}`)
 }
@@ -78,7 +78,7 @@ export function readNativeAccountState(snapshot: unknown): { state: NativeAccoun
     version: 2, flowKey: original.flowKey, token: original.token, cookieJar: original.cookieJar, phase: original.phase, hops: original.hops,
     ...(original.url !== undefined ? { url: original.url } : {}), ...(original.account !== undefined ? { account: original.account } : {}),
     ...(original.csrf !== undefined ? { csrf: original.csrf } : {}), ...(original.consoleOrigin !== undefined ? { consoleOrigin: original.consoleOrigin } : {}),
-    ...(original.referer !== undefined ? { referer: url(original.referer, ['accounts.feishu.cn', 'ask.feishu.cn', ...CONSOLE_HOSTS]).href } : {})
+    ...(original.referer !== undefined ? { referer: url(original.referer, original.phase === 'console' || original.phase === 'account' ? CONSOLE_FLOW_HOSTS : [...CROSS_LOGIN_HOSTS, ...CONSOLE_HOSTS]).href } : {})
   }
   const cookies = CookieJar.deserializeSync(state.cookieJar)
   // Reconstitute through the same strict policy rather than trusting serialized options.
