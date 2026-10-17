@@ -24,6 +24,7 @@ import { currentHostNetwork, useHostNetworkObservation } from './use-host-networ
 import { HostApplicationAccessPanel } from './HostApplicationAccessPanel'
 import { HostSessionSummary, HostExecutorsSummary } from './HostWorkSummary'
 import '../../styles/remote-management.css'
+import './hosts-settings.css'
 
 const ThemeObjectTopologyIcon = semanticIconComponent('object.topology')
 const ThemeLayoutListIcon = semanticIconComponent('object.list')
@@ -232,15 +233,15 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
   return (
     <div ref={container} className="settings-pane-stack settings-resource-workbench remote-management" data-resource-view={view} data-remote-mode={showTopology ? 'topology' : 'list'} data-remote-wide={wide}>
       <div className="settings-pane-toolbar remote-management__toolbar">
-        <div className="remote-management__scope"><strong>{hosts.length}</strong><span>environments</span><small>{hosts.filter(host => host.kind === 'ssh').length} SSH</small></div>
-        {showTopology ? <label className="settings-resource-search remote-management__search"><ThemeActionSearchIcon size={14} aria-hidden="true" /><TextInput type="search" aria-label="Filter hosts" placeholder="Find an environment or project…" value={filter.query} onChange={event => filterHosts(event.target.value)} /></label> : null}
-        {wide ? <div className="remote-management__modes" aria-label="Environment view">
+        <div className="remote-management__scope"><strong>{hosts.length}</strong><span>hosts</span><small>{hosts.filter(host => host.kind === 'ssh').length} SSH</small></div>
+        {showTopology ? <label className="settings-resource-search remote-management__search"><ThemeActionSearchIcon size={14} aria-hidden="true" /><TextInput type="search" aria-label="Filter hosts" placeholder="Find a host or project…" value={filter.query} onChange={event => filterHosts(event.target.value)} /></label> : null}
+        {wide ? <div className="remote-management__modes" aria-label="Host view">
           <button type="button" aria-label="Topology" aria-pressed={showTopology} onClick={() => setMode('topology')}><ThemeObjectTopologyIcon size={14} /><span>Topology</span></button>
           <button type="button" aria-label="List" aria-pressed={!showTopology} onClick={() => setMode('list')}><ThemeLayoutListIcon size={14} /><span>List</span></button>
         </div> : null}
         <button className="small-button" data-add-host disabled={saving} onClick={addHost}><ThemeActionCreateHostIcon size={13} /> Add SSH host</button>
       </div>
-      {filter.query.trim() ? <p className="remote-management__filter" role="status">{hosts.filter(host => matches(host.id)).length} of {hosts.length} configured environments match “{filter.query}”{selectedId && !matches(selectedId) ? ' · Selected environment remains open' : ''}</p> : null}
+      {filter.query.trim() ? <p className="remote-management__filter" role="status">{hosts.filter(host => matches(host.id)).length} of {hosts.length} configured hosts match “{filter.query}”{selectedId && !matches(selectedId) ? ' · Selected host remains open' : ''}</p> : null}
       <div className="settings-resource-split remote-management__body">
         {showTopology ? active ? <HostTopology selectedId={selectedId} onSelect={selectTopologyHost}
           onOpenLink={() => { if (selectedNetworkHost) selectTopologyHost(selectedNetworkHost.id) }}
@@ -258,7 +259,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
             }
           })} />}
         <div ref={editor} className="settings-resource-editor">
-          <button type="button" className="settings-resource-back small-button" onClick={backToLibrary}><ThemeNavigationBackIcon size={14} /> All environments</button>
+          <button type="button" className="settings-resource-back small-button" onClick={backToLibrary}><ThemeNavigationBackIcon size={14} /> All hosts</button>
         {hosts.filter((host) => host.id === selectedId).map((host) => {
           const check = currentHostCheck(checks[host.id], host)
           const hostSessions = sessionsByHost.get(host.id) ?? NO_SESSIONS
@@ -309,7 +310,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
                   onChange={(patch) => update(host.id, patch)}
                   onClear={(field) => clear(host.id, field)}
                 />
-              ) : <div className="settings-local-host"><strong>Your local environment</strong><p>Uses this computer’s installed agents and registered projects. No SSH configuration needed.</p></div> : null}
+              ) : <div className="settings-local-host"><strong>Your local host</strong><p>Uses this computer’s installed agents and registered projects. No SSH configuration needed.</p></div> : null}
               {panel === 'connection' && sessionCount > 0 ? <p className="field-hint">{sessionCount} Session reference{sessionCount === 1 ? '' : 's'}. Removal is protected while this connection is referenced.</p> : null}
             </section>
           )
@@ -342,7 +343,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
               connectionChanged={JSON.stringify(draft) !== JSON.stringify(committed)}
               active={active && selectedId === id && panel === 'projects'} hidden={selectedId !== id || panel !== 'projects'} onClose={onClose} />
           })}
-          {!hosts.some((host) => host.id === selectedId) ? <div className="settings-resource-editor__empty" role="status"><ThemeObjectHostIcon size={28} aria-hidden="true" /><strong>{requestedHost !== null ? 'Connection no longer available' : 'Connect your environments'}</strong><p>{requestedHost !== null ? `The requested connection (${requestedHost}) is no longer in these settings. Choose another connection to review it.` : 'Choose a connection, or add an SSH host to reuse across your projects.'}</p></div> : null}
+          {!hosts.some((host) => host.id === selectedId) ? <div className="settings-resource-editor__empty" role="status"><ThemeObjectHostIcon size={28} aria-hidden="true" /><strong>{requestedHost !== null ? 'Connection no longer available' : 'Connect your hosts'}</strong><p>{requestedHost !== null ? `The requested connection (${requestedHost}) is no longer in these settings. Choose another connection to review it.` : 'Choose a connection, or add an SSH host to reuse across your projects.'}</p></div> : null}
         </div>
       </div>
       <SettingsSaveBar save={saveState} dirty={dirty} label="Save hosts" onSave={() => void save()} />

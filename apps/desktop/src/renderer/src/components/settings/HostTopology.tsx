@@ -40,7 +40,7 @@ const HostTopologyNode = memo(function HostTopologyNode({ data }: NodeProps<Host
         <span><small>{host.kind === 'ssh' ? 'SSH USER' : 'ACCESS'}</small><code data-route-user>{host.kind === 'ssh' ? host.user || 'SSH config' : 'Local route'}</code></span>
         <span><small>{host.kind === 'ssh' ? 'PORT OVERRIDE' : 'NETWORK PORT'}</small><code data-route-port>{host.kind === 'ssh' ? host.port ?? 'SSH config' : 'Not applicable'}</code></span>
       </span>
-      <span className="remote-host-node__readout"><span className="remote-host-node__binding"><span>Runtime</span><code data-route-runtime title={host.kind === 'ssh' ? host.runtimeId : undefined}>{host.kind === 'ssh' ? host.runtimeId ?? 'Unconfirmed' : 'Inspect environment'}</code></span>
+      <span className="remote-host-node__readout"><span className="remote-host-node__binding"><span>Runtime</span><code data-route-runtime title={host.kind === 'ssh' ? host.runtimeId : undefined}>{host.kind === 'ssh' ? host.runtimeId ?? 'Unconfirmed' : 'Inspect host'}</code></span>
       <span className="remote-host-node__link" data-route-network title={data.network ?? undefined}>{data.network ?? 'Network · read on demand'}</span></span>
       <span className="remote-host-node__footer"><span className={`remote-check-dot remote-check-dot--${check?.state ?? 'idle'}`} />
         <span>{hostCheckLabel(check ?? { state: 'idle' })}</span>{checkedAt !== undefined ? <time dateTime={new Date(checkedAt).toISOString()} title={new Date(checkedAt).toLocaleString()}>{new Date(checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time> : null}
@@ -49,7 +49,7 @@ const HostTopologyNode = memo(function HostTopologyNode({ data }: NodeProps<Host
   </>
 })
 function ManagementEntry({ data }: NodeProps<EntryNode>) {
-  return <div className="remote-entry-node"><span className="remote-entry-node__label">CONNECTION MANAGER</span><TopologyIcon size={32} /><strong>{data.label}</strong><span>Configured environments</span>
+  return <div className="remote-entry-node"><span className="remote-entry-node__label">CONNECTION MANAGER</span><TopologyIcon size={32} /><strong>{data.label}</strong><span>Configured hosts</span>
     <Handle type="source" position={Position.Right} isConnectable={false} /></div>
 }
 const nodeTypes = { host: HostTopologyNode, entry: ManagementEntry }
@@ -94,8 +94,8 @@ export const HostTopology = memo(function HostTopology({ items, selectedId, onSe
     return () => cancelAnimationFrame(frame)
   }, [topologyKey])
 
-  return <div className="remote-topology" aria-label="Configured environment topology" data-host-topology>
-    <header className="remote-topology__header"><div className="remote-topology__caption"><span>ENVIRONMENT CONSOLE</span><small>{scope === 'fleet' ? 'Configured environments' : 'One selected connection'}</small></div>
+  return <div className="remote-topology" aria-label="Configured host topology" data-host-topology>
+    <header className="remote-topology__header"><div className="remote-topology__caption"><span>HOST CONNECTIONS</span><small>{scope === 'fleet' ? 'Configured hosts' : 'One selected connection'}</small></div>
       {linkView ? <div className="remote-topology__scope" aria-label="Topology scope"><button type="button" aria-label="Fleet map" aria-pressed={scope === 'fleet'} onClick={() => changeScope('fleet')}>Fleet</button><button type="button" aria-label="Selected link" aria-pressed={scope === 'link'} onClick={() => changeScope('link')}>Selected link</button></div> : null}</header>
     {scope === 'link' && linkView ? <div className="remote-topology__link">{linkView}</div> : <>
     <div className="remote-topology__viewport"><ReactFlow<TopologyNode, Edge> nodes={nodes} edges={edges} nodeTypes={nodeTypes}
@@ -104,12 +104,12 @@ export const HostTopology = memo(function HostTopology({ items, selectedId, onSe
       elementsSelectable={false} deleteKeyCode={null} zoomOnDoubleClick={false} minZoom={.1} maxZoom={1.4}
       defaultEdgeOptions={{ style: { strokeWidth: 1.25 } }} proOptions={{ hideAttribution: true }}>
     </ReactFlow></div>
-    {items.length === 0 ? <p className="remote-topology__empty">No environments match this search.</p> : null}
+    {items.length === 0 ? <p className="remote-topology__empty">No hosts match this search.</p> : null}
     <div className="remote-topology__controls" aria-label="Topology viewport">
       <button type="button" className="icon-button" aria-label="Zoom in" onClick={() => void instance.current?.zoomIn()}><ZoomInIcon size={15} /></button>
       <button type="button" className="icon-button" aria-label="Zoom out" onClick={() => void instance.current?.zoomOut()}><ZoomOutIcon size={15} /></button>
-      <button type="button" className="icon-button" aria-label="Fit all environments" onClick={fit}><FitIcon size={15} /></button>
+      <button type="button" className="icon-button" aria-label="Fit all hosts" onClick={fit}><FitIcon size={15} /></button>
     </div>
-    <p className="remote-topology__hint">Pan to explore · use the list to scan every environment</p></>}
+    <p className="remote-topology__hint">Pan to explore · use the list to scan every host</p></>}
   </div>
 })
