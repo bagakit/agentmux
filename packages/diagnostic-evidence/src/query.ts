@@ -6,6 +6,10 @@ export const DIAGNOSTIC_EVIDENCE_DEFAULT_BUDGET: Readonly<DiagnosticEvidenceBudg
   maxReads: 8, maxDepth: 2, maxBytes: 128 * 1024, deadlineMs: 1500,
 })
 const byteLength = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength
+/** JSON object key order is not target identity. Keep array order and the original targets intact. */
+const targetKey = (target: DiagnosticEvidenceTarget) => JSON.stringify(target, (_key, value) =>
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value)
 
 export function unavailableDiagnosticEvidence<TTarget, TData>(target: TTarget,
   code: DiagnosticEvidenceIssueCode, readAt = Date.now()): DiagnosticEvidenceRead<TTarget, TData> {
@@ -48,7 +52,7 @@ export class DiagnosticEvidenceQuery {
     const queue = [{ target, depth: 0 }], seen = new Set<string>()
     let usedBytes = 0, partial = false
     while (queue.length && reads.length < limits.maxReads) {
-      const next = queue.shift()!, key = JSON.stringify(next.target)
+      const next = queue.shift()!, key = targetKey(next.target)
       if (seen.has(key)) continue
       seen.add(key)
       const remaining = end - performance.now()
