@@ -54,6 +54,11 @@ export function resolveBrowserAgentControl(value?: Partial<BrowserAgentControlPr
 
 export const validBrowserAgentGlowColor = (value: string): boolean => /^#[0-9a-f]{6}$/i.test(value)
 
+/** A steady ownership edge. Animation and page blending belong to the softer halo. */
+export function browserAgentBoundaryAppearance(preferences: BrowserAgentControlPreferences): { color: string; opacity: number } {
+  return { color: preferences.glowColor, opacity: preferences.glowEnabled ? preferences.glowOpacity : 0 }
+}
+
 /** Shared by the isolated native feedback document and the Settings simulation. No host state. */
 export function browserAgentEffectsCss(preferences: BrowserAgentControlPreferences): string {
   const p = preferences
