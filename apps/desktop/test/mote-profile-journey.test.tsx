@@ -94,6 +94,97 @@ it('publishes the saved profile with native version labels and current entries w
   expect(f.creationCount).toBe(1)
 }, 30_000)
 
+it('refreshes blocked publication checks without publishing until a separate original continuation', async () => {
+  await ready()
+  const transport = f.registration.getMockImplementation()!
+  let incomplete = true
+  f.registration.mockImplementation(async (url, input) => {
+    const response = await transport(url, input)
+    return incomplete && new URL(url instanceof Request ? url.url : String(url)).pathname.includes('/visible/online/')
+      ? Response.json({ code: 0, data: { whiteList: native.audience } }) : response
+  })
+  await signIn()
+  await vi.waitFor(() => {
+    expect(document.querySelector('[data-mote-profile-action="refresh-publication-checks"]')?.textContent).toBe('Refresh publication checks')
+    expect(document.querySelector('[data-mote-profile-action="continue-profile-update"]')).toBeNull()
+    expect(document.querySelector('[aria-label="Publication checks"]')?.textContent).toContain('Both complete current visibility ranges are required')
+    expect(document.querySelector('[aria-label="Publication checks"]')?.textContent).toContain('1.0.1')
+  }, { timeout: 15_000 })
+  const setupId = document.querySelector('[data-console-profile-task]')!.getAttribute('data-console-profile-task')!
+  expect(f.connectionCalls.mock.calls.some(([method, input]) => method === 'connection.setup.inspect' && (input as { operationId?: string }).operationId === setupId && 'applicationConfiguration' in input)).toBe(false)
+  const count = native.requests.length
+  for (let read = 0; read < 2; read++) await api.connections.call('connection.setup.inspect', { operationId: setupId })
+  expect(native.requests).toHaveLength(count)
+  await f.click('Refresh publication checks')
+  await vi.waitFor(() => expect(native.requests).toHaveLength(count + 5))
+  await vi.waitFor(() => expect(document.querySelector<HTMLButtonElement>('[data-mote-profile-action="refresh-publication-checks"]')?.disabled).toBe(false))
+  expect(document.querySelector('[data-mote-profile-action="continue-profile-update"]')).toBeNull()
+  incomplete = false
+  await f.click('Refresh publication checks')
+  await vi.waitFor(() => {
+    expect(native.requests).toHaveLength(count + 10)
+    expect(document.querySelector('[data-mote-profile-action="continue-profile-update"]')).not.toBeNull()
+    expect(document.querySelector('[data-mote-profile-action="create-application-version"]')).toBeNull()
+    expect(document.querySelector('[data-console-profile-task]')?.textContent).not.toContain('Confirm a version and release notes')
+    expect(document.querySelector('[data-console-profile-task]')?.textContent).not.toContain('Version: Not confirmed')
+  })
+  expect(native.requests.some(request => request.path.includes('/app_version/create/') || request.path.includes('/publish/commit/'))).toBe(false)
+  expect(native.requests.filter(request => request.path.includes('/base_info/'))).toHaveLength(1)
+  expect(native.requests.filter(request => request.path.includes('/upload/image'))).toHaveLength(1)
+  expect(currentStep()).toBe('4')
+  await f.click('Continue this update')
+  await vi.waitFor(() => expect(progress().textContent).toContain('original profile version is approved'), { timeout: 15_000 })
+  expect(native.requests.filter(request => request.path.includes('/app_version/create/'))).toHaveLength(1)
+  expect(native.submitted).toBe(true)
+  expect(f.creationCount).toBe(1)
+}, 30_000)
+
+it('publishes the original complete audience from the supported native collection identities', async () => {
+  await ready()
+  const transport = f.registration.getMockImplementation()!
+  f.registration.mockImplementation(async (url, input) => {
+    const response = await transport(url, input)
+    return new URL(url instanceof Request ? url.url : String(url)).pathname.includes('/visible/online/')
+      ? Response.json({ code: 0, data: {
+          whiteList: { isAll: 0, departments: ['original-department'], members: [{ openId: 'original-member' }], groups: [{ chat_id: 'original-group' }] },
+          blackList: { isAll: 0, departments: [{ open_department_id: 'excluded-department' }], members: [], groups: [] }
+        } }) : response
+  })
+  await signIn()
+  await vi.waitFor(() => expect(progress().textContent).toContain('original profile version is approved'), { timeout: 15_000 })
+  const create = native.requests.filter(request => request.path.includes('/app_version/create/'))
+  expect(create).toHaveLength(1)
+  expect(create[0]!.body).toMatchObject({
+    visibleSuggest: { isAll: 0, departments: ['original-department'], members: ['original-member'], groups: ['original-group'] },
+    blackVisibleSuggest: { isAll: 0, departments: ['excluded-department'], members: [], groups: [] }
+  })
+  expect(native.requests.filter(request => request.path.includes('/base_info/'))).toHaveLength(1)
+  expect(native.submitted).toBe(true)
+  expect(f.creationCount).toBe(1)
+}, 30_000)
+
+it('names an unavailable publication review while keeping the original saved read receipts and refresh', async () => {
+  await ready()
+  const configuration = f.adapters.find(adapter => adapter.adapterId === 'feishu')!.setup!.applicationConfiguration!
+  vi.spyOn(configuration, 'publicationPlan').mockRejectedValue(new Error('Controlled publication interpretation unavailable'))
+  await signIn()
+  await vi.waitFor(() => {
+    expect(document.querySelector('[data-publication-unavailable]')?.textContent).toContain('current saved checks do not yet provide a confirmed publication review')
+    expect(document.querySelector('[data-mote-profile-action="refresh-publication-checks"]')).not.toBeNull()
+    expect(document.querySelector('[data-mote-profile-action="continue-profile-update"]')).toBeNull()
+  }, { timeout: 15_000 })
+  const setupId = document.querySelector('[data-console-profile-task]')!.getAttribute('data-console-profile-task')!
+  const count = native.requests.length
+  const view = await api.connections.call('connection.setup.inspect', { operationId: setupId })
+  expect(view.applicationConfiguration?.effect).toBe('create-application-version')
+  if (view.applicationConfiguration?.effect !== 'create-application-version') throw new Error('Missing original publication configuration')
+  expect(Object.keys(view.applicationConfiguration.sources)).toHaveLength(5)
+  expect(view.applicationConfiguration.review).toBeNull()
+  expect(native.requests).toHaveLength(count)
+  expect(native.requests.some(request => request.path.includes('/app_version/create/') || request.path.includes('/publish/commit/'))).toBe(false)
+  expect(native.requests.filter(request => request.path.includes('/base_info/'))).toHaveLength(1)
+}, 30_000)
+
 it.each([1, 2])('keeps the original QR mounted while a status %s poll is pending across local progress inspections', async status => {
   await ready()
   const transport = f.registration.getMockImplementation()!
