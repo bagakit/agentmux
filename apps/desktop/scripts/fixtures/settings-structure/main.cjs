@@ -40,6 +40,11 @@ app.whenReady().then(async () => {
       win.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, x: geometry.x, y: geometry.y })
       result.actions.push({ label, geometry }); return geometry
     }
+    const hover = async expression => {
+      const geometry = await hit(expression); assertHit(geometry)
+      win.webContents.sendInputEvent({ type: 'mouseMove', x: geometry.x, y: geometry.y })
+      await settle()
+    }
     const key = (keyCode, modifiers) => { win.webContents.sendInputEvent({ type:'keyDown', keyCode, modifiers }); win.webContents.sendInputEvent({ type:'keyUp', keyCode, modifiers }) }
     const capture = async file => { await settle(); fs.writeFileSync(path.join(evidence,file), (await win.webContents.capturePage()).toPNG()) }
     const footerHits = async () => {
@@ -101,9 +106,11 @@ app.whenReady().then(async () => {
     // Session through the actual Project Activity menu before taking the baseline.
     const initial = await read('window.structureProbe.beginSurface()')
     if (initial.tabs === 0) {
-      await click(`Array.from(document.querySelectorAll('.project-activity')).find(n=>n.checkVisibility())`, 'Open existing activity')
-      await until(`!!document.querySelector('.project-activity-group__summary')`); await settle()
-      await click(node('.project-activity-group__summary'), 'Select existing Session')
+      await hover(`Array.from(document.querySelectorAll('.project-activity')).find(n=>n.checkVisibility())`)
+      await until(`!!document.querySelector('.project-activity-menu [data-unplaced]')`)
+      await hover(node('.project-activity-menu [data-unplaced]'))
+      await until(`!!document.querySelector('.project-activity-submenu .focus-context[data-session-id="session-codex"]')`)
+      await click(node('.project-activity-submenu .focus-context[data-session-id="session-codex"]'), 'Select original Codex Session')
       await until(`window.structureProbe.beginSurface().tabs>0`); await settle()
     }
     result.original = await read('window.structureProbe.beginSurface()')

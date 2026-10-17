@@ -40,6 +40,12 @@ app.whenReady().then(async () => {
       result.actions.push(hit)
       await settle()
     }
+    const hover = async expression => {
+      const hit = await geometry(expression)
+      assert.deepEqual(hit.hits, [true,true,true,true,true], 'Actual hover target has five CSS hits')
+      win.webContents.sendInputEvent({ type:'mouseMove', x:hit.x, y:hit.y })
+      await settle()
+    }
     const capture = async file => {
       await read('document.querySelectorAll(".settings-overview__sweep").forEach(n=>n.getAnimations().forEach(a=>{if(a.playState==="running")a.finish()}))')
       await settle()
@@ -129,9 +135,11 @@ app.whenReady().then(async () => {
     await until('window.overviewProbe?.ready && !!document.querySelector(".window-status-bar [aria-label=Settings]")')
     const initial = await read('window.overviewProbe.beginSurface()')
     if (initial.tabs === 0) {
-      await click('Array.from(document.querySelectorAll(".project-activity")).find(n=>n.checkVisibility())')
-      await until('!!document.querySelector(".project-activity-group__summary")')
-      await click(node('.project-activity-group__summary'))
+      await hover('Array.from(document.querySelectorAll(".project-activity")).find(n=>n.checkVisibility())')
+      await until('!!document.querySelector(".project-activity-menu [data-unplaced]")')
+      await hover(node('.project-activity-menu [data-unplaced]'))
+      await until('!!' + node('.project-activity-submenu .focus-context[data-session-id="session-codex"]'))
+      await click(node('.project-activity-submenu .focus-context[data-session-id="session-codex"]'))
       await until('window.overviewProbe.beginSurface().tabs>0')
     }
     result.original = await read('window.overviewProbe.beginSurface()')

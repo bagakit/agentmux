@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -5,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 import type { AgentMuxSpaceFact, AgentMuxZoneFact } from '@agentmux/core/control'
 import type { HostConfig } from '../src/shared/contracts'
+import { createWorkspaceLayout } from '@agentmux/layout'
 import { RecentFocusTimeline } from '../src/renderer/src/components/RecentFocusTimeline'
 import { SpaceTopicsTree } from '../src/renderer/src/components/SpaceTopicsTree'
 import { WorkspaceTopicsPanel } from '../src/renderer/src/components/WorkspaceTopicsPanel'
@@ -26,9 +28,12 @@ import { BoardRowsProvider } from '../src/renderer/src/hooks/useBoardRows'
 import { createFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
 import { deriveFocusProjectLanes } from '../src/renderer/src/lib/focus-project-lanes'
 import { buildProjectBranchLanes } from '../src/renderer/src/lib/project-board'
+import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
+import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
 
 const dom = composerDOM()
 const home = _hygiene_fixturePath("Users/metadata-reader")
@@ -120,23 +125,38 @@ describe('typed project metadata consumers preserve canonical identities', () =>
     expect(rows[0]!.path).toBe(path)
   })
 
-  it.each(modes)('activity menu keeps exact original Session actions: %j %s', async (host, absolute, expected) => {
+  it.each(modes)('activity Zone styles its resource path and navigates the exact original workface: %j %s', async (host, absolute, expected) => {
     const { workspace, session } = seed(host, absolute)
-    const selectSession = vi.fn()
-    useAppStore.setState({ selectSession })
-    await dom.render(<ProjectActivity sessions={[session]} contexts={[{ id: workspace.id, kind: 'branch', label: 'main', hostId: host.id, path }]} />)
+    const tab = createWorkbenchTab('activity-tab', { kind: 'agent', phase: 'attached', workspaceId: workspace.id,
+      sessionId: session.id, regionId: 'activity-region' }, 'Original Tab')
+    useAppStore.setState({ tabs: { [tab.id]: tab }, layouts: { [workspace.id]: createWorkspaceLayout('activity-group', [tab.id]) } })
+    const graph = desktopSpatialGraph(useAppStore.getState(), [])
+    vi.spyOn(api.spatial, 'read').mockResolvedValue({ schemaVersion: 1, revision: 1, graph })
+    await initializeSpatialControlFixture()
+    const setMainSurface = vi.fn(), focusRegion = vi.fn(), selectSession = vi.fn(), reportError = vi.fn()
+    useAppStore.setState({ setMainSurface, focusRegion, selectSession, reportError })
+    await dom.render(<ProjectActivity sessions={[session]} />)
     const trigger = element('.project-activity')
     await act(async () => trigger.focus()); await key(trigger, 'ArrowDown')
-    const item = element('.project-activity-group__summary')
-    expect(item.title).toContain(expected)
-    expect(element('.project-activity-group__identity em').textContent).toContain(expected)
-    await act(async () => item.click())
-    expect(selectSession).toHaveBeenCalledExactlyOnceWith('reader')
+    const zone = element('.project-activity-zone[data-zone-id]')
+    expect(zone.title).toContain(expected)
+    expect(element('.project-activity-zone__identity em').textContent).toBe(expected)
+    await act(async () => zone.focus()); await key(zone, 'ArrowRight')
+    expect(element('.project-activity-submenu .project-activity-tab').textContent).toBe('Original Tab')
+    const card = element('.project-activity-submenu .focus-context[data-session-id="reader"][data-region-id="activity-region"]')
+    expect(card.isConnected).toBe(true)
+    await act(async () => card.focus()); await key(card, 'Enter')
+    expect(reportError).not.toHaveBeenCalled()
+    expect(setMainSurface).toHaveBeenCalledExactlyOnceWith('workbench')
+    expect(focusRegion).toHaveBeenCalledExactlyOnceWith(workspace.id, tab.id, 'activity-region', 'navigation', 'activity-group')
+    expect(selectSession).not.toHaveBeenCalled()
+    expect(useAppStore.getState().sessions[0]!.workspacePath).toBe(path)
+    expect(useAppStore.getState().sessions[0]!.control.run.runId).toBe('original-run')
   })
 
   it.each(modes)('sender disclosure and Goals hover honor project presentation: %j %s', async (host, absolute, expected) => {
     const { workspace } = seed(host, absolute)
-    const details = { sessionId: 'reader', label: 'Reader', providerId: 'codex', createdAt: 1,
+    const details = { sessionId: 'reader', label: 'Reader', providerId: 'codex', createdAt: _tailFixtureEpoch(0, 0, 1),
       project: { workspaceId: workspace.id, name: workspace.name, path }, goals: [] }
     const readDetails = vi.fn(() => details)
     await dom.render(<DesktopClientUiProvider><ConversationInputDetails messageId="message" speaker={{ role: 'agent', id: 'reader' }} describeSpeaker={() => ({ name: 'Reader', readDetails })} /></DesktopClientUiProvider>)
@@ -196,7 +216,7 @@ describe('typed project metadata consumers preserve canonical identities', () =>
   it.each(modes)('saved Session directory is styled while recovery identity remains canonical: %j %s', async (host, absolute, expected) => {
     const { workspace } = seed(host, absolute)
     const candidate = { agentSessionId: 'saved', hostId: host.id, workspacePath: path, providerId: 'codex', executorId: 'codex',
-      capabilities: { providerResume: true }, label: 'Saved reader', createdAt: 1, updatedAt: 2, run: { runId: 'old-run' } }
+      capabilities: { providerResume: true }, label: 'Saved reader', createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 2), run: { runId: 'old-run' } }
     useAppStore.setState({ recoveryCandidates: [candidate] })
     await dom.render(<LauncherResumePicker workspace={workspace} />)
     const resume = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Resume')!

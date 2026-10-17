@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mjs"
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -54,8 +55,8 @@ function SettingsFixture() {
 // These are projections with callback sinks, not real Sessions, Run or BrowserView owners.
 const sessions: SessionSnapshot[] = ['fixture-one', 'fixture-two'].map(id => ({
   id, kind: 'agent', providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: _hygiene_fixturePath("fixture"),
-  promptSubmissionPredecessor: null, agentSessionUpdatedAt: 1, label: id, createdAt: 1, updatedAt: 1, latestOutputBytes: 0, processState: 'running',
-  status: { state: 'running', source: 'run-process', observedAt: 1 },
+  promptSubmissionPredecessor: null, agentSessionUpdatedAt: _tailFixtureEpoch(0, 0, 1), label: id, createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1), latestOutputBytes: 0, processState: 'running',
+  status: { state: 'running', source: 'run-process', observedAt: _tailFixtureEpoch(0, 0, 1) },
   capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
   control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: `fixture-${id}` } }
 }))
@@ -74,8 +75,13 @@ function FeedbackFixture() {
     </Menu.Content></Menu.Portal></Menu.Root>
   </div>
 }
+const feedbackScenario = new URLSearchParams(location.search).get('scenario') === 'feedback'
+if (feedbackScenario) {
+  useAppStore.setState({ sessions })
+  probe.initialFacts = facts()
+}
 createRoot(document.getElementById('root')!).render(<>
-  {new URLSearchParams(location.search).get('scenario') === 'feedback' ? <FeedbackFixture /> : <SettingsFixture />}
+  {feedbackScenario ? <FeedbackFixture /> : <SettingsFixture />}
   <WindowOverlayHost />
 </>)
 probe.ready = true
