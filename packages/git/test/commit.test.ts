@@ -122,6 +122,7 @@ describe('neutral immutable commit reading through actual private Git', () => {
     expect(details.commit.message).toBe('Root subject\n\nFull body café first line\n  indented second line\n\nFinal paragraph\n')
     expect(details.commit.subject).toBe('Root subject')
     expect(details.commit.author).toBe('Private Author')
+    expect(details.commit.authorEmail).toBe('fixture@example.invalid')
     expect(details.commit.committer).toBe('Private Author')
     expect(details.commit.authoredAt).toEqual(expect.any(Number))
     expect(details.commit.committedAt).toEqual(expect.any(Number))

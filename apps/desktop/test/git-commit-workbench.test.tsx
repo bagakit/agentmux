@@ -37,7 +37,7 @@ const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', la
   appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
 function details(oid = 'a'.repeat(40), parentOid = 'b'.repeat(40)): Extract<GitCommitDetailsResult, { kind: 'ready' }> {
   return { kind: 'ready', snapshot: { hostId: 'local', repoPath: _hygiene_fixturePath("repo"), commitOid: oid, parentOid },
-    commit: { oid, parents: ['b'.repeat(40), 'c'.repeat(40)], subject: 'Complete merge', message: 'Complete merge\n\nThe full message body remains readable.\nSecond paragraph.', author: 'Original Author', committer: 'Original Committer', authoredAt: _tailFixtureEpoch(0, 0, 10), committedAt: _tailFixtureEpoch(0, 0, 20), refs: [] },
+    commit: { oid, parents: ['b'.repeat(40), 'c'.repeat(40)], subject: 'Complete merge', message: 'Complete merge\n\nThe full message body remains readable.\nSecond paragraph.', author: 'Original Author', authorEmail: '', committer: 'Original Committer', authoredAt: _tailFixtureEpoch(0, 0, 10), committedAt: _tailFixtureEpoch(0, 0, 20), refs: [] },
     entries: [{ path: 'new.ts', origPath: 'old.ts', change: 'renamed' }, { path: 'removed.ts', origPath: null, change: 'deleted' }], warnings: [] }
 }
 const commitDetails = vi.fn<(id: string, input: any) => Promise<GitCommitDetailsResult>>()

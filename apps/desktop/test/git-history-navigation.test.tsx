@@ -30,7 +30,7 @@ const historyPage: GitHistoryResult = { kind: 'ready', snapshot: { ...scope, roo
 const history = vi.fn(async () => historyPage)
 function commitResult(input: { oid: string; parentOid?: string }): GitCommitDetailsResult { return { kind: 'ready',
   snapshot: { ...scope, commitOid: input.oid, parentOid: input.parentOid ?? null },
-  commit: { ...(input.oid === firstOid ? first : next), oid: input.oid, message: input.oid === firstOid ? first.subject : next.subject, committer: 'Example Author', committedAt: null }, entries: [], warnings: [] } }
+  commit: { ...(input.oid === firstOid ? first : next), oid: input.oid, message: input.oid === firstOid ? first.subject : next.subject, authorEmail: '', committer: 'Example Author', committedAt: null }, entries: [], warnings: [] } }
 const commitDetails = vi.fn(async (_workspaceId: string, input: { oid: string; parentOid?: string }) => commitResult(input))
 const initial = useAppStore.getState()
 let host: HTMLDivElement, root: ReturnType<typeof createClientUiRoot>
