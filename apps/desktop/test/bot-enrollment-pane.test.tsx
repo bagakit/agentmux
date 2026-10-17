@@ -241,7 +241,7 @@ it('a successful list refresh cannot clear an unconfirmed application save or re
 
 it('keeps metadata and the existing-bot path browsable while the original secure action remains locked', async () => {
   await open(); const { operation: original } = await fixture.sdk.call('connection.enrollment.begin', fixture.input)
-  const secure = vi.spyOn(fixture.encryption, 'isEncryptionAvailable').mockReturnValue(false)
+  const secure = vi.spyOn(fixture.encryption, 'isAsyncEncryptionAvailable').mockResolvedValue(false)
   await mount()
   await ready('[data-enrollment-existing]')
   expect(secure).not.toHaveBeenCalled()

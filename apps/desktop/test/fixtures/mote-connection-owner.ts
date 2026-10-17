@@ -208,16 +208,16 @@ export async function moteConnectionOwner(
   }
   const key = Buffer.alloc(32, 4),
     encryption = {
-      isEncryptionAvailable: () => true,
-      encryptString: (v: string) => {
+      isAsyncEncryptionAvailable: async () => true,
+      encryptStringAsync: async (v: string) => {
         const iv = randomBytes(12),
           c = createCipheriv('aes-256-gcm', key, iv)
         return Buffer.concat([iv, c.update(v, 'utf8'), c.final(), c.getAuthTag()])
       },
-      decryptString: (v: Buffer) => {
+      decryptStringAsync: async (v: Buffer) => {
         const c = createDecipheriv('aes-256-gcm', key, v.subarray(0, 12))
         c.setAuthTag(v.subarray(-16))
-        return Buffer.concat([c.update(v.subarray(12, -16)), c.final()]).toString()
+        return { result: Buffer.concat([c.update(v.subarray(12, -16)), c.final()]).toString(), shouldReEncrypt: false }
       }
     }
   const adapters = options.generic ? [adapter] : createBuiltinConnectionAdapters()

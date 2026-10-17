@@ -58,7 +58,7 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
     })
     vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
     services = await createDesktopConnections({ directory: join(original.root, 'ui-connections'), ...(options.platform ? {} : { adapters: [original.adapter] }), bindings: { spatial: original.spatial, checkpoint: original.checkpoint },
-      encryption: { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value), decryptString: value => value.toString() },
+      encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: value.toString(), shouldReEncrypt: false }) },
       ...(options.ingress ? { ingress: { core: hostId => hostId === 'local' ? original.client : undefined } } : {}),
       ...(options.publication ? { publication: createPublicationConversationPort(() => [{ hostId: 'local', client: original.client }]) } : {}) })
     const secret = await services.secrets.store({ operationId: 'ui-credential', secret: 'controlled-host-credential' })

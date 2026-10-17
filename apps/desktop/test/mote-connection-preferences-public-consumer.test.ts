@@ -49,7 +49,7 @@ async function fixture(fault?: 'receipt' | 'occupy') {
   const publicFiles = new FileReadOwner({ catalog, workspace: id => id === workspace.id ? workspace : undefined,
     files: { read: noteWriter.read.bind(noteWriter), listFiles: files.listFiles.bind(files), write: noteWriter.write.bind(noteWriter) } })
   const connections = await createDesktopConnections({ directory: join(root, 'connections'), encryption: {
-    isEncryptionAvailable: () => false, encryptString: () => { throw new Error('Preferences cannot request a credential') }, decryptString: () => { throw new Error('Preferences cannot read a credential') }
+    isAsyncEncryptionAvailable: async () => false, encryptStringAsync: async () => { throw new Error('Preferences cannot request a credential') }, decryptStringAsync: async () => { throw new Error('Preferences cannot read a credential') }
   } })
   clean.push(() => connections.close())
   await connections.connections.configure({ operationId: 'configure-original', expectedRevision: null, connection: {

@@ -30,7 +30,7 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
   webFrame: { getZoomFactor: () => 1 }, app: { getPath: () => bridge.directory || _hygiene_fixturePath('isolated-launch'), getAppPath: () => resolve('apps/desktop') },
   ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => unknown) => bridge.handlers.set(channel, handler),
     removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
-  safeStorage: { isEncryptionAvailable: () => false }, clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
+  safeStorage: { isAsyncEncryptionAvailable: async () => false }, clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
 }))
 vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/core')>(),
   AgentMuxControlServer: class { async start() {} async stop() {} }

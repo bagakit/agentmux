@@ -53,7 +53,7 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
     off: (channel: string, listener: (...values: unknown[]) => void) => fixture.listeners.get(channel)?.delete(listener),
     send: vi.fn()
   },
-  safeStorage: { isEncryptionAvailable: () => false }, clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
+  safeStorage: { isAsyncEncryptionAvailable: async () => false }, clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
 }))
 vi.mock('@agentmux/core', async (importOriginal) => ({
   ...await importOriginal<typeof import('@agentmux/core')>(),

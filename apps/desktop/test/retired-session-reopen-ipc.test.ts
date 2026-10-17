@@ -16,7 +16,7 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
   app: { getPath: () => preload.root, getAppPath: () => resolve('apps/desktop'), isPackaged: false },
   ipcMain: { handle: (channel: string, handler: Function) => preload.handlers.set(channel, handler),
     removeHandler: (channel: string) => preload.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
-  clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, safeStorage: { isEncryptionAvailable: () => false }
+  clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, safeStorage: { isAsyncEncryptionAvailable: async () => false }
 }))
 vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/core')>(),
   AgentMuxControlServer: class { async start() {} async stop() {} }

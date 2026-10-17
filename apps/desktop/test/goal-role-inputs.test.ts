@@ -31,7 +31,7 @@ import type { AgentMuxPreloadApi, AppConfig } from '../src/shared/contracts'
 const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, invoke: vi.fn() }))
 vi.mock('electron', () => ({ contextBridge: { exposeInMainWorld: (_key: string, value: AgentMuxPreloadApi) => { bridge.api = value } },
   ipcRenderer: { invoke: bridge.invoke, on: vi.fn(), off: vi.fn(), send: vi.fn(), removeListener: vi.fn() }, webFrame: { getZoomFactor: () => 1 },
-  nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() }, safeStorage: { isEncryptionAvailable: () => false }, app: { getPath: () => tmpdir() } }))
+  nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() }, safeStorage: { isAsyncEncryptionAvailable: async () => false }, app: { getPath: () => tmpdir() } }))
 import '../src/preload/index'
 const cleanup: Array<() => Promise<unknown>> = []
 const initial = useAppStore.getState()

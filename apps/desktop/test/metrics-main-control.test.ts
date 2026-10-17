@@ -26,7 +26,7 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
     on: (channel: string, handler: Function) => { const values = fixture.ipc.listeners.get(channel) ?? new Set(); values.add(handler); fixture.ipc.listeners.set(channel, values) },
     off: (channel: string, handler: Function) => fixture.ipc.listeners.get(channel)?.delete(handler),
     removeListener: (channel: string, handler: Function) => fixture.ipc.listeners.get(channel)?.delete(handler) },
-  clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, safeStorage: { isEncryptionAvailable: () => false } }))
+  clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, safeStorage: { isAsyncEncryptionAvailable: async () => false } }))
 vi.mock('@agentmux/core', async original => ({ ...await original<typeof import('@agentmux/core')>(),
   AgentMuxControlServer: class {
     constructor(options: AgentMuxControlServerOptions) { fixture.controlOptions = options }

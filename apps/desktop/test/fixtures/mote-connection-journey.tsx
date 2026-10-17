@@ -59,7 +59,7 @@ export async function moteConnectionJourney(options: { encryption?: CredentialEn
   const publicFiles = new FileReadOwner({ catalog, workspace: id => id === workspace.id ? workspace : undefined,
     files: { read: writer.read.bind(writer), listFiles: files.listFiles.bind(files), write: writer.write.bind(writer) } })
   const services = await createDesktopConnections({ directory: join(root, 'connections'), bindings: { spatial, checkpoint: async () => { throw new Error('This read-only menu does not bind or grant access') } }, encryption: options.encryption ?? {
-    isEncryptionAvailable: () => false, encryptString: () => { throw new Error('No credential writes in a default choice') }, decryptString: () => { throw new Error('No credential reads in a default choice') }
+    isAsyncEncryptionAvailable: async () => false, encryptStringAsync: async () => { throw new Error('No credential writes in a default choice') }, decryptStringAsync: async () => { throw new Error('No credential reads in a default choice') }
   } })
   for (const suffix of ['a', 'b']) await services.connections.configure({ operationId: 'configure-' + suffix, expectedRevision: null, connection: {
     connectionId: 'robot-' + suffix, adapterId: 'feishu', application: { domain: 'feishu.cn', appId: 'app-' + suffix },
