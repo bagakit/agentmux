@@ -21,7 +21,7 @@ export const featureSettingsModule = {
 } as const satisfies SettingsModule
 ```
 
-模块的元信息同时用于侧栏、窄窗菜单、搜索和 Overview；`SettingsSectionId` 从注册数组的 literal id 派生，不另维护一份类型名单。`overview` 是呈现页，不能作为模块 ID；ID 在注册数组内唯一，组使用现有 Preferences、Message Tool、Remote、Conversation Channels、Resources、Work、Mote 或 Mods。组顺序和 Overview 列归属由 `settings-catalog.ts` 的唯一 `SETTINGS_GROUPS` 表达，注册数组只决定组内次序；所有导航投影沿同一目录。Work 组织 Space、Focus、Goals、Notes 的真实偏好，以及 Survey、Notes 原管理入口；Mote 是与 Preferences 平级的组，Mote Club 内容仍归原 owner。管理入口本身不生成 AppConfig 或新 CLI；只有新增实际偏好字段才补现 Main scalar 与公开调用者。Mods 的模块组 ID 是 `toolkit`，入口为 Toolkit Library。Remote 组织 Host 与环境，Conversation Channels 以 Amux Conversation 和 Lark 组织原设备接入与外部应用管理；分组只改变导航，不成为另一套配置或授权 owner。
+模块的元信息同时用于侧栏、窄窗菜单、搜索和 Overview；`SettingsSectionId` 从注册数组的 literal id 派生，不另维护一份类型名单。`overview` 是呈现页，不能作为模块 ID；ID 在注册数组内唯一，组使用现有 Preferences、Browser use、Message Tool、Remote、Conversation Channels、Resources、Work、Mote 或 Mods。组顺序和 Overview 列归属由 `settings-catalog.ts` 的唯一 `SETTINGS_GROUPS` 表达，注册数组只决定组内次序；所有导航投影沿同一目录。Work 组织 Space、Focus、Goals、Notes 的真实偏好，以及 Survey、Notes 原管理入口；Mote 是与 Preferences 平级的组，Mote Club 内容仍归原 owner。管理入口本身不生成 AppConfig 或新 CLI；只有新增实际偏好字段才补现 Main scalar 与公开调用者。Mods 的模块组 ID 是 `toolkit`，入口为 Toolkit Library。Remote 组织 Host 与环境，Conversation Channels 以 Amux Conversation 和 Lark 组织原设备接入与外部应用管理；分组只改变导航，不成为另一套配置或授权 owner。
 
 模块可用 `searchTargets` 贡献具体字段、动作或说明的静态 `id`、`title`、可选 `description` 与 `keywords`；原 Pane 用同一局部 ID 的 `data-settings-field` 标记准确位置。动作和说明分别声明 `kind: 'action'`／`'info'`，其余为设置字段。搜索只消费这些静态贡献，明确点选后才进入原 Pane 并定位；不扫描用户值、正文或隐藏页，不执行动作。动态资源仍经原库与准确对象导航；不要为其每个当前对象生成静态目标。行为与恢复边界见[设置页的信息架构](design/behavior/settings-and-observation.md#设置页的信息架构)。
 
