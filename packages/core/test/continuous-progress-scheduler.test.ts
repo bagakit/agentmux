@@ -64,6 +64,20 @@ describe('ContinuousProgressScheduler', () => {
     expect(s.list()).toEqual([original])
   })
 
+  it.each(['calendar', 'relative'] as const)('keeps a stopped %s schedule terminal in the standalone Core owner', kind => {
+    const s = new ContinuousProgressScheduler({ now: () => 1000, id: () => 'original' })
+    const timing = kind === 'relative' ? { afterMs: 90000 } : { calendar: { kind: 'daily' as const, timezone: 'UTC', time: (new Date(_historyFixtureEpoch(0, 34200)).toISOString().slice(11, 16)), policies: { gap: 'skip' as const, fold: 'earlier' as const, monthEnd: 'clamp' as const, overdue: 'latest' as const } } }
+    const original = s.createSchedule({ hostId: 'local', agentSessionId: 'a', providerId: 'generic', workspacePath: fixturePath('w'), prompt: 'original', operationId: 'create', nextDue: 91000, ...timing })
+    const stopped = s.stop(original.loopId)
+    for (const action of ['pause', 'resume'] as const) {
+      expect(() => s[action](original.loopId)).toThrow(expect.objectContaining({ code: 'SCHEDULE_CANCELLED' }))
+      expect(s.list()).toEqual([stopped]); expect(s.recover(100000)).toEqual([])
+    }
+    const restored = new ContinuousProgressScheduler(); restored.restore(s.list())
+    expect(() => restored.pause(original.loopId)).toThrow(expect.objectContaining({ code: 'SCHEDULE_CANCELLED' }))
+    expect(restored.list()).toEqual([stopped])
+  })
+
   it.each([1, 100, 1000])('does not copy %i unrelated loop bodies while checking the clock', (count) => {
     const s = new ContinuousProgressScheduler({ id: () => 'tick' })
     const base = { hostId: 'local', agentSessionId: 'a', providerId: 'codex', workspacePath: fixturePath('w'), intervalMs: 10,
