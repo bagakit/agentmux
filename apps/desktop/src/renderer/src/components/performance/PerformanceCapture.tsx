@@ -11,11 +11,11 @@ const ms = (value: number) => `${value.toFixed(1)} ms`
 const scriptName = (url: string) => url === '(runtime / no script)' ? url : url.split(/[\\/]/u).at(-1) || url
 
 export function currentPerformanceCaptureTarget(observation: MetricsObservation | null | undefined): RendererV8ProfileTarget | null {
+  // App process details contain bounded hotspots. The Renderer source owns this
+  // exact identity; Main verifies the five-field target again for each capture.
   const source = observation?.renderer, renderer = source?.data, window = observation?.window
   if (source?.state !== 'available' || !renderer || !window || renderer.process.pid === null || renderer.process.creationTime === null ||
-    window.windowId !== renderer.window.windowId || window.webContentsId !== renderer.window.webContentsId || window.generation !== renderer.window.generation ||
-    observation.app.state !== 'available' || !observation.app.data?.processes.some(process => process.role === 'renderer' &&
-      process.pid === renderer.process.pid && process.creationTime === renderer.process.creationTime)) return null
+    window.windowId !== renderer.window.windowId || window.webContentsId !== renderer.window.webContentsId || window.generation !== renderer.window.generation) return null
   return { ...window, pid: renderer.process.pid, creationTime: renderer.process.creationTime }
 }
 
