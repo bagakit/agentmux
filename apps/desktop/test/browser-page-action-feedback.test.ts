@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createBrowserPageDispatch } from '../src/main/browser-page-dispatch.js'
 import { DEFAULT_BROWSER_AGENT_CONTROL, type BrowserAgentControlPreferences } from '../src/shared/browser-agent-control.js'
 
-const native = vi.hoisted(() => ({ views: [] as any[], mode: 'click', key: undefined as string | undefined, onFeedback: undefined as undefined | (() => void), onWaiting: undefined as undefined | (() => Promise<void>), displayFails: false, displayThrows: false, displayAllThrows: false, observe: undefined as undefined | (() => Promise<unknown>), takeover: undefined as undefined | (() => void) }))
+const native = vi.hoisted(() => ({ views: [] as any[], mode: 'click', key: undefined as string | undefined, onFeedback: undefined as undefined | (() => void), onWaiting: undefined as undefined | (() => Promise<void>), displayFails: false, displayThrows: false, displayAllThrows: false, observe: undefined as undefined | (() => Promise<unknown>), takeover: undefined as undefined | (() => void), deferredCloseId: undefined as number | undefined }))
 vi.mock('../src/main/browser-page-dispatch.js', async importOriginal => {
   const actual = await importOriginal<typeof import('../src/main/browser-page-dispatch.js')>()
   return { ...actual, createBrowserPageDispatch: (...args: Parameters<typeof actual.createBrowserPageDispatch>) => {
@@ -98,7 +98,8 @@ vi.mock('electron', async () => {
       return Promise.resolve(!(native.displayFails && running))
     }
     async loadURL(url: string) { this.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false, url }); this.url = url; this.emit('did-navigate', {}, url); this.emit('dom-ready'); this.emit('did-finish-load'); this.emit('did-stop-loading') }
-    close() { if (this.destroyed) return; this.destroyed = true; this.focused = false; this.emit('destroyed') }
+    close() { if (this.id !== native.deferredCloseId) this.finishClose() }
+    finishClose() { if (this.destroyed) return; this.destroyed = true; this.focused = false; this.emit('destroyed') }
   }
   class View extends EventEmitter {
     readonly webContents = new Contents()
@@ -125,7 +126,7 @@ afterEach(async () => {
     expect(view.webContents.displays.filter((call: any) => call.family === 'unknown')).toEqual([])
   }
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
-  native.views.length = 0; native.mode = 'click'; native.key = undefined; native.onFeedback = undefined; native.onWaiting = undefined; native.displayFails = false; native.displayThrows = false; native.displayAllThrows = false; native.observe = undefined; native.takeover = undefined
+  native.views.length = 0; native.mode = 'click'; native.key = undefined; native.onFeedback = undefined; native.onWaiting = undefined; native.displayFails = false; native.displayThrows = false; native.displayAllThrows = false; native.observe = undefined; native.takeover = undefined; native.deferredCloseId = undefined
 })
 const actionPayloads = (contents: any, start = 0): any[] => contents.displays.slice(start).filter((call: any) => call.family === 'action').map((call: any) => call.payload)
 const controlPayloads = (contents: any): any[] => contents.displays.filter((call: any) => call.family === 'control').map((call: any) => call.payload)
@@ -211,6 +212,49 @@ describe('actual resolved document and sender after display', () => {
   })
 })
 describe('actual BrowserViewManager consumer', () => {
+  it.each(['completed', 'takeover'])('clears only its confirmed cleanup notice after delayed native destruction following %s', async ending => {
+    const f = await managerFixture(); native.mode = 'held-wait'
+    const operationId = 'delayed-close-' + ending
+    let shield: any
+    native.onWaiting = async () => {
+      shield = f.manager.nativeOwner('browser-one')!.inputShield
+      native.deferredCloseId = shield.webContents.id
+      if (ending === 'takeover') await f.manager.stopOperationById(operationId)
+    }
+    const report = await f.manager.runScript('browser-one', 'actual worker with delayed native close', undefined, undefined, operationId)
+    expect(report.outcome.kind).toBe(ending === 'completed' ? 'completed' : 'stopped')
+    expect(f.manager.target('browser-one')?.control?.inputIsolation).toBe('unconfirmed')
+    expect(f.manager.target('browser-one')?.status).toBe('ready'); expect(f.contents.isDestroyed()).toBe(false)
+    expect(report.runOperation?.warning?.match(/could not be fully released/gu)).toHaveLength(1)
+    expect(f.manager.nativeOwner('browser-one')?.inputShield).toBe(shield)
+    shield.webContents.finishClose()
+    await Promise.resolve(); await Promise.resolve()
+    expect(f.manager.nativeOwner('browser-one')?.inputShield).toBeUndefined()
+    expect(f.manager.target('browser-one')?.control?.inputIsolation).toBe('inactive')
+    expect(f.events.at(-1).browser.activity.warning ?? '').not.toContain('could not be fully released')
+    expect(report.runOperation?.warning ?? '').not.toContain('could not be fully released')
+    if (ending === 'takeover') expect(report.runOperation?.warning).toContain('stopped explicitly')
+    else expect(report.runOperation?.warning).toBeUndefined()
+    expect(f.sibling.commands).toEqual(f.siblingBefore.commands)
+  })
+  it('keeps a newer operation notice when an older exact native surface finishes cleanup', async () => {
+    const f = await managerFixture(); native.mode = 'held-wait'
+    let shield: any
+    native.onWaiting = async () => { shield = f.manager.nativeOwner('browser-one')!.inputShield; native.deferredCloseId = shield.webContents.id }
+    const original = await f.manager.runScript('browser-one', 'original delayed native close', undefined, undefined, 'original-close')
+    expect(original.runOperation?.warning).toContain('could not be fully released')
+    native.onWaiting = async () => {
+      const before = f.events.at(-1).browser.activity.operation
+      expect(before.id).toBe('new-operation')
+      expect(before.warning).toContain('Native Browser input isolation is unconfirmed')
+      shield.webContents.finishClose(); await Promise.resolve(); await Promise.resolve()
+      const after = f.events.at(-1).browser.activity.operation
+      expect(after.id).toBe('new-operation'); expect(after.warning).toContain('Native Browser input isolation is unconfirmed')
+    }
+    const next = await f.manager.runScript('browser-one', 'new healthy program with retained input observation', undefined, undefined, 'new-operation')
+    expect(next.outcome.kind).toBe('completed'); expect(next.runOperation?.warning).toContain('Native Browser input isolation is unconfirmed')
+    expect(original.runOperation?.warning).toBeUndefined()
+  })
   it('consumes the saved pointer preferences and dispatch acknowledgement through the original target callback', async () => {
     const preferences = { ...DEFAULT_BROWSER_AGENT_CONTROL, pointerDurationMs: 530, clickRadius: 33, glowColor: '#3366cc' }
     const f = await managerFixture(() => preferences)
