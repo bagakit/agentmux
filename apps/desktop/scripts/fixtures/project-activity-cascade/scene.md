@@ -11,6 +11,10 @@ The scene covers multiple Agents, split Regions, repeated Agent occurrences,
 an Agent with no confirmed position, and a Mote member. Native Chromium input
 checks hover, nested navigation, shared reading, selection, scrolling, Pin,
 keyboard navigation and exact explicit navigation at wide and narrow widths.
+The wide scene also checks one readable root summary, two-line Zone choices,
+the absence of repeated compact metrics, direct single-group entry and explicit
+repeated-Agent position cues. Activity cards retain one shared reading target;
+the shared Reader still exposes every confirmed original position.
 
 It does not operate the user's application or Runtime, create real Provider
 processes, prove Session restart, or certify visual quality. Saved PNGs require
