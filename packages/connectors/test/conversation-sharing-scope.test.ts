@@ -29,7 +29,7 @@ async function fixture() {
     prepare: operation => ({ adapterId: 'sample', renderVersion: 'scope-fixture', requestKey: operation.operationId,
       request: { method: 'POST', path: '/messages', body: operation.reference.source.recordId } }), dispatch }
   const services = await createDesktopConnections({ directory: join(f.root, 'sharing-host'),
-    encryption: { isEncryptionAvailable: () => true, encryptString: text => Buffer.from(text), decryptString: bytes => bytes.toString() },
+    encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async text => Buffer.from(text), decryptStringAsync: async bytes => ({ result: (bytes.toString()), shouldReEncrypt: false }) },
     adapters: [{ adapterId: 'sample', publication: adapter, test: async () => ({ authentication: { state: 'ready' }, transport: { state: 'ready' }, intake: { state: 'unknown' }, delivery: { state: 'unknown' } }) }],
     bindings: { spatial: f.spatial, checkpoint: f.checkpoint }, publication: createPublicationConversationPort(() => [{ hostId: 'local', client: f.client }]) })
   cleanup.push(services.close)

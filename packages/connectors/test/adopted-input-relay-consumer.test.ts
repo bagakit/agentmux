@@ -72,7 +72,7 @@ async function fixture() {
     return remote.http.request({ ...request, ...(params === undefined ? {} : { params }) })
   })
   const services = await createDesktopConnections({ directory: join(h.root, 'relay-host'),
-    encryption: { isEncryptionAvailable: () => true, encryptString: text => Buffer.from(text), decryptString: bytes => bytes.toString() },
+    encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async text => Buffer.from(text), decryptStringAsync: async bytes => ({ result: (bytes.toString()), shouldReEncrypt: false }) },
     bindings: { spatial, checkpoint: reference => h.client.conversationCheckpoint(reference) }, publication: createPublicationConversationPort(h.coreClients) })
   cleanup.push(() => services.close())
   const credential = await services.secrets.store({ operationId: 'relay-secret', secret: 'private-fixture-credential' })

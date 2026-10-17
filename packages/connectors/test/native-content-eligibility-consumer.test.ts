@@ -58,7 +58,7 @@ async function fixture(providerId: 'codex' | 'claude' | 'droid' = 'codex') {
   const adapters = createBuiltinConnectionAdapters(), adapter = adapters.find(adapter => adapter.adapterId === 'feishu')!
   let credentialReadable = true
   const openServices = () => createDesktopConnections({ directory: join(original.root, 'host'), adapters,
-    encryption: { isEncryptionAvailable: () => true, encryptString: text => Buffer.from(text), decryptString: bytes => { if (!credentialReadable) throw new Error('Fixture credential temporarily unavailable'); return bytes.toString() } },
+    encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async text => Buffer.from(text), decryptStringAsync: async bytes => { if (!credentialReadable) throw new Error('Fixture credential temporarily unavailable'); return { result: (bytes.toString()), shouldReEncrypt: false } } },
     bindings: { spatial, checkpoint: ref => original.client.conversationCheckpoint(ref) }, publication: port })
   const services = await openServices()
   closes.push(() => services.close())
