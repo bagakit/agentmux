@@ -53,7 +53,7 @@ import {
 } from '../lib/region-focus'
 import { layoutForActiveTopic } from '../lib/scratch-topic-layout'
 import { useWorkbenchObjectLayout } from '../hooks/useWorkbenchObjectLayout'
-import { projectWorkbenchProjection, selectWorkbenchProjectionTab, sameWorkbenchProjectionSelection, workbenchProjectionMatches, workbenchProjectionSlotId, workbenchRegionProjectionSlotId, workbenchProjectionTabIds, workbenchProjectionZone, WorkbenchProjectionContext, type WorkbenchProjection } from '../lib/workbench-projection'
+import { projectWorkbenchProjection, workbenchZoneUnplacedGroupId, selectWorkbenchProjectionTab, sameWorkbenchProjectionSelection, workbenchProjectionMatches, workbenchProjectionSlotId, workbenchRegionProjectionSlotId, workbenchProjectionTabIds, workbenchProjectionZone, WorkbenchProjectionContext, type WorkbenchProjection } from '../lib/workbench-projection'
 import { StableWorkbenchView } from './StableWorkbenchView'
 import { workbenchDisplayTabs, workbenchDisplayReferenceMatches, workbenchDisplayOccurrenceAmbiguous } from '../lib/workbench-resource-display'
 import { workbenchNavigationTabs } from '../lib/workbench-navigation-catalog'
@@ -1614,25 +1614,28 @@ function RetainedWorkbenchTab({ workspaceId, tabs, layout, original, targetTabId
 }) {
   const mote = useContext(MoteWorkfaceContext)
   const visibleGroups = layout ? new Set(groupIds(layout.root)) : new Set<string>()
-  const groups = layout?.groups.filter(group => visibleGroups.has(group.id) && group.tabOrder.length > 0) ?? []
+  const belongs = (tab: WorkbenchTab | undefined) => tab?.workspaceId === workspaceId &&
+    (!(topicId ?? mote?.topic.id) || tab.topicId === (topicId ?? mote?.topic.id))
+  const groups = layout?.groups.filter(group => visibleGroups.has(group.id))
+    .map(group => ({ ...group, tabOrder: group.tabOrder.filter(id => belongs(tabs[id])) }))
+    .filter(group => group.tabOrder.length > 0) ?? []
   const placedIds = new Set(groups.flatMap(group => group.tabOrder))
-  const unplaced = Object.values(tabs).filter(tab => tab.workspaceId === workspaceId && (!(topicId ?? mote?.topic.id) || tab.topicId === (topicId ?? mote?.topic.id)) && !placedIds.has(tab.id))
+  const unplaced = Object.values(tabs).filter(tab => belongs(tab) && !placedIds.has(tab.id))
+  const tabIds = [...unplaced.map(tab => tab.id), ...placedIds]
+  const creationGroup = groups.find(group => group.id === layout?.activeGroupId) ?? (groups.length === 1 ? groups[0] : undefined)
   return <>
-    {unplaced.length ? <header className="pane-tabbar pane-tabbar--root">
-      <WorkbenchTabStrip visible={visible} activeTabId={null} tabIds={unplaced.map(tab => tab.id)}>{unplaced.map(tab =>
-        <UnplacedWorkbenchTab key={tab.id} tab={tab} onSelect={() => onRecoverTab?.(tab.id)} />)}</WorkbenchTabStrip>
-      {!groups.length ? <div className="pane-tabbar__actions">{presentationAction}</div> : null}
-    </header> : null}
-    {groups.map(group => <header key={group.id} className="pane-tabbar pane-tabbar--root" data-workbench-group-id={group.id}>
-      <SortableContext items={group.tabOrder} strategy={horizontalListSortingStrategy}>
-        <WorkbenchTabStrip visible={visible} activeTabId={null} tabIds={group.tabOrder}
-          trailingAction={mote && onNewTab ? <button type="button" className="pane-action" aria-label="New discussion" title="New discussion"
-            onClick={() => onNewTab(group.id)}><ThemeActionCreateDiscussionIcon size={13} /></button> : undefined}>{group.tabOrder.flatMap(id => tabs[id] ? [<SortableWorkbenchTab key={id}
-          workspaceId={workspaceId} tab={tabs[id]!} group={{ ...group, activeTabId: null }} visible={visible} />] : [])}</WorkbenchTabStrip>
-      </SortableContext>
-      {layout?.activeGroupId === group.id ? <div className="pane-tabbar__actions">{presentationAction}</div> : null}
-    </header>)}
-    {!unplaced.length && !groups.some(group => group.id === layout?.activeGroupId) && presentationAction ? <header className="pane-tabbar pane-tabbar--root"><div className="pane-tabbar__actions">{presentationAction}</div></header> : null}
+    <header className="pane-tabbar pane-tabbar--root">
+      <WorkbenchTabStrip visible={visible} activeTabId={null} tabIds={tabIds}
+        trailingAction={mote && onNewTab && creationGroup ? <button type="button" className="pane-action" aria-label="New discussion" title="New discussion"
+          onClick={() => onNewTab(creationGroup.id)}><ThemeActionCreateDiscussionIcon size={13} /></button> : undefined}>
+        {unplaced.map(tab => <UnplacedWorkbenchTab key={tab.id} tab={tab} onSelect={() => onRecoverTab?.(tab.id)} />)}
+        {groups.map(group => <SortableContext key={group.id} items={group.tabOrder} strategy={horizontalListSortingStrategy}>
+          {group.tabOrder.map(id => <SortableWorkbenchTab key={id} workspaceId={workspaceId} tab={tabs[id]!}
+            group={{ ...group, activeTabId: null }} visible={visible} />)}
+        </SortableContext>)}
+      </WorkbenchTabStrip>
+      <div className="pane-tabbar__actions">{presentationAction}</div>
+    </header>
     <div className="pane-content"><div className="pane-body">
       {!layout ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
         step: 'Original discussions retained', mode: 'Their display layout is not confirmed yet.',
@@ -2022,9 +2025,13 @@ export function WorkspaceWorkbench({
         state.reportError(new Error('The exact Zone resource Group is unavailable here. Existing content is kept; create its Tab from the original resource workface.'))
         return
       }
-      const tabId = openLauncher({ workspaceId: zone.workspaceId, displayWorkspaceId: projection.displayWorkspaceId, ...(groupId ? { tabGroupId: groupId } : {}), zoneId: zone.zoneId, reveal: false })
-      const tab = tabId ? useAppStore.getState().tabs[tabId] : undefined
-      if (tab) projection.onSelect({ displayWorkspaceId: workspaceId, groupId, tabId: tab.id, regionId: tab.layout.activeRegionId })
+      const presentationOnly = groupId === workbenchZoneUnplacedGroupId(zone.zoneId)
+      const tabId = openLauncher({ workspaceId: zone.workspaceId, displayWorkspaceId: projection.displayWorkspaceId,
+        ...(!presentationOnly && groupId ? { tabGroupId: groupId } : {}), zoneId: zone.zoneId, reveal: false })
+      const created = useAppStore.getState()
+      const tab = tabId ? created.tabs[tabId] : undefined
+      const originalGroup = presentationOnly ? created.layouts[projection.displayWorkspaceId]?.groups.find(group => group.tabOrder.includes(tabId!))?.id : groupId
+      if (tab && originalGroup) projection.onSelect({ displayWorkspaceId: workspaceId, groupId: originalGroup, tabId: tab.id, regionId: tab.layout.activeRegionId })
       return
     }
     const choice = objectLayout.choice
