@@ -82,9 +82,11 @@ async function fixture(lostAcknowledgement = false) {
     async prepareNativeInput(context, target) {
       const id = target.nativeSessionId.replace(/^native-/u, ''), observed = await identity(id)
       expect(observed.processId).toBe(context.processId); expect(target.idleOnly).toBe(true)
+      if (!context.nativeActor) throw new Error('The original private fixture actor is missing')
       const transport = await connection(observed.endpoint, context.nativeActor.token)
       return { plan: { kind: 'native-rpc', protocolId: context.nativeActor.protocolId, sourceId: JSON.stringify([target.providerId, target.nativeSessionId]),
         actorId: context.nativeActor.actorId, threadId: target.nativeSessionId, operation: 'queue-idle' }, dispose: transport.dispose,
+        async assertCurrent() { expect((await identity(id)).processId).toBe(context.processId) },
         async send(wire, frozen) {
           const original = await store.readPromptAdmission(id, client.agentSession(id).run, JSON.parse(Buffer.from(frozen.clientCorrelation!.split('.')[1]!, 'base64url').toString()).key.submissionId)
           expect(original?.admission?.intent?.plan).toEqual(frozen)

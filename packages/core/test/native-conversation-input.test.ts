@@ -43,7 +43,7 @@ async function owner(outcome: 'admitted' | 'unknown' | 'not-applied' = 'admitted
     expect(context.nativeActor).toEqual(actor); expect(context.processId).toBe(1234)
     if (selected.providerId !== target.providerId || selected.nativeSessionId !== target.nativeSessionId) throw new AgentMuxError('Exact source is not loaded by this original actor', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
     return { plan: { kind: 'native-rpc', protocolId: actor.protocolId, sourceId: JSON.stringify([selected.providerId, selected.nativeSessionId]), actorId: actor.actorId,
-      threadId: selected.nativeSessionId, ...(selected.expectedTurnId ? { operation: 'steer', expectedTurnId: selected.expectedTurnId } : { operation: 'start-or-steer' }) }, send, dispose: vi.fn() }
+      threadId: selected.nativeSessionId, ...(selected.expectedTurnId ? { operation: 'steer', expectedTurnId: selected.expectedTurnId } : { operation: 'start-or-steer' }) }, assertCurrent: vi.fn(async () => {}), send, dispose: vi.fn() }
   })
   inner.providers.get('codex').prepareNativeInput = prepare
   // Deterministic Provider byte port for coordinator tests; the native binary E2E uses its real TUI renderer.

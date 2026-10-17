@@ -61,7 +61,7 @@ ws.send(JSON.stringify({jsonrpc:'2.0',id:request.id,result}));});});`)
       expect(context.nativeActor).toEqual(actor)
       expect(selected).toEqual(source)
       return { plan: { kind: 'native-rpc', protocolId: actor.protocolId, sourceId: JSON.stringify([source.providerId, source.nativeSessionId]),
-        actorId: actor.actorId, threadId: source.nativeSessionId, operation: 'start-or-steer' }, send, dispose: vi.fn() }
+        actorId: actor.actorId, threadId: source.nativeSessionId, operation: 'start-or-steer' }, assertCurrent: vi.fn(async () => {}), send, dispose: vi.fn() }
     })
   }
   f.inner.kernel.status = vi.fn(async (runId: string) => ({ ...f.run(runId), pid }))

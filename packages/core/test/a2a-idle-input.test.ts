@@ -54,7 +54,7 @@ async function fixture(outcome: 'admitted' | 'unknown' = 'admitted') {
   const prepare = vi.fn<NonNullable<AgentProvider['prepareNativeInput']>>(async (_context, selected) => {
     await beforePrepare?.()
     return { plan: { kind: 'native-rpc', protocolId: actor.protocolId, sourceId: JSON.stringify([selected.providerId, selected.nativeSessionId]),
-      actorId: actor.actorId, threadId: selected.nativeSessionId, operation: selected.idleOnly ? 'queue-idle' : 'start-or-steer' }, send, dispose: vi.fn() }
+      actorId: actor.actorId, threadId: selected.nativeSessionId, operation: selected.idleOnly ? 'queue-idle' : 'start-or-steer' }, assertCurrent: vi.fn(async () => {}), send, dispose: vi.fn() }
   })
   const provider = { ...new AgentProviderRegistry().get('codex'), prepareNativeInput: prepare }
   const coordinator = new AgentPromptSubmissionCoordinator({ ...deps, providers: new AgentProviderRegistry([provider]) })
