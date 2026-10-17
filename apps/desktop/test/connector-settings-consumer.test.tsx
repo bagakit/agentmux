@@ -12,7 +12,7 @@ import { ConnectionHost } from '../../../packages/connectors/src/connection-host
 import { DesktopConnectorSecrets, type CredentialEncryption } from '../src/main/connector-secrets.js'
 import { createDesktopConnections } from '../src/main/connector-host.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
-import { connectionsSettingsModule } from '../src/renderer/src/components/settings/modules/connections'
+import { larkSettingsModule } from '../src/renderer/src/components/settings/modules/lark'
 import { settingsNavGroups } from '../src/renderer/src/components/settings/settings-modules'
 import { api } from '../src/renderer/src/lib/api'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
@@ -44,7 +44,7 @@ async function fill(label: string, value: string) {
   expect(input).not.toBeNull()
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })) })
 }
-async function open() { const Pane = connectionsSettingsModule.Pane; await dom.render(<Pane active config={composerConfig} onClose={() => {}} onNavigate={() => {}} />); await act(async () => { await vi.waitFor(() => expect(completedLists).toBe(1)) }); if (dom.container.querySelector('[data-bot-enrollment]')) await dom.click('[data-enrollment-existing]') }
+async function open() { const Pane = larkSettingsModule.Pane; await dom.render(<Pane active config={composerConfig} onClose={() => {}} onNavigate={() => {}} />); await act(async () => { await vi.waitFor(() => expect(completedLists).toBe(1)) }); if (!dom.container.querySelector('[data-connection]')) await dom.click('[data-enrollment-existing]') }
 async function draft() { await act(async () => { dom.container.querySelector<HTMLDetailsElement>('.connector-optional')!.open = true }); await fill('Connection name', 'Shared team'); await fill('Connection app ID', 'app-a'); await fill('Connection app secret', secret) }
 
 describe('Settings uses the original connection owner through public service', () => {
@@ -59,7 +59,7 @@ describe('Settings uses the original connection owner through public service', (
       return result
     })
     try {
-      await dom.click('.connector-library .small-button')
+      await act(async () => [...dom.container.querySelectorAll<HTMLButtonElement>('.connector-saved-identities button')].find(button => button.textContent === 'Refresh')!.click())
       await vi.waitFor(() => expect(completedLists).toBe(2))
       await dom.click('[data-connection] button')
       await dom.click('[data-connection-editor] .connector-editor-actions .small-button')
@@ -88,7 +88,7 @@ describe('Settings uses the original connection owner through public service', (
       return result
     })
     await dom.click('[data-connection-save]')
-    await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('.connector-issue')?.textContent).toContain('List refresh unavailable') })
+    await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('[data-connection-list-issue]')?.textContent).toContain('List refresh unavailable') })
     const confirmed = (await owner.inspect({ connectionId: 'original-application' })).connection!
     expect(confirmed.revision).toBe(2)
     expect(confirmed.config.label).toBe('Updated application')
@@ -102,16 +102,16 @@ describe('Settings uses the original connection owner through public service', (
     await vi.waitFor(async () => { await act(async () => {}); expect((await owner.inspect({ connectionId: 'original-application' })).connection?.revision).toBe(3) })
   })
 
-  it('contributes to Mods and stores encrypted credentials before the real configure/list path', async () => {
-    expect(settingsNavGroups('').find(group => group.id === 'toolkit')!.items.map(item => item.id)).toContain('chat-connections')
-    expect(settingsNavGroups('扫码').flatMap(group => group.items).map(item => item.id)).toContain('chat-connections')
+  it('contributes to Conversation Channels and stores encrypted credentials before the real configure/list path', async () => {
+    expect(settingsNavGroups('').find(group => group.id === 'conversation-channels')!.items.map(item => item.id)).toContain('lark')
+    expect(settingsNavGroups('扫码').flatMap(group => group.items).map(item => item.id)).toContain('lark')
     await open(); await draft(); await dom.click('[data-connection-editor] .primary-button')
     await act(async () => { await vi.waitFor(() => expect(completedLists).toBe(2)) })
     const [saved] = (await owner.list()).connections
     expect(saved?.config.label).toBe('Shared team'); expect(saved?.config.application).toEqual({ domain: 'open.feishu.cn', appId: 'app-a' })
     expect(await secrets.resolve(saved!.config.credentialRef)).toBe(secret)
     expect(saved?.observation.authentication.state).toBe('unknown')
-    expect(dom.container.querySelector('.connector-connection-state')?.textContent).toContain('Saved · connection not yet confirmed')
+    await vi.waitFor(() => expect(dom.container.querySelector('.connector-connection-state')?.textContent).toContain('Saved · connection not yet confirmed'))
     expect(dom.container.querySelector('[aria-label="Connection app secret"]')).toBeNull()
     expect(JSON.stringify(await owner.list())).not.toContain(secret)
     database.exec('PRAGMA wal_checkpoint(FULL)')
@@ -153,11 +153,14 @@ describe('Settings uses the original connection owner through public service', (
     await open()
     await act(async () => { await vi.waitFor(() => expect(completedLists).toBe(1)) })
     await dom.click('[data-connection="connection-b"] button')
-    await dom.click('[data-connection-editor] .primary-button')
+    await vi.waitFor(() => expect(dom.container.querySelector<HTMLButtonElement>('[data-connection-check]')?.disabled).toBe(false))
+    await dom.click('[data-connection-check]')
     await act(async () => { await vi.waitFor(() => expect(completedChecks).toBe(1)) })
     const editor = dom.container.querySelector('[data-connection-editor]')!
-    expect(editor.querySelector('.connector-check-feedback')?.textContent).toContain('Not confirmed: application credentials, receiving messages, group delivery')
-    expect(editor.querySelector('.connector-check-feedback')?.textContent).toContain('Needs attention: live connection')
+    expect(editor.querySelector('[data-connection-stage="authentication"]')?.getAttribute('data-state')).toBe('unknown')
+    expect(editor.querySelector('[data-connection-stage="intake"]')?.getAttribute('data-state')).toBe('unknown')
+    expect(editor.querySelector('[data-connection-stage="delivery"]')?.getAttribute('data-state')).toBe('unknown')
+    expect(editor.querySelector('[data-connection-stage="transport"]')?.getAttribute('data-state')).toBe('unavailable')
     expect(editor.querySelector('.connector-stage-list')?.textContent).toContain('Receiving messages')
     expect(dom.container.querySelector('[data-connector-settings] > [role="status"]')).toBeNull()
     await dom.click('.connector-back')
@@ -181,8 +184,8 @@ describe('Settings uses the original connection owner through public service', (
     await act(async () => { await vi.waitFor(() => expect(completedLists).toBe(2)) })
     const record = (await owner.list()).connections[0]!
     expect(record.config.label).toBe('Feishu bot')
-    expect(dom.container.querySelector('.connector-next-step')?.textContent).toContain('Open an Agent’s menu')
-    expect(dom.container.querySelector('.connector-connection-state')?.textContent).toContain('connection not yet confirmed')
+    expect(dom.container.querySelector('.connector-setup-help')?.textContent).toContain('persistent connection')
+    await vi.waitFor(() => expect(dom.container.querySelector('.connector-connection-state')?.textContent).toContain('connection not yet confirmed'))
     expect(dom.container.querySelectorAll('[data-connection-editor] .primary-button')).toHaveLength(1)
     expect(database.prepare('SELECT COUNT(*) AS count FROM connection_configuration_operation').get()?.count).toBe(1)
     expect(vi.mocked(api.connections.call).mock.calls.map(call => call[0])).not.toContain('connection.test')
@@ -219,7 +222,7 @@ describe('Settings uses the original connection owner through public service', (
   })
   it('keeps the original credential draft through hidden settings and refresh without saving it', async () => {
     await open(); await draft()
-    const Pane = connectionsSettingsModule.Pane
+    const Pane = larkSettingsModule.Pane
     await dom.render(<Pane active={false} config={composerConfig} onClose={() => {}} onNavigate={() => {}} />)
     expect(dom.container.textContent).toBe('')
     await dom.render(<Pane active config={composerConfig} onClose={() => {}} onNavigate={() => {}} />)
