@@ -5,7 +5,7 @@ import type { SessionSnapshot } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import * as DropdownMenu from './HoverDropdownMenu'
+import { WorkbenchMenuScope } from './WorkbenchMenuScope'
 
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 const ThemeActionConfirmIcon = semanticIconComponent('action.confirm')
@@ -73,7 +73,7 @@ export function useAgentNativeSourceControls({ session, readOnly }: { session: A
     }
   }
   if (!session) return null
-  return <>
+  return <WorkbenchMenuScope.Consumer>{DropdownMenu => <>
     <DropdownMenu.Label className="agent-region-menu__context agent-native-source" data-native-source-state={observation?.state ?? 'confirmed'}>
       <span>Native session: {session.nativeHandle?.sessionId ?? 'Unknown'}</span>
       {observation ? <><strong>{nativeSourceLabel(session)}</strong><span>{observation.reason}</span>
@@ -102,6 +102,5 @@ export function useAgentNativeSourceControls({ session, readOnly }: { session: A
     </> : canReview ? <DropdownMenu.Item className="tab-context-menu__item" disabled={busy} onSelect={event => {
       event.preventDefault(); setNotice(null); setReview(nativeConfirmationInput(session, crypto.randomUUID()))
     }}><ThemeActionReviewSourceIcon size={14} /><span>Review source change…</span></DropdownMenu.Item> : null}
-    <DropdownMenu.Separator className="tab-context-menu__separator" />
-  </>
+  </>}</WorkbenchMenuScope.Consumer>
 }

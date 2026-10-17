@@ -37,9 +37,16 @@
 :where(.workbench-region):has(.agent-region-header-home) > .workbench-region__close:hover { background: transparent; }
 .agent-region-header-home .agent-region-header__more:is(:hover, :focus-visible, [data-state='open'])::before,
 :where(.workbench-region:has(.agent-region-header-home)) > .workbench-region__close:is(:hover, :focus-visible)::before { background: var(--surface-3); }
-.agent-region-menu { max-height: min(calc(100vh - 2 * var(--sp-4)), var(--radix-dropdown-menu-content-available-height, 100vh)); overflow-y: auto; }
+.agent-region-menu { max-height: min(calc(100vh - 2 * var(--sp-4)), var(--radix-dropdown-menu-content-available-height, var(--radix-context-menu-content-available-height, 100vh))); overflow-y: auto; }
 .agent-region-menu__context { display: grid; gap: var(--sp-1); padding: var(--sp-3) var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
 .agent-region-menu, .region-context-menu { max-width: min(40ch, calc(100vw - 2 * var(--sp-4))); }
+.agent-region-menu { width: 280px; }
+.agent-region-menu__summary { display: grid; gap: var(--sp-1); padding: var(--sp-3) var(--sp-4) var(--sp-4); overflow-wrap: anywhere; }
+.agent-region-menu__summary > strong { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; color: var(--text); font-size: var(--fs-body); font-weight: 500; line-height: 1.4; }
+.agent-region-menu__summary > span { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.4; }
+.agent-region-menu__label { padding: var(--sp-2) var(--sp-4); color: var(--text-3); font-size: var(--fs-micro); font-weight: 500; }
+.workbench-menu-submenu { max-width: min(44ch, calc(100vw - 2 * var(--sp-4))); max-height: min(calc(100vh - 2 * var(--sp-4)), var(--radix-popper-available-height, 100vh)); overflow-y: auto; }
+.agent-region-menu__details { width: 340px; }
 :where(.workbench-region:has(.agent-region-header)) > .workbench-region__close { isolation: isolate; top: calc(var(--region-focus-ring-width) + var(--sp-1)); right: calc(var(--region-focus-ring-width) + var(--sp-2)); align-items: flex-start; border: 0; background: transparent; box-shadow: none; opacity: 1; }
 .agent-region-header__more:focus-visible, :where(.workbench-region:has(.agent-region-header)) > .workbench-region__close:focus-visible { outline-offset: -2px; }
 .agent-region-header__more:has(.agent-region-header__source) { width: auto; min-width: 22px; gap: var(--sp-2); }

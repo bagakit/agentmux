@@ -1,6 +1,6 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { createContext, useContext, useId, useRef, type ReactNode } from 'react'
+import { createContext, useContext, useId, useRef, useState, type ReactNode } from 'react'
 import { useSessionRestart } from './SessionRestart'
 import { agentRegionExecution, useAppStore } from '../store'
 import { agentSessionPresentationIndex } from '../lib/session-presentation'
@@ -15,6 +15,7 @@ const ThemeActionCopyIcon = semanticIconComponent('action.copy')
 const ThemeActionCopyAddressIcon = semanticIconComponent('action.copy-address')
 const ThemeActionReplaceIcon = semanticIconComponent('action.replace')
 const ThemeActionRestartIcon = semanticIconComponent('action.restart-session')
+const ThemeActionStopIcon = semanticIconComponent('action.stop')
 const ThemeObjectConversationsIcon = semanticIconComponent('object.conversations')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 
@@ -31,6 +32,7 @@ export type RegionMenuEntry =
   | { kind: 'layout'; entries: readonly WorkbenchSplitMenuEntry[] }
   | { kind: 'swaps'; entries: readonly RegionSwapMenuEntry[] }
   | { kind: 'restart'; onSelect(): void }
+  | { kind: 'stop'; onSelect(): void }
   | { kind: 'promote'; onSelect(): void }
   | { kind: 'window'; onSelect(): void }
 
@@ -113,7 +115,7 @@ const REGION_MENU_ICONS: Record<RegionCopyAction['label'], typeof ThemeActionCop
   'Copy Agent Link': ThemeActionCopyIcon
 }
 
-const RegionMenuContext = createContext<{ entries: readonly RegionMenuEntry[]; onOpen(open: boolean): void; dialogOpen: boolean }>({ entries: [], onOpen: () => {}, dialogOpen: false })
+const RegionMenuContext = createContext<{ entries: readonly RegionMenuEntry[]; onOpen(open: boolean): void; dialogOpen: boolean; moreOpen?: boolean; setAgentMenuAvailable?: (available: boolean) => void }>({ entries: [], onOpen: () => {}, dialogOpen: false })
 
 export function useRegionMenuEntries(): readonly RegionMenuEntry[] {
   return useContext(RegionMenuContext).entries
@@ -156,6 +158,7 @@ export function RegionMenuEntryView({ entry, index, Item, Separator, Group = Con
           <span>{target.label}</span>
         </Item>)}
   </WorkbenchMenuSubmenu>
+  if (entry.kind === 'stop') return <Item className="tab-context-menu__item" onSelect={entry.onSelect}><ThemeActionStopIcon size={14} /><span>Stop Agent</span></Item>
   if (entry.kind === 'restart') return <Item className="tab-context-menu__item" onSelect={entry.onSelect}><ThemeActionRestartIcon size={14} /><span>Restart Session…</span></Item>
   if (entry.kind === 'window') return <Item className="tab-context-menu__item" onSelect={entry.onSelect}><ThemeActionOpenExternalIcon size={14} /><span>Open original Region in window</span></Item>
   if (entry.kind === 'promote') {
@@ -207,6 +210,10 @@ export function RegionContextMenu({
   promote?: (() => void) | undefined
 }) {
   const active = useWorkbenchPresentationActive()
+  const [agentMenuAvailable, setAgentMenuAvailable] = useState(false)
+  const [contextOpen, setContextOpen] = useState(false), [moreOpen, setMoreOpen] = useState(false)
+  function openMore(open: boolean) { setMoreOpen(open); if (open) setContextOpen(false); connector.onOpen(open || contextOpen) }
+  function openContext(open: boolean) { setContextOpen(open); if (open) setMoreOpen(false); connector.onOpen(open || moreOpen) }
   const restart = useSessionRestart(active)
   const origin = useRef<HTMLElement | null>(null)
   const target = useAppStore(state => {
@@ -231,17 +238,17 @@ export function RegionContextMenu({
   // （portal 到 React 根之外 + data-state=open）统一观察，见 lib/native-overlay-regions.ts。
   // 这个菜单——#544 那个被浏览器盖住的——正是"逐个接线会漏"的证据本身。
   return (
-    <RegionMenuContext.Provider value={{ entries: model.entries, onOpen: connector.onOpen, dialogOpen: connector.dialogOpen }}>
-      <ContextMenu.Root onOpenChange={connector.onOpen}>
+    <RegionMenuContext.Provider value={{ entries: model.entries, onOpen: openMore, moreOpen, setAgentMenuAvailable, dialogOpen: connector.dialogOpen || restart.dialog !== null }}>
+      <ContextMenu.Root open={contextOpen} onOpenChange={openContext}>
         <ContextMenu.Trigger asChild onContextMenu={event => { origin.current = event.currentTarget }}>{children}</ContextMenu.Trigger>
-        <DocumentOverlayPortal component={ContextMenu.Portal}>
+        {!agentMenuAvailable ? <DocumentOverlayPortal component={ContextMenu.Portal}>
           <ContextMenu.Content className="tab-context-menu region-context-menu" collisionPadding={8} onCloseAutoFocus={event => { if (connector.dialogOpen) event.preventDefault() }}>
             {model.entries.map((entry, index) => <RegionMenuEntryView
               key={index} entry={entry} index={index}
               Item={ContextMenu.Item} Separator={ContextMenu.Separator}
             />)}
           </ContextMenu.Content>
-        </DocumentOverlayPortal>
+        </DocumentOverlayPortal> : null}
       </ContextMenu.Root>
       {active ? restart.dialog : null}
     </RegionMenuContext.Provider>
