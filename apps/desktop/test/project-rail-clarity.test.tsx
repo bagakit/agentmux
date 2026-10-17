@@ -1,90 +1,63 @@
-const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot } from 'react-dom/client'
 import { expect, it, vi } from 'vitest'
-import type { SessionSnapshot } from '../src/shared/contracts'
-// 这个替身要**覆盖组件读的每一个 slice**，缺一个就是 `undefined`：`b3645c56` 给 ProjectActivity
-// 加了 `state.timelines` 与 `state.config` 两处读，替身没跟上，于是 `timelines[session.id]` 当场抛
-// TypeError——两条判据一条都没跑到，红得像组件坏了。真 store 的初值就是 `{}` 与 `null`（store.ts:1571），
-// 这里照抄的是那个初值，不是为了让测试过而编的形状。
-//
-// `agentNames` 是同一个缺陷的第二次复发（这次是手改名那条 slice，store.ts:1695 的初值同样是 `{}`）：
-// 组件读 `agentNames[row.sessionId]` 画 roster 里的名字，替身没有它，于是 `undefined['a']` 抛在
-// **生产文件**的行上，栈看起来像 ProjectActivity 回归。判别器：栈顶在生产文件、但报的是
-// `Cannot read properties of undefined`，先数替身的键够不够，再怀疑组件。
-const state = vi.hoisted(() => ({
-  selectSession: vi.fn(),
-  providerCatalog: [],
-  timelines: {},
-  config: null,
-  agentNames: {}
-}))
-vi.mock('../src/renderer/src/store', () => ({ useAppStore: (select: (value: typeof state) => unknown) => select(state) }))
 import { ProjectActivity } from '../src/renderer/src/components/ProjectActivity'
+import { useAppStore } from '../src/renderer/src/store'
+import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 
-it('hover explains which Agent needs a reply, selection navigates exactly there, and resolution replaces the needs-you marker with neutral completion', async () => {
-  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  const container = document.createElement('div'); document.body.append(container)
-  const root = createRoot(container)
-  const session: SessionSnapshot = { id: 'a', kind: 'agent', label: 'Reviewer', providerId: 'codex', executorId: 'codex',
-    capabilities: { terminal: true, timeline: 'streaming', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
-    hostId: 'local', workspacePath: _hygiene_fixturePath("project"), createdAt: 1, updatedAt: 1, processState: 'running', latestOutputBytes: 0,
-    control: { kind: 'agent', hostId: 'local', agentSessionId: 'a', run: { runId: 'run-a' } },
-    status: { state: 'waiting', source: 'run-process', observedAt: 1 },
-    pendingInteraction: { kind: 'question', id: 'q', agentSessionId: 'a', questions: [{ id: 'branch', prompt: 'Which branch should I review?', options: [] }], evidence: { source: 'native-hook', observedAt: 1 } } }
+const dom = composerDOM()
+function reviewer(id: string) {
+  const session = composerSession(id), observedAt = Date.now()
+  return { ...session, label: 'Reviewer', status: { state: 'waiting' as const, source: 'native-hook' as const, observedAt },
+    pendingInteraction: { kind: 'question' as const, id: `question-${id}`, agentSessionId: id,
+      questions: [{ id: 'choice', prompt: 'Which branch should I review?', options: [] }], evidence: { source: 'native-hook' as const, observedAt } } }
+}
+async function hoverAgents() {
+  const trigger = dom.container.querySelector<HTMLButtonElement>('.project-activity')
+  expect(trigger).not.toBeNull()
+  await act(async () => trigger!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
+  const unplaced = document.querySelector<HTMLElement>('.project-activity-menu [data-unplaced]')
+  expect(unplaced).not.toBeNull()
+  await act(async () => unplaced!.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
+  const rows = [...document.querySelectorAll<HTMLButtonElement>('.project-activity-submenu .focus-context[data-session-id]')]
+  expect(rows.length).toBeGreaterThan(0)
+  return rows
+}
 
-  try {
-    await act(async () => root.render(<ProjectActivity sessions={[session]} />))
-    const button = container.querySelector('button')!
-    expect(button.getAttribute('aria-label')).toContain('Needs you')
-    await act(async () => button.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
-    expect(document.querySelector('[role="menu"]')?.textContent).toContain('Unassigned')
-    await act(async () => (document.querySelector('[aria-label^="Show Agents"]') as HTMLElement).click())
-    expect(document.querySelector('[role="menu"]')?.textContent).toContain('Which branch should I review?')
-    await act(async () => (document.querySelector('[role="menuitem"]') as HTMLElement).click())
-    expect(state.selectSession).toHaveBeenCalledExactlyOnceWith('a')
-    const { pendingInteraction: _resolved, ...resolvedSession } = session
-    await act(async () => root.render(<ProjectActivity sessions={[{ ...resolvedSession, status: { ...session.status, state: 'done' } }]} />))
-    const completed = container.querySelector<HTMLButtonElement>('.project-activity')!
-    expect(completed.getAttribute('aria-label')).toContain('1 Completed')
-    expect(completed.getAttribute('aria-label')).not.toContain('Needs you')
-    expect(completed.dataset.category).toBe('active')
-  } finally { await act(async () => root.unmount()); container.remove() }
+it('hover explains the original question, explicit selection opens that Agent, and resolution clears its attention marker', async () => {
+  const session = reviewer('reviewer'), selectSession = vi.fn()
+  useAppStore.setState({ sessions: [session], tabs: {}, layouts: {}, selectSession })
+  await dom.render(<ProjectActivity sessions={[session]} />)
+  expect(dom.container.querySelector('.project-activity')?.getAttribute('aria-label')).toContain('Needs you')
+  const [card] = await hoverAgents()
+  expect(card!.dataset.sessionId).toBe(session.id)
+  expect(card!.textContent).toContain('Which branch should I review?')
+  expect(selectSession).not.toHaveBeenCalled()
+  await act(async () => card!.click())
+  expect(selectSession).toHaveBeenCalledExactlyOnceWith(session.id)
+  const { pendingInteraction: _resolved, ...original } = session
+  const completed = { ...original, status: { ...session.status, state: 'done' as const } }
+  await act(async () => useAppStore.setState({ sessions: [completed] }))
+  await dom.render(<ProjectActivity sessions={[completed]} />)
+  const trigger = dom.container.querySelector<HTMLButtonElement>('.project-activity')!
+  expect(trigger.getAttribute('aria-label')).toContain('1 Completed')
+  expect(trigger.getAttribute('aria-label')).not.toContain('Needs you')
+  expect(trigger.dataset.category).toBe('active')
 })
 
-it('renders one explicit work-line row and lets its primary action open the most urgent Agent', async () => {
-  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  state.selectSession.mockClear()
-  const container = document.createElement('div'); document.body.append(container)
-  const root = createRoot(container)
-  const waiting: SessionSnapshot = {
-    id: 'waiting', kind: 'agent', label: 'Reviewer', providerId: 'codex', executorId: 'codex',
-    capabilities: { terminal: true, timeline: 'streaming', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
-    hostId: 'local', workspacePath: _hygiene_fixturePath("project"), createdAt: 1, updatedAt: 4, processState: 'running', latestOutputBytes: 0,
-    control: { kind: 'agent', hostId: 'local', agentSessionId: 'waiting', run: { runId: 'run-waiting' } },
-    status: { state: 'waiting', source: 'native-hook', observedAt: 4 },
-    pendingInteraction: { kind: 'question', id: 'question', agentSessionId: 'waiting', questions: [{ id: 'choice', prompt: 'Choose a release lane', options: [] }], evidence: { source: 'native-hook', observedAt: 4 } }
-  }
-  const { pendingInteraction: _waitingPending, ...waitingBase } = waiting
-  const working: SessionSnapshot = {
-    ...waitingBase,
-    id: 'working', label: 'Builder',
-    control: { kind: 'agent', hostId: 'local', agentSessionId: 'working', run: { runId: 'run-working' } },
-    status: { state: 'working', source: 'native-hook', observedAt: 3 }
-  }
-  try {
-    await act(async () => root.render(<ProjectActivity
-      sessions={[working, waiting]}
-      contexts={[{ id: 'topic-1', kind: 'topic', label: 'Release prep', hostId: 'local', path: _hygiene_fixturePath("project") }]}
-    />))
-    const trigger = container.querySelector('button')!
-    await act(async () => trigger.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
-    const menu = document.querySelector('[role="menu"]')!
-    expect(menu.textContent).toContain('Topic · Release prep')
-    expect(menu.querySelectorAll('.project-activity-group')).toHaveLength(1)
-    expect(menu.querySelector('.project-activity-group__details')).toBeNull()
-    await act(async () => (menu.querySelector('.project-activity-group__summary') as HTMLElement).click())
-    expect(state.selectSession).toHaveBeenCalledExactlyOnceWith('waiting')
-  } finally { await act(async () => root.unmount()); container.remove() }
+it('hover keeps the full Agent collection and lets the user explicitly choose its urgent original subject', async () => {
+  const urgent = reviewer('urgent')
+  const working = { ...composerSession('working'), label: 'Builder',
+    status: { state: 'working' as const, source: 'native-hook' as const, observedAt: Date.now() } }
+  const selectSession = vi.fn()
+  useAppStore.setState({ sessions: [working, urgent], tabs: {}, layouts: {}, selectSession })
+  await dom.render(<ProjectActivity sessions={[working, urgent]} />)
+  const rows = await hoverAgents()
+  expect(rows.map(row => row.dataset.sessionId)).toEqual([working.id, urgent.id])
+  expect(rows[0]!.textContent).toContain('Builder')
+  expect(rows[1]!.textContent).toContain('Which branch should I review?')
+  expect(rows[1]!.getAttribute('data-bucket')).toBe('attention')
+  expect(selectSession).not.toHaveBeenCalled()
+  await act(async () => rows[1]!.click())
+  expect(selectSession).toHaveBeenCalledExactlyOnceWith(urgent.id)
 })

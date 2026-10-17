@@ -120,10 +120,17 @@ async function launch(label) {
   receipt[label] = { pid: child.pid, home, nativeHome, ready, origin: await cdp.evaluate('({href:location.href,origin:location.origin})') }
   return { child, main, cdp }
 }
+async function controlPoint(cdp, expression) {
+  return await waitFor('exact visible UI control', () => cdp.evaluate(`(() => { const matches = ${expression}; if (matches.length !== 1) return null; const element = matches[0]; if (element.disabled || !element.getClientRects().length) return null; element.scrollIntoView({block:'nearest'}); const r = element.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2} })()`))
+}
 async function click(cdp, expression, button = 'left') {
-  const point = await waitFor('exact visible UI control', () => cdp.evaluate(`(() => { const matches = ${expression}; if (matches.length !== 1) return null; const element = matches[0]; if (element.disabled || !element.getClientRects().length) return null; element.scrollIntoView({block:'nearest'}); const r = element.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2} })()`))
+  const point = await controlPoint(cdp, expression)
   await cdp.call('Input.dispatchMouseEvent', { type: 'mousePressed', button, clickCount: 1, ...point })
   await cdp.call('Input.dispatchMouseEvent', { type: 'mouseReleased', button, clickCount: 1, ...point })
+}
+async function hover(cdp, expression) {
+  const point = await controlPoint(cdp, expression)
+  await cdp.call('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point })
 }
 const selectors = selector => `Array.from(document.querySelectorAll(${JSON.stringify(selector)})).filter(e => e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden')`
 async function normalQuit(probe) {
@@ -147,7 +154,9 @@ async function identity() {
   const sources=['packages/core/src/agent-semantic-state.ts','packages/core/src/client.ts','packages/core/src/types.ts',
     'apps/desktop/src/main/runtime-controller.ts','apps/desktop/src/renderer/src/store.ts',
     'apps/desktop/src/renderer/src/lib/session-state.ts','apps/desktop/src/renderer/src/lib/agent-state-time.ts',
-    'apps/desktop/src/renderer/src/lib/project-activity-row.ts','apps/desktop/src/renderer/src/components/ProjectActivity.tsx',
+    'apps/desktop/src/renderer/src/lib/project-activity-row.ts','apps/desktop/src/renderer/src/lib/project-activity-spaces.ts',
+    'apps/desktop/src/renderer/src/components/ProjectActivity.tsx','apps/desktop/src/renderer/src/components/ProjectActivityMenu.tsx',
+    'apps/desktop/src/renderer/src/components/ProjectActivityMetrics.tsx','apps/desktop/src/renderer/src/components/AgentContextContent.tsx',
     'apps/desktop/src/renderer/src/components/HoverDropdownMenu.tsx','apps/desktop/src/shared/contracts.ts',
     'apps/desktop/scripts/verify-agent-state-time-restart.mjs','apps/desktop/scripts/probe-process.mjs']
   const assets=(await readdir(join(desktopRoot,'out/renderer/assets'))).filter(name=>name.endsWith('.js')).sort()
@@ -223,15 +232,14 @@ async function actualGeometry(cdp) {
   assert.equal(value.length,2,'Both actual Region geometries are required');return value
 }
 async function actualActivity(cdp) {
-  const values=await cdp.evaluate(`(()=>{const rows=Array.from(document.querySelectorAll('.project-activity-menu__item')).filter(e=>e.getClientRects().length);return {at:Date.now(),rows:rows.map(e=>({label:e.querySelector('strong')?.textContent,meta:e.querySelector('.project-activity-menu__meta')?.textContent,reason:e.querySelector('.project-activity-menu__reason')?.textContent}))}})()`)
+  const values=await cdp.evaluate(`(()=>{const rows=Array.from(document.querySelectorAll('.project-activity-submenu .project-activity-agent')).filter(e=>e.getClientRects().length);return {at:Date.now(),rows:rows.map(e=>({label:e.querySelector('.focus-context__identity > strong')?.textContent,meta:e.getAttribute('title'),reason:e.querySelector('.focus-context__detail')?.textContent}))}})()`)
   assert.equal(values.rows.length,2,'Both actual Agent rows must be visible');return values
 }
 async function openActivity(cdp) {
-  await click(cdp,selectors(`.project-rail-entry:has(.project-rail-row[data-workspace-id="${workspaceId}"]) > .project-activity`))
-  const disclosures=await cdp.evaluate(`${selectors('.project-activity-group__disclosure')}.map(e=>e.getAttribute('aria-expanded'))`)
-  assert.equal(disclosures.length,1)
-  if(disclosures[0]!=='true')await click(cdp,selectors('.project-activity-group__disclosure'))
-  return await waitFor('two real Activity rows',async()=>{const count=await cdp.evaluate(`${selectors('.project-activity-menu__item')}.length`);return count===2?actualActivity(cdp):null})
+  await hover(cdp,selectors(`.project-rail-entry:has(.project-rail-row[data-workspace-id="${workspaceId}"]) > .project-activity`))
+  await waitFor('original Activity Zone',async()=>await cdp.evaluate(`${selectors('.project-activity-menu .project-activity-zone')}.length===1`))
+  await hover(cdp,selectors('.project-activity-menu .project-activity-zone'))
+  return await waitFor('two real Activity rows',async()=>{const count=await cdp.evaluate(`${selectors('.project-activity-submenu .project-activity-agent')}.length`);return count===2?actualActivity(cdp):null})
 }
 function verifyAge(actual,label,state,entry) {
   const row=actual.rows.find(row=>row.label.startsWith(label));assert.ok(row,'Exact labelled actual row '+label)
@@ -277,7 +285,7 @@ try {
   // An empty ordinary Workspace has no durable Launcher Region. Open the existing
   // Session through the actual Activity row, then use its real durable Region identity.
   await openActivity(first.cdp)
-  await click(first.cdp,`${selectors('.project-activity-menu__item')}.filter(e=>e.querySelector('strong')?.textContent.startsWith('Known clock'))`)
+  await click(first.cdp,selectors(`.project-activity-submenu .project-activity-agent[data-session-id="${known.agentSessionId}"]`))
   const opened=await waitFor('real Activity navigation opens exact Session',async()=>{const value=await durableLayout(first.cdp);return regionForAgent(value.workbench,known.agentSessionId)})
   const region=await inspectedRegion(opened.regionId);assert.equal(region.agentSessionId,known.agentSessionId)
   const split=await control('agent.open',{content:{kind:'agent-session',agentSessionId:unknown.agentSessionId},destination:{regionId:region.regionId,split:'right'},focus:true})
