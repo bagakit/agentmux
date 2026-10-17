@@ -79,7 +79,7 @@ afterEach(async () => {
 function MountedSettings() {
   const [visible, setVisible] = useState(true)
   closeSettings = () => setVisible(false); reopen = () => setVisible(true)
-  return <SettingsPanel visible={visible} initialSection="chat-connections" onClose={closeSettings} />
+  return <SettingsPanel visible={visible} initialSection="lark" onClose={closeSettings} />
 }
 async function click(selector: string) {
   let button: HTMLButtonElement | null = null
