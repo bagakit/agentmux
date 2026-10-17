@@ -19,6 +19,8 @@ import { validateNativeReceipt } from './lib/browser-capability-proof-join.mjs'
 const repositoryRoot = resolve(import.meta.dirname, '../../..')
 const desktopRoot = join(repositoryRoot, 'apps/desktop')
 const privateCase = process.argv.includes('--case-private')
+const collaborationCase = process.argv.includes('--case-collaboration')
+const ordinaryCase = privateCase || collaborationCase
 const privateApp = process.env.AGENTMUX_BROWSER_PRIVATE_APP ? resolve(process.env.AGENTMUX_BROWSER_PRIVATE_APP) : null
 assert.ok(!privateApp || privateCase, 'The optional qualification App belongs only to the private Browser case')
 const qualificationRoot = privateApp ? resolve(privateApp, '../../../../..') : repositoryRoot
@@ -43,7 +45,7 @@ const launchedProbes = new Set()
 const privateCrash = process.argv.includes('--private-crash')
 const privateVisual = process.argv.includes('--private-visual')
 assert.ok(!privateCrash || privateCase); assert.ok(!privateVisual || privateCase)
-const deadline = Date.now() + (privateCase ? 180_000 : 120_000)
+const deadline = Date.now() + (collaborationCase ? 360_000 : privateCase ? 180_000 : 120_000)
 const receipt = { schema: 'agentmux.browser-recovery-restart.v1', completeGate: false, cleanup: {} }
 const downloadCase = process.argv.includes('--case-download')
 const uploadCase = process.argv.includes('--case-upload')
@@ -70,7 +72,7 @@ assert.ok(!observeNativeBounds || structuredCase, 'Main bounds observation belon
 if(observeRestartLifecycle)receipt.diagnosticMode='passive-original-second-process-lifecycle'
 if(observeStageDelivery)receipt.diagnosticMode='original-stage-conditional-breakpoints'
 if(overlayCase && process.env.AGENTMUX_OVERLAY_OBSERVE_ORIGINAL_PAINT === '1')receipt.diagnosticMode='original-overlay-paint-conditional-breakpoints'
-assert.ok([downloadCase,uploadCase,demonstrationCase,overlayCase,taskAssetsCase,taskDownloadCase,framesCase,localRecoveryCase,browserToolsCase,structuredCase,outcomeCase,privateCase].filter(Boolean).length<=1,'A product scenario has one owning outcome')
+assert.ok([downloadCase,uploadCase,demonstrationCase,overlayCase,taskAssetsCase,taskDownloadCase,framesCase,localRecoveryCase,browserToolsCase,structuredCase,outcomeCase,privateCase,collaborationCase].filter(Boolean).length<=1,'A product scenario has one owning outcome')
 const downloadPayload = Buffer.from([0,255,128,13,10,1,2,0,254])
 const downloadRequests = []
 if(downloadCase)receipt.case='download'
@@ -85,6 +87,7 @@ if(browserToolsCase)receipt.case='browser-tools'
 if(structuredCase)receipt.case='structured-output'
 if(outcomeCase)receipt.case='outcome'
 if(privateCase){receipt.case='private';receipt.privateExitKind=privateCrash?'crash':'ordinary'}
+if(collaborationCase)receipt.case='collaboration'
 await mkdir(join(repositoryRoot,'.tmp'),{recursive:true})
 const captureDirectory = await mkdtemp(join(repositoryRoot,'.tmp/browser-operation-visual-'))
 receipt.visual = { captureDirectory, captureOnly: true, aestheticReview: 'not-performed', frames: [],
@@ -123,8 +126,8 @@ async function connectCdp(url, role) {
     const id = ++serial, timer = setTimeout(() => { pending.delete(id); fail(error(`CDP timed out: ${method}`, method, id)) }, 12_000)
     pending.set(id, { done, fail, timer, method }); socket.send(JSON.stringify({ id, method, params }))
   })
-  Object.assign(cdp, { call, async evaluate(expression) {
-    const result = await call('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
+  Object.assign(cdp, { call, async evaluate(expression, awaitPromise = true) {
+    const result = await call('Runtime.evaluate', { expression, awaitPromise, returnByValue: true })
     if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text)
     return result.result.value
   } })
@@ -279,10 +282,21 @@ async function launch(label) {
   phase = `launch-${label}`
   for (const name of ['AGENTMUX_DESKTOP_RECOVERY_SEED', 'AGENTMUX_DESKTOP_RECOVERY_REPORT', 'AGENTMUX_DESKTOP_EXIT_AFTER_READY']) assert.equal(process.env[name], undefined, `Ordinary launch inherited ${name}`)
   const readyFile = join(root, `ready-${label}.json`)
-  const child = spawn(appExecutable ?? require('electron'), ['--inspect-brk=0', ...(!privateApp ? [mainPath] : []), '--remote-debugging-port=0', `--agentmux-probe-root=${root}`], {
+  let entryPath = mainPath
+  if (collaborationCase) {
+    // Configure the private Electron host before importing the unmodified ordinary Main.
+    // A sibling entry preserves app.getAppPath(); no source breakpoint or readiness hook is needed.
+    entryPath = join(desktopRoot, 'out/main/private-collaboration-' + label + '.cjs')
+    const bootstrap = `const{app}=require('electron');${[['home', privateHome], ['appData', join(root, 'app-data')], ['userData', userData], ['sessionData', userData]].map(([name, path]) => `app.setPath(${JSON.stringify(name)},${JSON.stringify(path)});`).join('')}globalThis.__amxPrivatePathsConfigured=true;import(${JSON.stringify(pathToFileURL(mainPath).href)}).catch(error=>{console.error(error);app.exit(1)});`
+    await writeFile(entryPath, bootstrap)
+    receipt.privateElectronHosts ??= []
+    receipt.privateElectronHosts.push({ label, entry: entryPath, source: bootstrap, sha256: digest(bootstrap), main: mainPath,
+      mainSha256: digest(await readFile(mainPath)), boundary: 'Electron public path setup only, before importing the complete original ordinary Main; no Runtime owner, saved state seed or readiness hook.' })
+  }
+  const child = spawn(appExecutable ?? require('electron'), [collaborationCase ? '--inspect=0' : '--inspect-brk=0', ...(!privateApp ? [entryPath] : []), '--remote-debugging-port=0', `--agentmux-probe-root=${root}`], {
     cwd: desktopRoot, detached: true, stdio: ['ignore', 'ignore', 'pipe'],
-    env: { ...(privateCase ? Object.fromEntries(Object.entries(process.env).filter(([key])=>!/^(?:AGENTMUX_|CTXMUX_|ELECTRON_)/.test(key))) : process.env), ...fixtureEnvironment,
-      ...(!privateCase ? { AGENTMUX_DESKTOP_READY_FILE: readyFile } : {}) }
+    env: { ...(ordinaryCase ? Object.fromEntries(Object.entries(process.env).filter(([key])=>!/^(?:AGENTMUX_|CTXMUX_|ELECTRON_)/.test(key))) : process.env), ...fixtureEnvironment,
+      ...(!ordinaryCase ? { AGENTMUX_DESKTOP_READY_FILE: readyFile } : {}) }
   })
   children.add(child)
   let diagnostics = '', mainUrl, rendererUrl, spawnError
@@ -298,11 +312,13 @@ async function launch(label) {
   const probe = { child, main }
   launchedProbes.add(probe)
   await main.call('Runtime.enable')
+  let home
+  if (!collaborationCase) {
   // Imports must finish before querying Electron. Pause before the first home-dependent constant;
   // require() during Node's --inspect-brk bootstrap can run an uninitialized module loader.
   await main.call('Debugger.enable')
   const lines = (await readFile(mainPath, 'utf8')).split('\n')
-  const anchors = lines.flatMap((line, index) => (privateApp
+  const anchors = lines.flatMap((line, index) => (privateApp || collaborationCase
     ? /^const SCRATCH_BACKING_PATH = [\w$]+\(app\.getPath\("home"\), "\.agentmux", "scratch"\);$/.test(line)
     : line.includes('const SCRATCH_BACKING_PATH = join(app.getPath("home")')) ? [index] : [])
   assert.equal(anchors.length, 1, 'The compiled home boundary must exist exactly once')
@@ -316,10 +332,10 @@ async function launch(label) {
   assert.ok(paused.hitBreakpoints?.includes(breakpoint.breakpointId), 'Only the exact pre-home pause permits fixture isolation')
   const isolated = await main.call('Debugger.evaluateOnCallFrame', {
     callFrameId: paused.callFrames[0].callFrameId,
-    expression: `(() => { app.setPath('home', ${JSON.stringify(privateHome)}); return app.getPath('home') })()`, returnByValue: true
+    expression: `(() => { app.setPath('home', ${JSON.stringify(privateHome)}); ${collaborationCase ? `app.setPath('appData',${JSON.stringify(join(root,'app-data'))});app.setPath('userData',${JSON.stringify(userData)});app.setPath('sessionData',${JSON.stringify(userData)});` : ''} return app.getPath('home') })()`, returnByValue: true
   })
   assert.equal(isolated.exceptionDetails, undefined, 'Public Electron home isolation must succeed')
-  const home = isolated.result.value
+  home = isolated.result.value
   assert.equal(home, privateHome, 'Home must be private before the home-dependent constant is evaluated')
   if (observeNativeBounds) {
     const observed = await main.call('Debugger.evaluateOnCallFrame', {
@@ -344,12 +360,13 @@ async function launch(label) {
   }
   await main.call('Debugger.removeBreakpoint', { breakpointId: breakpoint.breakpointId })
   await main.call('Debugger.resume')
+  }
   let ready
   try { ready = await waitFor(`${label} ready`, async () => {
     alive()
-    if (privateCase) return main.evaluate(`(()=>{const {app,BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
+    if (ordinaryCase) return main.evaluate(`(()=>{${collaborationCase ? 'if(globalThis.__amxPrivatePathsConfigured!==true)return null;' : ''}const {app,BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
       const windows=BrowserWindow.getAllWindows().filter(window=>!window.isDestroyed()&&window.webContents.getURL().startsWith('file:')&&!window.webContents.isLoadingMainFrame());
-      return app.isReady()&&windows.length===1?{pid:process.pid,productName:app.name,version:app.getVersion(),packaged:app.isPackaged,executable:process.execPath,appPath:app.getAppPath(),home:app.getPath('home'),userData:app.getPath('userData')}:null})()`)
+      return app.isReady()&&windows.length===1?{pid:process.pid,productName:app.name,version:app.getVersion(),packaged:app.isPackaged,executable:process.execPath,appPath:app.getAppPath(),home:app.getPath('home'),appData:app.getPath('appData'),sessionData:app.getPath('sessionData'),userData:app.getPath('userData')}:null})()`, false)
     try { return JSON.parse(await readFile(readyFile, 'utf8')) } catch (error) { if (error.code === 'ENOENT') return null; throw error }
   }) }
   catch (error) {
@@ -368,6 +385,8 @@ async function launch(label) {
     receipt.launchDiagnostics ??= {}; receipt.launchDiagnostics[label] = observed
     throw error
   }
+  home ??= ready.home
+  assert.equal(home, privateHome, 'The actual Electron host has its original private home')
   if (privateApp) { assert.equal(ready.packaged, true); assert.equal(ready.executable, appExecutable) }
   const endpoint = new URL(await waitFor(`${label} Renderer debugger`, () => { alive(); return rendererUrl }))
   const target = await waitFor(`${label} Renderer target`, async () => (await (await fetch(`http://${endpoint.host}/json/list`)).json()).find(item => item.type === 'page' && item.url.startsWith('file:')))
@@ -386,9 +405,10 @@ async function launch(label) {
   const nativeHome = await cdp.evaluate('(async () => (await window.agentmux.sessions.snapshot()).localHome)()')
   assert.equal(nativeHome, privateHome)
   let ordinaryInitialization
-  if (privateCase) {
+  if (ordinaryCase) {
     assert.equal(ready.pid, child.pid); assert.equal(ready.home, privateHome)
     assert.equal(await realpath(ready.userData), await realpath(userData))
+    if(collaborationCase){assert.equal(ready.appData,join(root,'app-data'));assert.equal(ready.sessionData,userData)}
     if (privateApp) assert.equal(await realpath(ready.appPath), await realpath(packageRoot))
     const release = JSON.parse(await readFile(join(packageRoot ?? desktopRoot, 'out/renderer/release.json'), 'utf8'))
     ordinaryInitialization = await waitFor(`${label} ordinary loaded Desktop owner`, async () => {
@@ -485,7 +505,7 @@ async function normalQuit(probe) {
   let replyFailure
   try { await probe.main.evaluate(`process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron').app.quit()` ) }
   catch (error) { replyFailure = error.message }
-  probe.main.close(); probe.cdp.close()
+  probe.main.close(); probe.cdp?.close()
   const exitDeadline=Date.now()+20_000
   while(probe.child.exitCode===null&&probe.child.signalCode===null&&Date.now()<exitDeadline)await delay(60)
   assert.ok(probe.child.exitCode!==null||probe.child.signalCode!==null,'Actual normal Desktop exit timed out')
@@ -903,6 +923,7 @@ async function consumeNativeProof(indexPath) {
   process.stdout.write(JSON.stringify({passed:true,completeGate:true,consumedOriginalNativeReceipt:proof.receipt.path})+'\n')
 }
 function lastReceiptPath() {
+  if(collaborationCase)return join(repositoryRoot,'.tmp/browser-collaboration-recovery-last.json')
   return join(repositoryRoot,'.tmp',privateCase?(privateCrash?'browser-private-crash-restart-last.json':'browser-private-restart-last.json'):localRecoveryCase?`browser-local-recovery-${localRecoveryKind}-last.json`:framesCase?'browser-frame-observation-last.json':taskDownloadCase?'browser-task-outcome-download-last.json':downloadCase?'browser-files-download-last.json':uploadCase?'browser-files-upload-last.json':demonstrationCase?'browser-demonstration-last.json':overlayCase?'browser-overlay-last.json':taskAssetsCase?'browser-task-assets-last.json':browserToolsCase?'browser-tools-last.json':structuredCase?'browser-structured-output-last.json':outcomeCase?'browser-outcome-last.json':'browser-recovery-restart-last.json')
 }
 if(process.env.AGENTMUX_BROWSER_NATIVE_PROOF_INDEX) {
@@ -921,13 +942,14 @@ try {
   const structured = structuredCase ? await import('./browser-structured-probe-scenario.mjs') : null
   const outcome = outcomeCase ? await import('./browser-outcome-probe-scenario.mjs') : null
   const privateScenario = privateCase ? await import('./browser-private-probe-scenario.mjs') : null
+  const collaboration = collaborationCase ? await import('./browser-collaboration-probe-scenario.mjs') : null
   const cost = outcomeCase ? await import('./lib/browser-capability-cost-collector.mjs') : null
   const scenarioContext = (probe,browserId,pageUrl)=>({probe,browserId,pageUrl,urls,receipt,localRecoveryKind,click,selectors,waitFor,runBrowser,setPhase:value=>{phase=value},nativeFrameReady:actualPageUrl=>observeNativeFrameReady(probe,actualPageUrl),nativePageScript:(target,expression,actualPageUrl=pageUrl)=>nativePageScript(target,expression,actualPageUrl),resize,
     rpc,
     diagnoseTarget:process.argv.includes('--diagnose-demonstration-target'),
     capture:(probe,label,content,actualPageUrl=pageUrl)=>capture(probe,label,content??(demonstrationCase||taskAssetsCase||taskDownloadCase?'demonstration':overlayCase?'overlay':browserToolsCase?'page':structuredCase?'structured-output':'operations'),actualPageUrl),desktopRoot,userData,workspacePath,repositoryRoot,coreRoot})
-  await Promise.all([mkdir(userData,{recursive:true}),mkdir(workspacePath,{recursive:true}),mkdir(codexHome,{recursive:true,mode:0o700}),mkdir(runtimeDirectory,{recursive:true})])
-  receipt.identityBefore=await identity();receipt.sourceCommit=(await exec('git',['rev-parse','HEAD'],{cwd:qualificationRoot})).stdout.trim()
+  await Promise.all([mkdir(userData,{recursive:true}),mkdir(workspacePath,{recursive:true}),mkdir(codexHome,{recursive:true,mode:0o700}),mkdir(runtimeDirectory,{recursive:true}),...(collaborationCase?[mkdir(join(root,'app-data'),{recursive:true})]:[])])
+  receipt.identityBefore=await identity();receipt.sourceCommit=collaborationCase?JSON.parse(await readFile(process.env.AGENTMUX_COLLABORATION_BUILD,'utf8')).candidate:(await exec('git',['rev-parse','HEAD'],{cwd:qualificationRoot})).stdout.trim()
   if (privateApp) receipt.verifierCommit=(await exec('git',['rev-parse','HEAD'],{cwd:repositoryRoot})).stdout.trim()
   server=createServer((request,response)=>{
     if(privateScenario?.handlePrivateRequest(request,response,receipt))return
@@ -963,9 +985,12 @@ try {
   })
   await new Promise((done,fail)=>{server.once('error',fail);server.listen(0,'127.0.0.1',done)})
   const address=server.address();assert.ok(address&&typeof address==='object');const urls=['a','b'].map(path=>`http://127.0.0.1:${address.port}/${path}`)
-  await writeFile(join(userData,'agentmux.config.json'),JSON.stringify({version:9,hosts:[{id:'local',kind:'local',label:'Private local'}],executors:{},workspaces:[{id:workspaceId,name:workspaceName,hostId:'local',path:workspacePath,kind:'folder'}],appearance:{terminalTheme:'graphite'},browser:{agentAutomation:true,toolbar:{selectElement:true,screenshot:true,devTools:true,viewport:true,saveBookmark:true,more:true}},notifications:{mode:'off'}}))
+  await writeFile(join(userData,'agentmux.config.json'),JSON.stringify({version:9,hosts:[{id:'local',kind:'local',label:'Private local'}],executors:collaborationCase?{collaboration:{label:'Recovery collaborator',providerId:'codex',command:join(coreRoot,'test/fixtures/fake-codex-cli.mjs'),args:[],injectAgentMuxGuide:false,env:{AGENTMUX_FAKE_READY_MODE:'working-until-resume',AGENTMUX_FAKE_NATIVE_RECORD:'1',AGENTMUX_FAKE_NATIVE_RECORD_DIRECTORY:join(codexHome,'sessions'),AGENTMUX_FAKE_NATIVE_PRESERVE:'1',AGENTMUX_FAKE_NATIVE_CONTEXT:'Original retained Browser collaboration conversation'}}}:{},workspaces:[{id:workspaceId,name:workspaceName,hostId:'local',path:workspacePath,kind:'folder'}],appearance:{terminalTheme:'graphite'},browser:{agentAutomation:true,agentControl:{showDiscussion:false},toolbar:{selectElement:true,screenshot:true,devTools:true,viewport:true,saveBookmark:true,more:true}},notifications:{mode:'off'}}))
   first=await launch('first');phase='create-actual-browser-split'
-  if(privateScenario) {
+  if(collaboration){
+    await collaboration.reviewCollaboration({...scenarioContext(first,null,urls[0]),workspaceId,runtimeDirectory,privateHome,state,launch,normalQuit,
+      retainSecond:probe=>{second=probe}})
+  } else if(privateScenario) {
     await privateScenario.reviewPrivate({ ...scenarioContext(first,null,urls[0]), privateCrash, privateVisual, workspaceId, runtimeDirectory, privateHome,
       state, launch, normalQuit,
       retainSecond: probe => {second=probe},
@@ -1049,6 +1074,10 @@ try {
 } catch(error) {
   failure={phase,message:error.message,stack:error.stack,...(error.privateCdp ? { privateCdp: error.privateCdp } : {})};const active=second??first
   if(active&&active.child.exitCode===null&&active.child.signalCode===null){try{receipt.failureWorkbench=await state(active.cdp);receipt.failureDom=await active.cdp.evaluate('document.body.innerText.slice(-5000)')}catch(error){receipt.diagnosticError=error.message}}
+  if(collaborationCase){
+    receipt.failureOwnerLogs={}
+    for(const name of ['agentmux-host.log','crash-log.ndjson'])try{receipt.failureOwnerLogs[name]=(await readFile(join(userData,name),'utf8')).slice(-32768)}catch(error){receipt.failureOwnerLogs[name]={code:error.code??null}}
+  }
 } finally {
   const errors=[]
   try{await rpc.dispose()}catch(error){errors.push(error.message)}
