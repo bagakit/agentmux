@@ -144,9 +144,9 @@ vi.mock('electron', () => ({
 // This suite owns manager/runner/dispatch wiring. Native hit-testing and CDP
 // coexistence are exercised by verify-browser-agent-input-isolation.mjs.
 vi.mock('../src/main/browser-native-input-shield.js', () => ({ BrowserNativeInputShield: class {
-  ready = Promise.resolve()
+  prepare = () => Promise.resolve()
   isolated = true
-  view = { webContents: { on() {}, focus() {}, isDestroyed: () => false, mainFrame: { framesInSubtree: [] } } }
+  view = { webContents: { on() {}, once() {}, focus() {}, isDestroyed: () => false, mainFrame: { framesInSubtree: [] } } }
   contents = this.view.webContents
   synchronize() {}
   dispose() { this.isolated = false }
