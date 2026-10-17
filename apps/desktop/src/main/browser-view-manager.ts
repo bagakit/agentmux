@@ -9,7 +9,7 @@ import { parseBrowserOutcomeCriteriaRequest, type BrowserOutcomeEvaluation, type
 import { randomUUID } from 'node:crypto'
 import { BaseWindow, session, WebContentsView, type BrowserWindow, type WebContents, type WebFrameMain, type Session } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { BROWSER_PAGE_CAPABILITY_NAMES, BROWSER_PAGE_MUTATING_CAPABILITY_NAMES, browserPageCapabilityNames, type AgentMuxBrowserMode, type AgentMuxBrowserTarget, type AgentMuxBrowserRetention, type AgentMuxBrowserRetentionReason, type AgentMuxBrowserReleaseReceipt } from '@agentmux/core'
+import { BROWSER_PAGE_CAPABILITY_NAMES, BROWSER_PAGE_MUTATING_CAPABILITY_NAMES, browserPageCapabilityNames, type AgentMuxBrowserMode, type AgentMuxBrowserTarget, type AgentMuxBrowserRetention, type AgentMuxBrowserRetentionReason, type AgentMuxBrowserControl, type AgentMuxBrowserReleaseReceipt } from '@agentmux/core'
 import {
   BROWSER_EVENT_CHANNEL,
   BROWSER_PRESENTATION_EVENT_CHANNEL,
@@ -41,6 +41,7 @@ import type { BrowserInputHistoryScope } from '../shared/browser-input-history.j
 import { showBrowserOperationFeedback, type BrowserOperationFeedback } from './browser-operation-feedback.js'
 import { installTextEditContextMenu } from './text-edit-context-menu.js'
 import { BrowserCdpSession } from './browser-cdp-session.js'
+import { BrowserNativeInputShield } from './browser-native-input-shield.js'
 import { cancelBrowserWebAuthnAccounts, registerBrowserWebAuthnAccounts, type BrowserWebAuthnOwner } from './browser-webauthn-accounts.js'
 import { cancelBrowserWebAuthnAccess, registerBrowserWebAuthnAccess } from './browser-webauthn-access.js'
 import { browserPngFromBytes, browserPngFromNativeImage } from './browser-image.js'
@@ -130,6 +131,9 @@ type BrowserEntry = {
   humanControl: boolean
   activeRun: { operationId: string; stop: () => void } | undefined
   runInFlight: boolean
+  controlRevision: number
+  inputShield?: BrowserNativeInputShield | undefined
+  inputIsolation: AgentMuxBrowserControl['inputIsolation']
   feedbackRevision: number
   feedback?: BrowserOperationFeedback
   demonstration?: BrowserDemonstrationState
@@ -162,6 +166,7 @@ type PresentationFirstPress = {
   source: WebContentsView
   capture: PresentationCapture
   navigationId: string
+  controlRevision: number
   sourceBounds: BrowserBounds
   sourceInputLeaseId: string | null
   geometry: BrowserPresentationGeometry
@@ -271,7 +276,7 @@ export interface AppLinkHost {
 }
 
 export const DEFAULT_BROWSER_ZOOM_FACTOR = 0.9
-export interface NativeBrowserOwner { browserId: string; bounds: BrowserBounds; view: WebContentsView }
+export interface NativeBrowserOwner { browserId: string; bounds: BrowserBounds; view: WebContentsView; inputShield?: WebContentsView }
 export type NativeBrowserPageInput = { type: 'pointer'; event: Electron.MouseInputEvent } | { type: 'escape' }
 const BROWSER_SELECTION_TIMEOUT_MS = 120_000
 // Standalone observations have no script worker deadline. End only this first-document
@@ -344,6 +349,7 @@ export class BrowserViewManager {
     const available = !contents.isDestroyed()
     const workspaceId = entry.workspaceId
     return { id: entry.id, workspaceId, source: 'embedded', mode: entry.storage.mode, status: available ? 'ready' : 'unavailable',
+      control: this.controlState(entry),
       url: available ? contents.getURL() : '', title: available ? contents.getTitle().slice(0, 512) : '',
       navigationId: entry.navigationId,
       capabilities: workspaceId ? [...BROWSER_PAGE_CAPABILITY_NAMES] : BROWSER_PAGE_CAPABILITY_NAMES.filter(name =>
@@ -595,15 +601,17 @@ export class BrowserViewManager {
     const lease = this.requirePresentationLease(sender, frame, leaseId)
     const entry = lease.entry
     const unconfirmed = (reason: Extract<BrowserPresentationActivationReceipt, { outcome: 'input-unconfirmed' }>['reason'],
-      message: string): BrowserPresentationActivationReceipt => ({ outcome: 'input-unconfirmed', reason, message })
+      message: string): Extract<BrowserPresentationActivationReceipt, { outcome: 'input-unconfirmed' }> => ({ outcome: 'input-unconfirmed', reason, message })
     if (activation?.kind === 'select') {
       if (activation.focus !== undefined && activation.focus !== 'preserve') throw new Error('Unknown Browser presentation focus policy')
       if (!lease.geometry.visible) return unconfirmed('hidden', 'This Browser presentation is hidden. The original page remains available.')
+      if (this.agentOwnsInput(entry)) return unconfirmed('agent-control-active', 'An Agent program owns the original Browser viewport. This live preview remains readable; take control explicitly before moving its native input owner.')
       entry.firstPress = null
       this.selectPresentation(lease, activation.focus !== 'preserve')
       return { outcome: 'selected' }
     }
     if (activation?.kind === 'prepare-first-press') {
+      if (this.agentOwnsInput(entry)) return unconfirmed('agent-control-active', 'An Agent program owns this Browser. Use explicit Take control before interacting with the page.')
       this.validatePresentationPoint(activation.down)
       this.validatePresentationModifiers(activation.modifiers)
       if (!['left', 'middle', 'right'].includes(activation.button) || ![1, 2].includes(activation.clickCount)) {
@@ -618,7 +626,7 @@ export class BrowserViewManager {
       if (!capture || capture.id !== activation.captureId || capture.document !== lease.document || !capture.trackIds ||
         !this.isPresentationCaptureCurrent(capture)) return unconfirmed('capture-changed', 'The displayed Browser frame is no longer authorized. The original page remains available.')
       const press: PresentationFirstPress = {
-        id: randomUUID(), lease, source: entry.view, capture, navigationId: entry.navigationId,
+        id: randomUUID(), lease, source: entry.view, capture, navigationId: entry.navigationId, controlRevision: entry.controlRevision,
         sourceBounds: entry.bounds, sourceInputLeaseId: entry.inputLeaseId,
         geometry: lease.geometry, zoom: entry.view.webContents.getZoomFactor(), viewport: entry.viewport,
         down: { ...activation.down }, button: activation.button, clickCount: activation.clickCount,
@@ -643,7 +651,7 @@ export class BrowserViewManager {
     if (press.state === 'dispatched') return press.result?.outcome === 'input-dispatched'
       ? { outcome: 'already-dispatched', inputScopeId: press.id } : press.result!
     const invalid = this.presentationFirstPressInvalid(press)
-    if (invalid) { press.state = 'cancelled'; return press.result = invalid }
+    if (invalid) { press.state = 'cancelled'; return press.result = { ...invalid, inputDispatch: 'not-started' } }
     // Consume BEFORE transport. A duplicate IPC cannot dispatch this gesture twice.
     press.state = 'dispatching'
     const contents = press.source.webContents
@@ -664,15 +672,17 @@ export class BrowserViewManager {
       contents.sendInputEvent({ type: 'mouseDown', x: Math.floor(press.down.x * press.sourceBounds.width),
         y: Math.floor(press.down.y * press.sourceBounds.height), button: press.button,
         clickCount: press.clickCount, modifiers: [...press.modifiers] })
+      const afterDown = this.presentationFirstPressInvalid(press)
+      if (afterDown) return press.result = { ...afterDown, inputDispatch: 'press-sent' }
       contents.sendInputEvent({ type: 'mouseUp', x: Math.floor(activation.up.x * press.sourceBounds.width),
         y: Math.floor(activation.up.y * press.sourceBounds.height), button: press.button,
         clickCount: press.clickCount, modifiers: [...activation.modifiers] })
-      if (!await observedUp) return press.result = unconfirmed('input-dispatch-failed', 'Browser input delivery could not be confirmed. The healthy original page remains in place; do not replay automatically.')
+      if (!await observedUp) return press.result = { ...unconfirmed('input-dispatch-failed', 'Browser input delivery could not be confirmed. The healthy original page remains in place; do not replay automatically.'), inputDispatch: 'gesture-sent' }
       // A transport observation is not a page-effect acknowledgement. Give the ordered Native
       // input queue its turn before moving/resizing; the actual first-click counter verifies effects.
       await new Promise<void>(resolve => setImmediate(resolve))
       const changed = this.presentationFirstPressInvalid(press)
-      if (changed) return press.result = changed
+      if (changed) return press.result = { ...changed, inputDispatch: 'gesture-sent' }
       this.selectPresentation(lease)
       return press.result = { outcome: 'input-dispatched', inputScopeId: press.id }
     } catch {
@@ -694,9 +704,10 @@ export class BrowserViewManager {
     this.sendPresentation({ type: 'input-owner-changed', browserId: lease.entry.id, leaseId: lease.id })
   }
 
-  private presentationFirstPressInvalid(press: PresentationFirstPress): BrowserPresentationActivationReceipt | null {
+  private presentationFirstPressInvalid(press: PresentationFirstPress): Extract<BrowserPresentationActivationReceipt, { outcome: 'input-unconfirmed' }> | null {
     const entry = press.lease.entry
-    const fail = (reason: Extract<BrowserPresentationActivationReceipt, { outcome: 'input-unconfirmed' }>['reason'], message: string): BrowserPresentationActivationReceipt => ({ outcome: 'input-unconfirmed', reason, message })
+    const fail = (reason: Extract<BrowserPresentationActivationReceipt, { outcome: 'input-unconfirmed' }>['reason'], message: string): Extract<BrowserPresentationActivationReceipt, { outcome: 'input-unconfirmed' }> => ({ outcome: 'input-unconfirmed', reason, message })
+    if (entry.controlRevision !== press.controlRevision || this.agentOwnsInput(entry)) return fail('control-changed', 'Browser control changed after this gesture was prepared. No further input was dispatched; do not replay it.')
     if (entry.firstPress !== press || this.entries.get(entry.id) !== entry || entry.view !== press.source ||
       press.source.webContents.isDestroyed() || !this.isPresentationDocumentCurrent(press.lease.document)) return fail('source-changed', 'This Browser input source changed; no further input or transfer was attempted.')
     if (this.presentationLeases.get(press.lease.id) !== press.lease || !press.lease.geometry.visible) return fail('hidden', 'This Browser presentation is no longer visible.')
@@ -928,7 +939,8 @@ export class BrowserViewManager {
   nativeOwner(browserId: string, window?: BrowserWindow): NativeBrowserOwner | undefined {
     const entry = this.entries.get(browserId)
     if (!entry || window && this.windowForView(entry.view) !== window || !entry.visible || !entry.bounds || !this.owns(entry, entry.view) || entry.view.webContents.isDestroyed() || !entry.view.getVisible()) return
-    return { browserId, bounds: entry.view.getBounds(), view: entry.view }
+    return { browserId, bounds: entry.view.getBounds(), view: entry.view,
+      ...(entry.inputShield && !entry.inputShield.contents.isDestroyed() ? { inputShield: entry.inputShield.view } : {}) }
   }
 
   /** Resolve an actual attachment without interpreting its geometry, title or page DOM. */
@@ -941,9 +953,9 @@ export class BrowserViewManager {
   /** Actual OS owners, including out-of-process frames; a shared PID is reported only once. */
   resourceProcessIds(): number[] {
     const pids = new Set<number>()
-    for (const { view } of this.entries.values()) {
-      if (view.webContents.isDestroyed()) continue
-      for (const frame of view.webContents.mainFrame.framesInSubtree) {
+    for (const entry of this.entries.values()) for (const contents of [entry.view.webContents, ...(entry.inputShield ? [entry.inputShield.contents] : [])]) {
+      if (!contents || contents.isDestroyed()) continue
+      for (const frame of contents.mainFrame.framesInSubtree) {
         if (!frame.detached && frame.osProcessId > 0) pids.add(frame.osProcessId)
       }
     }
@@ -1165,6 +1177,8 @@ export class BrowserViewManager {
       humanControl: false,
       activeRun: undefined,
       runInFlight: false,
+      controlRevision: 0,
+      inputIsolation: 'inactive',
       feedbackRevision: 0,
       presentationLeaseIds: new Set(), captureId: null, inputLeaseId: null, firstPress: null,
       resourceRisk: new Set(), resourceDocumentConfirmed: false, resourceReads: 0, publishedRetention: null, releaseAttempt: null
@@ -1220,6 +1234,7 @@ export class BrowserViewManager {
   async navigate(id: string, rawUrl: string): Promise<BrowserSnapshot> {
     if (this.entries.get(id)?.releaseAttempt?.pending) await this.prepareForConsumption(id)
     const entry = this.require(id)
+    this.requireHumanInput(entry)
     void this.startNavigation(entry, rawUrl).catch(() => {})
     return this.snapshot(entry)
   }
@@ -1307,6 +1322,7 @@ export class BrowserViewManager {
 
   async back(id: string): Promise<BrowserSnapshot> {
     const entry = this.require(id)
+    this.requireHumanInput(entry)
     this.cancelPendingSwitchForNavigation(entry, new Error('Browser profile switch was superseded by navigation'))
     if (entry.view.webContents.navigationHistory.canGoBack()) {
       entry.view.webContents.navigationHistory.goBack()
@@ -1316,6 +1332,7 @@ export class BrowserViewManager {
 
   async forward(id: string): Promise<BrowserSnapshot> {
     const entry = this.require(id)
+    this.requireHumanInput(entry)
     this.cancelPendingSwitchForNavigation(entry, new Error('Browser profile switch was superseded by navigation'))
     if (entry.view.webContents.navigationHistory.canGoForward()) {
       entry.view.webContents.navigationHistory.goForward()
@@ -1325,6 +1342,7 @@ export class BrowserViewManager {
 
   async reload(id: string): Promise<BrowserSnapshot> {
     const entry = this.require(id)
+    this.requireHumanInput(entry)
     this.cancelPendingSwitchForNavigation(entry, new Error('Browser profile switch was superseded by reload'))
     entry.error = null
     entry.view.webContents.reload()
@@ -1333,6 +1351,7 @@ export class BrowserViewManager {
 
   async switchProfile(id: string, profileId: string): Promise<BrowserSnapshot> {
     const entry = this.require(id)
+    this.requireHumanInput(entry)
     if (entry.storage.mode === 'private') throw new Error('A private Browser cannot switch to a saved Profile. Open a new normal Browser instead.')
     const partition = this.resolvePartition(profileId)
     this.cancelPendingSwitch(entry, new Error('Browser profile switch was superseded'))
@@ -1372,6 +1391,7 @@ export class BrowserViewManager {
       ) {
         throw new Error('Browser profile switch was superseded')
       }
+      this.requireHumanInput(entry)
 
       const zoomFactor = authoritativeView.webContents.getZoomFactor()
       candidate.webContents.setZoomFactor(zoomFactor)
@@ -1422,7 +1442,11 @@ export class BrowserViewManager {
   }
 
   openDevTools(id: string): void {
-    this.require(id).view.webContents.openDevTools({ mode: 'detach', activate: true })
+    const entry = this.require(id)
+    // Opening this engine debugger detaches the active Agent CDP session and
+    // exposes a page-writing Console. Reading retained inspect data stays free.
+    this.requireHumanInput(entry)
+    entry.view.webContents.openDevTools({ mode: 'detach', activate: true })
   }
 
   usesProfile(profileId: string): boolean {
@@ -1435,6 +1459,7 @@ export class BrowserViewManager {
 
   setViewport(id: string, viewport: BrowserViewport): BrowserSnapshot {
     const entry = this.require(id)
+    this.requireHumanInput(entry)
     if (!isBrowserViewport(viewport)) throw new Error('Unknown browser viewport or invalid dimensions')
     const ownedViewport = cloneBrowserViewport(viewport)
     this.applyViewport(entry, entry.view, ownedViewport)
@@ -1600,7 +1625,7 @@ export class BrowserViewManager {
       throw error
     }
     entry.activity = { operation, control: 'agent' }
-    await entry.feedback?.clear('replace')
+    const previousFeedback = entry.feedback
     const feedbackView = entry.view
     const feedback = showBrowserOperationFeedback({ contents: feedbackView.webContents, operationId: operation.id,
       navigationId: () => entry.navigationId, operatorName: operation.operator.name,
@@ -1617,12 +1642,15 @@ export class BrowserViewManager {
       } })
     entry.feedback = feedback
     entry.driving = true
+    ++entry.controlRevision
+    entry.inputIsolation = 'preparing'
     entry.activeRun = {
       operationId: operation.id,
       stop: () => {
         if (stopRequested) return
         stopRequested = true
         entry.humanControl = true
+        ++entry.controlRevision
         entry.driving = false
         operation.phase = 'stopped'
         operation.summary = 'Browser operation stopped explicitly'
@@ -1630,11 +1658,15 @@ export class BrowserViewManager {
         operation.warning = 'The Browser operation was stopped explicitly. Earlier actions may have completed. Review the page, explicitly return control, then decide whether to start a fresh program.'
         entry.activity = { operation, control: 'human', warning: operation.warning }
         stopController.abort()
+        this.releaseInputShield(entry)
         void this.operationJournal?.setPhase(operation.id, 'stopped', { summary: operation.summary, warning: operation.warning })
         this.emit(entry)
       }
     }
     try {
+      this.emit(entry)
+      await this.prepareInputShield(entry, runView, operation.id, stopController.signal)
+      await previousFeedback?.clear('replace')
       await onOperationStarted?.(operation)
       if (!stopRequested) {
         operation.phase = 'running'
@@ -1784,14 +1816,17 @@ export class BrowserViewManager {
       return { result: undefined, logs: run.logs, outcome, runOperation: operation }
     } finally {
       stopController.abort()
+      // Release native human input as soon as program dispatch ends. Feedback,
+      // debugger cleanup and journal IO do not own the input lease.
+      entry.driving = false
+      if (entry.activeRun?.operationId === operation.id) { entry.activeRun = undefined; ++entry.controlRevision }
+      this.releaseInputShield(entry)
       await feedback.end(operation.phase === 'completed')
       const cleanupWarning = session.detach()
       if (cleanupWarning) {
         operation.warning ??= cleanupWarning
         entry.activity = { ...entry.activity, warning: entry.activity.warning ?? cleanupWarning }
       }
-      entry.driving = false
-      if (entry.activeRun?.operationId === operation.id) entry.activeRun = undefined
       entry.runInFlight = false
       if (this.operationJournal) {
         const finalPhase = operation.phase === 'completed' || operation.phase === 'failed' || operation.phase === 'indeterminate' || operation.phase === 'stopped'
@@ -1951,7 +1986,7 @@ export class BrowserViewManager {
       // `stop()` 刚改的就是 `entry.activity.operation` 指的那个对象（runScript 里同一个引用），
       // 所以这里读到的是最新的一份，不必等 stop 里那条 fire-and-forget 的 journal 写落盘。
       const stopped = entry.activity.operation
-      if (stopped?.id === operationId) return stopped
+      if (stopped?.id === operationId) return { ...stopped, control: this.controlState(entry) }
       break
     }
     // 不在飞：已结束或本就不认识。两者的答案都从 journal 来——不在这里维护第二份账。
@@ -1966,7 +2001,12 @@ export class BrowserViewManager {
    * journal 本来就是 advisory 的。
    */
   async getOperation(operationId: string): Promise<BrowserOperation | null> {
-    return this.operationJournal ? await this.operationJournal.get(operationId) : null
+    const operation = this.operationJournal ? await this.operationJournal.get(operationId) : null
+    if (!operation) return null
+    const entry = this.entries.get(operation.browserId)
+    return entry?.activity.operation?.id === operation.id ? { ...operation,
+      ...(entry.activity.operation.warning ? { warning: entry.activity.operation.warning } : {}),
+      control: this.controlState(entry) } : operation
   }
 
   async getStepEvidence(operationId: string, sequence: number): Promise<BrowserStepEvidenceRead> {
@@ -2349,6 +2389,8 @@ export class BrowserViewManager {
   private yieldControl(id: string): void {
     const entry = this.require(id)
     entry.humanControl = true
+    ++entry.controlRevision
+    this.releaseInputShield(entry)
     entry.driving = false
     entry.activity = { ...entry.activity, control: 'human' }
     this.emit(entry)
@@ -2356,7 +2398,10 @@ export class BrowserViewManager {
 
   returnControl(id: string): BrowserSnapshot {
     const entry = this.require(id)
+    if (this.agentOwnsInput(entry)) return this.snapshot(entry)
+    this.releaseInputShield(entry)
     entry.humanControl = false
+    ++entry.controlRevision
     const { warning: _warning, ...activity } = entry.activity
     entry.activity = { ...activity, control: 'agent' }
     this.emit(entry)
@@ -2388,6 +2433,7 @@ export class BrowserViewManager {
     taskPage?: BrowserTaskPageExecution,
     deadlineMillis = taskPage?.cursor.deadlineMillis ?? Infinity
   ): (name: string, args: unknown[]) => Promise<unknown> {
+    const controlRevision = entry.controlRevision
     let activeStep: BrowserOperationStep | null = null
     const waitingSteps = new Set<number>()
     let beforeWaiting: { phase: BrowserOperation['phase']; summary: string } | null = null
@@ -2409,7 +2455,7 @@ export class BrowserViewManager {
       // Only the Main control owner or this operation's cancellation can revoke dispatch.
       if (!step || !BROWSER_ACTION_PAGE_CALLS.has(step.method)) return
       if (signal?.aborted) throw new Error('This Browser operation stopped before dispatch.')
-      if (entry.humanControl) throw new Error('Human control is active. Return control explicitly before running a fresh program.')
+      if (entry.humanControl || entry.controlRevision !== controlRevision) throw new Error('Browser control changed. Return control explicitly before running a fresh program; the old program cannot resume.')
       if (activeRecoveryMayDispatch && !activeRecoveryMayDispatch()) throw new Error('This recovery attempt no longer has dispatch authority.')
       if (taskPage?.cursor.expectedNavigationId && entry.navigationId !== taskPage.cursor.expectedNavigationId) throw new Error('The selected condition document changed before dispatch.')
       if (taskPage?.cursor.deadlineMillis !== undefined && performance.now() >= taskPage.cursor.deadlineMillis) throw new Error('Task execution budget reached before page dispatch.')
@@ -2699,12 +2745,14 @@ export class BrowserViewManager {
   async selectElement(id: string, inspectTarget?: (revision: number, inspectionToken: string) => Promise<void>): Promise<BrowserElementSelection | null> {
     if (this.entries.get(id)?.releaseAttempt?.pending) await this.prepareForConsumption(id)
     const entry = this.require(id)
+    this.requireHumanInput(entry)
     const view = entry.view
     const pending = Symbol('initial document selection')
     entry.selectionOperation = pending
     try { await this.waitForInitialDocument(entry, view) }
     catch (error) { if (entry.selectionOperation === pending) entry.selectionOperation = null; throw error }
     if (entry.selectionOperation !== pending) return null
+    this.requireHumanInput(entry)
     const navigationId = entry.navigationId
     entry.selectionOperation = null
     const preflightRevision = ++entry.selectionRevision
@@ -2721,6 +2769,7 @@ export class BrowserViewManager {
     ) {
       return null
     }
+    this.requireHumanInput(entry)
     const operation = ++entry.selectionRevision
     const inspectionToken = randomUUID()
     entry.selectionOperation = operation
@@ -2874,7 +2923,11 @@ export class BrowserViewManager {
       if (becomingVisible) { this.synchronizeVisiblePage(entry, entry.view); this.emit(entry) }
       if (hostChanged) this.notifyNativeVisibility(previousWindow)
       if (becomingVisible || boundsChanged || hostChanged) this.notifyNativeVisibility(nativeWindow)
-    } finally { this.publishNativeCoverage(entry) }
+    } finally {
+      try { entry.inputShield?.synchronize() }
+      catch { this.releaseInputShield(entry); this.inputIsolationFailed(entry) }
+      this.publishNativeCoverage(entry)
+    }
   }
 
   /**
@@ -2957,6 +3010,7 @@ export class BrowserViewManager {
       this.cleanupReleasedOwner(released)
       return this.releasedEntries.delete(id)
     }
+    this.releaseInputShield(entry)
     this.cancelPendingSwitch(entry, new Error('Browser owner released during profile switch'))
     cancelBrowserWebAuthnAccounts(entry.view.webContents)
     cancelBrowserWebAuthnAccess(entry.view.webContents)
@@ -3028,7 +3082,7 @@ export class BrowserViewManager {
       contents.on('did-create-window', child => this.trackPrivatePopup(entry.id, storage, child))
     }
     installTextEditContextMenu(contents, () => this.windowForView(view), {
-      isCurrent: () => this.nativeOwner(entry.id)?.view === view,
+      isCurrent: () => this.nativeOwner(entry.id)?.view === view && !this.agentOwnsInput(entry),
       origin: () => view.getBounds()
     })
     contents.on('input-event', (_event, input) => {
@@ -3040,6 +3094,13 @@ export class BrowserViewManager {
     })
     contents.on('before-input-event', (event, input) => {
       if (input.type === 'keyDown') this.markResourceRisk(entry, view, 'document-used')
+      // Native keys may already be queued for the old focused page when its child
+      // shield takes focus. CDP key input bypasses this native boundary in Electron.
+      if (this.owns(entry, view) && this.agentOwnsInput(entry) && entry.inputShield?.isolated) {
+        event.preventDefault()
+        if (contents.isFocused()) entry.inputShield.contents.focus()
+        return
+      }
       // Only this real page's non-IME Escape may be consumed by its open containing float.
       // Electron Input.isComposing is authoritative; input-event keyboard modifiers are not.
       if (!this.onNativeInput || !this.owns(entry, view) || input.type !== 'keyDown' || input.key !== 'Escape' || input.isComposing) return
@@ -3223,6 +3284,7 @@ export class BrowserViewManager {
       }
       this.releasedEntries.set(entry.id, released)
       const cleanupErrors: unknown[] = []
+      this.releaseInputShield(entry)
       try { this.revokePresentationCapture(entry, 'source-released') } catch (error) { cleanupErrors.push(error) }
       if (entry.captureId) this.presentationCaptures.delete(entry.captureId)
       entry.captureId = null
@@ -3482,6 +3544,7 @@ export class BrowserViewManager {
       error: entry.error,
       driving: entry.driving,
       retention: this.retention(entry),
+      control: this.controlState(entry),
       ...(entry.demonstration ? { demonstration: entry.demonstration } : {}),
       ...(entry.taskAssets ? { taskAssets: entry.taskAssets } : {}),
       appLinkPrompt: entry.appLinkPrompt,
@@ -3499,9 +3562,95 @@ export class BrowserViewManager {
   private emit(entry: BrowserEntry): void {
     if (entry.activity.control === 'human' || ['waiting', 'failed', 'stopped', 'indeterminate'].includes(entry.activity.operation?.phase ?? '')) void entry.feedback?.clear()
     if (this.entries.get(entry.id) !== entry || entry.view.webContents.isDestroyed()) return
+    if (entry.activity.operation) entry.activity.operation.control = this.controlState(entry)
     const browser = this.snapshot(entry)
     entry.publishedRetention = JSON.stringify(browser.retention)
     this.send({ type: 'updated', browser })
+  }
+
+  private agentOwnsInput(entry: BrowserEntry): boolean { return entry.activeRun !== undefined && !entry.humanControl }
+
+  private requireHumanInput(entry: BrowserEntry): void {
+    if (!this.agentOwnsInput(entry)) return
+    throw Object.assign(new Error('An Agent program owns this Browser. Use explicit Take control before changing its page, navigation, Profile or execution Viewport.'),
+      { code: 'BROWSER_AGENT_CONTROL_ACTIVE' satisfies AgentMuxControlErrorCode })
+  }
+
+  private controlState(entry: BrowserEntry): AgentMuxBrowserControl {
+    return { owner: this.agentOwnsInput(entry) ? 'agent' : 'human',
+      activeOperationId: entry.activeRun?.operationId ?? null, revision: entry.controlRevision,
+      inputIsolation: entry.inputIsolation === 'isolated' && !entry.inputShield?.isolated ? 'unconfirmed' : entry.inputIsolation }
+  }
+
+  private async prepareInputShield(entry: BrowserEntry, view: WebContentsView, operationId: string, signal: AbortSignal): Promise<void> {
+    if (signal.aborted || !this.owns(entry, view) || !this.agentOwnsInput(entry)) return
+    if (entry.inputShield) {
+      this.releaseInputShield(entry)
+      if (entry.inputShield) { this.inputIsolationFailed(entry); return }
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined, abort: (() => void) | undefined
+    try {
+      const shield = new BrowserNativeInputShield(view, () => this.windowForView(view), () =>
+        this.owns(entry, view) && entry.activeRun?.operationId === operationId && !entry.humanControl, () => {
+        if (!this.owns(entry, view) || entry.activeRun?.operationId !== operationId) return
+        this.releaseInputShield(entry)
+        this.inputIsolationFailed(entry)
+      })
+      entry.inputShield = shield
+      shield.contents.on('input-event', (_event, input) => {
+        if (!this.agentOwnsInput(entry) || !['mouseDown', 'mouseMove', 'mouseEnter', 'mouseLeave'].includes(input.type)) return
+        const owner = this.nativeOwner(entry.id)
+        if (owner) this.onNativeInput?.(owner, { type: 'pointer', event: input as Electron.MouseInputEvent })
+      })
+      shield.contents.on('before-input-event', (event, input) => {
+        if (entry.inputShield !== shield || !this.agentOwnsInput(entry) || input.type !== 'keyDown' || input.key !== 'Escape' || input.isComposing) return
+        const owner = this.nativeOwner(entry.id)
+        if (owner && this.onNativeInput?.(owner, { type: 'escape' })) event.preventDefault()
+      })
+      shield.contents.on('render-process-gone', () => {
+        if (entry.inputShield !== shield || !this.agentOwnsInput(entry)) return
+        this.inputIsolationFailed(entry)
+      })
+      await Promise.race([shield.ready, new Promise<void>((resolve, reject) => {
+        abort = resolve
+        signal.addEventListener('abort', abort, { once: true })
+        timer = setTimeout(() => reject(new Error('Native input surface preparation was not confirmed')), 1500)
+      })])
+      if (signal.aborted || entry.inputShield !== shield || !this.agentOwnsInput(entry)) return
+      if (!shield.isolated) throw new Error('The original native input surface is not attached')
+      entry.inputIsolation = 'isolated'
+      this.emit(entry)
+    } catch {
+      this.releaseInputShield(entry)
+      if (!signal.aborted && this.owns(entry, view) && entry.activeRun?.operationId === operationId) this.inputIsolationFailed(entry)
+    } finally {
+      clearTimeout(timer)
+      if (abort) signal.removeEventListener('abort', abort)
+    }
+  }
+
+  private inputIsolationFailed(entry: BrowserEntry): void {
+    entry.inputIsolation = 'unconfirmed'
+    const warning = 'Native Browser input isolation is unconfirmed. The original page and Agent remain available; avoid interacting with this page and use Take control before editing. Start a fresh program after returning control to retry isolation.'
+    entry.activity = { ...entry.activity, warning }
+    if (entry.activity.operation && !entry.activity.operation.warning?.includes(warning)) entry.activity.operation.warning = [entry.activity.operation.warning, warning].filter(Boolean).join(' ')
+    // A failed native surface is already unknown here. Notification failure must
+    // not turn the still-healthy page/program into a failure; inspect retains the
+    // original operation, isolation fact and persistent warning for the next read.
+    try { this.emit(entry) } catch { /* Keep current owner facts even when this projection is unavailable. */ }
+  }
+
+  private releaseInputShield(entry: BrowserEntry): void {
+    try {
+      entry.inputShield?.dispose()
+      entry.inputShield = undefined
+      entry.inputIsolation = 'inactive'
+    } catch {
+      entry.inputIsolation = 'unconfirmed'
+      const warning = 'The original Browser input surface could not be fully released. The page and operation are retained; use Return to Agent to retry release, then inspect the page before starting a fresh program.'
+      entry.activity = { ...entry.activity, warning }
+      if (entry.activity.operation) entry.activity.operation.warning = [entry.activity.operation.warning, warning].filter(Boolean).join(' ')
+    }
   }
 
   private send(event: BrowserEvent): void {

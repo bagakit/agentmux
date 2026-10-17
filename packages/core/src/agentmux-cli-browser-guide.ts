@@ -5,7 +5,10 @@ const capabilityExamples = () => (['observe', 'act', 'wait'] as const)
 
 export const AGENTMUX_BROWSER_TARGET_GUIDE = `First inspect the exact Tab/Region and read its typed Browser id with
 \`amux space inspect --tab TAB\` or \`amux space inspect --region REGION\`.
-Use \`amux browser targets\` to discover original available Browser targets.
+Use \`amux browser targets\` to discover original available Browser targets and their host-owned
+\`control\` facts: owner, activeOperationId, revision and inputIsolation. A retained operation or
+Agent working status does not acquire webpage input. External targets report unsupported isolation;
+an AgentMux visual border cannot block human input in an external browser.
 Discovery reports coverage=complete or coverage=partial. A partial result cannot confirm that an unreturned page was removed.
 Use \`amux browser input inspect --host-id HOST --operation-id INPUT\` to read one original captured input scene and message digest.
 HOST is its capture owner and INPUT is its original input ID, independently of Browser operation IDs.
@@ -103,13 +106,17 @@ disconnect does not take the operation with it. Asking about an id we have no re
 successful answer of nothing, not a failure; stopping one that has already finished answers
 with its existing outcome.
 
-A person can take the page back at any time: a real click, keypress or scroll on that Browser
-hands ownership to them mid-run. Actions (click, fillInput, gotoUrl, js, cdp, …) are refused
-from that moment on; observation (snapshot, pageInfo, waitFor…) keeps working so the program
-can see where it left things. The page carries a badge while a program is driving it, and the
-Tab it sits in is marked too, so the takeover is a deliberate act, not a surprise — they can
-see which Browser you are in without switching to it. A subsequent \`browser run\` stays refused
-until the person explicitly chooses Return to Agent (or an equivalent handoff control).
+During an embedded Agent program, confirmed native input isolation keeps ordinary human click,
+hover, wheel, key/IME, paste and drop out of the webpage; these gestures never take control.
+Host navigation and execution Viewport changes require explicit Take control. Reading activity,
+editing an address draft and messaging the operator remain available. Isolation preparation or
+failure is reported separately; unconfirmed isolation is never a claim that input is blocked.
+Normal program completion releases isolation. Explicit Take control or Stop fences future actions
+on the original operation; Chromium actions already dispatched may still complete. Inspect the
+original receipt and page rather than replaying unknown effects. A subsequent \`browser run\`
+returns BROWSER_HUMAN_CONTROL_ACTIVE until the person explicitly chooses Return to Agent.
+Return releases control only; it never resumes or replays the old program. There is no public
+CLI return/approval flag: an Agent cannot impersonate that human handoff.
 
 Large JSON return values become a durable \`browser-result-artifact\` reference (8 MiB per value,
 64 MiB retained store). Small values up to 128 KiB, including undefined/null, return inline.

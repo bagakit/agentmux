@@ -324,6 +324,7 @@ export class ExternalBrowserBridge {
   get warning(): string | undefined { return this.persistenceWarning }
   list(): AgentMuxBrowserTarget[] {
     return [...this.targets.values()].map(row => ({ id: row.id, workspaceId: row.workspaceId, source: 'external', status: row.status,
+      control: { owner: 'unknown', activeOperationId: null, revision: 0, inputIsolation: 'unsupported' },
       url: row.url, title: row.title, navigationId: row.navigationId,
       capabilities: BROWSER_PAGE_CAPABILITY_NAMES.filter(name => !['download', 'readDownload'].includes(name)),
       cdpMethods: EXTERNAL_CDP_METHODS,
