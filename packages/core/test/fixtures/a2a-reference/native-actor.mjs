@@ -19,7 +19,7 @@ server.on('connection', (socket, request) => {
       respond(status()); return
     }
     if (request.method === 'queue/add') {
-      await appendFile(path('requests.jsonl'), JSON.stringify({ ...request, processId: process.pid, stateAtReceipt: state }) + '\n', { mode: 0o600 })
+      await appendFile(path('requests.jsonl'), JSON.stringify({ ...request, processId: process.pid, stateAtReceipt: state, nativeStatus: status() }) + '\n', { mode: 0o600 })
       if (lostAcknowledgement === 'lost') { socket.close(); return }
       respond({ queuedSubmissionId: 'queued-' + request.params.clientUserMessageId }); return
     }
