@@ -250,19 +250,14 @@ it('never transfers a user link receipt through Agent create re-entry or the ori
   expect(own.authorizedBy).toEqual({ kind: 'agent', id: 'operator' }); expect(own.state).toBe('confirmed')
 }, 30_000)
 
-it('keeps later human profile drafts outside the enrolled Agent actor while retaining its own inspectable operations', async () => {
+it('retires old profile writes while retaining independent enrolled Agent access', async () => {
   const f = await fixture(); await saveOriginal(f)
-  const humanInput = { operationId: 'human-profile', connectionId: f.input.connectionId, expectedConnectionRevision: 1, desired: { name: 'private-human-profile-draft' } }
-  const human = await f.human.call('connection.profile.sync', humanInput)
-  expect(human.desired.name).toBe('private-human-profile-draft')
-  const inspected = await f.cli(['connection', 'profile', 'inspect', '--operation-id', humanInput.operationId])
-  expect(inspected.code).not.toBe(0); expect(inspected.stdout + inspected.stderr).not.toContain('private-human-profile-draft')
-  expect(result(await f.cli(['connection', 'profile', 'ls', '--connection', f.input.connectionId])).operations).toEqual([])
-  const own = result(await f.cli(['connection', 'profile', 'sync', '--input', '-'], { ...humanInput, operationId: 'agent-profile', desired: { name: 'Agent original profile' } }))
-  expect(result(await f.cli(['connection', 'profile', 'inspect', '--operation-id', 'agent-profile'])).operation).toEqual(own)
-  expect(result(await f.cli(['connection', 'profile', 'ls', '--connection', f.input.connectionId])).operations).toEqual([own])
-  expect((await f.human.call('connection.profile.inspect', { operationId: humanInput.operationId })).operation).toEqual(human)
-}, 30_000)
+  const denied = await f.cli(['connection', 'profile', 'sync', '--input', '-'], {operationId:'removed-write',connectionId:f.input.connectionId,expectedConnectionRevision:1,desired:{name:'Do not send'}})
+  expect(denied.code).not.toBe(0)
+  expect((await f.cli(['connection','profile','advance','--operation-id','removed-write'])).code).not.toBe(0)
+  expect(result(await f.cli(['connection','profile','ls','--connection',f.input.connectionId])).operations).toEqual([])
+  expect(result(await f.cli(['connection','ls'])).connections).toHaveLength(1)
+}, 30000)
 
 it('compiled binding discovery filters another actor bot even when that actor bound the same original Session', async () => {
   const { roomBindingFixture } = await import('../../connectors/test/fixtures/room-binding.js')

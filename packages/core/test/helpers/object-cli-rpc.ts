@@ -84,7 +84,7 @@ export function objectCliSeed(method: string, input: string): string[] {
   const fixed: Record<string, string[]> = {
     'runtime.network.inspect': ['--runtime', 'runtime-original', '--owner', 'owner-original'],
     'space.mote.connection.create': ['--input', '-'], 'space.mote.connection.sync': ['--input', '-'], 'space.mote.connection.advance': ['--operation-id', 'mote-original'], 'space.mote.connection.inspect': ['--operation-id', 'mote-original'], 'space.mote.connection.ls': ['--input', '-'],
-    'connection.profile.get': ['--connection', 'profile-connection', '--revision', '1'], 'connection.profile.sync': ['--input', '-'], 'connection.profile.advance': ['--operation-id', 'profile-original'], 'connection.profile.inspect': ['--operation-id', 'profile-original'], 'connection.profile.ls': ['--connection', 'profile-connection'],
+    'connection.profile.get': ['--connection', 'profile-connection', '--revision', '1'], 'connection.profile.inspect': ['--operation-id', 'profile-original'], 'connection.profile.ls': ['--connection', 'profile-connection'],
     'connection.enrollment.begin': ['--input', '-'], 'connection.enrollment.advance': ['--operation-id', 'enroll-original'], 'connection.enrollment.inspect': ['--operation-id', 'enroll-original'], 'connection.enrollment.ls': [],
     'connection.setup.begin': ['--input', '-'], 'connection.setup.advance': ['--input', '-'], 'connection.setup.inspect': ['--operation-id', 'setup-original'], 'connection.setup.ls': ['--connection', 'setup-connection'],
     'connection.service.get': [], 'connection.service.configure': ['--input', '-'], 'connection.service.inspect': ['--operation-id', 'service-original'],
