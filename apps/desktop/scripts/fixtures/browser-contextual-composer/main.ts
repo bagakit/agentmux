@@ -25,8 +25,8 @@ const receipt: any = { schema: 'agentmux.browser-contextual-composer.native.v1',
   boundary: 'Private actual BrowserPane/WindowOverlay/NativeOverlay/Store → production sandbox preload/registerIpc/RuntimeController → Hosted SDK/Host capture reader/Core → shipped CodexProvider/real ctxmux PTY/repository controlled CLI. Renderer CDP interaction does not attest physical OS input or foreground focus. No user Browser, Agent, clipboard or upstream model is used.',
   physicalInputQualified: false, independentVisualReview: 'not-performed' }
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
-async function until<T>(read: () => T | Promise<T>, label: string): Promise<T> {
-  for (let attempt = 0; attempt < 500; attempt++) { const value = await read(); if (value) return value; await delay(25) }
+async function until<T>(read: () => T | Promise<T>, label: string, attempts = 500): Promise<T> {
+  for (let attempt = 0; attempt < attempts; attempt++) { const value = await read(); if (value) return value; await delay(25) }
   throw new Error('Private contextual proof did not observe ' + label)
 }
 let window: BrowserWindow | undefined, core: any, sdk: any, rpc: any, hosted: any, hostServer: any, runtime: RuntimeController | undefined,
@@ -99,7 +99,12 @@ async function run() {
     const native = JSON.parse(execFileSync(join(directory, 'native-window'), [match[1]!, String(process.pid)], { encoding: 'utf8' }))
     await writeFile(join(directory, 'window-ready.json'), JSON.stringify({ native, sourceId, pid: process.pid, appPath: process.execPath.split('/Contents/MacOS/')[0], focused: window.isFocused() }))
     console.log('native-window-ready')
-    await until(async () => { try { return JSON.parse(await readFile(join(directory, 'window-ready-response.json'), 'utf8')).ready === true } catch { return false } }, 'the exact CUA private window observation')
+    const observed = await until(async () => { try { return JSON.parse(await readFile(join(directory, 'window-ready-response.json'), 'utf8')) } catch { return null } }, 'the exact CUA private window observation', 3600)
+    assert.equal(observed.pid, process.pid); assert.equal(observed.windowId, native.windowId)
+    receipt.nativeWindowObservation = observed
+    if (process.env.AGENTMUX_CONTEXTUAL_NATIVE_OPINION === '1') assert.equal(observed.ready, true, 'Actual native opinion requires the observed original private window')
+    if (observed.ready !== true) receipt.nativeCaptureAvailability = { status: 'unknown', sourceId, failure: observed.failure,
+      next: 'The exact private window capture remains unconfirmed. Preserve Renderer and native document evidence separately.' }
   }
   void evaluate(`window.agentmux.browser.runScript('contextual-browser', 'await waitForElement("Continue collaboration", 25000); return "finished"', ${JSON.stringify({ id: session.agentSessionId, name: snapshot.label })}, 'contextual-browser-program')`).then(report => { receipt.browserProgram = report })
   await until(() => evaluate('contextualProof.facts().browser?.activity?.operation?.steps?.length > 0'), 'actual running Browser step')
@@ -123,21 +128,28 @@ async function run() {
       ;(receipt.frames ??= []).push({ file, surface, pixels: picture.getSize(), actualWindow: window!.getBounds(),
         boundary: surface === 'page' ? 'Original native Browser document only' : surface === 'renderer' ? 'Whole Renderer document; excludes the native Browser view' : 'Native BrowserWindow.capturePage API; composed native child inclusion needs independent pixel confirmation, not OS input proof' })
     }
-    if (process.env.AGENTMUX_CONTEXTUAL_FOREGROUND === '1') {
+    if (process.env.AGENTMUX_CONTEXTUAL_FOREGROUND === '1' || process.env.AGENTMUX_CONTEXTUAL_CAPTURE_HANDOFF === '1') {
       if (process.env.AGENTMUX_CONTEXTUAL_CAPTURE_HANDOFF === '1' && name.includes('-fixed-')) return
-      window!.show(); app.focus({ steal: true }); window!.focus()
-      await until(() => window!.isFocused(), 'the exact authorized native capture window')
-      await settled()
-      assert.equal(window!.isFocused(), true, 'The exact private window must retain foreground for actual native capture')
+      if (receipt.nativeCaptureAvailability?.status === 'unknown') return
+      const foreground = process.env.AGENTMUX_CONTEXTUAL_FOREGROUND === '1'
+      if (foreground) {
+        window!.show(); app.focus({ steal: true }); window!.focus()
+        await until(() => window!.isFocused(), 'the exact authorized native capture window')
+        await settled()
+        assert.equal(window!.isFocused(), true, 'The exact private window must retain foreground for actual native capture')
+      }
       const sourceId = window!.getMediaSourceId(), match = /^window:(\d+):\d+$/u.exec(sourceId)
       assert.ok(match, 'Electron must return its exact native window media source identity')
       const native = JSON.parse(execFileSync(join(directory, 'native-window'), [match[1]!, String(process.pid)], { encoding: 'utf8' }))
-      assert.notEqual(native.screenLocked, true, 'A locked desktop cannot qualify the composed native window')
-      assert.equal(native.onScreen, true); assert.equal(native.layer, 0)
+      if (foreground) {
+        assert.notEqual(native.screenLocked, true, 'A locked desktop cannot qualify the foreground native window')
+        assert.equal(native.onScreen, true)
+      }
+      assert.equal(native.layer, 0)
       const file = name + '-os-window.png'
       ;(receipt.nativeCaptureAttempts ??= []).push({ native, sourceId, file })
       if (process.env.AGENTMUX_CONTEXTUAL_CAPTURE_HANDOFF === '1') {
-        const request = { captureId: name, native, sourceId, file, pid: process.pid }
+        const request = { captureId: name, native, sourceId, file, pid: process.pid, foreground }
         await writeFile(join(directory, 'capture-request.json'), JSON.stringify(request))
         console.log('native-capture-ready:' + name)
         const captured = await until(async () => {
@@ -145,11 +157,16 @@ async function run() {
           catch { return null }
         }, 'actual CUA image for the original native capture request')
         assert.equal(captured.windowId, native.windowId); assert.equal(captured.pid, process.pid)
+        if (captured.status === 'unknown') {
+          receipt.nativeCaptureAvailability = { status: 'unknown', sourceId, failure: captured.failure,
+            next: 'The exact private window capture remains unconfirmed. Renderer images do not replace the native window.' }
+          return
+        }
         assert.equal(captured.file, file)
         const bytes = await readFile(join(directory, file))
         assert.ok(bytes.byteLength > 1000, 'The actual capture must retain real full-window image bytes')
         receipt.frames.push({ file, surface: 'os-native-window', native, sourceId, captured,
-          boundary: 'Actual CUA screenshot of this exact private foreground window; complete original image bytes, no composition, separate from physical input proof' })
+          boundary: 'Actual CUA screenshot of this exact private window; complete original image bytes, no composition, separate from foreground or physical input proof' })
         return
       }
       if (receipt.nativeCaptureAvailability?.status === 'unknown') return

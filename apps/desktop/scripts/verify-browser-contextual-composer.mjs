@@ -13,11 +13,11 @@ const baselineOnly = process.argv.includes('--baseline')
 const foreground = process.argv.includes('--foreground')
 const captureHandoff = process.argv.includes('--capture-handoff')
 const nativeOpinion = process.argv.includes('--native-opinion')
-const output = join(root, '.tmp/browser-agent-collaboration', foreground ? 'contextual-composer-foreground-proof' : 'contextual-composer-proof')
+const output = join(root, '.tmp/browser-agent-collaboration', foreground ? 'contextual-composer-foreground-proof' : captureHandoff ? 'contextual-composer-capture-proof' : 'contextual-composer-proof')
 assert.ok(process.argv.slice(2).every(arg => ['--baseline', '--foreground', '--capture-handoff', '--native-opinion'].includes(arg)), 'Unsupported contextual proof argument')
-assert.ok(!captureHandoff || foreground, 'External native capture needs the explicit foreground mode')
 assert.ok(!nativeOpinion || captureHandoff, 'The actual OS opinion uses the external native handoff')
-assert.ok(!foreground || process.platform === 'darwin', 'Exact native foreground capture currently uses the macOS window source')
+assert.ok(!nativeOpinion || foreground, 'Actual OS opinion input needs the explicit foreground mode')
+assert.ok(!(foreground || captureHandoff) || process.platform === 'darwin', 'Exact native capture currently uses the macOS window source')
 await mkdir(output, { recursive: true })
 const hash = bytes => createHash('sha256').update(bytes).digest('hex'), sources = new Map()
 const receipt = { schema: 'agentmux.browser-contextual-composer.proof.v1', passed: false, diagnostic: baselineOnly,
@@ -158,11 +158,11 @@ async function native(label, mutation) {
     Object.assign(env, { AGENTMUX_CONTEXTUAL_ROOT: directory, AGENTMUX_CONTEXTUAL_SOURCE: root,
       AGENTMUX_RUNTIME_DIRECTORY: join(directory, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(directory, 'state'),
       AGENTMUX_AGENT_SESSION_STORE: join(directory, 'sessions.json'), AGENTMUX_MESSAGE_QUEUE_PATH: join(directory, 'messages.ndjson') })
-    if (foreground && !mutation) {
+    if ((foreground || captureHandoff) && !mutation) {
       const helper = join(root, 'apps/desktop/scripts/fixtures/browser-contextual-composer/native-window.swift')
       await bind(helper)
       execFileSync('/usr/bin/xcrun', ['swiftc', helper, '-o', join(directory, 'native-window')])
-      env.AGENTMUX_CONTEXTUAL_FOREGROUND = '1'
+      if (foreground) env.AGENTMUX_CONTEXTUAL_FOREGROUND = '1'
       if (captureHandoff) env.AGENTMUX_CONTEXTUAL_CAPTURE_HANDOFF = '1'
       if (nativeOpinion) env.AGENTMUX_CONTEXTUAL_NATIVE_OPINION = '1'
     }
