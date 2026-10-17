@@ -13,7 +13,7 @@ import { documentKey } from './workbench-tabs'
 export async function refreshTopicSpatial(): Promise<void> {
   const state = await api.spatial.read()
   if (!state) throw new Error('The original spatial state is not confirmed. Existing workfaces remain available.')
-  useAppStore.setState({ topicCategories: categoriesFromSpatial(state.graph), spaceZoneBindings: desktopBindingsFromSpatial(state.graph) })
+  useAppStore.setState({ topicCategories: categoriesFromSpatial(state.graph), spaceZoneBindings: desktopBindingsFromSpatial(state.graph, useAppStore.getState().config) })
 }
 export async function moveKnowledgeTopic(topic: KnowledgeTopic, categoryId: string): Promise<void> {
   const result = await api.topics.call('topic.move', { topicId: topic.topicId, categoryId, expectedRevision: topic.spatialRevision })

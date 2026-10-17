@@ -67,6 +67,10 @@ export type SpaceZoneBinding = {
   /** Topic content identity and confirmed resource path projected from the same Core Zone. */
   topicId?: string
   directoryPath?: string
+  /** Provenance for a default directory; not an override of the Core Zone's effective path. */
+  workspacePath?: string
+  /** Read projection of the Core Zone, not a second durable resource descriptor. */
+  resource?: Omit<AgentMuxZoneFact, 'zoneId' | 'workspaceId'>
   contentKind?: 'topic' | 'mote'
   /** Current effective relations on this same durable record. */
   relations?: Record<string, boolean>
@@ -140,12 +144,24 @@ export function spatialSources(config: AppConfig | null, topics: readonly Scratc
     const resourcePath = homePath ?? (originalHome && zoneId === homeZoneId(spaceId) && workspace?.id === SCRATCH_WORKSPACE_ID ? topicHomes.get(spaceId) ?? (
       Array.isArray(directoryContext) && directoryContext.length === 2 && directoryContext[0] === workspace.hostId &&
       typeof directoryContext[1] === 'string' && (directoryContext[1].startsWith('/') || /^[A-Za-z]:[\\/]/.test(directoryContext[1]) || directoryContext[1].startsWith('\\\\')) ? directoryContext[1] : undefined) : undefined)
-    const fact: AgentMuxZoneFact = workspace && (!originalHome || resourcePath) ? {
+    let fact: AgentMuxZoneFact = workspace && (!originalHome || resourcePath) ? {
       // A confirmed directory anchor changes the resource, not the Zone's original kind.
       zoneId, workspaceId, kind: resourcePath && originalHome ? 'home' : workspace.kind === 'worktree' ? 'worktree' : 'directory',
       hostId: workspace.hostId, directoryPath: resourcePath ?? workspace.path, branch: workspace.branch ?? null
     } : { zoneId, workspaceId, kind: 'unknown', hostId: null, directoryPath: null, branch: null,
       issue: 'The original Zone resource context is unavailable; its identity and bindings are retained.' }
+    const binding = bindings[zoneId]
+    const resource = binding?.workspaceId === workspaceId ? binding.resource : undefined
+    if (resource) {
+      // Only a confirmed default on the original Host follows a Workspace rebind.
+      // Explicit directories, unavailable facts and foreign Hosts retain the Core observation.
+      const followsWorkspace = binding!.directoryPath === undefined && !originalHome && workspace &&
+        resource.kind !== 'unknown' && resource.hostId === workspace.hostId && resource.directoryPath !== null
+      fact = { zoneId, workspaceId, ...resource, ...(followsWorkspace ? {
+        directoryPath: workspace.path, kind: workspace.kind === 'worktree' ? 'worktree' : 'directory',
+        branch: workspace.branch ?? null
+      } : {}) }
+    }
     const previous = zones.get(zoneId)
     if (previous && (previous.workspaceId !== workspaceId || previous.kind === 'home' && fact.kind === 'home' &&
       (previous.hostId !== fact.hostId || previous.directoryPath !== fact.directoryPath))) conflictingResources.add(zoneId)
