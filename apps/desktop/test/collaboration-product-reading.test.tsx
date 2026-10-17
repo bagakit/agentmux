@@ -43,7 +43,7 @@ function message(messageId: string, sender = 'agent-a', recipient = 'agent-b', b
 const graph = () => document.querySelector<HTMLElement>('.collaboration-map')!
 const bodyNode = () => graph().querySelector<HTMLElement>('.composer-mailbox__detail .log-turn__body')
 async function render(request: CollaborationMapTarget | null = original) {
-  await dom.render(<AgentCollaborationMap request={request} onClose={() => {}} onOpen={() => { throw Error('Reading must not navigate') }} />)
+  await dom.render(<AgentCollaborationMap request={request} onOpen={() => { throw Error('Reading must not navigate') }} />)
   if (request) await settleCollaborationCanvas(() => {
     expect(graph()?.querySelector('.collaboration-agent'), graph()?.textContent).not.toBeNull()
     expect(graph()?.textContent).not.toContain('Reading…')
@@ -57,7 +57,7 @@ async function clickText(text: string) {
 async function selectRelation(sender = 'Task A', recipient = 'Task B', kind?: string) {
   let button: HTMLButtonElement | undefined
   await settleCollaborationCanvas(() => {
-    button = [...graph().querySelectorAll<HTMLButtonElement>('.collaboration-relation')].find(node => (!kind || node.dataset.kind === kind) && node.querySelector('span')?.textContent === sender + ' → ' + recipient)
+    button = [...graph().querySelectorAll<HTMLButtonElement>('.collaboration-relation')].find(node => (!kind || node.dataset.kind === kind) && node.getAttribute('aria-label')?.startsWith(sender + ' → ' + recipient + ' · '))
     expect(button, graph().querySelector('.collaboration-inspector')?.textContent).toBeDefined()
   })
   await act(async () => button!.click())
@@ -137,7 +137,22 @@ it('keeps an already opened original body when the known map world grows', async
   await act(async () => useAppStore.setState({ sessions: [...sessions, composerSession('new-known-agent')] }))
   expect(bodyNode()).toBe(body); expect(getSelection()!.toString()).toBe(selected)
   expect(api.sessions.readMessage).toHaveBeenCalledTimes(1)
-  expect(graph().textContent).toContain('5 Agents')
+  expect(graph().querySelector('[aria-label="Map sources"]')?.getAttribute('title')).toContain('5 Agents')
+})
+
+it('retains the opened original message while inspecting its map sources', async () => {
+  await render(); await selectRelation(); await clickText('Read original message')
+  const body = bodyNode()!, source = graph().querySelector<HTMLButtonElement>('[aria-label="Map sources"]')!
+  expect(body).not.toBeNull()
+  await act(async () => source.click())
+  expect(bodyNode()).toBe(body); expect(body.closest('[hidden]')).not.toBeNull()
+  expect(api.sessions.readMessage).toHaveBeenCalledTimes(1)
+  expect(graph().querySelector('.collaboration-sources')).not.toBeNull()
+  await act(async () => source.click())
+  expect(bodyNode()).toBe(body); expect(body.closest('[hidden]')).toBeNull()
+  expect(api.sessions.readMessage).toHaveBeenCalledTimes(2)
+  expect(api.sessions.readMessage).toHaveBeenLastCalledWith(subject('agent-a'), 'message-a')
+  expect(graph().querySelector('.collaboration-endpoints')?.textContent).toContain('Task B')
 })
 
 it('retains the actual original body and selection while the document is hidden and resumes in place', async () => {
@@ -382,15 +397,15 @@ it('surfaces original catalogue failure with no selection and recovers through i
   await render()
   const card = graph().querySelector('.focus-context[data-session-id="agent-a"]')
   expect(card).not.toBeNull()
-  expect(graph().querySelector('.collaboration-map__footer')?.textContent).toContain('5 Agents')
+  expect(graph().querySelector('[aria-label="Map sources"]')?.getAttribute('title')).toContain('5 Agents')
   await act(async () => graph().querySelector<HTMLButtonElement>('[aria-label="Close map details"]')!.click())
   const inspector = graph().querySelector<HTMLElement>('.collaboration-inspector')!
   expect(inspector.hidden).toBe(true)
   await act(async () => graph().querySelector<HTMLButtonElement>('[aria-label="Refresh graph sources"]')!.click())
-  const sourceButton = graph().querySelector<HTMLButtonElement>('.collaboration-toolbar button[aria-expanded]')!
-  expect(sourceButton.textContent).toContain('Sources · 1')
-  expect(graph().querySelector('.collaboration-map__footer')?.textContent).toContain('Some sources unavailable')
-  expect(graph().querySelector('.collaboration-map__footer')?.textContent).toContain('5 Agents')
+  const sourceButton = graph().querySelector<HTMLButtonElement>('[aria-label="Map sources"]')!
+  expect(sourceButton.dataset.issue).toBe('true')
+  expect(graph().querySelector('[aria-label="Map sources"]')?.getAttribute('title')).toContain('1 source issues')
+  expect(graph().querySelector('[aria-label="Map sources"]')?.getAttribute('title')).toContain('5 Agents')
   expect(inspector.hidden).toBe(true)
   expect(graph().querySelector('.focus-context[data-session-id="agent-a"]')).toBe(card)
   expect(graph().querySelector<HTMLInputElement>('[aria-label="Find Agent in map"]')?.disabled).toBe(false)

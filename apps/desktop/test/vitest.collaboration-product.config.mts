@@ -4,6 +4,8 @@ import { createHash } from 'node:crypto'
 import { relative } from 'node:path'
 import shared from '../scripts/fixtures/agent-information-card/vitest.owning.config.mts'
 export const collaborationProductMutations = [
+  { name: 'keyboard-locate', file: 'components/CollaborationMapToolbar.tsx', before: 'locate(options[index].id)', after: 'setOpen(false)', assertion: 'uses keyboard search to explicitly locate an Agent and discloses sources without losing the selection' },
+  { name: 'source-reader-retention', file: 'components/AgentCollaborationMap.tsx', before: '<div hidden={sourcesOpen} inert={sourcesOpen}>', after: '<div key={String(sourcesOpen)} hidden={sourcesOpen} inert={sourcesOpen}>', assertion: 'retains the opened original message while inspecting its map sources' },
   { name: 'focus-entry', file: 'components/FocusToolbar.tsx', before: 'onClick={onOpenCollaboration}', after: 'onClick={() => {}}', assertion: 'locates the exact Focus Agent in the shared map and keeps the complete world and original draft' },
   { name: 'production-card', file: 'components/AgentCollaborationGraph.tsx', before: "agent.context && tier === 'active' && readable ? <FocusContextCardBody", after: 'false ? <FocusContextCardBody', assertion: 'locates the exact Focus Agent in the shared map and keeps the complete world and original draft' },
   { name: 'exact-workface', file: 'components/AgentCollaborationMap.tsx', before: 'onOpen(context, locations[0])', after: "onOpen({ ...context, id: 'wrong-workface' }, locations[0])", assertion: 'locates the exact Focus Agent in the shared map and keeps the complete world and original draft' },
