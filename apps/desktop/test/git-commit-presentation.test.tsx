@@ -74,17 +74,17 @@ function fileSummary() {
   return [...host.querySelectorAll('[aria-label="File change summary"] li')].map(item => item.textContent)
 }
 
-it('mounts the real details with a clean subject, restrained format, unchanged body and copyable full raw message', async () => {
+it('mounts one fully visible native message with a styled first line and exact selectable whitespace', async () => {
   const message = 'feat(core)!: Read fixed commit details\r\n\r\nKeep the first paragraph.\r\n\r\nBREAKING CHANGE: the old command is removed.\r\n  Preserve indentation.\r\n'
   await renderDetails(fixedCommit(message))
-  expect(host.querySelector('h2')?.textContent).toBe('Read fixed commit details')
+  expect(host.querySelector('[role="heading"]')?.textContent).toBe('feat(core)!: Read fixed commit details\r')
   expect([...host.querySelectorAll('.git-workbench__message-format > span')].map(item => item.textContent)).toEqual(['feat', 'core', 'Breaking change'])
   expect(host.querySelector('.git-workbench__message-body')).toBeNull()
   const raw = host.querySelector<HTMLPreElement>('.git-workbench__message')!
-  const disclosure = host.querySelector<HTMLDetailsElement>('.git-workbench__raw-message')!
   expect(raw.textContent).toBe(message)
-  expect(disclosure.open).toBe(true)
-  expect(disclosure.querySelector('summary')?.textContent).toBe('Full commit message')
+  expect(raw.closest('details')).toBeNull()
+  expect(host.querySelectorAll('.git-workbench__message')).toHaveLength(1)
+  expect(host.querySelectorAll('[role="heading"]')).toHaveLength(1)
   const range = document.createRange(); range.selectNodeContents(raw)
   window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range)
   expect(window.getSelection()!.toString()).toBe(message)
@@ -99,9 +99,9 @@ it.each([
   ['docs(reading): Explain the original message', 'Explain the original message', 'docs', 'reading', false],
   ['chore!: Remove the old flag', 'Remove the old flag', 'chore', null, true],
   ['custom-type(ui/core): Keep native scope', 'Keep native scope', 'custom-type', 'ui/core', false]
-] as const)('presents conventional subject %s without replacing the full message', async (message, heading, type, messageScope, breaking) => {
+] as const)('presents conventional subject %s without replacing the full message', async (message, _heading, type, messageScope, breaking) => {
   await renderDetails(fixedCommit(message))
-  expect(host.querySelector('h2')?.textContent).toBe(heading)
+  expect(host.querySelector('[role="heading"]')?.textContent).toBe(message)
   expect(host.querySelector('.git-workbench__message-format > span')?.textContent).toBe(type)
   expect(host.querySelector('[aria-label^="Scope:"]')?.textContent ?? null).toBe(messageScope)
   expect(Boolean(host.querySelector('.git-workbench__message-breaking'))).toBe(breaking)
@@ -120,7 +120,7 @@ it.each([
   '<img src="https://invalid.example/author.png" onerror="alert(1)">\n\n<script>alert(1)</script>\n![avatar](https://invalid.example/photo.png)'
 ])('keeps unknown, merge, revert and malformed text literal: %s', async message => {
   await renderDetails(fixedCommit(message))
-  expect(host.querySelector('h2')?.textContent).toBe(message.split('\n')[0])
+  expect(host.querySelector('[role="heading"]')?.textContent).toBe(message.split('\n')[0])
   expect(host.querySelector('.git-workbench__message-format')).toBeNull()
   expect(host.querySelector('.git-workbench__message')?.textContent).toBe(message)
   expect(host.querySelectorAll('img, script, iframe, a[href]')).toHaveLength(0)
@@ -135,15 +135,17 @@ it('leaves a footer-only breaking declaration readable without inventing a subje
   expect(host.querySelector('.git-workbench__message')?.textContent).toBe(message)
 })
 
-it('keeps a missing first line distinct from an empty message and resets raw disclosure for another commit', async () => {
+it('preserves a missing first line and empty message while resetting metadata disclosure for another commit', async () => {
   await renderDetails(fixedCommit('\nBody without a subject\n'))
-  expect(host.querySelector('h2')?.textContent).toBe('(No subject)')
+  expect(host.querySelector('[role="heading"]')?.textContent).toBe('')
   expect(host.querySelector('.git-workbench__message')?.textContent).toBe('\nBody without a subject\n')
   await act(async () => host.querySelector('summary')!.click())
+  expect(host.querySelector<HTMLDetailsElement>('details')!.open).toBe(true)
   const empty = fixedCommit(''); empty.commit.oid = 'd'.repeat(40); empty.snapshot.commitOid = empty.commit.oid
   await renderDetails(empty)
-  expect(host.querySelector('h2')?.textContent).toBe('(No commit message)')
-  expect(host.querySelector<HTMLDetailsElement>('details')!.open).toBe(true)
+  expect(host.querySelector('[role="heading"]')?.textContent).toBe('')
+  expect(host.querySelector<HTMLDetailsElement>('details')!.open).toBe(false)
+  expect(host.textContent).toContain('No commit message')
 })
 
 it('shows recorded author and committer differences, real timestamps and every reference without identity or network lookup', async () => {
@@ -211,6 +213,9 @@ it('counts actual file kinds for the fixed parent and passes the unchanged renam
   const rename = host.querySelector<HTMLButtonElement>('[aria-label="Open diff for src/renamed.ts"]')!
   expect(rename.getAttribute('aria-pressed')).toBe('true')
   expect(rename.title).toBe('src/original.ts → src/renamed.ts')
+  expect(rename.querySelector('.git-workbench__file-name')?.textContent).toBe('renamed.ts')
+  expect(rename.querySelector('small')?.textContent).toBe('src/')
+  expect(rename.querySelector('.git-workbench__file-origin')?.textContent).toBe('src/original.ts → src/renamed.ts')
   await act(async () => rename.click())
   expect(onSelectFile).toHaveBeenCalledExactlyOnceWith(result.entries[4])
   expect(onSelectFile.mock.calls[0]![0]).toBe(result.entries[4])
@@ -266,7 +271,7 @@ it('uses the production reader/bridge on parent change, never for formatting, di
   await vi.waitFor(() => expect(host.querySelector('.git-workbench__message')?.textContent).toBe(original.commit.message))
   expect(commitDetails).toHaveBeenCalledExactlyOnceWith(workspace.id, { oid: commitOid, parentOid: firstParent })
   await act(async () => {
-    host.querySelector('h2')!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+    host.querySelector('[role="heading"]')!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
     host.querySelector('summary')!.focus(); host.querySelector('summary')!.click()
   })
   expect(commitDetails).toHaveBeenCalledOnce()

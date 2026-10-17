@@ -67,10 +67,10 @@ afterEach(async () => {
   else Reflect.deleteProperty(document, 'visibilityState')
   vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
-function HistoryOwner({ workspace, visible }: { workspace: WorkspaceRecord; visible: boolean }) {
+function HistoryOwner({ workspace, visible, selectedOid }: { workspace: WorkspaceRecord; visible: boolean; selectedOid?: string }) {
   const history = useGitHistory(workspace, visible)
   controls = history
-  return createElement(GitHistoryPanel, { workspace, history, onSelectCommit: snapshot => fixture.state.openGitWorkbench(workspace.id, snapshot) })
+  return createElement(GitHistoryPanel, { workspace, history, selectedOid, onSelectCommit: snapshot => fixture.state.openGitWorkbench(workspace.id, snapshot) })
 }
 async function render(visible = true, value = workspace) { await act(async () => { root.render(createElement(HistoryOwner, { workspace: value, visible })) }) }
 async function click(label: string) {
@@ -83,6 +83,20 @@ async function select(value: string) {
 function rows() { return [...host.querySelectorAll('[data-history-oid]')].map(row => row.getAttribute('data-history-oid')) }
 
 describe('mounted GitHistoryPanel with production hook and bridge', () => {
+  it('emphasizes only the selected native OID without changing its edges, position or requesting Git again', async () => {
+    history.mockResolvedValue(page([commit(a, 'Merge topic', [b, c]), commit(b, 'First parent', [c]), commit(c, 'Root', [])]))
+    await act(async () => root.render(createElement(HistoryOwner, { workspace, visible: true, selectedOid: a })))
+    const edges = () => [...host.querySelectorAll('.git-history-parent')].map(edge => [edge.getAttribute('data-child-oid'), edge.getAttribute('data-parent-oid'), edge.getAttribute('d')])
+    const originalEdges = edges()
+    expect([...host.querySelectorAll('.git-history-node[data-selected="true"]')].map(node => node.getAttribute('data-commit-oid'))).toEqual([a])
+    await act(async () => root.render(createElement(HistoryOwner, { workspace, visible: true, selectedOid: b })))
+    expect([...host.querySelectorAll('[data-history-oid][aria-current="true"]')].map(row => row.getAttribute('data-history-oid'))).toEqual([b])
+    expect([...host.querySelectorAll('.git-history-node[data-selected="true"]')].map(node => node.getAttribute('data-commit-oid'))).toEqual([b])
+    expect(edges()).toEqual(originalEdges)
+    expect(host.querySelector(`[data-commit-oid="${b}"]`)?.getAttribute('cy')).toBe('36')
+    expect(history).toHaveBeenCalledExactlyOnceWith(workspace.id, { ref: null })
+  })
+
   it('keeps an unread hidden history pending until Git confirms repository status', async () => {
     history.mockResolvedValueOnce({ kind: 'not-a-git-repository', hostId: 'local', workspacePath: workspace.path })
     await render(false)
