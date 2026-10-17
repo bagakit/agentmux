@@ -3,6 +3,8 @@ import type { WebContents } from 'electron'
 import type { BrowserPageNode } from '../shared/contracts.js'
 import type { BrowserCdpSender } from './browser-page-snapshot.js'
 import { BROWSER_OPERATION_FEEDBACK_WORLD_NAME } from '../../browser-extension/protocol.js'
+import { DEFAULT_BROWSER_AGENT_CONTROL, type BrowserAgentControlPreferences } from '../shared/browser-agent-control.js'
+import { buildBrowserControlFeedbackScript } from './browser-control-feedback.js'
 export { BROWSER_OPERATION_FEEDBACK_WORLD_NAME }
 
 export const BROWSER_OPERATION_FEEDBACK_WORLD_ID = 1209
@@ -227,7 +229,7 @@ export function buildBrowserOperationTargetFeedbackDeclaration(): string {
 
 /** Read only our isolated-world ordering fact when its document outlives the client. */
 export function buildBrowserOperationFeedbackRevisionScript(): string {
-  return '(()=>{const value=globalThis.__agentMuxBrowserOperationFeedback?.revision;return Number.isSafeInteger(value)&&value>=0?value:0})()'
+  return '(()=>Math.max(...[globalThis.__agentMuxBrowserOperationFeedback?.revision,globalThis.__agentMuxBrowserControlFeedback?.revision].map(value=>Number.isSafeInteger(value)&&value>=0?value:0)))()'
 }
 
 type TargetContext = { send: BrowserCdpSender; id: number }
@@ -235,6 +237,7 @@ type FeedbackInput = {
   contents: Pick<WebContents, 'executeJavaScriptInIsolatedWorld' | 'isDestroyed'>
   operationId: string; navigationId(): string; operatorName: string
   nextRevision(): number; isCurrent(): boolean; warn(): void
+  preferences?(): BrowserAgentControlPreferences
 }
 
 /** One operation owns only its page and actually touched target document. */
@@ -247,7 +250,55 @@ export class BrowserOperationFeedback {
   private warned = false
   private token = ''
   private navigationId = ''
+  private controlSignature = ''
+  private controlMayExist = false
+  private controlRequest = 0
   constructor(private readonly input: FeedbackInput) {}
+  private async controlScript(code: string, active: boolean): Promise<boolean> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      const value = await Promise.race([
+        this.input.contents.executeJavaScriptInIsolatedWorld(BROWSER_OPERATION_FEEDBACK_WORLD_ID, [{ code }]),
+        new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('Control display deadline')), DISPLAY_BUDGET_MS) })
+      ])
+      if (active && value === false) throw new Error('Control feedback was unavailable')
+      return true
+    } catch { return false } finally { clearTimeout(timer) }
+  }
+  private warnControl(): void {
+    if (!this.warned) { this.warned = true; try { this.input.warn() } catch { /* Decoration cannot disable the page. */ } }
+  }
+  /** Retained only for this exact operation; waiting is still an input ownership fact. */
+  async synchronizeControl(force = false): Promise<void> {
+    if (this.input.contents.isDestroyed()) return
+    const active = this.input.isCurrent(), navigationId = this.input.navigationId()
+    const preferences = this.input.preferences?.() ?? DEFAULT_BROWSER_AGENT_CONTROL
+    const signature = JSON.stringify([active, navigationId, preferences])
+    if (!force && this.controlSignature === signature) return
+    this.controlSignature = signature
+    if (active) this.controlMayExist = true
+    else if (!this.controlMayExist) return
+    const request = ++this.controlRequest
+    const ok = await this.controlScript(buildBrowserControlFeedbackScript({ revision: this.input.nextRevision(), operationId: this.input.operationId,
+      navigationId, active, deadline: Date.now() + DISPLAY_BUDGET_MS }, preferences), active)
+    if (request !== this.controlRequest) return
+    if (!ok) { this.controlSignature = ''; this.warnControl() }
+    if (ok && !active) this.controlMayExist = false
+  }
+  async hide(reason: FeedbackPayload['clearReason'] = 'invalidate'): Promise<void> {
+    await Promise.all([this.clear(reason), this.hideControl()])
+  }
+  private async hideControl(): Promise<void> {
+    if (!this.controlMayExist) return
+    const request = ++this.controlRequest
+    this.controlSignature = ''
+    if (this.input.contents.isDestroyed()) return
+    const ok = await this.controlScript(buildBrowserControlFeedbackScript({ revision: this.input.nextRevision(), operationId: this.input.operationId,
+      navigationId: this.input.navigationId(), active: false, deadline: 0 }, this.input.preferences?.() ?? DEFAULT_BROWSER_AGENT_CONTROL), false)
+    if (request !== this.controlRequest) return
+    if (ok) this.controlMayExist = false
+    else this.warnControl()
+  }
   private current(): boolean { return this.input.isCurrent() && this.input.navigationId() === this.navigationId }
   private payload(phase: FeedbackPayload['phase'], kind: FeedbackPayload['kind'], deadline: number): FeedbackPayload {
     const action = this.method === 'pressKey' ? `Key ${this.keyLabel}` : ACTION_LABELS[this.method] ?? 'Operate'
@@ -333,6 +384,7 @@ export class BrowserOperationFeedback {
   async end(completed: boolean): Promise<void> {
     if (completed) await this.completeAction()
     else await this.clear()
+    await this.hideControl()
   }
   async clear(reason: FeedbackPayload['clearReason'] = 'invalidate'): Promise<void> {
     await this.clearAt(++this.generation, reason)

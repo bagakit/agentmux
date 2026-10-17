@@ -39,6 +39,7 @@ import { browserViewportSize, cloneBrowserViewport, isBrowserViewport } from '..
 import { resolveBrowserAddress } from '../shared/browser-address.js'
 import type { BrowserInputHistoryScope } from '../shared/browser-input-history.js'
 import { showBrowserOperationFeedback, type BrowserOperationFeedback } from './browser-operation-feedback.js'
+import { DEFAULT_BROWSER_AGENT_CONTROL, type BrowserAgentControlPreferences } from '../shared/browser-agent-control.js'
 import { installTextEditContextMenu } from './text-edit-context-menu.js'
 import { BrowserCdpSession } from './browser-cdp-session.js'
 import { BrowserNativeInputShield } from './browser-native-input-shield.js'
@@ -464,7 +465,8 @@ export class BrowserViewManager {
     private readonly demonstrations?: BrowserDemonstrationRecorder,
     private readonly taskAssets?: BrowserTaskAssets,
     private readonly downloads?: BrowserDownloads,
-    private readonly uploads?: BrowserUploads
+    private readonly uploads?: BrowserUploads,
+    private readonly feedbackPreferences: () => BrowserAgentControlPreferences = () => DEFAULT_BROWSER_AGENT_CONTROL
   ) {
     this.unsubscribeTaskAssets = taskAssets?.subscribe(browserId => {
       if (!this.entries.has(browserId)) return
@@ -1432,7 +1434,7 @@ export class BrowserViewManager {
       this.releaseUploadFiles(entry)
       void this.releaseDemonstrationCapture(entry)
       entry.pendingSwitch = null
-      void entry.feedback?.clear()
+      void entry.feedback?.hide()
       this.revokePresentationCapture(entry, 'source-replaced')
       this.clearFavicon(entry)
       entry.view = candidate
@@ -1658,10 +1660,10 @@ export class BrowserViewManager {
     const feedbackView = entry.view
     const feedback = showBrowserOperationFeedback({ contents: feedbackView.webContents, operationId: operation.id,
       navigationId: () => entry.navigationId, operatorName: operation.operator.name,
+      preferences: this.feedbackPreferences,
       nextRevision: () => ++entry.feedbackRevision,
       isCurrent: () => this.entries.get(entry.id) === entry && entry.view === feedbackView && entry.visible &&
-        entry.activeRun?.operationId === operation.id && !entry.humanControl &&
-        entry.activity.control === 'agent' && !feedbackView.webContents.isDestroyed(),
+        entry.activeRun?.operationId === operation.id && this.agentOwnsInput(entry) && !feedbackView.webContents.isDestroyed(),
       warn: () => {
         if (this.entries.get(entry.id) !== entry || entry.view !== feedbackView || entry.activity.operation?.id !== operation.id) return
         const warning = 'Browser action feedback could not be displayed. The page and Agent remain usable; inspect the activity and run another action to retry the visual feedback.'
@@ -1696,7 +1698,7 @@ export class BrowserViewManager {
     try {
       this.emit(entry)
       await this.prepareInputShield(entry, runView, operation.id, stopController.signal)
-      await previousFeedback?.clear('replace')
+      await previousFeedback?.hide('replace')
       await onOperationStarted?.(operation)
       if (!stopRequested) {
         operation.phase = 'running'
@@ -2926,7 +2928,7 @@ export class BrowserViewManager {
       if (bounds === null) {
         const wasVisible = entry.visible
         entry.visible = false
-        void entry.feedback?.clear()
+        void entry.feedback?.hide()
         entry.view.setVisible(false)
         if (wasVisible) { this.notifyNativeVisibility(this.windowForView(entry.view)); this.emit(entry) }
         return
@@ -3053,7 +3055,7 @@ export class BrowserViewManager {
     entry.captureId = null
     for (const leaseId of [...entry.presentationLeaseIds]) this.removePresentationLease(this.presentationLeases.get(leaseId)!)
     this.releaseUploadFiles(entry)
-    void entry.feedback?.clear()
+    void entry.feedback?.hide()
     void this.releaseDemonstrationCapture(entry)
     if (!entry.view.webContents.isDestroyed()) {
       entry.selectionOperation = null
@@ -3189,6 +3191,8 @@ export class BrowserViewManager {
       void this.refreshFaviconAfterLoad(entry, view)
     })
     contents.on('dom-ready', () => {
+      if (!this.owns(entry, view)) return
+      void entry.feedback?.synchronizeControl(true)
       const document = entry.initialDocument
       if (!this.owns(entry, view) || !document || document.view !== view ||
         !document.navigationId || document.navigationId !== entry.navigationId ||
@@ -3218,7 +3222,7 @@ export class BrowserViewManager {
       // A pending picker has no document handles yet. The initial navigation can
       // settle without canceling it; explicit cancel still clears this owner token.
       if (typeof entry.selectionOperation !== 'symbol' || !entry.initialDocument) entry.selectionOperation = null
-      void entry.feedback?.clear()
+      void entry.feedback?.hide()
       const selectionRevision = ++entry.selectionRevision
       const annotationRevision = ++entry.annotationRevision
       void contents.executeJavaScriptInIsolatedWorld(
@@ -3610,6 +3614,7 @@ export class BrowserViewManager {
   private emit(entry: BrowserEntry): void {
     if (entry.activity.control === 'human' || ['waiting', 'failed', 'stopped', 'indeterminate'].includes(entry.activity.operation?.phase ?? '')) void entry.feedback?.clear()
     if (this.entries.get(entry.id) !== entry || entry.view.webContents.isDestroyed()) return
+    void entry.feedback?.synchronizeControl()
     if (entry.activity.operation) entry.activity.operation.control = this.controlState(entry)
     const browser = this.snapshot(entry)
     entry.publishedRetention = JSON.stringify(browser.retention)
@@ -3617,6 +3622,11 @@ export class BrowserViewManager {
   }
 
   private agentOwnsInput(entry: BrowserEntry): boolean { return entry.activeRun !== undefined && !entry.activeRun.signal.aborted && !entry.humanControl }
+
+  /** Saved presentation changes wake only live Browser feedback; input ownership is unchanged. */
+  refreshAgentFeedback(): void {
+    for (const entry of this.entries.values()) if (entry.visible && entry.activeRun) void entry.feedback?.synchronizeControl()
+  }
 
   private requireHumanInput(entry: BrowserEntry): void {
     if (!this.agentOwnsInput(entry)) return

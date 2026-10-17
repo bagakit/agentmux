@@ -210,6 +210,7 @@ import { savePastedImage } from './pasted-image-write.js'
 import { readPastedImage } from './pasted-image-read.js'
 import { ConfigStore } from './config-store.js'
 import { ConfigOwner } from './config-owner.js'
+import { resolveBrowserAgentControl } from '../shared/browser-agent-control.js'
 import { registerThemeBootstrap } from './theme-bootstrap.js'
 import { resolveTheme } from '@agentmux/client-ui/theme'
 import { executeSettingsControl } from './settings-control.js'
@@ -439,7 +440,10 @@ export async function registerIpc(args: {
   }, browserOperationJournal, browserEvidence, browserResults, browserDemonstrations,
   new BrowserTaskAssets(new BrowserTaskAssetFileStore(join(app.getPath('userData'), BROWSER_TASK_ASSETS_FILE)), { nameAudit }),
   new BrowserDownloads(join(app.getPath('userData'), 'browser-downloads'), files, id => workspace(config, id)),
-  browserUploads)
+  browserUploads, () => resolveBrowserAgentControl(configOwner.current.browser.agentControl))
+  const disposeBrowserFeedbackPreferences = configOwner.subscribe((saved, previous) => {
+    if (JSON.stringify(saved.browser.agentControl) !== JSON.stringify(previous.browser.agentControl)) browsers.refreshAgentFeedback()
+  })
   const inputContextCaptures = new BrowserInputContextCaptures({ hostId: deliveryAttempts.hostId,
     source: id => browsers.inputContext(id, deliveryAttempts.hostId),
     files: new BrowserInputContextCaptureFiles(join(app.getPath('userData'), 'browser-input-context')) })
@@ -2339,6 +2343,7 @@ export async function registerIpc(args: {
       { owner: 'external-browsers', dispose: () => externalBrowsers.dispose() },
       { owner: 'workbench-native-window-port', dispose: releaseNativeWindowOwner },
       { owner: 'browsers', dispose: () => browsers.dispose() },
+      { owner: 'browser-feedback-preferences', dispose: disposeBrowserFeedbackPreferences },
       { owner: 'browser-input-history', dispose: () => browserInputHistory.flush() },
       { owner: 'browser-profiles', dispose: () => browserProfiles.dispose() },
       { owner: 'file-observations', dispose: () => fileObservations.dispose() },
