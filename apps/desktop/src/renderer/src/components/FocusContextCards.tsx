@@ -22,6 +22,9 @@ export function FocusContextCards({ contexts, columns, scrollRef, visible, layou
   const cardHeight = focusCardTrackHeight(replyLines), viewportMargin = cardHeight * 2
   const visited = useRef(new Set<string>())
   const [, render] = useReducer(value => value + 1, 0)
+  // Live card facts do not change the slots. Keep their observer through those
+  // updates; it already follows natural geometry changes between renders.
+  const cardOrder = contexts.map(contextKey).join('\n')
   useLayoutEffect(() => {
     const element = grid.current
     if (!visible || !element) return
@@ -71,7 +74,7 @@ export function FocusContextCards({ contexts, columns, scrollRef, visible, layou
     }, { root: rows, rootMargin: `${viewportMargin}px 0px` })
     for (const slot of slots) if (!visited.current.has(slot.dataset.focusCardKey!)) observer.observe(slot)
     return () => { active = false; observer.disconnect() }
-  }, [visible, layoutReady, columns, contexts, scrollRef, viewportMargin])
+  }, [visible, layoutReady, columns, cardOrder, scrollRef, viewportMargin])
 
   function reveal(context: FocusContext, slot: HTMLDivElement) {
     flushSync(() => { visited.current.add(contextKey(context)); render() })
