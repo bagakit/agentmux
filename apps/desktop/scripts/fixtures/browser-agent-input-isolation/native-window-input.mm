@@ -38,10 +38,43 @@ static napi_value Send(napi_env env, napi_callback_info info) {
     return result;
   }
 }
+static void SetProofBoolean(napi_env env, napi_value target, const char *key, bool value) {
+  napi_value item; napi_get_boolean(env, value, &item); napi_set_named_property(env, target, key, item);
+}
+static void SetProofNumber(napi_env env, napi_value target, const char *key, double value) {
+  napi_value item; napi_create_double(env, value, &item); napi_set_named_property(env, target, key, item);
+}
+static napi_value FocusState(napi_env env, napi_callback_info info) {
+  size_t count = 1, length = 0; napi_value args[1]; void *handle = nullptr;
+  napi_get_cb_info(env, info, &count, args, nullptr, nullptr);
+  if (count != 1 || napi_get_buffer_info(env, args[0], &handle, &length) != napi_ok || length != sizeof(void *)) {
+    napi_throw_type_error(env, nullptr, "Expected the exact private native window handle"); return nullptr;
+  }
+  @autoreleasepool {
+    NSView *view = (__bridge NSView *)(*static_cast<void **>(handle)); NSWindow *window = view.window;
+    if (!window || !NSThread.isMainThread) {
+      napi_throw_error(env, nullptr, "The private native window must exist on its Main thread"); return nullptr;
+    }
+    napi_value result; napi_create_object(env, &result);
+    SetProofBoolean(env, result, "applicationActive", NSApp.active);
+    SetProofBoolean(env, result, "windowKey", window.keyWindow);
+    SetProofBoolean(env, result, "windowMain", window.mainWindow);
+    SetProofBoolean(env, result, "canBecomeKey", window.canBecomeKeyWindow);
+    SetProofBoolean(env, result, "nativeVisible", window.visible);
+    SetProofNumber(env, result, "activationPolicy", NSApp.activationPolicy);
+    SetProofNumber(env, result, "windowNumber", window.windowNumber);
+    NSRunningApplication *front = NSWorkspace.sharedWorkspace.frontmostApplication;
+    if (front) SetProofNumber(env, result, "frontmostPid", front.processIdentifier);
+    else { napi_value missing; napi_get_null(env, &missing); napi_set_named_property(env, result, "frontmostPid", missing); }
+    return result;
+  }
+}
 static napi_value Init(napi_env env, napi_value exports) {
   napi_value function;
   napi_create_function(env, "send", NAPI_AUTO_LENGTH, Send, nullptr, &function);
   napi_set_named_property(env, exports, "send", function);
+  napi_create_function(env, "focusState", NAPI_AUTO_LENGTH, FocusState, nullptr, &function);
+  napi_set_named_property(env, exports, "focusState", function);
   return exports;
 }
 NAPI_MODULE(NODE_GYP_MODULE_NAME, Init)
