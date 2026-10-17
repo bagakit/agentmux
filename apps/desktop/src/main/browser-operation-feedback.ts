@@ -18,6 +18,7 @@ const ACTION_LABELS: Record<string, string> = {
 type FeedbackPayload = {
   revision: number; operationId: string; navigationId: string; phase: 'running' | 'completed' | 'clear' | 'click' | 'appearance' | 'preferences'
   kind: 'page' | 'target'; token: string; label: string; method: string; keyLabel: string
+  operatorName: string; actionLabel: string
   deadline: number; completedMs: number; moveMs: number; clearReason: 'replace' | 'invalidate'
   preferences: BrowserAgentControlPreferences; css: string; avatarPng?: string
 }
@@ -174,7 +175,12 @@ function applyFeedback(payload: FeedbackPayload, target?: Element): boolean {
     state.phase = 'completed'; state.host?.setAttribute('data-phase', 'completed')
     state.shadow?.querySelector('.executor')?.classList.remove('executing')
     pointer?.classList.add('complete')
-    if (label && labelText) { label.classList.add('complete'); labelText.textContent = completed.label; placeLabel() }
+    if (label && labelText) {
+      label.classList.add('complete')
+      const action = labelText.querySelector('small')
+      if (action) action.textContent = completed.actionLabel
+      placeLabel()
+    }
     if (!pointer && !state.shadow?.querySelector('.executor')) { state.hide('replace'); state.phase = 'completed'; return }
     state.expiresAt = Date.now() + completed.completedMs
     timer = setTimeout(() => state.hide('replace', true), completed.completedMs)
@@ -205,7 +211,7 @@ function applyFeedback(payload: FeedbackPayload, target?: Element): boolean {
   }
   const shadow = host.attachShadow({ mode: 'closed' })
   const sheet = new CSSStyleSheet()
-  const localCss = `:host,*{pointer-events:none;cursor:default;box-sizing:border-box}:host::before,:host::after{content:none!important;display:none!important;pointer-events:none!important}.pointer{width:18px;height:22px;transition:none}.pointer.hover svg{animation:float 1600ms ease-in-out infinite}.label{left:0;top:0;max-width:144px;white-space:normal;overflow-wrap:anywhere;transition:none}.label.complete{color:#c1cbc5}.amux-browser-agent-avatar{background:transparent}.amux-browser-agent-avatar img{width:100%;height:100%;object-fit:contain}.complete{opacity:.85}.executor{position:absolute;right:12px;bottom:12px;padding:3px 5px;border-radius:5px;background:#17231f;color:var(--amux-agent-color);font:600 15px/1 monospace}.executor.executing{animation:execute 900ms ease-in-out infinite}@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.5px)}}@keyframes execute{0%,100%{transform:scale(1);opacity:.65}50%{transform:scale(1.08);opacity:1}}@media (prefers-reduced-motion: reduce){.pointer.hover svg,.executor.executing{animation:none}}`
+  const localCss = `:host,*{pointer-events:none;cursor:default;box-sizing:border-box}:host::before,:host::after{content:none!important;display:none!important;pointer-events:none!important}.pointer{width:18px;height:22px;transition:none}.pointer.hover svg{animation:float 1600ms ease-in-out infinite}.label{left:0;top:0;max-width:200px;transition:none}.label.complete{color:#c1cbc5}.amux-browser-agent-avatar{background:transparent}.amux-browser-agent-avatar img{width:100%;height:100%;object-fit:contain}.complete{opacity:.85}.executor{position:absolute;right:12px;bottom:12px;padding:3px 5px;border-radius:5px;background:#17231f;color:var(--amux-agent-color);font:600 15px/1 monospace}.executor.executing{animation:execute 900ms ease-in-out infinite}@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.5px)}}@keyframes execute{0%,100%{transform:scale(1);opacity:.65}50%{transform:scale(1.08);opacity:1}}@media (prefers-reduced-motion: reduce){.pointer.hover svg,.executor.executing{animation:none}}`
   const updateStyle = (next: FeedbackPayload) => {
     preferences = next.preferences
     sheet.replaceSync(next.css + localCss + `.label{display:${preferences.showCursor && preferences.showCursorLabel ? 'flex' : 'none'}}`)
@@ -229,9 +235,13 @@ function applyFeedback(payload: FeedbackPayload, target?: Element): boolean {
     arrow.setAttribute('d', 'M1 1L1 17L5.5 13L9 21L12 19.5L8.5 12L15 12Z')
     svg.appendChild(arrow); pointer.appendChild(svg)
     label = document.createElement('span'); label.className = 'amux-browser-agent-label label'
-    labelText = document.createElement('span'); labelText.className = 'amux-browser-agent-label-text'; labelText.textContent = payload.label
+    labelText = document.createElement('span'); labelText.className = 'amux-browser-agent-label-text'
+    const name = document.createElement('span'); name.className = 'amux-browser-agent-label-name'; name.textContent = payload.operatorName
+    const separator = document.createElement('span'); separator.className = 'amux-browser-agent-label-separator'; separator.textContent = ' · '
+    const action = document.createElement('small'); action.textContent = payload.actionLabel
+    labelText.append(name, separator, action)
     label.appendChild(labelText)
-    label.style.maxWidth = `${Math.max(1, Math.min(144, innerWidth - 12))}px`
+    label.style.maxWidth = `${Math.max(1, Math.min(200, innerWidth - 12))}px`
     effects.appendChild(pointer); effects.appendChild(label)
   }
   state.decorate = (next: FeedbackPayload) => {
@@ -399,11 +409,12 @@ export class BrowserOperationFeedback {
   private payload(phase: FeedbackPayload['phase'], kind: FeedbackPayload['kind'], deadline: number): FeedbackPayload {
     const action = this.method === 'pressKey' ? `Key ${this.keyLabel}` : ACTION_LABELS[this.method] ?? 'Operate'
     const preferences = this.input.preferences?.() ?? DEFAULT_BROWSER_AGENT_CONTROL
+    const operatorName = this.input.operatorName.slice(0, 64), actionLabel = `${action}${phase === 'completed' ? ' complete' : ''}`
     return { revision: this.input.nextRevision(), operationId: this.input.operationId,
       navigationId: this.navigationId, phase, kind, token: this.token, deadline, completedMs: COMPLETED_CUE_MS,
       moveMs: preferences.pointerTween ? preferences.pointerDurationMs : 0, preferences, css: browserAgentEffectsCss(preferences),
       ...(this.avatarPng ? { avatarPng: this.avatarPng } : {}), method: this.method, keyLabel: this.keyLabel, clearReason: 'invalidate',
-      label: `${this.input.operatorName.slice(0, 64)} · ${action}${phase === 'completed' ? ' complete' : ''}` }
+      operatorName, actionLabel, label: `${operatorName} · ${actionLabel}` }
   }
   private async page(payload: FeedbackPayload): Promise<unknown> {
     if (this.input.contents.isDestroyed()) return false
