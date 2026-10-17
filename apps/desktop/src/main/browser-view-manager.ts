@@ -135,6 +135,10 @@ type BrowserEntry = {
   runInFlight: boolean
   controlRevision: number
   inputShield?: BrowserNativeInputShield | undefined
+  inputShieldCleanupNotice?: {
+    shield: BrowserNativeInputShield; originalOperation: BrowserOperation | null
+    activity: CleanupWarningContribution; operation?: CleanupWarningContribution
+  }
   inputIsolation: AgentMuxBrowserControl['inputIsolation']
   feedbackRevision: number
   feedback?: BrowserOperationFeedback
@@ -230,6 +234,21 @@ const BROWSER_FEEDBACK_CLEAR_INPUT_TYPES = new Set([
 ])
 
 const BROWSER_ACTION_PAGE_CALLS = BROWSER_PAGE_MUTATING_CAPABILITY_NAMES
+
+const INPUT_SHIELD_CLEANUP_WARNING = 'The original Browser input surface could not be fully released. The page and operation are retained; use Return to Agent to retry release, then inspect the page before starting a fresh program.'
+type CleanupWarningContribution = { before: string | undefined; after: string }
+function cleanupWarningContribution(before: string | undefined): CleanupWarningContribution {
+  return { before, after: [before, INPUT_SHIELD_CLEANUP_WARNING].filter(Boolean).join('\n') }
+}
+function removeCleanupWarning(current: string | undefined, contribution: CleanupWarningContribution): string | undefined {
+  if (current === contribution.after) return contribution.before
+  // Preserve later notices appended by their own owners. An unrelated replacement
+  // is left untouched rather than parsing its prose as a cleanup fact.
+  if (current?.startsWith(contribution.after + '\n')) {
+    return [contribution.before, current.slice(contribution.after.length + 1)].filter(Boolean).join('\n') || undefined
+  }
+  return current
+}
 
 /** Metadata retained while a hidden Browser native owner is released. */
 type ReleasedBrowser = {
@@ -3741,15 +3760,35 @@ export class BrowserViewManager {
   }
 
   private releaseInputShield(entry: BrowserEntry): void {
+    const shield = entry.inputShield
     try {
-      entry.inputShield?.dispose()
+      shield?.dispose()
       entry.inputShield = undefined
       entry.inputIsolation = 'inactive'
+      const notice = entry.inputShieldCleanupNotice
+      if (notice && shield && notice.shield === shield) {
+        delete entry.inputShieldCleanupNotice
+        if (notice.originalOperation && notice.operation) {
+          const warning = removeCleanupWarning(notice.originalOperation.warning, notice.operation)
+          if (warning === undefined) delete notice.originalOperation.warning
+          else notice.originalOperation.warning = warning
+        }
+        if (entry.activity.operation === notice.originalOperation) {
+          const warning = removeCleanupWarning(entry.activity.warning, notice.activity)
+          entry.activity = { ...entry.activity }
+          if (warning === undefined) delete entry.activity.warning
+          else entry.activity.warning = warning
+        }
+      }
     } catch {
       entry.inputIsolation = 'unconfirmed'
-      const warning = 'The original Browser input surface could not be fully released. The page and operation are retained; use Return to Agent to retry release, then inspect the page before starting a fresh program.'
-      entry.activity = { ...entry.activity, warning }
-      if (entry.activity.operation) entry.activity.operation.warning = [entry.activity.operation.warning, warning].filter(Boolean).join(' ')
+      if (!shield || entry.inputShieldCleanupNotice?.shield === shield) return
+      const originalOperation = entry.activity.operation
+      const activity = cleanupWarningContribution(entry.activity.warning)
+      const operation = originalOperation ? cleanupWarningContribution(originalOperation.warning) : undefined
+      entry.inputShieldCleanupNotice = { shield, originalOperation, activity, ...(operation ? { operation } : {}) }
+      entry.activity = { ...entry.activity, warning: activity.after }
+      if (originalOperation && operation) originalOperation.warning = operation.after
     }
   }
 
