@@ -1,3 +1,4 @@
+import { createDesktopInputContextCaptureReader } from './input-context-capture-reader.js'
 import { dirname, join } from 'node:path'
 import { AgentMuxFileAgentSessionStore, AgentMuxError,
   startHeadlessAgentMux, connectAgentMuxRpc, defaultAgentMuxControlSocketPath,
@@ -25,6 +26,7 @@ export type AgentMuxHostOptions = {
   desktopSocketPath?: string
   mobileBuildDirectory?: string
   mobilePort?: number
+  inputContextCaptureReader?: import('@agentmux/core').AgentInputContextCaptureReader
   externalInputAuthority?: import('@agentmux/core').AgentExternalInputAuthorityPort
 }
 
@@ -143,6 +145,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     // is never displaced or adopted by speculative workflow probes.
     runtime = await startHeadlessAgentMux({ store: options.store, socketPath: path,
       ...(options.providers ? { providers: options.providers } : {}), service,
+      inputContextCaptureReader: options.inputContextCaptureReader ?? createDesktopInputContextCaptureReader({ desktopSocketPath: desktopPath, captureHostId: 'local', executionHostId: 'local' }),
       externalInputAuthority: options.externalInputAuthority ?? createDesktopExternalInputAuthority({ desktopSocketPath: desktopPath, executionHostId: 'local' }) })
     if (options.store instanceof AgentMuxFileAgentSessionStore) {
       try {

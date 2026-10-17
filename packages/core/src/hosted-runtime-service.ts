@@ -133,7 +133,8 @@ export class AgentMuxHostedRuntimeService {
   private connection: Extract<AgentMuxClientEvent, { type: 'connection-state' }> | null = null
   constructor(readonly client: AgentMuxClient, private readonly storePath: string | null,
     private readonly identity: () => AgentMuxRuntimeOwnerIdentity, private readonly shutdown?: () => void | Promise<void>,
-    private readonly externalInputAuthority?: AgentExternalInputAuthorityPort) {
+    private readonly externalInputAuthority?: AgentExternalInputAuthorityPort,
+    private readonly inputContextCaptureReader?: import('./agent-input-context-capture.js').AgentInputContextCaptureReader) {
     this.unsubscribe = client.onEvent(event => {
       if (event.type === 'connection-state' && event.observationOrigin?.boundary === 'core-ctxmux') this.connection = structuredClone(event)
       this.publish(event)
@@ -351,12 +352,14 @@ export class AgentMuxHostedRuntimeService {
         return { identity, assertCurrent: (intent: import('./client.js').AgentMuxAgentInteractionInput) => port.assertInteractionCurrent!(structuredClone(identity), structuredClone(intent)) }
       })()
 
-      const pending = operation.apply(this.client, invocation.method === 'readAgentInputMailbox' ? [invocation.args[0], ...(context.caller ? [context.caller] : [])] : continuityControl ? [...invocation.args, {
+      const pending = operation.apply(this.client, invocation.method === 'readAgentInputMailbox' ? [invocation.args[0], ...(context.caller ? [context.caller] : [])] : continuityControl || invocation.method === 'ensureAgentContinuity' ? [...invocation.args, {
         ...(context.signal ? { requestSignal: context.signal } : {}),
-        ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {})
+        ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {}),
+        ...(invocation.method === 'ensureAgentContinuity' && this.inputContextCaptureReader ? { captureReader: this.inputContextCaptureReader } : {})
       }] : controlledInput ? [...invocation.args, {
         ...(context.signal ? { requestSignal: context.signal } : {}),
         ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {}),
+        ...(this.inputContextCaptureReader ? { captureReader: this.inputContextCaptureReader } : {}),
         ...(externalAuthor ? { externalAuthor } : {}),
         ...(externalAction ? { externalAction } : {})
       } satisfies import('./agent-input-wait.js').AgentInputCallContext] : invocation.args)
