@@ -94,6 +94,8 @@ Renderer 桥使用 Core [`conversation-changes`](../../packages/core/src/convers
 
 来源标签集中在 [`conversation-sources`](../../packages/client-ui/src/lib/conversation-sources.ts)，只索引已接受 Core records 和精确关系；同一事件可有多个来源，invocation 来源按 Core 归属与唯一调用身份只标对应 selector。Focus、搜索与 Mobile 复用该映射；来源标签不产生关联、作者、采用或完成事实。
 
+原生协作回报由 Provider 历史适配解释，沿既有 `collaboration.kind = message` 保留原 source、发送者、接收者、记录和回合；[`session-history`](../../packages/core/src/session-history.ts) 核对其原生命名空间，[Core timeline](../../packages/core/src/conversation-timeline.ts) 将其作为真实消息边界且不借父 Session 作者。共同 `ConversationView` 显示原生参与者及正文，不以 actor 字符串查询 AgentMux 身份或补头像。无准确原消息关联的 Hook 快照仍是独立观察；[`conversation-reply-preview`](../../packages/client-ui/src/lib/conversation-reply-preview.ts) 只生成有界阅读摘要，不持有关联或正文事实。观察沿同一过程的固定原节点披露，过程开合只隐藏步骤；连续已核作者的进度只收敛重复装饰，准确消息、SID、时间与动作仍独立保留。
+
 用户命名阅读点由 [`ConversationLandmarks`](../../apps/desktop/src/renderer/src/components/ConversationLandmarks.tsx) 经原 Main／公共控制服务到同一 [`ConversationLandmarkStore`](../../packages/core/src/conversation-landmark-store.ts)。该 Store 只持引用元数据。返回沿原 SessionPane 导航 owner；未确认写入保留原 operation 与暂存草稿，不建立第二份已保存事实。
 
 资源读取沿原 `SessionPane.readHistoryResource` → IPC → [`RuntimeController`](../../apps/desktop/src/main/runtime-controller.ts) → `sessionHistoryResource`。共同 [`ConversationResourceImage`](../../packages/client-ui/src/components/ConversationResourceImage.tsx) 和 [`readSessionHistoryTextResource`](../../packages/core/src/session-history-content.ts) 校验准确原记录、part、引用、完整 extent 和 digest。pasted 图片另经 Main 的受限 [`readPastedImage`](../../apps/desktop/src/main/pasted-image-read.ts)，不能替代原生资源 owner。
