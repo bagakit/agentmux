@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ConnectionRecord, ConnectionEnrollmentActionKind } from '@agentmux/core/connections'
 import type { MotePreferencesTarget } from '@agentmux/core/mote-preferences'
+import type { MoteConnectionOperation } from '@agentmux/core/mote-connections'
 import { useMoteBotSetup } from '../lib/use-mote-bot-setup'
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { generatedBotName } from '../lib/bot-creation-preset'
+import { api } from '../lib/api'
 import { SelectionField } from './SelectionField'
 import { BotConfirmationCode } from './BotConfirmationCode'
 import { ConnectionProfileResult } from './ConnectionProfileResult'
@@ -17,6 +19,8 @@ import { BotSetupGuide, type BotSetupGuideStage } from './settings/BotSetupGuide
 import '../styles/connector-experience.css'
 
 const LoadingIcon = semanticIconComponent('status.loading')
+const creationComplete = (operation: MoteConnectionOperation) => !!operation.enrollment?.configured && operation.defaultLink.state === 'saved' &&
+  (!operation.enrollment.initialPublication || operation.enrollment.initialSetup?.progress?.state === 'complete')
 
 const enrollmentActionLabel: Record<ConnectionEnrollmentActionKind, string> = {
   'continue-authentication': 'Check sign-in',
@@ -79,21 +83,35 @@ export function MoteBotSetup({
       }))
   ]
   const unfinished = setup.operations.find(
-    (item) =>
-      item.action === 'create' &&
-      (!item.enrollment?.configured || item.defaultLink.state !== 'saved' || !!item.enrollment.initialPublication && item.enrollment.initialSetup?.progress?.state !== 'complete')
+    (item) => item.action === 'create' && !creationComplete(item)
   )
   const resumeId =
     unfinished?.operationId ??
     setup.requests.find((item) => item.action === 'create' && !ids.has(item.input.operationId))?.input.operationId
   useEffect(() => {
     if (!shortcut.current) return
-    if (setup.selectedId) { shortcut.current = false; onCreateIntentConsumed?.(); return }
+    if (setup.selectedId) {
+      if (setup.checking) return
+      let current = true
+      const consume = (complete: boolean) => {
+        if (!current) return
+        shortcut.current = false
+        onCreateIntentConsumed?.()
+        if (complete) newDraft()
+      }
+      if (operation?.action === 'sync' && operation.setupOperationId) {
+        const operationId = operation.setupOperationId
+        void api.connections.call('connection.setup.inspect', { operationId })
+          .then(view => consume(view.operation?.operationId === operationId && view.profileUpdate?.state === 'complete'))
+          .catch(() => consume(false))
+      } else consume(operation?.action === 'create' && creationComplete(operation))
+      return () => { current = false }
+    }
     if (!setup.historyReady || setup.loading || !setup.profile || !capability) return
     shortcut.current = false
     onCreateIntentConsumed?.()
     if (resumeId) void setup.check(resumeId)
-  }, [setup.selectedId, setup.historyReady, setup.loading, setup.profile, capability, resumeId])
+  }, [setup.selectedId, setup.checking, operation, setup.historyReady, setup.loading, setup.profile, capability, resumeId])
   const enrollment = setup.enrollmentView?.operation && setup.enrollmentView.operation.operationId === operation?.enrollmentOperationId && setup.enrollmentView.operation.revision >= (operation?.enrollment?.revision ?? 0) ? setup.enrollmentView.operation : operation?.enrollment
   const initialSetup = enrollment?.initialSetup, initialProgress = initialSetup?.progress
   const challenge = setup.enrollmentView?.challenge,
