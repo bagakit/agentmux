@@ -1,7 +1,8 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 const { fixturePath: _hygiene_fixturePath, fixtureTime: _hygiene_fixtureTime } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { installGitHistoryViewport } from './helpers/git-history-viewport'
 // @vitest-environment happy-dom
-import { act, createElement, Profiler, useRef, useLayoutEffect } from 'react'
+import { act, createElement, Profiler, useLayoutEffect } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -12,8 +13,9 @@ const fixture = vi.hoisted(() => ({
   state: { localHome: _hygiene_fixturePath("Users/private"), config: { copyPathsAsAbsolute: false, hosts: [{ id: 'local', kind: 'local' }] }, openGitWorkbench: vi.fn() }
 }))
 vi.mock('../src/renderer/src/store.js', () => ({ useAppStore: (selector: (state: typeof fixture.state) => unknown) => selector(fixture.state) }))
-import { GitHistoryPanel, type GitHistoryViewportState } from '../src/renderer/src/features/git/history/GitHistoryPanel.js'
-import { useGitHistory, type GitHistoryWindow } from '../src/renderer/src/features/git/history/useGitHistory.js'
+import { GitHistoryPanel } from '../src/renderer/src/features/git/history/GitHistoryPanel.js'
+import { useGitHistory } from '../src/renderer/src/features/git/history/useGitHistory.js'
+import { selectHistoryReference } from './helpers/git-history-reference'
 vi.mock('../src/renderer/src/lib/conversation-avatar-color.js', async original => {
   const actual = await original<typeof import('../src/renderer/src/lib/conversation-avatar-color.js')>()
   return { ...actual, speakerColorHue: vi.fn(actual.speakerColorHue) }
@@ -23,7 +25,7 @@ import { speakerColorHue } from '../src/renderer/src/lib/conversation-avatar-col
 const oid = (digit: string) => digit.repeat(40)
 const a = oid('a'), b = oid('b'), c = oid('c'), d = oid('d'), e = oid('e')
 const workspace: WorkspaceRecord = { id: 'repo', hostId: 'local', path: _hygiene_fixturePath("Users/private/project"), name: 'Project', kind: 'folder' }
-const snapshot: GitHistorySnapshot = { hostId: 'local', repoPath: workspace.path, selectedRef: null, roots: [a], checkedAt: 1,
+const snapshot: GitHistorySnapshot = { hostId: 'local', repoPath: workspace.path, selectedRef: null, roots: [a], checkedAt: _tailFixtureEpoch(0, 0, 1),
   refs: [{ name: 'refs/heads/main', kind: 'local', oid: a }, { name: 'refs/remotes/origin/topic', kind: 'remote', oid: b }, { name: 'HEAD', kind: 'head', oid: a }] }
 function commit(id: string, subject: string, parents: string[]): GitHistoryCommit {
   return { oid: id, subject, parents, author: 'History author', authoredAt: _hygiene_fixtureTime(-67225600000), refs: snapshot.refs.filter(ref => ref.oid === id) }
@@ -43,6 +45,9 @@ let controls: ReturnType<typeof useGitHistory>
 const originalVisibility = Object.getOwnPropertyDescriptor(document, 'visibilityState')
 beforeEach(() => {
   installGitHistoryViewport()
+  vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function () {
+    return this.classList.contains('git-history-ref-picker__results') ? 264 : this.classList.contains('git-history-scroll') ? this.clientHeight || 300 : 24
+  })
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   host = document.createElement('div'); document.body.append(host); root = createRoot(host)
   stylesheet = document.createElement('style')
@@ -73,8 +78,7 @@ async function click(label: string) {
   expect(target).toBeDefined(); await act(async () => target!.click())
 }
 async function select(value: string) {
-  const element = host.querySelector('select')!; expect(element).not.toBeNull()
-  await act(async () => { element.value = value; element.dispatchEvent(new Event('change', { bubbles: true })) })
+  await selectHistoryReference(host, value)
 }
 function rows() { return [...host.querySelectorAll('[data-history-oid]')].map(row => row.getAttribute('data-history-oid')) }
 
@@ -218,20 +222,23 @@ describe('mounted GitHistoryPanel with production hook and bridge', () => {
     expect(document.querySelector('[data-history-detail-oid]')?.textContent).toContain('Root commit')
     expect(host.querySelector(`[data-commit-oid="${e}"]`)?.hasAttribute('data-branch-ref')).toBe(false)
     expect([...host.querySelectorAll('[data-unloaded-parent]')].map(edge => edge.getAttribute('data-unloaded-parent'))).toEqual([d])
-    expect(host.querySelectorAll('select option')).toHaveLength(223)
-    expect(host.querySelector('select')?.title).toBe('~/project')
+    await click('History reference')
+    expect(document.querySelector('[role="status"]')?.textContent).toBe('222 / 222 references')
+    expect(document.querySelectorAll('[role="option"]').length).toBeLessThan(30)
+    await act(async () => document.querySelector('[aria-label="Search history references"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+    expect(host.querySelector<HTMLElement>('[aria-label="History reference"]')?.title).toBe('~/project')
     expect(host.querySelector('.git-history-refs')?.textContent).toBe('branch-0branch-1+217')
     await act(async () => host.querySelector<HTMLElement>('.git-history-ref-count')!.focus())
     expect(document.querySelector('[data-history-detail-oid]')?.textContent).toContain(refs[218]!.name)
     expect(host.textContent).toContain('4 commits · 1 parent beyond view')
     fixture.state.config.copyPathsAsAbsolute = true; await render()
-    expect(host.querySelector('select')?.title).toBe(_hygiene_fixturePath("Users/private/project"))
+    expect(host.querySelector<HTMLElement>('[aria-label="History reference"]')?.title).toBe(_hygiene_fixturePath("Users/private/project"))
   })
 
   it('appends one explicit page, preserves it across tab hiding, and refresh creates a new snapshot', async () => {
     const first = page([commit(a, 'Merge', [b, c])], true)
     history.mockResolvedValueOnce(first).mockResolvedValueOnce(page([commit(b, 'Topic B', []), commit(c, 'Topic C', [])]))
-      .mockResolvedValueOnce(page([commit(e, 'New snapshot', [])], false, { ...snapshot, roots: [e], checkedAt: 2 }))
+      .mockResolvedValueOnce(page([commit(e, 'New snapshot', [])], false, { ...snapshot, roots: [e], checkedAt: _tailFixtureEpoch(0, 0, 2) }))
     await render(); await click('Load more')
     expect(rows()).toEqual([a, b, c]); expect(history.mock.calls[1]).toEqual(['repo', { ref: null, cursor: first.kind === 'ready' ? first.nextCursor : null }])
     await render(false); await render(true)
@@ -258,7 +265,7 @@ describe('mounted GitHistoryPanel with production hook and bridge', () => {
     history.mockResolvedValueOnce(page([sideTip, merge, sideRoot], true, scope))
       .mockResolvedValueOnce(page([mainWork, topicWork, shared], false, scope))
       .mockResolvedValueOnce(page([merge, topicWork, mainWork, shared, sideTip, sideRoot], false,
-        { ...scope, checkedAt: 2, refs: [...scope.refs].reverse() }))
+        { ...scope, checkedAt: _tailFixtureEpoch(0, 0, 2), refs: [...scope.refs].reverse() }))
     const hue = (element: Element | null) => {
       expect(element).not.toBeNull()
       return (element as HTMLElement).style.getPropertyValue('--history-branch-hue')
@@ -339,33 +346,43 @@ describe('mounted GitHistoryPanel with production hook and bridge', () => {
     const scope = { ...snapshot, refs: available }, pendingTopic = deferred<GitHistoryResult>(), pendingRoot = deferred<GitHistoryResult>()
     history.mockResolvedValueOnce(page([commit(a, 'All branches commit', [b])], false, scope))
       .mockReturnValueOnce(pendingTopic.promise).mockReturnValueOnce(pendingRoot.promise)
-    const options = () => [...host.querySelectorAll<HTMLOptionElement>('select option')].map(option => option.value)
+    const options = async () => {
+      await click('History reference')
+      const values = [...document.querySelectorAll<HTMLElement>('[role="option"][data-value]')].map(option => option.dataset.value)
+      await act(async () => document.querySelector('[aria-label="Search history references"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+      return values
+    }
     await render()
-    const initialOptions = options()
+    const initialOptions = await options()
+    const originalRepository = { hostId: snapshot.hostId, repoPath: snapshot.repoPath }
+    expect(controls.repository).toEqual(originalRepository)
     await select(topic)
-    expect(options()).toEqual(initialOptions)
-    expect(options()).toContain(rootOnly)
+    expect(await options()).toEqual(initialOptions)
+    expect(await options()).toContain(rootOnly)
     expect(controls.result).toBeNull()
+    expect(controls.repository).toEqual(originalRepository)
     expect(rows()).toEqual([])
     expect(host.textContent).not.toContain('All branches commit')
     await select(rootOnly)
+    expect(controls.repository).toEqual(originalRepository)
     expect(history).toHaveBeenLastCalledWith(workspace.id, { ref: rootOnly })
-    expect(options()).toEqual(initialOptions)
+    expect(await options()).toEqual(initialOptions)
     await act(async () => pendingTopic.resolve(page([commit(b, 'Obsolete topic commit', [])], false,
       { ...scope, selectedRef: topic, refs: [{ name: 'refs/heads/late-option', kind: 'local', oid: b }] })))
-    expect(options()).toEqual(initialOptions)
+    expect(await options()).toEqual(initialOptions)
     expect(controls.reference).toBe(rootOnly)
+    expect(controls.repository).toEqual(originalRepository)
     expect(rows()).toEqual([])
     const replaced = { ...scope, selectedRef: rootOnly, refs: available.filter(ref => ref.name === rootOnly) }
     await act(async () => pendingRoot.resolve(page([commit(c, 'Root-only commit', [])], false, replaced)))
     expect(rows()).toEqual([c])
     expect(controls.refs).toEqual(replaced.refs)
-    expect(options()).toEqual(['', rootOnly])
+    expect(await options()).toEqual(['', rootOnly])
     expect(host.textContent).not.toContain('Obsolete topic commit')
     expect(history).toHaveBeenCalledTimes(3)
   })
 
-  it('retains only same-workspace refs through hidden reads, error handoff and a foreign pending workspace', async () => {
+  it('retains only same-workspace refs through hidden reads, errors and a foreign pending workspace', async () => {
     const pending = deferred<GitHistoryResult>(), foreign = deferred<GitHistoryResult>()
     const other = { ...workspace, id: 'other', hostId: 'remote', path: _hygiene_fixturePath("other") }
     history.mockResolvedValueOnce(page([commit(a, 'Completed original range', [])]))
@@ -373,38 +390,37 @@ describe('mounted GitHistoryPanel with production hook and bridge', () => {
       .mockReturnValueOnce(foreign.promise).mockResolvedValueOnce({ kind: 'not-a-git-repository', hostId: other.hostId, workspacePath: other.path })
     await render(); await select('refs/heads/main'); await render(false)
     expect(controls.refs).toEqual(snapshot.refs)
-    expect(controls.captureWindow()).toBeNull() // A pending selection never becomes a completed window.
+    const originalRepository = { hostId: snapshot.hostId, repoPath: snapshot.repoPath }
+    expect(controls.repository).toEqual(originalRepository)
     await act(async () => pending.resolve(page([commit(b, 'Late hidden range', [])], false, { ...snapshot, refs: [] })))
     expect(controls.refs).toEqual(snapshot.refs)
     expect(rows()).toEqual([])
+    expect(controls.repository).toEqual(originalRepository)
     await render(true)
     expect(controls.error).toBe('Selected range unavailable')
     expect(controls.refs).toEqual(snapshot.refs)
-    const captured = controls.captureWindow()!
-    expect(captured.refs).toEqual(snapshot.refs)
-    function Next({ target }: { target: WorkspaceRecord }) {
-      const value = useGitHistory(target, true)
-      controls = value
-      useLayoutEffect(() => { value.adoptWindow(captured) }, [value.adoptWindow])
-      return createElement(GitHistoryPanel, { workspace: target, history: value, onSelectCommit: () => {} })
-    }
-    await act(async () => root.render(createElement(Next, { target: workspace })))
+    expect(controls.repository).toEqual(originalRepository)
     expect(history).toHaveBeenCalledTimes(3)
     expect(controls.reference).toBe('refs/heads/main')
     expect(controls.error).toBe('Selected range unavailable')
     expect(controls.refs).toEqual(snapshot.refs)
-    await act(async () => root.render(createElement(Next, { target: other })))
+    await render(true, other)
     expect(history).toHaveBeenLastCalledWith(other.id, { ref: null })
     expect(history).toHaveBeenCalledTimes(4)
     expect(controls.refs).toEqual([])
-    expect([...host.querySelectorAll<HTMLOptionElement>('select option')].map(option => option.value)).toEqual([''])
+    expect(controls.repository).toBeNull()
+    await click('History reference')
+    expect([...document.querySelectorAll<HTMLElement>('[role="option"][data-value]')].map(option => option.dataset.value)).toEqual([''])
+    await act(async () => document.querySelector('[aria-label="Search history references"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
     const foreignRefs = [{ name: 'refs/heads/other-only', kind: 'local' as const, oid: d }]
     await act(async () => foreign.resolve(page([commit(d, 'New repository commit', [])], false,
       { ...snapshot, hostId: other.hostId, repoPath: other.path, refs: foreignRefs })))
     expect(controls.refs).toEqual(foreignRefs)
+    expect(controls.repository).toEqual({ hostId: other.hostId, repoPath: other.path })
     await click('Refresh history')
     expect(controls.result?.kind).toBe('not-a-git-repository')
     expect(controls.refs).toEqual([])
+    expect(controls.repository).toBeNull()
   })
 
   it('invalidates pending pages while a tab or document is hidden, retains completed pages and allows a bounded retry', async () => {
@@ -432,7 +448,7 @@ describe('mounted GitHistoryPanel with production hook and bridge', () => {
     expect(rows()).toEqual([e]); expect(history.mock.calls.map(call => call[0])).toEqual(['repo', 'repo'])
     await act(async () => old.resolve(page([commit(a, 'Late previous path', [])])))
     expect(rows()).toEqual([e]); expect(host.textContent).not.toContain('Late previous path')
-    expect(host.querySelector('select')?.title).toBe(_hygiene_fixturePath("Users/private/rebound"))
+    expect(host.querySelector<HTMLElement>('[aria-label="History reference"]')?.title).toBe(_hygiene_fixturePath("Users/private/rebound"))
   })
 
   it('shows loading, successful empty, nonrepository, unavailable and errors without creating a root or dropping completed pages', async () => {
@@ -504,8 +520,9 @@ describe('History viewport work and controlled boundary', () => {
     expect(document.querySelector('[data-history-detail-oid]')).toBeNull()
   })
 
-  it('keeps the three read callbacks stable across owner rerenders and preserves the pinned read window', async () => {
-    history.mockResolvedValue(page(chain(100)))
+  it('keeps read and restoration callbacks stable across owner rerenders and preserves the confirmed repository and pinned window', async () => {
+    const confirmed = { ...snapshot, repoPath: _hygiene_fixturePath('confirmed-repository') }
+    history.mockResolvedValue(page(chain(100), false, confirmed))
     await render()
     const before = controls
     await render()
@@ -514,28 +531,11 @@ describe('History viewport work and controlled boundary', () => {
     expect(controls.loadMore).toBe(before.loadMore)
     expect(controls.refresh).toBe(before.refresh)
     expect(controls.selectReference).toBe(before.selectReference)
-    expect(controls.captureWindow).toBe(before.captureWindow)
-    expect(controls.adoptWindow).toBe(before.adoptWindow)
+    expect(controls.restoreReference).toBe(before.restoreReference)
     expect(controls.result).toBe(before.result)
+    expect(controls.repository).toEqual({ hostId: confirmed.hostId, repoPath: confirmed.repoPath })
+    expect(controls.repository).toBe(before.repository)
     expect(history).toHaveBeenCalledTimes(1)
-  })
-
-  it('transfers only the matching pinned viewport between presentation instances and resets another ref', async () => {
-    history.mockResolvedValueOnce(page(chain(100))).mockResolvedValue(page(chain(100), false, { ...snapshot, selectedRef: 'refs/heads/other', checkedAt: 2 }))
-    function ReadingOwner({ place }: { place: string }) {
-      const value = useGitHistory(workspace, true)
-      const position = useRef<GitHistoryViewportState | null>(null)
-      return createElement(GitHistoryPanel, { key: place, workspace, history: value, viewportState: position, onSelectCommit: () => {} })
-    }
-    await act(async () => root.render(createElement(ReadingOwner, { place: 'sidebar' })))
-    await move(1200)
-    const first = rows()[0]
-    await act(async () => root.render(createElement(ReadingOwner, { place: 'repository' })))
-    expect(scroll().scrollTop).toBe(1200); expect(rows()[0]).toBe(first)
-    expect(history).toHaveBeenCalledTimes(1)
-    await select('refs/heads/main')
-    expect(scroll().scrollTop).toBe(0)
-    expect(rows()[0]).toBe(a)
   })
 
   it('reaches offscreen rows with keyboard and reveals an explicit target without jumping to ordinary selection', async () => {
@@ -560,84 +560,92 @@ describe('History viewport work and controlled boundary', () => {
     expect(scroll().scrollTop).toBeGreaterThan(1200)
   })
 
-  it('hands completed pages/ref/viewport to a new exact owner before enabling and rejects old/foreign replies', async () => {
-    const pinned = { ...snapshot, selectedRef: 'refs/heads/main' }
-    const pending = deferred<GitHistoryResult>()
-    history.mockResolvedValueOnce(page(chain(100))).mockResolvedValueOnce(page(chain(100), true, pinned)).mockReturnValueOnce(pending.promise)
-      .mockResolvedValue(page([commit(d, 'Other workspace', [])], false, { ...snapshot, repoPath: _hygiene_fixturePath("other"), checkedAt: 2 }))
-    const position = { current: null as GitHistoryViewportState | null }
-    let owner!: ReturnType<typeof useGitHistory>
-    function First() {
-      owner = useGitHistory(workspace, true)
-      return createElement(GitHistoryPanel, { workspace, history: owner, viewportState: position, onSelectCommit: () => {} })
-    }
-    await act(async () => root.render(createElement(First)))
-    await select('refs/heads/main')
-    let captured = owner.captureWindow()!
-    await move(1200)
-    captured = owner.captureWindow()!
-    const originalOwner = owner
-    await act(async () => { void owner.loadMore() })
-    expect(history).toHaveBeenCalledTimes(3)
-    await act(async () => owner.adoptWindow(captured))
-    await act(async () => pending.resolve(page([commit(e, 'Obsolete pending reply', [])], false, pinned)))
-    expect(owner.result?.kind === 'ready' && owner.result.commits).toHaveLength(100)
-    function Next({ target, window }: { target: WorkspaceRecord; window: GitHistoryWindow }) {
-      owner = useGitHistory(target, true)
-      useLayoutEffect(() => { owner.adoptWindow(window) }, [owner.adoptWindow, window])
-      return createElement(GitHistoryPanel, { workspace: target, history: owner, viewportState: position, onSelectCommit: () => {} })
-    }
-    await act(async () => root.render(createElement(Next, { target: workspace, window: captured })))
-    expect(history).toHaveBeenCalledTimes(3)
-    expect(owner.reference).toBe('refs/heads/main')
-    expect(owner.result?.kind === 'ready' && owner.result.commits).toHaveLength(100)
-    expect(scroll().scrollTop).toBe(1200)
-    expect(owner.loading).toBe(false)
-    await act(async () => pending.resolve(page([commit(e, 'Obsolete pending reply', [])], false, pinned)))
-    expect(owner.result?.kind === 'ready' && owner.result.commits).toHaveLength(100)
-    expect(host.textContent).not.toContain('Obsolete pending reply')
-    const captureForA = owner.captureWindow
-    const other = { ...workspace, id: 'other', path: _hygiene_fixturePath("other") }
-    await act(async () => root.render(createElement(Next, { target: other, window: captured })))
-    expect(history).toHaveBeenCalledTimes(4)
-    expect(history).toHaveBeenLastCalledWith(other.id, { ref: null })
-    expect(owner.captureWindow()?.key).toBe(JSON.stringify([other.id, other.hostId, other.path]))
-    expect(captureForA()).toBeNull()
-    expect(scroll().scrollTop).toBe(0)
-    const foreignResult = owner.result
-    await act(async () => owner.adoptWindow(captured))
-    expect(owner.result).toBe(foreignResult)
-    await act(async () => root.render(createElement(Next, { target: workspace, window: captured })))
-    expect(history).toHaveBeenCalledTimes(4)
-    expect(owner.reference).toBe('refs/heads/main')
-    expect(owner.result?.kind === 'ready' && owner.result.commits).toHaveLength(100)
-    expect(originalOwner.captureWindow()?.key).toBe(captured.key)
-  })
-
   it('selects a durable reference during layout before the old enabled effect can read All branches', async () => {
     const reference = 'refs/heads/main'
     history.mockResolvedValue(page(chain(100), false, { ...snapshot, selectedRef: reference }))
     function Restored() {
       const value = useGitHistory(workspace, true)
-      useLayoutEffect(() => { value.selectReference(reference) }, [value.selectReference])
+      useLayoutEffect(() => { value.restoreReference(reference) }, [value.restoreReference])
       return createElement(GitHistoryPanel, { workspace, history: value, onSelectCommit: () => {} })
     }
     await act(async () => root.render(createElement(Restored)))
     expect(history).toHaveBeenCalledExactlyOnceWith(workspace.id, { ref: reference })
-    expect(host.querySelector<HTMLSelectElement>('select')?.value).toBe(reference)
+    expect(host.querySelector<HTMLElement>('[aria-label="History reference"]')?.dataset.value).toBe(reference)
     expect(rows()).toHaveLength(21)
   })
 
-  it('opens repository history as a separate explicit action without selecting a fabricated latest commit', async () => {
-    history.mockResolvedValue(page(chain(100)))
-    const openRepository = vi.fn(), choose = vi.fn()
-    function Owner() { const value = useGitHistory(workspace, true); return createElement(GitHistoryPanel, { workspace, history: value, onSelectCommit: choose, onOpenRepository: openRepository }) }
-    await act(async () => root.render(createElement(Owner)))
-    const entry = host.querySelector<HTMLElement>('[aria-label="Open repository history"]')!
-    expect(entry.textContent).toBe('Repository history')
-    expect(getComputedStyle(entry).flexShrink).toBe('0')
-    await click('Open repository history')
-    expect(openRepository).toHaveBeenCalledExactlyOnceWith()
-    expect(choose).not.toHaveBeenCalled()
+  it('restores a pristine unread owner only once per exact workspace and rejects an old restore closure after rebinding', async () => {
+    const main = 'refs/heads/main', remote = 'refs/remotes/origin/topic'
+    const other = { ...workspace, id: 'other-restored', hostId: 'remote', path: _hygiene_fixturePath('other-restored') }
+    history.mockResolvedValue(page([commit(b, 'Restored original ref', [])], false,
+      { ...snapshot, hostId: other.hostId, repoPath: other.path, selectedRef: remote, roots: [b] }))
+    await render(false)
+    const originalRestore = controls.restoreReference
+    expect(controls.repository).toBeNull()
+    await act(async () => controls.restoreReference(main))
+    await act(async () => controls.restoreReference(remote))
+    expect(controls.reference).toBe(main)
+    expect(history).not.toHaveBeenCalled()
+    await render(false, other)
+    await act(async () => originalRestore(main))
+    expect(controls.reference).toBeNull()
+    expect(controls.repository).toBeNull()
+    await act(async () => controls.restoreReference(remote))
+    await render(true, other)
+    expect(history).toHaveBeenCalledExactlyOnceWith(other.id, { ref: remote })
+    expect(controls.repository).toEqual({ hostId: other.hostId, repoPath: other.path })
+    expect(rows()).toEqual([b])
   })
+
+  it('preserves an explicit All choice before the first read instead of replacing it with a saved reference', async () => {
+    history.mockResolvedValue(page([commit(a, 'Explicit All history', [])]))
+    await render(false)
+    await act(async () => controls.selectReference(null))
+    await act(async () => controls.restoreReference('refs/heads/main'))
+    expect(controls.reference).toBeNull()
+    expect(history).not.toHaveBeenCalled()
+    await render(true)
+    expect(history).toHaveBeenCalledExactlyOnceWith(workspace.id, { ref: null })
+    expect(rows()).toEqual([a])
+  })
+
+  it('does not replace an already observed owner while its original initial read is pending or completed', async () => {
+    const pending = deferred<GitHistoryResult>()
+    history.mockReturnValueOnce(pending.promise)
+    await render()
+    await act(async () => controls.restoreReference('refs/heads/main'))
+    expect(controls.reference).toBeNull()
+    expect(controls.repository).toBeNull()
+    expect(history).toHaveBeenCalledExactlyOnceWith(workspace.id, { ref: null })
+    await act(async () => pending.resolve(page([commit(a, 'Observed All history', [])])))
+    const confirmed = controls.repository
+    await act(async () => controls.restoreReference('refs/remotes/origin/topic'))
+    expect(controls.reference).toBeNull()
+    expect(controls.repository).toBe(confirmed)
+    expect(rows()).toEqual([a])
+    expect(history).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the old repository out of a rebound consumer before its new read begins', async () => {
+    const other = { ...workspace, hostId: 'remote', path: _hygiene_fixturePath('rebound-consumer') }
+    const pending = deferred<GitHistoryResult>()
+    const observations: Array<{ path: string; repository: ReturnType<typeof useGitHistory>['repository'] }> = []
+    history.mockResolvedValueOnce(page([commit(a, 'Original repository', [])])).mockReturnValueOnce(pending.promise)
+    function Observed({ target }: { target: WorkspaceRecord }) {
+      const value = useGitHistory(target, true)
+      controls = value
+      useLayoutEffect(() => { observations.push({ path: target.path, repository: value.repository }) }, [target.path, value.repository])
+      return createElement(GitHistoryPanel, { workspace: target, history: value, onSelectCommit: () => {} })
+    }
+    await act(async () => root.render(createElement(Observed, { target: workspace })))
+    expect(controls.repository).toEqual({ hostId: snapshot.hostId, repoPath: snapshot.repoPath })
+    await act(async () => root.render(createElement(Observed, { target: other })))
+    expect(observations.filter(value => value.path === other.path).map(value => value.repository)).toEqual([null])
+    expect(history).toHaveBeenLastCalledWith(other.id, { ref: null })
+    await act(async () => pending.resolve(page([commit(b, 'Rebound repository', [])], false,
+      { ...snapshot, hostId: other.hostId, repoPath: other.path, roots: [b] })))
+    expect(controls.repository).toEqual({ hostId: other.hostId, repoPath: other.path })
+    expect(rows()).toEqual([b])
+  })
+
 })

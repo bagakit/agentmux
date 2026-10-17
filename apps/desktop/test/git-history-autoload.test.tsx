@@ -1,5 +1,7 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { installGitHistoryViewport } from './helpers/git-history-viewport'
+import { selectHistoryReference } from './helpers/git-history-reference'
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -14,10 +16,10 @@ import { GitHistoryPanel } from '../src/renderer/src/features/git/history/GitHis
 
 const workspace: WorkspaceRecord = { id: 'autoload', hostId: 'local', path: _hygiene_fixturePath("repo"), name: 'Private history', kind: 'folder' }
 const oid = (n: number) => n.toString(16).padStart(40, '0')
-const snapshot: GitHistorySnapshot = { hostId: 'local', repoPath: _hygiene_fixturePath("repo"), roots: [oid(1)], checkedAt: 1, selectedRef: null,
+const snapshot: GitHistorySnapshot = { hostId: 'local', repoPath: _hygiene_fixturePath("repo"), roots: [oid(1)], checkedAt: _tailFixtureEpoch(0, 0, 1), selectedRef: null,
   refs: [{ kind: 'local', name: 'refs/heads/main', oid: oid(1) }, { kind: 'remote', name: 'refs/remotes/origin/topic', oid: oid(2) }] }
 function page(values: number[], next: number | null, scope = snapshot): GitHistoryResult {
-  return { kind: 'ready', snapshot: scope, commits: values.map(n => ({ oid: oid(n), subject: `Commit ${n}`, author: 'Private author', authoredAt: 1,
+  return { kind: 'ready', snapshot: scope, commits: values.map(n => ({ oid: oid(n), subject: `Commit ${n}`, author: 'Private author', authoredAt: _tailFixtureEpoch(0, 0, 1),
     parents: [oid(n + 1)], refs: scope.refs.filter(ref => ref.oid === oid(n)) })), nextCursor: next === null ? null : { snapshot: scope, offset: next } }
 }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes }); return { resolve, promise } }
@@ -65,7 +67,7 @@ async function scroll(top: number) { await act(async () => { view().scrollTop = 
 async function visibility(hidden: boolean) {
   await act(async () => { Object.defineProperty(document, 'visibilityState', { configurable: true, value: hidden ? 'hidden' : 'visible' }); document.dispatchEvent(new Event('visibilitychange')) })
 }
-async function select(value: string) { await act(async () => { const picker = element.querySelector<HTMLSelectElement>('select')!; picker.value = value; picker.dispatchEvent(new Event('change', { bubbles: true })) }) }
+async function select(value: string) { await selectHistoryReference(element, value) }
 
 beforeEach(() => {
   installGitHistoryViewport()
