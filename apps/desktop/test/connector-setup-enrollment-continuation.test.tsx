@@ -223,3 +223,26 @@ it('Settings reads the exact safe authentication failure from its original durab
   expect(calls.at(-1)!.result).toMatchObject({ operation: { diagnostic: { boundary: 'json' } } })
   expect(fetch).toHaveBeenCalledTimes(before)
 }, 10_000)
+
+it('Settings shows the safe Console redirect reason from its original Host receipt without replay', async () => {
+  const nativeFetch = vi.mocked(fetch).getMockImplementation()!
+  vi.mocked(fetch).mockImplementation(async (url, options) => String(url) === 'https://open.feishu.cn/app'
+    ? new Response('private-console-redirect-body', { status: 302, headers: { location: 'https://unqualified.invalid/private-account?token=private-console-token#private-fragment' } })
+    : nativeFetch(url, options))
+  await dom.render(<MountedSettings />); await click('[data-enrollment-new]'); await click('[data-enrollment-create]')
+  await vi.waitFor(async () => {
+    await act(async () => {})
+    expect(dom.container.querySelector('.connector-enrollment .connector-diagnostics')?.textContent).toContain('console · redirect-unconfirmed · handoff · unexpected-host')
+  }, { timeout: 6000 })
+  const observed = calls.findLast(call => call.method === 'connection.enrollment.advance')!.result as ConnectionEnrollmentView
+  expect(observed.operation!.diagnostic).toMatchObject({ stage: 'authentication', step: 'console', failure: 'redirect-unconfirmed', boundary: 'handoff', httpStatus: 302, redirectReason: 'unexpected-host' })
+  expect(observed.account).toBeNull()
+  expect(dom.container.querySelector('[data-enrollment-action="create"]')).toBeNull()
+  expect(native).not.toContain('/developers/v1/manifest/upsert_by_template')
+  for (const value of ['unqualified.invalid', 'private-account', 'private-console-token', 'private-fragment', 'private-console-redirect-body']) expect(dom.container.textContent).not.toContain(value)
+  const before = vi.mocked(fetch).mock.calls.length, checks = calls.length
+  await click('[data-enrollment-recover], [data-enrollment-inspect]')
+  await vi.waitFor(() => expect(calls).toHaveLength(checks + 1))
+  expect(calls.at(-1)!.result).toMatchObject({ operation: { operationId: observed.operation!.operationId, diagnostic: { redirectReason: 'unexpected-host' } } })
+  expect(fetch).toHaveBeenCalledTimes(before)
+}, 10_000)

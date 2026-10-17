@@ -131,3 +131,27 @@ it('Mote keeps the failed original request and displays its actual safe parsing 
   await act(async () => { await f.connectionCalls.mock.results[observations]!.value })
   expect(f.registration).toHaveBeenCalledTimes(count)
 })
+
+it('Mote shows a missing Console redirect location from the original safe receipt without replay', async () => {
+  const views = observeViews(), native = f.registration.getMockImplementation()!
+  f.registration.mockImplementation(async (url, input) => String(url) === 'https://open.feishu.cn/app'
+    ? new Response('private-mote-console-body', { status: 302 }) : native(url, input))
+  await create()
+  await visible('[data-mote-enrollment-action="renew-authentication"]', 6000)
+  await f.click('Original setup details')
+  expect(document.querySelector('.bot-profile-details')?.textContent).toContain('console · redirect-unconfirmed · handoff · missing-location · HTTP 302')
+  expect(views.at(-1)!.operation!.diagnostic).toMatchObject({ stage: 'authentication', step: 'console', failure: 'redirect-unconfirmed', boundary: 'handoff', httpStatus: 302, redirectReason: 'missing-location' })
+  expect(views.at(-1)!.account).toBeNull()
+  expect(document.body.textContent).not.toContain('private-mote-console-body')
+  expect(document.querySelector('[data-mote-enrollment-action="confirm-account"]')).toBeNull()
+  expect(document.querySelector('[data-mote-enrollment-action="create"]')).toBeNull()
+  expect(f.creationCount).toBe(0); expect(f.beginCount).toBe(1)
+  const count = f.registration.mock.calls.length, checks = f.parentCalls.mock.calls.length, observations = f.connectionCalls.mock.calls.length
+  await f.click('Check saved progress')
+  expect(f.parentCalls).toHaveBeenCalledTimes(checks + 1)
+  await act(async () => { await f.parentCalls.mock.results[checks]!.value })
+  await vi.waitFor(() => expect(f.connectionCalls).toHaveBeenCalledTimes(observations + 1))
+  await act(async () => { await f.connectionCalls.mock.results[observations]!.value })
+  expect(f.registration).toHaveBeenCalledTimes(count)
+  expect(views.at(-1)!.operation!.diagnostic).toMatchObject({ redirectReason: 'missing-location' })
+})
