@@ -113,7 +113,7 @@ export async function arrangeCollaboration(input: CollaborationLayoutInput, sign
       seen.add(id); return node
     })
     if (area.folded || !members.length) {
-      local.set(area.id, []); groups.push({ id: area.id, width: 276, height: area.folded ? 54 : 112 }); continue
+      local.set(area.id, []); groups.push({ id: area.id, width: 276, height: members.length ? 54 : COLLABORATION_AREA_HEADER }); continue
     }
     const placed = positions(viz, members, within.get(area.id) ?? [], 'sfdp')
     const boxes = members.map(node => ({ id: node.id, areaId: area.id, kind: 'agent' as const, folded: false,
