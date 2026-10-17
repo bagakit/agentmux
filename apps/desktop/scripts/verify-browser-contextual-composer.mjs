@@ -50,13 +50,17 @@ const mutations = [
     expected: 'Closing a previously docked trace must preserve the live page footprint' },
   { id: 'live-anchor-commit', file: 'apps/desktop/src/renderer/src/components/BrowserTraceReadingHost.tsx',
     from: 'queueMicrotask(() => {', to: '((work: () => void) => work())(() => {',
-    expected: 'The live trace must actually be painted after its original parent ref commits' }
+    expected: 'The live trace must actually be painted after its original parent ref commits' },
+  { id: 'current-step-before-history', file: 'apps/desktop/src/renderer/src/styles/browser-contextual-composer.css',
+    from: '.browser-trace-rail .browser-rsi-history__list { max-height: min(160px, 24vh); overflow-y: auto; }',
+    to: '.browser-trace-rail .browser-rsi-history__list { max-height: none; overflow-y: auto; }',
+    expected: 'Opening the live trace must show the current step before scrolling through older operations' }
 ]
 for (const mutation of mutations) {
   const file = join(root, mutation.file); await bind(file)
   const original = await readFile(file, 'utf8')
   assert.equal(original.split(mutation.from).length, 2, 'Unique owning production mutation: ' + mutation.id)
-  await transform(original.replace(mutation.from, mutation.to), { loader: file.endsWith('.tsx') ? 'tsx' : 'ts', target: 'esnext', sourcefile: mutation.file })
+  await transform(original.replace(mutation.from, mutation.to), { loader: file.endsWith('.css') ? 'css' : file.endsWith('.tsx') ? 'tsx' : 'ts', target: 'esnext', sourcefile: mutation.file })
 }
 const aliases = {}, workspacePackages = new Map()
 for (const name of await readdir(join(root, 'packages'))) {

@@ -50,7 +50,7 @@ Object.assign(window, { contextualProof: {
     const browser = await api.browser.create('contextual-browser', url, 'contextual-workspace')
     const region = { ...browser, kind: 'browser' as const, browserId: browser.id, regionId: 'contextual-browser-region', workspaceId: 'contextual-workspace' }
     const tab = createWorkbenchTab('contextual-tab', region)
-    useAppStore.setState({ config, sessions: [session], loading: false, tabs: { [tab.id]: tab }, layouts: {},
+    useAppStore.setState({ config, sessions: [session], loading: false, toolsOpen: false, tabs: { [tab.id]: tab }, layouts: {},
       agentSteerQueues: {}, agentSteerInFlight: {}, agentSteerInFlightPhase: {}, error: null })
     root.render(<Fixture />)
     return { browser, identity }
