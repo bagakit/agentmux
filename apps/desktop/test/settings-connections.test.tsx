@@ -6,7 +6,7 @@ import type { AppConfig, HostConfig, HostCheckResult, SshHostConfig } from '../s
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { HostSettingsPane } from '../src/renderer/src/components/settings/HostSettingsPane'
 import { hostsSettingsModule } from '../src/renderer/src/components/settings/modules/hosts'
-import { devicesSettingsModule } from '../src/renderer/src/components/settings/modules/devices'
+import { amuxConversationSettingsModule } from '../src/renderer/src/components/settings/modules/amux-conversation'
 import { settingsModules, settingsNavGroups, visibleSettingsSections } from '../src/renderer/src/components/settings/settings-modules'
 import type { SettingsPageId } from '../src/renderer/src/components/settings/settings-modules'
 import { api } from '../src/renderer/src/lib/api'
@@ -64,22 +64,23 @@ async function toggleAdvanced(open: boolean) {
 async function save() { await dom.click('[data-settings-save-bar] button'); await act(async () => {}) }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
 
-describe('Connections settings', () => {
-  it('catalog: every navigation projection has the same Connections contributions without authorization guesses', async () => {
-    const groups = settingsNavGroups(''), connections = groups.find(group => group.id === 'connections')
+describe('Conversation Channels settings', () => {
+  it('catalog: every navigation projection has the same conversation channel contributions without authorization guesses', async () => {
+    const groups = settingsNavGroups(''), connections = groups.find(group => group.id === 'conversation-channels')
     expect(groups.find(group => group.id === 'remote')?.items.map(item => item.id), 'Remote group owns exactly environments').toEqual(['hosts'])
-    expect(connections?.items.map(item => item.id), 'Connections group owns devices').toEqual(['devices'])
+    expect(connections?.items.map(item => item.id), 'Conversation Channels owns the original native and external consumers').toEqual(['amux-conversation', 'lark'])
     expect(hostsSettingsModule.title).toBe('Environments')
-    expect(groups.find(group => group.id === 'toolkit')?.items.map(item => item.id), 'Mods owns the original conversation Connector').toContain('chat-connections')
-    expect(groups.find(group => group.id === 'resources')!.items.some(item => item.id === 'hosts' || item.id === 'devices')).toBe(false)
-    expect(visibleSettingsSections('手机').map(item => item.id)).toContain('devices')
+    expect(groups.find(group => group.id === 'toolkit')?.items.map(item => item.id)).not.toContain('lark')
+    expect(groups.some(group => group.id === 'connections')).toBe(false)
+    expect(groups.find(group => group.id === 'resources')!.items.some(item => item.id === 'hosts' || item.id === 'amux-conversation')).toBe(false)
+    expect(visibleSettingsSections('手机').map(item => item.id)).toContain('amux-conversation')
     expect(visibleSettingsSections('ssh').map(item => item.id)).toContain('hosts')
     expect(new Set(settingsModules.map(item => item.id)).size).toBe(settingsModules.length)
-    expect(devicesSettingsModule.savedSummary()).toBe('Phone connections and device access')
+    expect(amuxConversationSettingsModule.savedSummary()).toBe('Native conversations and device access')
     await dom.render(<Shell section="overview" />)
-    expect(dom.container.querySelector('#settings-overview-connections')).not.toBeNull()
+    expect(dom.container.querySelector('#settings-overview-conversation-channels')).not.toBeNull()
     expect(dom.container.querySelector('#settings-overview-remote')).not.toBeNull()
-    expect(dom.container.querySelector('[data-settings-section="devices"]')).not.toBeNull()
+    expect(dom.container.querySelector('[data-settings-section="amux-conversation"]')).not.toBeNull()
     expect(dom.container.querySelectorAll('[data-settings-pane]')).toHaveLength(0)
     expect(api.deviceManagement.ls).not.toHaveBeenCalled()
   })
@@ -152,10 +153,10 @@ describe('Connections settings', () => {
     vi.spyOn(api.deviceManagement, 'link').mockResolvedValue(structuredClone(deviceInvitation))
     await dom.render(<Shell section="hosts" />); await select(H); await toggleAdvanced(true); await fill(name(), 'Across device section')
     const originalPane = pane(), originalField = name(), originalDisclosure = editor().querySelector('.host-edit-disclosure')
-    await dom.click('[data-settings-target="devices"]')
+    await dom.click('[data-settings-target="amux-conversation"]')
     expect(api.deviceManagement.ls).toHaveBeenCalledExactlyOnceWith({})
     expect(pane()).toBe(originalPane); expect(originalPane.hidden).toBe(true); expect(originalField.isConnected).toBe(true)
-    const invite = [...dom.container.querySelectorAll<HTMLButtonElement>('[data-settings-pane="devices"] button')].find(node => node.textContent?.includes('Copy connection link'))!
+    const invite = [...dom.container.querySelectorAll<HTMLButtonElement>('[data-settings-pane="amux-conversation"] button')].find(node => node.textContent?.includes('Copy connection link'))!
     await act(async () => invite.click())
     expect(api.deviceManagement.link).toHaveBeenCalledExactlyOnceWith({})
     expect(dom.container.querySelector('[aria-label="Phone connection link"]')).not.toBeNull()
@@ -169,9 +170,21 @@ describe('Connections settings', () => {
     await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, appearance: { ...state.config!.appearance, terminalFontSize: 17 } } })))
     await select(H, 'projects'); await select(H)
     expect(api.deviceManagement.ls).toHaveBeenCalledTimes(reads)
-    await dom.click('[data-settings-target="devices"]')
+    await dom.click('[data-settings-target="amux-conversation"]')
     expect(api.deviceManagement.ls).toHaveBeenCalledTimes(reads + 1)
     expect(api.deviceManagement.link).toHaveBeenCalledTimes(1)
+  })
+  it('opens the original Input and Mailbox owner from native conversation settings without a channel switch', async () => {
+    const link = vi.spyOn(api.deviceManagement, 'link'), revoke = vi.spyOn(api.deviceManagement, 'revoke')
+    await dom.render(<Shell section="amux-conversation" />)
+    expect(api.deviceManagement.ls).toHaveBeenCalledExactlyOnceWith({})
+    const native = dom.container.querySelector('[data-settings-pane="amux-conversation"]')!
+    expect(native.querySelector('[data-message-tool-settings]')).toBeNull()
+    const input = [...native.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Open Input & Mailbox')!
+    expect(input).toBeDefined(); await act(async () => input.click())
+    expect(dom.container.querySelector('[data-settings-pane="message-tool"] [data-message-tool-settings]')).not.toBeNull()
+    expect(native.hasAttribute('hidden')).toBe(true)
+    expect(link).not.toHaveBeenCalled(); expect(revoke).not.toHaveBeenCalled()
   })
   it('captures complete Host Test and never reuses Ready after a later input', async () => {
     await dom.render(<LiveHost />); await select(H); await toggleAdvanced(true)

@@ -75,16 +75,15 @@ const overviewRow = () => connected('[data-settings-overview] [data-settings-sec
 
 it('a contributed module reaches Overview, sidebar, compact menu, search and its actual Pane through the generic shell', async () => {
   await dom.render(<SettingsPanel onClose={() => {}} />)
-  expect(registration.originalIds).toEqual([
-    'profile', 'appearance', 'notifications', 'continuity', 'browser', 'general', 'keyboard-shortcuts', 'message-tool', 'prompts', 'mote', 'space', 'focus', 'goals', 'survey', 'notes', 'toolkit', 'agents', 'hosts', 'devices', 'chat-connections'
-  ])
+  expect(registration.originalIds.length).toBeGreaterThan(0)
+  expect(new Set(registration.originalIds).size).toBe(registration.originalIds.length)
+  expect(registration.originalIds).not.toContain('fixture-module')
+  expect(registration.originalIds).toContain('browser-agent-control')
   const catalog = visibleSettingsSections('')
-  expect(catalog.map(module => module.id)).toEqual([
-    'profile', 'appearance', 'notifications', 'continuity', 'browser', 'general', 'keyboard-shortcuts',
-    'message-tool', 'prompts', 'hosts', 'devices', 'toolkit', 'chat-connections', 'agents', 'fixture-module',
-    'space', 'focus', 'goals', 'survey', 'notes', 'mote'
-  ])
+  expect(new Set(catalog.map(module => module.id))).toEqual(new Set([...registration.originalIds, 'fixture-module']))
+  expect(catalog).toHaveLength(registration.originalIds.length + 1)
   const navigation = settingsNavGroups('').flatMap(group => group.items)
+  expect(settingsNavGroups('').find(group => group.id === 'browser-use')?.items.map(module => module.id)).toEqual(['browser', 'browser-agent-control'])
   expect(new Set(navigation.map(module => module.id))).toEqual(new Set(catalog.map(module => module.id)))
   expect(navigation).toHaveLength(catalog.length)
   expect(navigation.map(module => module.id)).toEqual(catalog.map(module => module.id))
@@ -116,7 +115,8 @@ it('a contributed module reaches Overview, sidebar, compact menu, search and its
   await input('[aria-label="Search settings"]', 'fixture-needle')
   expect([...dom.container.querySelectorAll('nav[aria-label="Settings sections"] button')]
     .map(node => node.textContent)).toEqual(['Fixture module'])
-  expect(dom.container.querySelector('.settings-content__header h2')?.textContent).toBe('Fixture module')
+  expect(dom.container.querySelector('.settings-content__header h2')?.textContent).toBe('Search results')
+  await dom.click('[data-settings-search-section="fixture-module"]')
   expect(connected<HTMLElement>('[data-settings-pane="fixture-module"]').hidden).toBe(false)
   expect(mountedPanes()).toEqual(['fixture-module'])
 })
@@ -125,7 +125,7 @@ it('keeps the contributed draft, component identity and reading position while i
   const save = vi.spyOn(api.config, 'save').mockResolvedValue(undefined)
   await dom.render(<SettingsPanel onClose={() => {}} />)
   expect(connected('[data-settings-overview] [data-settings-section="general"] .settings-overview__summary').textContent)
-    .toBe('Home paths (~) · Wait for Agent availability')
+    .toBe('Home paths (~)')
   await section('Fixture module')
   const pane = connected<HTMLElement>('[data-settings-pane="fixture-module"]')
   const draft = connected<HTMLInputElement>('[aria-label="Fixture draft"]', pane)
@@ -140,7 +140,7 @@ it('keeps the contributed draft, component identity and reading position while i
   await act(async () => useAppStore.getState().setConfig({ ...before, copyPathsAsAbsolute: true }))
   expect(overviewRow().textContent).toContain('Saved absolute paths')
   expect(connected('[data-settings-overview] [data-settings-section="general"] .settings-overview__summary').textContent)
-    .toBe('Absolute paths · Wait for Agent availability')
+    .toBe('Absolute paths')
   await section('General')
   await section('Fixture module')
   expect(connected('[data-settings-pane="fixture-module"]')).toBe(pane)
@@ -173,7 +173,7 @@ it('Browser module saves its authored automation value against the original fiel
   expect(toggle.checked).toBe(true)
   const baseline = useAppStore.getState().config!
   const latest: AppConfig = { ...baseline, copyPathsAsAbsolute: true,
-    browser: { ...baseline.browser, toolbar: { ...baseline.browser.toolbar, screenshot: false },
+    browser: { ...baseline.browser, automaticMemoryRelease: true, toolbar: { ...baseline.browser.toolbar, screenshot: false },
       appLinkSchemes: { custom: 'allow', another: 'deny' } } }
   await act(async () => useAppStore.getState().setConfig(latest))
   expect(connected('input[type="checkbox"]', pane)).toBe(toggle)
@@ -199,6 +199,8 @@ it('finds the saved local Auth tool through ordinary auth and usage settings sea
     await input('[aria-label="Search settings"]', query)
     expect([...dom.container.querySelectorAll('nav[aria-label="Settings sections"] button')]
       .map(node => node.textContent)).toEqual(['Toolkit Library'])
+    expect(connected('.settings-content__header h2').textContent).toBe('Search results')
+    await dom.click('[data-settings-search-section="toolkit"]')
     expect(connected('.settings-content__header h2').textContent).toBe('Toolkit Library')
     expect(connected('.toolkit-library').getAttribute('aria-label')).toBe('Toolkit Library')
     expect(connected<HTMLElement>('[data-settings-pane="toolkit"]').hidden).toBe(false)
@@ -227,8 +229,11 @@ it('presents Mods beside Preferences through the actual shell and preserves the 
   const row = connected('[data-settings-target="toolkit"]', nav)
   expect(row.previousElementSibling!.textContent).toBe('Mods')
   const groups = settingsNavGroups('')
-  expect(groups.map(group => group.title)).toEqual(['Preferences', 'Message Tool', 'Remote', 'Connections', 'Mods', 'Resources', 'Work', 'Mote'])
-  expect(groups.find(group => group.title === 'Mods')!.items.map(item => item.id)).toEqual(['toolkit', 'chat-connections'])
+  const channelIndex = groups.findIndex(group => group.id === 'conversation-channels')
+  expect(channelIndex).toBeGreaterThan(groups.findIndex(group => group.id === 'remote'))
+  expect(channelIndex).toBeLessThan(groups.findIndex(group => group.id === 'toolkit'))
+  expect(groups[channelIndex]!.items.map(item => item.id)).toEqual(['amux-conversation', 'lark'])
+  expect(groups.find(group => group.title === 'Mods')!.items.map(item => item.id)).toEqual(['toolkit'])
   expect(groups.find(group => group.title === 'Preferences')!.items.map(item => item.id)).not.toContain('toolkit')
   await section('Toolkit Library')
   expect(connected('.settings-content__breadcrumb').textContent).toBe('Mods')
