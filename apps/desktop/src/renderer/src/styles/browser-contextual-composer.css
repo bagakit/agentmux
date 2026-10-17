@@ -1,0 +1,34 @@
+.browser-contextual-composer {
+  position: fixed; z-index: var(--layer-popover); display: flex; flex-direction: column;
+  width: 360px; min-width: 0; overflow: auto; padding: var(--sp-4);
+  gap: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-lg);
+  background: var(--surface-2); color: var(--text-2); box-shadow: var(--elev-2);
+  font: var(--fs-meta)/1.5 var(--font-sans); pointer-events: auto;
+}
+.browser-contextual-composer > header,
+.browser-contextual-composer > header > span,
+.browser-contextual-composer > footer { display: flex; align-items: center; gap: var(--sp-3); }
+.browser-contextual-composer > header { justify-content: space-between; }
+.browser-contextual-composer > header > span { min-width: 0; }
+.browser-contextual-composer > header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.browser-contextual-composer > header svg { flex: none; color: var(--green-2); }
+.browser-contextual-composer > header .icon-button svg { color: var(--text-3); }
+.browser-contextual-composer > textarea { flex: 1 0 76px; min-height: 56px; max-height: 180px; resize: vertical; padding: var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-1); font: inherit; }
+.browser-contextual-composer__source { min-width: 0; padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); background: var(--surface-3); }
+.browser-contextual-composer__source > label { display: flex; align-items: center; gap: var(--sp-2); }
+.browser-contextual-composer__source > label span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browser-contextual-composer__source input { margin: 0; accent-color: var(--green-2); }
+.browser-contextual-composer__source small,
+.browser-contextual-composer__source summary,
+.browser-contextual-composer > footer small { flex: none; color: var(--text-3); font-size: var(--fs-micro); }
+.browser-contextual-composer__source summary { cursor: pointer; margin-top: var(--sp-1); }
+.browser-contextual-composer__source details p { margin: var(--sp-2) 0 0; overflow-wrap: anywhere; font-size: var(--fs-micro); }
+.browser-contextual-composer__notice,
+.browser-contextual-composer__failure { margin: 0; color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
+.browser-contextual-composer__failure { color: var(--red); }
+.browser-contextual-composer > footer { flex-wrap: wrap; }
+.browser-contextual-composer > footer > small { margin-right: auto; }
+.browser-contextual-composer > footer button { flex: none; }
+
+.browser-trace-rail--floating { position: fixed; z-index: var(--layer-popover); width: 360px; max-width: calc(100vw - 16px); max-height: min(520px, calc(100vh - 80px)); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface-2); box-shadow: var(--elev-2); pointer-events: auto; }
+.browser-trace-held { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: var(--sp-3); font-size: var(--fs-micro); color: var(--text-3); }

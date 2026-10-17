@@ -54,6 +54,7 @@
 @import './mote-directory.css';
 @import './mote-idea-controls.css';
 @import './browser.css';
+@import './browser-contextual-composer.css';
 @import './browser-operation-surface.css';
 @import './browser-step-evidence.css';
 @import './browser-structured-fields.css';
