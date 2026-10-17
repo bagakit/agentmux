@@ -4,6 +4,7 @@ import { DIAGNOSTIC_GUIDE, GOAL_ACTIVITY_GUIDE, SPATIAL_GUIDE } from './agentmux
 import { goalRoleGuidanceContract } from './goal-role-guidance.js'
 import { GLOBAL_GOAL_PATROL_GUIDANCE } from './goal-patrol.js'
 import { AGENTMUX_PROTOCOL_CATALOG } from './agent-message-render.js'
+import { AGENTMUX_NOTE_EDITING_PATH } from './agentmux-cli-note-guide.js'
 
 interface ModuleDefinition {
   summary: string
@@ -557,12 +558,11 @@ original Session, Run and user working surface; do not replace an object to obta
     roles: 'Agents reading or editing notes',
     when: 'Resolve, inspect or modify an original Notebook/Note',
     guide: `The Notebook owner holds note/catalog identities and revisions; note bodies stay in
-their real filesystem source. Begin with notebook ls/resolve/inspect, retain exact source
-and revision, then apply only the authorized graph/content changes. A visual link or name
-is not a source identity, and unavailable notes are not an empty catalog.
+their real filesystem source. Markdown is the only saved body; graph indexes are derived.
+Use the original Files writer for content and notebook apply for organization or your own
+follow relationship. Authorship comes from the trusted caller, never body declarations.
 
-Read amux notebook --help for exact links, graph edits and original Note history; use the
-matching leaf help before changing the original catalog or content.`
+${AGENTMUX_NOTE_EDITING_PATH}`
   },
   schedule: {
     summary: 'Civil-time arrangements, one-shot countdowns and original lifecycle',

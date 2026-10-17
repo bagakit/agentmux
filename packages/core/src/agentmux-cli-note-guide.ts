@@ -1,3 +1,26 @@
+/** The short editing path shared by the module skill and detailed Note guide. */
+export const AGENTMUX_NOTE_EDITING_PATH = `## Edit an authorized Note
+1. Find the original with amux notebook ls or notebook resolve, then read
+   amux notebook inspect --note NOTE_ID --content. Keep its exact Note identity, resource,
+   saved Markdown and revision. A name is not an identity; unavailable is not an empty Note.
+2. Read relationships only when needed with amux notebook graph --note NOTE_ID.
+   Use notebook graph --help to choose a Notebook or all-catalog scope. Check coverage and
+   per-file revisions: partial results do not prove missing links. A shared include points
+   to one independent Markdown file; edit that exact original to change all its uses.
+3. Read amux file --skill, then file read --help and file write --help. Read the original
+   file and keep its complete returned resource and revision. Save edited Markdown through
+   file write; for concurrent Note edits, retain the exact base body and original operation ID
+   as described by that leaf help. Preserve stable IDs and later unsaved drafts. No page
+   needs to be open or Space activated. First-use sharing uses file share --help.
+4. Confirm the body write, canonical saved content/revision, attribution and history separately;
+   sharing also has separate source, shared-file and destination outcomes. After unknown,
+   keep the original request, operation/event IDs and drafts. Inspect that same file/history,
+   file share inspect or notebook inspect --operation-id as appropriate; never automatically
+   resend a write or infer its earlier receipt from matching current content.
+
+Read the matching leaf --help for arguments and receipt fields; amux notebook --help expands
+the original content, link, follow and history contracts.`
+
 /** Shared discovery for every managed Agent, including Agents outside Talk with Agent. */
 export const AGENTMUX_NOTE_GUIDE = `## Notes: read, edit, follow and inspect relationships
 Notes are original Markdown .note.md files, organized by the durable Notebook catalog.
@@ -6,6 +29,9 @@ You can edit an authorized Note through file.read and file.write. notebook.apply
 organization, sources and your own follow relationship. A rename-page writes the original
 file's title header first and then publishes its catalog projection. No App/page needs to be open.
 
+${AGENTMUX_NOTE_EDITING_PATH}
+
+### Original content and identity
 Start with amux notebook ls, then amux notebook inspect --note NOTE_ID --content.
 The content observation gives the exact resource, saved Markdown, revision, stable blockIds
 and noteProvenance from the original SQLite metadata owner. recorded/unconfirmed describes
@@ -97,7 +123,8 @@ amux notebook resolve --link '[[Page #Heading]]' [--note NOTE_ID] [--block BLOCK
 #^BLOCK_ID selects an exact block. A heading query cannot grant a fake unique match when
 unanchored headings remain unconfirmed. Resolution is read-only; save the chosen stable target by CAS.
 
-To save, discover the Note workface and exact Zone mapping with notebook inspect and space inspect.
+To save, resolve the original resource and exact Zone mapping with notebook inspect and,
+when needed, space inspect. Reading or saving a file does not require activating a Space.
 Run amux file read --zone ZONE --path ZONE_RELATIVE_PATH --host HOST --workspace WORKSPACE
 --workspace-path WORKSPACE_PATH. Use its returned resource and revision, never a guessed workspace.
 Pipe the complete edited Markdown to amux file write --zone ZONE --path ZONE_RELATIVE_PATH
