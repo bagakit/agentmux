@@ -113,6 +113,54 @@ export const dispatchDiscoveryJournalSchema = `
     WHERE json_extract(json, '$.kind') = 'message';
 `
 
+/** Batch intent and target positions over the same original journal; no delivery engine or copied message. */
+export const messageBroadcastJournalSchema = `
+  CREATE TABLE IF NOT EXISTS message_broadcasts (operation_id TEXT PRIMARY KEY, original_sequence INTEGER NOT NULL UNIQUE);
+  CREATE TABLE IF NOT EXISTS message_broadcast_targets (
+    operation_id TEXT NOT NULL, session_id TEXT NOT NULL, message_id TEXT NOT NULL UNIQUE,
+    claim_sequence INTEGER, result_sequence INTEGER, PRIMARY KEY(operation_id, session_id));
+`
+
+/** SQLite has no array expression index. These are rebuildable positions, never message facts. */
+function messageEventPositions(source: string): string {
+  return `WITH event(sequence, payload) AS (${source}), refs AS (
+    SELECT sequence, COALESCE(json_extract(payload, '$.messageId'), json_extract(payload, '$.sourceMessageId'), json_extract(payload, '$.envelope.messageId')) AS mid
+      FROM event WHERE json_extract(payload, '$.kind') IN ('message','delivery','delivery-issue','dispatch-open','dispatch-event')
+    UNION SELECT event.sequence, ref.value FROM event JOIN json_each(CASE json_extract(event.payload, '$.kind')
+      WHEN 'a2a-notification' THEN json_extract(event.payload, '$.notification.messageIds')
+      WHEN 'a2a-notification-result' THEN (SELECT json_extract(original.json, '$.notification.messageIds')
+        FROM a2a_notifications n JOIN records original ON original.sequence=n.original_sequence
+        WHERE n.notification_id=json_extract(event.payload, '$.notificationId')) ELSE '[]' END) ref)
+    SELECT refs.sequence AS event_sequence, m.message_id,
+      json_extract(original.json, '$.envelope.senderSessionId') AS sender,
+      json_extract(original.json, '$.envelope.recipientSessionId') AS recipient
+    FROM refs JOIN messages m ON m.message_id=refs.mid JOIN records original ON original.sequence=m.message_sequence
+    WHERE json_extract(original.json, '$.envelope.sender.kind')='agent-session'
+      AND json_extract(original.json, '$.envelope.recipient.kind')='agent-session'
+      AND json_extract(original.json, '$.envelope.sender.agentSessionId')=json_extract(original.json, '$.envelope.senderSessionId')
+      AND json_extract(original.json, '$.envelope.recipient.agentSessionId')=json_extract(original.json, '$.envelope.recipientSessionId')`
+}
+const messageEventRows = (source: string) => `WITH positions AS (${messageEventPositions(source)})
+  SELECT sender, event_sequence, message_id FROM positions UNION SELECT recipient, event_sequence, message_id FROM positions`
+
+/** Initialize a physical index once under the original writer transaction; original records never change. */
+export function initializeMessageEventIndex(db: DatabaseSync): void {
+  if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='message_event_positions'").get()) {
+    db.exec('CREATE INDEX IF NOT EXISTS message_event_by_message ON message_event_positions(participant_id, message_id, event_sequence)')
+    return
+  }
+  db.exec(`CREATE TABLE message_event_positions (
+    participant_id TEXT NOT NULL, event_sequence INTEGER NOT NULL, message_id TEXT NOT NULL,
+    PRIMARY KEY(participant_id, event_sequence, message_id)) WITHOUT ROWID`)
+  db.exec('CREATE INDEX message_event_by_message ON message_event_positions(participant_id, message_id, event_sequence)')
+  db.exec(`INSERT OR IGNORE INTO message_event_positions ${messageEventRows('SELECT sequence, json FROM records')}`)
+  // The trigger consumes exactly the new record and its original message/notification key.
+  // Same transaction as append; rollback cannot publish a partial historical index or miss a concurrent append.
+  db.exec(`CREATE TRIGGER message_event_position_insert AFTER INSERT ON records
+    WHEN json_extract(NEW.json, '$.kind') IN ('message','delivery','delivery-issue','dispatch-open','dispatch-event','a2a-notification','a2a-notification-result')
+    BEGIN INSERT OR IGNORE INTO message_event_positions SELECT * FROM (${messageEventRows('SELECT NEW.sequence, NEW.json')}); END`)
+}
+
 /** Explicit Dispatch reads select the original reply lineage, without scanning other messages. */
 export const dispatchReplyJournalSchema = `
   CREATE INDEX IF NOT EXISTS message_reply_chain ON records(
@@ -265,6 +313,7 @@ export async function openMessageJournal(
     db.exec('BEGIN IMMEDIATE')
     db.exec(schema)
     db.exec(inputControlJournalSchema)
+    db.exec(messageBroadcastJournalSchema)
     db.exec(messageRouteJournalSchema)
     db.prepare('INSERT INTO metadata VALUES (?, ?)').run(incarnation, sourceHash)
     if (archive) for await (const record of legacyRecords(archive)) importRecord(db, record)
