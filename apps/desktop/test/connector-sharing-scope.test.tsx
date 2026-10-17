@@ -59,7 +59,7 @@ it('the original default PublicationHost content gap remains readable beside its
   const effect = f.services.publication!.store.list(binding)[0]!
   await appendFile(f.original.transcript, row('unqualified-input', 'user'))
   await vi.waitFor(() => expect(f.services.publication!.observation(binding.bindingId, 1)).toEqual({ state: 'unavailable', reason: 'content-unconfirmed' }), { timeout: 6000 })
-  await f.button('Close'); await f.menu('Shared group details'); await ready('Some content has not synced'); await ready('Latest delivery confirmed')
+  await f.button('Close'); await f.menu('Shared group details'); await ready('Some content has not synced'); await ready('Delivery confirmed in this window')
   const service = document.querySelector('.agent-connector-service')!
   expect(service.closest('details'), 'content gap is readable before opening receipt details').toBeNull()
   expect(service.textContent).toContain('keep working in the original conversation')
