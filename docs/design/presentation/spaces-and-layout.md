@@ -410,7 +410,9 @@ Topic rail 以紧凑的 Tab 图标簇表达打开面，不再用宽大的 chip �
 
 ### Agent More 的动作层级
 
-同一 Agent Region 的右键与 More 使用一致的 Agent／Region 动作内容与控件语言，打开位置沿各自手势避让，名称确认准确 Agent，不能因格数变化提供不同会话动作。终端正文右键在同一菜单中补充其准确上下文工具，选区提示、路径与输出边界仍就近可读；不以旧终端菜单遮住共享 Agent 动作，也不把终端专属工具常驻到 More。Focus 顶栏的 Tab 操作入口沿[Focus 操作栏](focus-context.md#操作栏与原工作面)表达不同作用域。Agent More 用名称与轻量 Executor／Host 摘要建立上下文，长名称有界换行；原始 ID、目录与原生来源不支配首层宽度和高度。会话动作、工作面动作、详情与维护按用户任务成组，仅在组间分隔，不为每个实现片段插入横线。History、接管与当前对话操作保持直接可达；工作面动作沿同一组呈现，重启与停止单独收尾，避免与日常导航混淆。
+同一 Agent Region 的右键与 More 使用一致的动作名称与控件语言，打开位置沿各自手势避让，名称确认准确 Agent，不能因格数变化提供不同会话资格。两种入口按实际使用任务安排层级：Agent More 用名称与轻量 Executor／Host 摘要建立上下文，长名称有界换行；摘要后紧接会话控制组，Take over、Fork current conversation 与 Restart Session、Stop Agent 相邻，Stop 位于该组末项并保留原确认与后果说明。Conversation 资料组将 Conversation history 与 Session details 放在一起，不以工作面或连接动作把两者隔开；资料、工作面和连接动作之间仅作必要分隔，不为实现片段插入横线。原始 ID、目录与原生来源不支配首层宽度和高度。Focus 顶栏的 Tab 操作入口沿[Focus 操作栏](focus-context.md#操作栏与原工作面)表达不同作用域。
+
+终端正文右键先呈现紧凑的 Copy、Paste、Select all、Find 等正文工具，命中的路径、选区提示与输出操作就近可读，再衔接相关 Agent／Region 动作；常用复制与原生上下文的视觉优先级高于会话维护，不机械复刻 More 的整份顺序与内容密度。共享能力不依靠另一个终端菜单覆盖，终端专属工具也不常驻到 More。身份摘要、组名与分隔保持克制，不把正文右键变成第二份 Agent 管理面。实际目标、只读与未知资格及原动作后果沿[行为合同](../behavior/spaces-and-layout.md#agent-region-关闭与身份入口)。
 
 分屏与排列直接在一级菜单呈现下节的 `New region`、`Layout` 共享两行控件与说明，不再经过 `Split and layout` 子菜单。复制对象链接同样留在一级，用一行紧凑图标动作表达准确的 `Copy Agent Link`、`Copy Region Link`，复用共享行的对齐、命中区、hover／键盘说明和完整可访问名称；它们复制既有 amux 对象链接，不另造 ID 格式或用显示名替代身份。常用动作尽量扁平，可变多目标选择与低频资料才继续级联。详情面保留完整 Session、Host、cwd、原生来源与观察刷新，字段可换行阅读；来源异常继续在原 Header 明确可辨，详情内原因、候选与恢复动作相邻。主菜单和子菜单受实际窗口约束，鼠标路径连续，键盘、触控及返回焦点沿原菜单协议；以共享紧凑工具行控制首层高度，不用长列表、多层嵌套或裁切换密度。业务与身份边界见[Agent Region 关闭与身份入口](../behavior/spaces-and-layout.md#agent-region-关闭与身份入口)。
 
