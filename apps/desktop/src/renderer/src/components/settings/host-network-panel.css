@@ -1,0 +1,39 @@
+.host-network { min-width: 0; display: grid; gap: 12px; border-top: 1px solid var(--line-soft); padding-block: 18px; }
+.host-network__header, .host-network__policy > header { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; }
+.host-network__header > div { display: grid; gap: 5px; }
+.host-network__header strong { font-size: 13px; font-weight: 600; }
+.host-network__eyebrow { color: var(--text-3); font: 9px var(--font-mono); letter-spacing: .09em; }
+.host-network__hint, .host-network__boundary, .host-network__issue { margin: 0; font-size: 11px; line-height: 1.6; color: var(--text-3); overflow-wrap: anywhere; }
+.host-network__issue { color: var(--text-2); padding: 9px 11px; border-left: 2px solid var(--line); background: var(--surface-2); }
+.host-network__source-time { color: var(--text-3); font: 10px var(--font-mono); line-height: 1.5; }
+.host-network__request { padding: 14px; display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 5px 12px; background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: 8px; }
+.host-network__request > span { color: var(--text-2); font-size: 11px; }
+.host-network__request > strong { color: var(--text); font: 22px var(--font-mono); font-variant-numeric: tabular-nums; }
+.host-network__request > p { grid-column: 1 / -1; margin: 0; color: var(--text-3); font-size: 10px; line-height: 1.5; }
+.host-network__policy { display: grid; gap: 10px; }
+.host-network__policy strong { font-size: 11px; font-weight: 550; }
+.host-network__policy dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0; }
+.host-network__policy dl > div { min-width: 0; display: grid; gap: 5px; }
+.host-network__policy dt { color: var(--text-3); font-size: 10px; }
+.host-network__policy dd { margin: 0; color: var(--text-2); font-size: 11px; overflow-wrap: anywhere; }
+.host-network__path { display: grid; gap: 8px; }
+.host-network__path ol { display: grid; gap: 0; list-style: none; padding: 0; margin: 0; border: 1px solid var(--line-soft); border-radius: 8px; overflow: hidden; }
+.host-network__path li { display: grid; gap: 5px; padding: 10px 12px; background: var(--surface-1); border-bottom: 1px solid var(--line-soft); }
+.host-network__path li:last-child { border-bottom: 0; background: var(--surface-2); }
+.host-network__path li small { color: var(--text-3); font: 9px var(--font-mono); letter-spacing: .03em; }
+.host-network__path li span, .host-network__path li code { color: var(--text-2); font-size: 11px; overflow-wrap: anywhere; user-select: text; }
+.host-network__addresses { min-width: 0; padding-top: 8px; border-top: 1px solid var(--line-soft); }
+.host-network__addresses summary { display: flex; align-items: baseline; gap: 10px; cursor: pointer; color: var(--text-2); font-size: 11px; line-height: 1.8; }
+.host-network__addresses summary::before { content: '›'; color: var(--text-3); }
+.host-network__addresses[open] summary::before { content: '⌄'; }
+.host-network__addresses summary small { margin-left: auto; color: var(--text-3); font-size: 10px; }
+.host-network__addresses > p { margin-top: 8px; }
+.host-network__addresses > .host-network__source-time { display: block; }
+.host-network__address-list { display: grid; margin-top: 7px; }
+.host-network__address-list > div { display: grid; grid-template-columns: minmax(70px, .6fr) minmax(0, 1.4fr); gap: 10px; padding-block: 8px; border-bottom: 1px solid var(--line-soft); }
+.host-network__address-list > div > span { display: grid; gap: 4px; min-width: 0; }
+.host-network__address-list strong { font-size: 11px; font-weight: 500; overflow-wrap: anywhere; }
+.host-network__address-list small { font-size: 10px; line-height: 1.5; color: var(--text-3); }
+.host-network__address-list code { font: 11px/1.6 var(--font-mono); overflow-wrap: anywhere; user-select: text; }
+.host-network__boundary { font-size: 10px; }
+@container (max-width: 340px) { .host-network__policy dl { grid-template-columns: 1fr; gap: 8px; } .host-network__policy dl > div { grid-template-columns: 1fr 1fr; } .host-network__address-list > div { grid-template-columns: 1fr; gap: 5px; } }

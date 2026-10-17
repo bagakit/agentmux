@@ -17,6 +17,7 @@ export type HostTopologyItem = {
   check: HostCheckState | undefined
   projectCount: number
   sessionCount: number
+  network?: string | null | undefined
 }
 type HostNodeData = HostTopologyItem & { selected: boolean; onSelect: (id: string) => void }
 type HostNode = Node<HostNodeData, 'host'>
@@ -40,6 +41,7 @@ const HostTopologyNode = memo(function HostTopologyNode({ data }: NodeProps<Host
         <span><small>{host.kind === 'ssh' ? 'PORT OVERRIDE' : 'NETWORK PORT'}</small><code data-route-port>{host.kind === 'ssh' ? host.port ?? 'SSH config' : 'Not applicable'}</code></span>
       </span>
       <span className="remote-host-node__binding"><span>Runtime</span><code data-route-runtime title={host.kind === 'ssh' ? host.runtimeId : undefined}>{host.kind === 'ssh' ? host.runtimeId ?? 'Unconfirmed' : 'Inspect environment'}</code></span>
+      <span className="remote-host-node__link" data-route-network title={data.network ?? undefined}>{data.network ?? 'Network · read on demand'}</span>
       <span className="remote-host-node__footer"><span className={`remote-check-dot remote-check-dot--${check?.state ?? 'idle'}`} />
         <span>{hostCheckLabel(check ?? { state: 'idle' })}</span>{checkedAt !== undefined ? <time dateTime={new Date(checkedAt).toISOString()} title={new Date(checkedAt).toLocaleString()}>{new Date(checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time> : null}
         <span className="remote-host-node__work" title="Registered projects · client Session references">{data.projectCount} projects · {data.sessionCount} sessions</span></span>
@@ -67,9 +69,9 @@ export const HostTopology = memo(function HostTopology({ items, selectedId, onSe
     return [...(start === 0 ? [{ id: 'entry' }] : []), ...items.slice(start, start + 3).map(item => ({ id: `host:${item.host.id}` }))]
   }, [topologyKey])
   const nodes: TopologyNode[] = useMemo(() => [
-    { id: 'entry', type: 'entry', position: { x: 0, y: Math.min(1, Math.max(0, items.length - 1)) * 230 + 28 }, data: { label: 'AgentMux' }, selectable: false },
+    { id: 'entry', type: 'entry', position: { x: 0, y: Math.min(1, Math.max(0, items.length - 1)) * 250 + 28 }, data: { label: 'AgentMux' }, selectable: false },
     ...items.map((item, index): HostNode => ({ id: `host:${item.host.id}`, type: 'host',
-      position: { x: 310, y: index * 230 + 28 }, data: { ...item, selected: item.host.id === selectedId, onSelect } }))
+      position: { x: 310, y: index * 250 + 28 }, data: { ...item, selected: item.host.id === selectedId, onSelect } }))
   ], [items, selectedId, onSelect])
   const edges = useMemo<Edge[]>(() => items.map(item => ({ id: `route:${item.host.id}`, source: 'entry', target: `host:${item.host.id}`,
     type: 'smoothstep', label: item.host.kind === 'ssh' ? 'SSH' : 'Local', selectable: false })), [routeKey])

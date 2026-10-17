@@ -17,6 +17,8 @@ import { HostUpgradePanel } from './HostUpgradePanel'
 import { HostCreationTrustPanel } from './HostCreationTrustPanel'
 import { HostTopology } from './HostTopology'
 import { HostRuntimePanel } from './HostRuntimePanel'
+import { HostNetworkPanel, hostNetworkSummary } from './HostNetworkPanel'
+import { currentHostNetwork, useHostNetworkObservation } from './use-host-network-observation'
 import { HostApplicationAccessPanel } from './HostApplicationAccessPanel'
 import { HostSessionSummary, HostExecutorsSummary } from './HostWorkSummary'
 import '../../styles/remote-management.css'
@@ -80,6 +82,8 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
   const [requestedHost, setRequestedHost] = useState<string | null>(null)
   const appliedNavigation = useRef(navigationRequest)
   const pendingHostNavigation = requestedHostId !== undefined && appliedNavigation.current !== navigationRequest
+  const network = useHostNetworkObservation(active && panel === 'overview' && !pendingHostNavigation && (measuredWide === true || view === 'editor')
+    ? hosts.find(host => host.id === selectedId) ?? null : null)
   const editor = useRef<HTMLDivElement>(null)
   const [removeRequest, setRemoveRequest] = useState<SshHostConfig | null>(null)
   useEffect(() => { if (!active) setRemoveRequest(null) }, [active])
@@ -236,7 +240,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
       {filter.query.trim() ? <p className="remote-management__filter" role="status">{hosts.filter(host => matches(host.id)).length} of {hosts.length} configured environments match “{filter.query}”{selectedId && !matches(selectedId) ? ' · Selected environment remains open' : ''}</p> : null}
       <div className="settings-resource-split remote-management__body">
         {showTopology ? active ? <HostTopology selectedId={selectedId} onSelect={selectTopologyHost}
-          items={hosts.filter(host => matches(host.id)).map(host => ({ host, check: currentHostCheck(checks[host.id], host), projectCount: projectFacts.get(host.id)?.count ?? 0, sessionCount: sessionsByHost.get(host.id)?.length ?? 0 }))} /> : <div /> : <HostConnectionLibrary selectedId={selectedId} panel={panel} query={filter.query} onQuery={filterHosts} onSelect={selectHostPanel} focusRequest={returnFocus}
+          items={hosts.filter(host => matches(host.id)).map(host => ({ host, network: hostNetworkSummary(currentHostNetwork(network.reads[host.id], host)), check: currentHostCheck(checks[host.id], host), projectCount: projectFacts.get(host.id)?.count ?? 0, sessionCount: sessionsByHost.get(host.id)?.length ?? 0 }))} /> : <div /> : <HostConnectionLibrary selectedId={selectedId} panel={panel} query={filter.query} onQuery={filterHosts} onSelect={selectHostPanel} focusRequest={returnFocus}
           items={hosts.filter((host) => matches(host.id)).map((host) => {
             const check = currentHostCheck(checks[host.id], host)
             const projects = projectFacts.get(host.id)?.count ?? 0
@@ -283,6 +287,8 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
                   {check?.detail && check.state === 'error' ? <details className="remote-overview__check-details"><summary>Connection test details</summary><p>{check.detail}</p></details> : null}</div>
                 <HostSessionSummary sessions={hostSessions} active={active && (wide || view === 'editor')} onOpen={id => { useAppStore.getState().selectSession(id); onClose?.() }} />
                 <HostRuntimePanel host={host} committed={config.hosts.find(item => item.id === host.id)} active={active && !pendingHostNavigation && (measuredWide === true || view === 'editor')} />
+                <HostNetworkPanel host={host} committed={config.hosts.find(item => item.id === host.id)} state={network.reads[host.id]} onRead={network.read}
+                  active={active && !pendingHostNavigation && (measuredWide === true || view === 'editor')} visible={network.visible} />
               </div> : null}
               {panel === 'connection' && check?.detail && check.state !== 'checking' ? check.state === 'ready' ? (
                 <details className="host-check-details">

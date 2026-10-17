@@ -1652,6 +1652,7 @@ export type AgentMuxDesktopApi = {
   }
   hosts: {
     inspect(host: HostConfig, context?: { signal?: AbortSignal }): Promise<import('@agentmux/core').HostRuntimeObservation>
+    network(host: HostConfig, context?: { signal?: AbortSignal }): Promise<import('@agentmux/core').HostNetworkObservation>
     check(host: HostConfig): Promise<HostCheckResult>
     creationTrust(host: HostConfig): Promise<HostCreationTrustSnapshot>
     trustCreationSource(host: HostConfig, expected: HostCreationTrustSnapshot): Promise<HostCreationTrustSnapshot>
@@ -2103,8 +2104,9 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
       params: import('@agentmux/core').ApplicationAccessParameterMap[M]): Promise<SessionInputOperationResult<import('@agentmux/core').ApplicationAccessResultMap[M]>>
   }
   conversation: import('./conversation-read').ConversationReadPreloadApi
-  hosts: Omit<AgentMuxDesktopApi['hosts'], 'inspect'> & {
+  hosts: Omit<AgentMuxDesktopApi['hosts'], 'inspect' | 'network'> & {
     inspect(host: HostConfig, context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<import('@agentmux/core').HostRuntimeObservation>>
+    network(host: HostConfig, context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<import('@agentmux/core').HostNetworkObservation>>
   }
   browser: Omit<AgentMuxDesktopApi['browser'], 'runScript'> & {
     runScript(...args: Parameters<AgentMuxDesktopApi['browser']['runScript']>): Promise<import('./browser-run-result').BrowserRunResult>

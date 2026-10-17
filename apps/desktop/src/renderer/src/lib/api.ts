@@ -43,6 +43,7 @@ import { createRendererHistoryObservation } from './history-observation'
 import { createRendererSearchRead } from './search-read'
 import { unwrapBrowserRunResult } from '../../../shared/browser-run-result'
 import { createRendererHistoryRead } from './history-read'
+import { createRendererHostObservation } from './host-observation'
 import {
   DEFAULT_TOPIC_WIKI,
   MOTE_SOUL_PATH,
@@ -453,7 +454,7 @@ const mockApi: AgentMuxDesktopApi = {
       return () => configListeners.delete(listener)
     }
   },
-  hosts: { inspect: async () => { throw new Error('Runtime observation requires the original desktop Host. This preview does not simulate live Runtime facts.') }, check: async (host) => ({ input: structuredClone(host), outcome: host.kind === 'ssh' ? 'unsupported' : 'ready',
+  hosts: { network: async () => { throw new Error('Network observation requires the original desktop Host. No network facts are simulated in this preview.') }, inspect: async () => { throw new Error('Runtime observation requires the original desktop Host. This preview does not simulate live Runtime facts.') }, check: async (host) => ({ input: structuredClone(host), outcome: host.kind === 'ssh' ? 'unsupported' : 'ready',
     detail: host.kind === 'ssh' ? 'Remote Runs are not yet supported.' : 'CtxMux 0.1.0 · protocol 17' }),
     creationTrust: async () => { throw new Error('Source trust requires the original desktop and target Host. This preview cannot read authorization.') },
     trustCreationSource: async () => { throw new Error('Source trust requires explicit approval in the original desktop. This preview cannot grant authorization.') },
@@ -1514,19 +1515,7 @@ function requireDesktopApi(): AgentMuxDesktopApi {
     ...preload,
     applications: { call: async (method, params) => unwrapSessionInputOperationResult(await preload.applications.call(method, params)) },
     conversation: createConversationReadApi(preload.conversation),
-    hosts: { ...preload.hosts, inspect: async (host, context) => {
-      const signal = context?.signal
-      signal?.throwIfAborted()
-      try {
-        const result = await preload.hosts.inspect(host, signal ? { onAbort: cancel => {
-          if (signal.aborted) { cancel(); return () => {} }
-          signal.addEventListener('abort', cancel, { once: true })
-          return () => signal.removeEventListener('abort', cancel)
-        } } : undefined)
-        signal?.throwIfAborted()
-        return unwrapSessionInputOperationResult(result)
-      } catch (error) { signal?.throwIfAborted(); throw error }
-    } },
+    hosts: { ...preload.hosts, inspect: createRendererHostObservation(preload.hosts.inspect), network: createRendererHostObservation(preload.hosts.network) },
     landmarks: createConversationLandmarksApi(preload.landmarks),
     notebooks: { ...preload.notebooks, ...createRendererNotebookObservation(preload.notebooks) },
     scratch: { ...preload.scratch, listTopics: async workspaceId => {
