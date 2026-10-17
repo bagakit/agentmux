@@ -141,6 +141,16 @@ vi.mock('electron', () => ({
   WebContentsView: fakeElectron.FakeWebContentsView,
   app: { getPath: () => tmpdir() }
 }))
+// This suite owns manager/runner/dispatch wiring. Native hit-testing and CDP
+// coexistence are exercised by verify-browser-agent-input-isolation.mjs.
+vi.mock('../src/main/browser-native-input-shield.js', () => ({ BrowserNativeInputShield: class {
+  ready = Promise.resolve()
+  isolated = true
+  view = { webContents: { on() {}, focus() {}, isDestroyed: () => false, mainFrame: { framesInSubtree: [] } } }
+  contents = this.view.webContents
+  synchronize() {}
+  dispose() { this.isolated = false }
+} }))
 
 // 只替换派发层。CDP 会话用真的——`endedReason` 那条判据要的就是它真实的记账行为。
 // 走 vi.hoisted 是因为 vi.mock 的工厂会被提到文件顶部，直接引用下面的 const 会撞到 TDZ。
@@ -186,6 +196,7 @@ function fakeWindow(): any {
   return {
     events,
     isDestroyed: () => false,
+    getContentBounds: () => ({ x: 0, y: 0, width: 900, height: 700 }),
     contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
     // Electron serializes at send time. Retaining the mutable operation object here would let later
     // phase changes rewrite earlier events and make a missing real-time emit pass this test.

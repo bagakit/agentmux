@@ -102,7 +102,7 @@ async function fixture(focused = true) {
     if (previous !== -1) views.splice(previous, 1)
     views.splice(index, 0, view)
   })
-  const window = { webContents: app, isDestroyed: () => false, isFocused: () => focused, contentView: {
+  const window = { webContents: app, getContentBounds: () => ({ x: 0, y: 0, width: 900, height: 700 }), isDestroyed: () => false, isFocused: () => focused, contentView: {
     get children() { return views },
     addChildView,
     removeChildView: (view: InstanceType<typeof native.View>) => { views.splice(views.indexOf(view), 1) }
@@ -258,7 +258,7 @@ it('keeps a stale native window document from confirming coverage without hiding
 
 it('prepares a never-selected source in a hidden native shell without covering the Renderer', async () => {
   const f = await fixture(), lease = f.register('A')
-  expect(f.source.getBounds().width).toBe(0)
+  expect(f.source.getBounds().width).toBe(f.window.getContentBounds().width)
   const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, lease.leaseId)
   const shell = native.shells.at(-1)!
   expect(shell.options).toMatchObject({ show: false, focusable: false, width: geometry.bounds.width, height: geometry.bounds.height })
@@ -412,7 +412,7 @@ it('moves only the original Native view on explicit selection and updates only t
   const f = await fixture(), a = f.register('A'), b = f.register('B')
   f.manager.updatePresentation(f.app as never, f.frame as never, b.leaseId,
     { visible: true, bounds: { ...geometry.bounds, x: 550 } })
-  expect(f.source.bounds.width).toBe(0)
+  expect(f.source.bounds.width).toBe(f.window.getContentBounds().width)
   await f.manager.activatePresentation(f.app as never, f.frame as never, b.leaseId, { kind: 'select' })
   expect(f.source.bounds).toEqual({ ...geometry.bounds, x: 550 })
   f.manager.updatePresentation(f.app as never, f.frame as never, a.leaseId, geometry)
@@ -638,7 +638,7 @@ it('hidden original source still refuses an unfocused requester without page inp
 
 it('passive selection restores native geometry and input authority while preserving keyboard focus', async () => {
   const f = await fixture(), a = f.register('A')
-  expect(f.source.bounds.width).toBe(0)
+  expect(f.source.bounds.width).toBe(f.window.getContentBounds().width)
   expect(await f.manager.activatePresentation(f.app as never, f.frame as never, a.leaseId,
     { kind: 'select', focus: 'preserve' })).toEqual({ outcome: 'selected' })
   expect(f.source.bounds).toEqual(geometry.bounds)
@@ -665,7 +665,7 @@ it('rejects an invalid selection focus policy before changing the original nativ
   const f = await fixture(), a = f.register('A')
   await expect(f.manager.activatePresentation(f.app as never, f.frame as never, a.leaseId,
     { kind: 'select', focus: 'invented-policy' } as never)).rejects.toThrow('Unknown Browser presentation focus policy')
-  expect(f.source.bounds.width).toBe(0)
+  expect(f.source.bounds.width).toBe(f.window.getContentBounds().width)
   expect(f.source.getVisible()).toBe(false)
   expect(f.source.webContents.focus).not.toHaveBeenCalled()
   expect(f.source.webContents.dead).toBe(false)
