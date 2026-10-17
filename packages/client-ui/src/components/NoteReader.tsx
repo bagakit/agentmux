@@ -18,7 +18,7 @@ import { noteProvenanceAttributes } from '../note/note-provenance.js'
 export type { NoteEditState } from '../note/note-edit-state.js'
 export type { NoteLinkOpenRequest } from './NoteInlineLink.js'
 
-const Scope = createContext<{ knowledge: NoteKnowledge; workspaceId: string; graph?: NotebookGraph | undefined; trail: string[]; readInclude?: ((target: Pick<NoteInclude, 'noteId' | 'path' | 'workspaceId'>) => void) | undefined; readReference?: ((target: NoteBlockTarget) => void) | undefined; onOpenLink?: ((link: NoteLinkOpenRequest) => void) | undefined } | null>(null)
+const Scope = createContext<{ knowledge: NoteKnowledge; workspaceId: string; graph?: NotebookGraph | undefined; trail: string[]; compactIncludes?: boolean | undefined; readInclude?: ((target: Pick<NoteInclude, 'noteId' | 'path' | 'workspaceId'>) => void) | undefined; readReference?: ((target: NoteBlockTarget) => void) | undefined; onOpenLink?: ((link: NoteLinkOpenRequest) => void) | undefined } | null>(null)
 function InlineLink({ node, editor }: NodeViewProps) {
   const scope = useContext(Scope)
   return <NoteInlineLinkView node={node} editor={editor} onOpen={scope?.onOpenLink} />
@@ -48,6 +48,9 @@ function Include({ node }: NodeViewProps) {
     ? { workspaceId: observed.resource.workspaceId, path: observed.resource.path, revision: observed.revision } : undefined
   const resolved = resolveNoteInclude(scope.knowledge, include, scope.workspaceId, confirmed)
   const key = JSON.stringify(['file', include.noteId]), cycle = scope.trail.includes(key)
+  if (scope.compactIncludes && confirmed) return <NodeViewWrapper className="note-include-link" contentEditable={false} data-block-id={node.attrs.blockId} data-shared-note-id={include.noteId}>
+    <span>Shared block</span><button type="button" onClick={() => scope.onOpenLink?.({ text: resolved.status === 'resolved' ? resolved.source.note.title ?? 'Shared block' : 'Shared block', target: { noteId: include.noteId } })}>{resolved.status === 'resolved' ? resolved.source.note.title ?? 'Open shared original' : 'Open shared original'}</button>
+  </NodeViewWrapper>
   return <NodeViewWrapper className="mobile-note-reference note-include" contentEditable={false} data-block-id={node.attrs.blockId} data-shared-note-id={include.noteId}>
     <strong>{resolved.status === 'resolved' ? resolved.source.note.title ?? '共享内容' : '共享内容'}</strong>
     {cycle ? <p role="status">循环引用，原共享内容与引用保留。</p> : resolved.status === 'resolved'
@@ -192,13 +195,17 @@ export type NoteReaderProps = { noteProvenance?: NoteProvenanceSnapshot | undefi
   blockIds?: readonly string[] | undefined
   highlightBlockIds?: readonly string[] | undefined
   clipBlocks?: boolean | undefined
+  /** Read-only opening summary. Knowledge and original bytes remain complete. */
+  previewBlockCount?: number | undefined
+  /** Summarize includes when the original content already has its own reading surface. */
+  compactIncludes?: boolean | undefined
   editing?: NoteEditing | undefined
   target?: NoteBlockTarget | undefined
   onOpenLink?: ((link: NoteLinkOpenRequest) => void) | undefined
 }
 const EMPTY_IDS: readonly string[] = []
 const EMPTY_DOCUMENTS: NonNullable<NoteReaderProps['documents']> = []
-export function NoteReader({ content, path, workspaceId, revision, noteProvenance, documents = EMPTY_DOCUMENTS, graph, readInclude, blockIds, highlightBlockIds = EMPTY_IDS, clipBlocks = true, readReference, editing, target, onOpenLink }: NoteReaderProps) {
+export function NoteReader({ content, path, workspaceId, revision, noteProvenance, documents = EMPTY_DOCUMENTS, graph, readInclude, blockIds, highlightBlockIds = EMPTY_IDS, clipBlocks = true, previewBlockCount, compactIncludes, readReference, editing, target, onOpenLink }: NoteReaderProps) {
   const observed = useMemo(() => ({ path, content, revision: revision ?? '', ...noteProvenance ? { noteProvenance } : {} }), [path, content, revision, noteProvenance])
   const [written, setWritten] = useState<{ source: NoteFileDocument; document: NoteFileDocument } | null>(null)
   // Consume this original write receipt while its input observation is still current.
@@ -217,18 +224,18 @@ export function NoteReader({ content, path, workspaceId, revision, noteProvenanc
   const block = target ? resolveNoteBlock(knowledge, target) : null
   // A different read-only projection is not a revision of the same editing draft.
   const readingScope = JSON.stringify([workspaceId, path, parsed.status === 'valid' ? parsed.note.noteId : null,
-    blockIds ? [...new Set(blockIds)].sort() : null, blockIds ? clipBlocks : null])
+    blockIds ? [...new Set(blockIds)].sort() : null, blockIds ? clipBlocks : null, previewBlockCount ?? null, Boolean(compactIncludes)])
   useEffect(() => {
     if (!target || block?.status !== 'resolved') return
     const element = [...body.current?.querySelectorAll<HTMLElement>('[data-block-id]') ?? []].find(element => element.dataset.blockId === target.blockId)
     element?.scrollIntoView?.({ block: 'center' })
   }, [target?.noteId, target?.blockId, block?.status])
-  return parsed.status === 'valid' ? <Scope.Provider value={{ knowledge, workspaceId, graph, trail: [], readInclude, readReference, onOpenLink }}><div ref={body} data-note-id={parsed.note.noteId} data-target-block={block?.status === 'resolved' ? target?.blockId : undefined}>
+  return parsed.status === 'valid' ? <Scope.Provider value={{ knowledge, workspaceId, graph, trail: [], compactIncludes, readInclude, readReference, onOpenLink }}><div ref={body} data-note-id={parsed.note.noteId} data-target-block={block?.status === 'resolved' ? target?.blockId : undefined}>
     {original.noteProvenance?.status === 'unconfirmed' && <p role="status">块作者未确认：{original.noteProvenance.reason} 正文仍可阅读和编辑；重新读取同一原文件可核对元数据。</p>}
     {target && <section aria-label="原块定位" data-block-target-status={block?.status}>
       {block?.status === 'resolved' ? <><strong>引用的原块</strong><p>{block.block.text}</p></> : <p role="status">原块未确认：{block?.message} 原引用保留，仍可阅读完整笔记。</p>}
     </section>}
-    {editing && original.revision ? <EditableNote key={parsed.note.noteId} note={parsed.note} content={original.content} revision={original.revision} original={original} onWritten={document => setWritten({ source: observed, document })} editing={{ ...editing, subscribe: editing.subscribe ? listener => editing.subscribe!(state => { setWorking({ noteId: state.noteId, content: state.draft }); listener(state) }) : undefined, onDraft: state => { setWorking({ noteId: state.noteId, content: state.draft }); editing.onDraft(state) } }} /> : <RichContent key={readingScope} highlightBlockIds={highlightBlockIds} content={excerpt ? { type: 'doc', content: clipBlocks ? excerpt.content.content?.map(node => readingExcerpt(node, highlightBlockIds)) ?? [] : (excerpt.content.content ?? []) } : parsed.note.content} />}
+    {editing && original.revision ? <EditableNote key={parsed.note.noteId} note={parsed.note} content={original.content} revision={original.revision} original={original} onWritten={document => setWritten({ source: observed, document })} editing={{ ...editing, subscribe: editing.subscribe ? listener => editing.subscribe!(state => { setWorking({ noteId: state.noteId, content: state.draft }); listener(state) }) : undefined, onDraft: state => { setWorking({ noteId: state.noteId, content: state.draft }); editing.onDraft(state) } }} /> : <RichContent key={readingScope} highlightBlockIds={highlightBlockIds} content={excerpt ? { type: 'doc', content: clipBlocks ? excerpt.content.content?.map(node => readingExcerpt(node, highlightBlockIds)) ?? [] : (excerpt.content.content ?? []) } : previewBlockCount === undefined ? parsed.note.content : { ...parsed.note.content, content: parsed.note.content.content?.slice(0, previewBlockCount).map(node => readingExcerpt(node, highlightBlockIds)) ?? [] }} />}
   </div></Scope.Provider> : <><p role="status">原笔记读取问题：{parsed.message}</p><pre>{content}</pre></>
 }
 function EditableNote({ note, content, revision, editing, original, onWritten }: { note: NoteDocument; content: string; revision: string; editing: NoteEditing; original: NoteFileDocument; onWritten(document: NoteFileDocument): void }) {
