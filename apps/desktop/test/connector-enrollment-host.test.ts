@@ -80,16 +80,16 @@ beforeEach(async () => {
   vi.spyOn(Date, 'now').mockImplementation(() => clock)
   const key = randomBytes(32)
   const encryption: CredentialEncryption = {
-    isEncryptionAvailable: () => secureAvailable,
-    encryptString(value) {
+    isAsyncEncryptionAvailable: async () => secureAvailable,
+    async encryptStringAsync(value) {
       const iv = randomBytes(12),
         cipher = createCipheriv('aes-256-gcm', key, iv)
       return Buffer.concat([iv, cipher.update(value, 'utf8'), cipher.final(), cipher.getAuthTag()])
     },
-    decryptString(value) {
+    async decryptStringAsync(value) {
       const decipher = createDecipheriv('aes-256-gcm', key, value.subarray(0, 12))
       decipher.setAuthTag(value.subarray(-16))
-      return Buffer.concat([decipher.update(value.subarray(12, -16)), decipher.final()]).toString('utf8')
+      return { result: (Buffer.concat([decipher.update(value.subarray(12, -16)), decipher.final()]).toString('utf8')), shouldReEncrypt: false }
     }
   }
   vi.stubGlobal(
