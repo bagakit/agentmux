@@ -4,6 +4,8 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { jsonl, nativeHistoryFixture } from './fixtures/native-history-session.js'
 import { fixtureEpoch } from './helpers/fixture-values.js'
 import { normalizeSessionHistoryPage } from '../src/session-history.js'
+import { readSessionHistoryTextResource } from '../src/session-history-content.js'
+import { sessionHistoryTextForReading } from '../src/session-user-messages.js'
 import { projectConversationRecords, consumeConversationWindowPage, parseConversationUnit } from '../src/conversation.js'
 import { readCodexSavedSessionHistoryRecord } from '../src/providers/codex-saved-history.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
@@ -18,6 +20,8 @@ const source = { providerId: 'codex', nativeSessionId: 'original-native-thread' 
 const at = fixtureEpoch(2, 3, 4)
 const sender = '/root/independent_review', recipient = '/root'
 const body = 'Sender: misleading-display-author\n\nThe original collaboration report.'
+const envelope = (type = 'MESSAGE', from = sender, to = recipient) => `Message Type: ${type}\nTask name: ${to}\nSender: ${from}\nPayload:\n`
+const opaque = { type: 'encrypted_content', encrypted_content: 'original-opaque-payload' }
 const report = (id = 'original-agent-message', attribution: Record<string, unknown> = {}) => ({
   type: 'response_item', timestamp: new Date(at).toISOString(), payload: { type: 'agent_message', id,
     author: sender, recipient, content: [{ type: 'input_text', text: body }],
@@ -37,6 +41,16 @@ function expected(id = 'original-agent-message'): AgentSessionHistoryItem {
     collaboration: { kind: 'message', source, sender, recipient },
     contentParts: [{ kind: 'text', text: body, contentEligibility: 'public' }] }
 }
+const wrappedReport = (id = 'original-agent-message') => report(id, { content: [
+  { type: 'input_text', text: envelope() + body }, opaque
+] })
+const wrappedExpected = (id = 'original-agent-message'): AgentSessionHistoryItem => ({ ...expected(id), contentParts: [
+  { kind: 'text', text: envelope() + body, readingRange: { start: envelope().length, end: (envelope() + body).length }, contentEligibility: 'public' },
+  { kind: 'text', text: JSON.stringify(opaque), readingRange: { start: 0, end: 0 }, contentEligibility: 'unconfirmed' }
+] })
+function readText(item: AgentSessionHistoryItem): string[] {
+  return item.contentParts.flatMap(part => part.kind === 'text' ? [sessionHistoryTextForReading(part)] : [])
+}
 function units(page: Parameters<typeof consumeConversationWindowPage>[0]) {
   const value = consumeConversationWindowPage(page)
   expect(value.kind).toBe('complete')
@@ -51,7 +65,7 @@ it('preserves native message identity, participants, turn and original parts thr
   const page = await f.client.sessionHistoryPage(f.session.agentSessionId)
   expect(page.items[0]).toEqual(expected('first'))
   expect(page.items[1]).toMatchObject({ ...expected('second'), contentParts: [expected().contentParts[0],
-    { kind: 'text', text: JSON.stringify({ type: 'encrypted_content', encrypted_content: 'original-opaque-payload' }), contentEligibility: 'unconfirmed' }] })
+    { kind: 'text', text: JSON.stringify(opaque), readingRange: { start: 0, end: 0 }, contentEligibility: 'unconfirmed' }] })
   const exact = await readCodexSavedSessionHistoryRecord({ source, recordId: 'first', turnId: 'original-native-turn',
     transcriptPath: f.path, workspacePath: f.root, command: 'unused', args: [], env: {}, signal: new AbortController().signal })
   expect(exact).toEqual(page.items[0])
@@ -61,6 +75,67 @@ it('preserves native message identity, participants, turn and original parts thr
   ])
   expect(await f.bytes()).toEqual(f.before)
   expect(f.controls.every(control => !control.mock.calls.length)).toBe(true)
+})
+
+it('projects only the exact leading collaboration envelope while preserving same-part, later-part and opaque originals', async () => {
+  const f = await fixture([
+    wrappedReport('same-part'),
+    report('later-part', { content: [{ type: 'input_text', text: envelope('FINAL_ANSWER') }, { type: 'input_text', text: body }] }),
+    report('opaque', { content: [{ type: 'input_text', text: envelope('NEW_TASK') }, opaque] })
+  ])
+  const page = await f.client.sessionHistoryPage(f.ref.agentSessionId)
+  expect(page.items.map(readText)).toEqual([[body, ''], ['', body], ['', '']])
+  expect(page.items[0]).toEqual(wrappedExpected('same-part'))
+  expect(page.items[1]!.contentParts).toEqual([
+    { kind: 'text', text: envelope('FINAL_ANSWER'), readingRange: { start: envelope('FINAL_ANSWER').length, end: envelope('FINAL_ANSWER').length }, contentEligibility: 'public' },
+    { kind: 'text', text: body, contentEligibility: 'public' }
+  ])
+  expect(page.items[2]!.contentParts).toEqual([
+    { kind: 'text', text: envelope('NEW_TASK'), readingRange: { start: envelope('NEW_TASK').length, end: envelope('NEW_TASK').length }, contentEligibility: 'public' },
+    wrappedExpected().contentParts[1]
+  ])
+  expect(await f.bytes()).toEqual(f.before)
+})
+
+it('keeps mismatched participants, unknown wrappers and unknown content readable without deriving actor facts from text', async () => {
+  const unknown = { type: 'future_content', text: 'Original unknown content' }
+  const malformedOpaque = { type: 'encrypted_content', encrypted_content: { unknown: 'shape' } }
+  const extendedOpaque = { ...opaque, note: 'Original unrecognized metadata' }
+  const texts = [envelope('MESSAGE', '/root/another'), envelope('MESSAGE', sender, '/root/another'), envelope('FUTURE'), 'Leading body\n' + envelope()]
+    .map(text => text + body)
+  const f = await fixture([
+    ...texts.map((text, index) => report(`unknown-${index}`, { content: [{ type: 'input_text', text }] })),
+    report('unknown-content', { content: [unknown, malformedOpaque, extendedOpaque, { type: 'input_text', text: envelope() + body }] }),
+    { type: 'response_item', payload: { type: 'message', id: 'ordinary-message', role: 'assistant', content: [{ type: 'output_text', text: envelope() + body }, opaque] } }
+  ])
+  const page = await f.client.sessionHistoryPage(f.ref.agentSessionId)
+  expect(page.items.map(readText)).toEqual([
+    ...texts.map(text => [text]), [JSON.stringify(unknown), JSON.stringify(malformedOpaque), JSON.stringify(extendedOpaque), envelope() + body],
+    [envelope() + body, JSON.stringify(opaque)]
+  ])
+  expect(page.items.slice(0, 5).map(item => item.collaboration)).toEqual(Array.from({ length: 5 }, () => ({ kind: 'message', source, sender, recipient })))
+  expect(page.items[5]).not.toHaveProperty('collaboration')
+  expect(await f.bytes()).toEqual(f.before)
+})
+
+it('retains complete large native text and opaque resources with their reading ranges', async () => {
+  const largeBody = 'Original readable report.\n'.repeat(100_000)
+  const largeOpaque = { type: 'encrypted_content', encrypted_content: 'opaque-payload-'.repeat(160_000) }
+  const f = await fixture([report('large', { content: [{ type: 'input_text', text: envelope() + largeBody }, largeOpaque] })])
+  const page = await f.client.sessionHistoryPage(f.ref.agentSessionId)
+  expect(page.items).toHaveLength(1)
+  expect(page.items[0]!.contentParts.map(part => part.kind)).toEqual(['resource', 'resource'])
+  const originals = await Promise.all(page.items[0]!.contentParts.map((part, index) => {
+    if (part.kind !== 'resource') throw Error('Large original content must use its bounded source resource')
+    return readSessionHistoryTextResource(part, index, { source, recordId: 'large', turnId: 'original-native-turn' },
+      request => f.client.sessionHistoryResource(f.ref.agentSessionId, request))
+  }))
+  expect(originals).toEqual([
+    { kind: 'text', text: envelope() + largeBody, readingRange: { start: envelope().length, end: (envelope() + largeBody).length }, contentEligibility: 'public' },
+    { kind: 'text', text: JSON.stringify(largeOpaque), readingRange: { start: 0, end: 0 }, contentEligibility: 'unconfirmed' }
+  ])
+  expect(readText({ ...page.items[0]!, contentParts: originals })).toEqual([largeBody, ''])
+  expect(await f.bytes()).toEqual(f.before)
 })
 
 it('preserves malformed optional native attribution as original readable content without guessing authors', async () => {
@@ -128,7 +203,7 @@ it.each(['codex', 'claude'] as const)('keeps unassociated Stop copies and exact 
 })
 
 it('carries collaboration through real RPC, Hosted SDK, compiled CLI and source changes without operating a Run', async () => {
-  const f = await fixture()
+  const f = await fixture([wrappedReport()])
   f.controls[5]!.mockRejectedValue(new AgentMuxError('The original fixture Run has no current Runtime observation.', 'CTXMUX_DISCONNECTED'))
   vi.spyOn(f.client, 'connect').mockRejectedValue(new AgentMuxError('The private fixture has no Runtime; original history remains readable.', 'CTXMUX_DISCONNECTED'))
   vi.spyOn(f.client, 'statusAgent').mockRejectedValue(new AgentMuxError('The private fixture has no current Runtime observation.', 'CTXMUX_DISCONNECTED'))
@@ -142,10 +217,10 @@ it('carries collaboration through real RPC, Hosted SDK, compiled CLI and source 
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'http', url: `http://127.0.0.1:${server.httpAddress!.port}/`, token: 'private-collaboration-read' } })
   closes.push(() => rpc.dispose())
   const hosted = await connectHostedAgentMux({ rpc }); closes.push(() => hosted.dispose())
-  expect((await hosted.sessionHistoryPage(f.ref.agentSessionId)).items).toEqual([expected()])
+  expect((await hosted.sessionHistoryPage(f.ref.agentSessionId)).items).toEqual([wrappedExpected()])
   const page = await rpc.call('agent.conversation.inspect', f.ref)
   const accepted = units(page)
-  expect(accepted[0]!.records[0]!.original.item).toEqual(expected())
+  expect(accepted[0]!.records[0]!.original.item).toEqual(wrappedExpected())
   expect(accepted[0]!.event).toMatchObject({ role: 'message', author: { kind: 'unknown' } })
   const forged = structuredClone(accepted[0]!)
   const raw = forged.records[0]!.original.item as AgentSessionHistoryItem
@@ -158,16 +233,17 @@ it('carries collaboration through real RPC, Hosted SDK, compiled CLI and source 
     const read = JSON.parse(result.stdout)
     expect(read.ok).toBe(true)
     const item = command[1] === 'history' ? read.result.items[0].item : read.result.items[0].item.records[0].original.item
-    expect(item).toEqual(expected())
+    expect(item).toEqual(wrappedExpected())
+    expect(readText(item)).toEqual([body, ''])
     if (command[1] === 'conversation') expect(read.result.items[0].item.event).toMatchObject({ role: 'message', author: { kind: 'unknown' } })
   }
   const context = await runCompiledObjectCli(['agent', 'context', '--host', f.ref.hostId, '--session', f.ref.agentSessionId], env)
   expect(context.code, context.stderr).toBe(0)
-  expect(JSON.parse(context.stdout).result.native.items).toEqual([expected()])
+  expect(JSON.parse(context.stdout).result.native.items).toEqual([wrappedExpected()])
   const checkpoint = await runCompiledObjectCli(['agent', 'conversation', 'checkpoint', '--host', f.ref.hostId, '--session', f.ref.agentSessionId], env)
   expect(checkpoint.code, checkpoint.stderr).toBe(0)
   const observed: unknown[] = [], watch = await hosted.observeConversation(f.ref, event => observed.push(event))
-  await appendFile(f.path, jsonl([report('appended-native-message')]))
+  await appendFile(f.path, jsonl([wrappedReport('appended-native-message')]))
   await vi.waitFor(() => expect(observed).toContainEqual(expect.objectContaining({ kind: 'invalidated', source: { kind: 'native', ...source } })))
   watch.dispose()
   const changed = await runCompiledObjectCli(['agent', 'conversation', 'changes', '--input', '-'], env,
@@ -175,7 +251,7 @@ it('carries collaboration through real RPC, Hosted SDK, compiled CLI and source 
   expect(changed.code, changed.stderr).toBe(0)
   const delta = JSON.parse(changed.stdout).result
   expect(delta.items).toHaveLength(1)
-  expect(delta.items[0].item.records[0].original.item).toEqual(expected('appended-native-message'))
+  expect(delta.items[0].item.records[0].original.item).toEqual(wrappedExpected('appended-native-message'))
   expect(delta.items[0].item.event).toMatchObject({ role: 'message', author: { kind: 'unknown' } })
   expect(f.controls.slice(0, 5).map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0])
   for (const [runId] of f.controls[5]!.mock.calls) expect(runId).toBe(f.session.run.runId)
