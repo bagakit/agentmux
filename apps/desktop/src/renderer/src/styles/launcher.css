@@ -1,7 +1,7 @@
 /* A compact work origin; all Runtime and draft facts keep their existing owners. */
 .launch-surface { --surface-state-width: 720px; padding: clamp(var(--sp-6), 4%, var(--sp-8)); background: radial-gradient(ellipse at 50% 0, color-mix(in srgb, var(--green) 3%, transparent), transparent 58%), var(--surface-0); container-name: launcher; container-type: inline-size; }
 .launch-surface > .surface-state__content > .surface-state__body { display: flex; flex-direction: column; }
-.launcher-environment { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-6); padding-bottom: var(--sp-6); margin-bottom: var(--sp-7); border-bottom: 1px solid var(--line-soft); }
+.launcher-environment { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-6); padding-bottom: var(--sp-5); margin-bottom: var(--sp-4); border-bottom: 1px solid var(--line-soft); }
 .launcher-environment__project { min-width: 0; display: flex; align-items: center; gap: var(--sp-5); }
 .launcher-environment__project > svg { flex: none; color: var(--text-3); }
 .launcher-environment__project > div { min-width: 0; display: grid; gap: var(--sp-2); }
@@ -43,7 +43,7 @@
 .launcher-environment__details summary { color: var(--text-3); cursor: pointer; font-size: var(--fs-meta); }
 .launcher-environment__details dl { padding-top: 0; border-top: 0; }
 .launcher-environment__availability { margin: 0; padding-top: var(--sp-5); border-top: 1px solid var(--line-soft); color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
-.launcher-agents-head { min-height: 32px; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin-bottom: var(--sp-3); }
+.launcher-agents-head { min-height: 32px; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin-bottom: var(--sp-2); }
 .launcher-agents-head__identity { min-width: 0; display: inline-flex; align-items: center; gap: var(--sp-3); }
 .launcher-agents-head strong { color: var(--text-2); font-size: var(--fs-meta); font-weight: 600; }
 .launcher-agent-entry { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-4) var(--sp-3); border: 0; border-radius: var(--radius); color: var(--text-3); background: transparent; text-align: left; font: inherit; cursor: pointer; }
@@ -54,14 +54,15 @@
 .launcher-section-actions { flex: none; display: inline-flex; gap: var(--sp-1); align-items: center; }
 .launcher-section-actions .icon-button { width: 26px; height: 26px; color: var(--text-3); }
 .agent-catalog { max-height: 104px; overflow-y: auto; overscroll-behavior: contain; padding: var(--sp-2) var(--sp-2) var(--sp-6); margin-top: calc(-1 * var(--sp-2)); margin-bottom: 0; }
-.agent-picks { position: relative; isolation: isolate; display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.agent-picks { position: relative; isolation: isolate; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 108px), 1fr)); gap: var(--sp-2); }
+.agent-picks > :is(.launcher-other-agents, .agent-catalog__empty) { grid-column: 1 / -1; }
 .agent-picks > button, .agent-picks > .agent-catalog__empty { position: relative; z-index: 1; }
 .agent-pick { min-width: 0; max-width: 100%; min-height: 32px; display: inline-flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-4); border: 1px solid transparent; border-radius: var(--radius); color: var(--text-2); background: transparent; font: inherit; cursor: pointer; }
 .agent-pick strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-meta); font-weight: 550; }
 .agent-pick:hover { color: var(--text); background: var(--surface-1); }
 .agent-pick--selected, .agent-pick--selected:hover { color: var(--text); background: transparent; border-color: transparent; box-shadow: none; }
 .agent-pick--selected strong { font-weight: 650; }
-.agent-pick__check { flex: none; color: var(--green); }
+.agent-pick__check { flex: none; margin-inline-start: auto; color: var(--green); }
 .agent-pick__unconfirmed { color: var(--amber); font-size: var(--fs-meta); }
 .launcher-other-agents { display: inline-flex; align-items: center; gap: var(--sp-2); border: 0; color: var(--text-3); background: transparent; font-size: var(--fs-meta); cursor: pointer; }
 .launcher-unavailable-agents { display: flex; flex-wrap: wrap; gap: var(--sp-4); margin-top: var(--sp-4); }
@@ -144,12 +145,12 @@
 .launcher-restore:hover { color: var(--text); background: var(--surface-2); }
 .launcher-persistence-notice { margin: var(--sp-3) 0 0; color: var(--amber-text); font-size: var(--fs-meta); line-height: 1.5; }
 .launcher-mote { min-width: 0; }
-.launcher-mote__actions { min-width: 0; display: flex; align-items: center; width: fit-content; max-width: 100%; border: 1px solid var(--line-soft); border-radius: var(--radius); overflow: hidden; }
+.launcher-mote__actions { min-width: 0; display: flex; align-items: center; width: fit-content; max-width: 100%; gap: var(--sp-2); }
 .launcher-mote__create, .launcher-mote__target { min-height: 30px; min-width: 0; display: inline-flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border: 0; color: var(--text-3); background: transparent; font: var(--fs-meta)/1.4 var(--font-sans); white-space: nowrap; }
-.launcher-mote__create { flex: none; cursor: pointer; }
+.launcher-mote__create { flex: none; cursor: pointer; border-radius: var(--radius-sm); padding-inline-start: 0; }
 .launcher-mote__create:hover:not(:disabled) { color: var(--text); background: var(--surface-2); }
 .launcher-mote__create:disabled { opacity: .5; cursor: default; }
-.launcher-mote__target { max-width: 132px; border-left: 1px solid var(--line-soft); overflow: hidden; text-overflow: ellipsis; }
+.launcher-mote__target { max-width: 132px; border-radius: var(--radius-sm); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; }
 button.launcher-mote__target { cursor: pointer; }
 button.launcher-mote__target:hover { color: var(--text); background: var(--surface-2); }
 .launcher-mote__target > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }

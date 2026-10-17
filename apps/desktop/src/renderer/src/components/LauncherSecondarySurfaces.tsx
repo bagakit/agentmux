@@ -146,7 +146,7 @@ export function LauncherSecondarySurfaces({ workspace, tabGroupId, launcherRef, 
   function header(kind: UtilityKind) {
     const Icon = icons[kind], expanded = sections[kind] === 'expanded'
     return <header className="launcher-utility__head">
-      <span><Icon size={14} /><strong>{labels[kind]}</strong>{kind === 'terminal' && expanded ? <small>{warmSession ? 'Reusable shell' : warmPending ? 'Warming shell…' : warmPreview.state === 'unconfirmed' ? 'Check connection' : 'Open in tab'}</small> : null}</span>
+      <span><Icon size={14} /><strong>{labels[kind]}</strong>{kind === 'terminal' && expanded && !warmSession ? <small>{warmPending ? 'Preparing shell…' : warmPreview.state === 'unconfirmed' ? 'Check connection' : 'Open in tab'}</small> : null}</span>
       <span className="launcher-section-actions">
         {kind !== 'browser' && !(kind === 'note' && expanded && !hasNoteDraft) ? <button type="button" className="icon-button" disabled={disabled} aria-label={kind === 'note' ? hasNoteDraft ? 'Save and open note draft' : 'Create blank note' : kind === 'terminal' && warmSession ? 'Open reusable Terminal in tab' : `Open ${labels[kind]}`}
           title={kind === 'note' ? hasNoteDraft ? 'Save & open current draft' : 'Create blank note' : 'Open in tab'} data-agentmux-action={kind === 'terminal' ? DESKTOP_ACTIONS.claimReusableTerminal : DESKTOP_ACTIONS.createNote}
