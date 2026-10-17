@@ -6,7 +6,7 @@ export type InputHistoryRead = (input: Omit<AgentSessionHistoryReadInput, 'hostI
   signal: AbortSignal) => Promise<AgentSessionHistoryReadPage>
 export type InputHistorySource = 'captured' | 'native'
 type SourcePage = { source: InputHistorySource; messages: readonly AgentSessionUserMessage[]; cursor: string | null;
-  complete: boolean; examined: number; loading: boolean; error: string | null; retry?: { cursor?: string } }
+  complete: boolean; examined: number; loading: boolean; error: string | null; retry?: { cursor?: string; retain?: boolean } }
 const sources: readonly InputHistorySource[] = ['captured', 'native']
 const EMPTY_MESSAGES: readonly AgentSessionUserMessage[] = Object.freeze([])
 const empty = (source: InputHistorySource): SourcePage => ({ source, messages: [], cursor: null, complete: false, examined: 0, loading: false, error: null })
@@ -23,7 +23,7 @@ export function useAgentInputHistory({ scope, enabled, read, initialMessages = E
   const controllers = useRef(new Map<InputHistorySource, AbortController>())
   current.current.scope = scope; current.current.enabled = enabled; current.current.read = read
 
-  const load = useCallback(async (source: InputHistorySource, query: string, cursor?: string) => {
+  const load = useCallback(async (source: InputHistorySource, query: string, cursor?: string, retain = false) => {
     controllers.current.get(source)?.abort()
     const controller = new AbortController(); controllers.current.set(source, controller)
     const generation = current.current.generation
@@ -40,16 +40,17 @@ export function useAgentInputHistory({ scope, enabled, read, initialMessages = E
         if (value.scope !== scope || value.read !== read || value.query !== query) return value
         return { ...value, pages: value.pages.map(old => {
           if (old.source !== source) return old
-          const messages = cursor ? [...old.messages] : []
-          const ids = new Set(messages.map(message => message.id))
-          for (const message of page.userMessages!) if (!ids.has(message.id)) { ids.add(message.id); messages.push(message) }
+          // A refresh rechecks the head, retaining the reader's earlier observations.
+          // Paging resumes from the new snapshot; retained records do not claim scan coverage.
+          const messages = [...new Map([...(cursor || retain ? old.messages : []), ...page.userMessages!]
+            .map(message => [message.id, message])).values()]
           return { source, messages, cursor: page.nextCursor, complete: page.scan!.complete,
             examined: (cursor ? old.examined : 0) + page.scan!.examined, loading: false, error: null }
         }) }
       })
     } catch (error) {
       if (matches()) setState(value => ({ ...value, pages: value.pages.map(page => page.source === source
-        ? { ...page, loading: false, error: error instanceof Error ? error.message : String(error), retry: cursor ? { cursor } : {} } : page) }))
+        ? { ...page, loading: false, error: error instanceof Error ? error.message : String(error), retry: { ...(cursor ? { cursor } : {}), ...(retain ? { retain } : {}) } } : page) }))
     } finally { if (controllers.current.get(source) === controller) controllers.current.delete(source) }
   }, [scope, read])
 
@@ -62,6 +63,14 @@ export function useAgentInputHistory({ scope, enabled, read, initialMessages = E
       : { scope, read, query, pages: sources.map(empty) })
     if (current.current.enabled) for (const source of sources) void load(source, query)
   }, [scope, read, load, draftQuery])
+  const refresh = useCallback(() => {
+    const original = stateRef.current
+    if (!current.current.enabled || original.scope !== scope || original.read !== read) return
+    current.current.generation++
+    for (const controller of controllers.current.values()) controller.abort()
+    controllers.current.clear()
+    for (const source of sources) void load(source, original.query, undefined, true)
+  }, [scope, read, load])
   useEffect(() => {
     current.current.generation++
     if (enabled) {
@@ -69,7 +78,7 @@ export function useAgentInputHistory({ scope, enabled, read, initialMessages = E
       const same = previous.scope === scope && previous.read === read
       const query = same ? previous.query : ''
       if (!same) { setDraftQuery(''); setState({ scope, read, query, pages: sources.map(empty) }) }
-      for (const source of sources) void load(source, query)
+      for (const source of sources) void load(source, query, undefined, same)
     } else setState(value => value.scope === scope && value.read === read
       ? { ...value, pages: value.pages.map(page => ({ ...page, loading: false })) }
       : { scope, read, query: '', pages: sources.map(empty) })
@@ -104,9 +113,9 @@ export function useAgentInputHistory({ scope, enabled, read, initialMessages = E
   const loadMore = (source: InputHistorySource) => {
     const page = pages.find(page => page.source === source)
     if (!page || page.loading || (!page.error && !page.cursor)) return
-    void load(source, valid ? state.query : '', page.error ? page.retry?.cursor : page.cursor ?? undefined)
+    void load(source, valid ? state.query : '', page.error ? page.retry?.cursor : page.cursor ?? undefined, page.error ? page.retry?.retain : false)
   }
-  return { scope, draftQuery, setDraftQuery, query: valid ? state.query : '', search, messages, pages, loadMore,
+  return { scope, draftQuery, setDraftQuery, query: valid ? state.query : '', search, refresh, messages, pages, loadMore,
     loading: pages.some(page => page.loading) || enabled && pages.some(page => !page.complete && page.cursor === null && page.examined === 0 && page.error === null),
     complete: pages.every(page => page.complete && !page.error),
     examined: pages.reduce((total, page) => total + page.examined, 0) }

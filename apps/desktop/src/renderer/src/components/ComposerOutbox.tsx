@@ -157,10 +157,12 @@ export function QueuedDeliveryFailure({ entry, copy }: { entry: ComposerQueuedMe
     preparationReason={entry.preparationWait?.reason} copyText={copy ?? (async () => false)} />
 }
 
-export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive, onMoveToDraft, onHistory, onMove, onSend, onCancelPreparation, onEdit, sendImmediately = false, reading, sessionId, pendingInteraction = false, onFill, hideHeading = false, rowsOnly = false }: {
+export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive, onMoveToDraft, onHistory, onMove, onSend, onCancelPreparation, onEdit, sendImmediately = false, reading, sessionId, pendingInteraction = false, onFill, hideHeading = false, rowsOnly = false, query = '' }: {
   pendingInteraction?: boolean
   hideHeading?: boolean
   rowsOnly?: boolean
+  /** Filter presentation without changing the original queue adjacency. */
+  query?: string
   onFill?: ((text: string) => Promise<string | void>) | undefined
   reading?: ConversationReadingProps | undefined
   sessionId?: string | undefined
@@ -179,8 +181,9 @@ export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive
 }) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [failure, setFailure] = useState<{id:string;text:string;message:string} | null>(null)
-  if (!queued.length) return null
+  if (!queued.some(entry => !query || entry.text.includes(query))) return null
   const rows = queued.map((entry,index) => {
+        if (query && !entry.text.includes(query)) return null
         const selected = selectedId === entry.id, state = queuedMessageState(entry,pendingInteraction)
         const conditionChanged = entry.errorCode === 'AGENT_PROMPT_CONDITION_CHANGED'
         const canSend = !conditionChanged && !entry.archived && !state.busy && editingId !== entry.id
@@ -203,8 +206,8 @@ export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive
             {!entry.archived && onEdit ? <button key="edit" type="button" className="composer-tool" aria-label="编辑这条待发消息" title="编辑原消息，保存不会发送"
               disabled={!entry.editable || Boolean(editingId)} onClick={event => { onSelect(entry.id,event); setEditingId(entry.id) }}><ThemeActionEditIcon size={14} /></button> : null}
             {selected && !entry.archived && onMove ? <>
-              <button key="up" type="button" className="composer-tool" disabled={Boolean(editingId) || state.busy || index===0 || queued[index-1]?.sending || queued[index-1]?.preparing} onClick={() => onMove(entry.id,'up')} title="Move up" aria-label="Move up"><ThemeActionMoveUpIcon size={14} /></button>
-              <button key="down" type="button" className="composer-tool" disabled={Boolean(editingId) || state.busy || index===queued.length-1 || queued[index+1]?.sending || queued[index+1]?.preparing} onClick={() => onMove(entry.id,'down')} title="Move down" aria-label="Move down"><ThemeActionMoveDownIcon size={14} /></button>
+              <button key="up" type="button" className="composer-tool" disabled={Boolean(editingId) || state.busy || index===0 || queued[index-1]?.sending || queued[index-1]?.preparing} onClick={() => onMove(entry.id,'up')} title={query ? "Move up in the unfiltered queue" : "Move up"} aria-label="Move up"><ThemeActionMoveUpIcon size={14} /></button>
+              <button key="down" type="button" className="composer-tool" disabled={Boolean(editingId) || state.busy || index===queued.length-1 || queued[index+1]?.sending || queued[index+1]?.preparing} onClick={() => onMove(entry.id,'down')} title={query ? "Move down in the unfiltered queue" : "Move down"} aria-label="Move down"><ThemeActionMoveDownIcon size={14} /></button>
             </> : null}
             {onArchive ? <button key="archive" type="button" className="composer-tool" aria-label={entry.archived ? '恢复为待发' : '归档这条待发消息'}
               title={entry.archived ? entry.confirmed ? '原输入已确认，可读取原记录；不能重新投递' : '恢复原条目，等待明确发送' : '归档原条目，保留原文和投递记录；不会撤回已经输入的内容'}
