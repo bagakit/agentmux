@@ -1,3 +1,7 @@
+import { coldBrowserTargets } from '../src/main/browser-cold-descriptor'
+import { browserResourceLocations } from '../src/main/browser-resource-directory'
+import { browserRunResult, unwrapBrowserRunResult } from '../src/shared/browser-run-result'
+import { browserOperationAlreadyExistsError } from '../src/main/browser-operation-journal'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -517,7 +521,7 @@ async function sourceBrowserExecutor(f: Awaited<ReturnType<typeof fixture>>, o: 
   const methods = select(getterSource, node => ts.isMethodDeclaration(node) && ['getOperation', 'stopOperationById'].includes(node.name.getText(getterSource)))
   expect(methods, 'Original BVM journal getter and stop method must be present').toHaveLength(2)
   const journalOwner = compiled(`return ({ entries: new Map(), operationJournal, ${methods.map(node => node.getText(getterSource)).join(',\n')} });`, { operationJournal: o.journal })
-  const browsers = { targets: () => [], getOperation: (id: string) => journalOwner.getOperation(id),
+  const browsers = { resourceTargets: () => [], getOperation: (id: string) => journalOwner.getOperation(id),
     runScript: vi.fn(async () => { throw new Error('Unexpected embedded-page run') }),
     stopOperationById: vi.fn(async (id: string) => journalOwner.stopOperationById(id)) }
   const main = ast('../src/main/ipc.ts')
@@ -528,7 +532,9 @@ async function sourceBrowserExecutor(f: Awaited<ReturnType<typeof fixture>>, o: 
     expect(nodes, `Original Main registration must be unique: ${channel}`).toHaveLength(1)
     const call = nodes[0] as import('typescript').CallExpression
     callbacks.set(channel, compiled(`return ${call.arguments[1]!.getText(main)};`, { requireTrustedSender, config, workspace,
-      browsers, externalBrowsers: o.page, externalBridge: f.bridge }))
+      browsers, externalBrowsers: o.page, externalBridge: f.bridge, app: { getAppMetrics: () => [] },
+      spatialState: { read: async () => ({ graph: { tabs: [], regions: [], resources: {} } }) }, coldBrowserTargets, browserResourceLocations,
+      browserRunResult, browserOperationAlreadyExistsError, ensureBrowser: async () => { throw new Error('Unexpected embedded Browser acquisition') } }))
   }
   const preload = ast('../src/preload/index.ts')
   const names = ['listTargets', 'runScript', 'stopOperationById', 'getOperation']
@@ -541,6 +547,12 @@ async function sourceBrowserExecutor(f: Awaited<ReturnType<typeof fixture>>, o: 
       return callback(frame, ...args)
     } }
   }) }
+  const rendererApi = ast('../src/renderer/src/lib/api.ts')
+  const runProjection = select(rendererApi, node => ts.isPropertyAssignment(node) && node.name.getText(rendererApi) === 'runScript' && node.initializer.getText(rendererApi).includes('unwrapBrowserRunResult'))
+  expect(runProjection, 'Original Renderer Browser run result projection must be unique').toHaveLength(1)
+  api.browser.runScript = compiled(`return ${(runProjection[0] as import('typescript').PropertyAssignment).initializer.getText(rendererApi)};`, {
+    preload: { browser: { runScript: api.browser.runScript } }, unwrapBrowserRunResult
+  })
   const store = ast('../src/renderer/src/store.ts')
   const controlMethods = ['browser.targets', 'browser.run', 'browser.stop', 'browser.operation']
   const branches = select(store, node => ts.isIfStatement(node) && ts.isBinaryExpression(node.expression) &&
@@ -623,7 +635,7 @@ describe('external page owner uses the existing program and journal', () => {
     })
     const o = await programOwner(f, uploads)
     const report = await o.page.runScript(binding.id, 'const page=await snapshot();return await uploadFiles(page.nodes[0].ref,["selected.txt"])')
-    expect(report.outcome.kind).toBe('completed')
+    expect(report.outcome.kind, JSON.stringify(report)).toBe('completed')
     expect(report.result).toMatchObject({ kind: 'browser-upload-files', browserId: binding.id, workspaceId: 'fixture-workspace', navigationId: binding.navigationId })
     expect(selected).toHaveLength(1)
     await uploads.dispose()
@@ -763,7 +775,7 @@ describe('external page owner uses the existing program and journal', () => {
         }
       }
       const listed = cli.receipt(await cli.run(['browser', 'targets', '--workspace', 'fixture-workspace']))
-      expect(listed.result).toEqual({ targets: f.bridge.list() })
+      expect(listed.result).toEqual({ targets: f.bridge.list(), coverage: 'complete' })
       const run = cli.run(['browser', 'run', '--browser', binding.id, '--operation-id', 'public-stop-original'], 'await waitForLoad(5000); return 1')
       await started.promise
       const stoppedReceipt = cli.receipt(await cli.run(['browser', 'stop', '--operation-id', 'public-stop-original']))

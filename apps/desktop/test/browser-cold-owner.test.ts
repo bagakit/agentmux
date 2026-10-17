@@ -12,6 +12,7 @@ import type { AppConfig } from '../src/shared/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
+import { browserResourceLocations } from '../src/main/browser-resource-directory.js'
 import { browserColdDescriptor, coldBrowserTargets } from '../src/main/browser-cold-descriptor.js'
 import { parseBrowserTargetsResult } from '../../../packages/core/src/control-browser-targets.js'
 import type { AgentMuxBrowserTarget } from '@agentmux/core'
@@ -122,7 +123,7 @@ afterEach(async () => {
 })
 function savedGraph(count = 2): AgentMuxSpatialGraph {
   return { spaces: [], zones: [], bindings: [], locations: [], layouts: {}, tabLayouts: {},
-    tabs: Array.from({ length: count }, (_, i) => ({ tabId: 'tab-' + i, regionIds: ['region-' + i] })),
+    tabs: Array.from({ length: count }, (_, i) => ({ tabId: 'tab-' + i, workspaceId: 'workspace', regionIds: ['region-' + i] })),
     regions: Array.from({ length: count }, (_, i) => ({ tabId: 'tab-' + i, regionId: 'region-' + i, kind: 'browser', browserId: 'page-' + i })),
     resources: Object.fromEntries(Array.from({ length: count }, (_, i) => ['region:region-' + i, {
       browserId: 'page-' + i, workspaceId: 'workspace', url: 'https://fixture.invalid/page-' + i,
@@ -188,21 +189,21 @@ describe('cold Browser ownership through the original Main owner', () => {
   it('discovers thirty original cold identities through the public target handler without a native page or fictitious navigation', async () => {
     const { manager, views } = fixture(), ports = mainPorts(manager, savedGraph(30))
     const list = ipcFunction('browser:listTargets', { ...ports, requireTrustedSender: vi.fn(), workspace: vi.fn(),
-      browsers: manager, externalBridge: { list: () => [] }, coldBrowserTargets })
+      browsers: manager, app: { getAppMetrics: () => [] }, externalBridge: { membershipCoverage: 'complete', list: () => [] }, coldBrowserTargets, browserResourceLocations })
     const { targets }: { targets: AgentMuxBrowserTarget[] } = await list({})
     expect(views).toHaveLength(0); expect(targets).toHaveLength(30)
     expect(targets.every(target => target.status === 'unavailable' && target.navigationId === undefined && target.capabilities.length === 0)).toBe(true)
-    expect(parseBrowserTargetsResult({ targets }).targets).toEqual(targets)
-    expect(() => parseBrowserTargetsResult({ targets: [{ ...targets[0], status: 'ready' }] })).toThrow('navigation')
-    expect(() => parseBrowserTargetsResult({ targets: [{ ...targets[0], navigationId: '' }] })).toThrow()
+    expect(parseBrowserTargetsResult({ coverage: 'complete', targets }).targets).toEqual(targets)
+    expect(() => parseBrowserTargetsResult({ coverage: 'complete', targets: [{ ...targets[0], status: 'ready' }] })).toThrow('navigation')
+    expect(() => parseBrowserTargetsResult({ coverage: 'complete', targets: [{ ...targets[0], navigationId: '' }] })).toThrow()
   })
   it('keeps healthy live discovery usable when saved cold metadata cannot be observed', async () => {
     const { manager, views } = fixture(), ports = mainPorts(manager, savedGraph(30))
     await manager.create('live-page', 'https://fixture.invalid/live', 'workspace', 'original')
     ports.spatialState.read.mockRejectedValueOnce(new Error('Saved source temporarily unavailable'))
     const list = ipcFunction('browser:listTargets', { ...ports, requireTrustedSender: vi.fn(), workspace: vi.fn(),
-      browsers: manager, externalBridge: { list: () => [] }, coldBrowserTargets })
-    const before = manager.targets()
+      browsers: manager, app: { getAppMetrics: () => [] }, externalBridge: { membershipCoverage: 'complete', list: () => [] }, coldBrowserTargets, browserResourceLocations })
+    const before = manager.resourceTargets(null)
     const result = await list({})
     expect(result.targets).toEqual(before); expect(result.warning).toContain('unconfirmed')
     expect(views).toHaveLength(1); expect(views[0]!.webContents.loads).toEqual(['https://fixture.invalid/live'])

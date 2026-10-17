@@ -1,6 +1,10 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import ts from 'typescript'
+import { coldBrowserTargets } from '../src/main/browser-cold-descriptor'
+import { browserResourceLocations } from '../src/main/browser-resource-directory'
+import { browserRunResult, unwrapBrowserRunResult } from '../src/shared/browser-run-result'
+import { browserOperationAlreadyExistsError } from '../src/main/browser-operation-journal'
 
 const source = readFileSync(new URL('../src/main/ipc.ts', import.meta.url), 'utf8')
 const ast = ts.createSourceFile('ipc.ts', source, ts.ScriptTarget.Latest, true)
@@ -17,18 +21,21 @@ function handler(channel: string, dependencies: Record<string, unknown>) {
   const compiled = ts.transpileModule(`const callback = ${found[0]!.getText(ast)};`, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None }
   }).outputText
-  return new Function(...Object.keys(dependencies), `${compiled};return callback`)(...Object.values(dependencies)) as (...args: unknown[]) => Promise<unknown>
+  const callback = new Function(...Object.keys(dependencies), `${compiled};return callback`)(...Object.values(dependencies))
+  return channel === 'browser:runScript' ? async (...args: unknown[]) => unwrapBrowserRunResult(await callback(...args)) : callback as (...args: unknown[]) => Promise<unknown>
 }
 function fixture() {
-  const embedded = { id: 'embedded', workspaceId: null, source: 'embedded', status: 'ready' }
+  const embedded = { id: 'embedded', workspaceId: null, source: 'embedded', status: 'ready', resource: { state: 'unknown', processes: null, locations: [] } }
   const external = { id: 'shared-original', workspaceId: 'workspace-one', source: 'external', status: 'ready' }
   const config = { browser: { agentAutomation: true } }
   const requireTrustedSender = vi.fn((_channel, event) => { if (event !== 'trusted-original') throw new Error('Untrusted original sender') })
   const workspace = vi.fn((_config, id) => { if (id !== external.workspaceId) throw new Error('Unknown original Workspace'); return { id } })
   const externalBrowsers = { has: vi.fn(id => id === external.id), runScript: vi.fn(async (...args) => ({ source: 'external', args })) }
-  const browsers = { targets: vi.fn(() => [embedded]), runScript: vi.fn(async (...args) => ({ source: 'embedded', args })) }
-  const externalBridge = { list: vi.fn(() => [external]), require: vi.fn(() => external), createPairing: vi.fn(async id => ({ originalWorkspace: id })), stopSharing: vi.fn() }
-  return { embedded, external, config, requireTrustedSender, workspace, externalBrowsers, browsers, externalBridge }
+  const browsers = { getOperation: vi.fn(async () => null), resourceTargets: vi.fn(() => [embedded]), runScript: vi.fn(async (...args) => ({ source: 'embedded', args })) }
+  const externalBridge = { membershipCoverage: 'complete', list: vi.fn(() => [external]), require: vi.fn(() => external), createPairing: vi.fn(async id => ({ originalWorkspace: id })), stopSharing: vi.fn() }
+  return { embedded, external, config, requireTrustedSender, workspace, externalBrowsers, browsers, externalBridge,
+    app: { getAppMetrics: () => [] }, spatialState: { read: async () => ({ graph: { tabs: [], regions: [], resources: {} } }) }, coldBrowserTargets, browserResourceLocations,
+    browserRunResult, browserOperationAlreadyExistsError, ensureBrowser: vi.fn(async (id: string) => { if (id !== embedded.id) throw new Error('Unknown original Browser') }) }
 }
 describe('actual Main external Browser callback consumers', () => {
   it('uses original retained-upload store and an actual local native confirmation, cancelling without deleting', async () => {
@@ -38,7 +45,7 @@ describe('actual Main external Browser callback consumers', () => {
     const window = { isDestroyed: vi.fn(() => false) }
     const dialog = { showMessageBox: vi.fn(async () => ({ response: 0 })) }
     const browserUploads = { retained: vi.fn(async () => retained), confirmDiscardSelection: vi.fn(async (_id, confirm) => await confirm(selection)) }
-    const dependencies = { ...f, args: { window }, dialog, browserUploads }
+    const dependencies = { ...f, args: { workbenchWindows: { windowForDocument: vi.fn(() => window) } }, dialog, browserUploads }
     const list = handler('browser:listRetainedUploads', dependencies)
     const discard = handler('browser:discardRetainedUpload', dependencies)
     expect(await list('trusted-original')).toBe(retained)
@@ -74,8 +81,8 @@ describe('actual Main external Browser callback consumers', () => {
   })
   it('discovers actual embedded and explicitly shared identities without opening, selecting or focusing a substitute', async () => {
     const f = fixture(); const list = handler('browser:listTargets', f)
-    expect(await list('trusted-original')).toEqual({ targets: [f.embedded, f.external] })
-    expect(await list('trusted-original', 'workspace-one')).toEqual({ targets: [f.external] })
+    expect(await list('trusted-original')).toEqual({ coverage: 'complete', targets: [f.embedded, f.external] })
+    expect(await list('trusted-original', 'workspace-one')).toEqual({ coverage: 'complete', targets: [f.external] })
     expect(f.externalBrowsers.runScript).not.toHaveBeenCalled(); expect(f.browsers.runScript).not.toHaveBeenCalled()
   })
   it('pairs only the explicit trusted Workspace and revokes only the specified original grant', async () => {
