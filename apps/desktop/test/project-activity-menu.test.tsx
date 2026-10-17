@@ -10,10 +10,9 @@ async function openAgents() {
   const trigger = dom.container.querySelector<HTMLButtonElement>('.project-activity')
   expect(trigger).not.toBeNull()
   await act(async () => trigger!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
-  const unplaced = document.querySelector<HTMLElement>('.project-activity-menu [data-unplaced]')
-  expect(unplaced).not.toBeNull()
-  await act(async () => unplaced!.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
-  const cards = [...document.querySelectorAll<HTMLButtonElement>('.project-activity-submenu .focus-context')]
+  expect(document.querySelector('.project-activity-menu[data-direct="true"]')).not.toBeNull()
+  expect(document.querySelector('.project-activity-zone')).toBeNull()
+  const cards = [...document.querySelectorAll<HTMLButtonElement>('.project-activity-menu .focus-context')]
   expect(cards.length).toBeGreaterThan(0)
   return cards
 }
@@ -34,7 +33,7 @@ it('keeps both same-SID Host subjects readable without jumping to an ambiguous o
     await act(async () => card.click())
     expect(selectSession).not.toHaveBeenCalled()
     expect(document.querySelector('.project-activity-menu')).not.toBeNull()
-    expect(document.querySelectorAll('.project-activity-submenu .focus-context')).toHaveLength(2)
+    expect(document.querySelectorAll('.project-activity-menu .focus-context')).toHaveLength(2)
   }
   expect(reportError).toHaveBeenCalledTimes(2)
   expect(reportError.mock.calls.every(([error, context]) => error.message.includes('not uniquely confirmed') && context.kind === 'indeterminate')).toBe(true)
@@ -54,6 +53,6 @@ it('does not let a retained no-position card select a different Host after its o
   await act(async () => card!.click())
   expect(selectSession).not.toHaveBeenCalled()
   expect(reportError).toHaveBeenCalledTimes(1)
-  expect(document.querySelector('.project-activity-submenu .focus-context')).toBe(card)
+  expect(document.querySelector('.project-activity-menu .focus-context')).toBe(card)
   expect(useAppStore.getState().sessions).toEqual([replacement])
 })

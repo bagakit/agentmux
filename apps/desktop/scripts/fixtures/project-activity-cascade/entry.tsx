@@ -50,6 +50,7 @@ const spaceId = directoryIdentity('local', workspace.path), zoneId = workspaceZo
 const moteSpace = directoryIdentity('local', topic.identityDirectoryPath), moteZone = homeZoneId(moteSpace)
 let first = { ...createWorkbenchTab('activity-main-tab', { regionId: 'activity-a-left', kind: 'agent', phase: 'attached', workspaceId: workspace.id, sessionId: 'activity-a' }), name: 'Core runtime', space: { spaceId, zoneId } }
 first = addWorkbenchRegion(first, 'activity-a-left', 'right', { regionId: 'activity-b-right', kind: 'agent', phase: 'attached', workspaceId: workspace.id, sessionId: 'activity-b' }) as typeof first
+first = addWorkbenchRegion(first, 'activity-b-right', 'right', { regionId: 'activity-a-mirror', kind: 'agent', phase: 'attached', workspaceId: workspace.id, sessionId: 'activity-a' }) as typeof first
 const second = { ...createWorkbenchTab('activity-second-tab', { regionId: 'activity-a-second', kind: 'agent', phase: 'attached', workspaceId: workspace.id, sessionId: 'activity-a' }), name: 'Recovery check', space: { spaceId, zoneId } }
 const review = { ...createWorkbenchTab('activity-review-tab', { regionId: 'activity-review-region', kind: 'agent', phase: 'attached', workspaceId: worktree.id, sessionId: 'activity-c' }), name: 'Visual review', space: { spaceId, zoneId: reviewZone } }
 const mote = { ...createWorkbenchTab('activity-mote-tab', { regionId: 'activity-mote-region', kind: 'agent', phase: 'attached', workspaceId: scratch.id, sessionId: 'activity-mote-agent' }), name: 'Coordination', topicId: topic.id, space: { spaceId: moteSpace, zoneId: moteZone } }
@@ -83,18 +84,22 @@ useAppStore.setState(arranged)
 const execution = agentRegionExecution({ tabId: first.id, regionId: 'activity-a-left', agentSessionId: 'activity-a' })
 if (execution?.hostId !== 'local') throw new Error('Original Core spatial execution identity did not reach its actual Store consumer')
 const references = { sessions: useAppStore.getState().sessions, drafts: useAppStore.getState().agentComposerDrafts }
-function Scene() {
+type ActivityScope = 'all' | 'zone' | 'unplaced'
+function Scene({ scope }: { scope: ActivityScope }) {
   const current = useAppStore(state => state.sessions)
+  const scoped = scope === 'all' ? current : current.filter(session => scope === 'zone' ? ['activity-a', 'activity-b'].includes(session.id) : session.id === 'activity-orphan')
   return <div style={{ height: '100%', background: 'var(--bg-0)', padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
-    <header style={{ display: 'flex', alignItems: 'center', gap: '16px' }}><strong>AgentMux</strong><ProjectActivity sessions={current} /></header>
+    <header style={{ display: 'flex', alignItems: 'center', gap: '16px' }}><strong>AgentMux</strong><ProjectActivity sessions={scoped} /></header>
     <main style={{ flex: 1, padding: '20px', border: '1px solid var(--border-0)', borderRadius: 'var(--radius-md)' }}>
       <h2>Core runtime</h2><p>The workface stays available while inspecting Agent activity.</p>
       <input aria-label="Original workface input" defaultValue="保留原输入和选区" style={{ width: '100%', maxWidth: '520px', padding: '10px' }} />
     </main><AgentInformationPreviewHost /><WindowOverlayHost />
   </div>
 }
-createClientUiRoot(document.getElementById('root')!).render(<Scene />)
+const root = createClientUiRoot(document.getElementById('root')!)
+root.render(<Scene scope="all" />)
 Object.assign(window, { activityCascadeScene: { ready: true, zoneId, reviewZone, moteZone, longReply,
+  showScope(scope: ActivityScope) { root.render(<Scene scope={scope} />) },
   facts() { const state = useAppStore.getState(); return { activeWorkspaceId: state.activeWorkspaceId, selection: state.workbenchSpaceSelection,
     selectedId: state.agentFocus.execution.sessionId, selectedMoteId: state.agentFocus.pmo.sessionId, mainSurface: state.mainSurface,
     controls: [...controls], draft: state.agentComposerDrafts['activity-a'], sameDrafts: state.agentComposerDrafts === references.drafts,

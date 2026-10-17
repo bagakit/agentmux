@@ -83,10 +83,13 @@ async function pointerOpen(trigger: HTMLElement) {
   await act(async () => trigger.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
   expect(document.querySelector('.project-activity-menu')).not.toBeNull()
 }
-async function hoverActivityZone() {
+async function discloseActivityAgents() {
   const trigger = document.querySelector<HTMLElement>('.project-activity-menu .project-activity-zone')
-  expect(trigger).not.toBeNull()
-  await act(async () => trigger!.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
+  if (!trigger) {
+    expect(document.querySelector('.project-activity-menu[data-direct="true"] .project-activity-agent')).not.toBeNull()
+    return
+  }
+  await act(async () => trigger.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
   await act(async () => vi.waitFor(() => expect(document.querySelector('.project-activity-submenu')).not.toBeNull()))
   return trigger!
 }
@@ -158,8 +161,8 @@ it('closed Activity keeps the status summary; hover reads current scoped card fa
   const select = vi.fn(async (_id: string) => {}); await act(async () => useAppStore.setState({ selectSession: select }))
   await pointerOpen(trigger)
   expect(groups).toHaveBeenCalled(); expect(agents).not.toHaveBeenCalled()
-  await hoverActivityZone()
-  const originalCard = document.querySelector<HTMLButtonElement>('.project-activity-submenu .focus-context[data-session-id="project-0-one"]')
+  await discloseActivityAgents()
+  const originalCard = document.querySelector<HTMLButtonElement>('.project-activity-agent[data-session-id="project-0-one"]')
   expect(originalCard).not.toBeNull()
   expect(originalCard!.textContent).toContain('Current own name')
   expect(originalCard!.textContent).toContain('Current own tool')
@@ -202,8 +205,8 @@ it('the actual Sidebar retains its Activity entry and open intent across hiding 
   await mount()
   const trigger = projectFolder('local', _hygiene_fixturePath("repos/project-0")).querySelector<HTMLButtonElement>('.project-activity')!
   await pointerOpen(trigger)
-  await hoverActivityZone()
-  expect(document.querySelector('.project-activity-submenu .focus-context[data-session-id="project-0-one"]')).not.toBeNull()
+  await discloseActivityAgents()
+  expect(document.querySelector('.project-activity-agent[data-session-id="project-0-one"]')).not.toBeNull()
   await act(async () => root.render(<Profiler id="project-rail" onRender={() => { renders += 1 }}><WorkspaceSidebar visible={false} /></Profiler>))
   expect(projectFolder('local', _hygiene_fixturePath("repos/project-0")).querySelector('.project-activity')).toBe(trigger)
   expect(document.querySelector('.project-activity-menu')).toBeNull()
@@ -215,8 +218,8 @@ it('the actual Sidebar retains its Activity entry and open intent across hiding 
   await act(async () => root.render(<Profiler id="project-rail" onRender={() => { renders += 1 }}><WorkspaceSidebar visible /></Profiler>))
   expect(projectFolder('local', _hygiene_fixturePath("repos/project-0")).querySelector('.project-activity')).toBe(trigger)
   expect(document.querySelector('.project-activity-menu')).not.toBeNull()
-  await hoverActivityZone()
-  const card = document.querySelector('.project-activity-submenu .focus-context[data-session-id="project-0-one"]')
+  await discloseActivityAgents()
+  const card = document.querySelector('.project-activity-agent[data-session-id="project-0-one"]')
   expect(card?.textContent).toContain('Current hidden tool')
   expect(card?.textContent).toContain('Current after reveal')
 })
@@ -228,8 +231,8 @@ it('the actual Mote directory retains its Activity entry and opens current Agent
   await act(async () => root.render(<Profiler id="project-rail" onRender={() => { renders += 1 }}><WorkspaceSidebar visible /></Profiler>))
   const trigger = container.querySelector<HTMLButtonElement>('.space-motes-section .project-activity')!
   expect(trigger).toBeTruthy(); await pointerOpen(trigger)
-  await hoverActivityZone()
-  expect(document.querySelector('.project-activity-submenu .focus-context[data-session-id="default-agent"]')).not.toBeNull()
+  await discloseActivityAgents()
+  expect(document.querySelector('.project-activity-agent[data-session-id="default-agent"]')).not.toBeNull()
   await act(async () => root.render(<Profiler id="project-rail" onRender={() => { renders += 1 }}><WorkspaceSidebar visible={false} /></Profiler>))
   expect(container.querySelector('.space-motes-section .project-activity')).toBe(trigger)
   expect(document.querySelector('.project-activity-menu')).toBeNull()
@@ -238,8 +241,8 @@ it('the actual Mote directory retains its Activity entry and opens current Agent
   expect(renders).toBe(0); expect(agents).not.toHaveBeenCalled()
   await act(async () => root.render(<Profiler id="project-rail" onRender={() => { renders += 1 }}><WorkspaceSidebar visible /></Profiler>))
   expect(container.querySelector('.space-motes-section .project-activity')).toBe(trigger)
-  await hoverActivityZone()
-  expect(document.querySelector('.project-activity-submenu .focus-context[data-session-id="default-agent"]')?.getAttribute('data-state')).toBe('waiting')
+  await discloseActivityAgents()
+  expect(document.querySelector('.project-activity-agent[data-session-id="default-agent"]')?.getAttribute('data-state')).toBe('waiting')
   expect(trigger.getAttribute('aria-label')).toContain('Needs you')
 })
 
@@ -248,9 +251,9 @@ it('Activity starts clocks only for disclosed cards, stops them while hidden and
   const sessions = [agent('project-0-one', _hygiene_fixturePath("repos/project-0")), agent('project-0-two', _hygiene_fixturePath("repos/project-0"))]
   const intervals = vi.spyOn(globalThis, 'setInterval'), clears = vi.spyOn(globalThis, 'clearInterval')
   await act(async () => root.render(<ProjectActivity sessions={sessions} />))
-  await pointerOpen(container.querySelector<HTMLButtonElement>('.project-activity')!)
   expect(intervals).not.toHaveBeenCalled()
-  await hoverActivityZone()
+  await pointerOpen(container.querySelector<HTMLButtonElement>('.project-activity')!)
+  await discloseActivityAgents()
   expect(intervals).toHaveBeenCalledTimes(sessions.length)
   const disclosedClocks = intervals.mock.results.map(result => result.value)
   await act(async () => root.render(<ProjectActivity sessions={sessions} visible={false} />))
@@ -261,9 +264,8 @@ it('Activity starts clocks only for disclosed cards, stops them while hidden and
   expect(agents).not.toHaveBeenCalled()
   await act(async () => root.render(<ProjectActivity sessions={sessions} visible />))
   expect(container.querySelector('.project-activity')?.getAttribute('title')).toContain('Agent activity')
-  expect(intervals).toHaveBeenCalledTimes(sessions.length)
-  await hoverActivityZone()
-  expect(document.querySelector('.project-activity-submenu .focus-context[data-session-id="project-0-one"]')?.textContent).toContain('While hidden tool')
+  await discloseActivityAgents()
+  expect(document.querySelector('.project-activity-agent[data-session-id="project-0-one"]')?.textContent).toContain('While hidden tool')
   expect(intervals).toHaveBeenCalledTimes(sessions.length * 2)
 })
 
@@ -271,8 +273,8 @@ it('an open Activity reads only its own timeline and name revisions', async () =
   const sessions = useAppStore.getState().sessions.filter(session => ['project-0-one', 'project-0-two'].includes(session.id))
   await act(async () => root.render(<Profiler id="activity-scope" onRender={() => { renders += 1 }}><ProjectActivity sessions={sessions} /></Profiler>))
   await pointerOpen(container.querySelector<HTMLButtonElement>('.project-activity')!)
-  await hoverActivityZone()
-  const original = document.querySelector('.project-activity-submenu .focus-context[data-session-id="project-0-one"]')
+  await discloseActivityAgents()
+  const original = document.querySelector('.project-activity-agent[data-session-id="project-0-one"]')
   expect(original).not.toBeNull()
   const spaces = vi.spyOn(activitySpaces, 'buildActivitySpaces')
   renders = 0
@@ -283,13 +285,13 @@ it('an open Activity reads only its own timeline and name revisions', async () =
   await act(async () => useAppStore.setState(state => ({ agentNames: { ...state.agentNames, 'project-0-one': 'Current scoped Agent' },
     timelines: { ...state.timelines, 'project-0-one': timeline('project-0-one', 'Current scoped output') } })))
   expect(renders).toBeGreaterThan(0)
-  expect(document.querySelector('.project-activity-submenu .focus-context[data-session-id="project-0-one"]')).toBe(original)
+  expect(document.querySelector('.project-activity-agent[data-session-id="project-0-one"]')).toBe(original)
   expect(original!.textContent).toContain('Current scoped Agent')
   expect(original!.textContent).toContain('Current scoped output')
   expect(spaces).not.toHaveBeenCalled()
 })
 
-it('keyboard enters and leaves the no-position submenu and selects the exact original Agent', async () => {
+it('keyboard reaches no-position Agents directly and selects the exact original Agent', async () => {
   const sessions = useAppStore.getState().sessions.filter(session => ['project-0-one', 'project-0-two'].includes(session.id))
   const selectSession = vi.fn()
   useAppStore.setState({ selectSession, tabs: {}, layouts: {} })
@@ -298,17 +300,12 @@ it('keyboard enters and leaves the no-position submenu and selects the exact ori
   const trigger = container.querySelector<HTMLButtonElement>('.project-activity')!
   const key = async (node: HTMLElement, value: string) => act(async () => node.dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true })))
   await act(async () => trigger.focus()); await key(trigger, 'ArrowDown')
-  const zone = document.querySelector<HTMLElement>('.project-activity-menu [data-unplaced]')
-  expect(zone).not.toBeNull()
-  await act(async () => zone!.focus()); await key(zone!, 'ArrowRight')
-  expect(document.querySelector('.project-activity-submenu')).not.toBeNull()
-  const rows = [...document.querySelectorAll<HTMLButtonElement>('.project-activity-submenu .focus-context')]
-  expect(rows.map(row => row.dataset.sessionId)).toEqual(['project-0-one', 'project-0-two'])
-  await act(async () => rows[0]!.focus()); await key(rows[0]!, 'ArrowLeft')
+  expect(document.querySelector('.project-activity-menu[data-direct="true"]')).not.toBeNull()
+  expect(document.querySelector('.project-activity-zone')).toBeNull()
   expect(document.querySelector('.project-activity-submenu')).toBeNull()
-  expect(document.querySelector('.project-activity-menu')).not.toBeNull()
-  await key(zone!, 'ArrowRight')
-  const original = document.querySelector<HTMLButtonElement>('.project-activity-submenu .focus-context[data-session-id="project-0-two"]')
+  const rows = [...document.querySelectorAll<HTMLButtonElement>('.project-activity-agent')]
+  expect(rows.map(row => row.dataset.sessionId)).toEqual(['project-0-one', 'project-0-two'])
+  const original = document.querySelector<HTMLButtonElement>('.project-activity-agent[data-session-id="project-0-two"]')
   expect(original).not.toBeNull()
   await act(async () => original!.focus()); await key(original!, 'Enter')
   expect(selectSession).toHaveBeenCalledExactlyOnceWith('project-0-two')
