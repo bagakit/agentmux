@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { collectSurfaceMemoryCandidates } from '../src/renderer/src/lib/surface-memory-budget-candidates'
 // @vitest-environment happy-dom
@@ -111,8 +112,8 @@ it('opens repository history separately and keeps its exact selected file throug
   const restored = restorePersistedWorkbench({ config, persisted, sessions: [], createTabGroupId: () => 'unexpected' })
   expect(restored.tabs[repository.tabId]!.regions[repository.regionId]).toMatchObject({ history: { reference: 'refs/heads/topic' }, file: descriptor.file, selection: { commitOid: snapshot.commitOid, parentOid: snapshot.parentOid } })
   expect(restored.layouts).toEqual(source.layouts)
-  useAppStore.getState().showGitCommitDetails(repository.regionId)
-  expect(useAppStore.getState().tabs[repository.tabId]!.regions[repository.regionId]).not.toHaveProperty('history')
+  expect(useAppStore.getState()).toMatchObject({ workspaceTool: 'git', workspaceGitView: 'history', toolsOpen: true })
+  expect(useAppStore.getState().tabs[commit.tabId]!.regions[commit.regionId]).not.toHaveProperty('history')
 })
 it('invalidates an inline file response when another fixed file replaces it', async () => {
   const opened = useAppStore.getState().openGitWorkbench('repo', snapshot)
@@ -131,7 +132,7 @@ it('invalidates an inline file response when another fixed file replaces it', as
   expect(useAppStore.getState().tabs[opened.tabId]!.regions[opened.regionId]).toMatchObject({ file: { path: 'other.ts' } })
 })
 it('opens repository history through the original control owner without inventing a commit snapshot', async () => {
-  const history = vi.fn(async () => ({ kind: 'ready', snapshot: { hostId: 'local', repoPath: _hygiene_fixturePath("repo"), selectedRef: null, roots: [], refs: [], checkedAt: 1 }, commits: [], nextCursor: null }))
+  const history = vi.fn(async () => ({ kind: 'ready', snapshot: { hostId: 'local', repoPath: _hygiene_fixturePath("repo"), selectedRef: null, roots: [], refs: [], checkedAt: _tailFixtureEpoch(0, 0, 1) }, commits: [], nextCursor: null }))
   Object.assign(window.agentmux!.git, { history })
   const { oid: _oid, ...browse } = request
   const opened = await useAppStore.getState().executeControl(browse)

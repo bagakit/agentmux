@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
+import { selectHistoryReference } from './helpers/git-history-reference'
+import { installGitHistoryViewport } from './helpers/git-history-viewport'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { SurfaceToolDock } from '../src/renderer/src/components/SurfaceToolDock'
@@ -26,6 +28,7 @@ const history = vi.fn<(workspaceId: string, input: { ref?: string | null }) => P
 const commit = vi.fn(async () => undefined)
 
 beforeEach(() => {
+  installGitHistoryViewport()
   useAppStore.setState({ config, activeWorkspaceId: root.id, workspaceTool: 'files-branches', workspaceGitView: 'changes',
     gitCommitDrafts: {}, workbenchSpaceSelection: null, spaceZoneBindings: {}, topicCategories: [],
     sessions: [composerSession()], tabs: {}, layouts: { [root.id]: createWorkspaceLayout('root-group'), [other.id]: createWorkspaceLayout('other-group') } })
@@ -131,8 +134,7 @@ describe('Space Zone navigation and Git on the actual Dock', () => {
     await tool('git')
     const before = useAppStore.getState()
     await view('History')
-    const reference = visible<HTMLSelectElement>('[aria-label="History reference"]')[0]!
-    await act(async () => { reference.value = 'refs/heads/feature'; reference.dispatchEvent(new Event('change', { bubbles: true })) })
+    await selectHistoryReference(dom.container, 'refs/heads/feature')
     expect(history.mock.calls.at(-1)).toEqual([root.id, { ref: 'refs/heads/feature' }])
     expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
     expect(useAppStore.getState().sessions).toBe(before.sessions)
@@ -143,7 +145,7 @@ describe('Space Zone navigation and Git on the actual Dock', () => {
     await tool('files-branches')
     await tool('git')
     await view('History')
-    expect(visible<HTMLSelectElement>('[aria-label="History reference"]')[0]?.value).toBe('refs/heads/feature')
+    expect(visible('[aria-label="History reference"]')[0]?.getAttribute('data-value')).toBe('refs/heads/feature')
   })
 
   it('preserves commit drafts across tools and isolates them by original resource', async () => {
