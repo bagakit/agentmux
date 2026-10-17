@@ -1,21 +1,23 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildBrowserOperationFeedbackScript, buildBrowserOperationTargetFeedbackDeclaration, buildBrowserOperationFeedbackRevisionScript, showBrowserOperationFeedback } from '../src/main/browser-operation-feedback.js'
+import { browserAgentEffectsCss, DEFAULT_BROWSER_AGENT_CONTROL } from '../src/shared/browser-agent-control'
 import { buildOwnedFeedbackClearScript } from '../browser-extension/protocol.js'
 const key = '__agentMuxBrowserOperationFeedback'
 const globals = globalThis as any
 const base = { revision: 1, operationId: 'one', navigationId: 'document-one', token: 'private-one', phase: 'running' as const,
-  kind: 'target' as const, label: 'Agent · Click', method: 'click', keyLabel: '', deadline: Number.MAX_SAFE_INTEGER, completedMs: 900, moveMs: 180, clearReason: 'invalidate' as const }
+  kind: 'target' as const, label: 'Agent · Click', method: 'click', keyLabel: '', deadline: Number.MAX_SAFE_INTEGER, completedMs: 900, moveMs: 180, preferences: DEFAULT_BROWSER_AGENT_CONTROL, css: browserAgentEffectsCss(DEFAULT_BROWSER_AGENT_CONTROL), clearReason: 'invalidate' as const }
 const apply = (payload: any, target?: Element) => target
   ? new Function(`return (${buildBrowserOperationTargetFeedbackDeclaration()})`)().call(target, payload)
-  : new Function(buildBrowserOperationFeedbackScript(payload))()
+  : new Function('return ' + buildBrowserOperationFeedbackScript(payload))()
 const state = () => globals[key]
 function target(x = 20, y = 30) {
   const element = document.createElement('button'); document.body.appendChild(element)
   element.getBoundingClientRect = () => ({ left: x, top: y, right: x + 80, bottom: y + 20, width: 80, height: 20, x, y, toJSON() {} })
   return element
 }
-const moves: { element: HTMLElement; frames: Keyframe[]; options: KeyframeAnimationOptions; cancel: ReturnType<typeof vi.fn> }[] = []
+const moves: { element: HTMLElement; frames: Keyframe[]; options: KeyframeAnimationOptions; cancel: ReturnType<typeof vi.fn>; animation: { cancel: ReturnType<typeof vi.fn>; startTime: number; currentTime: number; effect: { setKeyframes: ReturnType<typeof vi.fn> } } }[] = []
+const labelMoves: typeof moves = []
 const presented = new WeakMap<HTMLElement, { x: number; y: number }>()
 beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
@@ -26,8 +28,10 @@ beforeEach(() => {
   })
   Object.defineProperty(HTMLElement.prototype, 'animate', { configurable: true, writable: true,
     value: vi.fn(function (this: HTMLElement, frames: Keyframe[], options: KeyframeAnimationOptions) {
-      const cancel = vi.fn(); moves.push({ element: this, frames, options, cancel })
-      return { cancel, get finished() { throw new Error('The page action must never await animation completion') } }
+      const cancel = vi.fn(), animation = { cancel, startTime: 17, currentTime: 0, effect: { setKeyframes: vi.fn() },
+        get finished() { throw new Error('The page action must never await animation completion') } }
+      ;(this.classList.contains('pointer') ? moves : labelMoves).push({ element: this, frames, options, cancel, animation })
+      return animation
     }) })
 })
 afterEach(() => {
@@ -35,7 +39,7 @@ afterEach(() => {
   const bridge = globals.__agentMuxBrowserOperationFeedbackBridge
   if (bridge) window.removeEventListener('message', bridge.listener)
   delete globals.__agentMuxBrowserOperationFeedbackBridge
-  document.body.replaceChildren(); moves.length = 0; vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals()
+  document.body.replaceChildren(); moves.length = labelMoves.length = 0; vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
 describe('actual isolated feedback document script', () => {
   it('clears only the recorded operation overlay on withdrawal, preserving the page and ordering fact', () => {
@@ -84,7 +88,7 @@ describe('actual isolated feedback document script', () => {
     apply(base, target(-200, -100)); expect(state()).toBeUndefined()
     apply(base, target(Number.NaN)); expect(state()).toBeUndefined()
     apply({ ...base, kind: 'page' }); expect(state().point).toBeNull()
-    expect(state().shadow.querySelectorAll('.glow')).toHaveLength(1)
+    expect(state().shadow.querySelectorAll('.glow')).toHaveLength(0)
     expect(state().shadow.querySelectorAll('.pointer')).toHaveLength(0)
   })
   it('normal completion reuses its host, expires locally without CDP, and old timer cannot remove a new operation', async () => {
@@ -107,12 +111,12 @@ describe('actual isolated feedback document script', () => {
     apply({ ...base, revision: 1000, phase: 'completed' }); expect(state().phase).toBe('running')
     apply({ ...base, revision: 1001, deadline: Date.now() - 1 }, target()); expect(state().operationId).toBe('two')
   })
-  it('scroll clears a stale target position but leaves the coordinate-free page glow', () => {
+  it('scroll clears a stale target position but leaves the coordinate-free page bridge without duplicating ownership glow', () => {
     const element = target(); apply(base, element)
     element.getBoundingClientRect = () => ({ left: 21, top: 30, right: 101, bottom: 50, width: 80, height: 20, x: 21, y: 30, toJSON() {} })
     window.dispatchEvent(new Event('scroll')); expect(state().point).toBeNull()
     apply({ ...base, revision: 2, kind: 'page' }); window.dispatchEvent(new Event('scroll'))
-    expect(state().host).not.toBeNull(); expect(state().shadow.querySelectorAll('.glow')).toHaveLength(1)
+    expect(state().host).not.toBeNull(); expect(state().shadow.querySelectorAll('.glow')).toHaveLength(0)
   })
   it('clear messages only remove the exact decoration, never accept a foreign window or token', () => {
     apply(base, target())
@@ -138,7 +142,7 @@ describe('actual Main feedback owner', () => {
     await old.clear()
     expect(revision).toBeGreaterThan(newerRevision)
     expect(state().operationId).toBe('two'); expect(state().phase).toBe('running')
-    expect(state().host).not.toBeNull(); expect(state().shadow.querySelectorAll('.glow')).toHaveLength(1)
+    expect(state().host).not.toBeNull(); expect(state().shadow.querySelectorAll('.glow')).toHaveLength(0)
     await current.clear()
   })
   it('missing live feedback world/handle warns locally and even a notification throw remains nonblocking', async () => {
@@ -193,6 +197,9 @@ describe('T024 actual document motion and invalidation consumers', () => {
     expect(dispatched).toBe(true) // The actual script returns while its local move is still unfinished.
     expect(moves).toHaveLength(1)
     expect(moves[0]!.frames).toEqual([{ transform: 'translate(60px,40px)' }, { transform: 'translate(180px,100px)' }])
+    expect(labelMoves).toHaveLength(1)
+    expect(labelMoves[0]!.frames).toEqual([{ transform: 'translate(75px,61px)' }, { transform: 'translate(195px,121px)' }])
+    expect(labelMoves[0]!.options).toEqual(moves[0]!.options)
     expect(moves[0]!.options).toEqual({ duration: 180, easing: 'cubic-bezier(0.2,0.8,0.2,1)' })
     const host = state().host
     apply({ ...next, revision: 4, phase: 'completed' })
@@ -247,7 +254,7 @@ describe('T024 actual document motion and invalidation consumers', () => {
   it('hover floats only its arrow while the real anchor and label remain stable; reduced motion uses a static endpoint', () => {
     apply(base, target()); apply({ ...base, revision: 2, token: 'hover', method: 'hover' }, target(100, 70))
     const value = state(), pointer = value.shadow.querySelector('.pointer'), label = value.shadow.querySelector('.label')
-    expect(pointer.className).toBe('pointer hover'); expect(pointer.style.transform).toBe('translate(140px,80px)')
+    expect(pointer.classList.contains('hover')).toBe(true); expect(pointer.style.transform).toBe('translate(140px,80px)')
     expect(label.style.transform).toBe('translate(155px,101px)')
     const rules = value.shadow.adoptedStyleSheets[0].cssRules
     expect(rules.length).toBeGreaterThan(0)
@@ -296,6 +303,122 @@ describe('T024 queued child registration after completion/control', () => {
     window.dispatchEvent(new MessageEvent('message', { source: source as never, data: message }))
     expect(source.postMessage.mock.calls.at(-1)![0].reason).toBe('invalidate')
     expect(globals.__agentMuxBrowserOperationFeedbackBridge.source).toBeNull()
+  })
+})
+
+describe('saved native pointer preferences and acknowledged click decoration', () => {
+  const customized = (preferences: Partial<typeof DEFAULT_BROWSER_AGENT_CONTROL>) => {
+    const value = { ...DEFAULT_BROWSER_AGENT_CONTROL, ...preferences }
+    return { preferences: value, css: browserAgentEffectsCss(value) }
+  }
+  it('moves the label on the same clock as the pointer, with the saved duration and no action wait', () => {
+    apply(base, target())
+    apply({ ...base, revision: 2, token: 'second', moveMs: 640, ...customized({ pointerDurationMs: 640 }) }, target(140, 90))
+    expect(moves).toHaveLength(1); expect(labelMoves).toHaveLength(1)
+    expect(moves[0]!.options.duration).toBe(640)
+    expect(labelMoves[0]!.options).toEqual(moves[0]!.options)
+    expect(state().shadow.querySelector('.label').style.transform).toBe('translate(195px,121px)')
+  })
+  it('turns tween off without losing the actual point, and never uses an invisible pointer as later motion history', () => {
+    apply(base, target())
+    apply({ ...base, revision: 2, token: 'static', ...customized({ pointerTween: false }) }, target(140, 90))
+    expect(moves).toHaveLength(0); expect(labelMoves).toHaveLength(0)
+    expect(state().point).toEqual({ x: 180, y: 100 })
+    apply({ ...base, revision: 3, token: 'hidden', ...customized({ showCursor: false }) }, target(220, 90))
+    apply({ ...base, revision: 4, token: 'visible' }, target(320, 90))
+    expect(moves).toHaveLength(0); expect(state().history).toBeNull()
+  })
+  it('applies saved cursor visibility to the existing host without extending completion or restarting a move', async () => {
+    vi.useFakeTimers(); apply(base, target()); apply({ ...base, revision: 2, phase: 'completed' })
+    const host = state().host, expiresAt = state().expiresAt
+    await vi.advanceTimersByTimeAsync(400)
+    apply({ ...base, revision: 3, phase: 'preferences', ...customized({ showCursor: false, showCursorLabel: false }) })
+    expect(state().host).toBe(host); expect(state().expiresAt).toBe(expiresAt)
+    const css = [...state().shadow.adoptedStyleSheets[0].cssRules].map((rule: CSSRule) => rule.cssText).join('')
+    expect(css).toContain('display: none'); expect(moves).toHaveLength(0)
+    await vi.advanceTimersByTimeAsync(500); expect(state().host).toBeNull()
+  })
+  it('plays a click only on acknowledged dispatch, keeps its configured local lifetime, and creates no hit target', async () => {
+    vi.useFakeTimers()
+    const payload = { ...base, ...customized({ clickDurationMs: 1500, clickRadius: 40 }) }
+    apply(payload, target())
+    expect(document.querySelector('[data-agentmux-browser-click-feedback]')).toBeNull()
+    apply({ ...payload, revision: 2, phase: 'click' })
+    const rippleHost = document.querySelector('[data-agentmux-browser-click-feedback]') as HTMLElement
+    expect(rippleHost).not.toBeNull(); expect(rippleHost.style.pointerEvents).toBe('none'); expect(rippleHost.shadowRoot).toBeNull()
+    apply({ ...payload, revision: 3, phase: 'completed' })
+    await vi.advanceTimersByTimeAsync(900)
+    expect(state().host).toBeNull(); expect(rippleHost.isConnected).toBe(true)
+    await vi.advanceTimersByTimeAsync(600); expect(rippleHost.isConnected).toBe(false)
+  })
+  it('never plays a disabled or stale-owner ripple and invalidates an acknowledged ripple with its actual document', () => {
+    apply({ ...base, ...customized({ clickRipple: false }) }, target())
+    apply({ ...base, revision: 2, phase: 'click' })
+    expect(document.querySelector('[data-agentmux-browser-click-feedback]')).toBeNull()
+    apply({ ...base, revision: 3, operationId: 'new-owner', token: 'new-action' }, target())
+    expect(apply({ ...base, revision: 40, phase: 'click' })).toBe(false)
+    apply({ ...base, revision: 4, operationId: 'new-owner', token: 'new-action', phase: 'click' })
+    expect(document.querySelector('[data-agentmux-browser-click-feedback]')).not.toBeNull()
+    window.dispatchEvent(new Event('pagehide'))
+    expect(document.querySelector('[data-agentmux-browser-click-feedback]')).toBeNull()
+  })
+  it('patches only a still-live avatar and preserves name, host, completion deadline and original revision fences', async () => {
+    vi.useFakeTimers()
+    const images: HTMLImageElement[] = [], originalCreate = document.createElement.bind(document)
+    vi.spyOn(document, 'createElement').mockImplementation(((tag: string, options?: ElementCreationOptions) => {
+      const element = originalCreate(tag, options)
+      if (tag === 'img') images.push(element as HTMLImageElement)
+      return element
+    }) as typeof document.createElement)
+    apply(base, target()); apply({ ...base, revision: 2, phase: 'completed', label: 'Agent · Click complete' })
+    const host = state().host, expiresAt = state().expiresAt
+    apply({ ...base, revision: 3, phase: 'appearance', avatarPng: 'data:image/png;base64,cHJpdmF0ZQ==' })
+    images[0]!.dispatchEvent(new Event('load'))
+    expect(state().host).toBe(host); expect(state().expiresAt).toBe(expiresAt)
+    expect(state().shadow.querySelector('.label').textContent).toBe('Agent · Click complete')
+    expect(state().shadow.querySelector('.label img').src).toBe('data:image/png;base64,cHJpdmF0ZQ==')
+    expect(state().shadow.querySelector('.amux-browser-agent-avatar').textContent).toBe('')
+    await vi.advanceTimersByTimeAsync(900)
+    expect(apply({ ...base, revision: 4, phase: 'appearance', avatarPng: 'data:image/png;base64,bGF0ZQ==' })).toBe(false)
+    expect(state().host).toBeNull(); expect(images).toHaveLength(1)
+  })
+  it('does not resurrect a cue when image decoding finishes after its original lifetime', async () => {
+    vi.useFakeTimers()
+    let image: HTMLImageElement | undefined
+    const originalCreate = document.createElement.bind(document)
+    vi.spyOn(document, 'createElement').mockImplementation(((tag: string) => {
+      const element = originalCreate(tag); if (tag === 'img') image = element as HTMLImageElement; return element
+    }) as typeof document.createElement)
+    apply({ ...base, avatarPng: 'data:image/png;base64,bGF0ZQ==' }, target())
+    apply({ ...base, revision: 2, phase: 'completed' }); await vi.advanceTimersByTimeAsync(900)
+    image!.dispatchEvent(new Event('load'))
+    expect(state().host).toBeNull(); expect(document.querySelector('[data-agentmux-browser-operation-feedback]')).toBeNull()
+  })
+  it('keeps the original pointer and label clocks when an avatar decodes during their actual move', () => {
+    let image: HTMLImageElement | undefined
+    const originalCreate = document.createElement.bind(document)
+    vi.spyOn(document, 'createElement').mockImplementation(((tag: string) => {
+      const element = originalCreate(tag)
+      if (tag === 'img') {
+        image = element as HTMLImageElement
+        // Control only the decode observation; happy-dom otherwise loads data URLs synchronously.
+        Object.defineProperty(image, 'src', { configurable: true, writable: true, value: '' })
+      }
+      return element
+    }) as typeof document.createElement)
+    apply(base, target())
+    apply({ ...base, revision: 2, token: 'with-face', avatarPng: 'data:image/png;base64,bGF0ZQ==' }, target(140, 90))
+    const arrow = moves[0]!, label = labelMoves[0]!
+    arrow.animation.currentTime = label.animation.currentTime = 80
+    image!.dispatchEvent(new Event('load'))
+    expect(moves).toHaveLength(1); expect(labelMoves).toHaveLength(1)
+    expect(arrow.cancel).not.toHaveBeenCalled(); expect(label.cancel).not.toHaveBeenCalled()
+    expect(label.animation.currentTime).toBe(80); expect(label.animation.startTime).toBe(arrow.animation.startTime)
+    expect(label.animation.effect.setKeyframes).toHaveBeenCalledWith([
+      { transform: 'translate(75px,61px)' }, { transform: 'translate(195px,121px)' }
+    ])
+    apply({ ...base, revision: 3, token: 'with-face', phase: 'preferences', ...customized({ glowColor: '#3366cc' }) })
+    expect(arrow.cancel).not.toHaveBeenCalled(); expect(label.cancel).not.toHaveBeenCalled()
   })
 })
 

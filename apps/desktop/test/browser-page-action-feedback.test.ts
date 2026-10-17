@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createBrowserPageDispatch } from '../src/main/browser-page-dispatch.js'
+import { DEFAULT_BROWSER_AGENT_CONTROL, type BrowserAgentControlPreferences } from '../src/shared/browser-agent-control.js'
 
 const native = vi.hoisted(() => ({ views: [] as any[], mode: 'click', key: undefined as string | undefined, onFeedback: undefined as undefined | (() => void), onWaiting: undefined as undefined | (() => Promise<void>), displayFails: false, displayThrows: false, displayAllThrows: false, observe: undefined as undefined | (() => Promise<unknown>), takeover: undefined as undefined | (() => void) }))
 vi.mock('../src/main/browser-page-dispatch.js', async importOriginal => {
@@ -43,7 +44,7 @@ vi.mock('electron', async () => {
   const { EventEmitter } = await import('node:events')
   let nextId = 90
   class Contents extends EventEmitter {
-    id = ++nextId; url = ''; attached = false; destroyed = false; focused = false; focusCalls = 0; actions = 0; displayAttempts = 0; feedbackCalls = 0; feedbackPayloads: any[] = []; scripts: string[] = []; commands: string[] = []
+    id = ++nextId; url = ''; attached = false; destroyed = false; focused = false; focusCalls = 0; actions = 0; displayAttempts = 0; feedbackCalls = 0; feedbackPayloads: any[] = []; scripts: string[] = []; commands: string[] = []; documentPayloads: any[] = []
     displays: Array<{ family: 'action' | 'control' | 'revision' | 'selection' | 'annotation' | 'unknown'; payload?: any; code: string }> = []
     readonly session = Object.assign(new EventEmitter(), { setPermissionCheckHandler() {}, setPermissionRequestHandler() {}, setDevicePermissionHandler() {} })
     readonly navigationHistory = { canGoBack: () => false, canGoForward: () => false }
@@ -56,7 +57,11 @@ vi.mock('electron', async () => {
         if (method === 'Page.createIsolatedWorld') return { executionContextId: 8 }
         if (method === 'Accessibility.getFullAXTree') return { nodes: [{ nodeId: '1', backendDOMNodeId: 11, role: { value: 'button' }, name: { value: 'Continue' }, childIds: [] }] }
         if (method === 'DOM.resolveNode') return { object: { objectId: params.executionContextId ? 'feedback-object' : 'action-object' } }
-        if (method === 'Runtime.evaluate') return { result: { value: true } }
+        if (method === 'Runtime.evaluate') {
+          const code = params.expression ?? '', start = code.lastIndexOf(')(')
+          if (start >= 0 && code.slice(start + 2, -1).startsWith('{')) this.documentPayloads.push(JSON.parse(code.slice(start + 2, -1)))
+          return { result: { value: true } }
+        }
         if (method === 'Runtime.callFunctionOn') {
           if (params.objectId === 'feedback-object') { this.feedbackCalls++; this.feedbackPayloads.push(params.arguments[0].value); native.onFeedback?.(); return { result: { value: true } } }
           if (params.functionDeclaration.includes('this.click()') || params.functionDeclaration.includes('this.value') || params.functionDeclaration.includes('pointerover')) this.actions++
@@ -124,7 +129,7 @@ afterEach(async () => {
 })
 const actionPayloads = (contents: any, start = 0): any[] => contents.displays.slice(start).filter((call: any) => call.family === 'action').map((call: any) => call.payload)
 const controlPayloads = (contents: any): any[] => contents.displays.filter((call: any) => call.family === 'control').map((call: any) => call.payload)
-async function managerFixture() {
+async function managerFixture(preferences?: () => BrowserAgentControlPreferences) {
   const root = await mkdtemp(_hygiene_fixturePath("tmp/amx-action-feedback-source-")); roots.push(root)
   const children: any[] = [], events: any[] = []
   const window = { getContentBounds: () => ({ x: 0, y: 0, width: 1000, height: 700 }), isFocused: () => true,
@@ -135,7 +140,8 @@ async function managerFixture() {
     }, removeChildView: (view: any) => { const index = children.indexOf(view); if (index >= 0) children.splice(index, 1) } },
     isDestroyed: () => false, webContents: Object.assign(new EventEmitter(), { isDestroyed: () => false, send: (_name: string, e: any) => events.push(structuredClone(e)) }) }
   const manager = new BrowserViewManager(window as never, { defaultProfileId: () => 'default', resolvePartition: () => 'persist:feedback' },
-    new BrowserRefLedgerStore(join(root, 'refs.json')), { rememberedSchemes: async () => ({}), rememberScheme: async () => {}, openExternal() {} })
+    new BrowserRefLedgerStore(join(root, 'refs.json')), { rememberedSchemes: async () => ({}), rememberScheme: async () => {}, openExternal() {} },
+    undefined, undefined, undefined, undefined, undefined, undefined, undefined, preferences)
   managers.push(manager)
   await manager.create('browser-one', 'https://generic.invalid/one', 'workspace')
   const source = children.find(view => view.webContents.getURL() === 'https://generic.invalid/one')
@@ -205,6 +211,21 @@ describe('actual resolved document and sender after display', () => {
   })
 })
 describe('actual BrowserViewManager consumer', () => {
+  it('consumes the saved pointer preferences and dispatch acknowledgement through the original target callback', async () => {
+    const preferences = { ...DEFAULT_BROWSER_AGENT_CONTROL, pointerDurationMs: 530, clickRadius: 33, glowColor: '#3366cc' }
+    const f = await managerFixture(() => preferences)
+    const report = await f.manager.runScript('browser-one', 'actual worker double', { id: 'agent', name: 'Actual Agent' })
+    expect(report.outcome.kind).toBe('completed'); expect(f.contents.actions).toBe(1)
+    const target = f.contents.feedbackPayloads[0]
+    expect(target.moveMs).toBe(530); expect(target.preferences).toEqual(preferences)
+    expect(target.css).toContain('--amux-agent-color:#3366cc')
+    const click = f.contents.documentPayloads.find((payload: any) => payload.phase === 'click')
+    expect(click).toMatchObject({ operationId: report.runOperation?.id, token: target.token, navigationId: target.navigationId, method: 'click', preferences })
+    native.mode = 'hover'
+    await f.manager.runScript('browser-one', 'actual worker double')
+    expect(f.contents.documentPayloads.filter((payload: any) => payload.phase === 'click')).toHaveLength(1)
+    expect(f.sibling.commands).toEqual(f.siblingBefore.commands)
+  })
   it('connects visible run to feedback, clears busy at normal end and leaves the unrelated Browser untouched', async () => {
     const f = await managerFixture()
     const report = await f.manager.runScript('browser-one', 'actual worker double', { id: 'agent', name: 'Actual Agent' })
@@ -238,7 +259,7 @@ describe('actual BrowserViewManager consumer', () => {
     expect(report.outcome.kind).toBe('completed'); expect(f.contents.actions).toBe(2)
     expect(f.contents.feedbackPayloads).toHaveLength(1)
     expect(f.contents.feedbackPayloads[0].label).toBe('Agent · Hover')
-    expect(actionPayloads(f.contents).at(-1).label).toBe('Hover complete')
+    expect(actionPayloads(f.contents).at(-1).label).toBe('Agent · Hover complete')
     expect(f.contents.attached).toBe(false); expect(f.sibling.commands).toEqual(f.siblingBefore.commands); expect(f.sibling.scripts).toEqual(f.siblingBefore.scripts)
   })
   it('a concurrent readonly call cannot replace the action guard before explicit takeover', async () => {
