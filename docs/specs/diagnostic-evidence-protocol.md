@@ -16,7 +16,7 @@
 
 logId 沿原 owner 一次分配并全链复用；现有 Delivery 使用 identity 包的 `mintObjectId`。不可覆盖冲突核验仍由原存储执行。业务 operationId、RPC request ID、executionId、Session/Run、ACK 和 Native 语义完成是不同事实。
 
-authority 统一为 `kind/id/lifetime`，仅描述记录 namespace；当前分支分别使用 `client-journal` 的 journalId 和 `core-runtime` 的语义 runtimeId。routeHostId 是读取路线，不能当 runtime 身份。durable/instance/unknown 是实际取得的生命周期范围；Hosted cached identity 未公开其持久范围时为 unknown。当前 namespace 不回填旧记录的当时 producer、build、PID 或 ownerInstanceId。
+authority 统一为 `kind/id/lifetime`，仅描述记录 namespace；Delivery 分别使用 `client-journal` 的 journalId 和 `core-runtime` 的语义 runtimeId，客户端故障档案使用独立的 `client-incident-archive` 身份。routeHostId 是读取路线，不能当 runtime 身份。durable/instance/unknown 是实际取得的生命周期范围；Hosted cached identity 未公开其持久范围时为 unknown。当前 namespace 不回填旧记录的当时 producer、build、PID 或 ownerInstanceId。
 
 authority 元数据与原记录可读性独立。未限定 authority 的准确 logId 读取在元数据 EACCES/损坏时仍可 found，保留 `recordRef.authority=null` 和身份缺证；显式 kind/id 限定必须 verified 且匹配，否则该限定读取拒绝，不能自动放宽。查询不连接、探测或恢复 Runtime 来补身份。journal 身份由原接收存储有界创建，读取本身不创建身份或改写旧文件。
 
@@ -67,21 +67,24 @@ reader 生命周期归原宿主；复用一个 query 实例承担 service 总在
 
 `system.diagnostics.inspect` 是 typed、只读 RPC；CLI 为 `amux system diagnostics inspect`。`--list` 只列本服务实际组装的领域合同，不读 owner，也不宣称当前来源在线。具体签名见 [public-rpc](../../packages/core/src/public-rpc.ts)，命令和 help/skill 来自 [CLI 注册](../../packages/core/src/agentmux-cli-commands.ts)。
 
-公共宿主已有 business-owner 转接时，发现并列本地与原 client 实际返回的能力，同 domain 保本地合同。已有本地 domain 始终沿原 reader、journal、authority 和原件，不依赖 GUI；只有本地未组装的 domain 才通过原通用转接读取。转接缺失或真实 transport 不可用时保本地事实；远端明确拒绝、取消、预算结果或坏回执不改成本地重读，也不凭转接 callback 广告能力。原 client query 继续持其实际在途成本，不新建第二 query 或跨跳完成期限。
+公共宿主已有 business-owner 转接时，发现并列本地与原 client 实际返回的能力，按 domain/target 组合保本地合同，同领域的不同选择器分别保留。已有本地选择器始终沿原 reader、journal、authority 和原件，不依赖 GUI；只有本地未组装的选择器才通过原通用转接读取。转接缺失或真实 transport 不可用时保本地事实；远端明确拒绝、取消、预算结果或坏回执不改成本地重读，也不凭转接 callback 广告能力。原 client query 继续持其实际在途成本，不新建第二 query 或跨跳完成期限。
 
 | domain | 准确目标 | 原 owner 与范围 |
 | --- | --- | --- |
 | delivery.client | hostId、logId，可选 authority | receiving client journal；默认安全投影、显式原件 |
 | delivery.core | hostId、logId，可选 authority | 已有 Core client 的原 DeliveryAttempt；路由与语义 runtime 分开 |
 | toolkit.performance-failure | hostId、executionId | 原 Toolkit get 的 latest failure；无 logId，不提供 archive/采样 |
+| performance.scene | hostId、captureId | 原 Scene owner 已保留的 capture；读取不启动采集，无原 logId |
 | mote.context.client | client route hostId、原 resource scope、prepare/open-space action；open-space 另含完整 reference | 原 client action owner 的 latest-per-scope-action 事实；无 logId、持久化或健康结论 |
 | reading.lifecycle | hostId、logId、可选原 Core instance authority，或 recent 范围 | 原 Core read／watch 的有限阶段；仅当前实例，metadata-only，原 scope 与访问路线分开 |
-| client.incident | client route hostId、logId、可选原 archive authority，或 recent 范围 | 原 client 档案的有限 Terminal／连接／探测／读取阶段；保原 producer 和原 reading ID，确认状态逐记录表达 |
+| client.incident | client route hostId、logId、可选原 archive authority，或 recent 范围 | 原 client 档案的有限 Terminal／连接／探测／读取阶段；[公共类型](../../packages/core/src/client-incident.ts) 持字段全集，保原 producer 和原 reading ID，确认状态逐记录表达 |
 | native-recorder-failure | hostId、agentSessionId、runId | 当前缺原 producer，not-exposed/null 原引用；不冒根因已取得 |
 
 managed Agent 沿原 capability 认证，受自身 Host 路线限定，不能借 user/device 或 Runtime 私有权限读其他 Host。局部拒绝不关闭原健康 Agent。GUI 继续沿原领域消费事实，既有 message.delivery.inspect、toolkit.inspect/watch 语义和原件能力不被替换。
 
 `recent` 是有界发现，不指一条原记录，因此 `recordRef=null`；每个候选保自己的准确引用，再以其原 authority 和 route 读取。cursor 只续接原来源、namespace 和筛选范围，不跨重启猜测重用。`reading.lifecycle` 的来源仅有 instance authority，不能声明 durable；exact 的 observedAt 和 completeness 与原事件时间和覆盖缺口一致。`client.incident` 的原档案 authority 不等于当时 Renderer producer；接收时间不能覆盖内嵌 reading 的来源时间。两种目标都沿原公共入口，不提供任意 payload 或本地文件读面。
+
+客户端故障档案的 recent 只发现当前保留候选，空页不能签此前没有故障；准确原件读取保原 authority 与持久确认语义。报告的执行 Host、Main 接收身份、Renderer 文档代次和原观察时刻分别保真。关联仅沿报告已得的 typed references 交给原 reader，重复目标按 JSON 对象语义去重；对象属性顺序不改变目标身份，数组顺序仍保留。查询不为补关联触发输入、刷新、探测或采集；没有公共 reader 的来源仍为缺证。
 
 Mote scope 的 host/path 来自原 action 捕获的 resource Workspace，不能用 Mote 的 physical/HomeZone/logical topic 目录替代。客户端路由和资源 Host 可以不同；读取不连接资源 Runtime。原 pending attempt 与保留 failure 的 target/time 分开，后来的发现不改写它们。该 point observation 的 recordRef/readAuthority/persistence 为 null，envelope observedAt 为 null；实际 action/failure 时刻留在 data，readAt 只表示本次读取。source absent 的 not-found/unknown 不签历史无错误。
 
