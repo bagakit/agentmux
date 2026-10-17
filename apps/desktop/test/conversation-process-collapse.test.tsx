@@ -4,7 +4,7 @@ import type { Root } from 'react-dom/client'
 import type { AgentSessionHistoryPage } from '@agentmux/core'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createClientUiRoot } from './helpers/client-ui-render'
-import { ActivityView } from '../src/renderer/src/components/ActivityView'
+import { StaticActivityView as ActivityView } from './helpers/conversation-static-fixture'
 import { api } from '../src/renderer/src/lib/api'
 import { useConversationTraceDisclosure, type ConversationTraceDisclosure } from '@agentmux/client-ui/conversation-trace-disclosure'
 
@@ -17,7 +17,7 @@ beforeEach(() => {
   host = document.createElement('div'); document.body.append(host); root = createClientUiRoot(host)
 })
 afterEach(async () => { getSelection()?.removeAllRanges(); await act(async () => root.unmount()); host.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
-const page = (nativeSessionId = 'source-a'): AgentSessionHistoryPage => ({ agentSessionId: 'original-session',
+const page = (nativeSessionId = 'source-a'): AgentSessionHistoryPage => ({ agentSessionId: 'original-session', sourceHostId: 'original-host',
   source: { providerId: 'reading-provider', nativeSessionId }, nextCursor: null, items: [
     { id: 'human', kind: 'user-message', contentParts: [{ kind: 'text', text: 'Keep the original human input.' }] },
     { id: 'process', kind: 'activity', contentParts: [
