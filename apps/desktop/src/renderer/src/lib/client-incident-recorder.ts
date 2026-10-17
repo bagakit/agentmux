@@ -78,6 +78,7 @@ export function createClientIncidentRecorder(input: {
         input.send(report)
         if (kind === 'terminal-attach-failed' || kind === 'terminal-replay-failed' || kind === 'terminal-reveal-deadline' ||
           kind === 'terminal-context-lost' || kind === 'terminal-output-gap' || kind === 'terminal-continuation-unavailable') lastFailure = occurrenceId
+        else if (kind === 'terminal-recovered' && relatedOccurrenceId === lastFailure) lastFailure = null
         return occurrenceId
       } catch { publicationFailures = increment(publicationFailures); return null }
     }
