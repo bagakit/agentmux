@@ -191,6 +191,7 @@ import { ExternalBrowserBridge } from './browser-external-bridge.js'
 import { ExternalBrowserOwner } from './browser-external-owner.js'
 import { BrowserViewManager } from './browser-view-manager.js'
 import { browserColdDescriptor, coldBrowserTargets } from './browser-cold-descriptor.js'
+import { browserResourceLocations } from './browser-resource-directory.js'
 import type { NativeOverlayRegion } from '../shared/native-overlay.js'
 import { BrowserOperationFileStore, BrowserOperationJournal, BROWSER_OPERATION_JOURNAL_FILE, browserOperationAlreadyExistsError } from './browser-operation-journal.js'
 import { browserRunResult } from '../shared/browser-run-result.js'
@@ -1873,18 +1874,25 @@ export async function registerIpc(args: {
   handleWithEvent('browser:listTargets', async (event, workspaceId?: string) => {
     requireTrustedSender('browser:listTargets', event)
     if (workspaceId !== undefined) workspace(config, workspaceId)
-    const live = [...browsers.targets(), ...externalBridge.list()]
-    let warning: string | undefined
+    let identities: Map<number, number> | null = null
+    try { identities = new Map(app.getAppMetrics().map(process => [process.pid, process.creationTime])) } catch { /* Process ownership remains unknown; catalog membership is separate. */ }
+    const live = [...browsers.resourceTargets(identities), ...externalBridge.list()]
+    const warnings: string[] = []
+    if (externalBridge.membershipCoverage === 'partial') warnings.push('Shared Browser membership is unconfirmed. Previously observed entries remain; retry discovery.')
+    let coverage: import('@agentmux/core').AgentMuxBrowserTargetsResult['coverage'] = 'partial'
     let cold: import('@agentmux/core').AgentMuxBrowserTarget[] = []
+    let graph: import('@agentmux/core/spatial-graph').AgentMuxSpatialGraph | null = null
     try {
       const saved = await spatialState.read()
-      if (saved) cold = coldBrowserTargets(saved.graph, live)
-      else warning = 'Saved Browser ownership is unconfirmed. Existing live targets remain usable; retry discovery.'
+      if (saved) {
+        graph = saved.graph
+        cold = coldBrowserTargets(graph, live).map(target => ({ ...target, resource: { state: 'cold', locations: [], processes: [] } }))
+        coverage = externalBridge.membershipCoverage
+      } else warnings.push('Saved Browser ownership is unconfirmed. Existing live targets remain usable; retry discovery.')
     }
-    catch { warning = 'Saved Browser discovery is unconfirmed. Existing live targets remain usable; retry discovery.' }
-    const targets = [...live, ...cold].filter(row => workspaceId === undefined || row.workspaceId === workspaceId)
-    if (targets.length > 256) warning = 'More Browser targets exist than this bounded discovery response can show.'
-    return { targets: targets.slice(0, 256), ...(warning ? { warning } : {}) }
+    catch { warnings.push('Saved Browser discovery is unconfirmed. Existing live targets remain usable; retry discovery.') }
+    const targets = browserResourceLocations([...live, ...cold], graph).filter(row => workspaceId === undefined || row.workspaceId === workspaceId)
+    return { targets, coverage, ...(warnings.length ? { warning: warnings.join(' ') } : {}) }
   })
   handleWithEvent('browser:createExternalPairing', async (event, workspaceId: string) => {
     requireTrustedSender('browser:createExternalPairing', event)

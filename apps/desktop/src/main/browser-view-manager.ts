@@ -323,6 +323,29 @@ export class BrowserViewManager {
           !workspaceId ? { warning: 'This embedded page has no verified Workspace binding. Workspace file and durable result capabilities are unavailable.' } : {}) }
     })
   }
+  /** One read of the existing owners; no page acquisition or persistent resource index. */
+  resourceTargets(processes: ReadonlyMap<number, number> | null): AgentMuxBrowserTarget[] {
+    const live = this.targets().map(target => {
+      const entry = this.entries.get(target.id)!
+      let identities: { pid: number; creationTime: number }[] | null = null
+      let retention: AgentMuxBrowserRetention = { status: 'unknown', reasons: ['owner-unavailable'] }
+      try {
+        retention = this.retention(entry)
+        if (processes && !entry.view.webContents.isDestroyed()) {
+          const pids = new Set(entry.view.webContents.mainFrame.framesInSubtree.filter(frame => !frame.detached).map(frame => frame.osProcessId))
+          if (pids.size && [...pids].every(pid => pid > 0 && Number.isFinite(processes.get(pid)) && processes.get(pid)! > 0)) identities = [...pids].map(pid => ({ pid, creationTime: processes.get(pid)! }))
+        }
+      } catch { /* Keep this original target; incomplete native observation is unknown. */ }
+      return { ...target, resource: { state: target.status === 'ready' ? 'live' as const : 'unknown' as const,
+        locations: [], processes: identities, retention } }
+    })
+    const released: AgentMuxBrowserTarget[] = [...this.releasedEntries.values()].map(entry => ({
+      id: entry.id, workspaceId: entry.workspaceId, source: 'embedded', mode: entry.storage.mode,
+      status: 'unavailable', url: entry.requestedUrl, title: '', capabilities: [],
+      resource: { state: 'released', locations: [], processes: [] }
+    }))
+    return [...live, ...released]
+  }
   private readonly entries = new Map<string, BrowserEntry>()
   /** Lookup index only; nativeOwner still verifies the current authoritative entry and attachment. */
   private readonly browserIdsByView = new WeakMap<WebContentsView, string>()
