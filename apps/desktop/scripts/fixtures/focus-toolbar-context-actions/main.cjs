@@ -2,7 +2,7 @@ const assert = require('node:assert/strict')
 const { writeFile, readFile } = require('node:fs/promises')
 const { join } = require('node:path')
 const { app, BrowserWindow } = require('electron')
-const [html, privateRoot, evidence, phase] = process.argv.slice(2)
+const [html, privateRoot, evidence, phase, mode] = process.argv.slice(2)
 assert.ok(['seed', 'restore'].includes(phase))
 app.setPath('userData', join(privateRoot, 'profile'))
 app.setPath('sessionData', join(privateRoot, 'session'))
@@ -14,18 +14,18 @@ app.whenReady().then(async () => {
     win = new BrowserWindow({ width: 1200, height: 720, show: false, webPreferences: { contextIsolation: true, sandbox: true, backgroundThrottling: false } })
     result.consoleMessages = []
     win.webContents.on('console-message', (_event, ...details) => result.consoleMessages.push(details))
-    await win.loadFile(html, { query: { phase } }); win.webContents.debugger.attach('1.3')
+    await win.loadFile(html, { query: { phase, ...(mode ? { mode } : {}) } }); win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     const evaluate = source => win.webContents.executeJavaScript(source)
     const until = async source => { for (let n = 0; n < 180; n++) { if (await evaluate(source)) return; await delay(25) } throw new Error('Did not settle: ' + source) }
     const facts = () => evaluate('toolbarActionsScene.facts()')
     const paint = async () => { await evaluate('new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))'); await delay(260); await evaluate('new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))') }
-    const click = async (selector, text) => {
+    const click = async (selector, text, button = 'left') => {
       await until('!!document.querySelector(' + JSON.stringify(selector) + ')'); await paint()
       const point = await evaluate('(()=>{const n=' + (text ? '([...document.querySelectorAll(' + JSON.stringify(selector) + ')]).find(n=>n.textContent===' + JSON.stringify(text) + ')' : 'document.querySelector(' + JSON.stringify(selector) + ')') + ';if(!n)throw new Error("Exact target unavailable");const r=n.getBoundingClientRect();if(!r.width||!r.height)throw new Error("No painted target");return{x:r.x+r.width/2,y:r.y+r.height/2}})()')
       assert.ok(point.x >= 0 && point.x < await evaluate('innerWidth'), 'Clickable target within window')
       assert.ok(point.y >= 0 && point.y < await evaluate('innerHeight'), 'Clickable target within window height')
-      for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, ...point, ...(type === 'mouseMoved' ? {} : { button: 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: 1 }) })
+      for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, ...point, ...(type === 'mouseMoved' ? {} : { button, buttons: type === 'mousePressed' ? button === 'right' ? 2 : 1 : 0, clickCount: 1 }) })
     }
     const key = async (key, code = key) => { for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key, code, windowsVirtualKeyCode: key === 'Enter' ? 13 : key === 'Tab' ? 9 : key === 'Escape' ? 27 : 0, ...(key === 'Enter' && type === 'keyDown' ? { text: '\r', unmodifiedText: '\r' } : {}) }) }
     const shot = async label => {
@@ -42,6 +42,37 @@ app.whenReady().then(async () => {
     result.start = await facts(); result.seedCount = await evaluate('toolbarActionsScene.seedCount')
     assert.equal(result.start.title, await evaluate('toolbarActionsScene.longName'))
     assert.ok(result.start.tabs['displayed-complete-tab'])
+    if (mode === 'tab-actions-only') {
+      const visibleHeaders = () => evaluate('([...document.querySelectorAll(".focused-tab-workspace .agent-region-header")]).filter(n=>n.getBoundingClientRect().width>0&&n.getBoundingClientRect().height>0).length')
+      await until('document.querySelector(".focused-tab-workspace .agent-region-header")?.getBoundingClientRect().width>0')
+      assert.equal(await visibleHeaders(), 2, 'The actual split workface keeps both original Agent Headers')
+      const menuLabels = () => evaluate('([...document.querySelectorAll("[role=menuitem]")]).map(n=>n.textContent)')
+      async function openTabMenu() {
+        await click('[aria-label="Tab actions"]')
+        await until('!!document.querySelector("[data-focus-tab-menu-context]")')
+        assert.deepEqual(await menuLabels(), ['Rename Tab', 'Show only this Region'])
+        assert.equal(await evaluate('document.querySelector("[data-focus-tab-menu-context]").textContent'), 'Tab actions · ' + result.start.title)
+      }
+      await shot('tab-actions-wide-workface')
+      await openTabMenu(); await shot('tab-actions-wide-menu')
+      await key('Escape'); await until('!document.querySelector("[role=menu]")')
+      assert.equal(await evaluate('document.activeElement?.getAttribute("aria-label")'), 'Tab actions')
+      await click('.focus-toolbar__identity', null, 'right')
+      await until('!!document.querySelector("[data-focus-tab-menu-context]")')
+      assert.deepEqual(await menuLabels(), ['Rename Tab', 'Show only this Region'])
+      await shot('tab-actions-title-menu')
+      await key('Escape'); await until('!document.querySelector("[role=menu]")')
+      assert.equal(await evaluate('document.activeElement?.classList.contains("focus-toolbar__identity")'), true)
+      win.setContentSize(760, 720); await until('innerWidth===760')
+      await shot('tab-actions-narrow-workface')
+      assert.equal(await visibleHeaders(), 2, 'Narrow Focus keeps both original Agent Headers')
+      await openTabMenu(); await shot('tab-actions-narrow-menu')
+      await key('Escape'); await until('!document.querySelector("[role=menu]")')
+      result.end = await facts()
+      for (const field of ['tabs','layouts','drafts','identities']) assert.deepEqual(result.end[field], result.start[field], 'Menu operations preserve original ' + field)
+      result.passed = true
+      return
+    }
     if (phase === 'restore') {
       const expected = JSON.parse(await readFile(join(privateRoot, 'expected.json'), 'utf8'))
       assert.equal(result.seedCount, 0, 'Restoring real Store initialize without second seed')
@@ -60,12 +91,12 @@ app.whenReady().then(async () => {
     } else {
       assert.equal(result.seedCount, 1)
       await shot('toolbar-context-actions-wide')
-      await click('[aria-label="Focus context actions"]'); await until('!!document.querySelector("[role=menu]")')
+      await click('[aria-label="Tab actions"]'); await until('!!document.querySelector("[role=menu]")')
       const labels = await evaluate('([...document.querySelectorAll("[role=menuitem]")]).map(n=>n.textContent)')
       assert.ok(!labels.includes('Continue in Space')); assert.ok(labels.includes('Rename Tab'))
       await shot('toolbar-context-actions-more-wide'); await key('Escape'); await until('!document.querySelector("[role=menu]")')
       for (const width of [640, 360]) { win.setContentSize(width, 640); await until('innerWidth===' + width); await shot('toolbar-context-actions-' + width) }
-      await click('[aria-label="Focus context actions"]'); await until('!!document.querySelector("[role=menu]")')
+      await click('[aria-label="Tab actions"]'); await until('!!document.querySelector("[role=menu]")')
       await click('[role=menuitem]', 'Show only this Region'); await until('!document.querySelector("[role=menu]")')
       await paint()
       result.regionOnlyGeometry = await evaluate('([...document.querySelectorAll(".focused-tab-workspace [data-workbench-region-id],.focused-tab-workspace [data-session-occurrence-slot]")]).map(n=>{const ancestry=[];for(let p=n;p&&ancestry.length<12;p=p.parentElement)ancestry.push({tag:p.tagName,id:p.id,classes:p.className});return{id:n.getAttribute("data-workbench-region-id")??n.getAttribute("data-session-occurrence-slot"),kind:n.hasAttribute("data-workbench-region-id")?"native-region":"readonly-occurrence-slot",rect:n.getBoundingClientRect().toJSON(),visibility:getComputedStyle(n).visibility,ancestry}})')
@@ -74,7 +105,7 @@ app.whenReady().then(async () => {
       const shownRegions = [...new Set(result.regionOnlyGeometry.filter(item => item.rect.width > 0 && item.rect.height > 0 && item.visibility !== 'hidden').map(item => item.id))]
       assert.deepEqual(shownRegions, ['displayed-agent-region'], 'Only the exact Region is physically displayed, through the existing native or readonly Agent slot')
       assert.equal(Object.keys((await facts()).tabs['displayed-complete-tab'].regions).length, 2, 'Region-only display preserves the complete original Tab')
-      await click('[aria-label="Focus context actions"]'); await until('!!document.querySelector("[role=menu]")')
+      await click('[aria-label="Tab actions"]'); await until('!!document.querySelector("[role=menu]")')
       await click('[role=menuitem]', 'Show entire Tab'); await until('!document.querySelector("[role=menu]")')
       win.setContentSize(1200, 720); await until('innerWidth===1200')
       await click('[aria-label="View in Space"]')

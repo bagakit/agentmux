@@ -10,7 +10,8 @@ import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
 
 const root = resolve(import.meta.dirname, '../../..'), desktop = join(root, 'apps/desktop')
 const args = process.argv.slice(2)
-const expectedImages = [
+const tabActionsOnly = args.includes('--tab-actions-only')
+const expectedImages = tabActionsOnly ? ['tab-actions-wide-workface.png', 'tab-actions-wide-menu.png', 'tab-actions-title-menu.png', 'tab-actions-narrow-workface.png', 'tab-actions-narrow-menu.png'] : [
   'toolbar-context-actions-wide.png', 'toolbar-context-actions-more-wide.png',
   'toolbar-context-actions-640.png', 'toolbar-context-actions-360.png',
   'toolbar-context-actions-region-only-360.png', 'keyboard-exact-Mote-discussion-pending.png',
@@ -18,8 +19,8 @@ const expectedImages = [
   'same-Mote-newborn-request-narrow.png', 'restored-original-workface-and-discussion-wide.png',
   'restored-same-Mote-request-wide.png'
 ]
-assert.ok(args.length === 0 || args.length === 2 && args[0] === '--consume-receipt', 'Only an explicit exact receipt may be consumed')
-if (args.length) {
+assert.ok(args.length === 0 || tabActionsOnly && args.length === 1 || args.length === 2 && args[0] === '--consume-receipt', 'Only an explicit exact receipt may be consumed')
+if (args[0] === '--consume-receipt') {
   const path = resolve(root, args[1]), previous = JSON.parse(await readFile(path, 'utf8'))
   assert.equal(previous.schema, 'agentmux.focus-toolbar-context-actions-scene.v1'); assert.equal(previous.capturedPass, true)
   assert.equal(previous.phases.length, 2)
@@ -33,25 +34,31 @@ if (args.length) {
   console.log(JSON.stringify({ consumedExactReceipt: path, capturedPass: true, sourceAndImagesCurrent: true, privateProcessesNotRepeated: true }))
   process.exit(0)
 }
-const evidence = join(root, '.bagakit/feature-tracker/focus-identity-consistency-artifacts/toolbar-context-actions', 'scene-' + globalThis.crypto.randomUUID())
+const evidence = join(root, tabActionsOnly ? '.bagakit/feature-tracker/agent-menu-product/artifacts/focus-toolbar' : '.bagakit/feature-tracker/focus-identity-consistency-artifacts/toolbar-context-actions', 'scene-' + globalThis.crypto.randomUUID())
 await mkdir(evidence, { recursive: true })
 const privateRoot = await mkdtemp(join(tmpdir(), 'amux-toolbar-context-actions-'))
 const fixture = join(desktop, 'scripts/fixtures/focus-toolbar-context-actions')
 const require = createRequire(join(desktop, 'package.json')), { build } = createRequire(require.resolve('vite/package.json'))('esbuild')
 const hash = bytes => createHash('sha256').update(bytes).digest('hex'), inputs = new Map(), transformations = [], logs = []
 const receipt = { schema: 'agentmux.focus-toolbar-context-actions-scene.v1', capturedPass: false, aestheticReview: 'pending independent full-image review',
-  actualUserAppOrRunControlled: false, phases: [],
-  boundary: 'Actual Global/Toolbar/Store initialize and persistence, precise spatial catalog/navigation, Mote entry/floating panel/Launcher/new discussion and Tab formatter. Maintained typed Session API, no actual Core/PTY/Run/CLI delivery. Original configured Mote has unconfirmed executor, so its exact newborn request is kept. Actual private Electron PID exit -> new PID on same Chromium profile, no second seed. Native terminal/Monaco paint alone isolated.' }
+  actualUserAppOrRunControlled: false, captureOnly: tabActionsOnly, phases: [],
+  boundary: tabActionsOnly ? 'Actual GlobalFocusSurface/FocusToolbar/WorkspaceWorkbench/SessionPane/Agent Header and original menu primitives. One private Renderer process with maintained typed preview Session facts; actual TerminalView with typed preview bytes and unused editor/media painting isolated. No user App/Run/Runtime control or restart proof.' : 'Actual Global/Toolbar/Store initialize and persistence, precise spatial catalog/navigation, Mote entry/floating panel/Launcher/new discussion and Tab formatter. Maintained typed Session API, no actual Core/PTY/Run/CLI delivery. Original configured Mote has unconfirmed executor, so its exact newborn request is kept. Actual private Electron PID exit -> new PID on same Chromium profile, no second seed. Native terminal/Monaco paint alone isolated.' }
 try {
   const freshness = spawnSync(process.execPath, ['--experimental-strip-types', '--input-type=module', '-e', `const {assertWorkspaceDistBuiltFromCurrentSource}=await import(${JSON.stringify(pathToFileURL(join(root, 'vitest.dist-freshness.ts')).href)});await assertWorkspaceDistBuiltFromCurrentSource(${JSON.stringify(root)});`], { cwd: root, encoding: 'utf8' })
   await writeFile(join(evidence, 'freshness.log'), freshness.stdout + freshness.stderr); assert.equal(freshness.status, 0, 'Original current source/dist guard')
   const observe = { name: 'actual-toolbar-context-action-source-binding', setup(builder) {
+    builder.onResolve({ filter: /\?worker$/ }, args => ({ path: createRequire(args.importer).resolve(args.path.slice(0, -7)), namespace: 'toolbar-worker' }))
+    builder.onLoad({ filter: /.*/, namespace: 'toolbar-worker' }, async ({ path }) => {
+      const file = 'worker-' + hash(path).slice(0, 12) + '.js'
+      await build({ entryPoints: [path], outfile: join(out, file), bundle: true, platform: 'browser', format: 'esm', target: 'es2022', logLevel: 'silent' })
+      return { contents: `export default class extends Worker { constructor(options) { super(new URL('./${file}',import.meta.url),{...options,type:'module'}); } }`, loader: 'js' }
+    })
     builder.onLoad({ filter: /\.[cm]?[jt]sx?$/ }, async ({ path }) => {
       if (!path.startsWith(root + '/') || path.includes('/node_modules/')) return
       const source = await readFile(path, 'utf8'); inputs.set(path, hash(source)); const component = path.slice(path.lastIndexOf('/') + 1)
-      if (['TerminalView.tsx', 'EditorPane.tsx', 'GitBranchDiffPane.tsx'].includes(component)) {
+      if ((!tabActionsOnly && component === 'TerminalView.tsx') || ['EditorPane.tsx', 'GitBranchDiffPane.tsx', 'ExcalidrawFilePreview.tsx', 'PdfContent.tsx'].includes(component)) {
         const code = `export function ${component.slice(0, -4)}(){return null}`
-        transformations.push({ path: relative(root, path), sourceSHA256: hash(source), loadedSHA256: hash(code), isolated: 'Native PTY/Monaco paint only; no Store, identity, Toolbar, navigation, Composer or Mote owner substitution' })
+        transformations.push({ path: relative(root, path), sourceSHA256: hash(source), loadedSHA256: hash(code), isolated: 'Native PTY and unused editor/media paint only; no Store, identity, Toolbar, navigation, Composer or Mote owner substitution' })
         return { contents: code, loader: 'js' }
       }
       return { contents: source, loader: path.endsWith('tsx') ? 'tsx' : path.endsWith('ts') ? 'ts' : 'js' }
@@ -68,15 +75,18 @@ try {
   const html = join(out, 'index.html'); await writeFile(html, '<!doctype html><html><meta charset="utf-8"><link rel="stylesheet" href="./app.css"><style>html,body,#root{height:100%;width:100%;margin:0;overflow:hidden}</style><div id="root"></div><script type="module" src="./app.js"></script></html>')
   receipt.compiled = { renderer: hash(await readFile(join(out, 'app.js'))), css: hash(await readFile(join(out, 'app.css'))) }
   const env = { ...process.env, AGENTMUX_DESKTOP_USER_DATA: join(privateRoot, 'profile'), AGENTMUX_RUNTIME_DIRECTORY: join(privateRoot, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(privateRoot, 'state') }; delete env.ELECTRON_RUN_AS_NODE
-  for (const phase of ['seed', 'restore']) {
-    const processReceipt = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), html, privateRoot, evidence, phase], { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(phase + ': ' + line) })
+  for (const phase of tabActionsOnly ? ['seed'] : ['seed', 'restore']) {
+    const processReceipt = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), html, privateRoot, evidence, phase, ...(tabActionsOnly ? ['tab-actions-only'] : [])], { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(phase + ': ' + line) })
     const actual = await readFile(join(evidence, phase + '.json'), 'utf8').then(JSON.parse).catch(() => ({
       passed: false, phase, failure: { message: 'Private process did not produce a completed phase receipt; inspect retained process evidence' }
     }))
     receipt.phases.push({ process: processReceipt, actual }); assert.equal(processReceipt.exitCode, 0, actual.failure?.message); assert.equal(actual.passed, true)
   }
-  assert.notEqual(receipt.phases[0].actual.pid, receipt.phases[1].actual.pid, 'Two actual Electron processes')
-  assert.equal(receipt.phases[0].actual.seedCount, 1); assert.equal(receipt.phases[1].actual.seedCount, 0)
+  if (!tabActionsOnly) {
+    assert.notEqual(receipt.phases[0].actual.pid, receipt.phases[1].actual.pid, 'Two actual Electron processes')
+    assert.equal(receipt.phases[1].actual.seedCount, 0)
+  }
+  assert.equal(receipt.phases[0].actual.seedCount, 1)
   receipt.frames = await Promise.all(receipt.phases.flatMap(item => item.actual.frames).map(async frame => ({ ...frame, sha256: hash(await readFile(join(evidence, frame.image))) })))
   assert.deepEqual(receipt.frames.map(frame => frame.image).sort(), [...expectedImages].sort(), 'Full wide/narrow action/Region/Mote/restart images')
   receipt.sourceAfter = Object.fromEntries(await Promise.all([...inputs.keys()].map(async path => [relative(root, path), hash(await readFile(path))])))

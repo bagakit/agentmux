@@ -1,5 +1,6 @@
 import { createElement as h, Fragment, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { mountThemeRuntime } from '@agentmux/client-ui/theme'
 import { createWorkspaceLayout, moveTabToNewGroup, addTabOccurrence, activateTab } from '@agentmux/layout'
 import { useAppStore, prepareRendererUpdate } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
@@ -69,6 +70,12 @@ if (phase === 'seed') {
   } }))
 }
 await useAppStore.getState().initialize()
+if (new URL(location.href).searchParams.get('mode') === 'tab-actions-only') {
+  const current = useAppStore.getState()
+  useAppStore.setState({ config: { ...current.config, executors: moteConfig.executors }, sessions: moteSessions,
+    agentNames: { [executionAgent.id]: 'Release reviewer' }, viewModes: { [executionAgent.id]: 'terminal' } })
+}
+mountThemeRuntime(window, useAppStore.getState().config?.appearance ?? {})
 // No seeding, Store replacement or rehydration override occurs on restore.
 function Scene() {
   const state = useAppStore(), [floating, setFloating] = usePmoTeamsTopicFloatingState()
