@@ -146,6 +146,7 @@ export class ConnectionEnrollmentStore {
         assetOperationId: randomUUID(),
         operation: {
           ...identity,
+          ...(input.initialPublication ? { initialSetup: { operationId: randomUUID(), progress: null } } : {}),
           preset: summarizeConnectionEnrollmentPreset(preset),
           revision: 1,
           authorization: 'not-started',
