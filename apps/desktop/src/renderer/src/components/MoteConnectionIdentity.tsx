@@ -156,7 +156,7 @@ export function MoteConnectionPanel({ target, topicId, moteName, onRead, onSaved
           <MoteBotSetup target={target} topicId={topicId} record={currentChoice?.record ?? null} hasSavedBot={!!current} onChoose={choose} onCurrent={() => void refresh()}
             createOnOpen={createOnOpen} onCreateIntentConsumed={onCreateIntentConsumed} onContinue={onContinueSetup ?? (settings ? (record, source) => {
               onSaved?.()
-              settings.openMoteConnector({ target, topicId, moteName, setup: { connectionId: record.config.connectionId, source } })
+              settings.openMoteLark({ target, topicId, moteName, setup: { connectionId: record.config.connectionId, source } })
             } : undefined)} />
           <details ref={identityOptions} className="mote-identity-options"><summary>Identity options</summary>
           {snapshot ? <details className="mote-bot-existing" open={choosing} onToggle={event => setChoosing(event.currentTarget.open)}><summary>Choose a saved bot</summary><label htmlFor={fieldId}>Chat bot</label><SelectionField id={fieldId} label="Mote chat bot" value={selection} menuClassName="mote-connection-dialog__choices"
@@ -170,7 +170,7 @@ export function MoteConnectionPanel({ target, topicId, moteName, onRead, onSaved
           <div className="mote-connection-dialog__secondary">
             <button type="button" className="small-button" onClick={() => void refresh()} disabled={loading}>Check current choice</button>
             {pending && reviewed && !busy ? <button type="button" className="small-button" onClick={() => { setAttempt(null); setNewChoice(true); edited.current = true }}>Use current revision for a new choice</button> : null}
-            {!inSettings && settings ? <button type="button" className="small-button" onClick={() => { onSaved?.(); settings.openMoteConnector({ target, topicId, moteName }) }}>Manage bots</button> : null}
+            {!inSettings && settings ? <button type="button" className="small-button" onClick={() => { onSaved?.(); settings.openMoteLark({ target, topicId, moteName }) }}>Manage bots</button> : null}
           </div>
           {retained.length ? <details className="mote-connection-dialog__requests"><summary>Retained save requests</summary>
             {retained.map(({ input, phase }) => <p key={input.operationId}><code>{input.operationId}</code><br />{input.values.connection?.application.appId ?? 'Remove default bot'} · {phase === 'not-dispatched' ? 'Not sent' : 'Result unconfirmed'}</p>)}

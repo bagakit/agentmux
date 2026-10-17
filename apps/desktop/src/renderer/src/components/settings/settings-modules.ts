@@ -1,4 +1,4 @@
-import { connectionsSettingsModule } from './modules/connections'
+import { larkSettingsModule } from './modules/lark'
 import { createSettingsCatalog } from './settings-catalog'
 import { appearanceSettingsModule } from './modules/appearance'
 import { notificationsSettingsModule } from './modules/notifications'
@@ -11,7 +11,7 @@ import { messageToolSettingsModule } from './modules/message-tool'
 import { profileSettingsModule } from './modules/profile'
 import { focusSettingsModule } from './modules/focus'
 import { hostsSettingsModule } from './modules/hosts'
-import { devicesSettingsModule } from './modules/devices'
+import { amuxConversationSettingsModule } from './modules/amux-conversation'
 import { toolkitSettingsModule } from './modules/toolkit'
 import { spaceSettingsModule } from './modules/space'
 import { goalsSettingsModule } from './modules/goals'
@@ -40,8 +40,8 @@ export const settingsModules = [
   toolkitSettingsModule,
   agentsSettingsModule,
   hostsSettingsModule,
-  devicesSettingsModule,
-  connectionsSettingsModule
+  amuxConversationSettingsModule,
+  larkSettingsModule
 ] as const
 
 export type SettingsSectionId = typeof settingsModules[number]['id']

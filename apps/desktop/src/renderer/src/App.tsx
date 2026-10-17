@@ -4,7 +4,7 @@ import { GitHistoryProvider } from './features/git/history/GitHistoryContext'
 import { workspaceZoneContext } from './lib/workspace-zone-context'
 import { observeNotebookLibrary } from './lib/notebook-library'
 import { ExecutorIdentityContext } from './components/AgentAvatar'
-import { SettingsNavigation, type SettingsNavigationRequest, type MoteConnectorSettingsOrigin, type ConnectorSettingsOrigin } from './components/SettingsNavigation'
+import { SettingsNavigation, type SettingsNavigationRequest, type MoteLarkSettingsOrigin, type LarkSettingsOrigin } from './components/SettingsNavigation'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { BrandIcon } from './components/BrandIcon'
@@ -111,12 +111,12 @@ function DesktopApp() {
   const closeSettings = useCallback((): void => setSettingsOpen(false), [])
   const openToolkit = useCallback((toolId: string): void => navigateSettings({ section: 'toolkit', toolId }), [navigateSettings])
   const openHostSettings = useCallback((hostId: string): void => navigateSettings({ section: 'hosts', hostId }), [navigateSettings])
-  const openConnector = useCallback((connectorOrigin: ConnectorSettingsOrigin): void => navigateSettings({ section: 'chat-connections', connectorOrigin }), [navigateSettings])
-  const openMoteConnector = useCallback((moteConnectorOrigin: MoteConnectorSettingsOrigin): void => navigateSettings({ section: 'chat-connections', moteConnectorOrigin }), [navigateSettings])
+  const openLark = useCallback((larkOrigin: LarkSettingsOrigin): void => navigateSettings({ section: 'lark', larkOrigin }), [navigateSettings])
+  const openMoteLark = useCallback((moteLarkOrigin: MoteLarkSettingsOrigin): void => navigateSettings({ section: 'lark', moteLarkOrigin }), [navigateSettings])
   const [windowResizeActive, setWindowResizeActive] = useState(false)
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false)
   const chooseAgent = useCallback(() => { setSettingsOpen(false); setQuickSwitchOpen(true) }, [])
-  const settingsNavigation = useMemo(() => ({ open: openSettings, openToolkit, openHost: openHostSettings, openConnector, openMoteConnector, chooseAgent }), [openSettings, openToolkit, openHostSettings, openConnector, openMoteConnector, chooseAgent])
+  const settingsNavigation = useMemo(() => ({ open: openSettings, openToolkit, openHost: openHostSettings, openLark, openMoteLark, chooseAgent }), [openSettings, openToolkit, openHostSettings, openLark, openMoteLark, chooseAgent])
   const quickSwitchOrigin = useRef<{ element: HTMLElement | null; navigation: string } | null>(null)
   const initialize = useAppStore((state) => state.initialize)
   const loading = useAppStore((state) => state.loading)

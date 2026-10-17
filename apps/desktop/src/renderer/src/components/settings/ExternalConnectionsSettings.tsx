@@ -3,7 +3,7 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { ConnectionConfigureInput, ConnectionRecord, ConnectionSetupEnrollmentSource } from '@agentmux/core/connections'
-import { SettingsNavigation, type SettingsNavigationRequest, type MoteConnectorSettingsOrigin } from '../SettingsNavigation'
+import { SettingsNavigation, type SettingsNavigationRequest, type MoteLarkSettingsOrigin } from '../SettingsNavigation'
 import { useAppStore } from '../../store'
 import { isSessionSurface } from '../../lib/workbench-surface-kinds'
 import { sessionPresentationById } from '../../lib/session-presentation'
@@ -23,7 +23,7 @@ const GroupIcon = semanticIconComponent('object.conversations')
 const platform = (domain: string) => domain === 'open.feishu.cn' ? 'Feishu' : domain === 'open.larksuite.com' ? 'Lark' : domain
 
 export function ExternalConnectionsSettings({ active, onClose, navigationRequest }: { active: boolean; onClose?: (() => void) | undefined; navigationRequest?: SettingsNavigationRequest | undefined }) {
-  const navigation = useContext(SettingsNavigation), origin = navigationRequest?.section === 'chat-connections' ? navigationRequest.connectorOrigin : undefined
+  const navigation = useContext(SettingsNavigation), origin = navigationRequest?.section === 'lark' ? navigationRequest.larkOrigin : undefined
   const originalAgent = useAppStore(state => {
     if (!active || !origin) return undefined
     const session = sessionPresentationById(state.sessions).get(origin.sessionId)
@@ -44,7 +44,7 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
   const [records, setRecords] = useState<ConnectionRecord[]>([]), [issue, setIssue] = useState(''), [busy, setBusy] = useState(false)
   const [listIssue, setListIssue] = useState('')
   const [view, setView] = useState<'loading' | 'library' | 'enrollment' | 'new' | 'saved' | 'edit' | 'management' | 'mote'>('loading')
-  const [moteSelection, setMoteSelection] = useState<{ origin: MoteConnectorSettingsOrigin; create: boolean } | null>(null)
+  const [moteSelection, setMoteSelection] = useState<{ origin: MoteLarkSettingsOrigin; create: boolean } | null>(null)
   useEffect(() => { if (!active) setMoteSelection(current => current?.create ? { ...current, create: false } : current) }, [active])
   const [libraryRevision, setLibraryRevision] = useState(0)
   const [saveNotice, setSaveNotice] = useState('')
@@ -128,7 +128,7 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
   }
   const existing = () => { setContinuation(null); appliedRoute.current = navigationRequest; if (selected && !pending.current) edit(null); else setView('new') }
   const startEnrollment = () => { setContinuation(null); appliedRoute.current = navigationRequest; setMoteSelection(null); enrollment.startAnother(); setView('enrollment') }
-  const openMote = (origin: MoteConnectorSettingsOrigin, create = false) => { setContinuation(null); appliedRoute.current = navigationRequest; setMoteSelection({ origin, create }); setView('mote'); setIssue('') }
+  const openMote = (origin: MoteLarkSettingsOrigin, create = false) => { setContinuation(null); appliedRoute.current = navigationRequest; setMoteSelection({ origin, create }); setView('mote'); setIssue('') }
   const library = () => { setContinuation(null); returnMote.current = moteSelection?.origin.topicId ?? null; appliedRoute.current = navigationRequest; setView('library'); setMoteSelection(null); setIssue(''); setLibraryRevision(value => value + 1) }
   useLayoutEffect(() => {
     const scroll = pane.current?.closest<HTMLElement>('.settings-content__scroll')
@@ -161,11 +161,11 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
     setContinuation({ connectionId: record.config.connectionId, source })
   }
   useEffect(() => {
-    if (active && navigationRequest?.moteConnectorOrigin && appliedRoute.current !== navigationRequest) openMote(navigationRequest.moteConnectorOrigin)
+    if (active && navigationRequest?.moteLarkOrigin && appliedRoute.current !== navigationRequest) openMote(navigationRequest.moteLarkOrigin)
   }, [active, navigationRequest])
   const appliedContinuation = useRef<SettingsNavigationRequest | undefined>(undefined)
   useEffect(() => {
-    const setup = navigationRequest?.moteConnectorOrigin?.setup
+    const setup = navigationRequest?.moteLarkOrigin?.setup
     if (!active || !setup || appliedContinuation.current === navigationRequest) return
     const record = records.find(item => item.config.connectionId === setup.connectionId)
     if (!record) return
