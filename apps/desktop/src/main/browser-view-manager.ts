@@ -856,7 +856,7 @@ export class BrowserViewManager {
       : sender !== this.window.webContents ? 'sender-mismatch'
       : sender.isDestroyed() ? 'sender-destroyed'
       : !frame ? 'frame-missing'
-      : frame.detached ? 'frame-detached'
+      : frame.isDestroyed() ? 'frame-destroyed'
       : frame !== sender.mainFrame ? 'frame-mismatch'
       : frame.parent !== null ? 'frame-not-top-level'
       : originalDocument !== undefined && (!originalDocument || originalDocument.processId !== frame.processId || originalDocument.frameToken !== frame.frameToken) ? 'document-changed'
@@ -877,7 +877,7 @@ export class BrowserViewManager {
     const sender = this.window.webContents
     return !sender.isDestroyed() &&
       document === this.presentationDocument && sender.session === document.session &&
-      !document.frame.detached && sender.mainFrame === document.frame &&
+      !document.frame.isDestroyed() && sender.mainFrame === document.frame &&
       document.frame.processId === document.processId && document.frame.frameToken === document.frameToken &&
       document.frame.url === document.url && sender.getURL() === document.url
   }
