@@ -11,6 +11,8 @@ import { createDesktopConnections } from '../src/main/connector-host.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { api } from '../src/renderer/src/lib/api'
+import { setBotTaskSelection, useAppStore } from '../src/renderer/src/store'
+import { managementTaskScope, restoredManagementTask } from '../src/renderer/src/lib/bot-task-selection'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { enrollmentEncryption } from '../../../packages/connectors/test/fixtures/connection-enrollment.js'
 import { moteEnrollmentWeb } from './fixtures/mote-enrollment-web'
@@ -28,6 +30,7 @@ const releases: Array<() => void> = []
 
 beforeEach(async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  useAppStore.setState({ botTaskSelections: {} })
   directory = await mkdtemp(join(tmpdir(), 'settings-auth-'))
   const encryption = enrollmentEncryption(); secureAvailable = true
   services = await createDesktopConnections({ directory: join(directory, 'connections'), encryption: { ...encryption, isEncryptionAvailable: () => secureAvailable } })
@@ -116,6 +119,7 @@ async function seed(id = 'settings-saved-bot', appId = 'cli_settings_saved_bot')
 }
 async function select(record: ConnectionRecord) { await click(`[data-connection="${record.config.connectionId}"] button`) }
 async function enter(record: ConnectionRecord) {
+  await ready(() => expect(panel() ?? dom.container.querySelector('[data-management-open]')).not.toBeNull())
   if (!panel()) await click('[data-management-open]')
   await ready(() => expect(panel()?.dataset.managementSetup).toBe(record.config.connectionId))
 }
@@ -249,14 +253,15 @@ it('retains separate safe submissions before admission across Back and Settings 
   expect(second.operationId).not.toBe(first.operationId)
   await click('[aria-label="Close settings"]')
   await act(async () => reopen()); await enter(saved.connection)
-  await click(`[data-management-original="${first.operationId}"]`)
+  await click('[data-management-select]'); await click(`[data-management-original="${first.operationId}"]`)
   await ready(() => expect(setupCalls('connection.setup.inspect').some(call => (call.input as { operationId: string }).operationId === first.operationId && call.result !== undefined)).toBe(true))
   expect(view(setupCalls('connection.setup.inspect').find(call => (call.input as { operationId: string }).operationId === first.operationId)!).operation).toBeNull()
   expect(setupCalls('connection.setup.begin')).toHaveLength(2)
   await leavePrivate(); await enter(saved.connection)
+  await click('[data-management-select]')
   expect(panel()?.querySelector(`[data-management-original="${second.operationId}"]`)).not.toBeNull()
   await click(`[data-management-original="${first.operationId}"]`)
-  await ready(() => expect(setupCalls('connection.setup.inspect').filter(call => (call.input as { operationId: string }).operationId === first.operationId && call.result !== undefined)).toHaveLength(2))
+  await ready(() => expect(setupCalls('connection.setup.inspect').filter(call => (call.input as { operationId: string }).operationId === first.operationId && call.result !== undefined)).toHaveLength(3))
   await click('[data-management-resume]')
   await ready(() => expect(setupCalls('connection.setup.begin')[2]?.result).toBeDefined())
   await waitStage('unknown')
@@ -265,7 +270,7 @@ it('retains separate safe submissions before admission across Back and Settings 
   await leavePrivate(); a.release(); b.release()
   await ready(() => expect(setupCalls('connection.setup.begin').slice(0, 2).map(call => call.result !== undefined)).toEqual([true, true]))
   expect(native).toHaveLength(2)
-  await enter(saved.connection); await click(`[data-management-original="${first.operationId}"]`); await click('[data-management-inspect]')
+  await enter(saved.connection); await waitStage('unknown'); await click('[data-management-inspect]')
   await waitStage('unknown')
   expect(native).toHaveLength(2); expect(setupCalls('connection.setup.begin')).toHaveLength(3)
   expect((await forward('connection.setup.ls', { connectionId: saved.connection.config.connectionId })).operations.map(operation => operation.operationId).sort()).toEqual([first.operationId, second.operationId].sort())
@@ -300,7 +305,7 @@ it('does not let a late earlier original selection display its code or advance a
   await mount(); await select(saved.connection); await enter(saved.connection)
   await click(`[data-management-original="${a.operationId}"]`); await ready(() => expect(held).toBe(true))
   await leavePrivate(); await enter(saved.connection)
-  await click(`[data-management-original="${b.operationId}"]`)
+  await click('[data-management-select]'); await click(`[data-management-original="${b.operationId}"]`)
   await ready(() => expect(setupCalls('connection.setup.inspect').some(call => (call.input as { operationId: string }).operationId === b.operationId && view(call)?.continuation?.stage === 'unknown')).toBe(true))
   await waitStage('unknown')
   await act(async () => { delayed.release(); await delayed.promise }); await settle()
@@ -322,7 +327,8 @@ it('an API source replacement with identical saved IDs and revision rejects the 
     await ready(() => expect(setupCalls('connection.setup.ls').length).toBeGreaterThan(1))
     await act(async () => { delayed.release(); await delayed.promise }); await settle()
     expect(panel()?.dataset.managementSetup).toBe(saved.connection.config.connectionId)
-    expect(panel()?.querySelector('[data-management-code]')).toBeNull()
+    await ready(() => expect(setupCalls('connection.setup.inspect').some(call => view(call)?.challenge?.qrPayload.includes(TOKEN) && call.delivered)).toBe(true))
+    expect(panel()?.querySelector('[data-management-code]')).not.toBeNull()
     expect(dom.container.textContent).not.toContain(USER)
     expect(setupCalls('connection.setup.advance')).toEqual([])
     expect(native.map(value => new URL(value.url).pathname)).toEqual(['/accounts/qrlogin/init'])
@@ -343,8 +349,14 @@ it.each(['another target', 'Settings close'] as const)('a delayed real account r
   }
   await act(async () => { delayed.release(); await delayed.promise }); await settle()
   expect(panel()?.dataset.managementSetup).toBe(exit === 'another target' ? b.connection.config.connectionId : a.connection.config.connectionId)
-  expect(dom.container.textContent).not.toContain(USER); expect(dom.container.textContent).not.toContain(TENANT)
-  expect(stage()).not.toBe('account'); expect(panel()?.querySelector('[data-management-code]')).toBeNull()
+  if (exit === 'another target') {
+    expect(dom.container.textContent).not.toContain(USER); expect(dom.container.textContent).not.toContain(TENANT)
+    expect(stage()).not.toBe('account')
+  } else {
+    await waitStage('account')
+    expect(setupCalls('connection.setup.inspect').some(call => view(call)?.continuation?.account?.userId === USER && call.delivered)).toBe(true)
+  }
+  expect(panel()?.querySelector('[data-management-code]')).toBeNull()
   expect(setupCalls('connection.setup.advance').filter(call => (call.input as ConnectionSetupAdvance).decision.value === 'confirm')).toEqual([])
   expect(native.map(value => new URL(value.url).pathname)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross-login', '/', '/', '/app'])
   expectNoSetupWrites(); await unchanged(a); await unchanged(b)
@@ -392,13 +404,16 @@ it.each(['before admission', 'after admission'] as const)('an original local ins
   await mount(); await select(saved.connection); await enter(saved.connection); await click('[data-management-start]')
   await ready(() => expect(held).toBe(true))
   const original = setupCalls('connection.setup.begin')[0]!.input as ConnectionSetupBegin
-  await leavePrivate(); await enter(saved.connection); await click(`[data-management-original="${original.operationId}"]`)
+  await leavePrivate(); await enter(saved.connection)
   await ready(() => expect(setupCalls('connection.setup.inspect').some(call => (call.input as { operationId: string }).operationId === original.operationId && call.result !== undefined)).toBe(true))
   const observed = view(setupCalls('connection.setup.inspect').find(call => (call.input as { operationId: string }).operationId === original.operationId)!)
   if (position === 'before admission') { expect(observed.operation).toBeNull(); expect(native).toEqual([]) }
   else { expect(observed.operation?.operationId).toBe(original.operationId); expect(observed.challenge).not.toBeNull(); expect(native).toHaveLength(1) }
   expect(setupCalls('connection.setup.begin')).toHaveLength(1)
   if (position === 'after admission') {
+    await waitStage('waiting')
+    expect(setupCalls('connection.setup.advance')).toEqual([])
+    await click('[data-management-resume]')
     await waitStage('expired')
     expect(view(setupCalls('connection.setup.advance')[0]!).operation?.authentication?.stage).toBe('expired')
   } else await leavePrivate()
@@ -472,4 +487,141 @@ it.each(['foreign target', 'revised target', 'foreign actor'] as const)('keeps t
   expect(panel()?.querySelector('[data-management-code]')).toBeNull(); expect(panel()?.querySelector('[data-management-confirm]')).toBeNull()
   expect(setupCalls('connection.setup.begin')).toEqual([]); expect(setupCalls('connection.setup.advance')).toEqual([])
   expect(native).toHaveLength(before)
+}, 30_000)
+
+
+it('retains the exact Enrollment cards selection across Back, category changes and Settings remount with passive inspection only', async () => {
+  const original = await enrollmentWithInitialSetup(), before = original.issuer.calls.length
+  calls = []
+  await mount(); await select(original.connection); await enter(original.connection)
+  expect(panel()?.querySelector('[data-management-selection-note]')?.textContent).toContain('No original request selected')
+  expect(panel()?.textContent).not.toContain('No request yet')
+  await click(`[data-management-original="${original.setupId}"]`); await waitStage('confirmed')
+  const selections = structuredClone(useAppStore.getState().botTaskSelections)
+  expect(restoredManagementTask(selections)).toEqual({ scope: managementTaskScope(original.connection), operationId: original.setupId })
+  expect(JSON.stringify(selections)).not.toMatch(/revision|account|csrf|qrPayload|initialPublication|preset|AMUX original bot/)
+  await leavePrivate(); calls = []; await enter(original.connection); await waitStage('confirmed')
+  await click('[data-settings-target="overview"]'); await click('[data-settings-target="lark"]'); await waitStage('confirmed')
+  await dom.render(<MountedSettings key="remounted-original" />); await waitStage('confirmed')
+  expect(setupCalls('connection.inspect').some(call => (call.input as { connectionId?: string }).connectionId === original.connection.config.connectionId)).toBe(true)
+  expect(setupCalls('connection.setup.inspect').filter(call => !(call.input as { requestTrace?: unknown }).requestTrace).every(call => (call.input as { operationId: string }).operationId === original.setupId)).toBe(true)
+  expect(setupCalls('connection.setup.begin')).toEqual([]); expect(setupCalls('connection.setup.advance')).toEqual([])
+  expect(original.issuer.calls).toHaveLength(before); expect(original.issuer.creates).toBe(1)
+}, 30_000)
+
+it('restores a known original independently of held discovery, keeps named read activity, and copies every safe receipt while the local view is held', async () => {
+  const original = await enrollmentWithInitialSetup(), before = original.issuer.calls.length
+  setBotTaskSelection(managementTaskScope(original.connection), original.setupId)
+  const held = deferred(), listing = deferred(); let readingOriginal = false
+  beforeCall = async call => {
+    if (call.method === 'connection.ls' || call.method === 'connection.setup.ls') await listing.promise
+    if (call.method === 'connection.setup.inspect' && (call.input as { applicationInspection?: unknown }).applicationInspection) { readingOriginal = true; await held.promise }
+  }
+  const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  vi.spyOn(api.ui, 'readLoadedIdentity').mockResolvedValue({ package: null, renderer: null })
+  calls = []; await mount(); await ready(() => expect(readingOriginal).toBe(true))
+  expect(panel()?.dataset.managementSetup).toBe(original.connection.config.connectionId)
+  const activity = panel()?.querySelector('[data-management-activity][role="status"]')
+  expect(activity?.getAttribute('aria-busy')).toBe('true'); expect(activity?.querySelector('svg')).not.toBeNull()
+  expect(panel()?.textContent).not.toContain('could not be read')
+  expect(panel()?.textContent).not.toContain('No request yet')
+  const button = [...panel()!.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === 'Copy diagnosis')!
+  expect(button.disabled).toBe(false); await act(async () => button.click())
+  await ready(() => expect(copy).toHaveBeenCalledOnce())
+  const text = copy.mock.calls[0]![0]
+  const trace = await forward('connection.setup.inspect', { operationId: original.setupId, requestTrace: { limit: 100 } })
+  expect(text).toContain(original.setupId)
+  for (const entry of trace.requestTrace!.entries) expect(text).toContain(entry.stepId)
+  for (const privateValue of [TOKEN, FLOW, USER, TENANT, SECRET, 'fixture-settings-private-cookie', 'fixture-settings-private-csrf', 'data:image/png']) expect(text).not.toContain(privateValue)
+  expect(panel()?.querySelector('[data-management-activity][role="status"]')).toBe(activity)
+  held.release(); await waitStage('confirmed')
+  expect(panel()?.querySelector('[data-management-activity][role="status"]')).toBeNull()
+  expect(setupCalls('connection.setup.begin')).toEqual([]); expect(setupCalls('connection.setup.advance')).toEqual([])
+  expect(original.issuer.calls).toHaveLength(before)
+}, 30_000)
+
+it.each(['absent', 'foreign actor', 'revised'] as const)('retains a selected original and diagnosis when passive restoration is %s', async boundary => {
+  const saved = await seed(), input = beginInput('return-original-task', saved.connection)
+  if (boundary === 'foreign actor') {
+    const foreign = new AgentMuxRpcService({ connections: services.connections })
+    await foreign.call('connection.setup.begin', input, { principal: { kind: 'device', id: 'other-operator' } })
+  } else if (boundary !== 'absent') await forward('connection.setup.begin', input)
+  if (boundary === 'revised') await forward('connection.configure', { operationId: 'return-revised-save', expectedRevision: saved.connection.revision, connection: { ...saved.connection.config, label: 'Revised saved name' } })
+  setBotTaskSelection(managementTaskScope(saved.connection), input.operationId)
+  const before = native.length; calls = []
+  await mount(); await waitStage(boundary === 'revised' ? 'revised' : 'unknown')
+  expect(panel()?.textContent).toContain(input.operationId)
+  const button = [...panel()!.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === 'Copy diagnosis')!
+  expect(button.disabled).toBe(false)
+  if (boundary === 'foreign actor') expect(setupCalls('connection.setup.inspect').find(call => call.error)?.error).toMatchObject({ code: 'CONNECTION_SETUP_AUTHORITY_REQUIRED' })
+  if (boundary === 'absent') expect(panel()?.textContent).toContain('not visible yet')
+  if (boundary === 'revised') expect(panel()?.textContent).toContain('This application changed')
+  expect(panel()?.querySelector('[data-management-code]')).toBeNull(); expect(panel()?.querySelector('[data-management-confirm]')).toBeNull()
+  expect(setupCalls('connection.setup.begin')).toEqual([]); expect(setupCalls('connection.setup.advance')).toEqual([]); expect(native).toHaveLength(before)
+}, 30_000)
+
+it('keeps the exact target and diagnosis visible when restoring the saved application fails, then retries that same target', async () => {
+  const saved = await seed(), input = beginInput('return-application-read', saved.connection)
+  await forward('connection.setup.begin', input); setBotTaskSelection(managementTaskScope(saved.connection), input.operationId)
+  const held = deferred(); let fail = true, requested = false
+  beforeCall = async call => { if (call.method === 'connection.inspect' && (call.input as { connectionId?: string }).connectionId === saved.connection.config.connectionId) { requested = true; await held.promise; if (fail) throw new Error('fixture-original-application-read-unavailable') } }
+  const before = native.length; calls = []; await mount(); await ready(() => expect(requested).toBe(true))
+  expect(dom.container.querySelector('[data-management-restoring] [data-management-activity]')).not.toBeNull()
+  expect(dom.container.textContent).toContain(input.operationId); expect(dom.container.textContent).not.toContain('fixture-original-application-read-unavailable')
+  const copy = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === 'Copy diagnosis')!
+  expect(copy.disabled).toBe(false)
+  held.release(); await ready(() => expect(dom.container.textContent).toContain('fixture-original-application-read-unavailable'))
+  expect(dom.container.querySelector('[data-management-restoring] [data-management-activity]')).toBeNull()
+  fail = false
+  const retry = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === 'Read original application again')!
+  await act(async () => retry.click()); await waitStage('waiting')
+  expect(setupCalls('connection.setup.advance')).toEqual([]); expect(setupCalls('connection.setup.begin')).toEqual([]); expect(native).toHaveLength(before)
+}, 30_000)
+
+it('discards a late saved-application restoration after an explicit different target is opened', async () => {
+  const a = await seed('return-target-a'), b = await seed('return-target-b', 'cli_return_other_bot')
+  const input = beginInput('return-late-original', a.connection)
+  await forward('connection.setup.begin', input); setBotTaskSelection(managementTaskScope(a.connection), input.operationId)
+  const held = deferred(); let reading = false
+  afterCall = async call => { if (call.method === 'connection.inspect' && (call.input as { connectionId?: string }).connectionId === a.connection.config.connectionId) { reading = true; await held.promise } }
+  const before = native.length; calls = []; await mount(); await ready(() => expect(reading).toBe(true))
+  await click('[data-management-restoring] .connector-back'); await select(b.connection); await enter(b.connection)
+  held.release(); await settle()
+  expect(panel()?.dataset.managementSetup).toBe(b.connection.config.connectionId)
+  expect(panel()?.textContent).not.toContain(input.operationId); expect(panel()?.querySelector('[data-management-code]')).toBeNull()
+  expect(restoredManagementTask(useAppStore.getState().botTaskSelections)).toBeNull()
+  expect(setupCalls('connection.setup.advance')).toEqual([]); expect(native).toHaveLength(before)
+}, 30_000)
+
+it('reads the explicitly selected request beyond the first history page without selecting a newer request or restarting its poll', async () => {
+  const saved = await seed(), original = beginInput('management-stored-oldest', saved.connection)
+  await forward('connection.setup.begin', original)
+  for (let index = 0; index < 26; index++) await forward('connection.setup.begin', beginInput('management-other-' + index, saved.connection))
+  const firstPage = await forward('connection.setup.ls', { connectionId: saved.connection.config.connectionId })
+  expect(firstPage.operations).toHaveLength(25); expect(firstPage.operations.some(operation => operation.operationId === original.operationId)).toBe(false)
+  setBotTaskSelection(managementTaskScope(saved.connection), original.operationId)
+  const before = native.length; calls = []; await mount(); await waitStage('waiting')
+  expect(panel()?.textContent).toContain(original.operationId)
+  const observed = setupCalls('connection.setup.inspect').find(call => view(call)?.operation?.operationId === original.operationId)!
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, Math.max(0, view(observed).challenge!.nextPollAt - Date.now()) + 30)) })
+  expect(setupCalls('connection.setup.begin')).toEqual([]); expect(setupCalls('connection.setup.advance')).toEqual([]); expect(native).toHaveLength(before)
+}, 30_000)
+
+it('keeps named activity visible throughout an explicitly resumed original sign-in reply without duplicating its action', async () => {
+  const saved = await seed(), original = beginInput('management-held-continuation', saved.connection)
+  await forward('connection.setup.begin', original); setBotTaskSelection(managementTaskScope(saved.connection), original.operationId)
+  const held = deferred(); let inFlight: Call | undefined
+  afterCall = async call => { if (!inFlight && call.method === 'connection.setup.advance') { inFlight = call; await held.promise } }
+  calls = []; await mount(); await waitStage('waiting'); await click('[data-management-resume]')
+  await ready(() => expect(inFlight).toBeDefined())
+  const activity = panel()?.querySelector('[data-management-activity][role="status"]')
+  expect(activity?.textContent).toContain('Continuing this original setup'); expect(activity?.querySelector('svg')).not.toBeNull()
+  expect(activity?.getAttribute('aria-busy')).toBe('true')
+  await settle(); expect(panel()?.querySelector('[data-management-activity][role="status"]')).toBe(activity)
+  expect(setupCalls('connection.setup.advance')).toHaveLength(1)
+  held.release(); await waitStage('account')
+  expect(panel()?.querySelector('[data-management-activity][role="status"]')).toBeNull()
+  expect(setupCalls('connection.setup.advance').filter(call => (call.input as ConnectionSetupAdvance).decision.actionId === (inFlight!.input as ConnectionSetupAdvance).decision.actionId)).toHaveLength(1)
+  expect(setupCalls('connection.setup.advance').some(call => (call.input as ConnectionSetupAdvance).decision.value === 'confirm')).toBe(false)
+  await leavePrivate()
 }, 30_000)
