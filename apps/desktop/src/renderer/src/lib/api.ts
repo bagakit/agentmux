@@ -1,5 +1,6 @@
 import { createConversationReadApi } from './conversation-read-api'
 import { unwrapSessionObservationResult } from '../../../shared/session-observation-result'
+import { createToolkitConfigurationApi } from './toolkit-configuration-api'
 import { conversationRevision } from '@agentmux/core/conversation'
 import { createConversationLandmarksApi } from './conversation-landmarks-api'
 import { createRendererNotebookObservation } from './notebook-observation-api'
@@ -897,6 +898,7 @@ const mockApi: AgentMuxDesktopApi = {
     openExternal: async () => {},
     // No native dialog outside Electron; dismissing is the honest answer.
     chooseFiles: async () => null,
+    chooseDirectory: async () => { throw new Error('Native folder selection is unavailable in this client. Enter the directory manually.') },
     exportTheme: async document => {
       const text = serializeThemeFile(document)
       const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }))
@@ -1544,6 +1546,7 @@ function requireDesktopApi(): AgentMuxDesktopApi {
   const preload: AgentMuxPreloadApi = window.agentmux
   return {
     ...preload,
+    toolkit: createToolkitConfigurationApi(preload.toolkit),
     applications: { call: async (method, params) => unwrapSessionInputOperationResult(await preload.applications.call(method, params)) },
     conversation: createConversationReadApi(preload.conversation),
     hosts: { ...preload.hosts, inspect: createRendererHostObservation(preload.hosts.inspect), network: createRendererHostObservation(preload.hosts.network) },

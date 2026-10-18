@@ -1870,6 +1870,8 @@ export type AgentMuxDesktopApi = {
     exportTheme(document: ThemeDocument, window?: WorkbenchWindowDocument): Promise<ThemeFileExportResult>
     /** Native file picker. Returns absolute paths, or null when dismissed. */
     chooseFiles(input?: { defaultPath?: string }, document?: WorkbenchWindowDocument): Promise<string[] | null>
+    /** Native directory picker. Choosing never registers a Workspace or saves configuration. */
+    chooseDirectory(input?: { defaultPath?: string }, document?: WorkbenchWindowDocument): Promise<string | null>
     /** Original local File path from Electron webUtils; empty for a pathless browser File. */
     pathForFile(file: File): string
     /** Persists pasted image bytes and returns the path an Agent can read them from. */
@@ -2152,7 +2154,12 @@ export type AgentMuxDesktopApi = {
   }
 }
 
-export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch' | 'notebooks' | 'search' | 'browser' | 'hosts' | 'applications' | 'conversation' | 'landmarks'> & {
+export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch' | 'notebooks' | 'search' | 'browser' | 'hosts' | 'applications' | 'conversation' | 'landmarks' | 'toolkit'> & {
+  toolkit: Omit<AgentMuxDesktopApi['toolkit'], 'add' | 'update' | 'remove'> & {
+    add(...args: Parameters<AgentMuxDesktopApi['toolkit']['add']>): Promise<import('./toolkit-configuration-result').ToolkitConfigurationResult<Awaited<ReturnType<AgentMuxDesktopApi['toolkit']['add']>>>>
+    update(...args: Parameters<AgentMuxDesktopApi['toolkit']['update']>): Promise<import('./toolkit-configuration-result').ToolkitConfigurationResult<Awaited<ReturnType<AgentMuxDesktopApi['toolkit']['update']>>>>
+    remove(...args: Parameters<AgentMuxDesktopApi['toolkit']['remove']>): Promise<import('./toolkit-configuration-result').ToolkitConfigurationResult<Awaited<ReturnType<AgentMuxDesktopApi['toolkit']['remove']>>>>
+  }
   landmarks: {
     list(...args: Parameters<AgentMuxDesktopApi['landmarks']['list']>): Promise<import('./session-observation-result').SessionObservationResult<Awaited<ReturnType<AgentMuxDesktopApi['landmarks']['list']>>>>
     apply(...args: Parameters<AgentMuxDesktopApi['landmarks']['apply']>): Promise<import('./session-observation-result').SessionObservationResult<Awaited<ReturnType<AgentMuxDesktopApi['landmarks']['apply']>>>>
