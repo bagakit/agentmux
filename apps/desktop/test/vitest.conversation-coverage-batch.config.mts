@@ -9,9 +9,11 @@ export default defineConfig({ ...base, cacheDir: '.cache/conversation-coverage-b
   name: 'original-coverage-batch', enforce: 'pre', transform(source, id) {
     const path = relative(root, id.split('?')[0]!)
     const ahead = 'apps/desktop/src/renderer/src/lib/use-conversation-read-ahead.ts'
-    if (path !== owner && path !== ahead && path !== 'packages/client-ui/src/lib/use-conversation-view.ts') return
+    const anchor = 'packages/client-ui/src/lib/conversation-reading-anchor.ts'
+    if (path !== owner && path !== ahead && path !== anchor && path !== 'packages/client-ui/src/lib/use-conversation-view.ts') return
     const mutation = process.env.AGENTMUX_COVERAGE_BATCH_MUTATION
     const edits: Record<string, [string, string]> = {
+      'linear-anchor-scan': ['if (visibleShells) {', 'if (false && visibleShells) {'],
       'unbounded-batch': ['    coverageDemand.current.remaining--', '    void 0'],
       'repaint-refill': ['const coverageDemand = useRef({ key, duration: coverageDuration, remaining: 2 })', 'const coverageDemand = { current: { key, duration: coverageDuration, remaining: 2 } }'],
       'ignore-source-share': ['Math.max(1, sources)', '1'],
@@ -26,7 +28,7 @@ export default defineConfig({ ...base, cacheDir: '.cache/conversation-coverage-b
     if (mutation && !edits[mutation]) throw new Error('Unknown coverage batch mutation')
     let code = source
     const edit = mutation ? edits[mutation] : undefined
-    const target = ['unbounded-read-ahead', 'ignore-opposite-demand', 'retain-hidden-demand'].includes(mutation ?? '') ? ahead
+    const target = mutation === 'linear-anchor-scan' ? anchor : ['unbounded-read-ahead', 'ignore-opposite-demand', 'retain-hidden-demand'].includes(mutation ?? '') ? ahead
       : ['ignore-request-limit', 'tiny-frozen-packets'].includes(mutation ?? '') ? 'packages/client-ui/src/lib/use-conversation-view.ts' : owner
     if (edit && path === target) {
       if (source.split(edit[0]).length !== 2) throw new Error('Coverage batch mutation must match exactly once')
