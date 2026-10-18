@@ -115,7 +115,7 @@ input:where([type='checkbox'], [type='radio'], [type='range'], [type='color'], [
 .global-system-notices__announcement { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .global-system-notices__trigger { display: inline-flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-micro); cursor: pointer; anchor-name: --global-system-notices; }
 .global-system-notices__trigger:hover, .global-system-notices__trigger[aria-expanded="true"] { color: var(--text); background: var(--surface-2); }
-.global-system-notices__badge { min-width: 14px; padding: 0 var(--sp-2); border-radius: var(--radius-sm); color: var(--blue-text); background: var(--blue-bg); font-size: var(--fs-micro); line-height: 16px; font-variant-numeric: tabular-nums; text-align: center; }
+.global-system-notices__badge { min-width: 14px; padding: 0 var(--sp-2); border-radius: var(--radius-sm); color: var(--blue); background: color-mix(in srgb, var(--blue) 14%, var(--surface-0)); font-size: var(--fs-micro); line-height: 16px; font-variant-numeric: tabular-nums; text-align: center; }
 .global-system-notices__trigger[data-attention="failure"] .global-system-notices__badge { color: var(--red-text); background: var(--red-bg); }
 .global-system-notices__details { position: fixed; inset: auto; box-sizing: border-box; margin: 0; visibility: hidden; width: min(480px, calc(100vw - 16px)); max-height: 70vh; overflow: hidden; padding: 0; border: 1px solid var(--line-soft); border-radius: var(--radius-lg); color: var(--text-2); background: var(--surface-1); box-shadow: var(--elev-2), var(--hl); font-size: var(--fs-body); }
 .global-system-notices__details[data-state="open"] { display: flex; flex-direction: column; }
@@ -169,6 +169,7 @@ input:where([type='checkbox'], [type='radio'], [type='range'], [type='color'], [
 .notification-item__details > summary:hover { color: var(--text); }
 .notification-item__original { padding: var(--sp-4); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--fs-meta); user-select: text; }
 .notification-item__original p { margin: 0 0 var(--sp-2); }
+.notification-item__original .notification-item__provenance { padding-bottom: var(--sp-3); margin-bottom: var(--sp-3); border-bottom: 1px solid var(--line-soft); color: var(--text-3); }
 .notification-item__original > span { display: block; margin-top: var(--sp-1); }
 .notification-item__original .small-button { padding: var(--sp-2) var(--sp-4); min-height: 26px; background: transparent; box-shadow: none; font-weight: 400; }
 .notification-item__original .service-window { margin: 0; padding: 0; border: 0; background: transparent; box-shadow: none; }

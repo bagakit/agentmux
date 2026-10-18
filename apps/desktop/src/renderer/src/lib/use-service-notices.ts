@@ -90,7 +90,7 @@ export function useServiceNotices(scope: string, notices: readonly ServiceNotice
         const remaining = { ...prior }; delete remaining[origin.id]
         if (Object.keys(remaining).length) next[origin.scope] = remaining
         else delete next[origin.scope]
-        if (!next[targetScope]?.[item.readKey]) next[targetScope] = {
+        if (next[targetScope]?.[item.readKey] !== sharedValue(item)) next[targetScope] = {
           ...next[targetScope], [item.readKey]: sharedValue(item)
         }
       }
