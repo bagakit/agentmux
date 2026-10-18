@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
+import { createRequire } from 'node:module'
 import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { candidateModule, candidateResolve } from './candidate-package-resolve.mjs'
+import { pathToFileURL } from 'node:url'
+import { candidateAlias, candidateModule, candidateResolve } from './candidate-package-resolve.mjs'
 
 const root = path.resolve(import.meta.dirname, '../../..')
 test('current Core and connector exports resolve from their original checkout manifests', async () => {
@@ -28,15 +30,18 @@ async function fixture(run) {
   try {
     const root = path.join(directory, 'candidate'), pkg = path.join(root, 'packages', 'new-owner')
     await mkdir(path.join(pkg, 'src/nested'), { recursive: true })
+    await mkdir(path.join(pkg, 'src/styles'), { recursive: true })
     await mkdir(path.join(pkg, 'dist/nested'), { recursive: true })
     await writeFile(path.join(pkg, 'package.json'), JSON.stringify({ name: '@agentmux/new-owner', exports: {
       './*': { browser: './src/*.ts', import: './dist/*.js' },
       './nested/*': { browser: './src/nested/*.ts', import: './dist/nested/*.js' },
-      './exact': { browser: './src/chosen.js', import: './dist/chosen.js' }
+      './exact': { browser: './src/chosen.js', import: './dist/chosen.js' },
+      './styles.css': './src/styles/exact.css', './styles/*': './src/styles/*'
     } }))
     for (const file of ['src/capability.ts', 'dist/capability.js', 'src/nested/capability.ts', 'dist/nested/capability.js', 'src/chosen.js', 'dist/chosen.js']) {
       await writeFile(path.join(pkg, file), 'export const original = true\n')
     }
+    for (const name of ['exact', 'wildcard']) await writeFile(path.join(pkg, 'src/styles', name + '.css'), '.candidate-' + name + ' { color: green }\n')
     await run({ directory: await realpath(directory), root: await realpath(root), pkg: await realpath(pkg) })
   } finally { await rm(directory, { recursive: true }) }
 }
@@ -68,4 +73,34 @@ test('loaded first-party modules stay in the candidate while ordinary dependenci
   const dependency = path.join(directory, 'shared/node_modules/dependency/index.js')
   await mkdir(path.dirname(dependency), { recursive: true }); await writeFile(dependency, 'export const dependency = true\n')
   assert.equal(candidateModule(root, dependency), dependency)
+}))
+
+for (const name of ['exact', 'wildcard']) test('Vite CSS imports consume candidate ' + name + ' exports instead of a shared foreign package', async () => fixture(async ({ directory, root: candidate, pkg }) => {
+  const require = createRequire(path.join(root, 'apps/desktop/package.json'))
+  const { build } = await import(pathToFileURL(require.resolve('vite')).href)
+  const foreign = path.join(directory, 'foreign/packages/new-owner')
+  await mkdir(path.join(foreign, 'src/styles'), { recursive: true })
+  await writeFile(path.join(foreign, 'package.json'), await readFile(path.join(pkg, 'package.json')))
+  await writeFile(path.join(foreign, 'src/styles', name + '.css'), '.foreign-' + name + ' { color: red }\n')
+  await mkdir(path.join(directory, 'node_modules/@agentmux'), { recursive: true })
+  await symlink(foreign, path.join(directory, 'node_modules/@agentmux/new-owner'))
+  const specifier = '@agentmux/new-owner/' + (name === 'exact' ? 'styles.css' : 'styles/wildcard.css')
+  const inputs = new Set(), manifests = new Map()
+  await writeFile(path.join(directory, 'index.html'), '<link rel="stylesheet" href="./entry.css">')
+  await writeFile(path.join(directory, 'entry.css'), `@import '${specifier}';\n`)
+  const built = await build({ configFile: false, root: directory, logLevel: 'silent',
+    resolve: { alias: [candidateAlias(candidate, { browser: true, source: true,
+      onManifest: (file, bytes) => manifests.set(file, bytes) })] },
+    css: { postcss: { plugins: [{ postcssPlugin: 'assert-candidate-css-inputs', Once(styles) {
+      styles.walk(node => {
+        const file = node.source?.input.file
+        if (file) inputs.add(candidateModule(candidate, file))
+      })
+    } }] } }, build: { outDir: path.join(directory, 'compiled'), write: false, minify: false, reportCompressedSize: false } })
+  assert.deepEqual([...inputs], [path.join(pkg, 'src/styles', name + '.css')])
+  assert.equal(manifests.size, 1)
+  for (const [file, bytes] of manifests) assert.deepEqual(bytes, await readFile(file))
+  const emitted = built.output.find(file => file.fileName.endsWith('.css'))
+  assert.ok(emitted && emitted.source.includes('.candidate-' + name))
+  assert.ok(!emitted.source.includes('.foreign-'))
 }))
