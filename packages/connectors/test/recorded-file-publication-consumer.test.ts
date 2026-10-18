@@ -6,7 +6,7 @@ import { defaultHttpInstance, type HttpInstance } from '@larksuiteoapi/node-sdk'
 import * as core from '../../core/dist/index.js'
 import { parseConnectionDelivery } from '../../core/dist/connections.js'
 import { createPublicationConversationPort } from '../dist/index.js'
-import { publicationContent, publicationPartKey } from '../dist/publication-content.js'
+import { isConversationPublicationPart, publicationContent, publicationPartKey } from '../dist/publication-content.js'
 import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
 import { rpcOwnerFixture } from '../../core/test/helpers/public-rpc-owner.js'
 import { createWorkspaceLayout } from '../../core/src/spatial-layout.js'
@@ -59,7 +59,7 @@ async function platform() {
           const kind = body.msg_type ?? original?.msg_type, parsed = JSON.parse(body.content)
           const message = { message_id: messageId, chat_id: body.receive_id ?? original?.chat_id, msg_type: kind,
             sender: { sender_type: 'app', id_type: 'app_id', id: feishuConfig.application.appId }, deleted: false,
-            body: { content: JSON.stringify(kind === 'file' ? parsed : parsed.zh_cn) } }
+            body: { content: JSON.stringify(kind === 'file' || kind === 'interactive' ? parsed : parsed.zh_cn) } }
           messages.set(messageId, message)
           result = controls.unknownFileMessage && kind === 'file' ? { code: 230049 } : { code: 0, data: message }
         }
@@ -150,7 +150,7 @@ it('publishes the original typed file once through the default Host, actual SDK 
   expect(original.contentParts[0]).toMatchObject({ contentEligibility: 'public', reference })
   expect(original.contentParts.at(-1)).toMatchObject({ kind: 'tool-result', contentEligibility: 'unconfirmed' })
   expect(resource).toHaveBeenCalledWith({ hostId: 'local', agentSessionId: 'original-agent' }, expect.objectContaining({ source, recordId: original.id, turnId: 'original-turn', partIndex: 0, expectedReference: reference, representation: 'file', maxBytes: 16 * 1024 * 1024 }), expect.any(AbortSignal))
-  expect(f.services.publication!.store.coverage(f.binding).gaps).toEqual(expect.arrayContaining([expect.objectContaining({ reason: 'public-content-unconfirmed', part: expect.objectContaining({ selector: { kind: 'native-part', partIndex: 1 } }) })]))
+  expect(f.services.publication!.store.coverage(f.binding).gaps).toEqual([])
   const operation = fileOperation(f)!, receipt = await f.rpc.call('connection.delivery.inspect', { operationId: operation.operationId })
   expect(await f.cli(operation.operationId)).toEqual(receipt)
   expect(receipt).toMatchObject({ delivery: { state: 'confirmed', resourceUpload: { kind: 'file', state: 'confirmed', attempt: 1, part: { selector: { kind: 'native-part', partIndex: 0 } } } } })
@@ -214,10 +214,10 @@ it('preserves a possibly applied file message and cannot retry, reupload or repl
   await wait(() => expect(fileOperation(f)?.state).toBe('unknown'))
   const original = fileOperation(f)!
   expect(original.uploads).toEqual([{ state: 'confirmed', fileKey: 'original-file-key-1' }]); expect(original.attempt).toBe(1)
-  expect(filePosts(f)).toHaveLength(1); expect(f.remote.messages.size).toBe(1)
+  expect(filePosts(f)).toHaveLength(1); expect([...f.remote.messages.values()].filter(message => message.msg_type === 'file')).toHaveLength(1)
   await expect(f.rpc.call('connection.delivery.retry', { operationId: original.operationId })).rejects.toMatchObject({ code: 'PUBLICATION_RETRY_UNCONFIRMED' })
   await f.restart(); f.services.publication!.refresh()
-  await wait(() => expect(f.services.publication!.observation(f.binding.bindingId, f.binding.revision)).toMatchObject({ state: 'unavailable', reason: 'content-unconfirmed' }))
+  await wait(() => expect(f.services.publication!.observation(f.binding.bindingId, f.binding.revision)).toMatchObject({ state: 'unknown', reason: 'effect-unconfirmed' }))
   const recovered = f.services.publication!.store.inspect(original.operationId)!
   expect(recovered.prepared).toEqual(original.prepared); expect(recovered.uploads).toEqual(original.uploads); expect(recovered.attempt).toBe(1)
   expect(f.remote.uploads).toHaveLength(1); expect(filePosts(f)).toHaveLength(1)
@@ -285,7 +285,7 @@ it('recovers same-record file gaps with ordered DELETE then POST and uses the cu
   const deletes = f.remote.calls.filter(call => call.method === 'DELETE')
   expect(deletes[0]!.path).toBe('/open-apis/im/v1/messages/' + firstMessage)
   expect(deletes[1]!.path).toBe('/open-apis/im/v1/messages/' + currentB.mapping!.messageId)
-  expect(f.remote.calls.some(call => call.method === 'PUT')).toBe(false)
+  expect(f.remote.calls.some(call => ['PUT', 'PATCH'].includes(call.method))).toBe(false)
   const activeKeys = [...f.remote.messages.values()].filter(message => !message.deleted && message.msg_type === 'file').map(message => JSON.parse((message.body as { content: string }).content).file_key)
   const activeNames = activeKeys.map(key => f.remote.uploads[Number(key.split('-').at(-1)) - 1]!.fileName)
   expect(activeNames).toEqual(names)
@@ -305,17 +305,17 @@ it('an explicitly rejected file withdrawal remains a barrier until retrying that
   await wait(() => expect(f.services.publication!.store.inspect(withdrawal.operationId)?.state).toBe('confirmed'))
   await wait(() => expect(filePosts(f)).toHaveLength(3))
   expect(f.remote.calls.filter(call => call.method === 'DELETE')).toHaveLength(2)
-  expect(f.remote.calls.some(call => call.method === 'PUT')).toBe(false)
+  expect(f.remote.calls.some(call => ['PUT', 'PATCH'].includes(call.method))).toBe(false)
 }, 25_000)
 
 it('an unknown file predecessor cannot be bypassed by gap recovery using a new key, operation or withdrawal', async () => {
   const { f, unavailable } = await recoverableFiles({ unknown: true }), original = fileOperation(f)!
   unavailable.clear(); f.services.publication!.refresh()
   await wait(() => expect(f.services.publication!.store.coverage(f.binding).gaps.some(gap => gap.reason === 'resource-unavailable')).toBe(false))
-  expect(f.services.publication!.store.coverage(f.binding).gaps).toEqual(expect.arrayContaining([expect.objectContaining({ reason: 'public-content-unconfirmed' })]))
+  expect(f.services.publication!.store.coverage(f.binding).gaps).toEqual([])
   expect(f.services.publication!.store.inspect(original.operationId)).toMatchObject({ state: 'unknown', prepared: original.prepared, uploads: original.uploads })
   expect(f.remote.uploads).toHaveLength(1); expect(filePosts(f)).toHaveLength(1)
-  expect(f.remote.calls.filter(call => call.method === 'DELETE' || call.method === 'PUT')).toEqual([])
+  expect(f.remote.calls.filter(call => call.method === 'DELETE' || ['PUT', 'PATCH'].includes(call.method))).toEqual([])
 }, 20_000)
 
 it('the original Store retains an independent withdrawal barrier when the same accepted file representation is restored', async () => {
@@ -346,5 +346,35 @@ it('the original Store retains an independent withdrawal barrier when the same a
   expect(successor.predecessorOperationId).toBe(withdrawal.operationId)
   expect(successor.mapping?.messageId).not.toBe(original.mapping!.messageId)
   expect(f.remote.messages.get(original.mapping!.messageId)?.deleted).toBe(true)
-  expect(f.remote.calls.some(call => call.method === 'PUT')).toBe(false)
+  expect(f.remote.calls.some(call => ['PUT', 'PATCH'].includes(call.method))).toBe(false)
 }, 25_000)
+
+it('the same original artifact bytes do not grant private, unconfirmed, tool-role, reasoning or raw metadata a sharing purpose', async () => {
+  const f = await fixture(); await append(f, completed()); f.services.publication!.refresh()
+  await wait(() => expect(fileOperation(f)?.state).toBe('confirmed'))
+  const operation = fileOperation(f)!
+  if (operation.payload.kind !== 'file') throw Error('The original typed artifact is required')
+  const page = await f.port.inspect({ hostId: 'local', agentSessionId: 'original-agent', record: operation.payload.part.record, maxBytes: 128 * 1024 }, new AbortController().signal)
+  const entry = page.items.find(entry => entry.kind === 'item')
+  if (entry?.kind !== 'item') throw Error('The actual original Core unit is required')
+  const unit = entry.item, record = unit.records.find(record => record.original.kind === 'native')!
+  if (record.original.kind !== 'native') throw Error('The actual native resource is required')
+  expect(unit.event.role).toBe('process'); expect(unit.event.author).toEqual({ kind: 'unknown' })
+  expect(isConversationPublicationPart(record, { kind: 'native-part', partIndex: 0 }, unit.event.author)).toBe(true)
+  // Probe the existing consumer with distinct owner-declared purposes over the same retained reference.
+  // These clones do not claim that the immutable native source changed.
+  for (const change of [{ contentEligibility: 'private' }, { contentEligibility: 'unconfirmed' }, { contentRole: 'tool' }, { contentRole: 'reasoning' }]) {
+    const changed = structuredClone(record)
+    if (changed.original.kind !== 'native') throw Error('The actual native resource is required')
+    Object.assign(changed.original.item.contentParts[0]!, change)
+    expect(changed.original.item.contentParts[0]!.kind === 'resource' && changed.original.item.contentParts[0]!.reference).toBe(reference)
+    expect(isConversationPublicationPart(changed, { kind: 'native-part', partIndex: 0 }, unit.event.author)).toBe(false)
+  }
+  const raw = structuredClone(record)
+  if (raw.original.kind !== 'native') throw Error('The original raw tool metadata is required')
+  Object.assign(raw.original.item.contentParts[1]!, { contentEligibility: 'public' })
+  expect(isConversationPublicationPart(raw, { kind: 'native-part', partIndex: 1 }, unit.event.author)).toBe(false)
+  expect(f.remote.uploads).toHaveLength(1); expect(filePosts(f)).toHaveLength(1)
+  expect(JSON.stringify(posts(f))).not.toContain(privateMarker)
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+}, 20_000)
