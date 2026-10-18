@@ -1,5 +1,6 @@
 import { DOMParser, onWarningStopParsing, type Element } from '@xmldom/xmldom'
 import type { AgentMuxMessageEnvelope } from './agent-message-envelope.js'
+import { channelTranscriptQuoteJson, parseChannelTranscriptQuote, type ChannelTranscriptQuote } from './channel-quote.js'
 import { parseChannelActorProfileObservation, type ChannelActorProfile } from './channel-profile.js'
 import { parseConnectionActor } from './room-binding-codec.js'
 import type { ConnectionActor } from './connections-contract.js'
@@ -32,7 +33,7 @@ function reminderText(text: string): string {
   return `<reminder>${text.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;').replace(/\r/gu, '&#13;')}</reminder>`
 }
 
-export function renderAgentMuxMessageEnvelope(envelope: Pick<AgentMuxMessageEnvelope, 'messageId' | 'sender' | 'senderSessionId' | 'body' | 'channelProfile'>): string {
+export function renderAgentMuxMessageEnvelope(envelope: Pick<AgentMuxMessageEnvelope, 'messageId' | 'sender' | 'senderSessionId' | 'body' | 'channelProfile' | 'channelQuote'>): string {
   if (envelope.sender.kind === 'agent-session' && envelope.senderSessionId !== null) {
     // The authored body is opaque. Only the fixed final reminder is escaped, so
     // tags, code and even complete example envelopes inside the body stay exact.
@@ -43,7 +44,7 @@ export function renderAgentMuxMessageEnvelope(envelope: Pick<AgentMuxMessageEnve
     const sender = envelope.sender
     const header = channelHeader({ actor: sender.actor, externalConversationId: sender.externalConversationId,
       externalMessageId: sender.externalMessageId, ...(envelope.channelProfile?.profile ? { profile: envelope.channelProfile.profile } : {}) })
-    return `${header}\n${envelope.body}\n</${AMUX_PROTOCOL_DEFINITIONS.channel.tag}>`
+    return `${envelope.channelQuote ? renderChannelTranscriptQuote(envelope.channelQuote) + '\n' : ''}${header}\n${envelope.body}\n</${AMUX_PROTOCOL_DEFINITIONS.channel.tag}>`
   }
   // Human input and unverified text cannot acquire an Agent sender by formatting.
   return envelope.body
@@ -56,6 +57,8 @@ type AgentMuxMessageReading = {
   declaredContexts?: readonly { raw: string; inputContext?: BrowserInputContext }[]
   /** Parsed text declaration only; never an authenticated author or input grant. */
   declaredChannel?: AgentMuxChannelDeclaration
+  /** Declared history only. The original Host owns its range and input authority. */
+  declaredChannelQuote?: { quote: ChannelTranscriptQuote; raw: string }
 }
 
 export type AgentMuxChannelDeclaration = {
@@ -316,7 +319,36 @@ function parseA2aContainer(text: string): AgentMuxMessagePrefix | null {
   return referenceReading(references, reminder)
 }
 
+export function renderChannelTranscriptQuote(quote: ChannelTranscriptQuote): string {
+  return `<${AMUX_PROTOCOL_DEFINITIONS['channel-quote'].tag} version="1">\n${channelTranscriptQuoteJson(quote)}\n</${AMUX_PROTOCOL_DEFINITIONS['channel-quote'].tag}>`
+}
+
+/** Validate retained wire with the original reader, never today's formatter. */
+export function channelQuoteWireMatchesEnvelope(wire: string, envelope: Pick<AgentMuxMessageEnvelope, 'sender' | 'body' | 'channelQuote' | 'channelProfile'>): boolean {
+  const reading = parseAgentMuxMessagePrefix(wire), channel = reading?.declaredChannel
+  return envelope.sender.kind === 'external' && !!envelope.channelQuote && !!reading?.declaredChannelQuote && !!channel && reading.kind === 'content' &&
+    reading.body === envelope.body && channelTranscriptQuoteJson(reading.declaredChannelQuote.quote) === channelTranscriptQuoteJson(envelope.channelQuote) &&
+    channel.actor.application.domain === envelope.sender.actor.application.domain && channel.actor.application.appId === envelope.sender.actor.application.appId &&
+    channel.actor.idType === envelope.sender.actor.idType && channel.actor.userId === envelope.sender.actor.userId &&
+    channel.externalConversationId === envelope.sender.externalConversationId && channel.externalMessageId === envelope.sender.externalMessageId &&
+    JSON.stringify(channel.profile) === JSON.stringify(envelope.channelProfile?.profile ?? undefined)
+}
+
+function parseQuotedChannel(text: string): AgentMuxMessagePrefix | null {
+  const match = /^<amux:quote version="1">\n([^\r\n]+)\n<\/amux:quote>\n/u.exec(text)
+  if (!match) return null
+  try {
+    const quote = parseChannelTranscriptQuote(JSON.parse(match[1]!))
+    if (renderChannelTranscriptQuote(quote) + '\n' !== match[0]) return null
+    const current = parseChannel(text.slice(match[0].length)), channel = current?.declaredChannel
+    if (!current || !channel || quote.application.domain !== channel.actor.application.domain || quote.application.appId !== channel.actor.application.appId ||
+      quote.externalConversationId !== channel.externalConversationId || quote.range.throughMessageId !== channel.externalMessageId) return null
+    return { ...current, declaredChannelQuote: { quote, raw: match[0].slice(0, -1) } }
+  } catch { return null }
+}
+
 function parseSenderPrefix(text: string): AgentMuxMessagePrefix | null {
+  if (text.startsWith('<amux:quote')) return parseQuotedChannel(text)
   const channelStart = `<${AMUX_PROTOCOL_DEFINITIONS.channel.tag}`
   if (text.startsWith(channelStart) && /^[\s/>]|^$/u.test(text.slice(channelStart.length, channelStart.length + 1))) return parseChannel(text)
   const a2aStart = `<${AMUX_PROTOCOL_DEFINITIONS.a2a.tag}`
@@ -382,6 +414,12 @@ const protocolExamples = {
     kind: 'external', connectionId: 'CONNECTION', actor: { application: { domain: 'chat.example', appId: 'APP' }, idType: 'user-id', userId: 'USER' },
     externalConversationId: 'ROOM', externalMessageId: 'MESSAGE', bindingId: 'BINDING', bindingRevision: 1, grantId: 'GRANT', grantRevision: 1
   } }) }],
+  'channel-quote': () => [{ label: 'Quoted history before the current request', wire: renderAgentMuxMessageEnvelope({ messageId: 'MID', senderSessionId: null, body: 'Current request.', sender: {
+    kind: 'external', connectionId: 'CONNECTION', actor: { application: { domain: 'chat.example', appId: 'APP' }, idType: 'user-id', userId: 'USER' },
+    externalConversationId: 'ROOM', externalMessageId: 'MESSAGE', bindingId: 'BINDING', bindingRevision: 1, grantId: 'GRANT', grantRevision: 1
+  }, channelQuote: { version: 1, application: { domain: 'chat.example', appId: 'APP' }, externalConversationId: 'ROOM', observedAt: 0,
+    range: { from: { messageId: 'FIRST', inclusive: true }, throughMessageId: 'MESSAGE', origin: 'first-observed' }, coverage: 'complete', gaps: [],
+    records: [{ messageId: 'FIRST', contentType: 'text', content: 'Original earlier message.', author: { kind: 'unknown' } }] } }) }],
   'a2a-reference': () => [
     { label: 'Single reference', wire: renderAgentMuxMessageReferences([sampleReference]) },
     { label: 'Merged references', wire: renderAgentMuxMessageReferences([sampleReference, { senderSessionId: 'SID-2', messageId: 'MID-2' }]) }

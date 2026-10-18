@@ -2,6 +2,7 @@ import { AgentMuxError } from './errors.js'
 import { parseAgentExternalMessageAuthor, type AgentExternalMessageAuthor } from './external-author.js'
 import type { AgentMuxMessageTarget } from './control.js'
 import { channelActorKey, parseChannelActorProfileObservation, type ChannelActorProfileObservation } from './channel-profile.js'
+import { parseChannelTranscriptQuote, type ChannelTranscriptQuote } from './channel-quote.js'
 
 export type AgentMuxMessageIdentity =
   | AgentExternalMessageAuthor
@@ -33,6 +34,8 @@ export type AgentMuxMessageEnvelope = {
   readonly body: string
   /** Frozen reading metadata, independent of the sender's original authorization. */
   readonly channelProfile?: ChannelActorProfileObservation
+  /** Frozen original history, separate from this unchanged current request. */
+  readonly channelQuote?: ChannelTranscriptQuote
 }
 
 export function messageEnvelopeString(value: string, label: string): string {
@@ -76,6 +79,10 @@ export function validateAgentMuxMessageEnvelope(value: unknown): AgentMuxMessage
   const sender = identity(source.sender, 'Message sender')
   const channelProfile = source.channelProfile === undefined ? undefined : parseChannelActorProfileObservation(source.channelProfile)
   if (channelProfile && (sender.kind !== 'external' || channelActorKey(sender.actor) !== channelActorKey(channelProfile.actor))) throw new AgentMuxError('Channel display metadata names another actor.', 'MESSAGE_ENVELOPE_INVALID')
+  const channelQuote = source.channelQuote === undefined ? undefined : parseChannelTranscriptQuote(source.channelQuote)
+  if (channelQuote && (sender.kind !== 'external' || channelQuote.application.domain !== sender.actor.application.domain ||
+    channelQuote.application.appId !== sender.actor.application.appId || channelQuote.externalConversationId !== sender.externalConversationId ||
+    channelQuote.range.throughMessageId !== sender.externalMessageId)) throw new AgentMuxError('Channel quote belongs to another original request.', 'MESSAGE_ENVELOPE_INVALID')
   const target = recipient(source.recipient)
   return Object.freeze({
     schema: source.schema,
@@ -93,7 +100,7 @@ export function validateAgentMuxMessageEnvelope(value: unknown): AgentMuxMessage
     recipientSessionId: source.recipientSessionId === null ? null : messageEnvelopeString(source.recipientSessionId, 'Message recipient session id'),
     recipientRunId: source.recipientRunId === null ? null : messageEnvelopeString(source.recipientRunId, 'Message recipient run id'),
     body: source.body,
-    ...(channelProfile ? { channelProfile } : {})
+    ...(channelProfile ? { channelProfile } : {}), ...(channelQuote ? { channelQuote } : {})
   })
 }
 

@@ -6,6 +6,7 @@ import { parseConnectionActor, parseConnectionApplication } from './room-binding
 import { parseAgentExternalMessageAuthor, parseAgentExternalInteractionAuthor } from './external-author.js'
 import { parseAgentInputSubmissionReceipt } from './agent-input-receipt-codec.js'
 import { channelActorKey, parseChannelActorProfileObservation } from './channel-profile.js'
+import { parseChannelTranscriptQuote } from './channel-quote.js'
 import type { ConnectionIngressAddressing, ConnectionIngressMethod, ConnectionIngressParamsMap, ConnectionIngressRecord, ConnectionIngressResultMap } from './ingress-contract.js'
 
 export const INGRESS_RPC_METHODS = { 'connection.ingress.inspect': 'long', 'connection.ingress.ls': 'long', 'connection.ingress.authority': 'long', 'connection.ingress.record-authority': 'long' } as const
@@ -80,15 +81,18 @@ export function parseConnectionIngressRecord(value: unknown): ConnectionIngressR
   if (p.state === 'refused') { if (p.input !== undefined) fail(); return { ...projected, state: 'refused', code: text(p.code) } }
   if (p.code !== undefined) fail()
   if (p.state === 'received') { if (p.input !== undefined) fail(); return { ...projected, state: 'received' } }
-  const input = object(p.input, ['hostId', 'agentSessionId', 'expectedRun', 'operationId', 'messageId', 'author', 'admissionIntent', 'channelProfile']), run = object(input.expectedRun, ['runId'])
+  const input = object(p.input, ['hostId', 'agentSessionId', 'expectedRun', 'operationId', 'messageId', 'author', 'admissionIntent', 'channelProfile', 'channelQuote', 'contextSource']), run = object(input.expectedRun, ['runId'])
   const channelProfile = input.channelProfile === undefined ? undefined : parseChannelActorProfileObservation(input.channelProfile)
+  const contextSource = input.contextSource === undefined ? undefined : (() => { const s = object(input.contextSource, ['providerId', 'nativeSessionId']); return { providerId: text(s.providerId), nativeSessionId: text(s.nativeSessionId) } })()
+  const channelQuote = input.channelQuote === undefined ? undefined : parseChannelTranscriptQuote(input.channelQuote)
+  if (channelQuote && (!equal(channelQuote.application, application) || channelQuote.externalConversationId !== base.externalConversationId || channelQuote.range.throughMessageId !== base.externalMessageId)) fail()
   if (channelProfile && channelActorKey(channelProfile.actor) !== channelActorKey(actor)) fail()
   const admissionIntent = input.admissionIntent === undefined ? undefined : validateAgentPromptAdmissionIntent(input.admissionIntent)
   if (admissionIntent && (admissionIntent.kind === 'exact-condition' || admissionIntent.expectedRun.runId !== run.runId)) fail()
   const author = parseAgentExternalMessageAuthor(input.author), operationId = text(input.operationId), messageId = text(input.messageId)
   // Intake retains its receiver alias; the author names the independently authorized Binding connection.
   if (operationId === messageId || !equal(author.actor, actor) || author.externalMessageId !== base.externalMessageId || author.externalConversationId !== base.externalConversationId) fail()
-  return { ...projected, state: 'claimed', input: { hostId: text(input.hostId), agentSessionId: text(input.agentSessionId), expectedRun: { runId: text(run.runId) }, operationId, messageId, author, ...(channelProfile ? { channelProfile } : {}), ...(admissionIntent === undefined ? {} : { admissionIntent: admissionIntent as Exclude<typeof admissionIntent, { kind: 'exact-condition' }> }) } }
+  return { ...projected, state: 'claimed', input: { hostId: text(input.hostId), agentSessionId: text(input.agentSessionId), expectedRun: { runId: text(run.runId) }, operationId, messageId, author, ...(channelProfile ? { channelProfile } : {}), ...(channelQuote ? { channelQuote } : {}), ...(contextSource ? { contextSource } : {}), ...(admissionIntent === undefined ? {} : { admissionIntent: admissionIntent as Exclude<typeof admissionIntent, { kind: 'exact-condition' }> }) } }
 }
 export function parseIngressParams<M extends ConnectionIngressMethod>(method: M, value: unknown): ConnectionIngressParamsMap[M] {
   if (method === 'connection.ingress.record-authority') return parseExternalConversationReference(value) as ConnectionIngressParamsMap[M]
