@@ -72,6 +72,8 @@ export function ToolkitPopover({ children, label = false, onVisibleChange, focus
     }
     const escape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.isComposing || event.keyCode === 229 || event.defaultPrevented) return
+      const terminal = event.target instanceof Element ? event.target.closest('[data-toolkit-terminal]') : null
+      if (terminal && b.contains(terminal) && terminal.contains(document.activeElement)) return
       // A focused local reader consumes its first Escape before the floating owner closes.
       const local = event.target instanceof Element ? event.target.closest('[data-toolkit-local-escape]') : null
       if (local && b.contains(local) && local === document.activeElement) return
@@ -92,7 +94,10 @@ export function ToolkitPopover({ children, label = false, onVisibleChange, focus
     </button>
     {open && visible ? <WindowOverlayPortal><div ref={panel} className="performance-popover" role="dialog" aria-label={name}
       style={{ visibility: 'hidden' }} onPointerEnter={() => clearTimeout(closeTimer.current)} onPointerLeave={leave}
-      onFocusCapture={() => { clearTimeout(closeTimer.current); origin.current = 'explicit' }}>
+      onFocusCapture={() => { clearTimeout(closeTimer.current); origin.current = 'explicit' }}
+      onKeyDown={event => {
+        if (event.key === 'Escape' && event.target instanceof Element && event.target.closest('[data-toolkit-terminal]')) event.stopPropagation()
+      }}>
       {children(close)}
     </div></WindowOverlayPortal> : null}
   </>
