@@ -389,6 +389,21 @@ request keys, and does not require an adapter-local record cache.
 
 Every dispatch attempt has a private durable receipt correlation under the same operation and platform key. A late outcome updates its original attempt rather than certifying a later retry. An authoritative non-application permits an explicit same-ID retry; an unknown effect is inspected without replay, a new key or group-level fallback. Each Binding has an independent read/effect lane, so a slow or unknown effect does not occupy another Binding or the original Core input lane.
 
+Within that lane, an unknown effect holds only its original projection and exact
+mapping dependencies. Later independent messages can be prepared and dispatched
+under their own current authority. Selection and atomic claim use the same
+projection ordering and recheck the selected operation ID; another concurrent
+claim cannot substitute an unqualified message. A failed image or file upload
+does not prevent independent text in the same original message from being sent.
+Audience-scoped open-operation indexes bound selection and read-only recovery to
+the relevant retained work. Recovery uses one asynchronous inspection slot on the
+existing lane and advances through original operation IDs. A slow inspection
+cannot delay independent messages, an unchanged unknown result does not wake
+itself, and a late receipt still settles only its original attempt. A newer
+confirmed message cannot overwrite the audience's retained unknown observation.
+The existing delivery and diagnosis RPC/CLI surfaces expose those aggregate and
+per-operation facts; this scheduling change adds no public operation.
+
 An image upload is a separate effect from its chat message. Each upload attempt and its result stay in the original operation JSON. A confirmed asset key is saved before the original claim freezes the final message request and key. Reopening after that save does not upload again. An interrupted upload or a reply without a key stays unknown; only explicit `connection.delivery.retry` may start another upload of the same bytes while the message is provably unattempted. Earlier unknown uploads remain recorded. A possibly applied message remains inspect-only, retaining its original key and wire. `ConnectionDelivery.resourceUpload` reports the exact part, upload attempt and stage without bytes or an asset key.
 
 Public `connection.delivery.inspect` and bounded `connection.delivery.ls` expose the original safe receipt and exact source reference, excluding body, prepared wire and credentials. The scoped list can report a source gap before any effect exists. Source replacement retains its old frontier for explicit relinking; storage or authority uncertainty retains the original work and reports the failed service step. Closing this publication owner releases only its readers and external-effect observation, preserving original Agents and durable operations.
@@ -724,9 +739,9 @@ Public `connection.delivery.ls` and `connection.delivery.inspect` retain each
 source revision, fragment ordinal, operation and platform mapping through the
 existing Host. Connection-wide Settings observations and a confirmed delivery to
 one exact Binding have different scopes; one confirmed message cannot certify
-other groups. An unknown external effect blocks only its original publication
-lane. Subsequent authenticated inputs and the original Core Session remain
-available.
+other groups. An unknown external effect holds only its original projection and
+mapping dependencies. Independent publication, subsequent authenticated inputs
+and the original Core Session remain available.
 
 The publication contract tests use the actual pinned SDK and Axios serialization
 against a loopback HTTP server. The default Desktop Host tests consume original
