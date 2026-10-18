@@ -37,7 +37,8 @@ import {
   isSystemArtifactPath,
   type TerminalPathLink
 } from '@agentmux/client-ui/terminal-path-link'
-import { terminalPathLinksInBuffer, terminalPathLinkAtBufferCell } from '../lib/terminal-link-range'
+import { terminalPathLinksInBuffer } from '../lib/terminal-link-range'
+import { terminalContextPathAtBufferCell } from '../lib/terminal-context-path'
 import { terminalLinkReadoutOverlapsText } from '../lib/terminal-link-readout'
 import { openTerminalFileLink, terminalFileMenuActions } from '../lib/terminal-file-action'
 import { createSessionProjectFileContextSelector } from '../lib/session-project-file-context'
@@ -165,7 +166,7 @@ function terminalPathAtPointer(
   const row = Math.floor(((clientY - rect.top) / rect.height) * terminal.rows)
   if (row < 0 || row >= terminal.rows || column < 1 || column > terminal.cols) return null
   const lineNumber = terminal.buffer.active.viewportY + row
-  return terminalPathLinkAtBufferCell(terminal.buffer.active, column, lineNumber + 1, workspaceRoot)
+  return terminalContextPathAtBufferCell(terminal, column, lineNumber + 1, workspaceRoot)
 }
 
 // 终端与对话正文都要判「哪些 scheme 点了能打开」，那必须是同一个判据，而不是各抄一份。判据本体
