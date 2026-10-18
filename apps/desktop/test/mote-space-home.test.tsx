@@ -9,6 +9,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { beginMoteStartupRecovery } from '../src/renderer/src/lib/mote-session-recovery'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
+import { desktopWorkbenchObservationSchema } from '../src/shared/client-observation'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
 
 let app: MoteAppFixture
@@ -115,13 +116,13 @@ it('opens the companion home from the actual directory and returns to the same o
   const covered = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: 'companion-covered-observation', operation: 'inspect.client' })
   expect(covered.operation).toBe('inspect.client')
   if (covered.operation !== 'inspect.client') throw new Error('Wrong original observation')
-  expect(covered.observation.desktop.presentation).toMatchObject({ state: 'covered', blockers: [] })
+  expect(desktopWorkbenchObservationSchema.parse(covered.observation).desktop.presentation).toMatchObject({ state: 'covered', blockers: [] })
   await moteClick(button('Continue discussion'))
   expect(homeExpanded()).toBeNull()
   const revealed = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: 'companion-revealed-observation', operation: 'inspect.client' })
   expect(revealed.operation).toBe('inspect.client')
   if (revealed.operation !== 'inspect.client') throw new Error('Wrong original observation')
-  expect(revealed.observation.desktop.presentation.state).not.toBe('covered')
+  expect(desktopWorkbenchObservationSchema.parse(revealed.observation).desktop.presentation.state).not.toBe('covered')
   expect(workface.hasAttribute('inert')).toBe(false)
   expect(originalComposer()).toBe(input)
   expect(input.textContent).toContain('Keep this exact original conversation draft.')
@@ -139,7 +140,7 @@ it('lets an explicit public focus of the same original address reveal the existi
   expect(choice.tabId).toBe(defaultTab.id)
   let result: unknown
   await act(async () => { result = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: 'companion-same-original-focus', operation: 'focus',
-    target: { kind: 'space', spaceId: choice.spaceId, zoneId: choice.zoneId, tabId: choice.tabId!, regionId: choice.regionId!, displayWorkspaceId: choice.workspaceId, groupId: choice.groupId! }, inputPolicy: 'preserve' }) })
+    target: { kind: 'space', spaceId: choice.spaceId!, zoneId: choice.zoneId!, tabId: choice.tabId!, regionId: choice.regionId!, displayWorkspaceId: choice.workspaceId, groupId: choice.groupId! }, inputPolicy: 'preserve' }) })
   await settleMoteApp()
   expect(result).toBeDefined()
   expect(homeExpanded()).toBeNull()

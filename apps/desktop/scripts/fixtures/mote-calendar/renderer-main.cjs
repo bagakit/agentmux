@@ -39,18 +39,18 @@ app.whenReady().then(async () => {
       const rect=e=>{if(!e)return null;const r=e.getBoundingClientRect();return {x:r.x,y:r.y,top:r.top,right:r.right,bottom:r.bottom,left:r.left,width:r.width,height:r.height}};
       const visible=e=>!!e&&e.getBoundingClientRect().width>0&&e.getBoundingClientRect().height>0&&getComputedStyle(e).visibility!=='hidden';
       const control=e=>{const r=rect(e),hit=r&&document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {label:e.getAttribute('aria-label')||e.textContent.trim(),rect:r,hit:!!hit&&(hit===e||e.contains(hit))}};
-      const mode=[...n.querySelectorAll(':scope > .mote-details__mode')].find(e=>!e.hidden),content=mode?.querySelector('.mote-details__content');
+      const mode=[...n.querySelectorAll('.mote-details__main > .mote-details__mode')].find(e=>!e.hidden),content=mode?.querySelector('.mote-details__content');
       const calendar=n.querySelector('.mote-calendar'),first=visible(calendar)?calendar.querySelector('[data-mote-date]'):null;
       const close=n.closest('.mote-profile-popover')?.querySelector('[aria-label="Close Mote profile"]');
       const bounds=rect(n),tabs=n.querySelector('[role="tablist"][aria-label="Mote details"]'),fonts=[...n.querySelectorAll('.mote-details__content,.mote-details__prose')].filter(visible);
-      return {panel:bounds,name:n.querySelector('.mote-details__name strong')?.textContent.trim(),header:rect(n.querySelector('.mote-details__profile')),
+      return {panel:bounds,section:n.dataset.section,main:rect(n.querySelector('.mote-details__main')),name:n.querySelector('.mote-details__name strong')?.textContent.trim(),header:rect(n.querySelector('.mote-details__profile')),
         content:rect(content),contentOffset:content?rect(content).top-bounds.top:null,calendarOffset:first?rect(first).top+calendar.scrollTop-bounds.top:null,
         calendarScroll:visible(calendar)?calendar.scrollTop:null,calendar:visible(calendar)?rect(calendar):null,
         calendarToolbar:visible(calendar)?rect(calendar.querySelector('.mote-calendar__toolbar')):null,
         calendarControls:visible(calendar)?[...calendar.querySelectorAll('.mote-calendar__toolbar button')].map(control):[],
         canvas:visible(calendar)?rect(calendar.querySelector('.mote-calendar__canvas')):null,agenda:visible(calendar)?rect(calendar.querySelector('.mote-calendar__day')):null,
         nameRect:rect(n.querySelector('.mote-details__name')),close:visible(close)?control(close):null,coarse:matchMedia('(pointer: coarse)').matches,
-        densityPolicy:matchMedia('(pointer: coarse)').matches?'coarse: 44px targets and unobstructed readable content':'fine: header 72/112px and first Calendar date 180/250px',
+        densityPolicy:matchMedia('(pointer: coarse)').matches?'coarse: 44px targets and unobstructed readable content':'fine: rail beside main content, first useful content visible, original Calendar density',
         tabs:[...tabs?.querySelectorAll('[role="tab"]')??[]].map(control),
         identity:[...n.querySelectorAll('[aria-label="Change Mote avatar"],[aria-label="Rename Mote"]')].map(control),
         fonts:fonts.map(e=>({prose:e.classList.contains('mote-details__prose'),size:parseFloat(getComputedStyle(e).fontSize),lineHeight:getComputedStyle(e).lineHeight})),
@@ -60,7 +60,13 @@ app.whenReady().then(async () => {
     const headerBudget = facts => {
       assert.equal(facts.coarse, false, 'The compact height budget is defined for the default fine pointer')
       assert.ok(facts.panel.width > 0 && facts.contentOffset > 0, 'A nonempty actual Mote content position is required')
-      const budget = facts.panel.width >= 560 ? 72 : 112
+      const rail = facts.section === 'profile' && facts.panel.width >= 720
+      if (rail) {
+        assert.ok(facts.main.left >= facts.header.right - 1, 'The identity rail must sit beside the working content')
+        assert.ok(facts.header.width < facts.panel.width / 3, 'The identity rail must leave the majority of Space for work')
+      }
+      const budget = rail ? 72 : facts.panel.height * 0.55
+      if (!rail) assert.ok(facts.header.height <= facts.panel.height * 0.45 + 1, 'The compact identity must leave most of the height for work')
       assert.ok(facts.contentOffset <= budget, 'Mote header density budget exceeded: ' + facts.contentOffset + ' > ' + budget)
     }
     const calendarBudget = facts => {
@@ -162,7 +168,17 @@ app.whenReady().then(async () => {
     await until(`(${panel}).textContent.includes('What shall we work on?')`, 'Companion profile')
     await until(`!(${panel}).textContent.includes('Reading original goals')`, 'Original Goal data ready')
     await capture('profile-wide-dark')
-    await densityMutation('header-excess-height', '.mote-details__profile { padding-block: 90px !important; }', headerBudget)
+    await click(inPanel('.mote-memory > summary'), 'Original memory entry')
+    await until(`(${inPanel('.mote-memory')})?.textContent.includes('Saved in MEMORY.md')`, 'Original saved memory')
+    await capture('profile-memory-wide-dark')
+    await click(inPanel('.mote-memory > summary'), 'Close original memory')
+    const homeArrangement = await read(`(${inPanel('[data-upcoming-id]')})?.dataset.upcomingId`)
+    assert.ok(homeArrangement, 'The companion home must display an original arrangement')
+    await click(inPanel('[data-upcoming-id="' + homeArrangement + '"]'), 'Original upcoming arrangement')
+    await until(`(${panel}).querySelector('[data-schedule-id="'+${JSON.stringify(homeArrangement)}+'"] details')?.open`, 'Selected original arrangement opened in Calendar')
+    await capture('profile-upcoming-to-calendar-dark')
+    await click(button('Profile'), 'Return to original companion home')
+    await densityMutation('navigation-excess-height', '.mote-details__navigation-bar { padding-block: 90px !important; }', headerBudget)
     win.setContentSize(332, 900); await capture('profile-narrow-dark')
     win.webContents.debugger.attach('1.3')
     try {
@@ -189,7 +205,7 @@ app.whenReady().then(async () => {
       win.webContents.debugger.detach()
     }
     await until(`!matchMedia('(pointer: coarse)').matches`, 'Restore original fine pointer')
-    await click(button('Preferences & memory'), 'Original preferences disclosure')
+    await click(button('Connection & preferences'), 'Original preferences disclosure')
     await capture('profile-preferences-narrow-dark')
     await click(button('Ideas'), 'Ideas workspace')
     await click(button('Find a worthwhile idea'), 'Original idea request')
@@ -216,9 +232,15 @@ app.whenReady().then(async () => {
     await capture('profile-wide-light')
     await read(`window.moteCalendarScene.name('一起做研究与设计的长期搭档 Mote')`)
     win.setContentSize(332, 700); await capture('profile-long-name-short-light')
-    await read(`window.moteCalendarScene.name('Mote')`); win.setContentSize(1240, 900)
+    await read(`window.moteCalendarScene.name('Mote');window.moteCalendarScene.summary('We keep original decisions, sources and unsent thoughts together. '.repeat(24))`)
+    win.setContentSize(332, 640); await capture('profile-long-summary-collapsed-light')
+    await click(button('Read more'), 'Expand original long summary')
+    await capture('profile-long-summary-expanded-light')
+    await click(button('Less'), 'Collapse original long summary')
+    await read(`window.moteCalendarScene.summary('A small working result, then the next decision.')`); win.setContentSize(1240, 900)
     await read(`window.moteCalendarScene.theme('dark')`)
     await showCalendar()
+    await click(button('Month'), 'Month after the selected home arrangement')
     await capture('01-space-month-dark')
     await densityMutation('calendar-toolbar-excess-spacing', '.mote-calendar__toolbar { padding-block: 90px !important; }', calendarBudget)
     await read(`document.querySelector('.calendar-fixture').dataset.mediumProof=''`)
