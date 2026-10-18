@@ -770,3 +770,33 @@ it('retires the initialization frame on its scheduling Window after the terminal
   nextFrames.clear()
   document.body.append(container); next.remove()
 })
+it('keeps a slow original input request on its starting Region after the same terminal moves', async () => {
+  await ready('Original attribution owner\r\n')
+  const terminal = fixture.terminals[0]!, pending = deferred<void>()
+  const before = rendererPerformance.snapshot(), instance = before.terminals.find(item => item.runId === session.control.run.runId)!.instanceId
+  let mono = performance.now()
+  vi.spyOn(performance, 'now').mockImplementation(() => mono)
+  write.mockReturnValue(pending.promise)
+  await act(async () => terminal.input('ORIGINAL ATTRIBUTED INPUT', true))
+  expect(write.mock.calls.at(-1)!.slice(0, 3)).toEqual([session.control, 'ORIGINAL ATTRIBUTED INPUT', 'user'])
+  mono += 90
+  await render(session, { regionId: 'later-display-region' })
+  expect(fixture.terminals).toHaveLength(1)
+  expect(attach).toHaveBeenCalledTimes(1)
+  await act(async () => { pending.resolve(); await pending.promise })
+  const row = rendererPerformance.snapshot().slowEvents.filter(item => item.kind === 'terminal-interaction' && item.detail === 'write-request').at(-1)!
+  expect(row.durationMs).toBeGreaterThanOrEqual(90)
+  expect(row.source).toEqual({ hostId: session.control.hostId, sessionId: session.id,
+    runId: session.control.run.runId, regionId: origin.regionId, instanceId: instance })
+  write.mockResolvedValue(undefined)
+  await act(async () => terminal.input('STILL ACCEPTED INPUT', true))
+  expect(write.mock.calls.at(-1)!.slice(0, 3)).toEqual([session.control, 'STILL ACCEPTED INPUT', 'user'])
+  expect(fixture.terminals[0]).toBe(terminal)
+  const replacement = { ...session, control: { ...session.control, run: { runId: 'source-replacement-run' } } }
+  const result = replay('Replacement attribution owner\r\n')
+  attach.mockResolvedValue({ ...result, attachmentId: 'source-replacement-attachment', session: replacement,
+    replay: result.replay.map(item => ({ ...item, runId: replacement.control.run.runId })) })
+  await render(replacement, { regionId: 'later-display-region' })
+  expect(fixture.terminals).toHaveLength(2)
+  expect(rendererPerformance.snapshot().slowEvents.find(item => item.id === row.id)?.source).toEqual(row.source)
+})

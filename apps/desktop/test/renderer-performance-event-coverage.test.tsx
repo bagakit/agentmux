@@ -292,7 +292,8 @@ it('passes original natural-event and request starts through the actual Terminal
     addEventListener(type: string, listener: EventListenerOrEventListenerObject) { listeners.set(type, listener) },
     removeEventListener(type: string) { listeners.delete(type) }
   }
-  const interaction = createTerminalInteractionObservation({ host, now: () => handlerAt, wall: () => 1000,
+  const interaction = createTerminalInteractionObservation({ host,
+    readSource: () => ({ hostId: 'local', sessionId: 'input-session', runId: 'input-run', regionId: 'input-region', instanceId: 1 }), now: () => handlerAt, wall: () => 1000,
     readContext: () => ({ visible: true, liveReady: true, acceptsInput: true, readOnly: false, buffer: 'normal', mouseTrackingMode: 'none' }), slow })
   let resolveRequest!: () => void
   const request = new Promise<void>(resolve => { resolveRequest = resolve })
