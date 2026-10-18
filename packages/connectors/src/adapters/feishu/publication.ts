@@ -183,6 +183,7 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
         : 'This relationship is saved. Individual message receipts show whether each direction is working.'
       card = { config: { update_multi: true }, header: { template: ended || paused ? 'grey' : 'blue', title: { tag: 'plain_text', content: title } }, elements: [
         { tag: 'div', text: { tag: 'plain_text', content: `Agent ${payload.agentSessionId}` } },
+        { tag: 'div', text: { tag: 'plain_text', content: `Group ${operation.target.externalConversationId}` } },
         { tag: 'div', text: { tag: 'plain_text', content: status } },
         ...(!ended && !paused ? [{ tag: 'div', text: { tag: 'plain_text', content: `${publication}\n${input}\nEarlier history is not backfilled. Internal reasoning, raw tool details and system context are not shared.` } }] : []),
         { tag: 'action', actions: [{ tag: 'button', type: 'default', text: { tag: 'plain_text', content: 'Open conversation' }, url: `amux://agent/${encodeURIComponent(payload.agentSessionId)}` }] }
