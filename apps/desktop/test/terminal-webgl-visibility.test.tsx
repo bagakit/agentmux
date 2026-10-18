@@ -1011,3 +1011,38 @@ it.each(['viewport', 'render-listener', 'subscription'] as const)(
     }
   }
 )
+
+
+it.each([[true, false], [false, false], [true, true], [false, true]] as const)(
+  'passes original live byte storage through the mounted parser with visible=%s overlap=%s', async (visible, overlap) => {
+    await render(visible)
+    const terminal = fixture.terminals[0]!, writes = vi.spyOn(terminal, 'write')
+    const bytes = new TextEncoder().encode('\u001b[31m中文\u001b[0m')
+    const fragments = overlap ? [new TextEncoder().encode('before \u001b[31m中文\u001b[0m')]
+      : [bytes.subarray(0, 2), bytes.subarray(2, 6), bytes.subarray(6)]
+    let cursor = 7
+    try {
+      for (const dataBytes of fragments) {
+        const original = dataBytes.slice(), previous = terminal.completed.length
+        const startByte = overlap ? 0 : cursor, endByte = startByte + dataBytes.byteLength
+        await act(async () => {
+          fixture.receive!({ type: 'core', hostId: 'local', event: { type: 'terminal-output', run: session.control.run,
+            data: new TextDecoder().decode(dataBytes), dataBytes,
+            evidence: { outputByteRange: { startByte, endByte } } } } as RuntimeEvent)
+          await vi.waitFor(() => expect(terminal.completed.length).toBe(previous + 1))
+        })
+        const accepted = writes.mock.calls.at(-1)![0] as Uint8Array
+        expect(accepted.buffer, 'The original parser must not receive a copied single-span payload').toBe(dataBytes.buffer)
+        expect(accepted.byteOffset).toBe(dataBytes.byteOffset + Math.max(0, cursor - startByte))
+        expect(accepted.byteLength).toBe(endByte - cursor)
+        if (!overlap) expect(accepted).toBe(dataBytes)
+        expect(dataBytes).toEqual(original)
+        cursor = endByte
+      }
+      expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toBe('before 中文')
+      expect(terminal.dispose).not.toHaveBeenCalled()
+      expect(fixture.detach).not.toHaveBeenCalled()
+      expect(fixture.attach).toHaveBeenCalledExactlyOnceWith(session.control, 0)
+    } finally { writes.mockRestore() }
+  }
+)

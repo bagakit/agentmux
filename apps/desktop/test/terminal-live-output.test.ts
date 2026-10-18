@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { appendFileSync, readFileSync } from 'node:fs'
+import { describe, expect, it, vi } from 'vitest'
 import {
   TerminalLiveOutputQueue,
   composeTerminalLiveOutputWrite,
@@ -235,4 +235,43 @@ describe('TerminalView 真的经过了这道闸', () => {
     // 逐块推进 cursor 的循环也不许留在壳里：留着就是第二个判定点。
     expect(source, '壳里又出现了逐块推进 cursor 的循环').not.toContain('nextCursor = output.endByte')
   })
+})
+
+
+it('does not allocate merge payloads for repeated single original live spans', () => {
+  const backing = new Uint8Array(65540), original = backing.subarray(2, 65538)
+  original.fill(0x78)
+  const before = original.slice(), copied = vi.spyOn(Uint8Array.prototype, 'set')
+  let reused = true, copiedBytes = 0
+  try {
+    for (let index = 0; index < 128; index++) {
+      const startByte = index * original.byteLength
+      const result = composeTerminalLiveOutputWrite([{ dataBytes: original, startByte, endByte: startByte + original.byteLength }], startByte)
+      reused &&= result.dataBytes === original
+      expect(result.cursor).toBe(startByte + original.byteLength)
+      expect(result.gap).toBe(false)
+    }
+    copiedBytes = copied.mock.calls.reduce((sum, [data]) => sum + data.length, 0)
+  } finally { copied.mockRestore() }
+  const sample = { writes: 128, bytesPerWrite: original.byteLength, copiedBytes, reused }
+  if (process.env.AGENTMUX_TERMINAL_COPY_SAMPLE) appendFileSync(process.env.AGENTMUX_TERMINAL_COPY_SAMPLE, JSON.stringify(sample) + '\n')
+  expect(copiedBytes, 'Single source spans must not allocate a merged payload').toBe(0)
+  expect(reused).toBe(true)
+  expect(original).toEqual(before)
+})
+
+it('reuses the exact original overlap suffix while still merging distinct live spans', () => {
+  const source = chunkOf(0, 'abcdefGHI')
+  const suffix = composeTerminalLiveOutputWrite([chunkOf(0, 'abc'), source, chunkOf(0, 'abc')], 6)
+  expect(suffix.dataBytes.buffer).toBe(source.dataBytes.buffer)
+  expect(suffix.dataBytes.byteOffset).toBe(source.dataBytes.byteOffset + 6)
+  expect(new TextDecoder().decode(suffix.dataBytes)).toBe('GHI')
+  expect(suffix).toMatchObject({ cursor: 9, gap: false })
+  const next = chunkOf(9, 'JK')
+  const merged = composeTerminalLiveOutputWrite([source, next], 6)
+  expect(new TextDecoder().decode(merged.dataBytes)).toBe('GHIJK')
+  expect(merged.dataBytes.buffer).not.toBe(source.dataBytes.buffer)
+  expect(merged.dataBytes.buffer).not.toBe(next.dataBytes.buffer)
+  expect(new TextDecoder().decode(source.dataBytes)).toBe('abcdefGHI')
+  expect(merged).toMatchObject({ cursor: 11, gap: false })
 })
