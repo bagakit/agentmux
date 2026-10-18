@@ -14,6 +14,7 @@ if (alternate) {
     rows.forEach((row, index) => process.stdout.write(index === selected
       ? '\x1b[48;5;24m\x1b[97m  › ' + row.padEnd(width - 6) + '\x1b[0m\r\n'
       : '    ' + row.padEnd(width - 6) + '\r\n'))
+    if (process.argv.includes('--palette-proof')) process.stdout.write('\r\n  \x1b[31mErrors\x1b[0m   \x1b[32mReady\x1b[0m   \x1b[34mLinks\x1b[0m   \x1b[35mNotes\x1b[0m\r\n')
     process.stdout.write('\r\n  \x1b[38;5;114m●\x1b[0m ' + status + '\r\n\r\n  ↑ ↓ Select    Esc Check input\r\n  Closing the panel keeps this Run alive.\r\n')
   }
   process.stdout.write('\x1b[?1049h\x1b[?25l'); render()

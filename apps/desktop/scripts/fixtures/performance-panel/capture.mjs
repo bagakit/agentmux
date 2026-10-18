@@ -13,7 +13,7 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
   assert.ok(['full','placement','buttons','toolkit','attribution','agent-cards','epoch-peak','diagnostic'].includes(captureScope),'已知明确 capture scope')
   assert.ok(typeof prepareOnly === 'boolean' && (!prepareOnly || captureScope === 'attribution'), 'Compile preparation is explicit attribution-only, never a full qualification')
   const tuiFixture = fixtureName === 'toolkit-tui'
-  assert.ok(toolkitScene === 'terminal' || tuiFixture && ['working-directory','polish'].includes(toolkitScene), 'Explicit Toolkit fixture scene')
+  assert.ok(toolkitScene === 'terminal' || tuiFixture && ['working-directory','polish','customization'].includes(toolkitScene), 'Explicit Toolkit fixture scene')
   const directoryScene = toolkitScene === 'working-directory'
   const toolkitFixture = fixtureName === 'toolkit-custom-ui' || tuiFixture
   assert.ok(fixtureName === 'performance-panel' && captureScope !== 'toolkit' || toolkitFixture && captureScope === 'toolkit', '明确产品 fixture 与有界 capture scope')
@@ -39,6 +39,7 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
     for(const file of [configFile,path.join(desktop,'electron.vite.config.ts'),path.join(desktop,'scripts/fixtures/performance-panel/capture.mjs'),path.join(root,'package.json'),path.join(root,'pnpm-lock.yaml'),path.join(desktop,'package.json'),path.join(desktop,'scripts/probe-process.mjs'),
       ...['capture.mjs','entry.tsx','main.cjs','preload.cjs','owner-entry.ts','index.html','data.ts'].map(file=>path.join(fixture,file))])await bind(file)
     if(directoryScene)for(const file of [path.join(fixture,'working-directory.cjs'),path.join(desktop,'scripts/capture-toolkit-working-directory.mjs')])await bind(file)
+    if(toolkitScene==='customization')for(const file of [path.join(fixture,'customization.cjs'),path.join(fixture,'customization.md'),path.join(desktop,'scripts/capture-toolkit-customization.mjs')])await bind(file)
     if(toolkitScene==='polish')for(const file of [path.join(fixture,'polish.cjs'),path.join(desktop,'scripts/capture-toolkit-tui-polish.mjs')])await bind(file)
     if(toolkitQualification)for(const name of ['health-entry.ts','coordinator.cjs','qualification.cjs'])await bind(path.join(fixture,name))
     if(captureScope==='attribution'||captureScope==='agent-cards'||captureScope==='epoch-peak'||captureScope==='diagnostic')for(const file of [path.join(desktop,`scripts/capture-${captureScope==='agent-cards'?'toolkit-agent-cards':captureScope==='epoch-peak'?'performance-epoch-peak':'performance-attribution'}.mjs`),path.join(fixture,'attribution-owner-entry.ts')])await bind(file)
