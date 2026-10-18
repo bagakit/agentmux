@@ -4,12 +4,12 @@ import { agentPromptCondition, type AgentPromptInputKey } from './agent-prompt-c
 import { agentTurnCompletionIdentity } from './agent-session-identity.js'
 import type { DurableAgentMuxMessageQueue } from './agent-global-message-queue.js'
 import type { AgentMuxMessageNotification } from './agent-message-notification.js'
-import type { AgentMuxAgentSession } from './types.js'
+import type { AgentMuxAgentSession, AgentPromptExecutionEvidence } from './types.js'
 
 type Dependencies = {
   queue: DurableAgentMuxMessageQueue
   connected(): boolean
-  read(agentSessionId: string): Promise<{ session: AgentMuxAgentSession; inputByte: number | null } | null>
+  read(agentSessionId: string): Promise<{ session: AgentMuxAgentSession; inputByte: number | null; nativeIdle?: AgentPromptExecutionEvidence } | null>
   submit(notification: AgentMuxMessageNotification): Promise<void>
   inputAbsent(key: AgentPromptInputKey): Promise<boolean>
   unavailable(agentSessionId: string | undefined, error: unknown): void
@@ -70,19 +70,22 @@ export class AgentMuxMessageNotifications {
     if (!await this.deps.queue.hasPendingNotification(agentSessionId)) { this.recipients.delete(agentSessionId); this.attempted.delete(agentSessionId); return }
     const current = await this.deps.read(agentSessionId)
     if (!current || this.disposed) return
-    const { session, inputByte } = current
-    // A completion selects an opportunity. The Input owner and Provider must
+    const { session, inputByte, nativeIdle } = current
+    // A completion or exact initial idle selects an opportunity. The Input owner and Provider must
     // still confirm this exact source and idle-only admission before any input.
     const completionId = agentTurnCompletionIdentity(session)
-    if (!completionId || inputByte === null) return
+    if (inputByte === null || !completionId && nativeIdle?.state !== 'idle') return
+    const idle = completionId ? { completionId, inputByte }
+      : { nativeEvidence: { sourceId: nativeIdle!.sourceId, id: nativeIdle!.id }, inputByte }
     const condition = agentPromptCondition(session)
     const position = await this.deps.queue.pendingNotificationPosition(agentSessionId, condition.expectedRun.runId)
-    const opportunity = JSON.stringify([completionId, inputByte, condition.afterSubmissionId, position])
+    // Our own rejected claim changes the predecessor, not the idle opportunity.
+    const opportunity = JSON.stringify([condition.expectedRun, idle, position])
     if (this.attempted.get(agentSessionId) === opportunity) return
     this.attempted.set(agentSessionId, opportunity)
     const notificationId = `a2a-notice-${mintObjectId()}`
     const notice = await this.deps.queue.prepareNotification({ agentSessionId,
-      notificationId, condition, idle: { completionId, inputByte },
+      notificationId, condition, idle,
       originalInputAbsent: () => this.deps.inputAbsent({ kind: 'prompt', agentSessionId, expectedRun: condition.expectedRun, submissionId: notificationId }) })
     if (notice) await this.deps.submit(notice)
     if (!await this.deps.queue.hasPendingNotification(agentSessionId)) { this.recipients.delete(agentSessionId); this.attempted.delete(agentSessionId) }
