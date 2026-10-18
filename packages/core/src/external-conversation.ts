@@ -3,12 +3,15 @@ import { rpcRecord } from './rpc-data.js'
 import { parseConnectionActor } from './room-binding-codec.js'
 import type { AgentExternalMessageAuthor } from './external-author.js'
 import type { ConversationItemRef } from './conversation.js'
+import { connectionDiagnosisIntakeCodes } from './connection-diagnosis-contract.js'
 
 /** Original platform attribution. Recording a message grants no execution permission. */
 export type AgentExternalConversationAuthor = Omit<AgentExternalMessageAuthor, 'grantId' | 'grantRevision'>
+/** Read-only projection of the original ingress, not a Core input receipt or authorization. */
+export type AgentExternalConversationInputObservation = { ingressId: string; state: 'received' | 'claimed' | 'refused'; code?: typeof connectionDiagnosisIntakeCodes[number] }
 export type AgentExternalConversationReference = { agentSessionId: string; ingressId: string }
 export type AgentExternalConversationMessage = AgentExternalConversationReference & {
-  hostId: string; author: AgentExternalConversationAuthor; body: string
+  hostId: string; author: AgentExternalConversationAuthor; body: string; inputMetadata?: AgentExternalConversationInputObservation
 }
 export type AgentExternalConversationAuthority = {
   message: AgentExternalConversationMessage | null
@@ -40,14 +43,20 @@ export function externalConversationAuthor(author: AgentExternalMessageAuthor | 
 export function externalConversationRecordId(author: AgentExternalConversationAuthor): string {
   return JSON.stringify(['external-message', author.actor.application.domain, author.actor.application.appId, author.externalConversationId, author.externalMessageId])
 }
+export function parseExternalConversationInputObservation(value: unknown): AgentExternalConversationInputObservation {
+  const p = rpcRecord(value, ['ingressId', 'state', 'code'], 'INVALID_EXTERNAL_CONVERSATION')
+  if (!['received', 'claimed', 'refused'].includes(p.state as string) || p.code !== undefined && !connectionDiagnosisIntakeCodes.includes(p.code as never)) fail()
+  return { ingressId: text(p.ingressId), state: p.state as AgentExternalConversationInputObservation['state'], ...(p.code === undefined ? {} : { code: p.code as NonNullable<AgentExternalConversationInputObservation['code']> }) }
+}
 export function parseExternalConversationAuthority(value: unknown): AgentExternalConversationAuthority {
   const p = rpcRecord(value, ['message', 'authority', 'code'], 'INVALID_EXTERNAL_CONVERSATION')
   if (!['current', 'refused', 'unavailable'].includes(String(p.authority))) fail()
   let message: AgentExternalConversationMessage | null = null
   if (p.message !== null) {
-    const m = rpcRecord(p.message, ['agentSessionId', 'ingressId', 'hostId', 'author', 'body'], 'INVALID_EXTERNAL_CONVERSATION')
+    const m = rpcRecord(p.message, ['agentSessionId', 'ingressId', 'hostId', 'author', 'body', 'inputMetadata'], 'INVALID_EXTERNAL_CONVERSATION')
     if (typeof m.body !== 'string' || !m.body || m.body.includes('\0')) fail()
-    message = { agentSessionId: text(m.agentSessionId), ingressId: text(m.ingressId), hostId: text(m.hostId), author: parseExternalConversationAuthor(m.author), body: m.body as string }
+    message = { agentSessionId: text(m.agentSessionId), ingressId: text(m.ingressId), hostId: text(m.hostId), author: parseExternalConversationAuthor(m.author), body: m.body as string, ...(m.inputMetadata === undefined ? {} : { inputMetadata: parseExternalConversationInputObservation(m.inputMetadata) }) }
+    if (message.inputMetadata && message.inputMetadata.ingressId !== message.ingressId) fail()
   }
   if (p.authority === 'current' && (!message || p.code !== undefined)) fail()
   return { message, authority: p.authority as AgentExternalConversationAuthority['authority'], ...(p.code === undefined ? {} : { code: text(p.code) }) }

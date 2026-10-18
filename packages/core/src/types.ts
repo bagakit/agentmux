@@ -2003,6 +2003,8 @@ export type AgentTimelineItem = {
   inputRef?: import('./agent-prompt-condition.js').AgentPromptInputKey
   /** Immutable membership in the original saved-input journal. */
   inputOrigin?: import('./agent-input-conversation.js').AgentInputJournalCut
+  /** Read-only original ingress observation; never input authority or an Agent receipt. */
+  externalInput?: import('./external-conversation.js').AgentExternalConversationInputObservation
   /** Safe projection of the original Input receipt, not Agent completion. */
   inputSubmission?: import('./agent-input-conversation.js').AgentInputSubmissionObservation
   toolName?: string
