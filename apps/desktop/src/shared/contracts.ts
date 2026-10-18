@@ -1611,6 +1611,7 @@ export const CONFIG_CHANGED_CHANNEL = 'agentmux:config-changed'
 /** Main -> renderer: one runtime/session event from the Agent runtime controller. */
 export const SESSION_EVENT_CHANNEL = 'agentmux:session-event'
 export const SESSION_HISTORY_OBSERVATION_CHANNEL = 'agentmux:session-history-observation'
+export const CONNECTION_METADATA_CHANGED_CHANNEL = 'connections:metadataChanged'
 /** Main -> renderer: one embedded-browser lifecycle/navigation event. */
 export const BROWSER_EVENT_CHANNEL = 'agentmux:browser-event'
 export const NATIVE_BROWSER_VISIBILITY_CHANNEL = 'ui:nativeBrowserVisibility'
