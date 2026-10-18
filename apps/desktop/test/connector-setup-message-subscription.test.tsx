@@ -87,11 +87,11 @@ it('original Delivery reviews current mode and the directory under one consent, 
   ])
   expect(dom.container.querySelector('[data-surface-mode="use-persistent-connection"]')?.getAttribute('aria-selected')).toBe('true')
   expect(dom.container.textContent).toContain('last checked persistent delivery mode')
-  expect(dom.container.textContent).toContain('Other event consumers may be affected')
+  expect(dom.container.textContent).toContain('other event consumers may be affected')
   expect(writes()).toEqual([])
   await click('[data-reception-add]')
   await ready(() => expect(current().applicationConfiguration!.selected?.secureStorage).toBe('stored'))
-  expect(writes()).toEqual([{ path: '/developers/v1/event/update/' + APP, body: { events: [], appEvents: [EVENT], userEvents: [], operation: 'add', eventMode: 4 } }])
+  expect(writes()).toEqual([{ path: '/developers/v1/event/update/' + APP, body: { clientId: APP, events: [], appEvents: [EVENT], userEvents: [], operation: 'add', eventMode: 4 } }])
   const selected = current().applicationConfiguration!.selected!
   expect(selected).toMatchObject({ effect: 'add-message-reception', request: 'confirmed', secureStorage: 'stored' })
   expect(dom.container.querySelector('[data-reception-result="' + selected.stepId + '"] span')?.textContent).toBe('Accepted result saved')

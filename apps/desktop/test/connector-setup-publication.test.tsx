@@ -176,16 +176,22 @@ it('accepted version creation with lost local ACK has one primary saving action 
   expect(native).toEqual(before)
 }, 30_000)
 
-it('an ordinary observation failure hides prior authority while keeping same-operation user draft fields for a fresh retry', async () => {
+it('an ordinary observation failure keeps confirmed account facts and same-operation drafts without retaining write authority', async () => {
   await open(); await reviewCreation()
   await fill('Publication release notes', 'Unsaved notes stay with this operation')
+  const operationId = current().operation!.operationId
   failObservation = true; await click('[data-publication-review]')
   await ready(() => expect(dom.container.textContent).toContain('Application observation interrupted'))
   expect(dom.container.querySelector('[data-publication-confirm]')).toBeNull()
-  expect(dom.container.textContent).not.toContain('settings-publication-user')
+  const account = dom.container.querySelector('.connector-management__account')!
+  expect(account.textContent).toContain('Last confirmed account')
+  expect(account.textContent).toContain('settings-publication-user')
+  expect(dom.container.querySelector('[data-management-code]')).toBeNull()
+  expect(dom.container.querySelector('[data-management-confirm]')).toBeNull()
   expect(writes()).toEqual([])
   await click('[data-management-inspect]')
   await ready(() => expect(dom.container.querySelector('[aria-label="Publication release notes"]')).not.toBeNull())
+  expect(current().operation!.operationId).toBe(operationId)
   expect((dom.container.querySelector('[aria-label="Publication release notes"]') as HTMLTextAreaElement).value).toBe('Unsaved notes stay with this operation')
   expect((dom.container.querySelector('[aria-label="Publication version"]') as HTMLInputElement).value).toBe('1.1.0')
   expect((dom.container.querySelector('[aria-label="Publication review reason"]') as HTMLTextAreaElement).value).toBe('Explain the application permission change')

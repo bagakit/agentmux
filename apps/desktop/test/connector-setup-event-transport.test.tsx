@@ -88,7 +88,7 @@ it('original mounted Settings reads the event mode then explicitly confirms its 
   expect(selected).toMatchObject({ effect: 'use-persistent-connection', request: 'confirmed', secureStorage: 'stored' })
   expect(dom.container.querySelector('[data-management-effect-result="' + selected.stepId + '"] small')?.textContent).toBe('Result saved')
   expect(current().applicationConfiguration!.capability).toBe('unknown')
-  expect(writes()).toEqual([{ path: '/developers/v1/event/switch/' + APP, body: { eventMode: 4 } }])
+  expect(writes()).toEqual([{ path: '/developers/v1/event/switch/' + APP, body: { clientId: APP, eventMode: 4 } }])
   mode = 4; await click('[data-management-read-events]')
   await ready(() => expect(dom.container.querySelector('[data-management-current-transport]')?.textContent).toBe('Last checked event delivery: Persistent connection'))
   expect(current().applicationConfiguration!.capability).toBe('enabled')
