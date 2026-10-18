@@ -132,7 +132,7 @@ export function regionFocusClaimsCaret(cause: RegionFocusCause): boolean {
  *
  * 两个表面**共用这一个匹配器**，而不是各写一句 `request?.regionId === myRegionId`：那样就是「同一个判断有
  * 两个写入点」，其中一处漏改（比如把 `===` 写成别的、或忘了判 null）只坏一个表面，而另一个照旧全绿。
- * region id 全局唯一（`newRegionId` / uuid），所以只比 regionId 足矣，不必再带 workspace/tab。
+ * region id 全局唯一（`newRegionId` / 统一对象 ID），所以只比 regionId 足矣，不必再带 workspace/tab。
  */
 export function regionCaretFocusTargets(
   request: { regionId: string; nonce: number } | null | undefined,

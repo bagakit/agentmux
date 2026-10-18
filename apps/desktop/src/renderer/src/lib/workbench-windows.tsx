@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { observeResolvedTheme } from '@agentmux/client-ui/theme'
 import { updateIconSprite, removeIconSprite } from '@agentmux/client-ui/icons'
 import { useNativeOverlayChrome } from '../hooks/useNativeOverlayChrome'
@@ -20,14 +21,14 @@ const publishIssue = (error: unknown) => { snapshot = { ...snapshot, issue: Stri
 
 export async function openWorkbenchWindow(target: AppWindowTarget): Promise<void> {
   try {
-    const page = await api.ui.workbenchWindows.call('app.window.open', { operationId: crypto.randomUUID(), target })
+    const page = await api.ui.workbenchWindows.call('app.window.open', { operationId: mintObjectId(), target })
     snapshot = { ...snapshot, windows: page.windows, operation: page.recordedOperation }; notify()
     if (page.recordedOperation?.state !== 'confirmed') publishIssue(page.recordedOperation?.message ?? 'Original window presentation is unconfirmed. Original work remains.')
   } catch (error) { publishIssue(error) }
 }
 export async function focusWorkbenchWindow(identity: WorkbenchWindowDocument): Promise<boolean> {
   try {
-    const page = await api.ui.workbenchWindows.call('app.window.focus', { operationId: crypto.randomUUID(), ...identity })
+    const page = await api.ui.workbenchWindows.call('app.window.focus', { operationId: mintObjectId(), ...identity })
     snapshot = { ...snapshot, windows: page.windows, operation: page.recordedOperation }; notify()
     if (page.recordedOperation?.state !== 'confirmed') publishIssue(page.recordedOperation?.message ?? 'Original window focus is unconfirmed.')
     return page.recordedOperation?.state === 'confirmed'
@@ -35,7 +36,7 @@ export async function focusWorkbenchWindow(identity: WorkbenchWindowDocument): P
 }
 export async function returnWorkbenchWindow(identity: WorkbenchWindowDocument): Promise<void> {
   try {
-    const page = await api.ui.workbenchWindows.call('app.window.return', { operationId: crypto.randomUUID(), ...identity })
+    const page = await api.ui.workbenchWindows.call('app.window.return', { operationId: mintObjectId(), ...identity })
     snapshot = { ...snapshot, windows: page.windows, operation: page.recordedOperation }; notify()
     if (page.recordedOperation?.state !== 'confirmed') publishIssue(page.recordedOperation?.message ?? 'Returning the original workface is unconfirmed. Original work remains.')
   } catch (error) { publishIssue(error) }
