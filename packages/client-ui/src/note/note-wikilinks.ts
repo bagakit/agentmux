@@ -23,6 +23,7 @@ export function noteInlineQuery(text: string): string | null {
 }
 /** Shared indexes include the same text that a person can select and edit. */
 export function noteSemanticText(node: ProseMirrorNode): string {
+  if (node.type.name === 'noteRawBlock') return node.attrs.source
   if (node.type.name === 'noteMathInline' || node.type.name === 'noteMathBlock') return node.attrs.latex
   return node.textBetween(0, node.content.size, '', leaf => leaf.type.name === 'noteLink' ? `[[${String(leaf.attrs.text)}]]` : leaf.type.name === 'noteMathInline' ? String(leaf.attrs.latex) : leaf.type.name === 'image' ? String(leaf.attrs.alt ?? '') : leaf.type.name === 'hardBreak' ? '\n' : '')
 }
