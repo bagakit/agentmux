@@ -6,18 +6,27 @@ module.exports = async function captureWorkingDirectory({ win, read, until, wait
   const field = '[aria-label="Fixed working directory"]'
   const save = '.toolkit-editor__footer .primary-button'
   const value = selector => read(`document.querySelector(${JSON.stringify(selector)}).value`)
+  await read(`window.directoryInputEvents=[];for(const type of ['focusin','focusout','beforeinput','input'])document.addEventListener(type,event=>{const target=event.target;window.directoryInputEvents.push({type:event.type,inputType:event.inputType,data:event.data,trusted:event.isTrusted,value:target.value,target:target.tagName+'.'+target.className,focused:document.activeElement===target,documentHasFocus:document.hasFocus()})},true)`)
   const fill = async (selector, text) => {
-    await click(selector)
-    await until(`document.activeElement === document.querySelector(${JSON.stringify(selector)})`)
-    win.webContents.selectAll()
-    await until(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});return n.selectionStart===0 && n.selectionEnd===n.value.length})()`)
-    raw.actions.push({ type: 'native-select-all', selector })
-    for (const type of ['keyDown', 'keyUp']) win.webContents.sendInputEvent({ type, keyCode: 'Backspace' })
-    await until(`document.querySelector(${JSON.stringify(selector)}).value === ''`)
-    await win.webContents.insertText(text)
-    raw.actions.push({ type: 'native-insert-text', selector, text })
-    await until(`document.querySelector(${JSON.stringify(selector)}).value === ${JSON.stringify(text)}`)
-    await settle()
+    const facts = async () => ({ ...await read(`(()=>{const n=document.querySelector(${JSON.stringify(selector)}),a=document.activeElement;return {value:n?.value,focused:a===n,active:a?.tagName+'.'+a?.className,selectionStart:n?.selectionStart,selectionEnd:n?.selectionEnd,documentHasFocus:document.hasFocus(),eventCount:window.directoryInputEvents.length}})()`), webContentsFocused: win.webContents.isFocused() })
+    const observation = { selector, text }
+    ;(raw.directoryInputs ??= []).push(observation)
+    try {
+      await click(selector)
+      await until(`document.activeElement === document.querySelector(${JSON.stringify(selector)})`)
+      win.webContents.selectAll()
+      await until(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});return n.selectionStart===0 && n.selectionEnd===n.value.length})()`)
+      raw.actions.push({ type: 'native-select-all', selector })
+      observation.before = await facts()
+      await win.webContents.insertText(text)
+      raw.actions.push({ type: 'native-insert-text', selector, text })
+      await until(`document.querySelector(${JSON.stringify(selector)}).value === ${JSON.stringify(text)}`)
+      await settle()
+    } finally {
+      observation.after = await facts()
+      observation.events = await read(`window.directoryInputEvents.slice(${observation.before?.eventCount ?? 0})`)
+    }
+    assert.ok(observation.events.some(event => event.type === 'input' && event.trusted && event.value === text), 'Native replacement reaches the actual input')
   }
   const revealField = async () => { await read(`document.querySelector(${JSON.stringify(field)}).scrollIntoView({block:'center'})`); await settle() }
   const saveAndRead = async (expected, kind) => {
@@ -77,6 +86,5 @@ module.exports = async function captureWorkingDirectory({ win, read, until, wait
   await until('innerWidth <= 720'); await revealField(); await frame('directory-package-narrow')
   assert.deepEqual(owner.current.workspaces, workspaces, 'Editing Toolkit directories does not register or change workspaces')
   raw.workspacesUnchanged = true
-  raw.renderer = await read('({keys:window.tuiScene.keys})')
-  assert.ok(raw.renderer.keys.some(event => event.trusted), 'Settings received native keyboard events')
+  assert.equal(raw.directoryInputs.length, 4, 'All directory scene text edits have native input receipts')
 }
