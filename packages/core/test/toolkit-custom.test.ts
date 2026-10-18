@@ -6,9 +6,12 @@ import { tmpdir } from 'node:os'
 import { createServer } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parseToolkitCommand } from '../src/toolkit-cli.js'
+import { agentMuxCommandHelp } from '../src/agentmux-cli-help.js'
+import { agentMuxModuleSkill } from '../src/agentmux-cli-module-skills.js'
 import { AgentMuxControlServer, parseAgentMuxControlReceipt, parseAgentMuxControlRequest, connectAgentMuxRpc, AgentMuxRpcLines } from '../src/control-host.js'
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, AGENTMUX_CONTROL_SCHEMA_VERSION, agentMuxControlTimeoutMs } from '../src/control.js'
 import { parseToolkitResult, parseToolkitSnapshot, parseToolkitToolFields,
+  parseToolkitToolConfiguration, parseToolkitToolDefinition,
   type AgentMuxToolkitPort, type ToolkitScriptSnapshot, type ToolkitToolDefinition } from '../src/toolkit.js'
 
 const definition: ToolkitToolDefinition = { id: 'summary', revision: 'revision-one', name: 'Summary', icon: 'terminal',
@@ -32,6 +35,60 @@ async function publicClient(path: string) {
 }
 
 describe('custom Toolkit public data and authored CLI', () => {
+  it('keeps shell TUI mode explicit and separate from finite result programs', () => {
+    const action = { id: 'refresh', label: 'Refresh', script: "console.log('ready')", args: [] }
+    const finite = { ...fields, mode: 'script' as const, actions: [action], display: { script: action.script, args: [] } }
+    const tui = { ...fields, mode: 'tui' as const, script: 'exec cat "$1"', args: ['argument with spaces'], display: null }
+    expect(parseToolkitToolFields(fields)).toEqual(fields)
+    expect(parseToolkitToolFields(finite)).toEqual(finite)
+    expect(parseToolkitToolFields(tui)).toEqual(tui)
+    expect(parseToolkitToolFields({ mode: 'script' }, true)).toEqual({ mode: 'script' })
+    expect(parseToolkitToolFields({ mode: 'tui', actions: [], display: null }, true)).toEqual({ mode: 'tui', actions: [], display: null })
+    expect(() => parseToolkitToolFields({ ...tui, mode: 'terminal' })).toThrow()
+    expect(() => parseToolkitToolFields({ ...tui, mode: null })).toThrow()
+    expect(() => parseToolkitToolFields({ ...tui, actions: [action] })).toThrow()
+    expect(() => parseToolkitToolFields({ ...tui, display: finite.display })).toThrow()
+    expect(() => parseToolkitToolConfiguration({ id: definition.id, revision: definition.revision,
+      kind: 'package', packagePath: fixturePath('tool-package'), workspacePath: definition.workspacePath,
+      enabled: true, statusBar: 'icon', args: [], mode: 'tui' })).toThrow()
+    expect(() => parseToolkitToolDefinition({ ...definition, ...tui, package: {
+      path: fixturePath('tool-package'), configRevision: definition.revision, contentSHA256: 'a'.repeat(64), entry: 'main.mjs', actionEntries: [] } })).toThrow()
+    expect(agentMuxCommandHelp('toolkit.create')).toContain('enabled TUI loads and starts')
+    expect(agentMuxCommandHelp('toolkit.update')).toContain('source edits affect the next run')
+    expect(agentMuxModuleSkill('toolkit')).toContain('never automatically replay it')
+  })
+  it('preserves the captured TUI Run across current mode edits without treating output as a result document', () => {
+    const captured = { ...definition, mode: 'tui' as const, script: 'exec cat' }
+    const admission = { executionId: 'tui-execution', invocationId: 'tui-invocation', definition: captured,
+      expectedLatestExecutionId: null, target: { workspacePath: captured.workspacePath },
+      run: { hostId: 'local', runId: 'tui-run' }, startedAt: reshapeFixtureEpoch(0, 0, 10),
+      state: 'running', reason: null, text: '', action: null }
+    const current = { ...snapshot(), state: 'running', admission }
+    expect(parseToolkitSnapshot(current)).toEqual(current)
+    expect(() => parseToolkitSnapshot({ ...current, admission: { ...admission, text: 'terminal output' } })).toThrow()
+    expect(() => parseToolkitSnapshot({ ...current, admission: { ...admission, document: null } })).toThrow()
+    const tools = [{ kind: 'metrics', toolId: 'performance', name: 'Performance', readonly: true },
+      { kind: 'script', toolId: definition.id, name: definition.name, readonly: false, revision: definition.revision,
+        icon: definition.icon, enabled: true, statusBar: 'icon', mode: 'tui' }]
+    expect(parseToolkitResult('toolkit.list', { tools })).toEqual({ operation: 'toolkit.list', tools })
+    expect(() => parseToolkitResult('toolkit.list', { tools: [tools[0], { ...tools[1], mode: 'terminal' }] })).toThrow()
+    expect(() => parseToolkitResult('toolkit.list', { tools: [tools[0], { ...tools[1], display: true }] })).toThrow()
+  })
+  it('carries TUI creation through the original CLI and public service without losing its mode or arguments', async () => {
+    const dir = await directory(), file = join(dir, 'tui.json'), path = join(dir, 'tui.sock')
+    const value = { ...fields, mode: 'tui' as const, script: 'exec "$1"', args: ['command with spaces'] }
+    await writeFile(file, JSON.stringify(value))
+    const command = await parseToolkitCommand(['create', definition.id, '--input', file])
+    expect(command).toEqual({ method: 'toolkit.create', params: { toolId: definition.id, value } })
+    const execute = vi.fn(async () => ({ operation: 'toolkit.add' as const,
+      definition: { ...definition, ...value }, changed: true }))
+    const server = new AgentMuxControlServer({ coreClients: () => [], execute: vi.fn(), toolkit: { execute, subscribe: vi.fn() } }, path)
+    await server.start(); cleanup.push(() => server.stop())
+    const client = await publicClient(path)
+    await expect(client.call('toolkit.create', { toolId: definition.id, value: command.params.value, operationId: base.requestId })).resolves.toEqual({ definition: { ...definition, ...value }, changed: true })
+    expect(execute).toHaveBeenCalledExactlyOnceWith({ ...base, operation: 'toolkit.add', toolId: definition.id, value },
+      expect.any(AbortSignal), expect.objectContaining({ entryPoint: 'toolkit.create', transport: 'unix' }))
+  })
   it('admits only fixed fields, complete invocation scope and durable operation budgets', () => {
     const request = parseAgentMuxControlRequest({ ...base, operation: 'toolkit.add', toolId: definition.id, value: fields })
     expect(request).toEqual({ ...base, operation: 'toolkit.add', toolId: definition.id, value: fields })
@@ -77,7 +134,7 @@ describe('custom Toolkit public data and authored CLI', () => {
     expect(parseToolkitToolFields(maximum)).toEqual(maximum)
     const tools = [{ kind: 'metrics' as const, toolId: 'performance' as const, name: 'Performance', readonly: true as const },
       ...Array.from({ length: 128 }, (_, index) => ({ kind: 'script' as const, readonly: false as const,
-        toolId: '\\'.repeat(124) + index, revision: '\\'.repeat(128), name: maximum.name, icon: maximum.icon, enabled: true, statusBar: 'label' as const }))]
+        toolId: '\\'.repeat(124) + index, revision: '\\'.repeat(128), name: maximum.name, icon: maximum.icon, enabled: true, statusBar: 'label' as const, mode: 'tui' as const }))]
     const frame = { ...base, operation: 'toolkit.list', ok: true, result: { tools } }
     expect(Buffer.byteLength(JSON.stringify(frame) + '\n')).toBeLessThan(AGENTMUX_CONTROL_MAX_MESSAGE_BYTES)
     const path = join(await directory(), 'list.sock')
