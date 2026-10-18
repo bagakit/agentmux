@@ -53,7 +53,7 @@ function scenario(count = 480) {
 type Scene = ReturnType<typeof scenario>
 let requests: engine.CollaborationLayoutRequest[], boxes: Map<string, engine.CollaborationLayoutBox>, paths: Map<string, engine.CollaborationPath>
 let holdResponses = false, heldResponses: { response: engine.CollaborationLayoutResponse; deliver(): void }[] = []
-function graph(scene: Scene, selection: CollaborationSelection = null, relations: readonly CollaborationRelation[] = scene.relations, pulses: readonly CollaborationPulse[] = [], agents: ReadonlyMap<string, CollaborationAgent> = scene.agents, options: Pick<ComponentProps<typeof AgentCollaborationGraph>, 'ready' | 'active' | 'locate' | 'onPreviewAgent' | 'peeked'> = {}) {
+function graph(scene: Scene, selection: CollaborationSelection = null, relations: readonly CollaborationRelation[] = scene.relations, pulses: readonly CollaborationPulse[] = [], agents: ReadonlyMap<string, CollaborationAgent> = scene.agents, options: Pick<ComponentProps<typeof AgentCollaborationGraph>, 'ready' | 'active' | 'locate' | 'context' | 'onPreviewAgent' | 'peeked'> = {}) {
   return <AgentCollaborationGraph agents={agents} areas={scene.areas} relations={relations} pulses={pulses} selection={selection} onSelect={select} onOpen={open} ready={false} {...options} />
 }
 async function viewport(x: number, y: number, width = 600, height = 400, zoom = 1) {
@@ -506,6 +506,96 @@ it('preserves the clicked area heading through folding and unfolding without res
   // The explicitly read heading remains the anchor; a reappearing Agent is not a new reading intent.
   expect(headingAt().x).toBeCloseTo(heading.x, 8); expect(headingAt().y).toBeCloseTo(heading.y, 8)
   expect(captured.store!.getState().transform).toBe(camera)
+})
+
+function regionLabelBounds(id: string) {
+  const label = dom.container.querySelector<HTMLElement>(`[data-region-id="${id}"]`)!
+  expect(label).not.toBeNull()
+  return { element: label, x: Number.parseFloat(label.style.left), y: Number.parseFloat(label.style.top), width: Number(label.dataset.labelWidth), height: Number(label.dataset.labelHeight) }
+}
+async function readDistantRegion(scene: Scene) {
+  const area = renderedBox(JSON.stringify(['area', 'area-0'])) as Extract<engine.CollaborationLayoutBox, { kind: 'area' }>
+  const member = scene.areas[0]!.members.map(id => renderedBox(collaborationAgentNode('area-0', id))).sort((a, b) => b.y - a.y)[0]!
+  await viewport(-member.x + 20, -member.y + 90, 600, 400)
+  const label = regionLabelBounds('area-0'), [x, y, zoom] = captured.store!.getState().transform
+  expect((area.y + area.heading.y + area.heading.height) * zoom + y).toBeLessThan(0)
+  expect(label.element.dataset.context).toBe('true')
+  expect(label.x).toBeGreaterThanOrEqual(0); expect(label.y).toBeGreaterThanOrEqual(0)
+  expect(label.x + label.width).toBeLessThanOrEqual(600); expect(label.y + label.height).toBeLessThanOrEqual(400)
+  return { area, label, camera: [x, y, zoom] }
+}
+
+it('keeps a clamped region label and its Expand action visible after the original world heading folds offscreen', async () => {
+  const scene = scenario(24); await loaded(scene)
+  const { area, label, camera } = await readDistantRegion(scene)
+  holdResponses = true
+  await act(async () => label.element.querySelector<HTMLButtonElement>('.collaboration-area__fold')!.click())
+  await settleCollaborationCanvas(() => expect(heldResponses.some(item => item.response.type === 'complete')).toBe(true))
+  expect(captured.store!.getState().transform).toEqual(camera)
+  await releasePlacement()
+  const folded = renderedBox(area.id) as Extract<engine.CollaborationLayoutBox, { kind: 'area' }>
+  expect(folded.folded).toBe(true)
+  const [x, y, zoom] = captured.store!.getState().transform
+  expect(zoom).toBe(camera[2])
+  expect((folded.x + folded.heading.x) * zoom + x).toBeCloseTo(label.x, 6)
+  expect((folded.y + folded.heading.y + folded.heading.height) * zoom + y).toBeCloseTo(label.y + label.height, 6)
+  const visible = regionLabelBounds('area-0'), expand = visible.element.querySelector<HTMLButtonElement>('[aria-label="Expand Original area 0"]')!
+  expect(expand).not.toBeNull()
+  expect(visible.x).toBeGreaterThanOrEqual(0); expect(visible.y).toBeGreaterThanOrEqual(0)
+  expect(visible.x + visible.width).toBeLessThanOrEqual(600); expect(visible.y + visible.height).toBeLessThanOrEqual(400)
+  await act(async () => expand.click())
+  await settleCollaborationCanvas(() => { expect(renderedBox(area.id).folded).toBe(false); expect(dom.container.querySelector('.collaboration-canvas__progress')).toBeNull() })
+  expect(regionLabelBounds('area-0').element.querySelector('[aria-label="Collapse Original area 0"]')).not.toBeNull()
+  expect(captured.store!.getState().transform[2]).toBe(camera[2])
+})
+
+it.each(['pan', 'locate'] as const)('a newer %s cancels the pending screen anchor of an earlier region fold', async intent => {
+  const scene = scenario(24); await loaded(scene)
+  const { label } = await readDistantRegion(scene)
+  holdResponses = true
+  await act(async () => label.element.querySelector<HTMLButtonElement>('.collaboration-area__fold')!.click())
+  await settleCollaborationCanvas(() => expect(heldResponses.some(item => item.response.type === 'complete')).toBe(true))
+  if (intent === 'pan') {
+    await act(async () => captured.moveStart!(new MouseEvent('mousedown'), { x: -321, y: -654, zoom: .8 }))
+    await viewport(-321, -654, 600, 400, .8)
+  } else {
+    await dom.render(graph(scene, null, scene.relations, [], scene.agents, { ready: true, locate: { token: {}, agentId: subject('canvas-1') } }))
+  }
+  await releasePlacement()
+  await settleCollaborationCanvas(() => {
+    const [x, y, zoom] = captured.store!.getState().transform
+    if (intent === 'pan') expect([x, y, zoom]).toEqual([-321, -654, .8])
+    else {
+      const target = renderedBox(collaborationAgentNode('area-1', subject('canvas-1')))
+      expect((target.x + target.width / 2) * zoom + x).toBeCloseTo(300, 4)
+      expect((target.y + target.height / 2) * zoom + y).toBeCloseTo(200, 4)
+    }
+  })
+})
+
+it('measures a newly visible original Locate control as a region-label obstacle without changing world geometry', async () => {
+  const originalRect = HTMLElement.prototype.getBoundingClientRect
+  const controlRect = new DOMRect(12, 12, 240, 32)
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    if (this.classList.contains('collaboration-map__locate')) return controlRect
+    return originalRect.call(this)
+  })
+  const scene = scenario(24); await loaded(scene)
+  const area = renderedBox(JSON.stringify(['area', 'area-0'])) as Extract<engine.CollaborationLayoutBox, { kind: 'area' }>
+  await viewport(-area.x - area.heading.x + 12, -area.y - area.heading.y + 12)
+  expect(collaborationBoundsOverlap(regionLabelBounds('area-0'), controlRect)).toBe(true)
+  const camera = captured.store!.getState().transform, geometry = captured.nodes.map(node => node.data.box), operations = requests.length, onLocate = vi.fn()
+  await dom.render(graph(scene, null, scene.relations, [], scene.agents, { context: { name: 'Original reading context', onLocate } }))
+  await settleCollaborationCanvas(() => {
+    const labels = [...dom.container.querySelectorAll<HTMLElement>('[data-region-id]')]
+    expect(labels.length).toBeGreaterThan(0)
+    for (const label of labels) expect(collaborationBoundsOverlap(regionLabelBounds(label.dataset.regionId!), controlRect)).toBe(false)
+  })
+  const control = dom.container.querySelector<HTMLButtonElement>('.collaboration-map__locate')!
+  expect(control.textContent).toContain('Original reading context')
+  await act(async () => control.click()); expect(onLocate).toHaveBeenCalledOnce()
+  expect(captured.store!.getState().transform).toBe(camera)
+  expect(captured.nodes.map(node => node.data.box)).toEqual(geometry); expect(requests).toHaveLength(operations)
 })
 
 it('opens a real working region at readable scale instead of fitting many empty regions', async () => {
