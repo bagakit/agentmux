@@ -15,7 +15,7 @@
 | 内存 | [RendererMemoryInspector](../../apps/desktop/src/main/renderer-memory.ts)、[allocation sampler](../../apps/desktop/src/main/renderer-allocations.ts) 与 [heap owner](../../apps/desktop/src/main/renderer-heap-snapshot.ts) | heap／backing 点读、采样窗口内存活分配或显式对象持有关系，各有范围；计数可能重叠，不能拼成全部 RSS 分账。 |
 | 现场组合 | [PerformanceSceneOwner](../../apps/desktop/src/main/performance-scene.ts) → [安全诊断投影](../../packages/core/src/performance-scene-evidence.ts) | 串行阶段的原身份、区间、原件与失败／unknown；不是同一时刻的全系统快照。 |
 
-各层沿原公共 owner 接线。分析器是无 IO 的便携纯函数，不持有 Session、进程、debugger 或历史；本机 CLI 只转换用户明确指定的导出文件，不创建另一套服务事实。
+各层沿原公共 owner 接线。分析器是无 IO 的便携纯函数，不持有 Session、进程、debugger 或历史；本机 CLI 只转换用户明确指定的导出文件，不创建另一套服务事实。[Performance 本机导入](../../apps/desktop/src/renderer/src/components/performance/PerformanceProfileImport.tsx)通过用户选择的 `File` 读取有界原字节，复用同一解析、加权分析和技术摘要；[共享视图](../../apps/desktop/src/renderer/src/components/performance/PerformanceProfileView.tsx)同时服务原现场和导入结果。文件选择与下载归 client，Core 不引入文件系统或 UI 服务。
 
 ## 函数样本的解释
 
@@ -23,7 +23,7 @@
 
 技术摘要分别报告 profile 的原始起止时长、样本数、加权时长、最大样本间隔及末次样本至结束的未代表尾段。权重超过原区间时保留负尾段和异常，不裁剪或归一化成正常；这些数字都不是进程 CPU 覆盖率或丢样率。idle 和 GC 仅识别精确 V8 合成节点，其余无法归属的样本保持未知；四类只分 self 权重。
 
-GUI 与离线分析共用上述解释。裸 `.cpuprofile` 没有可验证的 PID、进程创建身份或构建归属；本机报告保留输入原字节 SHA，捕获回执另行关联，不能用文件名补造身份。派生摘要限制展示行、调用者深度和标签长度并报告省略，原文件不变。默认诊断封套继续只读安全投影，不能将函数名、原 URL 或源代码自动写入日志、上传或扩散到普通查询。
+GUI 与离线分析共用上述解释及 `agentmux.v8-profile-analysis.v1` 技术摘要。裸 `.cpuprofile` 没有可验证的 PID、进程创建身份或构建归属；本机报告保留输入原字节 SHA，捕获回执另行关联，不能用文件名补造身份。派生摘要限制展示行、调用者深度和标签长度并报告省略，原文件不变。默认诊断封套继续只读安全投影，不能将函数名、原 URL 或源代码自动写入日志、上传或扩散到普通查询。
 
 ## 复用成熟分析工具
 
