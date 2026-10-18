@@ -5,9 +5,9 @@ const { pathToFileURL } = require('node:url')
 const { createHash } = require('node:crypto')
 const { app, BrowserWindow, ipcMain } = require('electron')
 const [html, ownerBundle, privateRoot, evidence, phase, asset, cli, scene = 'terminal'] = process.argv.slice(2)
-assert.ok(['terminal', 'working-directory', 'polish'].includes(scene), 'Explicit Toolkit scene')
-const directoryScene = scene === 'working-directory', polishScene = scene === 'polish'
-for (const key of ['home', 'userData', 'sessionData']) { const value = path.join(privateRoot, key); fs.mkdirSync(value, { recursive: true }); app.setPath(key, value) }
+assert.ok(['terminal', 'working-directory', 'polish', 'customization'].includes(scene), 'Explicit Toolkit scene')
+const directoryScene = scene === 'working-directory', polishScene = scene === 'polish', customizationScene = scene === 'customization'
+for (const key of ['home', 'appData', 'userData', 'sessionData']) { const value = path.join(privateRoot, key); fs.mkdirSync(value, { recursive: true }); app.setPath(key, value) }
 app.on('window-all-closed', () => {})
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
 const raw = { phase, scene, qualified: false, frames: [], actions: [], errors: [], sessions: { attachments: [], writes: [], detaches: [] },
@@ -62,6 +62,7 @@ app.whenReady().then(async () => {
     ipcMain.handle('proof:tui:config:get', () => owner.current)
     ipcMain.handle('proof:tui:config:save', (_event, next, expected) => owner.edit(expected, next))
     ipcMain.handle('proof:tui:seed', async (_event, preview) => {
+      if (seeded && customizationScene) return { workspaceId: 'tui-work' }
       assert.equal(seeded, false)
       await owner.update(() => ({ ...preview, appearance: { ...preview.appearance, appAppearance: 'dark', terminalTheme: 'graphite' },
         workspaces: [{ id: 'tui-work', hostId: 'local', name: directoryScene ? 'Toolkit directory' : 'TUI Toolkit', path: work, kind: 'folder' }],
@@ -69,7 +70,7 @@ app.whenReady().then(async () => {
       runtime.commit(await runtime.prepare({ ...owner.current, hosts: owner.current.hosts.filter(host => host.kind === 'local') }))
       for (const [index, id] of ids.entries()) { await toolkit.execute({ operation: 'toolkit.add', toolId: id, value: {
         name: index ? 'Live output' : 'Workspace monitor', icon: 'terminal', mode: 'tui', enabled: !polishScene, statusBar: 'label', workspacePath: work,
-        script: index ? 'exec env ELECTRON_RUN_AS_NODE=1 "$1" "$2"' : 'exec env ELECTRON_RUN_AS_NODE=1 "$1" "$2" --alternate', args: [process.execPath, program]
+        script: index ? 'exec env ELECTRON_RUN_AS_NODE=1 "$1" "$2"' : 'exec env ELECTRON_RUN_AS_NODE=1 "$1" "$2" --alternate' + (customizationScene ? ' --palette-proof' : ''), args: [process.execPath, program]
       } }, new AbortController().signal)
         created.push(id)
       }
@@ -104,6 +105,12 @@ app.whenReady().then(async () => {
       await until('window.tuiScene?.ready')
       await require('./working-directory.cjs')({ win, read, until, waitFor, settle, click, frame, owner, store, created, raw, home: app.getPath('home') })
       assert.equal(raw.sessions.attachments.length, 0, 'Directory editing does not attach a terminal')
+      raw.qualified = true
+      return
+    }
+    if (customizationScene) {
+      await until('window.tuiScene?.ready')
+      await require('./customization.cjs')({ app, win, html, read, until, waitFor, settle, click, key, frame, owner, store, snapshot, bytes, raw, runtime })
       raw.qualified = true
       return
     }
@@ -180,21 +187,31 @@ app.whenReady().then(async () => {
     raw.qualified = true
   } catch (error) { raw.failure = { name: error.name, message: error.message, stack: error.stack } }
   finally {
-    try {
-      if (win && !win.isDestroyed()) win.close()
-      for (const id of created) {
-        if (!toolkit) break
-        const state = (await toolkit.execute({ operation: 'toolkit.get', toolId: id }, new AbortController().signal)).snapshot
-        if (state.admission?.run) await toolkit.execute({ operation: 'toolkit.stop', toolId: id, executionId: state.admission.executionId }, new AbortController().signal)
-      }
-      detachToolkit?.(); await toolkit?.dispose()
+    const cleanup = async (stage, action) => {
+      try { await action() }
+      catch (error) { (raw.cleanupErrors ??= []).push({ stage, message: String(error) }); raw.qualified = false }
+    }
+    await cleanup('window-close', () => { if (win && !win.isDestroyed()) win.close() })
+    for (const id of created) await cleanup('stop-private-tool:' + id, async () => {
+      const state = (await toolkit.execute({ operation: 'toolkit.get', toolId: id }, new AbortController().signal)).snapshot
+      if (state.admission?.run) await toolkit.execute({ operation: 'toolkit.stop', toolId: id, executionId: state.admission.executionId }, new AbortController().signal)
+    })
+    await cleanup('toolkit-ipc', () => detachToolkit?.())
+    await cleanup('toolkit-dispose', () => toolkit?.dispose())
+    await cleanup('toolkit-leases', async () => {
       raw.afterDisposalLeases = 0
-      for (const id of created) if (toolkit) raw.afterDisposalLeases += (await toolkit.execute({ operation: 'toolkit.get', toolId: id }, new AbortController().signal)).snapshot.consumerCount
+      for (const id of created) raw.afterDisposalLeases += (await toolkit.execute({ operation: 'toolkit.get', toolId: id }, new AbortController().signal)).snapshot.consumerCount
       assert.equal(raw.afterDisposalLeases, 0)
-      await server?.stop(); detachTheme?.(); detachRuntime?.(); await runtime?.dispose(); sampler?.dispose()
-    } catch (error) { raw.cleanupError = String(error); raw.qualified = false }
-    try { if (native?.spawned) { await native.shutdown(); raw.native.shutdown = true; await native.dispose() } }
-    catch (error) { raw.nativeCleanupError = String(error); raw.qualified = false }
+    })
+    await cleanup('control-server', () => server?.stop())
+    await cleanup('theme-bootstrap', () => detachTheme?.())
+    await cleanup('runtime-events', () => detachRuntime?.())
+    await cleanup('runtime-dispose', () => runtime?.dispose())
+    await cleanup('sampler-dispose', () => sampler?.dispose())
+    if (native?.spawned) {
+      await cleanup('native-shutdown', async () => { await native.shutdown(); raw.native.shutdown = true })
+      await cleanup('native-dispose', () => native.dispose())
+    }
     fs.writeFileSync(path.join(evidence, phase + '-render.json'), JSON.stringify(raw, null, 2) + '\n')
     if (win && !win.isDestroyed()) win.destroy()
     app.exit(raw.qualified ? 0 : 1)

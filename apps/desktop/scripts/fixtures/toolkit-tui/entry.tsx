@@ -7,10 +7,14 @@ import { api } from '../../../src/renderer/src/lib/api'
 import { createToolkitConfigurationApi } from '../../../src/renderer/src/lib/toolkit-configuration-api'
 import { createRendererSessionEvents } from '../../../src/renderer/src/lib/session-events'
 import { useAppStore } from '../../../src/renderer/src/store'
+import { ToolkitIcon } from '../../../src/renderer/src/components/toolkit/ToolkitIcon'
+import { TOOLKIT_ICON_OPTIONS } from '../../../src/shared/toolkit-preferences'
+import { terminalTheme } from '../../../src/renderer/src/lib/terminal-theme'
 import { useLauncherState } from '../../../src/renderer/src/lib/launcher-state'
 import '../../../src/renderer/src/styles/index.css'
 
 const w = window as any, bridge = w.tuiProof
+const storageWrite = Object.getOwnPropertyDescriptor(Storage.prototype, 'setItem')!
 const setup = await bridge.seed(await api.config.get())
 api.config.get = () => bridge.get()
 api.config.save = (next, expected) => bridge.save(next, expected)
@@ -35,6 +39,21 @@ while (useAppStore.getState().loading || !useAppStore.getState().config) await n
 useAppStore.setState({ activeWorkspaceId: setup.workspaceId, mainSurface: 'workbench', toolsOpen: false, projectRailOpen: false })
 w.tuiScene = { ready: true, attachments, writes, keys, setup,
   config: () => useAppStore.getState().config,
+  preference: (id: string) => useAppStore.getState().toolkitPresentation[id],
+  saveWarning: () => useAppStore.getState().workbenchSaveWarning,
+  failPreferenceStorage: (fail: boolean) => { Object.defineProperty(Storage.prototype, 'setItem', fail ? { ...storageWrite, value(this: Storage, key: string, value: string) {
+    if (key === 'agentmux-workbench-v1') throw new DOMException('Private preference storage unavailable', 'QuotaExceededError')
+    return storageWrite.value.call(this, key, value)
+  } } : storageWrite) },
+  palette: (id: any) => terminalTheme(id),
+  iconSheet: () => {
+    const host = document.createElement('div')
+    Object.assign(host.style, { position: 'fixed', inset: '80px 200px', zIndex: '1000', overflow: 'auto', padding: '24px', background: 'var(--surface-0)', color: 'var(--text)', border: '1px solid var(--line)', borderRadius: '12px' })
+    document.body.append(host)
+    const root = createRoot(host)
+    root.render(<><h2>Tool icons · 12 / 14 / 16 px</h2><div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>{TOOLKIT_ICON_OPTIONS.map(option => <div key={option.value} style={{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 40 }}>{[12, 14, 16].map(size => <ToolkitIcon key={size} icon={option.value} size={size} />)}<span>{option.value}</span></div>)}</div></>)
+    w.tuiScene.closeIconSheet = () => { root.unmount(); host.remove() }
+  },
   toolkit: async (id: string) => api.toolkit.get(id),
   editor: async () => {
     const { editor } = await import('monaco-editor')
