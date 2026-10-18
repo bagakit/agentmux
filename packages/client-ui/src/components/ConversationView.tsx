@@ -1,4 +1,5 @@
 import { ConversationBodyWorkContext } from './ConversationProgressiveBody.js'
+import { ConversationReadingCommit } from './ConversationReadingCommit.js'
 import type { ConversationReadingGeometry } from '../lib/conversation-body-work.js'
 import { ConversationCoverage } from './ConversationCoverage.js'
 import { CapturedProcessRecord } from './CapturedProcessRecord.js'
@@ -243,7 +244,7 @@ export const ConversationView = memo(function ConversationView({
       </div>
 
   }
-  return <ConversationBodyWorkContext.Provider value={bodyScope}><section ref={layout.root} className="conversation-native-thread" aria-label="Conversation"
+  return <ConversationBodyWorkContext.Provider value={bodyScope}><ConversationReadingCommit work={layout.bodyWork} preserve={layout.preserve}><section ref={layout.root} className="conversation-native-thread" aria-label="Conversation"
     data-native-provider={page?.source.providerId} data-native-source={describedRecords.some(record => record.original.kind === 'captured') || insertions?.length || !page ? undefined : JSON.stringify([page.source.providerId, page.source.nativeSessionId])}>
     <ConversationCoverage coverage={projection.coverage} {...(onLocateRecord ? { onLocate: onLocateRecord } : {})} />
     {layout.held ? <p className="conversation-metrics__notice" role="status">{layout.reason === 'anchor' ? '保留当前阅读位置，移开后更新消息。' : layout.reason === 'focus' ? '保留当前焦点，移开后更新消息。' : '保留选区，取消选择后更新已确认的消息关系。'}</p> : null}
@@ -256,7 +257,7 @@ export const ConversationView = memo(function ConversationView({
       {...(page ? { nativeSourceKey: JSON.stringify([page.source.providerId, page.source.nativeSessionId]) } : {})}
       {...(insertions ? { insertions } : {})}
       renderRecord={renderRecord} {...(renderProcess ? { renderProcess } : {})} {...(recordBoundary ? { recordBoundary } : {})} />
-  </section></ConversationBodyWorkContext.Provider>
+  </section></ConversationReadingCommit></ConversationBodyWorkContext.Provider>
 })
 
 function recordTitle(item: AgentSessionHistoryItem): string {

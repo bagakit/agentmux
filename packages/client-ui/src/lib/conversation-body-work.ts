@@ -111,8 +111,9 @@ export class ConversationBodyWork {
       if (this.mounting === node) { this.mounting = null; this.schedule() }
     }
   }
-  capture(): void {
+  capture(cold = false): void {
     if (!this.available()) return
+    if (this.geometry?.following()) return
     if (this.geometry?.captureAnchor) { this.geometry.captureAnchor(); this.anchorCaptured = true; return }
     const viewport = this.viewport
     if (!viewport) return
@@ -127,7 +128,7 @@ export class ConversationBodyWork {
       this.anchor = { node: selectedNode, viewport, offset: selectedRect.top - bounds.top }; this.anchorCaptured = true; return
     }
     let first: Anchor | null = null
-    for (const shell of this.near) {
+    for (const shell of this.near.size || !cold ? this.near : this.shells) {
       if (!this.shells.has(shell)) continue
       const node = conversationReadingNode(shell)
       if (!node) continue
@@ -182,10 +183,10 @@ export class ConversationBodyWork {
         if (gap < distance) { distance = gap; next = this.bodies.get(node) }
       }
       if (!next) return
-      this.capture(); this.bodies.delete(next.node); this.observer?.unobserve(next.node); this.near.delete(next.node)
+      this.bodies.delete(next.node); this.observer?.unobserve(next.node); this.near.delete(next.node)
       this.mounting = next.node
       next.mount()
-      // The component commit restores before scheduling another first mount.
+      // Its before-mutation snapshot captures the current reader before the body commits.
     })
   }
 }
