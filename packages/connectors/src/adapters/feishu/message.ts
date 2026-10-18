@@ -102,7 +102,7 @@ function postBody(content: string, mentions: FeishuMessageEvent['event']['messag
 
 export function projectFeishuMessage(payload: FeishuMessageEvent, application: ConnectionApplication, botOpenId: string): VerifiedIngressEvent {
   const { message, sender } = payload.event
-  if (sender.sender_type !== 'user' || message.chat_type !== 'group') feishuFailure('FEISHU_EVENT_OUTSIDE_SCOPE')
+  if (sender.sender_type !== 'user' || !['group', 'p2p'].includes(message.chat_type)) feishuFailure('FEISHU_EVENT_OUTSIDE_SCOPE')
   let body = '', mentioned = false, unsupported = message.message_type !== 'text' && message.message_type !== 'post' || typeof message.content !== 'string'
   if (!unsupported) {
     try {
@@ -114,6 +114,7 @@ export function projectFeishuMessage(payload: FeishuMessageEvent, application: C
     } catch { unsupported = true }
   }
   return {
+    conversationKind: message.chat_type === 'p2p' ? 'direct' : 'group',
     eventId: payload.header.event_id, messageId: message.message_id, externalConversationId: message.chat_id,
     actor: { application: { ...application }, idType: 'open_id', userId: feishuIdentity(sender.sender_id?.open_id) },
     body, selection: mentioned ? 'mention' : 'message',
