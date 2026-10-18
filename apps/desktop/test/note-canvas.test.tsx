@@ -23,7 +23,7 @@ import { NoteLinksPanel } from '../src/renderer/src/components/NoteLinksPanel'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { noteCanvasScopeKey } from '../src/renderer/src/lib/note-canvas-state'
-import { composerDOM } from './helpers/composer-dom-fixture'
+import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
 import { installNoteCanvasBlockRows } from './helpers/note-canvas-block-dom'
 import { GRAPHITE_THEME, mountThemeRuntime, previewTheme, serializeThemeFile } from '@agentmux/client-ui/theme'
@@ -294,9 +294,17 @@ it('keeps newer bytes out of an older card and refreshes explicitly without repl
   await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-reader')?.textContent).toContain('Later saved bytes'))
   expect(api.notebooks.graph).toHaveBeenCalledTimes(2)
   const readCount = vi.mocked(api.notebooks.content).mock.calls.length
-  await act(async () => useAppStore.setState({ documents: { 'notes\0target.note.md': { path: 'target.note.md', content: body('target', 'Unsaved draft is kept'), revision: 'draft' } }, dirtyDocuments: { 'notes\0target.note.md': true }, sessions: [...useAppStore.getState().sessions] }))
+  const saved = await readFile(join(directory, 'target.note.md'), 'utf8')
+  await act(async () => useAppStore.setState({ config: { ...composerConfig, workspaces: [{ id: 'notes', hostId: 'local', path: directory, name: 'Notes', kind: 'folder' }] }, documents: { 'notes\0target.note.md': { path: 'target.note.md', content: body('target', 'Unsaved draft is kept'), revision: 'draft' } }, dirtyDocuments: { 'notes\0target.note.md': true }, sessions: [...useAppStore.getState().sessions] }))
+  const target = () => dom.container.querySelector('.react-flow__node[data-id="target"]')!
+  await vi.waitFor(() => expect(target().querySelector('.note-canvas-reader')?.textContent).toContain('Unsaved draft is kept'))
+  await act(async () => target().querySelector<HTMLButtonElement>('[aria-label="Saved original"]')!.click())
+  await vi.waitFor(() => expect(target().querySelector('.note-canvas-reader')?.textContent).toContain('Later saved bytes'))
+  await act(async () => target().querySelector<HTMLButtonElement>('[aria-label="Current draft"]')!.click())
+  await vi.waitFor(() => expect(target().querySelector('.note-canvas-reader')?.textContent).toContain('Unsaved draft is kept'))
   expect(api.notebooks.graph).toHaveBeenCalledTimes(2); expect(api.notebooks.content).toHaveBeenCalledTimes(readCount)
-  expect(dom.container.querySelector('.note-canvas-reader')?.textContent).toContain('Later saved bytes')
+  expect(await readFile(join(directory, 'target.note.md'), 'utf8')).toBe(saved)
+  expect(useAppStore.getState().documents['notes\0target.note.md']?.content).toContain('Unsaved draft is kept')
 })
 
 it('retains the last usable graph on failed refresh and aborts a hidden pending original observation', async () => {
