@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import type { MetricsObservation, RendererAllocationsResult, RendererPerformanceScene } from '@agentmux/core/control'
 import type { PerformanceSceneState } from '../../lib/use-performance-scene'
-import { CaptureResult, currentPerformanceCaptureTarget, downloadPerformanceJSON, downloadPerformanceTrace } from './PerformanceCapture'
+import { CaptureResult, currentPerformanceCaptureTarget } from './PerformanceCapture'
+import { downloadPerformanceJSON, downloadPerformanceTrace } from './performance-export'
 
 const bytes = (value: number) => value >= 1048576 ? `${(value / 1048576).toFixed(1)} MiB` : value >= 1024 ? `${(value / 1024).toFixed(1)} KiB` : `${value} B`
 const time = (value: number) => new Date(value).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
