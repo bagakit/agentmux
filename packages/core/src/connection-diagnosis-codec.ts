@@ -1,4 +1,5 @@
 import { AgentMuxError } from './errors.js'
+import { parseIngressContextObservation } from './ingress-codec.js'
 import { connectionDiagnosisIntakeCodes, connectionDiagnosisRecordingCodes, connectionDiagnosisSourceCodes, connectionDiagnosisWindowLimit, type ConnectionDiagnosis, type ConnectionDiagnosisInput, type ConnectionDiagnosisReading, type ConnectionGroupDiagnosis } from './connection-diagnosis-contract.js'
 
 function fail(): never { throw new AgentMuxError('The bounded connection diagnosis is malformed or belongs to another target.', 'INVALID_CONNECTION_DIAGNOSIS') }
@@ -78,7 +79,7 @@ function group(value: unknown, request: ConnectionDiagnosisInput): ConnectionGro
   const incoming = reading(p.incoming, value => {
     const page = object(value, ['beforeIngressId', 'next', 'rows']); if (page.beforeIngressId !== (request.beforeIngressId ?? null)) return fail()
     const rows = array(page.rows, value => {
-      const i = object(value, ['ingressId', 'sourceConnectionId', 'kind', 'state', 'code', 'codeRecorded', 'bindingId', 'bindingRevision', 'targetConnectionId', 'scope', 'inputOperationId', 'coreStatus', 'coreObservation', 'nativeAdoption', 'waiting', 'recording'])
+      const i = object(value, ['ingressId', 'sourceConnectionId', 'kind', 'state', 'code', 'codeRecorded', 'bindingId', 'bindingRevision', 'targetConnectionId', 'scope', 'inputOperationId', 'coreStatus', 'coreObservation', 'nativeAdoption', 'waiting', 'recording', 'context'])
       const bindingId = nullable(i.bindingId, id), bindingRevision = nullable(i.bindingRevision, value => count(value, 1)), targetConnectionId = nullable(i.targetConnectionId, id), inputOperationId = nullable(i.inputOperationId, id)
       const rowScope = member(i.scope, ['current-binding', 'other-binding', 'group-event'] as const)
       if (rowScope === 'group-event' ? bindingId !== null || bindingRevision !== null || targetConnectionId !== null || inputOperationId !== null : !bindingId || !bindingRevision || !targetConnectionId) return fail()
@@ -97,7 +98,8 @@ function group(value: unknown, request: ConnectionDiagnosisInput): ConnectionGro
       })
       const coreStatus = nullable(i.coreStatus, value => member(value, ['waiting', 'stopped', 'terminal-confirmed', 'admitted', 'not-applied', 'unknown', 'saved', 'bytes-accepted', 'hook-written', 'acp-acknowledged'] as const))
       if ((rowScope !== 'current-binding' || inputOperationId === null) && (coreStatus !== null || waiting !== null || i.nativeAdoption !== null)) return fail()
-      return { ingressId: id(i.ingressId), sourceConnectionId: id(i.sourceConnectionId), kind: member(i.kind, ['message', 'action'] as const), state: member(i.state, ['received', 'refused', 'claimed'] as const), code: nullable(i.code, value => member(value, connectionDiagnosisIntakeCodes)), codeRecorded: bool(i.codeRecorded), bindingId, bindingRevision, targetConnectionId, scope: rowScope, inputOperationId, recording, coreStatus, waiting, coreObservation: member(i.coreObservation, ['not-started', 'observed', 'unavailable'] as const), nativeAdoption: nullable(i.nativeAdoption, value => member(value, ['unknown'] as const)) }
+      if (i.context !== undefined && (rowScope !== 'current-binding' || inputOperationId === null || i.kind !== 'message')) return fail()
+      return { ingressId: id(i.ingressId), sourceConnectionId: id(i.sourceConnectionId), kind: member(i.kind, ['message', 'action'] as const), state: member(i.state, ['received', 'refused', 'claimed'] as const), code: nullable(i.code, value => member(value, connectionDiagnosisIntakeCodes)), codeRecorded: bool(i.codeRecorded), bindingId, bindingRevision, targetConnectionId, scope: rowScope, inputOperationId, recording, coreStatus, waiting, coreObservation: member(i.coreObservation, ['not-started', 'observed', 'unavailable'] as const), nativeAdoption: nullable(i.nativeAdoption, value => member(value, ['unknown'] as const)), ...(i.context === undefined ? {} : { context: parseIngressContextObservation(i.context) }) }
     })
     if (new Set(rows.map(row => row.ingressId)).size !== rows.length) return fail()
     return { beforeIngressId: nullable(page.beforeIngressId, id), next: nullable(page.next, id), rows }

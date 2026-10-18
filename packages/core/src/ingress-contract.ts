@@ -64,10 +64,17 @@ export type ConnectionIngressAction = {
 export type ConnectionIngressRecord = ConnectionIngressMessage | ConnectionIngressAction
 export type ConnectionIngressInspectInput = { ingressId: string }
 export type ConnectionIngressListInput = { connectionId: string; bindingId?: string; afterIngressId?: string; limit?: number }
+/** Safe original context preparation/position facts. No quoted bodies or actor identities. */
+export type ConnectionIngressContextObservation = {
+  coverage: import('./channel-quote.js').ChannelTranscriptQuote['coverage']
+  quotedMessages: number; gapCount: number; positionMessageId: string | null
+  observation: 'observed' | 'unavailable'
+}
 export type ConnectionIngressInspection = {
   ingress: ConnectionIngressRecord | null
   /** Original Core read only. An absent receipt never licenses a replay. */
   inputReceipt: AgentInputSubmissionReceipt | null
+  context?: ConnectionIngressContextObservation
   /** Safe projection of the original Core historical-question admission, not another input journal. */
   questionReceipt?: { agentSessionId: string; expectedRun: { runId: string }; operationId: string;
     source: import('./types.js').AgentSessionHistorySource; recordId: string; questionIds: string[]; outcome: 'saved' | 'unknown' | 'not-applied' | 'submitted' } | null

@@ -114,11 +114,12 @@ export function parseIngressResult<M extends ConnectionIngressMethod>(method: M,
     return { ingress, authority: p.authority, ...(p.code === undefined ? {} : { code: p.code }) } as ConnectionIngressResultMap[M]
   }
   if (method === 'connection.ingress.inspect') {
-    const p = object(value, ['ingress', 'inputReceipt', 'interactionReceipt', 'questionReceipt', 'observation']), ingress = p.ingress === null ? null : parseConnectionIngressRecord(p.ingress)
+    const p = object(value, ['ingress', 'inputReceipt', 'interactionReceipt', 'questionReceipt', 'observation', 'context']), ingress = p.ingress === null ? null : parseConnectionIngressRecord(p.ingress)
     const receipt = p.inputReceipt === null ? null : parseAgentInputSubmissionReceipt(p.inputReceipt)
     if (ingress && ingress.ingressId !== (input as ConnectionIngressParamsMap['connection.ingress.inspect']).ingressId || !['not-started', 'observed', 'unavailable'].includes(String(p.observation))) fail()
     if (!ingress?.input && (receipt || p.observation !== 'not-started') || ingress?.input && p.observation === 'not-started' || p.observation === 'unavailable' && receipt) fail()
     if (ingress?.kind === 'action') {
+      if (p.context !== undefined) fail()
       if (ingress.input?.responseKind === 'question') {
         if (p.interactionReceipt !== undefined || receipt) fail()
         let questionReceipt: import('./ingress-contract.js').ConnectionIngressInspection['questionReceipt']
@@ -145,7 +146,10 @@ export function parseIngressResult<M extends ConnectionIngressMethod>(method: M,
     }
     if (p.interactionReceipt !== undefined || p.questionReceipt !== undefined) fail()
     if (receipt && (receipt.key.kind !== 'message' || receipt.key.messageId !== ingress?.input?.messageId || receipt.key.agentSessionId !== ingress?.input?.agentSessionId || !equal(receipt.key.expectedRun, ingress?.input?.expectedRun) || receipt.originalControlOperationId !== ingress?.input?.operationId)) fail()
-    return { ingress, inputReceipt: receipt, observation: p.observation } as ConnectionIngressResultMap[M]
+    const context = p.context === undefined ? undefined : parseIngressContextObservation(p.context)
+    if (context && (!ingress?.input?.channelQuote || context.coverage !== ingress.input.channelQuote.coverage ||
+        context.quotedMessages !== ingress.input.channelQuote.records.length || context.gapCount !== ingress.input.channelQuote.gaps.length)) fail()
+    return { ingress, inputReceipt: receipt, observation: p.observation, ...(context ? { context } : {}) } as ConnectionIngressResultMap[M]
   }
   const p = object(value, ['ingresses', 'nextAfterIngressId']), expected = input as ConnectionIngressParamsMap['connection.ingress.ls']
   if (!Array.isArray(p.ingresses) || p.ingresses.length > (expected.limit ?? 25)) fail()
@@ -154,4 +158,18 @@ export function parseIngressResult<M extends ConnectionIngressMethod>(method: M,
   const nextAfterIngressId = p.nextAfterIngressId === null ? null : text(p.nextAfterIngressId)
   if (nextAfterIngressId !== null && nextAfterIngressId !== ingresses.at(-1)?.ingressId) fail()
   return { ingresses, nextAfterIngressId } as ConnectionIngressResultMap[M]
+}
+
+export function parseIngressContextObservation(value: unknown): import('./ingress-contract.js').ConnectionIngressContextObservation {
+  const p = object(value, ['coverage', 'quotedMessages', 'gapCount', 'positionMessageId', 'observation'])
+  if (typeof p.coverage !== 'string' || !['complete', 'partial', 'unavailable'].includes(p.coverage) ||
+      typeof p.observation !== 'string' || !['observed', 'unavailable'].includes(p.observation) ||
+      !Number.isSafeInteger(p.quotedMessages) || Number(p.quotedMessages) < 0 ||
+      !Number.isSafeInteger(p.gapCount) || Number(p.gapCount) < 0 ||
+      (p.coverage === 'complete' ? Number(p.gapCount) !== 0 : Number(p.gapCount) === 0) ||
+      p.observation === 'unavailable' && p.positionMessageId !== null) fail()
+  return { coverage: p.coverage as import('./ingress-contract.js').ConnectionIngressContextObservation['coverage'],
+    quotedMessages: Number(p.quotedMessages), gapCount: Number(p.gapCount),
+    positionMessageId: p.positionMessageId === null ? null : text(p.positionMessageId),
+    observation: p.observation as 'observed' | 'unavailable' }
 }

@@ -44,6 +44,7 @@ export type ConnectionDiagnosisIntake = {
   recording: { state: 'recorded' | 'unavailable' | 'refused' | 'not-started'; code?: typeof connectionDiagnosisRecordingCodes[number] } | null
   coreStatus: AgentInputSubmissionReceipt['status'] | 'saved' | 'bytes-accepted' | 'hook-written' | 'acp-acknowledged' | null
   coreObservation: 'not-started' | 'observed' | 'unavailable'; nativeAdoption: 'unknown' | null
+  context?: import('./ingress-contract.js').ConnectionIngressContextObservation
   waiting: { phase: AgentInputWaitReason['phase']; reason: AgentInputWaitReason['reason']; wake: AgentInputWaitReason['wake'] } | null
 }
 export type ConnectionGroupDiagnosis = {
