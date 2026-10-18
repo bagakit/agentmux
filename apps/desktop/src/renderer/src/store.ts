@@ -6332,8 +6332,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         if (live.control.agentSessionId !== savedContinuation.agentSessionId || live.providerId !== savedContinuation.providerId || live.workspacePath !== savedContinuation.workspacePath || live.control.run.runId !== savedContinuation.initialDelivery?.condition.expectedRun.runId) throw controlFailure('STALE_AGENT_SESSION', 'The original Session changed after its start was saved. Its loop and healthy Agent are retained.')
       }
       const attachedSessionId = originalDispatch?.agentSessionId ?? sessionId ?? (assigneeSessionIds.length === 1 ? assigneeSessionIds[0] : null)
-      if (!attachedSessionId || !originalDispatch && !savedContinuation && !assigneeSessionIds.includes(attachedSessionId)) throw controlFailure('INVALID_CONTROL_REQUEST', 'Choose an exact responsible Session before starting. With multiple assignees, select this start’s Agent explicitly; creating or saving an Agent does not start work.')
-      const session = sourceForStart(attachedSessionId, originalDispatch?.hostId ?? savedContinuation?.hostId)
+      let session: Extract<SessionSnapshot, { kind: 'agent' }>
+      try {
+        if (!attachedSessionId || !originalDispatch && !savedContinuation && !assigneeSessionIds.includes(attachedSessionId)) throw controlFailure('INVALID_CONTROL_REQUEST', 'Choose an exact responsible Session before starting. With multiple assignees, select this start’s Agent explicitly; creating or saving an Agent does not start work.')
+        session = sourceForStart(attachedSessionId, originalDispatch?.hostId ?? savedContinuation?.hostId)
+      } catch (error) {
+        // Only local rejection before this fresh finite preparation is known not applied.
+        // Existing operations, Loop preparation and any owner/transport call keep unknown.
+        if (!originalDispatch && !continuation && error instanceof Error) Object.assign(error, { controlFailure: { disposition: 'not_applied', confirmedInputBytes: null } })
+        throw error
+      }
       const original = savedContinuation?.initialDelivery
       const prompt = originalDispatch?.prompt ?? original?.prompt ?? (current.description.trim() || current.title)
       const prepared = await api.demands.prepareGoalStart(demandId, originalDispatch ? { operationId: originalDispatch.operationId, agentSessionId: originalDispatch.agentSessionId, hostId: originalDispatch.hostId, runId: originalDispatch.runId, execution: originalDispatch.execution, prompt: originalDispatch.prompt, ...(originalDispatch.loopId ? { loopId: originalDispatch.loopId, alignmentRevision: originalDispatch.alignmentRevision } : {}) } : {
