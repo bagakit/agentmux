@@ -28,6 +28,17 @@ reasoning, tools and platform notices are not answers. message ls/read cover ori
 participation. Read leaf help for the exact Host, source, cursor and authorization contract.
 Discovery never grants access to another Agent's private messages or working surface.
 
+Trusted first-party human inputs saved by Core also appear in the original captured
+conversation while waiting. The same inputRef and record survive rejoin and dispatch;
+recorded means its public content is saved. inputSubmission retains the original
+waiting/stopped/terminal-confirmed/admitted/not-applied/unknown receipt and observation.
+Terminal confirmation proves ordered input bytes; Native admission is not Agent completion.
+Use agent input ls/inspect for the original control and agent conversation inspect/changes
+for its read projection. Generated context remains separate from the public user body.
+The captured frontier's inputJournal and the record's inputOrigin preserve original
+journal membership across recovery; a later capture or status change never moves an
+older input past an audience's sharing cut. Missing old cut proof stays unconfirmed.
+
 Load only the journey needed now:
 - Independent Session communication: amux message --skill for the full shared contract.
 - Create an Agent: amux agent open --help for configured Executor discovery and opening workflow.
