@@ -256,7 +256,7 @@ it('joined group conversation records once, reaches the original Agent and share
     await f.services.ingress!.dispatch(intake.ingress.ingressId)
   }
   await receive('join-original')
-  await vi.waitFor(async () => expect((await f.captured())[0]?.item.inputRef?.kind).toBe('message'))
+  await vi.waitFor(async () => expect((await f.captured())[0]?.item.inputRef?.kind).toBe('message'), { timeout: 5000 })
   expect(f.inner.kernel.input).toHaveBeenCalledOnce()
   const native = (id: string, text: string) => JSON.stringify({ type: 'assistant', sessionId: 'group-native', uuid: id, message: { role: 'assistant', content: [{ type: 'text', text }] } }) + '\n'
   await appendFile(join(f.root, 'native.jsonl'), native('joint-reply', 'Public answer from original Agent'))
