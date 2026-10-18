@@ -6,7 +6,6 @@ import { ProjectActivity } from './ProjectActivity'
 import { SpaceSectionHeader } from './SpaceSectionHeader'
 import { MOTE_DIRECTORY_VIEW_DEFAULT, MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT, type SessionSnapshot, type ScratchTopicSnapshot, type WorkspaceRecord } from '../../../shared/contracts'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, MOTE_SOUL_PATH, scratchTopicDirectoryName, scratchTopicPhysicalPath } from '../../../shared/scratch-topics'
-import { api } from '../lib/api'
 import { useScratchTopics } from '../hooks/useScratchTopics'
 import { useTopicSessions, useTopicSessionPaths } from '../lib/topic-session-subscriptions'
 import { scratchMoteTopics } from '../lib/scratch-topic-snapshots'
@@ -20,7 +19,7 @@ import { originalTopicAddress, directoryIdentity } from '../../../shared/space-a
 import { TopicCategoryDialog } from './TopicCategoryDialog'
 import { orderTopics, partitionPinned } from '../lib/topic-order'
 import { rowAttention, rowAttentionLabel } from '../lib/row-attention'
-import { fileNavigationSelection, useAppStore } from '../store'
+import { useAppStore } from '../store'
 import { matchesSpaceQuery } from '../lib/space-tree-navigation'
 import { categorySpaceIconTarget, topicSpaceIconTarget, type SpaceIconOverrides, type SpaceIconTarget } from '../lib/space-object-appearance'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
@@ -108,35 +107,16 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, vi
   async function openMote(id: string, edit = false): Promise<boolean> {
     pendingOpen.current?.abort()
     const controller = new AbortController(); pendingOpen.current = controller
-    const selected = fileNavigationSelection(useAppStore.getState())
-    const cancel = () => controller.abort()
-    const unsubscribe = useAppStore.subscribe(state => {
-      if (fileNavigationSelection(state) !== selected) cancel()
-    })
-    // FocusScope and our own reveal restore focus without a new human intent.
-    const events = ['pointerdown', 'keydown', 'input'] as const
-    for (const event of events) document.addEventListener(event, cancel, true)
-    let released = false
-    const release = () => {
-      if (released) return
-      released = true; unsubscribe()
-      for (const event of events) document.removeEventListener(event, cancel, true)
-      controller.signal.removeEventListener('abort', release)
-    }
-    controller.signal.addEventListener('abort', release, { once: true })
     try {
-      await api.scratch.ensureMote(workspace.id, id)
-      if (controller.signal.aborted) return false
-      // The original Topic owner fences its own read/reveal. Stop observing before
-      // handing it navigation, so its accepted activation is never self-cancelled.
-      release()
-      const opened = await openTopic(id, workspace.id, { signal: controller.signal })
+      // Existing directory navigation does not create or repair files. The Topic
+      // owner reveals its original selection before refreshing metadata.
+      const opened = await openTopic(id, workspace.id, { signal: controller.signal,
+        ...(!edit ? { onRevealed: () => contentPresentation?.expand() } : {}) })
       if (!opened || controller.signal.aborted) return false
       if (edit) await openFile(`${scratchTopicDirectoryName(id)}/${MOTE_SOUL_PATH}`, undefined, undefined, workspace.id)
-      else contentPresentation?.expand()
       return true
     } catch (cause) { reportError(cause); return false }
-    finally { release(); if (pendingOpen.current === controller) pendingOpen.current = null }
+    finally { if (pendingOpen.current === controller) pendingOpen.current = null }
   }
 
   function moteSection(objects: typeof motes) {
