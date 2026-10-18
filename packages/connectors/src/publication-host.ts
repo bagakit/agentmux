@@ -197,7 +197,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       const ordered = [...consumed.snapshot.units].reverse() // The Core wire explicitly declares newest-first.
       const resolvedText = await this.resolve(reference, ordered, signal, binding, adapter)
       const questions = adapter.questionActions ? this.options.permissions?.questions?.(binding, ordered) : undefined
-      this.store.commitPage(binding, state.after, page, () => this.authorized(binding), { units: ordered, resolvedText, fragmentBytes: adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, ...(questions ? { questions } : {}) })
+      this.store.commitPage(binding, state.after, page, () => this.authorized(binding), { units: ordered, resolvedText, fragmentBytes: adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, ...(adapter.fragmentText ? { fragmentText: payload => adapter.fragmentText!(payload, binding) } : {}), ...(questions ? { questions } : {}) })
       after = page.checkpoint; lane.view = page.window.view!; lane.viewId = page.window.id; lane.read = { after }
       if (lane.watchViewId !== lane.viewId) lane.dirty = true
       if (!page.more) { lane.read = undefined; break }
@@ -288,7 +288,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
           if (cursor === page.nextCursor) throw Error('Original part continuation made no progress')
           cursor = page.nextCursor
         }
-        for (const unit of units) this.store.recoverPart(binding, gap, unit, await this.resolve(reference, [unit], signal, binding, adapter), () => this.authorized(binding), adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes)
+        for (const unit of units) this.store.recoverPart(binding, gap, unit, await this.resolve(reference, [unit], signal, binding, adapter), () => this.authorized(binding), adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, adapter.fragmentText ? payload => adapter.fragmentText!(payload, binding) : undefined)
       } catch { signal.throwIfAborted() /* Original exact gap remains durable and other contents continue. */ }
     }
   }

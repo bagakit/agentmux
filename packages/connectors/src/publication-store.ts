@@ -35,9 +35,11 @@ export type BindingLifecyclePayload = {
   scope: RoomBinding['scope']
   synchronization: boolean | null
 }
+export type PublicationTextFragment = { text: string; presentationContext?: { before: string; after: string } }
 export type PublicationPayload = PermissionPublicationPayload | QuestionPublicationPayload | BindingLifecyclePayload | ImagePublicationPayload | FilePublicationPayload | {
   kind: 'speech'
   text: string
+  presentationContext?: PublicationTextFragment['presentationContext']
   inputSubmission?: import('@agentmux/core').AgentInputSubmissionObservation
   phase?: 'progress' | 'final'
   questions?: NonNullable<AgentSessionHistoryItem['questionRequest']>['questions']
@@ -70,6 +72,7 @@ export function publicDelivery(operation: PublicationOperation): ConnectionDeliv
 }
 export type PublicationPageOptions = {
   fragmentBytes?: number
+  fragmentText?: (payload: Extract<PublicationPayload, { kind: 'speech' }>) => readonly PublicationTextFragment[] | undefined
   units: readonly ConversationUnit[]
   resolvedText: ReadonlyMap<string, ResolvedPublicationPart>
   questions?: ReadonlyMap<string, QuestionPublicationPayload>
@@ -86,7 +89,7 @@ type RepresentationIntent = { kind: 'representation'; projectionId: string } & P
 type LegacyRepresentationIntent = { kind: 'legacy-representation'; projectionId: string; record: ConversationItemRef; operations: string[]; text: string }
 type RepresentationRow = { ordinal: number; id: string; value: RepresentationIntent | LegacyRepresentationIntent }
 /** Exact UTF-8 text fragments. The adapter declares its supported payload budget before admission. */
-function fragments(payload: Extract<PublicationPayload, { kind: 'speech' }>, byteLimit: number): PublicationPayload[] {
+function fragments(payload: Extract<PublicationPayload, { kind: 'speech' }>, byteLimit: number, fragmentText?: PublicationPageOptions['fragmentText']): PublicationPayload[] {
   if (!Number.isSafeInteger(byteLimit) || byteLimit < 4 || byteLimit > 128 * 1024)
     throw new AgentMuxError('The adapter must declare a bounded publication text budget.', 'INVALID_PUBLICATION_REQUEST')
   const texts: string[] = []
@@ -97,11 +100,14 @@ function fragments(payload: Extract<PublicationPayload, { kind: 'speech' }>, byt
     text += character; bytes += size
   }
   if (text || !texts.length) texts.push(text)
-  return texts.map((part, index) => ({ kind: 'speech', text: part,
+  const selected: readonly PublicationTextFragment[] = fragmentText?.(payload) ?? texts.map(text => ({ text }))
+  if (!selected.length || selected.some(part => typeof part.text !== 'string' || payload.text.length > 0 && !part.text.length) || selected.map(part => part.text).join('') !== payload.text)
+    throw new AgentMuxError('The adapter must retain nonempty publication text fragments.', 'INVALID_PUBLICATION_REQUEST')
+  return selected.map((part, index) => ({ kind: 'speech', text: part.text, ...(part.presentationContext ? { presentationContext: part.presentationContext } : {}),
     ...(payload.inputSubmission ? { inputSubmission: payload.inputSubmission } : {}),
     ...(payload.relay ? { relay: payload.relay } : {}),
     ...(payload.phase === undefined ? {} : { phase: payload.phase }),
-    ...(index !== texts.length - 1 || payload.questions === undefined ? {} : { questions: payload.questions }) }))
+    ...(index !== selected.length - 1 || payload.questions === undefined ? {} : { questions: payload.questions }) }))
 }
 
 type RepresentationPart = { text: string; part?: ConversationContentRef; image?: PublicationImage; file?: PublicationFile }
@@ -120,9 +126,9 @@ function representation(parts: readonly RepresentationPart[], phase?: 'progress'
   }
   flush(); return { kind: 'sequence', parts: result }
 }
-function representationFragments(value: RepresentationPayload, bytes: number): ContentPayload[] {
-  return value.kind === 'speech' ? value.text ? fragments(value, bytes) as ContentPayload[] : []
-    : value.parts.flatMap(part => part.kind === 'speech' ? fragments(part, bytes) as ContentPayload[] : [part])
+function representationFragments(value: RepresentationPayload, bytes: number, fragmentText?: PublicationPageOptions['fragmentText']): ContentPayload[] {
+  return value.kind === 'speech' ? value.text ? fragments(value, bytes, fragmentText) as ContentPayload[] : []
+    : value.parts.flatMap(part => part.kind === 'speech' ? fragments(part, bytes, fragmentText) as ContentPayload[] : [part])
 }
 /** Connector-owned publication facts, not another Agent history or lifecycle. Borrows the Host database. */
 export class PublicationStore {
@@ -477,7 +483,7 @@ export class PublicationStore {
         if (mappingConflict) continue
         const materialized = this.materialize(boundary, projectionId, unit, plan, coalesced)
         this.queueRepresentation(boundary, projectionId, unit, materialized, options.fragmentBytes ?? 4096, undefined, undefined,
-          plan.pieces.map(piece => options.questions?.get(conversationRecordId(piece.part.record))).find(value => value !== undefined))
+          plan.pieces.map(piece => options.questions?.get(conversationRecordId(piece.part.record))).find(value => value !== undefined), options.fragmentText)
         // Explicit Core coalescence moves only representation intent. Original
         // platform mappings retire through their normal ordered effects; an
         // unknown predecessor remains inspect-only and keeps its request bytes.
@@ -486,13 +492,13 @@ export class PublicationStore {
       this.database.prepare('UPDATE connector_publication_frontier SET checkpoint_json=? WHERE binding_id=? AND binding_revision=? AND source_key=?').run(encode(page.checkpoint), ...scopeKey(boundary), 'unified')
     })
   }
-  private queueRepresentation(boundary: PublicationBoundary, projectionId: string, unit: ConversationUnit, plan: MaterializedPlan, fragmentBytes: number, event: ConnectionDelivery['event'] = { id: unit.event.id, revision: unit.event.revision }, references: readonly ConversationItemRef[] = [unit.event.reference!, ...unit.records.map(record => record.reference!)], question?: QuestionPublicationPayload): void {
+  private queueRepresentation(boundary: PublicationBoundary, projectionId: string, unit: ConversationUnit, plan: MaterializedPlan, fragmentBytes: number, event: ConnectionDelivery['event'] = { id: unit.event.id, revision: unit.event.revision }, references: readonly ConversationItemRef[] = [unit.event.reference!, ...unit.records.map(record => record.reference!)], question?: QuestionPublicationPayload, fragmentText?: PublicationPageOptions['fragmentText']): void {
     const latest = this.database.prepare('SELECT operation_json,state FROM connector_publication_operation WHERE ordinal IN (SELECT MAX(ordinal) FROM connector_publication_operation WHERE projection_id=? GROUP BY fragment_ordinal) ORDER BY fragment_ordinal').all(projectionId).map(row => this.read(row)!)
     // An unresolved part never withdraws a prior complete platform representation.
     if (!plan.text && !plan.resourceParts?.some(part => part.image || part.file) && !plan.complete) return
     const payload = representation(plan.resourceParts ?? [{ text: plan.text }], plan.phase, plan.relay, '\n\n', plan.inputSubmission)
     const representedQuestion = question && plan.complete && plan.text && payload.kind === 'speech' ? { ...question, text: plan.text, ...(plan.phase ? { phase: plan.phase } : {}) } : undefined
-    const revision = digest(representedQuestion ?? payload), parts: PublicationPayload[] = representedQuestion ? [representedQuestion] : representationFragments(payload, fragmentBytes)
+    const revision = digest(representedQuestion ?? payload), parts: PublicationPayload[] = representedQuestion ? [representedQuestion] : representationFragments(payload, fragmentBytes, fragmentText)
     if (parts.length && latest.length && latest.every(o => o.sourceRevision === revision && o.state !== 'cancelled')) return
     const previous = new Map(latest.map(o => [o.fragment.ordinal, o])), count = Math.max(parts.length, ...latest.map(o => o.fragment.ordinal + 1))
     for (let ordinal = 0; ordinal < count; ordinal++) {
@@ -532,7 +538,7 @@ export class PublicationStore {
       .all(...scopeKey(boundary), after).map(row => ({ ordinal: Number(row.rowid), gap: JSON.parse(String(row.decision_json)).gap }))
   }
   /** Recovery admits only the missing exact part, with no read-cut movement or replay of represented bytes. */
-  recoverPart(boundary: PublicationBoundary, gap: ConnectionDeliveryGap, original: ConversationUnit, resolvedText: ReadonlyMap<string, ResolvedPublicationPart>, authorized: () => boolean, fragmentBytes: number): boolean {
+  recoverPart(boundary: PublicationBoundary, gap: ConnectionDeliveryGap, original: ConversationUnit, resolvedText: ReadonlyMap<string, ResolvedPublicationPart>, authorized: () => boolean, fragmentBytes: number, fragmentText?: PublicationPageOptions['fragmentText']): boolean {
     if (!gap.anchor || !gap.part || !gap.event) return false
     const event = gap.event
     const unit = parseConversationUnit(original, { hostId: gap.anchor.frontier.sourceHostId, agentSessionId: boundary.agentSessionId }, gap.anchor.frontier.frontier.scope)
@@ -549,7 +555,7 @@ export class PublicationStore {
       // event/message or substitutes a newer original record.
       if (!represented) return false
       const { projectionId, records } = JSON.parse(String(represented.decision_json)) as { projectionId: string; records: ConversationItemRef[] }
-      this.queueRepresentation(boundary, projectionId, unit, this.materialize(boundary, projectionId, unit, plan, [], gap.part, records), fragmentBytes, event, records)
+      this.queueRepresentation(boundary, projectionId, unit, this.materialize(boundary, projectionId, unit, plan, [], gap.part, records), fragmentBytes, event, records, undefined, fragmentText)
       for (const representation of plan.origins) this.saveDecision(boundary, 'origin-' + digest(representation.part), representation.part.recordRevision, { kind: 'origin', representation })
       this.database.prepare('UPDATE connector_publication_decision SET decision_json=? WHERE rowid=?').run(encode({ ...JSON.parse(String(row.decision_json)), state: 'resolved' }), Number(row.rowid))
       return true
