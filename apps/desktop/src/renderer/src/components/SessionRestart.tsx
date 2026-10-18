@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useRef, useState } from 'react'
 import type { SessionRestartResult } from '../../../shared/contracts'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -40,7 +41,7 @@ export function useSessionRestart(active = true) {
     origin?.focus({ preventScroll: true })
     setFeedback(pending ? 'An original restart is retained. Check its result before sending another request.' : null)
     setRequest({ target: retainAgentMenuTarget({ ...target, control: { ...target.control, run: pending?.previousRun ?? target.control.run } }),
-      name, operationId: pending?.operationId ?? crypto.randomUUID(), submitted: Boolean(pending), canRetry: false })
+      name, operationId: pending?.operationId ?? mintObjectId(), submitted: Boolean(pending), canRetry: false })
   }
 
   async function confirmRestart() {
@@ -55,7 +56,7 @@ export function useSessionRestart(active = true) {
         return
       }
       setRequest({ target: retainAgentMenuTarget(current), name: original.name,
-        operationId: crypto.randomUUID(), submitted: false, canRetry: false })
+        operationId: mintObjectId(), submitted: false, canRetry: false })
       setFeedback('The previous startup failed. Review this new restart before confirming it.')
       return
     }

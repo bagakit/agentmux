@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { type AgentPromptNotApplied } from '@agentmux/core/prompt-condition'
 import { parseQuestionReplyAttempt, questionReplyKey,
   questionReplyState, submitQuestionReply, type ConversationQuestionInput, type ConversationQuestionTarget, type QuestionReplyState } from '@agentmux/client-ui/conversation-question-reply'
@@ -55,7 +56,7 @@ export async function sendConversationQuestionReply(control: AgentSessionControl
   }
   await submitQuestionReply({ sessionId: control.agentSessionId, get,
     create: () => ({ hostId: control.hostId, phase: 'sending', input: { ...structuredClone(input),
-      expectedRun: { ...control.run }, afterSubmissionId: session.promptSubmissionPredecessor ?? null, operationId: crypto.randomUUID() } }),
+      expectedRun: { ...control.run }, afterSubmissionId: session.promptSubmissionPredecessor ?? null, operationId: mintObjectId() } }),
     retain: (next, expected) => retainConversationQuestionReply(control.agentSessionId, key, next, expected),
     submit: original => { assertOwner(); return api.sessions.replyQuestion(control, original) }
   })

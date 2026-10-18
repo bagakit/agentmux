@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { ConversationImage } from '@agentmux/client-ui/components/ConversationImage'
@@ -67,7 +68,7 @@ export function useBrowserOpinionSelection({ source, visible, locked, document, 
         const geometry = screenshotCropGeometry(input.displayWidth, input.displayHeight, 1, input.crop)
         const region = { x: geometry.left / geometry.scale, y: geometry.top / geometry.scale,
           width: geometry.cropWidth / geometry.scale, height: geometry.cropHeight / geometry.scale, space: 'capture-pixels' as const }
-        intent = { scene: original.scene!.reference, frame: frame.scene.reference, operationId: crypto.randomUUID(),
+        intent = { scene: original.scene!.reference, frame: frame.scene.reference, operationId: mintObjectId(),
           region, ...(input.crop ? { crop: { x: region.x, y: region.y, width: region.width, height: region.height } } : {}), png }
         prepared.current = intent
         change({ ...current.current!, selectionPreparation: { operationId: intent.operationId, frame: intent.frame } })

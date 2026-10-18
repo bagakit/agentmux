@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import type { AgentMuxSpaceMutationReport } from '@agentmux/core/control'
 import type { AgentSessionHistoryDescriptor } from '@agentmux/core'
 import type { OpenHttpLinkOrigin } from './open-destination'
@@ -165,7 +166,7 @@ export async function inspectTakeover(source: TakeoverSource): Promise<AgentMuxS
   source = await exactTakeoverSource(source)
   const requestId = await latestTakeoverRequestId(source), state = useAppStore.getState()
   if (!state.spatialRequests[requestId]) return null
-  const result = await state.executeControl({ schemaVersion: 5, requestId: `inspect:${crypto.randomUUID()}`,
+  const result = await state.executeControl({ schemaVersion: 5, requestId: `inspect:${mintObjectId()}`,
     operation: 'space.inspect', target: { requestId } })
   if (result.operation !== 'space.inspect') throw new Error('The original creation inspection returned another operation. Its result is unconfirmed.')
   if (!result.request?.report) throw new Error('The original takeover intent is retained; creation is unconfirmed. Check this same request again.')

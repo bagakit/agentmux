@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useWorkbenchWindowDocument } from '../lib/workbench-document'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { TextInput } from '@agentmux/client-ui/input'
@@ -76,7 +77,7 @@ export function GoalAgentPicker({ demand, role, onSave, onClose }: { demand: Dem
   async function inspectOriginal(original: GoalAgentCreationDraft) {
     setBusy(true); setIssue(null)
     try {
-      const result = await useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: `goal-agent-inspect-${crypto.randomUUID()}`, operation: 'space.inspect', target: { requestId: original.operationId } })
+      const result = await useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: `goal-agent-inspect-${mintObjectId()}`, operation: 'space.inspect', target: { requestId: original.operationId } })
       if (result.operation !== 'space.inspect' || !result.request?.report) { setIssue('The original creation is not yet observed. Its operation is retained; check it again.'); return }
       observe(result.request.report)
     } catch (error) { setIssue(error instanceof Error ? error.message : String(error)) }
@@ -93,7 +94,7 @@ export function GoalAgentPicker({ demand, role, onSave, onClose }: { demand: Dem
     if (mode === 'mote' && (!scratch || !mote)) { setIssue('Choose a Mote from its original directory observation. Existing Agents remain available.'); return }
     if (mode === 'agent' && !workspace) { setIssue('Choose an execution directory for this new Agent.'); return }
     const spaceId = mode === 'mote' ? directoryIdentity(scratch!.hostId, scratchTopicIdentityPath(scratch!, mote!)) : workspaceProjectId(workspace!)
-    const operationId = `goal-agent-create-${crypto.randomUUID()}`
+    const operationId = `goal-agent-create-${mintObjectId()}`
     const original: GoalAgentCreationDraft = { goalId: demand.id, role: role as 'assignees' | 'related', operationId, phase: 'not-dispatched',
       request: { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: operationId, operation: 'agent.open', focus: false,
         content: { kind: 'new-agent', executorId, ...(mode === 'agent' ? { executionWorkspaceId: workspace!.id } : {}) },

@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useCallback } from 'react'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import { useAppStore } from '../store'
@@ -7,7 +8,7 @@ export function useGoalNavigation() {
   const execute = useAppStore(state => state.executeControl)
   return useCallback(async (goalId: string) => {
     try {
-      const result = await execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: crypto.randomUUID(),
+      const result = await execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(),
         operation: 'focus', target: { kind: 'goal', goalId }, inputPolicy: 'preserve' })
       if (result.operation !== 'focus' || result.navigation.state === 'rejected' || result.navigation.state === 'unconfirmed') {
         const issue = result.operation === 'focus' ? result.issues.find(issue => issue.step === 'target' || issue.step === 'navigation') : undefined

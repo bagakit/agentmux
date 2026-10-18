@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { canFormatFile } from './format-support'
 
 export type FileFormatResult = { status: 'formatted' | 'unchanged' | 'unsupported' | 'unavailable' | 'stale' | 'cancelled' | 'failed'; message?: string }
@@ -41,7 +42,7 @@ export async function formatFileRegion(regionId: string, signal?: AbortSignal): 
   try { worker = new Worker(new URL('./format-worker.ts', import.meta.url), { type: 'module' }) }
   catch { return { status: 'unavailable', message: 'The formatter could not start. The draft is unchanged.' } }
   return await new Promise(resolve => {
-    const id = crypto.randomUUID()
+    const id = mintObjectId()
     let finished = false
     let unwatch = () => {}
     const stopWatching = () => { const cleanup = unwatch; unwatch = () => {}; cleanup() }

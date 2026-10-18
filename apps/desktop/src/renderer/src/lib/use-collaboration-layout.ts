@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useRef, useState } from 'react'
 import type { CollaborationLayoutInput, CollaborationLayoutBox, CollaborationLayoutRequest, CollaborationLayoutResponse } from './collaboration-layout-engine'
 import { translateCollaborationPath, type CollaborationPath } from './collaboration-layout-engine'
@@ -30,7 +31,7 @@ export function useCollaborationLayout(input: CollaborationLayoutInput, active: 
       if (!current()) return
       try { worker = createCollaborationLayoutWorker() }
       catch (error) { setBusy(false); failure(`Map layout could not start: ${error instanceof Error ? error.message : String(error)}. Original Agents and sources are retained.`); return }
-      const id = crypto.randomUUID()
+      const id = mintObjectId()
       const requestedAnchor = readingAnchor.current
       let layoutFailed = false
       let offset = { x: 0, y: 0 }

@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useMemo, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useVisibleWork } from '@agentmux/client-ui/use-visible-work'
@@ -24,7 +25,7 @@ export function DiagramFilePreview({ content, kind, path, visible = true, page, 
   useEffect(() => {
     if (!inView) return
     let current = true, url: string | undefined
-    const id = crypto.randomUUID()
+    const id = mintObjectId()
     void api.files.renderDiagram({ id, kind, content, theme, ...(page !== undefined ? { page } : {}) }).then(value => {
       if (!current || value.id !== id) return
       if (value.error) setResult({ owner, source: content, kind, page, attempt, error: value.error })

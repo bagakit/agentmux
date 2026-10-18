@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
@@ -32,7 +33,7 @@ export function GoalContinuationControl({ demand, onRefresh, onChooseSupervisor,
   const attempt = useRef<{ goalId: string; sessionId: string; intervalMs: number; alignmentRevision: number; operationId: string } | undefined>(undefined)
   async function inspect(goalId = demand.id, owner = scope.current) {
     inspected.current = owner
-    const result = await execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: crypto.randomUUID(), operation: 'demand.show', demandId: goalId })
+    const result = await execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(), operation: 'demand.show', demandId: goalId })
     if (scope.current !== owner || result.operation !== 'demand.show') return
     setLoops(result.goalContinuations); setObservedGoal(goalId)
   }
@@ -61,7 +62,7 @@ export function GoalContinuationControl({ demand, onRefresh, onChooseSupervisor,
     const alignment = demand.alignment
     if (!retry) {
       if (attempt.current || alignment?.confirmedAt == null || !supervisorId || !assigneeSessionIds.includes(supervisorId)) return
-      attempt.current = { goalId: demand.id, sessionId: supervisorId, intervalMs: Number(minutes) * 60_000, alignmentRevision: alignment.revision, operationId: crypto.randomUUID() }
+      attempt.current = { goalId: demand.id, sessionId: supervisorId, intervalMs: Number(minutes) * 60_000, alignmentRevision: alignment.revision, operationId: mintObjectId() }
     }
     const saved = attempt.current
     if (!saved || saved.goalId !== demand.id) return
@@ -82,7 +83,7 @@ export function GoalContinuationControl({ demand, onRefresh, onChooseSupervisor,
     if (flight.current) return
     if (!retry) {
       if (mutation.current || !Number.isSafeInteger(loop.revision) || !loop.revision || loop.revision < 1) return
-      mutation.current = { goalId: demand.id, loopId: loop.loopId, action, expectedRevision: loop.revision, operationId: crypto.randomUUID() }
+      mutation.current = { goalId: demand.id, loopId: loop.loopId, action, expectedRevision: loop.revision, operationId: mintObjectId() }
     }
     const saved = mutation.current
     if (!saved || saved.goalId !== demand.id || saved.loopId !== loop.loopId || saved.action !== action) return
@@ -97,7 +98,7 @@ export function GoalContinuationControl({ demand, onRefresh, onChooseSupervisor,
   const assigneeSessionIds = demand.assigneeSessionIds ?? []
   const openSupervisor = () => {
     if (onChooseSupervisor) onChooseSupervisor()
-    else void run(() => execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: crypto.randomUUID(), operation: 'focus', target: { kind: 'goal', goalId: demand.id }, inputPolicy: 'preserve' }))
+    else void run(() => execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(), operation: 'focus', target: { kind: 'goal', goalId: demand.id }, inputPolicy: 'preserve' }))
   }
   return <section className="goals-continuation" aria-label="Goal continuous progress">
     <div className="goals-continuation__heading"><span>Continue this work</span><button type="button" className="goals-button" disabled={busy} onClick={() => void run(() => inspect())}>Refresh</button></div>

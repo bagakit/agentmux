@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, type AgentMuxControlRequest, type AgentMuxControlResult } from '@agentmux/core/control'
 import { globalGoalPatrolPrompt } from '@agentmux/core/goal-patrol'
 import type { Demand } from '@agentmux/demand'
@@ -38,7 +39,7 @@ export async function executeGlobalGoalPatrol(ports: Ports, request: Extract<Age
     if (original.operation !== 'agent.open' || original.purpose !== 'goal-global-patrol') throw new Error('This operation belongs to another original intent. Keep its identity; no global inspection was created.')
     show(original.target.displayWorkspaceId && original.target.groupId ? { displayWorkspaceId: original.target.displayWorkspaceId,
       groupId: original.target.groupId, tabId: original.tabId, regionId: original.regionId } : null)
-    const result = await ports.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: crypto.randomUUID(), operation: 'space.inspect', target: { requestId: request.requestId } })
+    const result = await ports.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(), operation: 'space.inspect', target: { requestId: request.requestId } })
     if (result.operation !== 'space.inspect' || !result.request?.report) throw new Error('The original global inspection receipt is unconfirmed. Inspect this same operation; no new Tab or input was created.')
     return { ...result.request.report, operation: 'demand.patrol-all' }
   }

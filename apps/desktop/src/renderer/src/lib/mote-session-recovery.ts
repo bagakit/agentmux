@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useLayoutEffect, useRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { AppConfig, SessionSnapshot, ScratchTopicSnapshot } from '../../../shared/contracts'
@@ -115,7 +116,7 @@ async function recoverOriginal(session: Agent, current: () => boolean, trigger: 
     created.job = Promise.resolve().then(() => {
       if (!admitted()) return
       created.dispatched = true
-      return useAppStore.getState().recoverSession(session.id, crypto.randomUUID(), { preserveView: true, stillCurrent: admitted, trigger, ...(timingOverride ? { timingOverride } : {}) })
+      return useAppStore.getState().recoverSession(session.id, mintObjectId(), { preserveView: true, stillCurrent: admitted, trigger, ...(timingOverride ? { timingOverride } : {}) })
     }).finally(() => { if (recovering.get(key) === created) recovering.delete(key) })
     recovering.set(key, created); flight = created
   }

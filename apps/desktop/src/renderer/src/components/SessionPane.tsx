@@ -1,4 +1,5 @@
 import { usePendingDeliveryLayout, type PendingDeliveryLayout } from '../lib/pending-delivery-layout'
+import { mintObjectId } from '@agentmux/core/object-id'
 import { ConversationLandmarkList, renderConversationLandmarkAction } from './ConversationLandmarks'
 import { questionReplyKey } from '@agentmux/client-ui/conversation-question-reply'
 import { useObservedAppStore, useObservedConsumerCommit } from '../lib/use-observed-app-store'
@@ -691,7 +692,7 @@ export function SessionPane({
     try {
       if (detachedFrontendNotice && session?.kind === 'agent') {
         const scope = JSON.stringify([session.control.hostId, session.id, session.control.run.runId, session.terminalFrontend?.frontendId])
-        if (frontendRecoveryIntent.current?.scope !== scope) frontendRecoveryIntent.current = { scope, operationId: originalFrontendRecovery(session)?.operationId ?? crypto.randomUUID() }
+        if (frontendRecoveryIntent.current?.scope !== scope) frontendRecoveryIntent.current = { scope, operationId: originalFrontendRecovery(session)?.operationId ?? mintObjectId() }
         await recoverSession(sessionId, frontendRecoveryIntent.current.operationId)
       } else await recoverSession(sessionId)
     } catch (error) {
@@ -712,7 +713,7 @@ export function SessionPane({
       return
     }
     const observeOnly = retainedOperationId !== undefined
-    const operationId = retainedOperationId ?? crypto.randomUUID()
+    const operationId = retainedOperationId ?? mintObjectId()
     retainedUnconfirmedIntent.current = operationId
     retainedReopenRef.current = attempt
     setRecovering(true)

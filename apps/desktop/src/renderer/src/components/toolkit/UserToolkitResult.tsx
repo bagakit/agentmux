@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { Textarea } from '@agentmux/client-ui/input'
 import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
@@ -100,7 +101,7 @@ export function UserToolkitResult({ definition, active, close, official = false,
         await api.toolkit.stop(definition.id, captured.executionId)
       } else {
         if (!canRun) return
-        const invocationId = crypto.randomUUID()
+        const invocationId = mintObjectId()
         if (copyOnRun && !primaryActionId) copyInvocation.current = invocationId
         await api.toolkit.run(definition.id, { invocationId, expectedRevision: snapshot.definition.revision, expectedLatestExecutionId: snapshot.latestConfirmed?.executionId ?? null })
       }
@@ -113,7 +114,7 @@ export function UserToolkitResult({ definition, active, close, official = false,
     const expectedAdmissionExecutionId = snapshot.admission?.executionId ?? null
     setBusy(true); setOperationError(''); setCopyNotice('')
     try {
-      await api.toolkit.action(definition.id, action.id, { invocationId: crypto.randomUUID(), expectedRevision: source.definition.revision, sourceExecutionId: source.executionId, expectedAdmissionExecutionId })
+      await api.toolkit.action(definition.id, action.id, { invocationId: mintObjectId(), expectedRevision: source.definition.revision, sourceExecutionId: source.executionId, expectedAdmissionExecutionId })
       await reading.check()
     } catch (cause) { setOperationError(presentError(cause)) }
     finally { setBusy(false) }
@@ -130,7 +131,7 @@ export function UserToolkitResult({ definition, active, close, official = false,
     void invokeAction(action, result, copyOnRun)
   }, [snapshot?.latestConfirmed, snapshot?.admission, snapshot?.definition.revision, copyOnRun])
   async function invokeAction(action: ToolkitAction, source: ToolkitConfirmedResult, copy: boolean) {
-    const invocationId = crypto.randomUUID()
+    const invocationId = mintObjectId()
     setConnecting(copy)
     if (copy) copyInvocation.current = invocationId
     setBusy(true); setOperationError(''); setCopyNotice('')
@@ -149,7 +150,7 @@ export function UserToolkitResult({ definition, active, close, official = false,
     if (source && action) { await invokeAction(action, source, copyOnRun); return }
     // The explicit action first queries its declared entry to capture a result identity.
     // No visibility, hover or passive result read reaches this path.
-    const invocationId = crypto.randomUUID()
+    const invocationId = mintObjectId()
     bootstrap.current = { invocationId, actionId: primaryActionId }
     setConnecting(true)
     setBusy(true); setOperationError(''); setCopyNotice('')

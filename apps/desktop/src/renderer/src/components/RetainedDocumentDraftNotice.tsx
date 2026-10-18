@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 import { useEffect, useRef, useState } from 'react'
@@ -32,7 +33,7 @@ export function useNoteConversionObservation(surface: FileWorkbenchSurface, acti
     const request = epoch.current
     setRetrying(true)
     try {
-      const value = await api.notesStorage.change(storage.operation ?? { operationId: crypto.randomUUID(), expectedDirectory: storage.directory, directory: storage.directory })
+      const value = await api.notesStorage.change(storage.operation ?? { operationId: mintObjectId(), expectedDirectory: storage.directory, directory: storage.directory })
       await useAppStore.getState().refreshNotesStorage()
       if (epoch.current === request) { setSnapshot({ scope, value }); setFailure(null) }
     } catch (error) {

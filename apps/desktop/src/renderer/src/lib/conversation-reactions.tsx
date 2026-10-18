@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useCallback, useMemo } from 'react'
 import { ConversationReactionActions, type ConversationReactionSend } from '@agentmux/client-ui/components/ConversationReactionActions'
 import { conversationReplySourceKey, promptReactionDefinitions, promptReactionMessage, samePromptReaction, type ConversationReplySource, type PromptReactionDefinition } from '@agentmux/core/prompt-reaction'
@@ -34,7 +35,7 @@ export async function sendConversationReaction(sessionId: string, expected: Prom
     throw new Error('This reply is already in the Outbox. Check its status there before retrying.')
   }
   const input = promptReactionMessage(selected, source)
-  const operationId = crypto.randomUUID()
+  const operationId = mintObjectId()
   const accepted = state.enqueueAgentSteer(sessionId, input.prompt, onRejected, operationId, 'manual', input.agentMuxNote,
     { reaction: { code: selected.keyword, replySource: source }, sourceChannel: 'reaction', execution: 'immediate' })
   if (!accepted) return false

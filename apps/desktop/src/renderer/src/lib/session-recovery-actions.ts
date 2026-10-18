@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import type { AgentMuxSpaceMutationReport } from '@agentmux/core/control'
 import type { SessionHistoryReference } from '../../../shared/contracts'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
@@ -142,7 +143,7 @@ export async function inspectRecoveryRequest(source: RecoverySource, mode: Recov
       ? 'Core confirms the original analysis message was delivered to the chosen Mote. No message was resent.'
       : 'The original analysis intent is retained, but Core has not confirmed delivery. It may not have been sent. Check this same recipient and operation; no message is resent.' }
   }
-  const result = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: `inspect:${crypto.randomUUID()}`,
+  const result = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: `inspect:${mintObjectId()}`,
     operation: 'space.inspect', target: { requestId } })
   if (result.operation !== 'space.inspect') throw new Error('The original request inspection returned another operation.')
   const report = result.request?.report ?? undefined

@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentMuxSpaceMutationReport } from '@agentmux/core/control'
@@ -66,7 +67,7 @@ export function useAgentCurrentForkControls({ session, linkOrigin, readOnly }: {
     let dispatched = false
     try {
       requireOriginalRegion(review)
-      const inspected = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: `fork-location:${crypto.randomUUID()}`,
+      const inspected = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: `fork-location:${mintObjectId()}`,
         operation: 'space.inspect', target: { tabId: review.origin.tabId, regionId: review.origin.regionId,
           displayWorkspaceId: review.origin.workspaceId, groupId: review.origin.tabGroupId } })
       if (inspected.operation !== 'space.inspect') throw new Error('The original location inspection returned an unrelated result.')
@@ -97,7 +98,7 @@ export function useAgentCurrentForkControls({ session, linkOrigin, readOnly }: {
     const revision = receiptRevision.current
     update({ ...stateRef.current, busy: true, notice: null })
     try {
-      const result = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: `fork-check:${crypto.randomUUID()}`,
+      const result = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: `fork-check:${mintObjectId()}`,
         operation: 'space.inspect', target: { requestId: operationId } })
       if (result.operation !== 'space.inspect') throw new Error('Operation inspection returned an unrelated result.')
       // A read started before the creation receipt cannot replace its newer facts.
@@ -113,7 +114,7 @@ export function useAgentCurrentForkControls({ session, linkOrigin, readOnly }: {
     const reason = currentForkUnavailableReason(session, origin, readOnly)
     return <AgentCurrentForkControls reason={reason} readOnly={readOnly} state={state} begin={() => {
       if (reason || stateRef.current.busy || stateRef.current.dispatching || stateRef.current.operationId && stateRef.current.report?.outcome !== 'opened') return
-      const review = reviewCurrentFork(session, origin, crypto.randomUUID())
+      const review = reviewCurrentFork(session, origin, mintObjectId())
       update({ ...emptyState(), operationId: review.operationId, review })
     }} cancel={() => { if (!stateRef.current.busy && stateRef.current.review) update(emptyState()) }}
       select={destination => { void select(destination) }} inspect={() => { void inspect() }} />

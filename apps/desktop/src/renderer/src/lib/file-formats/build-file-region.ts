@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { FileBuildKind, FileBuildRequest, FileBuildSnapshot } from '../../../../shared/file-build'
 import { api } from '../api'
@@ -121,7 +122,7 @@ export function releaseFileRegionBuild(regionId: string): void {
 }
 
 /** Explicit GUI/public action; starting a preview never invokes this function. */
-export async function buildFileRegion(regionId: string, signal?: AbortSignal, buildId: string = crypto.randomUUID()): Promise<FileRegionBuildResult> {
+export async function buildFileRegion(regionId: string, signal?: AbortSignal, buildId: string = mintObjectId()): Promise<FileRegionBuildResult> {
   if (signal?.aborted) return result(regionId, buildId, 'cancelled', 'Document build cancelled. The draft is unchanged.')
   const adapter = adapters.get(regionId)
   if (!adapter) return result(regionId, buildId, 'unavailable', 'The original File Region is not visible. Open it before building.')

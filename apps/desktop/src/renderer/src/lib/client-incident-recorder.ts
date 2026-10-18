@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { parseClientIncidentMetadata, parseClientIncidentReport, safeClientIncidentCode, type AgentMuxClientIncidentKind, type AgentMuxClientReadingIncidentKind, type AgentMuxClientIncidentMetadata,
   type AgentMuxClientIncidentReport, type AgentMuxClientIncidentStage } from '@agentmux/core/client-incident'
 import { createClientIncidentDispatcher, type ClientIncidentDispatcher, type ClientIncidentDispatchStatus } from './client-incident-dispatcher'
@@ -28,7 +29,7 @@ export function createClientIncidentRecorder(input: {
     try { return read() } catch { readFailures = increment(readFailures); return unavailable }
   }
   const mono = () => timestamp(input.monotonic ? input.monotonic() : performance.now())
-  const id = () => input.id ? input.id() : crypto.randomUUID()
+  const id = () => input.id ? input.id() : mintObjectId()
   const started = observe<number | null>(mono, null)
   let attemptId = observe<string | null>(id, null)
   const stages: AgentMuxClientIncidentReport['stages'] = []

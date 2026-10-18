@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { groupIds } from '@agentmux/layout'
 import type { WorkspaceRecord } from '../../../shared/contracts'
 import { zoneFileResource } from '../../../shared/zone-file-resource'
@@ -28,7 +29,7 @@ function fileTarget(displayWorkspace: WorkspaceRecord, workspaceRelativePath: st
 export async function openWorkspaceZoneFile(displayWorkspace: WorkspaceRecord, workspaceRelativePath: string, mode?: 'diff'): Promise<void> {
   try {
     const target = fileTarget(displayWorkspace, workspaceRelativePath)
-    const result = await target.state.executeControl({ schemaVersion: 5, requestId: crypto.randomUUID(), operation: 'open.file',
+    const result = await target.state.executeControl({ schemaVersion: 5, requestId: mintObjectId(), operation: 'open.file',
       spaceId: target.context.spaceId, zoneId: target.zone.zoneId, path: target.path,
       displayWorkspaceId: target.displayWorkspaceId, groupId: target.groupId, focus: true }, undefined,
       { fileOpenIntent: mode === 'diff' ? 'source' : 'default', fileInputPolicy: 'target' })

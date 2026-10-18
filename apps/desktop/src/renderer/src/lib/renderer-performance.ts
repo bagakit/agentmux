@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { createInputPerformanceRecorder, readInputObservation, RENDERER_SESSION_EVENT_TYPES, RENDERER_TIMING_KINDS } from '@agentmux/core/control'
 import type { RendererConsumerCost, RendererOverlayObservation, RendererPerformanceSnapshot, RendererSessionEventType, RendererSlowEvent, RendererTerminalCleanupContext, RendererTerminalCost, RendererTerminalWriteContext, RendererWorkSource, RendererWorkTiming } from '@agentmux/core/control'
 import type { AgentMuxClientEvent } from '@agentmux/core'
@@ -34,7 +35,7 @@ export function rendererSessionEventSource(hostId: string, event: AgentMuxClient
   return { hostId, sessionId, runId, regionId: null, instanceId: null }
 }
 /** No clock, subscription, payload or historical buffer scan on a selector check. */
-export function createRendererPerformance(now = () => performance.now(), wall = Date.now, nonce: () => string = () => globalThis.crypto.randomUUID()) {
+export function createRendererPerformance(now = () => performance.now(), wall = Date.now, nonce: () => string = () => mintObjectId()) {
   const startedAt = wall()
   const observerId = (() => { try { return readInputObservation({ observerId: nonce(), source: 'user', sequence: 1 })?.observerId ?? null } catch { return null } })()
   const inputDetails = createInputPerformanceRecorder(now, wall)

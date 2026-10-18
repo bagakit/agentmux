@@ -645,7 +645,7 @@ function BrowserPaneContent({
     try {
       await executeControl({
         schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-        requestId: crypto.randomUUID(),
+        requestId: mintObjectId(),
         operation: 'browser.stop',
         operationId
       })
@@ -768,7 +768,7 @@ function BrowserPaneContent({
       // 在客户端再滤一遍就是把同一条规则写两处。
       const receipt = await executeControl({
         schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-        requestId: crypto.randomUUID(),
+        requestId: mintObjectId(),
         operation: 'browser.history',
         browserId: tab.browserId
       })
@@ -808,7 +808,7 @@ function BrowserPaneContent({
   const taskAsset = tab.taskAssets?.assets.find(asset => asset.id === selectedTaskAssetId) ?? tab.taskAssets?.assets.at(-1) ?? null
   const taskRun = taskAsset ? tab.taskAssets?.runs.find(run => run.id === tab.taskAssets?.selectedRunId && run.assetId === taskAsset.id && run.browserId === tab.browserId) ?? null : null
   const loadTaskReliability = useCallback(async (input: BrowserTaskReliabilityRequest) => {
-    const receipt = await executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: crypto.randomUUID(),
+    const receipt = await executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(),
       operation: 'browser.task.reliability', ...input })
     if (receipt.operation !== 'browser.task.reliability') throw new Error('The exact version reliability read is unavailable.')
     return receipt.reliability
@@ -853,7 +853,7 @@ function BrowserPaneContent({
       // 这条人工闸门规则搬到了 Renderer。
       const receipt = await executeControl({
         schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-        requestId: crypto.randomUUID(),
+        requestId: mintObjectId(),
         operation: 'browser.replay',
         browserId: tab.browserId,
         operationId: replayPlan.operationId,
@@ -876,7 +876,7 @@ function BrowserPaneContent({
     try {
       const receipt = await executeControl({
         schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-        requestId: crypto.randomUUID(),
+        requestId: mintObjectId(),
         operation: 'browser.replay',
         browserId: tab.browserId,
         operationId: replayPlan.operationId,
@@ -1476,7 +1476,7 @@ function BrowserPaneContent({
               setReplayOutcome(undefined)
               void executeControl({
                 schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-                requestId: crypto.randomUUID(),
+                requestId: mintObjectId(),
                 operation: 'browser.replay',
                 browserId: tab.browserId,
                 operationId: operation.id,

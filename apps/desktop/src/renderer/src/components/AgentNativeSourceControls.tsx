@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentMuxNativeSessionConfirmationInput } from '@agentmux/core'
@@ -100,7 +101,7 @@ export function useAgentNativeSourceControls({ session, readOnly }: { session: A
         event.preventDefault(); setReview(null)
       }}><ThemeActionCancelIcon size={14} /><span>Cancel source change</span></DropdownMenu.Item>
     </> : canReview ? <DropdownMenu.Item className="tab-context-menu__item" disabled={busy} onSelect={event => {
-      event.preventDefault(); setNotice(null); setReview(nativeConfirmationInput(session, crypto.randomUUID()))
+      event.preventDefault(); setNotice(null); setReview(nativeConfirmationInput(session, mintObjectId()))
     }}><ThemeActionReviewSourceIcon size={14} /><span>Review source change…</span></DropdownMenu.Item> : null}
   </>}</WorkbenchMenuScope.Consumer>
 }

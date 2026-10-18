@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
@@ -549,7 +550,7 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
       if (!space || !zone) throw new Error('The original Mote Space is not available')
       destinationSpaceId = space.spaceId
       destinationZoneId = zone.zoneId
-      const receipt = await current.executeControl({ schemaVersion: 5, requestId: crypto.randomUUID(), operation: 'focus',
+      const receipt = await current.executeControl({ schemaVersion: 5, requestId: mintObjectId(), operation: 'focus',
         target: { kind: 'space', spaceId: space.spaceId, ...(destination ?? { zoneId: zone.zoneId }) }, inputPolicy: 'preserve' }, controller.signal)
       if (receipt.operation !== 'focus') throw new Error('The original Mote Space focus was not confirmed')
       if (!['applied', 'unchanged'].includes(receipt.navigation.state))

@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { dataPreviewBudget } from '../file-data-preview'
 import type { StructuredDataKind } from './data-parse'
 import type { StructuredPreview } from './data-model'
@@ -9,7 +10,7 @@ export async function requestStructuredPreview(kind: StructuredDataKind, content
   if (limit) return limit
   const worker = new Worker(new URL('./data-structured.worker.ts', import.meta.url), { type: 'module' })
   return new Promise((resolve, reject) => {
-    const id = crypto.randomUUID()
+    const id = mintObjectId()
     let finished = false
     const finish = () => {
       if (finished) return false

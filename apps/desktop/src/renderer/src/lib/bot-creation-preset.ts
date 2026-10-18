@@ -1,10 +1,11 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import iconUrl from '../../../../resources/icon-512.png'
 import type { ConnectionEnrollmentPreset, ConnectionSetupInitialPublication } from '@agentmux/core/connections'
 
 export const initialBotPublication: ConnectionSetupInitialPublication = { version: '1.0.0', notes: 'Enable AMUX conversations.' }
 
 /** A new form draft gets one random public name, with no local identity embedded. */
-export const generatedBotName = () => 'AMUX-' + crypto.randomUUID().slice(0, 8).toUpperCase()
+export const generatedBotName = () => 'AMUX-' + mintObjectId().toUpperCase()
 
 /** The Desktop supplies its own public asset; the common protocol receives explicit PNG bytes. */
 export async function desktopBotCreationPreset(name: string): Promise<ConnectionEnrollmentPreset> {
