@@ -34,7 +34,7 @@ it.each([false, true])('independent public final follows progress without replay
   } })); cleanup.push(f.close)
   const transcript = join(f.root, 'native.jsonl')
   await writeFile(transcript, JSON.stringify({ type: 'session_meta', payload: { id: 'original-native', cwd: f.root, history_mode: 'paginated' } }) + '\n')
-  const native = (id: string, phase: string, text: string) => JSON.stringify({ type: 'response_item', payload: {
+  const native = (id: string, phase: string, text: string) => JSON.stringify({ timestamp: new Date(60_000).toISOString(), type: 'response_item', payload: {
     type: 'message', id, role: 'assistant', phase, content: [{ type: 'output_text', text }]
   } }) + '\n'
   const spatial = new core.AgentMuxSpatialStateStore(join(f.root, 'spatial.json'))
@@ -63,6 +63,8 @@ it.each([false, true])('independent public final follows progress without replay
   await appendFile(transcript, native('original-progress', 'commentary', progress)); services.publication!.refresh()
   await vi.waitFor(() => expect(operations()[0]?.state).toBe(lost ? 'unknown' : 'confirmed'))
   const original = operations()[0]!
+  expect(original.presentationTime).toBe(60_000)
+  expect(JSON.parse(JSON.parse(posts()[0]!.body).content).config.summary.content).toBe(([0, 1].map(value => String(value).padStart(2, '0')).join(':') + " · Agent progress · ") + progress)
   expect([...remote.records.values()].some(message => JSON.stringify(message).includes(progress))).toBe(true)
   expect(JSON.parse(JSON.parse(posts()[0]!.body).content)).toMatchObject({ schema: '2.0', body: { elements: [{ tag: 'div', text_size: 'notation', text: { tag: 'plain_text', content: progress } }] } })
   expect(JSON.parse(JSON.parse(posts()[0]!.body).content).header).toBeUndefined()
@@ -101,7 +103,7 @@ it.each([false, true])('independent public final follows progress without replay
   const publicResult = await services.connections.delivery!.list({ connectionId: feishuConfig.connectionId, bindingId: bound.binding.bindingId, bindingRevision: 1 })
   expect(publicResult.observation.state).toBe(lost ? 'unknown' : 'ready')
   expect(publicResult.deliveries.some(delivery => delivery.operationId === next.operationId && delivery.state === 'confirmed')).toBe(true)
-  expect(JSON.stringify(publicResult)).not.toMatch(/Controlled original public progress|fixture-credential|prepared/)
+  expect(JSON.stringify(publicResult)).not.toMatch(/Controlled original public progress|fixture-credential|prepared|presentationTime/)
   if (lost) {
     const server = new core.AgentMuxControlServer({ socketPath: join(f.root, 'diagnosis.sock'), connections: services.connections, spatialState: spatial, coreClients: f.coreClients })
     await server.start(); cleanup.push(() => server.stop())

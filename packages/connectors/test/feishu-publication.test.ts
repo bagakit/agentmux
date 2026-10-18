@@ -61,7 +61,7 @@ it.each([
 
 it('delivers, replaces and inspects compact progress through the native SDK without changing original text or request bytes', async () => {
   const f = await fixture(), text = '正在检查群消息的投递链路。\n先核对原始回执，再确认 Agent 是否采用。\n<at user_id="all">保持原文</at>'
-  const original = operation({ payload: { kind: 'speech', phase: 'progress', text } }), prepared = f.publisher.prepare(original)
+  const original = operation({ presentationTime: 0, payload: { kind: 'speech', phase: 'progress', text } }), prepared = f.publisher.prepare(original)
   const frozen = JSON.stringify(prepared), signal = new AbortController().signal
   const created = await f.publisher.dispatch(prepared, original.target, 'fixture-credential', signal)
   expect(created.state).toBe('confirmed'); if (created.state !== 'confirmed') throw Error('Compact progress did not reach native create')
@@ -82,6 +82,41 @@ it('delivers, replaces and inspects compact progress through the native SDK with
     await writeFile(join(process.env.AGENTMUX_COMPACT_CARD_OUTPUT, 'native-consumer.json'), JSON.stringify({ originalOperationId: original.operationId,
       receipt: created, frozenUnchanged: JSON.stringify(prepared) === frozen, calls: f.remote.messageCalls() }, null, 2))
   }
+})
+
+const feedCases: Array<[string, Partial<PublicationOperation>, string]> = [
+  ['progress', { payload: { kind: 'speech', phase: 'progress', text: 'Original progress body' } }, 'Agent progress · Original progress body'],
+  ['final', { payload: { kind: 'speech', phase: 'final', text: 'Original final body' } }, 'Agent reply · Original final body'],
+  ['conversation', { payload: { kind: 'speech', text: 'Original conversation body' } }, 'Conversation message · Original conversation body'],
+  ['user', { payload: { kind: 'speech', text: 'Original human body', relay: { sender: 'application', sources: [{ author: { kind: 'human' },
+    part: { record: { hostId: 'local', agentSessionId: 'original-session', source: { kind: 'captured', recordId: 'original-user' } }, recordRevision: 'original-user-revision', selector: { kind: 'captured-field', field: 'content' } } }] } } }, 'User · via amux · Original human body'],
+  ['question', { payload: { kind: 'question', text: 'Original question body', status: 'pending', actionRef: 'original-action',
+    questions: [{ id: 'original-question', prompt: 'Choose an original color', options: [{ id: 'original-option', label: 'Blue' }], acceptsText: true }] } }, 'Question from the Agent · Original question body'],
+  ['permission', { payload: { kind: 'permission', title: 'Read the original file', status: 'pending', disclosure: 'shared', options: [] } }, 'Permission · Read the original file'],
+  ['relationship', { payload: { kind: 'binding-lifecycle', event: 'connected', agentSessionId: 'original-session',
+    scope: { input: 'all-messages', publication: 'future-shared-conversation' }, synchronization: true } }, 'Conversation connected · Agent original-session'],
+  ['image', { payload: { kind: 'image', part: { record: { hostId: 'local', agentSessionId: 'original-session', source: { kind: 'captured', recordId: 'original-image' } }, recordRevision: 'original-image-revision', selector: { kind: 'captured-field', field: 'content' } }, image: {} as never },
+    uploads: [{ state: 'confirmed', imageKey: 'original-image-key' }] }, 'Shared image · Original conversation image']
+]
+it.each(feedCases)('native %s feed summary has stable short time, purpose and real body', async (_kind, fields, excerpt) => {
+  const f = await fixture(), original = operation({ ...fields, presentationTime: 0 }), prepared = f.publisher.prepare(original)
+  const card = JSON.parse(JSON.parse(prepared.request.body!).content), summary = card.config.summary.content
+  expect(summary.startsWith(Array.from(([0, 0].map(value => String(value).padStart(2, '0')).join(':') + " · ") + excerpt).slice(0, 60).join(''))).toBe(true)
+  expect(summary.length).toBeGreaterThanOrEqual(8); expect(Array.from(summary).length).toBeLessThanOrEqual(60)
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(3_600_000)
+  const preparedAgain = f.publisher.prepare(original); clock.mockRestore()
+  expect(preparedAgain).toEqual(prepared)
+  const result = await f.publisher.dispatch(prepared, original.target, 'fixture-credential', new AbortController().signal)
+  expect(result.state).toBe('confirmed')
+  if (result.state !== 'confirmed') throw Error('Native summary consumer did not create its original card')
+  expect(await f.publisher.inspect(prepared, original.target, 'fixture-credential', new AbortController().signal, result.mapping)).toEqual(result)
+})
+it('unknown original card time stays absent and summaries preserve Unicode without changing full text', async () => {
+  const f = await fixture(), text = '😀'.repeat(80), original = operation({ payload: { kind: 'speech', phase: 'final', text } })
+  const prepared = f.publisher.prepare(original), card = JSON.parse(JSON.parse(prepared.request.body!).content)
+  expect(card.config.summary.content.startsWith('Agent reply · 😀')).toBe(true)
+  expect(card.config.summary.content).not.toMatch(/[\ud800-\udbff]$/u)
+  expect(Array.from(card.config.summary.content)).toHaveLength(60); expect(card.elements[0].text.content).toBe(text)
 })
 
 it('updates, inspects and withdraws the exact original mapping when successful ACK omits its thread', async () => {
@@ -180,7 +215,7 @@ it.each([
   ['array', []], ['string', 'false'], ['null', null], ['object', {}], ['literal-false', false], ['literal-true', true], ['absent', undefined]
 ] as const)('only literal deletion facts can settle the original SDK message: %s', async (_name, deleted) => {
   const original = operation({ mapping: { messageId: 'original-platform-message', threadId: 'original-platform-thread' } })
-  const expectedCard = { config: { update_multi: true }, header: { title: { tag: 'plain_text', content: 'Conversation message' }, template: 'blue' }, elements: [{ tag: 'div', text: { tag: 'plain_text', content: original.payload.text } }] }
+  const expectedCard = { config: { update_multi: true, summary: { content: 'Conversation message · 原文 Literal <at user_id="all">all</at>' } }, header: { title: { tag: 'plain_text', content: 'Conversation message' }, template: 'blue' }, elements: [{ tag: 'div', text: { tag: 'plain_text', content: original.payload.text } }] }
   const message = { message_id: original.mapping!.messageId, chat_id: original.target.externalConversationId, thread_id: original.mapping!.threadId,
     msg_type: 'interactive', sender: { sender_type: 'app', id_type: 'app_id', id: original.target.application.appId },
     body: { content: JSON.stringify(expectedCard) },
