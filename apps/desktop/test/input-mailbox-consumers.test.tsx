@@ -22,7 +22,18 @@ import { composerConfig, composerDOM, composerSession } from './helpers/composer
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 const dom = composerDOM(), closes: Array<() => Promise<unknown>> = []
-afterEach(async () => { for (const close of closes.splice(0).reverse()) await close(); vi.unstubAllEnvs() })
+afterEach(async () => {
+  const failures: unknown[] = []
+  // Release mounted reading/observation leases before their original clients and files.
+  // A cleanup failure must not strand a portal or skip another fixture's close.
+  try { await dom.render(null) } catch (error) { failures.push(error) }
+  try {
+    for (const close of closes.splice(0).reverse()) {
+      try { await close() } catch (error) { failures.push(error) }
+    }
+  } finally { vi.unstubAllEnvs() }
+  if (failures.length) throw failures.length === 1 ? failures[0] : new AggregateError(failures, 'Original mailbox fixture cleanup failed')
+})
 const system = { available: true, notices: [], unread: [], acknowledge: vi.fn() }
 async function inputs() {
   const f = await ingressFixture(false); closes.push(f.close)
