@@ -73,7 +73,7 @@ export const MODULE_GUIDES = {
   "space": { ...{"summary":"Durable spatial identities, display layout and exact navigation","roles":"Agents opening, arranging or navigating workfaces","when":"Inspect a visible layout or move an exact presentation"}, guide: guideModulesSpace },
   "system": { ...{"summary":"Endpoint, diagnostics, storage, crash evidence and metrics","roles":"Agents diagnosing original owners","when":"Inspect reachability, resource facts or retained failure evidence"}, guide: guideModulesSystem },
   "terminal": { ...{"summary":"Terminal creation at an exact inspected destination","roles":"Agents preparing an authorized terminal workface","when":"Open a terminal after inspecting its intended workface"}, guide: guideModulesTerminal },
-  "toolkit": { ...{"summary":"Saved local tools, explicit execution, display evaluation and metrics","roles":"Authorized local tool operators","when":"Inspect, install, edit or explicitly run a saved tool"}, guide: guideModulesToolkit },
+  "toolkit": { ...{"summary":"Saved scripts, persistent TUI tools, display evaluation and metrics","roles":"Authorized local tool operators","when":"Inspect, install, edit, run or stop a saved tool"}, guide: guideModulesToolkit },
   "topic": { ...{"summary":"Topic categories, real knowledge sources and scoped migration","roles":"Agents organizing or reading Topic materials","when":"Discover or edit an original Topic/knowledge resource"}, guide: guideModulesTopic },
   "whoami": { ...{"summary":"Authenticated caller, exact Session/Run and current capabilities","roles":"Every Agent at entry","when":"Establish current identity and available capabilities"}, guide: guideModulesWhoami }
 } as const
