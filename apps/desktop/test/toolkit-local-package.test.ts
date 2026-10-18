@@ -35,7 +35,7 @@ async function ownerFixture() {
   let running = true, listener: ((event: any) => void) | undefined
   const run = () => ({ runId: 'local-run', kind: 'terminal', state: running ? 'running' : 'exited', exitCode: running ? undefined : 0, latestOutputBytes: 0 })
   const attached = () => ({ run: run(), replay: [], gap: null }) as any
-  const port: ToolkitRunPort = { create: vi.fn(async (_request, event) => { listener = event; return run() as any }),
+  const port: ToolkitRunPort = { observe: () => () => {}, create: vi.fn(async (_request, event) => { listener = event; return run() as any }),
     attach: vi.fn(async (_ref, _byte, event) => { if (event) listener = event; return attached() }), replay: vi.fn(async () => attached()), status: vi.fn(async () => run() as any),
     release: vi.fn(async () => {}), remove: vi.fn(async () => {}), stop: vi.fn(async () => { running = false; listener?.({ type: 'process-state', run: { runId: 'local-run' }, state: 'exited', exitCode: 0 }) }) }
   const storage = { read: async (id: string) => receipts.get(id) ?? null, save: async (id: string, value: unknown) => { receipts.set(id, structuredClone(value)) } }

@@ -38,7 +38,7 @@ function fixture(producer?: (env: Record<string, string>, run: Run) => Promise<v
   const configOwner = new ConfigOwner({ read: () => config, prepare: async (_current, next) => next, save: async next => next, publish: () => {} })
   const attached = (id: string): AgentMuxRunAttachment => ({ run: { ...runs.get(id)! }, gap: null,
     replay: [{ startByte: 0, endByte: bytes.length, dataBytes: bytes }] }) as unknown as AgentMuxRunAttachment
-  const port: ToolkitRunPort = { create: vi.fn(async (input, listener) => {
+  const port: ToolkitRunPort = { observe: () => () => {}, create: vi.fn(async (input, listener) => {
     const run: Run = { runId: input.createOperationId, kind: 'terminal', state: initialState, exitCode: 0, latestOutputBytes: bytes.length }
     runs.set(run.runId, run); listeners.set(run.runId, listener)
     await producer?.(input.env, run)

@@ -23,7 +23,7 @@ afterEach(async()=>{for(const owner of owners.splice(0).reverse())await owner.di
 async function fixture(delayed = false) {
   let accept: (event: AgentMuxClientEvent) => void = () => {}
   let releaseCreate: (() => void) | undefined
-  const port: ToolkitRunPort = { create: vi.fn(async (_input, listener) => {
+  const port: ToolkitRunPort = { observe: () => () => {}, create: vi.fn(async (_input, listener) => {
     accept = listener
     if (delayed) await new Promise<void>(resolve => { releaseCreate = resolve })
     return { runId: 'owned-run', pid: 88, kind: 'terminal' } as any

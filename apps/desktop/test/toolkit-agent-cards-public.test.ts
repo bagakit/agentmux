@@ -179,7 +179,7 @@ async function publicLoop(count: number, id: (i: number) => string = i => 'run-'
   let child: ChildProcess | null = null, cursor = 0, listener: (event: any) => void = () => {}
   const frames: any[] = []; let buffer = '', stderr = '', exited: Promise<unknown> = Promise.resolve(), recorded = false
   const launches: any[] = []
-  const runPort: ToolkitRunPort = {
+  const runPort: ToolkitRunPort = { observe: () => () => {},
     async create(input, onEvent) {
       launches.push(input); listener = onEvent
       child = spawn(input.command, input.args, { cwd: input.workspacePath, env: input.env, stdio: ['ignore', 'pipe', 'pipe'] })
@@ -304,7 +304,7 @@ it('executes an ordinary Custom script and carries its exact confirmed document 
     save:async next=>structuredClone(next),publish:saved=>{config=saved as typeof config;combined.configurationChanged()} })
   const metadata = () => ({runId:'actual-custom-run',kind:'terminal',state:'exited',exitCode:0,latestOutputBytes:output.length})
   const attachment = () => ({run:metadata(),gap:null,replay:[{startByte:0,endByte:output.length,dataBytes:output}]})
-  const port:ToolkitRunPort = { async create(input) {
+  const port:ToolkitRunPort = { observe: () => () => {}, async create(input) {
     const child=spawn(input.command,input.args,{cwd:input.workspacePath,env:input.env,stdio:['ignore','pipe','pipe']})
     childPid=child.pid
     const chunks:Buffer[]=[];let error=''

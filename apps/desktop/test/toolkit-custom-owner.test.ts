@@ -29,7 +29,7 @@ function fixture(output = '工具_ACK', initialState: 'running' | 'exited' = 'ex
     save: vi.fn(async next => structuredClone(next)), publish: saved => { config = saved as typeof config; custom.configurationChanged() } })
   const run = () => ({ runId: 'exact-tool-run', kind: 'terminal', state, exitCode: state === 'exited' ? exitCode : undefined, latestOutputBytes: finalBytes })
   const snapshot = () => ({ run: run(), replay: bytes.length ? [{ startByte: 0, endByte: bytes.length, dataBytes: bytes }] : [], gap: null }) as AgentMuxRunAttachment
-  const port: ToolkitRunPort = { create: vi.fn(async (_input, listener) => { accept = listener; return run() as any }),
+  const port: ToolkitRunPort = { observe: () => () => {}, create: vi.fn(async (_input, listener) => { accept = listener; return run() as any }),
     attach: vi.fn(async (_ref, _after, listener) => {
       if (listener) accept = listener
       // Production attach publishes state before returning replay. This cannot recurse into another attach.

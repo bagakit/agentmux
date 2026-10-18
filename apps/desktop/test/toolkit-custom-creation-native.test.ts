@@ -27,7 +27,7 @@ it('repeats the exact private create input on pinned Native after a lost acknowl
     await client.connect()
     let listener: (event: AgentMuxClientEvent) => void = () => {}, calls = 0
     unsubscribe = client.onEvent(event => listener(event))
-    const port: ToolkitRunPort = { create: async (input, onEvent) => {
+    const port: ToolkitRunPort = { observe: () => () => {}, create: async (input, onEvent) => {
       listener = onEvent; calls++
       if (calls === 1) originalInputHash = hash(input)
       else continuedInputHash = hash(input)
