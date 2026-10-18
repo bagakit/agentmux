@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { NoteResource, NotebookPage } from '@agentmux/core/notebook-catalog'
 import type { NoteContentObservation, NoteGraphReference } from '@agentmux/core/notebook-observation'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { noteContentSummary } from '@agentmux/client-ui/note/note-knowledge'
 import { noteContentMatchesGraph, type NotebookGraphSnapshot } from '../../../shared/notebook-observation'
 import { api } from '../lib/api'
 import { noteKnowledge } from '../lib/note-knowledge'
@@ -105,7 +106,7 @@ function SharedOriginal({ references, graph, active, navigate, onOpenFile, selec
   const source = useMemo(() => confirmed ? noteKnowledge([{ location: { workspaceId: confirmed.resource.workspaceId, path: confirmed.resource.path },
     document: { path: confirmed.resource.path, revision: confirmed.revision, content: confirmed.content } }]).sources[0] : undefined, [confirmed])
   const note = source?.note.kind === 'shared-block' && source.note.noteId === targetId ? source.note : null
-  const title = note?.title || (source && [...source.blocks.values()].find(block => block.text.trim())?.text.trim().slice(0, 120)) || 'Shared content'
+  const title = note?.title?.trim() || (source && noteContentSummary(source.note).slice(0, 120)) || 'Shared content'
   const target = original ? { ...original.resource, noteId: targetId } : null
   const locations = useMemo(() => {
     const keys = new Set(references.map(noteGraphReferenceKey))
