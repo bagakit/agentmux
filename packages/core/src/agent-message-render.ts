@@ -1,5 +1,8 @@
 import { DOMParser, onWarningStopParsing, type Element } from '@xmldom/xmldom'
 import type { AgentMuxMessageEnvelope } from './agent-message-envelope.js'
+import { parseChannelActorProfileObservation, type ChannelActorProfile } from './channel-profile.js'
+import { parseConnectionActor } from './room-binding-codec.js'
+import type { ConnectionActor } from './connections-contract.js'
 import { composeOutboundMessage } from './agent-outbound-message.js'
 import { AGENTMUX_A2A_REMINDER } from './agent-messaging-guidance.js'
 import { browserInputContextJson, parseBrowserInputContext, type BrowserInputContext } from './browser-input-context.js'
@@ -29,7 +32,7 @@ function reminderText(text: string): string {
   return `<reminder>${text.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;').replace(/\r/gu, '&#13;')}</reminder>`
 }
 
-export function renderAgentMuxMessageEnvelope(envelope: Pick<AgentMuxMessageEnvelope, 'messageId' | 'sender' | 'senderSessionId' | 'body'>): string {
+export function renderAgentMuxMessageEnvelope(envelope: Pick<AgentMuxMessageEnvelope, 'messageId' | 'sender' | 'senderSessionId' | 'body' | 'channelProfile'>): string {
   if (envelope.sender.kind === 'agent-session' && envelope.senderSessionId !== null) {
     // The authored body is opaque. Only the fixed final reminder is escaped, so
     // tags, code and even complete example envelopes inside the body stay exact.
@@ -37,9 +40,10 @@ export function renderAgentMuxMessageEnvelope(envelope: Pick<AgentMuxMessageEnve
     return `<${tag} from="${attributeText(envelope.senderSessionId)}" msg-id="${attributeText(envelope.messageId)}">\n${envelope.body}\n${reminderText(AGENTMUX_A2A_REMINDER)}\n</${tag}>`
   }
   if (envelope.sender.kind === 'external') {
-    const source = [envelope.sender.actor.application.domain, envelope.sender.actor.application.appId, envelope.sender.actor.idType,
-      envelope.sender.actor.userId, envelope.sender.externalConversationId].map(encodeURIComponent).join('/')
-    return composeOutboundMessage({ amux: `External message from ${source}.`, user: envelope.body })
+    const sender = envelope.sender
+    const header = channelHeader({ actor: sender.actor, externalConversationId: sender.externalConversationId,
+      externalMessageId: sender.externalMessageId, ...(envelope.channelProfile?.profile ? { profile: envelope.channelProfile.profile } : {}) })
+    return `${header}\n${envelope.body}\n</${AMUX_PROTOCOL_DEFINITIONS.channel.tag}>`
   }
   // Human input and unverified text cannot acquire an Agent sender by formatting.
   return envelope.body
@@ -50,6 +54,49 @@ type AgentMuxMessageReading = {
   reminder?: { raw: string; text: string }
   /** Complete input-leading declarations, preserved as original source spans. */
   declaredContexts?: readonly { raw: string; inputContext?: BrowserInputContext }[]
+  /** Parsed text declaration only; never an authenticated author or input grant. */
+  declaredChannel?: AgentMuxChannelDeclaration
+}
+
+export type AgentMuxChannelDeclaration = {
+  actor: ConnectionActor
+  externalConversationId: string
+  externalMessageId: string
+  profile?: ChannelActorProfile
+  raw: string
+}
+
+function channelHeader(channel: Omit<AgentMuxChannelDeclaration, 'raw'>): string {
+  const fields = [ ['domain', channel.actor.application.domain], ['app-id', channel.actor.application.appId],
+    ['id-type', channel.actor.idType], ['user-id', channel.actor.userId], ['conversation-id', channel.externalConversationId], ['message-id', channel.externalMessageId],
+    ...(channel.profile?.name === undefined ? [] : [['name', channel.profile.name]]),
+    ...(channel.profile?.avatarUrl === undefined ? [] : [['avatar-url', channel.profile.avatarUrl]]),
+    ...(channel.profile === undefined ? [] : [['observed-at', String(channel.profile.observedAt)]]) ]
+  return `<${AMUX_PROTOCOL_DEFINITIONS.channel.tag} ${fields.map(([key, value]) => `${key}="${attributeText(value!)}"`).join(' ')}>`
+}
+
+/** Parse the producer header only. The complete body, including nested closing tags, stays opaque. */
+function parseChannel(text: string): AgentMuxMessagePrefix | null {
+  const header = /^<amux:channel ([^\r\n]+)>\n/u.exec(text), closing = `\n</${AMUX_PROTOCOL_DEFINITIONS.channel.tag}>`
+  if (!header || !text.endsWith(closing)) return null
+  try {
+    const document = new DOMParser({ onError: onWarningStopParsing }).parseFromString(`<channel ${header[1]}/>`, 'text/xml'), root = document.documentElement
+    if (!root || root.tagName !== 'channel' || root.childNodes.length || Array.from(document.childNodes).some(node => node !== root) ||
+      !attributes(root, ['domain', 'app-id', 'id-type', 'user-id', 'conversation-id', 'message-id'], ['name', 'avatar-url', 'observed-at'])) return null
+    const actor = parseConnectionActor({ application: { domain: root.getAttribute('domain'), appId: root.getAttribute('app-id') }, idType: root.getAttribute('id-type'), userId: root.getAttribute('user-id') })
+    const externalConversationId = root.getAttribute('conversation-id')!, externalMessageId = root.getAttribute('message-id')!
+    if ([externalConversationId, externalMessageId].some(value => /[\u0000-\u001f\u007f]/u.test(value))) return null
+    let profile: ChannelActorProfile | undefined
+    const observedAt = root.getAttribute('observed-at'), name = root.getAttribute('name'), avatarUrl = root.getAttribute('avatar-url')
+    if (observedAt !== null) {
+      profile = parseChannelActorProfileObservation({ actor, state: 'observed', checkedAt: Number(observedAt), freshness: 'current',
+        profile: { observedAt: Number(observedAt), ...(name === null ? {} : { name }), ...(avatarUrl === null ? {} : { avatarUrl }) } }).profile!
+    } else if (name !== null || avatarUrl !== null) return null
+    const declaration = { actor, externalConversationId, externalMessageId, ...(profile ? { profile } : {}) }
+    if (channelHeader(declaration) + '\n' !== header[0]) return null
+    return { kind: 'content', sourceLabel: profile?.name ?? `${actor.userId} · ${actor.application.domain}`, declaredAgentSessionId: null,
+      body: text.slice(header[0].length, -closing.length), declaredChannel: { ...declaration, raw: text } }
+  } catch { return null }
 }
 
 export type AgentMuxMessagePrefix = AgentMuxMessageReading & ({
@@ -270,6 +317,8 @@ function parseA2aContainer(text: string): AgentMuxMessagePrefix | null {
 }
 
 function parseSenderPrefix(text: string): AgentMuxMessagePrefix | null {
+  const channelStart = `<${AMUX_PROTOCOL_DEFINITIONS.channel.tag}`
+  if (text.startsWith(channelStart) && /^[\s/>]|^$/u.test(text.slice(channelStart.length, channelStart.length + 1))) return parseChannel(text)
   const a2aStart = `<${AMUX_PROTOCOL_DEFINITIONS.a2a.tag}`
   if (text.startsWith(a2aStart) && /^[\s/>]|^$/u.test(text.slice(a2aStart.length, a2aStart.length + 1))) {
     const reference = parseReference(text, 'amux:a2a')
@@ -329,6 +378,10 @@ const protocolExamples = {
     page: { url: 'https://example.org/', title: 'Example page' }
   }, user: 'Original request.' }) }],
   a2a: () => [{ label: 'Original message', wire: renderAgentMuxMessageEnvelope({ messageId: 'MID', sender: { kind: 'agent-session', agentSessionId: 'SID' }, senderSessionId: 'SID', body: 'Original message body.' }) }],
+  channel: () => [{ label: 'Original channel message', wire: renderAgentMuxMessageEnvelope({ messageId: 'MID', senderSessionId: null, body: 'Original channel body.', sender: {
+    kind: 'external', connectionId: 'CONNECTION', actor: { application: { domain: 'chat.example', appId: 'APP' }, idType: 'user-id', userId: 'USER' },
+    externalConversationId: 'ROOM', externalMessageId: 'MESSAGE', bindingId: 'BINDING', bindingRevision: 1, grantId: 'GRANT', grantRevision: 1
+  } }) }],
   'a2a-reference': () => [
     { label: 'Single reference', wire: renderAgentMuxMessageReferences([sampleReference]) },
     { label: 'Merged references', wire: renderAgentMuxMessageReferences([sampleReference, { senderSessionId: 'SID-2', messageId: 'MID-2' }]) }
