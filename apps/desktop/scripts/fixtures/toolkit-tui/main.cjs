@@ -5,16 +5,16 @@ const { pathToFileURL } = require('node:url')
 const { createHash } = require('node:crypto')
 const { app, BrowserWindow, ipcMain } = require('electron')
 const [html, ownerBundle, privateRoot, evidence, phase, asset, cli, scene = 'terminal'] = process.argv.slice(2)
-assert.ok(['terminal', 'working-directory'].includes(scene), 'Explicit Toolkit scene')
-const directoryScene = scene === 'working-directory'
+assert.ok(['terminal', 'working-directory', 'polish'].includes(scene), 'Explicit Toolkit scene')
+const directoryScene = scene === 'working-directory', polishScene = scene === 'polish'
 for (const key of ['home', 'userData', 'sessionData']) { const value = path.join(privateRoot, key); fs.mkdirSync(value, { recursive: true }); app.setPath(key, value) }
 app.on('window-all-closed', () => {})
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
 const raw = { phase, scene, qualified: false, frames: [], actions: [], errors: [], sessions: { attachments: [], writes: [], detaches: [] },
   boundary: 'Real App, terminal components, ConfigOwner, ToolkitOwner, registered Toolkit IPC, product preload and RuntimeController with two private Native TUI programs. A private local Core connector replaces the product Host process; other App services use preview data. No user Run or installation.' }
 if (directoryScene) raw.boundary = 'Real App Toolkit Settings, ConfigOwner/ConfigStore/ToolkitOwner, registered Toolkit IPC and product preload. Actual native input saves to the isolated authoritative owner and disk; a private local Core connector supplies empty Runtime facts. Other App services use preview data. No terminal interaction or OS folder-dialog qualification.'
-let win, toolkit, runtime, sampler, detachRuntime, detachToolkit, detachTheme, owner, native
-const ids = directoryScene ? [] : ['tui-monitor', 'tui-output'], created = []
+let win, toolkit, runtime, sampler, detachRuntime, detachToolkit, detachTheme, owner, native, server
+const ids = directoryScene ? [] : polishScene ? ['tui-monitor'] : ['tui-monitor', 'tui-output'], created = []
 const checkpoint = step => { (raw.checkpoints ??= []).push(step); fs.writeFileSync(path.join(evidence, 'progress.json'), JSON.stringify({ steps: raw.checkpoints }) + '\n'); process.stderr.write('TUI_SCENE=' + step + '\n') }
 checkpoint('created')
 app.whenReady().then(async () => {
@@ -22,7 +22,7 @@ app.whenReady().then(async () => {
   try {
     const product = await import(pathToFileURL(ownerBundle).href)
     checkpoint('owner-imported')
-    const { ConfigOwner, ConfigStore, ToolkitOwner, registerToolkitIpc, RuntimeController, ProcessResourceSampler, AgentMuxMemoryAgentSessionStore, sessionSnapshotPayload, sessionObservationResult, sessionInputWriteResult, tuiProgram, localRuntimeConnector, registerThemeBootstrap, activateRuntime } = product
+    const { ConfigOwner, ConfigStore, ToolkitOwner, registerToolkitIpc, RuntimeController, ProcessResourceSampler, AgentMuxMemoryAgentSessionStore, sessionSnapshotPayload, sessionObservationResult, sessionInputWriteResult, tuiProgram, localRuntimeConnector, registerThemeBootstrap, activateRuntime, AgentMuxControlServer } = product
     const runtimeDirectory = path.join(privateRoot, 'runtime'), stateDir = path.join(runtimeDirectory, 'state', 'ctxmux')
     fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 })
     native = await activateRuntime({ executable: path.resolve(path.dirname(cli), '../vendor/ctxmux', process.platform + '-' + process.arch, 'bin/ctxmuxd'),
@@ -44,6 +44,7 @@ app.whenReady().then(async () => {
     detachTheme = registerThemeBootstrap(ipcMain, win, () => owner.current.appearance, () => true)
     toolkit = new ToolkitOwner({ config: owner, receiptPath: path.join(app.getPath('userData'), 'toolkit-receipts.json'), openRunPort: () => runtime.toolkitRunPort(), enabled: () => false,
       launch: () => ({ runner: process.execPath, cli, script: asset, cwd: work, env: { ELECTRON_RUN_AS_NODE: '1', HOME: app.getPath('home') } }) })
+    if (polishScene) server = new AgentMuxControlServer({ toolkit })
     detachToolkit = registerToolkitIpc(toolkit, (channel, handler) => ipcMain.handle(channel, handler))
     detachRuntime = runtime.attach(win.webContents)
     ipcMain.handle('sessions:snapshot', async () => sessionSnapshotPayload(await runtime.snapshot(owner.current), undefined, app.getPath('home')))
@@ -55,7 +56,7 @@ app.whenReady().then(async () => {
     ipcMain.handle('sessions:replay', (event, attachmentId, afterByte) => sessionObservationResult(() => runtime.readSessionReplay(event.sender.id, attachmentId, afterByte)))
     ipcMain.handle('sessions:refresh', (_event, control) => runtime.refresh(control, owner.current))
     ipcMain.handle('sessions:detach', async (event, attachmentId) => { await runtime.detachSession(event.sender.id, attachmentId); raw.sessions.detaches.push(attachmentId) })
-    ipcMain.handle('sessions:resize', (event, attachmentId, cols, rows) => runtime.resizeSessionAttachment(event.sender.id, attachmentId, cols, rows))
+    ipcMain.handle('sessions:resize', async (event, attachmentId, cols, rows) => { await runtime.resizeSessionAttachment(event.sender.id, attachmentId, cols, rows); (raw.sessions.resizes ??= []).push({ attachmentId, cols, rows }) })
     ipcMain.handle('sessions:write', (_event, control, data, source, observation) => sessionInputWriteResult(async () => { const result = await runtime.write(control, data, source, observation); raw.sessions.writes.push({ control, data, source }); return result }))
     ipcMain.handle('sessions:paste', (_event, control, text, terminalData, observation) => sessionInputWriteResult(() => runtime.paste(control, text, terminalData, observation)))
     ipcMain.handle('proof:tui:config:get', () => owner.current)
@@ -67,11 +68,12 @@ app.whenReady().then(async () => {
         toolkit: { performance: { enabled: false, statusBar: 'icon' }, mobileConnection: { enabled: false, statusBar: 'icon' }, tools: [] } }))
       runtime.commit(await runtime.prepare({ ...owner.current, hosts: owner.current.hosts.filter(host => host.kind === 'local') }))
       for (const [index, id] of ids.entries()) { await toolkit.execute({ operation: 'toolkit.add', toolId: id, value: {
-        name: index ? 'Live output' : 'Workspace monitor', icon: 'terminal', mode: 'tui', enabled: true, statusBar: 'label', workspacePath: work,
+        name: index ? 'Live output' : 'Workspace monitor', icon: 'terminal', mode: 'tui', enabled: !polishScene, statusBar: 'label', workspacePath: work,
         script: index ? 'exec env ELECTRON_RUN_AS_NODE=1 "$1" "$2"' : 'exec env ELECTRON_RUN_AS_NODE=1 "$1" "$2" --alternate', args: [process.execPath, program]
       } }, new AbortController().signal)
         created.push(id)
       }
+      await server?.start()
       checkpoint('config-seeded')
       seeded = true
       return { workspaceId: 'tui-work' }
@@ -102,6 +104,12 @@ app.whenReady().then(async () => {
       await until('window.tuiScene?.ready')
       await require('./working-directory.cjs')({ win, read, until, waitFor, settle, click, frame, owner, store, created, raw, home: app.getPath('home') })
       assert.equal(raw.sessions.attachments.length, 0, 'Directory editing does not attach a terminal')
+      raw.qualified = true
+      return
+    }
+    if (polishScene) {
+      await until('window.tuiScene?.ready')
+      await require('./polish.cjs')({ win, read, until, waitFor, settle, click, key, frame, owner, store, snapshot, bytes, raw, cli, privateRoot })
       raw.qualified = true
       return
     }
@@ -183,7 +191,7 @@ app.whenReady().then(async () => {
       raw.afterDisposalLeases = 0
       for (const id of created) if (toolkit) raw.afterDisposalLeases += (await toolkit.execute({ operation: 'toolkit.get', toolId: id }, new AbortController().signal)).snapshot.consumerCount
       assert.equal(raw.afterDisposalLeases, 0)
-      detachTheme?.(); detachRuntime?.(); await runtime?.dispose(); sampler?.dispose()
+      await server?.stop(); detachTheme?.(); detachRuntime?.(); await runtime?.dispose(); sampler?.dispose()
     } catch (error) { raw.cleanupError = String(error); raw.qualified = false }
     try { if (native?.spawned) { await native.shutdown(); raw.native.shutdown = true; await native.dispose() } }
     catch (error) { raw.nativeCleanupError = String(error); raw.qualified = false }
