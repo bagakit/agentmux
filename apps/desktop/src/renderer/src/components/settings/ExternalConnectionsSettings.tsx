@@ -12,6 +12,7 @@ import { BotEnrollmentPane, useBotEnrollment } from './BotEnrollmentPane'
 import { ConnectionProfilePanel } from './ConnectionProfilePanel'
 import { ConnectionSetupResult } from './ConnectionSetupResult'
 import { ConnectionIdentityFacts } from './ConnectionIdentityFacts'
+import { ConnectionIdentityRemoval, RetainedIdentityRemovals } from './ConnectionIdentityRemoval'
 import { ConnectionRequestTrace } from './ConnectionRequestTrace'
 import { ConnectionManagementSetup } from './ConnectionManagementSetup'
 import { MoteConnectionPanel } from '../MoteConnectionIdentity'
@@ -228,10 +229,14 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
       <header className="connector-identities-heading"><div><h3>Give your Motes a chat identity</h3><p>Create a bot with its name and avatar, or choose one you already have.</p></div><button data-enrollment-new className="small-button" aria-label="Create a general identity" onClick={startEnrollment}>+ General identity</button></header>
       <MoteIdentityCards readings={identities} records={records} recordsIssue={listIssue} onOpen={openMote} />
       <section className="connector-saved-identities" aria-label="Saved identities"><header><h3>Saved identities</h3><div className="connector-identities-heading__actions"><button className="connector-enrollment__text-action" onClick={() => { void read(); setLibraryRevision(value => value + 1) }}>Refresh</button><button data-enrollment-existing className="connector-enrollment__text-action" onClick={existing}>Connect existing bot</button></div></header>
+        {saveNotice ? <p className="settings-group-note" role="status">{saveNotice}</p> : null}
         {records.length ? records.map(record => <article className="connector-record" key={record.config.connectionId} data-connection={record.config.connectionId}>
           <button className="connector-record__open" onClick={() => { setMoteSelection(null); edit(record); setView('saved') }}><span className="connector-record__mark"><GroupIcon size={18} /></span><span><strong className="connector-record__name">{record.config.label}</strong><small>{platform(record.config.application.domain)}</small><ConnectionIdentityFacts record={record} readings={identities} compact /></span><span className="connector-record__action">Manage</span></button>
         </article>) : <p className="settings-group-note">{listIssue ? 'Your saved identities could not be read. Refresh to try again.' : 'No saved identities yet. Start with a Mote above or create a general identity.'}</p>}
       </section>
+      <RetainedIdentityRemovals readings={identities} active={active} onDeleted={receipt => {
+        setRecords(records => records.filter(record => record.config.connectionId !== receipt.connectionId)); setSaveNotice('The original identity removal is confirmed. The remote application and original history are kept.'); setLibraryRevision(value => value + 1)
+      }} />
     </section> : null}
     {view === 'management' && !current && restoration ? <section className="connector-setup" data-management-restoring>
       <button type="button" className="connector-back small-button" onClick={library}>All identities</button>
@@ -265,6 +270,9 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
         <div className="connector-editor-actions"><button className="small-button" disabled={busy} onClick={() => edit(current)}>Edit application</button>{management.catalog?.issue ? <button className="small-button" onClick={() => void management.list()}>Check setup support</button> : null}</div>
         <details className="connector-setup-help"><summary>Finish setup in {platform(current.config.application.domain)}</summary><ol><li>Enable the bot capability in your application.</li><li>In Events & Callbacks, choose persistent connection and add <code>im.message.receive_v1</code>.</li><li>Enable the messaging and group permissions required by the features you use, then publish the application.</li></ol><p className="settings-group-note">Keep this application enabled here while finishing event setup.</p><button className="small-button" data-management-console onClick={() => void openConsole(current.config.application.domain)}>Open {platform(current.config.application.domain)} console <LinkIcon size={12} /></button></details>
         <ConnectionProfilePanel key={JSON.stringify([current.config.connectionId, current.config.application, current.revision])} record={current} />
+        <ConnectionIdentityRemoval key={JSON.stringify([current.config.connectionId, current.config.application])} record={current} readings={identities} active={active} onDeleted={receipt => {
+          generation.current++; setRecords(records => records.filter(record => record.config.connectionId !== receipt.connectionId)); setSelected(null); setMoteSelection(null); setView('library'); setIssue(''); setSaveNotice('Identity removed from AgentMux. The remote bot application, Motes and original history are kept.'); setLibraryRevision(value => value + 1)
+        }} />
       </> : null}
     </section> : null}
     {current && navigation ? <div className="connector-editor-actions"><button className="small-button" data-connector-return-agent onClick={returnToAgent}>{originalAgent ? 'Return to Agent' : 'Choose an Agent'}</button><span className="settings-group-note">Connect a group from the Agent’s menu.</span></div> : null}

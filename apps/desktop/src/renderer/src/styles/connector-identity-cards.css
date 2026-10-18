@@ -48,3 +48,11 @@
 .connector-identity-facts { padding-block: var(--sp-4); border-block: 1px solid var(--line-soft); }
 .connector-identity-facts > div { flex: 1 1 180px; }
 @media (max-width: 480px) { .connector-record__facts { grid-template-columns: minmax(0, 1fr); } }
+.connector-identity-removal { display: grid; justify-items: start; gap: var(--sp-2); margin-top: var(--sp-3); padding-top: var(--sp-4); border-top: 1px solid var(--line-soft); }
+.connector-identity-removal > p, .connector-identity-removal__review > p { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
+.connector-identity-removal__review { display: grid; gap: var(--sp-3); }
+.connector-identity-removals { display: grid; gap: var(--sp-4); }
+.connector-identity-removals h3 { margin: 0; color: var(--text-2); font-size: var(--fs-body); font-weight: 550; }
+.connector-identity-removals > div { min-width: 0; padding-top: var(--sp-3); border-top: 1px solid var(--line-soft); }
+.connector-identity-removals > div > code { color: var(--text-2); font: var(--fs-meta)/1.6 var(--font-mono); overflow-wrap: anywhere; }
+.connector-identity-removals .connector-identity-removal { margin-top: 0; padding-top: var(--sp-2); border: 0; }
