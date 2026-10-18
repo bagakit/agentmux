@@ -127,17 +127,17 @@ trace timestamps and Main/Renderer wall or monotonic clocks must not be equated 
 local paths may be sensitive; no automatic watch/Toolkit capture, upload, log export, retained
 handle or recapture on lost replies/local write errors. An incomplete receipt remains incomplete.
 system metrics heap capture is a separate heavy, explicit native V8 snapshot. Supply the
-exact five-field Renderer target and a new --capture-id UUID. It may pause the Renderer,
+exact five-field Renderer target and a new --capture-id ID. It may pause the Renderer,
 trigger engine GC and use substantial native memory/disk; cancellation only ends observation,
 not native collection. No automatic retry, upload, heap RPC body or arbitrary server destination.
 The result references the original private Host file (Host, path, bytes and hash), not a local
 --output. Export the previous file before replacing the single latest snapshot. system metrics
-heap inspect --capture-id UUID reads that original operation without recapturing; available
+heap inspect --capture-id ID reads that original operation without recapturing; available
 is current file integrity, not a past durability ACK. Load an exported .heapsnapshot in DevTools
 Memory and use Retainers. This is V8 object evidence, not all workers/native/GPU/RSS or a leak
 verdict. Two-file Comparison requires independently established isolate/object-ID continuity.
 While its original attempt remains retained/pending, the same capture-id never starts
-native collection again. Every new capture intent requires a fresh UUID. Inspect a retired
+native collection again. Every new capture intent requires a fresh capture ID. Inspect a retired
 ID first: replaced IDs report mismatch, or absent when no snapshot is retained. This bounded
 retention is not permanent historical idempotency. Only a completed original with a known
 before-replace publication failure can explicitly repeat capture to retry its small receipt
