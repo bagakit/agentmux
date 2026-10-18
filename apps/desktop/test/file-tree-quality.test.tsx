@@ -52,6 +52,18 @@ afterEach(async () => {
 async function mount() { await act(async () => root.render(<FileExplorer />)); await settle() }
 
 describe('actual FileExplorer visible window', () => {
+  it('consumes an original file reveal once and preserves later reading when the tree becomes active again', async () => {
+    useAppStore.setState({ lastActiveFileByWorkspace: { [workspace.id]: entries[100]!.path } })
+    await mount()
+    expect(tree().scrollTop).toBeGreaterThan(0)
+    await scroll(12000)
+    const original = tree(), top = original.scrollTop
+    await act(async () => root.render(<FileExplorer active={false} />)); await settle()
+    await act(async () => root.render(<FileExplorer />)); await settle()
+    expect(tree()).toBe(original)
+    expect(tree().scrollTop).toBe(top)
+  })
+
   it('renders a bounded window of 1500 original paths and moves keyboard focus to an off-window item before opening its menu', async () => {
     const before = useAppStore.getState()
     await mount()
