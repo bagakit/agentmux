@@ -116,6 +116,11 @@ export type RendererSlowEvent = {
   retainedAs: Array<'latest' | 'current-peak' | 'previous-peak'>
   terminal: (RendererTerminalWriteContext & { payload: { unit: 'bytes' | 'string-code-units'; length: number } }) | null
   cleanup: RendererTerminalCleanupContext | null
+  /** Detached occurrence/start identity for Session work or terminal input; never inferred from later focus. */
+  source: RendererWorkSource | null
+}
+export type RendererWorkSource = {
+  hostId: string; sessionId: string | null; runId: string | null; regionId: string | null; instanceId: number | null
 }
 /** Synchronous call observation only; returned does not acknowledge asynchronous resource release. */
 export type RendererTerminalCleanupContext = {

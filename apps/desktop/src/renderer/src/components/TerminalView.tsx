@@ -936,7 +936,10 @@ export function TerminalView({
       readContext: () => ({ visible: visibleRef.current, liveReady: readyForLiveOutput,
         acceptsInput: acceptsCurrentInput(), readOnly: readOnlyRef.current,
         buffer: terminal.buffer.active.type, mouseTrackingMode: terminal.modes.mouseTrackingMode }),
-      slow: (detail, duration, occurrenceMonoMs) => rendererPerformance.terminalInteraction(detail, duration, occurrenceMonoMs)
+      readSource: () => ({ hostId: session.control.hostId,
+        sessionId: session.control.kind === 'agent' ? session.control.agentSessionId : session.id,
+        runId: session.control.run.runId, regionId: linkOriginRef.current.regionId ?? null, instanceId: performanceInstance }),
+      slow: (detail, duration, occurrenceMonoMs, source) => rendererPerformance.terminalInteraction(detail, duration, occurrenceMonoMs, source)
     })
     const readObservation = (): AgentMuxTerminalViewObservation | undefined => {
       if (disposed || terminalRef.current !== terminal) return undefined

@@ -1,4 +1,4 @@
-import type { RendererTerminalCost, RendererWorkTiming } from '@agentmux/core/control'
+import type { RendererTerminalCost, RendererWorkSource, RendererWorkTiming } from '@agentmux/core/control'
 
 type Interaction = RendererTerminalCost['interaction']
 type Context = Omit<NonNullable<Interaction['lastEvent']>, 'kind' | 'observedAt' | 'delayMs'>
@@ -8,18 +8,19 @@ function add(timing: RendererWorkTiming, duration: number) {
 }
 
 /** Passive observations only: no input values, DOM reads, timers or capability decisions. */
-export function createTerminalInteractionObservation({ host, readContext, slow,
+export function createTerminalInteractionObservation({ host, readContext, readSource, slow,
   now = () => performance.now(), wall = Date.now
 }: {
   host: Pick<HTMLElement, 'addEventListener' | 'removeEventListener'>
   readContext: () => Context
-  slow: (detail: 'keydown-dispatch' | 'wheel-dispatch' | 'write-request', duration: number, occurrenceMonoMs: number) => void
+  readSource: () => RendererWorkSource
+  slow: (detail: 'keydown-dispatch' | 'wheel-dispatch' | 'write-request', duration: number, occurrenceMonoMs: number, source: RendererWorkSource) => void
   now?: () => number; wall?: () => number
 }) {
   // Pending input replies outlive a retired view. Keep its callbacks and DOM owner
   // behind one removable reference rather than retaining them in every Promise reaction.
-  let owner: { host: typeof host; readContext: typeof readContext; slow: typeof slow;
-    now: typeof now; wall: typeof wall } | null = { host, readContext, slow, now, wall }
+  let owner: { host: typeof host; readContext: typeof readContext; readSource: typeof readSource; slow: typeof slow;
+    now: typeof now; wall: typeof wall } | null = { host, readContext, readSource, slow, now, wall }
   const state: Interaction = {
     observedSinceAt: wall(),
     keydown: { count: 0, unknownDelayCount: 0, delay: timing() },
@@ -36,7 +37,7 @@ export function createTerminalInteractionObservation({ host, readContext, slow,
     const delayMs = Number.isFinite(at) && Number.isFinite(stamp) && stamp > 0 && stamp <= at ? at - stamp : null
     item.count++
     if (delayMs === null) item.unknownDelayCount++
-    else { add(item.delay, delayMs); current.slow(`${kind}-dispatch`, delayMs, stamp) }
+    else { add(item.delay, delayMs); current.slow(`${kind}-dispatch`, delayMs, stamp, { ...current.readSource() }) }
     state.lastEvent = { ...current.readContext(), kind, observedAt: current.wall(), delayMs }
   }
   const options = { capture: true, passive: true }
@@ -45,6 +46,7 @@ export function createTerminalInteractionObservation({ host, readContext, slow,
   return {
     observeWriteRequest(request: Promise<unknown>, startedAt: number) {
       if (!owner) return
+      const source = { ...owner.readSource() }
       const requests = state.writeRequests
       requests.started++; requests.pending++; requests.lastStartedAt = owner.wall()
       let settled = false
@@ -54,7 +56,7 @@ export function createTerminalInteractionObservation({ host, readContext, slow,
         settled = true
         requests.pending--; requests[failed ? 'failed' : 'completed']++; requests.lastSettledAt = current.wall()
         const elapsed = Math.max(0, current.now() - startedAt)
-        add(requests.wall, elapsed); current.slow('write-request', elapsed, startedAt)
+        add(requests.wall, elapsed); current.slow('write-request', elapsed, startedAt, source)
       }
       // Observe both outcomes without replacing the original Promise or its error handler.
       void request.then(() => settle(false), () => settle(true))

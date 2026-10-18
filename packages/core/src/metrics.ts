@@ -208,7 +208,9 @@ const slowEventParser = record({ id: count, kind: timingKind, detail: text, obse
     payload: record({ unit: v => { if (!['bytes', 'string-code-units'].includes(v as string)) invalid() }, length: count }) })),
   cleanup: nullable(record({ hostId: identity, sessionId: identity, runId: identity, regionId: nullable(identity), instanceId: count,
     operation: v => { if (!['webgl-dispose', 'xterm-dispose'].includes(v as string)) invalid() },
-    outcome: v => { if (!['returned', 'threw'].includes(v as string)) invalid() } })) })
+    outcome: v => { if (!['returned', 'threw'].includes(v as string)) invalid() } })),
+  source: nullable(record({ hostId: identity, sessionId: nullable(identity), runId: nullable(identity),
+    regionId: nullable(identity), instanceId: nullable(count) })) })
 const slowEventsParser: Parser = value => {
   boundedArray(6 * timingKinds.length, slowEventParser)(value)
   const events = value as RendererPerformanceSnapshot['slowEvents']
@@ -221,6 +223,14 @@ const slowEventsParser: Parser = value => {
   for (const event of events) {
     if ((event.kind === 'terminal-write') !== (event.terminal !== null)) invalid()
     if ((event.kind === 'terminal-cleanup') !== (event.cleanup !== null)) invalid()
+    if (event.kind === 'session-event' && !Object.hasOwn(RENDERER_SESSION_EVENT_TYPES, event.detail)) invalid()
+    if (event.source !== null) {
+      if (event.kind === 'session-event') {
+        if (event.source.regionId !== null || event.source.instanceId !== null) invalid()
+      } else if (event.kind === 'terminal-interaction') {
+        if (event.source.sessionId === null || event.source.runId === null || event.source.instanceId === null) invalid()
+      } else invalid()
+    }
   }
 }
 const performanceParser = record({ startedAt: number, observedAt: number, recording: literal('bounded-lifetime'),

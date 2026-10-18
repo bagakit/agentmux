@@ -45,7 +45,7 @@ import { deliveryFailure } from '@agentmux/core/delivery-attempt'
 import { startDeliveryAttempt, type DeliveryAttemptSeed } from '@agentmux/client-ui/delivery-diagnostics'
 import { recordMessageDeliveryFailure } from './lib/message-delivery-diagnostics'
 import { recordHistory, navigateHistory, restoreComposerHistory, type HistoryState } from './lib/composer-history'
-import { rendererPerformance } from './lib/renderer-performance'
+import { rendererPerformance, rendererSessionEventSource } from './lib/renderer-performance'
 import { runServiceProjection } from './lib/run-service-projection'
 import type { ConversationItemRef } from '@agentmux/core/conversation'
 import type { ConversationRevealIntent, MailboxMessageNavigationResult } from './lib/mailbox-message-navigation'
@@ -12001,6 +12001,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   applyEvent(event) {
     const observationStarted = rendererPerformance.start()
+    const observationSource = rendererSessionEventSource(event.hostId, event.event)
     try {
     const core = event.event
     if (core.type === 'agent-input') {
@@ -12111,7 +12112,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         : core.type === 'agent-status' && freshCompletion ? eventSourceId : undefined
       if (sessionId && get().agentSteerQueues[sessionId]?.length) void get().flushAgentSteerQueue(sessionId)
     }
-    } finally { rendererPerformance.sessionEvent(event.event.type, observationStarted) }
+    } finally { rendererPerformance.sessionEvent(event.event.type, observationStarted, observationSource) }
   },
   decayStaleAgentStatuses(now) {
     set((state) => {
