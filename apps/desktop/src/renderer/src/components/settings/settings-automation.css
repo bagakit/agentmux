@@ -1,0 +1,7 @@
+.continuation-settings > .browser-automation-toggle { padding-inline: 0; }
+.continuation-settings .continuation-effect { color: var(--text-2); }
+.automation-save-scope { margin: var(--sp-3) 0 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.automation-prompt-disclosure > summary { padding-block: var(--sp-3); }
+.automation-prompt-disclosure .automation-defaults-prompt { padding-top: 0; }
+.automation-defaults > .settings-pane-actions { margin-top: var(--sp-3); }
+.continuation-settings > .settings-pane-actions { margin-top: var(--sp-2); }
