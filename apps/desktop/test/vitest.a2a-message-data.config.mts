@@ -9,6 +9,7 @@ const exports = JSON.parse(readFileSync(resolve(root, 'packages/core/package.jso
 const alias = Object.entries(exports).map(([key, value]) => ({ find: key === '.' ? '@agentmux/core' : `@agentmux/core/${key.slice(2)}`,
   replacement: resolve(root, 'packages/core', (value as { import: string }).import.replace('/dist/', '/src/').replace(/\.js$/, '.ts')) })).sort((a,b) => b.find.length-a.find.length)
 const mutations: Record<string, [string, string, string]> = {
+  originalResponseHost: ['src/renderer/src/components/DesktopClientUiProvider.tsx', 'if (result.hostId !== reference.hostId)', 'if (false)'],
   notifyHost: ['src/main/runtime-controller.ts', 'this.configuredClient(reference.hostId).notifyMessages(', "this.configuredClient('replacement-host').notifyMessages("],
   notifyMid: ['src/main/runtime-controller.ts', 'messageIds: [messageId]', "messageIds: ['replacement-mid']"],
   notifyTrust: ['src/main/ipc.ts', "handleWithEvent('sessions:notifyMessage', async (event, session: import('../shared/contracts.js').SessionHistoryReference, messageId: string, operationId: string) => {\n    assertManualPromptSenderTrusted(event.sender, contents)", "handleWithEvent('sessions:notifyMessage', async (event, session: import('../shared/contracts.js').SessionHistoryReference, messageId: string, operationId: string) => {\n    void event"],

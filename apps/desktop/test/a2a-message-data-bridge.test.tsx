@@ -140,6 +140,32 @@ it('the visible bounded hook reaches the original SDK through production Rendere
     expect(bridge.invoke.mock.calls.some(([channel]) => channel === 'sessions:messages')).toBe(true)
     expect(await queue.readJournal()).toEqual([...original, expect.objectContaining({ kind: 'message', envelope: expect.objectContaining({ messageId: 'new-undelivered', body }) })])
     expect(connect).not.toHaveBeenCalled(); for (const control of controls) expect(control).not.toHaveBeenCalled()
+    // The actual Desktop platform and shared notice now consume the same original journal read.
+    const { DesktopClientUiProvider } = await import('../src/renderer/src/components/DesktopClientUiProvider')
+    const { ConversationMessage } = await import('@agentmux/client-ui/components/ConversationMessage')
+    const { renderAgentMuxMessageReferences } = await import('@agentmux/core/agent-message-render')
+    const notice = <DesktopClientUiProvider><ConversationMessage speaker={{ role: 'system', id: 'agentmux' }}
+      a2aNotificationId="original-platform-notice" executionHostId={reference.hostId} conversationSessionId={reference.agentSessionId}
+      content={renderAgentMuxMessageReferences([{ senderSessionId: 'sender', messageId: 'incoming' }])} /></DesktopClientUiProvider>
+    await act(async () => render.render(notice))
+    expect(bodyRead).not.toHaveBeenCalled()
+    await act(async () => container!.querySelector<HTMLButtonElement>('.log-turn__system-toggle')!.click())
+    await vi.waitFor(() => expect(container!.querySelector('[data-a2a-original-message-id="incoming"]')?.textContent).toContain(body.trimEnd()))
+    expect(bodyRead).toHaveBeenCalledExactlyOnceWith({ messageId: 'incoming' })
+    expect(bridge.invoke).toHaveBeenCalledWith('sessions:message', reference, 'incoming')
+    expect(container!.querySelector('[data-a2a-original-message-id="incoming"] .conversation-protocol')).toBeNull()
+    expect(await queue.readJournal()).toEqual([...original, expect.objectContaining({ kind: 'message', envelope: expect.objectContaining({ messageId: 'new-undelivered', body }) })])
+    expect(connect).not.toHaveBeenCalled(); for (const control of controls) expect(control).not.toHaveBeenCalled()
+    const originalRead = await api.sessions.readMessage(reference, 'incoming')
+    const wrongHost = vi.spyOn(api.sessions, 'readMessage').mockResolvedValueOnce({ ...originalRead, hostId: 'wrong-response-host' })
+    await act(async () => render.render(<DesktopClientUiProvider key="wrong-response-host"><ConversationMessage
+      speaker={{ role: 'system', id: 'agentmux' }} a2aNotificationId="same-original-platform-notice"
+      executionHostId={reference.hostId} conversationSessionId={reference.agentSessionId}
+      content={renderAgentMuxMessageReferences([{ senderSessionId: 'sender', messageId: 'incoming' }])} /></DesktopClientUiProvider>))
+    await act(async () => container!.querySelector<HTMLButtonElement>('.log-turn__system-toggle')!.click())
+    await vi.waitFor(() => expect(container!.querySelector('.conversation-a2a-originals__pending')?.textContent).toContain('Host could not be confirmed'))
+    expect(container!.querySelector('[data-a2a-original-message-id]')).toBeNull()
+    expect(wrongHost).toHaveBeenCalledExactlyOnceWith(reference, 'incoming'); wrongHost.mockRestore()
     // Explicit UI notification crosses the registered trusted bridge into the actual Core journal.
     const notificationOriginal = { messageId: 'manual-reference', operationId: 'manual-source-operation', createdAt: 3,
       sender: { kind: 'agent-session' as const, agentSessionId: 'sender' }, recipient: { kind: 'agent-session' as const, agentSessionId: 'child-a' },
