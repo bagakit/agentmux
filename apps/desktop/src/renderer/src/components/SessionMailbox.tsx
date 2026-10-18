@@ -565,7 +565,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
             selectedKey={wanted} active={open && visible} loading={window.loading} error={window.error} observationError={window.observationError}
             nextCursor={window.nextCursor} refresh={window.refresh} loadEarlier={window.loadEarlier} readMessage={readMessage}
             onOpen={selectRecord} reading={reading} onCopy={onCopyQueued}
-            renderNotification={message => notifications.render(message, window.refresh)} notificationAttempt={notifications.attempt}
+            renderNotification={message => notifications.render(message, window.refresh, reading?.describeSpeaker?.({ role: 'agent', id: message.envelope.recipientSessionId! }, 18)?.name || message.envelope.recipientSessionId!)} notificationAttempt={notifications.attempt}
             {...(inputHistory && inputHistory.canFill !== false ? { onFill: inputHistory.fillText } : {})}
             {...(name === 'inbox' ? { renderNavigation: renderA2ANavigation } : {})} />
             : <MailboxEmpty title="The original Agent and Host are not yet known" /> : null}

@@ -91,9 +91,13 @@ export function useComposerInputHistory({ sessionId, control, visible, readOnly,
     }, { separate: true })
     return attachments ? '已插入正文，尚未发送；附件仍在原记录' : undefined
   }
-  const fillText = async (text: string) => {
+  const fillText = async (text: string | (() => Promise<string>)) => {
     const { controller, editor } = beginAction(true)
-    await editor!.insert(() => { assertCurrent(controller, editor); return text }, { separate: true })
+    await editor!.insert(async () => {
+      const content = typeof text === 'function' ? await text() : text
+      assertCurrent(controller, editor)
+      return content
+    }, { separate: true })
   }
   const fillLocal = async (entry: { text: string }) => fillText(entry.text)
   const copy = async (message: AgentSessionUserMessage) => {
