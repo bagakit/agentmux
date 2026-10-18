@@ -1,4 +1,5 @@
 import * as ThemeBridge from './bridge.js';
+import futureDesigns from './future-designs.json';
 const $ = selector => document.querySelector(selector);
 const escape = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const KEY = 'agentmux.icon-review.v1';
@@ -7,7 +8,10 @@ const editable = ['glyph','feature','meaning','note','status'];
 let data, roleById, draft, activeId = 'status.working', category = 'all', mode = 'gallery', query = '', modifiedOnly = false;
 let storageAvailable = true, corruptRaw = null, toastTimer, lastTrigger = null;
 let manifest, sessionExportTime, projectedTheme;
-let motionGlyph, motionTrigger;
+let motionGlyph, motionTrigger, motePreview;
+const views = ['gallery','matrix','motion','mote','future'];
+const initialView = window.location.hash.slice(1);
+if(views.includes(initialView))mode=initialView;
 if (import.meta.hot) import.meta.hot.on('icon-review:source-change', () => {
   if (!window.iconReview?.ready || storageAvailable) location.reload();
   else notice('源码已更新；当前草稿尚未保存，请先导出修改，再手动刷新。');
@@ -123,15 +127,23 @@ function renderCategories() {
   $('#mobile-category').innerHTML=data.categories.map(c=>`<option value="${c.id}">${escape(c.label)}</option>`).join('');
   $('#mobile-category').value=category;
 }
-function setCategory(value) {category=value;if(mode==='motion')mode='gallery';renderCategories();renderInventory();$('#inventory-content').scrollTop=0;}
+function setCategory(value) {category=value;if(!['gallery','matrix'].includes(mode))mode='gallery';renderCategories();renderInventory();$('#inventory-content').scrollTop=0;}
 function renderInventory() {
-  for(const view of ['gallery','matrix','motion'])$('#view-'+view).setAttribute('aria-pressed',mode===view);
+  for(const view of views)$('#view-'+view).setAttribute('aria-pressed',mode===view);
   $('.workspace').dataset.view=mode;
-  $('.edited-filter').hidden=mode==='motion';
-  $('.instance-preview-tools').hidden=mode==='motion';$('#semantic-samples').hidden=mode==='motion';
-  $('#search').placeholder=mode==='motion'?'搜索自绘名称、静止设计、动效或用途':'搜索图标、功能、含义或语义 ID';
+  motePreview?.dispose();motePreview=undefined;
+  const directory=['gallery','matrix'].includes(mode);
+  if(!directory&&$('#inspector').open)$('#inspector').close();
+  if(directory&&!mobile()&&!$('#inspector').open)$('#inspector').show();
+  $('.edited-filter').hidden=!directory;$('#mobile-category').hidden=!directory;
+  $('#sample-lab').hidden=!directory;$('.inventory-tools').hidden=mode==='mote';
+  if(!directory){samplePresentation.animation='none';$('#preview-animation').value='none';renderSamples();}
+  window.history.replaceState(null,'','#'+mode);
+  $('#search').placeholder=mode==='motion'?'搜索自绘名称、静止设计、动效或用途':mode==='future'?'搜索候选名称、用途或定义来源':'搜索图标、功能、含义或语义 ID';
   $('#search').setAttribute('aria-label',$('#search').placeholder);
   if(mode==='motion'){renderMotionInventory();return;}
+  if(mode==='mote'){renderMote();return;}
+  if(mode==='future'){renderFuture();return;}
   const found=rows(),groups=orderedGroups(found);
   $('#result-count').textContent=`${groups.length} 种图形 · ${found.length} 个用途${query?' · 搜索结果':''}`;
   const host=$('#inventory-content');
@@ -149,6 +161,36 @@ function renderInventory() {
   }
 }
 function authoredRoles(glyph) {return data.roles.filter(role=>role.glyph===glyph);}
+function renderMote() {
+  const role=roleById.get('object.mote'), drawing=drawingLabel(role);
+  $('#result-count').textContent='真实组件 · 靠近、悬停、聚焦与按压';
+  $('#inventory-content').innerHTML=`<div class="mote-showcase">
+    <section class="mote-stage" id="mote-stage" data-interactive="true">
+      <p class="eyebrow">A QUIET COMPANION</p><h2>一个有回应的搭档</h2>
+      <p>把指针移近，停留片刻，或轻轻按住。</p>
+      <div class="mote-playground"><button type="button" class="mote-target" aria-label="试试 Mote 的悬停、聚焦与按压回应"><span id="mote-preview"></span></button></div>
+      <label class="mote-toggle"><input type="checkbox" id="mote-interactive" checked>启用交互回应</label>
+      <small>仅在这个区域演示，不执行 Mote 操作。</small>
+    </section>
+    <section class="mote-notes"><h3>从细节看性格</h3><dl>
+      <div><dt>靠近</dt><dd>目光轻轻跟随指针，远离后回到原位。</dd></div>
+      <div><dt>悬停 / 键盘聚焦</dt><dd>短暂眨眼，回应你的注意。</dd></div>
+      <div><dt>按住 / 松开</dt><dd>身体轻压再回弹，鼠标与触控共用原交互。</dd></div>
+      <div><dt>安静时</dt><dd>保持完整轮廓；系统减少动画时静止。</dd></div>
+    </dl><p class="mote-theme-note">当前图形：<code>${escape(drawing)}</code>。主题自选图形与路径保留原样；默认搭档才启用这些局部回应。</p></section>
+    <section class="mote-scale"><div><h3>回到实际尺寸</h3><p>类型、目录与历史标记保持静止。</p></div><div class="motion-rest-sizes">${[12,16,24,40].map(size=>`<span>${semantic('object.mote',size)}<small>${size} px</small></span>`).join('')}</div><button type="button" class="button" data-role="object.mote">编辑 Mote 图标 ↗</button></section>
+  </div>`;
+  motePreview=ThemeBridge.mountMotePreview($('#mote-preview'),{size:88,interactive:true});
+}
+function renderFuture() {
+  const needle=query.trim().toLowerCase();
+  const found=futureDesigns.filter(item=>[item.id,item.label,item.proposedSemantic,item.description,...item.definitions].join(' ').toLowerCase().includes(needle));
+  $('#result-count').textContent=`${found.length} / ${futureDesigns.length} 个候选 · 尚未采用`;
+  $('#inventory-content').innerHTML=`<p class="motion-inventory-note">为项目概念准备的静态草案。拟议用途与定义来源可供核对；这些候选未进入图标选择器或主题导出。</p><div class="future-grid">${found.map(item=>`<article class="future-card" data-future-glyph="${escape(item.id)}"><div class="future-title"><h2>${escape(item.label)}</h2><span class="design-kind">设计储备</span></div><div class="future-sizes">${[12,16,24,40].map(size=>`<span>${drawingMarkup(item.shapes,size)}<small>${size} px</small></span>`).join('')}</div><p>${escape(item.description)}</p><code>${escape(item.id)}</code><details><summary>拟议用途与定义来源</summary><p>拟议语义：<code>${escape(item.proposedSemantic)}</code></p>${item.definitions.map(path=>`<code class="definition-source">${escape(path)}</code>`).join('')}</details></article>`).join('')}</div>${found.length?'':'<div class="empty"><strong>没有匹配的候选</strong>试试对象名称或拟议用途。</div>'}`;
+}
+function drawingMarkup(shapes,size) {
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="stroke-width:var(--icon-stroke-width);stroke-linecap:var(--icon-linecap);stroke-linejoin:var(--icon-linejoin)" aria-hidden="true">${shapes.map(([tag,attrs])=>`<${tag} ${Object.entries(attrs).map(([key,value])=>`${key}="${escape(value)}"`).join(' ')}/>`).join('')}</svg>`;
+}
 function renderMotionInventory() {
   const needle=query.trim().toLowerCase(), entries=Object.entries(ThemeBridge.authoredDesigns);
   const found=entries.filter(([glyph,design])=>[glyph,design.rest,design.motion.description,design.motion.trigger,motionLabels[design.motion.kind],...authoredRoles(glyph).flatMap(role=>[role.id,role.label,role.meaning,role.feature])].join(' ').toLowerCase().includes(needle));
@@ -161,7 +203,9 @@ function renderMotionInventory() {
 // Catalogue drawings retain the authored parts; the product stylesheet owns all motion.
 // This does not replace a semantic symbol or alter a user-selected glyph/paths asset.
 function authoredDemoMarkup(glyph,animation) {
-  const drawing=icon(glyph,24,'semantic-icon');
+  const role=authoredRoles(glyph)[0];
+  if(role)return ThemeBridge.semanticMarkup(role.id,40,'',{animation});
+  const drawing=icon(glyph,40,'semantic-icon');
   return animation==='none'?drawing:`<span class="semantic-icon-motion" data-icon-animation="${animation}">${drawing}</span>`;
 }
 function renderMotionDialog() {
@@ -171,7 +215,7 @@ function renderMotionDialog() {
   $('#motion-content').innerHTML=`
     <div class="motion-comparison">
       <section class="motion-panel"><h3>静止轮廓</h3><div class="motion-rest-sizes">${[12,16,24].map(size=>`<span>${icon(motionGlyph,size)}<small>${size} px</small></span>`).join('')}</div><p>${escape(design.rest)}</p></section>
-      <section class="motion-panel motion-panel--demo"><h3>${motionLabels[motion.kind]}</h3><div id="authored-demo" class="authored-demo" data-authored-glyph="${escape(motionGlyph)}">${authoredDemoMarkup(motionGlyph,motion.animation)}</div><div class="motion-controls">${motion.kind==='loop'?'<button id="pause-motion" class="button" aria-pressed="false">暂停循环</button>':motion.kind==='once'?'<button id="replay-motion" class="button">重播一次</button>':'<span class="motion-still-label">此图形保持静止</span>'}</div><p>${escape(motion.description)}</p></section>
+      <section class="motion-panel motion-panel--demo"><h3>${roles.length?'当前主题演示':'未绑定 · 原图演示'}</h3><div id="authored-demo" class="authored-demo" data-authored-glyph="${escape(motionGlyph)}">${authoredDemoMarkup(motionGlyph,motion.animation)}</div><div class="motion-controls">${motion.kind==='loop'?'<button id="pause-motion" class="button" aria-pressed="false">暂停循环</button>':motion.kind==='once'?'<button id="replay-motion" class="button">重播一次</button>':'<span class="motion-still-label">此图形保持静止</span>'}</div><p>${escape(motion.description)}</p>${roles.length?`<small class="demo-asset">${escape(roles[0].id)} · ${escape(drawingLabel(roles[0]))}</small>`:''}</section>
     </div>
     <div class="motion-guidance"><h3>何时使用</h3><p>${escape(motion.trigger)}</p><small>此处仅演示设计，遵循系统的“减少动画”设置。</small></div>
     <section class="motion-roles"><h3>当前主题与草稿</h3><p>下方按真实语义用途显示当前图形，保持静止；自选图形与路径不会被目录演示替换。</p>${roles.length?`<div class="motion-role-list">${roles.map(role=>`<button class="motion-role" data-motion-role="${escape(role.id)}">${semantic(role.id,20)}<span><strong>${escape(role.label)}</strong><code>${escape(role.id)}</code><small>${escape(drawingLabel(role))}</small></span><span aria-hidden="true">↗</span></button>`).join('')}</div>`:'<p class="motion-unbound">尚未绑定语义用途，当前主题没有可对照的语义项。目录原图仍可完整查看。</p>'}</section>`;
@@ -209,7 +253,7 @@ function renderInspector() {
     <label class="field"><span class="field-label">评审状态</span><select id="edit-status" name="status">${Object.entries(STATUSES).map(([value,label])=>`<option value="${value}" ${e.status===value?'selected':''}>${label}</option>`).join('')}</select></label>
     <div class="inspector-bottom"><span>自动保存为浏览器草稿</span><button type="button" id="restore-role" ${changed(r.id)?'':'disabled'}>撤回此项草稿</button></div></form>
     <details class="evidence"><summary>原始定义与来源 <span>${r.sources.length} 处引用</span></summary><p class="source-explanation">图形和语义 ID 来自源码；中文含义与功能归纳可修订。引用包含静态命中、未解析具体目标的动态前缀候选及原生样式投影；候选不代表实际消费覆盖或 Runtime 状态。</p><div class="original-definition"><code>${escape(r.id)}</code><br>原图标：${escape(r.glyph)}<br>原含义：${escape(r.meaning)}<br>目录标签：${escape(r.label)}</div><div class="source-item"><span class="source-kind">定义</span><code>${escape(r.definition.file)}:${r.definition.line}</code></div>${r.sources.length?r.sources.map(s=>`<div class="source-item"><span class="source-kind">${{literal:'源码引用',dynamic:'动态前缀候选',native:'原生样式'}[s.kind]}</span><code>${escape(s.file)}:${s.line}</code><pre>${escape(s.excerpt)}</pre></div>`).join(''):'<p class="source-explanation">本次扫描没有发现具体业务消费；保留目录定义供核对。</p>'}</details>`;
-  if(!mobile()&&!$('#inspector').open)$('#inspector').show();
+  if(['gallery','matrix'].includes(mode)&&!mobile()&&!$('#inspector').open)$('#inspector').show();
 }
 function refreshInspectorSignals() {
   const e=effective(roleById.get(activeId));
@@ -326,17 +370,27 @@ function attachEvents() {
   $('#mobile-category').addEventListener('change',event=>setCategory(event.target.value));
   $('#search').addEventListener('input',event=>{query=event.target.value;renderInventory();});
   $('#modified-only').addEventListener('change',event=>{modifiedOnly=event.target.checked;renderInventory();});
-  for(const view of ['gallery','matrix','motion'])$('#view-'+view).addEventListener('click',()=>{
+  for(const view of views)$('#view-'+view).addEventListener('click',()=>{
     mode=view;
-    if(view==='motion'){samplePresentation.animation='none';$('#preview-animation').value='none';renderSamples();}
+    query='';$('#search').value='';
     renderInventory();$('#inventory-content').scrollTop=0;
   });
   $('#inventory-content').addEventListener('click',event=>{
     const card=event.target.closest('[data-glyph]'),row=event.target.closest('[data-role]'),design=event.target.closest('[data-motion-glyph]');
     if(design)openMotion(design.dataset.motionGlyph,design);
     if(card){const candidates=rows().filter(r=>r.glyph===card.dataset.glyph);selectRole(candidates.find(r=>r.id===activeId)?.id??candidates[0].id,card);}
-    if(row)selectRole(row.dataset.role,row.querySelector('button'));
+    if(row){if(!['gallery','matrix'].includes(mode)){mode='matrix';category='all';query=row.dataset.role;$('#search').value=query;renderCategories();}selectRole(row.dataset.role,row.querySelector('button')??row);}
   });
+  $('#inventory-content').addEventListener('change',event=>{
+    if(event.target.id==='mote-interactive'){
+      motePreview?.dispose();motePreview=ThemeBridge.mountMotePreview($('#mote-preview'),{size:88,interactive:event.target.checked});
+      $('#mote-stage').dataset.interactive=String(event.target.checked);
+    }
+  });
+  $('#sample-lab').addEventListener('toggle',()=>{if(!$('#sample-lab').open){samplePresentation.animation='none';$('#preview-animation').value='none';renderSamples();}});
+  window.addEventListener('hashchange',()=>{const next=window.location.hash.slice(1);if(views.includes(next)&&next!==mode){closeMotion();mode=next;query='';$('#search').value='';renderInventory();}});
+  window.addEventListener('pagehide',()=>{motePreview?.dispose();motePreview=undefined;});
+  window.addEventListener('pageshow',event=>{if(event.persisted&&mode==='mote')renderMote();});
   $('#motion-content').addEventListener('click',event=>{
     if(event.target.closest('#replay-motion')){
       $('#authored-demo').innerHTML=authoredDemoMarkup(motionGlyph,ThemeBridge.authoredDesigns[motionGlyph].motion.animation);
@@ -396,6 +450,7 @@ function attachEvents() {
   });
   matchMedia('(max-width:950px)').addEventListener('change',()=>{
     const dialog=$('#inspector'),modal=dialog.matches(':modal');
+    if(!['gallery','matrix'].includes(mode)){if(dialog.open)dialog.close();return;}
     if(mobile()){
       if(dialog.open&&!modal){dialog.close();dialog.showModal();}
     }else{
