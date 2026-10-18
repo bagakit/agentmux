@@ -2580,6 +2580,7 @@ export class RuntimeController {
     intentId: string; operationId: string; agentMuxNote: string }): Promise<void> {
     const client = await this.connectedClient(input.hostId)
     const session = await client.inspectAgentCreation(input.supervisorAgentSessionId)
+    if (session.kind === 'retired-agent') throw new AgentMuxError('The original reminder target is closed. Its Goal and request are retained; explicitly recover the Session before scheduling input.', 'AGENT_SESSION_RETIRED')
     if (session.run.runId !== input.supervisorRunId) throw new AgentMuxError('The original reminder target Run changed. Keep its Goal responsibility and inspect the original reminder.', 'STALE_AGENT_SESSION')
     await client.saveAgentFuturePromptIntent({ agentSessionId: input.supervisorAgentSessionId, intentId: input.intentId,
       operationId: input.operationId, prompt: '', agentMuxNote: input.agentMuxNote, active: true })

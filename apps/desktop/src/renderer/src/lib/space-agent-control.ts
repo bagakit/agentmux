@@ -1,6 +1,6 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { zoneFileResource } from './zone-file-resource'
-import type { AgentMuxAgentSession } from '@agentmux/core'
+import type { AgentMuxAgentSession, AgentMuxAgentCreationInspection } from '@agentmux/core'
 import type {
   AgentMuxSpaceAddress, AgentMuxSpaceAgentFact, AgentMuxSpaceRegionFact, AgentMuxSpaceCatalog, AgentMuxSpaceControlRequest,
   AgentMuxSpaceControlResult, AgentMuxSpaceDestination, AgentMuxSpaceMutationReport,
@@ -39,7 +39,7 @@ export type SpatialControlPorts = {
   surveyPresentation?(catalog: AgentMuxSpaceCatalog): NonNullable<AgentMuxSpaceCatalog['survey']>
   createResource(input: SpaceZoneResourceInput): Promise<SpaceZoneResourceResult>
   launch(input: AgentLaunchInput & { agentSessionId: string; createOperationId: string }): Promise<AgentLaunchResult>
-  creation(hostId: string, sessionId: string): Promise<AgentMuxAgentSession>
+  creation(hostId: string, sessionId: string): Promise<AgentMuxAgentCreationInspection>
   attach(regionId: string, result: AgentLaunchResult): Promise<void>
   save(layoutApplied: boolean): Promise<AgentMuxSpatialSave>
   focus(address: AgentMuxSpaceAddress): void
@@ -365,7 +365,7 @@ export function applySpatialPlacement(state: SpatialWorkbench, topics: readonly 
   return { tabs, layouts }
 }
 
-function agentFact(session: AgentMuxAgentSession, hostId: string): AgentMuxSpaceAgentFact {
+function agentFact(session: Pick<AgentMuxAgentSession, 'agentSessionId' | 'run' | 'providerId' | 'executorId' | 'workspacePath' | 'creation' | 'forkedFrom'>, hostId: string): AgentMuxSpaceAgentFact {
   return { agentSessionId: session.agentSessionId, runId: session.run.runId, providerId: session.providerId,
     executorId: session.executorId, hostId, cwd: session.workspacePath,
     createOperationId: session.creation?.createOperationId ?? null, initialPrompt: session.creation?.initialPrompt ?? 'unknown',
@@ -420,13 +420,23 @@ async function reconcile(ports: SpatialControlPorts, topics: readonly ScratchTop
     if (hostId) try {
       const created = await ports.creation(hostId, binding.agentSessionId)
       if (created.agentSessionId !== binding.agentSessionId) throw new Error('Creation read returned another Session identity.')
-      if (created.creation?.createOperationId !== binding.requestId) throw new Error('Core has not confirmed this original creation operation identity. Its healthy Session is retained without attaching a replacement.')
-      agent = agentFact(created, hostId)
-      creationConfirmed = created.creation?.persistence !== 'unconfirmed' && !created.creation?.failure
-      // Repair only the original reserved projection from the existing Core receipt.
-      // This read never repeats creation, input or lifecycle recovery.
-      const afterRead = currentLocation()
-      if (binding.recovery && afterRead.atTarget && !afterRead.snapshot) await ports.attach(binding.regionId, { created, projectionFailures: [] })
+      const creation = created.kind === 'retired-agent' ? created.history?.creation : created.creation
+      if (creation?.createOperationId !== binding.requestId) throw new Error('Core has not confirmed this original creation operation identity. Its healthy Session is retained without attaching a replacement.')
+      if (created.kind === 'retired-agent') {
+        const history = created.history!
+        // A retired receipt outranks a stale live snapshot. Inspection keeps the
+        // original topology but never attaches or recovers this ended identity.
+        agent = { ...agentFact({ ...history, agentSessionId: created.agentSessionId, run: created.run }, hostId),
+          retirement: { source: created.source, observedAt: created.observedAt } }
+        creationConfirmed = true
+      } else {
+        agent = agentFact(created, hostId)
+        creationConfirmed = created.creation?.persistence !== 'unconfirmed' && !created.creation?.failure
+        // Repair only the original reserved projection from the existing Core receipt.
+        // This read never repeats creation, input or lifecycle recovery.
+        const afterRead = currentLocation()
+        if (binding.recovery && afterRead.atTarget && !afterRead.snapshot) await ports.attach(binding.regionId, { created, projectionFailures: [] })
+      }
     }
     catch (error) {
       issues.push(issue('creation-read', 'AGENT_CREATION_UNKNOWN', `Current creation check: ${error instanceof Error ? error.message : String(error)}`))
@@ -440,17 +450,17 @@ async function reconcile(ports: SpatialControlPorts, topics: readonly ScratchTop
   const resource = binding.resource ? { projectId: source ? directoryIdentity(source.hostId, source.repoPath ?? source.path) : null,
     sourceWorkspaceId: binding.resource.sourceWorkspaceId ?? null, hostId: binding.resource.hostId, path: binding.resource.path,
     kind: binding.resource.kind, branch: binding.resource.branch, workspaceId: workspace?.id ?? null } : null
-  if (!atTarget) issues.push(issue('layout-read', 'SPACE_PLACEMENT_UNKNOWN', 'The request has a durable correlation, but its reserved target placement is not observed. Its current Region location is returned without claiming completion.'))
-  if (agent?.initialPrompt === 'unconfirmed' || agent?.initialPrompt === 'unknown' && binding.createAgent) {
+  if (!atTarget && !agent?.retirement) issues.push(issue('layout-read', 'SPACE_PLACEMENT_UNKNOWN', 'The request has a durable correlation, but its reserved target placement is not observed. Its current Region location is returned without claiming completion.'))
+  if (!agent?.retirement && (agent?.initialPrompt === 'unconfirmed' || agent?.initialPrompt === 'unknown' && binding.createAgent)) {
     issues.push(issue('first-prompt', 'INITIAL_PROMPT_UNCONFIRMED', 'Core has not confirmed the original first prompt protocol.'))
   }
-  if (agent?.forkedFrom && agent.agentMuxContext !== 'confirmed') {
+  if (!agent?.retirement && agent?.forkedFrom && agent.agentMuxContext !== 'confirmed') {
     issues.push(issue('identity-reminder', 'AGENTMUX_CONTEXT_UNCONFIRMED', 'The new Agent exists; its new AgentMux identity reminder has not been confirmed. Inspect the original creation operation without replaying input.'))
   }
-  if (agent?.creationPersistence === 'unconfirmed' || agent?.creationFailure) issues.push(issue('creation',
+  if (!agent?.retirement && (agent?.creationPersistence === 'unconfirmed' || agent?.creationFailure)) issues.push(issue('creation',
     agent.creationFailure?.code ?? 'AGENT_CREATION_UNCONFIRMED', agent.creationFailure?.message ?? 'The new Run is retained; its Session persistence is unconfirmed. Inspect the original creation operation without repeating it.'))
   const unchanged = binding.from && binding.target.tabId === binding.from.tabId && binding.target.regionId === binding.from.regionId
-  return { requestId: binding.requestId, outcome: atTarget && agent && issues.length === 0 ? binding.operation === 'space.mv' ? unchanged ? 'unchanged' : 'moved' : 'opened' : 'unknown',
+  return { requestId: binding.requestId, outcome: agent?.retirement ? 'retired' : atTarget && agent && issues.length === 0 ? binding.operation === 'space.mv' ? unchanged ? 'unchanged' : 'moved' : 'opened' : 'unknown',
     from: binding.from ?? null, to, agent, resource, save: unsaved(Boolean(to)), issues }
 }
 
@@ -581,7 +591,9 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
         const parent = ports.get().sessions.find((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => session.kind === 'agent' && session.id === source.agentSessionId)
         if (!parent) failure('AGENT_SESSION_UNKNOWN', 'The source Agent Session is not currently observed; its workbench is retained.')
         if (!parent.capabilities.providerFork?.current) failure('AGENT_FORK_UNSUPPORTED', 'This Provider does not support forking its current conversation.')
-        forkParent = await ports.creation(parent.hostId, parent.id)
+        const inspected = await ports.creation(parent.hostId, parent.id)
+        if (inspected.kind === 'retired-agent') failure('AGENT_SESSION_RETIRED', 'The original fork source is closed. Its history and workface are retained; explicitly reopen it before forking this Session.')
+        forkParent = inspected
         // Core owns server-local Session identity; the Desktop snapshot owns the route to that server.
         forkExecutionHostId = parent.hostId
         const handle = forkParent.nativeHandle

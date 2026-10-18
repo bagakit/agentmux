@@ -425,11 +425,16 @@ function save(value: unknown, code: Code): AgentMuxSpatialSave {
 function report(value: unknown, code: Code): AgentMuxSpaceMutationReport {
   const source = fields(value, ['requestId', 'outcome', 'from', 'to', 'agent', 'resource', 'save', 'issues'], code)
   const agent = source.agent === null ? null : (() => {
-    const item = fields(source.agent, ['agentSessionId', 'runId', 'providerId', 'executorId', 'hostId', 'cwd', 'createOperationId', 'initialPrompt', 'agentMuxContext', 'forkedFrom', 'creationPersistence', 'creationFailure', 'executorRevision', 'initialMessageOrigin', 'createdBy', 'createdRun', 'initialMessageId'], code)
+    const item = fields(source.agent, ['agentSessionId', 'runId', 'providerId', 'executorId', 'hostId', 'cwd', 'createOperationId', 'initialPrompt', 'agentMuxContext', 'forkedFrom', 'creationPersistence', 'creationFailure', 'executorRevision', 'initialMessageOrigin', 'createdBy', 'createdRun', 'initialMessageId', 'retirement'], code)
     return { agentSessionId: spaceControlId(item.agentSessionId, 'Agent Session', code), runId: nullableId(item.runId, 'Run', code),
       providerId: nullableId(item.providerId, 'Provider', code), executorId: nullableId(item.executorId, 'Executor', code), hostId: spaceControlId(item.hostId, 'Host', code),
       cwd: string(item.cwd, 'Execution cwd', code), createOperationId: nullableId(item.createOperationId, 'Creation operation', code),
       initialPrompt: member(item.initialPrompt, ['not-requested', 'confirmed', 'unconfirmed', 'unknown'], 'Initial prompt', code),
+      ...(item.retirement === undefined ? {} : { retirement: (() => {
+        const retirement = fields(item.retirement, ['source', 'observedAt'], code)
+        if (typeof retirement.observedAt !== 'number' || !Number.isFinite(retirement.observedAt) || retirement.observedAt < 0) fail('Retirement observation time is invalid.', code)
+        return { source: member(retirement.source, ['user'], 'Retirement source', code), observedAt: retirement.observedAt as number }
+      })() }),
       ...(item.agentMuxContext === undefined ? {} : { agentMuxContext: member(item.agentMuxContext, ['confirmed', 'unconfirmed', 'unknown'], 'AgentMux identity reminder', code) }),
       ...(item.creationPersistence === undefined ? {} : { creationPersistence: member(item.creationPersistence, ['unconfirmed'], 'Creation persistence', code) }),
       ...(item.executorRevision === undefined ? {} : { executorRevision: string(item.executorRevision, 'Executor revision', code, 256) }),
@@ -447,12 +452,15 @@ function report(value: unknown, code: Code): AgentMuxSpaceMutationReport {
       })() }),
       ...(item.forkedFrom === undefined ? {} : { forkedFrom: parseAgentForkSource(item.forkedFrom) }) }
   })()
+  if ((source.outcome === 'retired') !== Boolean(agent?.retirement) || agent?.retirement && (!agent.runId || !agent.createOperationId)) {
+    fail('A retired creation requires its original Session, Run and creation operation facts.', code)
+  }
   const resource = source.resource === null ? null : (() => {
     const item = fields(source.resource, ['projectId', 'sourceWorkspaceId', 'hostId', 'path', 'workspaceId', 'kind', 'branch'], code)
     return { projectId: nullableId(item.projectId, 'Resource Project', code, true), sourceWorkspaceId: nullableId(item.sourceWorkspaceId, 'Resource Workspace', code), hostId: spaceControlId(item.hostId, 'Resource Host', code), path: string(item.path, 'Resource directory', code),
       workspaceId: nullableId(item.workspaceId, 'Workspace', code), kind: member(item.kind, ['directory', 'worktree'], 'Resource kind', code), branch: nullableString(item.branch, 'Branch', code) }
   })()
-  return { requestId: spaceControlId(source.requestId, 'Mutation Request', code), outcome: member(source.outcome, ['opened', 'moved', 'unchanged', 'partial', 'unknown'], 'Mutation outcome', code),
+  return { requestId: spaceControlId(source.requestId, 'Mutation Request', code), outcome: member(source.outcome, ['opened', 'moved', 'unchanged', 'partial', 'unknown', 'retired'], 'Mutation outcome', code),
     from: source.from === null ? null : address(source.from, code), to: source.to === null ? null : address(source.to, code), agent, resource,
     save: save(source.save, code),
     issues: list(source.issues, value => {

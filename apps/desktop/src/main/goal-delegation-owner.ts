@@ -105,6 +105,8 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
           this.runtime.agentCreation(intent.hostId, intent.ownerAgentSessionId),
           this.runtime.agentCreation(intent.hostId, intent.workerAgentSessionId)
         ])
+        if (owner.kind === 'retired-agent' || worker.kind === 'retired-agent') throw new AgentMuxError(
+          'An original delegation participant is closed. Its Goal, request and history are retained; explicitly recover the Session before a new delegation.', 'AGENT_SESSION_RETIRED')
         if (owner.agentSessionId !== intent.ownerAgentSessionId || owner.run.runId !== intent.ownerRunId ||
             worker.agentSessionId !== intent.workerAgentSessionId || worker.run.runId !== intent.workerRunId ||
             authority.runId !== intent.ownerRunId) throw new AgentMuxError(
@@ -149,6 +151,8 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
         if (existing.message) this.assertReply(saved, report, existing.message, body)
         else {
           const owner = await this.runtime.agentCreation(saved.hostId, saved.ownerAgentSessionId)
+          if (owner.kind === 'retired-agent') throw new AgentMuxError(
+            'The original report recipient is closed. Keep the worker report and its original operation; explicitly recover the recipient before sending.', 'AGENT_SESSION_RETIRED')
           await core.call(saved.hostId, 'agent.send', { target: { kind: 'agent-session', agentSessionId: saved.ownerAgentSessionId },
             operationId: report.operationId, messageId: report.replyMessageId, threadId: saved.threadId, correlationId: saved.sourceMessageId,
             replyTo: saved.sourceMessageId, text: body, expectedRun: owner.run }, context)

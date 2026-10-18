@@ -198,6 +198,7 @@ import type {
   AgentMuxAgentPasteInput,
   AgentMuxAgentWriteInput,
   AgentMuxAgentSession,
+  AgentMuxAgentCreationInspection,
   AgentNativeActivityEvent,
   AgentCurrentActivity,
   AgentMuxNativeSessionConfirmationInput,
@@ -839,7 +840,10 @@ export class AgentMuxClient {
     const origin = input.initialMessageAdmission ? await authority.verify(input.initialMessageAdmission, { runtimeId, intentDigest }) : undefined
     // Resolve an existing intent before reading a possibly changed Executor configuration. Never
     // restart or re-input an operation whose original delivery is unknown.
-    const existing = await this.readCreationSession(input.agentSessionId)
+    const existing = await this.readCreationSession(input.agentSessionId, input.createOperationId)
+    if (existing?.kind === 'retired-agent') throw new AgentMuxError(
+      'The original creation belongs to a retired Agent. Inspect that operation; only an explicit reopen or a new creation intent can continue work.',
+      'AGENT_CREATION_RETIRED', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
     if (existing) {
       if (existing.creation?.createOperationId !== input.createOperationId || existing.creation.intentDigest !== intentDigest ||
         JSON.stringify(existing.creation.initialMessageOrigin) !== JSON.stringify(origin)) {
@@ -2209,9 +2213,24 @@ export class AgentMuxClient {
       !durable.some(current => current.agentSessionId === session.agentSessionId))].map(session => this.projectSession(session))
   }
 
-  /** Exact creation facts; only a genuinely started, unconfirmed projection may supplement the Store. */
-  private async readCreationSession(agentSessionId: string): Promise<AgentMuxAgentSession | undefined> {
+  /** Exact durable facts precede the registry, including an original creation's later retirement. */
+  private async readCreationSession(agentSessionId: string, createOperationId?: string): Promise<AgentMuxAgentCreationInspection | undefined> {
+    if (createOperationId !== undefined) {
+      const originalId = await this.store.loadCreationSessionId(createOperationId)
+      if (originalId && originalId !== agentSessionId) throw new AgentMuxError(
+        'This creation operation belongs to another original Session. Inspect its existing identity without repeating creation.',
+        'AGENT_CREATION_OPERATION_CONFLICT', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
+    }
     const durable = await this.store.readMetadata(agentSessionId)
+    const retired = await this.store.readRetiredAgentSession(agentSessionId)
+    if (retired) {
+      if (!retired.history?.creation) throw new AgentMuxError(
+        'The retired Agent has no confirmed original creation record. Its retirement and retained history are preserved.', 'AGENT_CREATION_UNKNOWN')
+      if (createOperationId !== undefined && retired.history.creation.createOperationId !== createOperationId) throw new AgentMuxError(
+        'This retired Session belongs to another original creation operation. Keep both identities and inspect the original operation.',
+        'AGENT_CREATION_OPERATION_CONFLICT', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
+      return { kind: 'retired-agent', ...retired }
+    }
     if (durable) return this.projectSession(durable)
     const started = this.registry.has(agentSessionId) ? this.registry.get(agentSessionId) : undefined
     return started?.creation?.persistence === 'unconfirmed' ? this.projectSession(started) : undefined
@@ -2249,8 +2268,9 @@ export class AgentMuxClient {
   }
 
   /** Reconcile only the original prepared operation with authoritative Runs, never start or input. */
-  async inspectAgentCreation(agentSessionId: string): Promise<AgentMuxAgentSession> {
+  async inspectAgentCreation(agentSessionId: string): Promise<AgentMuxAgentCreationInspection> {
     const existing = await this.readCreationSession(agentSessionId)
+    if (existing?.kind === 'retired-agent') return existing
     if (existing && existing.creation?.persistence !== 'unconfirmed') return existing
     const correlation = await this.store.loadCreationCorrelation(agentSessionId)
     if (!correlation?.preparedCreation?.creation?.intentDigest) {
@@ -4489,7 +4509,10 @@ export class AgentMuxClient {
       Boolean(createdBy || forkSource || input.injectAgentMuxGuide || input.agentMuxNote?.trim() || input.optionalContext?.length)
     const lifecycleOperationId = agentLifecycleOperationIdentity('create', agentSessionId, createOperationId)
     // A replay reads the original created identity and receipt before checking a now-changed parent.
-    const existing = await this.readCreationSession(agentSessionId)
+    const existing = await this.readCreationSession(agentSessionId, createOperationId)
+    if (existing?.kind === 'retired-agent') throw new AgentMuxError(
+      'The original creation belongs to a retired Agent. Inspect that operation; only an explicit reopen or a new creation intent can continue work.',
+      'AGENT_CREATION_RETIRED', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
     if (existing && existing.creation?.persistence !== 'unconfirmed') {
       if (existing.creation?.createOperationId !== createOperationId || existing.providerId !== input.providerId ||
         existing.executorId !== executorId || existing.workspacePath !== input.workspacePath ||

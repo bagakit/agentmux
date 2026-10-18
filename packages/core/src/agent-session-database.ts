@@ -9,6 +9,8 @@ const sqliteHeader = Buffer.from('SQLite format 3\0')
 export const promptAdmissionSchema = `CREATE TABLE IF NOT EXISTS prompt_admissions (
   session_id TEXT NOT NULL, run_id TEXT NOT NULL, record_id TEXT NOT NULL,
   json TEXT NOT NULL, PRIMARY KEY(session_id, run_id, record_id));`
+export const retiredCreationIndexSchema = `CREATE INDEX IF NOT EXISTS retired_creation_operation
+  ON retired_sessions(json_extract(json,'$.history.creation.createOperationId'));`
 const schema = `
   PRAGMA application_id = ${applicationId};
   PRAGMA user_version = 1;
@@ -22,6 +24,7 @@ const schema = `
   CREATE TABLE reservations (id TEXT PRIMARY KEY, json TEXT NOT NULL);
   CREATE TABLE retired_runs (id TEXT PRIMARY KEY, json TEXT NOT NULL);
   CREATE TABLE retired_sessions (id TEXT PRIMARY KEY, json TEXT NOT NULL);
+  ${retiredCreationIndexSchema}
   CREATE TABLE run_bindings (run_id TEXT PRIMARY KEY, session_id TEXT);
   CREATE INDEX session_runs ON run_bindings(session_id);
   CREATE TABLE native_bindings (native_key TEXT PRIMARY KEY, session_id TEXT NOT NULL);

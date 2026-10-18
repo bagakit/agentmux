@@ -158,6 +158,8 @@ export type AgentMuxSpatialSave = {
 }
 export type AgentMuxSpatialIssue = { step: string; code: string; message: string; recovery: string; candidates?: AgentMuxSpaceSelector[] }
 export type AgentMuxSpaceAgentFact = {
+  /** Authoritative retirement of this exact Session/Run; never an active projection. */
+  retirement?: { source: 'user'; observedAt: number }
   executorRevision?: string
   initialMessageOrigin?: import('./agent-creation-admission.js').AgentMuxCreationOrigin
   createdBy?: import('./agent-spawn.js').AgentMuxSpawnCreator
@@ -178,7 +180,7 @@ export type AgentMuxSpaceAgentFact = {
 }
 export type AgentMuxSpaceMutationReport = {
   requestId: string
-  outcome: 'opened' | 'moved' | 'unchanged' | 'partial' | 'unknown'
+  outcome: 'opened' | 'moved' | 'unchanged' | 'partial' | 'unknown' | 'retired'
   from: AgentMuxSpaceAddress | null
   to: AgentMuxSpaceAddress | null
   agent: AgentMuxSpaceAgentFact | null
