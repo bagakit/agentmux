@@ -80,11 +80,10 @@ export class BrowserControlFeedback {
   private signature = ''
   private mayExist = false
   private request = 0
-  private warned = false
   constructor(private readonly input: {
     contents: Pick<WebContents, 'executeJavaScriptInIsolatedWorld' | 'isDestroyed'>
     browserId: string; ownerId: string; navigationId(): string
-    nextRevision(): number; isCurrent(): boolean; warn(): void
+    nextRevision(): number; isCurrent(): boolean; report(available: boolean): void
     preferences?(): BrowserAgentControlPreferences
   }) {}
 
@@ -101,8 +100,8 @@ export class BrowserControlFeedback {
       return !active || value !== false
     } catch { return false } finally { clearTimeout(timer) }
   }
-  private warn(): void {
-    if (!this.warned) { this.warned = true; try { this.input.warn() } catch { /* Decoration cannot disable the page. */ } }
+  private report(available: boolean): void {
+    try { this.input.report(available) } catch { /* Decoration cannot disable the page. */ }
   }
   async synchronize(force = false): Promise<void> {
     if (this.input.contents.isDestroyed()) return
@@ -115,8 +114,9 @@ export class BrowserControlFeedback {
     const request = ++this.request
     const ok = await this.publish(active, navigationId)
     if (request !== this.request) return
-    if (!ok) { this.signature = ''; this.warn() }
+    if (!ok) this.signature = ''
     if (ok && !active) this.mayExist = false
+    this.report(ok)
   }
   async hide(): Promise<void> {
     if (!this.mayExist) return
@@ -126,6 +126,6 @@ export class BrowserControlFeedback {
     const ok = await this.publish(false, this.input.navigationId())
     if (request !== this.request) return
     if (ok) this.mayExist = false
-    else this.warn()
+    this.report(ok)
   }
 }
