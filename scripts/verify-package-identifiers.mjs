@@ -43,6 +43,7 @@ function validateStage(stage, inventory, red = false) {
 }
 function validateProof(proof) {
   assert.equal(proof.schema, schema); assert.equal(proof.passed, true); assert.equal(proof.sharedSourceMutations, 0); assert.ok(proof.isolatedConsumer); assert.deepEqual(proof.runtime, runtime)
+  assert.equal(proof.scan.autonomousUuidCalls, 0); assert.equal(proof.scan.nativeCreateWireUuidCalls, 1)
   validateStage(proof.baseline, proof.baseline.inventory)
   assert.ok(proof.baseline.inventory.some(item => item.includes('compiled Demand CLI')))
   assert.ok(proof.baseline.inventory.some(item => item.includes('local Relay allocates')))
@@ -133,9 +134,20 @@ for (const args of [['--filter', '@agentmux/core...', 'build'], ['--filter', '@a
 }
 const production = (await Promise.all(['packages/connectors/src', 'packages/demand/src', 'packages/relay/src'].map(files))).flat().filter(path => /\.ts$/u.test(path))
 assert.ok(production.length >= 40)
-for (const path of production) assert.ok(!/randomUUID\s*\(/u.test(await readFile(join(root, path), 'utf8')), 'Remaining autonomous UUID allocation: ' + path)
-proof.scan = { files: production.length, autonomousUuidCalls: 0,
-  preserved: ['Feishu prepared native SHA-256 request mapping', 'Relay 32-byte control bearer', 'NaCl key material and 24-byte frame nonce', 'original caller and persisted identifiers'] }
+let nativeCreateWireUuidCalls = 0
+for (const path of production) {
+  let source = await readFile(join(root, path), 'utf8')
+  if (path === 'packages/connectors/src/connection-enrollment-store.ts') {
+    // Only the original create-claim allocator is exempt; other calls in this file fail.
+    const originalCreateClaim = "const attemptId = kind === 'create' ? randomUUID() : mintObjectId()"
+    assert.equal(source.split(originalCreateClaim).length, 2, 'Original external create wire allocation changed')
+    source = source.replace(originalCreateClaim, 'const attemptId = mintObjectId()'); nativeCreateWireUuidCalls++
+  }
+  assert.ok(!/randomUUID\s*\(/u.test(source), 'Remaining autonomous UUID allocation: ' + path)
+}
+assert.equal(nativeCreateWireUuidCalls, 1)
+proof.scan = { files: production.length, autonomousUuidCalls: 0, nativeCreateWireUuidCalls,
+  preserved: ['Original enrollment create-claim UUID wire format; shorter native cid acceptance is unknown', 'Feishu prepared native SHA-256 request mapping', 'Relay 32-byte control bearer', 'NaCl key material and 24-byte frame nonce', 'original caller and persisted identifiers'] }
 const consumers = (await Promise.all(['packages/core/dist', 'packages/connectors/dist', 'packages/demand/dist', 'packages/relay/dist', 'packages/identity/dist'].map(path => files(relative(root, join(candidate, path)))))).flat()
 proof.consumerHashes = await fingerprints(consumers)
 }
