@@ -13,7 +13,7 @@ async function fixture() {
   const connections = new ConnectionHost({ database, secrets: { resolve: async () => 'fixture-credential' }, adapters: [adapter] })
   cleanup.push(() => { connections.close(); database.close() })
   await connections.configure({ operationId: 'configure-feishu', expectedRevision: null, connection: feishuConfig })
-  const ingress = new DurableIngressHost({ connections, bindings: { listActive: () => [] } as never, core: () => undefined, authenticators: [adapter] })
+  const ingress = new DurableIngressHost({ connections, bindings: { findActiveAudience: () => null } as never, core: () => undefined, authenticators: [adapter] })
   connections.ingress = ingress
   const abort = new AbortController()
   const receiver = await startFeishuTransport(adapter.transport, feishuConfig, ingress, abort.signal); cleanup.push(() => receiver.close())
