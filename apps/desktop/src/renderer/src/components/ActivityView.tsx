@@ -47,12 +47,11 @@ import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { ConversationReadFailure, type ConversationReadIssue } from './ConversationReadFailure'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { useWorkbenchDocumentVisibility } from '../lib/workbench-window-registry'
-import { Ruler } from './ConversationRuler'
+import { ConversationReadingRuler, type ConversationVisibleShells } from './ConversationReadingRuler'
 export { Ruler } from './ConversationRuler'
-import { ConversationRulerControls } from './ConversationRulerControls'
-import { RULER_WINDOWS, conversationRulerRecords, conversationRulerWindow, type RulerRecord, type RulerWindow } from '../lib/conversation-ruler'
+import { RULER_WINDOWS, conversationRulerRecords, type RulerRecord, type RulerWindow } from '../lib/conversation-ruler'
 import { projectAgentActivityHistory } from '@agentmux/core/timeline'
-import { ConversationAxis, type DescribeSpeaker } from './ConversationAxis'
+import type { DescribeSpeaker } from './ConversationAxis'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
 import type { ConversationProcessProps } from '@agentmux/client-ui/components/ConversationRecordSequence'
@@ -388,6 +387,7 @@ export function ActivityView({
 }) {
   const logRef = useRef<HTMLDivElement>(null)
   const [feedEl, setFeedEl] = useState<HTMLDivElement | null>(null)
+  const visibleShells = useRef<ConversationVisibleShells | null>(null)
   const anchorRef = useRef<ReturnType<typeof conversationReadingAnchor>>(null)
   const followRef = useRef(initFollowState())
   const [showJump, setShowJump] = useState(false)
@@ -596,7 +596,8 @@ export function ActivityView({
     const element = node instanceof Element ? node : node?.parentElement
     const segment = element?.closest<HTMLElement>('[data-segment-key]')
     if (segment && viewport.contains(segment)) return { kind: 'segment', id: segment.dataset.segmentKey!, offset: segment.getBoundingClientRect().top - viewport.getBoundingClientRect().top }
-    return conversationReadingAnchor(viewport)
+    const observed = visibleShells.current
+    return conversationReadingAnchor(viewport, undefined, false, observed?.feed === viewport && observed.sessionId === sessionId ? observed.shells : undefined)
   }
   const readEntryImage = useCallback<ReadPastedImage>(path => readingEnabled && readPastedImage
     ? readPastedImage(path) : Promise.resolve(null), [readingEnabled, readPastedImage])
@@ -609,18 +610,11 @@ export function ActivityView({
   }, [unifiedItems])
   const rulerRecords = useMemo(() => conversationRulerRecords(sessionId, nativeHistoryPage, unifiedItems, conversationRecords),
     [sessionId, nativeHistoryPage, unifiedItems])
-  const [visible, setVisible] = useState<Set<string>>(new Set())
-  const ruler = useMemo(() => conversationRulerWindow(rulerRecords, rulerWindow, visible), [rulerRecords, rulerWindow, visible])
   const activity = useMemo(() => projectAgentActivityHistory(items), [items])
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null)
   const selectedRecord = rulerRecords.find(record => record.id === selectedRecordId)
   const selectedIndex = selectedRecord?.target.kind === 'observed' ? selectedRecord.target.index : null
-  const rulerSelectedIndex = ruler.items.findIndex(record => record.id === selectedRecordId)
-  const scale = ruler.scale
-  const band = useMemo(() => {
-    const indices = ruler.items.flatMap((record, index) => visible.has(record.id) ? [index] : [])
-    return rulerBand(scale, indices.length ? { from: Math.min(...indices), to: Math.max(...indices) } : null)
-  }, [ruler.items, scale, visible])
+
 
   const [locatedMessageKey, setLocatedMessageKey] = useState<string | null>(null)
   useEffect(() => {
@@ -707,7 +701,8 @@ export function ActivityView({
   const requestReadingEdge = (direction: number, el: HTMLElement, delta = 0): void => {
     if (!conversationReading?.enabled) return
     if (direction < 0 && anchorRef.current?.kind === 'segment') {
-      const nativeAnchor = conversationReadingAnchor(el, undefined, true)
+      const observed = visibleShells.current
+      const nativeAnchor = conversationReadingAnchor(el, undefined, true, observed?.feed === el && observed.sessionId === sessionId ? observed.shells : undefined)
       // Captured content has its own readable tail. Hand paging back only when
       // the original sequence is actually visible in this viewport.
       if (!nativeAnchor) { readAhead.cancel(); return }
@@ -870,89 +865,7 @@ export function ActivityView({
     }
   }
 
-  // Retain confirmed DOM visibility through observation handoff, never message bodies.
-  const visibleShells = useRef<{ feed: HTMLDivElement; sessionId: string; shells: Set<Element> } | null>(null)
-  // Register committed shells once. Disclosure registers only added descendants, never a scroll-frame scan.
-  useEffect(() => {
-    if (!readingEnabled || !feedEl) return
-    const expected = new Map<string, string[]>()
-    const segmentsByIndex = new Map<number, string>()
-    for (const segment of placed) for (let index = segment.from; index <= segment.to; index++) segmentsByIndex.set(index, segment.key)
-    for (const record of rulerRecords) {
-      const target = record.target
-      const key = target.kind === 'native' ? JSON.stringify([target.source, target.recordId]) : segmentsByIndex.get(target.index)
-      if (key) { const ids = expected.get(key) ?? []; ids.push(record.id); expected.set(key, ids) }
-    }
-    const mapping = new Map<Element, readonly string[]>()
-    const previous = visibleShells.current
-    const onscreen = previous?.feed === feedEl && previous.sessionId === sessionId ? previous.shells : new Set<Element>()
-    visibleShells.current = { feed: feedEl, sessionId, shells: onscreen }
-    let active = true
-    const recompute = (): void => {
-      if (!active) return
-      const next = new Set([...onscreen].flatMap(el => mapping.get(el) ?? []))
-      setVisible(current => current.size === next.size && [...current].every(id => next.has(id)) ? current : next)
-    }
-    const ruler = feedEl.querySelector<HTMLElement>('.activity-ruler')
-    let headerHeight = -1
-    let observer: IntersectionObserver
-    function observeViewport(): void {
-      if (!active) return
-      const height = Math.ceil(ruler?.getBoundingClientRect().height ?? 0)
-      if (height === headerHeight) return
-      headerHeight = height
-      observer?.disconnect()
-      const current = new IntersectionObserver(entries => {
-        if (!active || observer !== current) return
-        for (const entry of entries) entry.isIntersecting ? onscreen.add(entry.target) : onscreen.delete(entry.target)
-        recompute()
-      }, { root: feedEl, rootMargin: `-${height}px 0px 0px 0px`, threshold: 0 })
-      observer = current
-      for (const node of mapping.keys()) observer.observe(node)
-    }
-    observeViewport()
-    const resize = new ResizeObserver(observeViewport)
-    if (ruler) resize.observe(ruler)
-    function unregister(node: Element): void {
-      observer.unobserve(node)
-      mapping.delete(node)
-      onscreen.delete(node)
-    }
-    function register(node: HTMLElement): void {
-      const id = node.dataset.nativeRecordId ?? node.dataset.nativeStepId
-      const source = node.closest<HTMLElement>('[data-native-source]')?.dataset.nativeSource
-      const key = id && source ? JSON.stringify([source, id]) : node.dataset.segmentKey
-      // Only a folded header represents the group's records. Expanded steps keep their own visibility.
-      const group = node.matches('.wf-head[aria-expanded="false"]') ? node.closest<HTMLElement>('[data-native-record-ids]') : null
-      const records = group && source
-        ? (JSON.parse(group.dataset.nativeRecordIds ?? '[]') as string[]).flatMap(recordId => expected.get(JSON.stringify([source, recordId])) ?? [])
-        : key ? expected.get(key) : undefined
-      if (!records?.length) { unregister(node); return }
-      mapping.set(node, records)
-      observer.observe(node)
-    }
-    const selector = '[data-native-record-id], [data-native-step-id], [data-segment-key], [data-native-record-ids] .wf-head'
-    feedEl.querySelectorAll<HTMLElement>(selector).forEach(register)
-    for (const node of onscreen) if (!mapping.has(node) || !node.isConnected) onscreen.delete(node)
-    recompute()
-    const mutations = new MutationObserver(entries => {
-      if (!active) return
-      for (const entry of entries) {
-        if (entry.type === 'attributes' && entry.target instanceof HTMLElement && entry.target.matches('[data-native-record-ids] .wf-head')) register(entry.target)
-        for (const added of entry.addedNodes) if (added instanceof HTMLElement) {
-          if (added.matches(selector)) register(added)
-          added.querySelectorAll<HTMLElement>(selector).forEach(register)
-        }
-        for (const removed of entry.removedNodes) if (removed instanceof HTMLElement) {
-          if (removed.matches(selector)) unregister(removed)
-          removed.querySelectorAll(selector).forEach(unregister)
-        }
-      }
-      recompute()
-    })
-    mutations.observe(feedEl, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-expanded'] })
-    return () => { active = false; mutations.disconnect(); resize.disconnect(); observer.disconnect() }
-  }, [rulerRecords, placed, feedEl, sessionId, readingEnabled])
+
 
   const locateRef = useRef<{ frame: number | null; source: AgentSessionHistoryPage | null | undefined }>({ frame: null, source: nativeHistoryPage })
   locateRef.current.source = nativeHistoryPage
@@ -990,7 +903,7 @@ export function ActivityView({
   const hasAcceptedFrame = Boolean(conversationReading && readingWindow.snapshot)
   const initialReadPending = readPending && !hasAcceptedFrame
   const earlierReadPending = readingWindow.loadingEarlier || readingWindow.coverageLoading
-  const hasReadContent = hasUserMessages || hasNativeRecords || hasItems || ruler.items.length > 0
+  const hasReadContent = hasUserMessages || hasNativeRecords || hasItems || rulerRecords.length > 0
   const readingIssues: ConversationReadIssue[] = []
   if (readingWindow.error || !hasReadContent && readingWindow.automaticReadError) readingIssues.push({
     id: 'conversation-records', label: 'Conversation records',
@@ -1268,29 +1181,12 @@ export function ActivityView({
           This executor does not provide structured activity. Terminal remains available.
         </div>
       ) : null}
-      {renderReadingHeader(<>{collapseTraces}{findTrigger}{renderReadingTools?.(readingEnabled, revealLoadedRecord)}</>, ruler.items.length > 0 ? <Ruler visible={readingEnabled}
-        items={ruler.items}
-        scale={scale}
-        selectedIndex={rulerSelectedIndex < 0 ? null : rulerSelectedIndex}
-        band={band}
-        {...(conversationReading ? { reading: { hasMore: readingWindow.hasMore } } : {})}
-        pending={readPending && !earlierReadPending}
-        recentFraction={ruler.recentFraction}
-        activity={activity.segments}
-        controls={close => <><ConversationRulerControls window={rulerWindow} onWindow={setRulerWindow}
-          untimed={ruler.untimed} onSelect={selectRulerRecord} describe={describeSpeaker ?? (() => ({ name: 'Recorded input' }))}
-          onOpen={() => { close() }} />{collapseTraces}{findTrigger}{renderReadingTools?.(readingEnabled, revealLoadedRecord)}</>}
-        onSelect={index => selectRulerRecord(ruler.items[index]!)}
-        axes={({ width, onPeek, onPeekEnd }) =>
-          describeSpeaker ? (
-            <ConversationAxis items={ruler.items} belongs={() => true} width={width}
-              label="Participants" size={16} describe={describeSpeaker}
-              conversationSessionId={sessionId} recentFraction={ruler.recentFraction}
-              selectedIndex={rulerSelectedIndex < 0 ? null : rulerSelectedIndex}
-              onSelect={index => selectRulerRecord(ruler.items[index]!)} onPeek={onPeek} onPeekEnd={onPeekEnd} />
-          ) : null
-        }
-      /> : undefined)}
+      {renderReadingHeader(<>{collapseTraces}{findTrigger}{renderReadingTools?.(readingEnabled, revealLoadedRecord)}</>, rulerRecords.length > 0 ? <ConversationReadingRuler
+        feedEl={feedEl} sessionId={sessionId} readingEnabled={readingEnabled} rulerRecords={rulerRecords} placed={placed}
+        visibleShells={visibleShells} rulerWindow={rulerWindow} onWindow={setRulerWindow} selectedRecordId={selectedRecordId}
+        selectRulerRecord={selectRulerRecord} hasMore={conversationReading ? readingWindow.hasMore : undefined}
+        pending={readPending && !earlierReadPending} activity={activity.segments} describeSpeaker={describeSpeaker}
+        tools={<>{collapseTraces}{findTrigger}{renderReadingTools?.(readingEnabled, revealLoadedRecord)}</>} /> : undefined)}
       {holdCapturedLayout ? <p className="conversation-metrics__notice" role="status">保留选区，取消选择后更新消息顺序。</p> : null}
       <div ref={logRef}>
       <ConversationView
