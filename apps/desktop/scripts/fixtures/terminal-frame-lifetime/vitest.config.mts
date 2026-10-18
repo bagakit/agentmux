@@ -8,10 +8,10 @@ import base from '../../../../../vitest.config'
 const root = resolve(import.meta.dirname, '../../../../..')
 const product = 'apps/desktop/src/renderer/src/components/TerminalView.tsx'
 const consumer = 'apps/desktop/test/terminal-incident-product.test.tsx'
-const anchor = '      focusWindow.cancelAnimationFrame(focusFrame)'
+const anchor = 'focusWindow.cancelAnimationFrame(focusFrame)'
 const mutations: Record<string, string> = {
-  uncancelled: '      /* mutation: retired initialization frame retained */',
-  owner: '      root.ownerDocument.defaultView!.cancelAnimationFrame(focusFrame)'
+  uncancelled: 'undefined /* mutation: retired initialization frame retained */',
+  owner: 'root.ownerDocument.defaultView!.cancelAnimationFrame(focusFrame)'
 }
 export default defineConfig({ ...base, root,
   resolve: { conditions: ['browser'] },
