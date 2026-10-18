@@ -226,6 +226,8 @@
 .collaboration-node-key[data-tier=active] { background: var(--green); border-color: var(--green); box-shadow: 0 0 0 2px color-mix(in srgb, var(--green) 16%, transparent); }
 .collaboration-node-key[data-tier=closed] { width: 5px; height: 5px; margin-inline: 1.5px; border: 0; background: var(--text-3); }
 .collaboration-node-key[data-tier=unknown] { background: transparent; }
+/* The effective map preference may explicitly override reduced motion, only for original event marks. */
+.collaboration-canvas[data-motion=on] :is(.collaboration-activity, .collaboration-edge__pulse, .collaboration-edge__packet) { animation-duration: var(--collaboration-activity-duration) !important; }
 .collaboration-canvas[data-motion=off] .collaboration-activity { animation: none; }
 .collaboration-canvas[data-motion=off] .react-flow__edge[data-recent=true] .collaboration-edge { opacity: 1; stroke-width: 2.5; }
 .collaboration-canvas__hud { position: absolute; z-index: 6; left: 12px; right: 12px; bottom: 12px; display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 8px; pointer-events: none; }
