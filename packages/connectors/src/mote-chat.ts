@@ -261,6 +261,7 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
     if (!generation) return null
     return generation.binding && this.active(generation) ? generation.binding : null
   }
+  knowsAudience(input: { application: RoomBinding['application']; externalConversationId: string }): boolean { return this.store.knowsAudience(input.application, input.externalConversationId) }
   listBindings(input: RoomBindingListInput = {}): RoomBinding[] {
     return this.store.allBindings(input).map(row => ({ ...row.binding!, state: this.active(row) ? 'active' as const : 'paused' as const }))
   }
@@ -293,7 +294,7 @@ export function composeMoteChatBindings(groups: RoomBindingReadPort, chat: MoteC
   return {
     readExact: (id, revision) => chat.readExact(id, revision) ?? groups.readExact(id, revision),
     readCurrent: id => chat.readCurrent(id) ?? groups.readCurrent(id),
-    findActiveAudience: input => chat.findActiveAudience(input) ?? groups.findActiveAudience(input),
+    findActiveAudience: input => chat.knowsAudience(input) ? chat.findActiveAudience(input) : groups.findActiveAudience(input),
     listActive: input => [...groups.listActive(input), ...chat.listActive(input)],
     publicationAuthority: (id, revision) => chat.readExact(id, revision) ? chat.publicationAuthority(id, revision) : groups.publicationAuthority(id, revision),
     readGrant: (id, revision) => chat.readGrant(id, revision) ?? groups.readGrant(id, revision),
