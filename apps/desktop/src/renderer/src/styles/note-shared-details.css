@@ -15,6 +15,11 @@
 .note-shared-details__uses button:hover, .note-shared-details__actions button:hover { background: var(--wash-1); }
 .note-shared-details__uses span, .note-shared-details__uses small { display: block; overflow-wrap: anywhere; }
 .note-shared-details__uses small { color: var(--text-3); font-size: var(--fs-micro); }
+.note-use-context { display: block; margin-block: 3px; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; }
+.note-use-context strong, .note-use-context > span { display: block; font-weight: 400; }
+.note-use-context strong { color: var(--text); }
+.note-links .note-links-shared-use { align-items: flex-start; flex-wrap: wrap; }
+.note-links-shared-use > .note-links-target { flex: 1; min-width: 0; padding-block: 5px; }
 .note-shared-details__actions { display: grid; gap: 4px; border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; }
 .note-shared-details__actions button { min-height: 28px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); text-align: start; font: inherit; padding: 4px 6px; }
 .note-shared-details__actions button:first-child { color: var(--green); }

@@ -7,11 +7,11 @@ import { readNoteMarkdownHeader } from '@agentmux/core/note-format'
 import { NOTE_SCHEMA, serializeNoteDocument, type NoteDocument, type NoteInclude } from '../../../shared/note-document'
 import type { NoteFileTarget } from '../lib/file-document-consumers'
 import { noteSharedRelations } from '../lib/note-shared-relations'
-import { noteGraphReferenceKey } from '../lib/note-graph-references'
 import { writeNoteShareClipboard } from '../lib/note-share-staging'
 import type { useNoteCanvasObservation } from '../lib/use-note-canvas-observation'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import '../styles/note-shared-details.css'
+import { NoteUseContextReader, NoteUseLocations } from './NoteUseLocations'
 
 type Props = { note: NoteDocument; target: NoteFileTarget; host: NoteFileTarget; include: NoteInclude; active: boolean;
   graph: ReturnType<typeof useNoteCanvasObservation>; onOpen(target: NoteFileTarget, blockId?: string, signal?: AbortSignal): Promise<void> }
@@ -20,6 +20,7 @@ type Props = { note: NoteDocument; target: NoteFileTarget; host: NoteFileTarget;
 export function NoteSharedDetails({ note, target, host, include, graph, active, onOpen }: Props) {
   const [open, setOpen] = useState(false), [anchor, setAnchor] = useState<HTMLButtonElement | null>(null), [content, setContent] = useState<HTMLDivElement | null>(null)
   const [message, setMessage] = useState<string | null>(null)
+  const currentlyOpen = useRef(false); currentlyOpen.current = open && active
   const explicit = useRef(false), suppressFocus = useRef(false), restoreFocus = useRef(false), timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const navigation = useRef<AbortController | null>(null)
   const identity = JSON.stringify([target.hostId, target.workspaceId, target.workspacePath, target.path, target.noteId,
@@ -84,13 +85,14 @@ export function NoteSharedDetails({ note, target, host, include, graph, active, 
         onOpenAutoFocus={event => { event.preventDefault(); if (explicit.current) content?.focus({ preventScroll: true }) }}
         onFocusOutside={event => { if (!explicit.current) event.preventDefault() }}
         onEscapeKeyDown={() => { restoreFocus.current = true }}
-        onCloseAutoFocus={event => { event.preventDefault(); if (restoreFocus.current && anchor?.isConnected) { suppressFocus.current = true; anchor.focus({ preventScroll: true }) } restoreFocus.current = false }}>
+        onCloseAutoFocus={event => { event.preventDefault(); if (!currentlyOpen.current && restoreFocus.current && anchor?.isConnected) { suppressFocus.current = true; anchor.focus({ preventScroll: true }) } restoreFocus.current = false }}>
         <div className="note-shared-details__heading"><Dialog.Title>{note.title ?? 'Shared content'}</Dialog.Title><button type="button" className="icon-button" aria-label="Close shared details" onClick={() => { restoreFocus.current = true; close() }}><X size={14} /></button></div>
         <Dialog.Description>{source ? 'This is the source position.' : 'This position uses the same original content.'} Edits update every use.</Dialog.Description>
         <div className="note-shared-details__origin"><span>Originally extracted at</span>{relations?.source ? <button type="button" onClick={() => void navigate({ ...relations.source!.reference.sourceResource, noteId: relations.source!.reference.source.noteId }, relations.source!.reference.source.blockId)}>{relations.source.title}</button>
           : <p>{note.origin ? 'The original position is not confirmed in this observation. Shared content remains available.' : 'No original extraction position is recorded.'}</p>}</div>
         <div className="note-shared-details__uses-heading"><strong>Use locations</strong>{relations && <span>{last ? 'Last confirmed · ' : partial ? 'At least · ' : ''}{relations.documents} documents · {relations.uses.length} uses</span>}</div>
-        {relations && <ol className="note-shared-details__uses">{relations.uses.map(use => <li key={noteGraphReferenceKey(use.reference)}><button type="button" onClick={() => void navigate({ ...use.reference.sourceResource, noteId: use.reference.source.noteId }, use.reference.source.blockId)}><span>{use.title}</span><small>{use.source ? 'Source' : 'Use'}{use.current ? ' · Current position' : ''}</small></button></li>)}</ol>}
+        {relations && <NoteUseContextReader snapshot={graph.snapshot} active={open && active}><NoteUseLocations uses={relations.uses} active={open && active} className="note-shared-details__uses"
+          onOpen={use => void navigate({ ...use.reference.sourceResource, noteId: use.reference.source.noteId }, use.reference.source.blockId)} /></NoteUseContextReader>}
         {(last || partial || !relations) && <p className="note-shared-details__notice" role="status">{graph.issue ?? (last ? 'Saved originals changed. These are the last confirmed locations.' : graph.busy ? 'Reading saved locations…' : 'Some sources have not been read; this is not the complete set.')} <button type="button" onClick={graph.refresh}>Refresh locations</button></p>}
         <div className="note-shared-details__actions"><button type="button" onClick={() => void navigate(target)}>Open shared content</button><button type="button" onClick={() => copy(false)}>Copy content link</button><button type="button" onClick={() => copy(true)}>Copy shared reference</button></div>
         {message && <p className="note-shared-details__notice" role="status">{message}</p>}
