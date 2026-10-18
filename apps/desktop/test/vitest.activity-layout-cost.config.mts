@@ -7,6 +7,7 @@ import { candidateAlias, candidateModule } from '../scripts/candidate-package-re
 
 const root = resolve(import.meta.dirname, '../../..')
 const owner = 'apps/desktop/src/renderer/src/components/ActivityView.tsx'
+const bodyWork = 'packages/client-ui/src/lib/conversation-body-work.ts'
 const mutation = process.env.AGENTMUX_ACTIVITY_LAYOUT_MUTATION ?? null
 export default defineConfig({ ...base,
   resolve: { ...base.resolve, alias: [candidateAlias(root, { source: true, browser: true }),
@@ -18,13 +19,18 @@ export default defineConfig({ ...base,
     const actual = candidateModule(root, file), path = relative(root, actual)
     if (!actual.startsWith(root + '/') || actual.includes('/node_modules/')) return
     let loaded = source, applied: string | null = null
-    if (path === owner && mutation) {
-      const before = 'if (followRef.current.following || atLoadedTail) syncTailPosition()'
+    if (path === owner && mutation && mutation !== 'ignore-resize-cause') {
+      const before = 'if (followRef.current.following || atLoadedTail || physicalTail) syncTailPosition()'
       if (source.split(before).length !== 2) throw new Error('Missing exact original layout-tail gate')
       const after = mutation === 'measure-detached-layout' ? 'syncTailPosition()'
         : mutation === 'skip-detached-tail-transition' ? 'if (followRef.current.following) syncTailPosition()' : null
       if (!after) throw new Error('Unknown original layout-tail mutation')
       loaded = source.replace(before, after); applied = mutation
+    }
+    if (path === bodyWork && mutation === 'ignore-resize-cause') {
+      const before = "this.restore('resize')"
+      if (source.split(before).length !== 2) throw new Error('Missing exact original resize notification')
+      loaded = source.replace(before, 'this.restore()'); applied = mutation
     }
     if (process.env.AGENTMUX_ACTIVITY_LAYOUT_LOADED) {
       const sha = (value: string | Buffer) => createHash('sha256').update(value).digest('hex')

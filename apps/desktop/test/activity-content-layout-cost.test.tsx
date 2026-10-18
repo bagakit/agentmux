@@ -8,10 +8,12 @@ import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-valu
 import { conversationPagePortFixture } from './helpers/conversation-page-port-fixture'
 import { activityReadingProps } from './helpers/activity-reading-props'
 import { inspectConversationConsumers } from '../src/renderer/src/lib/conversation-consumer-observation'
+import { api } from '../src/renderer/src/lib/api'
 
 
 let container: HTMLDivElement, root: ReturnType<typeof createClientUiRoot>
 let source: Awaited<ReturnType<typeof conversationPagePortFixture>>
+let resizes: { targets: Set<Element>; invoke(): void }[]
 const reference = { hostId: 'local', agentSessionId: 'reading-cost' }
 const nativeSource = { providerId: 'codex', nativeSessionId: 'reading-cost-native' }
 const originalItems: AgentTimelineItem[] = [
@@ -22,7 +24,14 @@ const originalItems: AgentTimelineItem[] = [
 ]
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  resizes = []
+  vi.stubGlobal('ResizeObserver', class {
+    targets = new Set<Element>()
+    constructor(callback: ResizeObserverCallback) { resizes.push({ targets: this.targets, invoke: () => callback([], this) }) }
+    observe(target: Element) { this.targets.add(target) }
+    unobserve(target: Element) { this.targets.delete(target) }
+    disconnect() { this.targets.clear() }
+  })
   vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} })
   container = document.createElement('div'); document.body.append(container)
   root = createClientUiRoot(container)
@@ -61,7 +70,7 @@ function geometry() {
   const scroll = async (position: number) => {
     await act(async () => { feed.scrollTop = position; feed.dispatchEvent(new Event('scroll')) })
   }
-  return { feed, tail, tailRect, writes, scroll, grow() { height += 200 } }
+  return { feed, tail, tailRect, writes, scroll, grow() { height += 200 }, setHeight(value: number) { height = value; top = Math.max(0, Math.min(top, height - 400)) } }
 }
 function revised(revision: number, content = originalItems[1]!.content) {
   return originalItems.map(item => ({ ...item, updatedAt: revision, ...(item.id === 'original-reply' ? { content } : {}) }))
@@ -125,4 +134,40 @@ it('keeps an upward reader and original selection without measuring on continuin
   expect(container.querySelector('.activity-feed')).toBe(view.feed)
   expect(selection.anchorNode).toBe(text); expect(selection.toString()).toBe(selected)
   expect(view.feed.querySelector('.log-turn__body, .log-row__prose')).toBe(body)
+})
+
+it('rechecks the loaded tail after real resize clamps a detached reader, preserving selection and detached intent', async () => {
+  await render(originalItems)
+  const disclosure = container.querySelector<HTMLDetailsElement>('[data-submission-id="original-input"] .message-disclosure')!
+  expect(disclosure).not.toBeNull()
+  await act(async () => { disclosure.open = true; disclosure.dispatchEvent(new Event('toggle')) })
+  const view = geometry()
+  await view.scroll(600); await view.scroll(100)
+  expect(container.querySelector('[data-message-tool-control="jump-to-latest"]')).not.toBeNull()
+  const body = view.feed.querySelector<HTMLElement>('.log-turn__body')!
+  const text = document.createTreeWalker(body, NodeFilter.SHOW_TEXT).nextNode()!
+  const selection = document.getSelection()!, range = document.createRange()
+  range.setStart(text, 1); range.setEnd(text, 5); selection.removeAllRanges(); selection.addRange(range)
+  const selected = selection.toString()
+  const resize = async () => {
+    const owners = resizes.filter(observer => observer.targets.has(view.feed))
+    expect(owners).toHaveLength(1)
+    await act(async () => owners[0]!.invoke())
+  }
+  const reads = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
+  const changes = vi.mocked(api.conversation.readConversationChanges).mock.calls.length
+  view.tailRect.mockClear(); view.writes.length = 0; view.setHeight(450)
+  await resize()
+  expect(view.feed.scrollTop).toBe(50)
+  expect(view.tailRect.mock.calls.length).toBeGreaterThan(0)
+  expect(container.querySelector('[data-message-tool-control="jump-to-latest"]')).toBeNull()
+  view.setHeight(1000); await resize()
+  expect(container.querySelector('[data-message-tool-control="jump-to-latest"]')).not.toBeNull()
+  expect(vi.mocked(api.conversation.readAgentConversation)).toHaveBeenCalledTimes(reads)
+  expect(vi.mocked(api.conversation.readConversationChanges)).toHaveBeenCalledTimes(changes)
+  view.tailRect.mockClear(); view.grow(); await resize()
+  expect(view.tailRect, 'A real resize still far from the physical tail needs no loaded-tail measurement').not.toHaveBeenCalled()
+  await render(revised(_historyFixtureEpoch(0, 0, 3), 'New output after the physical resize.'))
+  expect(view.tailRect).not.toHaveBeenCalled(); expect(view.writes).toHaveLength(0)
+  expect(view.feed.scrollTop).toBe(50); expect(selection.anchorNode).toBe(text); expect(selection.toString()).toBe(selected)
 })
