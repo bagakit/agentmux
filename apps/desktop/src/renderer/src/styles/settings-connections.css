@@ -178,7 +178,7 @@
 .connector-enabled input { flex: none; width: 16px; height: 16px; margin: 0; padding: 0; accent-color: var(--green); }
 .connector-optional .settings-group-note { margin-top: var(--sp-3); }
 .connector-editor-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); }
-.lark-settings > .connector-service-control { margin-top: var(--sp-6); padding-top: var(--sp-6); }
+.lark-settings > .connector-service-control { margin: 0; padding: 0 0 var(--sp-5); border-top: 0; border-bottom: 1px solid var(--line-soft); }
 .connector-service-control { display: grid; gap: var(--sp-4); }
 .connector-service-control__heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-4); }
 .connector-service-control__heading > div:first-child { min-width: 0; flex: 1 1 200px; }

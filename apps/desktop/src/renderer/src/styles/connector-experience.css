@@ -70,7 +70,6 @@
 .connector-mote-card__identity { gap: var(--sp-4); }
 .connector-mote-card__identity strong { font-size: var(--fs-title); }
 .connector-saved-identities { padding-top: var(--sp-5); }
-.lark-settings > .connector-service-control { margin-top: var(--sp-6); padding-top: var(--sp-5); }
 .connector-service-control__heading h3 { font-size: var(--fs-body); font-weight: 550; }
 .connector-service-control__heading .settings-group-note, .connector-service-control__setting { font-size: var(--fs-meta); }
 .connector-service-requests { font-size: var(--fs-meta); color: var(--text-3); }
