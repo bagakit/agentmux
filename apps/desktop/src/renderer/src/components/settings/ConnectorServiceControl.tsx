@@ -1,10 +1,13 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useRef, useState } from 'react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { parseConnectionServiceResult, type ConnectionServiceOperation, type ConnectionServiceState } from '@agentmux/core/connections'
 import { retainConnectorServiceIntent, useAppStore } from '../../store'
 import { api } from '../../lib/api'
 import { observeConnectorService, readConnectorService } from '../../lib/connector-service-observation'
+
+const RefreshIcon = semanticIconComponent('action.refresh')
 
 type RequestObservation = { receipt?: ConnectionServiceOperation | null; issue?: string }
 
@@ -86,11 +89,11 @@ export function ConnectorServiceControl({ active }: { active: boolean }) {
 
   if (!active) return null
   return <section className="settings-group connector-service-control" aria-label="Connector service" data-connector-service>
-    <div className="connector-service-control__heading"><div><h3>Automatic chat sync</h3><p className="settings-group-note">Controls automatic messages for all your external bots. Each bot keeps its own setting.</p></div><div className="connector-service-control__setting"><span role="status" data-connector-service-state={state ? state.enabled ? 'on' : 'off' : 'unconfirmed'}>{state ? `${issue ? 'Last confirmed: ' : ''}${state.enabled ? 'On' : 'Off'}` : 'State not confirmed'}</span>{state ? <label className="connector-enabled"><input type="checkbox" aria-label="Enable external chat sync" checked={draft ?? state.enabled} onChange={event => {
+    <div className="connector-service-control__heading"><div><h3>Automatic chat sync</h3><p className="settings-group-note">Automatic messages for all bots. Individual bot settings are kept.</p></div><div className="connector-service-control__setting"><span role="status" data-connector-service-state={state ? state.enabled ? 'on' : 'off' : 'unconfirmed'}>{state ? `${issue ? 'Last confirmed: ' : ''}${state.enabled ? 'On' : 'Off'}` : 'State not confirmed'}</span>{state ? <label className="connector-enabled"><input type="checkbox" aria-label="Enable external chat sync" checked={draft ?? state.enabled} onChange={event => {
       ++selection.current; if (!needsCurrent) setBaseline({ state, source: api.connections.call }); setDraft(event.target.checked); setNotice('')
-    }} /><span>Enable</span></label> : null}<button className="small-button connector-service-control__refresh" onClick={checkCurrent}>Refresh status</button></div></div>
+    }} /><span>Enable</span></label> : null}<button className="small-button connector-service-control__refresh" onClick={checkCurrent}><RefreshIcon size={14} />Refresh status</button></div></div>
     {draft !== null ? <div className="connector-editor-actions"><span className="settings-group-note">Unsaved change</span><button data-connector-service-save className="primary-button" disabled={busy || !baseline || needsCurrent || baseline.source !== api.connections.call} onClick={() => void save()}>{busy ? 'Saving…' : 'Save changes'}</button>{needsCurrent ? <button className="small-button" onClick={() => void newChoice()}>Review latest setting</button> : null}</div> : null}
-    {issue ? <p className="connector-check-feedback" role="status">The sync status could not be refreshed. Bot setup and saved connections are still available.</p> : null}
+    {issue ? <p className="connector-check-feedback" role="status">Sync status could not be refreshed. You can still manage your bots.</p> : null}
     {notice ? <p className="settings-group-note" role="status">{notice}</p> : null}
     <details className="connector-service-requests"><summary>Sync settings and history</summary><p className="settings-group-note">Turning sync off pauses new automatic messages for all bots. Your bots, groups and each bot’s own setting are kept.</p>{issue ? <p className="connector-enrollment__technical">{issue}</p> : null}{Object.values(intents).length ? <p className="settings-group-note">Earlier changes and their original results are kept here. Refreshing the current status does not confirm an earlier save.</p> : null}{Object.values(intents).map(intent => {
       const result = requests[intent.input.operationId]
