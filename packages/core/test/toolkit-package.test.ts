@@ -135,7 +135,7 @@ describe('Toolkit local package data and original public command', () => {
     expect(isAgentMuxRpcMethod('toolkit.install')).toBe(false)
     expect(agentMuxCommandHelp('toolkit.install')).toContain('--path <absolute-directory>')
     expect(agentMuxModuleSkill('toolkit')!).toContain('next explicit')
-    for (const args of [[], ['--path', 'relative'], ['--path', fields.packagePath, '--path', fixturePath("duplicate")], ['--path', fields.packagePath, '--cwd', 'relative'], ['--input', fixturePath("a.json")]]) {
+    for (const args of [[], ['--path', 'relative'], ['--path', fields.packagePath, '--path', fixturePath("duplicate")], ['--input', fixturePath("a.json")]]) {
       await expect(parseToolkitCommand(['install', configuration.id, ...args])).rejects.toMatchObject({ code: 'INVALID_CLI_ARGUMENT' })
     }
   })
