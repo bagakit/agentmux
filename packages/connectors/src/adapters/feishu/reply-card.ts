@@ -19,25 +19,24 @@ const codeSpan = (text: string) => {
 }
 /** Native extension tags in authored prose remain literal, never new mentions.
  * Code is already literal; only parser-identified HTML needs presentation escaping. */
-function markdown(text: string, nodes: readonly Nodes[]): string {
+function markdown(text: string, nodes: readonly Nodes[], start = 0, end = text.length): string {
   const replacements: Array<{ start: number; end: number; value: string }> = []
   const visit = (node: Nodes) => {
     if (node.type === 'html') replacements.push({ start: node.position!.start.offset!, end: node.position!.end.offset!, value: codeSpan(source(text, node)) })
     else if ('children' in node) node.children.forEach(visit)
   }
   nodes.forEach(visit)
-  let result = text
-  for (const item of replacements.sort((a, b) => b.start - a.start)) result = result.slice(0, item.start) + item.value + result.slice(item.end)
+  let result = text.slice(start, end)
+  for (const item of replacements.sort((a, b) => b.start - a.start)) result = result.slice(0, item.start - start) + item.value + result.slice(item.end - start)
   return result
 }
 function table(text: string, node: Table): Record<string, unknown> {
   const [header, ...rows] = node.children
   const cellText = (cell: Table['children'][number]['children'][number] | undefined) => {
     if (!cell?.children.length) return ''
-    const raw = text.slice(cell.children[0]!.position!.start.offset!, cell.children.at(-1)!.position!.end.offset!)
-    return markdown(raw, parser.parse(raw).children)
+    return markdown(text, cell.children, cell.children[0]!.position!.start.offset!, cell.children.at(-1)!.position!.end.offset!)
   }
-  const columns = Array.from({ length: Math.max(...node.children.map(row => row.children.length)) }, (_, index) => ({
+  const columns = Array.from({ length: node.children.reduce((count, row) => Math.max(count, row.children.length), 0) }, (_, index) => ({
     name: `c${index}`, display_name: cellText(header!.children[index]) || ' ', data_type: 'lark_md', width: 'auto'
   }))
   return { tag: 'table', page_size: Math.min(10, Math.max(1, rows.length)), row_height: 'low',
@@ -52,19 +51,19 @@ export function feishuReplyElements(text: string): Record<string, unknown>[] {
     const start = node.position!.start.offset!, end = node.position!.end.offset!
     if (start > cursor) {
       const before = text.slice(cursor, start)
-      // Parse the exact slice so source offsets stay local to that component.
-      if (before.trim()) elements.push({ tag: 'markdown', content: markdown(before, parser.parse(before).children) })
+      if (before.trim()) elements.push({ tag: 'markdown', content: markdown(text, root.children.filter(child => child.position!.start.offset! >= cursor && child.position!.end.offset! <= start), cursor, start) })
     }
     elements.push(table(text, node)); cursor = end
   }
   const after = text.slice(cursor)
-  if (after.trim() || !elements.length) elements.push({ tag: 'markdown', content: markdown(after, parser.parse(after).children) })
+  if (after.trim() || !elements.length) elements.push({ tag: 'markdown', content: markdown(text, root.children.filter(child => child.position!.start.offset! >= cursor), cursor) })
   return elements
 }
-export function feishuReplyCard(text: string, fragment?: { ordinal: number; count: number }): Record<string, unknown> {
+export function feishuReplyCard(text: string, fragment?: { ordinal: number; count: number }, literal = false): Record<string, unknown> {
   return { schema: '2.0', config: { update_multi: true },
     body: { padding: '12px 14px 12px 14px', vertical_spacing: '8px', elements: [
-      ...feishuReplyElements(text),
+      ...(literal ? [{ tag: 'div', text: { tag: 'plain_text', content: text } }] : feishuReplyElements(text)),
+      ...(literal ? [{ tag: 'div', text_size: 'notation', text: { tag: 'plain_text', content: 'Original Markdown source · exceeds native card format limits' } }] : []),
       ...(fragment && fragment.count > 1 ? [{ tag: 'div', text_size: 'notation', text: { tag: 'plain_text', content: `Reply · ${fragment.ordinal + 1}/${fragment.count}` } }] : [])
     ] } }
 }
@@ -123,7 +122,18 @@ export function fragmentFeishuReply(text: string, fits: (part: PublicationTextFr
       const prefix = opening?.[0] ?? fence + (node.lang ?? '') + '\n'
       const closing = raw.slice(0, nodeEnd).match(/(?:^|\n)[ \t]*(`{3,}|~{3,})[ \t]*$/u)
       const contentEnd = closing ? nodeEnd - closing[0].length : nodeEnd
-      frame = (from, through) => ({ before: from > nodeStart ? prefix : '', after: through <= contentEnd ? '\n' + fence + '\n' : '' })
+      if (opening && fits({ text: 'x', presentationContext: { before: prefix, after: '\n' + fence + '\n' } })) {
+        frame = (from, through) => ({ before: from > nodeStart ? prefix : '', after: through <= contentEnd ? '\n' + fence + '\n' : '' })
+      } else if (!opening) {
+        // Indented code retains the original line indentation. Never add an
+        // unmatched fence or turn its four source spaces into code body.
+        let offset = 0
+        const lines = raw.match(/[^\n]*\n|[^\n]+$/gu) ?? []
+        boundaries = lines.map(line => offset += line.length)
+        if (lines.some(line => !fits({ text: line }))) {
+          frame = () => ({ before: '', after: '', literal: true }); boundaries = undefined
+        }
+      } else frame = () => ({ before: '', after: '', literal: true })
     } else if (node.type === 'table') {
       const rows = node.children.slice(1), first = rows[0]?.position!.start.offset
       const header = first === undefined ? raw : text.slice(start, first)
@@ -134,8 +144,7 @@ export function fragmentFeishuReply(text: string, fits: (part: PublicationTextFr
       if (first === undefined || rows.some(row => !fits({ text: source(text, row), presentationContext: { before: header, after: '\n' } }))) {
         // One row/header itself exceeds a card. Show its complete source in
         // explicitly identified literal continuations; no cell is discarded.
-        const fence = '`'.repeat(longestTicks(raw, 2) + 1)
-        frame = () => ({ before: `Table source · continued\n\n${fence}text\n`, after: '\n' + fence + '\n' })
+        frame = () => ({ before: '', after: '', literal: true })
         boundaries = undefined
       } else frame = (from, through) => ({ before: from ? header : '', after: through < raw.length ? '\n' : '' })
     }

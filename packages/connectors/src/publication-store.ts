@@ -35,7 +35,7 @@ export type BindingLifecyclePayload = {
   scope: RoomBinding['scope']
   synchronization: boolean | null
 }
-export type PublicationTextFragment = { text: string; presentationContext?: { before: string; after: string } }
+export type PublicationTextFragment = { text: string; presentationContext?: { before: string; after: string; literal?: true } }
 export type PublicationPayload = PermissionPublicationPayload | QuestionPublicationPayload | BindingLifecyclePayload | ImagePublicationPayload | FilePublicationPayload | {
   kind: 'speech'
   text: string
