@@ -655,6 +655,69 @@ it('authenticated Mobile reads confirmed source labels from the original Core ev
   expect(f.writes).toHaveLength(0);expect(f.submit).not.toHaveBeenCalled();expect(f.reply).not.toHaveBeenCalled()
 })
 
+it('authenticated Mobile preserves detached reading when layout restoration lands near the tail', async () => {
+  const sizes: Array<{ targets: Set<Element>; callback: ResizeObserverCallback }> = []
+  const visibility: Array<{ targets: Set<Element>; callback: IntersectionObserverCallback; options?: IntersectionObserverInit }> = []
+  const originalResize = browser.ResizeObserver, originalIntersection = browser.IntersectionObserver
+  class Sizes {
+    targets = new Set<Element>()
+    constructor(readonly callback: ResizeObserverCallback) { sizes.push(this) }
+    observe(node: Element) { this.targets.add(node) }
+    unobserve(node: Element) { this.targets.delete(node) }
+    disconnect() { this.targets.clear() }
+  }
+  class Visibility {
+    targets = new Set<Element>()
+    constructor(readonly callback: IntersectionObserverCallback, readonly options?: IntersectionObserverInit) { visibility.push(this) }
+    observe(node: Element) { this.targets.add(node) }
+    unobserve(node: Element) { this.targets.delete(node) }
+    disconnect() { this.targets.clear() }
+  }
+  Object.assign(browser, { ResizeObserver: Sizes, IntersectionObserver: Visibility })
+  closes.push(async () => { Object.assign(browser, { ResizeObserver: originalResize, IntersectionObserver: originalIntersection }) })
+  const f = await authenticatedFixture()
+  const anchor = { id: 'reading-anchor', kind: 'assistant-message' as const, contentParts: [{ kind: 'text' as const, text: 'Original mobile anchor remains readable.' }] }
+  f.setRecent({ ...page(), items: [anchor], nextCursor: null })
+  const view = await mount(f.surface())
+  await vi.waitFor(() => expect(view.element.querySelector('[data-native-record-id="reading-anchor"]')).not.toBeNull())
+  const feed = view.element.querySelector<HTMLElement>('.mobile-conversation__reading')!
+  const original = view.element.querySelector<HTMLElement>('[data-native-record-id="reading-anchor"]')!
+  let top = 600, height = 1000, anchorPosition = 100
+  Object.defineProperties(feed, {
+    clientHeight: { configurable: true, get: () => 400 }, scrollHeight: { configurable: true, get: () => height },
+    scrollTop: { configurable: true, get: () => top, set: value => { top = Math.max(0, Math.min(value, height - 400)) } }
+  })
+  feed.getBoundingClientRect = () => new DOMRect(0, 0, 390, 400)
+  original.getBoundingClientRect = () => new DOMRect(0, anchorPosition - top, 390, 80)
+  const scroll = async (value: number) => { await act(async () => { feed.scrollTop = value; feed.dispatchEvent(new Event('scroll', { bubbles: true })) }) }
+  await scroll(600); await scroll(100)
+  expect(view.element.querySelector('.mobile-reading-latest')).not.toBeNull()
+  const visible = visibility.find(value => value.options?.root === feed && value.options.rootMargin === '600px 0px')!
+  expect(visible.targets.has(original)).toBe(true)
+  await act(async () => visible.callback([{ target: original, isIntersecting: true }] as IntersectionObserverEntry[], {} as IntersectionObserver))
+  const offset = original.getBoundingClientRect().top
+  // A late layout change above the reader and a shorter tail put the restored
+  // original anchor near the end. Geometry does not grant a new follow intent.
+  anchorPosition += 120; height = 620
+  const resized = sizes.find(value => value.targets.has(feed))!
+  await act(async () => resized.callback([], {} as ResizeObserver))
+  expect(feed.scrollTop).toBe(220); expect(original.getBoundingClientRect().top).toBe(offset)
+  await scroll(220)
+  expect(view.element.querySelector('.mobile-reading-latest'), 'Restoration cannot silently resume following').not.toBeNull()
+  height = 1100
+  const later: AgentTimelineItem = { id: 'later-tail', agentSessionId: sid, kind: 'assistant_message', source: 'native-hook',
+    status: 'complete', title: 'Later original reply', content: 'A later original reply must not pull the reader away.',
+    createdAt: _historyTailFixtureEpoch(0, 0, 2), updatedAt: _historyTailFixtureEpoch(0, 0, 2) }
+  await act(async () => Reflect.get(f.core, 'persistAndPublishTimeline').call(f.core,
+    { type: 'append', agentSessionId: sid, item: later }, { source: 'agentmux', observedAt: later.updatedAt }, 'local'))
+  await vi.waitFor(() => expect(view.element.textContent).toContain('A later original reply must not pull the reader away.'))
+  await act(async () => resized.callback([], {} as ResizeObserver))
+  expect(feed.scrollTop).toBe(220); expect(original.getBoundingClientRect().top).toBe(offset)
+  expect(view.element.querySelector('[data-native-record-id="reading-anchor"]')).toBe(original)
+  expect(view.element.querySelector('.mobile-reading-latest')).not.toBeNull()
+  expect(f.authenticated.length).toBeGreaterThan(0); expect(f.writes).toHaveLength(0); expect(f.submit).not.toHaveBeenCalled()
+}, 15000)
+
 it('authenticated Mobile admits new neighbors around a selected captured version and holds only its replacement body', async () => {
   const f = await authenticatedFixture()
   const original: AgentTimelineItem = { id: 'mobile-selected-captured', agentSessionId: sid, kind: 'assistant_message',
