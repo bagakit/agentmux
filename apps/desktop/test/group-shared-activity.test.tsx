@@ -58,6 +58,7 @@ it.each([
     { kind: 'conversation', operationId: 'confirmed-original', state: 'confirmed', receipt: 'confirmed', platformMessageId: 'confirmed-message', reason: null, resourceUpload: null },
     { kind: 'conversation', operationId: 'unknown-original', state: 'unknown', receipt: 'unknown', platformMessageId: null, reason: 'effect-unconfirmed', resourceUpload: null }
   ]
+  if (effect && observation.state === 'unavailable') deliveries[1] = { ...deliveries[1]!, operationId: 'not-applied-original', state: 'not-applied', receipt: 'not-applied' }
   // The aggregate observation cannot replace either original receipt. Exercise both first-row summaries.
   if (!effect) deliveries.reverse()
   const call = vi.spyOn(api.connections, 'call').mockImplementation(async (method, input) => {
@@ -75,7 +76,15 @@ it.each([
   const detail = host!.querySelector('details')!.textContent!
   if (effect) {
     expect(detail).toContain('Platform request observation: ' + observation.state)
-    expect(detail).toContain('Some original platform request results are unconfirmed. Each request has its own receipt below. Unconfirmed requests are not sent again.')
+    expect(detail).toContain('Each request has its own receipt below. Unconfirmed requests are not sent again.')
+    if (observation.state === 'unknown') {
+      const note = [...host!.querySelectorAll('details p')].find(node => node.textContent!.startsWith('Platform request observation:'))!
+      expect(note.outerHTML).toBe('<p class="agent-connector-note">Platform request observation: unknown. Some original platform request results are unconfirmed. Each request has its own receipt below. Unconfirmed requests are not sent again.</p>')
+    }
+    else {
+      expect(detail).toContain('Check each original platform request receipt below for its outcome.')
+      expect(detail).not.toContain('Some original platform request results are unconfirmed.')
+    }
     expect(detail).not.toContain('Source observation:')
     expect(detail).not.toContain('This describes local source reading')
   } else {
@@ -85,7 +94,8 @@ it.each([
   }
   const rows = [...host!.querySelectorAll('.agent-connector-receipt')]
   expect(rows.find(row => row.textContent!.includes('confirmed-original'))!.textContent).toContain('Platform receipt: confirmed')
-  expect(rows.find(row => row.textContent!.includes('unknown-original'))!.textContent).toContain('Platform receipt: unknown')
+  const otherReceipt = effect && observation.state === 'unavailable' ? 'not-applied' : 'unknown'
+  expect(rows.find(row => row.textContent!.includes(otherReceipt + '-original'))!.textContent).toContain('Platform receipt: ' + otherReceipt)
   await act(async () => [...host!.querySelectorAll('button')].find(button => button.textContent === 'Check group activity')!.click())
   expect(call.mock.calls.map(([method]) => method)).toEqual(['connection.diagnose', 'connection.diagnose'])
 })
