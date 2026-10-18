@@ -8,6 +8,7 @@ import { useAppStore } from '../../store'
 import { TerminalView } from '../TerminalView'
 import { SettingsNavigation } from '../SettingsNavigation'
 import { ToolkitIcon } from './ToolkitIcon'
+import { ToolkitPopoverResizeHandle } from '../performance/ToolkitPopoverResizeHandle'
 import type { ToolkitToolIdentity } from './use-toolkit-packages'
 import { useToolkitScriptObservation } from './use-toolkit-script-observation'
 import { continueToolkitRequest, CONTINUE_TOOLKIT_NOTICE } from './continue-toolkit-request'
@@ -89,9 +90,19 @@ export function TuiToolkitResult({ definition, reading, active, close, compact =
     if (run && !compact) try { await refreshSession({ kind: 'terminal', hostId: run.hostId, runId: run.runId, run: { runId: run.runId } }) }
     catch { /* The latest refresh already owns its visible error. */ }
   }
+  const status = reading.error ? 'Observation unavailable' : snapshot ? stateLabel[snapshot.state] : 'Reading terminal status…'
+  const actions = <>
+    {!snapshot?.admission ? <button type="button" disabled={!canStart || busy} title={snapshot?.latestConfirmed ? 'Run saved command' : 'Start'} aria-label={snapshot?.latestConfirmed ? 'Run saved command' : 'Start'} onClick={() => void operate('start')}><StartIcon size={13} /><span className="toolkit-tui__action-label">{snapshot?.latestConfirmed ? 'Run saved command' : 'Start'}</span></button> : snapshot.admission.run ? <button type="button" disabled={busy} title="Stop command" aria-label="Stop command" onClick={() => void operate('stop')}><StopIcon size={13} /><span className="toolkit-tui__action-label">Stop</span></button> : snapshot.state === 'unknown' ? <button type="button" disabled={busy} title="Continue original request" aria-label="Continue original request" onClick={() => void operate('continue')}><StartIcon size={13} /><span className="toolkit-tui__action-label">Continue original request</span></button> : null}
+    <button type="button" disabled={reading.pending || busy} title="Check status" aria-label="Check status" onClick={() => void check()}><RefreshIcon size={13} /><span className="toolkit-tui__action-label">Check status</span></button>
+    {!compact && navigation ? <button type="button" title="Configure" aria-label="Configure" onClick={() => { close?.(); navigation.openToolkit(definition.id) }}><SettingsIcon size={13} /><span className="toolkit-tui__action-label">Configure</span></button> : null}
+  </>
   return <section className={compact ? 'toolkit-tui toolkit-tui--compact' : 'toolkit-tui'} aria-label={compact ? 'TUI execution' : undefined}>
-    {!compact ? <header className="performance-header"><div className="performance-title"><ToolkitIcon icon={icon} size={17} /><div className="toolkit-result__identity"><small>Interactive terminal</small><h2>{name}</h2></div></div><button type="button" className="performance-icon-button" data-toolkit-close aria-label={`Close ${name}`} onClick={close}><CloseIcon size={14} /></button></header> : null}
-    <div className="toolkit-tui__status" role="status"><span>{reading.error ? 'Observation unavailable' : snapshot ? stateLabel[snapshot.state] : 'Reading terminal status…'}</span><small>{compact ? 'Closing the panel keeps the terminal running.' : 'Click the terminal to interact'}</small></div>
+    {!compact ? <><ToolkitPopoverResizeHandle /><header className="toolkit-tui__header">
+      <ToolkitIcon icon={icon} size={17} />
+      <div className="toolkit-tui__identity"><h2 title={name}>{name}</h2>{terminal && snapshot?.state === 'running' ? <small className="toolkit-tui__hint">Click terminal to type</small> : null}</div>
+      <span className="toolkit-tui__state" data-state={reading.error ? 'unknown' : snapshot?.state} role="status" title="Command status · Closing this panel does not stop the command">{status}</span>
+      <div className="toolkit-tui__controls">{actions}<button type="button" title="Close panel" data-toolkit-close aria-label={`Close ${name}`} onClick={close}><CloseIcon size={14} /></button></div>
+    </header></> : <div className="toolkit-tui__status" role="status">{status}</div>}
     {reading.error || reading.sourceReason || snapshot?.reason || terminalError || operationError || changed ? <div className="toolkit-tui__notices" role="status">
       {reading.error ? <p>{reading.error} The original terminal is kept.</p> : null}
       {reading.sourceReason ? <p>{reading.sourceReason}</p> : null}
@@ -104,10 +115,6 @@ export function TuiToolkitResult({ definition, reading, active, close, compact =
       {terminal ? <TerminalView session={terminal} themeId={themeId} {...(fontSize ? { fontSize } : {})} interactiveResize={false} visible={active} autoFocus={false} {...(workspaceId ? { linkOrigin: { workspaceId } } : {})} onRefreshSession={refreshSession} /> : <p className="toolkit-tui__empty">{run ? 'Connecting to the original terminal…' : snapshot?.admission ? 'Waiting for the original launch receipt…' : 'Start the saved command to open its terminal.'}</p>}
     </div> : null}
     {snapshot?.state === 'unknown' && snapshot.admission?.run === null ? <p className="toolkit-tui__notice">{CONTINUE_TOOLKIT_NOTICE}</p> : null}
-    <footer className="performance-actions toolkit-tui__actions">
-      {!snapshot?.admission ? <button type="button" disabled={!canStart || busy} onClick={() => void operate('start')}><StartIcon size={13} />{snapshot?.latestConfirmed ? 'Run saved command' : 'Start'}</button> : snapshot.admission.run ? <button type="button" disabled={busy} onClick={() => void operate('stop')}><StopIcon size={13} />Stop</button> : snapshot.state === 'unknown' ? <button type="button" disabled={busy} onClick={() => void operate('continue')}><StartIcon size={13} />Continue original request</button> : null}
-      <button type="button" disabled={reading.pending || busy} onClick={() => void check()}><RefreshIcon size={13} />Check status</button>
-      {!compact && navigation ? <button type="button" onClick={() => { close?.(); navigation.openToolkit(definition.id) }}><SettingsIcon size={13} />Configure</button> : null}
-    </footer>
+    {compact ? <footer className="performance-actions toolkit-tui__actions">{actions}</footer> : null}
   </section>
 }
