@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-const incoming = ".log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent'])"
+const incoming = ".log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-role='external'], [data-speaker-relation='other-agent'])"
 export const messageSlotMutations = ['incoming-slot-scope', 'progress-body-scope', 'system-body-scope']
 export function mutateMessageSlotScope(styles, name, owner) {
   assert.ok(messageSlotMutations.includes(name), 'Known slot-boundary mutation')
