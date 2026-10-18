@@ -132,8 +132,8 @@ async function openRequest(endpoint: AgentMuxRpcEndpoint, request: JSONRPCReques
   input.on('data', (chunk: Buffer) => { if (closed) return
     try { lines.accept(chunk, onFrame) } catch (error) { finish(transportError(error)) } })
   input.once('end', () => { try { lines.end(); finish() } catch (error) { finish(transportError(error)) } })
-  input.once('error', error => finish(transportError(error)))
-  output.once('error', error => finish(transportError(error)))
+  input.once('error', error => finish(transportError(error, 'connection')))
+  output.once('error', error => finish(transportError(error, 'connection')))
   socket.once('connect', () => output.write(encoded))
   if (signal.aborted) abort()
   return { dispose: async () => { signal.removeEventListener('abort', abort); if (closed) return

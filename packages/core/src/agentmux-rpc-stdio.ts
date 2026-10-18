@@ -59,16 +59,16 @@ export async function forwardAgentMuxRpcStdio(options: { endpoint: AgentMuxRpcEn
   const socket = createConnection({ path: options.endpoint.path })
   await new Promise<void>((resolve, reject) => {
     let settled = false
-    const stop = (error?: Error) => { if (settled) return; settled = true
+    const stop = (error?: Error, boundary: 'protocol' | 'connection' = 'protocol') => { if (settled) return; settled = true
       options.input.unpipe(gate); gate.unpipe(socket); gate.destroy()
       socket.unpipe(responses); responses.unpipe(outgoing); responses.destroy()
       outgoing.unpipe(options.output); outgoing.destroy(); socket.destroy(); options.signal?.removeEventListener('abort', abort)
-      if (error) reject(transportError(error)); else resolve() }
+      if (error) reject(transportError(error, boundary)); else resolve() }
     const abort = () => stop()
     options.signal?.addEventListener('abort', abort, { once: true })
-    socket.once('error', error => stop(error)); gate.once('error', error => stop(error))
-    responses.once('error', error => stop(error)); outgoing.once('error', error => stop(error))
-    options.input.once('error', error => stop(error)); options.output.once('error', error => stop(error))
+    socket.once('error', error => stop(error, 'connection')); gate.once('error', error => stop(error))
+    responses.once('error', error => stop(error)); outgoing.once('error', error => stop(error, 'connection'))
+    options.input.once('error', error => stop(error, 'connection')); options.output.once('error', error => stop(error, 'connection'))
     socket.once('connect', () => {
       outgoing.pipe(options.output, { end: false })
       options.input.pipe(gate).pipe(socket); socket.pipe(responses).pipe(outgoing, { end: false })
