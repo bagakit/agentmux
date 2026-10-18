@@ -90,6 +90,10 @@ operation. app focus selects a surface; it does not accept a task or certify inp
 Use app focus --surface focus --view map to open the same collaboration map, or --view
 list for execution contexts. Omitting --view preserves the existing Focus view; other
 surfaces cannot use --view. Space always presents the original workbench.
+Use app focus --surface focus --host HOST --session SID for one exact Agent in the list.
+Both identities are required; this cannot use map view or transfer input. Original filters
+remain, with one explained temporary reveal. Inspect focus.agent for actual card visibility,
+not merely surface selection or an accepted navigation.
 app inspect reports selection.focusView separately from actual presentation and input.
 Retained Tab/Region selection does not certify that content is visible behind the map.
 Selection, focus and native input receipts are separate. Preserve current drafts and caret

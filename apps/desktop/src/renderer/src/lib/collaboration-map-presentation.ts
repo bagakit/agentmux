@@ -1,5 +1,3 @@
-import type { AgentSessionHistoryDescriptor } from '@agentmux/core'
-import type { FocusContext } from './focus-context'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { focusActivityEntryTime, focusBucketForSession } from './focus-context'
 import { observeAgentSession } from './agent-observation'
@@ -24,13 +22,3 @@ export function collaborationRecency(at: number | null | undefined, now = Date.n
 }
 
 export const collaborationAgentName = (agent: CollaborationAgent | undefined) => agent?.name ?? agent?.context?.name ?? agent?.sessionId ?? ''
-
-/** A retained descriptor supplies reading metadata, never a synthetic Session or current Run. */
-export function collaborationHistoryContext(source: AgentSessionHistoryDescriptor, name?: string): FocusContext {
-  return { id: source.agentSessionId, hostId: source.hostId, name: name ?? source.agentSessionId,
-    kind: 'agent', providerId: source.history?.providerId ?? null, ...(source.history?.executorId ? { executorId: source.history.executorId } : {}),
-    workspacePath: source.history?.workspacePath ?? '', workspace: undefined, workspaceId: '', workspaceName: 'Retained Session', topicId: null,
-    runId: '', runUnobserved: true, processState: 'interrupted', state: 'disconnected', stateLabel: source.state === 'retired' ? 'Retired' : 'Unobserved', bucket: 'idle',
-    liveAgent: false, actionable: false, lastActivityAt: null, workingEnteredAt: null,
-    detail: `${source.state === 'retired' ? 'Retired' : 'Retained'} Session · Current Run is unconfirmed`, detailIsRecap: false, detailKind: 'service', recap: null }
-}

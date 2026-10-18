@@ -1,7 +1,7 @@
 import { COLLECTED_REPLY_TITLE } from '@agentmux/client-ui/conversation-sources'
 import { projectConversationSummary } from '@agentmux/core/conversation'
 import { scratchTopicsForConfig } from './scratch-topic-snapshots'
-import type { AgentTimelineItem, AgentTimelineSnapshot } from '@agentmux/core'
+import type { AgentSessionHistoryDescriptor, AgentTimelineItem, AgentTimelineSnapshot } from '@agentmux/core'
 import { isAgentActivityStatusSource } from '@agentmux/core/agent-status'
 import type { AppConfig, SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { type ScratchTopicSnapshot, scratchTopicIdFromWorkspacePath } from '../../../shared/scratch-topics'
@@ -42,6 +42,16 @@ export type FocusContext = {
   detailKind?: 'activity' | 'message' | 'service' | 'observation'
   activitySemantic?: AgentObservation['semantic']
 }
+/** A retained descriptor supplies reading metadata, never a synthetic Session or current Run. */
+export function retainedFocusContext(source: AgentSessionHistoryDescriptor, name?: string): FocusContext {
+  return { id: source.agentSessionId, hostId: source.hostId, name: name ?? source.agentSessionId,
+    kind: 'agent', providerId: source.history?.providerId ?? null, ...(source.history?.executorId ? { executorId: source.history.executorId } : {}),
+    workspacePath: source.history?.workspacePath ?? '', workspace: undefined, workspaceId: '', workspaceName: 'Retained Session', topicId: null,
+    runId: '', runUnobserved: true, processState: 'interrupted', state: 'disconnected', stateLabel: source.state === 'retired' ? 'Retired' : 'Unobserved', bucket: 'idle',
+    liveAgent: false, actionable: false, lastActivityAt: null, workingEnteredAt: null,
+    detail: `${source.state === 'retired' ? 'Retired' : 'Retained'} Session · Current Run is unconfirmed`, detailIsRecap: false, detailKind: 'service', recap: null }
+}
+
 export function groupFocusContexts(rows: readonly FocusContext[]): Record<FocusBucket, FocusContext[]> {
   const groups: Record<FocusBucket, FocusContext[]> = { attention: [], working: [], results: [], idle: [] }
   for (const row of rows) groups[row.bucket].push(row)

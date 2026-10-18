@@ -44,7 +44,7 @@ function budget(value: unknown, code: Code): void {
 }
 
 function parseDesktopFocusTarget(value: unknown, code: Code): AgentMuxDesktopFocusTarget {
-  const source = fields(value, ['kind', 'spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId', 'goalId', 'surface', 'view'], code)
+  const source = fields(value, ['kind', 'spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId', 'goalId', 'surface', 'view', 'hostId', 'agentSessionId'], code)
   if (source.kind === 'space') {
     fields(source, ['kind', 'spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId'], code)
     const { kind: _, ...raw } = source
@@ -55,6 +55,11 @@ function parseDesktopFocusTarget(value: unknown, code: Code): AgentMuxDesktopFoc
   if (source.kind === 'goal') {
     fields(source, ['kind', 'goalId'], code)
     return { kind: 'goal', goalId: spaceControlId(source.goalId, 'Goal ID', code) }
+  }
+  if (source.kind === 'focus-agent') {
+    fields(source, ['kind', 'hostId', 'agentSessionId'], code)
+    return { kind: 'focus-agent', hostId: spaceControlId(source.hostId, 'Host ID', code),
+      agentSessionId: spaceControlId(source.agentSessionId, 'Agent Session ID', code) }
   }
   if (source.kind === 'surface') {
     const surface = member(source.surface, surfaces, 'Surface', code)
@@ -145,8 +150,13 @@ function overlays(value: unknown, code: Code): AgentMuxDesktopOverlays {
     quickSwitcher: nullableBoolean(source.quickSwitcher, 'Quick switcher', code) }
 }
 function focus(value: unknown, code: Code): AgentMuxDesktopObservation['focus'] {
-  const source = fields(value, ['executionSessionId', 'pmoSessionId'], code)
-  return { executionSessionId: nullableId(source.executionSessionId, 'Execution focus', code), pmoSessionId: nullableId(source.pmoSessionId, 'PMO focus', code) }
+  const source = fields(value, ['executionSessionId', 'pmoSessionId', 'agent'], code)
+  const agent = source.agent === null ? null : fields(source.agent, ['hostId', 'agentSessionId', 'presentationSessionId', 'state'], code)
+  const result = { executionSessionId: nullableId(source.executionSessionId, 'Execution focus', code), pmoSessionId: nullableId(source.pmoSessionId, 'PMO focus', code),
+    agent: agent === null ? null : { hostId: spaceControlId(agent.hostId, 'Focus Host', code), agentSessionId: spaceControlId(agent.agentSessionId, 'Focus Agent Session', code),
+      presentationSessionId: nullableId(agent.presentationSessionId, 'Focus presentation Session', code), state: member(agent.state, ['visible', 'hidden', 'unconfirmed'], 'Focus Agent presentation', code) } }
+  if (result.agent?.state === 'visible' && result.agent.presentationSessionId === null) fail('A visible Focus Agent requires its actual presentation identity.', code)
+  return result
 }
 export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControlSuccessReceipt {
   const code = 'CONTROL_PROTOCOL_ERROR'
@@ -180,6 +190,9 @@ export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControl
     (!navigation.requested.tabId && !navigation.requested.regionId))) fail('Input target requires an exact Tab or Region.', code)
   if ((navigation.state === 'applied' || navigation.state === 'unchanged')) {
     const requested = navigation.requested, actual = navigation.selection
+    if (requested.kind === 'focus-agent' && (actual.surface !== 'focus' || actual.focusView !== 'list' ||
+      result.focus.agent?.hostId !== requested.hostId || result.focus.agent.agentSessionId !== requested.agentSessionId || result.focus.agent.state !== 'visible'))
+      fail('Focus Agent receipt is not visibly confirmed for the exact target.', code)
     if (requested.kind === 'goal' && (actual.goalId !== requested.goalId || actual.surface !== 'goals')) fail('Goal receipt target is mismatched.', code)
     if (requested.kind === 'surface' && (actual.surface !== requested.surface || requested.surface === 'focus' && requested.view !== undefined && actual.focusView !== requested.view)) fail('Surface receipt target is mismatched.', code)
     if (requested.kind === 'space') {
@@ -189,6 +202,8 @@ export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControl
       }
     }
   }
+  if (result.focus.agent?.state === 'visible' && (navigation.selection.surface !== 'focus' || navigation.selection.focusView !== 'list' || result.presentation.state !== 'main-visible'))
+    fail('A visible Focus Agent requires the actual Focus list presentation.', code)
   const map = navigation.selection.surface === 'focus' && navigation.selection.focusView === 'map'
   if (map && (result.presentation.tabId !== null || result.presentation.regionId !== null || result.presentation.windowId !== undefined ||
     result.presentation.documentGeneration !== undefined || result.presentation.state === 'floating' || result.presentation.state === 'window')) {

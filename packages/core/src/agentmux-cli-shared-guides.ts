@@ -207,7 +207,9 @@ export const AGENT_OPEN_WORKFLOW = `Agent-first workflow:
 
 space mv moves a presentation and leaves the original execution cwd/Host/Session/Run intact.
 Default Agent/File opens and presentation changes keep background navigation and eligible input.
-app focus selects a Surface; space focus and goal focus navigate exact objects. Selection,
+app focus selects a Surface, or --surface focus --host HOST --session SID reveals an exact
+original Agent in Focus list without changing the filters or transferring input. Inspect
+focus.agent for actual card visibility. space focus and goal focus navigate exact objects. Selection,
 presentation and actual caret eligibility are separate facts. Never stop a healthy Run to repair
 an observation or handshake. Reader cancellation only detaches that reader.`
 
