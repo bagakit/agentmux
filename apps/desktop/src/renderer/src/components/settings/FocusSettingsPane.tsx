@@ -62,6 +62,10 @@ export function FocusSettingsPane({ preferences, active = true, onSave }: {
           <p className="focus-settings-description">Alt-click chooses a position for that link.</p>
           {previewButton('opening-resources', 'Opening resources', 'links')}
         </section>
+        <section className="settings-group"><header><span>Map</span></header>
+          <Choices id="map-motion" legend="Map motion" value={draft.value.mapMotion} options={[{ value: 'system', label: 'Follow system', hint: 'Respect reduced motion' }, { value: 'on', label: 'On', hint: 'Animate recent activity' }, { value: 'off', label: 'Off', hint: 'Keep activity still' }]} onChange={value => draft.setField('mapMotion', value)} />
+          <p className="focus-settings-description">Only changes movement on the map. New messages and activity remain visible.</p>
+        </section>
         <div className="focus-settings__timeline" data-settings-field="timeline"><span><strong>Timeline</strong><small>Use the same ruler and time zone settings as Focus.</small></span><FocusTimelineRulerSettings active={active} preferences={ruler} onChange={saveRuler} dateChoice={null} onSelectDate={() => {}} onCancelDate={() => {}} /></div>
       </div>
       <FocusSettingsPreview values={draft.value} active={active} scene={scene} onScene={setScene} previewRef={preview.previewRef} returnAction={preview.returnAction} />
