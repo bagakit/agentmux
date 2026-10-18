@@ -39,7 +39,15 @@ export function prepareDiscordPublication(operation: Readonly<PublicationOperati
     if (!actionable) text += '\n' + localAgent
     if (actionable) buttons.push({ type: 1, components: [{ type: 2, style: 1, label: 'Answer questions', custom_id: 'q:' + p.actionRef }] })
   }
-  const components = [{ type: 17, components: [{ type: 10, content: ('phase' in p && p.phase === 'progress' ? '**Progress**\n' : '') + text }, ...buttons] }]
+  const content = ('phase' in p && p.phase === 'progress' ? '**Progress**\n' : '') + text
+  if (content.length > 4000 && (p.kind === 'question' || p.kind === 'permission' && p.disclosure === 'shared')) {
+    const file = publicationResourceDescriptor(operation, 'public-interaction-text')
+    const payloadJson = JSON.stringify({ flags: 32768, components: [{ type: 17, components: [
+      { type: 10, content: `The complete original ${p.kind === 'question' ? 'question and recorded answers' : 'permission request'} is in the attached text file. Read it before responding.\n${localAgent}` },
+      { type: 13, file: { url: 'attachment://' + file.name } }, ...buttons] }], attachments: [{ id: 0, filename: file.name }], allowed_mentions: { parse: [] }, ...(!mapping ? { nonce: discordNonce(operation.operationId), enforce_nonce: true } : {}) })
+    return { adapterId: DISCORD_PUBLICATION.adapterId, renderVersion: DISCORD_PUBLICATION.renderVersion, requestKey: operation.operationId, request: { method: mapping ? 'PATCH' : 'POST', path, multipart: { payloadJson, files: [file] } } }
+  }
+  const components = [{ type: 17, components: [{ type: 10, content }, ...buttons] }]
   const body = JSON.stringify({ flags: 32768, components, allowed_mentions: { parse: [] }, ...(!mapping ? { nonce: discordNonce(operation.operationId), enforce_nonce: true } : {}) })
   return { adapterId: DISCORD_PUBLICATION.adapterId, renderVersion: DISCORD_PUBLICATION.renderVersion, requestKey: operation.operationId, request: { method: mapping ? 'PATCH' : 'POST', path, body, contentType: 'application/json' } }
 }
