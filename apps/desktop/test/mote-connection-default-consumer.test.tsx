@@ -20,15 +20,26 @@ const ref = (suffix: string) => ({ connectionId: 'robot-' + suffix, application:
 async function setDefault(suffix: string, index = 0) {
   const current = await f.read(index)
   expect(current.status, JSON.stringify(current)).toBe('ready')
-  return await f.client.call('space.mote.preferences.save', { kind: 'connection', operationId: 'seed-' + suffix + '-' + index,
+  const saved = await f.client.call('space.mote.preferences.save', { kind: 'connection', operationId: 'seed-' + suffix + '-' + index,
     target: f.target(index), baseline: moteConnectionBaseline(current)!, values: { connection: ref(suffix) } })
+  expect(saved.status, JSON.stringify(saved)).toBe('saved')
+  return saved
 }
-const row = () => document.querySelector<HTMLElement>('.mote-connection__row')!
+const row = () => document.querySelector<HTMLElement>('[data-mote-connection="' + f.motes[0]!.id + '"] .mote-connection__row')!
 const dialog = () => document.querySelector<HTMLElement>('.mote-connection-dialog, .agent-connector-dialog')!
 async function waitText(text: string) { await vi.waitFor(async () => { await act(async () => {}); expect(document.body.textContent).toContain(text) }) }
+async function openPreferences() {
+  const preferences = row().closest<HTMLDetailsElement>('.mote-profile__preferences')!
+  expect(preferences).not.toBeNull()
+  if (!preferences.open) await moteClick(preferences.querySelector('summary')!)
+}
+async function openMoteBots() {
+  await openPreferences(); await moteClick(row())
+  await vi.waitFor(() => expect(document.querySelector('.mote-connection-dialog [aria-label="Mote chat bot"]')).not.toBeNull())
+}
 
 it('saves a bot from the original Mote Profile through trusted IPC and reads the same file through the compiled CLI', async () => {
-  await f.mount(); await f.open(); await f.choose('Robot B')
+  await f.mount(); await openMoteBots(); await f.choose('Robot B')
   const before = useAppStore.getState()
   await f.button('Use this bot')
   await vi.waitFor(() => expect(document.querySelector('.mote-connection-dialog')).toBeNull())
@@ -52,8 +63,8 @@ it('keeps the newer saved choice when the Profile opening read arrives after the
     if (input.kind === 'connection' && !held) { held = true; return new Promise(resolve => { release = resolve }) }
     return f.forwardRead(input)
   })
-  await f.mount(); expect(held).toBe(true)
-  await f.open(); await f.choose('Robot B'); await f.button('Use this bot')
+  await f.mount(); await openPreferences(); expect(held).toBe(true)
+  await openMoteBots(); await f.choose('Robot B'); await f.button('Use this bot')
   await vi.waitFor(() => expect(row().textContent).toContain('Robot B'))
   await act(async () => release(old)); await settleMoteApp()
   expect(row().textContent).toContain('Robot B')
@@ -61,13 +72,13 @@ it('keeps the newer saved choice when the Profile opening read arrives after the
 })
 
 it('retains the full unknown save across dialog close, Profile remount and workbench rehydration without replay', async () => {
-  await f.mount(); await f.open(); await f.choose('Robot A')
+  await f.mount(); await openMoteBots(); await f.choose('Robot A')
   f.saves.mockImplementationOnce(async input => { await f.forwardSave(input); throw new Error('Controlled lost Files acknowledgement') })
   await f.button('Use this bot'); await waitText('The save result is unconfirmed')
   const input = structuredClone(f.saves.mock.calls[0]![0])
   expect(useAppStore.getState().moteConnectionSaveIntents[input.operationId]).toEqual({ input, phase: 'may-have-dispatched' })
   await f.button('Close bot choice')
-  await f.app.remount(); await f.open()
+  await f.app.remount(); await openMoteBots()
   await waitText('The previous save is still unconfirmed')
   expect(dialog().textContent).toContain(input.operationId)
   expect([...dialog().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Use this bot')!.disabled).toBe(true)
@@ -92,8 +103,8 @@ async function openAgentGroup() {
   const trigger = document.querySelector<HTMLElement>('[data-workbench-region-id="default-region"] .agent-region-header__more')!
   expect(trigger).not.toBeNull()
   await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
-  await vi.waitFor(async () => { await act(async () => {}); expect([...document.querySelectorAll('[role="menuitem"]')].some(node => node.textContent?.trim() === 'Create group chat')).toBe(true) })
-  await moteClick([...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent?.trim() === 'Create group chat')!)
+  await vi.waitFor(async () => { await act(async () => {}); expect([...document.querySelectorAll('[role="menuitem"]')].some(node => node.textContent?.trim() === 'Connect group…')).toBe(true) })
+  await moteClick([...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent?.trim() === 'Connect group…')!)
 }
 
 it('initializes the original Agent menu from its Mote default while keeping the original workface', async () => {

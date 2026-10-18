@@ -34,19 +34,27 @@ async function managedIdentity(unknownEffect: string | null) {
 
 async function saveDefault(record: { config: { connectionId: string; application: { domain: string; appId: string } } }) {
   const current = await f.read()
-  await f.client.call('space.mote.preferences.save', { kind: 'connection', operationId: 'choose-managed', target: f.target(), baseline: moteConnectionBaseline(current)!,
+  const saved = await f.client.call('space.mote.preferences.save', { kind: 'connection', operationId: 'choose-managed', target: f.target(), baseline: moteConnectionBaseline(current)!,
     values: { connection: { connectionId: record.config.connectionId, application: record.config.application } } })
+  expect(saved.status, JSON.stringify(saved)).toBe('saved')
 }
 
 async function openAgentGroup() {
   const trigger = document.querySelector<HTMLElement>('[data-workbench-region-id="default-region"] .agent-region-header__more')!
   await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
-  let submenu: HTMLElement | undefined
-  await vi.waitFor(() => { submenu = [...document.querySelectorAll<HTMLElement>('[role="menuitem"][aria-haspopup="menu"]')].find(node => node.textContent?.trim() === 'Lark'); expect(submenu).toBeDefined() })
-  await act(async () => { submenu!.focus(); submenu!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })) })
   let create: HTMLElement | undefined
-  await vi.waitFor(() => { create = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent?.trim() === 'Create group chat'); expect(create).toBeDefined() })
+  await vi.waitFor(() => { create = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent?.trim() === 'Connect group…'); expect(create).toBeDefined() })
   await moteClick(create!)
+}
+
+async function openMoteBots() {
+  const row = document.querySelector<HTMLElement>('[data-mote-connection="' + f.motes[0]!.id + '"] .mote-connection__row')!
+  expect(row).not.toBeNull()
+  const preferences = row.closest<HTMLDetailsElement>('.mote-profile__preferences')!
+  expect(preferences).not.toBeNull()
+  if (!preferences.open) await moteClick(preferences.querySelector('summary')!)
+  await moteClick(row)
+  await vi.waitFor(() => expect(document.querySelector('.mote-connection-dialog [aria-label="Mote chat bot"]')).not.toBeNull())
 }
 
 it('keeps an unfinished original bot out of new-group choices while retaining its local Mote preference and exact setup recovery', async () => {
@@ -83,7 +91,7 @@ it('offers the original completed bot through the actual Agent menu with unteste
   expect(document.querySelector('[data-incomplete-application]')).toBeNull()
   await f.button('Close group setup')
   await f.client.call('connection.service.configure', { operationId: 'pause-group-service', expectedRevision: 0, service: { enabled: false } })
-  await f.open(); await f.choose('AMUX identity')
+  await openMoteBots(); await f.choose('AMUX identity')
   expect(document.querySelector('.mote-connection-dialog')?.textContent).toContain('Incoming paused')
   expect(document.querySelector('.mote-connection-dialog')?.textContent).toContain('Initial setup was completed')
   expect(web.requests).toHaveLength(before)
@@ -92,7 +100,7 @@ it('offers the original completed bot through the actual Agent menu with unteste
 it('shows the recorded setup gap in the Mote chooser without adding a gate to saving a local default', async () => {
   const { web } = await managedIdentity('/event/switch/')
   const before = web.requests.length
-  await f.mount(); await f.open(); await f.choose('AMUX identity')
+  await f.mount(); await openMoteBots(); await f.choose('AMUX identity')
   expect(document.querySelector('.mote-connection-dialog')?.textContent).toContain('Setup incomplete')
   await f.button('Use this bot')
   await settleMoteApp()
