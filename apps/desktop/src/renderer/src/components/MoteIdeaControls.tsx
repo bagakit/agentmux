@@ -32,28 +32,35 @@ export function MoteIdeaControls({ scope, reference, material, onOpenPath, activ
   const arrangement = input.arrangement
   const arranged = useRef<HTMLDivElement>(null)
   const request = useRef<HTMLDetailsElement>(null)
-  const alive = useRef(true), current = useRef({ input, material, reference }); current.current = { input, material, reference }
-  useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
+  const lifetime = useRef<object | null>(null), current = useRef({ input, material, reference }); current.current = { input, material, reference }
+  // Only preparation belongs to the visible section. The original arrangement
+  // and its last confirmed observations stay mounted across section changes.
+  useEffect(() => {
+    lifetime.current = active ? {} : null
+    setPending(false)
+    return () => { lifetime.current = null }
+  }, [active])
   const update = (next: MoteIdeaDraft) => { useLauncherState.getState().setMoteIdeaDraft(key, next); current.current.input = next }
-  const finish = (promise: Promise<unknown>, success: string) => {
+  const finish = (promise: Promise<unknown>, success: string, epoch: object) => {
     setIssue(null); setStatus(null); setPending(true)
-    void promise.then(() => { if (alive.current) setStatus(success) }).catch(error => { if (alive.current) setIssue(presentError(error)) })
-      .finally(() => { if (alive.current) setPending(false) })
+    void promise.then(() => { if (lifetime.current === epoch) setStatus(success) }).catch(error => { if (lifetime.current === epoch) setIssue(presentError(error)) })
+      .finally(() => { if (lifetime.current === epoch) setPending(false) })
   }
   async function prepareArrangement() {
     if (arrangement) { arranged.current?.querySelector<HTMLElement>('summary')?.focus(); return }
-    if (pending) return
+    const epoch = lifetime.current
+    if (pending || !epoch) return
     const { input: capturedInput, material: capturedMaterial, reference: capturedReference } = current.current
     setPending(true); setIssue(null); setStatus(null)
-    const stillCurrent = () => alive.current && current.current.input === capturedInput && current.current.material === capturedMaterial &&
+    const stillCurrent = () => lifetime.current === epoch && current.current.input === capturedInput && current.current.material === capturedMaterial &&
       (current.current.reference === capturedReference || !!capturedReference && sameWorkbenchProjectionSelection(current.current.reference ?? null, capturedReference))
     try {
       const prepared = await prepareMoteIdeaSchedule(scope, capturedReference, capturedInput, capturedMaterial, stillCurrent)
       if (!stillCurrent()) throw new Error('Your later direction or selected source changed. Your inputs are kept; prepare the current request again.')
       update({ ...current.current.input, arrangement: prepared })
       if (request.current) request.current.open = false
-    } catch (error) { if (alive.current) setIssue(presentError(error)) }
-    finally { if (alive.current) setPending(false) }
+    } catch (error) { if (lifetime.current === epoch) setIssue(presentError(error)) }
+    finally { if (lifetime.current === epoch) setPending(false) }
   }
   return <>
     <details ref={request} className="mote-details__idea-request"><summary>Find a worthwhile idea</summary>
@@ -65,10 +72,12 @@ export function MoteIdeaControls({ scope, reference, material, onOpenPath, activ
         <p className="mote-details__hint">Uses the saved profile and selected note. Optionally include this discussion and its Goals.</p>
         <div className="mote-idea-controls__actions"><button type="button" className="small-button" aria-label="Prepare idea request" disabled={pending || !input.direction.trim()} onClick={() => {
           if (pending) { setIssue('A context read is in progress. Your current inputs are kept.'); return }
+          const epoch = lifetime.current
+          if (!epoch) return
           const { input: capturedInput, material: capturedMaterial, reference: capturedReference } = current.current
-          finish(prepareMoteIdeaDraft(scope, reference, input, material, () => alive.current && current.current.input === capturedInput && current.current.material === capturedMaterial &&
+          finish(prepareMoteIdeaDraft(scope, reference, input, material, () => lifetime.current === epoch && current.current.input === capturedInput && current.current.material === capturedMaterial &&
             (current.current.reference === capturedReference || !!capturedReference && sameWorkbenchProjectionSelection(current.current.reference ?? null, capturedReference))),
-            'Request prepared in a new Launcher. Review it, choose the Agent and model, then Start.')
+            'Request prepared in a new Launcher. Review it, choose the Agent and model, then Start.', epoch)
         }}><ThemeObjectIdeaIcon size={14} />Prepare request</button><button type="button" className="small-button" aria-label={arrangement ? 'Review sourced idea arrangement' : 'Arrange sourced ideas'} disabled={pending || !input.direction.trim()} onClick={() => void prepareArrangement()}><ThemeObjectScheduleIcon size={14} />{arrangement ? 'Review arrangement' : 'Arrange ideas'}</button><span>{pending ? 'Reading selected sources…' : 'Review before starting.'}</span></div>
       </div>
     </details>
