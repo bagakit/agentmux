@@ -446,6 +446,8 @@ type OpenScratchTopicOptions = {
   initialRequest?: { prompt: string; agentMuxNote?: string; executorId?: string }
   /** User navigation reveals the Topic workbench; background preparation must leave focus alone. */
   reveal?: boolean
+  /** Present an existing object's accepted selection without waiting for its metadata refresh. */
+  onRevealed?: () => void
   /** Cancels this caller's late navigation, without cancelling metadata or a Session. */
   signal?: AbortSignal
   /** When supplied, focus this exact bound Tab instead of selecting the first Tab for the Topic. */
@@ -8988,6 +8990,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               undefined, { displayWorkspaceId: choice.workspaceId, groupId: choice.groupId!, tabId: choice.tabId!, regionId: choice.regionId! }) } : {}) }
         })
         showConversation(known)
+        options?.onRevealed?.()
       }
       if (!known) set((current) => {
         // An unconfirmed discovery cannot replace a previously selected object.
@@ -9086,6 +9089,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           ...(selectedLayout && choice.tabId && choice.groupId ? { layouts: { ...current.layouts,
             [choice.workspaceId]: activateLayoutTab(selectedLayout, choice.groupId, choice.tabId) } } : {}) }))
         showConversation(snapshot)
+        options?.onRevealed?.()
       }
       return true
     }
@@ -9151,7 +9155,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     })
     if (placementFailed) throw new Error('The Tab Group is no longer available')
-    if (mayReveal) showConversation(snapshot)
+    if (mayReveal) {
+      showConversation(snapshot)
+      options?.onRevealed?.()
+    }
     // A filesystem Topic with no existing View is still expected to open a usable work
     // surface. Keep the launcher as the durable owner and replace its active Region through
     // the same lifecycle path used by the New Tab Terminal action. Background preparation (the
