@@ -35,4 +35,11 @@ while (useAppStore.getState().loading || !useAppStore.getState().config) await n
 useAppStore.setState({ activeWorkspaceId: setup.workspaceId, mainSurface: 'workbench', toolsOpen: false, projectRailOpen: false })
 w.tuiScene = { ready: true, attachments, writes, keys, setup,
   config: () => useAppStore.getState().config,
-  toolkit: async (id: string) => api.toolkit.get(id) }
+  toolkit: async (id: string) => api.toolkit.get(id),
+  editor: async () => {
+    const { editor } = await import('monaco-editor')
+    const mounted = editor.getEditors().find(item => item.getDomNode()?.isConnected), model = mounted?.getModel(), selection = mounted?.getSelection()
+    return model ? { language: model.getLanguageId(), value: model.getValue(), model: model.id, selectedAll: selection?.equalsRange(model.getFullModelRange()),
+      tokens: editor.tokenize(model.getValue(), model.getLanguageId()),
+      painted: [...document.querySelectorAll('.monaco-editor .view-line span[class*="mtk"]')].map(node => ({ text: node.textContent, color: getComputedStyle(node).color })) } : null
+  } }
