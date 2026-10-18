@@ -1,4 +1,6 @@
 import { MoteQuickMode } from './MoteQuickMode'
+import { useMoteSpace } from './MoteSpaceFrame'
+import { MoteDiscussions } from './MoteDiscussions'
 import { MoteConnectionIdentity } from './MoteConnectionIdentity'
 import { MotePrivateChat } from './MotePrivateChat'
 import { MOTE_QUICK_MODE_PATH } from '../../../shared/mote-quick-mode'
@@ -53,8 +55,14 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote, a
   scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined; active?: boolean
   onOpenPath(path: string): Promise<unknown>; onCreateNote?: (() => void) | undefined
 }) {
-  const [section, setSection] = useState<MoteSection>('profile')
+  const [localSection, setLocalSection] = useState<MoteSection>('profile')
+  const frame = useMoteSpace()
   const presentation = useSpaceContentPresentation()
+  const space = presentation && frame?.topicId === scope.topic.id ? frame : null
+  const discussion = space?.section === 'discussion'
+  const section = space && space.section !== 'discussion' ? space.section : localSection
+  const setSection = (next: MoteSection) => { setLocalSection(next); space?.select(next) }
+  const [nameOpen, setNameOpen] = useState(false)
   const [introductionOpen, setIntroductionOpen] = useState(false)
   const [calendarRequest, setCalendarRequest] = useState<{ scheduleId: string }>()
   const showCalendar = (scheduleId?: string) => {
@@ -109,13 +117,16 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote, a
               avatarWorkspaceId={scope.workspace.id} avatarTopicId={scope.topic.id} moteSessionId={sessionId}
               visible={active} moteHostId={scope.workspace.hostId} moteAvailability={sessionId ? 'restoring' : reference === null ? 'restoring' : 'no-agent'} />
           </button>
-          <div><div className="mote-details__name"><strong>{scope.topic.title}</strong><button type="button" className="icon-button" aria-label="Rename Mote" title="Rename Mote" onClick={event => {
+          <div><div className="mote-details__name"><button type="button" className="mote-details__full-name" title={scope.topic.title} aria-label={scope.topic.title} aria-expanded={nameOpen} onClick={() => setNameOpen(value => !value)}><strong>{scope.topic.title}</strong></button><button type="button" className="icon-button" aria-label="Rename Mote" title="Rename Mote" onClick={event => {
             renameInvoker.current = { node: event.currentTarget, key: scope.topic.id }
             setRename({ topic: { ...scope.topic }, workspace: { ...scope.workspace } })
           }}><ThemeActionEditIcon size={12} /></button></div><span className="mote-details__status">{status ? <><StatusDot status={status} />{status.state}</> : sessionId || reference === null ? 'Status not confirmed' : 'No Agent selected'}</span></div>
         </div>
   </>
-  return <section className="mote-details" data-mote-details={scope.topic.id} data-section={section}>
+  return <section className="mote-details" data-mote-details={scope.topic.id} data-section={discussion ? 'discussion' : section} data-shared-navigation={space ? 'true' : undefined}>
+    {!space ? <div className="mote-details__navigation-bar"><SurfaceModeSwitch value={section} active={active} ariaLabel="Mote details"
+      options={[{ value: 'profile', label: 'Profile' }, { value: 'ideas', label: 'Ideas' }, { value: 'calendar', label: 'Calendar' }]} onChange={setSection} />
+    </div> : null}
     <header className="mote-details__profile" aria-label="Mote identity">
       <div className="mote-details__cover" aria-hidden="true" />{identity}
       {scope.topic.summary ? <div className="mote-details__introduction" data-expanded={introductionOpen || scope.topic.summary.length <= 160}>
@@ -126,21 +137,18 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote, a
         <dl><div><dt>Workspace</dt><dd>{scope.workspace.name}</dd></div></dl>
         <button type="button" className="mote-details__edit-profile" onClick={() => void onOpenPath(scope.rootPath + '/topic.md')}><ThemeActionEditIcon size={12} />Edit profile</button>
       </div>
-      {presentation ? <button type="button" className="mote-details__continue" onClick={() => presentation.expanded ? presentation.collapse() : presentation.expand()}>
-        <span>{presentation.expanded ? sessionId ? 'Continue discussion' : 'Open workface' : 'Open companion home'}</span><ThemeNavigationForwardIcon size={15} />
-      </button> : null}
     </header>
     <div className="mote-details__main">
-    <div className="mote-details__navigation-bar"><SurfaceModeSwitch value={section} active={active} ariaLabel="Mote details"
-      options={[{ value: 'profile', label: 'Profile' }, { value: 'ideas', label: 'Ideas' }, { value: 'calendar', label: 'Calendar' }]} onChange={setSection} />
-    </div>
-    <div className="mote-details__mode" hidden={section === 'calendar'}>
+    {space ? <div className="mote-details__discussion-directory" hidden={!discussion}>
+      <MoteDiscussions scope={scope} active={active && !!discussion} />
+    </div> : null}
+    <div className="mote-details__mode" hidden={discussion || section === 'calendar'}>
     <MoteContent key={JSON.stringify([scope.workspace.id, scope.workspace.hostId, scope.workspace.path, scope.topic.id, scope.topic.directoryPath, scope.rootPath])}
-      scope={scope} reference={reference} active={active && section !== 'calendar'} section={contentSection.current}
+      scope={scope} reference={reference} active={active && !discussion && section !== 'calendar'} section={contentSection.current} sharedQuestion={!!space}
       onShowIdeas={() => setSection('ideas')} onShowCalendar={showCalendar} onOpenPath={onOpenPath} onCreateNote={onCreateNote} />
     </div>
-    <div className="mote-details__mode" hidden={section !== 'calendar'}>
-      <MoteCalendar key={JSON.stringify([scope.workspace.id, scope.workspace.hostId, scope.workspace.path, scope.topic.id])} scope={scope} reference={reference} active={active && section === 'calendar'} openRequest={calendarRequest} />
+    <div className="mote-details__mode" hidden={discussion || section !== 'calendar'}>
+      <MoteCalendar key={JSON.stringify([scope.workspace.id, scope.workspace.hostId, scope.workspace.path, scope.topic.id])} scope={scope} reference={reference} active={active && !discussion && section === 'calendar'} openRequest={calendarRequest} />
     </div>
     </div>
     <MoteRenameDialog target={rename} onClose={() => setRename(null)} returnFocus={() => renameInvoker.current?.key === scope.topic.id && renameInvoker.current.node.isConnected ? renameInvoker.current.node : null} />
@@ -148,8 +156,8 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote, a
   </section>
 }
 
-function MoteContent({ scope, reference, section, onShowIdeas, onShowCalendar, onOpenPath, onCreateNote, active }: {
-  scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined; section: Exclude<MoteSection, 'calendar'>; active: boolean; onShowIdeas(): void; onShowCalendar(scheduleId?: string): void
+function MoteContent({ scope, reference, section, onShowIdeas, onShowCalendar, onOpenPath, onCreateNote, active, sharedQuestion }: {
+  scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined; section: Exclude<MoteSection, 'calendar'>; active: boolean; sharedQuestion: boolean; onShowIdeas(): void; onShowCalendar(scheduleId?: string): void
   onOpenPath(path: string): Promise<unknown>; onCreateNote?: (() => void) | undefined
 }) {
   const content = useRef<HTMLDivElement>(null)
@@ -180,7 +188,7 @@ function MoteContent({ scope, reference, section, onShowIdeas, onShowCalendar, o
   const [behaviorOpen, setBehaviorOpen] = useState(false)
   const behaviorInvoker = useRef<HTMLElement | null>(null)
   useEffect(() => { setBehaviorOpen(false) }, [section])
-  const noteRequest = useMemo(() => ({}), [scope.workspace.id, section, selected, attempt, revision])
+  const noteRequest = useMemo(() => ({}), [scope.workspace.id, selected, attempt, revision])
   const currentNote = useRef<object | null>(noteRequest); currentNote.current = noteRequest
   const admittedNote = useRef<object | null>(null)
   useEffect(() => () => { currentNote.current = null }, [])
@@ -198,7 +206,7 @@ function MoteContent({ scope, reference, section, onShowIdeas, onShowCalendar, o
         : 'The original file contains binary data. Open its file to inspect it.')
     }).catch(error => { if (currentNote.current === noteRequest) setIssue(presentError(error)) })
       .finally(() => { if (currentNote.current === noteRequest) setLoading(false) })
-  }, [active, noteRequest])
+  }, [active, noteRequest, section])
   const notes = (tree.rootCache?.children ?? []).filter(entry => !entry.isDirectory && /\.(md|txt)$/i.test(entry.name) && ![MOTE_SOUL_PATH, MOTE_BEHAVIOR_PATH, MOTE_QUICK_MODE_PATH, TOPIC_AGENT_INSTRUCTIONS_PATH, MOTE_MEMORY_PATH, 'topic.md'].includes(entry.name))
   const recent = notes.filter(entry => typeof entry.mtimeMs === 'number' && Number.isFinite(entry.mtimeMs))
     .sort((a, b) => b.mtimeMs! - a.mtimeMs!).slice(0, 3)
@@ -233,6 +241,7 @@ function MoteContent({ scope, reference, section, onShowIdeas, onShowCalendar, o
     onScroll={event => { if (active) readingPositions.current[section] = event.currentTarget.scrollTop }}>
     <div className="mote-profile" hidden={section !== 'profile'}>
       <MoteBehaviorSummary scope={scope} active={profileActive} onEdit={() => { behaviorInvoker.current = document.activeElement as HTMLElement; setBehaviorOpen(true) }} onOpenPath={onOpenPath} />
+      {sharedQuestion ? <MoteDiscussions scope={scope} active={profileActive} limit={3} /> : null}
       <MoteMemory scope={scope} active={profileActive} onOpenPath={onOpenPath} />
       <div className="mote-profile__columns">
       <div className="mote-profile__work">
@@ -248,10 +257,10 @@ function MoteContent({ scope, reference, section, onShowIdeas, onShowCalendar, o
       </div>
       </div>
       <aside className="mote-profile__about" aria-label="Cooperation settings">
-      <section className="mote-profile__start" aria-label="Work together">
+      {!sharedQuestion ? <section className="mote-profile__start" aria-label="Work together">
         <h3>Start a new discussion</h3>
-        {profileActive ? <MoteFirstCooperation scope={scope} reference={reference} /> : null}
-      </section>
+        <MoteFirstCooperation scope={scope} reference={reference} />
+      </section> : null}
       <MotePrivateChat scope={scope} active={profileActive} reference={reference} onOpenPath={onOpenPath} />
       <details className="mote-profile__preferences" onToggle={event => setPreferencesOpen(event.currentTarget.open)}>
         <summary>Connection &amp; preferences<ThemeNavigationDownIcon size={14} /></summary>
