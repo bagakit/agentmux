@@ -113,7 +113,7 @@ export function parseIngressResult<M extends ConnectionIngressMethod>(method: M,
     if (p.authority === 'current' ? !ingress || p.code !== undefined : !CONNECTION_INGRESS_AUTHORITY_CODES.includes(p.code as never)) fail()
     const unavailable = p.code === 'INGRESS_SERVICE_UNCONFIRMED' || p.code === 'INGRESS_STORAGE_UNCONFIRMED' || p.code === 'INGRESS_ADDRESSING_UNCONFIRMED'
     if (p.authority === 'unavailable' ? !unavailable : unavailable) fail()
-    return { ingress, authority: p.authority, ...(p.code === undefined ? {} : { code: 'known-publications-unavailable' as const }) } as ConnectionIngressResultMap[M]
+    return { ingress, authority: p.authority, ...(p.code === undefined ? {} : { code: p.code }) } as ConnectionIngressResultMap[M]
   }
   if (method === 'connection.ingress.inspect') {
     const p = object(value, ['ingress', 'inputReceipt', 'interactionReceipt', 'questionReceipt', 'observation', 'context']), ingress = p.ingress === null ? null : parseConnectionIngressRecord(p.ingress)
