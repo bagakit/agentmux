@@ -42,7 +42,7 @@ export function TuiToolkitResult({ definition, reading, active, close, compact =
   const name = snapshot?.definition.name ?? definition.name
   const icon = snapshot?.definition.icon ?? definition.icon
   const navigation = useContext(SettingsNavigation)
-  const themeId = useAppStore(state => state.config?.appearance.terminalTheme ?? 'workspace')
+  const themeId = useAppStore(state => state.toolkitPresentation[definition.id]?.theme ?? state.config?.appearance.terminalTheme ?? 'workspace')
   const fontSize = useAppStore(state => state.config?.appearance.terminalFontSize)
   const workspaceId = useAppStore(state => state.config?.workspaces.find(workspace => workspace.hostId === run?.hostId && workspace.path === execution?.target.workspacePath)?.id)
   const [session, setSession] = useState<SessionSnapshot | null>(null)
@@ -106,7 +106,7 @@ export function TuiToolkitResult({ definition, reading, active, close, compact =
   const checkAction = <button type="button" disabled={reading.pending || busy} title="Check status" aria-label="Check status" onClick={() => void check()}><RefreshIcon size={13} /><span className="toolkit-tui__action-label">Check status</span></button>
   const actions = <>{mainAction}{checkAction}{!compact && navigation ? <button type="button" title="Configure" aria-label="Configure" onClick={() => { close?.(); navigation.openToolkit(definition.id) }}><SettingsIcon size={13} /><span className="toolkit-tui__action-label">Configure</span></button> : null}</>
   return <section className={compact ? 'toolkit-tui toolkit-tui--compact' : 'toolkit-tui'} aria-label={compact ? 'TUI execution' : undefined}>
-    {!compact ? <><ToolkitPopoverResizeHandle /><header className="toolkit-tui__header">
+    {!compact ? <><ToolkitPopoverResizeHandle toolId={definition.id} /><header className="toolkit-tui__header">
       <ToolkitIcon icon={icon} size={17} />
       <div className="toolkit-tui__identity"><h2 title={name}>{name}</h2>{terminal && snapshot?.state === 'running' ? <small className="toolkit-tui__hint">Click terminal to type</small> : null}</div>
       <span className="toolkit-tui__state" data-state={reading.error ? 'unknown' : snapshot?.state} role="status" title="Command status · Closing this panel does not stop the command">{status}</span>

@@ -1,3 +1,4 @@
+import { restoreToolkitPresentations, updateToolkitPresentation, type ToolkitPresentations, type ToolkitPresentationPatch } from './lib/toolkit-presentation'
 import { goalDiscussionTarget } from './lib/goal-discussion-recipient'
 import { restoredGoalFiniteStartIntents, type GoalFiniteStartIntent } from './lib/goal-finite-start'
 import { observeNotifications } from './lib/notification-observation'
@@ -1093,6 +1094,8 @@ export type AppState = {
   setSpaceObjectIcon(key: string, icon: SpaceIconChoice | null): Promise<void>
   /** 在一个 scope 内 pin/unpin 一个 id。保序；unpin 恰好移除一条；移空则删掉该 scope 键（同 toggleProjectGroup 删键，不留空数组）。 */
   togglePinnedItem(scope: string, id: string): void
+  toolkitPresentation: ToolkitPresentations
+  setToolkitPresentation(toolId: string, patch: ToolkitPresentationPatch): void
   toolsOpen: boolean
   workspaceTool: WorkspaceTool
   workspaceGitView: WorkspaceGitView
@@ -3650,6 +3653,7 @@ type PersistedAppState = {
   explorerCollapsed?: Record<string, boolean>
   pinnedItems?: Record<string, string[]>
   spaceObjectIcons?: unknown
+  toolkitPresentation?: unknown
   toolsOpen?: boolean
   workspaceTool?: WorkspaceTool
   workspaceGitView?: WorkspaceGitView
@@ -3688,6 +3692,7 @@ export type RestoredUiState = Pick<
   | 'explorerCollapsed'
   | 'pinnedItems'
   | 'spaceObjectIcons'
+  | 'toolkitPresentation'
   | 'toolsOpen'
   | 'workspaceTool'
   | 'workspaceGitView'
@@ -3785,6 +3790,7 @@ export function restorePersistedUiState(
     | 'explorerCollapsed'
     | 'pinnedItems'
     | 'spaceObjectIcons'
+    | 'toolkitPresentation'
     | 'toolsOpen'
     | 'workspaceTool'
     | 'workspaceGitView'
@@ -3826,6 +3832,7 @@ export function restorePersistedUiState(
     explorerCollapsed: restoredExplorerCollapsed(persisted.explorerCollapsed),
     pinnedItems: restoredPinnedItems(persisted.pinnedItems),
     spaceObjectIcons: restoreSpaceIconOverrides(Object.hasOwn(config.appearance, 'spaceObjectIcons') ? config.appearance.spaceObjectIcons : retainedSpaceIconHandoff ?? persisted.spaceObjectIcons),
+    toolkitPresentation: restoreToolkitPresentations(persisted.toolkitPresentation),
     toolsOpen: restoredBoolean(persisted.toolsOpen, true),
     workspaceTool: restoredWorkspaceTool(persisted.workspaceTool),
     workspaceGitView: restoreWorkspaceGitView(persisted.workspaceGitView),
@@ -3926,6 +3933,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     // 与已逐字持久化的 file Region path、collapsedProjectGroups 的目录 key 同一档事实，没有新增敏感面。
     pinnedItems: state.pinnedItems,
     ...(retainedSpaceIconHandoff === undefined ? {} : { spaceObjectIcons: retainedSpaceIconHandoff }),
+    toolkitPresentation: state.toolkitPresentation,
     toolsOpen: state.toolsOpen,
     workspaceTool: state.workspaceTool,
     workspaceGitView: state.workspaceGitView,
@@ -4374,16 +4382,21 @@ function agentDisplayOverride(names: Record<string, string>, sessionId: string):
 function requestWorkbenchStorageCommit(): void {
   void requestWorkbenchStorageFlush().catch(() => {})
 }
+/** A failed preference save leaves the current view usable and the original writer pending. */
+async function flushWorkbenchPresentation(): Promise<void> {
+  try {
+    if (!workbenchWriteFence.isOpen()) throw new Error('Current workbench changes cannot be saved yet.')
+    const requestBeforeFlush = workbenchSaveRequest
+    persistentWorkbenchStorage.flush()
+    // Writing a pending value already requests its platform commit once.
+    if (workbenchSaveRequest === requestBeforeFlush) requestWorkbenchStorageCommit()
+  } catch (error) { useAppStore.getState().reportWorkbenchSaveFailure(error) }
+}
 // Only a captured, already-bound explicit message treats presentation saving as advisory.
 // Core admission remains the durable Input owner; automatic/recovery paths retain their fence.
 async function flushMessageWorkbench(explicitlyBound: boolean): Promise<void> {
   if (explicitlyBound) {
-    try {
-      if (!workbenchWriteFence.isOpen()) throw new Error('Current workbench changes cannot be saved yet.')
-      persistentWorkbenchStorage.flush()
-      // Do not await a host save response before sending to a healthy Run.
-      requestWorkbenchStorageCommit()
-    } catch (error) { useAppStore.getState().reportWorkbenchSaveFailure(error) }
+    await flushWorkbenchPresentation()
     return
   }
   if (!workbenchWriteFence.isOpen()) throw new Error(
@@ -5038,6 +5051,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   explorerCollapsed: {},
   pinnedItems: {},
   spaceObjectIcons: {},
+  toolkitPresentation: {},
   toolsOpen: true,
   workspaceTool: 'files-branches',
   workspaceGitView: 'changes',
@@ -8046,6 +8060,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   setProjectRailWidth(projectRailWidth) {
     set({ projectRailWidth: clampProjectRailWidth(projectRailWidth) })
+  },
+  setToolkitPresentation(toolId, patch) {
+    let changed = false
+    set(state => {
+      const toolkitPresentation = updateToolkitPresentation(state.toolkitPresentation, toolId, patch)
+      changed = toolkitPresentation !== state.toolkitPresentation
+      return changed ? { toolkitPresentation } : state
+    })
+    if (changed) void flushWorkbenchPresentation()
   },
   setToolDockWidth(toolDockWidth) {
     set({ toolDockWidth: clampToolDockWidth(toolDockWidth) })
