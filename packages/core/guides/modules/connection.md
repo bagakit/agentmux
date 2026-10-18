@@ -39,6 +39,16 @@ accepts optional name to freeze an explicit bot name; omit name to use the exact
 Retain that complete input: changing name on the same operationId conflicts. Neither choice edits
 the saved Mote source. Sync still uses the saved Mote name and does not accept name. Saved identity,
 application creation, profile write and Mote default save retain separate original receipts.
+For private Mote chat use space mote chat configure/inspect/history/audience/allocate --input FILE|-.
+A person or device controls chat policy and per-person total allowances. A chat Agent may read only
+its own retained lane with space mote chat history; copy the original target from its first context.
+The saved Mote Executor starts lazily on authorized direct messages. Inactivity creates a new Agent
+without removing prior conversations. Quota counts unique admitted native messages, including the
+last allowed message; replies do not consume quota. An unknown mutation keeps its entire input and
+operationId; inspect that original operation before explicitly continuing the same intent.
+connection delete --input FILE|- removes one exact local identity by connectionId and revision.
+It preserves the remote application, conversations and receipts. Inspect the original deletion with
+connection delete inspect --operation-id ID; a missing receipt never proves an in-flight delete failed.
 
 For original request evidence use connection enrollment/setup inspect --operation-id ID --request-trace.
 This separate local selection returns bounded ordered journal steps and next; copy that cursor with
