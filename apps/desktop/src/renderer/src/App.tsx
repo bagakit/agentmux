@@ -71,6 +71,7 @@ import { layoutForLogicalRegionFocus } from './lib/region-focus'
 import { sessionPresentationById } from './lib/session-presentation'
 import { isSessionSurface } from './lib/workbench-surface-kinds'
 import { SpaceContentPresentationContext, useSpaceContentPresentationOwner } from './lib/space-content-presentation'
+import { MoteSpaceFrame } from './components/MoteSpaceFrame'
 
 const WorkspaceWorkbench = memo(WorkspaceWorkbenchView)
 
@@ -658,6 +659,7 @@ function DesktopApp() {
             <TopRowLeadingChrome />
           </header>
         ) : null}
+        <MoteSpaceFrame workspaceId={workspace?.id} active={workbenchVisible}>
         <div className="workbench-shell">
               <div
                 ref={containerRef}
@@ -748,6 +750,7 @@ function DesktopApp() {
               ) : null}
             </section>
           </div>
+        </MoteSpaceFrame>
       </main>
       </div>
       <PmoTeamsTopicFloatingPanel floating={moteFloating} setFloating={setMoteFloating} projectionState={moteProjection} />
