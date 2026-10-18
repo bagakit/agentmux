@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useContext, useEffect, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { RoomBinding } from '@agentmux/core/connections'
 import type { SessionSnapshot } from '../../../shared/contracts'
@@ -7,9 +7,13 @@ import { useAppStore } from '../store'
 import { observeConnectorTarget } from '../lib/connector-room-intent'
 import { AgentConnectorDialog, type AgentConnectorTarget } from './AgentConnectorDialog'
 import { ServiceNoticeDisclosure } from './ServiceNoticeDisclosure'
+import { SettingsNavigation } from './SettingsNavigation'
+import { useAgentConnectorMenu } from '../lib/use-agent-connector-menu'
 
 /** Reads only this original Session's audiences. No input, history, lifecycle or global watcher. */
-export function ConnectorSharing({ session, regionId, visible }: { session: Extract<SessionSnapshot, { kind: 'agent' }>; regionId?: string | undefined; visible: boolean }) {
+export function ConnectorSharing({ session, tabId, regionId, visible }: { session: Extract<SessionSnapshot, { kind: 'agent' }>; tabId?: string | undefined; regionId?: string | undefined; visible: boolean }) {
+  const connector = useAgentConnectorMenu(regionId ?? '', regionId ? session.id : null, tabId)
+  const settings = useContext(SettingsNavigation)
   const target = { executionHostId: session.control.hostId, agentSessionId: session.control.agentSessionId }
   const identity = JSON.stringify(target)
   const [read, setRead] = useState<{ identity: string; bindings: RoomBinding[]; issue: string; loading: boolean } | null>(null)
@@ -32,8 +36,14 @@ export function ConnectorSharing({ session, regionId, visible }: { session: Extr
   const notice = current?.issue ? { kind: 'indeterminate' as const, notice: {
     step: 'Sharing status could not be read', mode: 'The current audience is unconfirmed. Last known groups are kept.',
     restore: 'Refresh reads the sharing status for this Session; it does not change sharing.' } } : null
-  if (!current?.bindings.length && !current?.issue) return null
+  const canConnect = current && !current.loading && !current.bindings.length && !current.issue && (regionId || settings)
+  if (!current?.bindings.length && !current?.issue && !canConnect && !connector.dialogOpen && !dialog) return null
   return <div className="connector-sharing" aria-label="Group sharing before sending">
+    {canConnect ? <button type="button" className="connector-sharing__group connector-sharing__connect" onClick={event => {
+      if (regionId) connector.openConnect(event.currentTarget)
+      else settings?.openLark({ sessionId: session.id, hostId: target.executionHostId, agentSessionId: target.agentSessionId })
+    }}>Connect group…</button> : null}
+    {connector.issue ? <p className="connector-sharing__error" role="status">{connector.issue}</p> : null}
     {current?.bindings.map(binding => <ConnectorSharingAudience key={binding.bindingId} binding={binding} unconfirmed={!!current.issue} onSelect={trigger => {
       const store = useAppStore.getState(), executorId = session.executorId ?? undefined
       const appearance = executorId ? store.config?.executors[executorId]?.avatar ?? store.config?.appearance.agentAvatars?.[executorId] : undefined
@@ -50,6 +60,7 @@ export function ConnectorSharing({ session, regionId, visible }: { session: Extr
       <p className="connector-sharing__error">The current audience is unconfirmed. Last known groups remain visible. Refresh checks this Session’s sharing status without changing sharing.</p>
       <p className="connector-sharing__error">{current?.issue}</p>
     </ServiceNoticeDisclosure>
+    {connector.dialog}
     {dialog ? <AgentConnectorDialog original={dialog} mode="details" onClose={() => setDialog(null)} returnFocus={() => returned.current} /> : null}
   </div>
 }

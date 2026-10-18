@@ -286,7 +286,7 @@ export function AgentSessionComposer({
       onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) inputHistory.setFocused(false) }}>
     {fileReferencesOpen && workspace && visible ? <ComposerFileReferences key={attachmentScope} workspace={workspace}
       onClose={() => setFileReferencesOpen(false)} onSelect={path => { void attachments.referencePaths([path]) }} /> : null}
-    <AgentComposer key={sessionId} active={visible} aboveInput={<>{pending}{session?.kind === 'agent' ? <ConnectorSharing session={session} regionId={mailboxOrigin?.regionId} visible={visible} /> : null}</>} mailbox={mailbox}
+    <AgentComposer key={sessionId} active={visible} aboveInput={<>{pending}{session?.kind === 'agent' ? <ConnectorSharing session={session} tabId={mailboxOrigin?.tabId} regionId={mailboxOrigin?.regionId} visible={visible} /> : null}</>} mailbox={mailbox}
       readPastedImage={api.ui.readPastedImage}
       insertionRef={insertionRef}
       identity={session?.kind === 'agent' && displayName ? <AgentIdentity session={session} name={displayName}
