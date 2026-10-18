@@ -111,12 +111,11 @@ export class ConversationBodyWork {
       if (this.mounting === node) { this.mounting = null; this.schedule() }
     }
   }
-  capture(cold = false): void {
-    if (!this.available()) return
-    if (this.geometry?.following()) return
-    if (this.geometry?.captureAnchor) { this.geometry.captureAnchor(); this.anchorCaptured = true; return }
+  capture(cold = false): boolean {
+    if (!this.available() || this.geometry?.following()) return false
+    if (this.geometry?.captureAnchor) { this.geometry.captureAnchor(); this.anchorCaptured = true; return true }
     const viewport = this.viewport
-    if (!viewport) return
+    if (!viewport) return false
     const bounds = viewport.getBoundingClientRect()
     const selected = this.root && selectedConversationReadingNode(this.root, '[data-conversation-layout-key]', shell => {
       const rect = conversationReadingNode(shell)?.getBoundingClientRect()
@@ -125,7 +124,7 @@ export class ConversationBodyWork {
     const selectedNode = selected && conversationReadingNode(selected)
     const selectedRect = selectedNode?.getBoundingClientRect()
     if (selectedNode && selectedRect && selectedRect.height > 0 && selectedRect.bottom > bounds.top && selectedRect.top < bounds.bottom) {
-      this.anchor = { node: selectedNode, viewport, offset: selectedRect.top - bounds.top }; this.anchorCaptured = true; return
+      this.anchor = { node: selectedNode, viewport, offset: selectedRect.top - bounds.top }; this.anchorCaptured = true; return true
     }
     let first: Anchor | null = null
     for (const shell of this.near.size || !cold ? this.near : this.shells) {
@@ -137,6 +136,7 @@ export class ConversationBodyWork {
         first = { node, viewport, offset: rect.top - bounds.top }
     }
     if (first) { this.anchor = first; this.anchorCaptured = true }
+    return Boolean(first)
   }
   restore(): void {
     if (!this.available()) return
