@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { AgentMuxFileAgentSessionStore, AgentMuxControlServer, connectAgentMuxRpc, type AgentMuxClient } from '@agentmux/core'
@@ -72,12 +72,24 @@ ipcMain.handle('reading-proof:request', async (event, operation, ...args) => {
         const value = { sessionId: session.id, runId: session.control.run.runId, nativeSessionId: stored.nativeHandle!.sessionId }
         await fs.writeFile(path.join(privateRoot, 'ids.json'), JSON.stringify(value))
         const seeded = scene === 'surfaces' ? surfaceRows() : sceneRows(scene), preparationStarted = performance.now()
+        const lastTurn = seeded.findLast((row: any) => row.type === 'event_msg' && row.payload?.type === 'task_complete') as
+          { ordinal: number; payload: { turn_id: string } } | undefined
+        result.preparationInput = { original: value, nativeHandle: stored.nativeHandle, lastTurn }
+        // The original writer finishes its startup boundary before history is appended.
+        // This receipt orders fixture input; it does not assert readiness or completion.
+        const startupReceipt = !lastTurn ? null : await until(async () => {
+          const current = await store.readMetadata(session.id), receipt = current?.hookReceipt
+          return current?.run.runId === value.runId && current.providerId === 'codex' &&
+            current.nativeHandle?.kind === 'provider' && current.nativeHandle.providerId === 'codex' &&
+            current.nativeHandle.sessionId === value.nativeSessionId && current.nativeHandle.transcriptPath === stored.nativeHandle!.transcriptPath &&
+            receipt?.id === `stop-${session.id}-1` && receipt.eventName === 'Stop' &&
+            receipt.agentSessionId === session.id && receipt.providerId === 'codex' && receipt.run.runId === value.runId &&
+            receipt.subject?.kind === 'main' && receipt.subject.nativeSessionId === value.nativeSessionId ? receipt : null
+        }, 'original native startup writer receipt')
         await append(seeded)
         if (scene === 'surfaces') await store.applyTimelineMutation({ type: 'append', agentSessionId: session.id, item: surfaceCaptured(session.id) })
         // Seeded completed turns are input preparation, not live work during scrolling.
         // Keep every original observation; wait for its exact durable final projection.
-        const lastTurn = seeded.findLast((row: any) => row.type === 'event_msg' && row.payload?.type === 'task_complete') as
-          { ordinal: number; payload: { turn_id: string } } | undefined
         if (lastTurn) {
           assert.ok(Number.isSafeInteger(lastTurn.ordinal) && typeof lastTurn.payload.turn_id === 'string')
           const turnId = lastTurn.payload.turn_id
@@ -95,7 +107,7 @@ ipcMain.handle('reading-proof:request', async (event, operation, ...args) => {
           assert.equal(captured.records[0]!.item.id, prepared.activity.id)
           assert.deepEqual(captured.records[0]!.item.activityState, prepared.activity.activityState)
           result.preparation = { kind: 'native-turn-committed', elapsedMs: performance.now() - preparationStarted,
-            original: value, turnId, ordinal: lastTurn.ordinal, ...prepared,
+            original: value, startupReceipt, turnId, ordinal: lastTurn.ordinal, ...prepared,
             captured: { stream: captured.stream, sequence: captured.records[0]!.sequence, revision: captured.records[0]!.revision },
             boundary: 'Original input preparation completed before App rendering and the first conversation read. The fixture removed no source records; Provider gap diagnostics retain their original meaning.' }
         } else {
@@ -136,6 +148,22 @@ ipcMain.handle('reading-proof:request', async (event, operation, ...args) => {
       case 'flush': await win.webContents.session.flushStorageData(); return
       default: throw new Error(`Unexpected private reading operation: ${operation}${operation === 'unexpected-control' ? '/' + args[0] : ''}`)
     }
+  } catch (error) {
+    if (operation === 'seed') {
+      try {
+        const original = await ids(), current = await store.readMetadata(original.sessionId)
+        result.preparationFailure = { original, metadata: current && { providerId: current.providerId, run: current.run,
+          nativeHandle: current.nativeHandle, hookReceipt: current.hookReceipt, semanticStatus: current.semanticStatus,
+          nativeTurnEnds: current.nativeTurnEnds, activityCommit: current.activityCommit } }
+        const handle = result.preparationInput?.nativeHandle
+        if (handle?.kind === 'provider' && handle.transcriptPath) {
+          const bytes = await fs.readFile(handle.transcriptPath), file = `${scene}-${phase}-preparation-native.jsonl`
+          await fs.writeFile(path.join(evidence, file), bytes)
+          result.preparationFailure.native = { file, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }
+        }
+      } catch (observationError) { result.preparationObservationError = String(observationError) }
+    }
+    throw error
   } finally { calls.push({ operation, elapsedMs: performance.now() - started }) }
 })
 
