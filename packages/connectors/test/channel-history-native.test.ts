@@ -104,3 +104,19 @@ it('malformed native thread and body observations cannot certify a complete quot
   const healthy = await discord.readHistory(discordConfig, { externalConversationId: '300', range: { from: { messageId: '800', inclusive: false }, throughMessageId: '1000', origin: 'admitted-input' } }, 'fixture-token', signal())
   expect(healthy.coverage).toBe('complete'); expect(healthy.records.map(item => item.messageId)).toEqual(['900'])
 })
+
+it('both native protocols consult the original Host authority before requesting another history page', async () => {
+  const rows = [fm('through', 100000), ...Array.from({ length: 110 }, (_, i) => fm('middle-' + i, 2000 + i * 100)).toReversed(), fm('from', 1000)]
+  const f = feishuHistoryTransport(rows), feishu = new FeishuAdapter({ http: f.http })
+  let checks = 0
+  const quote = await feishu.readHistory(feishuConfig, { externalConversationId: 'original-room', range: feishuRange,
+    assertCurrent: () => { if (++checks === 4) throw Error('Original authority changed') } }, 'fixture-credential', signal())
+  expect(quote.coverage).toBe('partial'); expect(quote.gaps).toContainEqual({ reason: 'native-history-unavailable' })
+  expect(f.requests.filter(item => item.url?.endsWith('/im/v1/messages'))).toHaveLength(1)
+  const d = await discordHistoryTransport(Array.from({ length: 205 }, (_, i) => dm(String(1000 - i)))); cleanup.push(d.close)
+  const discord = new DiscordAdapter({ http: d.http }); checks = 0
+  const result = await discord.readHistory(discordConfig, { externalConversationId: '300', range: { from: { messageId: '800', inclusive: false }, throughMessageId: '1000', origin: 'admitted-input' },
+    assertCurrent: () => { if (++checks === 5) throw Error('Original authority changed') } }, 'fixture-token', signal())
+  expect(result.coverage).toBe('partial'); expect(result.gaps).toContainEqual({ reason: 'native-history-unavailable' })
+  expect(d.requests.filter(item => item.path === '/channels/300/messages')).toHaveLength(1)
+})
