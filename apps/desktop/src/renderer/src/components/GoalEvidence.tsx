@@ -19,7 +19,8 @@ function Evidence({ reference }: { reference: DemandEvidence }) {
   const sourceName = useAppStore(state => {
     if (typeof reference === 'string') return ''
     const workspace = state.config?.workspaces.find(value => value.id === reference.resource.workspaceId && value.hostId === reference.resource.hostId && value.path === reference.resource.workspacePath)
-    return workspace?.name ?? 'Original workspace'
+    const host = state.config?.hosts.find(value => value.id === reference.resource.hostId)
+    return `${host?.label || reference.resource.hostId} · ${workspace?.name || reference.resource.workspaceId}`
   })
   const external = typeof reference === 'string' && /^[a-z][a-z0-9+.-]*:\/\//iu.test(reference) && !/^file:\/\//iu.test(reference)
   async function openFile(evidence: DemandFileEvidence) {
@@ -70,7 +71,7 @@ function Evidence({ reference }: { reference: DemandEvidence }) {
     {typeof reference !== 'string' || external ? <button type="button" className="goals-evidence__open" title={label} disabled={busy} onClick={() => void open()}>{label}<OpenIcon size={11} /></button> : <code title={label}>{label}</code>}
     <button type="button" className="goals-evidence__copy" aria-label={`Copy evidence location ${label}`} title="Copy full location" onClick={() => void copy()}>Copy</button>
     {typeof reference === 'string' && !external ? <small>Original reference · File source not recorded</small> : null}
-    {typeof reference !== 'string' ? <details><summary>{sourceName}</summary><code>{reference.resource.workspacePath}</code><small>{reference.resource.hostId} · {reference.revision ?? 'Revision not recorded'}</small></details> : null}
+    {typeof reference !== 'string' ? <details><summary>{sourceName}</summary><code>{reference.resource.workspacePath}</code><small>{reference.resource.hostId} · {reference.resource.workspaceId} · {reference.revision ?? 'Revision not recorded'}</small></details> : null}
     {issue ? <span className="goals-service" role="status">{issue}{changed ? <button type="button" className="goals-button" disabled={busy} onClick={() => void open(true)}>View current file</button> : null}</span> : null}
   </span>
 }
