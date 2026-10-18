@@ -29,7 +29,7 @@ async function fixture(options:{store?:{read():Promise<any>;save(value:any):Prom
  cleanup.push(async()=>{await Promise.allSettled([...writes])})
  let accept:(event:any)=>void=()=>{},cursor=0
  const port:ToolkitRunPort={create:vi.fn(async(_input,onEvent)=>{accept=onEvent;return {runId:'original-toolkit-run',pid:88,kind:'terminal'} as any}),
-  attach:vi.fn(async()=>({replay:[],gap:null}) as any),replay:vi.fn(async()=>({replay:[],gap:null}) as any),stop:vi.fn(async()=>{}),release:vi.fn(async()=>{}),remove:vi.fn(async()=>{if(options.cleanupError)throw new Error('cleanup unknown')})}
+  attach:vi.fn(async()=>({replay:[],gap:null}) as any),replay:vi.fn(async()=>({replay:[],gap:null}) as any),status:vi.fn(async()=>null),stop:vi.fn(async()=>{}),release:vi.fn(async()=>{}),remove:vi.fn(async()=>{if(options.cleanupError)throw new Error('cleanup unknown')})}
  const owner=new PerformanceToolkitOwner({openRunPort:async()=>port,launch:()=>({runner:process.execPath,cli:_hygiene_fixturePath("private/fixture-cli"),script:resolve('apps/desktop/resources/toolkit/performance.mjs'),cwd:dir,env:{}}),enabled:()=>true,receipts:{read:async()=>null,save:async()=>{}},failures,now:()=>1234})
  cleanup.push(()=>owner.dispose())
  let resultSocket: Awaited<ReturnType<typeof connectToolkitResultChannel>> | null = null, path = ''
@@ -295,7 +295,7 @@ it('known Run exit exposes bounded draining and never reuses a stuck result stre
  expect(f.port.stop).not.toHaveBeenCalled();expect(f.port.release).toHaveBeenCalledOnce();expect(f.port.remove).toHaveBeenCalledOnce()
 })
 it.each([false,true])('keeps actual channel I/O origin after attach/result (result=%s)',async observed=>{
- const channels=await import('../../../packages/core/src/toolkit-result-channel.js'),actual=channels.openToolkitResultChannel
+ const channels=await import('@agentmux/core/toolkit-result-channel'),actual=channels.openToolkitResultChannel
  let channelError!:(error:unknown)=>void
  vi.spyOn(channels,'openToolkitResultChannel').mockImplementation(args=>{channelError=args.onError;return actual(args)})
  const f=await fixture();await f.watch(true)

@@ -36,7 +36,7 @@ it('repeats the exact private create input on pinned Native after a lost acknowl
       expect(run.runId).toBe(originalRun!.runId)
       return run
     }, attach: async (ref, after, onEvent) => { if (onEvent) listener = onEvent; return await client.attachTerminal(ref.runId, after, 'raw') },
-    replay: async (ref, after) => await client.readRunReplay(ref, after, 'raw'), release: async ref => await client.releaseRunAttachment(ref),
+    replay: async (ref, after) => await client.readRunReplay(ref, after, 'raw'), status: async ref => (await client.listRuns()).find(run => run.runId === ref.runId) ?? null, release: async ref => await client.releaseRunAttachment(ref),
     stop: vi.fn(async ref => await client.stopTerminal(ref)), remove: async ref => await client.removeTerminal(ref) }
     const definition = { id: 'native-document', revision: 'revision', name: 'Native document', icon: 'terminal', enabled: true,
       statusBar: 'icon', workspacePath: native.directory, args: [], script: "import{appendFileSync}from'node:fs';appendFileSync(process.env.RESULT_COUNTER,'x');console.log('original-native-ack')" } satisfies ToolkitToolDefinition

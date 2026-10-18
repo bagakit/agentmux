@@ -44,7 +44,7 @@ function fixture(producer?: (env: Record<string, string>, run: Run) => Promise<v
     await producer?.(input.env, run)
     return { ...run } as any
   }), attach: vi.fn(async (ref, _after, listener) => { if (listener) listeners.set(ref.runId, listener); return attached(ref.runId) }),
-  replay: vi.fn(async ref => attached(ref.runId)), release: vi.fn(async () => {}), remove: vi.fn(async () => {}),
+  replay: vi.fn(async ref => attached(ref.runId)), status: vi.fn(async ref => runs.get(ref.runId) as any ?? null), release: vi.fn(async () => {}), remove: vi.fn(async () => {}),
   stop: vi.fn(async ref => { const run = runs.get(ref.runId)!; run.state = 'exited'; listeners.get(ref.runId)?.({ type: 'process-state', run: ref, state: 'exited', exitCode: 0 } as any) }) }
   const makeOwner = (runner = process.execPath, snapshotRoot = options.snapshotRoot) => { const value = new CustomToolkitOwner({ config: configOwner, receipts: storage, openRunPort: async () => port, runner, env: { EXISTING_ENV: 'kept' }, ...(snapshotRoot ? { snapshotRoot } : {}) }); cleanup.push(() => value.dispose()); return value }
   const owner = makeOwner()
