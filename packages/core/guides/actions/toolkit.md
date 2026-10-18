@@ -107,6 +107,21 @@ trace timestamps and Main/Renderer wall or monotonic clocks must not be equated 
 --output creates a new local trace JSON atomically and never overwrites files/symlinks. URLs and
 local paths may be sensitive; no automatic watch/Toolkit capture, upload, log export, retained
 handle or recapture on lost replies/local write errors. An incomplete receipt remains incomplete.
+system metrics heap capture is a separate heavy, explicit native V8 snapshot. Supply the
+exact five-field Renderer target and a new --capture-id UUID. It may pause the Renderer,
+trigger engine GC and use substantial native memory/disk; cancellation only ends observation,
+not native collection. No automatic retry, upload, heap RPC body or arbitrary server destination.
+The result references the original private Host file (Host, path, bytes and hash), not a local
+--output. Export the previous file before replacing the single latest snapshot. system metrics
+heap inspect --capture-id UUID reads that original operation without recapturing; available
+is current file integrity, not a past durability ACK. Load an exported .heapsnapshot in DevTools
+Memory and use Retainers. This is V8 object evidence, not all workers/native/GPU/RSS or a leak
+verdict. Two-file Comparison requires independently established isolate/object-ID continuity.
+The same capture-id never starts native collection again. Only a completed original with a
+known before-replace publication failure can explicitly repeat capture to retry its small
+receipt write. After-replace unknown must inspect the actual same-ID manifest/file first;
+readability does not turn the original missing durability ACK into confirmed. A pending
+publication preserves the prior file plus one candidate and refuses further native captures.
 system metrics get returns the first bounded frame and releases its own reader; a
 pending Renderer has not failed. Watch frames may update different sources: use the
 app source observation time and process intervalMs to identify actual CPU intervals.
