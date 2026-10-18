@@ -9,10 +9,28 @@
 [data-message-tool-settings] .settings-reading-width > label { align-items: flex-start; }
 [data-message-tool-settings] .settings-reading-width > label > input { margin-top: 3px; }
 .message-tool-layout-option { display: grid; gap: var(--sp-1); width: 100%; min-width: 0; }
-.message-tool-layout-preview { display: flex; gap: var(--sp-2); align-items: center; margin-top: var(--sp-3); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--text-3); font-size: var(--fs-meta); }
-.message-tool-layout-preview__input { flex: 1; min-width: 0; text-align: left; }
-.message-tool-layout-preview__tools { display: flex; flex: none; align-items: center; gap: var(--sp-2); font-family: var(--font-mono); color: var(--text-2); }
-.message-tool-layout-preview__tools > span { margin-left: auto; color: var(--green); }
-.message-tool-layout-preview[data-layout="two-line"] { flex-direction: column; align-items: stretch; }
-.message-tool-layout-preview[data-layout="two-line"] .message-tool-layout-preview__tools { border-top: 1px solid var(--line-soft); padding-top: var(--sp-1); }
 [data-message-tool-settings] .settings-group > .settings-pane-actions { position: static; min-height: 0; margin-top: var(--sp-3); padding: var(--sp-3) 0 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: none; box-shadow: none; backdrop-filter: none; }
+
+.message-tool-preview { margin: 0; padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); }
+.message-tool-preview figcaption { display: flex; justify-content: space-between; gap: var(--sp-3); margin-bottom: var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); }
+.message-tool-preview__composer { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-0); }
+.message-tool-preview__text { flex: 1; min-width: 0; color: var(--text-2); font-size: var(--fs-body); line-height: 1.5; }
+.message-tool-preview__caret { display: inline-block; height: 1em; margin-left: 2px; border-left: 1px solid var(--green); vertical-align: text-bottom; }
+.message-tool-preview__tools { display: flex; align-items: center; flex: none; gap: var(--sp-3); }
+.message-tool-preview__tools > span { display: flex; align-items: center; gap: var(--sp-1); color: var(--text-2); }
+.message-tool-preview__tools kbd { min-width: 20px; text-align: center; font: var(--fs-body) var(--font-mono); overflow-wrap: anywhere; }
+.message-tool-preview__tools small { font-size: var(--fs-micro); color: var(--text-3); }
+.message-tool-preview__tools [data-disabled] kbd { font-size: var(--fs-micro); color: var(--text-3); }
+.message-tool-preview__composer[data-layout="one-line"] .message-tool-preview__tools small { display: none; }
+.message-tool-preview__tools .message-tool-preview__send { display: grid; place-items: center; flex: none; margin-left: auto; width: 26px; height: 26px; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--green); font-size: var(--fs-body); }
+.message-tool-preview__composer[data-layout="two-line"] { flex-direction: column; align-items: stretch; }
+.message-tool-preview__composer[data-layout="two-line"] .message-tool-preview__text { padding-block: var(--sp-2); }
+.message-tool-preview__composer[data-layout="two-line"] .message-tool-preview__tools { padding-top: var(--sp-2); border-top: 1px solid var(--line-soft); flex-wrap: wrap; }
+.message-tool-preview > p { margin: var(--sp-3) 0 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
+[data-message-tool-settings] .message-tool-layouts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.message-tool-shortcuts { border-top: 1px solid var(--line); padding-top: var(--sp-3); }
+.message-tool-shortcuts > summary { cursor: pointer; color: var(--text-2); font-size: var(--fs-body); }
+.message-tool-shortcuts > summary span { display: block; margin-top: var(--sp-1); color: var(--text-3); font-size: var(--fs-micro); }
+.message-tool-shortcuts > summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; }
+.message-tool-shortcuts .keyboard-shortcuts { margin-top: var(--sp-4); padding-bottom: 0; }
+@media (max-width: 420px) { .message-tool-preview__tools { gap: var(--sp-2); } }
