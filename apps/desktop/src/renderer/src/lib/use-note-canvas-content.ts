@@ -6,7 +6,7 @@ import { api } from './api'
 
 export type CanvasContent = { snapshot: NotebookGraphSnapshot; value?: NoteContentObservation; issue?: string; pending?: boolean; document?: NoteFileDocument }
 // A bounded automatic reading window, not a limit on explicit reading or the original file.
-const AUTO_FILES = 6, CONCURRENCY = 2, AUTO_BYTES = 256 * 1024
+const AUTO_FILES = 6, CACHE_FILES = 12, CONCURRENCY = 2, AUTO_BYTES = 256 * 1024
 type Request = { full: boolean; attempt: number }
 
 /** One ephemeral observation per original/snapshot, shared by every reader on this surface. */
@@ -16,6 +16,19 @@ export function useNoteCanvasContent(snapshot: NotebookGraphSnapshot | null, act
   const [explicit, setExplicit] = useState<Record<string, Request>>({})
   const jobs = useRef(new Map<string, { controller: AbortController; snapshot: NotebookGraphSnapshot; request: Request }>())
   const current = useRef({ results, snapshot }); current.current = { results, snapshot }
+  const automatic = [...new Set([...priority, ...visible])].filter(id => snapshot && (snapshot.catalog.pages[id] || observed.has(id)) && !snapshot.graph.duplicateNoteIds.includes(id)).slice(0, AUTO_FILES)
+  const wanted = [...new Set([...Object.keys(explicit), ...automatic])]
+  const readingWindow = useRef(new Set(wanted)); readingWindow.current = new Set(wanted)
+  const storeResult = useCallback((id: string, result: CanvasContent) => setResults(held => {
+    if (current.current.snapshot !== result.snapshot) return held
+    const next = { ...held, [id]: result }, ids = Object.keys(next)
+    // Retain two small windows for backtracking, never every original visited in a long session.
+    for (const previous of ids) {
+      if (Object.keys(next).length <= CACHE_FILES) break
+      if (!readingWindow.current.has(previous) && !jobs.current.has(previous)) delete next[previous]
+    }
+    return next
+  }), [])
   const request = useCallback((noteId: string, full = true) => {
     const { results, snapshot } = current.current, held = results[noteId]
     if (jobs.current.get(noteId)?.request.full || held?.snapshot === snapshot && held.value?.status === 'read' && snapshot && noteContentMatchesGraph(snapshot, held.value)) return
@@ -31,10 +44,11 @@ export function useNoteCanvasContent(snapshot: NotebookGraphSnapshot | null, act
       jobs.current.clear()
       return
     }
-    const admitted = Object.keys(results).filter(id => results[id]?.snapshot === snapshot)
-    const automatic = [...new Set([...priority, ...visible])].filter(id => (snapshot.catalog.pages[id] || observed.has(id)) && !snapshot.graph.duplicateNoteIds.includes(id))
-    const withinBudget = automatic.filter(id => { if (admitted.includes(id)) return true; if (admitted.length >= AUTO_FILES) return false; admitted.push(id); return true })
-    const wanted = [...new Set([...Object.keys(explicit), ...priority, ...withinBudget])]
+    for (const [id, job] of jobs.current) {
+      if (wanted.includes(id)) continue
+      job.controller.abort(); jobs.current.delete(id)
+      setResults(held => held[id]?.snapshot === job.snapshot && held[id]?.pending ? Object.fromEntries(Object.entries(held).filter(([key]) => key !== id)) : held)
+    }
     for (const id of wanted) {
       if (jobs.current.size >= CONCURRENCY) break
       if (jobs.current.has(id) || (!snapshot.catalog.pages[id] && !observed.has(id))) continue
@@ -47,19 +61,19 @@ export function useNoteCanvasContent(snapshot: NotebookGraphSnapshot | null, act
       if (held?.snapshot === snapshot && held.pending) continue
       const controller = new AbortController(), job = { controller, snapshot, request: intent }
       jobs.current.set(id, job)
-      setResults(values => ({ ...values, [id]: { snapshot, pending: true } }))
+      storeResult(id, { snapshot, pending: true })
       // Explicit reading keeps the original owner's full-file budget and remains available after a small automatic read.
       void api.notebooks.content(id, { signal: controller.signal, ...intent.full ? {} : { maxBytes: AUTO_BYTES } }).then(value => {
-        if (!controller.signal.aborted && jobs.current.get(id) === job) setResults(values => ({ ...values, [id]: { snapshot, value, ...value.status === 'read' ? { document: { path: value.resource.path, content: value.content, revision: value.revision, ...(value.noteProvenance ? { noteProvenance: value.noteProvenance } : {}) } } : {} } }))
+        if (!controller.signal.aborted && jobs.current.get(id) === job) storeResult(id, { snapshot, value, ...value.status === 'read' ? { document: { path: value.resource.path, content: value.content, revision: value.revision, ...(value.noteProvenance ? { noteProvenance: value.noteProvenance } : {}) } } : {} })
       }).catch(error => {
-        if (!controller.signal.aborted && jobs.current.get(id) === job) setResults(values => ({ ...values, [id]: { snapshot, issue: error instanceof Error ? error.message : String(error) } }))
+        if (!controller.signal.aborted && jobs.current.get(id) === job) storeResult(id, { snapshot, issue: error instanceof Error ? error.message : String(error) })
       }).finally(() => {
         if (jobs.current.get(id) !== job) return
         jobs.current.delete(id)
         setExplicit(values => values[id] === intent ? Object.fromEntries(Object.entries(values).filter(([key]) => key !== id)) : values)
       })
     }
-  }, [active, snapshot, visible, priority, results, explicit, observed])
+  }, [active, snapshot, visible, priority, results, explicit, observed, storeResult])
   // Stop this observation only; the original files and other clients remain unaffected.
   useEffect(() => {
     if (!active) setResults(values => Object.fromEntries(Object.entries(values).filter(([, value]) => !value.pending)))

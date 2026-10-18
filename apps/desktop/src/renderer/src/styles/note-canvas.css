@@ -186,3 +186,11 @@
 .note-canvas-reader .note-include-link { display: flex; flex-direction: column; gap: 3px; margin-block: 10px; padding: 7px 10px; border-left: 2px solid var(--green); background: var(--wash-1); }
 .note-canvas-reader .note-include-link > span { color: var(--text-3); font-size: 9px; }
 .note-canvas-reader .note-include-link > button { padding: 0; border: 0; background: transparent; color: var(--green); font-size: 11px; line-height: 1.6; text-align: left; overflow-wrap: anywhere; }
+
+.note-canvas-draft, .note-canvas-empty-body { margin-block: 10px; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
+.note-canvas-draft { color: var(--text-2); }
+.note-canvas-source-details > summary { cursor: pointer; }
+.note-canvas-source-details > span { display: block; padding-top: 5px; }
+
+/* Summary handles stay registered while relationships are collapsed or changing attachment. */
+.note-canvas-block-summary[data-empty="true"] { height: 0; margin: 0; padding: 0; border: 0; visibility: hidden; }
