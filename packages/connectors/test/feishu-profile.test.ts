@@ -34,3 +34,30 @@ it.each([
   const f=fixture(bad),o=await f.adapter.profile.get(feishuConfig,1,credential)
   expect(o.profile?.name).toBe('Online name');expect(o.profile).not.toHaveProperty('description');expect(o.version).toBeNull()
 })
+
+it('qualifies the human creator in the exact app open-id namespace without a contacts or console lookup', async () => {
+  const f = fixture({ app: { code: 0, data: { app: { app_id: app, creator_id: 'creator-open-id' } } } })
+  const o = await f.adapter.profile.get(feishuConfig, 3, credential)
+  expect(o).toMatchObject({ state: 'observed', creator: { idType: 'open_id', userId: 'creator-open-id' } })
+  expect(f.calls).toHaveLength(2)
+  expect(f.calls[1]).toMatchObject({ method: 'GET', params: { lang: 'zh_cn', user_id_type: 'open_id' } })
+  expect(f.calls.every(r => !r.url?.includes('/contact/') && !r.url?.includes('/developers/'))).toBe(true)
+})
+it.each([
+  { app_id: 'foreign-app', creator_id: 'foreign-creator' },
+  { app_id: app },
+  { app_id: app, creator_id: '' },
+  { app_id: app, creator_id: 'unsafe\ncreator' },
+  { app_id: app, creator_id: { open_id: 'untyped-creator' } }
+])('does not suggest an unqualified creator from %j', async nativeApp => {
+  const f = fixture({ app: { code: 0, data: { app: nativeApp } } })
+  expect(await f.adapter.profile.get(feishuConfig, 1, credential)).toMatchObject({ creator: null, profile: { name: 'Online name' } })
+})
+it('keeps the independent bot profile readable when self-resource permission is absent', async () => {
+  const f = fixture({ app: { code: 210508 } })
+  expect(await f.adapter.profile.get(feishuConfig, 1, credential)).toMatchObject({ state: 'observed', creator: null, reason: 'permission-required', profile: { name: 'Online name' } })
+})
+it('preserves qualified creator identity when bot and unrelated application profile fields are malformed', async () => {
+  const f = fixture({ bot: { code: 0, bot: {} }, app: { code: 0, data: { app: { app_id: app, creator_id: 'creator-open-id', description: { malformed: true } } } } })
+  expect(await f.adapter.profile.get(feishuConfig, 1, credential)).toMatchObject({ state: 'observed', creator: { idType: 'open_id', userId: 'creator-open-id' }, profile: null, metadata: null, reason: 'online-unconfirmed' })
+})
