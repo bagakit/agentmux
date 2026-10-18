@@ -41,3 +41,21 @@ it('hides the same lane disclosure when inactive and retains explicit original p
   await render(); await act(async () => axis().click())
   expect(onSelect).toHaveBeenCalledExactlyOnceWith(focusProjectKey(lane.hostId, lane.projectId))
 })
+
+it('keeps the actual HTML lane disclosure event driven without a per-frame anchor read', async () => {
+  await render()
+  const heading = article().querySelector<HTMLElement>('.focus-project-lanes__heading')!
+  const reads = vi.spyOn(heading, 'getBoundingClientRect')
+  await act(async () => axis().focus())
+  const panel = tooltip()!
+  expect(panel.textContent).toContain(summary)
+  const frames = () => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+  await act(async () => frames())
+  const settled = reads.mock.calls.length
+  expect(settled).toBeGreaterThan(0)
+  await act(async () => frames())
+  expect(reads).toHaveBeenCalledTimes(settled)
+  expect(tooltip()).toBe(panel); expect(onSelect).not.toHaveBeenCalled()
+  await render(false)
+  expect(tooltip()).toBeNull()
+})
