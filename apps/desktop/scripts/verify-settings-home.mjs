@@ -18,8 +18,9 @@ const takeoverMutant = process.argv.includes('--takeover-scroll-mutation')
 const appearanceMutant = process.argv.includes('--appearance-contrast-mutation')
 const previewReturnMutant = process.argv.includes('--preview-return-mutation')
 const larkNavigationMutant = process.argv.includes('--lark-navigation-mutation')
-assert.ok([navigationMutant,providerMutant,takeoverMutant,appearanceMutant,previewReturnMutant,larkNavigationMutant].filter(Boolean).length<=1,'One native source mutation per receipt')
-const nativeMutant = navigationMutant || providerMutant || takeoverMutant || appearanceMutant || previewReturnMutant || larkNavigationMutant
+const focusContentMutant = process.argv.includes('--focus-content-mutation')
+assert.ok([navigationMutant,providerMutant,takeoverMutant,appearanceMutant,previewReturnMutant,larkNavigationMutant,focusContentMutant].filter(Boolean).length<=1,'One native source mutation per receipt')
+const nativeMutant = navigationMutant || providerMutant || takeoverMutant || appearanceMutant || previewReturnMutant || larkNavigationMutant || focusContentMutant
 const pageArguments = process.argv.filter(argument => argument.startsWith('--pages='))
 assert.ok(pageArguments.length <= 1, 'One explicit page selection')
 const requestedPages = pageArguments.length ? pageArguments[0].slice('--pages='.length).split(',') : null
@@ -29,6 +30,8 @@ if (requestedPages) {
 }
 let navigationMutationLoads = 0, providerMutationLoads = 0, takeoverMutationLoads = 0, appearanceMutationLoads = 0
 let previewReturnMutationLoads = 0, larkNavigationMutationLoads = 0
+let focusContentMutationLoads = 0
+const focusContentMutationOwners = new Set()
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 await fs.mkdir(evidence,{recursive:true})
 async function bind(file) {
@@ -123,6 +126,12 @@ try {
       const files=new Set();css.walk(node=>{if(node.source?.input?.file)files.add(node.source.input.file)})
       for(const file of files)if(file.startsWith(root+'/')&&!file.includes('/node_modules/'))await bind(file)
       const before=takeoverMutationLoads
+      if(focusContentMutant) css.walkDecls('height',declaration=>{
+        if(!declaration.source?.input?.file?.endsWith('/styles/settings-focus.css')||declaration.value!=='auto'||!declaration.parent.selector.includes("[data-scene='links']"))return
+        focusContentMutationOwners.add(declaration.source.input.file+':'+declaration.source.start.line+':'+declaration.source.start.column)
+        focusContentMutationLoads++;declaration.value='370px'
+      })
+      if(focusContentMutationLoads) await fs.writeFile(path.join(evidence,'focus-content-mutant.css'),css.toString())
       if(takeoverMutant) css.walkDecls('position',declaration=>{
         if(!declaration.source?.input?.file?.endsWith('/components/settings/agent-takeover-settings.css')||declaration.value!=='static'||declaration.parent?.parent?.name!=='container'||declaration.parent.parent.params!=='agent-control-settings (max-width: 639px)')return
         assert.equal(declaration.parent.selector,'.browser-agent-control-settings .browser-agent-preview','Exact compact preview owner')
@@ -135,13 +144,19 @@ try {
   const visual = path.join(evidence,'visual'), stderr=[]
   await fs.mkdir(visual)
   if(takeoverMutant) assert.equal(takeoverMutationLoads,1,'One exact compact preview declaration is mutated')
-  const capture = await runProbeProcess(require('electron'),[path.join(fixture,'main.cjs'),path.join(compiled,'index.html'),owned,visual,larkNavigationMutant?'lark-navigation':previewReturnMutant?'preview-return':navigationMutant?'navigation':providerMutant?'provider-scroll':takeoverMutant?'takeover-scroll':'full',requestedPages?.join(',')??''],{
-    cwd:root,env,timeoutMs:600000,onLine:line=>stderr.push(line)
+  const capture = await runProbeProcess(require('electron'),[path.join(fixture,'main.cjs'),path.join(compiled,'index.html'),owned,visual,focusContentMutant?'focus-content':larkNavigationMutant?'lark-navigation':previewReturnMutant?'preview-return':navigationMutant?'navigation':providerMutant?'provider-scroll':takeoverMutant?'takeover-scroll':'full',requestedPages?.join(',')??''],{
+    cwd:root,env,timeoutMs:1200000,onLine:line=>stderr.push(line)
   })
   await fs.writeFile(path.join(visual,'stderr.log'),stderr.join('\n'))
   const render = JSON.parse(await fs.readFile(path.join(visual,'render.json'),'utf8'))
   assert.equal(capture.timedOut,false)
-  if (larkNavigationMutant) {
+  if (focusContentMutant) {
+    assert.equal(focusContentMutationOwners.size,1,'One original content-sized canvas rule was mutated across its CSS bundle copies')
+    assert.ok(focusContentMutationLoads>0,'The original content-sized canvas mutation was consumed')
+    assert.equal(capture.exitCode,1)
+    assert.equal(render.failure?.name,'AssertionError')
+    assert.match(render.failure.message,/Focus short examples fit their content/u,'Real content geometry kills the original CSS mutant')
+  } else if (larkNavigationMutant) {
     assert.equal(larkNavigationMutationLoads,1,'The actual Lark inspection owner mutant was consumed once')
     assert.equal(capture.exitCode,1)
     assert.equal(render.failure?.name,'AssertionError')
