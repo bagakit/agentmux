@@ -2,7 +2,7 @@ import { chmod, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError } from '@agentmux/core'
-import { ConnectionHost, RoomBindingHost, RoomProvisioningHost, PublicationHost, DurableIngressHost, ConnectionReceivers, MoteChatHost, composeMoteChatBindings, createBuiltinConnectionAdapters, type DurableIngressOptions, type PublicationConversationPort, type RoomBindingHostOptions, type ConnectionAdapter, type MoteChatAgentPort } from '@agentmux/connectors'
+import { ConnectionHost, RoomBindingHost, RoomProvisioningHost, PublicationHost, PublicationStore, DurableIngressHost, ConnectionReceivers, MoteChatHost, composeMoteChatBindings, createBuiltinConnectionAdapters, type DurableIngressOptions, type PublicationConversationPort, type RoomBindingHostOptions, type ConnectionAdapter, type MoteChatAgentPort } from '@agentmux/connectors'
 import type { ConnectionPort } from '@agentmux/core/connections'
 import type { MoteChatPort, MoteChatTarget } from '@agentmux/core/mote-chat'
 import { DesktopConnectorSecrets, type CredentialEncryption } from './connector-secrets.js'
@@ -35,12 +35,15 @@ export async function createDesktopConnections(options: { directory: string; enc
         database = new DatabaseSync(path); await chmod(path, 0o600)
         const secrets = new DesktopConnectorSecrets(database, options.encryption)
         const connections = new ConnectionHost({ database, secrets, adapters })
-        const bindings = options.bindings ? new RoomBindingHost({ ...options.bindings, connections }) : undefined
+        const publicationStore = options.publication ? new PublicationStore(database) : undefined
+        const bindings = options.bindings ? new RoomBindingHost({ ...options.bindings, connections, ...(publicationStore ? { lifecycle: publicationStore } : {}) }) : undefined
         const moteChat = options.moteChat ? new MoteChatHost({ connections, agents: options.moteChat.agents, assertTarget: options.moteChat.assertTarget }) : undefined
         const routing = bindings && moteChat ? composeMoteChatBindings(bindings, moteChat) : bindings
         if (bindings) connections.bindings = moteChat ? {
           bind: (input, context) => bindings.bind(input, context),
           pause: (input, context) => bindings.pause(input, context),
+          resume: (input, context) => bindings.resume(input, context),
+          detach: (input, context) => bindings.detach(input, context),
           relink: (input, context) => bindings.relink(input, context),
           grant: (input, context) => bindings.grant(input, context),
           list: async input => ({ bindings: [...(await bindings.list(input)).bindings, ...moteChat.listBindings(input)] }),
@@ -63,7 +66,7 @@ export async function createDesktopConnections(options: { directory: string; enc
             }
             return { state: 'ready' as const }
           } } : {}) }) : undefined
-        publication = routing && options.publication ? new PublicationHost({ connections, bindings: routing, conversation: options.publication, ...(ingress ? { permissions: ingress.permissions } : {}) }) : undefined
+        publication = routing && options.publication ? new PublicationHost({ connections, ...(publicationStore ? { store: publicationStore } : {}), bindings: routing, conversation: options.publication, ...(ingress ? { permissions: ingress.permissions } : {}) }) : undefined
         if (publication) connections.delivery = publication
         if (ingress) connections.ingress = ingress
         receivers = ingress ? new ConnectionReceivers(connections, ingress) : undefined
@@ -138,6 +141,8 @@ export async function createDesktopConnections(options: { directory: string; enc
         inspect: async input => (await ensure()).connections.bindings!.inspect(input),
         list: async input => (await ensure()).connections.bindings!.list(input),
         pause: async (input, context) => { const owner = await ensure(); const result = await owner.bindings!.pause(input, context); owner.publication?.refresh(); owner.receivers?.refresh(); return result },
+        resume: async (input, context) => { const owner = await ensure(); const result = await owner.bindings!.resume(input, context); owner.publication?.refresh(); owner.receivers?.refresh(); return result },
+        detach: async (input, context) => { const owner = await ensure(); const result = await owner.bindings!.detach(input, context); owner.publication?.refresh(); owner.receivers?.refresh(); return result },
         relink: async (input, context) => { const owner = await ensure(); const result = await owner.bindings!.relink(input, context); owner.publication?.refresh(); owner.receivers?.refresh(); return result },
         grant: async (input, context) => { const owner = await ensure(); const result = await owner.bindings!.grant(input, context); owner.publication?.refresh(); owner.receivers?.refresh(); return result }
       } satisfies import('@agentmux/core/connections').RoomBindingsPort } : {}),
@@ -150,8 +155,7 @@ export async function createDesktopConnections(options: { directory: string; enc
         listAudience: async input => (await ensure()).ingress!.listAudience(input),
         inspect: async input => (await ensure()).ingress!.inspect(input),
         list: async input => (await ensure()).ingress!.list(input),
-        authority: async input => (await ensure()).ingress!.authority(input),
-        recordAuthority: async input => (await ensure()).ingress!.recordAuthority(input)
+        authority: async input => (await ensure()).ingress!.authority(input)
       } satisfies import('@agentmux/core/connections').ConnectionIngressReadPort } : {}),
       delete: async (input, context) => { const owner = await ensure(); const result = await owner.connections.delete(input, context); owner.receivers?.refresh(); owner.publication?.refresh(); return result },
       inspectDeletion: async input => (await ensure()).connections.inspectDeletion(input),
