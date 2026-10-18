@@ -44,6 +44,8 @@ export type PublicationMapping = ConnectionDeliveryMapping
 export type PublicationFailureReason = ConnectionDeliveryReceiptReason
 export type PublicationReceipt = ConnectionDeliveryReceipt
 export type PublicationOperation = ConnectionDelivery & {
+  /** Presentation only: original source time or the first recorded operation time. */
+  presentationTime?: number
   payload: PublicationPayload
   /** Absent in original stored operations, whose scope remains assistant speech. */
   publicationScope?: RoomBinding['scope']['publication']
@@ -57,7 +59,7 @@ export type PublicationOperation = ConnectionDelivery & {
 /** Reuse the original public receipt codec without accepting private request or body fields. */
 const parseReceipt = parseConnectionDeliveryReceipt
 export function publicDelivery(operation: PublicationOperation): ConnectionDelivery {
-  const { payload: _payload, publicationScope: _scope, prepared: _prepared, attempt: _attempt, sourceRecords: _records, uploads: _uploads, ...delivery } = operation
+  const { payload: _payload, publicationScope: _scope, prepared: _prepared, attempt: _attempt, sourceRecords: _records, uploads: _uploads, presentationTime: _presentationTime, ...delivery } = operation
   const last = operation.uploads?.at(-1)
   return parseConnectionDelivery({ ...delivery, ...((operation.payload.kind === 'image' || operation.payload.kind === 'file') && operation.effect === 'upsert' && !operation.prepared?.request.multipart ? { resourceUpload: { kind: operation.payload.kind, part: operation.payload.part, attempt: operation.uploads?.length ?? 0, state: last?.state ?? 'pending' } } : {}) })
 }
@@ -203,7 +205,7 @@ export class PublicationStore {
       operationId, projectionId, sourceRevision: digest(payload), bindingId: boundary.bindingId, bindingRevision: boundary.revision,
       reference: { ...ref(boundary), source: { kind: 'binding-operation', operationId: bindingOperationId, event } },
       target: { connectionId: boundary.connectionId, application: boundary.application, externalConversationId: boundary.externalConversationId },
-      publicationScope: boundary.scope.publication, payload, effect: 'upsert', fragment: { ordinal: 0, count: 1 }, state: 'pending'
+      publicationScope: boundary.scope.publication, presentationTime: Date.now(), payload, effect: 'upsert', fragment: { ordinal: 0, count: 1 }, state: 'pending'
     }
     this.database.prepare('INSERT INTO connector_publication_operation (operation_id,projection_id,source_revision,fragment_ordinal,binding_id,binding_revision,operation_json,state) VALUES (?,?,?,?,?,?,?,?)')
       .run(operationId, projectionId, operation.sourceRevision, 0, boundary.bindingId, boundary.revision, encode(operation), 'pending')
@@ -465,7 +467,11 @@ export class PublicationStore {
       let identity = prior?.operationId ?? null
       const queue = (effect: 'upsert' | 'withdraw', payload: PublicationPayload, parent: PublicationOperation | null): PublicationOperation => {
         const operationId = 'publication-' + digest([projectionId, ordinal, identity, revision, effect])
-        const operation: PublicationOperation = { operationId, projectionId, sourceRevision: revision, ...(event ? { event } : {}), sourceRecords: [...references],
+        const original = unit.records.find(record => record.id === unit.event.anchorId)?.original
+        const sourceTime = original?.kind === 'native' ? original.item.startedAt : original?.item.createdAt
+        const presentationTime = sourceTime !== undefined && Number.isFinite(sourceTime) && Math.abs(sourceTime) <= 8.64e15
+          ? sourceTime : prior?.presentationTime ?? Date.now()
+        const operation: PublicationOperation = { operationId, projectionId, sourceRevision: revision, presentationTime, ...(event ? { event } : {}), sourceRecords: [...references],
           bindingId: boundary.bindingId, bindingRevision: boundary.revision, publicationScope: boundary.scope.publication,
           reference: unit.event.reference!, target: { connectionId: boundary.connectionId, application: boundary.application, externalConversationId: boundary.externalConversationId },
           payload, ...(plan.relay ? { relay: plan.relay } : {}), effect, fragment: { ordinal, count: parts.length }, state: 'pending', ...(parent ? { predecessorOperationId: parent.operationId } : {}) }
@@ -521,7 +527,7 @@ export class PublicationStore {
       const predecessor = this.appliedPredecessor(prior ?? undefined)
       if (prior?.state === 'pending' || prior?.state === 'not-applied') this.write({ ...prior, state: 'superseded' })
       const operationId = 'publication-' + digest([projectionId, prior?.operationId ?? null, revision])
-      const operation: PublicationOperation = { operationId, projectionId, sourceRevision: revision,
+      const operation: PublicationOperation = { operationId, projectionId, sourceRevision: revision, presentationTime: prior?.presentationTime ?? Date.now(),
         bindingId: boundary.bindingId, bindingRevision: boundary.revision, publicationScope: boundary.scope.publication,
         reference, target: { connectionId: boundary.connectionId, application: boundary.application, externalConversationId: boundary.externalConversationId },
         payload, effect: 'upsert', fragment: { ordinal: 0, count: 1 }, state: 'pending', ...(predecessor ? { predecessorOperationId: predecessor.operationId } : {}) }
