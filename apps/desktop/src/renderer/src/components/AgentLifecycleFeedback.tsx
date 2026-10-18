@@ -19,6 +19,8 @@ export function AgentLifecycleFeedback({ owner, retry, busy = false, refreshObse
   const notice = current ? agentLifecycleFailureNotice(current.failure, current.message) : null
   return <div className={current ? 'agent-launch-notice' : 'service-disclosure-home'}>
     <ServiceWindowNotice notice={notice} disclosure={{ scope: `local:lifecycle:${identity}`, id: 'lifecycle',
+      ...(record ? { readKey: record.id, readScope: 'global:events' as const,
+        readOrigin: { scope: `local:lifecycle:${identity}`, id: 'lifecycle' } } : {}),
       cause: record?.id ?? '', visible, available: !loading || Boolean(current) }}
       {...(current && notice ? { summary: { step: notice.notice.step,
       mode: current.failure.step === 'launch' ? 'Agent availability unconfirmed; draft and workbench kept.'

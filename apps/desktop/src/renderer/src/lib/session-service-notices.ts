@@ -40,8 +40,8 @@ export function sessionServiceNotices(session: SessionSnapshot | undefined, queu
   if (session?.kind !== 'agent') return notices
   const recovery = continuitySupervisionPresentation(session)
   if (recovery) notices.push({ id: 'continuity-supervision', occurrence: recovery.root.operationId,
-    cause: JSON.stringify([recovery.supervision.phase, recovery.supervision.activeAttemptOperationId, recovery.supervision.attemptCount,
-      recovery.supervision.attemptLimit, recovery.supervision.nextAttemptAt, recovery.supervision.observationError]),
+    cause: JSON.stringify([['observing', 'retry-wait'].includes(recovery.supervision.phase) ? 'recovering' : recovery.supervision.phase,
+      recovery.supervision.observationError]),
     observedAt: recovery.supervision.observedAt, notice: { kind: 'indeterminate', notice: {
       step: recovery.title, mode: `${recovery.processDetail} ${recovery.detail} ${recovery.failure ?? ''}`,
       restore: `${recovery.originalInput} ${recovery.initialInput} ${recovery.childInput ?? ''} Open the original Session recovery notice to re-read or control this exact intent.`
@@ -161,5 +161,8 @@ export function sessionServiceNotices(session: SessionSnapshot | undefined, queu
         ? 'Your original message and operation are kept. Inspect the original conversation and outbox before choosing Send; it will not be replayed automatically.'
         : 'Your message is kept. Open the outbox to inspect, send, copy or edit it.'
     } } })
-  return notices
+  return notices.map(item => ({ ...item,
+    readKey: JSON.stringify([session.hostId, session.id, item.id]),
+    readOrigin: { scope: session.id, id: item.id }
+  }))
 }
