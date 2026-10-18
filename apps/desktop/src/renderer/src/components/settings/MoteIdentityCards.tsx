@@ -69,19 +69,19 @@ function MoteIdentityCard({ reading, records, recordsIssue, onOpen, onRetry }: {
   const choice = ref && !recordsIssue ? moteConnectionChoice(ref, records) : null
   const unbound = !issue && saved?.status === 'ready' && saved.values?.connection === null
   const origin = { target, topicId: scope.topic.id, moteName: scope.topic.title }
-  const status = issue || saved?.status === 'unconfirmed' ? 'Identity not confirmed'
-    : ref ? choice?.record?.config.label ?? 'Saved identity'
-    : unbound ? 'No identity yet' : 'Reading identity…'
+  const status = issue || saved?.status === 'unconfirmed' ? 'Bot not confirmed'
+    : ref ? choice?.record?.config.label ?? 'Saved bot'
+    : unbound ? 'No bot linked' : 'Reading bot…'
   return <article className="connector-mote-card" data-mote-identity={scope.topic.id} data-identity-state={unbound ? 'unbound' : ref ? 'bound' : 'unconfirmed'}>
-    <button type="button" className="connector-mote-card__identity" aria-label={`View identity for ${scope.topic.title}`} onClick={() => onOpen(origin, false)}>
+    <button type="button" className="connector-mote-card__identity" aria-label={`View bot for ${scope.topic.title}`} onClick={() => onOpen(origin, false)}>
       <span className="connector-mote-card__avatar"><SpaceObjectIcon kind="mote" name={scope.topic.title} manualIcon={icon}
         avatarWorkspaceId={scope.workspace.id} avatarTopicId={scope.topic.id} avatarObjectKey={target?.spaceId} /></span>
       <span><strong>{scope.topic.title}</strong><small>{status}</small></span>
     </button>
-    <p className="connector-mote-card__caption">{ref ? `${ref.application.domain === 'open.feishu.cn' ? 'Feishu' : ref.application.domain === 'open.larksuite.com' ? 'Lark' : ref.application.domain} · ${choice?.issue || recordsIssue ? 'Needs attention' : 'Default identity'}` : unbound ? 'Uses this Mote’s saved profile.' : 'Your saved choice is kept.'}</p>
+    <p className="connector-mote-card__caption">{ref ? `${ref.application.domain === 'open.feishu.cn' ? 'Feishu' : ref.application.domain === 'open.larksuite.com' ? 'Lark' : ref.application.domain} · ${choice?.issue || recordsIssue ? 'Needs attention' : 'Default bot'}` : unbound ? 'Uses this Mote’s saved profile.' : 'Your saved choice is kept.'}</p>
     {issue ? <p className="connector-mote-card__issue" role="status">{issue}</p> : null}
     <div className="connector-mote-card__actions">
-      <button type="button" className={unbound ? 'primary-button' : 'small-button'} data-mote-card-action={unbound ? 'create' : 'manage'} onClick={() => onOpen(origin, unbound)}>{unbound ? 'Create Feishu identity' : ref ? 'Manage identity' : 'Review identity'}</button>
+      <button type="button" className={unbound ? 'primary-button' : 'small-button'} data-mote-card-action={unbound ? 'create' : 'manage'} onClick={() => onOpen(origin, unbound)}>{unbound ? 'Create Feishu bot' : ref ? 'Manage bot' : 'Review bot'}</button>
       {unbound ? <button type="button" className="connector-enrollment__text-action" onClick={() => onOpen(origin, false)}>Use existing</button> : issue ? <button type="button" className="connector-enrollment__text-action" onClick={onRetry}>Retry</button> : null}
     </div>
   </article>
@@ -91,9 +91,9 @@ function MoteIdentityCard({ reading, records, recordsIssue, onOpen, onRetry }: {
 export function MoteIdentityCards({ readings, records, recordsIssue, onOpen }: {
   readings: MoteIdentityReadings; records: ConnectionRecord[]; recordsIssue: string; onOpen(origin: MoteLarkSettingsOrigin, create: boolean): void
 }) {
-  return <section className="connector-mote-identities" aria-label="Mote identities">
-    <header><div><h3>Mote identities</h3><p>Choose a Mote to create or manage its identity.</p></div><span className="connector-identity-count">{readings.items.length || null}</span></header>
+  return <section className="connector-mote-identities" aria-label="Mote bots">
+    <header><div><h3>Mote bots</h3><p>A bot with your Mote’s name and avatar.</p></div><span className="connector-identity-count">{readings.items.length || null}</span></header>
     {readings.items.length ? <div className="connector-mote-grid">{readings.items.map(reading => <MoteIdentityCard key={JSON.stringify([reading.scope.workspace.hostId, reading.scope.workspace.id, reading.scope.topic.id])} reading={reading} records={records} recordsIssue={recordsIssue} onOpen={onOpen} onRetry={readings.refresh} />)}</div>
-      : <p className="settings-group-note" role="status">{readings.reading ? 'Reading your Motes…' : readings.issue ? 'Your Motes could not be read. Saved identities remain available below.' : 'Create an identity for a Mote here, or add a general identity for any Agent.'}</p>}
+      : <p className="settings-group-note" role="status">{readings.reading ? 'Reading your Motes…' : readings.issue ? 'Motes could not be read. Saved bots remain available below.' : 'Mote bots will appear here when you create a Mote.'}</p>}
   </section>
 }
