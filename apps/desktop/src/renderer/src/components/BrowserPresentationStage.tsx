@@ -134,6 +134,9 @@ export function useBrowserPresentationCapture(browserId: string) {
         inputSelectionLease.current = lease.leaseId
         const selection = api.browser.activatePresentation(lease.leaseId, { kind: 'select', focus: 'preserve' }).then(receipt => {
           if (current !== generation.current || !inputCurrent()) return
+          // Viewing the page does not transfer its Agent-held native input owner.
+          // Keep that refusal distinct from capture health and from a selected lease.
+          if (receipt.outcome === 'input-unconfirmed' && receipt.reason === 'agent-control-active') return
           if (receipt.outcome !== 'selected') throw new Error(receipt.outcome === 'input-unconfirmed'
             ? receipt.message : 'The Browser presentation input owner could not be confirmed')
           if (ownerRevision.current === selectedAt) inputChosen.current = lease.leaseId
@@ -301,7 +304,7 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
     void geometryWriter.current?.(next.bounds, selectionIntent.current).catch(error => {
       if (lease.current === current && latest.current.inputSelected) setNotice({ source: 'presentation', message: String(error) })
     })
-  }, [inputSelected, media.ownerClearedRevision, geometry])
+  }, [inputSelected, control?.owner, media.ownerClearedRevision, geometry])
   const [playbackRevision, setPlaybackRevision] = useState(0)
   const [playback, setPlayback] = useState<{ stream: MediaStream | null; phase: 'idle' | 'starting' | 'first-frame' | 'ready' | 'failed'; message?: string; retentionFailed?: true }>({ stream: null, phase: 'idle' })
   const nativeCovered = media.nativeCoverage !== null && media.nativeCoverage.captureId === media.captureId &&
