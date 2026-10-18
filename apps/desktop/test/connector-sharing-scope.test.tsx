@@ -6,6 +6,7 @@ vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 vi.mock('react-resizable-panels', async () => { const { createRequire } = await import('node:module'); return createRequire(import.meta.url)('../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.cjs.js') })
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => <div>Controlled terminal rendering</div> }))
 import { connectorJourneyFixture } from './fixtures/connector-journey'
+import { openConnectedGroup } from './helpers/connector-header-navigation'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 
@@ -35,7 +36,7 @@ it('existing reply-only consent is not expanded by opening details and a broader
   expect((await f.cli(['binding', 'inspect', '--binding', original.bindingId])).binding.scope.publication).toBe('future-native-user-facing')
   const change = [...document.querySelectorAll('details')].find(node => node.querySelector('summary')?.textContent === 'Change connected group')!
   await act(async () => change.querySelector('summary')!.click())
-  await consent(); await ready('Reconnect to start sharing from now.')
+  await consent(); await ready('These sharing settings are saved. Changes apply only after confirmation.')
   expect([...document.querySelectorAll<HTMLButtonElement>('footer button')].find(node => node.textContent === 'Reconnect group')?.disabled).toBe(false)
   expect(f.calls.filter(call => call.method === 'connection.binding.relink')).toHaveLength(0)
   await select('Group sharing content', 'future-shared-conversation')
@@ -84,15 +85,14 @@ it('switching applications starts an exact delivery window even when different b
   for (let revision = 1; revision <= 10; revision++) expect((await api.connections.call('connection.binding.relink', { ...original, operationId: 'advance-window-' + revision, expectedRevision: revision })).state).toBe('applied')
   expect((await api.connections.call('connection.bind', { ...original, operationId: 'second-delivery-window', bindingId: 'a1', connectionId: 'other-application', externalConversationId: 'oc_second' })).state).toBe('applied')
   await f.mount()
-  await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelectorAll('.connector-sharing__group')).toHaveLength(4) })
-  const audience = [...document.querySelectorAll<HTMLButtonElement>('.connector-sharing__group')].find(node => node.getAttribute('aria-label')?.includes('oc_first'))!
-  await act(async () => audience.click())
-  await vi.waitFor(async () => { await act(async () => {}); expect(f.calls.some(call => call.method === 'connection.delivery.ls' && (call.input as { bindingId: string }).bindingId === 'a')).toBe(true) })
+  await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelectorAll('.conversation-sharing-notice__audience')).toHaveLength(4) })
+  await openConnectedGroup('oc_first')
+  await vi.waitFor(async () => { await act(async () => {}); expect(f.calls.some(call => call.method === 'connection.diagnose' && (call.input as { bindingId: string; bindingRevision: number }).bindingId === 'a' && (call.input as { bindingRevision: number }).bindingRevision === 11)).toBe(true) })
   await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('[role="dialog"]')?.getAttribute('aria-busy')).toBe('false') })
   await select('Group application', 'other-application')
   expect(document.querySelector('[aria-label="Group application"]')?.getAttribute('data-value')).toBe('other-application')
-  await vi.waitFor(async () => { await act(async () => {}); expect(f.calls.some(call => call.method === 'connection.delivery.ls' && (call.input as { bindingId: string }).bindingId === 'a1')).toBe(true) })
-  expect(f.calls.filter(call => call.method === 'connection.delivery.ls').map(call => call.input)).toContainEqual({ connectionId: 'other-application', bindingId: 'a1', bindingRevision: 1, limit: 5 })
+  await vi.waitFor(async () => { await act(async () => {}); expect(f.calls.some(call => call.method === 'connection.diagnose' && (call.input as { bindingId: string; bindingRevision: number }).bindingId === 'a1' && (call.input as { bindingRevision: number }).bindingRevision === 1)).toBe(true) })
+  expect(f.calls.filter(call => call.method === 'connection.diagnose').map(call => call.input)).toContainEqual({ executionHostId: 'local', agentSessionId: 'original-agent', bindingId: 'a1', bindingRevision: 1 })
   expect((await f.cli(['binding', 'inspect', '--binding', 'a'])).binding.revision).toBe(11)
   expect((await f.cli(['binding', 'inspect', '--binding', 'a1'])).binding.revision).toBe(1)
   expect(f.calls.some(call => call.method === 'connection.delivery.retry')).toBe(false); await f.original.unchanged()

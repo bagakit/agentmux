@@ -6,6 +6,7 @@ vi.mock('react-resizable-panels', async () => { const { createRequire } = await 
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => <div>Controlled terminal rendering</div> }))
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap } from '@agentmux/core/connections'
 import { connectorJourneyFixture } from './fixtures/connector-journey'
+import { openConnectionsMenu } from './helpers/connector-header-navigation'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { invalidateConnectorTarget } from '../src/renderer/src/lib/connector-room-intent'
@@ -16,10 +17,12 @@ const region = () => document.querySelector<HTMLElement>('[data-workbench-region
 async function ready(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check() }, { timeout: 6000 }) }
 const writes = () => f.calls.filter(call => ['connection.service.configure', 'connection.configure', 'connection.room.create', 'connection.bind', 'connection.binding.relink', 'connection.grant', 'connection.room.members.add', 'connection.room.link.create', 'connection.delivery.retry'].includes(call.method))
 
-it('opens the unbound Composer entry on its original Agent without mutation or lost input and keeps that dialog through an audience refresh', async () => {
+it('keeps unbound input free of connection management while the original header opens setup without mutation or lost input', async () => {
   await f.mount()
-  await ready(() => expect(region().querySelector('.connector-sharing__connect')).not.toBeNull())
-  const editor = region().querySelector<HTMLElement>('[role="textbox"]')!, trigger = region().querySelector<HTMLButtonElement>('.connector-sharing__connect')!
+  await ready(() => expect(region().querySelector('.agent-region-header__connector')).not.toBeNull())
+  expect(region().querySelector('.conversation-sharing-notice')).toBeNull()
+  expect(region().querySelector('[data-agent-composer]')?.textContent).not.toContain('Connect group')
+  const editor = region().querySelector<HTMLElement>('[role="textbox"]')!
   const draft = useAppStore.getState().agentComposerDrafts['original-agent']
   await act(async () => editor.focus())
   const reads = f.calls.filter(call => call.method === 'connection.binding.ls')
@@ -27,7 +30,11 @@ it('opens the unbound Composer entry on its original Agent without mutation or l
   expect(reads.every(call => JSON.stringify(call.input) === JSON.stringify(target))).toBe(true)
   expect(document.activeElement).toBe(editor)
   expect(writes()).toHaveLength(0)
-  await act(async () => { trigger.focus(); trigger.click() })
+  const trigger = await openConnectionsMenu()
+  const connect = [...document.querySelectorAll<HTMLElement>('.connector-header-menu [role="menuitem"]')].find(node => node.textContent === 'Connect Lark group')!
+  expect(connect).toBeDefined()
+  await act(async () => connect.click())
+  await ready(() => expect(document.querySelector('.connector-header-menu')).toBeNull())
   await ready(() => expect(document.querySelector<HTMLElement>('[aria-label="Group application"]')?.dataset.value).toBe(f.config.connectionId))
   await ready(() => expect(document.querySelector('[role="dialog"]')?.getAttribute('aria-busy')).toBe('false'))
   const dialog = document.querySelector('[role="dialog"]')!
@@ -46,7 +53,7 @@ it('opens the unbound Composer entry on its original Agent without mutation or l
   } finally {
     await act(async () => { for (const release of pending) release() })
   }
-  await ready(() => expect(region().querySelector('.connector-sharing__connect')).not.toBeNull())
+  await ready(() => expect(region().querySelector('.agent-region-header__connector')).toBe(trigger))
   expect(document.querySelector('[role="dialog"]')).toBe(dialog)
   await f.button('Cancel')
   expect(region().querySelector('[role="textbox"]')).toBe(editor)

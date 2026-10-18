@@ -5,6 +5,7 @@ vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 vi.mock('react-resizable-panels', async () => { const { createRequire } = await import('node:module'); return createRequire(import.meta.url)('../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.cjs.js') })
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => <div>Controlled terminal rendering</div> }))
 import { connectorJourneyFixture } from './fixtures/connector-journey'
+import { openConnectedGroup } from './helpers/connector-header-navigation'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import type { RoomReadWire } from '../../../packages/connectors/test/fixtures/room-discovery'
@@ -65,19 +66,19 @@ it('the Composer names its exact default-Host audience and keeps that audience a
   }
   await f.mount(); const editor = document.querySelector<HTMLElement>('[data-workbench-region-id="original-region"] [role="textbox"]')!
   await f.journey('existing'); await chooseGroup('oc_other'); await consent(); await f.button('Connect group'); await ready('Group saved'); await f.button('Close')
-  await vi.waitFor(async () => { await act(async () => {}); expect([...document.querySelectorAll('.connector-sharing__group')].every(node => node.textContent?.includes('Design review'))).toBe(true); expect(document.querySelectorAll('.connector-sharing__group')).toHaveLength(2) })
+  await vi.waitFor(async () => { await act(async () => {}); expect([...document.querySelectorAll('.conversation-sharing-notice__audience')].every(node => node.textContent?.includes('Design review'))).toBe(true); expect(document.querySelectorAll('.conversation-sharing-notice__audience')).toHaveLength(2) })
   const binding = (await f.services.connections.bindings!.list({})).bindings[0]!, counts = f.calls.length
   await act(async () => useAppStore.setState(state => ({ sessions: [...state.sessions, ...Array.from({ length: 250 }, (_, index) => composerSession('unrelated-name-' + index))] })))
   await act(async () => {}); expect(f.calls).toHaveLength(counts)
   failed = true
   await api.connections.call('connection.binding.pause', { operationId: 'pause-named-audience', bindingId: binding.bindingId, expectedRevision: binding.revision })
   await act(async () => { editor.focus(); invalidateConnectorTarget(binding) })
-  await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('.connector-sharing')?.textContent).toContain('Sharing paused · Design review'); expect(document.querySelector('.connector-sharing')?.textContent).toContain('Group name unconfirmed') })
+  await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('.conversation-sharing-notice')?.textContent).toContain('Sharing paused'); expect(document.querySelector('.conversation-sharing-notice')?.textContent).toContain('Group name unconfirmed') })
   expect(document.querySelector('[data-workbench-region-id="original-region"] [role="textbox"]')).toBe(editor); expect(document.activeElement).toBe(editor)
   expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep the original draft 中')
   expect(f.calls.filter(call => call.method === 'connection.room.get').every(call => (call.input as { externalConversationId: string }).externalConversationId === 'oc_other')).toBe(true)
-  await act(async () => document.querySelector<HTMLButtonElement>('.connector-sharing__group')!.click())
-  await ready('Group connection'); expect(document.querySelector('.agent-connector-identity [data-executor-id]')?.getAttribute('data-executor-id')).toBe(f.session.kind === 'agent' ? f.session.executorId : null)
+  await openConnectedGroup('oc_other')
+  await ready('Join this group'); expect(document.querySelector('.agent-connector-identity [data-executor-id]')?.getAttribute('data-executor-id')).toBe(f.session.kind === 'agent' ? f.session.executorId : null)
   expect((await f.cli(['binding', 'inspect', '--binding', binding.bindingId])).binding).toMatchObject({ externalConversationId: 'oc_other', state: 'paused' })
   await f.original.unchanged()
 }, 25_000)

@@ -6,6 +6,7 @@ vi.mock('react-resizable-panels', async () => { const { createRequire } = await 
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => <div>Controlled terminal rendering</div> }))
 vi.mock('electron', () => ({ app: {}, nativeImage: {} }))
 import { connectorJourneyFixture } from './fixtures/connector-journey'
+import { openConnectedGroup } from './helpers/connector-header-navigation'
 import { permissionActionsFixture } from '../../../packages/connectors/test/fixtures/permission-actions.js'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { AttentionRequestPanel } from '../src/renderer/src/components/AttentionRequestPanel.js'
@@ -37,7 +38,7 @@ describe('the original member access owner', () => {
   async function open() {
     await f.mount(); await f.journey('existing'); await f.fill('Existing group ID', 'oc_original')
     await act(async () => document.querySelector<HTMLInputElement>('.agent-connector-check input')!.click())
-    await f.button('Connect group'); await ready('Group saved'); await disclosure('Manage member access')
+    await f.button('Connect group'); await ready('Group saved'); await disclosure('Member access')
     await f.fill('Member access ID type', 'open_id'); await f.fill('Member access ID', 'ou_original')
   }
   it('starts remote permission off, explicitly shares decision context for one member and revokes only that capability through trusted IPC/public CLI', async () => {
@@ -70,9 +71,7 @@ describe('the original member access owner', () => {
     await api.connections.call('connection.grant', { operationId: 'first-member-grant', bindingId: first.bindingId, expectedBindingRevision: 1, grantId: 'first-member', expectedRevision: null,
       actor: { application: configured.application, idType: 'open_id', userId: 'ou_original' }, capabilities: ['permission'], state: 'active' })
     await f.mount()
-    let firstButton: HTMLButtonElement | undefined
-    await vi.waitFor(async () => { await act(async () => {}); firstButton = [...document.querySelectorAll<HTMLButtonElement>('.connector-sharing__group')].find(node => node.getAttribute('aria-label')?.includes('oc_first')); expect(firstButton).toBeDefined() })
-    await act(async () => firstButton!.click()); await ready('Revoke permission decisions')
+    await openConnectedGroup('oc_first'); await ready('Revoke permission decisions')
     let release!: () => void
     const barrier = new Promise<void>(resolve => { release = resolve }), forward = f.forward
     vi.spyOn(api.connections, 'call').mockImplementation(async (method, input) => {
@@ -169,7 +168,8 @@ describe('the original member access owner', () => {
     expect(summary.textContent).toContain('Member access not confirmed')
     expect(summary.textContent).toContain('Last confirmed:')
     expect(summary.textContent).toContain(baseline === 'approved' ? '1 member approved' : 'no members approved')
-    const access = [...document.querySelectorAll('details')].find(node => node.querySelector(':scope > summary')?.textContent === 'Manage member access')!
+    const access = document.querySelector<HTMLElement>('section[aria-label="Member access"]')!
+    expect(access, 'original member access remains directly visible').not.toBeNull()
     if (baseline === 'approved') expect(access.textContent).toContain('Last confirmed:')
     await vi.waitFor(async () => { await act(async () => {}); expect([...access.querySelectorAll('button')].map(node => node.textContent)).toContain('Check original member access') })
     expect([...access.querySelectorAll('button')].some(node => node.textContent === 'Approve this member' || node.textContent === 'Save member access')).toBe(false)
