@@ -45,10 +45,10 @@ export function AgentInformationPreviewHost() {
 }
 
 /** Each surface retains its own primary action; only a bounded reading intent is shared. */
-export function useAgentInformationPreview(context: FocusContext, requested: boolean, identity: FocusContextIdentity | undefined, goalLinks: FocusGoalLinks | undefined,
+export function useAgentInformationPreview(context: FocusContext | undefined, requested: boolean, identity: FocusContextIdentity | undefined, goalLinks: FocusGoalLinks | undefined,
   openWorkface: () => void, options?: { readingKey: 'ArrowRight'; readingBranch: { attach(element: HTMLElement): () => void; retainedEscape(event: KeyboardEvent): boolean } }) {
   const document = useWorkbenchDocument()
-  const active = useWorkbenchPresentationActive(), enabled = requested && active
+  const active = useWorkbenchPresentationActive(), enabled = requested && active && Boolean(context)
   const previewTrigger = useAppStore(state => resolveFocusPreviewTrigger(state.config?.focus?.previewTrigger))
   const anchor = useRef<HTMLButtonElement>(null), token = useRef({}).current
   const intent = useAgentPreviewIntent(() => show(), previewTrigger, enabled)
@@ -68,7 +68,7 @@ export function useAgentInformationPreview(context: FocusContext, requested: boo
     intent.cancel(); keepOpen()
     const trigger = anchor.current
     // Only the transient peek needs an available visible invoker; Agent actions stay independent.
-    if (!enabled || !trigger?.isConnected || trigger.closest('[inert]') || !workbenchDocumentVisible(document)) return false
+    if (!enabled || !context || !trigger?.isConnected || trigger.closest('[inert]') || !workbenchDocumentVisible(document)) return false
     return agentInformationPreview.show({ token, id, context, identity, goalLinks, anchor: trigger, openWorkface, enterReading, keepOpen, readingBranch: options?.readingBranch,
       restoreFocus() {
         if (!trigger.isConnected || trigger.closest('[inert]')) return
@@ -83,9 +83,17 @@ export function useAgentInformationPreview(context: FocusContext, requested: boo
       close()
     }, 160)
   }
-  useLayoutEffect(() => { agentInformationPreview.noteContent(token, context); close() }, [context.id, context.hostId, context.runId, context.name, context.state, context.detail,
-    context.recap?.text, context.recap?.source, context.recap?.origin, context.recap?.reading?.text,
-    context.recap?.reading?.truncated, context.workspacePath, context.originAddress, enabled, previewTrigger, close, document])
+  useLayoutEffect(() => { if (context) agentInformationPreview.noteContent(token, context); close() }, [context?.id, context?.hostId, context?.runId, context?.name, context?.state, context?.detail,
+    context?.recap?.text, context?.recap?.source, context?.recap?.origin, context?.recap?.reading?.text,
+    context?.recap?.reading?.truncated, context?.workspacePath, context?.originAddress, enabled, previewTrigger, close, document])
+  // Metadata becoming readable must follow the actual held input on this invoker.
+  // A cached relationship highlight cannot create a new reading intent.
+  useLayoutEffect(() => {
+    if (!enabled || previewTrigger === 'keyboard') return
+    const trigger = anchor.current
+    if (trigger === document.activeElement) show()
+    else if (trigger?.matches(':hover')) showSoon()
+  }, [enabled, document])
   useLayoutEffect(() => () => { close() }, [close])
   const position = identity?.tabs.some(tab => tab.regions.length > 1) ? <span className="focus-context__position"
     aria-label={`${identity.occurrenceCount} confirmed ${identity.occurrenceCount === 1 ? 'position' : 'positions'}`}
