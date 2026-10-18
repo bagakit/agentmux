@@ -5,7 +5,7 @@ import { noteInlineLinkContent } from '@agentmux/client-ui/note/note-wikilinks'
 import { fixtureEpoch as _tailRefreshFixtureEpoch } from "../../../test/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { EventEmitter } from 'node:events'
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { act } from 'react'
@@ -30,6 +30,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
 import { installNoteCanvasBlockRows } from './helpers/note-canvas-block-dom'
+import { noteSummaryCases, noteSummaryContent } from './helpers/note-summary-fixture'
 
 const dom = composerDOM(), scope = { kind: 'note', noteId: 'target' } as const
 let directory: string, store: AgentMuxNotebookStore, files: WorkspaceFiles
@@ -454,4 +455,20 @@ it('distinguishes saved empty content from an unsaved original draft and keeps t
   expect(dom.container.querySelector('.note-canvas-source-details')!.textContent).toContain('2/2 originals read')
   expect(useAppStore.getState().documents[key]!.content).toContain('Private unsaved draft')
   expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
+})
+
+it.each(noteSummaryCases)('uses readable $name on the real shared Graph node without rewriting the original file', async example => {
+  await sharedGraphFixture()
+  const path = join(directory, 'block-shared.note.md')
+  const shared = noteFromMarkdown(await readFile(path, 'utf8'))
+  delete shared.title
+  if (example.title) shared.title = example.title
+  shared.content = noteSummaryContent(example)
+  const original = serializeNoteDocument(shared)
+  await writeFile(path, original)
+  await dom.render(<NoteCanvas scope={{ kind: 'notebook', notebookId: (await store.read()).pages.target!.notebookId }} onOpen={() => {}} />)
+  await vi.waitFor(() => expect(dom.container.querySelector('.react-flow__node[data-id="shared-content"] .note-canvas-title')?.textContent).toBe(example.expected))
+  expect(dom.container.querySelector('.react-flow__node[data-id="shared-content"] .note-canvas-reader')).not.toBeNull()
+  expect(await readFile(path, 'utf8')).toBe(original)
+  expect((await store.read()).pages['shared-content']).toBeUndefined()
 })
