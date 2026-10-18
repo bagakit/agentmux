@@ -1,22 +1,27 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { expect, it, vi } from 'vitest'
+import { beforeEach, expect, it, vi } from 'vitest'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 vi.mock('react-resizable-panels', async () => { const { createRequire } = await import('node:module'); return createRequire(import.meta.url)('../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.cjs.js') })
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => <div>Controlled terminal rendering</div> }))
 import { connectorJourneyFixture } from './fixtures/connector-journey'
 import { api } from '../src/renderer/src/lib/api'
+import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap } from '@agentmux/core/connections'
 import { retainConnectorRoomIntent, useAppStore } from '../src/renderer/src/store'
 import { observeConnectorService } from '../src/renderer/src/lib/connector-service-observation'
 import { invalidateConnectorTarget } from '../src/renderer/src/lib/connector-room-intent'
 import { composerSession } from './helpers/composer-dom-fixture'
 import { ConnectorRoomJoinLink } from '../src/renderer/src/components/ConnectorRoomJoinLink'
+import type { RoomReadWire } from '../../../packages/connectors/test/fixtures/room-discovery'
 
+let roomRead: ((request: RoomReadWire) => Promise<unknown>) | null = null
+beforeEach(() => { roomRead = null })
 const f = connectorJourneyFixture({ platform: async request => {
   if (request.url?.endsWith('/chats') && request.method?.toUpperCase() === 'POST') return { code: 0, data: { chat_id: 'oc_header_created' } }
   if (request.url?.endsWith('/link')) return { code: 0, data: { share_link: 'https://applink.feishu.cn/client/chat/chatter/add_by_link?link_token=header-join', expire_time: String(Math.floor(Date.now() / 1000) + 300), is_permanent: false } }
   if (request.url?.endsWith('/members')) return { code: 0, data: { items: [], has_more: false } }
   if (request.url?.endsWith('/chats') || request.url?.endsWith('/chats/search')) return { code: 0, data: { items: [], has_more: false } }
+  if (roomRead) return await roomRead(request)
   return { code: 0, data: { name: 'Original team', chat_status: 'normal', chat_mode: 'group' } }
 } })
 const target = { executionHostId: 'local', agentSessionId: 'original-agent', regionAnchor: { regionId: 'original-region' } }
@@ -25,11 +30,29 @@ const header = () => document.querySelector<HTMLElement>('[data-workbench-region
 const trigger = () => header().querySelector<HTMLButtonElement>('.agent-region-header__connector')!
 const writes = () => f.calls.filter(call => ['connection.configure', 'connection.service.configure', 'connection.room.create', 'connection.room.link.create', 'connection.bind', 'connection.binding.relink', 'connection.binding.pause', 'connection.grant'].includes(call.method))
 async function close() { await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Close group setup"]')!.click()) }
+async function menu() {
+  await act(async () => { trigger().focus(); trigger().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
+  await wait(() => expect(document.querySelector('.connector-header-menu')).not.toBeNull())
+}
+async function action(label: string) {
+  await menu()
+  const item = [...document.querySelectorAll<HTMLElement>('.connector-header-menu [role="menuitem"]')].find(node => node.textContent?.trim() === label)
+  expect(item, label).toBeDefined()
+  await act(async () => item!.click())
+}
+async function openGroup(id = 'oc_header') {
+  await menu()
+  const item = [...document.querySelectorAll<HTMLElement>('.connector-header-menu__item')].find(node => node.getAttribute('aria-label')?.includes(id))
+  expect(item, 'exact original connection row').toBeDefined()
+  await act(async () => item!.click())
+  await wait(() => expect(document.querySelector('.connector-header-menu')).toBeNull())
+}
+
 async function bind() {
   await f.mount(); await f.journey('existing'); await f.fill('Existing group ID', 'oc_header')
   await act(async () => document.querySelector<HTMLInputElement>('.agent-connector-check input')!.click())
   await f.button('Connect group'); await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Group saved'))
-  await f.button('Close'); await wait(() => expect(trigger()?.textContent).toBe('Group connected'))
+  await f.button('Close'); await wait(() => expect(trigger()?.querySelector('span')?.textContent).toBe('Original team'))
   return (await f.services.connections.bindings!.list({})).bindings[0]!
 }
 
@@ -45,14 +68,14 @@ it('the unbound header remains usable during the first read and unrelated host o
     return f.forward(method, input)
   })
   try {
-    await f.mount(); await wait(() => expect(trigger()?.textContent).toBe('Connect group'))
+    await f.mount(); await wait(() => expect(trigger()?.textContent).toBe('Connections'))
     expect(trigger().getAttribute('aria-busy')).toBe('true'); expect(trigger().disabled).toBe(false)
-    await act(async () => trigger().click())
+    await action('Connect Lark group')
     await wait(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull())
   } finally { await act(async () => { for (const release of pending) release() }); vi.mocked(api.connections.call).mockImplementation(f.forward) }
   await wait(() => expect(document.querySelector<HTMLElement>('[aria-label="Group application"]')?.dataset.value).toBe(f.config.connectionId))
   expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain('Other setup')
-  await close(); await wait(() => expect(trigger()?.textContent).toBe('Connect group'))
+  await close(); await wait(() => expect(trigger()?.textContent).toBe('Connections'))
   expect(writes()).toHaveLength(0)
   expect(Object.keys(useAppStore.getState().connectorRoomIntents)).toEqual(['foreign-session-setup', 'foreign-host-setup'])
   expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep the original draft 中')
@@ -60,22 +83,24 @@ it('the unbound header remains usable during the first read and unrelated host o
 }, 25_000)
 
 it('the header continues its created but unbound group with the original request through close, reopen and a failed binding read', async () => {
-  await f.mount(); await wait(() => expect(trigger()?.textContent).toBe('Connect group'))
-  await act(async () => trigger().click())
+  await f.mount(); await wait(() => expect(trigger()?.textContent).toBe('Connections'))
+  await action('Connect Lark group')
   await wait(() => expect(document.querySelector<HTMLElement>('[aria-label="Group application"]')?.dataset.value).toBe(f.config.connectionId))
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="New group"]')!.click())
   await f.fill('Group name', 'Original header setup'); await f.button('Create group')
   await wait(() => expect(f.calls.find(call => call.method === 'connection.room.create')?.result).toMatchObject({ creation: { state: 'created', externalConversationId: 'oc_header_created' } }))
   const original = f.calls.find(call => call.method === 'connection.room.create')!.input as { operationId: string }
-  await close(); await wait(() => expect(trigger()?.textContent).toBe('Continue group setup'))
-  await act(async () => trigger().click())
+  await close(); await wait(() => expect(trigger()?.textContent).toBe('Connections'))
+  await menu(); expect(document.querySelector('.connector-header-menu')?.textContent).toContain('Continue Lark group setup')
+  const retained = [...document.querySelectorAll<HTMLElement>('.connector-header-menu [role="menuitem"]')].find(node => node.textContent === 'Continue Lark group setup')!
+  await act(async () => retained.click())
   await wait(() => expect(f.calls.some(call => call.method === 'connection.room.inspect' && (call.input as { operationId: string }).operationId === original.operationId)).toBe(true))
   await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('oc_header_created'))
   await close()
   vi.mocked(api.connections.call).mockImplementation(async (method, input) => { if (method === 'connection.binding.ls') throw Error('Controlled binding observation failure'); return f.forward(method, input) })
   await act(async () => invalidateConnectorTarget(target))
-  await wait(() => expect(trigger()?.textContent).toBe('Continue group setup · Status unknown'))
-  await act(async () => trigger().click()); await wait(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull())
+  await wait(() => expect(trigger()?.textContent).toBe('Connections· Status unknown'))
+  await action('Continue Lark group setup'); await wait(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull())
   expect(useAppStore.getState().connectorRoomIntents[original.operationId]?.input).toEqual(original)
   expect(writes().map(call => call.method)).toEqual(['connection.room.create'])
   expect(f.platformCalls.filter(call => call.method?.toUpperCase() === 'POST' && call.url?.endsWith('/chats'))).toHaveLength(1)
@@ -85,27 +110,28 @@ it('the header continues its created but unbound group with the original request
 
 it('bound header status separates saved binding from source-qualified automatic sync without dispatching effects', async () => {
   await bind()
-  expect(trigger().textContent).toBe('Group connected')
+  expect(trigger().querySelector('span')?.textContent).toBe('Original team')
   const off = await api.connections.call('connection.service.configure', { operationId: 'header-sync-off', expectedRevision: 0, service: { enabled: false } })
   const count = writes().length
   await act(async () => observeConnectorService(off.service))
-  expect(trigger().textContent).toBe('Sync off')
-  expect(trigger().title).toContain('Group binding is saved locally.')
-  expect(trigger().title).toContain('Automatic chat sync is off.')
+  expect(trigger().textContent).toBe('Original team· Sync off')
+  expect(trigger().title).toContain('oc_header')
+  expect(trigger().title).toContain('Sync off')
   await act(async () => useAppStore.setState({ connectorServiceObservation: { source: (async () => { throw Error('Other endpoint') }) as typeof api.connections.call, generation: 1, state: { enabled: false, revision: 3 }, issue: '' } }))
-  expect(trigger().textContent).toBe('Group connected')
-  expect(trigger().title).toContain('Automatic chat sync is not confirmed.')
+  expect(trigger().querySelector('span')?.textContent).toBe('Original team')
+  expect(trigger().title).toContain('Sync unknown')
   expect(writes()).toHaveLength(count)
   await f.original.unchanged()
 }, 25_000)
 
 it('the actual Terminal header opens its exact original group and joining section, and only explicit link creation produces its QR', async () => {
   const binding = await bind()
-  expect(trigger().getAttribute('aria-label')).toContain('Feishu group and joining details')
+  expect(trigger().getAttribute('aria-label')).toContain('Feishu')
+  expect(trigger().querySelector('span')?.textContent).toBe('Original team')
   expect(trigger().getAttribute('title')).toContain('oc_header')
   expect(trigger().querySelector('img')).not.toBeNull()
   const writes = f.platformCalls.filter(call => call.method === 'POST').length
-  await act(async () => trigger().click())
+  await openGroup()
   await wait(() => expect(document.querySelector('[aria-label="Joining this group"]')).not.toBeNull())
   const joining = document.querySelector<HTMLElement>('[aria-label="Joining this group"]')!
   expect(joining.closest('details:not([open])'), 'Joining actions are directly available').toBeNull()
@@ -120,7 +146,11 @@ it('the actual Terminal header opens its exact original group and joining sectio
   expect(f.platformCalls.filter(call => call.url?.endsWith('/link'))).toHaveLength(1)
   const originalLink = f.calls.find(call => call.method === 'connection.room.link.create')!
   expect(originalLink.input).toMatchObject({ connectionId: binding.connectionId, externalConversationId: 'oc_header' })
-  await f.button('Close'); await act(async () => trigger().click())
+  await f.button('Close'); await menu()
+  expect(document.querySelector('.connector-header-menu')?.textContent).toContain('Connect Lark group')
+  expect(document.querySelector('.connector-header-menu')?.textContent).not.toContain('Continue Lark group setup')
+  const originalGroup = document.querySelector<HTMLElement>('.connector-header-menu__item')!
+  await act(async () => originalGroup.click())
   await wait(() => expect(document.querySelector('svg[role="img"] title')?.textContent).toBe('Join this group'))
   expect(f.platformCalls.filter(call => call.url?.endsWith('/link'))).toHaveLength(1)
   expect(f.calls.some(call => call.method === 'connection.room.link.inspect' && (call.input as { operationId: string }).operationId === (originalLink.input as { operationId: string }).operationId)).toBe(true)
@@ -134,20 +164,20 @@ it('the header retains the original paused group through observation failure and
   const binding = await bind()
   await api.connections.call('connection.binding.pause', { operationId: 'pause-header-group', bindingId: binding.bindingId, expectedRevision: binding.revision })
   await act(async () => invalidateConnectorTarget(target))
-  await wait(() => expect(trigger().textContent).toBe('Sharing paused'))
+  await wait(() => expect(trigger().textContent).toBe('Original team· Sharing paused'))
   const count = f.calls.filter(call => call.method === 'connection.binding.ls').length
   await act(async () => useAppStore.setState(state => ({ sessions: [...state.sessions, ...Array.from({ length: 200 }, (_, index) => composerSession('unrelated-header-' + index))] })))
   expect(f.calls.filter(call => call.method === 'connection.binding.ls')).toHaveLength(count)
   vi.mocked(api.connections.call).mockImplementation(async (method, input) => { if (method === 'connection.binding.ls') throw new Error('Original audience unavailable'); return f.forward(method, input) })
   const editor = document.querySelector<HTMLElement>('[data-workbench-region-id="original-region"] [role="textbox"]')!
   await act(async () => { editor.focus(); invalidateConnectorTarget(target) })
-  await wait(() => expect(trigger().textContent).toBe('Status unknown'))
+  await wait(() => expect(trigger().textContent).toBe('Original team· Status unknown'))
   expect(trigger().getAttribute('title')).toContain('oc_header'); expect(trigger().disabled).toBe(false)
   expect(document.activeElement).toBe(editor); expect(editor.getAttribute('contenteditable')).toBe('true')
   vi.mocked(api.connections.call).mockImplementation(f.forward)
-  await act(async () => trigger().click())
+  await openGroup()
   await wait(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull())
-  await f.button('Close'); await wait(() => expect(trigger().textContent).toBe('Sharing paused'))
+  await f.button('Close'); await wait(() => expect(trigger().textContent).toBe('Original team· Sharing paused'))
   expect(f.original.create).not.toHaveBeenCalled(); await f.original.unchanged()
 }, 25_000)
 
@@ -157,10 +187,10 @@ it('a multiple-group header selects the named original application instead of th
   await api.connections.call('connection.configure', { operationId: 'header-other-application', expectedRevision: null, connection: { ...first, connectionId: 'other-header-connection', application: { ...first.application, appId: 'other-header-app' } } })
   const other = await api.connections.call('connection.bind', { ...f.original.input, operationId: 'header-other-binding', bindingId: 'other-header-binding', connectionId: 'other-header-connection', externalConversationId: 'oc_other_header' })
   expect(other.state).toBe('applied'); await act(async () => invalidateConnectorTarget(target))
-  await wait(() => expect(trigger().textContent).toBe('2 groups'))
-  await act(async () => { trigger().focus(); trigger().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
-  await wait(() => expect(document.querySelectorAll('.connector-header-menu [role="menuitem"]')).toHaveLength(2))
-  const item = [...document.querySelectorAll<HTMLElement>('.connector-header-menu [role="menuitem"]')].find(node => node.textContent?.includes('oc_other_header'))!
+  await wait(() => expect(trigger().textContent).toBe('Connections · 2'))
+  await menu()
+  await wait(() => expect(document.querySelectorAll('.connector-header-menu__item')).toHaveLength(2))
+  const item = [...document.querySelectorAll<HTMLElement>('.connector-header-menu [role="menuitem"]')].find(node => node.getAttribute('aria-label')?.includes('oc_other_header'))!
   expect(item.textContent).toContain('other-header-app')
   await act(async () => item.click())
   await wait(() => expect(document.querySelector<HTMLElement>('[aria-label="Group application"]')?.dataset.value).toBe('other-header-connection'))
@@ -168,6 +198,128 @@ it('a multiple-group header selects the named original application instead of th
   expect(f.calls.filter(call => call.method === 'connection.binding.inspect').at(-1)?.input).toEqual({ bindingId: 'other-header-binding', revision: 1 })
   expect(f.platformCalls.some(call => call.method === 'POST')).toBe(false)
   expect(f.settings).not.toHaveBeenCalled(); await f.original.unchanged()
+}, 25_000)
+
+it('same-name groups from the supported native domains remain separate platform-qualified original connections', async () => {
+  await bind()
+  const first = (await f.services.connections.list()).connections[0]!.config
+  await api.connections.call('connection.configure', { operationId: 'header-lark-application', expectedRevision: null,
+    connection: { ...first, connectionId: 'lark-header-connection', application: { domain: 'open.larksuite.com', appId: 'lark-header-app' } } })
+  const linked = await api.connections.call('connection.bind', { ...f.original.input, ...target, operationId: 'header-lark-binding', bindingId: 'lark-header-binding', connectionId: 'lark-header-connection', externalConversationId: 'oc_lark_header' })
+  expect(linked.state).toBe('applied')
+  await act(async () => invalidateConnectorTarget(target))
+  await wait(() => expect(trigger().textContent).toBe('Connections · 2'))
+  await menu()
+  await wait(() => expect([...document.querySelectorAll('.connector-header-menu__item strong')].map(node => node.textContent)).toEqual(['Original team', 'Original team']))
+  const items = [...document.querySelectorAll<HTMLElement>('.connector-header-menu__item')]
+  expect(items.map(item => item.querySelector('small')?.textContent)).toEqual(['Feishu · Group connected', 'Lark · Group connected'])
+  expect(items[0]!.getAttribute('aria-label')).toContain('open.feishu.cn')
+  expect(items[1]!.getAttribute('aria-label')).toContain('open.larksuite.com')
+  expect(items[1]!.getAttribute('aria-label')).toContain('lark-header-app')
+  await act(async () => items[1]!.click())
+  await wait(() => expect(f.calls.filter(call => call.method === 'connection.binding.inspect').at(-1)?.input).toEqual({ bindingId: 'lark-header-binding', revision: 1 }))
+  expect(f.original.create).not.toHaveBeenCalled(); await f.original.unchanged()
+}, 25_000)
+
+it('a first unavailable native name keeps the exact original group ID and a working details action', async () => {
+  const binding = await api.connections.call('connection.bind', { ...f.original.input, ...target, operationId: 'header-unavailable-binding', bindingId: 'header-unavailable-binding',
+    connectionId: f.config.connectionId, externalConversationId: 'oc_unavailable_header' })
+  expect(binding.state).toBe('applied')
+  roomRead = async () => { throw Error('Controlled native observation unavailable') }
+  await f.mount()
+  await wait(() => expect(trigger().title).toContain('Group name unconfirmed'))
+  expect(trigger().querySelector('span')?.textContent).toBe('oc_unavailable_header')
+  expect(trigger().disabled).toBe(false)
+  await openGroup('oc_unavailable_header')
+  await wait(() => expect(f.calls.filter(call => call.method === 'connection.binding.inspect').at(-1)?.input).toEqual({ bindingId: 'header-unavailable-binding', revision: 1 }))
+  expect(f.calls.filter(call => call.method === 'connection.bind')).toHaveLength(1)
+  expect(f.original.create).not.toHaveBeenCalled(); await f.original.unchanged()
+}, 25_000)
+
+it('the common connection menu opens automatic sync settings with its original Agent and never changes policy on navigation', async () => {
+  await bind()
+  const before = writes().length
+  await action('Automatic sync settings')
+  await wait(() => expect(document.querySelector('.connector-header-menu')).toBeNull())
+  expect(f.settings).toHaveBeenCalledExactlyOnceWith({ sessionId: 'original-agent', hostId: 'local', agentSessionId: 'original-agent' })
+  expect(writes()).toHaveLength(before)
+  expect(document.querySelector('[role="dialog"]')).toBeNull()
+  expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep the original draft 中')
+  await f.original.unchanged()
+}, 25_000)
+
+it('refreshing original group details and reopening Connections re-read the native name without a binding revision or background polling', async () => {
+  const binding = await bind()
+  await openGroup()
+  roomRead = async () => ({ code: 0, data: { name: 'Renamed group', chat_status: 'normal', chat_mode: 'group' } })
+  await f.button('Refresh group details')
+  await wait(() => expect(document.querySelector('.agent-connector-room-overview')?.textContent).toContain('Renamed group'))
+  await f.button('Close')
+  await wait(() => expect(trigger().querySelector('span')?.textContent).toBe('Renamed group'))
+  expect((await f.services.connections.bindings!.list({})).bindings[0]!.revision).toBe(binding.revision)
+  await wait(() => expect(f.calls.map(call => !!call.result)).not.toContain(false))
+  roomRead = async () => ({ code: 0, data: { name: 'Renamed again', chat_status: 'normal', chat_mode: 'group' } })
+  const before = f.calls.length
+  await act(async () => {})
+  expect(f.calls).toHaveLength(before)
+  await menu()
+  await wait(() => expect(trigger().querySelector('span')?.textContent).toBe('Renamed again'))
+  expect(document.querySelector('.connector-header-menu__item strong')?.textContent).toBe('Renamed again')
+  expect(f.calls.filter(call => call.method === 'connection.bind')).toHaveLength(1)
+  expect(f.original.create).not.toHaveBeenCalled(); await f.original.unchanged()
+}, 25_000)
+
+it('a late native name from a former binding revision cannot replace the current relinked group or its original navigation target', async () => {
+  const binding = await bind(), releases: (() => void)[] = []
+  roomRead = async request => {
+    if (request.url?.endsWith('/chats/oc_header')) {
+      await new Promise<void>(resolve => releases.push(resolve))
+      return { code: 0, data: { name: 'Former group late reply', chat_status: 'normal', chat_mode: 'group' } }
+    }
+    return { code: 0, data: { name: 'Current group', chat_status: 'normal', chat_mode: 'group' } }
+  }
+  try {
+    const paused = await api.connections.call('connection.binding.pause', { operationId: 'header-delay-old-name', bindingId: binding.bindingId, expectedRevision: binding.revision })
+    expect(paused.state).toBe('applied')
+    await act(async () => invalidateConnectorTarget(target))
+    await wait(() => expect(releases.length).toBeGreaterThan(0))
+    const relink = await api.connections.call('connection.binding.relink', { ...f.original.input, ...target, operationId: 'header-current-name', bindingId: binding.bindingId,
+      expectedRevision: 2, connectionId: binding.connectionId, externalConversationId: 'oc_current_header' })
+    expect(relink.state).toBe('applied')
+    await act(async () => invalidateConnectorTarget(target))
+    await wait(() => expect(trigger().querySelector('span')?.textContent).toBe('Current group'))
+    await act(async () => releases.forEach(release => release()))
+    await wait(() => expect(document.querySelectorAll('.connector-sharing__group')).toHaveLength(2))
+    expect([...document.querySelectorAll('.connector-sharing__group')].map(node => node.textContent)).toEqual(['Shared group · Current group', 'Shared group · Current group'])
+    expect(trigger().querySelector('span')?.textContent).toBe('Current group')
+    expect(trigger().title).toContain('oc_current_header'); expect(trigger().title).not.toContain('oc_header ·')
+    await openGroup('oc_current_header')
+    await wait(() => expect(f.calls.filter(call => call.method === 'connection.binding.inspect').at(-1)?.input).toEqual({ bindingId: binding.bindingId, revision: 3 }))
+    expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain('Former group late reply')
+    expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep the original draft 中')
+    await f.original.unchanged()
+  } finally { await act(async () => releases.forEach(release => release())) }
+}, 25_000)
+
+it('an unavailable or mismatched room observation keeps the exact relationship usable and never substitutes another application name', async () => {
+  await bind()
+  vi.mocked(api.connections.call).mockImplementation(async <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
+    const result = await f.forward(method, params)
+    if (method === 'connection.room.get') {
+      const value = result as ConnectionResultMap['connection.room.get']
+      return { ...value, connectionId: 'foreign-connection', application: { ...f.config.application, appId: 'foreign-app' }, room: value.room ? { ...value.room, name: 'Foreign group' } : null } as ConnectionResultMap[M]
+    }
+    return result
+  })
+  const binding = (await f.services.connections.bindings!.list({})).bindings[0]!
+  await api.connections.call('connection.binding.pause', { operationId: 'header-metadata-unavailable', bindingId: binding.bindingId, expectedRevision: binding.revision })
+  await act(async () => invalidateConnectorTarget(target))
+  await wait(() => expect(trigger().title).toContain('Group name unavailable'))
+  expect(trigger().querySelector('span')?.textContent).toBe('Original team')
+  expect(trigger().disabled).toBe(false); expect(trigger().textContent).not.toContain('Foreign group')
+  await openGroup()
+  await wait(() => expect(f.calls.filter(call => call.method === 'connection.binding.inspect').at(-1)?.input).toEqual({ bindingId: binding.bindingId, revision: 2 }))
+  expect(f.original.create).not.toHaveBeenCalled(); await f.original.unchanged()
 }, 25_000)
 
 it('an open confirmed join QR retires at its original expiry while keeping the receipt and explicit regeneration', async () => {
