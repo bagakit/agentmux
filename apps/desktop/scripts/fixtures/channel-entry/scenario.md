@@ -1,0 +1,5 @@
+# Common Channel entry
+
+Production WorkspaceWorkbench, Agent Connections header/menu/dialog, Settings contributions and saved pane with production CSS. Native Electron pointer/text entry operates the original controls. Controlled public typed DTOs describe one Discord application, visible channel and preview binding; no account, token, native permission, live process or installation is asserted. Real IPC/Host/native SDK/binding and actual App route are verified separately in channel-entry-consumer.test.tsx.
+
+Read docs/design/presentation/conversation-mode.md (Connections header and group task), docs/design/behavior/conversation-mode.md (common channel protocol) and the owning Settings density. Capture unbound menu, supported existing-channel task and accurate unavailable creation at wide/narrow widths, bound platform icon/menu, original group details and exact saved platform Settings. A missing exact local identity stays unknown with its original target, then a real list refresh recovers that same identity. Keep the original draft; selecting a group does not approve any member.
