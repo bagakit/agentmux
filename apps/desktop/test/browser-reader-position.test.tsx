@@ -75,7 +75,7 @@ function rectangle(element: HTMLElement, width: number, height: number, x = 0, y
   vi.spyOn(element, 'getBoundingClientRect').mockImplementation(() => new DOMRect(x, y, width, height))
 }
 function PortalComment({ pane, host }: { pane: HTMLElement; host: HTMLElement }) {
-  const opinion = useBrowserContextualComposer(operation.browserId, operation, true)
+  const opinion = useBrowserContextualComposer(operation.browserId, { hostId: 'local', agentSessionId: 'agent-1' }, operation, true)
   return <>{createPortal(<button onClick={event => opinion.open(event.currentTarget,
     { operationId: 'historical-operation', sequence: 2 }, pane)}>Comment on step 2</button>, host)}{opinion.dialog}</>
 }
