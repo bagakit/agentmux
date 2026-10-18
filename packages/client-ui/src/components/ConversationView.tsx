@@ -1,7 +1,7 @@
 import { ConversationCoverage } from './ConversationCoverage.js'
 import { CapturedProcessRecord } from './CapturedProcessRecord.js'
 import { ConversationOriginalRecords, ConversationOriginalRecordContent } from './ConversationOriginalRecords.js'
-import { useConversationRecordLayout } from '../lib/use-conversation-record-layout.js'
+import { useConversationRecordLayout, type ConversationPresentationPort } from '../lib/use-conversation-record-layout.js'
 import type { AgentCapabilities, AgentMuxRunRef, AgentSessionHistorySource, AgentSessionHistoryItem, AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
 import type { ConversationRecord } from '../lib/conversation-records.js'
 import { memo, useEffect, useMemo, useState, type ReactNode } from 'react'
@@ -30,6 +30,7 @@ export type ConversationReadActivity = {
 }
 
 type Props = ReadingProps & {
+  presentation?: ConversationPresentationPort
   readActivity?: ConversationReadActivity
   questionReplyRoute?: AgentCapabilities['asyncQuestionReply']
   questionReplyTarget?: { source: AgentSessionHistorySource; run: AgentMuxRunRef } | undefined
@@ -69,12 +70,17 @@ type Props = ReadingProps & {
 
 /** Continuous source-order reading over the committed page; no reader or independent body cache. */
 export const ConversationView = memo(function ConversationView({
-  page, timeline, records: acceptedRecords, originalRecords: acceptedOriginals, coverage, onLocateRecord, renderCapturedRecord, expandSubmissions = false, readActivity, questionAnswerContext, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary, renderMessageActions, renderRecordActions, messageIdForRecord, showSource = false, insertions, questionReplyRoute, questionReplyTarget, questionReplyContext, questionDraftNotice, onOpenQuestionTerminal, questionReplyState, questionReplyDraft, onQuestionDraftChange, onQuestionReply, renderQuestionNotice, ...reading
+  presentation, page: acceptedPage, timeline, records: acceptedRecords, originalRecords: acceptedOriginals, coverage, onLocateRecord, renderCapturedRecord, expandSubmissions = false, readActivity, questionAnswerContext, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary: acceptedBoundary, renderMessageActions, renderRecordActions, messageIdForRecord, showSource = false, insertions: acceptedInsertions, questionReplyRoute, questionReplyTarget, questionReplyContext, questionDraftNotice, onOpenQuestionTerminal, questionReplyState, questionReplyDraft, onQuestionDraftChange, onQuestionReply, renderQuestionNotice, ...reading
 }: Props) {
-  const projection = useMemo(() => ({ records: acceptedRecords, originalRecords: acceptedOriginals ?? acceptedRecords,
-    coverage: coverage ?? acceptedRecords[0]?.coverage ?? [] }), [acceptedRecords, acceptedOriginals, coverage])
-  const layout = useConversationRecordLayout(projection.records, projection.originalRecords, JSON.stringify([reading.executionHostId, sessionId, timeline?.stream?.epoch]))
-  const describedRecords = layout.records
+  const frame = useMemo(() => ({ records: acceptedRecords, originalRecords: acceptedOriginals ?? acceptedRecords,
+    coverage: coverage ?? acceptedRecords[0]?.coverage ?? [], page: acceptedPage, recordBoundary: acceptedBoundary, insertions: acceptedInsertions }),
+    [acceptedRecords, acceptedOriginals, coverage, acceptedPage, acceptedBoundary, acceptedInsertions])
+  const sourceKey = JSON.stringify([reading.executionHostId, sessionId, timeline?.stream?.epoch])
+  const boundaryRecord = acceptedRecords.find(record => record.original.kind === 'native' && record.rawId === acceptedBoundary?.beforeRecordId)
+  const layout = useConversationRecordLayout(frame, sourceKey, { ...(boundaryRecord ? { beforeRecordId: boundaryRecord.presentationKey ?? boundaryRecord.id } : {}),
+    ...(acceptedInsertions ? { anchors: acceptedInsertions } : {}), active: reading.active !== false, ...(presentation ? { presentation, intent: presentation.intent } : {}) })
+  const { records: describedRecords, page, recordBoundary, insertions } = layout
+  const projection = layout
   const choiceScope = JSON.stringify([reading.executionHostId, sessionId, timeline?.stream?.epoch])
   // Only local disclosure choices survive coalescence; no message or relation facts are retained here.
   const [submissionChoices, setSubmissionChoices] = useState<{ scope: string; values: ReadonlyMap<string, boolean> }>({ scope: choiceScope, values: new Map() })
@@ -97,7 +103,6 @@ export const ConversationView = memo(function ConversationView({
   }
   if (page && page.agentSessionId !== sessionId) return null
   if (describedRecords.length === 0 && !insertions?.length && projection.coverage.length === 0) return null
-  const descriptions = new Map(describedRecords.filter(record => record.original.kind === 'native').map(record => [record.rawId, record]))
   const originals = new Map(layout.originalRecords.map(record => [record.records![0]!.id, record]))
   const continuedProgress = new Set<string>()
   let previousProgress: { author: string; turn?: string } | undefined
@@ -117,20 +122,13 @@ export const ConversationView = memo(function ConversationView({
     .map(question => [question.recordId, question]))
   const locatedRecord = locatedMessageKey ? describedRecords.find(record => conversationMessageSourceKey(sessionId, record.source) === locatedMessageKey
     || record.records?.some(source => originals.has(source.id) && conversationMessageSourceKey(sessionId, originals.get(source.id)!.source) === locatedMessageKey)) : undefined
-  const nativeRecords = describedRecords.flatMap(record => record.original.kind === 'native' ? [record.original.item] : [])
-  const capturedInsertions: ConversationRecordInsertion[] = []
-  let beforeRecordId: string | undefined
-  for (let index = describedRecords.length - 1; index >= 0; index--) {
-    const record = describedRecords[index]!
-    if (record.original.kind === 'native') { beforeRecordId = record.rawId; continue }
-    capturedInsertions.push({ key: record.presentationKey ?? record.id, ...(beforeRecordId === undefined ? {} : { beforeRecordId }),
-      role: record.role === 'process' ? 'process' : record.role === 'observation' ? 'anchor' : 'message', recordIds: [record.rawId],
-      content: disclosure => <div data-conversation-layout-key={record.presentationKey ?? record.id}>{renderCaptured(record, disclosure, true)}{renderOriginals(record)}</div> })
-  }
-  capturedInsertions.reverse()
-  const orderedInsertions = [...(insertions ?? []), ...capturedInsertions]
-
-  function renderCaptured(record: ConversationRecord, disclosure?: ConversationProcessProps['disclosure'], feed = false): ReactNode {
+  function renderCaptured(record: ConversationRecord, canonicalDisclosure?: ConversationProcessProps['disclosure'], feed = false): ReactNode {
+    // Source leaves keep their raw payload API; all stored choices use the canonical key.
+    const key = record.presentationKey ?? record.id
+    const value = canonicalDisclosure?.steps.get(key)
+    const disclosure = canonicalDisclosure ? { ...canonicalDisclosure, steps: new Map(value === undefined ? [] : [[record.rawId, value]]),
+      onStepExpandedChange: (_id: string, open: boolean) => canonicalDisclosure.onStepExpandedChange(key, open),
+      onStepsPresented: () => canonicalDisclosure.onStepsPresented?.([key]) } : undefined
     const choiceKey = record.records?.find(source => source.original.item === record.original.item)?.id ?? record.id
     const target = record.sources?.unreadSubmissionTarget
     const request = readActivity?.sourceRead
@@ -176,10 +174,12 @@ export const ConversationView = memo(function ConversationView({
   function renderOriginal(record: ConversationRecord): ReactNode {
     return record.original.kind === 'native' ? renderNativeRecord(record.original.item, undefined, record) : renderCaptured(record)
   }
-  const renderRecord: ConversationRecordRenderer = (item, wrapBody) => renderNativeRecord(item, wrapBody)
-  function renderNativeRecord(item: AgentSessionHistoryItem, wrapBody?: (body: ReactNode) => ReactNode, original?: ConversationRecord): ReactNode {
+  const renderRecord: ConversationRecordRenderer = (record, wrapBody, disclosure) => record.original.kind === 'native'
+    ? renderNativeRecord(record.original.item, wrapBody, undefined, record)
+    : <div data-conversation-layout-key={record.presentationKey ?? record.id}>{renderCaptured(record, disclosure, true)}{renderOriginals(record)}</div>
+  function renderNativeRecord(item: AgentSessionHistoryItem, wrapBody?: (body: ReactNode) => ReactNode, original?: ConversationRecord, canonical?: ConversationRecord): ReactNode {
       if (!page) return null
-      const record = original ?? descriptions.get(item.id)!
+      const record = original ?? canonical!
       const recordId = record.id
       const question = questions.get(item.id)
       const questionAttempt = question && questionReplyState && question.turnId ? questionReplyState({ source: question.source, turnId: question.turnId, recordId: question.recordId }) : undefined
@@ -240,20 +240,17 @@ export const ConversationView = memo(function ConversationView({
 
   }
   return <section ref={layout.root} className="conversation-native-thread" aria-label="Conversation"
-    data-native-provider={page?.source.providerId} data-native-source={orderedInsertions.length || !page ? undefined : JSON.stringify([page.source.providerId, page.source.nativeSessionId])}>
+    data-native-provider={page?.source.providerId} data-native-source={describedRecords.some(record => record.original.kind === 'captured') || insertions?.length || !page ? undefined : JSON.stringify([page.source.providerId, page.source.nativeSessionId])}>
     <ConversationCoverage coverage={projection.coverage} {...(onLocateRecord ? { onLocate: onLocateRecord } : {})} />
-    {layout.held ? <p className="conversation-metrics__notice" role="status">保留选区，取消选择后更新已确认的消息关系。</p> : null}
+    {layout.held ? <p className="conversation-metrics__notice" role="status">{layout.reason === 'anchor' ? '保留当前阅读位置，移开后更新消息。' : layout.reason === 'focus' ? '保留当前焦点，移开后更新消息。' : '保留选区，取消选择后更新已确认的消息关系。'}</p> : null}
     {showSource && page ? <div className="conversation-native-thread__source" title={`Native session ${page.source.nativeSessionId}`}>
       <span>{page.source.providerId} · Native conversation</span>
       <span>{describedRecords.length} {describedRecords.length === 1 ? 'record' : 'records'} · Current window</span>
     </div> : null}
-    <ConversationRecordSequence items={nativeRecords}
-      sourceKey={JSON.stringify([reading.executionHostId, sessionId, page?.sourceHostId, page?.source.providerId, page?.source.nativeSessionId])}
-      locatedNativeId={locatedRecord?.original.kind === 'native' ? locatedRecord.rawId : undefined}
-      locatedInsertionKey={locatedRecord?.original.kind === 'captured' ? locatedRecord.presentationKey ?? locatedRecord.id : undefined}
+    <ConversationRecordSequence records={describedRecords} sequence={layout.sequence} sourceKey={sourceKey}
+      locatedRecordId={locatedRecord ? locatedRecord.presentationKey ?? locatedRecord.id : undefined}
       {...(page ? { nativeSourceKey: JSON.stringify([page.source.providerId, page.source.nativeSessionId]) } : {})}
-      insertions={orderedInsertions}
-      nativeRoles={new Map(describedRecords.filter(record => record.original.kind === 'native' && record.role).map(record => [record.rawId, record.role!]))}
+      {...(insertions ? { insertions } : {})}
       renderRecord={renderRecord} {...(renderProcess ? { renderProcess } : {})} {...(recordBoundary ? { recordBoundary } : {})} />
   </section>
 })

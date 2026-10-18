@@ -1,4 +1,4 @@
-import { canReplaceCapturedWindow } from '@agentmux/client-ui/captured-conversation-page'
+import type { ConversationPresentationController } from '@agentmux/client-ui/use-conversation-record-layout'
 import { MessageDeliveryFailure } from '@agentmux/client-ui/components/MessageDeliveryFailure'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { mobileQuestionReplyState, reconcileMobileQuestionReplies, submitMobileQuestionReply } from './question-replies'
@@ -11,7 +11,6 @@ import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentSessionUserMessage } from '@agentmux/core'
 import type { InputHistoryRead } from '@agentmux/client-ui/use-agent-input-history'
 import { inputHistoryText } from '@agentmux/client-ui/input-history-text'
-import { protectsConversationWindow } from '@agentmux/client-ui/conversation-reading-anchor'
 import {
   AgentComposer, AgentInteractionCard, ClientUiProvider, NativeProcessObservation, ConversationView,
   createSpeakerResolver,
@@ -46,8 +45,10 @@ export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
 export function MobileConversationSurface({ client, agentSessionId, connection, platform, onAttach, onShowTerminal, visible = true, displayName,
   openWorkspaceFile, readPastedImage, openHttpLink }: MobileConversationSurfaceProps) {
   const feed = useRef<HTMLDivElement>(null), follow = useRef(initFollowState())
-  const reading = useHostedConversation(client, agentSessionId, visible && connection.state === 'connected', (snapshot, displayed) => canReplaceCapturedWindow(feed.current, snapshot, !follow.current.following, displayed),
-    (page, previous) => !protectsConversationWindow(feed.current, page, !follow.current.following, previous ?? undefined, { current: previous }))
+  const presentation = useRef<ConversationPresentationController | null>(null)
+  const presentationIntent = useRef(0)
+  const reading = useHostedConversation(client, agentSessionId, visible && connection.state === 'connected',
+    frame => presentation.current?.canPresent(frame, { preserveAnchor: !follow.current.following }) !== false)
   const [jump, setJump] = useState(false)
   useEffect(() => { follow.current = initFollowState(); setJump(false) }, [agentSessionId])
   useLayoutEffect(() => {
@@ -258,14 +259,14 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         {(reading.page?.nextCursor || reading.capturedHasMore) && <button className="mobile-reading-action" disabled={reading.reading} onClick={() => { follow.current.following = false; void reading.older() }}>更早消息</button>}
         {reading.hasNewer && <button className="mobile-reading-action" disabled={reading.reading} onClick={() => { void reading.newer() }}>较新消息</button>}
         {(jump || reading.newerAvailable || reading.olderWindow) && <button className="mobile-reading-action mobile-reading-latest" onClick={() => {
-          follow.current = initFollowState(); setJump(false)
+          follow.current = initFollowState(); presentationIntent.current++; setJump(false)
           if (reading.olderWindow || reading.newerAvailable) void reading.refresh()
           else if (feed.current) feed.current.scrollTop = feed.current.scrollHeight
         }}>{reading.newerAvailable ? '有新回复 · 回到最新' : '回到最新'}</button>}
         {workingObservedAt !== undefined ? <p className="mobile-active-state" role="status" data-activity-current={currentActivity}
           title={`最后观察：${new Date(workingObservedAt).toLocaleString()}`}><SemanticIcon name="status.presence-working" size={5} />{currentActivity ? '正在执行' : '最近观察：执行中'}</p> : null}
         {agentSessionId ? <>
-          <ConversationView page={reading.page} readActivity={reading.readActivity} expandSubmissions={Boolean(reading.readError)} timeline={reading.timeline ?? undefined} questionAnswerContext={reading.answerContext} records={reading.projection?.records ?? []} originalRecords={reading.projection?.originalRecords ?? []} coverage={reading.projection?.timeline.coverage ?? []} showInputSource={false} sessionId={agentSessionId} describeSpeaker={describeSpeaker}
+          <ConversationView presentation={{ controller: presentation, pending: reading.held, onRelease: reading.acceptHeld, intent: presentationIntent.current }} page={reading.page} readActivity={reading.readActivity} expandSubmissions={Boolean(reading.readError)} timeline={reading.timeline ?? undefined} questionAnswerContext={reading.answerContext} records={reading.projection?.records ?? []} originalRecords={reading.projection?.originalRecords ?? []} coverage={reading.projection?.timeline.coverage ?? []} showInputSource={false} sessionId={agentSessionId} describeSpeaker={describeSpeaker}
             renderProcess={props => <NativeProcessObservation {...props} compact />}
             questionReplyState={target => {
               const state = mobileQuestionReplyState(local, agentSessionId, target), original = state?.original
