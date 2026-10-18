@@ -100,7 +100,7 @@ export function useConversationRecordLayout<T extends ConversationPresentationFr
   const incoming = useMemo(() => placements(frame, sequence), [frame.records, frame.originalRecords, sequence])
   const changedFrame = prior !== null && prior.frame !== frame
   const document = root.current?.ownerDocument
-  const preserve = Boolean(active && prior && Object.is(prior.intent, intent))
+  const preserve = Boolean(active && prior && Object.is(prior.intent, intent) && !geometry?.following())
   const reason = prior && active && changedFrame ? protection(root.current, prior.placements, incoming, preserve) : null
   const held = reason !== null
   const accepted = held && prior ? prior : { source: sourceKey, frame, sequence, placements: incoming, intent }
@@ -116,7 +116,7 @@ export function useConversationRecordLayout<T extends ConversationPresentationFr
           || record.original.kind === 'native' && record.rawId === options?.beforeRecordId)
         const next = projectConversationRecordSequence(candidate.records, sourceKey, accepted.sequence.groups,
           boundary ? conversationPresentationKey(boundary) : undefined, anchors)
-        pendingReason.current = protection(root.current, accepted.placements, placements(candidate, next), options?.preserveAnchor !== false)
+        pendingReason.current = protection(root.current, accepted.placements, placements(candidate, next), options?.preserveAnchor !== false && !geometry?.following())
         return pendingReason.current === null
       }
     }
