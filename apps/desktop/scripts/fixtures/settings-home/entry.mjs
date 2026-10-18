@@ -1,6 +1,9 @@
 import { visibleSettingsSections } from '../../../src/renderer/src/components/settings/settings-modules'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
+import { installLarkPreview } from './lark-preview'
+
+const larkPreview = installLarkPreview()
 
 // Supply explicit valid fixture directories before the original App initializes.
 // The browser-only sample may contain logical labels, which are not durable paths.
@@ -35,6 +38,7 @@ window.settingsHomeProbe = {
   catalog: visibleSettingsSections('').map(({ id, title, group }) => ({ id, title, group })),
   errors: [],
   mobileConnectionProbe,
+  larkPreview,
   ready: true
 }
 window.addEventListener('error', event => window.settingsHomeProbe.errors.push(event.message))

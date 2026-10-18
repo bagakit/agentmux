@@ -236,11 +236,133 @@ app.whenReady().then(async () => {
     }
     await resize(1440,940)
   }
+  const larkInteractions = async (mutation = false) => {
+    const pane = '[data-settings-pane="lark"]', bot = '[data-connection="settings-preview-bot"] .connector-record__open'
+    const calls = () => read('window.settingsHomeProbe.larkPreview.calls')
+    const noWrites = async (start, label) => {
+      const recent = (await calls()).slice(start)
+      assert.equal(recent.some(call=>call.effect||['connection.setup.advance','connection.setup.begin','connection.enrollment.begin','connection.enrollment.advance'].includes(call.method)),false,'Lark navigation preserves a read-only connector boundary: '+label)
+      assert.equal(await read('window.settingsHomeProbe.larkPreview.credentialWrites.length'),0,'Lark navigation never stores a credential')
+      result.interactions.push({kind:'lark-read-only-navigation',label,calls:recent.length,implicitConnectorWrites:0})
+    }
+    const openSetup = async () => {
+      await click(node(bot)); await until(`${node('[data-management-open]')}?.checkVisibility()`)
+      await click(node('[data-management-open]'))
+      await until(`${node('[data-management-original="settings-preview-setup"]')}?.checkVisibility()||${node('[data-management-setup]')}?.dataset.managementStage==='confirmed'`)
+      if (await read(`${node('[data-management-original="settings-preview-setup"]')}?.checkVisibility()??false`)) await click(node('[data-management-original="settings-preview-setup"]'))
+      await until(`${node('[data-management-setup]')}?.dataset.managementStage==='confirmed'&&!!${node('[data-guided-management]')}`)
+    }
+    const openIndividual = async () => {
+      if (!await read(`${node('[data-guided-management]')}.open`)) await click(node('[data-guided-management] > summary'))
+      await until(`${node('[data-surface-mode="add-application-permissions"]')}?.checkVisibility()`)
+    }
+    for (const [width,height] of mutation?[[1440,940]]:[[1440,940],[500,840],[900,540]]) for (const color of mutation||width===900?['dark']:['dark','light']) {
+      await resize(width,height); await nav('lark'); await theme(color)
+      const start=(await calls()).length,label=`${width}-${height}-${color}`
+      await until(`${node(bot)}?.checkVisibility()`)
+      await captureSegments('lark-library-'+label,'lark',color)
+      await click(node('[data-enrollment-existing]'))
+      await fill('[aria-label="Connection app ID"]','cli_preview_draft')
+      await fill('[aria-label="Connection app secret"]','controlled-preview-secret')
+      const options=`${node(pane+' [aria-label="Connection name"]')}.closest('details')`
+      if (!await read(`${options}.open`)) await click(`${options}.querySelector('summary')`)
+      await fill('[aria-label="Connection name"]','Research assistant draft')
+      await nav('overview'); await nav('lark')
+      assert.equal(await read(`${node('[aria-label="Connection app ID"]')}.value`),'cli_preview_draft','Lark credential draft survives normal navigation')
+      assert.equal(await read(`${node('[aria-label="Connection name"]')}.value`),'Research assistant draft')
+      await captureSegments('lark-credentials-'+label,'lark',color)
+      await click(node(pane+' [data-connection-editor] .connector-back'))
+      await click(node(bot)); await captureSegments('lark-saved-'+label,'lark',color)
+      await click(node(pane+' [data-connection-editor] .connector-back'))
+      await openSetup(); await captureSegments('lark-setup-'+label,'lark',color)
+      await click(node('[data-configuration-progress] > summary'))
+      await captureSegments('lark-setup-progress-'+label,'lark',color)
+      await click(node('[data-configuration-progress] > summary'))
+      await openIndividual()
+      await click(node('[data-surface-mode="add-application-permissions"]'))
+      await noWrites(start,'select permissions')
+      await until(`${node('[data-management-permissions]')}?.checkVisibility()`)
+      await captureSegments('lark-permissions-'+label,'lark',color)
+      const exact=`${node('[data-management-permissions]')}.querySelector('details')`
+      if (!await read(`${exact}.open`)) await click(`${exact}.querySelector('summary')`)
+      await captureSegments('lark-permissions-detail-'+label,'lark',color)
+      await click(node('[data-surface-mode="enable-messaging"]'))
+      await click(node('[data-management-publication-open]'))
+      await until(`${node('[data-management-publication]')}?.checkVisibility()`)
+      await fill('[aria-label="Publication release notes"]','Enable conversations for the research team.')
+      await captureSegments('lark-publication-'+label,'lark',color)
+      await click(node('[data-publication-review-details] > summary'))
+      await captureSegments('lark-publication-detail-'+label,'lark',color)
+      await click(node('[data-management-back]'))
+      await until(`${node(pane+' [data-connection-editor]')}?.checkVisibility()`)
+      assert.ok(await read(`${node('[data-connection-editor]')}.textContent.includes('cli_preview_conversations')`),'Lark return preserves the exact saved application')
+      await click(node(pane+' [data-connection-editor] .connector-back'))
+      await noWrites(start,'return to original bot library')
+      await captureSegments('lark-return-'+label,'lark',color)
+    }
+    await resize(1440,940); await theme('dark'); await nav('lark')
+    const beforeService=(await calls()).filter(call=>call.method==='connection.service.configure').length
+    await choose('[aria-label="Enable external chat sync"]')
+    assert.equal((await calls()).filter(call=>call.method==='connection.service.configure').length,beforeService,'Lark service draft does not save')
+    await captureSegments('lark-service-draft','lark','dark')
+    await click(node('[data-connector-service-save]'))
+    await until(`${node('[data-connector-service-state]')}?.dataset.connectorServiceState==='on'`)
+    assert.equal((await calls()).filter(call=>call.method==='connection.service.configure').length,beforeService+1,'Only explicit service Save configures the controlled service')
+    assert.equal((await calls()).filter(call=>call.method==='connection.configure').length,0,'Global sync does not rewrite individual bots')
+    await captureSegments('lark-service-saved','lark','dark')
+    await openSetup(); await openIndividual(); await click(node('[data-surface-mode="add-application-permissions"]'))
+    const beforeReview=(await calls()).filter(call=>call.effect).length
+    await click(node('[data-permission-review]'))
+    await until(`${node('[data-permission-review]')}?.disabled===false&&!!${node('[data-permission-add]')}`)
+    assert.equal((await calls()).filter(call=>call.effect).length,beforeReview,'Permission review reads without requesting permissions')
+    const reviewed=(await calls()).filter(call=>call.method==='connection.setup.advance').slice(-2)
+    assert.deepEqual(reviewed.map(call=>call.actionKind),['read-permission-catalog','read-application-permissions'])
+    await click(node('[data-permission-add]'))
+    await until(`!${node('[data-permission-add]')}&&${node('[data-permission-review]')}?.disabled===false`)
+    const added=(await calls()).filter(call=>call.effect).at(-1)
+    assert.equal(added.actionKind,'add-application-permissions');assert.equal(added.input.operationId,'settings-preview-setup')
+    await captureSegments('lark-permissions-requested','lark','dark')
+    await click(node('[data-surface-mode="enable-messaging"]'));await click(node('[data-management-publication-open]'))
+    await fill('[aria-label="Publication release notes"]','Enable conversations for the research team.')
+    const beforePublication=(await calls()).filter(call=>call.effect).length
+    await click(node('[data-publication-review]'))
+    await until(`${node('[data-publication-confirm]')}?.disabled===false`)
+    assert.equal((await calls()).filter(call=>call.effect).length,beforePublication,'Publication review does not create or submit a version')
+    await captureSegments('lark-publication-reviewed','lark','dark')
+    await click(node('[data-publication-confirm]'))
+    await until(`${node('[data-publication-review-created]')}?.checkVisibility()`)
+    const created=(await calls()).filter(call=>call.effect).at(-1)
+    assert.equal(created.actionKind,'create-application-version');assert.equal(created.input.operationId,'settings-preview-setup')
+    assert.equal((await calls()).some(call=>call.actionKind==='submit-application-version'),false,'Creating a version does not submit it')
+    await captureSegments('lark-publication-created','lark','dark')
+    await click(node('[data-management-back]'));await click(node(pane+' [data-connection-editor] .connector-back'))
+    await click(node('[data-enrollment-existing]'))
+    await fill('[aria-label="Connection app ID"]','cli_preview_explicit_save')
+    await fill('[aria-label="Connection app secret"]','controlled-preview-secret')
+    await click(node('[data-connection-save]'))
+    await until(`${node('[data-management-open]')}?.checkVisibility()&&${node('[data-connection-editor]')}.textContent.includes('cli_preview_explicit_save')`)
+    const configured=(await calls()).filter(call=>call.method==='connection.configure')
+    assert.equal(configured.length,1,'Only explicit bot Save configures a connection')
+    const credentialWrites=await read('window.settingsHomeProbe.larkPreview.credentialWrites')
+    assert.equal(credentialWrites.length,1,'Explicit bot Save stores one controlled credential')
+    assert.equal(credentialWrites[0].operationId,configured[0].input.operationId+':credential','Credential save keeps the exact original configure intent')
+    assert.equal(configured[0].input.connection.application.appId,'cli_preview_explicit_save')
+    assert.equal((await calls()).filter(call=>call.effect).length,4,'Only the four explicitly confirmed controlled effects were requested')
+    const savedStages=await read(`Array.from(${node('[data-connection-editor]')}.querySelectorAll('[data-connection-stage]')).map(stage=>stage.dataset.state)`)
+    assert.deepEqual(savedStages,['unknown','unknown','unknown','unknown'],'Saving bot credentials does not confirm connection or delivery')
+    await captureSegments('lark-bot-saved','lark','dark')
+    await click(node(pane+' [data-connection-editor] .connector-back'))
+    result.lark={boundary:await read('window.settingsHomeProbe.larkPreview.boundary'),calls:await calls(),credentialWrites:await read('window.settingsHomeProbe.larkPreview.credentialWrites'),
+      untested:['external sign-in','real platform effects','keychain persistence','external message delivery','version submission','Mote association writes','local bot removal']}
+    result.interactions.push({kind:'lark-explicit-actions',serviceSaves:1,botSaves:1,permissionRequests:1,versionCreations:1,implicitConnectorWrites:0})
+  }
   const pageInteractions = async id => {
     const pane = `[data-settings-pane="${id}"]`
     const saves = await read('window.settingsHomeProbe.saves.length')
     const before = result.interactions.length
-    if (id==='profile') {
+    if (id==='lark') {
+      await larkInteractions()
+    } else if (id==='profile') {
       await fill('[aria-label="Display name"]','Alex')
       await fill('[aria-label="About you and how you work"]','Prefer concise decisions with one concrete example.')
       await nav('overview'); await nav(id)
@@ -557,7 +679,7 @@ app.whenReady().then(async () => {
       await capture('toolkit-new-draft',id,'dark','new custom draft')
     }
     assert.equal(await read('window.settingsHomeProbe.saves.length'),saves,'Page interaction does not implicitly save configuration')
-    if (id!=='lark') assert.ok(result.interactions.length>before,'Every reviewed page consumes actual input: '+id)
+    assert.ok(result.interactions.length>before,'Every reviewed page consumes actual input: '+id)
     result.interactions.push({kind:'page-interactions-complete',page:id,actions:result.interactions.length-before,implicitSaves:0})
   }
   const disclosureGeometry = async () => {
@@ -600,6 +722,7 @@ app.whenReady().then(async () => {
     assert.equal(await read('document.querySelectorAll("[data-settings-pane]").length'),0,'Home does not mount configuration editors')
     assert.deepEqual(await read('Array.from(document.querySelectorAll("[data-settings-directory] [data-settings-section]")).map(n=>n.dataset.settingsSection)'),catalog.map(item=>item.id))
     if (mode==='navigation') { await disclosureGeometry(); result.passed=true; return }
+    if (mode==='lark-navigation') { await nav('lark'); await larkInteractions(true); result.passed=true; return }
     if (mode==='provider-scroll') { await providerScroll(); result.passed=true; return }
     if (mode==='takeover-scroll') { await theme('dark'); await takeoverReachability(); result.passed=true; return }
     if (mode==='preview-return') {
@@ -782,6 +905,7 @@ app.whenReady().then(async () => {
       try { fs.writeFileSync(path.join(evidence,'failure.png'),(await bounded(win.webContents.capturePage(undefined,{stayHidden:true}),'failure capture')).toPNG()) } catch {}
       result.diagnostic = await read('({errors:window.settingsHomeProbe?.errors,text:document.querySelector(".settings-page")?.innerText})').catch(String)
       result.events = await read('window.settingsHomeProbe?.events').catch(String)
+      result.lark = await read('({boundary:window.settingsHomeProbe?.larkPreview?.boundary,calls:window.settingsHomeProbe?.larkPreview?.calls,credentialWrites:window.settingsHomeProbe?.larkPreview?.credentialWrites})').catch(String)
     }
   } finally {
     fs.writeFileSync(path.join(evidence,'render.json'),JSON.stringify(result,null,2))
