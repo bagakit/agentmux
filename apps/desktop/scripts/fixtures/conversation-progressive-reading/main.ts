@@ -97,7 +97,7 @@ ipcMain.handle('reading-proof:request', async (event, operation, ...args) => {
           result.preparation = { kind: 'native-turn-committed', elapsedMs: performance.now() - preparationStarted,
             original: value, turnId, ordinal: lastTurn.ordinal, ...prepared,
             captured: { stream: captured.stream, sequence: captured.records[0]!.sequence, revision: captured.records[0]!.revision },
-            boundary: 'Original input preparation completed before App rendering and the first conversation read; no native facts were skipped.' }
+            boundary: 'Original input preparation completed before App rendering and the first conversation read. The fixture removed no source records; Provider gap diagnostics retain their original meaning.' }
         } else {
           // The surfaces input has no turn-end protocol fact. In particular its
           // real pending PermissionRequest must not be guessed into a done state.
