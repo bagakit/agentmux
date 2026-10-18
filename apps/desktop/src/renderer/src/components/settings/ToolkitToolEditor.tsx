@@ -11,6 +11,7 @@ import { SettingsSaveBar } from './SettingsSaveBar'
 import { ConfirmationDialog } from '../ConfirmationDialog'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { toolkitDraftDirty, type ToolkitDraft, type useToolkitDrafts } from './use-toolkit-drafts'
+import { ToolkitWorkingDirectoryField, useToolkitWorkingDirectory } from './ToolkitWorkingDirectoryField'
 import './settings-toolkit-editor.css'
 
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
@@ -19,7 +20,6 @@ const ThemeObjectSourceCodeIcon = semanticIconComponent('object.source-code')
 const ThemeActionCancelIcon = semanticIconComponent('action.cancel')
 const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
 const ThemeActionAddOperationIcon = semanticIconComponent('action.add-operation')
-const ThemeObjectFolderIcon = semanticIconComponent('object.folder')
 const ThemeActionAddArgumentIcon = semanticIconComponent('action.add-argument')
 const ThemeActionRemoveArgumentIcon = semanticIconComponent('action.remove-argument')
 
@@ -47,6 +47,8 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
   const focusAction = useRef(false)
   const dirty = toolkitDraftDirty(entry)
   const tool = entry.value
+  const directory = useToolkitWorkingDirectory(tool.workspacePath)
+  const directorySaveError = save.errorField === 'workspacePath' ? save.error : ''
   const tui = tool.mode === 'tui'
   const actions = tool.actions ?? []
   const action = actionId === null ? null : actions.find(item => item.id === actionId)
@@ -54,7 +56,6 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
   const scriptTitle = displayOpen ? 'Display script' : actionId === null ? tui ? 'Shell command' : 'Main script' : action?.label.trim() || 'Action script'
   const missingFields = [
     ...(!tool.name.trim() ? ['a name'] : []),
-    ...(!tool.workspacePath.trim() ? ['a fixed working directory'] : []),
     ...(!tool.script.trim() ? ['a main script'] : []),
     ...(actions.some(item => !item.label.trim()) ? ['a label for each result action'] : []),
     ...(actions.some(item => !item.script.trim()) ? ['a script for each result action'] : []),
@@ -124,7 +125,7 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
     <fieldset className="toolkit-editor__mode"><legend>Tool type</legend>
       {(['script', 'tui'] as const).map(mode => <label key={mode}><input type="radio" name={`${uid}-mode`} value={mode} checked={(tool.mode ?? 'script') === mode} onChange={() => changeMode(mode)} /><span>{mode === 'tui' ? 'TUI · interactive terminal' : 'Script · text and results'}</span></label>)}
     </fieldset>
-    <label className="toolkit-editor__directory"><span><ThemeObjectFolderIcon size={13} /> Fixed working directory <small>Required</small></span><TextInput aria-required="true" value={tool.workspacePath} onChange={event => onEdit({ workspacePath: event.target.value })} placeholder="Choose an absolute local directory" /><small>Stays fixed when you switch Agents or workspaces.</small></label>
+    <ToolkitWorkingDirectoryField directory={directory} saveError={directorySaveError} active={active} onChange={workspacePath => onEdit({ workspacePath })} />
     {displayOpen || actionId !== null ? <div className="toolkit-editor__action-heading">
       <button type="button" className="small-button" onClick={() => { setActionId(null); setDisplayOpen(false) }}><ThemeNavigationBackIcon size={13} /> Main script</button>
       {displayOpen ? <p className="settings-hint">Runs once when the tool is displayed, including a hover that opens its panel. Refresh runs it again. Use a script that is safe to repeat.</p> : action ? <label><span>Action button label</span><TextInput ref={actionLabel} value={action.label} onChange={event => editScript({ label: event.target.value })} placeholder="Refresh identity" /></label> : <p className="settings-inline-error" role="status">This action is no longer in the current draft. Choose the main script or another action.</p>}
@@ -171,7 +172,7 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
     <footer className="toolkit-editor__footer">
       {invalid ? <p className="toolkit-editor__save-requirements" role="status">To save this tool, add {new Intl.ListFormat('en', { style: 'long', type: 'conjunction' }).format(missingFields)}.</p> : null}
       <button type="button" className="small-button" disabled={entry.saving || removing} onClick={() => entry.expected ? setConfirmDelete(true) : void remove()}>{entry.expected ? <><ThemeActionRemoveIcon size={13} /> Delete tool</> : <><ThemeActionCancelIcon size={13} /> Cancel new tool</>}</button>
-      <SettingsSaveBar save={save} dirty={dirty} disabled={invalid || entry.missing} label="Save tool" onSave={onSave} />
+      <SettingsSaveBar save={directorySaveError ? { ...save, error: '' } : save} dirty={dirty} disabled={invalid || directory.invalid || entry.missing} label="Save tool" onSave={onSave} />
     </footer>
     <ConfirmationDialog open={active && confirmTui} title="Switch this tool to TUI?" subject={tool.name} description="The main script is kept. Result actions and the display script will be removed from this draft. Update the command for the shell before saving." confirmLabel="Switch to TUI" onCancel={() => setConfirmTui(false)} onConfirm={() => applyMode('tui')} />
     <ConfirmationDialog open={active && confirmDelete} title="Delete this tool?" subject={tool.name} description="Remove the saved tool and its status bar entry. A running or unconfirmed execution prevents deletion." confirmLabel="Delete tool" busy={removing} onCancel={() => setConfirmDelete(false)} onConfirm={() => void remove()} />

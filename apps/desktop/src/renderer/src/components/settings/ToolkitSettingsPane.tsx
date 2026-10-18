@@ -2,7 +2,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { ToolkitToolConfiguration, ToolkitConfigurationFields } from '@agentmux/core/control'
+import { DEFAULT_TOOLKIT_WORKSPACE_PATH, type ToolkitToolConfiguration, type ToolkitConfigurationFields } from '@agentmux/core/control'
 import { DEFAULT_MOBILE_CONNECTION_PREFERENCES, MOBILE_CONNECTION_TOOL_ID, type MobileConnectionPreferences, type PerformancePreferences } from '../../../../shared/toolkit-preferences'
 import { ToolkitIcon } from '../toolkit/ToolkitIcon'
 import type { SettingsNavigationRequest } from '../SettingsNavigation'
@@ -88,13 +88,13 @@ export function ToolkitSettingsPane({ performance, mobileConnection = DEFAULT_MO
   function add() {
     if (entries.length >= 128) return
     const id = mintObjectId()
-    resource.add(id, { name: '', icon: 'terminal', enabled: true, statusBar: 'icon', workspacePath: '', script: "console.log('Hello from your toolkit')\n", args: [], actions: [] })
+    resource.add(id, { name: '', icon: 'terminal', enabled: true, statusBar: 'icon', workspacePath: DEFAULT_TOOLKIT_WORKSPACE_PATH, script: "console.log('Hello from your toolkit')\n", args: [], actions: [] })
     focusNewName.current = true; setQuery(''); open(id)
   }
   function install() {
     if (entries.length >= 128) return
     const id = mintObjectId()
-    resource.add(id, { kind: 'package', packagePath: '', enabled: true, statusBar: 'icon', workspacePath: '', args: [] })
+    resource.add(id, { kind: 'package', packagePath: '', enabled: true, statusBar: 'icon', workspacePath: DEFAULT_TOOLKIT_WORKSPACE_PATH, args: [] })
     focusNewName.current = true; setQuery(''); open(id)
   }
   function back() { focusBack.current = true; setView('library') }

@@ -1,0 +1,11 @@
+.toolkit-editor__directory { display: grid; min-width: 0; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
+.toolkit-editor__directory > label { display: flex; align-items: center; gap: var(--sp-2); }
+.toolkit-editor__directory > label > small { margin-left: var(--sp-2); font-size: var(--fs-micro); font-weight: 400; }
+.toolkit-editor__directory small { color: var(--text-3); line-height: 1.5; overflow-wrap: anywhere; }
+.toolkit-directory__input { display: flex; min-width: 0; gap: var(--sp-2); }
+.toolkit-directory__input > input { flex: 1; min-width: 0; font-family: var(--font-mono); }
+.toolkit-directory__input > button { flex: none; }
+.toolkit-editor__directory p { margin: 0; line-height: 1.5; overflow-wrap: anywhere; }
+.toolkit-directory__preview { display: grid; gap: var(--sp-1); }
+.toolkit-directory__preview > span { color: var(--text-3); font-size: var(--fs-micro); }
+.toolkit-directory__preview > code { color: var(--text-2); font: var(--fs-meta)/1.5 var(--font-mono); }
