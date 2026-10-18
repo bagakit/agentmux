@@ -196,7 +196,7 @@ describe('TUI toolkit product presentation', () => {
     document.removeEventListener('keydown', outside)
     expect(document.querySelector('[role="dialog"]')).not.toBeNull(); expect(document.activeElement).toBe(field)
   })
-  it('saves an explicit TUI command from the editor without a second renderer launch', async () => {
+  it('saves a default-shell TUI from the editor without a second renderer launch', async () => {
     const add = vi.fn(async (id, value) => ({ ...value, id, revision: 'saved-tui' }))
     const run = vi.fn()
     vi.spyOn(api.toolkit, 'observe').mockReturnValue({ dispose: vi.fn() })
@@ -215,7 +215,7 @@ describe('TUI toolkit product presentation', () => {
     })
     await dom.click('.toolkit-editor .primary-button')
     expect(add).toHaveBeenCalledOnce()
-    expect(add.mock.calls[0]?.[1]).toMatchObject({ mode: 'tui', script: 'exec /bin/sh\n', actions: [] })
+    expect(add.mock.calls[0]?.[1]).toMatchObject({ mode: 'tui', script: '', actions: [] })
     expect(add.mock.calls[0]?.[1]).not.toHaveProperty('display')
     expect(run).not.toHaveBeenCalled()
   })

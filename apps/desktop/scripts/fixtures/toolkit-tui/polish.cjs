@@ -23,7 +23,7 @@ module.exports = async function capturePolish({ win, read, until, waitFor, settl
   await until('window.tuiScene.editor().then(value=>value?.language==="shell")')
   await click('.toolkit-icon-picker > summary')
   assert.equal(await read('document.querySelector(".toolkit-icon-picker summary").textContent'), 'Icon')
-  assert.equal(await read('document.querySelectorAll(".toolkit-icon-picker input[type=radio]").length'), 9)
+  assert.equal(await read('document.querySelectorAll(".toolkit-icon-picker input[type=radio]").length'), 18)
   await click('.toolkit-icon-picker label:has(input[value="zap"])'); await key('Escape')
   assert.equal(await read('document.activeElement===document.querySelector(".toolkit-icon-picker summary") && !document.querySelector(".toolkit-icon-picker").open'), true)
   await read('window.polishInputEvents=[];document.addEventListener("input",event=>window.polishInputEvents.push({trusted:event.isTrusted,data:event.data,monaco:!!event.target.closest(".monaco-editor")}),true)')

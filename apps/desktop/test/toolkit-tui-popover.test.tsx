@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { computePosition, size } from '@floating-ui/dom'
 import { ToolkitPopover } from '../src/renderer/src/components/performance/PerformancePopover'
 import { ToolkitPopoverResizeHandle } from '../src/renderer/src/components/performance/ToolkitPopoverResizeHandle'
+import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM } from './helpers/composer-dom-fixture'
 
 vi.mock('@floating-ui/dom', () => ({
@@ -16,13 +17,14 @@ const frames = new Map<number, FrameRequestCallback>()
 let frameId = 0
 beforeEach(() => {
   frames.clear()
+  useAppStore.setState({ toolkitPresentation: {} })
   vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => { frames.set(++frameId, callback); return frameId })
   vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(id => { frames.delete(id) })
 })
 function Consumer({ terminal = true }: { terminal?: boolean }) {
   const [selected, select] = useState<string | symbol | null>(null)
   return <ToolkitPopover toolId="terminal" name="Workspace monitor" icon={<span />} selectedToolId={selected} onSelectTool={select}>{close => <>
-    {terminal ? <ToolkitPopoverResizeHandle /> : null}
+    {terminal ? <ToolkitPopoverResizeHandle toolId="terminal" /> : null}
     <button data-toolkit-close onClick={close}>Close</button>
     <div data-toolkit-terminal><textarea aria-label="Original terminal" /></div>
   </>}</ToolkitPopover>
@@ -46,7 +48,7 @@ async function flush() {
 }
 async function key(node: Element, key: string, shiftKey = false) {
   const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key, shiftKey })
-  await act(async () => node.dispatchEvent(event))
+  await act(async () => { node.dispatchEvent(event); node.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, cancelable: true, key, shiftKey })) })
   return event
 }
 
@@ -91,7 +93,7 @@ describe('original Toolkit popover resize consumer', () => {
     expect((await key(field, 'Escape')).defaultPrevented).toBe(false)
     expect(document.querySelector('.performance-popover')).toBe(panel)
   })
-  it('supports directional keyboard sizing and restores default geometry when the presenter leaves', async () => {
+  it('supports directional keyboard sizing and releases inline geometry when the presenter leaves', async () => {
     await dom.render(<Consumer />); await dom.click('[data-toolkit-id="terminal"]')
     const { panel, handle } = elements()
     expect((await key(handle, 'ArrowLeft')).defaultPrevented).toBe(true)
@@ -101,6 +103,45 @@ describe('original Toolkit popover resize consumer', () => {
     expect(panel.style.width).toBe('760px'); expect(panel.style.height).toBe('510px')
     await dom.render(<Consumer terminal={false} />)
     expect(panel.style.width).toBe(''); expect(panel.style.height).toBe('')
+  })
+  it('commits a held keyboard resize once on release and cancels unfinished key gestures', async () => {
+    await dom.render(<Consumer />); await dom.click('[data-toolkit-id="terminal"]')
+    const { panel, handle } = elements()
+    const save = vi.spyOn(useAppStore.getState(), 'setToolkitPresentation')
+    for (let repeat = 0; repeat < 4; repeat++) await act(async () => handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', repeat: repeat > 0, bubbles: true, cancelable: true })))
+    expect(panel.style.width).toBe('800px'); expect(save).not.toHaveBeenCalled()
+    await act(async () => handle.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowLeft', bubbles: true, cancelable: true })))
+    expect(save).toHaveBeenCalledOnce()
+    await act(async () => handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })))
+    await act(async () => window.dispatchEvent(new Event('blur')))
+    expect(panel.style.height).toBe('500px'); expect(save).toHaveBeenCalledOnce()
+  })
+  it('remembers only a completed gesture for the same tool when closed and reopened', async () => {
+    await dom.render(<Consumer />); await dom.click('[data-toolkit-id="terminal"]')
+    const { panel, handle } = elements()
+    await pointer(handle, 'pointerdown', 100, 100)
+    await pointer(handle, 'pointermove', 70, 60); await flush()
+    expect(useAppStore.getState().toolkitPresentation.terminal).toBeUndefined()
+    await pointer(handle, 'pointerup', 60, 50)
+    expect(useAppStore.getState().toolkitPresentation.terminal?.size).toEqual({ width: 800, height: 550 })
+    await act(async () => panel.querySelector<HTMLButtonElement>('[data-toolkit-close]')!.click())
+    await dom.click('[data-toolkit-id="terminal"]')
+    const reopened = elements()
+    expect(reopened.panel.style.width).toBe('800px'); expect(reopened.panel.style.height).toBe('550px')
+    await pointer(reopened.handle, 'pointerdown', 100, 100)
+    await pointer(reopened.handle, 'pointermove', 50, 50); await flush()
+    expect(reopened.panel.style.width).toBe('850px')
+    await pointer(reopened.handle, 'pointercancel', 50, 50)
+    expect(reopened.panel.style.width).toBe('800px')
+    expect(useAppStore.getState().toolkitPresentation.terminal?.size).toEqual({ width: 800, height: 550 })
+  })
+  it('keeps the unclipped preferred axis when only the other axis is resized', async () => {
+    useAppStore.setState({ toolkitPresentation: { terminal: { size: { width: 1000, height: 600 } } } })
+    await dom.render(<Consumer />); await dom.click('[data-toolkit-id="terminal"]')
+    const { panel, handle } = elements()
+    vi.mocked(panel.getBoundingClientRect).mockReturnValue({ width: 400, height: 300 } as DOMRect)
+    await key(handle, 'ArrowUp')
+    expect(useAppStore.getState().toolkitPresentation.terminal?.size).toEqual({ width: 1000, height: 310 })
   })
   it.each(['pointercancel', 'lostpointercapture', 'blur', 'unmount'])('releases capture and pending work on %s, leaving later input usable', async reason => {
     await dom.render(<Consumer />); await dom.click('[data-toolkit-id="terminal"]')
