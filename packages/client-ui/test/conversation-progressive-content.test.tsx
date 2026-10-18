@@ -101,11 +101,12 @@ it('keeps 180 original shells while admitting only one nearby heavy body each fr
   expect(Visibility.all.filter(value => value.options?.rootMargin === '600px 0px')).toHaveLength(1)
   await near([59, 60, 61]); await frame()
   expect(parse).toHaveBeenCalledTimes(1)
-  await frame(); expect(parse).toHaveBeenCalledTimes(2)
+  await frame(); expect(parse.mock.calls.length + resources.mock.calls.length).toBe(2)
+  await frame(); expect(parse.mock.calls.length + resources.mock.calls.length).toBe(3)
   await frame(); expect(parse).toHaveBeenCalledTimes(3)
   expect(body(0).dataset.conversationBodyPresented).toBe('false')
   expect(resources).toHaveBeenCalledTimes(1)
-  console.log(JSON.stringify({ records: 180, initialParses: 0, initialImageReads: 0, nearbyParsesAfter3Frames: parse.mock.calls.length, nearbyImageReads: resources.mock.calls.length }))
+  console.log(JSON.stringify({ records: 180, initialParses: 0, initialImageReads: 0, nearbyParsesAfter4Frames: parse.mock.calls.length, nearbyImageReads: resources.mock.calls.length }))
 })
 
 it('retains the exact read Text node and Range after leaving, hiding and appending', async () => {
@@ -136,7 +137,7 @@ it('copies the full far original before mounting and locates only the exact body
 })
 
 it('compensates an above-reader first mount and a later image resize without moving the original record', async () => {
-  await render(); await near([60]); await frame()
+  await render(); await near([60]); await frame(); await frame()
   const original = shell(60), offset = original.getBoundingClientRect().top
   expanded.set(59, 240)
   await near([59]); await frame()
@@ -263,7 +264,9 @@ it('copies an unread complete text resource without presenting neighboring heavy
   expect(copy.mock.calls.at(-1)?.[0]).toBe(original)
   expect(resources).toHaveBeenCalledTimes(1)
   expect(resources.mock.calls[0]![0]).toMatchObject({ recordId: 'record-2', expectedReference: part.reference, source: page.source })
-  expect(body(2).dataset.conversationBodyPresented).toBe('false')
+  expect(body(2)).toBeNull() // Its unopened text resource has only an inexpensive explicit read control.
+  expect(shell(2).textContent).toContain('Read complete content')
+  expect(body(3).dataset.conversationBodyPresented).toBe('false')
   expect(parse).toHaveBeenCalledTimes(0)
 })
 
