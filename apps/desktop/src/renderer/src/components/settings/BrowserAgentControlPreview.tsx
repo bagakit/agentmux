@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react'
 import { createPortal } from 'react-dom'
 import { browserAgentEffectsCss, type BrowserAgentControlPreferences } from '../../../../shared/browser-agent-control'
 import { AgentProviderIcon } from '../AgentProviderIcon'
@@ -10,7 +10,7 @@ const targets = [{ x: .23, y: .39 }, { x: .72, y: .39 }, { x: .72, y: .72 }] as 
 type PreviewPhase = 'running' | 'observing' | 'script' | 'navigating' | 'waiting' | 'completed' | 'human'
 
 /** Local illustration only: no API, Store, Browser, Session or navigation reads. */
-export function BrowserAgentControlPreview({ preferences, active, dirty }: { preferences: BrowserAgentControlPreferences; active: boolean; dirty: boolean }) {
+export function BrowserAgentControlPreview({ preferences, active, dirty, previewRef, returnAction }: { preferences: BrowserAgentControlPreferences; active: boolean; dirty: boolean; previewRef?: Ref<HTMLElement>; returnAction?: ReactNode }) {
   const [phase, setPhase] = useState<PreviewPhase>('running')
   const [background, setBackground] = useState<'light' | 'dark'>('light')
   const [playing, setPlaying] = useState(false), [step, setStep] = useState(0)
@@ -60,12 +60,12 @@ export function BrowserAgentControlPreview({ preferences, active, dirty }: { pre
     steps: [{ sequence: step + 1, method: phase === 'observing' ? 'snapshot' : phase === 'script' ? 'js' : phase === 'navigating' ? 'gotoUrl' : phase === 'waiting' ? 'wait' : 'click',
       label: 'Sample step', startedAt: 0, status: phase === 'completed' ? 'completed' : phase === 'human' ? 'stopped' : 'running' }]
   }
-  return <section className="browser-agent-preview" aria-label="Agent control simulation">
+  return <section ref={previewRef} tabIndex={-1} className="browser-agent-preview" aria-label="Agent control simulation">
     <header className="browser-agent-preview__header"><span><strong>Live preview</strong><small>Simulation · {dirty ? 'unsaved draft' : 'saved appearance'}</small></span>
-      <div className="browser-agent-preview__playback">
+      <div className="settings-preview-header-actions">{returnAction}<div className="browser-agent-preview__playback">
         <button type="button" className="small-button" disabled={phase !== 'running'} onClick={() => setPlaying(value => !value)} aria-pressed={playing}>{playing ? 'Pause' : 'Play'}</button>
         <button type="button" className="small-button" disabled={phase !== 'running'} onClick={() => setStep(value => value + 1)}>Step</button>
-      </div>
+      </div></div>
     </header>
     <div className="browser-agent-preview__options">
       <label>State <select aria-label="Simulation state" value={phase} onChange={event => setPhase(event.target.value as PreviewPhase)}>

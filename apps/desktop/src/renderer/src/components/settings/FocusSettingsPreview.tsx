@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from 'react'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import type { AgentTurnUsage } from '@agentmux/core'
 import type { WorkspaceRecord } from '../../../../shared/contracts'
@@ -32,7 +32,7 @@ function exampleContexts(now: number): FocusContext[] {
 }
 
 /** Static example facts and local interaction only; original product leaves own the drawings. */
-export function FocusSettingsPreview({ values, active, scene, onScene }: { values: FocusSettingsValues; active: boolean; scene: FocusPreviewScene; onScene(value: FocusPreviewScene): void }) {
+export function FocusSettingsPreview({ values, active, scene, onScene, previewRef, returnAction }: { values: FocusSettingsValues; active: boolean; scene: FocusPreviewScene; onScene(value: FocusPreviewScene): void; previewRef?: Ref<HTMLElement>; returnAction?: ReactNode }) {
   const document = useWorkbenchDocument(), [documentVisible, setDocumentVisible] = useState(() => document.visibilityState !== 'hidden')
   useEffect(() => {
     if (!active) return
@@ -72,8 +72,8 @@ export function FocusSettingsPreview({ values, active, scene, onScene }: { value
     {content}
   </button>
   }
-  return <aside className="focus-settings-preview" aria-label="Focus settings live example" inert={!enabled} data-active={enabled} style={style}>
-    <header><span><SemanticIcon name="navigation.focus" size={15} /><strong>Live preview</strong></span><small>Example workspace</small></header>
+  return <aside ref={previewRef} tabIndex={-1} className="focus-settings-preview" aria-label="Focus settings live example" inert={!enabled} data-active={enabled} style={style}>
+    <header><span><SemanticIcon name="navigation.focus" size={15} /><strong>Live preview</strong></span><div className="settings-preview-header-actions"><small>Example workspace</small>{returnAction}</div></header>
     <nav aria-label="Focus example view">{([['board', 'Board'], ['reading', 'Agent preview'], ['links', 'Links']] as const).map(([key, label]) => <button type="button" key={key} aria-pressed={scene === key} onClick={() => onScene(key)}>{label}</button>)}</nav>
     <div className="focus-settings-preview__canvas" data-scene={scene}>
       {scene === 'board' ? <div className="focus-settings-preview__board">
