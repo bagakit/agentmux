@@ -2,6 +2,7 @@
 import { act } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, realpath, rm } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Editor } from '@tiptap/core'
@@ -17,6 +18,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
 import { NoteSnapshotTestWorker } from './note-snapshot-test-worker'
+const authorshipStyles = readFileSync(join(import.meta.dirname, '../../../packages/client-ui/src/styles/note-authorship.css'), 'utf8')
 
 const originalWorker = globalThis.Worker
 const dom = composerDOM(), creator = { kind: 'agent', id: 'exact-original-creator' } as const, editorActor = { kind: 'agent', id: 'exact-latest-editor' } as const
@@ -41,7 +43,7 @@ async function original() {
   const read = await writer.read(workspace, 'original.note.md'); expect(read.status).toBe('read')
   if (read.status !== 'read') throw Error('Original read failed')
   const parsed = parseNoteFile(read.document); if (parsed.status !== 'valid') throw Error('Original must parse')
-  return { document: read.document, note: parsed.note }
+  return { document: read.document, note: parsed.note, writer, workspace }
 }
 async function openAuthors(id: string) { await act(async () => button(id).click()); await vi.waitFor(() => expect(panel()).not.toBeNull()) }
 async function escape() { await act(async () => panel()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))); expect(panel()).toBeNull() }
@@ -130,4 +132,60 @@ it('identifies saved reference occurrence authors separately from the referenced
   expect(panel()!.textContent).toContain('Recorded for this saved reference occurrence.')
   expect(panel()!.textContent).toContain(creator.id)
   await escape()
+})
+
+it.each(['rich editor', 'reader'] as const)('keeps checked-item and paragraph authors exact on one line without hidden human line boxes in the real %s', async mode => {
+  const f = await original(), human = { kind: 'user', id: 'original-list-writer' } as const
+  const p = (id: string, text: string) => ({ type: 'paragraph', attrs: { blockId: id }, content: [{ type: 'text', text }] })
+  const note = newNoteDocument('', 'list-authors', 'unused')
+  note.content.content = [{ type: 'taskList', content: [{ type: 'taskItem', attrs: { blockId: 'checked-item', checked: false }, content: [p('checked-body', 'Original task text'),
+    { type: 'taskList', content: [{ type: 'taskItem', attrs: { blockId: 'nested-item', checked: false }, content: [p('nested-body', 'Nested text')] }] }] }] },
+    { type: 'bulletList', content: [{ type: 'listItem', attrs: { blockId: 'plain-item' }, content: [p('plain-body', 'Plain item text')] }] },
+    { type: 'codeBlock', attrs: { blockId: 'human-code' }, content: [{ type: 'text', text: 'Original code' }] }]
+  const created = await f.writer.write(f.workspace, { path: 'items.note.md', content: serializeNoteDocument(note), expectedRevision: null }, { actor: human })
+  if (created.status !== 'written') throw Error('Original list write must succeed')
+  note.content.content![0]!.content![0]!.attrs!.checked = true
+  const checked = await f.writer.write(f.workspace, { path: 'items.note.md', content: serializeNoteDocument(note), expectedRevision: created.revision }, { actor: editorActor })
+  if (checked.status !== 'written') throw Error('Checked-only write must succeed')
+  const read = await f.writer.read(f.workspace, 'items.note.md')
+  if (read.status !== 'read') throw Error('Original list must read')
+  const parsed = parseNoteFile(read.document)
+  if (parsed.status !== 'valid') throw Error('Original list must parse')
+  useAppStore.setState({ agentNames: names })
+  const changed = vi.fn(), style = document.createElement('style'); style.textContent = authorshipStyles; document.head.append(style)
+  try {
+    if (mode === 'rich editor') await dom.render(<NoteBlockEditor note={parsed.note} knowledge={noteKnowledge([])} onChange={changed} onOpen={() => {}} onSave={() => {}} onIssue={() => {}} />)
+    else await dom.render(<NoteReader {...read.document} workspaceId={f.workspace.id} agentNames={names} />)
+    const editor = (dom.container.querySelector('.ProseMirror') as HTMLElement & { editor: Editor }).editor
+    const content = editor.getJSON(), selection = editor.state.selection.toJSON(), couldUndo = editor.can().undo()
+    expect(button('checked-item').closest('p')?.dataset.blockId).toBe('checked-body')
+    expect(button('nested-item').closest('p')?.dataset.blockId).toBe('nested-body')
+    expect(button('plain-item').closest('p')?.dataset.blockId).toBe('plain-body')
+    expect(button('checked-item').textContent).toBe('Item · Agent · Review')
+    expect(button('checked-item').getAttribute('aria-label')).toBe('Item authors: Agent · Review')
+    expect(button('checked-item').hasAttribute('data-human-only')).toBe(false)
+    expect(button('checked-body').hasAttribute('data-human-only')).toBe(true)
+    expect(getComputedStyle(button('checked-body')).position).toBe('absolute')
+    const nestedGroup = button('nested-item').parentElement!
+    expect(nestedGroup).toBe(button('nested-body').parentElement)
+    expect(getComputedStyle(nestedGroup).position).toBe('absolute')
+    expect(getComputedStyle(button('nested-item')).position).toBe('static')
+    expect(button('human-code').closest('pre')).toBeNull()
+    expect(button('human-code').dataset.authorPlacement).toBe('block-end')
+    expect(getComputedStyle(button('human-code')).position).toBe('absolute')
+    await openAuthors('checked-item')
+    expect(panel()!.textContent).toContain('Item authors')
+    expect(panel()!.textContent).toContain('structure and checked state')
+    expect(panel()!.textContent).toContain('Created byPerson')
+    expect(panel()!.textContent).toContain('Last edited byAgent · Review')
+    expect(panel()!.textContent).toContain(human.id); expect(panel()!.textContent).toContain(editorActor.id)
+    await escape(); expect(document.activeElement).toBe(button('checked-item'))
+    await openAuthors('checked-body')
+    expect(panel()!.textContent).toContain('Last edited byPerson')
+    expect(panel()!.textContent).not.toContain(editorActor.id)
+    await escape()
+    expect(editor.getJSON()).toEqual(content); expect(editor.state.selection.toJSON()).toEqual(selection)
+    expect(editor.can().undo()).toBe(couldUndo); expect(changed).not.toHaveBeenCalled()
+    expect(serializeNoteDocument({ ...parsed.note, content: editor.getJSON() })).toBe(read.document.content)
+  } finally { style.remove() }
 })
