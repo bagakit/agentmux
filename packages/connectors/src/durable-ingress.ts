@@ -159,6 +159,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     // Let the transport finish its native ACK before optional profile I/O. A
     // failed/missing profile is never part of the original input admission.
     if (event.actor) setImmediate(() => { void this.options.connections.observeChannelActor(connection.config, event.actor!).catch(() => {}) })
+    if (event.kind !== 'action' && event.conversationKind === 'group') setImmediate(() => { void this.options.connections.observeChannelConversation(connection.config, event.externalConversationId).catch(() => {}) })
     return saved
   }
   private freezeGroup(application: ConnectionConfig['application'], externalConversationId: string): NonNullable<ConnectionIngressMessage['group']>['target'] {

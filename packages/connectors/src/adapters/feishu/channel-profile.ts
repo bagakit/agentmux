@@ -1,6 +1,9 @@
 import type { Client } from '@larksuiteoapi/node-sdk'
 import { channelActorKey, parseChannelActorProfileObservation, type ChannelActorProfileObservation, type ConnectionConfig } from '@agentmux/core/connections'
 import type { ChannelProfileAdapter, ChannelActorProfileRead } from '../../channel-profile-adapter.js'
+import { AgentMuxError } from '@agentmux/core'
+import { parseChannelConversationProfileObservation, parseChannelMetadataEntry, type ChannelMetadataSubject, type ChannelConversationProfileObservation, type ChannelMetadataEntry } from '@agentmux/core/connections'
+import type { ChannelStoragePort } from '../../channel-storage.js'
 
 type WithClient = <T>(config: ConnectionConfig, credential: string, call: (client: Client) => Promise<T>, signal?: AbortSignal) => Promise<T>
 // Display freshness belongs to this native adapter. A stale value remains readable.
@@ -18,7 +21,7 @@ function readActor(input: ChannelActorProfileRead): ChannelActorProfileObservati
 
 /** Exact contact.user observation through the same authenticated official SDK as native intake. */
 export function createFeishuChannelProfiles(withClient: WithClient): ChannelProfileAdapter {
-  return {
+  const adapter: ChannelProfileAdapter = {
     readActor,
     async refreshActor(input, credential, signal) {
       const storageKey = actorKey(input), original = input.storage.get(storageKey), cached = readActor(input)
@@ -49,6 +52,66 @@ export function createFeishuChannelProfiles(withClient: WithClient): ChannelProf
         const current = readActor(input)
         return current.profile ? current : { ...observation, state: 'unavailable', freshness: observation.profile ? 'stale' : 'unknown', reason: 'storage-unconfirmed' }
       }
+    }
+  }
+  return Object.assign(adapter, createFeishuMetadata(withClient, adapter))
+}
+
+function createFeishuMetadata(withClient: WithClient, actors: ChannelProfileAdapter): Pick<ChannelProfileAdapter, 'getMetadata' | 'listMetadata' | 'clearMetadata' | 'refreshConversation'> {
+  const storageKey = (subject: ChannelMetadataSubject) => subject.kind === 'actor' ? 'actor-profile:' + channelActorKey(subject.actor) : 'conversation-profile:' + JSON.stringify(subject.externalConversationId)
+  type Read = { config: ConnectionConfig; subject: ChannelMetadataSubject; storage: ChannelStoragePort }
+  function getMetadata(input: Read): ChannelMetadataEntry {
+    const { subject, storage, config } = input, row = storage.get(storageKey(subject))
+    if (subject.kind === 'actor') return parseChannelMetadataEntry({ subject, observation: actors.readActor({ actor: subject.actor, storage }), cacheRevision: row?.revision ?? null }, config.application)
+    let observation: ChannelConversationProfileObservation
+    if (!row) observation = { application: config.application, externalConversationId: subject.externalConversationId, state: 'unknown', profile: null, checkedAt: Date.now(), freshness: 'unknown', reason: 'not-observed' }
+    else {
+      if (row.value.kind !== 'json') throw Error('Original conversation profile is not metadata')
+      const original = parseChannelConversationProfileObservation(row.value.value)
+      observation = { ...original, freshness: original.profile ? original.state === 'observed' && Date.now() - original.checkedAt < PROFILE_FRESH_MS ? 'current' : 'stale' : 'unknown' }
+    }
+    return parseChannelMetadataEntry({ subject, observation, cacheRevision: row?.revision ?? null }, config.application)
+  }
+  return {
+    getMetadata,
+    listMetadata(input) {
+      const prefix = input.kind === 'actor' ? 'actor-profile:' : 'conversation-profile:'
+      const page = input.storage.list({ limit: input.limit, prefix, ...(input.cursor ? { after: input.cursor } : {}) })
+      const entries = page.entries.map(entry => {
+        const row = input.storage.get(entry.key)
+        if (!row || row.value.kind !== 'json') throw Error('Original metadata value is unavailable')
+        const subject: ChannelMetadataSubject = input.kind === 'actor'
+          ? { kind: 'actor', actor: parseChannelActorProfileObservation(row.value.value).actor }
+          : { kind: 'conversation', externalConversationId: parseChannelConversationProfileObservation(row.value.value).externalConversationId }
+        return getMetadata({ ...input, subject })
+      })
+      return { entries, next: page.next }
+    },
+    clearMetadata(input) {
+      const key = storageKey(input.subject), row = input.storage.get(key)
+      if (!row) return false
+      if (input.expectedCacheRevision === null) throw new AgentMuxError('The exact metadata cache changed. Read its original revision before clearing.', 'CHANNEL_STORAGE_CONFLICT')
+      return input.storage.delete({ key, expectedRevision: input.expectedCacheRevision })
+    },
+    async refreshConversation(input, credential, signal) {
+      const subject: ChannelMetadataSubject = { kind: 'conversation', externalConversationId: input.externalConversationId }, key = storageKey(subject)
+      const original = input.storage.get(key), cached = getMetadata({ ...input, subject }).observation as ChannelConversationProfileObservation
+      const failure = (): ChannelConversationProfileObservation => ({ ...cached, state: 'unavailable', checkedAt: Date.now(), freshness: cached.profile ? 'stale' : 'unknown', reason: 'source-unconfirmed' })
+      let observation: ChannelConversationProfileObservation
+      try {
+        const response = await withClient(input.config, credential, client => client.im.chat.get({ path: { chat_id: encodeURIComponent(input.externalConversationId) }, params: { user_id_type: 'open_id' } }), signal)
+        signal.throwIfAborted()
+        if (response.code !== 0 || !response.data || typeof response.data.name !== 'string') observation = failure()
+        else {
+          const now = Date.now()
+          observation = parseChannelConversationProfileObservation({ application: input.config.application, externalConversationId: input.externalConversationId, state: 'observed', checkedAt: now, freshness: 'current', profile: { name: response.data.name, ...(response.data.avatar ? { avatarUrl: response.data.avatar } : {}), observedAt: now } })
+        }
+      } catch { observation = failure() }
+      if (!signal.aborted) {
+        try { input.storage.put({ key, expectedRevision: original?.revision ?? null, value: { kind: 'json', value: observation } }) }
+        catch { return getMetadata({ ...input, subject }).observation as ChannelConversationProfileObservation }
+      }
+      return observation
     }
   }
 }

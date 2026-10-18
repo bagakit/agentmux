@@ -12,7 +12,7 @@ export interface ChannelStoragePort {
   put(input: { key: string; value: ChannelStorageValue; expectedRevision: string | null }): ChannelStorageRecord
   delete(input: { key: string; expectedRevision: string }): boolean
   /** Values are read individually: listing large retained attachments never materializes their bytes. */
-  list(input?: { limit?: number; after?: string }): { entries: Array<Pick<ChannelStorageRecord, 'key' | 'revision'>>; next: string | null }
+  list(input?: { limit?: number; after?: string; prefix?: string }): { entries: Array<Pick<ChannelStorageRecord, 'key' | 'revision'>>; next: string | null }
 }
 const invalid = (): never => { throw new AgentMuxError('The exact Channel storage request is invalid.', 'INVALID_CHANNEL_STORAGE_REQUEST') }
 const conflict = (): never => { throw new AgentMuxError('The original Channel value changed. Read its current revision before updating.', 'CHANNEL_STORAGE_CONFLICT') }
@@ -64,17 +64,22 @@ export class ChannelStorage {
       list: (input = {}) => this.safe(() => {
         const limit = input.limit ?? 30
         if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) return invalid()
+        const prefix = input.prefix === undefined ? '' : key(input.prefix), cursorScope = [...namespace, prefix]
+        const upper = Array.from(prefix)
+        while (upper.length && upper.at(-1)!.codePointAt(0) === 0x10ffff) upper.pop()
+        if (upper.length) upper[upper.length - 1] = String.fromCodePoint(upper.at(-1)!.codePointAt(0)! + 1)
+        const end = upper.length ? upper.join('') : undefined
         let after = ''
         if (input.after !== undefined) {
           try {
             const cursor = JSON.parse(Buffer.from(input.after, 'base64url').toString('utf8'))
-            if (!Array.isArray(cursor) || cursor.length !== 2 || JSON.stringify(cursor[0]) !== JSON.stringify(namespace)) return invalid()
+            if (!Array.isArray(cursor) || cursor.length !== 2 || JSON.stringify(cursor[0]) !== JSON.stringify(cursorScope)) return invalid()
             after = key(cursor[1])
           } catch { return invalid() }
         }
-        const rows = this.database.prepare('SELECT storage_key,revision FROM channel_storage WHERE adapter_id=? AND domain=? AND app_id=? AND storage_key>? ORDER BY storage_key LIMIT ?').all(...namespace, after, limit + 1)
+        const rows = this.database.prepare('SELECT storage_key,revision FROM channel_storage WHERE adapter_id=? AND domain=? AND app_id=? AND storage_key>? AND storage_key>=?' + (end ? ' AND storage_key<?' : '') + ' ORDER BY storage_key LIMIT ?').all(...namespace, after, prefix, ...(end ? [end] : []), limit + 1)
         const entries = rows.slice(0, limit).map(row => ({ key: String(row.storage_key), revision: String(row.revision) }))
-        return { entries, next: rows.length > limit ? Buffer.from(JSON.stringify([namespace, entries.at(-1)!.key])).toString('base64url') : null }
+        return { entries, next: rows.length > limit ? Buffer.from(JSON.stringify([cursorScope, entries.at(-1)!.key])).toString('base64url') : null }
       })
     }
   }
