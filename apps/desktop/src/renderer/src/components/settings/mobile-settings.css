@@ -9,9 +9,13 @@
 .device-management__devices > .settings-pane-toolbar { align-items: flex-start; }
 .device-management__devices > .settings-pane-toolbar > div { flex: 1; min-width: 0; }
 .device-management__count { margin: var(--sp-2) 0 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.device-management__service { display: grid; grid-template-columns: 1fr auto; gap: var(--sp-2) var(--sp-4); margin-top: var(--sp-4); padding-block: var(--sp-3); border-block: 1px solid var(--line-soft); font-size: var(--fs-meta); color: var(--text-3); }
+.device-management__service > strong { color: var(--text-2); font-weight: 500; }
+.device-management__service > details { grid-column: 1 / -1; }
+.device-management__service p { margin: var(--sp-2) 0 0; overflow-wrap: anywhere; line-height: 1.6; }
 .device-management[data-device-view='settings'] .device-management__records { margin-top: var(--sp-5); border-block: 1px solid var(--line-soft); padding-block: var(--sp-3); }
 .device-management[data-device-view='settings'] .device-management__records > summary { padding-block: var(--sp-2); color: var(--text-2); }
-.device-management__read-issue { margin-top: var(--sp-4); padding: var(--sp-4) var(--sp-5); border-radius: var(--radius); background: var(--surface-1); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; overflow-wrap: anywhere; }
+.device-management__read-issue { margin-top: var(--sp-4); padding: var(--sp-3) var(--sp-4); border-left: 2px solid var(--line); border-radius: var(--radius); background: var(--surface-1); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; overflow-wrap: anywhere; }
 .device-management__read-issue > strong { color: var(--text-2); font-weight: 500; }
 .device-management__read-issue p { margin: var(--sp-1) 0; }
 .device-management__read-issue details { margin-top: var(--sp-2); }

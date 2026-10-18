@@ -73,14 +73,20 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
       <div className="settings-pane-toolbar">
         <button className="primary-button" disabled={busy} onClick={() => { void link() }}>{busy ? <ThemeStatusLoadingIcon size={16} animation="spin" /> : <ThemeActionCopyIcon size={16} />}{busy ? 'Working…' : 'Copy connection link'}</button>
       </div>
-      {list && <p className="settings-group-note" role="status">{list.mobileAccess.state === 'connected' ? 'Ready to connect' : list.mobileAccess.state === 'starting' ? 'Connection service is starting. Try again shortly.' : 'Connection service unavailable'}</p>}
-      {list && list.mobileAccess.state !== 'connected' && <details><summary>Connection details</summary><p className="settings-group-note">{list.mobileAccess.message}</p></details>}
       {notice && <p className="device-management__feedback" role="status">{notice}</p>}
       {url && <><ConnectionLinkCode url={url} /><details className="device-management__link"><summary>View full connection link</summary><Textarea aria-label="Phone connection link" rows={3} readOnly value={url} onFocus={event => event.target.select()} /></details></>}
     </div>
     <div className="device-management__devices">
-      <div className="settings-pane-toolbar"><div><h3>Devices</h3><p className="device-management__count">{list ? `${devices.filter(device => device.online === true).length} connected · ${devices.length} authorized` : 'Device status not yet confirmed'}</p></div><button className="small-button" disabled={refreshing} onClick={() => { void read() }}>{refreshing ? <ThemeStatusLoadingIcon size={16} animation="spin" /> : <ThemeActionRefreshIcon size={16} />}{refreshing ? 'Checking…' : 'Refresh'}</button></div>
+      <div className="settings-pane-toolbar"><div><h3>Devices</h3><p className="device-management__count">{list ? `${readIssue ? 'Last observed: ' : ''}${devices.filter(device => device.online === true).length} connected · ${devices.length} authorized` : 'Device status not yet confirmed'}</p></div><button className="small-button" disabled={refreshing} onClick={() => { void read() }}>{refreshing ? <ThemeStatusLoadingIcon size={16} animation="spin" /> : <ThemeActionRefreshIcon size={16} />}{refreshing ? 'Checking…' : 'Refresh'}</button></div>
       {observedAt && <p className="device-management__updated">Last checked {new Date(observedAt).toLocaleTimeString()}</p>}
+      {list && <div className="device-management__service">
+        <span>Connection service{readIssue ? ' · last observed' : ''}</span><strong>{list.mobileAccess.state === 'connected' ? 'Ready to connect' : list.mobileAccess.state === 'starting' ? 'Starting' : 'Unavailable'}</strong>
+        {list.mobileAccess.state !== 'connected' && <details><summary>Connection details</summary><p>{list.mobileAccess.message}</p></details>}
+      </div>}
+      {readIssue && <div className="device-management__read-issue" role="status">
+        <strong>Device status unavailable</strong><p>Previous records are kept. Refresh to check again.</p>
+        <details><summary>Observation details</summary><p>{readIssue}</p></details>
+      </div>}
       <details className="device-management__records" data-device-records>
         <summary>Device records{list ? ` · ${devices.length} authorized` : ''}</summary>
         {devices.map(device => <details className="device-management__record" data-device-record={device.deviceId} key={device.deviceId}>
@@ -106,10 +112,6 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
         </details>)}
         {list && !devices.length && <p className="settings-group-note">No devices paired yet. Your phone will appear after opening the link.</p>}
       </details>
-      {readIssue && <div className="device-management__read-issue" role="status">
-        <strong>Device status unavailable</strong><p>Previous records are kept. Refresh to check again.</p>
-        <details><summary>Observation details</summary><p>{readIssue}</p></details>
-      </div>}
     </div>
   </section>
 }
