@@ -1,0 +1,5 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "rootDir": "../../..", "module": "ESNext", "moduleResolution": "Bundler", "noEmit": true, "allowImportingTsExtensions": true, "lib": ["ES2024", "DOM", "DOM.Iterable"] },
+  "include": ["mote-chat-owner.test.ts", "mote-chat-desktop-journey.integration.test.ts", "vitest.mote-chat.config.mts"]
+}

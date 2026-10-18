@@ -1,0 +1,230 @@
+import { appendFile, mkdir, rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { afterEach, expect, it, vi } from 'vitest'
+import * as core from '@agentmux/core'
+import type { ConnectionIngressMessage } from '@agentmux/core/connections'
+import { spatialCatalog } from '@agentmux/core/spatial-state'
+import { createPublicationConversationPort, PublicationHost, type ConnectionAdapter, type MoteChatAgentPort } from '@agentmux/connectors'
+import { rpcOwnerFixture } from '../../core/test/helpers/public-rpc-owner.js'
+import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
+import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createMoteChatAgents } from '../../../apps/desktop/src/main/mote-chat-agents.js'
+import { ScratchTopics } from '../../../apps/desktop/src/main/scratch-topics.js'
+import { directoryIdentity, homeZoneId } from '../../../apps/desktop/src/shared/space-addresses.js'
+import { SCRATCH_WORKSPACE_ID } from '../../../apps/desktop/src/shared/scratch-topics.js'
+import type { AppConfig, WorkspaceRecord } from '../../../apps/desktop/src/shared/contracts.js'
+import { signedRoomAdapter, type SignedRoomMessage } from './fixtures/signed-room-adapter.js'
+
+const cleanup: Array<() => void | Promise<void>> = []
+afterEach(async () => { try { for (const close of cleanup.splice(0).reverse()) await close() } finally { vi.restoreAllMocks(); vi.unstubAllEnvs() } })
+type DirectMessage = SignedRoomMessage & { nativeKind: 'direct' | 'group' }
+
+async function fixture(strangerMessageLimit = 1, conversationIdleMs = 60_000) {
+  const publicationRefresh = vi.spyOn(PublicationHost.prototype, 'refresh')
+  const original = await rpcOwnerFixture([], core)
+  const client = original.client as core.AgentMuxClient
+  cleanup.push(async () => {
+    try { await original.close() } catch (error) {
+      // Aborted original read observers can finish their owned receipt write after dispose.
+      if ((error as NodeJS.ErrnoException).code !== 'ENOTEMPTY') throw error
+      await rm(original.root, { recursive: true, force: true, maxRetries: 3, retryDelay: 20 })
+    }
+  })
+  const workspace: WorkspaceRecord = { id: SCRATCH_WORKSPACE_ID, name: 'Mote homes', hostId: 'local', path: join(original.root, 'homes'), kind: 'folder' }
+  await mkdir(workspace.path)
+  const topics = new ScratchTopics(), topic = await topics.ensureMote(workspace, 'view:private-chat')
+  await writeFile(join(topic.physicalDirectoryPath!, 'MOTE.md'), '---\nversion: 1\ndefaults:\n  executorId: saved-chat\n---\n')
+  await writeFile(join(topic.physicalDirectoryPath!, 'SOUL.md'), '# Original Mote\nKeep this Mote personality.\n')
+  const spaceId = directoryIdentity('local', topic.identityDirectoryPath!), zoneId = homeZoneId(spaceId)
+  const target = { spaceId, zoneId, expectedResource: { hostId: 'local', workspaceId: workspace.id, workspacePath: workspace.path } }
+  const graph = { spaces: [{ spaceId, kind: 'mote' as const, name: 'Original Mote', hostId: 'local', directoryPath: topic.physicalDirectoryPath!, projectId: null, topicId: topic.id }],
+    zones: [{ zoneId, workspaceId: workspace.id, kind: 'home' as const, hostId: 'local', directoryPath: topic.physicalDirectoryPath!, branch: null }],
+    bindings: [{ spaceId, zoneId }], tabs: [], regions: [], layouts: {}, tabLayouts: {}, resources: {} }
+  const spatial = new core.AgentMuxSpatialStateStore(join(original.root, 'spatial.json'))
+  await spatial.commit({ expectedRevision: 0, graph })
+  const config = { hosts: [{ id: 'local', kind: 'local', label: 'Original host' }], workspaces: [workspace],
+    executors: { 'saved-chat': { label: 'Saved Executor', providerId: 'claude', command: 'claude', injectAgentMuxGuide: false } },
+    profile: { displayName: 'Original owner', about: '', avatar: '', shareWithAgents: true } } as unknown as AppConfig
+
+  // Native process creation, Hook handshake and signed transport are controlled leaves.
+  // Core creation/CAS, original message journal, native history and automatic publication execute.
+  const inner = original.client as unknown as typeof original.inner & { hookServer: Record<string, unknown>; ensureManagedHooks: unknown; ensureTerminalHandshakeOrDegrade: unknown;
+    providers: { get(id: string): core.AgentProvider } }
+  const runs = new Map<string, ReturnType<typeof original.run>>(), sources = new Map<number, { id: string; path: string }>()
+  const start = vi.fn(async (_input: { env?: Record<string, string>; args: string[] }) => {
+    const number = runs.size + 1, runId = `native-run-${number}`, pid = 400_000 + number, id = `native-chat-${number}`, path = join(original.root, `${id}.jsonl`)
+    await writeFile(path, JSON.stringify({ sessionId: id, uuid: 'original-context', type: 'system', message: { role: 'system', content: 'Native system context' } }) + '\n')
+    const run = { ...original.run(runId), program: 'claude', pid, workspacePath: topic.physicalDirectoryPath! }
+    runs.set(runId, run); sources.set(pid, { id, path }); return run
+  })
+  inner.kernel.start = start
+  inner.kernel.status = async (id: string) => { const run = runs.get(id); if (!run) throw new Error('Unknown original native Run'); return run }
+  inner.hookServer.isRunning = () => true
+  inner.hookServer.createBinding = () => ({ bindingId: 'b'.repeat(43), endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) }, bindRun: async () => {}, close: async () => {} })
+  inner.ensureManagedHooks = async () => {}
+  inner.ensureTerminalHandshakeOrDegrade = async (session: core.AgentMuxAgentSession) => session
+  vi.spyOn(client, 'probeAgent').mockImplementation(async id => ({ providerId: id, executable: id, installed: true, capabilities: new core.AgentProviderRegistry().get(id).catalog.capabilities }))
+  const provider = inner.providers.get('claude') as core.AgentProvider & Required<Pick<core.AgentProvider, 'discoverNativeSession'>>
+  expect(typeof provider.discoverNativeSession).toBe('function')
+  vi.spyOn(provider, 'discoverNativeSession').mockImplementation(async ({ processId }) => {
+    const source = sources.get(processId)
+    return source ? { handle: { kind: 'provider' as const, providerId: 'claude', sessionId: source.id, transcriptPath: source.path }, assertCurrent: async () => {} } : null
+  })
+  vi.spyOn(provider, 'planPromptInput').mockImplementation(text => ({ kind: 'single-phase', data: text + '\r' }))
+  const clients = () => [{ hostId: 'local', client: original.client }]
+  const checkpoint = (ref: Parameters<typeof original.client.conversationCheckpoint>[0]) => original.client.conversationCheckpoint(ref)
+  const desktopAgents = createMoteChatAgents({ config: () => config, catalog: async () => spatialCatalog(graph), topics, clients, checkpoint })
+  const wire = signedRoomAdapter(), application = { domain: 'signed.example', appId: 'original-mote-app' }
+  const creator = { application, idType: 'email', userId: 'creator@example.test' }, guest = { ...creator, userId: 'guest@example.test' }
+  const verify = wire.adapter.ingress!.verify
+  const adapter: ConnectionAdapter = { ...wire.adapter,
+    ingress: { ...wire.adapter.ingress!, verify: async (...args) => {
+      const verified = await verify(...args), native = JSON.parse(args[1]) as DirectMessage
+      if (!['direct', 'group'].includes(native.nativeKind) || verified.kind === 'action') throw new Error('Missing signed native conversation kind')
+      return { ...verified, conversationKind: native.nativeKind }
+    } },
+    profile: { get: async () => ({ connectionId: 'original-bot', connectionRevision: 1, application, language: null, state: 'observed', profile: null,
+      metadata: null, creator: { idType: creator.idType, userId: creator.userId }, botId: null, onlineVersionId: null, reviewingVersionId: null, version: null }) } }
+  let services: Awaited<ReturnType<typeof createDesktopConnections>>, server: core.AgentMuxControlServer, sdk: Awaited<ReturnType<typeof core.connectAgentMuxRpc>>
+  const prepare = vi.fn<MoteChatAgentPort['prepare']>(async input => {
+    wire.trace.push('prepare')
+    const retained = (await services.ingress!.list({ connectionId: 'original-bot' })).ingresses
+    expect(retained.some(record => record.kind !== 'action' && record.conversationKind === 'direct' && record.state === 'received')).toBe(true)
+    return desktopAgents.prepare(input)
+  })
+  const agents = { ...desktopAgents, prepare }
+  async function open() {
+    services = await createDesktopConnections({ directory: join(original.root, 'connectors'), adapters: [adapter],
+      encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: value.toString(), shouldReEncrypt: false }) },
+      bindings: { spatial, checkpoint }, moteChat: { agents, assertTarget: desktopAgents.assertTarget, assertReady: desktopAgents.assertReady },
+      publication: createPublicationConversationPort(clients), ingress: { core: host => host === 'local' ? original.client : undefined } })
+    server = new core.AgentMuxControlServer({ socketPath: join(original.root, 'public.sock'), connections: services.connections, moteChat: services.moteChat!, spatialState: spatial, coreClients: clients })
+    await server.start()
+    sdk = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+  }
+  async function close() { await sdk?.dispose(); await server?.stop(); services?.close() }
+  await open(); cleanup.push(close)
+  const cli = async (command: 'configure' | 'history', input: unknown, credentials?: core.AgentMuxRpcCredentials) => {
+    const overrides = credentials ? { AGENTMUX_AGENT_SESSION_ID: credentials.agentSessionId, AGENTMUX_AGENT_CAPABILITY: credentials.capability } : {}
+    const result = await runCompiledObjectCli(['--endpoint', 'unix:' + server.path, 'space', 'mote', 'chat', command, '--input', '-'], objectCliEnvironment(original.root, overrides), JSON.stringify(input))
+    expect(result.code, result.stdout + result.stderr).toBe(0)
+    return JSON.parse(result.stdout).result
+  }
+  const credential = await services!.secrets.store({ operationId: 'store-original-key', secret: 'fixture-signing-key' })
+  await sdk!.call('connection.configure', { operationId: 'configure-original-bot', expectedRevision: null,
+    connection: { connectionId: 'original-bot', adapterId: adapter.adapterId, application, label: 'Original bot', enabled: true, credentialRef: credential.credentialRef } })
+  await cli('configure', { operationId: 'enable-original-chat', target, expectedRevision: null, expectedConnectionRevision: 1,
+    values: { enabled: true, connection: { connectionId: 'original-bot', application }, conversationIdleMs, strangerMessageLimit } })
+  await vi.waitFor(() => expect(wire.endpoint).toBeDefined())
+  publicationRefresh.mockClear()
+  const submit = client.submitAgentMessage.bind(client)
+  const submissionErrors: Array<{ code?: string; message: string }> = []
+  const submission = vi.spyOn(client, 'submitAgentMessage').mockImplementation(async (...args) => { wire.trace.push('core-submit');
+    try { return await submit(...args) } catch (error) { submissionErrors.push({ code: (error as core.AgentMuxError).code, message: String(error) }); throw error } })
+  const message = (id: string, actor = creator): DirectMessage => ({ deliveryKey: `event/${id}`, recordKey: `message/${id}`, roomKey: `private/${actor.userId}`, person: actor.userId,
+    text: `Original external question ${id}`, addressing: 'broadcast', nativeKind: 'direct' })
+  const records = async () => (await services.ingress!.list({ connectionId: 'original-bot', limit: 100 })).ingresses as ConnectionIngressMessage[]
+  async function claimed(id: string) {
+    let record: ConnectionIngressMessage | undefined
+    await vi.waitFor(async () => { record = (await records()).find(r => r.externalMessageId === `message/${id}`); expect(record?.state).toBe('claimed') }, { timeout: 4_000 })
+    await services.ingress!.dispatch(record!.ingressId)
+    return record!
+  }
+  async function reply(agentSessionId: string, id: string, text: string) {
+    const session = await original.client.readAgentSession(agentSessionId), source = session!.nativeHandle!
+    if (source.kind !== 'provider' || !source.transcriptPath) throw new Error('Original native source is missing')
+    await appendFile(source.transcriptPath, JSON.stringify({ sessionId: source.sessionId, uuid: id, type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } }) + '\n')
+  }
+  return { ...original, get services() { return services }, get sdk() { return sdk }, topic, target, creator, guest, wire, message, records, claimed, reply, start, prepare, submission,
+    cli, publicationRefresh, credentials(index: number) { const env = start.mock.calls[index]![0].env!; return { agentSessionId: env.AGENTMUX_AGENT_SESSION_ID!, capability: env.AGENTMUX_AGENT_CAPABILITY! } },
+    submissionErrors, async restart() { await close(); await open(); await vi.waitFor(() => expect(wire.endpoint).toBeDefined()) } }
+}
+
+it('retains the signed direct message before lazy Mote creation, submits original external input and automatically replies to the original private chat', async () => {
+  const f = await fixture()
+  expect(f.start).not.toHaveBeenCalled()
+  expect(await f.wire.post(f.message('first'), false)).toBe(401)
+  f.wire.trace.length = 0
+  expect(await f.wire.post(f.message('first'))).toBe(202)
+  const record = await f.claimed('first'), input = record.input!
+  await vi.waitFor(async () => expect(f.inner.kernel.input, JSON.stringify({ errors: f.submissionErrors, receipt: await f.services.ingress!.inspect({ ingressId: record.ingressId }) })).toHaveBeenCalledOnce(), { timeout: 4_000 })
+  expect(f.wire.trace.slice(0, 5)).toEqual(['callback', 'ack', 'callback-returned', 'prepare', 'core-submit'])
+  expect(record).toMatchObject({ conversationKind: 'direct', actor: f.creator, input: { agentSessionId: expect.stringMatching(/^mote-chat-/u), author: { actor: f.creator, externalConversationId: f.message('first').roomKey } } })
+  const queued = await new core.DurableAgentMuxMessageQueue(f.client.agentMessageQueuePath()).readByOperationId(input.operationId)
+  expect(queued?.envelope).toMatchObject({ body: f.message('first').text, sender: input.author })
+  const created = await f.client.readAgentSession(input.agentSessionId)
+  expect(created?.creation).toMatchObject({ initialPrompt: 'not-requested', agentMuxContext: 'confirmed' })
+  expect(f.start).toHaveBeenCalledOnce(); expect(f.prepare).toHaveBeenCalledOnce()
+  expect(f.publicationRefresh.mock.calls.some(args => args.length === 0)).toBe(true)
+  const started = performance.now()
+  await f.reply(input.agentSessionId, 'native-answer', 'Answer from the original Mote')
+  await vi.waitFor(() => expect(f.wire.effects).toHaveLength(1), { timeout: 2_500 })
+  expect(performance.now() - started).toBeLessThan(2_500)
+  expect(f.wire.effects[0]).toMatchObject({ room: f.message('first').roomKey, text: 'Answer from the original Mote' })
+  expect(await f.wire.post(f.message('first'))).toBe(202)
+  expect(await f.wire.post({ ...f.message('first'), deliveryKey: 'redelivery/first' })).toBe(202)
+  await new Promise(resolve => setImmediate(resolve))
+  expect(f.inner.kernel.input).toHaveBeenCalledOnce(); expect(f.start).toHaveBeenCalledOnce()
+  expect(await f.records()).toHaveLength(1)
+  expect((await f.services.moteChat!.audience({ target: f.target })).people).toMatchObject([{ creator: true, used: 1, total: null }])
+}, 15_000)
+
+it('counts only admitted original guest messages and leaves the last admitted task able to answer after exhaustion and owner restart', async () => {
+  const f = await fixture(1)
+  expect(await f.wire.post(f.message('last', f.guest))).toBe(202)
+  const first = await f.claimed('last')
+  await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledOnce())
+  expect(await f.wire.post({ ...f.message('last', f.guest), deliveryKey: 'guest-redelivery' })).toBe(202)
+  expect(await f.wire.post(f.message('over-limit', f.guest))).toBe(202)
+  await vi.waitFor(async () => expect((await f.records()).find(record => record.externalMessageId === 'message/over-limit')).toMatchObject({ state: 'refused', code: 'MOTE_CHAT_QUOTA_EXHAUSTED' }))
+  expect((await f.services.moteChat!.audience({ target: f.target })).people).toMatchObject([{ actor: f.guest, used: 1, total: 1, remaining: 0 }])
+  await f.restart()
+  const authority = await f.sdk.call('connection.ingress.authority', { operationId: first.input!.operationId })
+  expect(authority).toMatchObject({ authority: 'current', ingress: { input: first.input } })
+  await f.reply(first.input!.agentSessionId, 'last-allowed-answer', 'Last allowed question still receives its answer')
+  await vi.waitFor(() => expect(f.wire.effects).toHaveLength(1), { timeout: 2_500 })
+  expect(f.wire.effects[0]).toMatchObject({ room: f.message('last', f.guest).roomKey, text: 'Last allowed question still receives its answer' })
+  expect(f.start).toHaveBeenCalledOnce(); expect(f.inner.kernel.input).toHaveBeenCalledOnce()
+  expect((await f.services.moteChat!.audience({ target: f.target })).people).toMatchObject([{ used: 1, remaining: 0 }])
+}, 15_000)
+
+it('keeps an earlier claimed generation authoritative and publishes its late reply after rollover without retargeting or replay on restart', async () => {
+  const f = await fixture(1, 1)
+  expect(await f.wire.post(f.message('older'))).toBe(202)
+  const older = await f.claimed('older')
+  await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledOnce())
+  expect(await f.wire.post(f.message('newer'))).toBe(202)
+  const newer = await f.claimed('newer')
+  await vi.waitFor(async () => expect(f.inner.kernel.input, JSON.stringify({ errors: f.submissionErrors, receipt: await f.services.ingress!.inspect({ ingressId: newer.ingressId }) })).toHaveBeenCalledTimes(2))
+  expect(newer.input!.agentSessionId).not.toBe(older.input!.agentSessionId)
+  expect(f.start.mock.calls[1]![0].args.join('\n')).toContain(`amux://agent/${older.input!.agentSessionId}`)
+  expect(await f.sdk.call('connection.ingress.authority', { operationId: older.input!.operationId })).toMatchObject({ authority: 'current', ingress: { input: older.input } })
+  const bindings = await f.services.connections.bindings!.list({ connectionId: 'original-bot' })
+  expect(bindings.bindings.map(binding => binding.agentSessionId)).toEqual(expect.arrayContaining([older.input!.agentSessionId, newer.input!.agentSessionId]))
+  expect(bindings.bindings.every(binding => binding.state === 'active')).toBe(true)
+  const history = await f.cli('history', { target: f.target, limit: 1 })
+  expect(history.generations.map((generation: { agentSessionId: string }) => generation.agentSessionId)).toEqual([newer.input!.agentSessionId])
+  const more = await f.cli('history', { target: f.target, limit: 1, cursor: history.next })
+  expect(more.generations.map((generation: { agentSessionId: string }) => generation.agentSessionId)).toEqual([older.input!.agentSessionId])
+  expect(await f.wire.post(f.message('another-person', f.guest))).toBe(202)
+  const guest = await f.claimed('another-person')
+  await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledTimes(3))
+  const ownHistory = await f.cli('history', { target: f.target, actor: f.creator }, f.credentials(0))
+  expect(ownHistory.generations).toHaveLength(2)
+  expect(ownHistory.generations.some((generation: { agentSessionId: string }) => generation.agentSessionId === guest.input!.agentSessionId)).toBe(false)
+  const agent = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(f.root, 'public.sock') }, credentials: f.credentials(0) })
+  try {
+    await expect(agent.call('space.mote.chat.history', { target: f.target, actor: f.guest })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+    await expect(agent.call('space.mote.chat.audience', { target: f.target })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  } finally { await agent.dispose() }
+  await f.reply(newer.input!.agentSessionId, 'newer-answer', 'New generation answer')
+  await vi.waitFor(() => expect(f.wire.effects).toHaveLength(1), { timeout: 2_500 })
+  await f.reply(older.input!.agentSessionId, 'older-late-answer', 'Original generation late answer')
+  await vi.waitFor(() => expect(f.wire.effects).toHaveLength(2), { timeout: 2_500 })
+  expect(f.wire.effects.map(effect => [effect.room, effect.text])).toEqual([[f.message('newer').roomKey, 'New generation answer'], [f.message('older').roomKey, 'Original generation late answer']])
+  await f.restart()
+  expect(await f.sdk.call('connection.ingress.authority', { operationId: older.input!.operationId })).toMatchObject({ authority: 'current' })
+  expect(await f.wire.post({ ...f.message('older'), deliveryKey: 'old-generation-redelivery' })).toBe(202)
+  await new Promise(resolve => setImmediate(resolve))
+  expect(f.start).toHaveBeenCalledTimes(3); expect(f.inner.kernel.input).toHaveBeenCalledTimes(3); expect(f.wire.effects).toHaveLength(2)
+}, 20_000)
