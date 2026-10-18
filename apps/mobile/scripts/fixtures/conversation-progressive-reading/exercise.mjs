@@ -106,16 +106,19 @@ export async function runMobile({BrowserWindow,setup,evidence,phase,scene,preloa
     const beforeCurrent=await read('({started:performance.now(),receiptCount:mobileReading.facts().conversationReads.length})')
     await tap('.mobile-reading-latest')
     const currentProgress=`(()=>{
-      const before=${JSON.stringify(beforeCurrent)},receipts=mobileReading.facts().conversationReads.slice(before.receiptCount);
+      const facts=mobileReading.facts(),receipts=facts.conversationReads;
       const own=r=>r.hostId==='local'&&r.agentSessionId===${JSON.stringify(mobile.agentSessionId)};
-      const request=receipts.find(r=>own(r)&&r.method==='readAgentConversation'&&r.requestCursor===null&&r.started>=before.started);
-      if(!request)return null;
-      const frame=receipts.filter(r=>own(r)&&r.windowId===request.windowId&&r.revision===request.revision),complete=frame.find(r=>r.complete);
-      const presented=[...document.querySelectorAll('.mobile-conversation__reading [data-native-record-id]')].some(n=>n.dataset.nativeRecordId===${JSON.stringify(latestNativeId)});
-      return complete&&presented&&frame.some(r=>r.nativeIds.includes(${JSON.stringify(latestNativeId)}))?{windowId:request.windowId,revision:request.revision,requestCursor:request.requestCursor,complete:complete.complete,nativeCut:complete.nativeCut,originalId:${JSON.stringify(latestNativeId)}}:null;
+      const complete=receipts.findLast(r=>own(r)&&r.complete);
+      if(!complete)return null;
+      const frame=receipts.filter(r=>own(r)&&r.windowId===complete.windowId&&r.revision===complete.revision);
+      const feed=document.querySelector('.mobile-conversation__reading'),presented=[...feed.querySelectorAll('[data-native-record-id]')].some(n=>n.dataset.nativeRecordId===${JSON.stringify(latestNativeId)});
+      const pending=facts.reads.some(r=>!r.finished&&r.method==='runtime.invoke'&&['readAgentConversation','readConversationChanges'].includes(r.params?.invocation?.method)&&r.params.invocation.args[0].hostId==='local'&&r.params.invocation.args[0].agentSessionId===${JSON.stringify(mobile.agentSessionId)});
+      return !pending&&presented&&feed.scrollHeight-feed.clientHeight-feed.scrollTop<=2&&frame.some(r=>r.nativeIds.includes(${JSON.stringify(latestNativeId)}))?{windowId:complete.windowId,revision:complete.revision,complete:complete.complete,nativeCut:complete.nativeCut,anchor:complete.anchor,navigation:complete.navigation,originalId:${JSON.stringify(latestNativeId)},mode:receipts.slice(${beforeCurrent.receiptCount}).some(r=>own(r)&&r.requestCursor===null)?'refreshed':'retained-live-frame',tailDistance:feed.scrollHeight-feed.clientHeight-feed.scrollTop}:null;
     })()`
-    await until(`!!${currentProgress}`,'the actual Current action completes its original latest read and presents the original current native record')
+    await until(`!!${currentProgress}`,'the actual Current action presents its complete original current frame at the tail')
     const current=await read(currentProgress)
+    assert.equal(current.anchor,null,'The complete Core window is not anchored in historical mode')
+    assert.equal(current.navigation.newer,null,'The complete Core window already contains its current tail')
     result.operations.push({type:'current-readable',receipt:current})
     await sample('current-before-selection')
     await read(`(()=>{const f=document.querySelector('.mobile-conversation__reading');const b=[...f.querySelectorAll('.log-turn__body:not(.conversation-progressive-body__placeholder)')].find(n=>n.closest('[data-native-record-id]')&&n.textContent.trim().length>14);if(!b)throw Error('No original readable body');b.scrollIntoView({block:'center'});const walker=document.createTreeWalker(b,NodeFilter.SHOW_TEXT);let t;while(t=walker.nextNode())if(t.textContent.trim().length>14)break;if(!t)throw Error('No original text');const range=document.createRange();range.setStart(t,0);range.setEnd(t,12);getSelection().removeAllRanges();getSelection().addRange(range);window.originalMobileSelection={node:t,body:b,text:getSelection().toString()}})()`)
@@ -128,18 +131,20 @@ export async function runMobile({BrowserWindow,setup,evidence,phase,scene,preloa
     assert.equal(typeof recordId,'string','The append returns its original source record identity')
     const appendProgress=`(()=>{
       const receipts=mobileReading.facts().conversationReads,own=r=>r.hostId==='local'&&r.agentSessionId===${JSON.stringify(mobile.agentSessionId)};
-      const receipt=receipts.findLast(r=>own(r)&&r.finished>${before.started}&&r.windowId===${JSON.stringify(current.windowId)}&&r.nativeCut!==${JSON.stringify(before.nativeCut)}&&r.nativeIds.includes(${JSON.stringify(recordId)}));
-      const complete=receipt&&receipts.find(r=>own(r)&&r.windowId===receipt.windowId&&r.revision===receipt.revision&&r.complete);
-      return complete?{receipt,complete}:null;
+      const complete=receipts.findLast(r=>own(r)&&r.finished>${before.started}&&r.windowId===${JSON.stringify(current.windowId)}&&r.complete&&r.nativeCut!==${JSON.stringify(before.nativeCut)});
+      if(!complete)return null;
+      const pages=receipts.filter(r=>own(r)&&r.finished>${before.started}&&r.windowId===complete.windowId&&r.revision===complete.revision);
+      const receipt=pages.find(r=>r.nativeIds.includes(${JSON.stringify(recordId)}));
+      return receipt?{receipt,complete,pages}:null;
     })()`
     await until(`!!${appendProgress}`,'the live original Surface reader completes the appended source frame with its exact record identity and changed native cut')
-    const {receipt:appendReceipt,complete:appendComplete}=await read(appendProgress)
+    const {receipt:appendReceipt,complete:appendComplete,pages:appendPages}=await read(appendProgress)
     await sample('selection');await capture('selection')
     assert.equal(await read('getSelection().toString()'),selected.text)
     assert.equal(await read('originalMobileSelection.node.isConnected'),true)
     assert.equal(await read('originalMobileSelection.body.isConnected'),true)
     assert.ok(Math.abs(await read('originalMobileSelection.body.getBoundingClientRect().top')-selected.top)<=2,'The original selected Mobile anchor remains in place')
-    result.operations.push({type:'selection-retained',appendReceipt,appendComplete,appendedRecordId:recordId,priorNativeCut:before.nativeCut,originalNode:true,originalText:true,originalAnchor:true})
+    result.operations.push({type:'selection-retained',appendReceipt,appendComplete,appendPages,appendedRecordId:recordId,priorNativeCut:before.nativeCut,originalNode:true,originalText:true,originalAnchor:true})
     await read('getSelection().removeAllRanges()')
     await until(`[...document.querySelectorAll('.mobile-conversation__reading [data-native-record-id]')].some(n=>n.dataset.nativeRecordId===${JSON.stringify(recordId)})`,'the original appended native record is presented after the selection releases')
     result.operations.push({type:'append-presented',recordId,windowId:appendReceipt.windowId,revision:appendReceipt.revision})
