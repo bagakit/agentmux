@@ -4,6 +4,7 @@ import { AgentMuxError } from './errors.js';
 import { conversationRevision } from './conversation-stream.js';
 import { normalizeAgentTimelineItem } from './session-timeline.js';
 import { applyNormalizedTimelineMutation } from './session-timeline-reducer.js';
+import { parseAgentInputJournalCut, type AgentInputJournalCut } from './agent-input-conversation.js'
 import type { AgentCapturedTimelinePage, AgentCapturedTimelineRead, AgentCapturedTimelineRecord, AgentCapturedTimelineStream, AgentTimelineCommit, AgentTimelineMutation, AgentTimelineSnapshot } from './types.js';
 // These are tables in the original Session database, under its original transaction/flock.
 // Bodies exist only in immutable versions. Heads and recent windows are indexes/queries.
@@ -83,6 +84,12 @@ export function commitCapturedMutation(db: DatabaseSync, mutation: AgentTimeline
   if (!Number.isSafeInteger(stream.sequence + 1) || !Number.isSafeInteger(stream.revision + 1))
     throw new AgentMuxError('Captured stream sequence limit reached.', 'AGENT_TIMELINE_REVISION_LIMIT');
   const item = next[0]!, sequence = stream.sequence + 1, revision = stream.revision + 1, itemRevision = conversationRevision(item);
+  if (item.inputOrigin) {
+    initializeInputProjection(db)
+    if (item.inputRef && item.inputSubmission && (item.inputSubmission.status === 'waiting' || item.inputSubmission.status === 'unknown' || item.inputSubmission.observation === 'owned'))
+      db.prepare('INSERT INTO captured_input_pending VALUES (?,?,?) ON CONFLICT(session_id,record_id) DO UPDATE SET key_json=excluded.key_json').run(id, recordId, JSON.stringify(item.inputRef))
+    else db.prepare('DELETE FROM captured_input_pending WHERE session_id=? AND record_id=?').run(id, recordId)
+  } else if (previous?.inputOrigin) db.prepare('DELETE FROM captured_input_pending WHERE session_id=? AND record_id=?').run(id, recordId)
   db.prepare('INSERT INTO captured_record_versions VALUES (?,?,?,?,?,?,?)')
     .run(id, stream.epoch, sequence, recordId, itemRevision, revision, JSON.stringify(item));
   db.prepare(`INSERT INTO captured_record_heads VALUES (?,?,?,?,?,?,?) ON CONFLICT(session_id,epoch,record_id)
@@ -91,6 +98,25 @@ export function commitCapturedMutation(db: DatabaseSync, mutation: AgentTimeline
   db.prepare('UPDATE captured_streams SET sequence=?,revision=? WHERE session_id=?').run(sequence, revision, id);
   return { agentSessionId: id, revision, changed: true, mutation, stream: { ...header, sequence, revision },
     position: { id: recordId, firstSequence: previousRow ? Number(previousRow.first_sequence) : sequence, sequence, revision: itemRevision } };
+}
+export function readCapturedInputProjection(db: DatabaseSync, id: string, after = '') {
+  if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='captured_input_projection'").get()) return { cut: null, pending: [], next: null }
+  const row = db.prepare('SELECT cut_json FROM captured_input_projection WHERE session_id=?').get(id)
+  const pending = db.prepare('SELECT record_id,key_json FROM captured_input_pending WHERE session_id=? AND record_id>? ORDER BY record_id LIMIT 101').all(id, after)
+  return { cut: row ? parseAgentInputJournalCut(JSON.parse(String(row.cut_json))) : null,
+    pending: pending.slice(0, 100).map(row => ({ recordId: String(row.record_id), key: JSON.parse(String(row.key_json)) as import('./agent-prompt-condition.js').AgentPromptInputKey })),
+    next: pending.length > 100 ? String(pending[99]!.record_id) : null }
+}
+function initializeInputProjection(db: DatabaseSync): void {
+  db.exec(`CREATE TABLE IF NOT EXISTS captured_input_projection (session_id TEXT PRIMARY KEY, cut_json TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS captured_input_pending (session_id TEXT NOT NULL, record_id TEXT NOT NULL, key_json TEXT NOT NULL, PRIMARY KEY(session_id,record_id));`)
+}
+export function writeCapturedInputProjection(db: DatabaseSync, id: string, value: AgentInputJournalCut): void {
+  initializeInputProjection(db)
+  const cut = parseAgentInputJournalCut(value), row = db.prepare('SELECT cut_json FROM captured_input_projection WHERE session_id=?').get(id)
+  const previous = row ? parseAgentInputJournalCut(JSON.parse(String(row.cut_json))) : null
+  if (previous && (previous.queueId !== cut.queueId || previous.incarnation !== cut.incarnation)) throw new AgentMuxError('The original input projection journal changed.', 'AGENT_INPUT_READ_UNCONFIRMED')
+  if (!previous || previous.sequence < cut.sequence) db.prepare('INSERT INTO captured_input_projection VALUES (?,?) ON CONFLICT(session_id) DO UPDATE SET cut_json=excluded.cut_json').run(id, JSON.stringify(cut))
 }
 export function readCapturedPage(db: DatabaseSync, id: string, input: AgentCapturedTimelineRead = {}): AgentCapturedTimelinePage {
   const stream = accepted(db, id), cut = input.throughSequence ?? stream.sequence, limit = input.limit ?? 100;

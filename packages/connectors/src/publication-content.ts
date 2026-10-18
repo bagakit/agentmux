@@ -7,6 +7,7 @@ export type PublicationContentPlan = {
   pieces: Array<{ part: ConversationContentRef; text: string; image?: PublicationImage; file?: PublicationFile; contentEligibility?: 'public'; purpose?: 'conversation'; relay?: ConnectionDeliveryRelay['sources'][number] }>
   relay?: ConnectionDeliveryRelay
   phase?: 'progress' | 'final'
+  inputSubmission?: import('@agentmux/core').AgentInputSubmissionObservation
   gaps: ConnectionDeliveryGap[]
   origins: ConnectionOriginRepresentation[]
   excluded: ConversationContentRef[]
@@ -64,6 +65,8 @@ export function publicationContent(unit: ConversationUnit, binding: RoomBinding,
     if (original.kind === 'captured') {
       const start = binding.sourceFrontier?.frontier.cuts.find(c => c.kind === 'captured')
       if (!start || start.kind !== 'captured' || record.order.kind !== 'captured-stream' || record.order.epoch !== start.epoch || record.order.firstSequence <= start.sequence) { gap('start-cut-unconfirmed'); continue }
+      const inputOrigin = original.item.inputOrigin
+      if (inputOrigin && (!start.inputJournal || inputOrigin.queueId !== start.inputJournal.queueId || inputOrigin.incarnation !== start.inputJournal.incarnation || inputOrigin.sequence <= start.inputJournal.sequence)) { gap('start-cut-unconfirmed'); continue }
     }
     if (original.kind === 'native') {
       if (original.item.kind === 'user-message' && original.item.conversation?.adoptedInput && unit.event.author.kind === 'unknown') {
@@ -129,5 +132,8 @@ export function publicationContent(unit: ConversationUnit, binding: RoomBinding,
       if (text) sections.push(text)
     }
   }
-  return { text: sections.join('\n\n'), pieces, ...(phase ? { phase } : {}), gaps, origins, excluded, complete: gaps.length === 0 }
+  const inputs = unit.records.flatMap(record => record.original.kind === 'captured' && record.original.item.inputOrigin && record.original.item.inputSubmission && record.original.item.authorHuman === true
+    ? [{ key: record.original.item.inputRef, observation: record.original.item.inputSubmission }] : [])
+  const inputSubmission = inputs.length && new Set(inputs.map(value => JSON.stringify(value.key))).size === 1 ? inputs[0]!.observation : undefined
+  return { text: sections.join('\n\n'), pieces, ...(phase ? { phase } : {}), ...(inputSubmission ? { inputSubmission } : {}), gaps, origins, excluded, complete: gaps.length === 0 }
 }

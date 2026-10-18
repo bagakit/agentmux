@@ -3,6 +3,7 @@ import { agentInputContextCaptureProofFields } from './agent-input-context-captu
 import { conversationRevision } from './conversation-stream.js'
 import { parseAgentExternalMessageAuthor } from './external-author.js'
 import { validateAgentPromptInputKey } from './agent-prompt-condition.js'
+import { parseAgentInputJournalCut, parseAgentInputSubmissionObservation } from './agent-input-conversation.js'
 import { conversationProvenanceFields } from './conversation-provenance.js'
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
@@ -68,6 +69,7 @@ const KIND_MEMBERS: Record<AgentTimelineItemKind, true> = {
 }
 const KINDS = Object.keys(KIND_MEMBERS) as readonly AgentTimelineItemKind[]
 const STATUS_MEMBERS: Record<AgentTimelineItemStatus, true> = {
+  recorded: true,
   streaming: true,
   complete: true,
   failed: true
@@ -200,6 +202,11 @@ export function normalizeAgentTimelineItem(value: unknown): AgentTimelineItem {
       source.authorHuman !== undefined || source.authorAgentSessionId !== undefined || source.authorExternal !== undefined)) throw new AgentMuxError(
     'An A2A notification must retain its original platform source.', 'INVALID_AGENT_TIMELINE')
   const inputRef = source.inputRef === undefined ? undefined : validateAgentPromptInputKey(source.inputRef)
+  const inputOrigin = source.inputOrigin === undefined ? undefined : parseAgentInputJournalCut(source.inputOrigin)
+  const inputSubmission = source.inputSubmission === undefined ? undefined : parseAgentInputSubmissionObservation(source.inputSubmission)
+  if (source.status === 'recorded' && !inputOrigin) throw new AgentMuxError('Recorded input status needs its original saved-input membership.', 'INVALID_AGENT_TIMELINE')
+  if ((inputOrigin || inputSubmission) && (!inputOrigin || inputOrigin.sequence < 1 || !inputSubmission || !inputRef || inputRef.kind !== 'prompt' || source.authorHuman !== true || source.authorAgentSessionId !== undefined || source.authorExternal !== undefined)) throw new AgentMuxError(
+    'A saved human input projection requires its original journal membership and receipt.', 'INVALID_AGENT_TIMELINE')
   if (inputRef && (inputRef.agentSessionId !== source.agentSessionId || !(source.kind === 'user_message' && source.source === 'user' && source.publicContent === 'confirmed' ||
       source.kind === 'system_message' && source.source === 'agentmux' && a2aNotificationId !== undefined && inputRef.kind === 'prompt' && inputRef.submissionId === a2aNotificationId)))
     throw new AgentMuxError('Timeline input identity does not describe its original public user submission.', 'INVALID_AGENT_TIMELINE')
@@ -222,6 +229,7 @@ export function normalizeAgentTimelineItem(value: unknown): AgentTimelineItem {
     ...(contentEligibility === undefined ? {} : { contentEligibility }),
     ...(source.publicContent === undefined ? {} : { publicContent: 'confirmed' as const }),
     ...(inputRef ? { inputRef } : {}),
+    ...(inputOrigin ? { inputOrigin, inputSubmission: inputSubmission! } : {}),
     ...(a2aNotificationId === undefined ? {} : { a2aNotificationId }),
     ...authorAgent,
     ...(source.authorExternal === undefined ? {} : { authorExternal: ('grantId' in Object(source.authorExternal) ? parseAgentExternalMessageAuthor(source.authorExternal) : parseExternalConversationAuthor(source.authorExternal)) }),

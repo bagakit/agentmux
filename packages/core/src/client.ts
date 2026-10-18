@@ -94,7 +94,7 @@ import {
 } from './agent-global-message-queue.js'
 import { renderAgentMuxMessageEnvelope } from './agent-message-render.js'
 import { agentInputSubmissionStatus, agentInputJournalKey, validateAgentInputWaitRef,
-  type AgentInputJournalIntent, type AgentInputSelector, type AgentInputSubmissionReceipt,
+  type AgentInputJournalIntent, type AgentInputJournalEntry, type AgentInputSelector, type AgentInputSubmissionReceipt,
   type AgentInputWaitRef, type AgentInputWaitStopReceipt, type AgentInputSavedEnvironment, type AgentInputCallContext } from './agent-input-wait.js'
 import { answerAsk, cancelAsk, type AgentAsk } from './agent-ask.js'
 import {
@@ -889,6 +889,9 @@ export class AgentMuxClient {
     controller: AbortController; runtimeWake: boolean; requested: boolean; active: boolean; sequence: number
   }>()
   private readonly inputWaitingRecipients = new Map<string, { pending: Promise<void>; again: boolean }>()
+  private readonly inputConversationTails = new Map<string, Promise<import('./agent-input-conversation.js').AgentInputJournalCut>>()
+  private readonly inputConversationRecovered = new Set<string>()
+  private readonly inputConversationWrites = new Map<string, Promise<void>>()
   private inputWaitingDisposed = false
   private readonly inputWaitingUnsubscribe: () => void
   private readonly continuityInputs: AgentSessionContinuityInputs
@@ -2632,7 +2635,20 @@ export class AgentMuxClient {
     const sourceOptions = previous ? { nativeSource: 'previous' as const } : {}
     if (previous && history) descriptor = { ...descriptor, history: { ...history, nativeHandle: history.previousNativeHandle! } }
     return { reference, port: { state: this.conversationReadState, descriptor, readHostId: input.hostId, ...(options.signal ? { signal: options.signal } : {}),
-      captured: query => this.store.readCapturedHistory(input.agentSessionId, query),
+      captured: async query => {
+        let inputJournal: import('./agent-input-conversation.js').AgentInputJournalCut | undefined
+        let failure: { code: string; message: string } | undefined
+        try { inputJournal = await this.syncInputConversation(input.agentSessionId, options.signal) }
+        catch (error) {
+          options.signal?.throwIfAborted()
+          failure = { code: 'AGENT_INPUT_CONVERSATION_UNCONFIRMED', message: error instanceof Error ? error.message : String(error) }
+          // A capture failure cannot move the original input birth past a later
+          // sharing cut. Preserve the independently readable journal frontier.
+          try { inputJournal = await this.messageQueue.readConversationInputCut(input.agentSessionId) } catch { /* The precise input source gap remains visible. */ }
+        }
+        const page = await this.store.readCapturedHistory(input.agentSessionId, query)
+        return { ...page, stream: { ...page.stream, ...(inputJournal ? { inputJournal } : {}), gaps: [...page.stream.gaps, ...(failure ? [failure] : [])] } }
+      },
       nativePage: (cursor, limit) => this.sessionHistoryPage(input.agentSessionId, { ...sourceOptions, limit, ...(cursor === undefined ? {} : { cursor }), ...(options.signal ? { signal: options.signal } : {}) }),
       nativeCheckpoint: () => this.sessionHistoryCheckpoint(input.agentSessionId, { ...sourceOptions, ...(options.signal ? { signal: options.signal } : {}) }),
       nativeChanges: (checkpoint, limit) => this.readSessionHistoryChanges(input.agentSessionId, { ...sourceOptions, checkpoint, limit, ...(options.signal ? { signal: options.signal } : {}) }),
@@ -6825,6 +6841,94 @@ export class AgentMuxClient {
     return receipt
   }
 
+  /** Materialize the original journal into the existing captured source, never another input owner. */
+  private async syncInputConversation(agentSessionId: string, signal?: AbortSignal): Promise<import('./agent-input-conversation.js').AgentInputJournalCut> {
+    const previous = this.inputConversationTails.get(agentSessionId)
+    const work = (previous?.catch(() => {}) ?? Promise.resolve()).then(async () => {
+      signal?.throwIfAborted()
+      let position = await this.store.readInputConversationProjection(agentSessionId)
+      if (!this.inputConversationRecovered.has(agentSessionId)) {
+        for (;;) {
+          for (const pending of position.pending) {
+            signal?.throwIfAborted()
+            const saved = await this.messageQueue.inspectInput({ key: pending.key })
+            const original = (await this.store.readCapturedHistory(agentSessionId, { recordId: pending.recordId })).records[0]?.item
+            if (saved && original?.inputOrigin) await this.writeInputConversation(saved, original.createdAt, original.inputOrigin)
+          }
+          if (!position.next) break
+          position = await this.store.readInputConversationProjection(agentSessionId, position.next)
+        }
+        this.inputConversationRecovered.add(agentSessionId)
+      }
+      let cut = position.cut ?? undefined
+      for (;;) {
+        signal?.throwIfAborted()
+        const page = await this.messageQueue.readConversationInputPage(agentSessionId, cut)
+        for (const saved of page.items) {
+          signal?.throwIfAborted()
+          await this.writeInputConversation(saved, saved.recordedAt, { ...page.cut, sequence: saved.sequence })
+        }
+        if (page.cut.sequence > 0 && (!cut || !isDeepStrictEqual(cut, page.cut))) await this.store.recordInputConversationProjection(agentSessionId, page.cut)
+        cut = page.cut
+        if (!page.more) return cut
+      }
+    })
+    this.inputConversationTails.set(agentSessionId, work)
+    try { return await work }
+    finally { if (this.inputConversationTails.get(agentSessionId) === work) this.inputConversationTails.delete(agentSessionId) }
+  }
+
+  private async writeInputConversation(saved: AgentInputJournalEntry, recordedAt: number, inputOrigin: import('./agent-input-conversation.js').AgentInputJournalCut): Promise<void> {
+    const id = agentInputJournalKey(saved.intent.key), previous = this.inputConversationWrites.get(id)
+    const work = (previous?.catch(() => {}) ?? Promise.resolve()).then(() => this.writeInputConversationRecord(saved, recordedAt, inputOrigin))
+    this.inputConversationWrites.set(id, work)
+    try { await work }
+    finally { if (this.inputConversationWrites.get(id) === work) this.inputConversationWrites.delete(id) }
+  }
+
+  private async writeInputConversationRecord(saved: AgentInputJournalEntry, recordedAt: number, inputOrigin: import('./agent-input-conversation.js').AgentInputJournalCut): Promise<void> {
+    const source = saved.intent.source, key = saved.intent.key
+    if (source.kind !== 'prompt' || source.authorHuman !== true || key.kind !== 'prompt') return
+    const receipt = await this.inspectAgentInput({ key })
+    if (!receipt) throw new AgentMuxError('The original saved input observation is unavailable.', 'AGENT_INPUT_READ_UNCONFIRMED')
+    const recordId = `prompt:${key.submissionId}`, original = (await this.store.readCapturedHistory(key.agentSessionId, { recordId })).records[0]?.item
+    if (original && (original.content !== source.prompt || original.authorHuman !== true || !isDeepStrictEqual(original.inputRef, key) ||
+      original.inputOrigin && !isDeepStrictEqual(original.inputOrigin, inputOrigin))) throw new AgentMuxError(
+      'The saved input conflicts with its original public conversation record.', 'AGENT_TIMELINE_ID_CONFLICT')
+    const session = await this.historyDescriptor(key.agentSessionId), at = Math.max(Date.now(), original?.updatedAt ?? recordedAt)
+    const item: AgentTimelineItem = { ...original, id: recordId, agentSessionId: key.agentSessionId, kind: 'user_message', source: 'user', status: 'recorded',
+      createdAt: original?.createdAt ?? recordedAt, updatedAt: at, title: original?.title ?? 'User input', content: source.prompt,
+      publicContent: 'confirmed', authorHuman: true, inputRef: key, inputOrigin,
+      inputSubmission: { status: receipt.status, observation: receipt.observation },
+      ...(source.sourceChannel ? { sourceChannel: source.sourceChannel } : {}), ...(source.sourceDevice ? { sourceDevice: source.sourceDevice } : {}),
+      ...(source.inputContext ? { inputContext: source.inputContext, inputContextSource: source.inputContextSource,
+        ...(source.inputContextCaptureProof ? { inputContextCaptureProof: source.inputContextCaptureProof } : {}) } : {}) }
+    if (original) {
+      const { createdAt: _originalCreatedAt, updatedAt: _originalUpdatedAt, ...originalFacts } = original
+      const { createdAt: _createdAt, updatedAt: _updatedAt, ...nextFacts } = item
+      if (isDeepStrictEqual(originalFacts, nextFacts)) return
+    }
+    await this.persistAndPublishTimeline({ type: 'upsert', agentSessionId: key.agentSessionId, item },
+      { source: 'user', observedAt: at, run: key.expectedRun }, session.hostId)
+  }
+
+  private async publishInputReceipt(receipt: AgentInputSubmissionReceipt): Promise<void> {
+    this.publisher.publish({ type: 'agent-input', receipt })
+    try {
+      const saved = await this.messageQueue.inspectInput({ key: receipt.key })
+      if (saved?.intent.source.kind === 'prompt' && saved.intent.source.authorHuman === true) {
+        // Current intake never waits for old membership projection. The reader
+        // alone advances the recovery cursor after every preceding row is read.
+        const cut = await this.messageQueue.readConversationInputCut(receipt.key.agentSessionId)
+        await this.writeInputConversation(saved, saved.recordedAt, { ...cut, sequence: saved.sequence })
+      }
+    } catch (error) {
+      this.publisher.publish({ type: 'agent-error', agentSessionId: receipt.key.agentSessionId, code: 'AGENT_INPUT_CONVERSATION_UNCONFIRMED',
+        message: error instanceof Error ? error.message : String(error), failure: deliveryFailure(error),
+        evidence: { source: 'agentmux', observedAt: Date.now(), run: receipt.key.expectedRun } })
+    }
+  }
+
   private async assertInputWaitingAuthor(intent: AgentInputJournalIntent, caller?: { agentSessionId: string; capability: string }): Promise<void> {
     if (intent.source.kind === 'prompt') {
       if (caller) throw new AgentMuxError('An Agent cannot take ownership of a local prompt producer.', 'MESSAGE_SENDER_MISMATCH')
@@ -6867,7 +6971,7 @@ export class AgentMuxClient {
       this.inputWaitingContexts.delete(agentInputJournalKey(ref.key))
     }
     const projection = await this.inspectAgentInput({ key: ref.key })
-    if (projection) this.publisher.publish({ type: 'agent-input', receipt: projection })
+    if (projection) await this.publishInputReceipt(projection)
     return receipt
   }
 
@@ -6968,7 +7072,7 @@ export class AgentMuxClient {
         void this.scheduleInputWaiting(ref.key.agentSessionId)
       }
       const receipt = (await this.inspectAgentInput({ key: ref.key }))!
-      this.publisher.publish({ type: 'agent-input', receipt })
+      await this.publishInputReceipt(receipt)
       return receipt
     } finally {
       // The original Core owns any accepted waiting context after this receipt.
@@ -7058,7 +7162,7 @@ export class AgentMuxClient {
           if (context.controller.signal.aborted) throw error
           await waiting({ phase: 'authorization', reason: 'author-authorization-needed', wake: 'explicit-rejoin', failure: deliveryFailure(error) })
           const receipt = await this.inspectAgentInput({ key })
-          if (receipt) this.publisher.publish({ type: 'agent-input', receipt })
+          if (receipt) await this.publishInputReceipt(receipt)
           return
         }
         preparationPhase = 'input-coordination'
@@ -7095,7 +7199,7 @@ export class AgentMuxClient {
       }
     }
     const receipt = await this.inspectAgentInput({ key })
-    if (receipt) this.publisher.publish({ type: 'agent-input', receipt })
+    if (receipt) await this.publishInputReceipt(receipt)
   }
 
   /** Read the original failed invocation, including while its Agent or Runtime is unavailable. */
@@ -8992,6 +9096,14 @@ export class AgentMuxClient {
           message: error instanceof Error ? error.message : String(error), evidence })
       }
       return
+    }
+    if (message.userContent && message.authorHuman && inputRef?.kind === 'prompt') {
+      const saved = await this.messageQueue.inspectInput({ key: inputRef })
+      if (saved?.intent.source.kind === 'prompt' && saved.intent.source.authorHuman === true) {
+        const receipt = await this.inspectAgentInput({ key: inputRef })
+        if (receipt) await this.publishInputReceipt(receipt)
+        return
+      }
     }
     if (message.userContent) await this.recordMessageAfterSideEffect(session, `prompt:${operationId}`,
       title, message.userContent, now, 'user', { status, publicContent: 'confirmed', ...(inputRef ? { inputRef } : {}),

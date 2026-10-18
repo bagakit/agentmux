@@ -31,7 +31,7 @@ import { continuityExecutorEntries } from './agent-continuity-executor.js'
 import { isPermissionOptionKind, isPromptDeliveryDegradedReason, RISK_TIERS } from './types.js'
 import { applyNormalizedTimelineMutation } from './session-timeline-reducer.js'
 import { conversationRevision } from './conversation-stream.js'
-import { beginCapturedStream, capturedHistorySchema, capturedStream, commitCapturedMutation, readCapturedPage, readRecentCaptured, readyCapturedStream } from './captured-history.js'
+import { beginCapturedStream, capturedHistorySchema, capturedStream, commitCapturedMutation, readCapturedPage, readRecentCaptured, readyCapturedStream, readCapturedInputProjection, writeCapturedInputProjection } from './captured-history.js'
 import { archiveCapturedOriginal, capturedFileWitness, importCapturedFile } from './captured-history-import.js'
 import {
   normalizeAgentTimelineMutation
@@ -232,6 +232,8 @@ export type AgentMuxAgentSessionStore = {
     next: AgentMuxStoredAgentSession | null
   ): Promise<void>
   readCapturedHistory(agentSessionId: string, input?: AgentCapturedTimelineRead): Promise<AgentCapturedTimelinePage>
+  readInputConversationProjection(agentSessionId: string, after?: string): Promise<ReturnType<typeof readCapturedInputProjection>>
+  recordInputConversationProjection(agentSessionId: string, cut: import('./agent-input-conversation.js').AgentInputJournalCut): Promise<void>
   loadTimeline(agentSessionId: string): Promise<AgentTimelineSnapshot>
   applyTimelineMutation(
     mutation: AgentTimelineMutation,
@@ -2208,6 +2210,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
   private readonly reservations = new Map<string, AgentMuxLifecycleReservation>()
   private retiredRuns: AgentMuxRunRef[] = []
   private retiredAgentSessions: AgentMuxRetiredAgentSession[] = []
+  private readonly inputConversationCuts = new Map<string, import('./agent-input-conversation.js').AgentInputJournalCut>()
   private readonly timelines = new Map<string, { stream: AgentCapturedTimelinePage['stream']; heads: Map<string, AgentCapturedTimelinePage['records'][number]>; versions: AgentCapturedTimelinePage['records'] }>()
 
   private promptRecordKey(value: AgentPromptSubmissionRecord): string {
@@ -2607,6 +2610,19 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
       this.timelines.set(id, history);
     }
     return history;
+  }
+
+  async readInputConversationProjection(id: string, after = ''): Promise<ReturnType<typeof readCapturedInputProjection>> {
+    const rows = [...this.memoryCaptured(id).heads.values()].filter(({ item }) => item.id > after && item.inputOrigin && item.inputRef && item.inputSubmission &&
+      (item.inputSubmission.status === 'waiting' || item.inputSubmission.status === 'unknown' || item.inputSubmission.observation === 'owned'))
+      .sort((a, b) => a.item.id.localeCompare(b.item.id)).slice(0, 101)
+    return structuredClone({ cut: this.inputConversationCuts.get(id) ?? null,
+      pending: rows.slice(0, 100).map(({ item }) => ({ recordId: item.id, key: item.inputRef! })), next: rows.length > 100 ? rows[99]!.item.id : null })
+  }
+  async recordInputConversationProjection(id: string, cut: import('./agent-input-conversation.js').AgentInputJournalCut): Promise<void> {
+    const previous = this.inputConversationCuts.get(id)
+    if (previous && (previous.queueId !== cut.queueId || previous.incarnation !== cut.incarnation)) throw new AgentMuxError('The original input projection journal changed.', 'AGENT_INPUT_READ_UNCONFIRMED')
+    if (!previous || previous.sequence < cut.sequence) this.inputConversationCuts.set(id, structuredClone(cut))
   }
 
   async readCapturedHistory(id: string, input: AgentCapturedTimelineRead = {}): Promise<AgentCapturedTimelinePage> {
@@ -3383,6 +3399,16 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       if (this.capturedPreparations.get(id) === work)
         this.capturedPreparations.delete(id);
     }
+  }
+
+  async readInputConversationProjection(id: string, after = ''): Promise<ReturnType<typeof readCapturedInputProjection>> {
+    await this.timelineTails.get(id); await this.tail
+    await this.prepareCapturedHistory(id)
+    return this.withCapturedRead(db => readCapturedInputProjection(db, id, after))
+  }
+  async recordInputConversationProjection(id: string, cut: import('./agent-input-conversation.js').AgentInputJournalCut): Promise<void> {
+    await this.prepareCapturedHistory(id)
+    await this.enqueue(async () => { writeCapturedInputProjection(this.db, id, cut); this.dirty = true })
   }
 
   async readCapturedHistory(agentSessionId: string, input: AgentCapturedTimelineRead = {}): Promise<AgentCapturedTimelinePage> {

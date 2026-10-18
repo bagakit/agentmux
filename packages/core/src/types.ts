@@ -1128,6 +1128,7 @@ export type AgentSessionUserMessageAuthor =
   | { kind: 'unknown' }
 
 export type AgentSessionUserMessage = {
+  inputSubmission?: import('./agent-input-conversation.js').AgentInputSubmissionObservation
   inputContext?: import('./browser-input-context.js').BrowserInputContext
   inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource
   inputContextCaptureProof?: import('./agent-input-context-capture.js').AgentInputContextCaptureProof
@@ -1925,7 +1926,7 @@ export type AgentTimelineItemKind =
   | 'permission'
   | 'lifecycle'
 
-export type AgentTimelineItemStatus = 'streaming' | 'complete' | 'failed'
+export type AgentTimelineItemStatus = 'streaming' | 'complete' | 'failed' | 'recorded'
 
 /** Accepted semantic observations and actual Run/connection boundaries, never inferred from text. */
 export type AgentActivityState = {
@@ -1998,8 +1999,12 @@ export type AgentTimelineItem = {
   contentEligibility?: AgentSessionHistoryContentEligibility
   /** Set by the original userContent writer, never inferred from legacy content or author. Not sharing authority. */
   publicContent?: 'confirmed'
-  /** Original submitted Input identity; attribution or opaque item IDs never reconstruct it. */
+  /** Original saved or submitted Input identity; attribution or opaque IDs never reconstruct it. */
   inputRef?: import('./agent-prompt-condition.js').AgentPromptInputKey
+  /** Immutable membership in the original saved-input journal. */
+  inputOrigin?: import('./agent-input-conversation.js').AgentInputJournalCut
+  /** Safe projection of the original Input receipt, not Agent completion. */
+  inputSubmission?: import('./agent-input-conversation.js').AgentInputSubmissionObservation
   toolName?: string
   toolInput?: string
   /**
@@ -2044,6 +2049,8 @@ export type AgentTimelineMutation =
 
 /** Original captured stream position; neither a message count nor a delivery receipt. */
 export type AgentCapturedTimelineStream = {
+  /** Accepted original Input journal frontier, distinct from captured sequence. */
+  inputJournal?: import('./agent-input-conversation.js').AgentInputJournalCut
   epoch: string
   sequence: number
   revision: number
