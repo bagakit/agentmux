@@ -87,3 +87,16 @@ it('discovers independent Mote and spark meanings in Settings and keeps an expli
   await click('Restore default drawing')
   expect(draft.icons).toEqual({ 'object.mote': { kind: 'glyph', glyph: 'mote-mark' } })
 })
+
+it('finds and edits the preview meaning without borrowing reveal or inspect', async () => {
+  await fill('Find semantic icon', 'action.preview')
+  expect(host.querySelectorAll('.theme-icon-editor__meaning')).toHaveLength(1)
+  await click('Edit action.preview')
+  expect(host.querySelector('[aria-label="Selected semantic icon"] code')?.textContent).toBe('action.preview')
+  expect(host.querySelector('.theme-icon-editor__comparison')?.textContent).toContain('eye')
+  await click('Choose a drawing'); await fill('Find icon drawing', 'circle-play'); await click('Use circle-play')
+  expect(draft.icons).toEqual({ 'action.preview': { kind: 'glyph', glyph: 'circle-play' } })
+  await click('Restore default drawing')
+  expect(draft.icons).toEqual({})
+  expect(host.querySelector('[aria-label="Selected semantic icon"] code')?.textContent).toBe('action.preview')
+})
