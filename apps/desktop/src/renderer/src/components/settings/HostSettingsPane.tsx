@@ -233,6 +233,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
   return (
     <div ref={container} className="settings-pane-stack settings-resource-workbench remote-management" data-resource-view={view} data-remote-mode={showTopology ? 'topology' : 'list'} data-remote-wide={wide}>
       <div className="settings-pane-toolbar remote-management__toolbar">
+        <button type="button" className="settings-resource-back small-button" onClick={backToLibrary}><ThemeNavigationBackIcon size={14} /> All hosts</button>
         <div className="remote-management__scope"><strong>{hosts.length}</strong><span>hosts</span><small>{hosts.filter(host => host.kind === 'ssh').length} SSH</small></div>
         {showTopology ? <label className="settings-resource-search remote-management__search"><ThemeActionSearchIcon size={14} aria-hidden="true" /><TextInput type="search" aria-label="Filter hosts" placeholder="Find a host or project…" value={filter.query} onChange={event => filterHosts(event.target.value)} /></label> : null}
         {wide ? <div className="remote-management__modes" aria-label="Host view">
@@ -259,7 +260,6 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
             }
           })} />}
         <div ref={editor} className="settings-resource-editor">
-          <button type="button" className="settings-resource-back small-button" onClick={backToLibrary}><ThemeNavigationBackIcon size={14} /> All hosts</button>
         {hosts.filter((host) => host.id === selectedId).map((host) => {
           const check = currentHostCheck(checks[host.id], host)
           const hostSessions = sessionsByHost.get(host.id) ?? NO_SESSIONS
