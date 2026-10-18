@@ -14,6 +14,20 @@ const fail = (): never => { throw new AgentMuxError('Ingress data does not descr
 const object = (value: unknown, fields: string[]) => rpcRecord(value, fields, 'INVALID_CONNECTION_INGRESS')
 function text(value: unknown): string { if (typeof value !== 'string' || !value.trim() || value.length > 16_384 || /[\u0000-\u001f\u007f]/u.test(value)) fail(); return value as string }
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+export function parseConnectionQuestionAnswerSubmissions(value: unknown): import('./ingress-contract.js').ConnectionQuestionAnswerSubmission[] {
+  if (!Array.isArray(value) || !value.length || value.length > 100) fail()
+  const ids = new Set<string>()
+  return (value as unknown[]).map(value => {
+    const answer = object(value, ['questionId', 'optionIds', 'text']), questionId = text(answer.questionId)
+    if (ids.has(questionId)) fail()
+    ids.add(questionId)
+    if (answer.text !== undefined && (typeof answer.text !== 'string' || !answer.text.trim() || answer.text.length > 131_072)) fail()
+    if (answer.optionIds !== undefined && (!Array.isArray(answer.optionIds) || !answer.optionIds.length || answer.optionIds.length > 100 || new Set(answer.optionIds).size !== answer.optionIds.length)) fail()
+    if (answer.text === undefined && answer.optionIds === undefined || answer.text !== undefined && answer.optionIds !== undefined) fail()
+    return { questionId, ...(answer.text === undefined ? {} : { text: answer.text as string }),
+      ...(answer.optionIds === undefined ? {} : { optionIds: (answer.optionIds as unknown[]).map(text) }) }
+  })
+}
 export const CONNECTION_INGRESS_AUTHORITY_CODES = ['INGRESS_SERVICE_DISABLED', 'INGRESS_SERVICE_UNCONFIRMED', 'INGRESS_CLAIM_UNAVAILABLE', 'INGRESS_CONNECTION_UNAVAILABLE', 'INGRESS_BINDING_UNAVAILABLE', 'INGRESS_ACTOR_NOT_AUTHORIZED', 'INGRESS_INPUT_OUTSIDE_SCOPE', 'INGRESS_ADDRESSING_UNCONFIRMED', 'INGRESS_AUTHORITY_REVISED', 'INGRESS_STORAGE_UNCONFIRMED'] as const satisfies readonly import('./ingress-contract.js').ConnectionIngressAuthorityCode[]
 function addressing(value: unknown): ConnectionIngressAddressing {
   const p = object(value, ['replyToMessageId', 'state', 'selection', 'reason']), replyToMessageId = text(p.replyToMessageId)
@@ -25,20 +39,22 @@ function addressing(value: unknown): ConnectionIngressAddressing {
 }
 export function parseConnectionIngressRecord(value: unknown): ConnectionIngressRecord {
   if (value && typeof value === 'object' && !Array.isArray(value) && Reflect.get(value, 'kind') === 'action') {
-    const p = object(value, ['kind', 'ingressId', 'connectionId', 'application', 'eventId', 'actor', 'externalConversationId', 'sourceMessageId', 'actionRef', 'state', 'code', 'input'])
+    const p = object(value, ['kind', 'ingressId', 'connectionId', 'application', 'eventId', 'actor', 'externalConversationId', 'sourceMessageId', 'actionRef', 'answers', 'state', 'code', 'input'])
     const application = parseConnectionApplication(p.application)
     const actor = p.actor === undefined ? undefined : parseConnectionActor(p.actor)
     if (!['received', 'claimed', 'refused'].includes(String(p.state)) || actor && !equal(actor.application, application)) fail()
     const base = { kind: 'action' as const, ingressId: text(p.ingressId), connectionId: text(p.connectionId), application, eventId: text(p.eventId),
       ...(actor === undefined ? {} : { actor }), ...(p.externalConversationId === undefined ? {} : { externalConversationId: text(p.externalConversationId) }),
       ...(p.sourceMessageId === undefined ? {} : { sourceMessageId: text(p.sourceMessageId) }), ...(p.actionRef === undefined ? {} : { actionRef: text(p.actionRef) }),
+      ...(p.answers === undefined ? {} : { answers: parseConnectionQuestionAnswerSubmissions(p.answers) }),
       }
     if (p.state === 'refused') { if (p.input !== undefined || p.code !== 'INGRESS_ACTION_UNSUPPORTED' && !CONNECTION_INGRESS_AUTHORITY_CODES.includes(p.code as never)) fail(); return { ...base, state: 'refused', code: p.code as NonNullable<import('./ingress-contract.js').ConnectionIngressAction['code']> } }
     if (!base.actor || !base.externalConversationId || !base.sourceMessageId || !base.actionRef || p.code !== undefined) fail()
     if (p.state === 'received') { if (p.input !== undefined) fail(); return { ...base, state: 'received' } }
-    const input = object(p.input, ['hostId','agentSessionId','expectedRun','operationId','intentDigest','author']), run = object(input.expectedRun, ['runId']), author = parseAgentExternalInteractionAuthor(input.author)
+    const input = object(p.input, ['hostId','agentSessionId','expectedRun','operationId','intentDigest','author','responseKind']), run = object(input.expectedRun, ['runId']), author = parseAgentExternalInteractionAuthor(input.author)
+    if (input.responseKind !== undefined && input.responseKind !== 'question') fail()
     if (!/^[a-f0-9]{64}$/u.test(text(input.intentDigest)) || author.connectionId !== base.connectionId || !equal(author.actor, base.actor) || author.externalConversationId !== base.externalConversationId || author.sourceMessageId !== base.sourceMessageId || author.actionRef !== base.actionRef) fail()
-    return { ...base, state: 'claimed', input: { hostId: text(input.hostId), agentSessionId: text(input.agentSessionId), expectedRun: { runId: text(run.runId) }, operationId: text(input.operationId), intentDigest: text(input.intentDigest), author } }
+    return { ...base, state: 'claimed', input: { hostId: text(input.hostId), agentSessionId: text(input.agentSessionId), expectedRun: { runId: text(run.runId) }, operationId: text(input.operationId), intentDigest: text(input.intentDigest), author, ...(input.responseKind === 'question' ? { responseKind: 'question' as const } : {}) } }
   }
   const p = object(value, ['ingressId', 'connectionId', 'application', 'eventId', 'externalMessageId', 'externalConversationId', 'conversationKind', 'actor', 'body', 'state', 'code', 'input', 'addressing', 'group'])
   const actor = parseConnectionActor(p.actor), app = object(p.application, ['domain', 'appId'])
@@ -94,11 +110,25 @@ export function parseIngressResult<M extends ConnectionIngressMethod>(method: M,
     return { ingress, authority: p.authority, ...(p.code === undefined ? {} : { code: p.code }) } as ConnectionIngressResultMap[M]
   }
   if (method === 'connection.ingress.inspect') {
-    const p = object(value, ['ingress', 'inputReceipt', 'interactionReceipt', 'observation']), ingress = p.ingress === null ? null : parseConnectionIngressRecord(p.ingress)
+    const p = object(value, ['ingress', 'inputReceipt', 'interactionReceipt', 'questionReceipt', 'observation']), ingress = p.ingress === null ? null : parseConnectionIngressRecord(p.ingress)
     const receipt = p.inputReceipt === null ? null : parseAgentInputSubmissionReceipt(p.inputReceipt)
     if (ingress && ingress.ingressId !== (input as ConnectionIngressParamsMap['connection.ingress.inspect']).ingressId || !['not-started', 'observed', 'unavailable'].includes(String(p.observation))) fail()
     if (!ingress?.input && (receipt || p.observation !== 'not-started') || ingress?.input && p.observation === 'not-started' || p.observation === 'unavailable' && receipt) fail()
     if (ingress?.kind === 'action') {
+      if (ingress.input?.responseKind === 'question') {
+        if (p.interactionReceipt !== undefined || receipt) fail()
+        let questionReceipt: import('./ingress-contract.js').ConnectionIngressInspection['questionReceipt']
+        if (p.questionReceipt === null) questionReceipt = null
+        else if (p.questionReceipt !== undefined) {
+          const q = object(p.questionReceipt, ['agentSessionId','expectedRun','operationId','source','recordId','questionIds','outcome']), run = object(q.expectedRun, ['runId']), source = object(q.source, ['providerId','nativeSessionId'])
+          if (q.agentSessionId !== ingress.input.agentSessionId || q.operationId !== ingress.input.operationId || run.runId !== ingress.input.expectedRun.runId ||
+              !['saved','unknown','not-applied','submitted'].includes(String(q.outcome)) || !Array.isArray(q.questionIds) || !q.questionIds.length || new Set(q.questionIds).size !== q.questionIds.length || p.observation !== 'observed') fail()
+          questionReceipt = { agentSessionId: text(q.agentSessionId), expectedRun: { runId: text(run.runId) }, operationId: text(q.operationId),
+            source: { providerId: text(source.providerId), nativeSessionId: text(source.nativeSessionId) }, recordId: text(q.recordId), questionIds: (q.questionIds as unknown[]).map(text), outcome: q.outcome as NonNullable<typeof questionReceipt>['outcome'] }
+        }
+        return { ingress, inputReceipt: null, observation: p.observation, ...(questionReceipt === undefined ? {} : { questionReceipt }) } as ConnectionIngressResultMap[M]
+      }
+      if (p.questionReceipt !== undefined) fail()
       if (receipt) fail()
       let interactionReceipt: import('./ingress-contract.js').ConnectionIngressInspection['interactionReceipt']
       if (p.interactionReceipt === null) interactionReceipt = null
@@ -109,7 +139,7 @@ export function parseIngressResult<M extends ConnectionIngressMethod>(method: M,
       }
       return { ingress, inputReceipt: null, observation: p.observation, ...(interactionReceipt === undefined ? {} : { interactionReceipt }) } as ConnectionIngressResultMap[M]
     }
-    if (p.interactionReceipt !== undefined) fail()
+    if (p.interactionReceipt !== undefined || p.questionReceipt !== undefined) fail()
     if (receipt && (receipt.key.kind !== 'message' || receipt.key.messageId !== ingress?.input?.messageId || receipt.key.agentSessionId !== ingress?.input?.agentSessionId || !equal(receipt.key.expectedRun, ingress?.input?.expectedRun) || receipt.originalControlOperationId !== ingress?.input?.operationId)) fail()
     return { ingress, inputReceipt: receipt, observation: p.observation } as ConnectionIngressResultMap[M]
   }

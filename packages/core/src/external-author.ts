@@ -3,7 +3,7 @@ import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseConnectionActor } from './room-binding-codec.js'
 import type { ConnectionActor } from './connections-contract.js'
-import type { AgentMuxAgentInteractionInput } from './client.js'
+import type { AgentMuxAgentInteractionInput, AgentMuxSessionQuestionReplyInput } from './client.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { agentInteractionRequestTarget } from './agent-interaction-state.js'
 
@@ -29,6 +29,7 @@ export interface AgentExternalInputAuthorityPort extends Partial<AgentExternalCo
   assertCurrent(author: AgentExternalMessageAuthor, intent: AgentExternalInputIntent): void | Promise<void>
   /** The same original intake authority, with a distinct exact interaction intent. */
   assertInteractionCurrent?(author: AgentExternalInteractionAuthor, intent: AgentMuxAgentInteractionInput): void | Promise<void>
+  assertQuestionCurrent?(author: AgentExternalInteractionAuthor, intent: AgentMuxSessionQuestionReplyInput): void | Promise<void>
 }
 
 /** Platform attribution is not permission; the executing Host resolves its original durable claim. */
@@ -65,6 +66,13 @@ export function agentInteractionRequestDigest(request: import('./types.js').Agen
 export function agentInteractionIntentDigest(input: AgentMuxAgentInteractionInput): string {
   return canonicalDigest({ agentSessionId: input.agentSessionId, expectedRun: input.expectedRun,
     operationId: input.operationId, expectedRequest: agentInteractionRequestTarget(input.expectedRequest), response: input.response })
+}
+
+/** A historical question answer retains its exact source, predecessor and authored answers. */
+export function agentQuestionReplyIntentDigest(input: AgentMuxSessionQuestionReplyInput): string {
+  return canonicalDigest({ agentSessionId: input.agentSessionId, expectedRun: input.expectedRun,
+    afterSubmissionId: input.afterSubmissionId, operationId: input.operationId, source: input.source,
+    turnId: input.turnId, recordId: input.recordId, answers: input.answers.map(({ questionId, answer }) => ({ questionId, answer })) })
 }
 
 export function parseAgentExternalMessageAuthor(value: unknown): AgentExternalMessageAuthor {

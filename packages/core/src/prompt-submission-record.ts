@@ -1,6 +1,6 @@
 import { agentInputContextCaptureProofFields } from './agent-input-context-capture.js'
 import { normalizeAgentContinuityLaunchInput } from './agent-session-continuity.js'
-import { parseAgentExternalMessageAuthor } from './external-author.js'
+import { parseAgentExternalMessageAuthor, parseAgentExternalInteractionAuthor } from './external-author.js'
 import { AgentMuxError } from './errors.js'
 import { browserInputContextFields } from './browser-input-context.js'
 import { validateAgentInputControlId, validateAgentInputWaitRef } from './agent-input-wait.js'
@@ -275,13 +275,14 @@ function promptInputIntent(value: unknown): NonNullable<NonNullable<AgentMuxStor
         ...(message.sourceChannel === undefined ? {} : { sourceChannel: normalizeMessageChannel(message.sourceChannel) }),
         ...(message.questionReply === undefined ? {} : { questionReply: (() => {
           const question = record(message.questionReply, 'original question reply'), source = record(question.source, 'original question source')
-          if (Object.keys(question).some(key => !['source', 'turnId', 'recordId', 'questionIds'].includes(key)) ||
+          if (Object.keys(question).some(key => !['source', 'turnId', 'recordId', 'questionIds', 'externalAction'].includes(key)) ||
               Object.keys(source).some(key => !['providerId', 'nativeSessionId'].includes(key)) ||
               !Array.isArray(question.questionIds) || !question.questionIds.length || new Set(question.questionIds).size !== question.questionIds.length) throw new AgentMuxError(
             'Original question reply identity is invalid.', 'INVALID_AGENT_SESSION_STORE')
           return { source: { providerId: string(source.providerId, 'original question Provider'), nativeSessionId: string(source.nativeSessionId, 'original question source') },
             turnId: string(question.turnId, 'original question turn'), recordId: string(question.recordId, 'original question record'),
-            questionIds: question.questionIds.map(id => string(id, 'original question identity', MAX_STORED_TEXT_BYTES)) }
+            questionIds: question.questionIds.map(id => string(id, 'original question identity', MAX_STORED_TEXT_BYTES)),
+            ...(question.externalAction === undefined ? {} : { externalAction: parseAgentExternalInteractionAuthor(question.externalAction) }) }
         })() })
       }
     })() }) }
