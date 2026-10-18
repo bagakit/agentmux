@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { mintObjectId } from '@agentmux/core/object-id'
 import type { DatabaseSync } from 'node:sqlite'
 import {
   AgentMuxError,
@@ -251,10 +251,10 @@ export class MoteConnectionOperations implements MoteConnectionPort {
         return old
       }
       const name = action === 'create' ? (input as MoteConnectionCreate).name ?? source.name : source.name,
-        enrollmentOperationId = action === 'create' ? randomUUID() : null,
-        setupOperationId = action === 'sync' ? randomUUID() : null,
+        enrollmentOperationId = action === 'create' ? mintObjectId() : null,
+        setupOperationId = action === 'sync' ? mintObjectId() : null,
         connectionId =
-          action === 'create' ? randomUUID() : (input as MoteConnectionSync).connection.connectionId
+          action === 'create' ? mintObjectId() : (input as MoteConnectionSync).connection.connectionId
       const operation: MoteConnectionOperation = {
         operationId: input.operationId,
         action,
@@ -301,7 +301,7 @@ export class MoteConnectionOperations implements MoteConnectionPort {
             ...(source.pngDataUrl ? { avatar: { pngDataUrl: source.pngDataUrl } } : {})
           }, publication: { notes: 'Update bot identity from the saved Mote profile.' } }
         } : null,
-        defaultOperationId: randomUUID(),
+        defaultOperationId: mintObjectId(),
         defaultPhase: 'pending'
       }
       parseMoteConnectionOperation(operation)

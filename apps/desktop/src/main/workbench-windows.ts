@@ -1,5 +1,6 @@
+import { mintObjectId, mintCapabilityToken } from '@agentmux/core/object-id'
 import { installTextEditContextMenu } from './text-edit-context-menu.js'
-import { randomUUID } from 'node:crypto'
+
 import type { BrowserWindow, HandlerDetails, IpcMainEvent, IpcMainInvokeEvent, WebContents, WebFrameMain, WindowOpenHandlerResponse } from 'electron'
 import {
   parseAppWindowParams, type AgentMuxRpcWindowsOwner, type AppWindowActor, type AppWindowCallContext,
@@ -43,8 +44,8 @@ export function windowContainsOccurrence(target: AppWindowTarget, occurrence: {
 
 /** One Main presentation owner. Its children contain no second application or runtime. */
 export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
-  private mainId: string = randomUUID()
-  private mainGeneration: string = randomUUID()
+  private mainId: string = mintObjectId()
+  private mainGeneration: string = mintObjectId()
   private rendererAvailable = false
   private storageWritable = true
   private issue: string | null = null
@@ -68,7 +69,7 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
       this.mainId = loaded.state.mainWindowId
       this.storageWritable = loaded.writable
       this.issue = loaded.issue
-      for (const record of loaded.state.windows) this.retain({ ...record, generation: randomUUID(), native: null,
+      for (const record of loaded.state.windows) this.retain({ ...record, generation: mintObjectId(), native: null,
         phase: 'pending', ticket: null, durable: true })
     })
     main.on('close', event => {
@@ -201,7 +202,7 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
     window.on('close', event => {
       if (this.quitting || this.mayClose.has(window.id)) return
       event.preventDefault()
-      void this.call('app.window.return', { operationId: randomUUID(), windowId: record.windowId, documentGeneration: record.generation },
+      void this.call('app.window.return', { operationId: mintObjectId(), windowId: record.windowId, documentGeneration: record.generation },
         { actor: { kind: 'user', id: 'desktop' } }).catch(error => this.warn(String(error)))
     })
     window.on('closed', () => {
@@ -345,7 +346,7 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
       return this.finish(operation, 'rejected', 'This original Tab or one of its Regions is already in the recorded window. Return it before moving the overlapping original workface.')
     }
     const bounds = this.main.getNormalBounds()
-    const record: ManagedWindow = { windowId: randomUUID(), generation: randomUUID(), target, native: null, phase: 'pending', ticket: null,
+    const record: ManagedWindow = { windowId: mintObjectId(), generation: mintObjectId(), target, native: null, phase: 'pending', ticket: null,
       durable: false, geometry: clampGeometryToVisibleArea({ x: bounds.x + 40, y: bounds.y + 40,
         width: Math.max(640, Math.min(1120, bounds.width)), height: Math.max(480, Math.min(820, bounds.height)), maximized: false }, this.visibleAreas()) }
     this.retain(record)
@@ -374,8 +375,8 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
   private async launch(record: ManagedWindow, late?: RendererPending['late']): Promise<WorkbenchWindowResponse> {
     const generation = record.generation
     const url = new URL('./workbench-window.html', this.main.webContents.getURL())
-    url.searchParams.set('window', record.windowId); url.searchParams.set('document', record.generation); url.searchParams.set('ticket', randomUUID())
-    record.ticket = { url: url.href, frameName: 'workbench-window-' + randomUUID(), admitted: false }
+    url.searchParams.set('window', record.windowId); url.searchParams.set('document', record.generation); url.searchParams.set('ticket', mintCapabilityToken())
+    record.ticket = { url: url.href, frameName: 'workbench-window-' + mintCapabilityToken(), admitted: false }
     const response = await this.request(record, { action: 'open', url: record.ticket.url, frameName: record.ticket.frameName }, async response => {
       if (record.generation !== generation || this.windows.get(record.windowId) !== record || !record.native || record.native.isDestroyed()) return
       if (response.outcome === 'applied') { record.phase = 'visible'; record.native.showInactive(); this.changed() }
@@ -412,7 +413,7 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
   }
 
   private request(record: ManagedWindow, action: { action: 'prepare' | 'return' | 'focus' } | { action: 'open'; url: string; frameName: string }, late?: RendererPending['late']): Promise<WorkbenchWindowResponse> {
-    const request = { requestId: randomUUID(), windowId: record.windowId, documentGeneration: record.generation, target: record.target, ...action } as WorkbenchWindowRequest
+    const request = { requestId: mintObjectId(), windowId: record.windowId, documentGeneration: record.generation, target: record.target, ...action } as WorkbenchWindowRequest
     return new Promise(resolve => {
       const timer = setTimeout(() => {
         const pending = this.pending.get(request.requestId)
@@ -428,7 +429,7 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
   private departChild(record: ManagedWindow, native: BrowserWindow, generation: string): void {
     if (this.quitting || this.disposed || this.windows.get(record.windowId) !== record || record.native !== native || record.generation !== generation || this.mayClose.has(native.id)) return
     if (!native.isDestroyed()) record.geometry = this.geometry(native)
-    record.retiredNative = native; record.retiredGeneration = generation; record.native = null; record.generation = randomUUID(); record.phase = 'unknown'; record.ticket = null
+    record.retiredNative = native; record.retiredGeneration = generation; record.native = null; record.generation = mintObjectId(); record.phase = 'unknown'; record.ticket = null
     this.warn('The original workface window document ended. Its Session and Run remain; the original content is returning to the main workbench. Open the same original target to restore this window.')
     const departed = { ...record, generation, phase: 'returning' as const }
     const cleanup = (async () => {
@@ -454,7 +455,7 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
     if (!this.rendererAvailable) return
     this.rendererAvailable = false
     this.retireFocus({ windowId: this.mainId, documentGeneration: this.mainGeneration })
-    this.mainGeneration = randomUUID()
+    this.mainGeneration = mintObjectId()
     this.navigationCleanup = this.navigationCleanup.then(() => this.rendererDeparted()).then(async () => { await Promise.all(this.childDepartures.values()) })
   }
 
@@ -472,7 +473,7 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
         catch (error) { record.phase = 'unknown'; this.warn(String(error)); continue }
       }
       this.retireFocus({ windowId: record.windowId, documentGeneration: record.generation })
-      record.generation = randomUUID(); record.ticket = null; record.phase = 'pending'
+      record.generation = mintObjectId(); record.ticket = null; record.phase = 'pending'
     }
     this.changed()
   }

@@ -1,5 +1,6 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import type { IpcMainInvokeEvent } from 'electron'
-import { randomUUID } from 'node:crypto'
+
 import { AgentMuxError } from '@agentmux/core'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, assertToolkitResultTarget, parseToolkitRequest, parseToolkitResult, parseToolkitSnapshot, type ToolkitRequest, type ToolkitResult, type AgentMuxToolkitPort } from '@agentmux/core/control'
 import { TOOLKIT_CHANGED_CHANNEL, TOOLKIT_ENDED_CHANNEL } from '../shared/contracts.js'
@@ -12,7 +13,7 @@ export function registerToolkitIpc(port: AgentMuxToolkitPort,
     return id
   }
   const execute = async (raw: unknown): Promise<ToolkitResult> => {
-    const request = parseToolkitRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: randomUUID(), ...(raw as object) })
+    const request = parseToolkitRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(), ...(raw as object) })
     const result = await port.execute(request, new AbortController().signal)
     if (result.operation !== request.operation) throw new AgentMuxError('Toolkit IPC operation mismatch.', 'CONTROL_PROTOCOL_ERROR')
     const { operation: _, ...payload } = result
@@ -31,7 +32,7 @@ export function registerToolkitIpc(port: AgentMuxToolkitPort,
   handle('toolkit:observe', async (event, rawToolId: unknown, rawId: unknown, rawOptions: unknown) => {
     const options = rawOptions === undefined ? {} : rawOptions
     if (typeof options !== 'object' || options === null || Array.isArray(options) || Object.keys(options).some(key => key !== 'evaluateOnDisplay')) throw new AgentMuxError('Toolkit display observation options are invalid.', 'INVALID_CONTROL_REQUEST')
-    const request = parseToolkitRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: randomUUID(), operation: 'toolkit.watch', toolId: rawToolId, ...options }) as Extract<ToolkitRequest, { operation: 'toolkit.watch' }>
+    const request = parseToolkitRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(), operation: 'toolkit.watch', toolId: rawToolId, ...options }) as Extract<ToolkitRequest, { operation: 'toolkit.watch' }>
     const id = validId(rawId), sender = event.sender, key = sender.id + ':' + id
     if (consumers.has(key)) throw new AgentMuxError('Toolkit consumer identity is already active.', 'INVALID_CONTROL_REQUEST')
     const controller = new AbortController()

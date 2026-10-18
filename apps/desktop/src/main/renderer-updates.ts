@@ -1,8 +1,9 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import type { DesktopLoadedRenderer } from '../shared/client-observation.js'
 import { watch, type FSWatcher } from 'node:fs'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { randomUUID } from 'node:crypto'
+
 import { validateRendererRelease, type RendererRelease } from './renderer-release.js'
 
 export type RendererPointer = { current: string | null; previous: string | null }
@@ -93,7 +94,7 @@ export class RendererUpdates {
     }
   }
   private async writeBundledMarker(id: string): Promise<void> {
-    const temporary = join(this.options.directory, `.bundled-${randomUUID()}.json`)
+    const temporary = join(this.options.directory, `.bundled-${mintObjectId()}.json`)
     await writeFile(temporary, JSON.stringify({ schema: 1, id }), { mode: 0o600 })
     await rename(temporary, join(this.options.directory, 'bundled.json'))
   }
@@ -118,7 +119,7 @@ export class RendererUpdates {
     return { path: join(directory, 'index.html'), renderer: { kind: 'staged', id, identity: release.identity } }
   }
   private async recordOutcome(requested: string | null, error?: unknown): Promise<void> {
-    const temporary = join(this.options.directory, `.status-${randomUUID()}.json`)
+    const temporary = join(this.options.directory, `.status-${mintObjectId()}.json`)
     await writeFile(temporary, JSON.stringify({ requested, current: this.current,
       outcome: error === undefined ? 'applied' : 'rejected', at: Date.now(),
       ...(error === undefined ? {} : { message: error instanceof Error ? error.message : String(error) })
@@ -126,7 +127,7 @@ export class RendererUpdates {
     await rename(temporary, join(this.options.directory, 'status.json'))
   }
   private async publish(pointer: RendererPointer): Promise<void> {
-    const temporary = join(this.options.directory, `.active-${randomUUID()}.json`)
+    const temporary = join(this.options.directory, `.active-${mintObjectId()}.json`)
     await writeFile(temporary, JSON.stringify(pointer), { mode: 0o600 })
     await rename(temporary, join(this.options.directory, 'active.json'))
   }

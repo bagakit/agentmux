@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { mintObjectId, mintCapabilityToken } from '@agentmux/core/object-id'
 import type { IpcMainInvokeEvent, WebContents } from 'electron'
 import { type AgentMuxClientIncidentReport, type AgentMuxClientIncidentProducer } from '@agentmux/core'
 import { ClientIncidentArchive, type ClientIncidentReceipt } from './client-incident-archive.js'
@@ -19,8 +19,8 @@ export class ClientIncidentIpcOwner {
     const generation = this.frame(event)
     if (generation === null) return null
     if (!this.current || this.current.generation !== generation || this.current.frame !== event.senderFrame) {
-      this.current = { generation, frame: event.senderFrame, token: randomUUID(), producer: {
-        kind: 'renderer', appInstanceId: this.owner.archive.appInstanceId, producerInstanceId: randomUUID(),
+      this.current = { generation, frame: event.senderFrame, token: mintCapabilityToken(), producer: {
+        kind: 'renderer', appInstanceId: this.owner.archive.appInstanceId, producerInstanceId: mintObjectId(),
         windowId: String(this.owner.windowId), documentGeneration: String(generation), buildId: this.owner.rendererBuildId?.() ?? null
       } }
     }

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { mintObjectId } from '@agentmux/core/object-id'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, parseAmuxObjectLink, agentSessionInspectCommand, type AgentMuxControlFocusRequest, type AgentMuxControlRequest, type AgentMuxControlResult } from '@agentmux/core'
 
 type Execute = (request: AgentMuxControlRequest, signal: AbortSignal) => Promise<AgentMuxControlResult>
@@ -41,9 +41,9 @@ export class SpatialLinkIngress {
     this.execution = controller
     const navigate = async () => {
       let request: AgentMuxControlFocusRequest
-      const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: randomUUID(), operation: 'focus' as const, inputPolicy: 'preserve' as const }
+      const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(), operation: 'focus' as const, inputPolicy: 'preserve' as const }
       if (target.kind === 'agent') {
-        const discovery = await execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: randomUUID(), operation: 'space.ls', target: {} }, controller.signal)
+        const discovery = await execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(), operation: 'space.ls', target: {} }, controller.signal)
         if (controller.signal.aborted) return
         if (discovery.operation !== 'space.ls') throw new Error('The spatial discovery owner returned another operation.')
         const regionIds = new Set(discovery.catalog.regions.filter(region => region.kind === 'agent' && region.agentSessionId === target.agentSessionId).map(region => region.regionId))

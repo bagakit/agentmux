@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { mintObjectId } from '@agentmux/core/object-id'
 import { CLIENT_INCIDENT_MAX_STAGES, safeClientIncidentCode, type AgentMuxClientEvent, type AgentMuxClientIncidentMetadata,
   type AgentMuxClientIncidentProducer, type AgentMuxClientIncidentReport, type AgentMuxClientReadingIncidentKind } from '@agentmux/core'
 import type { AppConfig, ExecutorDetection } from '../shared/contracts.js'
@@ -48,7 +48,7 @@ export class ClientIncidentRuntimeOwner {
       // This is the local diagnostic subscription, not a failure of any execution Host or Run.
       const metadata = { disposed }
       const code = incidentCode(error)
-      this.record(this.archive.hostId, 'connection-failed', 'observation-unavailable', randomUUID(), null,
+      this.record(this.archive.hostId, 'connection-failed', 'observation-unavailable', mintObjectId(), null,
         code, metadata, [{ stage: 'observation-unavailable', elapsedMs: 0, metadata }], 0)
     } catch { /* Even unavailable diagnostic admission cannot block the original IPC owner. */ }
   }
@@ -85,7 +85,7 @@ export class ClientIncidentRuntimeOwner {
   private beginProbe(executorId: string, hostId: string, config: AppConfig): Attempt | null {
     try {
       const scope = this.scope(executorId, hostId, config)
-      const attempt: Attempt = { id: randomUUID(), started: performance.now(), sequence: scope ? ++scope.sequence : 0,
+      const attempt: Attempt = { id: mintObjectId(), started: performance.now(), sequence: scope ? ++scope.sequence : 0,
         scope, related: scope?.failure ?? null, stages: [{ stage: 'probe-started', elapsedMs: 0, metadata: { executorId } }] }
       if (attempt.related) attempt.related = this.record(hostId, 'capability-probe', 'probe-started', attempt.id,
         attempt.related, null, { executorId }, attempt.stages, 0)
@@ -123,7 +123,7 @@ export class ClientIncidentRuntimeOwner {
       const started = previous?.started ?? performance.now(), elapsed = Math.max(0, performance.now() - started)
       const metadata: AgentMuxClientIncidentMetadata = { connectionBoundary: origin.boundary, connectionState: event.state }
       const stages = [...(previous?.stages ?? []), { stage: 'connection-state' as const, elapsedMs: elapsed, metadata }].slice(-CLIENT_INCIDENT_MAX_STAGES)
-      const attemptId = previous?.attemptId ?? randomUUID()
+      const attemptId = previous?.attemptId ?? mintObjectId()
       const occurrenceId = this.record(hostId, failed ? 'connection-failed' : 'connection-recovered', 'connection-state',
         attemptId, previous?.occurrenceId ?? null, code, metadata, stages, elapsed, event.evidence.observedAt)
       if (failed) boundaries.set(origin.boundary, { attemptId, started, occurrenceId, state: event.state,
@@ -135,7 +135,7 @@ export class ClientIncidentRuntimeOwner {
   private record(hostId: string, kind: Exclude<AgentMuxClientIncidentReport['kind'], AgentMuxClientReadingIncidentKind>, stage: AgentMuxClientIncidentReport['stage'], attemptId: string,
     relatedOccurrenceId: string | null, code: unknown, metadata: AgentMuxClientIncidentMetadata, stages: Stages, elapsedMs: number,
     observedAt = Date.now()): string {
-    const occurrenceId = randomUUID()
+    const occurrenceId = mintObjectId()
     this.archive.enqueue({ occurrenceId, attemptId, relatedOccurrenceId, hostId, regionId: null, kind, stage,
       code: safeClientIncidentCode(code), agentSessionId: null, runId: null, observedAt, elapsedMs, metadata, stages, references: [] }, this.producer)
     return occurrenceId

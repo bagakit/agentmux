@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { mintObjectId } from '@agentmux/core/object-id'
 import { AgentMuxError } from '@agentmux/core'
 import { ZodError } from 'zod'
 import { app } from 'electron'
@@ -28,7 +28,7 @@ export async function prepareToolkitConfig(current: AppConfig, next: AppConfig,
   const prepared = tools.map(tool => {
     const old = before.get(tool.id)
     const same = old && configValuesEqual(toolkitFields(old), toolkitFields(tool))
-    return toolkitToolSchema.parse({ ...tool, revision: same ? old.revision : randomUUID() })
+    return toolkitToolSchema.parse({ ...tool, revision: same ? old.revision : mintObjectId() })
   })
   if (configValuesEqual(tools, prepared)) return next
   return { ...next, toolkit: { ...next.toolkit, tools: prepared } }
@@ -45,7 +45,7 @@ export async function executeToolkitConfig(request: Extract<ToolkitRequest,
       if (old) fail('SETTING_RESOURCE_EXISTS', `Tool “${request.toolId}” already exists.`)
       const value = 'kind' in request.value ? { ...request.value, workspacePath: request.value.workspacePath ?? app.getPath('home') } : request.value
       const fields = parseToolkitConfigurationFields(value, false, 'INVALID_SETTING_VALUE') as ToolkitConfigurationFields
-      next = { id: request.toolId, revision: randomUUID(), ...fields }
+      next = { id: request.toolId, revision: mintObjectId(), ...fields }
       changed = true
     } else {
       if (!old) fail('SETTING_RESOURCE_NOT_FOUND', `Tool “${request.toolId}” does not exist.`)

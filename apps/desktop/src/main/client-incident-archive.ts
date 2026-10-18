@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { clientIncidentPriority } from '@agentmux/core/client-incident'
 import { link, lstat, mkdir, open, opendir, unlink } from 'node:fs/promises'
@@ -42,7 +42,7 @@ function readingKey(report: AgentMuxClientIncidentReport, producer: AgentMuxClie
 /** Main-owned immutable records and a bounded durable index. This owner performs no business calls. */
 export class ClientIncidentArchive {
   readonly hostId = 'local'
-  readonly appInstanceId = randomUUID()
+  readonly appInstanceId = mintObjectId()
   private readonly queue: Pending[] = []
   private queueBytes = 0
   private readonly memory = new Map<string, AgentMuxClientIncidentRecord>()
@@ -128,7 +128,7 @@ export class ClientIncidentArchive {
       const directory = await opendir(this.directory)
       try { if (await directory.read()) throw new Error('Diagnostic index is missing.') }
       finally { await directory.close().catch(() => {}) }
-      this.manifest = { schema: 'agentmux.client-incidents.v1', archiveId: randomUUID(), revision: 0,
+      this.manifest = { schema: 'agentmux.client-incidents.v1', archiveId: mintObjectId(), revision: 0,
         entries: [], evicted: [], counters: emptyCounters() }
       try { await this.saveIndex() } catch (error) { this.manifest = null; throw error }
     }
