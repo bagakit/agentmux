@@ -13,6 +13,7 @@ import { agentProviderLabel } from '../AgentProviderIcon'
 import { useResourceDrafts } from './use-resource-drafts'
 import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
 import { describeAgentDisplayState } from '../../../../shared/agent-state-presentation'
+import './settings-prompts-editor.css'
 
 const ThemeActionCreatePromptIcon = semanticIconComponent('action.create-prompt')
 const ThemeActionAddQuickRepliesIcon = semanticIconComponent('action.add-quick-replies')
@@ -232,13 +233,18 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
               <div className="prompt-reaction-settings__choices"><button type="button" className="small-button" aria-pressed={!prompt.reactionIcon} onClick={() => bindReaction(prompt.id)}>None</button>
                 {PROMPT_REACTION_ICONS.map(icon => <button type="button" className="small-button" key={icon} aria-label={`Quick reply icon ${icon}`} aria-pressed={prompt.reactionIcon === icon} onClick={() => bindReaction(prompt.id, icon)}>
                   <PromptReactionIconView icon={icon} />{icon === 'check' ? 'Check' : icon === 'play' ? 'Play' : 'Explain'}</button>)}
-              </div><small>Clicking its SVG sends this saved instruction only, with the original reply reference. It never approves permission requests.</small>
+              </div><small>Sends this saved instruction with the original reply reference. Never approves permission requests.</small>
               {prompt.reactionIcon ? <small>Agent lookup: <code>amux settings prompts inspect --keyword {prompt.keyword.trim() || 'code'}</code></small> : null}
             </fieldset>
             <fieldset className="prompt-state-settings"><legend>Available in Agent status when</legend><div className="prompt-state-settings__choices">{COMPOSER_PROMPT_STATES.map((state) => {
               const meaning = describeAgentDisplayState(state)
-              return <label key={state}><input type="checkbox" value={state} checked={prompt.states?.includes(state) ?? false} onChange={(event) => update(prompt.id, { states: event.target.checked ? [...(prompt.states ?? []), state] : (prompt.states ?? []).filter((candidate) => candidate !== state) })} /><span><strong>{meaning.label} <code>{state}</code></strong><small>{meaning.description}</small></span></label>
-            })}</div><small>Each selection matches its exact state. Running does not include working. Visibility is separate from whether a message can be sent.</small></fieldset>
+              return <label key={state}><input type="checkbox" value={state} aria-describedby={`${descriptionId}-state-${state}`} checked={prompt.states?.includes(state) ?? false} onChange={(event) => update(prompt.id, { states: event.target.checked ? [...(prompt.states ?? []), state] : (prompt.states ?? []).filter((candidate) => candidate !== state) })} /><span><strong>{meaning.label}</strong></span></label>
+            })}</div><small>Each selection matches its exact state. Running does not include working. Visibility is separate from whether a message can be sent.</small>
+              <details className="prompt-state-reference"><summary>What each state means</summary><dl>{COMPOSER_PROMPT_STATES.map(state => {
+                const meaning = describeAgentDisplayState(state)
+                return <div key={state}><dt>{meaning.label} <code>{state}</code></dt><dd id={`${descriptionId}-state-${state}`}>{meaning.description}</dd></div>
+              })}</dl></details>
+            </fieldset>
             <section className="prompt-usage" aria-label="Usage preview"><header>Usage preview <small>Read only</small></header><div><code>/{prompt.keyword.trim() || 'keyword'}</code><span>Type / or its bare keyword to add your instruction to a draft instead of sending.</span></div>{prompt.states?.length ? <div><span className="prompt-usage__example">{promptName(prompt)}</span><span>Open the receiving Agent avatar at {prompt.states.map(stateName).join(', ')} to choose this user prompt. Click sends this instruction only; pending permission or question requests queue it. Your draft is kept.</span></div> : <p>Draft shortcut only. Select states to make this instruction available in the receiving Agent avatar. Pending permission or question requests queue it.</p>}</section>
               </div>
             </details>

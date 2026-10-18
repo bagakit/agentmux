@@ -1,0 +1,16 @@
+.prompt-editor__fields .prompt-state-settings:not(.prompt-reaction-settings) .prompt-state-settings__choices { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.prompt-editor__fields .prompt-state-settings__choices label { align-items: center; min-height: 32px; }
+.prompt-state-reference { margin-top: var(--sp-3); color: var(--text-3); font-size: var(--fs-meta); }
+.prompt-state-reference > summary { width: fit-content; cursor: pointer; }
+.prompt-state-reference > summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.prompt-state-reference dl { display: grid; gap: var(--sp-3); margin-bottom: 0; }
+.prompt-state-reference dt { color: var(--text-2); }
+.prompt-state-reference dt code { margin-left: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
+.prompt-state-reference dd { margin: var(--sp-1) 0 0; line-height: 1.5; }
+@container prompt-settings (max-width: 660px) {
+  .prompt-workbench[data-view='editor'] > .prompt-scope,
+  .prompt-workbench[data-view='editor'] > .prompt-workbench__toolbar { display: none; }
+}
+@container prompt-settings (max-width: 360px) {
+  .prompt-editor__fields .prompt-state-settings:not(.prompt-reaction-settings) .prompt-state-settings__choices { grid-template-columns: minmax(0, 1fr); }
+}
