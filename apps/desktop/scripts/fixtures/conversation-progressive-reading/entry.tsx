@@ -144,6 +144,17 @@ const rows = () => Array.from(feed()?.querySelectorAll<HTMLElement>('[data-conve
   ids, reads, metrics, errors, events, mark,
   consumer() { return inspectConversationConsumers({ hostId: 'local', agentSessionId: ids.sessionId, expectedRunId: ids.runId }).consumers.find(item => item.location.regionId === 'reading-region') },
   nativeCut() { return nativeCut },
+  appendDisposition(priorCut: string, recordId: string, allowHeld = true) {
+    const consumer = inspectConversationConsumers({ hostId: 'local', agentSessionId: ids.sessionId, expectedRunId: ids.runId,
+      records: [{ hostId: 'local', agentSessionId: ids.sessionId, source: { kind: 'native', providerId: 'codex', nativeSessionId: ids.nativeSessionId, recordId } }]
+    }).consumers.find(item => item.location.regionId === 'reading-region')
+    if (!consumer || consumer.inFlight || consumer.loading) return null
+    const changed = (frame: NonNullable<typeof consumer>['accepted']) => {
+      const cut = frame?.checkpoint.frontier.cuts.find(cut => cut.kind === 'native')
+      return cut?.kind === 'native' && cut.checkpoint.cursor !== priorCut && frame?.membership[0]?.present === true
+    }
+    return changed(consumer.accepted) || allowHeld && consumer.held && changed(consumer.pending) ? consumer : null
+  },
   holdEarlier() { if (!olderCursor) throw new Error('No exact earlier page cursor'); held = { cursor: olderCursor, received: false } },
   heldEarlier() { return held?.received === true },
   releaseEarlier() { if (!held?.release) throw new Error('No original response to release'); released = { cursor: held.cursor }; mark('release-earlier-response'); held.release(); held = undefined },

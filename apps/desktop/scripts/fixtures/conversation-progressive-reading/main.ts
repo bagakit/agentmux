@@ -237,14 +237,16 @@ app.whenReady().then(async () => {
     await read('getSelection().removeAllRanges()')
     await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
     result.selected = await selectOriginal()
-    result.appendCost = { before: await read('readingProof.metrics.heavyMounts.length') }
+    const appended = appendRow(scene, `desktop-${phase}`)
+    const appendedMounts = () => read(`readingProof.metrics.heavyMounts.filter(mount=>JSON.parse(mount.source).at(-1)===${JSON.stringify(appended.payload.id)}).length`)
+    result.appendCost = { recordId: appended.payload.id, before: await appendedMounts() }
     const beforeAppend = await read('readingProof.nativeCut()')
     assert.ok(beforeAppend, 'The original native frontier is observed before appending')
-    await append([appendRow(scene, `desktop-${phase}`)])
-    await ready(`readingProof.nativeCut() !== ${JSON.stringify(beforeAppend)}`)
+    await append([appended])
+    result.appendDisposition = await ready(`readingProof.appendDisposition(${JSON.stringify(beforeAppend)},${JSON.stringify(appended.payload.id)})`)
     await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
     result.afterAppend = await read('({text:getSelection().toString(),sameNode:readingSelectedNode.isConnected,sameBody:readingSelectedBody.isConnected,top:readingSelectedBody.getBoundingClientRect().top})')
-    result.appendCost.after = await read('readingProof.metrics.heavyMounts.length')
+    result.appendCost.after = await appendedMounts()
     assert.equal(result.afterAppend.text, result.selected.text, 'The original selected text survives appends')
     assert.equal(result.afterAppend.sameNode, true); assert.equal(result.afterAppend.sameBody, true)
     assert.ok(Math.abs(result.afterAppend.top - result.selected.top) <= 2, 'The selected original anchor remains in place')
@@ -257,6 +259,11 @@ app.whenReady().then(async () => {
     assert.ok(original, 'The selected copy target is an exact original fixture record')
     assert.equal(copies.at(-1), original.payload.content.map((part: any) => part.text).join('\n'))
     await read('getSelection().removeAllRanges()')
+    if (proofMode === 'cost') {
+      result.appendCost.disposition = await ready(`readingProof.appendDisposition(${JSON.stringify(beforeAppend)},${JSON.stringify(appended.payload.id)},false)`)
+      await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+      result.appendCost.after = await appendedMounts()
+    }
     if (await read('!!document.querySelector(".activity-feed__jump")')) {
       await click('document.querySelector(".activity-feed__jump")')
       await ready('document.querySelector("[data-conversation-reading]")?.dataset.conversationReading === "current"')

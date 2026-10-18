@@ -21,6 +21,8 @@ export function readingCost(actual) {
   const start = Math.min(...actual.reads.map(read => read.started))
   assert.ok(first.at >= start)
   assert.ok(actual.appendCost)
+  assert.ok(actual.appendCost.disposition?.accepted?.membership.some(row => row.present === true && row.record.source.kind === 'native' && row.record.source.recordId === actual.appendCost.recordId),
+    'Pending selection-held frames cannot qualify as an append scheduling improvement')
   const firstSample = actual.samples.find(sample => sample.name === 'first-readable')
   return { firstReadableMs: first.at - start, firstMounts: first.heavyMounts, firstShells: first.heavyShells,
     appendMounts: actual.appendCost.after - actual.appendCost.before, firstNodes: first.nodes, finalNodes: firstSample.ui.allNodes,
@@ -61,5 +63,5 @@ export function compareReadingCosts(phases, transforms) {
   }
   return { schema: 'agentmux.conversation-reading-costs.v1', baseline: 'same-source-immediate-first-mount', transforms, scenes,
     passed: scenes.every(scene => scene.passed),
-    boundary: 'Three paired trials per controlled transcript in the same environment. This compares only initial heavy-body scheduling. Observed baseline range is a local noise bound, not a universal latency target or proof of all architecture changes.' }
+    boundary: 'Three paired trials per controlled transcript in the same environment. This compares only initial heavy-body scheduling. firstReadable is any visible original prose, including short user text; it does not measure completion of a long answer. Observed baseline range is a local noise bound, not a universal latency target or proof of all architecture changes.' }
 }
