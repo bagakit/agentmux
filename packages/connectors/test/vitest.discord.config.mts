@@ -23,7 +23,9 @@ export default defineConfig({ root, cacheDir: resolve(root, '.cache/discord-chan
       reconnect: ['adapters/discord/index.ts', 'manager.on(WebSocketShardEvents.Closed, () => { receiver.socketFailed = true })', 'void 0'],
       guidance: ['adapters/discord/actions.ts', "question.acceptsText ? { description: 'Select one option", "false ? { description: 'Select one option"],
       feedback: ['adapters/discord/actions.ts', 'No answer was submitted.', 'The original action is unavailable.'],
-      resume: ['adapters/discord/index.ts', 'const saved = readSession(id)', 'const saved = null']
+      resume: ['adapters/discord/index.ts', 'const saved = readSession(id)', 'const saved = null'],
+      'history-registration': ['platform-adapters.ts', 'readHistory: async (...input) => (await discord()).readHistory(...input)', 'readHistory: undefined'],
+      'history-content': ['adapters/discord/history.ts', 'content: JSON.stringify(body)', "content: JSON.stringify({ content: 'Changed original native quote' })"]
     } as const
     const change = changes[mutant as keyof typeof changes]
     let loaded = code, mutation: string | undefined

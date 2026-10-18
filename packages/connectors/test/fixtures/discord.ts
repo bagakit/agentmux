@@ -10,6 +10,11 @@ export async function discordTransport() {
   const sessions: Array<{ op: number; data: Record<string, unknown> }> = [], sockets = new Set<WebSocket>()
   const paused = new Set<WebSocket>(); let pauseHello = false
   const uploads: Buffer[] = []
+  const history = new Map<string, Record<string, unknown>>()
+  const historyMessage = (id: string, content: string, observation: Record<string, unknown> = {}) => {
+    const message = { id, channel_id: discordRoomId, guild_id: '500', type: 0, content, timestamp: new Date(Number(id)).toISOString(), author: { id: discordUserId, username: 'original-user', global_name: 'Original person', avatar: 'native_avatar' }, mentions: [{ id: discordBotId }], attachments: [], embeds: [], ...observation }
+    history.set(id, message); return message
+  }
   let channelName = 'Original channel', applicationId = '100'
   const nativeComponents = (value: unknown): unknown => { let id = 0; const assign = (item: unknown): unknown => Array.isArray(item) ? item.map(assign) : item && typeof item === 'object' ? { ...(typeof (item as { type?: unknown }).type === 'number' ? { id: ++id } : {}), ...Object.fromEntries(Object.entries(item).map(([key, child]) => [key, assign(child)])) } : item; return assign(value) }
   const boundedComponents = (value: unknown): boolean => {
@@ -44,7 +49,7 @@ export async function discordTransport() {
       response.writeHead(400, { 'content-type': 'application/json' }); response.end(JSON.stringify({ code: 50035, message: 'Invalid components: total display capacity exceeded' })); return
     }
     let status = 200, result: unknown
-    if (path === '/oauth2/applications/@me') result = { id: applicationId, name: 'Application', bot: { id: discordBotId, username: 'Original bot', avatar: null } }
+    if (path === '/oauth2/applications/@me') result = { id: applicationId, name: 'Application', flags: 524288, bot: { id: discordBotId, username: 'Original bot', avatar: null } }
     else if (path.startsWith('/interactions/') && path.endsWith('/callback')) { if (dropCallback) { dropCallback = false; request.socket.destroy(); return } status = 204 }
     else if (path === '/gateway/bot') result = { url: gateway, shards: 1, session_start_limit: { total: 1000, remaining: 1000, reset_after: 60000, max_concurrency: 1 } }
     else if (path === '/users/@me/guilds') result = url.searchParams.has('after') ? [] : [{ id: '500', name: 'Original guild' }]
@@ -52,13 +57,14 @@ export async function discordTransport() {
     else if (path === '/channels/300/invites' && request.method === 'POST') result = { code: 'original-invite', created_at: new Date().toISOString(), max_age: 604800 }
     else if (path === '/users/' + discordUserId) result = { id: discordUserId, username: 'original-user', global_name: 'Original person', avatar: 'native_avatar' }
     else if (path === '/channels/' + discordRoomId) result = { id: discordRoomId, type: 0, guild_id: '500', name: channelName }
+    else if (path === `/channels/${discordRoomId}/messages` && request.method === 'GET') result = [...history.values()].filter(message => !url.searchParams.has('before') || BigInt(String(message.id)) < BigInt(url.searchParams.get('before')!)).sort((a, b) => BigInt(String(a.id)) > BigInt(String(b.id)) ? -1 : 1).slice(0, Number(url.searchParams.get('limit') ?? 50))
     else if (path === `/channels/${discordRoomId}/messages` && request.method === 'POST') {
       const parsed = JSON.parse(body), id = String(++nextMessage)
       result = { ...parsed, components: nativeComponents(parsed.components), id, channel_id: discordRoomId, author: { id: discordBotId, bot: true }, attachments: [] }
       messages.set(id, result as Record<string, unknown>); if (!suppressNextEcho) emit('MESSAGE_CREATE', result); suppressNextEcho = false
       if (dropNextResponse) { dropNextResponse = false; request.socket.destroy(); return }
     } else if (path.startsWith(`/channels/${discordRoomId}/messages/`)) {
-      const id = path.split('/').at(-1)!, original = messages.get(id)
+      const id = path.split('/').at(-1)!, original = messages.get(id) ?? (request.method === 'GET' ? history.get(id) : undefined)
       if (!original) { status = 404; result = { message: 'Unknown Message', code: 10008 } }
       else if (request.method === 'DELETE') { messages.delete(id); status = 204 }
       else if (request.method === 'PATCH') { const parsed = JSON.parse(body); result = { ...original, ...parsed, components: nativeComponents(parsed.components) }; messages.set(id, result as Record<string, unknown>); if (dropNextResponse) { dropNextResponse = false; request.socket.destroy(); return } }
@@ -99,7 +105,8 @@ export async function discordTransport() {
       emit('INTERACTION_CREATE', value); return value
     },
     rename(name: string) { channelName = name; emit('CHANNEL_UPDATE', { id: discordRoomId, guild_id: '500', type: 0, name }) },
-    message(id = '700', content = 'Original Discord input\nEvery line') { const message = { id, channel_id: discordRoomId, guild_id: '500', type: 0, content, author: { id: discordUserId, username: 'original-user', global_name: 'Original person', avatar: 'native_avatar' }, mentions: [{ id: discordBotId }], attachments: [], embeds: [] }; emit('MESSAGE_CREATE', message); return message },
+    historyMessage,
+    message(id = '700', content = 'Original Discord input\nEvery line', observation: Record<string, unknown> = {}) { const message = historyMessage(id, content, observation); emit('MESSAGE_CREATE', message); return message },
     loseNextMessageResponse(witness = true) { dropNextResponse = true; suppressNextEcho = !witness },
     loseNextCallbackResponse() { dropCallback = true },
     async close() { for (const socket of sockets) socket.terminate(); websocket.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())) }
