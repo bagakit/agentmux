@@ -11,7 +11,7 @@ import { useConversationTraceDisclosure } from '@agentmux/client-ui/conversation
 import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode, type ComponentProps, type KeyboardEvent, type WheelEvent } from 'react'
-import type { AgentDisplayState, AgentSessionHistoryPage, AgentSessionUserMessage } from '@agentmux/core'
+import type { AgentDisplayState, AgentSessionHistoryPage } from '@agentmux/core'
 import type { AgentObservation } from '@agentmux/core/agent-status'
 import type { AgentTimelineItem } from '../../../shared/contracts'
 import {
@@ -118,48 +118,14 @@ function WorkingIndicator({ active }: { active: boolean }): JSX.Element {
   )
 }
 
-type UserMessageReadState = {
-  loading: boolean
-  error: Error | null
-  observationError?: Error | null
-  windowFrozen?: boolean
-  windowIncomplete?: boolean
-  hasMore: boolean
-  onRetry: () => void
-  onReadEarlier: (trigger: HTMLButtonElement) => void
-}
-
-function UserMessageReadNotice({ read, showEarlier = true }: { read: UserMessageReadState | undefined; showEarlier?: boolean }) {
-  if (!read) return null
-  const needsService = Boolean(read.error || read.observationError || read.windowFrozen)
-  if (!needsService && (!showEarlier || !read.windowIncomplete && !read.hasMore)) return null
-  return (
-    <div className="activity-feed__read-notice" role="status">
-      <span>
-        {read.error
-          ? `Native input read failed: ${read.error.message}. Existing messages are kept.`
-          : read.windowFrozen ? 'Native source changed. The current reading window is kept. Read latest records to open a new window.'
-          : read.observationError ? `Automatic native updates are unavailable: ${read.observationError.message}. The current reading window is kept; Refresh retries the source.`
-          : read.windowIncomplete ? 'This window keeps recent conversation and process records. Read earlier to browse the original sequence.'
-          : 'Earlier conversation records are available.'}
-      </span>
-      {read.error ? <button type="button" className="small-button" disabled={read.loading} onClick={read.onRetry}>Retry</button> : null}
-      {!read.error && (read.windowFrozen || read.observationError) ? <button type="button" className="small-button" disabled={read.loading} onClick={read.onRetry}>{read.windowFrozen ? 'Read latest records' : 'Refresh'}</button> : null}
-      {showEarlier && (read.hasMore || read.windowIncomplete) ? <button type="button" className="small-button" onClick={(event) => read.onReadEarlier(event.currentTarget)}>Read earlier records</button> : null}
-    </div>
-  )
-}
-
 export function ActivityView({
   sessionId,
   executionHostId,
-  userMessages,
   nativeHistoryPage: recentNativePage,
   nativeContextItems,
   conversationReading,
   readingNotice,
   readingAction,
-  userMessageRead,
   revealRequest,
   capability,
   displayState,
@@ -180,13 +146,11 @@ export function ActivityView({
 }: {
   sessionId: string
   executionHostId?: string
-  userMessages?: readonly AgentSessionUserMessage[]
   nativeHistoryPage?: AgentSessionHistoryPage | null
   nativeContextItems?: AgentSessionHistoryPage['items']
   conversationReading?: ConversationReading
   readingNotice?: ReactNode
   readingAction?: ReactNode
-  userMessageRead?: UserMessageReadState
   revealRequest?: ConversationRevealRequest | null
   capability: 'unavailable' | 'complete-events' | 'streaming'
   /** Session 的显示状态——「这个 turn 在不在工作」的唯一真相，不从时间轴形状反推。 */
@@ -706,10 +670,10 @@ export function ActivityView({
     })
   }
 
-  const hasUserMessages = Boolean((conversationReading ? readingWindow.projection?.inputs : userMessages)?.length)
+  const hasUserMessages = Boolean(readingWindow.projection?.inputs.length)
   const hasNativeRecords = nativeHistoryPage?.agentSessionId === sessionId && nativeHistoryPage.items.length > 0
   const hasItems = unifiedItems.length > 0
-  const readPending = readingEnabled && Boolean(readingWindow.loading || !conversationReading && userMessageRead?.loading)
+  const readPending = readingEnabled && readingWindow.loading
   const hasAcceptedFrame = Boolean(conversationReading && readingWindow.snapshot)
   const initialReadPending = readPending && !hasAcceptedFrame
   const earlierReadPending = readingWindow.loadingEarlier || readingWindow.coverageLoading
@@ -720,15 +684,7 @@ export function ActivityView({
     reasons: [readingWindow.error ?? readingWindow.automaticReadError!.message], loading: readingWindow.loading,
     retryLabel: readingWindow.retryLabel === 'Retry' ? 'Retry conversation records' : readingWindow.retryLabel, retry: readingWindow.retry
   })
-  if (!readingWindow.historical && userMessageRead) {
-    const reasons = [userMessageRead.error ? `Native input read failed: ${userMessageRead.error.message}` : null,
-      userMessageRead.observationError ? `Automatic native updates are unavailable: ${userMessageRead.observationError.message}` : null,
-      userMessageRead.windowFrozen ? 'Native source changed. The current reading window is kept. Read latest records to open a new window.' : null]
-      .filter((reason): reason is string => reason !== null)
-    if (reasons.length) readingIssues.push({ id: 'native-input-records', label: 'Native input records', reasons,
-      loading: userMessageRead.loading, retryLabel: userMessageRead.windowFrozen ? 'Read latest records' : 'Retry native input records', retry: userMessageRead.onRetry })
-  }
-  const emptyReadFailed = Boolean(readingWindow.error || readingWindow.automaticReadError || !readingWindow.historical && userMessageRead?.error)
+  const emptyReadFailed = Boolean(readingWindow.error || readingWindow.automaticReadError)
   const readingServiceScope = JSON.stringify(['conversation-reading', executionHostId, sessionId, conversationReading?.identity])
   const fullReadFailure = Boolean(conversationReading && !hasReadContent && readingIssues.length)
   const emptyReadStatus = fullReadFailure ? <ConversationReadFailure scope={readingServiceScope} issues={readingIssues}
@@ -784,7 +740,6 @@ export function ActivityView({
     {conversationReading ? !fullReadFailure && readingIssues.length > 0 ? <ConversationReadFailure
       scope={readingServiceScope} issues={readingIssues} visible={readingEnabled} /> : null : readingWindow.error ? <div role="status" className="activity-feed__read-notice"><span>{readingWindow.error}</span>
       <button type="button" className="small-button" disabled={readingWindow.loading} onClick={readingWindow.retry}>{readingWindow.retryLabel}</button></div> : null}
-    {!conversationReading && !readingWindow.historical ? <UserMessageReadNotice read={userMessageRead} /> : null}
   </>
   const collapseTraces = nativeHistoryPage?.items.some(item => item.contentParts.some(part =>
     part.kind === 'reasoning' || part.kind === 'tool-call' || part.kind === 'tool-result')) ? <button type="button"
@@ -862,8 +817,8 @@ export function ActivityView({
         <ConversationCoverage coverage={conversationCoverage} onLocate={revealLoadedRecord} />
         {fileReferenceNotice}
         {renderReadingHeader(findTrigger)}
-        {!emptyReadStatus && (!readPending || hasAcceptedFrame) && !readingWindow.error && !userMessageRead?.error ? <div className="activity-feed__empty">
-          {userMessageRead?.hasMore ? 'No inputs in the recent conversation window.' : 'No structured activity yet. Terminal remains available.'}
+        {!emptyReadStatus && (!readPending || hasAcceptedFrame) && !readingWindow.error ? <div className="activity-feed__empty">
+          No structured activity yet. Terminal remains available.
         </div> : null}
       </div>
     ))
@@ -947,7 +902,6 @@ export function ActivityView({
     <div className="activity-feed" data-workbench-reading-scroll onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
         onWheel={handleReadingWheel}>
       {readNotice}
-      {!nativeHistoryPage && userMessages?.some(message => message.source.kind === 'native') ? <p className="activity-feed__read-notice" role="status">Original input records remain readable. Their complete native page and cross-source order are not loaded.</p> : null}
       {fileReferenceNotice}
       {capability === 'unavailable' ? (
         <div className="activity-feed__empty" role="status">
