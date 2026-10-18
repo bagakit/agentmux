@@ -1,4 +1,4 @@
-import { DEFAULT_AGENT_CONTINUITY_POLICY, normalizeAgentContinuityPolicy, type AgentMuxContinuityPolicy } from '@agentmux/core/agent-session-continuity'
+import { agentContinuityRetryBaseDelay, DEFAULT_AGENT_CONTINUITY_POLICY, normalizeAgentContinuityPolicy, type AgentMuxContinuityPolicy } from '@agentmux/core/agent-session-continuity'
 import { TextInput } from '@agentmux/client-ui/input'
 import { useId, useState, type ReactNode } from 'react'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
@@ -90,6 +90,19 @@ function policyValue(value: ReturnType<typeof editValue>): ExecutionSettings {
     retryMaxAttempts: /^\d+$/.test(value.retryMaxAttempts) ? Number(value.retryMaxAttempts) : NaN }))
 }
 
+function RetryExample({ policy }: { policy: ExecutionSettings }) {
+  const count = Math.min(policy.retryMaxAttempts, 6)
+  return <aside className="recovery-policy-example" aria-label="Recovery retry example">
+    <header><strong>After a failed recovery</strong><small>Draft example</small></header>
+    {count === 0 ? <p>Automatic retries are off. The original Session remains available for manual recovery.</p> : <>
+      <p>Each additional retry waits after the previous failure. Earlier input is never replayed.</p>
+      <ol>{Array.from({ length: count }, (_, index) => <li key={index}><span>Retry {index + 1}</span><strong>{readableDuration(agentContinuityRetryBaseDelay(policy, index + 1))}</strong></li>)}</ol>
+      <p className="continuity-hint">{count < policy.retryMaxAttempts ? `First ${count} of ${policy.retryMaxAttempts} retries shown. ` : ''}Base waits double up to {readableDuration(policy.retryMaxDelayMs)}. Confirmed process-exit retries add up to 25% of the base, capped at one second; frontend reconnection uses the base alone.</p>
+      <p>After {policy.retryMaxAttempts} {policy.retryMaxAttempts === 1 ? 'retry' : 'retries'}, automatic recovery pauses. You can still resume the original Session.</p>
+    </>}
+  </aside>
+}
+
 export function ContinuitySettingsPane({ preferences, onSave }: {
   preferences: Partial<AgentMuxContinuityPolicy> | undefined
   onSave(value: ExecutionSettings, expected: ExecutionSettings): Promise<void>
@@ -100,8 +113,9 @@ export function ContinuitySettingsPane({ preferences, onSave }: {
     <label htmlFor={`${id}-${key}`}><strong>{label}</strong><small>{hint}</small></label>
     <DurationSettingInput id={`${id}-${key}`} label={label} value={draft.value[key]} onChange={value => draft.setField(key, value)} />
   </div>
-  let valid = true
-  try { policyValue(draft.value) } catch { valid = false }
+  let parsed: ExecutionSettings | undefined
+  try { parsed = policyValue(draft.value) } catch { /* The original form reports invalid drafts below. */ }
+  const valid = parsed !== undefined
   async function save() {
     const submitted = draft.beginSave()
     submitted.finish(await saveState.run(async () => {
@@ -140,7 +154,7 @@ export function ContinuitySettingsPane({ preferences, onSave }: {
       <div className="continuity-setting-row" data-settings-field="retryMaxAttempts"><label htmlFor={`${id}-retries`}><strong>Additional retries</strong><small>Attempts after the initial recovery. Zero disables automatic retries. Reaching the limit pauses recovery and keeps the original Session available.</small></label>
         <TextInput id={`${id}-retries`} className="continuity-count" aria-label="Additional retries" inputMode="numeric" value={draft.value.retryMaxAttempts}
           aria-invalid={!/^\d+$/.test(draft.value.retryMaxAttempts) || !Number.isSafeInteger(Number(draft.value.retryMaxAttempts))} onChange={event => draft.setField('retryMaxAttempts', event.target.value)} /></div>
-      <p className="continuity-hint">Each schedule adds a small offset of at most one second and at most one quarter of its base delay.</p>
+      {parsed && <RetryExample policy={parsed} />}
       </div>
     </details>
     <details className="continuity-disclosure">
@@ -151,6 +165,11 @@ export function ContinuitySettingsPane({ preferences, onSave }: {
         <TextInput id={`${id}-attempts`} className="continuity-count" aria-label="Recheck count" inputMode="numeric" value={draft.value.recheckMaxAttempts}
           aria-invalid={!/^\d+$/.test(draft.value.recheckMaxAttempts) || !Number.isSafeInteger(Number(draft.value.recheckMaxAttempts))} onChange={event => draft.setField('recheckMaxAttempts', event.target.value)} /></div>
       {duration('recheckIntervalMs', 'Recheck interval', 'Delay between follow-up observations of the same recovery operation.')}
+      {parsed && <aside className="recovery-policy-example" aria-label="Recovery recheck example">
+        <header><strong>Check the same operation</strong><small>Draft example</small></header>
+        <p>{parsed.recheckMaxAttempts === 0 ? 'No automatic follow-up checks.' : `Up to ${parsed.recheckMaxAttempts} follow-up ${parsed.recheckMaxAttempts === 1 ? 'check' : 'checks'}, ${readableDuration(parsed.recheckIntervalMs)} apart.`} A check reads the original recovery result. It does not start a new attempt or resend input.</p>
+        <p className="continuity-hint">If the result is still unknown, the original operation stays available for inspection or an explicit retry.</p>
+      </aside>}
       </div>
     </details>
     <details className="continuity-disclosure continuity-defaults">
