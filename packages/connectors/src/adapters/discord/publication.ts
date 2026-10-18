@@ -2,7 +2,7 @@ import { DiscordAPIError, HTTPError, RequestMethod } from '@discordjs/rest'
 import type { APIMessage } from 'discord-api-types/v10'
 import type { PublicationAdapter } from '../../publication-adapter.js'
 import type { PublicationMapping, PublicationOperation, PublicationReceipt, PublicationTarget } from '../../publication-store.js'
-import { parsePreparedPublication, type PreparedPublication } from '../../publication-wire.js'
+import { parsePreparedPublication, type PreparedPublication, type PublicationEffectContext } from '../../publication-wire.js'
 import type { ChannelStoragePort } from '../../channel-storage.js'
 import { discordId, discordFailure } from './protocol.js'
 import type { DiscordClients } from './client.js'
@@ -23,16 +23,24 @@ export class DiscordPublicationAdapter implements PublicationAdapter {
   readonly renderVersion = 'discord-components-v1'
   readonly supportedRenderVersions = [this.renderVersion]
   readonly fragmentBytes = 1900
+  readonly directResources = true as const
+  readonly images = { maxBytes: 16 * 1024 * 1024, accepts: () => true }
+  readonly files = { maxBytes: 16 * 1024 * 1024, accepts: () => true }
   constructor(private readonly clients: DiscordClients, private readonly storage: (target: PublicationTarget) => ChannelStoragePort | undefined) {}
   prepare = prepareDiscordPublication
 
-  async dispatch(value: PreparedPublication, target: PublicationTarget, credential: string, signal: AbortSignal, mapping?: Readonly<PublicationMapping>): Promise<PublicationReceipt> {
+  async dispatch(value: PreparedPublication, target: PublicationTarget, credential: string, signal: AbortSignal, mapping?: Readonly<PublicationMapping>, context?: PublicationEffectContext): Promise<PublicationReceipt> {
     const prepared = parsePreparedPublication(value, this)
+    let files: Array<{ name: string; contentType: string; data: Buffer }> | undefined
+    try { files = prepared.request.multipart?.files.map(file => {
+      if (!context) return discordFailure('DISCORD_RESOURCE_UNCONFIRMED')
+      return { name: file.name, contentType: file.contentType, data: Buffer.from(context.readResource(file)) }
+    }) } catch { return { state: 'not-applied', reason: 'unsupported-format' } }
     try {
       const rest = this.clients.rest({ ...target, adapterId: this.adapterId, label: '', enabled: true, credentialRef: '' }, credential)
       const identity = await this.clients.identity({ ...target, adapterId: this.adapterId, label: '', enabled: true, credentialRef: '' }, credential, signal)
       const message = await rest.request({ method: prepared.request.method as RequestMethod, fullRoute: prepared.request.path as `/${string}`, signal,
-        ...(prepared.request.body === undefined ? {} : { body: JSON.parse(prepared.request.body) }) }) as APIMessage | undefined
+        ...(prepared.request.multipart ? { body: JSON.parse(prepared.request.multipart.payloadJson), files: files! } : prepared.request.body === undefined ? {} : { body: JSON.parse(prepared.request.body) }) }) as APIMessage | undefined
       if (prepared.request.method === 'DELETE') return mapping ? { state: 'confirmed', mapping: { ...mapping } } : unknown()
       if (!message || message.channel_id !== target.externalConversationId || message.author?.id !== identity.botId || mapping && message.id !== mapping.messageId || prepared.request.method === 'POST' && String(message.nonce) !== discordNonce(prepared.requestKey)) return unknown()
       discordId(message.id)
@@ -54,7 +62,7 @@ export class DiscordPublicationAdapter implements PublicationAdapter {
     try {
       const rest = this.clients.rest({ ...target, adapterId: this.adapterId, label: '', enabled: true, credentialRef: '' }, credential)
       const message = await rest.get(`/channels/${discordId(target.externalConversationId)}/messages/${discordId(mapping.messageId)}`, { signal }) as APIMessage
-      const expected = prepared.request.body ? JSON.parse(prepared.request.body) : undefined
+      const expected = prepared.request.multipart ? JSON.parse(prepared.request.multipart.payloadJson) : prepared.request.body ? JSON.parse(prepared.request.body) : undefined
       return message.id === mapping.messageId && message.channel_id === target.externalConversationId && JSON.stringify(message.components) === JSON.stringify(expected?.components) ? { state: 'confirmed', mapping: { ...mapping } } : null
     } catch { return null }
   }

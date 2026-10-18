@@ -1,8 +1,9 @@
 import type { PublicationOperation } from '../../publication-store.js'
 import { publicationSpeechText, type PreparedPublication } from '../../publication-wire.js'
 import { discordId, discordFailure } from './protocol.js'
+import { publicationResourceDescriptor } from '../../publication-resource.js'
 import { createHash } from 'node:crypto'
-export const DISCORD_PUBLICATION = { adapterId: 'discord', renderVersion: 'discord-components-v1', fragmentBytes: 1900 } as const
+export const DISCORD_PUBLICATION = { adapterId: 'discord', renderVersion: 'discord-components-v1', fragmentBytes: 1900, directResources: true } as const
 export const discordNonce = (operationId: string): string => createHash('sha256').update(operationId).digest('base64url').slice(0, 25)
 export function prepareDiscordPublication(operation: Readonly<PublicationOperation>): PreparedPublication {
     const channel = discordId(operation.target.externalConversationId), mapping = operation.mapping
@@ -12,6 +13,12 @@ export function prepareDiscordPublication(operation: Readonly<PublicationOperati
       return { adapterId: DISCORD_PUBLICATION.adapterId, renderVersion: DISCORD_PUBLICATION.renderVersion, requestKey: operation.operationId, request: { method: 'DELETE', path } }
     }
     const p = operation.payload
+    if (p.kind === 'image' || p.kind === 'file') {
+      const file = publicationResourceDescriptor(operation)
+      const components = p.kind === 'image' ? [{ type: 12, items: [{ media: { url: 'attachment://' + file.name } }] }] : [{ type: 13, file: { url: 'attachment://' + file.name } }]
+      const payloadJson = JSON.stringify({ flags: 32768, components, attachments: [{ id: 0, filename: file.name }], allowed_mentions: { parse: [] }, ...(!mapping ? { nonce: discordNonce(operation.operationId), enforce_nonce: true } : {}) })
+      return { adapterId: DISCORD_PUBLICATION.adapterId, renderVersion: DISCORD_PUBLICATION.renderVersion, requestKey: operation.operationId, request: { method: mapping ? 'PATCH' : 'POST', path, multipart: { payloadJson, files: [file] } } }
+    }
     const text = p.kind === 'speech' ? publicationSpeechText(p) : p.kind === 'binding-lifecycle'
       ? `${p.event === 'disconnected' ? 'Conversation sharing ended' : 'Conversation sharing ' + p.event}\nAgent ${p.agentSessionId}\n${p.scope.publication === 'future-shared-conversation' ? 'New conversation messages' : 'Agent replies'} · ${p.scope.input}\n${p.synchronization === true ? 'Synchronization enabled' : p.synchronization === false ? 'Synchronization disabled' : 'Synchronization state unconfirmed'}${p.event === 'disconnected' ? '\nThe Agent remains available.' : ''}`
       : discordFailure('DISCORD_REPRESENTATION_UNSUPPORTED')
