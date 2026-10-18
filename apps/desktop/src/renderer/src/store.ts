@@ -4645,8 +4645,8 @@ async function openGoalPmo(demandId: string, prompt?: string, userRequest?: stri
     (session) => state.agentNames[session.id] ?? session.label
   )
   const pmoNote = (fresh = false): string => [
-      MOTE_COORDINATION_ROLE,
-      goalRoleGuidance({ role: 'manager', goalId: demandId, source: { kind: fresh ? 'goal-pmo-launch' : 'goal-discussion', ...(intent.creationOperationId ? { operationId: intent.creationOperationId } : {}) } }),
+      ...(!fresh ? [MOTE_COORDINATION_ROLE] : []),
+      ...(fresh ? [goalRoleGuidance({ role: 'manager', goalId: demandId, source: { kind: 'goal-pmo-launch', ...(intent.creationOperationId ? { operationId: intent.creationOperationId } : {}) } })] : []),
       prompt?.trim(),
       projectContext,
       executionContext,
