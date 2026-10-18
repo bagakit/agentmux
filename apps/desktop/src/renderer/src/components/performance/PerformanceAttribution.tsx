@@ -54,7 +54,7 @@ function WorkAndWait({ performance: p, available }: { performance: RendererPerfo
         const state = kind === 'long-task' ? p.longTasks.state : kind === 'input-delay' ? p.inputDelay.state : null
         const supported = state === null || state === 'observing'
         const peak = p.slowEvents.find(event => event.kind === kind && event.retainedAs.includes(selected === 'current' ? 'current-peak' : 'previous-peak'))
-        const owner = peak?.terminal ?? peak?.cleanup
+        const owner = peak?.terminal ?? peak?.cleanup ?? peak?.source
         return <section key={kind} className="performance-work-cell" data-timing-kind={kind} style={heat(timing.count && supported ? timing.maxMs : null, 50, available, '--amber-text')}>
           <strong>{label}</strong><small>{description}</small>
           <span>{timing.count ? `${Math.round(timing.totalMs)} ms` : 'No samples'}<small>{timing.count} samples · max {timing.maxMs.toFixed(1)} ms</small></span>
@@ -64,8 +64,8 @@ function WorkAndWait({ performance: p, available }: { performance: RendererPerfo
               {owner ? <>
                 {peak.terminal ? <span>{peak.terminal.cause} · {peak.terminal.payload.length} {peak.terminal.payload.unit}</span> : null}
                 {peak.cleanup ? <span>{peak.cleanup.outcome === 'returned' ? 'Returned synchronously' : 'Threw'} · not a resource release ACK</span> : null}
-                <span>Host {owner.hostId} · Session {owner.sessionId}</span>
-                <span>Run {owner.runId} · Region {owner.regionId ?? 'unknown'} · instance {owner.instanceId}</span>
+                <span>Host {owner.hostId} · Session {owner.sessionId ?? 'unknown'}</span>
+                <span>Run {owner.runId ?? 'unknown'} · Region {owner.regionId ?? 'unknown'} · instance {owner.instanceId ?? 'unknown'}</span>
               </> : <span>Renderer-wide · terminal owner unknown</span>}
             </> : 'No retained slow event (≥50 ms)'}
           </small>

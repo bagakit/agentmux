@@ -1,5 +1,6 @@
 import { createInputPerformanceRecorder, readInputObservation, RENDERER_SESSION_EVENT_TYPES, RENDERER_TIMING_KINDS } from '@agentmux/core/control'
-import type { RendererConsumerCost, RendererOverlayObservation, RendererPerformanceSnapshot, RendererSessionEventType, RendererSlowEvent, RendererTerminalCleanupContext, RendererTerminalCost, RendererTerminalWriteContext, RendererWorkTiming } from '@agentmux/core/control'
+import type { RendererConsumerCost, RendererOverlayObservation, RendererPerformanceSnapshot, RendererSessionEventType, RendererSlowEvent, RendererTerminalCleanupContext, RendererTerminalCost, RendererTerminalWriteContext, RendererWorkSource, RendererWorkTiming } from '@agentmux/core/control'
+import type { AgentMuxClientEvent } from '@agentmux/core'
 import { tabSwitchObservation } from './tab-switch-observation'
 import { surfaceSwitchObservation } from './surface-switch-observation'
 
@@ -19,6 +20,19 @@ const epoch = (startMonoMs: number): RendererPerformanceSnapshot['timingEpochs']
 const copyEpoch = (value: ReturnType<typeof epoch>): ReturnType<typeof epoch> => ({
   ...value, timings: Object.fromEntries(timingKinds.map(kind => [kind, { ...value.timings[kind] }])) as ReturnType<typeof epoch>['timings']
 })
+/** Original protocol fields only. No Session/Run lookup or event payload survives this call. */
+export function rendererSessionEventSource(hostId: string, event: AgentMuxClientEvent): RendererWorkSource {
+  const sessionId = event.type === 'agent-session' ? event.session.agentSessionId
+    : event.type === 'agent-input' ? event.receipt.key.agentSessionId
+    : event.type === 'interaction' ? event.request.agentSessionId
+    : 'agentSessionId' in event ? event.agentSessionId ?? null : null
+  const runId = event.type === 'agent-session' ? event.session.run?.runId ?? null
+    : event.type === 'agent-input' ? event.receipt.key.expectedRun.runId
+    : event.type === 'interaction' ? event.request.evidence.run?.runId ?? null
+    : 'run' in event ? event.run.runId
+    : 'evidence' in event ? event.evidence.run?.runId ?? null : null
+  return { hostId, sessionId, runId, regionId: null, instanceId: null }
+}
 /** No clock, subscription, payload or historical buffer scan on a selector check. */
 export function createRendererPerformance(now = () => performance.now(), wall = Date.now, nonce: () => string = () => globalThis.crypto.randomUUID()) {
   const startedAt = wall()
@@ -57,7 +71,7 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
     previousEpoch = startMonoMs === currentEpoch.endMonoMs ? currentEpoch : epoch(startMonoMs - 10_000)
     currentEpoch = epoch(startMonoMs)
   }
-  function record(kind: TimingKind, detail: string, durationMs: number, occurrence: number | null, deliveredAtMonoMs: number, terminal: RendererSlowEvent['terminal'] = null, cleanup: RendererSlowEvent['cleanup'] = null): void {
+  function record(kind: TimingKind, detail: string, durationMs: number, occurrence: number | null, deliveredAtMonoMs: number, terminal: RendererSlowEvent['terminal'] = null, cleanup: RendererSlowEvent['cleanup'] = null, source: RendererWorkSource | null = null): void {
     rotate(deliveredAtMonoMs)
     const occurredAtMonoMs = occurrence !== null && Number.isFinite(occurrence) && occurrence >= recordingSinceMonoMs && occurrence <= deliveredAtMonoMs ? occurrence : null
     if (occurredAtMonoMs === null) unknown[kind]++
@@ -66,7 +80,7 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
     else late[kind]++
     if (durationMs < 50) return
     const records = slowByKind[kind]
-    const event: RendererSlowEvent = { id: ++eventSerial, kind, detail, observedAt: wall(), durationMs, occurredAtMonoMs, deliveredAtMonoMs, retainedAs: [], terminal, cleanup }
+    const event: RendererSlowEvent = { id: ++eventSerial, kind, detail, observedAt: wall(), durationMs, occurredAtMonoMs, deliveredAtMonoMs, retainedAs: [], terminal, cleanup, source: source && { ...source } }
     slowEventCounts[kind]++
     if (records.length === 4) records.shift()
     records.push(event)
@@ -114,16 +128,16 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
       }
       if (observation.collectMs !== undefined) add(overlay.collect, observation.collectMs)
     },
-    terminalInteraction(detail: 'keydown-dispatch' | 'wheel-dispatch' | 'write-request', duration: number, occurrenceMonoMs: number) {
+    terminalInteraction(detail: 'keydown-dispatch' | 'wheel-dispatch' | 'write-request', duration: number, occurrenceMonoMs: number, source: RendererWorkSource | null = null) {
       const delivered = now()
-      record('terminal-interaction', detail, duration, occurrenceMonoMs, delivered)
+      record('terminal-interaction', detail, duration, occurrenceMonoMs, delivered, null, null, source)
     },
     // Event type is not a public free-text channel. No prompt/body supplied by a caller is retained.
-    sessionEvent(kind: string, start: number) {
+    sessionEvent(kind: string, start: number, source: RendererWorkSource | null = null) {
       const delivered = now(), elapsed = Math.max(0, delivered - start)
       const type = Object.hasOwn(RENDERER_SESSION_EVENT_TYPES, kind) ? kind as RendererSessionEventType : 'unknown'
       add(sessionEventTypes[type], elapsed)
-      add(sessionEvents, elapsed); record('session-event', 'session-event', elapsed, start, delivered)
+      add(sessionEvents, elapsed); record('session-event', type, elapsed, start, delivered, null, null, source)
     },
     terminalWrite(visible: boolean, data: string | Uint8Array, start: number, context: RendererTerminalWriteContext) {
       const delivered = now(), elapsed = Math.max(0, delivered - start)
@@ -217,7 +231,8 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
         return retained.map(event => ({ ...event,
           retainedAs: [...(latest.includes(event) ? ['latest' as const] : []), ...(currentPeaks[kind] === event ? ['current-peak' as const] : []), ...(previousPeaks[kind] === event ? ['previous-peak' as const] : [])],
           terminal: event.terminal && { ...event.terminal, payload: { ...event.terminal.payload } },
-          cleanup: event.cleanup && { ...event.cleanup }
+          cleanup: event.cleanup && { ...event.cleanup },
+          source: event.source && { ...event.source }
         }))
       }).sort((a, b) => a.id - b.id)
       const value: RendererPerformanceSnapshot = {
