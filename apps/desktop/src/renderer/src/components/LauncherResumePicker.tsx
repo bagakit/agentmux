@@ -78,7 +78,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
     ...launcherResumeRows({ topics, candidates, config, workspace, timelines: facts.timelines,
       agentNames: facts.names, sessions: facts.sessions,
       nativeRecaps: Object.fromEntries(Object.entries(reads).map(([id, read]) => [id, read.recap])) }),
-    ...launcherNativeResumeRows({ topics, catalogs, managed: candidates, config, workspace }).map(row => {
+    ...launcherNativeResumeRows({ topics, catalogs, managed: candidates, agentNames: facts.names, config, workspace }).map(row => {
       if (!('native' in row.candidate)) return row
       const read = nativeReads[launcherCandidateKey(row.candidate)]
       return read?.sourceKey === JSON.stringify([row.candidate.hostId, row.candidate.executorId, launcherNativeSourceKey(row.candidate.native.source)])
@@ -233,7 +233,9 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
       const ids = new Set(launcherManagedCandidates(state.recoveryCandidates, state.sessions).map(candidate => candidate.agentSessionId))
       setFacts({
         timelines: Object.fromEntries([...ids].flatMap(id => state.timelines[id] ? [[id, state.timelines[id]!]] : [])),
-        names: Object.fromEntries([...ids].flatMap(id => state.agentNames[id] ? [[id, state.agentNames[id]!]] : [])),
+        // Retired native candidates arrive after discovery. Keep the existing name
+        // snapshot available by original SID without subscribing to unrelated output.
+        names: state.agentNames,
         sessions: state.sessions.filter(session => ids.has(session.id))
       })
       setScope('project'); setQuery(''); setSelectedId(null); setFeedback(null)

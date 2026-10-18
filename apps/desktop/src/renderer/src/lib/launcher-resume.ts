@@ -108,6 +108,7 @@ export function launcherManagedCandidates(candidates: readonly AgentSessionRecov
 export function launcherNativeResumeRows(input: {
   catalogs: readonly import('../../../shared/contracts').NativeAgentSessionsResult[]
   managed: readonly AgentSessionRecoveryCandidate[]
+  agentNames: Readonly<Record<string, string>>
   config: AppConfig | null
   topics?: readonly import('../../../shared/scratch-topics').ScratchTopicSnapshot[] | null
   workspace?: WorkspaceRecord | undefined
@@ -127,7 +128,10 @@ export function launcherNativeResumeRows(input: {
       label: native.title || 'Untitled conversation',
       createdAt: native.createdAt ?? native.updatedAt, updatedAt: native.updatedAt }
     const workspace = input.config?.workspaces.find(item => workspaceOwnsSessionPath(item, candidate, input.topics))
-    rows.set(key, { candidate, name: candidate.label, workspace,
+    rows.set(key, { candidate, name: resolveAgentName({
+      userName: native.managed ? input.agentNames[native.managed.agentSessionId] : undefined,
+      fallback: candidate.label
+    }).name, workspace,
       projectName: workspace?.name ?? candidate.workspacePath.split(/[\\/]/u).filter(Boolean).at(-1) ?? candidate.workspacePath,
       hostName: input.config?.hosts.find(host => host.id === catalog.hostId)?.label ?? catalog.hostId,
       executorName: input.config?.executors[candidate.executorId]?.label ?? candidate.executorId,
