@@ -7,10 +7,12 @@ import { WorkspaceWorkbench } from '../../../src/renderer/src/components/Workspa
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { readTerminalViewObservation } from '../../../src/renderer/src/lib/terminal-view-observation'
-import { applyAppAppearance } from '../../../src/renderer/src/lib/app-appearance'
+import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import '../../../src/renderer/src/styles/index.css'
+
+mountThemeRuntime(window, { appAppearance: 'dark' })
 
 // Read-only instrumentation of the actual xterm instances in this private
 // producer. open, geometry, rendering, bytes and options retain their owner.
@@ -63,6 +65,7 @@ const initialSnapshot = boot?.snapshot ?? {
 let nativeSnapshot = structuredClone(initialSnapshot)
 let creations = boot?.creations ?? {}
 const launches: unknown[] = [], trusted: unknown[] = [], flushes: unknown[] = []
+const nativeReads: unknown[] = []
 let failureMode = false
 const launchApi = api.sessions.launchAgent
 const attachApi = api.sessions.attach
@@ -74,16 +77,42 @@ api.sessions.resize = async (attachmentId, cols, rows) => {
 }
 api.config.get = async () => structuredClone(config)
 api.sessions.snapshot = async () => structuredClone(nativeSnapshot)
-api.sessions.historySources = async () => nativeSnapshot.sessions.filter(session => session.kind === 'agent').map(session => ({
+api.sessions.historySources = async () => [...nativeSnapshot.sessions.filter(session => session.kind === 'agent').map(session => ({
   agentSessionId: session.id, hostId: session.hostId, state: 'active', history: {
     providerId: session.providerId!, executorId: session.executorId!, workspacePath: session.workspacePath, createdAt: session.createdAt
   }
-}))
+})), ...Object.values(creations).filter((item: any) => item.kind === 'retired-agent').map((item: any) => ({
+  agentSessionId: item.agentSessionId, hostId: item.hostId, state: 'retired', retiredAt: item.observedAt, history: item.history
+}))]
 api.sessions.timeline = async control => structuredClone(nativeSnapshot.timelines[control.agentSessionId] ?? { agentSessionId: control.agentSessionId, revision: 0, items: [] })
 api.sessions.creation = async (_host, id) => {
   const creation = creations[id]
   if (!creation) throw new Error('The private Native owner has no confirmed receipt for this exact creation.')
   return structuredClone(creation)
+}
+function nativeSession(control: Parameters<typeof api.sessions.refresh>[0], operation: string) {
+  const id = control.kind === 'agent' ? control.agentSessionId : control.runId
+  const session = nativeSnapshot.sessions.find(item => item.id === id && item.hostId === control.hostId &&
+    item.control.kind === control.kind && item.control.run.runId === control.run.runId)
+  if (!session) {
+    nativeReads.push({ operation, control: structuredClone(control), outcome: 'exact-session-unavailable' })
+    throw new Error('The controlled Native owner has no matching Host, Session and Run for this observation.')
+  }
+  return session
+}
+api.sessions.refresh = async control => {
+  const session = nativeSession(control, 'refresh')
+  nativeReads.push({ operation: 'refresh', control: structuredClone(control), result: structuredClone(session.control) })
+  return structuredClone(session)
+}
+api.sessions.recover = async control => {
+  const session = nativeSession(control, 'recover')
+  if (session.processState !== 'running') throw new Error('The controlled Native owner has no healthy running Run to reattach.')
+  // Core returns reattachable for this exact healthy Run. The generic web
+  // preview recover always mints a replacement Run and is not this fixture's
+  // Native owner; allowing it here would contradict the controlled snapshot.
+  nativeReads.push({ operation: 'recover', control: structuredClone(control), kind: 'reattachable', result: structuredClone(session.control) })
+  return { kind: 'reattachable', session: structuredClone(session) }
 }
 api.sessions.attach = async (control, afterByte = 0) => {
   const id = control.kind === 'agent' ? control.agentSessionId : control.runId
@@ -179,12 +208,11 @@ function render() {
   const source = initialOrigins[0]
   flushSync(() => root.render(<>
     <section hidden={!focusProjection} style={{ width: focusProjection ? '100%' : 0, height: '100%', display: focusProjection ? 'flex' : 'none', flexDirection: 'column' }} aria-label="Original Workbench View in Focus">
-      <div id="takeover-focus-slot-header" className="focus-workspace__header" style={{ minHeight: 36, display: 'flex', justifyContent: 'flex-end' }} />
       <div id="takeover-focus-slot" style={{ flex: 1, minHeight: 0, display: 'flex' }} />
     </section>
     <div style={{ width: focusProjection ? 0 : '100%', height: '100%', overflow: 'hidden' }}>
       <WorkspaceWorkbench workspaceId={workspaceId} viewTargets={focusProjection ? { [source.tabId]: [{
-        hostId: 'takeover-focus-slot', headerPortalTargetId: 'takeover-focus-slot-header', active: true, visible: true, surface: 'focus',
+        hostId: 'takeover-focus-slot', active: true, visible: true, surface: 'focus',
         reference: { displayWorkspaceId: workspaceId, groupId: source.groupId, tabId: source.tabId, regionId: source.regionId }
       }] } : undefined} />
     </div>
@@ -196,15 +224,48 @@ function facts() {
   const state = useAppStore.getState()
   return { tabs: state.tabs, layouts: state.layouts, drafts: state.agentComposerDrafts,
     sessions: state.sessions.map(session => ({ id: session.id, control: session.control })),
+    nativeSessions: nativeSnapshot.sessions.map(session => ({ id: session.id, control: session.control })),
+    nativeReads: [...nativeReads],
     requests: state.spatialRequests, origins: initialOrigins, launches: [...launches], trusted: [...trusted], flushes: [...flushes],
     workbenchSaveWarning: state.workbenchSaveWarning, persisted: localStorage.getItem('agentmux-workbench-v1'), bootRestored: Boolean(boot) }
 }
 Object.assign(window, { takeoverProbe: {
-  focus, facts, terminalFacts, appearance: applyAppAppearance, failure(value: boolean) { failureMode = value },
+  focus, facts, terminalFacts, appearance(appAppearance: 'dark' | 'light') {
+    const result = updateThemeSelection({ appAppearance })
+    if (!result.applied) throw new Error(result.reason)
+  }, failure(value: boolean) { failureMode = value },
   focusProjection(value: boolean) { focusProjection = value; render(); return true },
+  async retire(agentSessionId: string) {
+    const created = creations[agentSessionId]
+    if (!created || created.kind !== 'agent') throw new Error('Only an exact confirmed private Native creation can retire.')
+    // This is the controlled Native boundary, not a Renderer retirement model.
+    // Deliberately retain the stale Renderer Session/Region so the real spatial
+    // consumer must prefer the authoritative retirement over that projection.
+    const retired = { kind: 'retired-agent', agentSessionId, hostId: created.hostId, run: created.run,
+      source: 'user', observedAt: Date.now(), history: { providerId: created.providerId, executorId: created.executorId,
+        workspacePath: created.workspacePath, createdAt: created.createdAt, creation: created.creation } }
+    creations[agentSessionId] = retired
+    nativeSnapshot.sessions = nativeSnapshot.sessions.filter(session => session.id !== agentSessionId)
+    delete nativeSnapshot.timelines[agentSessionId]
+    await bridge.saveRuntime({ config, snapshot: nativeSnapshot, creations })
+    return structuredClone(retired)
+  },
+  inspect(requestId: string) {
+    return useAppStore.getState().executeControl({ schemaVersion: 5, operation: 'space.inspect',
+      requestId: `fixture-inspect:${crypto.randomUUID()}`, target: { requestId } })
+  },
+  async saved() {
+    const state = useAppStore.getState(), saved = await bridge.spatialRead()
+    const preferences = JSON.parse(localStorage.getItem('agentmux-workbench-v1') ?? 'null')?.state
+    return JSON.stringify(saved.graph.layouts) === JSON.stringify(state.layouts) &&
+      JSON.stringify(saved.graph.tabLayouts) === JSON.stringify(Object.fromEntries(Object.values(state.tabs).map(tab => [tab.id, tab.layout]))) &&
+      JSON.stringify(preferences?.spatialRequests) === JSON.stringify(state.spatialRequests) &&
+      JSON.stringify(preferences?.agentComposerDrafts) === JSON.stringify(state.agentComposerDrafts)
+  },
   async seal() {
-    // A production read saves no replacement topology. flush() commits the already
-    // admitted executeControl/presentation writer, then Chromium flushes its real profile.
+    // saved() observes completion of the actual Core/presentation writers before
+    // shutdown. This flush only commits Chromium's already-written preferences;
+    // it never exports replacement topology or reseeds the next Renderer.
     await bridge.saveRuntime({ config, snapshot: nativeSnapshot, creations })
     await bridge.flush()
     return facts()
