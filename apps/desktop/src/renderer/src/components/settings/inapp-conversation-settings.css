@@ -15,8 +15,11 @@
 .inapp-conversation__view figcaption { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-3); border-bottom: 1px solid var(--line-soft); color: var(--text-2); font-size: var(--fs-meta); }
 .inapp-conversation__view figcaption strong { font-weight: 600; }
 .inapp-conversation__view figcaption > span { margin-left: auto; color: var(--text-3); font-size: var(--fs-micro); }
-.inapp-conversation__activity { padding: var(--sp-3); }
+.inapp-conversation__activity { display: grid; gap: var(--sp-5); padding: var(--sp-3); }
 .inapp-conversation__activity .log-turn { min-width: 0; }
+.inapp-conversation__activity .log-turn[data-compact='true'] { grid-template-columns: 24px minmax(0, 1fr); }
+.inapp-conversation__activity .log-turn[data-compact='true'] .log-turn__node { width: 24px; height: 24px; }
+.inapp-conversation__activity .log-turn__body { margin-top: 0; }
 .inapp-conversation__terminal { padding: var(--sp-3); font: var(--fs-meta)/1.65 var(--font-mono); color: var(--text-2); }
 .inapp-conversation__terminal p { display: grid; gap: var(--sp-1); margin: 0 0 var(--sp-3); }
 .inapp-conversation__terminal b { font-weight: 500; color: var(--text-3); }
