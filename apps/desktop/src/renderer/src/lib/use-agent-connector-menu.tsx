@@ -1,9 +1,8 @@
-import { useContext, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import { useAppStore } from '../store'
 import { sessionPresentationById } from './session-presentation'
 import { AgentConnectorDialog, type AgentConnectorTarget } from '../components/AgentConnectorDialog'
-import { SettingsNavigation } from '../components/SettingsNavigation'
 import { agentMoteConnectionSource } from './mote-connection-default'
 import { readConnectorService } from './connector-service-observation'
 
@@ -15,7 +14,7 @@ export function useAgentConnectorMenu(regionId: string, sessionId: string | null
   const service = observed?.state
   const [dialog, setDialog] = useState<{ original: AgentConnectorTarget; mode: 'create' | 'existing' | 'details' } | null>(null)
   const selection = useRef<typeof dialog>(null), menuOpen = useRef(false)
-  const settings = useContext(SettingsNavigation), returned = useRef<HTMLElement | null>(null), read = useRef(0)
+  const returned = useRef<HTMLElement | null>(null), read = useRef(0)
   useEffect(() => () => { read.current++ }, [regionId, sessionId, tabId])
   function onOpen(open: boolean) {
     menuOpen.current = open
@@ -43,23 +42,19 @@ export function useAgentConnectorMenu(regionId: string, sessionId: string | null
     if (menuOpen.current) selection.current = selected
     else setDialog(selected)
   }
-  function openConnect(trigger: HTMLElement) {
+  function openConnect(trigger: HTMLElement, mode: 'existing' | 'details' = 'existing') {
     returned.current = trigger
     const generation = ++read.current
     void readConnectorService(() => generation === read.current).catch(() => {})
-    open('existing')
+    open(mode)
   }
   return { onOpen, openConnect, issue, dialogOpen: dialog !== null, group: !sessionId ? null : {
-    label: 'Lark',
+    label: 'Connections',
     entries: [
       { label: 'Connect group…', onSelect: () => open('existing') },
       { label: 'Shared group details', onSelect: () => open('details') },
-      ...(settings ? [{ label: 'Lark settings', onSelect: () => {
-        const session = sessionId ? sessionPresentationById(useAppStore.getState().sessions).get(sessionId) : undefined
-        if (session?.kind === 'agent') settings.openLark({ sessionId: session.id, hostId: session.control.hostId, agentSessionId: session.control.agentSessionId })
-        else settings.open('lark')
-      } }] : [])
+      { label: 'Automatic sync settings', onSelect: () => open('details') }
     ],
-    issue: [!service ? 'Automatic chat sync is not confirmed. Open Lark settings to check it.' : !service.enabled ? 'Automatic chat sync is off. Open Lark settings to turn it on. Existing groups are kept.' : '', observed?.issue ? `Current service check unconfirmed; keeping the last confirmed policy. ${observed.issue}` : '', issue].filter(Boolean).join(' ')
+    issue: [!service ? 'Automatic chat sync is not confirmed. Open Connections to check it.' : !service.enabled ? 'Automatic chat sync is off. Open Connections to turn it on. Existing groups are kept.' : '', observed?.issue ? `Current service check unconfirmed; keeping the last confirmed policy. ${observed.issue}` : '', issue].filter(Boolean).join(' ')
   }, dialog: dialog ? <AgentConnectorDialog key={JSON.stringify(dialog.original.target)} {...dialog} returnFocus={() => returned.current} onClose={() => setDialog(null)} /> : null }
 }

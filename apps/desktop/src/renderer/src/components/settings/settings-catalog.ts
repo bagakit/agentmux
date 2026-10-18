@@ -3,6 +3,9 @@ import type { SemanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AppConfig } from '../../../../shared/contracts'
 import type { SettingsNavigationRequest } from '../SettingsNavigation'
 import type { SettingsPageId } from './settings-modules'
+import type { ConnectionApplication } from '@agentmux/core/connections'
+
+export type ChannelPresentation = { section: SettingsPageId; title: string; icon: ComponentType<{ size?: number | undefined }> }
 
 export const SETTINGS_GROUPS = [
   { id: 'preferences', title: 'Preferences', description: 'Your profile and everyday defaults.' },
@@ -43,6 +46,8 @@ export type SettingsModule = {
   keywords: string
   searchTargets?: readonly SettingsSearchTarget[]
   icon: SemanticIconComponent
+  /** Presentation of this leaf's applications. Never implementation support or native authorization. */
+  channel?: { adapterId: string; domains: readonly { domain: string; title: string }[]; icon: ComponentType<{ size?: number | undefined }> }
   /** Optional ordered shortcut on Overview; the original editor remains the destination. */
   overviewShortcut?: number
   savedSummary(config: AppConfig): string
@@ -85,7 +90,15 @@ export function createSettingsCatalog<const Modules extends readonly SettingsMod
     })
   }
 
-  return { visibleSections, navGroups, searchResults }
+  function channelPresentation(application: ConnectionApplication, adapterId?: string): ChannelPresentation | null {
+    const matches = orderedModules.flatMap(module => {
+      const channel = (module as SettingsModule).channel
+      return channel && (adapterId === undefined || channel.adapterId === adapterId)
+        ? channel.domains.filter(item => item.domain === application.domain).map(item => ({ section: module.id as SettingsPageId, title: item.title, icon: channel.icon })) : []
+    })
+    return matches.length === 1 ? matches[0]! : null
+  }
+  return { visibleSections, navGroups, searchResults, channelPresentation }
 }
 
 function targetText(target: SettingsSearchTarget): string {

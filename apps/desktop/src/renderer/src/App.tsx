@@ -5,7 +5,8 @@ import { GitHistoryProvider } from './features/git/history/GitHistoryContext'
 import { workspaceZoneContext } from './lib/workspace-zone-context'
 import { observeNotebookLibrary } from './lib/notebook-library'
 import { ExecutorIdentityContext } from './components/AgentAvatar'
-import { SettingsNavigation, type SettingsNavigationRequest, type MoteLarkSettingsOrigin, type LarkSettingsOrigin } from './components/SettingsNavigation'
+import { SettingsNavigation, type SettingsNavigationRequest, type MoteLarkSettingsOrigin, type ChannelSettingsOrigin } from './components/SettingsNavigation'
+import { settingsCatalog } from './components/settings/settings-modules'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { BrandIcon } from './components/BrandIcon'
@@ -115,12 +116,16 @@ function DesktopApp() {
   const closeSettings = useCallback((): void => setSettingsOpen(false), [])
   const openToolkit = useCallback((toolId: string): void => navigateSettings({ section: 'toolkit', toolId }), [navigateSettings])
   const openHostSettings = useCallback((hostId: string): void => navigateSettings({ section: 'hosts', hostId }), [navigateSettings])
-  const openLark = useCallback((larkOrigin: LarkSettingsOrigin): void => navigateSettings({ section: 'lark', larkOrigin }), [navigateSettings])
+  const openChannel = useCallback((channelOrigin: ChannelSettingsOrigin): void => {
+    const { connection } = channelOrigin
+    const presentation = settingsCatalog.channelPresentation(connection.application, connection.adapterId)
+    navigateSettings({ section: presentation?.section ?? 'overview', channelOrigin })
+  }, [navigateSettings])
   const openMoteLark = useCallback((moteLarkOrigin: MoteLarkSettingsOrigin): void => navigateSettings({ section: 'lark', moteLarkOrigin }), [navigateSettings])
   const [windowResizeActive, setWindowResizeActive] = useState(false)
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false)
   const chooseAgent = useCallback(() => { setSettingsOpen(false); setQuickSwitchOpen(true) }, [])
-  const settingsNavigation = useMemo(() => ({ open: openSettings, openToolkit, openHost: openHostSettings, openLark, openMoteLark, chooseAgent }), [openSettings, openToolkit, openHostSettings, openLark, openMoteLark, chooseAgent])
+  const settingsNavigation = useMemo(() => ({ open: openSettings, openToolkit, openHost: openHostSettings, openChannel, channelPresentation: settingsCatalog.channelPresentation, openMoteLark, chooseAgent }), [openSettings, openToolkit, openHostSettings, openChannel, openMoteLark, chooseAgent])
   const quickSwitchOrigin = useRef<{ element: HTMLElement | null; navigation: string } | null>(null)
   const initialize = useAppStore((state) => state.initialize)
   const loading = useAppStore((state) => state.loading)
