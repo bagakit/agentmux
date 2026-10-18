@@ -87,7 +87,7 @@ Core 的原 `AgentMuxMessageEnvelope` 在 external sender 之外持有可选 `ch
 
 ### Channel 对话记录引用
 
-Channel 输入附带的前文以 amux 对话记录 quote 承载，与当前原请求及受信平台说明分别定界。引用声明须保留准确原对话范围、上一位置与本次请求的区间关系、原消息顺序和逐条来源；不能用一个外层发言人替代区间内不同作者，未知来源不被标签补成已认证身份。引用包含区间内完整消息及其原内容／资源关系，当前请求在引用外独立保留。区间与位置的业务边界归[外部交流入口](../design/behavior/conversation-mode.md#共同对话协议与外部交流入口)。
+Channel 输入附带的前文以 amux 对话记录 quote 承载，与当前原请求及受信平台说明分别定界。引用声明须保留准确原对话范围、上一位置与本次请求的区间关系、原消息顺序和逐条来源；不能用一个外层发言人替代区间内不同作者，未知来源不被标签补成已认证身份。引用保留所选原消息的完整内容／资源关系，当前请求在引用外独立保留。同一接收 Session 已知的自身外发消息只按原准确投递映射排除，不改变连续范围、覆盖结论或推进位置的采用回执；具体选择与位置边界归[外部交流入口](../design/behavior/conversation-mode.md#共同对话协议与外部交流入口)。
 
 原 envelope 的 `channelQuote` 采用 [ChannelTranscriptQuote](../../packages/core/src/channel-quote.ts) 严格合同。wire 按 `<amux:quote version="1">`、一行确定性 JSON、`</amux:quote>` 定界，随后另起原 `<amux:channel ...>` 当前请求；JSON 的 `<`、`>`、`&` 使用 Unicode 转义，解码后原内容不变。reader 只在完整的 quote 与后续当前请求应用、对话和消息 ID 一致时展示引用，不递归解释消息正文中的同形样例。
 
