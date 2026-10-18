@@ -8,13 +8,15 @@ const graph = 'components/AgentCollaborationGraph.tsx', tooltip = 'components/Wo
 const disclosure = 'reads the complete original relation in the window tooltip and releases it when the retained map hides'
 const tracking = 'tracks a transformed original SVG path through real FloatingUI without following its live packet'
 export const collaborationLabelMutations = [
-  { file: tooltip, name: 'svg-camera-tracking', before: "animationFrame: anchor.namespaceURI === 'http://www.w3.org/2000/svg'", after: 'animationFrame: false', assertion: tracking },
+  { file: tooltip, name: 'svg-camera-tracking', before: 'animationFrame: svgAnchor', after: 'animationFrame: false', assertion: tracking },
   { file: graph, name: 'stable-path-anchor', before: "event.currentTarget.querySelector<SVGPathElement>('.react-flow__edge-path')", after: 'event.currentTarget', assertion: tracking },
   { file: graph, name: 'hidden-map-disclosure', before: "useWorkbenchNameTooltip(record.label, '', !active,", after: "useWorkbenchNameTooltip(record.label, '', false,", assertion: disclosure },
   { file: graph, name: 'persistent-selected-caption', before: '</g>{tooltip.content}</>', after: '{record.selected ? <EdgeLabelRenderer><div className="collaboration-edge__label">{record.label}</div></EdgeLabelRenderer> : null}</g>{tooltip.content}</>', assertion: disclosure },
   { file: graph, name: 'focused-pointer-departure', before: 'if (!event.currentTarget.contains(event.currentTarget.ownerDocument.activeElement)) tooltip.hide()', after: 'tooltip.hide()', assertion: disclosure },
   { file: graph, name: 'fixed-region-activity-slot', before: '<i className="collaboration-area__activity"', after: '{data.activity ? <i className="collaboration-area__activity"', tail: ' : undefined} />', tailAfter: ' : undefined} /> : null}', assertion: 'reserves the same region activity slot and geometry before during and after an original pulse' },
-  { file: tooltip, name: 'html-frame-cost', before: "animationFrame: anchor.namespaceURI === 'http://www.w3.org/2000/svg'", after: 'animationFrame: true', assertion: 'keeps the actual HTML lane disclosure event driven without a per-frame anchor read' }
+  { file: tooltip, name: 'html-frame-cost', before: 'animationFrame: svgAnchor', after: 'animationFrame: true', assertion: 'keeps the actual HTML lane disclosure event driven without a per-frame anchor read' },
+  { file: tooltip, name: 'svg-observation-turn', before: 'if (svgAnchor) {', after: 'if (false) {', assertion: 'starts original SVG tooltip observation outside its mounting turn and cancels both pending and active work' },
+  { file: tooltip, name: 'svg-observation-cancellation', before: 'if (startFrame !== undefined) window.cancelAnimationFrame(startFrame); ', after: '', assertion: 'starts original SVG tooltip observation outside its mounting turn and cancels both pending and active work' }
 ] as const
 const selected = process.env.AGENTMUX_COLLABORATION_LABEL_MUTATION
 const mutation = collaborationLabelMutations.find(item => item.name === selected)

@@ -851,6 +851,38 @@ it('tracks a transformed original SVG path through real FloatingUI without follo
   expect(readPath).toHaveBeenCalledTimes(stopped); expect(panel.isConnected).toBe(false)
 })
 
+it('starts original SVG tooltip observation outside its mounting turn and cancels both pending and active work', async () => {
+  const scene = await loadedDetourScene(), connection = detour()!.connection
+  await revealWorld()
+  const edge = edgeElement(connection.id)!, originalObserver = globalThis.ResizeObserver
+  const observed = new Set<Element>(), frames = new Map<number, FrameRequestCallback>(); let sequence = 0
+  vi.stubGlobal('ResizeObserver', class extends originalObserver {
+    observe(target: Element, options?: ResizeObserverOptions) { observed.add(target); super.observe(target, options) }
+    unobserve(target: Element) { observed.delete(target); super.unobserve(target) }
+    disconnect() { observed.clear(); super.disconnect() }
+  })
+  const frameSpy = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => { frames.set(++sequence, callback); return sequence })
+  const cancelSpy = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(id => { frames.delete(id) })
+  try {
+    await act(async () => edge.dispatchEvent(new FocusEvent('focusin', { bubbles: true })))
+    const pendingPanel = document.getElementById(edge.getAttribute('aria-describedby')!)!
+    expect(pendingPanel).not.toBeNull(); expect(pendingPanel.style.visibility).toBe('visible')
+    expect(observed.has(pendingPanel)).toBe(false)
+    expect(frames.size).toBe(1)
+    await dom.render(graph(scene, null, scene.relations, [], scene.agents, { active: false }))
+    expect(frames.size).toBe(0); expect(observed.size).toBe(0); expect(pendingPanel.isConnected).toBe(false)
+    await dom.render(graph(scene))
+    await act(async () => edge.dispatchEvent(new FocusEvent('focusin', { bubbles: true })))
+    const activePanel = document.getElementById(edge.getAttribute('aria-describedby')!)!
+    expect(activePanel).not.toBeNull(); expect(observed.has(activePanel)).toBe(false); expect(frames.size).toBe(1)
+    await act(async () => { const pending = [...frames.values()]; frames.clear(); for (const callback of pending) callback(performance.now()) })
+    expect(observed.has(activePanel)).toBe(true)
+    expect(frames.size).toBe(1)
+    await dom.render(graph(scene, null, scene.relations, [], scene.agents, { active: false }))
+    expect(frames.size).toBe(0); expect(observed.size).toBe(0); expect(activePanel.isConnected).toBe(false)
+  } finally { frameSpy.mockRestore(); cancelSpy.mockRestore(); vi.stubGlobal('ResizeObserver', originalObserver) }
+})
+
 it('reserves the same region activity slot and geometry before during and after an original pulse', async () => {
   const scene = scenario(24); await loaded(scene)
   const area = boxes.get(JSON.stringify(['area', 'area-0']))!
