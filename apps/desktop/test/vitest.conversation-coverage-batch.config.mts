@@ -10,7 +10,8 @@ export default defineConfig({ ...base, cacheDir: '.cache/conversation-coverage-b
     const path = relative(root, id.split('?')[0]!)
     const ahead = 'apps/desktop/src/renderer/src/lib/use-conversation-read-ahead.ts'
     const anchor = 'packages/client-ui/src/lib/conversation-reading-anchor.ts'
-    if (path !== owner && path !== ahead && path !== anchor && path !== 'packages/client-ui/src/lib/use-conversation-view.ts') return
+    if (![owner, ahead, anchor, 'packages/client-ui/src/lib/use-conversation-view.ts',
+      'apps/desktop/src/renderer/src/components/ActivityView.tsx', 'apps/desktop/src/renderer/src/components/ConversationReadingRuler.tsx'].includes(path)) return
     const mutation = process.env.AGENTMUX_COVERAGE_BATCH_MUTATION
     const edits: Record<string, [string, string]> = {
       'linear-anchor-scan': ['if (visibleShells) {', 'if (false && visibleShells) {'],
