@@ -14,6 +14,7 @@ import { api } from '../../lib/api'
 import { usePathDisplay } from '../../hooks/usePathDisplay'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { SettingsNavigation } from '../SettingsNavigation'
+import { TuiToolkitResult } from './TuiToolkitResult'
 import { ToolkitIcon } from './ToolkitIcon'
 import type { ToolkitToolIdentity } from './use-toolkit-packages'
 import { ToolkitResultLink } from './ToolkitResultLink'
@@ -42,10 +43,21 @@ function ExecutionDirectory({ path, hostId }: { path: string; hostId: string }) 
   return <dd>{displayPath(path, hostId)}</dd>
 }
 
-export function UserToolkitResult({ definition, active, close, official = false, runLabel, copyOnRun = false, primaryActionId, entryLabel }: { definition: ToolkitToolIdentity; active: boolean; close(): void; official?: boolean; runLabel?: string; copyOnRun?: boolean; primaryActionId?: string; entryLabel?: string }) {
-  const [connecting, setConnecting] = useState(false)
+type UserToolkitResultProps = { definition: ToolkitToolIdentity; active: boolean; close(): void; official?: boolean; runLabel?: string; copyOnRun?: boolean; primaryActionId?: string; entryLabel?: string }
+
+export function UserToolkitResult(props: UserToolkitResultProps) {
   const [scriptOpen, setScriptOpen] = useState(false)
-  const reading = useToolkitScriptObservation(api.toolkit, definition.id, active && !scriptOpen, true)
+  const reading = useToolkitScriptObservation(api.toolkit, props.definition.id, props.active && !scriptOpen, true)
+  const execution = reading.snapshot?.admission ?? reading.snapshot?.latestConfirmed
+  const mode = execution ? execution.definition.mode ?? 'script' : reading.snapshot?.definition.mode ?? props.definition.mode
+  return mode === 'tui' ? <TuiToolkitResult definition={props.definition} active={props.active} close={props.close} reading={reading} /> :
+    <ScriptToolkitResult {...props} reading={reading} scriptOpen={scriptOpen} setScriptOpen={setScriptOpen} />
+}
+
+function ScriptToolkitResult({ definition, active, close, official = false, runLabel, copyOnRun = false, primaryActionId, entryLabel, reading, scriptOpen, setScriptOpen }: UserToolkitResultProps & {
+  reading: ReturnType<typeof useToolkitScriptObservation>; scriptOpen: boolean; setScriptOpen(value: boolean): void
+}) {
+  const [connecting, setConnecting] = useState(false)
   const { snapshot } = reading
   const name = snapshot?.definition.name ?? definition.name, icon = snapshot?.definition.icon ?? definition.icon
   const navigation = useContext(SettingsNavigation)!

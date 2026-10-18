@@ -4,6 +4,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { lazy, Suspense, useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import type { ToolkitAction, ToolkitToolDefinition, ToolkitToolFields, ToolkitInlineToolConfiguration } from '@agentmux/core/control'
 import { TOOLKIT_ICON_IDS } from '../../../../shared/toolkit-preferences'
+import { TuiToolkitSettings } from '../toolkit/TuiToolkitResult'
 import { ToolkitIcon, toolkitIconLabels } from '../toolkit/ToolkitIcon'
 import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
 import { SettingsSaveBar } from './SettingsSaveBar'
@@ -34,6 +35,7 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
   const uid = useId()
   const picker = useRef<HTMLDetailsElement>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [confirmTui, setConfirmTui] = useState(false)
   useEffect(() => { if (!active) setConfirmDelete(false) }, [active])
   const [removing, setRemoving] = useState(false)
   const [executing, setExecuting] = useState(false)
@@ -45,10 +47,11 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
   const focusAction = useRef(false)
   const dirty = toolkitDraftDirty(entry)
   const tool = entry.value
+  const tui = tool.mode === 'tui'
   const actions = tool.actions ?? []
   const action = actionId === null ? null : actions.find(item => item.id === actionId)
   const args = displayOpen ? tool.display?.args ?? [] : actionId === null ? tool.args : action?.args ?? []
-  const scriptTitle = displayOpen ? 'Display script' : actionId === null ? 'Main script' : action?.label.trim() || 'Action script'
+  const scriptTitle = displayOpen ? 'Display script' : actionId === null ? tui ? 'Shell command' : 'Main script' : action?.label.trim() || 'Action script'
   const missingFields = [
     ...(!tool.name.trim() ? ['a name'] : []),
     ...(!tool.workspacePath.trim() ? ['a fixed working directory'] : []),
@@ -74,6 +77,15 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
     onEdit({ actions: [...actions, { id: next, label: '', script: "console.log('Action ready')\n", args: [] }] })
     chooseAction(next)
   }
+  function changeMode(mode: 'script' | 'tui') {
+    if (mode === 'tui' && (actions.length || tool.display)) { setConfirmTui(true); return }
+    applyMode(mode)
+  }
+  function applyMode(mode: 'script' | 'tui') {
+    setActionId(null); setDisplayOpen(false); setConfirmTui(false)
+    onEdit({ mode, ...(mode === 'tui' ? { actions: [], display: null } : {}),
+      ...(!entry.expected && tool.script === "console.log('Hello from your toolkit')\n" && mode === 'tui' ? { script: 'exec /bin/sh\n' } : {}) })
+  }
   async function run() {
     if (!entry.expected || dirty || entry.saving || executing) return
     setExecuting(true); setOperationError(''); setRunFeedback('')
@@ -90,8 +102,8 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
   return <section className="toolkit-editor" data-tool-editor={id} aria-label={`Edit ${tool.name.trim() || 'new tool'}`}>
     <header className="toolkit-editor__heading">
       <button type="button" className="small-button toolkit-editor__back" onClick={onBack}><ThemeNavigationBackIcon size={13} /> Back to tools</button>
-      <span className="toolkit-editor__metadata"><span>Custom tool · JavaScript ESM</span><span className="toolkit-editor__status" data-dirty={dirty}>{entry.saving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved'}</span></span>
-      <button type="button" className="small-button toolkit-editor__run" disabled={dirty || entry.saving || !entry.expected || !tool.enabled || executing || entry.missing} onClick={() => void run()}><ThemeActionStartIcon size={13} /> {executing ? 'Starting…' : actionId === null ? 'Run' : 'Run main script'}</button>
+      <span className="toolkit-editor__metadata"><span>Custom tool · {tui ? 'TUI' : 'JavaScript ESM'}</span><span className="toolkit-editor__status" data-dirty={dirty}>{entry.saving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved'}</span></span>
+      {!tui ? <button type="button" className="small-button toolkit-editor__run" disabled={dirty || entry.saving || !entry.expected || !tool.enabled || executing || entry.missing} onClick={() => void run()}><ThemeActionStartIcon size={13} /> {executing ? 'Starting…' : actionId === null ? 'Run' : 'Run main script'}</button> : null}
     </header>
     {entry.missing ? <p className="settings-inline-error" role="status">The saved tool is no longer available. Your draft is kept.</p> : null}
     <div className="toolkit-editor__identity">
@@ -109,17 +121,20 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
       </details>
       <label className="toolkit-editor__name"><span>Name <small>Required</small></span><TextInput aria-required="true" ref={nameInput} value={tool.name} onChange={event => onEdit({ name: event.target.value })} placeholder="Workspace summary" /></label>
     </div>
+    <fieldset className="toolkit-editor__mode"><legend>Tool type</legend>
+      {(['script', 'tui'] as const).map(mode => <label key={mode}><input type="radio" name={`${uid}-mode`} value={mode} checked={(tool.mode ?? 'script') === mode} onChange={() => changeMode(mode)} /><span>{mode === 'tui' ? 'TUI · interactive terminal' : 'Script · text and results'}</span></label>)}
+    </fieldset>
     <label className="toolkit-editor__directory"><span><ThemeObjectFolderIcon size={13} /> Fixed working directory <small>Required</small></span><TextInput aria-required="true" value={tool.workspacePath} onChange={event => onEdit({ workspacePath: event.target.value })} placeholder="Choose an absolute local directory" /><small>Stays fixed when you switch Agents or workspaces.</small></label>
     {displayOpen || actionId !== null ? <div className="toolkit-editor__action-heading">
       <button type="button" className="small-button" onClick={() => { setActionId(null); setDisplayOpen(false) }}><ThemeNavigationBackIcon size={13} /> Main script</button>
       {displayOpen ? <p className="settings-hint">Runs once when the tool is displayed, including a hover that opens its panel. Refresh runs it again. Use a script that is safe to repeat.</p> : action ? <label><span>Action button label</span><TextInput ref={actionLabel} value={action.label} onChange={event => editScript({ label: event.target.value })} placeholder="Refresh identity" /></label> : <p className="settings-inline-error" role="status">This action is no longer in the current draft. Choose the main script or another action.</p>}
     </div> : null}
-    <section className="toolkit-editor__script" aria-label={displayOpen ? 'Display JavaScript script' : actionId === null ? 'JavaScript script' : 'Action JavaScript script'}>
-      <header><span><ThemeObjectSourceCodeIcon size={13} /> {scriptTitle}</span><span>JavaScript</span></header>
-      {active && (displayOpen ? Boolean(tool.display) : actionId === null || action) ? <Suspense fallback={<p className="settings-hint">Opening script editor…</p>}><ScriptEditor key={JSON.stringify([id, displayOpen, actionId])} id={id} actionId={actionId} display={displayOpen} value={displayOpen ? tool.display!.script : actionId === null ? tool.script : action!.script} onChange={script => editScript({ script })} /></Suspense> : null}
+    <section className="toolkit-editor__script" aria-label={tui ? 'Shell command' : displayOpen ? 'Display JavaScript script' : actionId === null ? 'JavaScript script' : 'Action JavaScript script'}>
+      <header><span><ThemeObjectSourceCodeIcon size={13} /> {scriptTitle}</span><span>{tui ? 'Shell' : 'JavaScript'}</span></header>
+      {active && (displayOpen ? Boolean(tool.display) : actionId === null || action) ? <Suspense fallback={<p className="settings-hint">Opening script editor…</p>}><ScriptEditor key={JSON.stringify([id, displayOpen, actionId])} id={id} actionId={actionId} display={displayOpen} mode={tool.mode ?? 'script'} value={displayOpen ? tool.display!.script : actionId === null ? tool.script : action!.script} onChange={script => editScript({ script })} /></Suspense> : null}
     </section>
-    <p className="settings-hint">{displayOpen ? 'Save to enable evaluation when displayed. This script runs as your local user with the same file and network access as the main script.' : actionId === null ? `${dirty ? 'Save before running. ' : ''}Runs as your local user. Saving and hovering do not run the main script.` : 'Save the tool to publish this action. Run it from a confirmed result in the status bar.'}</p>
-    <details className="toolkit-editor__result-actions">
+    <p className="settings-hint">{tui ? 'Starts when the enabled tool is loaded. Closing its panel keeps it running. Saving changes does not restart the current terminal.' : displayOpen ? 'Save to enable evaluation when displayed. This script runs as your local user with the same file and network access as the main script.' : actionId === null ? `${dirty ? 'Save before running. ' : ''}Runs as your local user. Saving and hovering do not run the main script.` : 'Save the tool to publish this action. Run it from a confirmed result in the status bar.'}</p>
+    {!tui ? <details className="toolkit-editor__result-actions">
       <summary>Result actions <span>· {actions.length || 'optional'}</span></summary>
       <p className="settings-hint">Buttons shown with a confirmed result. Each action runs its saved script in this tool’s fixed directory.</p>
       <div className="toolkit-action-list">
@@ -129,14 +144,15 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
         </div>)}
       </div>
       <button type="button" className="small-button" disabled={actions.length >= 16} onClick={addAction}><ThemeActionAddOperationIcon size={13} /> Add action</button>
-    </details>
+    </details> : null}
+    {entry.expected ? <TuiToolkitSettings definition={entry.expected} active={active} /> : null}
     <details className="toolkit-editor__scope"><summary>Local execution scope</summary><p>Your script can read and write local files, environment variables and the network. It uses your current user account; it is not sandboxed.</p></details>
     <div className="toolkit-editor__fields">
       <label className="toolkit-editor__toggle"><span><strong>Show in status bar</strong><small>Hide the entry and prevent new runs when off. An existing run keeps its captured version.</small></span><input type="checkbox" checked={tool.enabled} onChange={event => onEdit({ enabled: event.target.checked })} /></label>
-      <div className="toolkit-editor__display">
+      {!tui ? <div className="toolkit-editor__display">
         <label className="toolkit-editor__toggle"><span><strong>Evaluate when displayed</strong><small>Run a separate display script when its panel opens. No background polling.</small></span><input type="checkbox" aria-label="Evaluate when displayed" checked={Boolean(tool.display)} onChange={event => { onEdit({ display: event.target.checked ? { script: "console.log('Display ready')\n", args: [] } : null }); if (!event.target.checked) setDisplayOpen(false) }} /></label>
         {tool.display ? <button type="button" className="small-button" aria-pressed={displayOpen} onClick={() => { setActionId(null); setDisplayOpen(true) }}><ThemeObjectSourceCodeIcon size={13} /> Edit display script</button> : null}
-      </div>
+      </div> : null}
       <fieldset className="toolkit-settings__layout"><legend>Status bar appearance</legend><div className="toolkit-settings__choices">
         <LiquidSelectionSurface selected={tool.statusBar} active={active} targetAttribute="data-settings-target" />
         {(['icon', 'label'] as const).map(value => <label key={value} data-settings-target={value} data-selected={tool.statusBar === value}>
@@ -145,7 +161,7 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
         </label>)}
       </div></fieldset>
       {(displayOpen ? Boolean(tool.display) : actionId === null || action) ? <details className="toolkit-editor__arguments"><summary>{displayOpen ? 'Display arguments' : actionId === null ? 'Arguments' : 'Action arguments'} <span>{args.length ? `· ${args.length}` : '· optional'}</span></summary>
-        <p className="settings-hint">Each argument is a separate value. No shell expansion or interpolation.</p>
+        <p className="settings-hint">{tui ? 'Passed as separate shell positional arguments: $1, $2, and so on. Quote them in your command to preserve spaces.' : 'Each argument is a separate value. No shell expansion or interpolation.'}</p>
         {args.map((arg, index) => <label className="toolkit-argument" key={index}><span>Argument {index + 1}</span><TextInput value={arg} onChange={event => editScript({ args: args.map((value, i) => i === index ? event.target.value : value) })} /><button type="button" className="small-button" aria-label={`Remove argument ${index + 1}`} onClick={() => editScript({ args: args.filter((_, i) => i !== index) })}><ThemeActionRemoveArgumentIcon size={13} /></button></label>)}
         <button type="button" className="small-button" disabled={args.length >= 32} onClick={() => editScript({ args: [...args, ''] })}><ThemeActionAddArgumentIcon size={13} /> Add argument</button>
       </details> : null}
@@ -157,6 +173,7 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
       <button type="button" className="small-button" disabled={entry.saving || removing} onClick={() => entry.expected ? setConfirmDelete(true) : void remove()}>{entry.expected ? <><ThemeActionRemoveIcon size={13} /> Delete tool</> : <><ThemeActionCancelIcon size={13} /> Cancel new tool</>}</button>
       <SettingsSaveBar save={save} dirty={dirty} disabled={invalid || entry.missing} label="Save tool" onSave={onSave} />
     </footer>
+    <ConfirmationDialog open={active && confirmTui} title="Switch this tool to TUI?" subject={tool.name} description="The main script is kept. Result actions and the display script will be removed from this draft. Update the command for the shell before saving." confirmLabel="Switch to TUI" onCancel={() => setConfirmTui(false)} onConfirm={() => applyMode('tui')} />
     <ConfirmationDialog open={active && confirmDelete} title="Delete this tool?" subject={tool.name} description="Remove the saved tool and its status bar entry. A running or unconfirmed execution prevents deletion." confirmLabel="Delete tool" busy={removing} onCancel={() => setConfirmDelete(false)} onConfirm={() => void remove()} />
   </section>
 }

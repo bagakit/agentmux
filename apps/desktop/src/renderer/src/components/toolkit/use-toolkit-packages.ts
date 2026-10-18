@@ -4,7 +4,7 @@ import { api } from '../../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 
 export type ToolkitPackageDescriptor = Extract<ToolkitDescriptor, { kind: 'package' }>
-export type ToolkitToolIdentity = { id: string; name: string; icon: string; enabled: boolean; statusBar: 'icon' | 'label' }
+export type ToolkitToolIdentity = { id: string; name: string; icon: string; enabled: boolean; statusBar: 'icon' | 'label'; mode?: 'script' | 'tui' }
 
 /** Manifest facts are transient observations. Source code and file facts never enter configuration. */
 export function useToolkitPackages(tools: readonly ToolkitToolConfiguration[], active: boolean) {
@@ -41,5 +41,5 @@ export function packageFact(tool: ToolkitToolConfiguration, facts: ReadonlyMap<s
 }
 export function toolkitIdentity(tool: ToolkitToolConfiguration, facts: ReadonlyMap<string, ToolkitPackageDescriptor>): ToolkitToolIdentity {
   const fact = packageFact(tool, facts)
-  return { id: tool.id, name: 'kind' in tool ? fact?.name ?? tool.id : tool.name, icon: 'kind' in tool ? fact?.icon ?? 'terminal' : tool.icon, enabled: tool.enabled, statusBar: tool.statusBar }
+  return { ...(!('kind' in tool) && tool.mode ? { mode: tool.mode } : {}), id: tool.id, name: 'kind' in tool ? fact?.name ?? tool.id : tool.name, icon: 'kind' in tool ? fact?.icon ?? 'terminal' : tool.icon, enabled: tool.enabled, statusBar: tool.statusBar }
 }

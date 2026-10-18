@@ -1,0 +1,14 @@
+.performance-popover:has(.toolkit-tui:not(.toolkit-tui--compact)) { width: min(760px, calc(100vw - 24px)); height: min(500px, calc(100vh - 48px)); min-width: min(360px, calc(100vw - 24px)); min-height: min(260px, calc(100vh - 48px)); max-width: calc(100vw - 24px); max-height: calc(100vh - 48px); resize: both; }
+.toolkit-tui { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
+.toolkit-tui__status { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); padding: var(--sp-2) var(--sp-6) var(--sp-4); color: var(--text-2); font-size: var(--fs-meta); }
+.toolkit-tui__status small { margin-left: auto; color: var(--text-3); font-size: var(--fs-micro); }
+.toolkit-tui__notices { padding: 0 var(--sp-6) var(--sp-3); max-height: 100px; overflow: auto; color: var(--amber-text); font-size: var(--fs-meta); }
+.toolkit-tui__notices p { margin: var(--sp-2) 0; overflow-wrap: anywhere; }
+.toolkit-tui__notice { margin: 0; padding: var(--sp-3) var(--sp-6); color: var(--text-3); font-size: var(--fs-meta); }
+.toolkit-tui__terminal { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; overflow: hidden; border-top: 1px solid var(--line-soft); }
+.toolkit-tui__terminal > .terminal-view { flex: 1; }
+.toolkit-tui__empty { margin: auto; padding: var(--sp-6); color: var(--text-3); font-size: var(--fs-meta); }
+.toolkit-tui__actions { flex-wrap: wrap; flex: none; }
+.toolkit-tui__actions > button:disabled { color: var(--text-3); opacity: .65; cursor: default; }
+.toolkit-tui--compact { flex: none; border: 1px solid var(--line-soft); border-radius: var(--radius); }
+.toolkit-tui--compact .toolkit-tui__status { padding-top: var(--sp-4); }
