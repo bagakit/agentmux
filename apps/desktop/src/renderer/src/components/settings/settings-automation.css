@@ -8,9 +8,10 @@
 .automation-policy-example { margin-top: var(--sp-4); padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); }
 .automation-policy-example header { display: flex; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-2); }
 .automation-policy-example header small { color: var(--text-3); }
-.automation-policy-example p { margin: var(--sp-2) 0 0; color: var(--text-2); line-height: 1.5; }
-.automation-policy-example dl { display: grid; gap: var(--sp-3); margin: var(--sp-3) 0; }
-.automation-policy-example dl > div { display: grid; grid-template-columns: minmax(8em, 1fr) minmax(0, 3fr); gap: var(--sp-3); }
+.automation-policy-example { font-size: var(--fs-body); }
+.automation-policy-example p { margin: var(--sp-2) 0 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; }
+.automation-policy-example dl { display: grid; gap: var(--sp-2); margin: var(--sp-3) 0; }
+.automation-policy-example dl > div { display: grid; grid-template-columns: 6em minmax(0, 1fr); gap: var(--sp-3); }
 .automation-policy-example dt { color: var(--text-3); }
 .automation-policy-example dd { margin: 0; color: var(--text-2); line-height: 1.5; }
-@media (max-width: 620px) { .automation-policy-example dl > div { grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); } }
+@media (max-width: 620px) { .automation-policy-example dl > div { grid-template-columns: 5em minmax(0, 1fr); gap: var(--sp-2); } }

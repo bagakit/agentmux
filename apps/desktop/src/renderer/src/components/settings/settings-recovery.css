@@ -13,13 +13,15 @@
 .recovery-timing .continuity-duration { justify-items: start; }
 .recovery-settings .browser-automation-toggle { padding-inline: 0; }
 .recovery-behavior .continuity-hint + .continuity-hint { margin-top: var(--sp-2); }
-.recovery-policy-example { margin-block: var(--sp-4); padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); }
+.recovery-settings { container: recovery-settings / inline-size; }
+.recovery-policy-example { margin-block: var(--sp-4); padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); font-size: var(--fs-body); }
 .recovery-policy-example header { display: flex; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-2); }
 .recovery-policy-example header small { color: var(--text-3); }
-.recovery-policy-example p { margin: var(--sp-2) 0 0; color: var(--text-2); line-height: 1.5; }
-.recovery-policy-example ol { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: var(--sp-3) 0; padding: 0; list-style: none; }
-.recovery-policy-example li { display: grid; gap: var(--sp-1); min-width: 5em; padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); background: var(--surface-2); }
+.recovery-policy-example p { margin: var(--sp-2) 0 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; }
+.recovery-policy-example ol { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--sp-2); margin: var(--sp-3) 0; padding: 0; list-style: none; }
+.recovery-policy-example li { display: grid; gap: var(--sp-1); min-width: 0; padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); background: var(--surface-2); }
 .recovery-policy-example li span { color: var(--text-3); font-size: var(--fs-meta); }
+@container recovery-settings (max-width: 520px) { .recovery-policy-example ol { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 620px) {
   .recovery-mode-options { gap: var(--sp-2); }
   .recovery-mode-options label { gap: var(--sp-2); padding: var(--sp-2); }
