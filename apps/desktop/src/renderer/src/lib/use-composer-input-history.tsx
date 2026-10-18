@@ -10,6 +10,7 @@ import { copyTextToClipboard } from './clipboard-copy'
 import { useAppStore } from '../store'
 import { useSessionUserMessages } from './session-user-messages'
 import { userInputHistoryMessages } from './user-input-history'
+import { projectSessionInputs } from '@agentmux/core/conversation'
 
 const EMPTY: readonly string[] = Object.freeze([])
 const EMPTY_MESSAGES: readonly AgentSessionUserMessage[] = Object.freeze([])
@@ -47,17 +48,23 @@ export function useComposerInputHistory({ sessionId, control, visible, readOnly,
     [selectCaptured, sid, timeline, timeline?.revision, control?.hostId])
   // The original live reader retains input facts independently of its clipped continuous page.
   const nativeMessages = native.sourceMessages.length ? native.sourceMessages : EMPTY_MESSAGES
-  const initialMessages = useMemo(() => [...nativeMessages.filter(message => message.source.kind === 'native'), ...captured], [nativeMessages, captured])
+  const initialMessages = useMemo(() => [...nativeMessages, ...captured], [nativeMessages, captured])
   const history = useAgentInputHistory({ scope, enabled, read, initialMessages })
   // Apply the current accepted entity membership after every original query/page,
   // including search. Raw source seeds never acquire an author of their own.
   const userMessages = useMemo(() => userInputHistoryMessages(history.messages, native.messages,
     { hostId: control?.hostId ?? '', agentSessionId: sid }), [history.messages, native.messages, control?.hostId, sid])
   const userHistory = { ...history, messages: userMessages, loading: history.loading || native.loading }
+  const sourceHosts = new Set([history.sourceHostId, native.conversation?.reading?.timeline.reference?.hostId,
+    ...native.messages.map(input => input.sourceHostId)].filter((host): host is string => Boolean(host)))
+  const sourceHostId = sourceHosts.size === 1 ? [...sourceHosts][0] : undefined
+  const groups = useMemo(() => projectSessionInputs({ hostId: control?.hostId ?? '', agentSessionId: sid,
+    ...(sourceHostId ? { sourceHostId } : {}), messages: userMessages, inputs: native.messages }),
+  [control?.hostId, sid, sourceHostId, userMessages, native.messages])
   useEffect(() => () => action.current?.abort(), [scope, visible, mailboxOpen, history.query])
   const local = useAppStore(state => state.agentComposerHistory[sessionId] ?? EMPTY)
-  const entries = useMemo(() => [...userMessages.filter(message =>
-    message.contentParts.every(part => part.kind === 'text')).map(message => message.content).reverse(), ...local], [local, userMessages])
+  const entries = useMemo(() => [...groups.flatMap(group => group.primary ? [group.primary] : []).filter(message =>
+    message.contentParts.every(part => part.kind === 'text')).map(message => message.content).reverse(), ...local], [local, groups])
   const resourceReader = useCallback(async (request: AgentSessionHistoryResourceRequest) => {
     if (!control) throw new Error('原 Agent 资源来源未提供。')
     return api.sessions.historyResource(control, request)
@@ -111,5 +118,5 @@ export function useComposerInputHistory({ sessionId, control, visible, readOnly,
   }
   return { history: userHistory, localEntries: local.map((text, index) => ({ id: `local:${scope}:${index}`, text })).reverse(),
     fill, fillText, fillLocal, copy, canFill: visible && !readOnly, resourceReader,
-    entries, messages: userMessages, setMailboxOpen, setFocused }
+    entries, messages: userMessages, sourceMessages: history.messages, inputs: native.messages, sourceHostId, setMailboxOpen, setFocused }
 }

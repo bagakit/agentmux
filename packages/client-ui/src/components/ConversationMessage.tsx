@@ -64,6 +64,8 @@ export type ConversationMessageProps = {
   copyText?: string
   /** A client retains its feedback owner and returns the actual clipboard result. */
   onCopy?: (text: string) => Promise<boolean>
+  /** The containing original-record reader supplies its complete Copy action and feedback. */
+  copyInParent?: boolean
   messageId?: string
   speaker?: ConversationSpeaker
   /** Read-only identity/role from the one Core timeline; never grants control. */
@@ -173,7 +175,7 @@ function ConversationCollaborationOriginal({ parts, identity, hasResources }: {
 /** A readable message, shared by Activity, native history and Gallery. The host owns identity
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
-  active = true, compact = false, continuation = false, expandedContent = false, detailsOnlyMetadata = false, recordTitle, messagePhase, recordedIdentity = false, nativeCollaboration, messageDetails, renderSubmissionOriginal, messageActions, located = false, copyText, onCopy,
+  active = true, compact = false, continuation = false, expandedContent = false, detailsOnlyMetadata = false, recordTitle, messagePhase, recordedIdentity = false, nativeCollaboration, messageDetails, renderSubmissionOriginal, messageActions, located = false, copyText, onCopy, copyInParent = false,
   speaker: recordedSpeaker, conversationEvent, sources, conversationSessionId, itemRef, inputSource, publicContent, inputContext, inputContextSource, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, contentBoundary = 'wire', a2aNotificationId, questionAnswers, questionDiagnostic, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
   openWorkspaceFile, readPastedImage, readHistoryResource, nativeResourceRecord, openHttpLink, onContinue, onSelectAnnotation, expandedTraces: controlledTraces, onToggleTrace: controlledToggle, traceDisclosure
 }: ConversationMessageProps) {
@@ -346,10 +348,10 @@ export function ConversationMessage({
       ? renderClock(createdAt) : `${renderClock(createdAt)} · ${formatOffset(createdAt, origin)} from start`}>
       {renderClock(createdAt)}
     </span>,
-    actions: hasCopyContent || messageActions ? <span className="log-turn__actions" data-copy-state={copyState}>
+    actions: hasCopyContent && !copyInParent || messageActions ? <span className="log-turn__actions" data-copy-state={copyState}>
       {messageActions}
       {copyState === 'failed' ? <span className="log-turn__copy-error" role="alert">{copyReadError ?? 'Copy failed'}</span> : null}
-      {hasCopyContent ? <button type="button" className="log-turn__action" onClick={() => { void copyMessage() }} title="Copy message" aria-label={copyState === 'copied' ? 'Message copied' : 'Copy message'}>
+      {hasCopyContent && !copyInParent ? <button type="button" className="log-turn__action" onClick={() => { void copyMessage() }} title="Copy message" aria-label={copyState === 'copied' ? 'Message copied' : 'Copy message'}>
         <SemanticIcon name="action.copy" size={13} />{copyState === 'copied' ? <span>Copied</span> : null}{copyState === 'failed' ? <span>Retry</span> : null}
       </button> : null}
     </span> : null,

@@ -1,5 +1,5 @@
 import type { AgentSessionUserMessage, AgentTimelineItem, AgentTimelineSnapshot } from '@agentmux/core'
-import { conversationItemRef, type ConversationItemRef } from '@agentmux/core/conversation'
+import { conversationItemRef, type ConversationItemRef, type SessionInputGroup } from '@agentmux/core/conversation'
 import { createCapturedInputSelector } from './session-captured-inputs'
 import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
 
@@ -8,6 +8,7 @@ export type MailboxDisplayItem = {
   /** Retain original attribution and lineage; projection does not rewrite the recorded object. */
   original: AgentTimelineItem | AgentSessionUserMessage
   reference: ConversationItemRef | null
+  group?: SessionInputGroup
 }
 export function isMailboxUserMessage(item: MailboxDisplayItem['original']): item is AgentSessionUserMessage {
   return typeof item.source === 'object' && item.source !== null
@@ -15,6 +16,17 @@ export function isMailboxUserMessage(item: MailboxDisplayItem['original']): item
 /** Preserve existing row and read-marker identities while sharing exact record references. */
 export function mailboxMessageKey({ message }: Pick<MailboxDisplayItem, 'message'>): string {
   return message.source.kind === 'captured' ? `timeline:${message.source.submissionId}` : `native:${message.id}`
+}
+/** Core has already established group membership; this only adapts original reading targets. */
+export function mailboxInputMessages(groups: readonly SessionInputGroup[], sourceHostId?: string): MailboxDisplayItem[] {
+  return groups.flatMap(group => {
+    const message = group.primary
+    if (!message || group.mailbox.length) return []
+    const source = message.source.kind === 'captured'
+      ? { kind: 'captured' as const, recordId: message.source.submissionId } : message.source
+    return [{ message, original: message, group, reference: message.sourceRecord?.record ?? conversationItemRef({
+      agentSessionId: message.agentSessionId, ...(sourceHostId ? { sourceHostId } : {}), source }) }]
+  })
 }
 /** Read existing identities and original Core input facts, never merge bodies or infer delivery. */
 export function createMailboxMessagesSelector() {
