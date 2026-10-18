@@ -10,7 +10,7 @@ const copy = vi.fn<ClientUiPlatform['copyText']>()
 const platform: ClientUiPlatform = { copyText: copy, overlayContainer: () => document.body, bindComposerFocus: () => () => {},
   renderMessageAvatar: () => null, renderProjectIcon: () => null, renderProjectLabel: () => null, renderIcon: () => null }
 beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); copy.mockReset(); copy.mockResolvedValue(true); host = document.createElement('div'); document.body.append(host); root = createRoot(host) })
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals() })
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.useRealTimers(); vi.unstubAllGlobals() })
 const button = (label: string) => host.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!
 async function click(label: string) { expect(button(label)).not.toBeNull(); await act(async () => button(label).click()) }
 async function render(props: Partial<ConversationMessageProps> = {}) {
@@ -97,4 +97,15 @@ it('keeps a failed full-text read visible when another action succeeds', async (
   await click('Copy message'); expect(host.querySelector('.log-turn__copy-error')?.textContent).toContain('temporarily unavailable')
   await click('Copy Agent ID')
   expect(button('Agent ID copied')).not.toBeNull(); expect(host.querySelector('.log-turn__copy-error')?.textContent).toContain('temporarily unavailable')
+})
+
+it('expires each success on its own timer without clearing another action or a newer failure', async () => {
+  vi.useFakeTimers(); const attempts = pending(); await render(); await click('Copy message')
+  await act(async () => attempts[0]!.resolve(true)); await act(async () => vi.advanceTimersByTime(800))
+  await click('Copy Agent ID'); await act(async () => attempts[1]!.resolve(true))
+  await act(async () => vi.advanceTimersByTime(800))
+  expect(button('Copy message')).not.toBeNull(); expect(button('Agent ID copied')).not.toBeNull()
+  await click('Copy message'); await act(async () => attempts[2]!.resolve(false))
+  await act(async () => vi.advanceTimersByTime(800))
+  expect(button('Copy Agent ID')).not.toBeNull(); expect(host.querySelector('.log-turn__actions')?.getAttribute('data-copy-state')).toBe('failed')
 })
