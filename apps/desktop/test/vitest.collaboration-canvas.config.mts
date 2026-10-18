@@ -9,6 +9,7 @@ const detour = 'renders and selects an actual Worker detour while both original 
 const graph = 'components/AgentCollaborationGraph.tsx'
 const metadata = 'rebuilds only one exact offscreen Agent node for metadata without another layout job or unrelated card render'
 export const collaborationCanvasMutations = [
+  { file: graph, name: 'original-route-diagnostic', before: '{message}</p>)}</details>', after: '{null}</p>)}</details>', assertion: 'keeps local route diagnostics inspectable and retries only the failed original connection' },
   { file: graph, name: 'current-parent-origin', before: 'previous?.position.x === card.x - box.x && previous.position.y === card.y - box.y && ', after: '', assertion: 'adopts parent-relative positions when a local resize expands the original area toward the left' },
   { file: graph, name: 'current-envelope-members', before: 'old?.box === box && sameGeometry ? old.envelope', after: 'old?.box === box ? old.envelope', assertion: 'rebuilds the real envelope when current members change inside identical enclosing bounds' },
   { file: graph, name: 'immediate-message-mark', before: '{data.activity ? <ActivityMark activity={data.activity} /> : null}', after: '{null}', assertion: 'shows immediate source and recipient activity while the original new path is still arriving' },

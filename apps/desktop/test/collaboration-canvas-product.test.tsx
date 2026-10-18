@@ -702,3 +702,38 @@ it('keeps the exact reading occurrence and translates all curves through an expl
     expect([translated.labelX, translated.labelY]).toEqual([rawPath.labelX + offset.x, rawPath.labelY + offset.y])
   }
 })
+
+
+it('keeps local route diagnostics inspectable and retries only the failed original connection', async () => {
+  const scene = scenario(24), diagnostic = 'Connection routing crosses original card ["original-owner","original-peer"]. Retry this same connection.'
+  let failing = true, failedId = ''
+  vi.mocked(engine.handleCollaborationLayoutRequest).mockImplementation((request, publish, signal) => {
+    if (request.type === 'arrange') failedId = request.input.connections[0]!.id
+    return originalDispatch(request, response => {
+      if (response.type === 'paths' && failing && response.paths[failedId]) {
+        const paths = { ...response.paths }; delete paths[failedId]
+        if (Object.keys(paths).length) publish({ ...response, paths })
+        publish({ id: request.id, type: 'error', connectionId: failedId, message: diagnostic })
+      } else publish(response)
+    }, signal)
+  })
+  await dom.render(graph(scene))
+  await settleCollaborationCanvas(() => expect(dom.container.querySelector('.collaboration-canvas__issue details p')?.textContent).toBe(diagnostic))
+  const issue = dom.container.querySelector('.collaboration-canvas__issue')!
+  expect(issue.querySelector(':scope > span')?.textContent).toBe('1 connection could not be drawn. Original records remain readable.')
+  expect(issue.querySelector('details')?.hasAttribute('open')).toBe(false)
+  expect(captured.nodes).toHaveLength(28)
+  const originals = captured.nodes
+  await focusNode(collaborationAgentNode(scene.areas[0]!.id, subject('canvas-0')))
+  const card = dom.container.querySelector('.focus-context[data-session-id="canvas-0"]')!
+  expect(card).not.toBeNull()
+  await act(async () => card.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+  expect(select).toHaveBeenCalledWith({ kind: 'agent', id: subject('canvas-0') })
+  failing = false
+  await act(async () => issue.querySelector('button')!.click())
+  await settleCollaborationCanvas(() => expect(dom.container.querySelector('.collaboration-canvas__issue')).toBeNull())
+  const retry = requests.at(-1)!
+  expect(retry.type).toBe('route'); if (retry.type !== 'route') throw Error('Original connection retry required')
+  expect(retry.connections).toHaveLength(1); expect(retry.connections[0]!.id).toBe(failedId)
+  expect(captured.nodes).toBe(originals)
+})
