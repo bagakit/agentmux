@@ -25,6 +25,7 @@ function owner(onYield?: (count: number) => void) {
   const queue = new TerminalLiveOutputQueue()
   const yieldWork = async () => { yields.push(sizes.length); onYield?.(sizes.length); await yieldTerminalWork() }
   const bindings = {
+    incidents: null, // Diagnostics are outside this parser/work-order fixture.
     terminalContinuationSteps, TERMINAL_REPLAY_BATCH_BYTES, composeTerminalLiveOutputWrite,
     hydrateTerminalReplay: (chunks: Parameters<typeof hydrateTerminalReplay>[0], write: Parameters<typeof hydrateTerminalReplay>[1]) => hydrateTerminalReplay(chunks, write, yieldWork),
     restoreTerminalCheckpoint: (bytes: Uint8Array, write: Parameters<typeof hydrateTerminalReplay>[1]) => restoreTerminalCheckpoint(bytes, write, yieldWork),
