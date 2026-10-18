@@ -13,6 +13,7 @@
 | 项目分层、身份与唯一事实 owner | [系统职责地图](architecture/system-ownership.md) |
 | CPU、内存与卡顿的证据 owner、分析链路和缺测 | [性能技术剖面](architecture/performance-diagnostics.md) |
 | 公开 API / CLI 的实际合同与接线来源 | [公共能力源码入口](specs/public-capabilities.md) |
+| Agent 生成页面的持久托管、隔离／注入模式及 HITL | [持久交互页面 PRD](design/behavior/local-page-hosting.md) |
 | Note Markdown、稳定块／引用与独立元数据 | [Note 文件格式与存储](specs/note-markdown.md) |
 | Note 中 Agent 与人的协同编辑、并发与历史回滚 | [协同编辑产品要求](design/behavior/knowledge-workflows.md#note-中-agent-与人的协同编辑) |
 | Agent 的目标、边界和交付责任 | [AGENTS.md](../AGENTS.md) |
