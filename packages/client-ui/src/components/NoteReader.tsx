@@ -4,7 +4,7 @@ import type { NoteProvenanceSnapshot } from '@agentmux/core/note-provenance'
 import type { FileWriteReceipt, FileReadResult } from '@agentmux/core/files'
 import type { NotebookGraph } from '@agentmux/core/notebook-observation'
 import { Node as TiptapNode, type JSONContent } from '@tiptap/core'
-import { noteContentExtensions, NoteBlockReferenceNode, NoteIncludeNode, NoteInlineLinkNode, noteIdentityExtensions } from '../note/note-content-schema.js'
+import { NoteBlockReferenceNode, NoteIncludeNode, NoteInlineLinkNode, noteIdentityExtensions } from '../note/note-content-schema.js'
 import { NoteInlineLinkView, type NoteLinkOpenRequest } from './NoteInlineLink.js'
 import { noteWikiLiteralExtension } from '../note/note-wiki-view.js'
 import { noteReadingSelectionExtension } from '../note/note-reading-selection.js'
@@ -14,6 +14,8 @@ import { readNoteDocument, serializeNoteDocument, type NoteBlockReference, type 
 import { noteKnowledge, parseNoteFile, projectNoteBlocks, resolveNoteBlock, resolveNoteInclude, type NoteKnowledge, type NoteFileDocument } from '../note/note-knowledge.js'
 import { acknowledgeNoteWrite, acknowledgeNoteCanonicalRead, noteWriteCanonicalContent, type NoteEditState } from '../note/note-edit-state.js'
 import { mergeLiveNote } from '../note/note-live-merge.js'
+import { noteRichContentExtensions } from './NoteRichContent.js'
+import { NoteInsertMenu } from './NoteInsertMenu.js'
 import { NoteBlockAuthors } from './NoteBlockAuthors.js'
 export type { NoteEditState } from '../note/note-edit-state.js'
 export type { NoteLinkOpenRequest } from './NoteInlineLink.js'
@@ -108,7 +110,7 @@ function readingExcerpt(content: JSONContent, selected: readonly string[]): JSON
 function RichContent({ content, onChange, onCompositionChange, onSnapshotIssue, onKeepDisplayedDraft, highlightBlockIds = EMPTY_IDS }: { content: JSONContent; highlightBlockIds?: readonly string[] | undefined; onChange?: ((value: JSONContent, editorBefore?: JSONContent) => void) | undefined; onCompositionChange?: ((composing: boolean) => void) | undefined; onSnapshotIssue?: ((displayed: JSONContent, incoming: JSONContent, reason: string) => void) | undefined; onKeepDisplayedDraft?: ((displayed: JSONContent, incoming: JSONContent) => void) | undefined }) {
   const selected = useRef(highlightBlockIds); selected.current = highlightBlockIds
   const scope = useContext(Scope), open = useRef(scope?.onOpenLink); open.current = scope?.onOpenLink
-  const extensions = useMemo(() => noteContentExtensions().map(extension => extension.name === NoteBlockReferenceNode.name
+  const extensions = useMemo(() => noteRichContentExtensions().map(extension => extension.name === NoteBlockReferenceNode.name
     ? NoteBlockReferenceNode.extend({ addNodeView() { return ReactNodeViewRenderer(Reference) } }) : extension.name === NoteInlineLinkNode.name
     ? NoteInlineLinkNode.extend({ addNodeView() { return ReactNodeViewRenderer(InlineLink) } }) : extension.name === NoteIncludeNode.name
     ? NoteIncludeNode.extend({ addNodeView() { return ReactNodeViewRenderer(Include) } }) : extension).concat(onChange ? [...noteIdentityExtensions(), noteWikiInputExtension()] : []).concat([noteWikiLiteralExtension(link => open.current?.(link)), ...onChange ? [] : [ExcerptNode, noteReadingSelectionExtension(() => selected.current)]]), [Boolean(onChange)])
@@ -162,6 +164,7 @@ function RichContent({ content, onChange, onCompositionChange, onSnapshotIssue, 
     <button type="button" aria-pressed={state?.heading} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>标题</button>
     <button type="button" aria-pressed={state?.list} onClick={() => editor.chain().focus().toggleBulletList().run()}>列表</button>
     <button type="button" aria-pressed={state?.code} onClick={() => editor.chain().focus().toggleCodeBlock().run()}>代码</button>
+    <NoteInsertMenu editor={editor} />
     <button type="button" onClick={() => editor.chain().focus().undo().run()}>撤销</button>
     <button type="button" onClick={() => editor.chain().focus().redo().run()}>重做</button>
   </div>}{issue && <section role="status" aria-label="Incoming update recovery"><p>{issue}</p>

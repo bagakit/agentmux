@@ -34,10 +34,12 @@ export function NoteBlockAuthors({ editor, agentNames = EMPTY_NAMES }: { editor:
         const unknown = !provenance?.created || !provenance?.lastEdited
         const human = !unknown && provenance?.created?.actor.kind !== 'agent' && provenance?.lastEdited?.actor.kind !== 'agent'
         const reference = node.type.name === 'noteInclude' || node.type.name === 'blockReference'
-        decorations.push(Decoration.widget(position + node.nodeSize - (node.isLeaf ? 0 : 1), view => {
+        const afterBlock = node.type.name === 'codeBlock'
+        decorations.push(Decoration.widget(position + node.nodeSize - (node.isLeaf || afterBlock ? 0 : 1), view => {
           const button = view.dom.ownerDocument.createElement('button')
           button.type = 'button'; button.contentEditable = 'false'; button.className = 'note-block-author nodrag nopan'
           button.dataset.authorBlock = node.attrs.blockId
+          if (afterBlock) button.dataset.authorPlacement = 'block-end'
           if (human) button.dataset.humanOnly = ''
           button.textContent = unknown && entry?.actor.kind !== 'agent' ? 'Author unconfirmed' : label
           button.setAttribute('aria-label', `${reference ? 'Reference' : 'Block'} authors: ${label}${unknown && entry ? ' · some attribution is unconfirmed' : ''}`)

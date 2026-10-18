@@ -7,7 +7,7 @@ import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, useEd
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { desktopElementVisible } from '../lib/desktop-presentation'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { NOTE_BLOCK_TYPES, NoteIncludeNode, NoteBlockReferenceNode, NoteInlineLinkNode, noteContentExtensions, noteIdentityExtensions } from '../../../shared/note-content-schema'
+import { NOTE_BLOCK_TYPES, NoteIncludeNode, NoteBlockReferenceNode, NoteInlineLinkNode, noteIdentityExtensions } from '../../../shared/note-content-schema'
 import { NoteInlineLinkView, type NoteLinkOpenRequest } from '@agentmux/client-ui/components/NoteInlineLink'
 import { noteWikiInputExtension } from '@agentmux/client-ui/note/note-wiki-input'
 import { noteWikiLiteralExtension } from '@agentmux/client-ui/note/note-wiki-view'
@@ -16,6 +16,8 @@ import type { NoteInlineLinkAttributes, NoteLinkTarget } from '@agentmux/core/no
 import { bindNoteWikiLink, noteInlineLinkContent, noteWikiTextTokens } from '@agentmux/client-ui/note/note-wikilinks'
 import { useNoteWikiCompletion } from './NoteWikiCompletion'
 import { serializeNoteDocument, type NoteInclude, type NoteBlockReference, type NoteBlockTarget, type NoteDocument } from '../../../shared/note-document'
+import { noteRichContentExtensions } from '@agentmux/client-ui/components/NoteRichContent'
+import { NoteInsertMenu } from '@agentmux/client-ui/components/NoteInsertMenu'
 import { NoteBlockAuthors } from '@agentmux/client-ui/components/NoteBlockAuthors'
 import { useAppStore } from '../store'
 import { noteBacklinks, resolveNoteBlock, type NoteKnowledge, type NoteSource } from '../lib/note-knowledge'
@@ -58,7 +60,7 @@ function InlineLinkView({ node, editor }: NodeViewProps) {
 /** The canonical content schema plus two maintained identity allocators; read-only views use neither. */
 export function noteEditorExtensions(folded: () => ReadonlySet<string> = () => new Set()) {
   return [
-    ...noteContentExtensions().map(extension => extension.name === NoteIncludeNode.name ? includeExtension() : extension.name === NoteBlockReferenceNode.name ? referenceExtension() : extension.name === NoteInlineLinkNode.name ? inlineLinkExtension() : extension),
+    ...noteRichContentExtensions().map(extension => extension.name === NoteIncludeNode.name ? includeExtension() : extension.name === NoteBlockReferenceNode.name ? referenceExtension() : extension.name === NoteInlineLinkNode.name ? inlineLinkExtension() : extension),
     ...noteIdentityExtensions(),
     Extension.create({
       name: 'noteBlockFold',
@@ -104,7 +106,7 @@ export function ReadOnlyBlock({ content }: { content: JSONContent }) {
   // A list item requires its schema container even when its subtree is the requested projection.
   const doc = useMemo(() => content.type === 'doc' ? content : ({ type: 'doc', content: [content.type === 'listItem' ? { type: 'bulletList', content: [content] } : content] }), [content])
   const context = useContext(ReferenceContext), openLink = useRef(context?.onOpenLink); openLink.current = context?.onOpenLink
-  const editor = useEditor({ extensions: [...noteContentExtensions().map(extension => extension.name === NoteIncludeNode.name ? includeExtension(true) : extension.name === NoteBlockReferenceNode.name ? referenceExtension() : extension.name === NoteInlineLinkNode.name ? inlineLinkExtension() : extension), noteWikiLiteralExtension(link => openLink.current?.(link))], content: doc, editable: false,
+  const editor = useEditor({ extensions: [...noteRichContentExtensions().map(extension => extension.name === NoteIncludeNode.name ? includeExtension(true) : extension.name === NoteBlockReferenceNode.name ? referenceExtension() : extension.name === NoteInlineLinkNode.name ? inlineLinkExtension() : extension), noteWikiLiteralExtension(link => openLink.current?.(link))], content: doc, editable: false,
     editorProps: { attributes: { class: 'note-embedded-content', 'aria-label': 'Original block, read only' } } }, [])
   useLayoutEffect(() => { if (editor && !editor.isDestroyed) editor.view.updateRoot() }, [editor, ownerDocument])
   const [issue, setIssue] = useState<string | null>(null), snapshot = useRef<NoteSnapshotSync | null>(null)
@@ -394,6 +396,7 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
           editor.view.dispatch(editor.state.tr.setMeta('noteFold', true)); setFoldRevision(value => value + 1)
         }}><ThemeNavigationDownIcon size={15} /></RovingToolbarButton>
       </div>
+      <NoteInsertMenu editor={actionEditor} />
     </RovingToolbar>
     <div className="note-editor__body" onFocus={event => { if (editor && (event.target as HTMLElement).closest('.note-block-content') === editor.view.dom) { shared?.focusEditor(editor); showSelectedAction() } }} onPointerMove={event => {
       if (!editor || editor.isDestroyed || !(event.target instanceof ownerDocument.defaultView!.Element)) return
