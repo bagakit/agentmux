@@ -33,6 +33,7 @@ async function privateRuntime(run: (root: string, activation: RuntimeActivation,
   const root = await realpath(await mkdtemp(fixturePath("tmp/amx-color-run-")))
   let activation: RuntimeActivation | undefined
   const clients: AgentMuxClient[] = [], pids: number[] = []
+  let runFailure: { error: unknown } | undefined
   try {
     const runtime = join(root, 'runtime'), state = join(root, 'state')
     await mkdir(runtime, { mode: 0o700 }); await mkdir(join(state, 'ctxmux'), { recursive: true, mode: 0o700 })
@@ -46,13 +47,26 @@ async function privateRuntime(run: (root: string, activation: RuntimeActivation,
     expect(activation.spawned).toBe(true)
     pids.push(activation.childPid!)
     await run(root, activation, clients, pids)
+  } catch (error) {
+    runFailure = { error }
   } finally {
-    await Promise.all(clients.map(client => client.dispose()))
-    await activation?.dispose({ shutdown: true })
-    for (const pid of pids) await waitFor(async () => gone(pid), value => value)
-    await rm(root, { recursive: true, force: true })
+    const failures: unknown[] = []
+    const disposed = await Promise.allSettled(clients.map(client => client.dispose()))
+    for (const result of disposed) if (result.status === 'rejected') failures.push(result.reason)
+    try { await activation?.dispose({ shutdown: true }) } catch (error) { failures.push(error) }
+    let allGone = true
+    for (const pid of pids) {
+      try { await waitFor(async () => gone(pid), value => value) }
+      catch (error) { failures.push(error); allGone = false }
+    }
+    if (allGone) {
+      try { await rm(root, { recursive: true, force: true }) } catch (error) { failures.push(error) }
+    }
     vi.unstubAllEnvs()
+    if (failures.length > 0) throw new AggregateError(
+      [...(runFailure ? [runFailure.error] : []), ...failures], 'Private Runtime cleanup failed')
   }
+  if (runFailure) throw runFailure.error
   expect(pids.length).toBeGreaterThan(1)
   expect(pids.map(gone)).toEqual(pids.map(() => true))
 }
