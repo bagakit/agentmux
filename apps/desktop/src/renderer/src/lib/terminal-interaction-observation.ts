@@ -16,7 +16,10 @@ export function createTerminalInteractionObservation({ host, readContext, slow,
   slow: (detail: 'keydown-dispatch' | 'wheel-dispatch' | 'write-request', duration: number, occurrenceMonoMs: number) => void
   now?: () => number; wall?: () => number
 }) {
-  let disposed = false
+  // Pending input replies outlive a retired view. Keep its callbacks and DOM owner
+  // behind one removable reference rather than retaining them in every Promise reaction.
+  let owner: { host: typeof host; readContext: typeof readContext; slow: typeof slow;
+    now: typeof now; wall: typeof wall } | null = { host, readContext, slow, now, wall }
   const state: Interaction = {
     observedSinceAt: wall(),
     keydown: { count: 0, unknownDelayCount: 0, delay: timing() },
@@ -25,31 +28,33 @@ export function createTerminalInteractionObservation({ host, readContext, slow,
     lastEvent: null
   }
   const event = (event: Event) => {
-    if (disposed || !event.isTrusted || (event.type !== 'keydown' && event.type !== 'wheel')) return
-    const kind = event.type, at = now(), stamp = event.timeStamp, item = state[kind]
+    const current = owner
+    if (!current || !event.isTrusted || (event.type !== 'keydown' && event.type !== 'wheel')) return
+    const kind = event.type, at = current.now(), stamp = event.timeStamp, item = state[kind]
     // Same-document trusted event timestamps use this Renderer monotonic origin.
     // Epoch, future and invalid timestamps remain unknown, never a zero-latency sample.
     const delayMs = Number.isFinite(at) && Number.isFinite(stamp) && stamp > 0 && stamp <= at ? at - stamp : null
     item.count++
     if (delayMs === null) item.unknownDelayCount++
-    else { add(item.delay, delayMs); slow(`${kind}-dispatch`, delayMs, stamp) }
-    state.lastEvent = { ...readContext(), kind, observedAt: wall(), delayMs }
+    else { add(item.delay, delayMs); current.slow(`${kind}-dispatch`, delayMs, stamp) }
+    state.lastEvent = { ...current.readContext(), kind, observedAt: current.wall(), delayMs }
   }
   const options = { capture: true, passive: true }
   host.addEventListener('keydown', event, options)
   host.addEventListener('wheel', event, options)
   return {
     observeWriteRequest(request: Promise<unknown>, startedAt: number) {
-      if (disposed) return
+      if (!owner) return
       const requests = state.writeRequests
-      requests.started++; requests.pending++; requests.lastStartedAt = wall()
+      requests.started++; requests.pending++; requests.lastStartedAt = owner.wall()
       let settled = false
       const settle = (failed: boolean) => {
-        if (disposed || settled) return
+        const current = owner
+        if (!current || settled) return
         settled = true
-        requests.pending--; requests[failed ? 'failed' : 'completed']++; requests.lastSettledAt = wall()
-        const elapsed = Math.max(0, now() - startedAt)
-        add(requests.wall, elapsed); slow('write-request', elapsed, startedAt)
+        requests.pending--; requests[failed ? 'failed' : 'completed']++; requests.lastSettledAt = current.wall()
+        const elapsed = Math.max(0, current.now() - startedAt)
+        add(requests.wall, elapsed); current.slow('write-request', elapsed, startedAt)
       }
       // Observe both outcomes without replacing the original Promise or its error handler.
       void request.then(() => settle(false), () => settle(true))
@@ -60,10 +65,11 @@ export function createTerminalInteractionObservation({ host, readContext, slow,
         writeRequests: { ...state.writeRequests, wall: { ...state.writeRequests.wall } }, lastEvent: state.lastEvent && { ...state.lastEvent } }
     },
     dispose() {
-      if (disposed) return
-      disposed = true
-      host.removeEventListener('keydown', event, options)
-      host.removeEventListener('wheel', event, options)
+      const current = owner
+      if (!current) return
+      owner = null
+      current.host.removeEventListener('keydown', event, options)
+      current.host.removeEventListener('wheel', event, options)
     }
   }
 }
