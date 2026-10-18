@@ -75,6 +75,7 @@
 - 产品交互和行为在交互 SSOT，视觉和密度在密度 SSOT；相邻文档链接到 owning 章节，不复制规则全文。
 - 当前版本、平台、协议、依赖和 artifact identity 引用 manifest、package 或 lockfile，不在多份正文手抄一套。历史证据中的原版本、SHA 和测量值保留，注明范围。
 - 当前命令以实际执行版本的 `--help` / `--skill` 为准；源码目标命令树明确为目标，不冒充已安装能力。操作指南给原入口和前提，不成为第二份 parser 合同。
+- AgentMux 系统使用指南的正文唯一在 Core `guides/`；新增或调整手册、共享规则与代码事实时，沿 [Core 指南维护入口](../../packages/core/guides/README.md#maintaining-system-guides)完成生成、真实消费和对应验证，不在项目 Agent 规则中另写系统用法。
 - 源码引用优先用 repo-relative 文件链接加 symbol，避免易漂移的当前行号。复盘可保留绑定提交的原 file:line 证据。
 - 过程性文档不提交，包含 raw 调研、计划、评审、状态、原型和验收输出；长期结论经过提炼再归原 owner，完整记录和证据留本机。忽略与已有跟踪文件的处理唯一见[过程资料边界](../process-directories.md)。长期说明不依赖本机资料；可选证据注明范围与缺口，不能伪造永久链接或当前验收结论。
 
