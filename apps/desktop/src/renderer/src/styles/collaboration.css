@@ -50,6 +50,7 @@
 .collaboration-canvas { position: relative; flex: 1; min-width: 0; min-height: 0; background: var(--surface-1); }
 .collaboration-canvas .react-flow__background { opacity: .15; }
 .collaboration-canvas .react-flow__viewport-portal { pointer-events: none; }
+.collaboration-canvas .react-flow__edgelabel-renderer { z-index: 1; }
 .collaboration-connections .react-flow__edge { cursor: pointer; }
 .collaboration-canvas .react-flow__node-area { z-index: -1 !important; }
 .collaboration-area { height: 100%; pointer-events: none; }
@@ -106,6 +107,10 @@
 
 .collaboration-canvas__issue { position: absolute; left: 14px; right: 14px; top: 44px; padding: 8px; background: var(--surface-2); color: var(--text-2); font-size: var(--fs-micro); border: 1px solid var(--line); border-radius: var(--radius-sm); }
 .collaboration-canvas__issue button { color: var(--green); background: transparent; border: 0; cursor: pointer; }
+.collaboration-canvas__issue details { display: inline; margin-left: 8px; }
+.collaboration-canvas__issue summary { display: inline; cursor: pointer; }
+.collaboration-canvas__issue details[open] { display: block; margin: 8px 0 0; }
+.collaboration-canvas__issue details p { margin: 6px 0 0; max-height: 160px; overflow: auto; overflow-wrap: anywhere; }
 .collaboration-navigation { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px; margin-bottom: 14px; }
 .collaboration-navigation button { margin: 3px; }
 
