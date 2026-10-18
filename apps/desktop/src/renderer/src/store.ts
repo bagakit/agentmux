@@ -2623,10 +2623,10 @@ async function enqueueNoteShareSave(tabId: string, regionId?: string, explicit?:
       if (overwritten && observed.result.document.revision !== overwritten.revision) throw Error('The observed file changed again before overwrite. Its pending uses and complete draft are kept; inspect the new current version.')
       const baseline = overwritten ?? (document?.noteEditing?.baseline?.revision === original.revision ? document.noteEditing.baseline : observed.result.document.revision === original.revision ? observed.result.document : undefined)
       if (!baseline || noteHistoryRevision(baseline.content) !== (overwritten?.revision ?? original.revision)) throw Error('The original sharing baseline is unconfirmed. Its draft and current file are kept.')
-      return { ...read, expectedResource: observed.resource, content: original.content, expectedRevision: overwritten?.revision ?? original.revision, baseContent: baseline.content, operationId: crypto.randomUUID() }
+      return { ...read, expectedResource: observed.resource, content: original.content, expectedRevision: overwritten?.revision ?? original.revision, baseContent: baseline.content, operationId: mintObjectId() }
     }
     const destination = await prepare(destinationRead, surface.workspaceId, surface.path, currentRead.note.noteId)
-    const params: FileShareParams = { operationId: crypto.randomUUID(), destination, promotions: [] }
+    const params: FileShareParams = { operationId: mintObjectId(), destination, promotions: [] }
     const removed = removedSavedNoteIncludes(destination.baseContent!, destination.content)
     if (removed.length) { params.undoReferenceIds = removed; params.preserveNoteIds = preserveNoteDrafts(state, key) }
     const sourceWrites = new Map<string, FileWriteParams>()
@@ -2644,7 +2644,7 @@ async function enqueueNoteShareSave(tabId: string, regionId?: string, explicit?:
       }
       if (!block || !ticket.copy.block.blockId && noteBlockFingerprint(block) !== ticket.copy.block.fingerprint) throw Error('The copied source content changed before sharing. Your Note is kept; copy its current content again.')
       if (!block.attrs?.blockId) {
-        block.attrs = { ...block.attrs, blockId: crypto.randomUUID() }
+        block.attrs = { ...block.attrs, blockId: mintObjectId() }
         bindNoteDraftBlockIdentity(sourceKey, ticket.copy.block.path, ticket.copy.block.fingerprint, String(block.attrs.blockId))
       }
       write.content = serializeNoteDocument(parsed.note)
@@ -2758,7 +2758,7 @@ async function enqueueFileSave(
         : document.noteEditing?.baseline ?? (noteHistoryRevision(document.content) === document.revision ? { content: document.content, revision: document.revision } : undefined)
       const baseContent = baseline?.revision === expectedRevision && noteHistoryRevision(baseline.content) === expectedRevision ? baseline.content : undefined
       const enhanced = baseContent !== undefined && readNoteDocument(baseContent).status === 'valid' && readNoteDocument(document.content).status === 'valid'
-      noteAttempt = { operationId: crypto.randomUUID(), noteId: header?.status === 'valid' ? header.noteId : null, content: document.content, expectedRevision, generation,
+      noteAttempt = { operationId: mintObjectId(), noteId: header?.status === 'valid' ? header.noteId : null, content: document.content, expectedRevision, generation,
         resource: { hostId: savedResource.hostId, workspaceId: savedResource.id, workspacePath: savedResource.path, path: surface.path }, phase: 'sending',
         ...(baseContent === undefined ? {} : { baseContent }), ...(enhanced ? { enhanced: true } : {}) }
       const originalRegion = target ? undefined : fileSurface(tab, regionId)?.regionId
@@ -2884,7 +2884,7 @@ async function enqueueNoteHistoryAction(tabId: string, regionId: string, selecti
     if (!document || current.documents[key]?.noteEditing?.attempt) throw Error('The original Note document is unavailable or has an unresolved request.')
     const resourceWatch = watchNoteResource(initial.workspaceId, { hostId: observed.target.expectedResource.hostId, path: observed.target.expectedResource.workspacePath })
     try {
-    const generation = current.documentGenerations[key] ?? 0, operationId = crypto.randomUUID()
+    const generation = current.documentGenerations[key] ?? 0, operationId = mintObjectId()
     const params = { ...observed.target, operationId, expectedRevision: observed.document.revision }
     const action: NonNullable<NoteFileAttempt['action']> = 'eventId' in selected
       ? { kind: 'restore', params: { ...params, eventId: selected.eventId } }
@@ -3879,7 +3879,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     workspaceAgentOrder: state.workspaceAgentOrder,
     recentMoteAgents: state.recentMoteAgents,
     // Agent 手改名是用户意图，重开要还在。key 是 session id；已消失的 session 留一条死名字无害——
-    // 它不投影到任何界面（没有对应 session），下次同 id 复现的概率是 uuid 级零。
+    // 它不投影到任何界面（没有对应 session），随机对象 ID 再次碰撞的概率极低。
     agentNames: state.agentNames,
     // Only the original Session mode owner writes this map; read-only defaults remain derived.
     viewModes: state.viewModes,
@@ -4012,7 +4012,7 @@ async function commitDisplayName(target: AgentMuxNameTarget, value: string | nul
   source: 'manual' | 'launch' | 'derived', expectedNameRevision = currentDisplayNameRevision(target.kind, target.id)):
   Promise<AgentMuxDisplayLabelResult> {
   // A new target needs registration; an existing name does not depend on unrelated layout writes.
-  const operationId = crypto.randomUUID()
+  const operationId = mintObjectId()
   try {
     if (!coreSpatialPersistence) throw new Error('Name storage is unconfirmed. Original names and the running Agent are retained; restore storage and retry the edit.')
     const graph = coreSpatialPersistence.current?.graph
@@ -4423,7 +4423,7 @@ function restoredBoolean(candidate: unknown, fallback: boolean): boolean {
 
 
 
-function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void, operationId: string = crypto.randomUUID(), origin?: 'manual', agentMuxNote?: string, options?: AgentSteerOptions, directInputBinding?: AgentSteerQueueEntry['directInputBinding']): string | false {
+function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void, operationId: string = mintObjectId(), origin?: 'manual', agentMuxNote?: string, options?: AgentSteerOptions, directInputBinding?: AgentSteerQueueEntry['directInputBinding']): string | false {
   if (!text.trim() && !agentMuxNote?.trim()) return false
   const session = useAppStore.getState().sessions.find((item) => item.id === sessionId)
   if (!session || session.kind !== 'agent') return false
@@ -4706,7 +4706,7 @@ async function openGoalPmo(demandId: string, prompt?: string, userRequest?: stri
           return done(mappedTab.id)
         }
       }
-      const operationId = intent.creationOperationId === undefined ? crypto.randomUUID() : await goalPmoOperation(intent, 'discussion')
+      const operationId = intent.creationOperationId === undefined ? mintObjectId() : await goalPmoOperation(intent, 'discussion')
       const previous = get().agentSteerQueues[recipientId]?.find(entry => entry.operationId === operationId)
       if (previous && recipient?.kind === 'agent') {
         await api.demands.reconcilePmoInput(intent, recipient.control, operationId)
@@ -4833,7 +4833,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     return await executeWorkspaceAgentOrder({ get, resolveExecution: agentRegionExecution,
       set: (id, value) => set(state => ({ workspaceAgentOrder: { ...state.workspaceAgentOrder, [id]: value } })),
       save: () => saveWorkbenchSelection(false)
-    }, { schemaVersion: 5, requestId: crypto.randomUUID(), operation: 'space.agent-order', displayWorkspaceId: workspaceId, order: workspaceAgentOrderMembers(order) })
+    }, { schemaVersion: 5, requestId: mintObjectId(), operation: 'space.agent-order', displayWorkspaceId: workspaceId, order: workspaceAgentOrderMembers(order) })
   },
   recentMoteAgents: {},
   rememberMoteAgent(reference) {
@@ -6721,7 +6721,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
 
     if (request.operation === 'open.terminal') {
       if (signal?.aborted) throw controlCancellation(signal)
-      const pendingId = `terminal-launch:${crypto.randomUUID()}`
+      const pendingId = `terminal-launch:${mintObjectId()}`
       const pending: TerminalWorkbenchSurface = {
         regionId: plan.regionId, kind: 'terminal', phase: 'launching', workspaceId: workspace.id, sessionId: pendingId
       }
@@ -6905,7 +6905,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       : addTabPlacement(layout, targetTabGroupId, tabId)
     if (!nextLayout) {
       get().reportError(new Error('The Tab Group is no longer available'), { kind: 'indeterminate', subject: session.control,
-        event: { source: 'spatial', key: crypto.randomUUID(), object: { kind: 'tab-group', id: targetTabGroupId, workspaceId: workspace.id } } })
+        event: { source: 'spatial', key: mintObjectId(), object: { kind: 'tab-group', id: targetTabGroupId, workspaceId: workspace.id } } })
       return false
     }
     const next = { ...get(), tabs: { ...get().tabs, [tab.id]: tab }, layouts: { ...get().layouts, [workspace.id]: nextLayout } }
@@ -6941,13 +6941,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       notice: notice => get().reportError(new Error(`${notice.message} ${notice.recovery}`)) }, input)
   },
   async setZoneSpaceRelation(zoneId, spaceId, linked) {
-    const result = await get().executeControl({ schemaVersion: 5, requestId: `binding:${crypto.randomUUID()}`,
+    const result = await get().executeControl({ schemaVersion: 5, requestId: `binding:${mintObjectId()}`,
       operation: linked ? 'space.bind' : 'space.unbind', binding: { kind: 'zone-space', zoneId, spaceId } })
     if (result.operation !== 'space.bind' && result.operation !== 'space.unbind') throw new Error('The binding owner returned a different operation.')
     return result
   },
   async setTabDisplayPlacement(tabId, displayWorkspaceId, groupId, present) {
-    const result = await get().executeControl({ schemaVersion: 5, requestId: `binding:${crypto.randomUUID()}`,
+    const result = await get().executeControl({ schemaVersion: 5, requestId: `binding:${mintObjectId()}`,
       operation: present ? 'space.bind' : 'space.unbind', binding: { kind: 'tab-group', tabId, displayWorkspaceId, groupId } })
     if (result.operation !== 'space.bind' && result.operation !== 'space.unbind') throw new Error('The binding owner returned a different operation.')
     return result
@@ -6958,13 +6958,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const layout = state.layouts[displayId]
     if (!layout) {
       get().reportError(new Error('The Workspace layout is still restoring'), { kind: 'indeterminate',
-        event: { source: 'spatial', key: crypto.randomUUID(), object: { kind: 'workspace', id: displayId } } })
+        event: { source: 'spatial', key: mintObjectId(), object: { kind: 'workspace', id: displayId } } })
       return
     }
     const targetTabGroupId = tabGroupId ?? layout.activeGroupId
     if (!groupIds(layout.root).includes(targetTabGroupId) || !findGroup(layout, targetTabGroupId)) {
       get().reportError(new Error('The exact display Tab Group is no longer available'), { kind: 'indeterminate',
-        event: { source: 'spatial', key: crypto.randomUUID(), object: { kind: 'tab-group', id: targetTabGroupId, workspaceId: displayId } } })
+        event: { source: 'spatial', key: mintObjectId(), object: { kind: 'tab-group', id: targetTabGroupId, workspaceId: displayId } } })
       return
     }
     let space: WorkbenchTab['space']
@@ -6975,7 +6975,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const zone = catalog.zones.find(zone => zone.zoneId === zoneId)
       if (!zone || zone.workspaceId !== workspaceId || zone.kind === 'unknown') {
         get().reportError(new Error('The exact Zone resource context is unavailable. Its original reference is retained.'), { kind: 'indeterminate',
-          event: { source: 'spatial', key: crypto.randomUUID(), object: { kind: 'zone', id: zoneId, workspaceId } } })
+          event: { source: 'spatial', key: mintObjectId(), object: { kind: 'zone', id: zoneId, workspaceId } } })
         return
       }
       try {
@@ -7001,7 +7001,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const nextLayout = addTabPlacement(layout, targetTabGroupId, tab.id)
     if (!nextLayout) {
       get().reportError(new Error('The Tab Group is no longer available'), { kind: 'indeterminate',
-        event: { source: 'spatial', key: crypto.randomUUID(), object: { kind: 'tab-group', id: targetTabGroupId, workspaceId: displayId } } })
+        event: { source: 'spatial', key: mintObjectId(), object: { kind: 'tab-group', id: targetTabGroupId, workspaceId: displayId } } })
       return
     }
     let selectedObject = state.workbenchSpaceSelection
@@ -7173,7 +7173,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const visibleGroup = projected?.groups.find(group => group.id === targetPaneId)
     const storedGroup = layout.groups.find(group => group.id === targetPaneId)
     if (!visibleGroup || !storedGroup) { current.reportError(new Error('The selected object Group is unconfirmed. Original Tabs are kept.'), { kind: 'indeterminate',
-      event: { source: 'spatial', key: crypto.randomUUID(), object: { kind: 'tab-group', id: targetPaneId, workspaceId } } }); return }
+      event: { source: 'spatial', key: mintObjectId(), object: { kind: 'tab-group', id: targetPaneId, workspaceId } } }); return }
     const anchor = visibleGroup.tabOrder[visibleTargetIndex]
     const storedIndex = anchor ? storedGroup.tabOrder.indexOf(anchor) : storedGroup.tabOrder.length
     set((state) => ({
@@ -7597,7 +7597,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const groupId = tabGroupForTab(layout, tabId) ?? layout.activeGroupId
     const nextLayout = existing ? activateLayoutTab(layout, groupId, tabId) : addTabPlacement(layout, groupId, tabId)
     if (!nextLayout) { get().reportError(new Error('The Tab Group is no longer available'), { kind: 'indeterminate',
-      event: { source: 'spatial', key: crypto.randomUUID(), object: { kind: 'tab-group', id: groupId, workspaceId } } }); return }
+      event: { source: 'spatial', key: mintObjectId(), object: { kind: 'tab-group', id: groupId, workspaceId } } }); return }
     const tab = existing
       ? focusWorkbenchTabRegion(existing.tab, existing.surface.regionId)
       : createWorkbenchTab(tabId, { kind: 'git-diff', regionId: newRegionId(), workspaceId, comparison })
@@ -9224,7 +9224,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const notebookContext = notebook ?? { notebookId: projection?.presentationId === 'recall-workbench' && captured.mainSurface === 'recall' && captured.recallNotebookId
       ? captured.recallNotebookId : DEFAULT_NOTEBOOK_ID }
     const noteId = retrying ? previous.noteId : mintObjectId(), blockId = retrying ? previous.blockIds[0]! : mintObjectId(), draft = retrying ? previous.draft : initialContent ?? ''
-    let receipt: NoteCreationReceipt = { intentId: retrying ? previous.intentId : crypto.randomUUID(), createdAt: retrying ? previous.createdAt : Date.now(), noteId, blockIds: [blockId], draft, path: '', status: 'pending', revealed: false,
+    let receipt: NoteCreationReceipt = { intentId: retrying ? previous.intentId : mintObjectId(), createdAt: retrying ? previous.createdAt : Date.now(), noteId, blockIds: [blockId], draft, path: '', status: 'pending', revealed: false,
       ...(launcher ? { launcher } : {}),
       notebook: retrying && previous.notebook ? previous.notebook : notebookContext,
       target: { workspaceId, hostId: originalResource.hostId, workspacePath: originalResource.path, directoryPath: null, relativeDirectory: null, zoneId: tab?.space?.zoneId ?? null,
@@ -9392,7 +9392,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // The original File owner has confirmed success. A catalog failure never undoes or
       // blocks this healthy file; exact metadata intents survive in the original UI receipt.
       if (relocations.length) {
-        try { await recordNotebookChanges(relocations, 'note-file-move:' + crypto.randomUUID()) }
+        try { await recordNotebookChanges(relocations, 'note-file-move:' + mintObjectId()) }
         catch (error) { get().reportError(error, { kind: 'process-degraded' }) }
       }
     })
@@ -9739,7 +9739,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const originalOptions = providerId ? state.launcherOptionDrafts[regionId]?.[providerId] : undefined
     const submittedOptions = originalOptions && launchOptions && shallow(originalOptions, launchOptions) ? originalOptions : undefined
     const launchNote = agentMuxNote ?? state.agentComposerNotes[regionId]
-    const createOperationId = pmo?.intent.creationOperationId === undefined ? crypto.randomUUID() : await goalPmoOperation(pmo.intent, 'create')
+    const createOperationId = pmo?.intent.creationOperationId === undefined ? mintObjectId() : await goalPmoOperation(pmo.intent, 'create')
     const sessionId = pmo?.intent.creationOperationId === undefined ? mintObjectId() : await api.sessions.resolveCreationSessionId(workspace.hostId, createOperationId)
     const live = get(), liveTargetTab = launcher ? live.tabs[tabId] : targetTab
     const liveLayout = live.layouts[displayWorkspaceId!]
@@ -9937,11 +9937,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const tabId = targetTab.id
     if (!workbenchViewCloseAllowsView(state.closingWorkbenchViews, tabId)) throw new Error('The View is closing')
     const regionId = launcher?.regionId ?? targetTab.layout.activeRegionId
-    const sessionId = crypto.randomUUID()
+    const sessionId = mintObjectId()
     const request: TerminalLaunchInput = {
       hostId: workspace.hostId,
       workspacePath: workspacePath ?? workspace.path,
-      createOperationId: crypto.randomUUID()
+      createOperationId: mintObjectId()
     }
     const pendingSurface: TerminalWorkbenchSurface = {
       regionId,
@@ -10030,7 +10030,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const request: TerminalLaunchInput = {
       hostId: workspace.hostId,
       workspacePath: workspace.path,
-      createOperationId: crypto.randomUUID()
+      createOperationId: mintObjectId()
     }
     const creation: WarmTerminalCreation = { request, inFlight: true }
     const ready = api.sessions.launchTerminal(request).catch(error => {
@@ -10165,7 +10165,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         // Another preview cannot erase that request, and only one opening may claim the same Run.
         const pendingSurface: TerminalWorkbenchSurface | undefined = launcherTab && launcher ? {
           regionId: launcher.regionId, kind: 'terminal', phase: 'launching', workspaceId: workspace.id,
-          sessionId: held.session?.id ?? crypto.randomUUID()
+          sessionId: held.session?.id ?? mintObjectId()
         } : undefined
         flight.pendingSurface = pendingSurface
         set((current) => ({ ...(pendingSurface && launcherTab ? {
@@ -10870,7 +10870,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         throw error
       })
     }
-    const newOperationId = crypto.randomUUID()
+    const newOperationId = mintObjectId()
     let changed = false
     set(state => {
       const current = state.agentSteerQueues[sessionId]
@@ -10994,12 +10994,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const previous = entry.inputStopIntent
       const intent = previous && previous.ref.waitGeneration === ref.waitGeneration && previous.ref.key.kind === ref.key.kind &&
         previous.ref.key.agentSessionId === ref.key.agentSessionId && previous.ref.key.expectedRun.runId === ref.key.expectedRun.runId
-        ? previous : { ref: structuredClone(ref), cancelOperationId: crypto.randomUUID() }
+        ? previous : { ref: structuredClone(ref), cancelOperationId: mintObjectId() }
       set(current => ({ agentSteerQueues: { ...current.agentSteerQueues, [sessionId]: (current.agentSteerQueues[sessionId] ?? []).map(item =>
         item.operationId === operationId ? { ...item, inputStopIntent: intent } : item) } }))
       const stopped = await api.sessions.stopInputWaiting(control, intent.ref, intent.cancelOperationId)
       // The original stop ACK is already known. A later read failure must not
-      // discard it or replace that cancellation operation with another UUID.
+      // discard it or replace that original cancellation operation with a new identity.
       set(current => ({ agentSteerQueues: { ...current.agentSteerQueues, [sessionId]: (current.agentSteerQueues[sessionId] ?? []).map(item =>
         item.operationId === operationId ? { ...item, inputStopReceipt: stopped } : item) } }))
       try {
@@ -11419,7 +11419,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   send(sessionId, text, onRejected, origin, agentMuxNote, options) {
     // Admission transfers ownership from draft to queue; transport completion is a separate fact.
-    const operationId = crypto.randomUUID(), session = get().sessions.find(item => item.id === sessionId)
+    const operationId = mintObjectId(), session = get().sessions.find(item => item.id === sessionId)
     const seed = startDeliveryAttempt({ agentSessionId: session?.kind === 'agent' ? session.control.agentSessionId : sessionId,
       operationId, hostId: session?.hostId ?? null, prompt: composeAgentPrompt(text, agentMuxNote).text })
     const reject = (error: unknown) => {
@@ -11487,7 +11487,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const cancellation = action === 'cancel' ? scope.find(item => item.intent && !item.intent.rejection && item.intent.request.intentOperationId === intentOperationId && item.intent.request.action === 'cancel') : undefined
     if (cancellation) return await get().reconcileSessionContinuityControl(session.hostId, sessionId, cancellation.operationId)
     const request = parseAgentContinuityControlInput({ agentSessionId: sessionId, intentOperationId,
-      expectedRun: { ...session.control.run }, operationId: crypto.randomUUID(), action,
+      expectedRun: { ...session.control.run }, operationId: mintObjectId(), action,
       ...(action === 'continue' ? { additionalAttempts } : {}) })
     set(state => ({ continuityControlIntents: { ...state.continuityControlIntents, [key]: { ...state.continuityControlIntents[key], [request.operationId]: { hostId: session.hostId, request } } } }))
     return await get().reconcileSessionContinuityControl(session.hostId, sessionId, request.operationId)
@@ -11605,7 +11605,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     } finally { stopObservingView() }
   },
-  async reopenRetiredSession(source, operationId = crypto.randomUUID(), observeOnly = false) {
+  async reopenRetiredSession(source, operationId = mintObjectId(), observeOnly = false) {
     if (source.state !== 'retired' || source.retiredAt === undefined) {
       throw new Error('This conversation has no confirmed closed Session identity. Read its current state before continuing.')
     }
@@ -11772,7 +11772,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     try {
       let recovery: SessionRecoveryResult
       try {
-        recovery = await api.sessions.recover(recoveryControl, current.workspacePath, operationId ?? crypto.randomUUID(), {
+        recovery = await api.sessions.recover(recoveryControl, current.workspacePath, operationId ?? mintObjectId(), {
           trigger: options?.trigger ?? 'manual', ...(options?.timingOverride ? { timingOverride: options.timingOverride } : {}),
           ...(options?.input ? { input: options.input } : {}) })
       } catch (error) {
@@ -12182,7 +12182,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // Without an original producer or exact subject, identical prose is not proof of one failure.
     // Mint once at intake and keep that receipt on both the latest error and its history record.
     if (!context?.event && !context?.subject && !context?.lifecycle && !context?.startupSessionSnapshot && !context?.startupProviderCatalog) {
-      context = { kind: 'indeterminate', ...context, event: { source: 'operation', key: crypto.randomUUID() } }
+      context = { kind: 'indeterminate', ...context, event: { source: 'operation', key: mintObjectId() } }
     }
     const observedAt = Date.now()
     const observedRecord = (id: string, prior?: NotificationEvent): NotificationEvent => {
