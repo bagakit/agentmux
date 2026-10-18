@@ -7,46 +7,13 @@ vi.mock('@agentmux/core/toolkit-result-channel', () => ({ openToolkitResultChann
 import { randomUUID } from 'node:crypto'
 import { AgentMuxError } from '@agentmux/core'
 import { DEFAULT_CONFIG } from '../src/main/config-store.js'
-import { ConfigOwner } from '../src/main/config-owner.js'
 import { CustomToolkitOwner } from '../src/main/toolkit-custom-owner.js'
-import { executeToolkitConfig, prepareToolkitConfig, toolkitFields } from '../src/main/toolkit-config.js'
-import { AGENTMUX_CONTROL_SCHEMA_VERSION, parseToolkitSnapshot, type ToolkitAdmission, type ToolkitActionInput, type ToolkitRunInput, type ToolkitToolDefinition } from '@agentmux/core/control'
-import type { AgentMuxClientEvent, AgentMuxRunAttachment } from '@agentmux/core'
+import { executeToolkitConfig, toolkitFields } from '../src/main/toolkit-config.js'
+import { AGENTMUX_CONTROL_SCHEMA_VERSION, parseToolkitSnapshot, type ToolkitAdmission, type ToolkitActionInput, type ToolkitToolDefinition } from '@agentmux/core/control'
+import type { AgentMuxRunAttachment } from '@agentmux/core'
 import type { ToolkitRunPort } from '../src/main/toolkit-run-port.js'
 
-const tool: ToolkitToolDefinition = { id: 'quota', revision: 'author-1', name: 'Quota', icon: 'terminal', enabled: true,
-  statusBar: 'icon', workspacePath: _hygiene_fixturePath("tmp"), script: "console.log('工具_ACK')", args: [], actions: [] }
-const flush = async () => { for (let i = 0; i < 12; i++) await new Promise(resolve => setImmediate(resolve)) }
-const deferred = () => { let resolve!: () => void; return { promise: new Promise<void>(r => { resolve = r }), release: () => resolve() } }
-function fixture(output = '工具_ACK', initialState: 'running' | 'exited' = 'exited', definition = tool) {
-  let config = { ...structuredClone(DEFAULT_CONFIG), toolkit: { tools: [structuredClone(definition)] } }
-  let custom!: CustomToolkitOwner, accept: (event: AgentMuxClientEvent) => void = () => {}
-  let state = initialState, exitCode = 0, bytes = Buffer.from(output), finalBytes = bytes.byteLength
-  const receipts = new Map<string, unknown>()
-  const storage = { read: vi.fn(async (id: string) => receipts.get(id) ?? null), save: vi.fn(async (id: string, value: unknown) => { receipts.set(id, structuredClone(value)) }) }
-  const owner = new ConfigOwner({ read: () => config,
-    prepare: (current, next) => prepareToolkitConfig(current, next, id => custom.guardDelete(id)),
-    save: vi.fn(async next => structuredClone(next)), publish: saved => { config = saved as typeof config; custom.configurationChanged() } })
-  const run = () => ({ runId: 'exact-tool-run', kind: 'terminal', state, exitCode: state === 'exited' ? exitCode : undefined, latestOutputBytes: finalBytes })
-  const snapshot = () => ({ run: run(), replay: bytes.length ? [{ startByte: 0, endByte: bytes.length, dataBytes: bytes }] : [], gap: null }) as AgentMuxRunAttachment
-  const port: ToolkitRunPort = { observe: () => () => {}, create: vi.fn(async (_input, listener) => { accept = listener; return run() as any }),
-    attach: vi.fn(async (_ref, _after, listener) => {
-      if (listener) accept = listener
-      // Production attach publishes state before returning replay. This cannot recurse into another attach.
-      accept({ type: 'process-state', state, exitCode: state === 'exited' ? exitCode : undefined, run: { runId: 'exact-tool-run' } } as any)
-      return snapshot()
-    }), replay: vi.fn(async () => snapshot()), status: vi.fn(async () => run() as any),
-    release: vi.fn(async () => {}), remove: vi.fn(async () => {}),
-    stop: vi.fn(async () => { state = 'exited'; accept({ type: 'process-state', state: 'exited', exitCode: 0, run: { runId: 'exact-tool-run' } } as any) }) }
-  custom = new CustomToolkitOwner({ config: owner, receipts: storage, openRunPort: async () => port, runner: process.execPath, env: {} })
-  const input = (latest: string | null = null): ToolkitRunInput => ({ invocationId: randomUUID(), expectedRevision: config.toolkit.tools[0]!.revision, expectedLatestExecutionId: latest })
-  return { custom, owner, storage, receipts, port, input, get config() { return config },
-    exit: (code = 0) => { state = 'exited'; exitCode = code; accept({ type: 'process-state', state: 'exited', exitCode: code, run: { runId: 'exact-tool-run' } } as any) },
-    begin: () => { state = 'running'; bytes = Buffer.alloc(0); finalBytes = 0 },
-    final: (text: string, barrier = Buffer.byteLength(text)) => { bytes = Buffer.from(text); finalBytes = barrier },
-    liveBytes: (data: Uint8Array, startByte: number) => accept({ type: 'terminal-output', run: { runId: 'exact-tool-run' }, dataBytes: data,
-      evidence: { outputByteRange: { startByte, endByte: startByte + data.byteLength } } } as any) }
-}
+import { tool, fixture, flush, deferred } from './helpers/toolkit-custom-owner-fixture'
 
 describe('Toolkit display evaluation lanes', () => {
   const displayed = { ...tool, display: { script: "console.log('display_ACK')", args: [] } }
@@ -146,6 +113,42 @@ describe('Toolkit display evaluation lanes', () => {
     expect(f.port.create).toHaveBeenCalledOnce()
     expect((await f.custom.get(tool.id)).display).toMatchObject({ state: 'succeeded', latestConfirmed: { text: 'shared_visible' } })
     one.dispose(); two.dispose(); await f.custom.dispose()
+  })
+})
+
+describe('Toolkit current execution reason', () => {
+  it.each(['ordinary', 'display'] as const)('scopes %s reasons to the current admission while retaining the stopped receipt', async lane => {
+    const definition = lane === 'display' ? { ...tool, display: { script: 'void 0', args: [] } } : tool
+    const f = fixture('', 'running', definition), signal = new AbortController().signal, held = deferred()
+    const seen: any[] = []
+    const reader = await f.custom.subscribe(tool.id, value => seen.push(value), vi.fn(), signal)
+    const select = (value: any) => lane === 'display' ? value.display : value
+    const launch = async (latest: string | null = null) => select(await (lane === 'display'
+      ? f.custom.evaluate(tool.id, undefined, signal) : f.custom.run(tool.id, f.input(latest), signal)))
+    try {
+      const first = await launch()
+      const stopped = select(await f.custom.stop(tool.id, first.admission.executionId))
+      expect(stopped).toMatchObject({ state: 'stopped', reason: 'Stopped explicitly.', admission: null })
+      const previous = stopped.latestConfirmed
+      f.begin()
+      const create = vi.mocked(f.port.create), original = create.getMockImplementation()!
+      create.mockImplementationOnce(async (...args) => { await held.promise; return original(...args) })
+      const next = launch(previous.executionId)
+      await flush()
+      const pending = select(await f.custom.get(tool.id))
+      expect(pending).toMatchObject({ state: 'pending', reason: null, admission: { reason: null }, latestConfirmed: previous })
+      expect(pending.admission.executionId).not.toBe(previous.executionId)
+      expect(seen.map(select).filter(Boolean)).toContainEqual(expect.objectContaining({ state: 'pending', reason: null }))
+      held.release()
+      const running = await next
+      expect(running).toMatchObject({ state: 'running', reason: null, latestConfirmed: previous })
+      expect(parseToolkitSnapshot(await f.custom.get(tool.id))).toBeDefined()
+      const stoppedAgain = select(await f.custom.stop(tool.id, running.admission.executionId))
+      f.begin()
+      create.mockRejectedValueOnce(new Error('Stopped explicitly.'))
+      const unknown = await launch(stoppedAgain.latestConfirmed.executionId)
+      expect(unknown).toMatchObject({ state: 'unknown', reason: 'Stopped explicitly.', admission: { state: 'unknown', reason: 'Stopped explicitly.' }, latestConfirmed: stoppedAgain.latestConfirmed })
+    } finally { held.release(); reader.dispose(); await f.custom.dispose() }
   })
 })
 
