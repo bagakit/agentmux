@@ -13,6 +13,8 @@ import { ActivityView } from '../src/renderer/src/components/ActivityView'
 import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
+import { activityReadingProps } from './helpers/activity-reading-props'
+import { desktopConversationReadBridge } from './helpers/conversation-read-bridge'
 
 const NOTE = 'Keep the original local context.'
 const context = composeOutboundMessage({ amux: NOTE })
@@ -26,6 +28,8 @@ const DRAFT = 'Keep the original unsent spacing draft.'
 const initial = useAppStore.getState()
 let host: HTMLDivElement, root: Root
 const natives: Awaited<ReturnType<typeof nativeHistoryFixture>>[] = []
+const bridges: Array<() => unknown | Promise<unknown>> = []
+const originalMetadata = new Map<Awaited<ReturnType<typeof nativeHistoryFixture>>, readonly unknown[]>()
 let controls: MockInstance<typeof api.sessions.stop>[]
 
 beforeEach(() => {
@@ -39,10 +43,13 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount()); host.remove(); window.getSelection()?.removeAllRanges()
   expect(natives.length).toBeGreaterThan(0); expect(controls).toHaveLength(5); expect(controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0])
+  for (const close of bridges.splice(0).reverse()) await close()
   for (const native of natives.splice(0)) {
     expect(native.controls).toHaveLength(6); expect(native.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
-    expect(await native.bytes()).toEqual(native.before); await native.close()
+    expect((await native.bytes()).native).toEqual(native.before.native)
+    expect(await native.store.load()).toEqual(originalMetadata.get(native)); await native.close()
   }
+  originalMetadata.clear()
   expect(useAppStore.getState().agentComposerDrafts['private-agent']).toBe(DRAFT)
   vi.restoreAllMocks(); vi.unstubAllGlobals(); useAppStore.setState(initial, true)
 })
@@ -52,70 +59,83 @@ async function fixture(bodies: readonly string[]) {
   const ids = bodies.map((_, index) => `spacing-original-${index + 1}`)
   const native = await nativeHistoryFixture('claude', jsonl(bodies.map((text, index) => ({ sessionId: 'native-main', uuid: ids[index], type: 'user', message: { role: 'user', content: text } }))))
   natives.push(native)
+  originalMetadata.set(native, await native.store.load())
   const reads = vi.spyOn(native.client, 'sessionHistoryPage'), page = await native.client.sessionHistoryPage(native.session.agentSessionId, { limit: 30 })
   expect(page.items.map(item => [item.id, item.kind, item.startedAt])).toEqual(ids.map(id => [id, 'user-message', undefined]))
-  expect(page.items.map(item => item.contentParts)).toEqual(bodies.map(text => [{ kind: 'text', text }]))
+  expect(page.items.map(item => item.contentParts)).toEqual(bodies.map(text => [{ kind: 'text', text, contentEligibility: 'unconfirmed' }]))
   const messages = projectSessionUserMessages({ agentSessionId: page.agentSessionId, historyPage: page })
   expect(messages.map(message => [message.rawId, message.author.kind, message.recordedAt])).toEqual(ids.map(id => [id, 'unknown', undefined]))
   expect(messages.map(message => message.content)).toEqual(bodies)
+  await desktopConversationReadBridge(native, bridges)
   return { ...native, ids, bodies, page, messages, reads }
 }
 function activity(f: Awaited<ReturnType<typeof fixture>>, state: 'done' | 'working' = 'done') {
-  return <ActivityView sessionId={f.page.agentSessionId} capability="complete-events" displayState={state} items={[]} nativeHistoryPage={f.page} userMessages={f.messages} />
+  return <ActivityView {...activityReadingProps({ control: f.session })} displayState={state} nativeHistoryPage={f.page} />
 }
 async function draw(f: Awaited<ReturnType<typeof fixture>>, state: 'done' | 'working' = 'done') {
   await act(async () => root.render(activity(f, state)))
-  expect([...host.querySelectorAll<HTMLElement>('[data-native-record-id]')].map(row => row.dataset.nativeRecordId)).toEqual(f.ids)
+  await vi.waitFor(async () => {
+    await act(async () => { await Promise.resolve() })
+    expect([...host.querySelectorAll<HTMLElement>('[data-native-record-id]')].map(row => row.dataset.nativeRecordId)).toEqual(f.ids)
+  })
 }
 function turn(id: string) { const row = host.querySelector<HTMLElement>(`[data-native-record-id="${id}"] .log-turn`); expect(row).not.toBeNull(); return row! }
-function paragraph(row: HTMLElement) { const p = row.querySelector<HTMLElement>('.log-turn__text > p'); expect(p).not.toBeNull(); return p! }
+function paragraph(row: HTMLElement) { const p = row.querySelector<HTMLElement>('.log-turn__text p.md-paragraph'); expect(p).not.toBeNull(); return p! }
 async function copy(row: HTMLElement, original: string) {
   const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined), button = row.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')
   expect(button).not.toBeNull(); await act(async () => button!.click()); expect(clipboard).toHaveBeenLastCalledWith(original)
 }
 
-it('actual Claude display removes only two complete declaration separator line breaks and preserves original body and Copy', async () => {
+it('actual Claude declaration separators use shared Markdown paragraphs while preserving each original body and Copy', async () => {
   const variants = [
-    { wire: plain, body: '\n\nClarify goal', display: 'Clarify goal' },
-    { wire: context + '\nClarify goal', body: '\nClarify goal', display: 'Clarify goal' },
-    { wire: context + '\r\n\r\nClarify goal', body: '\r\n\r\nClarify goal', display: 'Clarify goal' },
-    { wire: composeOutboundMessage({ amux: NOTE, user: '\nClarify goal' }), body: '\n\n\nClarify goal', display: '\nClarify goal' },
-    { wire: context + ' \n\nClarify goal', body: ' \n\nClarify goal', display: ' \n\nClarify goal' },
-    { wire: context + '\t\n\nClarify goal', body: '\t\n\nClarify goal', display: '\t\n\nClarify goal' },
-    { wire: context + '\rClarify goal', body: '\rClarify goal', display: '\rClarify goal' }
+    { wire: plain, body: '\n\nClarify goal' },
+    { wire: context + '\nClarify goal', body: '\nClarify goal' },
+    { wire: context + '\r\n\r\nClarify goal', body: '\r\n\r\nClarify goal' },
+    { wire: composeOutboundMessage({ amux: NOTE, user: '\nClarify goal' }), body: '\n\n\nClarify goal' },
+    { wire: context + ' \n\nClarify goal', body: ' \n\nClarify goal' },
+    { wire: context + '\t\n\nClarify goal', body: '\t\n\nClarify goal' },
+    { wire: context + '\rClarify goal', body: '\rClarify goal' }
   ]
   expect(variants).toHaveLength(7)
   const f = await fixture(variants.map(variant => variant.wire)); await draw(f)
   for (const [index, variant] of variants.entries()) {
     const parsed = parseAgentMuxMessagePrefix(f.messages[index]!.content)!; expect(parsed).not.toBeNull(); expect(parsed.declaredContexts).toEqual([{ raw: context }]); expect(parsed.body).toBe(variant.body)
-    const row = turn(f.ids[index]!), p = paragraph(row); expect(p.textContent).toBe(variant.display); expect(p.classList.contains('md-paragraph')).toBe(true)
+    const row = turn(f.ids[index]!), p = paragraph(row); expect(p.textContent).toBe('Clarify goal'); expect(p.classList.contains('md-paragraph')).toBe(true)
+    expect([...p.childNodes].map(node => node.nodeName)).toEqual(['#text'])
     expect(row.querySelectorAll('.log-turn__declared-context')).toHaveLength(1); await copy(row, variant.wire)
   }
-  expect(f.reads).toHaveBeenCalledOnce()
+  expect(f.reads).toHaveBeenCalledTimes(2)
 })
 
-it('ordinary undeclared text retains whitespace and production fallback custom class and file-reference behavior', async () => {
+it('undeclared input keeps shared Markdown hard breaks while unmarked standalone text preserves whitespace and file references', async () => {
   const text = '\n\nOriginal plain line  \n  Keep spaces and src/task.ts', wire = composeOutboundMessage({ user: text })
   const f = await fixture([wire]); await draw(f)
   expect(parseAgentMuxMessagePrefix(f.messages[0]!.content)).toBeNull(); const row = turn(f.ids[0]!)
-  expect(row.querySelectorAll('.log-turn__declared-context')).toHaveLength(0); expect(paragraph(row).textContent).toBe(text); expect(paragraph(row).classList.contains('md-paragraph')).toBe(true)
+  expect(row.querySelectorAll('.log-turn__declared-context')).toHaveLength(0)
+  expect([...paragraph(row).childNodes].map(node => [node.nodeName, node.textContent])).toEqual([
+    ['#text', 'Original plain line'], ['BR', ''], ['#text', 'Keep spaces and src/task.ts']
+  ])
+  expect(paragraph(row).classList.contains('md-paragraph')).toBe(true)
   await copy(row, wire)
   const open = vi.fn()
-  await act(async () => root.render(<>{activity(f)}<AgentMarkdown content={f.messages[0]!.content} className="spacing-original-class" workspaceRoot={f.root} openWorkspaceFile={open} /></>))
-  const custom = host.querySelector<HTMLElement>('p.spacing-original-class'); expect(custom).not.toBeNull(); expect(custom!.classList.contains('md-paragraph')).toBe(true); expect(custom!.textContent).toBe(text)
+  const unmarked = '\n\nOriginal plain line\n  Keep spaces and src/task.ts'
+  await act(async () => root.render(<>{activity(f)}<AgentMarkdown content={unmarked} className="spacing-original-class" workspaceRoot={f.root} openWorkspaceFile={open} /></>))
+  const custom = host.querySelector<HTMLElement>('p.spacing-original-class'); expect(custom).not.toBeNull(); expect(custom!.classList.contains('md-paragraph')).toBe(true); expect(custom!.textContent).toBe(unmarked)
   const reference = custom!.querySelector<HTMLButtonElement>('button.md-link--file'); expect(reference).not.toBeNull()
-  await act(async () => reference!.click()); expect(open).toHaveBeenCalledOnce(); expect(open.mock.calls[0]![0]).toBe('src/task.ts'); expect(f.reads).toHaveBeenCalledOnce()
+  await act(async () => reference!.click()); expect(open).toHaveBeenCalledOnce(); expect(open.mock.calls[0]![0]).toBe('src/task.ts'); expect(f.reads).toHaveBeenCalledTimes(2)
 })
 
-it('actual Claude declaration tails preserve genuine four-space Markdown code and indented XML literal paragraph including line-end spaces', async () => {
+it('actual Claude declaration tails preserve four-space Markdown code and indented XML literals including line-end spaces', async () => {
   const f = await fixture([code, literal]); await draw(f)
   expect(f.ids).toHaveLength(2)
   expect(parseAgentMuxMessagePrefix(f.messages[0]!.content)?.body).toBe('\n\n' + CODE_TAIL)
   const codeRow = turn(f.ids[0]!), codeElement = codeRow.querySelector('code'); expect(codeElement).not.toBeNull(); expect(codeElement!.textContent).toBe('const indentation = "four spaces"  ')
   expect(codeRow.querySelector('strong')?.textContent).toBe('The original code remains readable.'); await copy(codeRow, code)
   expect(parseAgentMuxMessagePrefix(f.messages[1]!.content)?.body).toBe('\n\n' + XML_TAIL)
-  const literalRow = turn(f.ids[1]!); expect(literalRow.querySelectorAll('.log-turn__declared-context')).toHaveLength(1); expect(paragraph(literalRow).textContent).toBe(XML_TAIL); await copy(literalRow, literal)
-  expect(f.reads).toHaveBeenCalledOnce()
+  const literalRow = turn(f.ids[1]!); expect(literalRow.querySelectorAll('.log-turn__declared-context')).toHaveLength(1)
+  expect(literalRow.querySelector('pre code')?.textContent).toBe('<amux from="amux">Original indented literal.</amux>  ')
+  expect(literalRow.querySelector('pre code amux')).toBeNull(); await copy(literalRow, literal)
+  expect(f.reads).toHaveBeenCalledTimes(2)
 })
 
 it('actual three-record reading keeps IDs, unknown facts, paragraph DOM and Range, disclosure, scroll, stored draft and complete raw Copy across rerender', async () => {
@@ -128,8 +148,8 @@ it('actual three-record reading keeps IDs, unknown facts, paragraph DOM and Rang
   const feed = host.querySelector<HTMLElement>('.activity-feed'); expect(feed).not.toBeNull(); feed!.scrollTop = 167
   await draw(f, 'working'); expect(turn(f.ids[0]!)).toBe(row); expect(paragraph(row)).toBe(p); expect(row.querySelector('.log-turn__text')).toBe(body)
   expect(row.querySelector('details.log-turn__declared-context')).toBe(disclosure); expect(disclosure.open).toBe(true); expect(range.startContainer).toBe(text); expect(window.getSelection()!.toString()).toBe('Clarify'); expect(feed!.scrollTop).toBe(167)
-  const noTail = turn(f.ids[1]!); expect(parseAgentMuxMessagePrefix(contextOnly.text)?.body).toBe(''); expect(noTail.querySelectorAll('.log-turn__text > p')).toHaveLength(0); expect(noTail.querySelectorAll('.log-turn__declared-context')).toHaveLength(1)
-  expect(row.querySelector('.log-turn__who')?.textContent).toBe('You'); expect(row.querySelector('.log-turn__declared-source')).toBeNull(); await copy(row, plain); expect(f.reads).toHaveBeenCalledOnce()
+  const noTail = turn(f.ids[1]!); expect(parseAgentMuxMessagePrefix(contextOnly.text)?.body).toBe(''); expect(noTail.querySelectorAll('.log-turn__text p.md-paragraph')).toHaveLength(0); expect(noTail.querySelectorAll('.log-turn__declared-context')).toHaveLength(1)
+  expect(row.querySelector('.log-turn__who')?.textContent).toBe('You'); expect(row.querySelector('.log-turn__declared-source')).toBeNull(); await copy(row, plain); expect(f.reads).toHaveBeenCalledTimes(2)
   if (process.env.AGENTMUX_CONTEXT_SPACING_SCENE_OUTPUT) {
     const output = resolve(process.env.AGENTMUX_CONTEXT_SPACING_SCENE_OUTPUT); await mkdir(resolve(output, '..'), { recursive: true })
     await writeFile(output, JSON.stringify({ schema: 'agentmux.conversation-declared-context-spacing-public-scene.v1', page: f.page, messages: f.messages, draft: DRAFT,
