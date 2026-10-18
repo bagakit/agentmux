@@ -1061,6 +1061,9 @@ const mockApi: AgentMuxDesktopApi = {
       if (!timeline) throw new Error(`Timeline not found: ${control.agentSessionId}`)
       return structuredClone(timeline)
     },
+    historySource: async reference => ({ reference, source: 'hostId' in reference
+      ? (await mockHistorySources()).find(source => source.hostId === reference.hostId && source.agentSessionId === reference.agentSessionId) ?? null : null,
+      issue: 'runtimeId' in reference ? { code: 'RUNTIME_UNAVAILABLE', message: 'The original Runtime binding requires Desktop.', recovery: 'Open Desktop to read the original owner.' } : null }),
     historySources: mockHistorySources,
     readHistory: async () => {
       throw new Error('Host input history queries are unavailable in the web preview. The current draft and existing records are kept.')

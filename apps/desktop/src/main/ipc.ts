@@ -1636,6 +1636,7 @@ export async function registerIpc(args: {
   })
   handle('sessions:creation', async (hostId: string, agentSessionId: string) => await args.runtime.agentCreation(hostId, agentSessionId))
   handle('sessions:resolveCreationSessionId', async (hostId: string, createOperationId: string) => args.runtime.resolveCreationSessionId(hostId, createOperationId))
+  handle('sessions:historySource', async (reference: import('../shared/contracts.js').SessionHistorySourceReference) => args.runtime.sessionHistorySource(reference))
   handle('sessions:historySources', async (options?: { observation: true }) => {
     if (options === undefined) return await args.runtime.sessionHistorySources()
     if (!options || options.observation !== true || Object.keys(options).some(key => key !== 'observation')) {

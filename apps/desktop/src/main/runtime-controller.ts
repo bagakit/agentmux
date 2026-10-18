@@ -1339,6 +1339,36 @@ export class RuntimeController {
     return (await this.connectedClient(hostId)).resolveAgentCreationSessionId(createOperationId)
   }
 
+  /** Read one retained identity through its original owner, without inventory, input or Run probing. */
+  async sessionHistorySource(reference: import('../shared/contracts.js').SessionHistorySourceReference): Promise<import('../shared/contracts.js').SessionHistorySourceObservation> {
+    const id = (value: unknown): value is string => typeof value === 'string' && Boolean(value.trim()) && !/[\0\r\n]/u.test(value)
+    if (!reference || typeof reference !== 'object' || !id(reference.agentSessionId) ||
+        ('hostId' in reference ? !id(reference.hostId) || Object.keys(reference).some(key => !['hostId', 'agentSessionId'].includes(key))
+          : !('runtimeId' in reference) || !id(reference.runtimeId) || Object.keys(reference).some(key => !['runtimeId', 'agentSessionId'].includes(key)))) {
+      throw new TypeError('History metadata requires one exact Host or semantic Runtime and Session ID.')
+    }
+    try {
+      const matches = 'hostId' in reference ? [...this.hosts].filter(([hostId]) => hostId === reference.hostId)
+        : [...this.hosts].filter(([, host]) => { const owner = runtimeOwner(host.client)
+          return owner?.availability === 'connected' && owner.runtimeId === reference.runtimeId })
+      if (matches.length !== 1) throw new AgentMuxError(matches.length
+        ? 'The original Runtime has multiple configured routes. Its reference is retained; choose its exact Host.'
+        : 'The original metadata owner is not available. Its Session reference is retained.', matches.length ? 'AMBIGUOUS_AGENT_SESSION' : 'RUNTIME_UNAVAILABLE')
+      const [hostId, host] = matches[0]!, owner = runtimeOwner(host.client)
+      this.assertObservationHostConnection(hostId, host)
+      const sources = await host.client.sessionHistorySources({ agentSessionId: reference.agentSessionId })
+      if (this.hosts.get(hostId) !== host || owner && (runtimeOwner(host.client)?.runtimeId !== owner.runtimeId ||
+          runtimeOwner(host.client)?.ownerInstanceId !== owner.ownerInstanceId || owner.availability === 'connected' && runtimeOwner(host.client)?.availability !== 'connected')) throw new AgentMuxError(
+        'The original metadata owner changed during this read. Retry the retained reference.', 'EXECUTOR_HOST_CHANGED')
+      if (sources.length > 1 || sources.some(source => source.agentSessionId !== reference.agentSessionId)) throw new AgentMuxError(
+        'The metadata owner returned another Session. The original reference is retained.', 'CONTROL_PROTOCOL_ERROR')
+      return { reference, source: sources[0] ? { ...sources[0], hostId } : null, issue: null }
+    } catch (error) {
+      return { reference, source: null, issue: { code: error instanceof AgentMuxError ? error.code : 'HISTORY_SOURCE_UNAVAILABLE',
+        message: error instanceof Error ? error.message : String(error), recovery: 'Retry this original identity. Existing work remains available.' } }
+    }
+  }
+
   async sessionHistorySources(options: { observation: true }): Promise<SessionHistorySourcesObservation>
   async sessionHistorySources(): Promise<AgentSessionHistoryDescriptor[]>
   async sessionHistorySources(options?: { observation: true }): Promise<AgentSessionHistoryDescriptor[] | SessionHistorySourcesObservation> {
