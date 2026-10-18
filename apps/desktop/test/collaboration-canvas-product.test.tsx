@@ -482,14 +482,17 @@ it('overview keeps exact Agent endpoints without relayout and enters a named reg
   expect(heading).not.toBeNull()
   expect(heading.textContent).toContain('Original area 0')
   expect(heading.textContent).toContain('6 Agents')
-  const area = heading.closest<HTMLElement>('.collaboration-area')!
+  const area = heading.closest<HTMLElement>('.collaboration-area__overview-label')!
   const areaBox = renderedBox(JSON.stringify(['area', 'area-0']))
   expect(areaBox.kind).toBe('area')
   expect(Number.parseFloat(area.style.getPropertyValue('--collaboration-label-width'))).toBeCloseTo(Math.min(240, (areaBox.width - (areaBox as Extract<engine.CollaborationLayoutBox, { kind: 'area' }>).heading.x) * .25))
+  expect(area.closest('.react-flow__edgelabel-renderer')).not.toBeNull()
+  const originalHeading = (areaBox as Extract<engine.CollaborationLayoutBox, { kind: 'area' }>).heading
+  expect(Number.parseFloat(area.style.top) + Number.parseFloat(area.style.getPropertyValue('--collaboration-label-height')) / .25).toBeCloseTo(areaBox.y + originalHeading.y + originalHeading.height)
   await dom.render(graph(scene, null, scene.relations, [], scene.agents, { ready: true }))
   // Locate is an explicit control intent, so it is allowed to replace this already-set camera.
   await viewport(-left * .25 + 20, -top * .25 + 20, 1600, 1200, .25)
-  await act(async () => heading.click())
+  await act(async () => dom.container.querySelector<HTMLButtonElement>('[aria-label="Locate Original area 0 · 6 Agents"]')!.click())
   await settleCollaborationCanvas(() => expect(captured.store!.getState().transform[2]).toBeGreaterThanOrEqual(.7))
   expect(requests).toHaveLength(operations)
   expect(open).not.toHaveBeenCalled()

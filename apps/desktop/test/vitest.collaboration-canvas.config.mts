@@ -9,6 +9,7 @@ const detour = 'renders and selects an actual Worker detour while both original 
 const graph = 'components/AgentCollaborationGraph.tsx'
 const metadata = 'rebuilds only one exact offscreen Agent node for metadata without another layout job or unrelated card render'
 export const collaborationCanvasMutations = [
+  { file: graph, name: 'overview-heading-clearance', before: 'data.box.heading.y + data.box.heading.height - labelHeight / zoom', after: 'data.box.heading.y', assertion: 'overview keeps exact Agent endpoints without relayout and enters a named region through its control' },
   { file: 'lib/collaboration-map-geometry.ts', name: 'envelope-member-extents', before: '{ ...box, x: box.x - area.x, y: box.y - area.y }', after: '{ ...box, x: box.x - area.x, y: box.y - area.y, width: 0, height: 0 }', assertion: 'encloses complete member corners and the exact heading without a rectangular frame' },
   { file: graph, name: 'selected-group-detail', before: 'new Set([selection.id, ...selection.relatedIds ?? []])', after: 'new Set([selection.id])', assertion: 'keeps every selected original relation emphasized when an explicitly folded group expands' },
   { file: graph, name: 'initial-world-fit', before: 'void flow.setCenter(target.x, target.y, { zoom: target.zoom })', after: 'void flow.fitView({ minZoom: .05, maxZoom: .95, includeHiddenNodes: true })', assertion: 'opens a real working region at readable scale instead of fitting many empty regions' },
