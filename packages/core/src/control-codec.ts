@@ -605,7 +605,8 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
       continuation = { intervalMs: c.intervalMs, alignmentRevision: c.alignmentRevision as number }
     }
     const owner = optionalCaller(source.caller)
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), ...(source.sessionId === undefined ? {} : { sessionId: id(source.sessionId, 'Agent Session id is invalid.', 'INVALID_CONTROL_REQUEST') }), ...(continuation ? { continuation } : {}), ...(owner ? { caller: owner } : {}) }
+    if (source.expectedUpdatedAt !== undefined && (!Number.isSafeInteger(source.expectedUpdatedAt) || (source.expectedUpdatedAt as number) < 0)) throw new AgentMuxError('Expected Goal version is invalid.', 'INVALID_CONTROL_REQUEST')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, ...(source.expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt: source.expectedUpdatedAt as number }), demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), ...(source.sessionId === undefined ? {} : { sessionId: id(source.sessionId, 'Agent Session id is invalid.', 'INVALID_CONTROL_REQUEST') }), ...(continuation ? { continuation } : {}), ...(owner ? { caller: owner } : {}) }
   }
   if (source.operation === 'demand.continuation-action') {
     if (!['pause', 'resume', 'stop', 'check'].includes(source.action as string) || !Number.isSafeInteger(source.expectedRevision) || (source.expectedRevision as number) < 1) throw new AgentMuxError('Goal continuation action or revision is invalid.', 'INVALID_CONTROL_REQUEST')

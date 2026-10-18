@@ -52,7 +52,7 @@ import type { MoteAvatarSeriesParameterMap } from '@agentmux/core/mote-avatar-se
 import { readInputObservation } from '@agentmux/core/control'
 import { GoalDispatchInputOwner } from './goal-dispatch-input.js'
 import { assertGoalDispatchReference, type GoalDispatchReference } from '../shared/goal-dispatch.js'
-import { parseDemandDispatchIntent, sameDemandDispatchIntent, type DemandDispatchIntent } from '@agentmux/demand'
+import { isDemandStoreError, parseDemandDispatchIntent, sameDemandDispatchIntent, type DemandDispatchIntent } from '@agentmux/demand'
 import { admittedDemandParticipation, admittedDemandCreateMatches, admittedDemandUpdateMatches } from './demand-participation.js'
 import { resolveGoalsPreferences } from '../shared/goals-preferences.js'
 import { assertGoalPmoIntent, goalPmoOperation, type GoalPmoIntent } from '../shared/goal-pmo-origin.js'
@@ -1232,14 +1232,14 @@ export async function registerIpc(args: {
     requireTrustedSender('demands:reconcileDispatch', event); assertGoalDispatchReference(reference)
     return goalDispatchInputs.reconcile(reference)
   })
-  handleWithEvent('demands:prepareGoalStart', async (event, goalId: string, input: DemandDispatchIntent, controlRequestId?: string) => {
+  handleWithEvent('demands:prepareGoalStart', async (event, goalId: string, input: DemandDispatchIntent, controlRequestId?: string, expectedUpdatedAt?: number) => {
     requireTrustedSender('demands:prepareGoalStart', event)
     const intent = parseDemandDispatchIntent(input)
     if (controlRequestId !== undefined) controlBridge.nameRequest(controlRequestId, request =>
       (request.operation === 'demand.start' || request.operation === 'demand.assign' && request.start === true) &&
       request.demandId === goalId && request.requestId === intent.operationId &&
       (request.sessionId === undefined || request.sessionId === intent.agentSessionId) &&
-      (request.operation !== 'demand.start' || Boolean(request.continuation) === (intent.execution === 'continue')))
+      (request.operation !== 'demand.start' || Boolean(request.continuation) === (intent.execution === 'continue') && (request.expectedUpdatedAt === undefined || request.expectedUpdatedAt === expectedUpdatedAt)))
     const original = await demands.inspectDispatch(goalId, intent.operationId)
     if (original) {
       if (!sameDemandDispatchIntent(original, intent)) throw new AgentMuxError('The original Goal Start input or target changed.', 'CONTROL_REQUEST_CONFLICT')
@@ -1256,7 +1256,13 @@ export async function registerIpc(args: {
     const native = await args.runtime.agentCreation(intent.hostId, intent.agentSessionId)
     if (native.kind === 'retired-agent') throw new AgentMuxError('The original Goal target is closed. Keep its request and explicitly recover the Session before preparing input.', 'AGENT_SESSION_RETIRED')
     if (native.agentSessionId !== intent.agentSessionId || native.run.runId !== intent.runId) throw new AgentMuxError('The original Goal Run changed before preparation. Keep the original Agent and inspect this operation.', 'CONTROL_REQUEST_CONFLICT')
-    return demands.prepareDispatch(goalId, intent)
+    try { return await demands.prepareDispatch(goalId, intent, expectedUpdatedAt) }
+    catch (error) {
+      const cause = isDemandStoreError(error) ? error.cause as { kind?: string; goalId?: string; operationId?: string; currentUpdatedAt?: number } | undefined : undefined
+      if (cause?.kind === 'goal-start-version-conflict' && cause.goalId === goalId && cause.operationId === intent.operationId && typeof cause.currentUpdatedAt === 'number')
+        return { conflict: 'goal-version' as const, goalId, operationId: intent.operationId, currentUpdatedAt: cause.currentUpdatedAt }
+      throw error
+    }
   })
   const pmoGoal = async (intent: GoalPmoIntent) => {
     assertGoalPmoIntent(intent)
