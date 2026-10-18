@@ -59,6 +59,9 @@ export async function feishuPublicationHttp(override?: (call: FeishuHttpCall) =>
     response.writeHead(result.status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(result.body))
     } catch { response.writeHead(400, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ code: 230001 })) }
   })
+  // The controlled platform stays available while the real Core reads a large
+  // source-backed resource; its default idle socket expiry is not the scenario.
+  server.keepAliveTimeout = 0
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', () => resolve()) })
   // The SDK's response interceptor returns data; retain its own HttpInstance contract at this transport boundary.
   const port = (server.address() as { port: number }).port, request = defaultHttpInstance.request.bind(defaultHttpInstance) as HttpInstance['request']
