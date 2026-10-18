@@ -82,7 +82,7 @@ it('keeps an unfocused empty formula and a read-only formula from claiming keybo
 it.each(['inline-formula', 'block-formula'])('inserts %s into the existing draft and leaves source editing reachable', async kind => {
   const { editor, change, save } = await setup()
   await act(async () => { editor.commands.setTextSelection(1) })
-  const select = dom.container.querySelector<HTMLSelectElement>('[aria-label="Insert diagram or formula"]')!
+  const select = dom.container.querySelector<HTMLSelectElement>('[aria-label="Insert Note content"]')!
   await act(async () => { select.value = kind; select.dispatchEvent(new Event('change', { bubbles: true })) })
   expect(change).toHaveBeenCalled(); expect(save).not.toHaveBeenCalled()
   expect(activeEditor()).toBe(editor)
@@ -96,7 +96,7 @@ it.each(['inline-formula', 'block-formula'])('inserts %s into the existing draft
 it.each(['mermaid', 'drawio', 'dot', 'plantuml'])('inserts %s through the menu and preserves its source through canonical Markdown', async language => {
   const { editor, change, save } = await setup()
   await act(async () => { editor.commands.setTextSelection(1) })
-  const select = dom.container.querySelector<HTMLSelectElement>('[aria-label="Insert diagram or formula"]')!
+  const select = dom.container.querySelector<HTMLSelectElement>('[aria-label="Insert Note content"]')!
   await act(async () => { select.value = language; select.dispatchEvent(new Event('change', { bubbles: true })) })
   let source = ''
   editor.state.doc.descendants(node => { if (node.type.name === 'codeBlock' && node.attrs.language === language) source = node.textContent })
