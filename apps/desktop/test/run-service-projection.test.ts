@@ -32,6 +32,26 @@ function state(sessions: SessionSnapshot[]): SessionProjectionState {
   return { sessions, timelines: {}, pendingAgentLaunches: {}, tabs: {}, layouts: {}, viewModes: {} }
 }
 
+it('retains a mounted host terminal service independently of workbench collection membership', () => {
+  const owner = createRunServiceProjection(), original = session(), unrelated = session('local', 'unrelated')
+  const first = owner.subscribe(original, vi.fn()), second = owner.subscribe(original, vi.fn())
+  owner.reconcile([unrelated])
+  const pressured = { ...service(2), output: { type: 'backpressured' as const } }
+  expect(owner.apply(event(pressured))).toBe(true)
+  expect(owner.read(original)).toBe(pressured)
+  const refreshed = { ...original, nativeService: service(3) }
+  owner.observeSnapshot(refreshed)
+  expect(owner.read(original)).toBe(refreshed.nativeService)
+  owner.observeSnapshot(original)
+  expect(owner.read(original)).toBe(refreshed.nativeService)
+  first()
+  expect(owner.read(original)).toBe(refreshed.nativeService)
+  second()
+  expect(owner.read(original)).toBeNull()
+  expect(owner.apply(event(service(3)))).toBe(false)
+  expect(owner.read(unrelated)).toBe(unrelated.nativeService)
+})
+
 it('retains every full revision without notifying health subscribers or replacing ordinary Sessions', () => {
   const owner = createRunServiceProjection(), original = session(), unrelated = session('remote', 'other')
   const projected = state([original, unrelated])

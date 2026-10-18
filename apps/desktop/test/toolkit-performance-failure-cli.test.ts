@@ -19,7 +19,7 @@ it('normal compiled public CLI watch capture and inspect consume original Owner 
  const env=objectCliEnvironment(dir),cli=resolve('packages/core/bin/amux')
  expect((await readFile(resolve('packages/core/dist/agentmux.js'))).byteLength).toBeGreaterThan(0)
  let accept:(event:any)=>void=()=>{}
- const port:ToolkitRunPort={create:vi.fn(async(_input,onEvent)=>{accept=onEvent;return {runId:'private-cli-toolkit-run',pid:88,kind:'terminal'} as any}),attach:vi.fn(async()=>({replay:[],gap:null}) as any),replay:vi.fn(async()=>({replay:[],gap:null}) as any),status:vi.fn(async()=>null),stop:vi.fn(async()=>{}),release:vi.fn(async()=>{}),remove:vi.fn(async()=>{})}
+ const port:ToolkitRunPort={ observe: () => () => {},create:vi.fn(async(_input,onEvent)=>{accept=onEvent;return {runId:'private-cli-toolkit-run',pid:88,kind:'terminal'} as any}),attach:vi.fn(async()=>({replay:[],gap:null}) as any),replay:vi.fn(async()=>({replay:[],gap:null}) as any),status:vi.fn(async()=>null),stop:vi.fn(async()=>{}),release:vi.fn(async()=>{}),remove:vi.fn(async()=>{})}
  const owner=new PerformanceToolkitOwner({openRunPort:async()=>port,launch:()=>({runner:process.execPath,cli,script:resolve('apps/desktop/resources/toolkit/performance.mjs'),cwd:dir,env:{}}),enabled:()=>true,receipts:{read:async()=>null,save:async()=>{}}})
  cleanup.push(()=>owner.dispose())
  const server=new AgentMuxControlServer({socketPath:join(dir,'control.sock'),coreClients:()=>[],execute:vi.fn(),toolkit:desktopToolkitPublicPort(owner)});await server.start();cleanup.push(()=>server.stop())
