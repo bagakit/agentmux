@@ -5,6 +5,7 @@ import type { WorkspaceRecord } from '../../../shared/contracts'
 import { collaborationSubjectKey, type CollaborationArea } from './agent-collaboration'
 import { createWorkspaceAgentListSelector, type WorkspaceAgentExecutionResolver, type WorkspaceAgentScopeState, type WorkspaceAgentList, type WorkspaceAgentSources } from './workspace-agent-scope'
 import { projectRailNavigation, workspaceProjectId } from './workspace-projects'
+import { folderSpaceIconTarget, topicSpaceIconTarget } from './space-object-appearance'
 import { scratchTopicsForConfig, scratchTopicKind } from './scratch-topic-snapshots'
 
 export type CollaborationAreaRequest = { workspaceId: string; choice: AgentMuxDesktopSpaceSelection | null }
@@ -38,7 +39,8 @@ export function createCollaborationAreasSelector(resolve: WorkspaceAgentExecutio
     const { scratch, projects } = projectRailNavigation(state.config?.workspaces ?? [])
     for (const project of projects) {
       const lists = project.workspaces.map(workspace => list('workspace:' + workspace.id, workspace, null))
-      areas.push({ id: project.id, name: project.name, kind: 'project', ...areaMembers(lists),
+      areas.push({ id: project.id, name: project.name, kind: 'project', iconTarget: folderSpaceIconTarget(project),
+        workspaceId: project.preferredWorkspaceId, hostId: project.hostId, ...areaMembers(lists),
         issue: [...new Set(lists.flatMap(value => value.issue ? [value.issue] : []))].join(' ') || null })
     }
     let selected: ReturnType<typeof list> | undefined, current: string[] = [], issue: string | null = null
@@ -61,7 +63,9 @@ export function createCollaborationAreasSelector(resolve: WorkspaceAgentExecutio
         const choice: AgentMuxDesktopSpaceSelection = { workspaceId: scratch.id, topicId: id, spaceId: display?.spaceId ?? null, zoneId: source?.zoneId ?? null, tabId: null, regionId: null, groupId: null }
         const value = list('topic:' + id, scratch, choice)
         const kind = source && state.spaceZoneBindings[source.zoneId]?.contentKind || scratchTopicKind(id, topics)
+        const iconTarget = topic ? topicSpaceIconTarget(scratch, topic, state.spaceZoneBindings) : null
         const area: CollaborationArea = { id: value.key, name: value.title, kind: kind === 'unknown' ? 'unplaced' : kind,
+          ...(iconTarget ? { iconTarget } : {}), workspaceId: scratch.id, hostId: scratch.hostId,
           ...areaMembers([value]), issue: value.issue }
         areas.push(area)
         if (selected?.key === value.key) current.push(area.id)

@@ -6,12 +6,12 @@ import type { CollaborationAgent } from './agent-collaboration'
 export const COLLABORATION_ACTIVITY_MS = 3200
 
 /** Original activity facts choose visual weight; no activity is inferred from map use or output. */
-export function collaborationAgentPresentation(session: Extract<SessionSnapshot, { kind: 'agent' }>, name?: string): Pick<CollaborationAgent, 'name' | 'tier' | 'lastActivityAt'> {
+export function collaborationAgentPresentation(session: Extract<SessionSnapshot, { kind: 'agent' }>, name?: string): Pick<CollaborationAgent, 'name' | 'tier' | 'lastActivityAt' | 'providerId' | 'executorId'> {
   const bucket = focusBucketForSession(session, false)
   const tier = session.processState === 'exited' && !session.runUnobserved ? 'closed'
     : bucket === 'working' || bucket === 'attention' ? 'active'
       : session.processState === 'running' && observeAgentSession(session, Date.now()).semantic === 'idle' ? 'idle' : 'unknown'
-  return { name: name ?? session.label, tier, lastActivityAt: focusActivityEntryTime(session) ?? null }
+  return { name: name ?? session.label, tier, lastActivityAt: focusActivityEntryTime(session) ?? null, providerId: session.providerId, executorId: session.executorId }
 }
 export function collaborationNodeSize(tier: CollaborationAgent['tier']) {
   return tier === 'closed' ? { width: 24, height: 24 } : tier === 'idle' || tier === 'unknown' ? { width: 154, height: 38 } : { width: 250, height: 94 }
