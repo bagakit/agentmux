@@ -13,6 +13,7 @@ export const authoredDesigns = AUTHORED_ICON_DESIGNS
 export const themes = getThemeCatalog().items.filter(item => item.readonly).map(item => ({ id: item.id, ...item.value }))
 export { parseThemeFile, serializeThemeFile }
 export { ICON_ANIMATIONS }
+export { mountMotePreview } from './mote-preview.js'
 
 /** The same native projection used by editors; the root owns all geometry. */
 export function semanticMarkup(name: SemanticIconId, size = 24, className = '', presentation: Pick<SemanticIconPresentation, 'color' | 'animation'> = {}) {

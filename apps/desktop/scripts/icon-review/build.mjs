@@ -23,10 +23,12 @@ const metadata = await import('data:text/javascript;base64,' + Buffer.from(metad
 const catalog = await createReviewCatalog(metadata, { context: option('--context') })
 await fs.writeFile(join(out, 'catalog.json'), JSON.stringify(catalog))
 for (const file of ['index.html', 'styles.css', 'review-manifest.json']) await fs.copyFile(join(source, file), join(out, file))
-const motionStyle='packages/client-ui/src/styles/semantic-icons.css'
-await fs.copyFile(join(root,motionStyle),join(out,'semantic-icons.css'))
-inputs.set(motionStyle,sha(await fs.readFile(join(root,motionStyle))))
-await build({configFile:false,root:source,logLevel:'error',define:{'process.env.NODE_ENV':'"production"'},plugins:[inputCapture()],build:{emptyOutDir:false,outDir:out,minify:false,lib:{entry:join(source,'app.js'),formats:['es'],fileName:()=> 'app.js'},rollupOptions:{output:{inlineDynamicImports:true}}}})
+for (const name of ['semantic-icons', 'mote-identity']) {
+  const style=`packages/client-ui/src/styles/${name}.css`
+  await fs.copyFile(join(root,style),join(out,`${name}.css`))
+  inputs.set(style,sha(await fs.readFile(join(root,style))))
+}
+await build({configFile:false,root:source,logLevel:'error',define:{'process.env.NODE_ENV':'"production"'},esbuild:{jsxDev:false},plugins:[inputCapture()],build:{emptyOutDir:false,outDir:out,minify:false,lib:{entry:join(source,'app.js'),formats:['es'],fileName:()=> 'app.js'},rollupOptions:{output:{inlineDynamicImports:true}}}})
 for(const name of ['index.html','styles.css','review-manifest.json','context-labels.json','catalog.mjs','catalog-source.ts','build.mjs'])inputs.set(relative(root,join(source,name)),sha(await fs.readFile(join(source,name))))
 await fs.writeFile(join(out, 'build-inputs.json'), JSON.stringify({ inputs:[...inputs].map(([path,sha256])=>({path,sha256})), publicContract: 'Original catalog, native semantic sprite, theme runtime and validated complete theme file; no product configuration writes.' }, null, 2))
 console.log(JSON.stringify({ out: relative(root, out), roles: catalog.roles.length, glyphs: catalog.glyphCount, sourceRefs: catalog.roles.reduce((count, role) => count + role.sources.length, 0), snapshot: catalog.snapshot }))

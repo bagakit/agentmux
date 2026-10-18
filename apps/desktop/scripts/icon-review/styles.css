@@ -84,3 +84,38 @@ body{height:100dvh;display:flex;flex-direction:column;overflow:hidden;font-famil
   .motion-role-list{grid-template-columns:1fr}
   .motion-controls .button{min-height:40px}
 }
+
+/* Keep the directory visible in a split Browser; experiments are opened on demand. */
+/* This preview host supplies the same interaction timing role as Desktop and Mobile. */
+:root{--bg:var(--surface-1,#f4f5f3);--dur-fast:120ms}
+.masthead{height:60px}.workspace{grid-template-columns:170px minmax(0,1fr) 310px}
+.inventory{padding-top:22px}.inventory-intro{margin-bottom:16px}.inventory-intro .eyebrow{margin-bottom:7px}
+.inventory>.view-switch{margin-left:0;flex-shrink:0;align-self:flex-start;margin-bottom:17px;gap:2px;flex-wrap:wrap}
+.inventory>.view-switch button{font-size:12px;padding:7px 12px;min-height:36px}
+.sample-lab{flex-shrink:0;margin:0 0 15px;border-bottom:1px solid var(--line);padding-bottom:12px}
+.sample-lab>summary{font-size:12px;color:var(--ink);cursor:pointer;padding:4px 0;line-height:1.7}
+.sample-lab>summary span{margin-left:8px;font-size:11px;color:var(--muted)}
+.sample-lab[open] .instance-preview-tools{margin-top:14px}.sample-lab .semantic-samples{margin-bottom:4px}
+.workspace:is([data-view=motion],[data-view=mote],[data-view=future]){grid-template-columns:1fr;max-width:1300px}
+.workspace:is([data-view=motion],[data-view=mote],[data-view=future])>.sidebar,
+.workspace:is([data-view=motion],[data-view=mote],[data-view=future])>.inspector{display:none}
+.motion-grid{grid-template-columns:repeat(auto-fill,minmax(175px,1fr))}.demo-asset{display:block;margin-top:9px;font:10px/1.6 var(--mono);color:var(--muted);overflow-wrap:anywhere}
+.mote-showcase{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:22px;padding:1px 1px 8px}
+.mote-stage{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:28px;text-align:center}
+.mote-stage h2{font-size:24px;letter-spacing:-.5px;margin:10px 0;font-weight:550}.mote-stage>p:not(.eyebrow){font-size:12px;line-height:1.8;color:var(--muted);margin:0}
+.mote-playground{display:grid;place-items:center;min-height:235px;background:radial-gradient(ellipse at center,var(--mint),transparent 66%)}
+.mote-target{display:grid;place-items:center;width:140px;height:140px;border-radius:50%;color:var(--ink);touch-action:manipulation}
+.mote-target:focus-visible{outline-offset:8px}.mote-toggle{font-size:12px;display:inline-flex;align-items:center;gap:7px;cursor:pointer;min-height:36px}.mote-toggle input{accent-color:var(--green)}
+.mote-stage>small{display:block;font-size:11px;line-height:1.7;color:var(--muted);margin-top:7px}
+.mote-notes{padding:22px 12px}.mote-showcase h3{font-size:13px;font-weight:550;margin:0 0 15px}.mote-notes dl{margin:0}.mote-notes dl>div{padding:13px 0;border-bottom:1px solid var(--line)}
+.mote-notes dt{font-size:12px;font-weight:550;margin-bottom:6px}.mote-notes dd{margin:0;font-size:12px;line-height:1.75;color:var(--muted)}.mote-theme-note{font-size:11px;line-height:1.8;color:var(--muted);margin:18px 0 0}.mote-theme-note code{overflow-wrap:anywhere}
+.mote-scale{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:20px;border-top:1px solid var(--line);padding:19px 4px}.mote-scale h3{margin-bottom:6px}.mote-scale p{font-size:11px;color:var(--muted);line-height:1.7;margin:0}.mote-scale .motion-rest-sizes{min-height:64px;padding:0;gap:25px}
+.future-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;padding:1px 1px 6px}
+.future-card{padding:20px;border:1px solid var(--line);border-radius:9px;background:var(--surface);min-width:0}.future-title{display:flex;justify-content:space-between;align-items:center;gap:10px}.future-title h2{font-size:15px;font-weight:550;margin:0}.future-sizes{display:flex;justify-content:center;align-items:flex-end;gap:23px;min-height:106px;padding:20px 0}
+.future-sizes>span{display:flex;flex-direction:column;align-items:center;gap:12px}.future-sizes small{font:10px var(--mono);color:var(--muted)}.future-card>p{font-size:12px;line-height:1.8;margin:8px 0}.future-card>code{font:11px var(--mono);color:var(--muted)}
+.future-card details{font-size:11px;line-height:1.8;margin-top:18px;padding-top:12px;border-top:1px solid var(--line);color:var(--muted)}.future-card summary{cursor:pointer}.future-card code{overflow-wrap:anywhere}.definition-source{display:block;font-size:10px;margin:7px 0}
+@media(min-width:1650px){.workspace{grid-template-columns:190px minmax(0,1fr) 350px}}
+@media(max-width:1100px) and (min-width:951px){.workspace{grid-template-columns:140px minmax(0,1fr) 290px}.inventory{padding-left:18px;padding-right:18px}.inventory>.view-switch button{padding:6px 8px;font-size:11px}.theme-preview-tools{gap:8px}}
+@media(max-width:950px){.masthead{height:60px}.inventory{padding:23px 24px 0}.mote-showcase{gap:16px}.mote-stage{padding:24px 16px}.mote-notes{padding:18px 4px}.mote-stage h2{font-size:21px}.mote-playground{min-height:210px}}
+@media(max-width:580px){.masthead{height:auto;min-height:102px}.inventory{padding:18px 16px 0}.inventory-intro{margin-bottom:15px}.intro-copy{max-width:unset}.totals{display:none}.inventory>.view-switch{align-self:stretch;justify-content:space-between;gap:0;margin-bottom:14px}.inventory>.view-switch button{font-size:11px;padding:5px 7px;min-height:38px}.theme-preview-tools{gap:8px}.theme-preview-tools select{max-width:138px}.theme-preview-tools .button{margin-left:0}.sample-lab>summary span{font-size:10px}.mote-showcase{grid-template-columns:1fr;gap:12px}.mote-stage{padding:23px 18px}.mote-playground{min-height:190px}.mote-notes{padding:14px 6px}.mote-scale{flex-wrap:wrap;gap:18px}.mote-scale .motion-rest-sizes{gap:22px}.mote-scale>.button{width:100%}.future-grid{grid-template-columns:1fr}.motion-comparison{grid-template-columns:1fr}.motion-rest-sizes{min-height:58px}.inventory-tools .search{flex-basis:100%}}
+@media(max-height:700px){.inventory-intro{display:none}.inventory{padding-top:14px}.inventory>.view-switch{margin-bottom:10px}.theme-preview-tools{margin-bottom:9px}.mote-playground{min-height:150px}.mote-stage{padding-top:18px;padding-bottom:18px}}

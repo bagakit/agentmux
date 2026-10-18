@@ -6,7 +6,8 @@ import { createServer } from 'vite'
 import { createReviewCatalog, root, sourceRoots } from './catalog.mjs'
 
 const source = import.meta.dirname
-const motionStyle = resolve(root, 'packages/client-ui/src/styles/semantic-icons.css')
+const sharedStyles = Object.fromEntries(['semantic-icons', 'mote-identity'].map(name =>
+  [`/${name}.css`, resolve(root, `packages/client-ui/src/styles/${name}.css`)]))
 const watchedRoots = [source, ...sourceRoots.map(path => resolve(root, path))]
 const relevant = file => watchedRoots.some(path => file.startsWith(path + '/'))
   && ['.ts', '.tsx', '.css', '.js', '.json'].includes(extname(file))
@@ -30,12 +31,12 @@ export function iconReviewConfig({ port = 4186, open = false, context } = {}) {
         server.httpServer?.once('close', () => clearTimeout(refresh))
         server.middlewares.use(async (req, res, next) => {
           const path = req.url?.split('?')[0]
-          if (!['/catalog.json', '/semantic-icons.css'].includes(path)) return next()
+          if (path !== '/catalog.json' && !Object.hasOwn(sharedStyles, path)) return next()
           res.setHeader('Cache-Control', 'no-store')
           try {
-            if (path === '/semantic-icons.css') {
+            if (Object.hasOwn(sharedStyles, path)) {
               res.setHeader('Content-Type', 'text/css')
-              res.end(await fs.readFile(motionStyle))
+              res.end(await fs.readFile(sharedStyles[path]))
             } else {
               const metadata = await server.ssrLoadModule(resolve(source, 'catalog-source.ts'))
               const catalog = await createReviewCatalog(metadata, { context })
