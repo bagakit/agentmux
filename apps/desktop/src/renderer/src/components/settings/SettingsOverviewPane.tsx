@@ -38,7 +38,7 @@ export function SettingsOverviewPane<Module extends SettingsModule>({ config, gr
           const Icon = item.icon
           return <button key={item.id} type="button" className="settings-overview__shortcut" data-settings-shortcut={item.id} data-settings-target={item.id} onClick={() => onOpen(item.id)}>
             <Icon size={20} aria-hidden="true" />
-            <span><strong>{item.title}</strong><small>{item.savedSummary(config)}</small></span>
+        <span><strong>{item.title}</strong><small title={item.savedSummary(config)}>{item.savedSummary(config)}</small></span>
             <ThemeNavigationDisclosureIcon size={14} aria-hidden="true" />
           </button>
         })}
