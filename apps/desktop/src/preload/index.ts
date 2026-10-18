@@ -522,6 +522,7 @@ const api: AgentMuxPreloadApi = {
       return unwrapSessionAgentLaunchResult(result)
     },
     launchTerminal: (input: TerminalLaunchInput) => ipcRenderer.invoke('sessions:launchTerminal', input).then(unwrapSessionLaunchResult),
+    historySource: reference => ipcRenderer.invoke('sessions:historySource', reference),
     historySources: (options?: { observation: true }) => options === undefined
       ? ipcRenderer.invoke('sessions:historySources') : ipcRenderer.invoke('sessions:historySources', options),
     confirmNativeSession: (session, input) => ipcRenderer.invoke('sessions:confirmNativeSession', session, input),

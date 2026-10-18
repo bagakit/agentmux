@@ -1155,6 +1155,14 @@ export type SessionHistorySourcesObservation = {
   warnings: RuntimeEndpointWarning[]
 }
 
+/** Exact retained metadata lookup; Runtime IDs name semantic Core owners, never ctxmux instances. */
+export type SessionHistorySourceReference = SessionHistoryReference | { runtimeId: string; agentSessionId: string }
+export type SessionHistorySourceObservation = {
+  reference: SessionHistorySourceReference
+  source: AgentSessionHistoryDescriptor | null
+  issue: { code: string; message: string; recovery: string } | null
+}
+
 export type ProviderCatalogObservation = {
   catalog: AgentCatalogEntry[]
   warnings: RuntimeEndpointWarning[]
@@ -1931,8 +1939,9 @@ export type AgentMuxDesktopApi = {
     resolveCreationSessionId(hostId: string, createOperationId: string): Promise<string>
     creation(hostId: string, agentSessionId: string): Promise<AgentMuxAgentCreationInspection>
     launchTerminal(input: TerminalLaunchInput): Promise<SessionSnapshot>
-    historySources(options: { observation: true }): Promise<SessionHistorySourcesObservation>
+    historySource(reference: SessionHistorySourceReference): Promise<SessionHistorySourceObservation>
     historySources(): Promise<AgentSessionHistoryDescriptor[]>
+    historySources(options: { observation: true }): Promise<SessionHistorySourcesObservation>
     timeline(session: SessionHistoryReference): Promise<AgentTimelineSnapshot>
     dispatches(session: SessionHistoryReference, options?: SessionDispatchPageOptions): Promise<AgentMuxRpcResult<'message.dispatch.ls'>>
     dispatch(session: SessionHistoryReference, sourceMessageId: string): Promise<AgentMuxRpcResult<'message.dispatch.read'>>
