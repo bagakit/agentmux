@@ -1,3 +1,4 @@
+import { decodePreparedTerminal, parsePreparedTerminal, type AgentMuxPreparedTerminal } from './terminal-preparation.js'
 import { parseExternalConversationReference, parseExternalConversationAuthority, externalConversationAuthor, externalConversationRecordId, type AgentExternalConversationAuthorityPort, type AgentExternalConversationReceipt, type AgentExternalConversationReference } from './external-conversation.js'
 import { mintObjectId } from './object-id.js'
 import type { ReadingDiagnosticRecord, ReadingDiagnosticReason } from './reading-diagnostic.js'
@@ -3923,17 +3924,31 @@ export class AgentMuxClient {
     }
   }
 
+  /** Capture this Host's complete launch request without starting or observing a Run. */
+  prepareTerminal(input: AgentMuxTerminalCreateInput): AgentMuxPreparedTerminal {
+    const createOperationId = input.createOperationId ?? mintObjectId()
+    return parsePreparedTerminal({
+      createOperationId,
+      workspacePath: input.workspacePath,
+      launch: JSON.stringify({ createOperationId, request: this.kernel.prepareStart({
+        program: input.command ?? process.env.SHELL ?? '/bin/sh',
+        args: input.args ?? [], cwd: input.workspacePath,
+        env: terminalEnvironment({ ...input.env, AGENTMUX_MESSAGE_QUEUE_PATH: this.messageQueue.path }, this.agentSessionStorePath()),
+        ...(input.cols === undefined ? {} : { cols: input.cols }),
+        ...(input.rows === undefined ? {} : { rows: input.rows })
+      }) })
+    })
+  }
+
   async createTerminal(input: AgentMuxTerminalCreateInput): Promise<AgentMuxRun> {
     this.requireConnected()
-    const run = await this.kernel.start({
-      operationKey: input.createOperationId ?? mintObjectId(),
-      program: input.command ?? process.env.SHELL ?? '/bin/sh',
-      args: input.args ?? [],
-      cwd: input.workspacePath,
-      env: terminalEnvironment({ ...input.env, AGENTMUX_MESSAGE_QUEUE_PATH: this.messageQueue.path }, this.agentSessionStorePath()),
-      ...(input.cols === undefined ? {} : { cols: input.cols }),
-      ...(input.rows === undefined ? {} : { rows: input.rows })
-    })
+    return await this.createPreparedTerminal(this.prepareTerminal(input))
+  }
+
+  async createPreparedTerminal(input: AgentMuxPreparedTerminal): Promise<AgentMuxRun> {
+    const { prepared, request } = decodePreparedTerminal(input)
+    this.requireConnected()
+    const run = await this.kernel.startPrepared(request, prepared.createOperationId)
     this.runPids.set(run.runId, run.pid)
     const projected = this.projectRun(run)
     this.publisher.publishRunState(projected)
