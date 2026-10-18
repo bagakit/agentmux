@@ -2,7 +2,15 @@ import { AgentMuxError, connectAgentMuxRpc, parseAgentExternalMessageAuthor, par
 
 /** Original local Desktop business owner, separate from the semantic Host and its input journal. */
 export function createDesktopExternalInputAuthority(options: { desktopSocketPath: string; executionHostId: string }): AgentExternalInputAuthorityPort {
-  return { async assertCurrent(author, intent): Promise<void> {
+  return { async resolveConversationMessage(input) {
+    let rpc: Awaited<ReturnType<typeof connectAgentMuxRpc>> | undefined
+    try {
+      rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: options.desktopSocketPath } })
+      const result = await rpc.call('connection.ingress.record-authority', input)
+      if (result.message && (result.message.hostId !== options.executionHostId || result.message.agentSessionId !== input.agentSessionId || result.message.ingressId !== input.ingressId)) throw new AgentMuxError('The original group record belongs to another target.', 'EXTERNAL_RECORD_TARGET_UNCONFIRMED')
+      return result
+    } finally { try { await rpc?.dispose() } catch { /* Release this read only. */ } }
+  }, async assertCurrent(author, intent): Promise<void> {
     let rpc: Awaited<ReturnType<typeof connectAgentMuxRpc>> | undefined
     const unavailable = () => new AgentMuxError('The original external input authority is unconfirmed. Retain the original input and reconnect its authority owner. Ordinary Agent input remains available.', 'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED')
     try {
