@@ -3,6 +3,8 @@ import { focusActivityEntryTime, focusBucketForSession } from './focus-context'
 import { observeAgentSession } from './agent-observation'
 import type { CollaborationAgent } from './agent-collaboration'
 
+export const COLLABORATION_ACTIVITY_MS = 3200
+
 /** Original activity facts choose visual weight; no activity is inferred from map use or output. */
 export function collaborationAgentPresentation(session: Extract<SessionSnapshot, { kind: 'agent' }>, name?: string): Pick<CollaborationAgent, 'name' | 'tier' | 'lastActivityAt'> {
   const bucket = focusBucketForSession(session, false)

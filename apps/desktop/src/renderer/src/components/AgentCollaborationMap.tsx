@@ -95,7 +95,8 @@ function CollaborationReadingMap({ request, visible, onOpen, onViewInFocus }: { 
   }, [request])
   const wanted = useMemo(() => new Set([...visibleIds, ...(peeked ? [peeked] : []), ...(selection?.kind === 'agent' ? [selection.id] : [])]), [visibleIds, selection, peeked])
   const subjects = useMemo(() => [...wanted].flatMap(id => { const subject = catalog.agents.get(id)?.subject; return subject ? [subject] : subjectKey === id && request.kind === 'focus' ? [request.subject] : [] }), [wanted, catalog, request, subjectKey])
-  const reading = useCollaborationReading(subjects, enabled)
+  const activityScope = useRef<ReadonlySet<string>>(new Set())
+  const reading = useCollaborationReading(subjects, enabled, activityScope)
   const project = useMemo(createCollaborationProjector, [])
   const recorded = useMemo(() => project(reading.facts), [project, reading.facts])
   const contextCache = useRef(new Map<string, { session: Facts['sessions'][number] | AgentSessionHistoryDescriptor; name: string | undefined; workspace: ReturnType<typeof workspaceForSession>; topicId: ReturnType<typeof topicIdForSession>; context: FocusContext }>())
@@ -146,6 +147,8 @@ function CollaborationReadingMap({ request, visible, onOpen, onViewInFocus }: { 
     return result
   }, [recorded.agents, catalog.agents, originals])
   const projection = useMemo(() => ({ ...recorded, agents }), [recorded, agents])
+  // The notification scope follows original displayed identities; it never expands history/body demand.
+  activityScope.current = useMemo(() => new Set([...agents.values()].flatMap(agent => agent.subject ? [collaborationSubjectKey(agent.subject)] : [])), [agents])
   const members = useMemo(() => new Set(areas.flatMap(area => area.members)), [areas])
   const relations = useMemo(() => visibleCollaboration(projection.relations, members, kinds), [projection, members, kinds])
   const identitySelector = useMemo(createFocusContextIdentitySelector, []), goalSelector = useMemo(createFocusGoalLinksSelector, [])
