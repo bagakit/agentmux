@@ -215,7 +215,7 @@ export class TerminalLiveOutputQueue implements Iterable<TerminalLiveItem> {
  * this payload. The existing xterm parser owns continuation across raw writes.
  */
 function dataAfterByte(chunk: TerminalLiveOutputChunk, afterByte: number): Uint8Array {
-  return chunk.dataBytes.subarray(Math.max(0, afterByte - chunk.startByte))
+  return afterByte <= chunk.startByte ? chunk.dataBytes : chunk.dataBytes.subarray(Math.max(0, afterByte - chunk.startByte))
 }
 
 /**
@@ -249,6 +249,8 @@ export function composeTerminalLiveOutputWrite(
     bytes += suffix.byteLength
     nextCursor = chunk.endByte
   }
+  // Borrow the original read-only bytes through the parser callback; only multiple spans need a merge.
+  if (parts.length === 1) return { dataBytes: parts[0]!, cursor: nextCursor, gap }
   const dataBytes = new Uint8Array(bytes)
   let offset = 0
   for (const part of parts) {
