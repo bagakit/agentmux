@@ -7,6 +7,13 @@ app.setPath('userData', path.join(owned, 'user-data'))
 app.setPath('sessionData', path.join(owned, 'session-data'))
 const result = { passed: false, captureOnly: true, aestheticReview: 'not-performed', frames: [], interactions: [],
   boundary: 'Actual App, SettingsPanel, original catalog/editors and production CSS with isolated public Preview data and trusted Electron Renderer input. No user App, live Runtime, durability, external service or installation claim.' }
+// A diagnostic journal preserves completed original inputs if the OS blocks a
+// later native capture. It never represents a successful whole-run receipt.
+const checkpoint = stage => {
+  const target = path.join(evidence, 'render-progress.json')
+  fs.writeFileSync(target + '.pending', JSON.stringify({...result, passed:false, stage, incomplete:true}, null, 2))
+  fs.renameSync(target + '.pending', target)
+}
 let win
 app.whenReady().then(async () => {
   const bounded = (promise, label) => new Promise((resolve, reject) => {
@@ -98,6 +105,7 @@ app.whenReady().then(async () => {
     const file = name + '.png'
     fs.writeFileSync(path.join(evidence,file),(await bounded(win.webContents.capturePage(undefined,{stayHidden:true}),'capture '+file)).toPNG())
     result.frames.push({file,page,theme,position,checks})
+    checkpoint('captured:' + file)
   }
   const captureSegments = async (prefix, id, color) => {
     const pane = node(`[data-settings-pane="${id}"]`)
@@ -105,7 +113,7 @@ app.whenReady().then(async () => {
     // These are passive review frames; authored values and control identity stay intact.
     await read('document.activeElement?.blur()')
     await read(`${pane}.scrollTop=0`)
-    const readers = await read(`(() => {let index=0;return [...${pane}.querySelectorAll('*')].filter(n=>n.checkVisibility()&&n.clientHeight>80&&n.scrollHeight>n.clientHeight+24&&['auto','scroll'].includes(getComputedStyle(n).overflowY)).map(n=>{n.dataset.settingsReviewScroll=String(index++);n.scrollTop=0;return {id:n.dataset.settingsReviewScroll,height:n.scrollHeight,viewport:n.clientHeight}})})()`)
+    const readers = await read(`(() => {for(const n of ${pane}.querySelectorAll('[data-settings-review-scroll]'))delete n.dataset.settingsReviewScroll;let index=0;return [...${pane}.querySelectorAll('*')].filter(n=>n.checkVisibility()&&n.clientHeight>80&&n.scrollHeight>n.clientHeight+24&&['auto','scroll'].includes(getComputedStyle(n).overflowY)).map(n=>{n.dataset.settingsReviewScroll=String(index++);n.scrollTop=0;return {id:n.dataset.settingsReviewScroll,height:n.scrollHeight,viewport:n.clientHeight}})})()`)
     await capture(prefix,id,color)
     const dimensions = await read(`({height:${pane}.scrollHeight,viewport:${pane}.clientHeight})`)
     assert.ok(dimensions.viewport>0,'The actual page has a readable viewport')
@@ -359,6 +367,18 @@ app.whenReady().then(async () => {
       untested:['external sign-in','real platform effects','keychain persistence','external message delivery','version submission','Mote association writes','local bot removal']}
     result.interactions.push({kind:'lark-explicit-actions',serviceSaves:1,botSaves:1,permissionRequests:1,versionCreations:1,implicitConnectorWrites:0})
   }
+  const focusContentSize = async () => {
+    const pane='[data-settings-pane="focus"]'
+    for (const [scene,label] of [['reading','Agent preview'],['links','Links']]) {
+      await click(button(pane+' [aria-label="Focus example view"]',label))
+      const geometry=await read(`(() => {const canvas=${node(pane+' .focus-settings-preview__canvas')},content=canvas.lastElementChild,style=getComputedStyle(canvas);return {scene:canvas.dataset.scene,height:canvas.getBoundingClientRect().height,unused:canvas.getBoundingClientRect().bottom-content.getBoundingClientRect().bottom-parseFloat(style.paddingBottom),populated:!!canvas.querySelector('.focus-settings-preview__peek,.focus-settings-preview__workface')}})()`)
+      assert.equal(geometry.scene,scene)
+      assert.equal(geometry.populated,false,'The compact example is the original idle scene')
+      assert.ok(geometry.height>0&&geometry.unused<=2,'Focus short examples fit their content without a padded empty canvas')
+      result.interactions.push({kind:'focus-content-geometry',...geometry})
+      await capture('focus-content-'+scene,'focus','dark','content-sized original example')
+    }
+  }
   const pageInteractions = async id => {
     const pane = `[data-settings-pane="${id}"]`
     const saves = await read('window.settingsHomeProbe.saves.length')
@@ -383,14 +403,23 @@ app.whenReady().then(async () => {
       await capture('appearance-theme-details',id,'dark','theme comparison and scope')
       await click(node('.settings-appearance__help > summary'))
     } else if (id==='notifications') {
-      await click(node('[aria-label="Notification dwell"]')); await key('Home')
-      await until(`${node('[aria-label="Notification preview"]')}.dataset.notificationMode==='off'`)
-      assert.match(await read(`${node('[aria-label="Notification preview"]')}.textContent`),/Unsaved preview/)
-      assert.equal(await read(`${node('.notification-sound-toggle input')}.disabled`),true)
-      await capture('notifications-off',id,'dark','unsaved off preview')
-      await key('ArrowRight')
-      await until(`${node('[aria-label="Notification preview"]')}.dataset.notificationMode!=='off'`)
+      const slider='[aria-label="Desktop banner duration"]', preview='[aria-label="Desktop banner preview"]'
+      const sound=pane+' .notification-sound-toggle input'
+      await click(node(slider)); await key('Home')
+      await until(`${node(preview)}.dataset.notificationMode==='off'`)
+      assert.match(await read(`${node(preview)}.textContent`),/Unsaved preview/)
+      assert.equal(await read(`${node(sound)}.disabled`),false,'Sound remains an independent preference for enabled A2A alerts')
+      const originalSound=await read(`${node(sound)}.checked`)
+      await choose(sound)
+      assert.equal(await read(`${node(sound)}.checked`),!originalSound,'The original sound draft remains editable while Agent status banners are off')
+      assert.equal(await read(`${node(preview)}.dataset.notificationMode`),'off')
+      await capture('notifications-off',id,'dark','unsaved off preview and independent sound')
+      await click(node(slider)); await key('Home'); await key('ArrowRight')
+      await until(`${node(preview)}.dataset.notificationMode!=='off'`)
       await capture('notifications-brief',id,'dark','unsaved dwell preview')
+      await key('End')
+      await until(`${node(preview+' .notification-preview__dwell')}.dataset.persist==='true'`)
+      await capture('notifications-persistent',id,'dark','until-dismissed draft with independent sound')
     } else if (id==='continuity') {
       const windowInput = '[aria-label="Automatic recovery window"]', unit = '[aria-label="Automatic recovery window unit"]'
       const save = pane+' [data-settings-save-bar] button'
@@ -570,6 +599,7 @@ app.whenReady().then(async () => {
       await nav(id); assert.equal(await read(`${node(show)}.checked`),false)
       await capture('space-dense-draft',id,'dark','density and recorded-time preview')
     } else if (id==='focus') {
+      await focusContentSize()
       await choose(pane+' input[name="focus-reply-lines"][value="3"]')
       await click(button(pane+' [aria-label="Focus example view"]','Agent preview'))
       await click(node(pane+' .focus-settings-preview__try'))
@@ -737,6 +767,8 @@ app.whenReady().then(async () => {
       await previewRoundTrip(id,id==='focus'?'agent-reading':'fine-tuning',id==='focus'?'input[name="focus-recent-inputs"][value="6"]':'[data-settings-field="pointerDurationMs"] input')
       result.passed=true; return
     }
+    if (mode==='focus-content') { await nav('focus'); await theme('dark'); await focusContentSize(); result.passed=true; return }
+    await until(`${node('.settings-overview__art')}.complete&&${node('.settings-overview__art')}.naturalWidth>0`,'The actual Overview artwork is decoded before its normal visual baseline')
     for (const [width,height,label] of [[1440,940,'wide'],[900,620,'short'],[500,840,'compact'],[320,700,'narrow']]) {
       await resize(width,height)
       for (const mode of ['dark','light']) {
@@ -802,34 +834,19 @@ app.whenReady().then(async () => {
     await theme('dark'); await disclosureGeometry()
     for (const entry of reviewCatalog) {
       await nav(entry.id)
-      const pane = node(`[data-settings-pane="${entry.id}"]`)
-      await read(`${pane}.scrollTop=0`)
-      for (const mode of ['dark','light']) { await theme(mode); await capture(`page-${entry.id}-${mode}`,entry.id,mode) }
-      // Read every vertical segment of long pages for independent complete-page review.
-      await theme('dark')
-      const dimensions = await read(`({height:${pane}.scrollHeight,viewport:${pane}.clientHeight})`)
-      for (let offset=dimensions.viewport*.85,part=1;offset<dimensions.height-dimensions.viewport;offset+=dimensions.viewport*.85,part++) {
-        await read(`${pane}.scrollTop=${Math.round(offset)}`)
-        await capture(`page-${entry.id}-detail-${part}`,entry.id,'dark','continuation')
-      }
-      if (dimensions.height>dimensions.viewport+24) {
-        await read(`${pane}.scrollTop=${pane}.scrollHeight`)
-        await capture(`page-${entry.id}-end`,entry.id,'dark','bottom')
-      }
-      await read(`${pane}.scrollTop=0`)
-      const innerReaders = await read(`(() => {let index=0;return [...${pane}.querySelectorAll('*')].filter(n=>n.checkVisibility()&&n.clientHeight>80&&n.scrollHeight>n.clientHeight+24&&['auto','scroll'].includes(getComputedStyle(n).overflowY)).map(n=>{n.dataset.settingsReviewScroll=String(index++);return {id:n.dataset.settingsReviewScroll,height:n.scrollHeight,viewport:n.clientHeight}})})()`)
-      for (const reader of innerReaders) {
-        const scroll = `${pane}.querySelector('[data-settings-review-scroll="${reader.id}"]')`
-        for (let offset=reader.viewport*.85,part=1;offset<reader.height;offset+=reader.viewport*.85,part++) {
-          await read(`${scroll}.scrollTop=${Math.round(offset)}`)
-          await capture(`page-${entry.id}-inner-${reader.id}-${part}`,entry.id,'dark','inner continuation')
-          if (offset>=reader.height-reader.viewport) break
-        }
-        await read(`${scroll}.scrollTop=0`)
+      for (const mode of ['dark','light']) {
+        await theme(mode)
+        await captureSegments(`page-${entry.id}-${mode}`,entry.id,mode)
       }
     }
     await theme('dark')
-    for (const {id} of reviewCatalog) { await nav(id); await pageInteractions(id) }
+    for (const {id} of reviewCatalog) {
+      await nav(id); await pageInteractions(id)
+      result.events = await read('window.settingsHomeProbe.events')
+      result.completedInputPages ??= []
+      result.completedInputPages.push(id)
+      checkpoint('original-inputs-complete:' + id)
+    }
     for (const {id} of reviewCatalog) {
       await resize(500,840); await nav(id)
       for (const color of ['dark','light']) {
@@ -876,6 +893,30 @@ app.whenReady().then(async () => {
           await fill('.prompt-editor__name input',original)
           await click(node('[data-settings-pane="prompts"] .prompt-editor__back'))
           await capture('page-prompts-compact-return-'+color,id,color,'return to original prompt list')
+        }
+      }
+    }
+    // Audit the original progressive disclosures after the normal task flow.
+    // Only real summary clicks are used; no setting is saved or external action invoked.
+    for (const {id} of reviewCatalog) {
+      await resize(1440,940); await nav(id); await theme('dark')
+      const pane=node(`[data-settings-pane="${id}"]`), opened=[]
+      const saves=await read('window.settingsHomeProbe.saves.length')
+      for (let step=0;step<80;step++) {
+        const summary=`Array.from(${pane}.querySelectorAll('details:not([open]) > summary')).find(n=>n.checkVisibility())`
+        if (!await read(`!!(${summary})`)) break
+        const label=await read(`(${summary}).textContent.trim()`)
+        await click(summary)
+        opened.push(label)
+        assert.ok(step<79,'Every applicable original disclosure is reached without an unbounded loop')
+      }
+      result.interactions.push({kind:'page-disclosure-audit',page:id,opened,actions:opened.length,implicitSaves:0})
+      assert.equal(await read('window.settingsHomeProbe.saves.length'),saves,'Reviewing disclosures never saves configuration')
+      if (opened.length) for (const [width,height,size] of [[1440,940,'wide'],[500,840,'compact']]) {
+        await resize(width,height)
+        for (const color of ['dark','light']) {
+          await theme(color)
+          await captureSegments(`page-${id}-expanded-${size}-${color}`,id,color)
         }
       }
     }
