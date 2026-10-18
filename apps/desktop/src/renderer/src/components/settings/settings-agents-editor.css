@@ -1,0 +1,13 @@
+.settings-executor-name { display: grid; flex: 1; min-width: 0; gap: var(--sp-1); }
+.settings-executor-name > span { color: var(--text-3); font-size: var(--fs-meta); }
+.settings-executor-name > input { width: 100%; min-width: 0; color: var(--text); font-size: var(--fs-title); font-weight: 600; }
+.settings-executor-detail-layout .settings-resource-editor__header { align-items: flex-start; }
+.settings-executor-detail-layout .settings-resource-editor__header > .agent-provider-mark { padding-top: var(--sp-5); }
+.settings-executor-detail-layout .settings-resource-editor__header > .check-pill { align-self: center; }
+@container settings-resource (width < 720px) {
+  .settings-agent-pane[data-editor-view='editor'] > .settings-agent-toolbar,
+  .settings-agent-pane[data-editor-view='editor'] .settings-executor-toolbar,
+  .settings-agent-pane[data-editor-view='editor'] .settings-provider-catalog:not(:has(.settings-provider-catalog__notice)) { display: none; }
+  .settings-agent-pane[data-editor-view='editor'] .settings-provider-catalog > :not(.settings-provider-catalog__notice) { display: none; }
+  .settings-agent-pane[data-editor-view='editor'] .settings-resource-back { margin-bottom: var(--sp-3); }
+}

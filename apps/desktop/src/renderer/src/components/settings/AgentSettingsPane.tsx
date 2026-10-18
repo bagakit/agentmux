@@ -22,6 +22,7 @@ import { ProviderCatalogPane } from './ProviderCatalogPane'
 import { api } from '../../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { SettingsNavigationRequest } from '../SettingsNavigation'
+import './settings-agents-editor.css'
 
 const ThemeStatusCompletedIcon = semanticIconComponent('status.completed')
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
@@ -365,7 +366,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
     return counts
   }, {})
   return (
-    <div className="settings-agent-pane">
+    <div className="settings-agent-pane" data-editor-view={scope === 'templates' ? view : 'host'}>
       <div className="settings-pane-toolbar settings-agent-toolbar">
         {scopeControl}
         <span className="settings-resource-count">{scope === 'templates' ? `${executors.length} global templates` : null}</span>
@@ -399,13 +400,11 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
             <section className="agent-settings-card" key={id} id={`executor-settings-${id}`} data-resource-editor={id}>
               <header className="settings-resource-editor__header">
                 <span className="agent-provider-mark"><AgentAvatar providerId={draft.providerId} executorId={id} label={draft.label} appearance={avatar ?? {}} size={20} /></span>
-                <span><strong>{draft.label}</strong><small>{agentProviderLabel(draft.providerId)} executor · Global template</small></span>
+                <label className="settings-executor-name"><span>Name</span><TextInput data-executor-name value={draft.label} onChange={(event) => update(id, { label: event.target.value })} /><small>{agentProviderLabel(draft.providerId)} executor · Global template</small></label>
                 <em className={`check-pill check-pill--${detection?.state ?? 'idle'}`}>{status.icon}{status.label}</em>
               </header>
               <div className="agent-settings-fields">
-                <h4 className="settings-executor-section-title">Configuration</h4>
                 {detection?.detail ? <p className="settings-inline-error">{detection.detail}</p> : null}
-                <label><span>Name</span><TextInput data-executor-name value={draft.label} onChange={(event) => update(id, { label: event.target.value })} /></label>
                 {Object.hasOwn(resource.expected, id) ? <dl className="settings-executor-identity"><div><dt>Provider</dt><dd>{agentProviderLabel(draft.providerId)}</dd></div><div><dt>Executor ID</dt><dd><code>{id}</code></dd></div></dl> :
                   <label><span>Provider</span><select data-executor-provider disabled={saving} value={draft.providerId} onChange={(event) => chooseProvider(id, event.target.value)}>{!providerCatalog.some(provider => provider.id === draft.providerId) ? <option value={draft.providerId}>{agentProviderLabel(draft.providerId)} · current draft</option> : null}{providerCatalog.map((provider) => <option key={provider.id} value={provider.id}>{provider.label}</option>)}</select></label>}
                 <label><span>Executable</span><TextInput aria-label="Executor executable" value={draft.command} onChange={(event) => update(id, { command: event.target.value })} /></label>
