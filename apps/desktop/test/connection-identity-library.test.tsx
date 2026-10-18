@@ -24,7 +24,10 @@ beforeEach(async () => {
   const call = f.connectionCalls.getMockImplementation()!
   f.connectionCalls.mockImplementation(async (method, input) => {
     const result = await call(method, input)
-    return method === 'connection.ls' ? { ...result, connections: result.connections.map((record: ConnectionRecord) => ({ ...record, ...(states[record.config.connectionId] ? { initialSetup: states[record.config.connectionId] } : {}) })) } : result
+    return method === 'connection.ls' && 'connections' in result ? { ...result, connections: result.connections.map((record: ConnectionRecord) => {
+      const initialSetup = states[record.config.connectionId]
+      return initialSetup ? { ...record, initialSetup } : record
+    }) } : result
   })
 })
 afterEach(async () => { await f?.close() })
@@ -133,12 +136,14 @@ it('recovers a lost deletion reply after Settings remount even when the deleted 
   })
   await f.click('Remove identity'); await ready(() => expect(document.body.textContent).toContain('Removal result not confirmed.'))
   const input = f.connectionCalls.mock.calls.find(([method]) => method === 'connection.delete')![1]
+  if (!('operationId' in input)) throw Error('The actual deletion input must retain its operation ID')
+  expect(input.operationId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/u)
   await f.remountSettings()
   await ready(() => expect(document.querySelector('[aria-label="Original identity removals"]')).not.toBeNull())
   expect(identity('completed-identity')).toBeNull()
   await f.click('Review identity removal'); await f.click('Check original removal')
   await ready(() => expect(document.body.textContent).toContain('The original identity removal is confirmed.'))
   expect(f.connectionCalls.mock.calls.filter(([method]) => method === 'connection.delete')).toHaveLength(1)
-  expect(f.connectionCalls.mock.calls.some(([method, value]) => method === 'connection.delete.inspect' && value.operationId === input.operationId)).toBe(true)
+  expect(f.connectionCalls.mock.calls.some(([method, value]) => method === 'connection.delete.inspect' && 'operationId' in value && value.operationId === input.operationId)).toBe(true)
   expect(document.querySelector('[aria-label="Original identity removals"]')).toBeNull()
 })
