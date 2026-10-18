@@ -2528,6 +2528,19 @@ export class RuntimeController {
     return { message, hostId: reference.hostId }
   }
 
+  async notifySessionMessage(reference: SessionHistoryReference, messageId: string, operationId: string) {
+    await this.sessionMessage(reference, messageId)
+    return { ...await this.configuredClient(reference.hostId).notifyMessages({ operationId, messageIds: [messageId] }), hostId: reference.hostId }
+  }
+
+  async inspectSessionMessageNotification(reference: SessionHistoryReference, messageId: string, key: import('@agentmux/core').AgentPromptInputKey) {
+    const { message } = await this.sessionMessage(reference, messageId)
+    if (!message || key.kind !== 'prompt' || key.agentSessionId !== message.envelope.recipientSessionId ||
+        key.expectedRun.runId !== message.envelope.recipientRunId) throw new AgentMuxError(
+      'This notification input names another original recipient. The message, Agent and original operation are retained.', 'MESSAGE_RECIPIENT_MISMATCH')
+    return { record: await this.configuredClient(reference.hostId).inspectAgentPromptSubmission(key) }
+  }
+
   async observeOriginalRun(hostId: string, runId: string): Promise<Pick<AgentMuxRun, 'runId' | 'state'>> {
     const subject = await (await this.connectedClient(hostId, 'runtime')).runtimeSubject({ kind: 'terminal-run', runId })
     return { runId: subject.run.runId, state: subject.run.state }

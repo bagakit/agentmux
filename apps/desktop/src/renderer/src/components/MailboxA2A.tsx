@@ -66,6 +66,8 @@ type Props = {
   onCopy?: ((text: string) => Promise<boolean>) | undefined
   onFill?: ((text: string) => Promise<string | void>) | undefined
   renderNavigation?: ((messageId: string) => ReactNode) | undefined
+  renderNotification?: ((message: AgentMuxMessageMetadata | DurableAgentMuxMessage) => ReactNode) | undefined
+  notificationAttempt?: ((message: AgentMuxMessageMetadata | DurableAgentMuxMessage) => { operationId: string; state: 'pending' | 'submitted' | 'unconfirmed' | 'not-applied' } | undefined) | undefined
 }
 
 /** Original message reading, independent of input history, delivery and consumption. */
@@ -117,8 +119,19 @@ export function MailboxA2A(props: Props) {
   const current = detail?.scope === scope && detail.messageId === selectedId ? detail : undefined
   const record = current?.record
   const deliveryMessage = selected ?? record
-  const deliveryReason = deliveryMessage ? a2aMessageDeliveryReason(deliveryMessage) : undefined
-  const deliveryStatus = deliveryMessage ? a2aMessageStatus(deliveryMessage) : undefined
+  function observedNotification(message: AgentMuxMessageMetadata | DurableAgentMuxMessage) {
+    const attempt = props.notificationAttempt?.(message)
+    const earlier = message.deliveryMode === 'reference' && attempt && message.notification?.notificationId && message.notification.notificationId !== attempt.operationId
+    const priorInbox = message.deliveryMode === 'reference' && attempt && !message.notification?.notificationId
+    const sameOperation = message.deliveryMode === 'reference' && attempt && message.notification?.notificationId === attempt.operationId
+    const status = sameOperation ? attempt.state === 'submitted' ? undefined : `This notification: ${attempt.state === 'not-applied' ? 'not applied' : attempt.state}` : a2aMessageStatus(message)
+    return { earlier, priorInbox, status: priorInbox && status ? `Prior inbox observation: ${status[0]!.toLowerCase()}${status.slice(1)}`
+      : earlier && status ? `Earlier ${status[0]!.toLowerCase()}${status.slice(1)}` : status,
+      reason: sameOperation && attempt.state !== 'unconfirmed' ? undefined : a2aMessageDeliveryReason(message),
+      label: sameOperation ? `This notification: ${attempt.state === 'not-applied' ? 'not applied' : attempt.state}` : a2aMessageDeliveryLabel(message) }
+  }
+  const observed = deliveryMessage ? observedNotification(deliveryMessage) : undefined
+  const deliveryReason = observed?.reason, deliveryStatus = observed?.status
   const issues = <>
     {props.error ? <MailboxSourceNotice title="Message reading is unconfirmed" message={props.error} action="Refresh messages" onAction={() => void props.refresh()} /> : null}
     {props.observationError ? <MailboxSourceNotice title="Automatic message updates are unavailable" message={props.observationError} action="Refresh messages" onAction={() => void props.refresh()} /> : null}
@@ -133,7 +146,7 @@ export function MailboxA2A(props: Props) {
         messageId={record.envelope.messageId} speaker={{ role: 'agent', id: record.envelope.senderSessionId! }}
         name={name(record.envelope.senderSessionId!)} content={record.envelope.body} copyText={record.envelope.body} contentBoundary="body"
         createdAt={record.envelope.createdAt} {...(onCopy ? { onCopy } : {})}
-        messageActions={<>{onFill ? <MailboxDraftAction value={record.envelope.messageId} onFill={() => onFill(record.envelope.body)} /> : null}{props.renderNavigation?.(record.envelope.messageId)}</>}
+        messageActions={<>{props.renderNotification?.(deliveryMessage!)}{onFill ? <MailboxDraftAction value={record.envelope.messageId} onFill={() => onFill(record.envelope.body)} /> : null}{props.renderNavigation?.(record.envelope.messageId)}</>}
         messageDetails={<dl className="composer-mailbox__record-facts">
           <dt>Source</dt><dd>Original A2A message · {reference.hostId}</dd>
           <dt>Message ID</dt><dd>{record.envelope.messageId}</dd>
@@ -143,11 +156,11 @@ export function MailboxA2A(props: Props) {
           <dt>Sender Run</dt><dd>{record.envelope.senderRunId ?? 'Not recorded'}</dd>
           <dt>Recipient Run</dt><dd>{record.envelope.recipientRunId ?? 'Not determined at first save'}</dd>
           <dt>Saved</dt><dd><MailboxTime value={record.envelope.createdAt} complete /></dd>
-          <dt>{deliveryMessage?.deliveryMode === 'reference' ? 'Last observed notification' : 'Last observed delivery'}</dt><dd>{a2aMessageDeliveryLabel(deliveryMessage!)}{deliveryReason ? ` · ${deliveryReason}` : ''}</dd>
+          <dt>{observed?.earlier ? 'Earlier notification' : observed?.priorInbox ? 'Prior inbox observation' : deliveryMessage?.deliveryMode === 'reference' ? 'Last observed notification' : 'Last observed delivery'}</dt><dd>{observed?.label}{deliveryReason ? ` · ${deliveryReason}` : ''}</dd>
           {deliveryMessage?.notification?.notificationId ? <><dt>Notification input</dt><dd><code>{deliveryMessage.notification.notificationId}</code></dd></> : null}
         </dl>} />
-      {deliveryStatus ? <p className="composer-mailbox__record-status" title={a2aMessageDeliveryLabel(deliveryMessage!)}>{deliveryStatus}</p> : null}
-      {deliveryReason ? <p className="composer-mailbox__risk">{deliveryReason}</p> : null}
+      {deliveryStatus ? <p className="composer-mailbox__record-status" title={observed?.label}>{deliveryStatus}</p> : null}
+      {deliveryReason ? <p className="composer-mailbox__risk">{observed?.earlier ? 'Earlier notification: ' : observed?.priorInbox ? 'Prior inbox observation: ' : ''}{deliveryReason}</p> : null}
     </>}
   </article>
   return <>{issues}<div className="composer-mailbox__reading-tools"><span>{direction === 'incoming' ? 'Other Agents → this Agent' : 'This Agent → other Agents'} · {items.length} loaded</span>
@@ -157,13 +170,14 @@ export function MailboxA2A(props: Props) {
         const speaker = { role: 'agent' as const, id: peerId(item) }
         const identity = reading?.describeSpeaker?.(speaker, 18)
         const peerName = identity?.name || speaker.id
-        const status = a2aMessageStatus(item)
+        const observed = observedNotification(item), status = observed.status
         return <li key={item.envelope.messageId}><MailboxRecordRow recordKey={a2aMessageKey(item)}
           label={`${direction === 'incoming' ? 'From' : 'To'} ${peerName}`} text={undefined} bodyPreview={item.bodyPreview}
           avatar={identity?.avatar ?? <ConversationMessageAvatar speaker={speaker} name={peerName} size={18} providerId={identity?.providerId} project={identity?.project} />}
           metadata={<MailboxTime value={item.envelope.createdAt} />}
-          status={status ? <span title={a2aMessageDeliveryLabel(item)}>{status}</span> : null}
+          status={status ? <span title={observed.label}>{status}</span> : null}
           onOpen={props.onOpen} actions={<>
+            {props.renderNotification?.(item)}
             {onCopy ? <MailboxCopyAction value={item.envelope.messageId} onCopy={async () => onCopy((await readForAction(item.envelope.messageId)).envelope.body)} /> : null}
             {onFill ? <MailboxDraftAction value={item.envelope.messageId} onFill={async () => onFill((await readForAction(item.envelope.messageId)).envelope.body)} /> : null}
             {props.renderNavigation?.(item.envelope.messageId)}
