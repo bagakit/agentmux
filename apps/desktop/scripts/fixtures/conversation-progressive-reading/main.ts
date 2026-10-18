@@ -296,7 +296,8 @@ app.whenReady().then(async () => {
     await shot('earlier')
     await read('readingProof.holdEarlier()')
     await read(`document.querySelector('.activity-feed__reading-action[title="Read earlier conversation and process records in the original sequence"]').scrollIntoView({block:'nearest'})`)
-    await click(`document.querySelector('.activity-feed__reading-action[title="Read earlier conversation and process records in the original sequence"]')`)
+    const earlierPoint = await read('(() => { const r=document.querySelector(".activity-feed").getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2} })()')
+    await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...earlierPoint, deltaX: 0, deltaY: -620 })
     await ready('readingProof.heldEarlier()')
     result.delayedPageSelection = { before: await selectOriginal() }
     await read('readingProof.releaseEarlier()')
