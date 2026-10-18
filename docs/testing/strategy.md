@@ -127,6 +127,8 @@ Fast 与 Native 分开是为了让失败归因清晰，不允许用 Mock 代替 
 
 真实 Desktop Main 夹具还须在加载生产模块前设置并核对 Electron 的 `home`、`appData`、`userData` 与 `sessionData`；仅覆盖 `HOME` 或读取 `os.homedir()` 不能证明这些路径已隔离。独立启动入口先设置路径，再动态加载 Main，避免模块顶层提前固化用户目录。启动后复核实际 Store、scratch、Notes、Mote 和 connector owner 的目录；继承的 Agent 身份、Hook、端点及队列上下文须清除或由夹具明确替换。隔离缺口保留原回执和副作用未知，不以修正后的新夹具通过证明旧运行未触达用户数据。
 
+官方打包的私有启动检查由 `package-smoke-context.mjs` 提供明确环境：只保留系统搜索路径、语言和时区，替换私有 HOME、shell 配置目录、Store、消息队列及 Runtime/state，不继承执行检查的 Agent 凭据。检查失败后，先将该次私有 Desktop stdout/stderr、Host 日志及收尾回执保存在仓库本机状态目录，再删除临时包；每份日志最多保留末尾 1 MiB，回执明确完整、截断、读取期间变化或缺失，保留原主错误与收尾错误。证据保存本身失败时明确保留原暂存位置，不冒称已完成清理。该证据不代替启动成功，也不授权清理原 App、Run 或用户日志。
+
 ## 资源与故障证据
 
 本节的代表数值和故障结果是历史观测，适用范围由对应 receipt 的源码、产物、Runtime、机器和场景身份决定；它们不证明当前候选已通过，也不替代本轮热路径的相关消费者成本检查。当前预算与 harness 是执行来源。
