@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { replacesEditedBlock } from '@agentmux/client-ui/note/note-merge-identity'
 import type { FileWriteContext } from '@agentmux/core'
 import { NOTE_FILE_EXTENSION, NOTE_BLOCK_TYPES, readNoteDocument, serializeNoteDocument, type NoteDocument } from '../shared/note-document.js'
@@ -6,7 +7,7 @@ import { hydrateNoteProvenance } from '@agentmux/client-ui/note/note-metadata'
 import { noteContentSchema } from '../shared/note-content-schema.js'
 import type { WorkspaceFileReadResult, WorkspaceFileWriteInput, WorkspaceFileWriteResult, WorkspaceFileRestoreInput, WorkspaceFileUndoInput, WorkspaceRecord } from '../shared/contracts.js'
 import type { WorkspaceFiles } from './workspace-files.js'
-import { randomUUID } from 'node:crypto'
+
 import { prepareNoteWikiLinks, bindNoteWikiLink } from '@agentmux/client-ui/note/note-wikilinks'
 import type { NotebookState } from '@agentmux/core/notebook-catalog'
 import type { NotebookObservationOwner } from './notebook-observation-owner.js'
@@ -194,11 +195,11 @@ export class NoteFileWriter {
       const normalized = (note: NoteDocument) => ({ ...note, content: noteContentSchema.nodeFromJSON(note.content).toJSON() })
       const identified = normalized(candidate.note)
       const identify = (node: typeof identified.content) => {
-        if (NOTE_BLOCK_TYPES.some(type => type === node.type) && node.attrs?.blockId == null) node.attrs = { ...node.attrs, blockId: randomUUID() }
+        if (NOTE_BLOCK_TYPES.some(type => type === node.type) && node.attrs?.blockId == null) node.attrs = { ...node.attrs, blockId: mintObjectId() }
         node.content?.forEach(identify)
       }
       if (!action || action.draft) identify(identified.content)
-      const prepared = action && !action.draft ? { note: identified, pending: [] } : prepareNoteWikiLinks(identified, randomUUID)
+      const prepared = action && !action.draft ? { note: identified, pending: [] } : prepareNoteWikiLinks(identified, mintObjectId)
       let linked = prepared.note
       if (prepared.pending.length && this.links) {
         try {
@@ -241,7 +242,7 @@ export class NoteFileWriter {
       const noteId = action?.noteId ?? (candidate.status === 'valid' ? candidate.note.noteId : old?.status === 'valid' ? old.note.noteId : undefined)
       if (!noteId || input.expectedRevision !== null && !baseline || old?.status === 'valid' && old.note.noteId !== noteId) throw new Error('The original Note identity or history baseline cannot be confirmed.')
       const resource = resourceOf(workspace, input.path), previous = (await this.metadata.readHistory({ noteId, resource, limit: 1 })).entries[0]
-      const eventId = submitted.operationId ?? randomUUID(), actor = context?.actor ?? null
+      const eventId = submitted.operationId ?? mintObjectId(), actor = context?.actor ?? null
       const sameActivity = !action && previous?.status === 'committed' && previous.operation === 'edit' && previous.revision === baseline?.document.revision &&
         previous.actor !== null && actor !== null && previous.actor.kind === actor.kind && previous.actor.id === actor.id && at >= previous.at && at - previous.at <= NOTE_HISTORY_BATCH_WINDOW_MS
       historyIdentity = { eventId, batchId: sameActivity ? previous.batchId : eventId }

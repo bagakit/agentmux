@@ -1,4 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { mintObjectId } from '@agentmux/core/object-id'
+import { createHash } from 'node:crypto'
 import { mkdir, open, lstat, readFile, readdir, realpath, unlink } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import type { JSONContent } from '@tiptap/core'
@@ -70,7 +71,7 @@ async function stageMarkdown(converted: PreparedLegacyNoteMarkdown, stagingDirec
   try { if (!(await lstat(destination)).isFile() || digest(await readFile(destination)) !== converted.targetHash) return fail('The Markdown destination already contains different bytes.') }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
   await mkdir(stagingDirectory, { recursive: true, mode: 0o700 })
-  const preparedSource = join(stagingDirectory, randomUUID() + '.note.md')
+  const preparedSource = join(stagingDirectory, mintObjectId() + '.note.md')
   const handle = await open(preparedSource, 'wx', 0o600)
   try { await handle.writeFile(converted.targetBytes); await handle.sync() } finally { await handle.close() }
   const stageDirectory = await open(dirname(preparedSource), 'r')

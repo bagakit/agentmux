@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { mintObjectId } from '@agentmux/core/object-id'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { BrowserWindow } from 'electron'
@@ -65,7 +65,7 @@ export class FileDiagramRenderer {
     const request = job.request
     const window = new BrowserWindow({ show: false, width: 1200, height: 900, webPreferences: {
       sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true,
-      devTools: false, backgroundThrottling: false, partition: `diagram-${randomUUID()}`
+      devTools: false, backgroundThrottling: false, partition: `diagram-${mintObjectId()}`
     } })
     job.window = window
     this.active++
