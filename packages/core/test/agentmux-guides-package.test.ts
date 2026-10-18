@@ -19,7 +19,8 @@ it('ships readable system Markdown and serves the real installed CLI offline wit
   expect(proof.package.endpointConnections).toBe(0)
   expect(proof.package.relativeLinks).toBeGreaterThan(0)
   expect(proof.package.codeOwnerLinks).toBeGreaterThan(0)
-  expect(proof.browser).toMatchObject({ generatedConsumed: true, envelopeRendered: true, nodeGlobalsRequired: false })
+  expect(proof.browser).toMatchObject({ generatedConsumed: true, envelopeRendered: true, nodeGlobalsRequired: false,
+    unrelatedGuideIsolated: true })
 }, 180_000)
 
 it('rejects source drift and unregistered module guides and detects successful-generation consumer disconnects', async () => {
