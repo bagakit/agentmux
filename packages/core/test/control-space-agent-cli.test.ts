@@ -28,7 +28,8 @@ const catalog: AgentMuxSpaceCatalog = {
 function report(requestId: string, outcome: AgentMuxSpaceMutationReport['outcome'] = 'opened'): AgentMuxSpaceMutationReport {
   return { requestId, outcome, from: outcome === 'moved' ? { ...address, tabId: 'original-tab' } : null, to: address,
     agent: { agentSessionId: 'agent-target', runId: 'run-target', providerId: 'codex', executorId: 'saved-executor', hostId: 'original-host',
-      cwd: fixturePath("original-cwd"), createOperationId: 'creation-op', initialPrompt: 'confirmed' }, resource: null,
+      cwd: fixturePath("original-cwd"), createOperationId: 'creation-op', initialPrompt: 'confirmed',
+      ...(outcome === 'retired' ? { retirement: { source: 'user', observedAt: 42 } as const } : {}) }, resource: null,
     save: { layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null }, issues: [] }
 }
 
@@ -94,6 +95,15 @@ describe('public built Agent-first Space CLI uses one private Control owner', ()
       socket.once('end', () => { try { resolve(JSON.parse(reply)) } catch (error) { reject(error) } })
     })
   }
+
+  it('reads an original retired creation through the built space inspect CLI without creating', async () => {
+    outcome = 'retired'
+    const result = json(await run(['space', 'inspect', '--operation-id', 'original-takeover']))
+    expect(result).toMatchObject({ operation: 'space.inspect', result: { request: { operationId: 'original-takeover', known: true,
+      report: { operationId: 'original-takeover', outcome: 'retired', agent: { agentSessionId: 'agent-target', runId: 'run-target',
+        createOperationId: 'creation-op', retirement: { source: 'user', observedAt: 42 } } } } } })
+    expect(seen).toHaveLength(1); expect(seen[0]).toMatchObject({ operation: 'space.inspect', target: { requestId: 'original-takeover' } })
+  })
 
   it('roundtrips discovery IDs unchanged into an anchorless first Agent Tab with a single prompt request', async () => {
     expect(Buffer.byteLength(zoneId)).toBeGreaterThan(512)
