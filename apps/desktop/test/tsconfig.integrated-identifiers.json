@@ -6,6 +6,7 @@
     "performance-heap-snapshot.test.tsx",
     "mote-private-chat-profile.test.tsx",
     "connection-identity-library.test.tsx",
+    "../src/renderer/src/components/toolkit/TuiToolkitResult.tsx",
     "../../../packages/connectors/test/mote-chat-owner.test.ts",
     "../src/renderer/src/global.d.ts"
   ]
