@@ -189,6 +189,7 @@ async function publicLoop(count: number, id: (i: number) => string = i => 'run-'
       return { runId: 'owned-toolkit', pid: child.pid, kind: 'terminal' } as any
     },
     async attach() { return { replay: [], gap: null } as any }, async replay() { return { replay: [], gap: null } as any },
+    async status() { return null },
     async stop() { if (child && child.exitCode === null && child.signalCode === null) child.kill('SIGTERM'); await exited },
     async release() {}, async remove() {}
   }
@@ -311,7 +312,7 @@ it('executes an ordinary Custom script and carries its exact confirmed document 
     const code=await new Promise(done=>child.once('close',done))
     expect(code,error).toBe(0);output=Buffer.concat(chunks)
     return metadata() as any
-  },async attach(){return attachment() as any},async replay(){return attachment() as any},async stop(){},async release(){},async remove(){} }
+  },async attach(){return attachment() as any},async replay(){return attachment() as any},async status(){return metadata() as any},async stop(){},async release(){},async remove(){} }
   combined=new (await import('../src/main/toolkit-owner')).ToolkitOwner({config:configOwner,receiptPath:join(root,'receipt.json'),
     openRunPort:async()=>port,launch:()=>({runner:process.execPath,script:scriptPath,cli:resolve('packages/core/bin/amux'),cwd:root,env:objectCliEnvironment(root) as Record<string,string>}),enabled:()=>false})
   closes.push(()=>combined.dispose())

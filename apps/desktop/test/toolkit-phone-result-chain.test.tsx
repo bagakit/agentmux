@@ -69,6 +69,7 @@ function nodeProcessPort() {
     },
     async attach(ref, after, listener) { const run = runs.get(ref.runId)!; if (listener) run.listener = listener; return snapshot(run, after) },
     async replay(ref, after) { return snapshot(runs.get(ref.runId)!, after) },
+    async status(ref) { const run = runs.get(ref.runId); return run ? facts(run) : null },
     async release() {},
     async remove(ref) { expect(runs.get(ref.runId)?.state).toBe('exited'); runs.delete(ref.runId) },
     async stop(ref) { runs.get(ref.runId)?.child.kill('SIGTERM') }

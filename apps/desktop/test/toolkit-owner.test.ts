@@ -29,6 +29,7 @@ async function fixture(delayed = false) {
     return { runId: 'owned-run', pid: 88, kind: 'terminal' } as any
   }), attach: vi.fn(async () => ({ replay: [], gap: null } as any)),
     replay: vi.fn(async () => ({ replay: [], gap: null } as any)),
+    status: vi.fn(async () => null),
     stop: vi.fn(async () => {}), release: vi.fn(async () => {}), remove: vi.fn(async () => {}) }
   const owner = new ToolkitOwner({ openRunPort: async () => port, launch: () => ({
     runner: process.execPath, cli: _hygiene_fixturePath("private/compiled-cli.mjs"), script: resolve('apps/desktop/resources/toolkit/performance.mjs'),
@@ -127,6 +128,51 @@ describe('Toolkit observation owner', () => {
     await expect(f.owner.subscribe('performance',vi.fn(),vi.fn(),new AbortController().signal)).rejects.toMatchObject({code:'CONTROL_UNAVAILABLE'})
     expect(f.port.create).toHaveBeenCalledTimes(1)
     await f.owner.dispose()
+  })
+  it('reclaims a persisted execution only after the exact Run is confirmed terminal', async () => {
+    const f = await fixture()
+    const saved = vi.fn(async () => {})
+    const owner = new ToolkitOwner({ openRunPort: async () => f.port, launch: () => ({
+      runner: process.execPath, cli: _hygiene_fixturePath('private/compiled-cli.mjs'),
+      script: resolve('apps/desktop/resources/toolkit/performance.mjs'), cwd: process.cwd(), env: {} }),
+      enabled: () => true, receipts: { read: async () => ({ schema: 'agentmux.performance.receipt.v1', admission: {
+        executionId: 'old-execution', run: { hostId: 'local', runId: 'old-run' }, startedAt: 100, reason: null } }), save: saved } })
+    owners.push(owner)
+    ;(f.port.status as any).mockImplementation(async ref => ({ runId: ref.runId, state: ref.runId === 'old-run' ? 'exited' : 'running' }))
+    const lease = await owner.subscribe('performance', vi.fn(), vi.fn(), new AbortController().signal)
+    expect(f.port.status).toHaveBeenCalledWith({ runId: 'old-run' })
+    expect(f.port.stop).not.toHaveBeenCalled()
+    expect(f.port.release).toHaveBeenCalledWith({ runId: 'old-run' })
+    expect(f.port.remove).toHaveBeenCalledWith({ runId: 'old-run' })
+    expect(saved).toHaveBeenCalledWith('performance', { schema: 'agentmux.performance.receipt.v1', admission: null })
+    expect(f.port.create).toHaveBeenCalledOnce()
+    lease.dispose()
+  })
+  it('keeps the previous execution unknown when its exact Run is still running or unavailable', async () => {
+    const f = await fixture()
+    const owner = new ToolkitOwner({ openRunPort: async () => f.port, launch: () => ({
+      runner: process.execPath, cli: _hygiene_fixturePath('private/compiled-cli.mjs'),
+      script: resolve('apps/desktop/resources/toolkit/performance.mjs'), cwd: process.cwd(), env: {} }),
+      enabled: () => true, receipts: { read: async () => ({ schema: 'agentmux.performance.receipt.v1', admission: {
+        executionId: 'old-execution', run: { hostId: 'local', runId: 'old-run' }, startedAt: 100, reason: null } }), save: vi.fn() } })
+    owners.push(owner)
+    ;(f.port.status as any).mockResolvedValue({ runId: 'old-run', state: 'running' })
+    await expect(owner.subscribe('performance', vi.fn(), vi.fn(), new AbortController().signal)).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
+    ;(f.port.status as any).mockRejectedValue(new Error('Run list unavailable'))
+    await expect(owner.execute(request('toolkit.run'), new AbortController().signal)).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
+    expect(owner.current).toMatchObject({ state: 'unknown', run: { runId: 'old-run' } })
+    expect(f.port.stop).not.toHaveBeenCalled()
+    expect(f.port.create).not.toHaveBeenCalled()
+  })
+  it('finishes cleanup when the Run exits between status and stop', async () => {
+    const f = await fixture()
+    const lease = await f.owner.subscribe('performance', vi.fn(), vi.fn(), new AbortController().signal)
+    ;(f.port.status as any).mockResolvedValueOnce({ state: 'running' }).mockResolvedValueOnce({ state: 'exited' })
+    ;(f.port.stop as any).mockRejectedValueOnce(new Error('cannot stop exited Run'))
+    lease.dispose()
+    await vi.waitFor(() => expect(f.owner.current.state).toBe('paused'))
+    expect(f.port.release).toHaveBeenCalledOnce()
+    expect(f.port.remove).toHaveBeenCalledOnce()
   })
   it('rejects partial UTF8 at result EOF while terminal Gap remains diagnostic', async () => {
     const f = await fixture(), end = vi.fn()

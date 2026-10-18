@@ -35,7 +35,7 @@ function fixture(output = '工具_ACK', initialState: 'running' | 'exited' = 'ex
       // Production attach publishes state before returning replay. This cannot recurse into another attach.
       accept({ type: 'process-state', state, exitCode: state === 'exited' ? exitCode : undefined, run: { runId: 'exact-tool-run' } } as any)
       return snapshot()
-    }), replay: vi.fn(async () => snapshot()),
+    }), replay: vi.fn(async () => snapshot()), status: vi.fn(async () => run() as any),
     release: vi.fn(async () => {}), remove: vi.fn(async () => {}),
     stop: vi.fn(async () => { state = 'exited'; accept({ type: 'process-state', state: 'exited', exitCode: 0, run: { runId: 'exact-tool-run' } } as any) }) }
   custom = new CustomToolkitOwner({ config: owner, receipts: storage, openRunPort: async () => port, runner: process.execPath, env: {} })
