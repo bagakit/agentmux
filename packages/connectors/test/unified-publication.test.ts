@@ -300,7 +300,7 @@ it('actual ingress submission carries its typed original Input key through Core 
     recorded = (await f.client.sessionTimeline(f.session.agentSessionId)).items.find(item => item.authorExternal?.externalMessageId === received.ingress.externalMessageId)
     expect(recorded?.inputRef).toEqual({ kind: 'message', agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, messageId: input.messageId })
   }, { timeout: 10_000 })
-  expect(recorded).toMatchObject({ source: 'user', kind: 'user_message', publicContent: 'confirmed', content: renderAgentMuxMessageEnvelope({ messageId: input.messageId, sender: input.author, senderSessionId: null, body: received.ingress.body }), authorExternal: input.author })
+  expect(recorded).toMatchObject({ source: 'user', kind: 'user_message', publicContent: 'confirmed', content: received.ingress.body, authorExternal: input.author })
   host.refresh()
   await vi.waitFor(() => expect(host.store.coverage(binding).origins).toHaveLength(1), { timeout: 10_000 })
   const represented = host.store.coverage(binding).origins[0]!
@@ -369,7 +369,7 @@ it('actual ingress submission carries its typed original Input key through Core 
   expect(old.inputRef).toEqual(original.inputRef); expect(old.content).toBe(original.content)
 }, 20_000)
 
-it('retained ingress wire keeps its typed platform origin across formatter changes; a content edit loses that boundary', async () => {
+it('original ingress body keeps its typed platform origin across wire formatter changes; a content edit loses that boundary', async () => {
   const remote = await feishuPublicationHttp(); cleanup.push(remote.close)
   const adapter = new FeishuAdapter({ http: remote.http })
   const f = await ingressFixture(true, feishuConfig, { resolve: async () => 'isolated-credential' }, { adapters: [adapter], publication: 'future-shared-conversation' }); cleanup.push(f.close)
@@ -391,7 +391,7 @@ it('retained ingress wire keeps its typed platform origin across formatter chang
   let original: AgentTimelineItem | undefined
   await vi.waitFor(async () => {
     original = (await f.client.sessionTimeline(f.session.agentSessionId)).items.find(item => item.authorExternal?.externalMessageId === received.ingress.externalMessageId)
-    expect(original?.content).toBe(previousWire)
+    expect(original?.content).toBe(received.ingress.body)
   }, { timeout: 10_000 })
   oldProducer.mockRestore()
   const input = dispatched.ingress.input
