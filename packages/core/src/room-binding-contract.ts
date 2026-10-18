@@ -13,7 +13,9 @@ export type RoomBindingTarget = { executionHostId: string; agentSessionId: strin
 /** Explicit source selection for future input, independent of publication/read scope. Never freezes a per-message turn. */
 export type RoomBindingInputTarget = Omit<Extract<import('./agent-prompt-condition.js').AgentDirectedPromptTarget, { kind: 'native-conversation' }>, 'expectedTurnId'>
 /** An immutable authorized audience snapshot. A Region is navigation, never an execution route. */
-export type RoomBinding = RoomBindingTarget & {
+export type RoomBinding = Omit<RoomBindingTarget, 'regionAnchor'> & {
+  /** Optional original presentation; background conversations do not require a Region. */
+  regionAnchor?: RoomBindingTarget['regionAnchor']
   bindingId: string
   revision: number
   state: 'active' | 'paused'

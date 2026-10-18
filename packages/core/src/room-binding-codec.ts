@@ -41,7 +41,7 @@ export function parseConnectionGrant(value: unknown): ConnectionGrant {
 export function parseRoomBinding(value: unknown): RoomBinding {
   const p = object(value, ['bindingId', 'revision', 'state', 'connectionId', 'application', 'externalConversationId', 'scope', 'inputTarget', 'executionHostId', 'agentSessionId', 'regionAnchor', 'sourceCheckpoints', 'sourceFrontier', 'authorizedBy'])
   if (p.state !== 'active' && p.state !== 'paused' || !Array.isArray(p.sourceCheckpoints) || p.sourceCheckpoints.length < 1 || p.sourceCheckpoints.length > 32) fail()
-  const t = target(p), checkpoints = (p.sourceCheckpoints as unknown[]).map(parseNativeConversationCheckpoint)
+  const t = { executionHostId: id(p.executionHostId), agentSessionId: id(p.agentSessionId), ...(p.regionAnchor === undefined ? {} : { regionAnchor: target(p).regionAnchor }) }, checkpoints = (p.sourceCheckpoints as unknown[]).map(parseNativeConversationCheckpoint)
   if (checkpoints.some(c => c.agentSessionId !== t.agentSessionId) || new Set(checkpoints.map(c => JSON.stringify(c.source))).size !== checkpoints.length) fail()
   const frontier = p.sourceFrontier === undefined ? undefined : parseConversationCheckpoint(p.sourceFrontier, { hostId: t.executionHostId, agentSessionId: t.agentSessionId })
   if (frontier && (frontier.frontier.cuts.filter(c => c.kind === 'native').length !== checkpoints.length || checkpoints.some(c => !frontier.frontier.cuts.some(cut => cut.kind === 'native' && JSON.stringify(cut.checkpoint) === JSON.stringify(c))))) fail()
