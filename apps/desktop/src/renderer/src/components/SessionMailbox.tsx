@@ -508,11 +508,7 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
       if (panel.matches(':popover-open')) {
         suspension.current = { scope, phase: 'hidden' }
         // Native presentation can open before its asynchronous toggle reaches React.
-        if (!open) {
-          setFolder(requestedFolder.current ?? openFolder()); requestedFolder.current = null
-          if (!preview.current) setViewed(true)
-          setOpen(true)
-        }
+        if (!open) setOpen(true)
         panel.hidePopover()
       }
     } else if (open && suspension.current?.scope === scope && !panel.matches(':popover-open')) {
@@ -565,6 +561,10 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
       data-state={open && visible ? 'open' : 'closed'} inert={!open || !visible}
       onBeforeToggle={event => {
         if (event.target !== event.currentTarget) return
+        if (event.newState === 'open' && suspension.current?.scope !== scope) {
+          setFolder(requestedFolder.current ?? openFolder()); requestedFolder.current = null
+          if (!preview.current) setViewed(true)
+        }
         event.currentTarget.inert = event.newState !== 'open'
         motion.beforeToggle(event.newState)
       }}
@@ -579,9 +579,7 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
         if (event.target !== event.currentTarget) return
         const opening = event.newState === 'open'
         if (opening) {
-          const restoring = suspension.current?.scope === scope
           suspension.current = null
-          if (!restoring) { setFolder(requestedFolder.current ?? openFolder()); requestedFolder.current = null; if (!preview.current) setViewed(true) }
         } else {
           if (suspension.current?.scope === scope && suspension.current.phase === 'hidden') return
           // A queued native close may have been superseded by the same surface reopening.
