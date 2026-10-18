@@ -3,7 +3,7 @@
 .settings-preview-open { justify-self: start; margin-top: var(--sp-3); }
 .settings-preview-open > svg, .settings-preview-return > svg { flex: none; }
 .settings-preview-return { min-width: 0; max-width: 100%; }
-.settings-preview-return > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.settings-preview-return > span { white-space: normal; overflow-wrap: anywhere; text-align: left; line-height: 1.3; }
 .settings-preview-header-actions { display: flex; flex: 1; min-width: 0; justify-content: flex-end; align-items: center; gap: var(--sp-3); }
 .settings-preview-header-actions > small { color: var(--text-3); font-size: var(--fs-micro); }
 .settings-preview-header-actions > .browser-agent-preview__playback { flex: none; }

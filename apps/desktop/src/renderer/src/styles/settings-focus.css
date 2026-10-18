@@ -35,6 +35,7 @@
 .focus-settings-preview > nav > button:hover { background: var(--surface-2); }
 .focus-settings-preview button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
 .focus-settings-preview__canvas { flex: 1 1 auto; min-height: 0; height: 370px; overflow: auto; padding: var(--sp-3); overscroll-behavior: contain; }
+.focus-settings-preview__canvas[data-scene='links'], .focus-settings-preview__canvas[data-scene='reading']:not(:has(.focus-settings-preview__peek, .focus-settings-preview__workface)) { flex: 0 1 auto; height: auto; }
 .focus-settings-preview__caption { display: flex; justify-content: space-between; gap: var(--sp-2); padding: 5px 4px 12px; color: var(--text-3); font-size: var(--fs-micro); }
 .focus-settings-preview__lane { border-top: 1px solid var(--line-soft); padding: 7px 0; }
 .focus-settings-preview__lane > header { display: flex; align-items: center; gap: 6px; padding: 0 4px 5px; color: var(--text-2); }
@@ -54,13 +55,13 @@
 .focus-settings-preview__peek .agent-input-recall h4 small { font-weight: 400; color: var(--text-3); }
 .focus-settings-preview__peek > footer { display: flex; align-items: center; gap: var(--sp-3); padding: 8px 12px; border-top: 1px solid var(--line); }
 .focus-settings-preview__peek > footer > small { margin-left: auto; color: var(--text-3); font-size: var(--fs-micro); }
-.focus-settings-preview__idle { display: grid; justify-items: center; gap: 12px; padding: 60px 12px; color: var(--text-3); font-size: var(--fs-micro); }
+.focus-settings-preview__idle { display: grid; justify-items: center; gap: 10px; padding: 16px 12px; color: var(--text-3); font-size: var(--fs-micro); }
 .focus-settings-preview__footnote { flex: none; margin: 0; padding: 11px var(--sp-4); border-top: 1px solid var(--line-soft); color: var(--text-3); font-size: var(--fs-micro); }
 .focus-settings-preview__tabs { display: flex; gap: 3px; padding: 6px; background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: var(--radius) var(--radius) 0 0; }
 .focus-settings-preview__tabs > span { font-size: var(--fs-micro); color: var(--text-3); padding: 5px 8px; }
 .focus-settings-preview__tabs > span[data-selected='true'] { background: var(--surface-1); color: var(--text); border-radius: var(--radius-sm); }
 .focus-settings-preview__resource-layout { display: grid; grid-template-columns: minmax(0,1fr); border: 1px solid var(--line-soft); border-top: 0; border-radius: 0 0 var(--radius) var(--radius); overflow: hidden; }
-.focus-settings-preview__resource-layout > section { min-width: 0; min-height: 250px; padding: 28px 14px; display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+.focus-settings-preview__resource-layout > section { min-width: 0; padding: 16px 14px; display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
 .focus-settings-preview__resource-layout strong { color: var(--text); font-size: var(--fs-meta); overflow-wrap: anywhere; }
 .focus-settings-preview__resource-layout p { margin: 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
 .focus-settings-preview__links[data-open='true'][data-destination='region'] .focus-settings-preview__resource-layout { grid-template-columns: repeat(2,minmax(0,1fr)); }
