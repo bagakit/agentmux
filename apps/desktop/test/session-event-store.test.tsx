@@ -6,6 +6,7 @@ import type { RuntimeEvent } from '../src/shared/contracts'
 import { ProjectActivity } from '../src/renderer/src/components/ProjectActivity'
 import { useAppStore } from '../src/renderer/src/store'
 import { rendererPerformance } from '../src/renderer/src/lib/renderer-performance'
+import { parseRendererPerformanceSnapshot } from '@agentmux/core/control'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
 
 const original = useAppStore.getState()
@@ -80,4 +81,22 @@ it('includes original synchronous subscribers, preserves the exact thrown error 
     const changed = useAppStore.getState().sessions[0]
     expect(changed?.kind === 'agent' && changed.turnUsage?.totalTokens).toBe(18)
   } finally { offThrow() }
+})
+
+it('keeps a slow real Store event on its original source after focus, Run and payload changes', async () => {
+  let mono = performance.now()
+  vi.spyOn(performance, 'now').mockImplementation(() => mono)
+  const incoming = statusEvent(2000, 'waiting'), original = session()
+  const off = useAppStore.subscribe(() => { mono += 80 })
+  try { await act(async () => useAppStore.getState().applyEvent(incoming)) } finally { off() }
+  const before = parseRendererPerformanceSnapshot(rendererPerformance.snapshot()).slowEvents.at(-1)!
+  expect(before).toMatchObject({ kind: 'session-event', detail: 'agent-status', source: {
+    hostId: original.control.hostId, sessionId: original.control.agentSessionId, runId: original.control.run.runId,
+    regionId: null, instanceId: null
+  } })
+  if (incoming.event.type === 'agent-status') incoming.event.evidence.run = { runId: 'changed-input-run' }
+  await act(async () => useAppStore.setState({ mainSurface: 'agents', sessions: [composerSession('replacement-owner')] }))
+  const after = parseRendererPerformanceSnapshot(rendererPerformance.snapshot()).slowEvents.find(row => row.id === before.id)!
+  expect(after.source).toEqual(before.source)
+  expect(after.source!.runId).toBe(original.control.run.runId)
 })

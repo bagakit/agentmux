@@ -47,3 +47,32 @@ it('strict metrics reject missing, extra, accessor and invalid type measurements
   invalid(value => { Object.defineProperty(value.byType, 'agent-status', { enumerable: true, get: getter }) })
   expect(getter).not.toHaveBeenCalled()
 })
+
+it('retains detached original event and input identities across later mutations and strict readback', () => {
+  let mono = 0
+  const costs = createRendererPerformance(() => mono, () => mono)
+  const source = { hostId: 'original-host', sessionId: 'original-session', runId: 'original-run', regionId: null, instanceId: null }
+  mono = 75; costs.sessionEvent('agent-status', 0, source)
+  source.sessionId = 'later-session'; source.runId = 'later-run'
+  const input = { ...source, regionId: 'input-region', instanceId: 7 }
+  mono = 150; costs.terminalInteraction('write-request', 75, 75, input)
+  input.regionId = 'later-region'; input.instanceId = 8
+  mono = 225; costs.sessionEvent('private-body', 150)
+  const snapshot = parseRendererPerformanceSnapshot(costs.snapshot())
+  expect(snapshot.slowEvents).toMatchObject([
+    { kind: 'session-event', detail: 'agent-status', source: { hostId: 'original-host', sessionId: 'original-session', runId: 'original-run', regionId: null, instanceId: null } },
+    { kind: 'terminal-interaction', source: { sessionId: 'later-session', runId: 'later-run', regionId: 'input-region', instanceId: 7 } },
+    { kind: 'session-event', detail: 'unknown', source: null }
+  ])
+  snapshot.slowEvents[0]!.source!.runId = 'readback-mutation'
+  expect(costs.snapshot().slowEvents[0]!.source!.runId).toBe('original-run')
+  expect(JSON.stringify(snapshot)).not.toContain('private-body')
+  for (const change of [
+    (row: any) => { row.source = { ...row.source, instanceId: 7 } },
+    (row: any) => { row.detail = 'private-body' },
+    (row: any) => { row.source.payload = 'private-body' }
+  ]) {
+    const invalid = costs.snapshot(); change(invalid.slowEvents[0])
+    expect(() => parseRendererPerformanceSnapshot(invalid)).toThrow()
+  }
+})

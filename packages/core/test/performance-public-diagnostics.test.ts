@@ -40,8 +40,13 @@ it('preserves nonempty stage evidence and unknown sources through actual Unix RP
   // Use actual production recorders, not a hand-authored public field fixture.
   let time = 1000
   const renderer = createRendererPerformance(() => time, () => 1000 + time)
-  time = 1070; renderer.sessionEvent('agent-status', 1000)
+  time = 1070; renderer.sessionEvent('agent-status', 1000, {
+    hostId: 'original-event-host', sessionId: 'original-event-session', runId: 'original-event-run', regionId: null, instanceId: null
+  })
   time = 1090; renderer.sessionEvent('agent-session', 1070)
+  time = 1170; renderer.terminalInteraction('keydown-dispatch', 80, 1090, {
+    hostId: 'original-input-host', sessionId: 'original-input-session', runId: 'original-input-run', regionId: 'original-input-region', instanceId: 7
+  })
   time = 2900; renderer.terminalWrite(false, 'private-output', 1083.3, { ...terminalWriteContextFixture(), runId: 'exact-peak-run', cause: 'checkpoint' })
   for (let i = 0; i < 40; i++) { time += 100; renderer.terminalWrite(false, new Uint8Array(1), time - 70, terminalWriteContextFixture()) }
   const callbacks: FrameRequestCallback[] = []
@@ -71,6 +76,10 @@ it('preserves nonempty stage evidence and unknown sources through actual Unix RP
   expect(expectedRenderer.sessionEvents.byType['agent-session']).toEqual({ count: 1, totalMs: 20, maxMs: 20 })
   expect(expectedRenderer.slowEventsOmitted['terminal-write']).toBe(36)
   expect(expectedRenderer.slowEvents.some(event => event.kind === 'session-event')).toBe(true)
+  expect(expectedRenderer.slowEvents.find(event => event.kind === 'session-event')).toMatchObject({ detail: 'agent-status',
+    source: { hostId: 'original-event-host', sessionId: 'original-event-session', runId: 'original-event-run', regionId: null, instanceId: null } })
+  expect(expectedRenderer.slowEvents.find(event => event.kind === 'terminal-interaction')).toMatchObject({ detail: 'keydown-dispatch',
+    source: { hostId: 'original-input-host', sessionId: 'original-input-session', runId: 'original-input-run', regionId: 'original-input-region', instanceId: 7 } })
   expect(expectedRenderer.slowEvents.find(event => event.retainedAs.includes('current-peak') && event.kind === 'terminal-write')).toMatchObject({ terminal: { runId: 'exact-peak-run', cause: 'checkpoint', payload: { unit: 'string-code-units', length: 14 } } })
   expect(expectedRenderer.timingEpochs.current.timings['terminal-write']).toEqual({ count: 41, totalMs: 4616.7, maxMs: 1816.7 })
   expect(expectedRenderer.tabSwitches[0]).toMatchObject({ state: 'pending', pendingStage: 'input-gate', elapsedMs: 1500 })
