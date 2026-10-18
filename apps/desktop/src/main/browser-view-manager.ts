@@ -44,6 +44,7 @@ import { browserViewportSize, cloneBrowserViewport, isBrowserViewport } from '..
 import { resolveBrowserAddress } from '../shared/browser-address.js'
 import type { BrowserInputHistoryScope } from '../shared/browser-input-history.js'
 import { showBrowserOperationFeedback, type BrowserOperationFeedback } from './browser-operation-feedback.js'
+import { BrowserControlFeedback } from './browser-control-feedback.js'
 import { validateBrowserOperatorAvatarPng } from './browser-operator-avatar.js'
 import { DEFAULT_BROWSER_AGENT_CONTROL, type BrowserAgentControlPreferences } from '../shared/browser-agent-control.js'
 import { installTextEditContextMenu } from './text-edit-context-menu.js'
@@ -150,6 +151,7 @@ type BrowserEntry = {
   inputIsolation: AgentMuxBrowserControl['inputIsolation']
   feedbackRevision: number
   feedback?: BrowserOperationFeedback
+  controlFeedback?: BrowserControlFeedback
   demonstration?: BrowserDemonstrationState
   demonstrationInterpreter?: BrowserDemonstrationInterpreter
   taskAssets?: BrowserTaskAssetState
@@ -613,6 +615,7 @@ export class BrowserViewManager {
     this.presentationLeases.set(id, { id, entry, document, window: nativeWindow, windowDocument: input.window,
       occurrence: { presentationId: occurrence.presentationId, location: { ...occurrence.location } }, geometry })
     entry.presentationLeaseIds.add(id)
+    if (geometry.visible) void entry.controlFeedback?.synchronize()
     return { leaseId: id }
   }
 
@@ -623,12 +626,14 @@ export class BrowserViewManager {
   updatePresentation(sender: WebContents, frame: WebFrameMain | null,
     leaseId: string, value: BrowserPresentationGeometry): void {
     const lease = this.requirePresentationLease(sender, frame, leaseId)
+    const wasVisible = lease.geometry.visible
     lease.geometry = this.presentationGeometry(value)
     if (lease.entry.inputLeaseId === leaseId) {
       if (lease.geometry.visible) this.setBounds(lease.entry.id, lease.geometry.bounds)
       else this.clearPresentationInput(lease.entry)
     }
     if (!this.hasVisiblePresentation(lease.entry)) this.revokePresentationCapture(lease.entry, 'no-visible-presentations')
+    if (wasVisible !== lease.geometry.visible) void lease.entry.controlFeedback?.synchronize()
   }
 
   removePresentation(sender: WebContents, frame: WebFrameMain | null, leaseId: string): void {
@@ -965,6 +970,7 @@ export class BrowserViewManager {
     lease.entry.presentationLeaseIds.delete(lease.id)
     if (lease.entry.inputLeaseId === lease.id) this.clearPresentationInput(lease.entry)
     if (!this.hasVisiblePresentation(lease.entry)) this.revokePresentationCapture(lease.entry, 'no-visible-presentations')
+    void lease.entry.controlFeedback?.synchronize()
     this.publishNativeCoverage(lease.entry)
   }
 
@@ -1529,7 +1535,7 @@ export class BrowserViewManager {
       entry.pendingSwitch = pending
       this.placeView(candidate, this.windowForView(authoritativeView))
       pending.attached = true
-      this.attach(entry, candidate)
+      const candidateControlFeedback = this.attach(entry, candidate)
       await Promise.race([candidate.webContents.loadURL(url), cancellation])
       if (
         this.entries.get(id) !== entry ||
@@ -1554,12 +1560,14 @@ export class BrowserViewManager {
       void this.releaseDemonstrationCapture(entry)
       entry.pendingSwitch = null
       void entry.feedback?.hide()
+      void entry.controlFeedback?.hide()
       this.revokePresentationCapture(entry, 'source-replaced')
       this.clearFavicon(entry)
       const previousStorage = entry.storage
       const previousPreviewScope = this.recoveryPreviewScope(id)
       this.cancelRecoveryPreview(entry)
       entry.view = candidate
+      entry.controlFeedback = candidateControlFeedback
       // Candidate preparation predates current-owner input/media observation. Do not inherit
       // another WC's quiet proof; this page remains usable, but is not an automatic discard target.
       entry.resourceRisk.add('document-unconfirmed')
@@ -2016,7 +2024,7 @@ export class BrowserViewManager {
       // The original source can end before the live target is projected again.
       // Its returned operation still reports the final dispatch/control facts.
       operation.control = this.controlState(entry)
-      await feedback.end(operation.phase === 'completed', this.agentOwnsInput(entry))
+      await feedback.end(operation.phase === 'completed')
       const cleanupWarning = session.detach()
       if (cleanupWarning) {
         operation.warning ??= cleanupWarning
@@ -3102,7 +3110,8 @@ export class BrowserViewManager {
         const wasVisible = entry.visible
         entry.visible = false
         this.cancelRecoveryPreview(entry)
-        void entry.feedback?.hide()
+        void entry.feedback?.clear()
+        void entry.controlFeedback?.synchronize()
         entry.view.setVisible(false)
         if (wasVisible) { this.notifyNativeVisibility(this.windowForView(entry.view)); this.emit(entry) }
         return
@@ -3298,6 +3307,7 @@ export class BrowserViewManager {
     for (const leaseId of [...entry.presentationLeaseIds]) this.removePresentationLease(this.presentationLeases.get(leaseId)!)
     this.releaseUploadFiles(entry)
     void entry.feedback?.hide()
+    void entry.controlFeedback?.hide()
     void this.releaseDemonstrationCapture(entry)
     if (!entry.view.webContents.isDestroyed()) {
       entry.selectionOperation = null
@@ -3362,9 +3372,22 @@ export class BrowserViewManager {
     })
   }
 
-  private attach(entry: BrowserEntry, view: WebContentsView): void {
+  private attach(entry: BrowserEntry, view: WebContentsView): BrowserControlFeedback {
     this.browserIdsByView.set(view, entry.id)
     const contents = view.webContents
+    const controlFeedback: BrowserControlFeedback = new BrowserControlFeedback({ contents, browserId: entry.id, ownerId: randomUUID(),
+      navigationId: () => entry.navigationId, nextRevision: () => ++entry.feedbackRevision,
+      isCurrent: () => this.owns(entry, view) && entry.controlFeedback === controlFeedback && this.agentOwnsInput(entry) &&
+        (entry.visible || this.hasVisiblePresentation(entry)),
+      preferences: this.feedbackPreferences,
+      warn: () => {
+        if (!this.owns(entry, view) || entry.controlFeedback !== controlFeedback) return
+        const warning = 'Browser control feedback could not be displayed. The page and Agent remain usable; show the page again or save its appearance to retry.'
+        entry.activity = { ...entry.activity, warning: entry.activity.warning ?? warning }
+        this.emit(entry)
+      } })
+    // A Profile candidate does not own this Browser until the prepared view commits.
+    if (entry.view === view) entry.controlFeedback = controlFeedback
     installTextEditContextMenu(contents, () => this.windowForView(view), {
       isCurrent: () => this.nativeOwner(entry.id)?.view === view && !this.agentOwnsInput(entry),
       origin: () => view.getBounds()
@@ -3446,7 +3469,7 @@ export class BrowserViewManager {
     })
     contents.on('dom-ready', () => {
       if (!this.owns(entry, view)) return
-      void entry.feedback?.synchronizeControl(true)
+      void entry.controlFeedback?.synchronize(true)
       const document = entry.initialDocument
       if (!this.owns(entry, view) || !document || document.view !== view ||
         !document.navigationId || document.navigationId !== entry.navigationId ||
@@ -3478,6 +3501,7 @@ export class BrowserViewManager {
       // settle without canceling it; explicit cancel still clears this owner token.
       if (typeof entry.selectionOperation !== 'symbol' || !entry.initialDocument) entry.selectionOperation = null
       void entry.feedback?.hide()
+      void entry.controlFeedback?.hide()
       const selectionRevision = ++entry.selectionRevision
       const annotationRevision = ++entry.annotationRevision
       void contents.executeJavaScriptInIsolatedWorld(
@@ -3614,6 +3638,7 @@ export class BrowserViewManager {
         ...(released.inputShield ? ['Native input surface cleanup is unconfirmed; reopening or Close retries its retained cleanup identity.'] : [])].join('; ')
       this.send({ type: 'unavailable', id: entry.id, error: 'Browser native page was destroyed. Retry to reopen this page.' + (reason ? ` Cleanup failed: ${reason}` : '') })
     })
+    return controlFeedback
   }
 
   private require(id: string): BrowserEntry {
@@ -3877,7 +3902,7 @@ export class BrowserViewManager {
   private emit(entry: BrowserEntry): void {
     if (entry.activity.control === 'human' || ['waiting', 'failed', 'stopped', 'indeterminate'].includes(entry.activity.operation?.phase ?? '')) void entry.feedback?.clear()
     if (this.entries.get(entry.id) !== entry || entry.view.webContents.isDestroyed()) return
-    void entry.feedback?.synchronizeControl()
+    void entry.controlFeedback?.synchronize()
     if (entry.activity.operation) entry.activity.operation.control = this.controlState(entry)
     const browser = this.snapshot(entry)
     entry.publishedRetention = JSON.stringify(browser.retention)
@@ -3889,6 +3914,7 @@ export class BrowserViewManager {
   /** Saved presentation changes wake only live Browser feedback; input ownership is unchanged. */
   refreshAgentFeedback(): void {
     for (const entry of this.entries.values()) if (this.agentOwnsInput(entry)) {
+      void entry.controlFeedback?.synchronize()
       if (entry.visible) void entry.feedback?.refreshPreferences()
       const shield = entry.inputShield
       void shield?.refreshAppearance().catch(() => {
