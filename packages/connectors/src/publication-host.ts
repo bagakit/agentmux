@@ -6,7 +6,7 @@ import { parsePreparedPublication } from './publication-wire.js'
 import type { PublicationAdapter } from './publication-adapter.js'
 import { publicationEffectContext, publicationImage, publicationFile, type ResourceUploadReceipt, type ResolvedPublicationPart } from './publication-resource.js'
 import { isConversationPublicationPart, publicationPartKey } from './publication-content.js'
-import { PublicationStore, publicDelivery, type PublicationReceipt, type PublicationOperation } from './publication-store.js'
+import { PublicationStore, publicDelivery, type PublicationReceipt, type PublicationOperation, type QuestionPublicationPayload } from './publication-store.js'
 
 /** Borrow original exact Core reads and the shared Provider observation. No transcript paths or second watcher. */
 export interface PublicationConversationPort {
@@ -18,7 +18,9 @@ export interface PublicationConversationPort {
 }
 export interface PublicationPermissionsPort {
   observe(binding: RoomBinding, wake: () => void): () => void
-  project(binding: RoomBinding, store: PublicationStore): string[]
+  project(binding: RoomBinding, store: PublicationStore, supported?: { permission: boolean; question: boolean }): string[]
+  questions?(binding: RoomBinding, units: readonly ConversationUnit[]): ReadonlyMap<string, QuestionPublicationPayload>
+  refreshQuestions?(binding: RoomBinding, store: PublicationStore): Promise<void>
   authorized(operation: PublicationOperation): boolean
 }
 export type PublicationObservation = ConnectionDeliveryObservation
@@ -58,7 +60,10 @@ export class PublicationHost implements ConnectionDeliveryPort {
       if (!lane) {
         lane = { binding, abort: new AbortController(), dirty: false, observation: { state: 'unknown', reason: 'not-started' } }
         this.lanes.set(binding.bindingId, lane)
-        try { const current = lane; lane.permissionStop = this.options.connections.publicationAdapter(binding.connectionId)?.permissionActions === true ? this.options.permissions?.observe(binding, () => this.wake(current)) : undefined } catch { lane.observation = { state: 'unavailable', reason: 'source-unconfirmed' } }
+        try {
+          const current = lane, adapter = this.options.connections.publicationAdapter(binding.connectionId)
+          lane.permissionStop = adapter?.permissionActions === true || adapter?.questionActions === true ? this.options.permissions?.observe(binding, () => this.wake(current)) : undefined
+        } catch { lane.observation = { state: 'unavailable', reason: 'source-unconfirmed' } }
         this.wake(lane)
       } else if (!recoveryOnly || lane.observation.state !== 'ready' || !lane.watch || lane.watch.closed?.aborted) this.wake(lane)
     }
@@ -125,9 +130,10 @@ export class PublicationHost implements ConnectionDeliveryPort {
     if (!adapter) { lane.observation = { state: 'unavailable', reason: 'adapter-unavailable' }; return }
     let permissionProjections: string[] = [], permissionsUnavailable = false
     try {
-      if (adapter.permissionActions === true) {
+      if (adapter.permissionActions === true || adapter.questionActions === true) {
         lane.permissionStop ??= this.options.permissions?.observe(binding, () => this.wake(lane))
-        permissionProjections = this.options.permissions?.project(binding, this.store) ?? []
+        permissionProjections = this.options.permissions?.project(binding, this.store, { permission: adapter.permissionActions === true, question: adapter.questionActions === true }) ?? []
+        if (adapter.questionActions) await this.options.permissions?.refreshQuestions?.(binding, this.store)
       }
     } catch { permissionsUnavailable = true }
     for (const projection of permissionProjections) {
@@ -188,7 +194,8 @@ export class PublicationHost implements ConnectionDeliveryPort {
       }
       const ordered = [...consumed.snapshot.units].reverse() // The Core wire explicitly declares newest-first.
       const resolvedText = await this.resolve(reference, ordered, signal, binding, adapter)
-      this.store.commitPage(binding, state.after, page, () => this.authorized(binding), { units: ordered, resolvedText, fragmentBytes: adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes })
+      const questions = adapter.questionActions ? this.options.permissions?.questions?.(binding, ordered) : undefined
+      this.store.commitPage(binding, state.after, page, () => this.authorized(binding), { units: ordered, resolvedText, fragmentBytes: adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, ...(questions ? { questions } : {}) })
       after = page.checkpoint; lane.view = page.window.view!; lane.viewId = page.window.id; lane.read = { after }
       if (lane.watchViewId !== lane.viewId) lane.dirty = true
       if (!page.more) { lane.read = undefined; break }
@@ -308,7 +315,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       }
       const frozen = JSON.stringify([original.projectionId, original.sourceRevision])
       const relevant = qualified.has(frozen) ? [] : this.store.pendingRecords(original)
-      if (!qualified.has(frozen) && ['speech', 'image', 'file'].includes(original.payload.kind) && original.effect === 'upsert') {
+      if (!qualified.has(frozen) && ['speech', 'image', 'file', 'question'].includes(original.payload.kind) && original.effect === 'upsert' && ['native', 'captured'].includes(original.reference.source.kind)) {
         const reference = { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId }
         try {
           for (const record of relevant) {
@@ -362,10 +369,10 @@ export class PublicationHost implements ConnectionDeliveryPort {
           if (original.uploads?.at(-1)?.state !== 'confirmed') continue
         }
       }
-      if (original.payload.kind === 'permission' && !this.options.permissions?.authorized(original)) return { state: 'unavailable', reason: 'source-unconfirmed' }
-      const claimed = this.store.claimNext(binding, () => authorized() && (original!.payload.kind !== 'permission' || this.options.permissions?.authorized(original!) === true), adapter, projectionId)
+      if (['permission', 'question'].includes(original.payload.kind) && !this.options.permissions?.authorized(original)) return { state: 'unavailable', reason: 'source-unconfirmed' }
+      const claimed = this.store.claimNext(binding, () => authorized() && (!['permission', 'question'].includes(original!.payload.kind) || this.options.permissions?.authorized(original!) === true), adapter, projectionId)
       if (!claimed) return
-      if (signal.aborted || !authorized() || claimed.payload.kind === 'permission' && !this.options.permissions?.authorized(claimed)) { this.store.settle(claimed.operationId, claimed.attempt!, { state: 'not-applied', reason: 'adapter-unavailable' }); return }
+      if (signal.aborted || !authorized() || ['permission', 'question'].includes(claimed.payload.kind) && !this.options.permissions?.authorized(claimed)) { this.store.settle(claimed.operationId, claimed.attempt!, { state: 'not-applied', reason: 'adapter-unavailable' }); return }
       const timeout = AbortSignal.timeout(30_000), dispatchSignal = AbortSignal.any([signal, timeout])
       let effect: Promise<PublicationReceipt>
       try { effect = Promise.resolve(adapter.dispatch(claimed.prepared!, claimed.target, credential, dispatchSignal, claimed.mapping, publicationEffectContext(claimed))) }

@@ -2,7 +2,7 @@ import { AgentMuxError } from '@agentmux/core'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { DurableIngressCore } from './durable-ingress.js'
 
-type HostedInput = Pick<AgentMuxHostedClient, 'recordExternalConversationMessage' | 'readAgentSession' | 'submitAgentMessage' | 'inspectAgentInput' | 'rejoinAgentInputWaiting' | 'agentSession' | 'onEvent' | 'respondAgentInteraction' | 'inspectAgentInteractionOperation'>
+type HostedInput = Pick<AgentMuxHostedClient, 'recordExternalConversationMessage' | 'readAgentSession' | 'submitAgentMessage' | 'inspectAgentInput' | 'rejoinAgentInputWaiting' | 'agentSession' | 'onEvent' | 'respondAgentInteraction' | 'inspectAgentInteractionOperation' | 'replySessionQuestion' | 'inspectAgentPromptSubmission' | 'providers'>
 /** Borrow the exact Host transport. Its semantic service must resolve original external authority in process. */
 export function createHostedIngressCorePort(clients: () => readonly { hostId: string; client: HostedInput }[]): (hostId: string) => DurableIngressCore | undefined {
   return hostId => {
@@ -17,6 +17,9 @@ export function createHostedIngressCorePort(clients: () => readonly { hostId: st
       onEvent: listener => client.onEvent(listener),
       respondAgentInteraction: input => client.respondAgentInteraction(input),
       inspectAgentInteractionOperation: input => client.inspectAgentInteractionOperation(input),
+      replySessionQuestion: input => client.replySessionQuestion(input),
+      inspectAgentPromptSubmission: input => client.inspectAgentPromptSubmission(input),
+      providers: client.providers,
       readAgentSession: async id => {
         const session = await client.readAgentSession(id)
         // The selected semantic endpoint owns local metadata; hostId is its configured route alias.

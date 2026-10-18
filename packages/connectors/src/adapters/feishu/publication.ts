@@ -7,6 +7,7 @@ import type { PublicationMapping, PublicationOperation, PublicationReceipt, Publ
 import { parsePreparedPublication, publicationSpeechText, type PreparedPublication } from '../../publication-wire.js'
 import type { FeishuAdapter } from './index.js'
 import { feishuFailure, feishuIdentity } from './message.js'
+import { feishuQuestionCard } from './question-card.js'
 
 const path = '/open-apis/im/v1/messages'
 const object = (value: unknown): Record<string, unknown> | null => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
@@ -16,16 +17,16 @@ function ownSender(value: unknown, application: ConnectionApplication): boolean 
   const sender = object(value)
   return sender?.sender_type === 'app' && sender.id_type === 'app_id' && sender.id === application.appId
 }
-function post(text: string): string {
-  return JSON.stringify({ zh_cn: { title: '', content: [[{ tag: 'text', text, un_escape: false }]] } })
-}
 function requestCard(prepared: PreparedPublication): Record<string, unknown> | null {
   try {
     const body = object(JSON.parse(prepared.request.body!)), card = typeof body?.content === 'string' ? object(JSON.parse(body.content)) : null
-    if (!card || object(card.config)?.update_multi !== true || object(object(card.header)?.title)?.tag !== 'plain_text' || !Array.isArray(card.elements)) return null
+    if (!card || object(card.config)?.update_multi !== true || object(object(card.header)?.title)?.tag !== 'plain_text') return null
+    if (card.schema === '2.0') return Array.isArray(object(card.body)?.elements) ? card : null
+    if (!Array.isArray(card.elements)) return null
     for (const element of card.elements) {
       const value = object(element)
       if (value?.tag === 'div') { if (object(value.text)?.tag !== 'plain_text' || typeof object(value.text)?.content !== 'string') return null }
+      else if (value?.tag === 'img') { if (typeof value.img_key !== 'string' || object(value.alt)?.tag !== 'plain_text') return null }
       else if (value?.tag === 'action' && Array.isArray(value.actions) && value.actions.length === 1) {
         const button = object(value.actions[0]), text = object(button?.text), ref = object(button?.value)
         if (button?.tag !== 'button' || text?.tag !== 'plain_text' || typeof text.content !== 'string') return null
@@ -117,11 +118,12 @@ function consistent(data: Record<string, unknown>, target: PublicationTarget, ma
 /** Stateless platform effects. The original Host owns source selection, durable work, ordering and retries. */
 export class FeishuPublicationAdapter implements PublicationAdapter {
   readonly adapterId = 'feishu'
-  readonly renderVersion = 'feishu-group-v2'
-  readonly supportedRenderVersions = ['feishu-post-group-v1', this.renderVersion]
+  readonly renderVersion = 'feishu-conversation-v3'
+  readonly supportedRenderVersions = ['feishu-post-group-v1', 'feishu-group-v2', this.renderVersion]
   readonly fragmentBytes = 4_096
   readonly addressing = 'group'
   readonly permissionActions = true as const
+  readonly questionActions = true as const
   readonly images = {
     maxBytes: 10 * 1024 * 1024,
     accepts: (image: PublicationImage) => image.byteLength > 0 && image.byteLength <= this.images.maxBytes && image.width > 0 && image.height > 0 &&
@@ -188,6 +190,8 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
         ...(!ended && !paused ? [{ tag: 'div', text: { tag: 'plain_text', content: `${publication}\n${input}\nEarlier history is not backfilled. Internal reasoning, raw tool details and system context are not shared.` } }] : []),
         { tag: 'action', actions: [{ tag: 'button', type: 'default', text: { tag: 'plain_text', content: 'Open conversation' }, url: `amux://agent/${encodeURIComponent(payload.agentSessionId)}` }] }
       ] }
+    } else if (operation.payload.kind === 'question') {
+      card = feishuQuestionCard(operation.payload, feishuIdentity(operation.reference.agentSessionId))
     } else if (operation.payload.kind === 'permission') {
       const payload = operation.payload
       const status = { pending: 'Choose one original permission option.', 'response-sent': 'Response returned. Native adoption and completion are not confirmed.', unconfirmed: 'The original response is not confirmed. Check it in amux; it will not be resent.', unavailable: 'Continue in the original amux terminal.' }[payload.status]
@@ -197,25 +201,25 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
         ...payload.options.map(option => ({ tag: 'action', actions: [{ tag: 'button', text: { tag: 'plain_text', content: option.label }, value: { actionRef: option.actionRef } }] }))
       ] }
     } else if (operation.payload.kind === 'speech' && operation.payload.relay) {
+      if (!publicationSpeechText(operation.payload)) feishuFailure('FEISHU_PUBLICATION_CONTENT_UNSUPPORTED')
       card = { config: { update_multi: true }, header: { title: { tag: 'plain_text', content: 'Shared message · via amux' } },
         elements: [{ tag: 'div', text: { tag: 'plain_text', content: publicationSpeechText(operation.payload) } }] }
+    } else if (operation.payload.kind === 'speech') {
+      if (!publicationSpeechText(operation.payload)) feishuFailure('FEISHU_PUBLICATION_CONTENT_UNSUPPORTED')
+      const title = operation.payload.phase === 'progress' ? 'Agent progress' : operation.payload.phase === 'final' ? 'Agent reply' : 'Conversation message'
+      card = { config: { update_multi: true }, header: { title: { tag: 'plain_text', content: title }, template: operation.payload.phase === 'progress' ? 'grey' : 'blue' },
+        elements: [{ tag: 'div', text: { tag: 'plain_text', content: publicationSpeechText(operation.payload) } }] }
+    } else if (operation.payload.kind === 'image') {
+      const uploaded = operation.uploads?.at(-1)
+      if (uploaded?.state !== 'confirmed' || !('imageKey' in uploaded)) feishuFailure('FEISHU_IMAGE_UPLOAD_UNCONFIRMED')
+      card = { config: { update_multi: true }, header: { title: { tag: 'plain_text', content: 'Shared image' } },
+        elements: [{ tag: 'img', img_key: feishuIdentity(uploaded.imageKey), alt: { tag: 'plain_text', content: 'Original conversation image' } }] }
     }
     if (card) {
       const body = JSON.stringify({ ...(mapping ? {} : { receive_id: operation.target.externalConversationId, msg_type: 'interactive', uuid: key(operation.operationId) }), content: JSON.stringify(card) })
       if (Buffer.byteLength(body) > 30 * 1024) feishuFailure('FEISHU_PUBLICATION_REQUEST_TOO_LARGE')
       return { adapterId: this.adapterId, renderVersion: this.renderVersion, requestKey: operation.operationId, request: {
         method: mapping ? 'PATCH' : 'POST', path: mapping ? `${path}/${encodeURIComponent(mapping.messageId)}` : path,
-        ...(mapping ? {} : { query: { receive_id_type: 'chat_id' } }), contentType: 'application/json', body } }
-    }
-    if (operation.payload.kind === 'image') {
-      const uploaded = operation.uploads?.at(-1)
-      if (uploaded?.state !== 'confirmed' || !('imageKey' in uploaded)) feishuFailure('FEISHU_IMAGE_UPLOAD_UNCONFIRMED')
-      const imageKey = feishuIdentity(uploaded.imageKey)
-      const body = JSON.stringify({ ...(mapping ? {} : { receive_id: operation.target.externalConversationId }), msg_type: 'post',
-        content: JSON.stringify({ zh_cn: { title: '', content: [[{ tag: 'img', image_key: imageKey }]] } }), ...(mapping ? {} : { uuid: key(operation.operationId) }) })
-      if (Buffer.byteLength(body) > 30 * 1024) feishuFailure('FEISHU_PUBLICATION_REQUEST_TOO_LARGE')
-      return { adapterId: this.adapterId, renderVersion: this.renderVersion, requestKey: operation.operationId, request: {
-        method: mapping ? 'PUT' : 'POST', path: mapping ? `${path}/${encodeURIComponent(mapping.messageId)}` : path,
         ...(mapping ? {} : { query: { receive_id_type: 'chat_id' } }), contentType: 'application/json', body } }
     }
     if (operation.payload.kind === 'file') {
@@ -228,25 +232,17 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       return { adapterId: this.adapterId, renderVersion: this.renderVersion, requestKey: operation.operationId, request: {
         method: 'POST', path, query: { receive_id_type: 'chat_id' }, contentType: 'application/json', body } }
     }
-    const text = operation.payload.kind === 'speech' ? publicationSpeechText(operation.payload) : ''
-    if (!text) feishuFailure('FEISHU_PUBLICATION_CONTENT_UNSUPPORTED')
-    const body = JSON.stringify({ ...(mapping ? {} : { receive_id: operation.target.externalConversationId }), msg_type: 'post', content: post(text), ...(mapping ? {} : { uuid: key(operation.operationId) }) })
-    // The platform limit applies after both JSON encodings, including exact target and envelope overhead.
-    if (Buffer.byteLength(body) > 30 * 1024) feishuFailure('FEISHU_PUBLICATION_REQUEST_TOO_LARGE')
-    return { adapterId: this.adapterId, renderVersion: this.renderVersion, requestKey: operation.operationId, request: {
-      method: mapping ? 'PUT' : 'POST', path: mapping ? `${path}/${encodeURIComponent(mapping.messageId)}` : path,
-      ...(mapping ? {} : { query: { receive_id_type: 'chat_id' } }), contentType: 'application/json', body
-    } }
+    return feishuFailure('FEISHU_PUBLICATION_CONTENT_UNSUPPORTED')
   }
   private valid(prepared: PreparedPublication, target: PublicationTarget, mapping?: Readonly<PublicationMapping>): boolean {
     try {
       parsePreparedPublication(prepared, this)
       if (prepared.request.body !== undefined && Buffer.byteLength(prepared.request.body) > 30 * 1024) return false
       if (mapping) return prepared.request.path === `${path}/${encodeURIComponent(feishuIdentity(mapping.messageId))}` &&
-        prepared.request.query === undefined && (prepared.request.method === 'DELETE' && prepared.request.body === undefined || prepared.request.method === 'PUT' && prepared.request.contentType === 'application/json' && (requestText(prepared) !== null || requestImage(prepared) !== null) || prepared.request.method === 'PATCH' && prepared.renderVersion === this.renderVersion && prepared.request.contentType === 'application/json' && requestCard(prepared) !== null)
+        prepared.request.query === undefined && (prepared.request.method === 'DELETE' && prepared.request.body === undefined || prepared.request.method === 'PUT' && prepared.request.contentType === 'application/json' && (requestText(prepared) !== null || requestImage(prepared) !== null) || prepared.request.method === 'PATCH' && ['feishu-group-v2', this.renderVersion].includes(prepared.renderVersion) && prepared.request.contentType === 'application/json' && requestCard(prepared) !== null)
       const body = object(JSON.parse(prepared.request.body!))
       return prepared.request.method === 'POST' && prepared.request.path === path && prepared.request.contentType === 'application/json' && prepared.request.query?.receive_id_type === 'chat_id' &&
-        body?.receive_id === target.externalConversationId && body.uuid === key(prepared.requestKey) && (body.msg_type === 'file' && requestFile(prepared) !== null || body.msg_type === 'post' && (requestText(prepared) !== null || requestImage(prepared) !== null) || body.msg_type === 'interactive' && prepared.renderVersion === this.renderVersion && requestCard(prepared) !== null)
+        body?.receive_id === target.externalConversationId && body.uuid === key(prepared.requestKey) && (body.msg_type === 'file' && requestFile(prepared) !== null || body.msg_type === 'post' && (requestText(prepared) !== null || requestImage(prepared) !== null) || body.msg_type === 'interactive' && ['feishu-group-v2', this.renderVersion].includes(prepared.renderVersion) && requestCard(prepared) !== null)
     } catch { return false }
   }
   async dispatch(prepared: PreparedPublication, target: PublicationTarget, credential: string, signal: AbortSignal, mapping?: Readonly<PublicationMapping>): Promise<PublicationReceipt> {

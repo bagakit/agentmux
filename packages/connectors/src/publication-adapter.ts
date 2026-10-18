@@ -9,6 +9,7 @@ export interface PublicationAdapter extends PublicationPreparer {
   fragmentBytesFor?(target: PublicationTarget): number
   /** This finite payload requires an explicit adapter implementation; speech support does not imply it. */
   readonly permissionActions?: true
+  readonly questionActions?: true
   readonly images?: {
     readonly maxBytes: number
     accepts(image: PublicationImage): boolean
