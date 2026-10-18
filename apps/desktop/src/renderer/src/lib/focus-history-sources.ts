@@ -21,14 +21,17 @@ export function useFocusHistorySources(enabled: boolean) {
     const episode = generation.current, requested = wanted.current
     const current = () => active.current && generation.current === episode
     reading.current = true; setLoading(true)
-    void api.sessions.historySources().then(values => {
+    void api.sessions.historySources({ observation: true }).then(({ sources: values, warnings }) => {
       if (!current()) return
       for (const source of values) {
         const key = JSON.stringify([source.hostId, source.agentSessionId])
         if ((known.current.get(key)?.revision ?? -1) < requested)
           known.current.set(key, { active: source.state === 'active', revision: requested })
       }
-      loaded.current = true; observed.current = requested; setSources(values); setError(null)
+      loaded.current = true; observed.current = requested
+      const failed = new Set(warnings.map(warning => warning.hostId))
+      setSources(previous => failed.size ? [...values, ...previous.filter(source => failed.has(source.hostId))] : values)
+      setError(warnings.length ? warnings.map(warning => `${warning.hostId}: ${warning.message}`).join(' · ') : null)
     }).catch(cause => {
       if (!current()) return
       observed.current = requested; setError(presentError(cause))
