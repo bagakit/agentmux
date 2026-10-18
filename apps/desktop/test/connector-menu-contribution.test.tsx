@@ -145,6 +145,30 @@ it('keeps connection and settings discovery visible while the mounted Settings m
   evidence('mounted-settings-two-menus', { input, originalReceipt: receipt.operation, current: await cli(['get']), preservedBots: (await f.services.connections.list()).connections.map(record => ({ connectionId: record.config.connectionId, enabled: record.config.enabled })), preservedAgent: defaultAgent.control })
 }, 15_000)
 
+it('opens visible sync controls from Connections and enables sync only after an explicit save', async () => {
+  await f.services.connections.service!.configure({ operationId: 'original-service-off', expectedRevision: 0, service: { enabled: false } })
+  await f.mount()
+  const before = useAppStore.getState()
+  const trigger = document.querySelector<HTMLElement>('[data-workbench-region-id="default-region"] .agent-region-header__connector')!
+  expect(trigger).not.toBeNull()
+  await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
+  await menuAction('Automatic sync settings')
+  await waitFor(() => expect(policy()?.dataset.connectorServiceState).toBe('off'))
+  expect(document.querySelector('.lark-settings')!.firstElementChild).toBe(document.querySelector('[data-connector-service]'))
+  expect(writes()).toHaveLength(0)
+  await toggle()
+  expect(master().checked).toBe(true)
+  expect((await f.services.connections.service!.get()).enabled).toBe(false)
+  expect(writes()).toHaveLength(0)
+  await save()
+  await waitFor(() => expect(policy().dataset.connectorServiceState).toBe('on'))
+  expect(writes()).toEqual([expect.objectContaining({ expectedRevision: 1, service: { enabled: true } })])
+  expect(await cli(['get'])).toEqual({ enabled: true, revision: 2 })
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(f.app.launch).not.toHaveBeenCalled(); expect(f.app.stop).not.toHaveBeenCalled(); expect(f.app.send).not.toHaveBeenCalled()
+}, 15_000)
+
 it('keeps an unknown save as its exact original request across remount and current reads, then queries its historical receipt', async () => {
   await f.mount(); await openSettings(); await toggle()
   const forward = f.connections.getMockImplementation()!
