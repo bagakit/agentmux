@@ -322,6 +322,12 @@ app.whenReady().then(async () => {
     assert.equal(result.afterAppend.sameNode, true); assert.equal(result.afterAppend.sameBody, true)
     assert.ok(Math.abs(result.afterAppend.top - result.selected.top) <= 2, 'The selected original anchor remains in place')
     await shot('selected'); await sample('selected-append')
+    if (proofMode === 'cost') {
+      await read('getSelection().removeAllRanges()')
+      result.appendCost.disposition = await ready(`readingProof.appendDisposition(${JSON.stringify(beforeAppend)},${JSON.stringify(appended.payload.id)},false)`)
+      await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+      result.appendCost.after = await appendedMounts()
+    }
     await read(`readingSelectedBody.closest('.log-turn').querySelector('[aria-label="Copy message"]').scrollIntoView({block:'center'})`)
     await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
     await click(`readingSelectedBody.closest('.log-turn').querySelector('[aria-label="Copy message"]')`)
@@ -330,11 +336,6 @@ app.whenReady().then(async () => {
     assert.ok(original, 'The selected copy target is an exact original fixture record')
     assert.equal(copies.at(-1), original.payload.content.map((part: any) => part.text).join('\n'))
     await read('getSelection().removeAllRanges()')
-    if (proofMode === 'cost') {
-      result.appendCost.disposition = await ready(`readingProof.appendDisposition(${JSON.stringify(beforeAppend)},${JSON.stringify(appended.payload.id)},false)`)
-      await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
-      result.appendCost.after = await appendedMounts()
-    }
     if (await read('!!document.querySelector(".activity-feed__jump")')) {
       await click('document.querySelector(".activity-feed__jump")')
       await ready('document.querySelector("[data-conversation-reading]")?.dataset.conversationReading === "current"')
