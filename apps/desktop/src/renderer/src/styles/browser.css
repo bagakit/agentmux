@@ -125,8 +125,20 @@
   .browser-toolbar > .browser-toolbar__more--optional { display: inline-flex; }
 }
 @container browser-pane (max-width: 380px) {
+  .browser-toolbar { padding-inline: var(--sp-1); }
   .browser-toolbar > .browser-toolbar__navigation { display: none; }
   .browser-toolbar > .browser-toolbar__reload { display: none; }
+  .browser-toolbar label { min-width: 36px; gap: var(--sp-1); padding-inline: var(--sp-1); }
+  .browser-operation-status__cue { display: none; }
+  .browser-toolbar .browser-operation-status__trigger--presence { gap: var(--sp-1); padding-inline: var(--sp-1); }
+  .browser-operation-status:has(.browser-operation-status__action-label) { min-width: 0; flex: 0 1 auto; }
+  .browser-operation-status__trigger--presence:has(.browser-operation-status__action-label) { min-width: 0; }
+  .browser-operation-status__trigger--presence > svg { flex: none; }
+  .browser-operation-status__action-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+}
+@container browser-pane (max-width: 240px) {
+  .browser-operation-status__action-label { display: none; }
+  .browser-operation-status__trigger--presence:has(.browser-operation-status__action-label) { min-width: 27px; }
 }
 .browser-menu { min-width: min(210px, calc(100vw - 16px)); max-width: calc(100vw - 16px); max-height: var(--radix-dropdown-menu-content-available-height); overflow-x: hidden; overflow-y: auto; z-index: var(--layer-popover); pointer-events: auto; outline: none; padding:var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius); color: var(--text-2); background: var(--surface-1); box-shadow: var(--elev-2); }
 .browser-menu [role="group"] { display: grid; gap:1px; }
