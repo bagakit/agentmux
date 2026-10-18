@@ -4,6 +4,20 @@
 .settings-survey .browser-start-settings__field { grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); margin-block: 0 var(--sp-4); }
 .settings-survey .browser-start-settings__field > span { font-size: var(--fs-meta); font-weight: 500; }
 .settings-survey .browser-start-settings__field input { min-width: 0; font-size: var(--fs-body); }
+.settings-survey__image-field { min-width: 0; padding-block: var(--sp-3); border-top: 1px solid var(--line-soft); }
+.settings-survey__image-row { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+.settings-survey__thumbnail { display: grid; place-items: center; flex: none; width: 58px; height: 58px; border: 1px solid var(--line-soft); border-radius: var(--radius); overflow: hidden; background: var(--surface-1); color: var(--text-3); }
+.settings-survey__thumbnail img { width: 100%; height: 100%; object-fit: contain; }
+.settings-survey__thumbnail[data-image-kind='background'] img { object-fit: cover; }
+.settings-survey__image-content { display: grid; gap: var(--sp-1); flex: 1; min-width: 0; }
+.settings-survey__image-content > strong { color: var(--text); font-size: var(--fs-meta); font-weight: 500; }
+.settings-survey__image-content > small { color: var(--text-3); font-size: var(--fs-micro); }
+.settings-survey__image-buttons { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-1); }
+.settings-survey__image-url { margin-top: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
+.settings-survey__image-url summary { cursor: pointer; width: fit-content; }
+.settings-survey__image-url summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; border-radius: var(--radius-sm); }
+.settings-survey__image-url input { width: 100%; min-width: 0; margin-top: var(--sp-2); box-sizing: border-box; }
+.settings-survey__field-notice { margin: var(--sp-2) 0 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: anywhere; }
 .settings-survey__preview { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; background: var(--surface-1); }
 .settings-survey__preview > header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--line-soft); }
 .settings-survey__preview > header strong { font-size: var(--fs-meta); font-weight: 500; }
