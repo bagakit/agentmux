@@ -1,3 +1,5 @@
+import type { ConnectionAdapter } from '../../../../packages/connectors/src/connection-host'
+import { settingsCatalog } from '../../src/renderer/src/components/settings/settings-modules'
 import { act } from 'react'
 import { join, resolve } from 'node:path'
 import { mkdir, writeFile } from 'node:fs/promises'
@@ -15,7 +17,7 @@ import { createWorkbenchTab, addWorkbenchRegion } from '../../src/renderer/src/l
 import { WorkspaceWorkbench } from '../../src/renderer/src/components/WorkspaceWorkbench'
 import { SettingsNavigation } from '../../src/renderer/src/components/SettingsNavigation'
 import { composerConfig, composerDOM, composerSession } from '../helpers/composer-dom-fixture'
-import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap } from '@agentmux/core/connections'
+import type { ConnectionConfig, ConnectionMethod, ConnectionParamsMap, ConnectionResultMap } from '@agentmux/core/connections'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../../packages/core/test/helpers/object-cli-rpc.js'
 import { rpcOwnerFixture } from '../../../../packages/core/test/helpers/public-rpc-owner.js'
 import { feishuConfig, feishuSdkTransport, botOpenId } from '../../../../packages/connectors/test/fixtures/feishu.js'
@@ -23,7 +25,7 @@ import { createPublicationConversationPort } from '../../../../packages/connecto
 import { defaultHttpInstance, type RoomReadWire } from '../../../../packages/connectors/test/fixtures/room-discovery.js'
 
 /** Production Renderer, IPC, public Core and Desktop Host; only encryption/adapter/terminal leaves are controlled. */
-export function connectorJourneyFixture(options: { platform?: (request: RoomReadWire) => Promise<unknown>; publication?: boolean; ingress?: boolean } = {}) {
+export function connectorJourneyFixture(options: { platform?: (request: RoomReadWire) => Promise<unknown>; publication?: boolean; ingress?: boolean; connection?: ConnectionConfig; adapter?(): ConnectionAdapter } = {}) {
   const dom = composerDOM(), settings = vi.fn()
   let original: Awaited<ReturnType<typeof roomProvisioningFixture>>, services: Awaited<ReturnType<typeof createDesktopConnections>>
   let server: InstanceType<typeof core.AgentMuxControlServer>, calls: { method: ConnectionMethod; input: unknown; result?: unknown }[]
@@ -49,7 +51,7 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
         async close() { await owner.close(); await history.close() } }
     }
     if (artifactDirectory) vi.stubEnv('AGENTMUX_TEST_CONNECTOR_ARTIFACTS', artifactDirectory)
-    platformCalls = []; connectionConfig = options.platform ? feishuConfig : config
+    platformCalls = []; connectionConfig = options.connection ?? (options.platform ? feishuConfig : config)
     ingressTransport = options.ingress ? feishuSdkTransport() : null
     if (options.platform) vi.spyOn(defaultHttpInstance, 'request').mockImplementation(async input => {
       if (ingressTransport && input.url?.endsWith('/callback/ws/endpoint')) return await ingressTransport.request(input)
@@ -59,7 +61,7 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
       return await options.platform!(input as RoomReadWire)
     })
     vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
-    services = await createDesktopConnections({ directory: join(original.root, 'ui-connections'), ...(options.platform ? {} : { adapters: [original.adapter] }), bindings: { spatial: original.spatial, checkpoint: original.checkpoint },
+    services = await createDesktopConnections({ directory: join(original.root, 'ui-connections'), ...(options.platform ? {} : { adapters: [options.adapter?.() ?? original.adapter] }), bindings: { spatial: original.spatial, checkpoint: original.checkpoint },
       encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: value.toString(), shouldReEncrypt: false }) },
       ...(options.ingress ? { ingress: { core: hostId => hostId === 'local' ? original.client : undefined } } : {}),
       ...(options.publication ? { publication: createPublicationConversationPort(() => [{ hostId: 'local', client: original.client }]) } : {}) })
@@ -78,6 +80,7 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
       call.result = result; return result
     }
     vi.spyOn(api.connections, 'call').mockImplementation(forward)
+    vi.spyOn(api.connections, 'onMetadataChanged').mockImplementation(listener => services.onChannelMetadataChanged(listener))
     const session = { ...composerSession(original.session.agentSessionId, 'claude'), workspacePath: original.root, nativeHandle: original.session.nativeHandle!, label: 'Original Mote Agent' }
     let tab = createWorkbenchTab('ui-tab', { kind: 'agent', phase: 'attached', workspaceId: 'workspace', regionId: 'original-region', sessionId: session.id })
     tab = addWorkbenchRegion(tab, 'original-region', 'right', { kind: 'agent', phase: 'attached', workspaceId: 'workspace', regionId: 'other-region', sessionId: session.id })
@@ -100,7 +103,7 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
     }
     await dom.render(null); await server?.stop(); services?.close(); await original?.close(); vi.unstubAllEnvs()
   })
-  async function mount() { await dom.render(<SettingsNavigation.Provider value={{ open: settings, openToolkit: () => {}, openHost: () => {}, openLark: settings, openMoteLark: settings, chooseAgent: () => {} }}><WorkspaceWorkbench workspaceId="workspace" /></SettingsNavigation.Provider>) }
+  async function mount() { await dom.render(<SettingsNavigation.Provider value={{ open: settings, openToolkit: () => {}, openHost: () => {}, openChannel: settings, channelPresentation: settingsCatalog.channelPresentation, openMoteLark: settings, chooseAgent: () => {} }}><WorkspaceWorkbench workspaceId="workspace" /></SettingsNavigation.Provider>) }
   async function journey(mode: 'create' | 'existing' | 'details', regionId = 'original-region', context = false) {
     const trigger = document.querySelector<HTMLElement>('[data-workbench-region-id="' + regionId + '"] .agent-region-header__more')
     expect(trigger, 'original Agent More trigger').not.toBeNull()

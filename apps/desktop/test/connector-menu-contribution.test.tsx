@@ -18,7 +18,7 @@ const evidence = (scenario: string, facts: unknown) => { runtimeEvidence.push({ 
 afterAll(async () => { if (process.env.AGENTMUX_CONNECTOR_MENU_RECEIPT) await writeFile(process.env.AGENTMUX_CONNECTOR_MENU_RECEIPT, JSON.stringify({ schema: 'agentmux.connector-menu-consumer.v1', scope: 'Mounted App, Settings and both original menus through trusted IPC, public Core, default ConnectionHost and compiled CLI; controlled I/O only', scenarios: runtimeEvidence }, null, 2) + '\n') })
 beforeEach(async () => { f = await moteConnectionJourney(); useAppStore.setState({ connectorServiceIntents: {}, connectorServiceObservation: null }) })
 afterEach(async () => { await f?.dispose() })
-const groupLabel = 'Lark'
+const groupLabel = 'Connections'
 const master = () => document.querySelector<HTMLInputElement>('[aria-label="Enable external chat sync"]')!
 const policy = () => document.querySelector<HTMLElement>('[data-connector-service-state]')!
 const original = (id: string) => document.querySelector<HTMLElement>(`[data-service-operation="${id}"]`)!
@@ -53,7 +53,7 @@ async function openMenu(kind: 'header' | 'region') {
 }
 async function serviceNotice() {
   let trigger: HTMLElement | undefined
-  await waitFor(() => { trigger = [...document.querySelectorAll<HTMLElement>('[role="menuitem"][aria-haspopup="menu"]')].find(item => item.textContent?.trim() === 'Lark service notice'); expect(trigger).toBeDefined() })
+  await waitFor(() => { trigger = [...document.querySelectorAll<HTMLElement>('[role="menuitem"][aria-haspopup="menu"]')].find(item => item.textContent?.trim() === 'Connections service notice'); expect(trigger).toBeDefined() })
   await act(async () => { trigger!.focus(); trigger!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })) })
   const content = () => document.getElementById(trigger!.getAttribute('aria-controls')!)
   await waitFor(() => { expect(content()).not.toBeNull(); expect(content()!.querySelector('[role="status"]')).not.toBeNull() })
@@ -65,11 +65,12 @@ async function menuAction(label: string) {
 }
 async function openSettings() {
   await openMenu('header')
-  await menuAction('Lark settings')
+  await menuAction('Automatic sync settings')
+  await waitFor(() => expect(document.querySelector('[role="dialog"] [data-connector-service]')).not.toBeNull())
   await waitFor(() => expect(policy()?.dataset.connectorServiceState).toBe('on'))
 }
 async function closeSettings() {
-  const close = document.querySelector<HTMLElement>('[aria-label="Close settings"]')!
+  const close = document.querySelector<HTMLElement>('[aria-label="Close group setup"], [aria-label="Close settings"]')!
   expect(close).not.toBeNull(); await moteClick(close)
 }
 async function settingsFromApp() {
@@ -102,9 +103,9 @@ it('keeps connection and settings discovery visible while the mounted Settings m
   }
   const before = useAppStore.getState(), bots = (await f.services.connections.list()).connections.map(record => record.config)
   await openSettings()
-  const pane = document.querySelector('.lark-settings')!
-  expect(pane.firstElementChild).toBe(document.querySelector('[data-connector-service]'))
-  expect(pane.firstElementChild?.textContent).toContain('all your external bots')
+  const pane = document.querySelector('[aria-label="Close group setup"]')!.closest('[role="dialog"]')!
+  expect(pane.querySelector('[data-connector-service]')?.textContent).toContain('for all bots')
+  expect(pane.querySelector('[data-connector-service]')).not.toBeNull()
   expect(writes()).toHaveLength(0)
   await toggle()
   expect(policy().dataset.connectorServiceState).toBe('on')
@@ -128,7 +129,7 @@ it('keeps connection and settings discovery visible while the mounted Settings m
     const menu = await openMenu(kind)
     expect(groups()).toHaveLength(1)
     expect(groups()[0]!.textContent).toContain('Connect group…')
-    expect(groups()[0]!.textContent).toContain('Lark settings')
+    expect(groups()[0]!.textContent).toContain('Automatic sync settings')
     expect(menu.querySelector('[data-connector-menu-separator]')).not.toBeNull()
     expect(menu.lastElementChild?.getAttribute('role')).not.toBe('separator')
     expect(menu.textContent).toContain('Copy link')
@@ -154,7 +155,7 @@ it('opens visible sync controls from Connections and enables sync only after an 
   await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
   await menuAction('Automatic sync settings')
   await waitFor(() => expect(policy()?.dataset.connectorServiceState).toBe('off'))
-  expect(document.querySelector('.lark-settings')!.firstElementChild).toBe(document.querySelector('[data-connector-service]'))
+  expect(document.querySelector('[role="dialog"] [data-connector-service]')).not.toBeNull()
   expect(writes()).toHaveLength(0)
   await toggle()
   expect(master().checked).toBe(true)
@@ -282,7 +283,7 @@ it('does not publish a late service read from a menu opening that has already cl
     return await forward(method, input)
   })
   await openMenu('header'); expect(held).toBe(true)
-  expect(groups()[0]!.textContent).toContain('Lark settings')
+  expect(groups()[0]!.textContent).toContain('Automatic sync settings')
   expect(groups()[0]!.textContent).toContain('Connect group…')
   await closeMenu()
   const before = useAppStore.getState().connectorServiceObservation
@@ -431,9 +432,9 @@ it('keeps group and settings discovery when no bot is enabled and automatic sync
     await openMenu(kind)
     expect(groups()).toHaveLength(1)
     expect(groups()[0]!.getAttribute('aria-label')).toBe(groupLabel)
-    expect([...groups()[0]!.querySelectorAll('[role="menuitem"]')].map(item => item.textContent?.trim())).toEqual(['Connect group…', 'Shared group details', 'Lark settings'])
+    expect([...groups()[0]!.querySelectorAll('[role="menuitem"]')].map(item => item.textContent?.trim())).toEqual(['Connect group…', 'Shared group details', 'Automatic sync settings'])
   }
-  await menuAction('Lark settings'); await waitFor(() => expect(master()).not.toBeNull())
+  await menuAction('Automatic sync settings'); await waitFor(() => expect(master()).not.toBeNull())
   await toggle(); await save(); await waitFor(() => expect(policy().dataset.connectorServiceState).toBe('off'))
   await closeSettings()
   for (const kind of ['header', 'region'] as const) { await openMenu(kind); expect(groups()).toHaveLength(1) }
