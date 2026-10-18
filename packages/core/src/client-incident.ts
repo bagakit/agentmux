@@ -3,6 +3,7 @@ import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { isDeliveryLogId } from './delivery-log-id.js'
 import { parseReadingDiagnosticRecord, type ReadingDiagnosticRecord } from './reading-diagnostic.js'
+export { clientIncidentPriority } from './client-incident-priority.js'
 
 export const CLIENT_READING_INCIDENT_KINDS = ['conversation-reading-progress', 'conversation-reading-failure',
   'conversation-reading-held', 'conversation-reading-recovered'] as const
@@ -16,7 +17,7 @@ export const CLIENT_INCIDENT_STAGES = ['attach-requested', 'attach-received', 'r
 export const CLIENT_INCIDENT_CODES = ['EIO', 'ENOSPC', 'EACCES', 'ENOENT', 'EDQUOT', 'EMFILE', 'ENFILE', 'EPIPE',
   'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EEXIST', 'ENOTDIR', 'EISDIR', 'EROFS', 'EINVAL', 'ABORT_ERR',
   'CONTROL_UNAVAILABLE', 'CONTROL_CONNECTION_FAILED', 'CONTROL_TIMEOUT', 'CONTROL_PROTOCOL_ERROR', 'CONTROL_CANCELLED', 'CONTROL_PERMISSION_DENIED',
-  'RUNTIME_UNAVAILABLE', 'RUNTIME_OWNER_CHANGED', 'CTXMUX_run_not_found', 'STALE_AGENT_SESSION', 'STALE_AGENT_SESSION_BINDING',
+  'RUNTIME_UNAVAILABLE', 'RUNTIME_OWNER_CHANGED', 'CTXMUX_DISCONNECTED', 'CTXMUX_run_not_found', 'STALE_AGENT_SESSION', 'STALE_AGENT_SESSION_BINDING',
   'UNKNOWN_AGENT_SESSION', 'INVALID_CONTROL_REQUEST', 'CTXMUX_EVENT_INVALID', 'EXECUTOR_HOST_CHANGED', 'EXECUTOR_CHECK_FAILED',
   'SETTING_RESOURCE_NOT_FOUND', 'EXECUTABLE_SEARCH_UNAVAILABLE', 'EXECUTABLE_WORKSPACE_REQUIRED',
   'EXECUTABLE_NOT_FILE', 'EXECUTABLE_CHECK_FAILED', 'CTXMUX_CONNECTION_OBSERVATION_FAILED'] as const
@@ -37,6 +38,7 @@ export type AgentMuxClientIncidentMetadata = {
   baseY?: number; viewportY?: number; bufferLength?: number; resizeRevision?: number
   renderCallbacks?: number; writeCompletions?: number; liveQueueBytes?: number; liveQueueItems?: number
   historyOverwritten?: number; reporterDropped?: number; recorderReadFailures?: number
+  reporterRejected?: number; reporterUnavailable?: number; reporterCoalesced?: number
   visible?: boolean; revealed?: boolean; liveReady?: boolean; replaying?: boolean; readOnly?: boolean; canControl?: boolean; disposed?: boolean
   attachmentState?: 'attaching' | 'attached' | 'reconnecting' | 'detached' | 'unknown'
   processState?: 'running' | 'exited' | 'lost' | 'unknown'
@@ -157,7 +159,8 @@ function namespace(value: unknown, durable = false) {
   if (durable) member(p.lifetime, ['durable', 'instance', 'unknown'])
 }
 const metadataNumbers = ['latestOutputBytes', 'cursorBytes', 'parserAppliedBytes', 'pendingBytes', 'pendingBatches', 'cols', 'rows',
-  'clientWidth', 'clientHeight', 'baseY', 'viewportY', 'bufferLength', 'resizeRevision', 'renderCallbacks', 'writeCompletions', 'liveQueueBytes', 'liveQueueItems', 'historyOverwritten', 'reporterDropped', 'recorderReadFailures']
+  'clientWidth', 'clientHeight', 'baseY', 'viewportY', 'bufferLength', 'resizeRevision', 'renderCallbacks', 'writeCompletions', 'liveQueueBytes', 'liveQueueItems', 'historyOverwritten', 'reporterDropped', 'recorderReadFailures',
+  'reporterRejected', 'reporterUnavailable', 'reporterCoalesced']
 const metadataBooleans = ['visible', 'revealed', 'liveReady', 'replaying', 'readOnly', 'canControl', 'disposed']
 export function parseClientIncidentMetadata(value: unknown): AgentMuxClientIncidentMetadata {
   const p = object(value, [...metadataNumbers, ...metadataBooleans, 'attachmentId', 'attachmentState', 'processState', 'bufferType', 'renderer',
