@@ -1,4 +1,6 @@
 export * from './renderer-allocations.js'
+export * from './renderer-heap-snapshot.js'
+import type { RendererHeapSnapshotInput, RendererHeapSnapshotResult, RendererHeapSnapshotInspectInput, RendererHeapSnapshotInspection } from './renderer-heap-snapshot.js'
 export * from './renderer-performance-scene.js'
 import type { RendererAllocationsInput, RendererAllocationsResult } from './renderer-allocations.js'
 import type { RendererSceneCaptureInput, RendererSceneCaptureResult, RendererSceneInspectInput, RendererSceneInspection } from './renderer-performance-scene.js'
@@ -91,6 +93,8 @@ export type PerformanceDiagnostics = {
 export type MetricsSubscription = { dispose(): void }
 /** The host owns observation. Core only frames, validates and releases consumption. */
 export interface AgentMuxMetricsPort {
+  captureHeapSnapshot?(input: RendererHeapSnapshotInput, signal?: AbortSignal): Promise<RendererHeapSnapshotResult>
+  inspectHeapSnapshot?(input: RendererHeapSnapshotInspectInput, signal?: AbortSignal): Promise<RendererHeapSnapshotInspection>
   inspectAnimations?(input: RendererAnimationsInput, signal?: AbortSignal): Promise<RendererAnimationsResult>
   captureAllocations?(input: RendererAllocationsInput, signal?: AbortSignal): Promise<RendererAllocationsResult>
   captureScene?(input: RendererSceneCaptureInput, signal?: AbortSignal): Promise<RendererSceneCaptureResult>

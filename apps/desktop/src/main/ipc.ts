@@ -10,6 +10,8 @@ import { NoteSharedBlockOwner } from './note-shared-block-owner.js'
 import { parseFileShareParams, parseFileShareResult, parseFileShareInspectParams, parseFileShareInspectResult } from '@agentmux/core/files'
 import { RendererAllocationSampler } from './renderer-allocations.js'
 import type { PerformanceSceneOwner } from './performance-scene.js'
+import type { RendererHeapSnapshotOwner } from './renderer-heap-snapshot.js'
+import { registerHeapSnapshotFileIpc } from './renderer-heap-snapshot-ipc.js'
 import { isApplicationAccessMethod, parseApplicationAccessParams, type AgentMuxApplicationAccessOwner } from '@agentmux/core'
 import { registerConversationReadIpc } from './conversation-read-ipc'
 import { registerBrowserResourceIpc } from './browser-resource-ipc.js'
@@ -56,7 +58,7 @@ import { NOTES_WORKSPACE_ID } from '../shared/notes-library.js'
 import { DeliveryAttemptStore, parseDeliveryAttempt, type DeliveryAttempt } from '@agentmux/core'
 import { SpaceObjectImages } from './space-object-images.js'
 import type { SpaceObjectImageTarget, ObjectAvatarInput, ObjectAvatarRef } from '../shared/object-avatars.js'
-import { homedir } from 'node:os'
+import { homedir, hostname } from 'node:os'
 import { FileUploadOwner } from './file-upload-owner.js'
 import { GitPublicControl } from './git-public-control.js'
 import { NoteTitleFileWriter } from './note-title-file-writer.js'
@@ -287,6 +289,7 @@ export async function registerIpc(args: {
   webLinks?: WebUrlIngress
   spatialLinks?: SpatialLinkIngress
   performanceScene?: PerformanceSceneOwner
+  performanceHeap?: RendererHeapSnapshotOwner
   clientIncidents?: ClientIncidentArchive
   loadedPackage?: DesktopPackageIdentity | null
   loadedRenderer?: () => DesktopLoadedRenderer | null
@@ -555,6 +558,8 @@ export async function registerIpc(args: {
   const animations = new RendererAnimationInspector(contents, currentRendererCaptureTarget)
   const tracer = new RendererTimelineTracer(contents, currentRendererCaptureTarget)
   const metrics = createResourceMetricsPort({ sampler: args.runtime.resourceSampler, currentWindow: currentMetricsWindow, profiler, tracer, memory, animations, allocations,
+    ...(args.performanceHeap ? { heap: { owner: args.performanceHeap, dependencies: { contents, currentTarget: currentRendererCaptureTarget,
+      host: () => ({ kind: 'unix-host' as const, hostId: 'local' as const, hostname: hostname(), mainPid: process.pid }) } } } : {}),
     ...(args.performanceScene ? { scene: { owner: args.performanceScene, currentTarget: currentRendererCaptureTarget, loaded: () => ({ mainPid: process.pid,
       package: args.loadedPackage ?? null, renderer: contents.isLoadingMainFrame() ? null : args.loadedRenderer?.() ?? null }) } } : {}) })
   const closeMetrics = () => metrics.dispose()
@@ -1321,6 +1326,11 @@ export async function registerIpc(args: {
     assertToolkitSenderTrusted(event.sender, event.senderFrame, contents, contents.mainFrame)
     return handler(event, input)
   }))
+  if (args.performanceHeap) registerHeapSnapshotFileIpc(args.performanceHeap, args.window, currentRendererCaptureTarget,
+    (channel, handler) => handleWithEvent(channel, (event, input) => {
+      assertToolkitSenderTrusted(event.sender, event.senderFrame, contents, contents.mainFrame)
+      return handler(event, input)
+    }))
 
   handleWithEvent('notesStorage:inspect', async (event, operationId?: string) => { requireTrustedSender('notesStorage:inspect', event); await notesStorageReady; return notesStorageOwner.inspect(operationId) })
   handleWithEvent('notesStorage:change', async (event, input: import('@agentmux/core/notebook-store').NotesStorageChange) => { requireTrustedSender('notesStorage:change', event); return notesStorageOwner.change(input) })

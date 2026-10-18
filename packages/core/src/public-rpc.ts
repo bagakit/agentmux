@@ -92,6 +92,8 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'system.metrics.scene.inspect': 'metrics.scene.inspect',
   'system.metrics.profile.capture': 'metrics.profile.capture',
   'system.metrics.memory.inspect': 'metrics.memory.inspect',
+  'system.metrics.heap.capture': 'metrics.heap.capture',
+  'system.metrics.heap.inspect': 'metrics.heap.inspect',
   'system.metrics.animations.inspect': 'metrics.animations.inspect',
   'system.metrics.trace.capture': 'metrics.trace.capture',
   'toolkit.ls': 'toolkit.list', 'toolkit.inspect': 'toolkit.get', 'toolkit.script': 'toolkit.script',

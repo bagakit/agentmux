@@ -104,6 +104,11 @@ const api: AgentMuxPreloadApi = {
   },
   conversation: createPreloadConversationRead(ipcRenderer),
   performance: {
+    captureHeapSnapshot: input => ipcRenderer.invoke('metrics:captureHeapSnapshot', input),
+    inspectHeapSnapshot: input => ipcRenderer.invoke('metrics:inspectHeapSnapshot', input),
+    saveHeapSnapshot: input => ipcRenderer.invoke('metrics:saveHeapSnapshot', input),
+    revealHeapSnapshot: input => ipcRenderer.invoke('metrics:revealHeapSnapshot', input),
+    openHeapDevTools: input => ipcRenderer.invoke('metrics:openHeapDevTools', input),
     inspectAnimations: input => ipcRenderer.invoke('metrics:inspectAnimations', input),
     captureAllocations: input => ipcRenderer.invoke('metrics:captureAllocations', input),
     captureScene: input => ipcRenderer.invoke('metrics:captureScene', input),

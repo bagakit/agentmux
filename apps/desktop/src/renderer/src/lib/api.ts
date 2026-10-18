@@ -386,6 +386,11 @@ const mockApi: AgentMuxDesktopApi = {
     releaseConversationView: async () => { throw new Error('Open Desktop to release the original reading view.') }
   },
   performance: {
+    captureHeapSnapshot: async () => { throw new Error('Open Desktop to explicitly capture native heap material.') },
+    inspectHeapSnapshot: async () => { throw new Error('Open Desktop to inspect original heap material.') },
+    saveHeapSnapshot: async () => { throw new Error('Open Desktop to save the original heap file.') },
+    revealHeapSnapshot: async () => { throw new Error('Open Desktop to reveal the original heap file.') },
+    openHeapDevTools: async () => { throw new Error('Open Desktop to use DevTools Memory.') },
     inspectAnimations: async () => { throw new Error('Open Desktop to inspect the original Renderer animations.') },
     captureAllocations: async () => { throw new Error('Open Desktop to sample original Renderer allocations.') },
     captureScene: async () => { throw new Error('Open Desktop to capture the original Renderer scene.') },

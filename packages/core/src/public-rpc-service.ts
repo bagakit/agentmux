@@ -12,6 +12,7 @@ import { isConnectionSetupMethod, parseConnectionSetupParams } from './connectio
 import { parseAgentContinuityControlInput, parseAgentContinuityControlResult } from './agent-session-continuity-control.js'
 import { parseRendererV8ProfileResult } from './renderer-v8-profile.js'
 import { parseRendererMemoryResult } from './renderer-memory.js'
+import { parseRendererHeapSnapshotResult, parseRendererHeapSnapshotInspection } from './renderer-heap-snapshot.js'
 import { parseRendererAnimationsResult } from './renderer-animations.js'
 import { parseRendererTraceResult } from './renderer-trace.js'
 import { ConversationLandmarkStore } from './conversation-landmark-store.js'
@@ -1297,6 +1298,8 @@ export class AgentMuxRpcService {
         : request.operation === 'metrics.scene.inspect' ? { operation: 'metrics.scene.inspect', inspection: await this.inspectScene(request.captureId === undefined ? {} : { captureId: request.captureId }, context.signal) }
         : request.operation === 'metrics.animations.inspect' ? { operation: 'metrics.animations.inspect', observation: await this.inspectAnimations({ target: request.target }, context.signal) }
         : request.operation === 'metrics.memory.inspect' ? { operation: 'metrics.memory.inspect', observation: await this.inspectMemory({ target: request.target }, context.signal) }
+        : request.operation === 'metrics.heap.capture' ? { operation: 'metrics.heap.capture', capture: await this.captureHeapSnapshot({ target: request.target, captureId: request.captureId }, context.signal) }
+        : request.operation === 'metrics.heap.inspect' ? { operation: 'metrics.heap.inspect', inspection: await this.inspectHeapSnapshot(request.captureId === undefined ? {} : { captureId: request.captureId }, context.signal) }
         : request.operation === 'metrics.trace.capture' ? { operation: 'metrics.trace.capture', capture: await this.captureTrace({ target: request.target, durationMs: request.durationMs }, context.signal) }
         : request.operation === 'metrics.profile.capture' ? { operation: 'metrics.profile.capture', capture: await this.captureProfile({ target: request.target, durationMs: request.durationMs }, context.signal) }
         : request.operation === 'metrics.get' ? { operation: 'metrics.get', observation: await this.metrics(context.signal) }
@@ -1975,6 +1978,14 @@ export class AgentMuxRpcService {
     if (operation !== request.operation) throw new AgentMuxError('Toolkit operation mismatch.', 'CONTROL_PROTOCOL_ERROR')
     const result = parseToolkitResult(request.operation, body)
     assertToolkitResultTarget(request, result); return result
+  }
+  private async captureHeapSnapshot(input: import('./renderer-heap-snapshot.js').RendererHeapSnapshotInput, signal?: AbortSignal) {
+    if (!this.ports.metrics?.captureHeapSnapshot) throw new AgentMuxError('Native heap capture is unavailable on the original metrics owner.', 'METRICS_UNSUPPORTED')
+    return parseRendererHeapSnapshotResult(await this.ports.metrics.captureHeapSnapshot(input, signal), input)
+  }
+  private async inspectHeapSnapshot(input: import('./renderer-heap-snapshot.js').RendererHeapSnapshotInspectInput, signal?: AbortSignal) {
+    if (!this.ports.metrics?.inspectHeapSnapshot) throw new AgentMuxError('Native heap inspection is unavailable on the original metrics owner.', 'METRICS_UNSUPPORTED')
+    return parseRendererHeapSnapshotInspection(await this.ports.metrics.inspectHeapSnapshot(input, signal), input)
   }
   private async captureAllocations(input: import('./renderer-allocations.js').RendererAllocationsInput, signal?: AbortSignal) {
     if (!this.ports.metrics?.captureAllocations) throw new AgentMuxError('Allocation sampling is unavailable on the original metrics owner.', 'METRICS_UNSUPPORTED')

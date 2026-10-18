@@ -1,4 +1,5 @@
 import { readSceneResources, type PerformanceSceneOwner } from './performance-scene.js'
+import type { RendererHeapSnapshotOwner, RendererHeapSnapshotDependencies } from './renderer-heap-snapshot.js'
 import type { RendererV8ProfileTarget, RendererSceneLoaded } from '@agentmux/core/control'
 import { hostname } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -19,6 +20,7 @@ export function createResourceMetricsPort(args: {
   sampler: ProcessResourceSampler; currentWindow(): MetricsWindow | null; now?: () => number
   allocations?: { capture: NonNullable<AgentMuxMetricsPort['captureAllocations']>; dispose(): void }
   scene?: { owner: PerformanceSceneOwner; currentTarget(): RendererV8ProfileTarget | null; loaded(): RendererSceneLoaded }
+  heap?: { owner: RendererHeapSnapshotOwner; dependencies: RendererHeapSnapshotDependencies }
   profiler?: { capture: NonNullable<AgentMuxMetricsPort['captureProfile']>; dispose(): void }
   memory?: { inspect: NonNullable<AgentMuxMetricsPort['inspectMemory']>; dispose(): void }
   animations?: { inspect: NonNullable<AgentMuxMetricsPort['inspectAnimations']>; dispose(): void }
@@ -27,20 +29,30 @@ export function createResourceMetricsPort(args: {
   const consumers = new Set<() => void>()
   let disposed = false
   const port: AgentMuxMetricsPort & { dispose(): void } = {
+    ...(args.heap ? {
+      captureHeapSnapshot: async (input, signal) => {
+        if (disposed) throw new AgentMuxError('Metrics Main owner was disposed.', 'CONTROL_UNAVAILABLE')
+        return args.heap!.owner.capture(input, args.heap!.dependencies, signal)
+      },
+      inspectHeapSnapshot: (input, signal) => args.heap!.owner.inspect(input, signal)
+    } : {}),
     ...(args.scene ? {
       inspectScene: (input, signal) => args.scene!.owner.inspect(input, signal),
       captureScene: async (input, signal) => {
         if (disposed || !port.captureProfile || !port.captureTrace || !port.captureAllocations || !port.inspectMemory) throw new AgentMuxError('Original Window scene dependencies are unavailable.', 'METRICS_UNSUPPORTED')
+        args.heap?.owner.assertDebuggerAvailable()
         return args.scene!.owner.capture(input, { currentTarget: args.scene!.currentTarget, loaded: args.scene!.loaded,
           resources: signal => readSceneResources(port, signal), captureProfile: port.captureProfile, captureAllocations: port.captureAllocations, captureTrace: port.captureTrace, inspectMemory: port.inspectMemory }, signal)
       }
     } : {}),
     ...(args.allocations ? { captureAllocations: (async (input, signal) => {
       if (disposed) throw new AgentMuxError('Metrics Main owner was disposed.', 'CONTROL_UNAVAILABLE')
+      args.heap?.owner.assertDebuggerAvailable()
       return args.allocations!.capture(input, signal)
     }) satisfies NonNullable<AgentMuxMetricsPort['captureAllocations']> } : {}),
     ...(args.memory ? { inspectMemory: (async (input, signal) => {
       if (disposed) throw new AgentMuxError('Metrics Main owner was disposed.', 'CONTROL_UNAVAILABLE')
+      args.heap?.owner.assertDebuggerAvailable()
       return args.memory!.inspect(input, signal)
     }) satisfies NonNullable<AgentMuxMetricsPort['inspectMemory']> } : {}),
     ...(args.animations ? { inspectAnimations: (async (input, signal) => {
@@ -49,10 +61,12 @@ export function createResourceMetricsPort(args: {
     }) satisfies NonNullable<AgentMuxMetricsPort['inspectAnimations']> } : {}),
     ...(args.tracer ? { captureTrace: (async (input, signal) => {
       if (disposed) throw new AgentMuxError('Metrics Main owner was disposed.', 'CONTROL_UNAVAILABLE')
+      args.heap?.owner.assertDebuggerAvailable()
       return args.tracer!.capture(input, signal)
     }) satisfies NonNullable<AgentMuxMetricsPort['captureTrace']> } : {}),
     ...(args.profiler ? { captureProfile: (async (input, signal) => {
       if (disposed) throw new AgentMuxError('Metrics Main owner was disposed.', 'CONTROL_UNAVAILABLE')
+      args.heap?.owner.assertDebuggerAvailable()
       return args.profiler!.capture(input, signal)
     }) satisfies NonNullable<AgentMuxMetricsPort['captureProfile']> } : {}),
     async subscribe(onSnapshot, onEnd, signal) {
