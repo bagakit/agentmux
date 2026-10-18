@@ -37,6 +37,8 @@ export type ConnectionIngressMessage = {
     channelQuote?: import('./channel-quote.js').ChannelTranscriptQuote
     /** Original recipient observation for position correlation; never an input grant. */
     contextSource?: import('./types.js').AgentSessionHistorySource
+    /** Original first-claim selection observation; does not change native coverage or input outcome. */
+    contextObservation?: 'known-publications-unavailable'
     /** Original first claim only; missing historical intent is unknown and never reconstructed. */
     admissionIntent?: Exclude<import('./agent-prompt-condition.js').AgentPromptAdmissionIntent, { kind: 'exact-condition' }>
   }
@@ -69,6 +71,7 @@ export type ConnectionIngressContextObservation = {
   coverage: import('./channel-quote.js').ChannelTranscriptQuote['coverage']
   quotedMessages: number; gapCount: number; positionMessageId: string | null
   observation: 'observed' | 'unavailable'
+  code?: 'known-publications-unavailable'
 }
 export type ConnectionIngressInspection = {
   ingress: ConnectionIngressRecord | null
