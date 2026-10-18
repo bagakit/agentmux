@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentMuxNotebookStore } from '@agentmux/core/notebook-store'
@@ -16,6 +16,8 @@ import { NotebookObservationOwner } from '../src/main/notebook-observation-owner
 import { newNoteDocument, serializeNoteDocument } from '../src/shared/note-document'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
+import { noteSummaryCases, noteSummaryContent } from './helpers/note-summary-fixture'
+import { noteKnowledge } from '@agentmux/client-ui/note/note-knowledge'
 
 const dom = composerDOM(), cleanups: Array<() => Promise<unknown>> = []
 beforeEach(installNoteCanvasGeometry)
@@ -148,4 +150,24 @@ it('passes a closed shared-details navigation cancellation through the footer to
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Close shared details"]')!.click())
   expect(pending?.aborted).toBe(true)
   expect(dom.container.querySelectorAll('.note-links-shared-use')).toHaveLength(2)
+})
+
+it.each(noteSummaryCases)('uses readable $name for the original shared footer without changing indexed text or source bytes', async example => {
+  const f = await fixture()
+  delete f.shared.title
+  if (example.title) f.shared.title = example.title
+  f.shared.content = noteSummaryContent(example)
+  const path = join(f.root, f.resource('shared').path), original = serializeNoteDocument(f.shared)
+  await writeFile(path, original)
+  await f.mount(); await dom.click('.note-links-toggle')
+  await vi.waitFor(() => expect(dom.container.textContent).toContain('Links from this note (1)'))
+  await clickText('Shared content')
+  await vi.waitFor(() => expect(dom.container.querySelector('.note-links-shared-original .note-links-source-heading .note-links-target')?.textContent).toBe(example.expected))
+  await clickText(example.expected)
+  expect(f.onOpenFile).toHaveBeenCalledExactlyOnceWith({ ...f.resource('shared'), noteId: 'shared' }, undefined, expect.any(AbortSignal))
+  expect(await readFile(path, 'utf8')).toBe(original)
+  const observed = await api.notebooks.content('shared')
+  if (observed.status !== 'read') throw new Error('Expected the original shared file')
+  const source = noteKnowledge([{ location: { workspaceId: 'notes', path: observed.resource.path }, document: { path: observed.resource.path, content: observed.content, revision: observed.revision } }]).sources[0]!
+  expect(source.blocks.get(example.indexedBlock)?.text).toBe(example.indexedText)
 })
