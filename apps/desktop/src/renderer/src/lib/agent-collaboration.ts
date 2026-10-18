@@ -1,5 +1,5 @@
-import type { AgentMuxMessageEvent, AgentMuxMessageEventReference, AgentMuxSpawnRecord } from '@agentmux/core'
-import type { SessionHistoryReference } from '../../../shared/contracts'
+import type { AgentMuxMessageEvent, AgentMuxMessageEventReference, AgentMuxSpawnRecord, AgentSessionHistoryDescriptor } from '@agentmux/core'
+import type { SessionHistoryReference, SessionHistorySourceReference } from '../../../shared/contracts'
 import type { FocusContext } from './focus-context'
 
 export type CollaborationSubject = SessionHistoryReference
@@ -25,7 +25,7 @@ export type CollaborationEvidence =
 export type CollaborationRelation = {
   id: string; source: string; target: string; kind: CollaborationEvidence['kind']; evidence: CollaborationEvidence[]
 }
-export type CollaborationAgent = { id: string; subject: CollaborationSubject | null; sessionId: string; context?: FocusContext; provenance?: string; name?: string; tier?: 'active' | 'idle' | 'closed' | 'unknown'; lastActivityAt?: number | null }
+export type CollaborationAgent = { id: string; subject: CollaborationSubject | null; reference?: SessionHistorySourceReference; sessionId: string; context?: FocusContext; provenance?: string; name?: string; tier?: 'active' | 'idle' | 'closed' | 'unknown'; lastActivityAt?: number | null }
 
 /** Original owner + Session is identity. Display context IDs and area membership are not. */
 export function collaborationAgents(contexts: readonly FocusContext[]): Map<string, CollaborationAgent> {
@@ -46,6 +46,7 @@ export function createCollaborationProjector() {
   const sources = new Map<string, SourceProjection>()
   const messages = new Map<string, Map<string, MessageContribution>>()
   const creations = new Map<string, Map<string, CreationContribution>>()
+  const retainedCreations = new Map<string, AgentSessionHistoryDescriptor>()
   const relationEvidence = new Map<string, Map<string, CollaborationEvidence>>()
   const dirtyRelations = new Map<string, { kind: CollaborationRelation['kind']; source: string; target: string }>()
   const relations = new Map<string, CollaborationRelation>()
@@ -101,13 +102,13 @@ export function createCollaborationProjector() {
     if (!owner) return
     const creator = owner.record.creation.createdBy, hostId = owner.subject.hostId
     const from = creator.owner.kind === 'local' ? agent({ hostId, agentSessionId: creator.agentSessionId }) : {
-      id: JSON.stringify(['runtime-reference', creator.owner.runtimeId, creator.agentSessionId]), subject: null, sessionId: creator.agentSessionId, provenance: `Runtime ${creator.owner.runtimeId}` }
+      id: JSON.stringify(['runtime-reference', creator.owner.runtimeId, creator.agentSessionId]), subject: null, reference: { runtimeId: creator.owner.runtimeId, agentSessionId: creator.agentSessionId }, sessionId: creator.agentSessionId, provenance: `Runtime ${creator.owner.runtimeId}` }
     const to = agent({ hostId, agentSessionId: owner.record.agentSessionId })
     const held = relationEvidence.get(JSON.stringify(['creation', from.id, to.id]))?.get(id)
     if (first && held?.kind === 'creation' && held.subject === first.subject && held.record === first.record) return
     setEvidence('creation', from, to, id, first ? { kind: 'creation', id, subject: first.subject, record: first.record } : undefined)
   }
-  return (readings: readonly CollaborationReading[]) => {
+  return (readings: readonly CollaborationReading[], retained: readonly AgentSessionHistoryDescriptor[] = []) => {
     copiedAgents = false; relationsChanged = false; dirtyRelations.clear()
     const active = new Set(readings.map(reading => collaborationSubjectKey(reading.subject)))
     const dirtyMessages = new Map<string, MessageContribution | undefined>(), dirtyCreations = new Map<string, CreationContribution | undefined>()
@@ -145,6 +146,24 @@ export function createCollaborationProjector() {
         group.set(key, { subject: reading.subject, record }); creations.set(id, group); held.creations.add(id); dirtyCreations.set(id, undefined)
       }
       held.reading = reading; sources.set(key, held)
+    }
+    const retainedIds = new Set<string>()
+    for (const source of retained) {
+      const creation = source.history?.creation
+      if (!creation?.createdBy) continue
+      const subject = { hostId: source.hostId, agentSessionId: source.agentSessionId }, id = collaborationSubjectKey(subject), key = `retained:${id}`
+      retainedIds.add(id)
+      if (retainedCreations.get(id) === source) continue
+      retainedCreations.set(id, source)
+      const record: AgentMuxSpawnRecord = { agentSessionId: source.agentSessionId, phase: source.state, currentRun: null,
+        createdAt: source.history!.createdAt, creation: { ...creation, createdBy: creation.createdBy } }
+      const group = creations.get(id) ?? new Map<string, CreationContribution>()
+      group.set(key, { subject, record }); creations.set(id, group); dirtyCreations.set(id, undefined)
+    }
+    for (const id of retainedCreations.keys()) if (!retainedIds.has(id)) {
+      const group = creations.get(id)!, key = `retained:${id}`
+      dirtyCreations.set(id, group.get(key)); group.delete(key); if (!group.size) creations.delete(id)
+      retainedCreations.delete(id)
     }
     for (const [id, previous] of dirtyMessages) messageEvidence(id, previous)
     for (const [id, previous] of dirtyCreations) creationEvidence(id, previous)
