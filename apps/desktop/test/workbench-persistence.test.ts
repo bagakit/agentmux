@@ -405,6 +405,8 @@ describe('durable Workbench file/browser projection', () => {
       browserId: 'brt-browser',
       id: 'brt-browser',
       navigationId: 'nav-transient',
+      agentCreationRequestId: 'original-browser-agent-click',
+      control: { owner: 'agent', agent: { hostId: 'local', agentSessionId: 'brt-agent' }, activeOperationId: 'transient-op', revision: 8, inputIsolation: 'isolated' },
       profileId: 'profile-transient',
       url: 'https://example.com/keep-me',
       title: 'Keep me',
@@ -440,6 +442,9 @@ describe('durable Workbench file/browser projection', () => {
     // 瞬时位回到中性默认，等 create 之后的真快照覆盖；绝不能把上一次运行的 driving/loading 带回来，
     // 那会让 UI 一启动就显示「Agent 正在操作」而底下根本没有 WebContentsView。
     expect(browser.navigationId).toBe('')
+    expect(browser.agent).toEqual({ hostId: 'local', agentSessionId: 'brt-agent' })
+    expect(browser.agentCreationRequestId).toBe('original-browser-agent-click')
+    expect(browser.control).toBeUndefined()
     expect(browser.driving).toBe(false)
     expect(browser.loading).toBe(false)
     // 分屏结构原样 —— browser 活下来但 tab 塌成单叶，等于只修好了一半。

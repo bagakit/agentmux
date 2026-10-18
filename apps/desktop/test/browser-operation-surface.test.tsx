@@ -45,7 +45,7 @@ const operation: BrowserOperation = {
 
 const activity: BrowserActivityState = { operation, control: 'agent' }
 const agentControl = { owner: 'agent', activeOperationId: operation.id, revision: 1, inputIsolation: 'isolated' } as const
-const humanControl = { owner: 'human', activeOperationId: null, revision: 2, inputIsolation: 'inactive' } as const
+const humanControl = { owner: 'human', agent: { hostId: 'local', agentSessionId: operation.operator.id }, activeOperationId: null, revision: 2, inputIsolation: 'inactive' } as const
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
 
 const plan: BrowserReplayPlan = {
@@ -164,6 +164,23 @@ describe('BrowserOperationStatus', () => {
       activity, control, ...(owner === 'human-without-callback' ? {} : { onReturnControl: vi.fn() })
     }))
     expect(markup).not.toContain('aria-label="Return to Agent"')
+  })
+
+  it.each([null, undefined])('creates only for confirmed-none association %j', agent => {
+    const { agent: _association, ...unknownControl } = humanControl
+    const markup = renderToStaticMarkup(createElement(BrowserOperationStatus, {
+      activity: { operation: null, control: 'human' }, control: { ...unknownControl, ...(agent === undefined ? {} : { agent }) }, onCreateAgent: vi.fn(), onReturnControl: vi.fn()
+    }))
+    expect(markup.includes('aria-label="在右侧创建 Agent"')).toBe(agent === null)
+    expect(markup).not.toContain('aria-label="Return to Agent"')
+    if (agent === null) expect(markup).toContain('data-semantic-icon="action.create-agent"')
+  })
+
+  it('disables the original create action while its actual request is pending', () => {
+    const markup = renderToStaticMarkup(createElement(BrowserOperationStatus, {
+      activity: { operation: null, control: 'human' }, control: { ...humanControl, agent: null }, onCreateAgent: vi.fn(), creatingAgent: true
+    }))
+    expect(markup).toContain('aria-label="正在创建 Agent…"'); expect(markup).toContain('disabled=""')
   })
 })
 
