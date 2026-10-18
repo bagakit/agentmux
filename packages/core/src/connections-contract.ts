@@ -21,6 +21,8 @@ export type ConnectionRecord = {
   config: ConnectionConfig
   revision: number
   observation: ConnectionObservation
+  /** Original registered adapter implementations, not native permission or readiness. Absent means unknown. */
+  capabilities?: { roomDiscovery: boolean; roomCreation: boolean; roomLink: boolean }
   /** The matching managed initial flow's recorded outcome, distinct from current platform readiness. */
   initialSetup?: { state: 'incomplete' | 'complete' | 'unconfirmed' }
 }
