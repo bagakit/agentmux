@@ -459,6 +459,9 @@ export function ActivityView({
     const geometry = feedGeometry()
     if (geometry) setAtLoadedTail(isNearBottom(geometry))
   }
+  function syncTailAfterLayout(): void {
+    if (followRef.current.following || atLoadedTail) syncTailPosition()
+  }
 
   function clearEarlierSpace(): void {
     earlierSpaceAllowed.current = false
@@ -582,7 +585,7 @@ export function ActivityView({
     })
     followRef.current = decision.state
     if (decision.scrollToBottom) pinToBottom()
-    syncTailPosition()
+    syncTailAfterLayout()
     setShowJump(shouldShowJumpToLatest(followRef.current))
   }, [unifiedItems, nativeHistoryPage, sessionId, feedEl, readingWindow.historical, readingEnabled])
 
@@ -963,7 +966,7 @@ export function ActivityView({
           following: () => !readingWindow.historical && followRef.current.following, pinToBottom,
           captureAnchor: () => { if (feedEl) anchorRef.current = captureReadingAnchor(feedEl) },
           restoreAnchor: () => { if (feedEl && anchorRef.current) { restoreReadingPosition(feedEl, anchorRef.current); markProgrammaticReadingScroll(feedEl) } },
-          onLayout: syncTailPosition }}
+          onLayout: syncTailAfterLayout }}
         presentation={{ controller: presentation, pending: readingWindow.held, onRelease: readingWindow.showLatestAutomatically,
           watchSelection: readingWindow.newerOutside && !readingWindow.historical && followRef.current.following,
           intent: readingWindow.presentationIntent }}
