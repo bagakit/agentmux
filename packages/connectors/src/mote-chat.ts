@@ -115,6 +115,7 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
   }
   async allocate(value: MoteChatAllocate, context: MoteChatCallContext) {
     const input = parseMoteChatParams('space.mote.chat.allocate', value); management(context); await context.assertCurrent?.(); await this.options.assertTarget(input.target)
+    await context.assertCurrent?.()
     const intent = encode({ method: 'allocate', input, actor: context.actor })
     return this.store.transaction(() => {
       const original = this.originalOperation(input.operationId, intent)
