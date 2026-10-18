@@ -444,6 +444,7 @@ const api: AgentMuxPreloadApi = {
     openExternal: (url: string) => ipcRenderer.invoke('ui:openExternal', url),
     exportTheme: (document, window) => ipcRenderer.invoke('ui:exportTheme', document, window),
     chooseFiles: (input, document) => ipcRenderer.invoke('ui:chooseFiles', input, document),
+    chooseDirectory: (input, document) => ipcRenderer.invoke('ui:chooseDirectory', input, document),
     pathForFile: (file: File) => webUtils.getPathForFile(file),
     savePastedImage: (input: { bytes: Uint8Array; extension: string }) =>
       ipcRenderer.invoke('ui:savePastedImage', input),

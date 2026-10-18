@@ -1,4 +1,5 @@
 import { mintObjectId } from '@agentmux/core/object-id'
+import { toolkitConfigurationResult } from '../shared/toolkit-configuration-result.js'
 import type { IpcMainInvokeEvent } from 'electron'
 
 import { AgentMuxError } from '@agentmux/core'
@@ -26,9 +27,9 @@ export function registerToolkitIpc(port: AgentMuxToolkitPort,
   for (const operation of ['run', 'evaluate'] as const) handle('toolkit:' + operation, (_event, toolId: unknown, input: unknown) => execute({ operation: 'toolkit.' + operation, toolId, ...(input === undefined ? {} : { input }) }))
   handle('toolkit:action', (_event, toolId: unknown, actionId: unknown, input: unknown) => execute({ operation: 'toolkit.action', toolId, actionId, input }))
   handle('toolkit:stop', (_event, toolId: unknown, executionId: unknown) => execute({ operation: 'toolkit.stop', toolId, ...(executionId === undefined ? {} : { executionId }) }))
-  handle('toolkit:add', (_event, toolId: unknown, value: unknown) => execute({ operation: 'toolkit.add', toolId, value }))
-  handle('toolkit:update', (_event, toolId: unknown, changes: unknown, expected: unknown) => execute({ operation: 'toolkit.update', toolId, changes, ...(expected === undefined ? {} : { expected }) }))
-  handle('toolkit:remove', (_event, toolId: unknown, expected: unknown) => execute({ operation: 'toolkit.remove', toolId, ...(expected === undefined ? {} : { expected }) }))
+  handle('toolkit:add', (_event, toolId: unknown, value: unknown) => toolkitConfigurationResult(() => execute({ operation: 'toolkit.add', toolId, value })))
+  handle('toolkit:update', (_event, toolId: unknown, changes: unknown, expected: unknown) => toolkitConfigurationResult(() => execute({ operation: 'toolkit.update', toolId, changes, ...(expected === undefined ? {} : { expected }) })))
+  handle('toolkit:remove', (_event, toolId: unknown, expected: unknown) => toolkitConfigurationResult(() => execute({ operation: 'toolkit.remove', toolId, ...(expected === undefined ? {} : { expected }) })))
   handle('toolkit:observe', async (event, rawToolId: unknown, rawId: unknown, rawOptions: unknown) => {
     const options = rawOptions === undefined ? {} : rawOptions
     if (typeof options !== 'object' || options === null || Array.isArray(options) || Object.keys(options).some(key => key !== 'evaluateOnDisplay')) throw new AgentMuxError('Toolkit display observation options are invalid.', 'INVALID_CONTROL_REQUEST')

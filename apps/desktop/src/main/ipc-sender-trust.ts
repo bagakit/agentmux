@@ -149,6 +149,7 @@ export const PRIVILEGED_SENDER_LABELS = {
   'ui:savePastedImage': 'pasted image',
   'ui:exportTheme': 'theme file export',
   'ui:chooseFiles': 'file selection',
+  'ui:chooseDirectory': 'directory selection',
   'workspaces:chooseLocalFolder': 'folder selection',
   'workspaces:rebindLocalFolder': 'Workspace folder selection',
   'ui:revealCrashLog': 'crash log',

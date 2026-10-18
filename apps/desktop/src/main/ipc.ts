@@ -49,7 +49,7 @@ import { MoteAvatarControl } from './mote-avatar-control.js'
 import { createMoteAvatarWriter } from './mote-avatar-writer.js'
 import type { MoteAvatarWriteParameterMap } from '@agentmux/core/mote-avatar-write'
 import type { MoteAvatarSeriesParameterMap } from '@agentmux/core/mote-avatar-series'
-import { readInputObservation } from '@agentmux/core/control'
+import { readInputObservation, resolveToolkitWorkspacePath } from '@agentmux/core/control'
 import { GoalDispatchInputOwner } from './goal-dispatch-input.js'
 import { assertGoalDispatchReference, type GoalDispatchReference } from '../shared/goal-dispatch.js'
 import { isDemandStoreError, parseDemandDispatchIntent, sameDemandDispatchIntent, type DemandDispatchIntent } from '@agentmux/demand'
@@ -792,6 +792,14 @@ export async function registerIpc(args: {
     })
     if (selection.canceled || selection.filePaths.length === 0) return null
     return selection.filePaths
+  })
+  handleWithEvent('ui:chooseDirectory', async (event, input: { defaultPath?: string } | undefined, scope?: import('../shared/workbench-windows.js').WorkbenchWindowDocument) => {
+    requireTrustedSender('ui:chooseDirectory', event)
+    const selection = await dialog.showOpenDialog(args.workbenchWindows.windowForDocument(scope), {
+      properties: ['openDirectory'],
+      ...(input?.defaultPath ? { defaultPath: resolveToolkitWorkspacePath(input.defaultPath, app.getPath('home')) } : {})
+    })
+    return selection.canceled ? null : selection.filePaths[0] ?? null
   })
   handle('workspaces:appearance', async (id: string) => {
     const item = workspace(config, id)
