@@ -3,6 +3,18 @@ import { conversationPresentationKey, type ConversationSequence, type Conversati
 import type { ConversationRecord } from '../lib/conversation-records.js'
 import { projectConversationMetrics, type ConversationMetricsObservation } from '../lib/conversation-metrics.js'
 import { ConversationMetrics } from './ConversationMetrics.js'
+import { conversationItemRef, type ConversationItemRef } from '@agentmux/core/conversation'
+
+/** Accepted presentation identity and the exact original records it represents. */
+export type ConversationProcessMember = { id: string; sources: readonly ConversationItemRef[] }
+
+function processMembers(records: readonly ConversationRecord[]): ConversationProcessMember[] {
+  return records.map(record => {
+    const originals = record.records?.flatMap(source => source.reference ? [source.reference] : [])
+    const primary = conversationItemRef(record)
+    return { id: record.id, sources: originals?.length ? originals : primary ? [primary] : [] }
+  })
+}
 
 export type ConversationRecordRenderer = (record: ConversationRecord, wrapBody?: (body: ReactNode) => ReactNode,
   disclosure?: NonNullable<ConversationProcessProps['disclosure']>) => ReactNode
@@ -92,7 +104,7 @@ export function ConversationRecordSequence({ records, sequence, sourceKey, rende
     : row.kind === 'anchor' ? renderAnchor(row.insertion.key)
     : row.kind === 'boundary' ? <div key={JSON.stringify([sourceKey, 'boundary'])} data-conversation-layout-key={JSON.stringify(['anchor', 'history-boundary'])}>{recordBoundary?.content}</div>
     : <div key={row.id} className="conversation-record-process" data-conversation-layout-key={row.id} data-conversation-process-key={row.id}
-      data-native-source={nativeSourceKey} data-native-record-ids={JSON.stringify(row.records.flatMap(record => record.original.kind === 'native' ? [record.rawId] : []))}>
+      data-native-source={nativeSourceKey} data-conversation-process-members={JSON.stringify(processMembers(row.records))}>
       {(() => {
         const disclosure = disclosureFor(row.records)
         if (!renderProcess) return row.entries.map(entry => entry.kind === 'record' ? renderOne(entry.record, undefined, disclosure) : renderAnchor(entry.insertion.key))

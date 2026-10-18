@@ -2,6 +2,7 @@ import { conversationRecordId, type ConversationItemRef, type ConversationWindow
 import type { ConversationConsumerQuery } from '@agentmux/core/control'
 import type { ConversationConsumerObservation, ConversationConsumerSample } from '../../../shared/conversation-consumer-observation'
 import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
+import type { ConversationProcessMember } from '@agentmux/client-ui/components/ConversationRecordSequence'
 
 // Mounted callbacks only. Bodies, frames and transport state stay in their original owners.
 const consumers = new Map<string, (query: ConversationConsumerQuery) => ConversationConsumerSample | null>()
@@ -41,9 +42,10 @@ export function conversationRenderedObservation(viewport: HTMLElement | null, se
     }
     if (node.classList.contains('conversation-original-record') || node.classList.contains('conversation-submission-record') || node.classList.contains('conversation-submission') || node.classList.contains('conversation-reply-observation')) disclosures.set(key, node)
   }
-  for (const node of viewport?.querySelectorAll<HTMLElement>('[data-native-record-ids]') ?? []) {
-    const source = node.closest<HTMLElement>('[data-native-source]')?.dataset.nativeSource
-    if (source) for (const id of JSON.parse(node.dataset.nativeRecordIds ?? '[]') as string[]) processes.add(JSON.stringify([source, id]))
+  for (const node of viewport?.querySelectorAll<HTMLElement>('[data-conversation-process-members]') ?? []) {
+    for (const member of JSON.parse(node.dataset.conversationProcessMembers!) as ConversationProcessMember[]) {
+      for (const source of member.sources) processes.add(conversationRecordId(source))
+    }
   }
   const exposed = (node: HTMLElement): boolean => {
     if (!node.isConnected) return false
@@ -61,8 +63,7 @@ export function conversationRenderedObservation(viewport: HTMLElement | null, se
     const details = original?.tagName === 'DETAILS' ? original as HTMLDetailsElement : original?.querySelector('details')
     const disclosure = Boolean(original)
     const open = details ? details.open : original ? original.querySelector('button[aria-expanded]')?.getAttribute('aria-expanded') === 'true' : null
-    const nativeSource = record.source.kind === 'native' ? JSON.stringify([record.source.providerId, record.source.nativeSessionId]) : null
-    const process = nativeSource !== null && processes.has(JSON.stringify([nativeSource, record.source.recordId]))
+    const process = processes.has(conversationRecordId(record))
     return { record, message: cards.length > 0, messageExposed: cards.some(exposed), process, disclosure, open }
   })
 }
