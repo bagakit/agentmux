@@ -7,6 +7,7 @@ import { ServiceNoticeDisclosure } from '../src/renderer/src/components/ServiceN
 import { ServiceWindowNotice } from '../src/renderer/src/components/ServiceWindowNotice'
 import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavigation'
 import { sessionServiceNotices } from '../src/renderer/src/lib/session-service-notices'
+import { serviceNoticeFingerprint } from '../src/renderer/src/lib/use-service-notices'
 import { api } from '../src/renderer/src/lib/api'
 import { projectNotifications, useAppStore } from '../src/renderer/src/store'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
@@ -149,6 +150,27 @@ it('local and global views share one exact original service read receipt without
   expect(unread()).toBe(0)
   expect(useAppStore.getState().sessions).toHaveLength(2)
   expect(Object.keys(useAppStore.getState().noticeReadReceipts['global:sessions'] ?? {})).toHaveLength(2)
+})
+
+it('a preexisting exact local read replaces a stale shared receipt without repeating or losing another reading fact', async () => {
+  const session = agent('original-read-owner'), other = agent('independent-owner')
+  const notice = sessionServiceNotices(session)[0]!, fingerprint = serviceNoticeFingerprint(notice)
+  expect(notice.readKey).toBeTruthy(); expect(notice.readOrigin).toBeTruthy()
+  useAppStore.setState({ sessions: [session, other], noticeReadReceipts: {
+    'global:sessions': { [notice.readKey!]: 'a-prior-version-of-this-original-notice' },
+    [notice.readOrigin!.scope]: { [notice.readOrigin!.id]: fingerprint, unrelated: 'retained-local-reading-fact' },
+    'independent-reading-scope': { original: 'retained-independent-reading-fact' }
+  } })
+  await dom.render(<LocalService id={session.id} />)
+  expect(dom.container.querySelector('.service-disclosure')!.getAttribute('data-unread')).toBe('false')
+  expect(useAppStore.getState().noticeReadReceipts['global:sessions']?.[notice.readKey!]).toBe(fingerprint)
+  expect(useAppStore.getState().noticeReadReceipts[notice.readOrigin!.scope]).toEqual({ unrelated: 'retained-local-reading-fact' })
+  expect(useAppStore.getState().noticeReadReceipts['independent-reading-scope']).toEqual({ original: 'retained-independent-reading-fact' })
+  await dom.render(<><LocalService id={session.id} /><GlobalSystemNotices /></>)
+  await toggleNotificationCenter(dom.container, 'open')
+  expect(unread()).toBe(1)
+  expect(rows().filter(row => row.dataset.unread === 'false')).toHaveLength(1)
+  expect(useAppStore.getState().sessions).toEqual([session, other])
 })
 
 it('diagnostic time refresh stays read while changed cause and confirmed resolution recurrence are unread', async () => {

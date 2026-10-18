@@ -195,7 +195,7 @@ describe('T-005 第二半：真实错位 → 记账 + 可发现 + 持续告示 +
 
     // 告示在场，且说的是这个 Agent、进程还在跑（文案来自 displacedAgentStepOutcome，经选择器过滤）。
     await toggleNotificationDetails(displacementRow(element, id)!)
-    const notice = displacementRow(element, id)?.querySelector('.service-window')
+    const notice = displacementRow(element, id)?.querySelector('.notification-item__original')
     expect(notice, '错位告示没有渲染出来——选择器返回空或组件没接上').not.toBeNull()
     expect(notice?.textContent).toContain('Builder')
     expect(notice?.textContent).toContain('still running')

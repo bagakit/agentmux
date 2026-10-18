@@ -49,6 +49,7 @@ it('the original Notifications preview distinguishes a changed draft and the off
   expect(preview.dataset.notificationMode).toBe('off')
   expect(preview.textContent).toContain('Unsaved preview')
   expect(preview.textContent).toContain('Agent status banners are off')
-  expect(dom.container.querySelector<HTMLInputElement>('.notification-sound-toggle input')!.disabled).toBe(true)
+  expect(dom.container.querySelector<HTMLInputElement>('.notification-sound-toggle input')!.disabled).toBe(false)
+  expect(dom.container.textContent).toContain('Applies to Agent status banners and enabled A2A message alerts')
   expect(save).not.toHaveBeenCalled()
 })

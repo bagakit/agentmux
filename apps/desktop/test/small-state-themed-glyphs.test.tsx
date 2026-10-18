@@ -9,6 +9,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices'
 import { ShortcutSettingsPane } from '../src/renderer/src/components/settings/ShortcutSettingsPane'
 import { composerDOM } from './helpers/composer-dom-fixture'
+import { currentNotificationRows, toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
 const dom = composerDOM(); let cleanup: () => void, styles: HTMLStyleElement
 beforeEach(() => { cleanup = mountThemeRuntime(window); styles = document.createElement('style'); styles.textContent = readFileSync('apps/desktop/src/renderer/src/styles/base.css', 'utf8') + readFileSync('apps/desktop/src/renderer/src/styles/settings-prompts.css', 'utf8'); document.head.append(styles); useAppStore.setState({ loading: false, noticeReadReceipts: {} }) })
 afterEach(() => { cleanup(); styles.remove() })
@@ -35,15 +36,36 @@ it('the Prompt editor uses separate saved/unsaved/invalid glyphs while retaining
   await fill(body, saved.body); await dom.click('[data-settings-save-bar] button')
   expect(save).toHaveBeenCalledWith([{ ...saved, label: 'Changed name' }], [saved]); expect(config.composerShortcuts).toEqual([saved])
 })
-it('the real notification inbox themes the unread slot without marking its notice read or changing health facts', async () => {
+it('the real notification inbox themes its icon and single unread badge without marking its notice read or changing health facts', async () => {
+  const sessions = useAppStore.getState().sessions
   await dom.render(<GlobalSystemNotices nativeOverlayWarning="Original floating overlay unavailable"/>)
-  const button = dom.container.querySelector<HTMLButtonElement>('.global-system-notices__trigger')!, dot = button.querySelector<SVGSVGElement>('.global-system-notices__dot')!
-  expect(dot, 'nonempty unread notice consumer').not.toBeNull(); expect(dot.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('status.unread')); expect(dot.getAttribute('width')).toBe('5'); expect(document.getElementById(semanticIconHref('status.unread').slice(1))?.querySelector('circle')?.getAttribute('fill')).toBe('currentColor'); expect(window.getComputedStyle(dot).color).toBe(window.getComputedStyle(document.documentElement).getPropertyValue('--red'))
+  const button = dom.container.querySelector<HTMLButtonElement>('.global-system-notices__trigger')!, icon = button.querySelector<SVGSVGElement>('svg')!
+  const badge = button.querySelector<HTMLElement>('.global-system-notices__badge')!
+  expect(badge, 'nonempty unread notice consumer').not.toBeNull()
+  expect(button.querySelectorAll('.global-system-notices__badge')).toHaveLength(1)
+  expect(button.querySelector('.global-system-notices__dot')).toBeNull()
+  expect(badge.textContent).toBe('2')
+  expect(icon.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('object.notifications'))
+  expect(icon.getAttribute('width')).toBe('14')
+  expect(button.getAttribute('data-attention')).toBe('quiet')
+  expect(window.getComputedStyle(badge).color).toBe(window.getComputedStyle(document.documentElement).getPropertyValue('--blue'))
   const before = button.getAttribute('aria-label'), receipts = structuredClone(useAppStore.getState().noticeReadReceipts)
-  expect(before).toContain('1 unread'); expect(button.getAttribute('aria-expanded')).toBe('false')
-  const custom = structuredClone(GRAPHITE_THEME); custom.id = 'custom.unread-status'; custom.name = 'Unread'; custom.icons = { 'status.unread': { kind: 'paths', paths: [{ d: 'M4 4H20V20H4Z', fill: 'currentColor' }] } }
+  expect(before).toContain('2 unread'); expect(button.getAttribute('aria-expanded')).toBe('false')
+  const custom = structuredClone(GRAPHITE_THEME); custom.id = 'custom.notification-status'; custom.name = 'Notifications'; custom.icons = { 'object.notifications': { kind: 'paths', paths: [{ d: 'M4 4H20V20H4Z', fill: 'currentColor' }] } }
   await act(async () => { expect(previewTheme(custom).applied).toBe(true) })
-  expect(button.querySelector('.global-system-notices__dot')).toBe(dot); expect(button.getAttribute('aria-label')).toBe(before)
-  expect(document.getElementById(semanticIconHref('status.unread').slice(1))?.querySelector('path')?.getAttribute('d')).toBe('M4 4H20V20H4Z')
-  expect(useAppStore.getState().noticeReadReceipts).toEqual(receipts); expect(dom.container.textContent).toContain('Existing Browser pages and Agents remain available')
+  expect(button.querySelector('svg')).toBe(icon); expect(button.querySelector('.global-system-notices__badge')).toBe(badge); expect(button.getAttribute('aria-label')).toBe(before)
+  expect(document.getElementById(semanticIconHref('object.notifications').slice(1))?.querySelector('path')?.getAttribute('d')).toBe('M4 4H20V20H4Z')
+  expect(useAppStore.getState().noticeReadReceipts).toEqual(receipts)
+  await toggleNotificationCenter(dom.container, 'open')
+  expect(useAppStore.getState().noticeReadReceipts).toEqual(receipts)
+  expect(currentNotificationRows(dom.container).map(row => row.getAttribute('data-notice-id')).sort()).toEqual([
+    JSON.stringify(['local', 'agent-1', 'activity-observation']), 'floating-chrome'
+  ])
+  const notice = dom.container.querySelector<HTMLElement>('.notification-item[data-notice-id="floating-chrome"]')!
+  expect(notice).not.toBeNull()
+  await toggleNotificationDetails(notice)
+  expect(notice.textContent).toContain('Original floating overlay unavailable')
+  expect(notice.textContent).toContain('Existing Browser pages and Agents remain available')
+  expect(notice.getAttribute('data-kind')).toBe('process-degraded')
+  expect(useAppStore.getState().sessions).toBe(sessions)
 })

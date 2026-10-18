@@ -12,6 +12,7 @@ import type { SessionSnapshot } from '../src/shared/contracts.js'
 import { loginShellEnvironmentWarning } from '@agentmux/core'
 import { providerCatalogReader } from './helpers/startup-observation-api-fixture'
 import { composerConfig } from './helpers/composer-dom-fixture'
+import { currentNotificationRows, markShownNotificationsRead, toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
 
 const initial = useAppStore.getState()
 const environmentWarning = loginShellEnvironmentWarning({ ok: true, shell: '/bin/zsh', mode: 'login' })!
@@ -36,13 +37,8 @@ afterEach(async () => {
 const trigger = () => element.querySelector<HTMLButtonElement>('.global-system-notices__trigger')!
 const details = () => element.querySelector<HTMLDivElement>('.global-system-notices__details')!
 async function render() { await act(async () => root.render(<GlobalSystemNotices />)) }
-// happy-dom has no native popover implementation. Browser verification exercises real clicks;
-// here the native state event drives the actual React handler, as in SessionMailbox's tests.
-async function toggle(state: 'open' | 'closed') {
-  const event = new Event('toggle')
-  Object.defineProperty(event, 'newState', { value: state })
-  await act(async () => details().dispatchEvent(event))
-}
+const toggle = (state: 'open' | 'closed') => toggleNotificationCenter(element, state)
+const shellRow = () => element.querySelector<HTMLElement>('.notification-item[data-notice-id="shell"]')!
 async function initializeSnapshot(warning: string | null) {
   const config = await api.config.get()
   vi.spyOn(api.providers, 'list').mockImplementation(providerCatalogReader())
@@ -60,24 +56,36 @@ describe('global shell environment notice', () => {
     expect(trigger().disabled).toBe(false)
     expect(trigger().getAttribute('aria-expanded')).toBe('false')
     expect(trigger().getAttribute('data-unread')).toBe('true')
-    expect(trigger().querySelector('.global-system-notices__dot')).not.toBeNull()
+    expect(trigger().querySelectorAll('.global-system-notices__badge')).toHaveLength(1)
+    expect(trigger().querySelector('.global-system-notices__dot')).toBeNull()
     expect(document.getElementById(trigger().getAttribute('popovertarget')!)).toBe(details())
     expect(details().getAttribute('popover')).toBe('auto')
-    expect(details().querySelector('[role="status"]')?.textContent).toContain(environmentWarning)
-    expect(details().textContent).toContain('Local shell environment is incomplete')
-    expect(details().textContent).toContain('restart AgentMux')
-    expect(details().textContent).toContain('Existing processes keep their original environment.')
+    expect(currentNotificationRows(element)).toHaveLength(0)
     await act(async () => useAppStore.getState().selectWorkspace(config.workspaces[0]!.id))
     expect(trigger().getAttribute('data-unread')).toBe('true')
     expect(useAppStore.getState().environmentWarning).toBe(environmentWarning)
+    await toggle('open')
+    expect(trigger().getAttribute('data-unread')).toBe('true')
+    await toggleNotificationDetails(shellRow())
+    expect(shellRow().getAttribute('role')).toBe('status')
+    expect(shellRow().textContent).toContain(environmentWarning)
+    expect(shellRow().textContent).toContain('Local shell environment is incomplete')
+    expect(shellRow().textContent).toContain('restart AgentMux')
+    expect(shellRow().textContent).toContain('Existing processes keep their original environment.')
   })
 
-  it('reads only on expansion and collapses without resolving or altering a Session receipt', async () => {
+  it('reads only through explicit Details and collapses without resolving or altering a Session receipt', async () => {
     useAppStore.setState({ noticeReadReceipts: { 'agent-1': { delivery: 'session-receipt' } } })
     await render()
     expect(useAppStore.getState().noticeReadReceipts['global:environment']).toBeUndefined()
     await toggle('open')
     expect(trigger().getAttribute('aria-expanded')).toBe('true')
+    expect(trigger().getAttribute('data-unread')).toBe('true')
+    expect(useAppStore.getState().noticeReadReceipts['global:environment']).toBeUndefined()
+    await toggle('closed')
+    expect(trigger().getAttribute('data-unread')).toBe('true')
+    await toggle('open')
+    await toggleNotificationDetails(shellRow())
     expect(trigger().getAttribute('data-unread')).toBe('false')
     expect(trigger().querySelector('.global-system-notices__dot')).toBeNull()
     const close = details().querySelector<HTMLButtonElement>('[aria-label="Collapse system notifications"]')!
@@ -88,13 +96,17 @@ describe('global shell environment notice', () => {
     expect(trigger().getAttribute('data-unread')).toBe('false')
     expect(useAppStore.getState().environmentWarning).toBe(environmentWarning)
     expect(useAppStore.getState().noticeReadReceipts['agent-1']).toEqual({ delivery: 'session-receipt' })
-    expect(details().textContent).toContain(environmentWarning)
+    expect(currentNotificationRows(element)).toHaveLength(0)
+    await toggle('open')
+    await toggleNotificationDetails(shellRow())
+    expect(shellRow().textContent).toContain(environmentWarning)
   })
 
   it('rehydrates the read fingerprint and keeps it while the restart snapshot is still missing', async () => {
     await initializeSnapshot(environmentWarning)
     await render()
     await toggle('open')
+    await markShownNotificationsRead(element)
     await toggle('closed')
     window.dispatchEvent(new Event('pagehide'))
     const name = useAppStore.persist.getOptions().name!
@@ -114,30 +126,39 @@ describe('global shell environment notice', () => {
     await act(async () => useAppStore.setState({ loading: false, environmentWarning }))
     expect(trigger().getAttribute('aria-expanded')).toBe('false')
     expect(trigger().getAttribute('data-unread')).toBe('false')
-    expect(details().textContent).toContain(environmentWarning)
+    await toggle('open')
+    await toggleNotificationDetails(shellRow())
+    expect(shellRow().textContent).toContain(environmentWarning)
   })
 
   it('marks changed content unread but coalesces the same warning', async () => {
     await render()
     await toggle('open')
+    await markShownNotificationsRead(element)
     await toggle('closed')
     await act(async () => useAppStore.setState({ environmentWarning: `${environmentWarning}` }))
     expect(trigger().getAttribute('data-unread')).toBe('false')
     const changed = 'Shell startup failed: the environment could not be read.'
     await act(async () => useAppStore.setState({ environmentWarning: changed }))
     expect(trigger().getAttribute('data-unread')).toBe('true')
-    expect(details().textContent).toContain(changed)
     await toggle('open')
+    expect(trigger().getAttribute('data-unread')).toBe('true')
+    await toggleNotificationDetails(shellRow())
+    expect(shellRow().textContent).toContain(changed)
     expect(trigger().getAttribute('data-unread')).toBe('false')
   })
 
   it('clears only the resolved global receipt and marks a later recurrence unread', async () => {
     await render()
     await toggle('open')
+    await markShownNotificationsRead(element)
     await toggle('closed')
     await act(async () => useAppStore.setState({ environmentWarning: null }))
-    expect(element.querySelector('.service-window')).toBeNull()
+    await toggle('open')
+    expect(shellRow()).toBeNull()
+    expect(currentNotificationRows(element)).toHaveLength(0)
     expect(useAppStore.getState().noticeReadReceipts['global:environment']).toBeUndefined()
+    await toggle('closed')
     await act(async () => useAppStore.setState({ environmentWarning }))
     expect(trigger().getAttribute('aria-expanded')).toBe('false')
     expect(trigger().getAttribute('data-unread')).toBe('true')
@@ -159,17 +180,20 @@ describe('one global system inbox', () => {
     await render()
     expect(element.querySelectorAll('.global-system-notices__trigger')).toHaveLength(1)
     expect(trigger().textContent, element.textContent ?? '').toBe('3')
-    expect(details().querySelectorAll('.service-window')).toHaveLength(3)
+    await toggle('open')
+    expect(currentNotificationRows(element)).toHaveLength(3)
     expect(details().textContent).toContain('Give it a place')
     expect(details().textContent).toContain('Runtime launch record is unavailable')
     expect(details().textContent).toContain('Local shell environment is incomplete')
-    await toggle('open')
+    expect(trigger().getAttribute('data-unread')).toBe('true')
+    await markShownNotificationsRead(element)
     await toggle('closed')
     expect(trigger().getAttribute('data-unread')).toBe('false')
     expect(useAppStore.getState().runtimeOwnershipWarnings).toEqual(['studio'])
     expect(useAppStore.getState().displacedAgentSessionIds).toEqual([displaced.id])
     expect(useAppStore.getState().environmentWarning).toBe(environmentWarning)
-    expect(details().querySelectorAll('.service-window')).toHaveLength(3)
+    await toggle('open')
+    expect(currentNotificationRows(element)).toHaveLength(3)
     expect(useAppStore.getState().noticeReadReceipts['global:runtime-ownership']?.ownership).toBeTruthy()
     expect(useAppStore.getState().noticeReadReceipts['global:displaced-agents']?.unplaced).toBeTruthy()
   })
@@ -179,6 +203,7 @@ describe('one global system inbox', () => {
     useAppStore.setState({ runtimeOwnershipWarnings: ['studio'], sessions: [displaced], displacedAgentSessionIds: [displaced.id], tabs: {} })
     await render()
     await toggle('open')
+    await markShownNotificationsRead(element)
     await toggle('closed')
     window.dispatchEvent(new Event('pagehide'))
     const name = useAppStore.persist.getOptions().name!
@@ -197,7 +222,8 @@ describe('one global system inbox', () => {
     await act(async () => useAppStore.setState({ loading: false }))
     expect(useAppStore.getState().noticeReadReceipts).toEqual(saved.noticeReadReceipts)
     expect(useAppStore.getState().displacedAgentSessionIds).toEqual([displaced.id])
-    expect(details().textContent).toContain('Waiting for Runtime status.')
+    await toggle('open')
+    expect(details().textContent).toContain('Some sources are still being checked. Existing notices are kept.')
     // Environment/host facts can recover before the Session projection; keep the displaced receipt.
     await act(async () => useAppStore.setState({ runtimeOwnershipWarnings: ['studio'], environmentWarning }))
     expect(useAppStore.getState().noticeReadReceipts).toEqual(saved.noticeReadReceipts)
@@ -207,7 +233,9 @@ describe('one global system inbox', () => {
     expect(trigger().getAttribute('data-unread')).toBe('false')
     await act(async () => useAppStore.setState({ runtimeOwnershipWarnings: ['different-host'] }))
     expect(trigger().getAttribute('data-unread')).toBe('true')
-    expect(details().textContent).toContain('different-host')
+    const ownership = element.querySelector<HTMLElement>('.notification-item[data-notice-id="ownership"]')!
+    await toggleNotificationDetails(ownership)
+    expect(ownership.textContent).toContain('different-host')
   })
 
   it('offers the system inbox with zero Agents and honestly distinguishes unknown from resolved', async () => {
@@ -215,9 +243,11 @@ describe('one global system inbox', () => {
     await render()
     expect(trigger().disabled).toBe(false)
     expect(trigger().textContent).toBe('')
-    expect(details().textContent).toContain('Waiting for Runtime status.')
+    await toggle('open')
+    expect(details().textContent).toContain('Some sources are still being checked. Existing notices are kept.')
     await act(async () => useAppStore.setState({ environmentWarning: null, runtimeOwnershipWarnings: [], runtimeEndpointWarnings: [] }))
-    expect(details().textContent).toContain('No system notifications.')
-    expect(details().querySelector('.service-window')).toBeNull()
+    expect(details().textContent).toContain('No current issues')
+    expect(details().querySelector('.global-system-notices__observation')).toBeNull()
+    expect(currentNotificationRows(element)).toHaveLength(0)
   })
 })
