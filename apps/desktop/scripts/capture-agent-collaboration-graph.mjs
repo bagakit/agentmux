@@ -12,14 +12,16 @@ const root = resolve(import.meta.dirname, '../../..'), desktop = join(root, 'app
 const fixture = join(desktop, 'scripts/fixtures/agent-collaboration-graph')
 const scriptPath = fileURLToPath(import.meta.url)
 const compiling = process.argv[2] === '--compile'
-assert.ok(compiling ? process.argv.length === 5 : process.argv[2] === '--evidence' && process.argv[3] && process.argv.length === 4, 'Use --evidence <new private evidence directory>')
+const scenario = process.argv[4] === '--scenario' ? process.argv[5] : 'readability'
+assert.ok(['readability', 'perception', 'perception-scale'].includes(scenario), 'Use a declared capture scenario')
+assert.ok(compiling ? process.argv.length === 5 : process.argv[2] === '--evidence' && process.argv[3] && (process.argv.length === 4 || process.argv.length === 6 && process.argv[4] === '--scenario'), 'Use --evidence <new private evidence directory> [--scenario perception|perception-scale]')
 const evidence = resolve(process.argv[compiling ? 4 : 3]); await mkdir(evidence, { recursive: true })
 if (!compiling) assert.equal((await readdir(evidence)).length, 0, 'Keep prior captures; use an empty evidence directory')
 const privateRoot = compiling ? resolve(process.argv[3]) : await mkdtemp(join(tmpdir(), 'amux-collaboration-capture-')), compiled = join(privateRoot, 'compiled')
 assert.ok(privateRoot.startsWith(join(tmpdir(), 'amux-collaboration-capture-')) && !relative(tmpdir(), privateRoot).includes(sep), 'Compilation stays in its own private capture root')
 const require = createRequire(join(desktop, 'package.json')), hash = bytes => createHash('sha256').update(bytes).digest('hex')
-const sources = {}, isolated = [], instrumented = [], logs = []
-const receipt = { schema: 'agentmux.collaboration-graph-capture.v1', scenario: 'focus-map-readability', capturedPass: false, captureOnly: true, aestheticReview: 'not-performed',
+const sources = {}, foreignWorkspaceSources = {}, isolated = [], instrumented = [], logs = []
+const receipt = { schema: 'agentmux.collaboration-graph-capture.v1', scenario: 'focus-map-' + scenario, capturedPass: false, captureOnly: true, aestheticReview: 'not-performed',
   boundary: 'Current source App, actual initialization/Store, Focus List/Map and original Space workfaces, original area owners, Graph, shared Focus cards and sole AgentInformationPreviewHost/Reader. The distribution includes permanent empty areas, uneven populated groups, isolated members and observed dense cross-area relations. Only platform API facts and unrelated PTY/Monaco painting are controlled. Private synthetic identities, events and content; no live Core lifecycle, Provider, Runtime, real messages, restart or installed-product claim.' }
 let compilationWrites = Promise.resolve()
 function publishCompilation(value) {
@@ -35,9 +37,23 @@ async function compileRenderer() {
     find: new RegExp('^' + (key === '.' ? '@agentmux/core' : '@agentmux/core/' + key.slice(2)).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'),
     replacement: resolve(root, 'packages/core', entry.import.replace('./dist/', './src/').replace(/\.js$/, '.ts'))
   }))
+  // Resolve these UI/layout browser exports against this exact candidate, even
+  // when dependencies are shared with another worktree. Core and identity use
+  // their explicit source aliases below; third-party dependencies stay original.
+  for (const name of ['client-ui', 'layout']) {
+    const manifest = JSON.parse(await readFile(join(root, 'packages', name, 'package.json'), 'utf8'))
+    const entries = Object.entries(manifest.exports).sort(([a], [b]) => Number(a.includes('*')) - Number(b.includes('*')) || b.length - a.length)
+    for (const [key, entry] of entries) {
+      const target = typeof entry === 'string' ? entry : entry.browser ?? entry.types ?? entry.import
+      const specifier = '@agentmux/' + name + (key === '.' ? '' : key.slice(1))
+      const pattern = specifier.split('*').map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('(.*)')
+      aliases.push({ find: new RegExp('^' + pattern + '$'), replacement: resolve(root, 'packages', name, target).replace('*', '$1') })
+    }
+  }
   const { build } = await import(pathToFileURL(require.resolve('vite')).href)
   const sourcePlugin = { name: 'collaboration-source-and-unrelated-paint', enforce: 'pre', async transform(source, id) {
       const file = id.split('?')[0]
+      if (!file.startsWith(root + sep) && !file.includes('/node_modules/') && /\/(?:packages|apps)\/[^/]+\/src\/.+\.(?:tsx?|jsx?|css)$/.test(file)) foreignWorkspaceSources[relative(root, file)] = hash(await readFile(file))
       if (!file.startsWith(root + sep) || file.includes('/node_modules/') || !/\.(tsx?|css|mjs)$/.test(file)) return
       if (id.includes('?')) { sources[relative(root, file)] = hash(await readFile(file)); return }
       sources[relative(root, id)] = hash(source)
@@ -78,7 +94,7 @@ if (compiling) {
   await publishCompilation({ phase: 'starting', transformed: 0 })
   try {
     await compileRenderer()
-    await publishCompilation({ phase: 'complete', inputs: sources, isolated, instrumented })
+    await publishCompilation({ phase: 'complete', inputs: sources, foreignWorkspaceSources, isolated, instrumented })
     process.exit(0)
   } catch (error) {
     await publishCompilation({ phase: 'failed', failure: error.message })
@@ -89,7 +105,7 @@ const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key
 Object.assign(env, { AGENTMUX_DESKTOP_USER_DATA: join(privateRoot, 'user-data'), AGENTMUX_RUNTIME_DIRECTORY: join(privateRoot, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(privateRoot, 'state'), COLLABORATION_CAPTURE_NODE: process.execPath })
 let server
 try {
-  const harnessFiles = ['index.html', 'entry.tsx', 'main.cjs', 'server-host.mjs', 'scenario.md'].map(name => join(fixture, name)).concat([scriptPath, join(desktop, 'scripts/probe-process.mjs'), join(desktop, 'scripts/fixtures/desktop-map/source-loader.mjs'), join(desktop, 'scripts/fixtures/performance-failure-evidence/source-loader.mjs'), join(desktop, 'test/helpers/desktop-map-source-mutations.mjs'), join(root, 'packages/core/dist/control-endpoint-listener-worker.js'), join(root, 'packages/core/src/control-endpoint-listener-worker.ts')])
+  const harnessFiles = ['index.html', 'entry.tsx', 'main.cjs', 'perception.cjs', 'server-host.mjs', 'scenario.md'].map(name => join(fixture, name)).concat([scriptPath, join(desktop, 'scripts/probe-process.mjs'), join(desktop, 'scripts/fixtures/desktop-map/source-loader.mjs'), join(desktop, 'scripts/fixtures/performance-failure-evidence/source-loader.mjs'), join(desktop, 'test/helpers/desktop-map-source-mutations.mjs'), join(root, 'packages/core/dist/control-endpoint-listener-worker.js'), join(root, 'packages/core/src/control-endpoint-listener-worker.ts')])
   receipt.harness = Object.fromEntries(await Promise.all(harnessFiles.map(async file => [relative(root, file), hash(await readFile(file))])))
   receipt.publicTransport = { boundary: 'Original Core source publication spawns its existing compiled listener asset; only listener transport uses dist. Its bytes and corresponding source are bound in harness; CLI, Core business and Renderer remain original source.', file: 'packages/core/dist/control-endpoint-listener-worker.js' }
   receipt.phase = 'compiling'; await writeFile(join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
@@ -101,6 +117,7 @@ try {
   assert.equal(receipt.compilationProcess.exitConfirmed, true, 'The source compiler exit is unconfirmed')
   assert.equal(receipt.compilationProcess.exitCode, 0, receipt.compilation?.failure ?? 'Source compilation failed')
   assert.equal(receipt.compilation?.phase, 'complete')
+  assert.deepEqual(receipt.compilation.foreignWorkspaceSources, {}, 'The exact candidate must not consume another worktree source')
   Object.assign(sources, receipt.compilation.inputs); isolated.push(...receipt.compilation.isolated); instrumented.push(...receipt.compilation.instrumented)
   receipt.inputs = sources; receipt.isolated = isolated; receipt.instrumented = instrumented
   for (const owner of ['App.tsx', 'GlobalFocusSurface.tsx', 'FocusToolbar.tsx', 'FocusViewSwitch.tsx', 'SurfaceToolDock.tsx', 'WorkspaceCollaboration.tsx', 'CollaborationMapToolbar.tsx', 'collaboration-areas.ts', 'collaboration-presentation.ts', 'workspace-agent-scope.ts', 'AgentCollaborationMap.tsx', 'AgentCollaborationGraph.tsx', 'collaboration-layout.worker.ts', 'collaboration-layout-engine.ts', 'collaboration-map-geometry.ts', 'desktop-presentation.ts', 'FocusContextCards.tsx', 'use-collaboration-layout.ts', 'FocusContextCardBody.tsx', 'FocusContextRow.tsx', 'AgentInformationPreview.tsx', 'AgentInformationReader.tsx', 'store.ts', 'collaboration.css']) {
@@ -124,7 +141,7 @@ try {
   })
   await new Promise(done => server.listen(0, '127.0.0.1', done))
   receipt.phase = 'capturing'; await writeFile(join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
-  receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), `http://127.0.0.1:${server.address().port}/`, privateRoot, evidence],
+  receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), `http://127.0.0.1:${server.address().port}/?scenario=${scenario}`, privateRoot, evidence, scenario],
     { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 210000, onLine: line => logs.push(line) })
   const actualText = await readFile(join(evidence, 'actual.json'), 'utf8').catch(error => error.code === 'ENOENT' ? '' : Promise.reject(error))
   if (actualText.trim()) receipt.actual = JSON.parse(actualText)
