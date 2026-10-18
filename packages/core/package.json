@@ -115,6 +115,10 @@
       "types": "./dist/session-timeline.d.ts",
       "import": "./dist/session-timeline.js"
     },
+    "./observation-read": {
+      "types": "./dist/observation-read.d.ts",
+      "import": "./dist/observation-read.js"
+    },
     "./session-user-messages": {
       "types": "./dist/session-user-messages.d.ts",
       "import": "./dist/session-user-messages.js"
