@@ -1,6 +1,7 @@
 import type { AgentSessionHistoryContentPart, AgentSessionHistoryItem, AgentSessionHistoryPage, AgentSessionHistorySource, AgentSessionUserMessage, AgentTimelineItem, AgentTimelineSnapshot } from './types.js'
 import { projectSessionUserMessages } from './session-user-messages.js'
-import { projectConversationTimeline, projectConversationEventFacts, conversationRecordRole, conversationRecordAuthor, type ConversationAuthor, type ConversationEvent, type ConversationSourceRecord, type ConversationProjectionInput, type ConversationTimeline } from './conversation-timeline.js'
+import { projectConversationTimeline, projectConversationEventFacts, type ConversationProjectionInput } from './conversation-timeline.js'
+import { conversationRecordRole, conversationRecordAuthor, type ConversationAuthor, type ConversationEvent, type ConversationSourceRecord, type ConversationTimeline } from './conversation-stream.js'
 export { projectSessionInputs, sessionInputMailboxAuthor, type SessionInputGroup } from './session-inputs.js'
 export { capturedToolEdit, type ConversationToolEdit } from './conversation-tool-edit.js'
 
@@ -184,13 +185,15 @@ export * from './conversation-questions.js'
 
 export * from './conversation-landmarks.js'
 
-export type * from './conversation-timeline.js'
+export type { ConversationProjectionInput } from './conversation-timeline.js'
+export type * from './conversation-stream.js'
 export { conversationValuesEqual, conversationRevision, conversationRecordId, conversationInvocationId,
   conversationRecordRelations, conversationRecordRole, conversationRecordAuthor, conversationEventAuthor,
   conversationSourceKey, conversationTailComesAfter, conversationInvocationFacts, conversationInvocationMembers,
   conversationSameEventTarget, conversationEventCoalesces, conversationInputKey, conversationInputWitnessKey,
   conversationNativeInputWitness, conversationInputAdoptionEdges, conversationRecordAnchors,
-  projectConversationTimeline } from './conversation-timeline.js'
+  projectConversationStream } from './conversation-stream.js'
+export { projectConversationTimeline } from './conversation-timeline.js'
 export * from './conversation-author.js'
 
 /** Only original Provider final/completed facts qualify a completed native reply. */

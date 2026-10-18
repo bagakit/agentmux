@@ -1,7 +1,7 @@
 import { mintObjectId } from './object-id.js'
 import type { DatabaseSync } from 'node:sqlite';
 import { AgentMuxError } from './errors.js';
-import { conversationRevision } from './conversation-timeline.js';
+import { conversationRevision } from './conversation-stream.js';
 import { normalizeAgentTimelineItem } from './session-timeline.js';
 import { applyNormalizedTimelineMutation } from './session-timeline-reducer.js';
 import type { AgentCapturedTimelinePage, AgentCapturedTimelineRead, AgentCapturedTimelineRecord, AgentCapturedTimelineStream, AgentTimelineCommit, AgentTimelineMutation, AgentTimelineSnapshot } from './types.js';

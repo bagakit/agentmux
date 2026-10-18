@@ -1,6 +1,6 @@
 import { parseExternalConversationAuthor } from './external-conversation.js'
 import { agentInputContextCaptureProofFields } from './agent-input-context-capture.js'
-import { conversationRevision } from './conversation-timeline.js'
+import { conversationRevision } from './conversation-stream.js'
 import { parseAgentExternalMessageAuthor } from './external-author.js'
 import { validateAgentPromptInputKey } from './agent-prompt-condition.js'
 import { conversationProvenanceFields } from './conversation-provenance.js'

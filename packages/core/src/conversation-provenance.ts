@@ -1,5 +1,5 @@
 import type { AgentSessionHistoryItem, AgentSessionHistorySource } from './types.js'
-import type { ConversationInvocation, ConversationRecordProvenance, ConversationSelector } from './conversation-timeline.js'
+import type { ConversationInvocation, ConversationRecordProvenance, ConversationSelector } from './conversation-stream.js'
 import { AgentMuxError } from './errors.js'
 import { parseConversationLandmarkRef } from './conversation-landmarks.js'
 import { validateAgentPromptInputKey } from './agent-prompt-condition.js'

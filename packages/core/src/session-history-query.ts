@@ -5,7 +5,7 @@ import type { Token } from 'stream-json/parser.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { projectSessionUserMessages, sessionHistoryTextForReading } from './session-user-messages.js'
-import { conversationRevision } from './conversation-timeline.js'
+import { conversationRevision } from './conversation-stream.js'
 import type { AgentSessionHistoryReadInput, AgentSessionHistoryReadPage, AgentSessionHistoryReader, AgentSessionHistoryReadContext } from './session-history-reader.js'
 import type { AgentSessionHistoryDescriptor, AgentSessionHistoryPage, AgentSessionHistoryItem, AgentTimelineItem, AgentSessionHistoryContentPart, AgentSessionHistoryQuestionAnswer, AgentSessionHistorySource, AgentCapturedTimelinePage } from './types.js'
 

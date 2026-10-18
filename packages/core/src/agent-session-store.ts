@@ -30,7 +30,7 @@ import { parseAgentRestartInput, type AgentMuxAgentRestartInput } from './agent-
 import { continuityExecutorEntries } from './agent-continuity-executor.js'
 import { isPermissionOptionKind, isPromptDeliveryDegradedReason, RISK_TIERS } from './types.js'
 import { applyNormalizedTimelineMutation } from './session-timeline-reducer.js'
-import { conversationRevision } from './conversation-timeline.js'
+import { conversationRevision } from './conversation-stream.js'
 import { beginCapturedStream, capturedHistorySchema, capturedStream, commitCapturedMutation, readCapturedPage, readRecentCaptured, readyCapturedStream } from './captured-history.js'
 import { archiveCapturedOriginal, capturedFileWitness, importCapturedFile } from './captured-history-import.js'
 import {

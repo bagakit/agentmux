@@ -1,7 +1,7 @@
 import type { ConversationItemRef } from './conversation.js'
 import type { ConnectionApplication } from './connections-contract.js'
 import type { RoomBindingCallContext } from './room-binding-contract.js'
-import type { ConversationContentRef, ConversationSourceRef } from './conversation-timeline.js'
+import type { ConversationContentRef, ConversationSourceRef } from './conversation-stream.js'
 import type { ConversationVersionedAnchor } from './conversation-changes.js'
 import type { AgentSessionUserMessageAuthor } from './types.js'
 

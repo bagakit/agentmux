@@ -4,7 +4,7 @@ import { normalizeSessionHistoryPage } from './session-history.js'
 import { normalizeAgentTimelineItem } from './session-timeline.js'
 import { parseConversationProvenance } from './conversation-provenance.js'
 import { conversationRecordId, conversationRevision, conversationValuesEqual, conversationRecordRole, conversationEventAuthor, conversationSourceKey, conversationInvocationMembers, conversationRecordRelations, conversationSameEventTarget, conversationRecordAnchors, conversationEventCoalesces, conversationInputAdoptionEdges, conversationNativeInputWitness, conversationInputKey,
-  type ConversationEvent, type ConversationSourceRecord, type ConversationSourceRef, type ConversationSourceCoverage, type ConversationTimeline } from './conversation-timeline.js'
+  type ConversationEvent, type ConversationSourceRecord, type ConversationSourceRef, type ConversationSourceCoverage, type ConversationTimeline } from './conversation-stream.js'
 import { parseNativeConversationCheckpoint, parseConversationRef, type NativeConversationCheckpoint } from './session-history-changes.js'
 import type { ConversationRef, ConversationItemRef } from './conversation.js'
 import { consumeJsonReadEntry, type JsonReadAssembly, type JsonReadEntry } from './json-read-fragments.js'
@@ -257,7 +257,7 @@ function coverage(value: unknown, ref: ConversationRef, accepted: ConversationSc
         return { code: text(gap.code), message: message(gap.message), ...(gap.record === undefined ? {} : { record: itemRef(gap.record, ref) }), ...(gap.continuation === undefined ? {} : { continuation: text(gap.continuation, 131_072) }) } }) }
   })
 }
-function selector(value: unknown): import('./conversation-timeline.js').ConversationSelector {
+function selector(value: unknown): import('./conversation-stream.js').ConversationSelector {
   const p = rpcRecord(value, ['kind', 'partIndex', 'field'], 'CONTROL_PROTOCOL_ERROR')
   if (p.kind === 'native-part' && p.field === undefined) return { kind: 'native-part', partIndex: integer(p.partIndex) }
   if (p.kind !== 'captured-field' || p.partIndex !== undefined || !['content', 'toolInput', 'toolOutput'].includes(String(p.field))) return bad()
@@ -296,7 +296,7 @@ export function parseConversationUnit(value: unknown, ref: ConversationRef, acce
   const e = rpcRecord(p.event, ['id', 'revision', 'anchorId', 'reference', 'role', 'author', 'recordIds', 'content', 'relations', 'coalesces', 'inputAdoption'], 'CONTROL_PROTOCOL_ERROR')
   const rawAdoption = e.inputAdoption === undefined ? undefined : rpcRecord(e.inputAdoption, ['unconfirmed', 'witnesses'], 'CONTROL_PROTOCOL_ERROR')
   if (rawAdoption && (rawAdoption.unconfirmed !== undefined && rawAdoption.unconfirmed !== true || !Array.isArray(rawAdoption.witnesses) || rawAdoption.witnesses.length > 400)) return bad()
-  const inputAdoption: import('./conversation-timeline.js').ConversationInputAdoptionContext | undefined = rawAdoption ? {
+  const inputAdoption: import('./conversation-stream.js').ConversationInputAdoptionContext | undefined = rawAdoption ? {
     ...(rawAdoption.unconfirmed ? { unconfirmed: true as const } : {}), witnesses: (rawAdoption.witnesses as unknown[]).map(value => {
       const w = rpcRecord(value, ['record', 'recordRevision', 'semanticItemId', 'turnId', 'clientCorrelation', 'key'], 'CONTROL_PROTOCOL_ERROR'), record = itemRef(w.record, ref, accepted), key = w.key === undefined ? undefined : validateAgentPromptInputKey(w.key), semanticItemId = text(w.semanticItemId), recordRevision = revision(w.recordRevision), turnId = text(w.turnId), clientCorrelation = text(w.clientCorrelation, 8192)
       if (record.source.kind !== 'native' || key && key.agentSessionId !== ref.agentSessionId || !clientCorrelation.startsWith('amux-input-v1.')) return bad()
