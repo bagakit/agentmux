@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import type { AgentSessionHistoryPage, AgentSessionHistorySource, AgentTimelineSnapshot } from '@agentmux/core'
 import { useConversationView, type ConversationViewOperation } from '@agentmux/client-ui/use-conversation-view'
 import { projectConversationWindow } from '@agentmux/client-ui/conversation-records'
-import { CONVERSATION_MAX_WINDOW_RECORDS } from '@agentmux/core/conversation'
+import { CONVERSATION_MAX_WINDOW_RECORDS, type ConversationWindowSnapshot } from '@agentmux/core/conversation'
 import { api } from './api'
 import type { SessionHistoryReference } from '../../../shared/contracts'
 import { nativeBindingKey, type AgentNativeSourceFacts } from '../../../shared/agent-native-source'
@@ -32,6 +32,12 @@ function handleSource(handle: AgentNativeSourceFacts['nativeHandle']): AgentSess
   return handle?.kind === 'provider' ? { providerId: handle.providerId, nativeSessionId: handle.sessionId } : undefined
 }
 const matchesSource = (a: AgentSessionHistorySource, b?: AgentSessionHistorySource) => !!b && a.providerId === b.providerId && a.nativeSessionId === b.nativeSessionId
+
+function remainingReadLimit(snapshot: ConversationWindowSnapshot | null): number {
+  const count = snapshot?.units.reduce((total, unit) => total + unit.records.length, 0) ?? 0
+  const sources = snapshot?.scope.sources.filter(source => source.kind === 'native' || source.kind === 'captured').length ?? 1
+  return Math.min(100, Math.floor((CONVERSATION_MAX_WINDOW_RECORDS - count) / Math.max(1, sources)))
+}
 
 /** DOM reading state over complete frames from the one public backend Reader. */
 export function useSessionConversationWindow(reading: ConversationReading | undefined,
@@ -102,9 +108,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
     if (!view.hasMore) { coverageDemand.current.remaining = 0; return }
     const times = page.items.flatMap(item => item.startedAt === undefined ? [] : [item.startedAt])
     if (coverageDuration !== Infinity && (!times.length || Math.max(...times) - Math.min(...times) >= coverageDuration)) { coverageDemand.current.remaining = 0; return }
-    const count = view.snapshot?.units.reduce((total, unit) => total + unit.records.length, 0) ?? 0
-    const sources = view.snapshot?.scope.sources.filter(source => source.kind === 'native' || source.kind === 'captured').length ?? 1
-    const limit = Math.min(100, Math.floor((CONVERSATION_MAX_WINDOW_RECORDS - count) / Math.max(1, sources)))
+    const limit = remainingReadLimit(view.snapshot)
     if (limit <= 0 || view.snapshot?.window.outside.newer) {
       coverageDemand.current.remaining = 0; return
     }
@@ -128,6 +132,15 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
     historyBoundary: boundary.current && page?.items.some(item => item.id === boundary.current) ? { beforeRecordId: boundary.current } : null,
     currentOutside, newerOutside: currentOutside, hasNewer: view.hasNewer, hasMore: view.hasMore,
     readEarlier: () => { coverageDemand.current.remaining = 0; void navigate('older') }, readNewer: () => { coverageDemand.current.remaining = 0; void navigate('newer') },
+    prepareEarlier: () => {
+      const limit = remainingReadLimit(view.snapshot)
+      if (!reading?.enabled || view.loading || view.held || view.error || !view.hasMore || limit <= 0) return false
+      coverageDemand.current.remaining = 0
+      intent.current = 'earlier'
+      if (!boundary.current) boundary.current = page?.items[0]?.id ?? null
+      void view.earlier(limit, { preserveCurrent: true })
+      return true
+    },
     retryLabel: expiredHistorical ? 'Read current records' : 'Retry',
     retry: () => {
       if (expiredHistorical) {

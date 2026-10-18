@@ -67,6 +67,7 @@ import type { ConversationRevealRequest, RevealConversationItem } from '../lib/m
 import { registerConversationConsumer, conversationFrameObservation, conversationRenderedObservation, conversationInspectionError } from '../lib/conversation-consumer-observation'
 import { conversationDiagnosticFrame } from '@agentmux/client-ui/conversation-reading-diagnostics'
 import { workbenchDocumentIdentity } from '../lib/workbench-window-registry'
+import { useConversationReadAhead } from '../lib/use-conversation-read-ahead'
 import type { ConversationConsumerQuery } from '@agentmux/core/control'
 import type { ConversationConsumerSample } from '../../../shared/conversation-consumer-observation'
 
@@ -400,7 +401,6 @@ export function ActivityView({
   const earlierSpaceAllowed = useRef(false)
   const earlierCommitPending = useRef(false)
   const physicalScrollRef = useRef<ScrollGeometry | null>(null)
-  const edgeRef = useRef({ earlier: false, newer: false })
   const [rulerWindow, setRulerWindow] = useState<RulerWindow>('24h')
   const readingWindow = useSessionConversationWindow(conversationReading, (page, intent, currentOriginal, projection) => {
     if (intent === 'earlier' || intent === 'newer') followRef.current = { ...followRef.current, following: false }
@@ -411,7 +411,6 @@ export function ActivityView({
     if (!keepAnchor) clearEarlierSpace()
     if (intent === 'current') {
       followRef.current = { ...followRef.current, following: true }
-      edgeRef.current.earlier = false; edgeRef.current.newer = false
     }
     return true
   }, RULER_WINDOWS[rulerWindow], (snapshot, displayed) => {
@@ -421,6 +420,7 @@ export function ActivityView({
     return true
   })
   function readEarlierRecords(): void {
+    readAhead.cancel()
     followRef.current = { ...followRef.current, following: false }
     if (feedEl) anchorRef.current = captureReadingAnchor(feedEl)
     readingWindow.readEarlier()
@@ -437,7 +437,6 @@ export function ActivityView({
     }
   }
   useLayoutEffect(() => {
-    edgeRef.current = { earlier: false, newer: false }
     physicalScrollRef.current = null
     clearEarlierSpace()
   }, [sessionId, conversationReading?.identity, conversationReading?.reference.hostId])
@@ -452,9 +451,6 @@ export function ActivityView({
     markProgrammaticReadingScroll(feedEl)
     syncTailPosition()
   }, [traceDisclosure.expandedTraces, feedEl])
-  useEffect(() => {
-    edgeRef.current.earlier = false; edgeRef.current.newer = false
-  }, [nativeHistoryPage?.nextCursor, readingWindow.error])
   const questionAnswerContext = useMemo(() => recentNativePage
     ? { ...recentNativePage, items: nativeContextItems ?? recentNativePage.items } : null,
     [recentNativePage, nativeContextItems])
@@ -466,6 +462,22 @@ export function ActivityView({
   const readingEnabled = conversationReading?.enabled !== false
   const consumerDocument = useWorkbenchDocument()
   const documentVisible = useWorkbenchDocumentVisibility(consumerDocument)
+  const readAhead = useConversationReadAhead({
+    identity: JSON.stringify([sessionId, conversationReading?.identity, conversationReading?.reference.hostId, nativeHistoryPage?.source]),
+    active: conversationReading?.enabled === true && documentVisible && conversationReading.consumer?.visible !== false,
+    stopped: Boolean(readingWindow.held || readingWindow.error || readingWindow.automaticReadError || readingWindow.previousSource),
+    loading: readingWindow.loading,
+    frame: readingWindow.snapshot,
+    nearEdge: direction => Boolean(feedEl && readingEdgeIsNear(direction, feedEl)),
+    read: direction => {
+      if (feedEl) anchorRef.current = captureReadingAnchor(feedEl)
+      followRef.current = { ...followRef.current, following: false }
+      if (direction === 'earlier') return readingWindow.prepareEarlier()
+      if (!readingWindow.hasNewer) return false
+      readingWindow.readNewer()
+      return true
+    }
+  })
   useLayoutEffect(() => {
     const frame = readingWindow.snapshot
     if (!frame || !feedEl?.isConnected) return
@@ -669,6 +681,7 @@ export function ActivityView({
   }
 
   const jumpToLatest = (): void => {
+    readAhead.cancel()
     anchorRef.current = null
     pinToBottom()
     const geometry = feedGeometry()
@@ -679,6 +692,7 @@ export function ActivityView({
   }
 
   const returnToLatest = (): void => {
+    readAhead.cancel()
     if (readingWindow.historical || readingWindow.newerOutside || readingWindow.held) {
       readingWindow.showCurrent()
     } else jumpToLatest()
@@ -696,25 +710,24 @@ export function ActivityView({
       const nativeAnchor = conversationReadingAnchor(el, undefined, true)
       // Captured content has its own readable tail. Hand paging back only when
       // the original sequence is actually visible in this viewport.
-      if (!nativeAnchor) return
+      if (!nativeAnchor) { readAhead.cancel(); return }
       anchorRef.current = nativeAnchor
     }
-    if (readingWindow.loading && !readingWindow.coverageLoading) return
-    const edges = edgeRef.current
+    if (!direction) return
+    const edge = direction < 0 ? 'earlier' : 'newer'
+    if (!readingEdgeIsNear(edge, el, delta) || edge === 'newer' && anchorRef.current?.kind === 'segment') {
+      readAhead.cancel(); return
+    }
+    readAhead.request(edge)
+  }
+  function readingEdgeIsNear(direction: 'earlier' | 'newer', el: HTMLElement, delta = 0): boolean {
     const distance = Math.max(80, el.clientHeight * 2)
     const nextTop = Math.max(0, el.scrollTop + delta)
     const boundary = earlierRef.current
     const boundaryTop = boundary ? el.scrollTop + boundary.getBoundingClientRect().bottom - el.getBoundingClientRect().top : 0
-    const earlier = nextTop <= boundaryTop + distance
-    const tailTop = (nativeReadingTail(el) ?? el.scrollHeight) - el.scrollTop
-    const newer = tailTop >= 0 && (nativeReadingTail(el) ?? el.scrollHeight) - el.clientHeight - nextTop <= distance
-    if (!earlier) edges.earlier = false
-    if (!newer) edges.newer = false
-    if (direction < 0 && earlier && !edges.earlier && (readingWindow.hasMore || readingWindow.capturedHasMore)) {
-      edges.earlier = true; readEarlierRecords()
-    } else if (direction > 0 && newer && anchorRef.current?.kind !== 'segment' && !edges.newer && readingWindow.hasNewer) {
-      edges.newer = true; readingWindow.readNewer()
-    }
+    if (direction === 'earlier') return nextTop <= boundaryTop + distance
+    const tail = nativeReadingTail(el) ?? el.scrollHeight
+    return tail - el.scrollTop >= 0 && tail - el.clientHeight - nextTop <= distance
   }
 
   // 用户主动往上滚才脱离；内容变长不算——两者都会让"离底部的距离"变大，能区分它们的证据是
@@ -1028,13 +1041,13 @@ export function ActivityView({
         ) : null}
         {readingWindow.hasNewer ? <button type="button" className="activity-feed__reading-action"
           disabled={readingWindow.loading && !readingWindow.coverageLoading || !conversationReading.enabled}
-          title="Read the adjacent newer page" onClick={readingWindow.readNewer}>Newer</button> : null}
+          title="Read the adjacent newer page" onClick={() => { readAhead.cancel(); readingWindow.readNewer() }}>Newer</button> : null}
         {conversationReading.nativeSourceFacts?.nativeConfirmation ? <>
           <span className="activity-feed__reading-status">{readingWindow.previousSource ? 'Previous native source' : 'Current native source'}</span>
           <button type="button" className="activity-feed__reading-action" disabled={!conversationReading.enabled}
-            onClick={readingWindow.showCurrentSource}>Current source</button>
+            onClick={() => { readAhead.cancel(); readingWindow.showCurrentSource() }}>Current source</button>
           <button type="button" className="activity-feed__reading-action" disabled={!conversationReading.enabled}
-            onClick={readingWindow.showPreviousSource}>Previous source</button>
+            onClick={() => { readAhead.cancel(); readingWindow.showPreviousSource() }}>Previous source</button>
         </> : null}
         {conversationReading.opened && conversationReading.onClose ? <button ref={returnRef} type="button"
           className="activity-feed__reading-action" aria-label={`Return to ${conversationReading.returnLabel ?? 'Activity'}`}
