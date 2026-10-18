@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
+import { unwrapSessionInputOperationResult } from '../src/shared/session-input-result.js'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -33,7 +34,7 @@ beforeEach(async () => {
   handlers = new Map(); trusted = vi.fn()
   registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) }, assertTrusted: trusted, socketPath: join(directory, 'public.sock'), secrets })
   completedLists = 0; completedChecks = 0
-  originalCall = async (method, params) => { const result = await handlers.get('connections:call')!({}, method, params); if (method === 'connection.ls') completedLists++; if (method === 'connection.test') completedChecks++; return result }
+  originalCall = async (method, params) => { const result = unwrapSessionInputOperationResult<ConnectionResultMap[typeof method]>(await handlers.get('connections:call')!({}, method, params)); if (method === 'connection.ls') completedLists++; if (method === 'connection.test') completedChecks++; return result }
   vi.spyOn(api.connections, 'call').mockImplementation(originalCall)
   vi.spyOn(api.connections, 'storeCredential').mockImplementation(async input => handlers.get('connections:storeCredential')!({}, input))
   vi.spyOn(api.connections, 'inspectCredential').mockImplementation(async operationId => handlers.get('connections:inspectCredential')!({}, operationId))
@@ -173,7 +174,9 @@ describe('Settings uses the original connection owner through public service', (
     await open()
     expect(dom.container.textContent).toContain('Credentials & Basic Info')
     expect(dom.container.querySelector('.connector-stage-list')).toBeNull()
-    expect(dom.container.querySelector('[aria-current="step"]')?.textContent).toContain('App credentials')
+    expect(dom.container.querySelector('.connector-editor-title')?.textContent).toBe('Connect an existing bot')
+    expect(dom.container.querySelector('[aria-label="Connection app ID"]')).not.toBeNull()
+    expect(dom.container.querySelector('[aria-label="Connection app secret"]')).not.toBeNull()
     await dom.click('.connector-credentials-source button')
     expect(external).toHaveBeenCalledExactlyOnceWith('https://open.feishu.cn/app')
     await dom.click('[data-connection-save]')
