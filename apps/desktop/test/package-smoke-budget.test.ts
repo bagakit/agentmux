@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import ts from 'typescript'
 import { expect, it } from 'vitest'
+import { privatePackageSmokeEnvironment } from '../scripts/package-smoke-context.mjs'
 import { fixturePath } from '../scripts/lib/fixture-values.mjs'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
@@ -43,8 +44,9 @@ function launch(scenario: Scenario = {}) {
   const ownerAt = scenario.ownerAt ?? 32_000
   const exitAt = scenario.exitAt ?? 35_000
   let now = _historyFixtureEpoch(0, 0, 0), launched = false, killed = false, ownerObserved = false, output = ''
-  const removed: string[] = [], signals: string[] = [], launchTimeouts: number[] = []
+  const removed: string[] = [], signals: string[] = [], launchTimeouts: number[] = [], stderrReads: string[] = []
   const boundaries = {
+    privatePackageSmokeEnvironment,
     Date: { now: () => now },
     setTimeout: (resolve: () => void, delay: number) => { now += delay; resolve() },
     join: path.join, sep: path.sep,
@@ -80,14 +82,17 @@ function launch(scenario: Scenario = {}) {
     pathExists: async (value: string) => value.endsWith('desktop-ready.json')
       ? launched && now >= readyAt
       : value.endsWith('owner.json') ? launched && now >= ownerAt : false,
-    readFile: async (value: string) => value.endsWith('desktop-stderr.log') ? '' : JSON.stringify(
+    readFile: async (value: string) => {
+      if (value.endsWith('desktop-stderr.log')) { stderrReads.push(value); throw new Error('Full stderr read is forbidden') }
+      return JSON.stringify(
       value.endsWith('desktop-ready.json')
         ? { productName: 'AgentMux', version: '0.1.0', packaged: true, executable, ...scenario.ready }
-        : { daemonPath, socketPath, ...scenario.owner }),
+        : { daemonPath, socketPath, ...scenario.owner })
+    },
     rm: async (value: string) => { removed.push(value) }
   }
   const invoke = new Function(...Object.keys(boundaries), `${functions}\nreturn verifyLaunchServices`)(...Object.values(boundaries))
-  return { result: invoke(app, root) as Promise<void>, facts: () => ({ now, ownerObserved, output, removed, signals, launchTimeouts, runtime }) }
+  return { result: invoke(app, root) as Promise<void>, facts: () => ({ now, ownerObserved, output, removed, signals, launchTimeouts, stderrReads, runtime }) }
 }
 
 async function failure(scenario: Scenario, message: string) {
@@ -96,6 +101,7 @@ async function failure(scenario: Scenario, message: string) {
   expect(error).toBeInstanceOf(AggregateError)
   expect(error.errors.map((entry: Error) => entry.message).join('\n')).toContain(message)
   expect(attempt.facts().output).toBe('')
+  expect(attempt.facts().stderrReads).toEqual([])
   return attempt.facts()
 }
 
