@@ -52,9 +52,11 @@ it('keeps a source-ready empty window separate from platform delivery and copies
   const binding = await bind(), before = f.platformCalls.length
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   await ready('Source observation: ready')
+  const callsBefore = f.calls.length
   await f.button('Copy group diagnosis')
   await vi.waitFor(() => expect(copy).toHaveBeenCalledOnce())
   const report = copy.mock.calls[0]![0]
+  expect(f.calls.slice(callsBefore).map(call => call.method)).toEqual(['connection.diagnose'])
   for (const value of [binding.bindingId, 'Window limit: 5', 'Delivery has next: false', 'No delivery in this reading window']) expect(report).toContain(value)
   expect(report).not.toContain('Service: ready')
   expect(f.platformCalls).toHaveLength(before)
@@ -149,34 +151,30 @@ it('shows an in-flight original request without claiming no request or a platfor
   } finally { release(); heldDelivery = null }
 }, 30_000)
 
-it('reads only an explicit connection window and never treats a different group or later page as absent history', async () => {
-  const binding = await bind()
-  const first = await incoming('window-first')
-  for (let index = 0; index < 4; index++) await incoming('other-group-' + index, 'oc_other_group')
-  const later = await incoming('window-later')
-  await reopen(); await ready('Connection window: 5 records · 1 match this group · has next: true')
-  const readCalls = () => f.calls.filter(call => call.method === 'connection.ingress.ls')
-  expect(readCalls().at(-1)?.input).toEqual({ connectionId: binding.connectionId, limit: 5 })
+it('reads newest exact-group intake across the original cursor instead of an early unrelated connection window', async () => {
+  const binding = await bind(), received = []
+  for (let index = 0; index < 7; index++) {
+    received.push(await incoming('group-window-' + index))
+    await incoming('other-group-' + index, 'oc_other_group')
+  }
+  await reopen(); await ready('Group window: 5 records, newest first · has next: true')
+  const readCalls = () => f.calls.filter(call => call.method === 'connection.diagnose')
+  expect(readCalls().at(-1)?.input).toEqual({ executionHostId: binding.executionHostId, agentSessionId: binding.agentSessionId, bindingId: binding.bindingId, bindingRevision: binding.revision })
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   await f.button('Copy group diagnosis'); await vi.waitFor(() => expect(copy).toHaveBeenCalledOnce())
-  expect(copy.mock.calls[0]![0]).toContain(first.ingressId)
-  expect(copy.mock.calls[0]![0]).not.toContain(later.ingressId)
-  expect(copy.mock.calls[0]![0]).toContain('inspected 5 · matching group 1 · has next true')
+  expect(copy.mock.calls[0]![0]).toContain(received[6]!.ingressId)
+  expect(copy.mock.calls[0]![0]).not.toContain(received[0]!.ingressId)
+  expect(copy.mock.calls[0]![0]).toContain('before: latest · records 5 · has next true')
   expect(copy.mock.calls[0]![0]).not.toContain('oc_other_group')
-  await f.button('Next intake window'); await ready('Connection window: 1 records · 1 match this group · has next: false')
-  expect(readCalls().at(-1)?.input).toMatchObject({ afterIngressId: expect.any(String), limit: 5 })
-  expect(panel().textContent).toContain(later.ingressId)
-  expect(panel().textContent).not.toContain(first.ingressId)
+  await f.button('Earlier intake'); await ready('Group window: 2 records, newest first · has next: false')
+  expect(readCalls().at(-1)?.input).toMatchObject({ beforeIngressId: received[2]!.ingressId, bindingId: binding.bindingId })
+  expect(panel().textContent).toContain(received[0]!.ingressId)
+  expect(panel().textContent).not.toContain(received[6]!.ingressId)
 }, 30_000)
 
 it('retains earlier facts on an unavailable local read and copies explicit partial sections without raw errors', async () => {
   await bind(); await ready('Source observation: ready')
-  const source = vi.mocked(api.connections.call)
-  source.mockImplementation(async (method, input) => {
-    const original = await f.forward(method, input)
-    if (method === 'connection.ingress.ls') throw new Error('PRIVATE exception https://secret.invalid ' + f.original.root)
-    return original
-  })
+  vi.spyOn(f.services.ingress!, 'listAudience').mockRejectedValue(new Error('PRIVATE exception https://secret.invalid ' + f.original.root))
   await f.button('Check group activity'); await ready('Incoming observation unconfirmed; earlier observed facts are kept.')
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   await f.button('Copy group diagnosis'); await vi.waitFor(() => expect(copy).toHaveBeenCalledOnce())
@@ -192,7 +190,7 @@ it.each(['cancel', 'leave', 'retarget'] as const)('does not copy a held original
   const held = new Promise<void>(resolve => { release = resolve })
   vi.mocked(api.connections.call).mockImplementation(async (method, input) => {
     const original = await f.forward(method, input)
-    if (method === 'connection.service.get') { entered = true; await held }
+    if (method === 'connection.diagnose') { entered = true; await held }
     return original
   })
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
