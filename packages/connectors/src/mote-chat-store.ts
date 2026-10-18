@@ -39,6 +39,7 @@ export class MoteChatStore {
       CREATE INDEX IF NOT EXISTS mote_chat_generation_lane ON mote_chat_generation(lane_key,sequence DESC);
       CREATE INDEX IF NOT EXISTS mote_chat_generation_space ON mote_chat_generation(space_id,sequence DESC);
       CREATE INDEX IF NOT EXISTS mote_chat_generation_audience ON mote_chat_generation(space_id,json_extract(snapshot_json,'$.generation.application.domain'),json_extract(snapshot_json,'$.generation.application.appId'),json_extract(snapshot_json,'$.generation.externalConversationId'),sequence DESC);
+      CREATE INDEX IF NOT EXISTS mote_chat_generation_native_audience ON mote_chat_generation(json_extract(snapshot_json,'$.generation.application.domain'),json_extract(snapshot_json,'$.generation.application.appId'),json_extract(snapshot_json,'$.generation.externalConversationId'));
       CREATE INDEX IF NOT EXISTS mote_chat_generation_connection ON mote_chat_generation(json_extract(snapshot_json,'$.connectionId'),sequence);
       CREATE TABLE IF NOT EXISTS mote_chat_admission (domain TEXT NOT NULL, app_id TEXT NOT NULL, message_id TEXT NOT NULL, ingress_id TEXT NOT NULL UNIQUE, snapshot_json TEXT NOT NULL, PRIMARY KEY(domain,app_id,message_id));
     `))
@@ -102,6 +103,9 @@ export class MoteChatStore {
       const row = this.database.prepare("SELECT sequence,snapshot_json FROM mote_chat_generation WHERE space_id=? AND json_extract(snapshot_json,'$.generation.application.domain')=? AND json_extract(snapshot_json,'$.generation.application.appId')=? AND json_extract(snapshot_json,'$.generation.externalConversationId')=? ORDER BY sequence DESC LIMIT 1").get(spaceId, application.domain, application.appId, externalConversationId)
       return row ? generationRow(row as { sequence: unknown; snapshot_json: unknown }) : null
     })
+  }
+  knowsAudience(application: ConnectionApplication, externalConversationId: string): boolean {
+    return this.safe(() => !!this.database.prepare("SELECT 1 FROM mote_chat_generation WHERE json_extract(snapshot_json,'$.generation.application.domain')=? AND json_extract(snapshot_json,'$.generation.application.appId')=? AND json_extract(snapshot_json,'$.generation.externalConversationId')=? LIMIT 1").get(application.domain, application.appId, externalConversationId))
   }
   generations(spaceId: string, before: number, limit: number, laneKey?: string, actor?: ConnectionActor): MoteChatGenerationRow[] {
     return this.safe(() => this.database.prepare('SELECT sequence,snapshot_json FROM mote_chat_generation WHERE space_id=? AND sequence<?' + (laneKey === undefined ? '' : ' AND lane_key=?') + (actor === undefined ? '' : " AND json_extract(snapshot_json,'$.generation.actor')=?") + ' ORDER BY sequence DESC LIMIT ?')
