@@ -13,8 +13,9 @@ import { localRuntimeConnector } from '../../../test/helpers/local-runtime-conne
 import type { AppConfig } from '../../../src/shared/contracts'
 import { sceneRows, appendRow, draft } from './scene.mjs'
 import { surfaceRows, surfaceCaptured, exerciseSurfaces } from './surfaces.mjs'
+import { exerciseIsolation } from './isolation.mjs'
 
-const [html, privateRoot, phase, preload, evidence, nodeExecutable, scene, mobileExercise, mobilePreload] = process.argv.slice(2)
+const [html, privateRoot, phase, preload, evidence, nodeExecutable, scene, mobileExercise, mobilePreload, proofMode] = process.argv.slice(2)
 app.on('window-all-closed', () => {})
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
@@ -236,12 +237,14 @@ app.whenReady().then(async () => {
     await read('getSelection().removeAllRanges()')
     await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
     result.selected = await selectOriginal()
+    result.appendCost = { before: await read('readingProof.metrics.heavyMounts.length') }
     const beforeAppend = await read('readingProof.nativeCut()')
     assert.ok(beforeAppend, 'The original native frontier is observed before appending')
     await append([appendRow(scene, `desktop-${phase}`)])
     await ready(`readingProof.nativeCut() !== ${JSON.stringify(beforeAppend)}`)
     await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
     result.afterAppend = await read('({text:getSelection().toString(),sameNode:readingSelectedNode.isConnected,sameBody:readingSelectedBody.isConnected,top:readingSelectedBody.getBoundingClientRect().top})')
+    result.appendCost.after = await read('readingProof.metrics.heavyMounts.length')
     assert.equal(result.afterAppend.text, result.selected.text, 'The original selected text survives appends')
     assert.equal(result.afterAppend.sameNode, true); assert.equal(result.afterAppend.sameBody, true)
     assert.ok(Math.abs(result.afterAppend.top - result.selected.top) <= 2, 'The selected original anchor remains in place')
@@ -260,6 +263,9 @@ app.whenReady().then(async () => {
       await sample('return-current')
     }
     }
+    result.readingMetrics = await read('structuredClone(readingProof.metrics)')
+    if (scene !== 'surfaces' && proofMode === 'acceptance') result.isolation = await exerciseIsolation({ runtime, core, store, config, privateRoot,
+      phase, read, click, until, appendRow, scene, original: result.ids })
     win.setContentSize(820, 760)
     await ready('innerWidth === 820'); await shot('narrow')
     win.setContentSize(1280, 912)
@@ -272,8 +278,11 @@ app.whenReady().then(async () => {
     assert.ok(result.reads.every((entry: any) => entry.input.agentSessionId === result.ids.sessionId), 'Every reading demand keeps the exact original Session')
     assert.equal(calls.filter(call => call.operation === 'unexpected-control').length, 0)
     await runMobileOnce()
-    result.runs = (await core.listRuns()).filter(run => run.state === 'running').map(run => ({ runId: run.runId, pid: run.pid }))
+    const running = (await core.listRuns()).filter(run => run.state === 'running').map(run => ({ runId: run.runId, pid: run.pid }))
+    result.runs = running.filter(run => run.runId === result.ids.runId)
+    result.unrelatedRuns = running.filter(run => run.runId === result.isolation?.unrelated.runId)
     assert.deepEqual(result.runs.map((run: any) => run.runId), [result.ids.runId])
+    assert.equal(running.length, 1 + (result.isolation ? 1 : 0), 'Only the exact original and explicitly controlled unrelated Run exist')
     if (scene !== 'surfaces') assert.equal(result.inflightSelection.passed, true, 'The selected original anchor survives any in-flight earlier page')
     if (scene !== 'surfaces') assert.equal(result.delayedPageSelection.passed, true, 'An actual delayed earlier page cannot move the selected original record')
     result.passed = true
