@@ -35,7 +35,7 @@ import { ConversationMessageAvatar } from './ConversationMessageAvatar'
 import { speakerOf } from '../lib/conversation-speaker'
 import type { ConversationSpeaker } from '@agentmux/client-ui/conversation-speaker'
 import type { RevealMailboxMessage } from '../lib/mailbox-message-navigation'
-import { mailboxMessages, mailboxMessageKey as messageKey, isMailboxUserMessage as isUserMessage, type MailboxDisplayItem } from '../lib/session-mailbox-messages'
+import { createMailboxMessagesSelector, mailboxMessageKey as messageKey, isMailboxUserMessage as isUserMessage, type MailboxDisplayItem } from '../lib/session-mailbox-messages'
 
 const ThemeObjectNotificationsIcon = semanticIconComponent('object.notifications')
 const ThemeActionRepeatIcon = semanticIconComponent('action.repeat')
@@ -322,7 +322,9 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
     items: inputMailbox.items.filter(item => { const { role } = inputMailboxPresentation(item).speaker; return role !== 'agent' && role !== 'system' }),
     failures: inputMailbox.failures.filter(item => { const { role } = inputMailboxPresentation(item).speaker; return role !== 'agent' && role !== 'system' })
   }), [inputMailbox])
-  const displayedMessages = useMemo(() => mailboxMessages(mailboxSessionId,timeline,effectiveUserMessages,effectiveControl?.hostId), [mailboxSessionId,timeline,effectiveUserMessages,effectiveControl?.hostId])
+  const selectDisplayedMessages = useMemo(createMailboxMessagesSelector, [])
+  const displayedMessages = useMemo(() => selectDisplayedMessages(mailboxSessionId,timeline,effectiveUserMessages,effectiveControl?.hostId),
+    [selectDisplayedMessages,mailboxSessionId,timeline,timeline?.revision,effectiveUserMessages,effectiveControl?.hostId])
   const sent = useMemo(() => displayedMessages.filter(item => item.message.author.kind !== 'agent'), [displayedMessages])
   const messageReference = useMemo(() => ({ hostId: inputMailboxHost, agentSessionId: mailboxSessionId ?? '' }), [inputMailboxHost, mailboxSessionId])
   const canReadMessages = Boolean(inputMailboxHost && mailboxSessionId)
@@ -369,9 +371,10 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
   const wanted = selection?.scope === scope && selection.folder === folder ? selection.key : null
   const selectedNotice = wanted && folder === 'system' ? notices.find(item => `notice:${item.id}:${serviceNoticeFingerprint(item)}` === wanted) : undefined
   const selectedQueue = wanted && folder === 'user' ? [...pending,...archived].find(item => `queue:${item.id}` === wanted) : undefined
-  const historyMessages = useMemo(() => inputHistory ? mailboxMessages(mailboxSessionId, undefined,
+  const selectHistoryMessages = useMemo(createMailboxMessagesSelector, [])
+  const historyMessages = useMemo(() => inputHistory ? selectHistoryMessages(mailboxSessionId, undefined,
     inputHistory.history.messages.filter(message => message.author.kind !== 'agent'), effectiveControl?.hostId) : sent,
-    [inputHistory?.history.messages, sent, mailboxSessionId, effectiveControl?.hostId])
+    [selectHistoryMessages, inputHistory?.history.messages, sent, mailboxSessionId, effectiveControl?.hostId])
   const selectedMessage = wanted && folder === 'user' ? historyMessages.find(item => messageKey(item) === wanted) : undefined
   const selectedJournal = wanted && folder === 'user' ? userInputMailbox.items.find(item => inputMailboxItemKey(inputMailboxHost, item) === wanted) : undefined
   const detail = Boolean(selectedNotice || selectedMessage || selectedJournal || (folder === 'inbox' || folder === 'outbox') && wanted?.startsWith('a2a:'))
