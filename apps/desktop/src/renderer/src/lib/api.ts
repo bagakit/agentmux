@@ -1,4 +1,5 @@
 import { createConversationReadApi } from './conversation-read-api'
+import { unwrapSessionObservationResult } from '../../../shared/session-observation-result'
 import { conversationRevision } from '@agentmux/core/conversation'
 import { createConversationLandmarksApi } from './conversation-landmarks-api'
 import { createRendererNotebookObservation } from './notebook-observation-api'
@@ -1535,7 +1536,10 @@ function requireDesktopApi(): AgentMuxDesktopApi {
     applications: { call: async (method, params) => unwrapSessionInputOperationResult(await preload.applications.call(method, params)) },
     conversation: createConversationReadApi(preload.conversation),
     hosts: { ...preload.hosts, inspect: createRendererHostObservation(preload.hosts.inspect), network: createRendererHostObservation(preload.hosts.network) },
-    landmarks: createConversationLandmarksApi(preload.landmarks),
+    landmarks: createConversationLandmarksApi({
+      list: (...args) => preload.landmarks.list(...args).then(unwrapSessionObservationResult),
+      apply: (...args) => preload.landmarks.apply(...args).then(unwrapSessionObservationResult)
+    }),
     notebooks: { ...preload.notebooks, ...createRendererNotebookObservation(preload.notebooks) },
     scratch: { ...preload.scratch, listTopics: async workspaceId => {
       const result = await preload.scratch.listTopics(workspaceId)
@@ -1551,6 +1555,11 @@ function requireDesktopApi(): AgentMuxDesktopApi {
     search: { query: createRendererSearchRead((input, context) => preload.search.query(input, context)) },
     sessions: {
       ...preload.sessions,
+      attach: (...args) => preload.sessions.attach(...args).then(unwrapSessionObservationResult),
+      refreshAttachment: (...args) => preload.sessions.refreshAttachment(...args).then(unwrapSessionObservationResult),
+      replay: (...args) => preload.sessions.replay(...args).then(unwrapSessionObservationResult),
+      restart: (...args) => preload.sessions.restart(...args).then(unwrapSessionObservationResult),
+      controlContinuity: (...args) => preload.sessions.controlContinuity(...args).then(unwrapSessionObservationResult),
       write: (...args) => preload.sessions.write(...args).then(result => { unwrapSessionInputWriteResult(result) }),
       paste: (...args) => preload.sessions.paste(...args).then(result => { unwrapSessionInputWriteResult(result) }),
       submitPrompt: (...args) => preload.sessions.submitPrompt(...args).then(unwrapSessionInputWriteResult),

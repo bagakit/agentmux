@@ -2132,7 +2132,11 @@ export type AgentMuxDesktopApi = {
   }
 }
 
-export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch' | 'notebooks' | 'search' | 'browser' | 'hosts' | 'applications' | 'conversation'> & {
+export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch' | 'notebooks' | 'search' | 'browser' | 'hosts' | 'applications' | 'conversation' | 'landmarks'> & {
+  landmarks: {
+    list(...args: Parameters<AgentMuxDesktopApi['landmarks']['list']>): Promise<import('./session-observation-result').SessionObservationResult<Awaited<ReturnType<AgentMuxDesktopApi['landmarks']['list']>>>>
+    apply(...args: Parameters<AgentMuxDesktopApi['landmarks']['apply']>): Promise<import('./session-observation-result').SessionObservationResult<Awaited<ReturnType<AgentMuxDesktopApi['landmarks']['apply']>>>>
+  }
   applications: {
     call<M extends import('@agentmux/core').ApplicationAccessMethod>(method: M,
       params: import('@agentmux/core').ApplicationAccessParameterMap[M]): Promise<SessionInputOperationResult<import('@agentmux/core').ApplicationAccessResultMap[M]>>
@@ -2152,8 +2156,13 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
   scratch: Omit<AgentMuxDesktopApi['scratch'], 'listTopics'> & {
     listTopics(workspaceId: string): Promise<import('./scratch-topics').ScratchTopicListResponse>
   }
-  sessions: Omit<AgentMuxDesktopApi['sessions'], 'onEvent' | 'observeHistory' | 'readHistory' | 'write' | 'paste' | 'submitPrompt' | 'inspectInput' | 'stopInputWaiting' | 'rejoinInputWaiting'> & {
+  sessions: Omit<AgentMuxDesktopApi['sessions'], 'onEvent' | 'observeHistory' | 'readHistory' | 'write' | 'paste' | 'submitPrompt' | 'inspectInput' | 'stopInputWaiting' | 'rejoinInputWaiting' | 'attach' | 'refreshAttachment' | 'replay' | 'restart' | 'controlContinuity'> & {
     /** Plain envelopes cross both IPC and contextBridge; Renderer restores typed failures. */
+    attach(...args: Parameters<AgentMuxDesktopApi['sessions']['attach']>): Promise<import('./session-observation-result').SessionObservationResult<Awaited<ReturnType<AgentMuxDesktopApi['sessions']['attach']>>>>
+    refreshAttachment(...args: Parameters<AgentMuxDesktopApi['sessions']['refreshAttachment']>): Promise<import('./session-observation-result').SessionObservationResult<Awaited<ReturnType<AgentMuxDesktopApi['sessions']['refreshAttachment']>>>>
+    replay(...args: Parameters<AgentMuxDesktopApi['sessions']['replay']>): Promise<import('./session-observation-result').SessionObservationResult<Awaited<ReturnType<AgentMuxDesktopApi['sessions']['replay']>>>>
+    restart(...args: Parameters<AgentMuxDesktopApi['sessions']['restart']>): Promise<import('./session-observation-result').SessionObservationResult<Awaited<ReturnType<AgentMuxDesktopApi['sessions']['restart']>>>>
+    controlContinuity(...args: Parameters<AgentMuxDesktopApi['sessions']['controlContinuity']>): Promise<import('./session-observation-result').SessionObservationResult<Awaited<ReturnType<AgentMuxDesktopApi['sessions']['controlContinuity']>>>>
     write(...args: Parameters<AgentMuxDesktopApi['sessions']['write']>): Promise<SessionInputWriteResult>
     paste(...args: Parameters<AgentMuxDesktopApi['sessions']['paste']>): Promise<SessionInputWriteResult>
     submitPrompt(...args: Parameters<AgentMuxDesktopApi['sessions']['submitPrompt']>): Promise<SessionInputWriteResult>
