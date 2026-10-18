@@ -195,7 +195,7 @@ describe('original Memory in the shared Mote Profile', () => {
     const disclosure = memory(), panel = container.querySelector<HTMLElement>('[role="tabpanel"]')!
     await click('Edit behavior settings')
     expect(document.querySelector('.mote-behavior-dialog')).not.toBeNull()
-    panel.scrollTop = 100
+    await act(async () => { panel.scrollTop = 100; panel.dispatchEvent(new Event('scroll')) })
     await click('Ideas'); expect(panel.scrollTop).toBe(0)
     expect(memory()).toBe(disclosure); expect(memory().closest<HTMLElement>('.mote-profile')?.hidden).toBe(true)
     expect(memory().querySelector('.mote-memory__prose')).toBeNull()
@@ -203,8 +203,8 @@ describe('original Memory in the shared Mote Profile', () => {
     await invalidate(); expect(memoryReads()).toHaveLength(reads)
     vi.mocked(api.files.readPublic).mockImplementation(async params => params.path === 'MEMORY.md'
       ? { resource: null, result: { status: 'unknown', code: 'ORIGINAL_UNKNOWN', message: 'Memory source is temporarily unconfirmed.' } } : material(params))
-    panel.scrollTop = 100; await click('Profile')
-    expect(panel.scrollTop).toBe(0); expect(memory()).toBe(disclosure)
+    await act(async () => { panel.scrollTop = 240; panel.dispatchEvent(new Event('scroll')) }); await click('Profile')
+    expect(panel.scrollTop).toBe(100); expect(memory()).toBe(disclosure)
     expect(memoryReads()).toHaveLength(reads + 1)
     expect(memory().textContent).toContain('Memory source is temporarily unconfirmed.')
     expect(memory().textContent).toContain('Give me the conclusion first.')
