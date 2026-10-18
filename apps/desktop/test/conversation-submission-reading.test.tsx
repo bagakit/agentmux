@@ -39,7 +39,9 @@ async function fixture(surface: 'desktop' | 'shared' = 'desktop', initiallyEmpty
     view = useConversationView(api.conversation, { hostId: 'local', agentSessionId: f.session.agentSessionId }, true)
     const projection = view.snapshot ? projectConversationWindow(view.snapshot) : null
     return <ConversationView sessionId={f.session.agentSessionId} executionHostId="local" records={projection?.records ?? []} originalRecords={projection?.originalRecords ?? []}
-      coverage={projection?.timeline.coverage ?? []} page={projection?.historyPage} timeline={projection?.captured}
+      coverage={projection?.timeline.coverage ?? []}
+      {...(projection?.historyPage ? { page: projection.historyPage } : {})}
+      {...(projection?.captured ? { timeline: projection.captured } : {})}
       readActivity={{ sourceRead: view.sourceRead, loading: view.loading }} />
   }
   await act(async () => root.render(surface === 'shared' ? <SharedReader /> : <ActivityView {...activityReadingProps({ control: { hostId: 'local', agentSessionId: f.session.agentSessionId, run: f.session.run }, workspaceRoot: f.root })} />))
