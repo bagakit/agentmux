@@ -46,7 +46,6 @@ export function NotificationItem({ title, kind, detail, summary, impact, childre
   }
   const volume = serviceNoticeAriaLive(kind)
   const heading = useMemo(() => notificationPreview(title, 'title'), [title])
-  const preview = useMemo(() => impact ? notificationPreview(impact, 'title') : undefined, [impact])
   return <article className="notification-item" data-kind={kind} data-unread={unread ?? false} data-event-id={eventId} data-notice-id={noticeId}
     role={volume === 'assertive' ? 'alert' : 'status'} aria-live={volume}>
     <Icon size={14} className="notification-item__icon" aria-hidden="true" />
@@ -54,7 +53,6 @@ export function NotificationItem({ title, kind, detail, summary, impact, childre
       <div className="notification-item__headline"><strong className="notification-item__title">{heading}</strong>
         {unread ? <span className="notification-item__unread" aria-label="Unread" title="Unread" /> : null}
       </div>
-      {preview ? <p className="notification-item__impact">{preview}</p> : null}
       <div className="notification-item__controls">
         <div className="notification-item__meta"><span className="notification-item__level">{notificationLevels[kind].label}</span>
           {timestamp ? <time dateTime={timestamp.dateTime} title={timestamp.title}>{timestamp.label}</time> : null}
@@ -69,6 +67,7 @@ export function NotificationItem({ title, kind, detail, summary, impact, childre
           <summary>Details</summary>
           {expanded ? <div className="notification-item__original" tabIndex={0} aria-label={`Complete details: ${heading}`}>
             {summary && !detail.includes(summary) ? <p>{summary}</p> : null}
+            {impact && !detail.includes(impact) ? <p>{impact}</p> : null}
             {children ?? <p>{detail}</p>}
             <button type="button" className="small-button" disabled={copy?.detail === detail && copy.label === 'Copying…'} onClick={() => void copyDetails()}>Copy details</button>
             {copy?.detail === detail ? <span role="status">{copy.label}</span> : null}
