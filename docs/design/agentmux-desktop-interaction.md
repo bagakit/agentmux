@@ -29,6 +29,7 @@
 | amux 可读信封、业务标记、内容分享与对象链接的格式 | [amux 格式协议](../specs/amux-protocol.md) |
 | ordered bytes、连续历史阅读、几何和相关成本 | [Terminal、历史与成本](behavior/terminal-reading.md) |
 | 协议、导航、自动化、控制交接与批准 | [Browser 工作面](behavior/browser-workface.md) |
+| 本地页面全托管、路径配置、重启后访问及 Agent 公共入口 | [本地页面托管](behavior/public-control.md#本地页面托管) |
 | 真实文件、格式、保存、worktree 与 Git 操作 | [文件、编辑与 Git](behavior/files-and-git.md) |
 | 配置入口、状态、通知、资源与 Toolkit | [设置、状态与观测](behavior/settings-and-observation.md) |
 | 远程管理、Host 连接拓扑、监控与维护流程 | [Remote 管理 PRD](behavior/remote-management.md) |
