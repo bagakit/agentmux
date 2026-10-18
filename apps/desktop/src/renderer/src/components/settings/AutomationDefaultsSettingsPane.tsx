@@ -6,6 +6,7 @@ import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraftRecord } from './use-setting-draft'
 import '../../styles/settings-continuity.css'
 import './settings-automation.css'
+import { readableSettingsDuration } from './settings-duration'
 
 export const AUTOMATION_DEFAULTS_SEARCH_TARGETS = [
   { id: 'progressIntervalMs', title: 'Default progress interval', keywords: 'periodic minutes check interval 周期 持续推进' },
@@ -79,11 +80,11 @@ export function AutomationDefaultsSettingsPane({ preferences, onSave }: {
       {number('checkInDailyBudget', 'Daily follow-up budget', 'attempts', 'Built-in default: 1 attempt per local day. Choose 1 to 3.')}
       {parsed && <aside className="automation-policy-example" aria-label="Quiet follow-up example">
         <header><strong>When a follow-up can happen</strong><small>Draft example</small></header>
-        <p>At a scheduled check, all of these conditions must be met:</p>
+        <p>All conditions apply at a scheduled check:</p>
         <dl>
-          <div><dt>Wait for silence</dt><dd>At least <strong>{parsed.checkInSilenceMs / 3_600_000} hours</strong> after your last confirmed message.</dd></div>
-          <div><dt>Respect quiet hours</dt><dd>No question from <strong>{parsed.checkInQuietStart} to {parsed.checkInQuietEnd}</strong>, in the arrangement’s timezone.</dd></div>
-          <div><dt>Space out attempts</dt><dd>At least <strong>{parsed.checkInMinIntervalMs / 3_600_000} hours</strong> after the previous attempt, with at most <strong>{parsed.checkInDailyBudget} {parsed.checkInDailyBudget === 1 ? 'attempt' : 'attempts'} per local day</strong>.</dd></div>
+          <div><dt>Silence</dt><dd>At least <strong>{readableSettingsDuration(parsed.checkInSilenceMs)}</strong> since your confirmed message.</dd></div>
+          <div><dt>Quiet hours</dt><dd>No question from <strong>{parsed.checkInQuietStart} to {parsed.checkInQuietEnd}</strong>, in the arrangement’s timezone.</dd></div>
+          <div><dt>Attempts</dt><dd>At least <strong>{readableSettingsDuration(parsed.checkInMinIntervalMs)}</strong> apart · at most <strong>{parsed.checkInDailyBudget} {parsed.checkInDailyBudget === 1 ? 'attempt' : 'attempts'} per local day</strong>.</dd></div>
         </dl>
         <p className="continuity-hint">Another question also needs a confirmed reply from you. These are defaults for arrangements where you enable quiet follow-up; this example schedules and sends nothing.</p>
       </aside>}
