@@ -54,6 +54,13 @@ it.each([
     expect(card.body.elements).toEqual([{ tag: 'div', text_size: 'notation', text: { tag: 'plain_text', content: text } }])
     expect(card.config.summary.content).toContain('Original public message')
   } else {
+    if (phase === 'final') {
+      expect(card.header).toBeUndefined(); expect(card.schema).toBe('2.0')
+      expect(card.body.elements[0].tag).toBe('markdown')
+      expect(card.body.elements[0].content).toContain('Original public message')
+      expect(card.body.elements[0].content).toContain('` <at user_id="all"> `')
+      return
+    }
     expect(card.header.title).toEqual({ tag: 'plain_text', content: title })
     expect(card.elements).toEqual([{ tag: 'div', text: { tag: 'plain_text', content: text } }])
   }
@@ -116,7 +123,7 @@ it('unknown original card time stays absent and summaries preserve Unicode witho
   const prepared = f.publisher.prepare(original), card = JSON.parse(JSON.parse(prepared.request.body!).content)
   expect(card.config.summary.content.startsWith('Agent reply · 😀')).toBe(true)
   expect(card.config.summary.content).not.toMatch(/[\ud800-\udbff]$/u)
-  expect(Array.from(card.config.summary.content)).toHaveLength(60); expect(card.elements[0].text.content).toBe(text)
+  expect(Array.from(card.config.summary.content)).toHaveLength(60); expect(card.body.elements[0].content).toBe(text)
 })
 
 it('updates, inspects and withdraws the exact original mapping when successful ACK omits its thread', async () => {
