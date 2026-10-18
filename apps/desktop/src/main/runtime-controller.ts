@@ -2049,13 +2049,19 @@ export class RuntimeController {
   async inspectContinuousProgressInitial(loop: import('@agentmux/core').ContinuousProgressLoop): Promise<'confirmed' | 'pending' | 'unconfirmed'> {
     const initial = loop.initialDelivery
     if (!initial) return 'unconfirmed'
-    const status = await (await this.connectedClient(loop.hostId)).statusAgent(loop.agentSessionId)
-    const session = status.session, admission = session.promptCompletionAdmission
+    const client = this.configuredClient(loop.hostId)
+    const session = await client.agentSession(loop.agentSessionId)
     if (session.hostId !== loop.hostId || session.agentSessionId !== loop.agentSessionId || session.providerId !== loop.providerId || session.workspacePath !== loop.workspacePath ||
-        session.run.runId !== initial.condition.expectedRun.runId || admission?.submissionId !== initial.operationId ||
-        admission.intent?.run.runId !== initial.condition.expectedRun.runId || admission.intent.prompt !== initial.prompt ||
-        admission.intent.message?.userContent !== initial.prompt || admission.intent.message.systemContext !== undefined) return 'unconfirmed'
-    if (admission.acknowledged === true || session.terminalPromptSubmission?.submissionId === initial.operationId && session.terminalPromptSubmission.submit.acknowledged === true) return 'confirmed'
+        session.kind !== 'agent') return 'unconfirmed'
+    const original = await client.inspectAgentPromptSubmission({ kind: 'prompt', agentSessionId: loop.agentSessionId,
+      expectedRun: initial.condition.expectedRun, submissionId: initial.operationId })
+    const admission = original?.admission
+    if (original?.agentSessionId !== loop.agentSessionId || original.run.runId !== initial.condition.expectedRun.runId ||
+        admission?.submissionId !== initial.operationId || admission.intent?.run.runId !== initial.condition.expectedRun.runId ||
+        admission.intent.message?.userContent !== initial.prompt) return 'unconfirmed'
+    // Core owns the original authored system segment and wire encoding. Neither display text
+    // nor the presence of platform guidance changes this exact user's input receipt.
+    if (admission.acknowledged === true || original.terminalPromptSubmission?.submissionId === initial.operationId && original.terminalPromptSubmission.submit.acknowledged === true) return 'confirmed'
     return 'pending'
   }
 
