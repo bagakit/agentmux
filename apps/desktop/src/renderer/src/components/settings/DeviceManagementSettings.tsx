@@ -11,6 +11,7 @@ const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeActionCopyIcon = semanticIconComponent('action.copy')
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 const ThemeObjectPhoneIcon = semanticIconComponent('object.phone')
+const ThemeObjectConnectionCodeIcon = semanticIconComponent('object.connection-code')
 
 
 type DeviceList = AgentMuxRpcResult<'device.ls'>
@@ -19,6 +20,7 @@ type DeviceList = AgentMuxRpcResult<'device.ls'>
 export function DeviceManagementSettings({ active }: { active: boolean }) {
   const [list, setList] = useState<DeviceList | null>(null), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false)
   const [url, setUrl] = useState(''), [readIssue, setReadIssue] = useState('')
+  const [linkAction, setLinkAction] = useState<'scan' | 'copy' | null>(null)
   const [copyFeedback, setCopyFeedback] = useState<{ deviceId: string; text: string } | null>(null)
   const [refreshing, setRefreshing] = useState(false), [observedAt, setObservedAt] = useState<number | null>(null)
   const generation = useRef(0), pending = useRef(false), readSequence = useRef(0)
@@ -36,18 +38,19 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
     const timer = setInterval(() => { void read(generation.current) }, 5000)
     return () => { generation.current++; clearInterval(timer) }
   }, [active])
-  const link = async () => {
+  const link = async (action: 'scan' | 'copy') => {
     if (pending.current) return
-    pending.current = true; setBusy(true); setNotice('')
+    pending.current = true; setBusy(true); setLinkAction(action); setNotice('')
     const epoch = generation.current
     try {
-      const value = await api.deviceManagement.link({})
+      const connectionUrl = action === 'copy' && url ? url : (await api.deviceManagement.link({})).url
       if (epoch !== generation.current) return
-      setUrl(value.url)
-      try { await api.ui.writeClipboardText(value.url); setNotice('Link copied. Open it on your phone to connect.') }
-      catch { setNotice('Link generated. Select and copy the full link below.') }
-    } catch (error) { if (epoch === generation.current) setNotice(`Could not generate a connection link. Try again later. ${presentError(error)}`) }
-    finally { pending.current = false; setBusy(false) }
+      setUrl(connectionUrl)
+      if (action === 'scan') { setNotice('Scan this code with your phone camera to connect.'); return }
+      try { await api.ui.writeClipboardText(connectionUrl); if (epoch === generation.current) setNotice('Link copied. Open it on your phone to connect.') }
+      catch { if (epoch === generation.current) setNotice('Could not copy the link. Scan the code or select the full link below.') }
+    } catch (error) { if (epoch === generation.current) setNotice(`Could not read the connection link. Try again. ${presentError(error)}`) }
+    finally { pending.current = false; setBusy(false); setLinkAction(null) }
   }
   const revoke = async (deviceId: string) => {
     if (pending.current) return
@@ -67,11 +70,12 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
     <div className="device-management__connection">
       <div className="device-management__intro">
         <span className="device-management__phone"><ThemeObjectPhoneIcon size={28} aria-hidden="true" /></span>
-        <div><h3>Connect your phone</h3><p className="settings-group-note">Keep both devices on the same Wi-Fi. Copy a connection link, then open it on your phone or scan its code.</p></div>
+        <div><h3>Connect your phone</h3><p className="settings-group-note">Keep both devices on the same Wi-Fi. Scan the code with your phone camera, or open the connection link on your phone.</p></div>
       </div>
   
-      <div className="settings-pane-toolbar">
-        <button className="primary-button" disabled={busy} onClick={() => { void link() }}>{busy ? <ThemeStatusLoadingIcon size={16} animation="spin" /> : <ThemeActionCopyIcon size={16} />}{busy ? 'Working…' : 'Copy connection link'}</button>
+      <div className="settings-pane-toolbar device-management__actions">
+        <button type="button" className="primary-button" data-device-action="scan" disabled={busy} onClick={() => { void link('scan') }}>{linkAction === 'scan' ? <ThemeStatusLoadingIcon size={16} animation="spin" /> : url ? <ThemeActionRefreshIcon size={16} /> : <ThemeObjectConnectionCodeIcon size={16} />}{linkAction === 'scan' ? 'Getting code…' : url ? 'Refresh code' : 'Scan to connect'}</button>
+        <button type="button" className="small-button" data-device-action="copy" disabled={busy} onClick={() => { void link('copy') }}>{linkAction === 'copy' ? <ThemeStatusLoadingIcon size={16} animation="spin" /> : <ThemeActionCopyIcon size={16} />}{linkAction === 'copy' ? 'Copying…' : 'Copy connection link'}</button>
       </div>
       {notice && <p className="device-management__feedback" role="status">{notice}</p>}
       {url && <><ConnectionLinkCode url={url} /><details className="device-management__link"><summary>View full connection link</summary><Textarea aria-label="Phone connection link" rows={3} readOnly value={url} onFocus={event => event.target.select()} /></details></>}

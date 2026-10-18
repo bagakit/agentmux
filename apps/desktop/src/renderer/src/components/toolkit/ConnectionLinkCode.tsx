@@ -4,7 +4,7 @@ import { QRCodeSVG } from 'qrcode.react'
 class CodeBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false }
   static getDerivedStateFromError() { return { failed: true } }
-  render() { return this.state.failed ? <p role="status">Code unavailable. Copy the connection link below.</p> : this.props.children }
+  render() { return this.state.failed ? <p role="status">Code unavailable. Copy the connection link.</p> : this.props.children }
 }
 
 /** Local encoding of the exact owner-issued URL, including its offer fragment. */
