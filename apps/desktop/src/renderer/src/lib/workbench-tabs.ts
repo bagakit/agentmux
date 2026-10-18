@@ -84,6 +84,10 @@ export type LauncherWorkbenchSurface = {
 }
 
 export type BrowserWorkbenchSurface = BrowserSnapshot & {
+  /** Cold association metadata only; never restores native input authority. */
+  agent?: import('@agentmux/core').AgentMuxBrowserControl['agent']
+  /** Reference to this Browser's original spatial creation admission. */
+  agentCreationRequestId?: string
   /** Client recovery notice; no previous private address or website state is retained. */
   privateSessionEnded?: true
   /** Exact Main unavailable event; transient, cleared by its next confirmed snapshot. */
