@@ -35,6 +35,8 @@ export type * from './space-control.js'
 export type * from './desktop-focus-control.js'
 export * from './mote-context-observation.js'
 import type { AgentMuxMoteContextEvidenceTarget, AgentMuxMoteContextObservation } from './mote-context-observation.js'
+export * from './client-notifications.js'
+import type { AgentMuxClientNotificationsTarget, AgentMuxClientNotificationsObservation } from './client-notifications.js'
 import type { ConversationConsumerQuery } from './conversation-consumer-query.js'
 export { parseConversationConsumerQuery, type ConversationConsumerQuery } from './conversation-consumer-query.js'
 
@@ -255,6 +257,9 @@ export type AgentMuxControlMetricsRequest = RequestBase & ({ operation: 'metrics
 export type AgentMuxControlInspectClientRequest = RequestBase & { operation: 'inspect.client'; conversation?: ConversationConsumerQuery }
 export type AgentMuxControlInspectMoteContextRequest = RequestBase & {
   operation: 'inspect.mote-context'; target: AgentMuxMoteContextEvidenceTarget; includeRaw: boolean; maxBytes: number
+}
+export type AgentMuxControlInspectNotificationsRequest = RequestBase & {
+  operation: 'inspect.notifications'; target: AgentMuxClientNotificationsTarget; includeRaw: boolean; maxBytes: number
 }
 export type AgentMuxControlInspectTabRequest = RequestBase & {
   operation: 'inspect.tab'; target: AgentMuxTabAnchor; caller?: AgentMuxControlCaller
@@ -647,6 +652,7 @@ export type AgentMuxControlRequest =
   | AgentMuxSpaceControlRequest
   | AgentMuxControlInspectClientRequest
   | AgentMuxControlInspectMoteContextRequest
+  | AgentMuxControlInspectNotificationsRequest
   | AgentMuxControlInspectTabRequest
   | AgentMuxControlInspectRegionRequest
   | AgentMuxControlOpenTerminalRequest
@@ -767,6 +773,7 @@ export type AgentMuxControlResult =
   | AgentMuxSpaceControlResult
   | { operation: 'inspect.client'; observation: Record<string, unknown> }
   | { operation: 'inspect.mote-context'; observation: AgentMuxMoteContextObservation }
+  | { operation: 'inspect.notifications'; observation: AgentMuxClientNotificationsObservation }
   | { operation: 'inspect.tab'; tab: AgentMuxInspectedTab }
   | { operation: 'inspect.region'; region: AgentMuxInspectedRegion }
   | { operation: 'open.terminal'; region: AgentMuxTerminalRegion }
@@ -1037,6 +1044,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'metrics.trace.capture': 'long',
   'inspect.client': 'short',
   'inspect.mote-context': 'short',
+  'inspect.notifications': 'short',
   'inspect.tab': 'short',
   'inspect.region': 'short',
   'agent.open': 'long',

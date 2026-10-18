@@ -1,3 +1,4 @@
+import { observeNotifications } from './lib/notification-observation'
 import type { CollaborationMapTarget } from './lib/collaboration-map-navigation'
 import { noteShareRange, noteShareSiblingRange } from '../../shared/note-share-range'
 import { pendingNoteShares, promotedPendingNoteShares, clearPendingNoteShares, applyNoteDraftShareEcho, applyNoteDraftRestoreEcho, bindNoteDraftBlockIdentity, noteBlockFingerprint, noteNodeAtPath } from './lib/note-share-staging'
@@ -5980,6 +5981,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     if (request.operation === 'space.rename') {
       throw controlFailure('CONTROL_UNAVAILABLE', 'Tab name edits belong to the public spatial label owner; keep this workface and use that owner.')
+    }
+    if (request.operation === 'inspect.notifications') {
+      return { operation: request.operation, observation: observeNotifications(request) }
     }
     if (request.operation === 'inspect.mote-context') {
       return { operation: request.operation, observation: observeMoteContextOperation(get().moteContextOperations, request) }

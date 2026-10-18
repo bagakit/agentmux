@@ -24,6 +24,10 @@ export async function inspectDiagnosticEvidence(query: DiagnosticEvidenceQuery, 
       { domain: 'client.incident' as const, target: 'log-id' as const, raw: false, read: 'supported' as const },
       { domain: 'client.incident' as const, target: 'recent' as const, raw: false, read: 'supported' as const },
     ] : []),
+    ...(ports.clientNotifications ? [
+      { domain: 'client.notifications' as const, target: 'notification-list' as const, raw: true, read: 'supported' as const },
+      { domain: 'client.notifications' as const, target: 'notification-id' as const, raw: true, read: 'supported' as const },
+    ] : []),
     { domain: 'native-recorder-failure', target: 'session-run', raw: false, read: 'not-exposed' },
   ]
   const complete = (report: Omit<AgentMuxDiagnosticEvidenceResult, 'capabilities'>): AgentMuxDiagnosticEvidenceResult => {
@@ -54,6 +58,12 @@ export async function inspectDiagnosticEvidence(query: DiagnosticEvidenceQuery, 
       if (!port) return missing('DIAGNOSTIC_EVIDENCE_SOURCE_UNSUPPORTED')
       if (port.hostId !== target.hostId) return missing('DIAGNOSTIC_EVIDENCE_SOURCE_UNAVAILABLE')
       return port.read(target, bounds)
+    }
+    if (target.domain === 'client.notifications') {
+      const port = ports.clientNotifications
+      if (!port) return missing('DIAGNOSTIC_EVIDENCE_SOURCE_UNSUPPORTED')
+      if (port.hostId !== target.hostId) return missing('DIAGNOSTIC_EVIDENCE_SOURCE_UNAVAILABLE')
+      return port.read(target, { ...bounds, includeRaw: params.includeRaw === true })
     }
     if (target.domain === 'performance.scene') {
       if (!ports.metrics?.inspectScene) return missing('DIAGNOSTIC_EVIDENCE_SOURCE_UNSUPPORTED')

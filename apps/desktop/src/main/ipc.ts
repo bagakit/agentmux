@@ -95,6 +95,7 @@ import { CONTINUOUS_PROGRESS_CHANGED, SCHEDULE_CHANGED, NATIVE_BROWSER_VISIBILIT
 import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
 import { inspectDesktopClient, registerLoadedIdentityIpc } from './client-observation.js'
+import { inspectNotifications, clientNotificationsPort } from './notification-observation.js'
 import { inspectMoteContext, moteContextEvidencePort } from './mote-context-observation.js'
 import { observeClientRpcSnapshot } from './rpc-client-observations.js'
 import { SessionHistoryObservationOwners } from './session-history-observation.js'
@@ -608,6 +609,11 @@ export async function registerIpc(args: {
       }
     }
 
+    if (request.operation === 'inspect.notifications') return await inspectNotifications(request, {
+      renderer: () => contents.isLoadingMainFrame() ? null : args.loadedRenderer?.() ?? null,
+      generation: () => args.runtime.rendererGeneration(contents),
+      execute: input => controlBridge.execute(input, signal)
+    })
     if (request.operation === 'inspect.mote-context') return await inspectMoteContext(request, {
       renderer: () => contents.isLoadingMainFrame() ? null : args.loadedRenderer?.() ?? null,
       generation: () => args.runtime.rendererGeneration(contents),
@@ -2368,6 +2374,7 @@ export async function registerIpc(args: {
     ...(connectorServices.moteChat ? { moteChat: connectorServices.moteChat } : {}),
     deliveryAttempts,
     ...(args.clientIncidents ? { clientIncidents: args.clientIncidents } : {}),
+    clientNotifications: clientNotificationsPort(deliveryAttempts.hostId, (request, signal) => executeControl(request, undefined, signal)),
     moteContext: moteContextEvidencePort(deliveryAttempts.hostId, request => executeControl(request)),
     execute: executeControl,
     nameHistory: query => desktopNameHistory(spatialState, demands, query),

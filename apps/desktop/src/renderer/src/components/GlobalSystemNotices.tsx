@@ -5,10 +5,10 @@ import { useContext, useId, useLayoutEffect, useMemo, useRef, useState } from 'r
 import { autoUpdate, computePosition, offset, shift, size } from '@floating-ui/dom'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { notificationEventIdentity, projectNotifications, useAppStore, type NotificationEvent, type NotificationEventObject } from '../store'
-import { useReadReceipts, useServiceNotices, type ServiceNoticeItem } from '../lib/use-service-notices'
+import { useReadReceipts, useServiceNotices, type ServiceNoticeItem, serviceNoticeFingerprint } from '../lib/use-service-notices'
 import { selectDisplacedAgentNotices, displacedAgentStepOutcome } from '../lib/control-spatial-commit'
 import { classifyServiceNotice, serviceNoticeToRender, serviceNoticeAriaLive } from '../lib/service-window-notice'
-import { NotificationGroup, type NotificationEntry } from './NotificationGroup'
+import { NotificationGroup } from './NotificationGroup'
 import { groupNotifications, notificationCategories, notificationTimestamp, type NotificationCategory, type NotificationFilter, type NotificationSection, type NotificationSubject } from '../lib/notification-center'
 import { createSessionServiceNoticeSelector } from '../lib/session-service-notices'
 import { runServiceProjection, useRunServiceHealthChanges } from '../lib/run-service-projection'
@@ -17,6 +17,9 @@ import { SettingsNavigation } from './SettingsNavigation'
 import { executorsForHost, hostExecutorInventoryMatches } from '../lib/executors'
 import { runtimeEndpointNotice } from '../lib/runtime-endpoint-notice'
 import { notificationPreview } from '../lib/notification-preview'
+import { compactNotificationIdentity } from '../lib/notification-read-identity'
+import { registerNotificationReader, type ObservedNotificationEntry, type NotificationProjection } from '../lib/notification-observation'
+import type { AgentMuxClientNotificationSubject } from '@agentmux/core/control'
 
 const ThemeObjectNotificationsIcon = semanticIconComponent('object.notifications')
 const ThemeNavigationCollapseIcon = semanticIconComponent('action.close')
@@ -152,7 +155,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   const endpointInbox = useServiceNotices('global:runtime-endpoints', endpoints, endpointWarnings !== undefined)
   const displacedKnown = !loading && displacedIds.every((sessionId) => sessions.some((session) => session.id === sessionId))
   const displacedInbox = useServiceNotices('global:displaced-agents', displaced, displacedKnown)
-  const sessionSubjects = new Map<string, NotificationSubject>()
+  const sessionOwners = new Map<string, (typeof sessions)[number]>()
   const sessionNotices: ServiceNoticeItem[] = sessions.flatMap(session => sessionServiceNotices(session, queues[session.id], sending[session.id],
     runServiceProjection.read(session),
     !(endpointWarnings ?? []).some(warning => warning.hostId === session.control.hostId &&
@@ -165,7 +168,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
           action: { label: `Open ${session.label} Session`, run: () => selectSession(session.id) } }
         sessionNoticeViews.set(item, view)
       }
-      if (open) sessionSubjects.set(view.id, { key: JSON.stringify(['agent', session.control.hostId, session.id, session.control.run.runId]), label: session.label, context: config?.hosts.find(host => host.id === session.control.hostId)?.label ?? session.control.hostId })
+      sessionOwners.set(view.id, session)
       return view
     }))
   const sessionInbox = useServiceNotices('global:sessions', sessionNotices, !loading)
@@ -203,7 +206,6 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   const currentCount = notices.length + projection.current.length
   const unread = inboxes.reduce((total, inbox) => total + inbox.unread.length, eventInbox.unread.length)
   const available = inboxes.every((inbox) => inbox.available)
-  const sessionsByIdentity = new Map((open ? sessions : []).map(session => [JSON.stringify([session.control.hostId, session.id]), session]))
   const unreadEventIds = useMemo(() => new Set(eventInbox.unread), [eventInbox.unread])
   const readEvents = open ? projection.history.filter(event => !unreadEventIds.has(event.id)).length : 0
   const latestUnreadEvent = useMemo(() => [...events].reverse().find(event => unreadEventIds.has(event.id)), [events, unreadEventIds])
@@ -214,9 +216,25 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   function navigationAction(action: NonNullable<ServiceNoticeItem['action']>) {
     return { label: action.label, run() { action.run(); detailsRef.current?.hidePopover?.() } }
   }
-  const currentEntries: NotificationEntry[] = []
-  const historyEntries: NotificationEntry[] = []
-  if (open) {
+  function buildEntries(): NotificationProjection {
+    const currentEntries: ObservedNotificationEntry[] = []
+    const historyEntries: ObservedNotificationEntry[] = []
+    const sessionsByIdentity = new Map(sessions.map(session => [JSON.stringify([session.control.hostId, session.id]), session]))
+    const sessionIdentity = (session: (typeof sessions)[number] | undefined): AgentMuxClientNotificationSubject => session
+      ? { kind: session.kind, hostId: session.control.hostId, ...(session.kind === 'agent' ? { agentSessionId: session.id } : {}), runId: session.control.run.runId }
+      : { kind: 'unknown' }
+    const sourceSubjects = (scope: string, item: ServiceNoticeItem): AgentMuxClientNotificationSubject => {
+      if (scope === 'global:workflow') return { kind: 'unknown' }
+      if (scope === 'global:sessions') return sessionIdentity(sessionOwners.get(item.id))
+      if (scope === 'global:displaced-agents') return sessionIdentity(sessions.find(session => session.id === item.id))
+      if (scope === 'global:startup-agent-availability') return { kind: 'host', hostId: item.id }
+      if (scope === 'global:runtime-endpoints') return { kind: 'host', hostId: endpointWarnings![endpoints.findIndex(source => source.id === item.id)]!.hostId }
+      return { kind: 'application' }
+    }
+    const sources = ['startup-agent-availability', 'environment', 'runtime-ownership', 'session-names', 'runtime-endpoints',
+      'displaced-agents', 'sessions', 'workbench-save', 'native-chrome', 'desktop-navigation', 'workflow'] as const
+    const unavailableSources: NotificationProjection['unavailableSources'] = inboxes.flatMap((inbox, index) => inbox.available ? [] : [sources[index]!])
+    if (loading) unavailableSources.push('events')
     const eventPresentation = (event: NotificationEvent) => ({
       timestamp: notificationTimestamp(event.lastObservedAt ?? event.firstObservedAt, (event.occurrences ?? 1) > 1 ? 'Last received' : 'Received'),
       occurrences: event.occurrences
@@ -246,7 +264,9 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
         id: JSON.stringify([inbox.scope, item.id]), noticeId: item.id, category: group, subject: subject(item), kind: item.notice.kind,
         title: item.summary?.step ?? item.notice.notice.step,
         impact: item.summary?.mode ?? item.notice.notice.mode,
-        detail: [item.notice.notice.step, item.notice.notice.mode, item.notice.notice.restore].join('\n'),
+        get detail() { return [item.notice.notice.step, item.notice.notice.mode, item.notice.notice.restore].join('\n') },
+        observation: { source: sources[inboxes.indexOf(inbox)]!, subject: sourceSubjects(inbox.scope, item),
+          get version() { return JSON.stringify([serviceNoticeFingerprint(item), item.notice, item.summary]) }, ...(item.observedAt === undefined ? {} : { observedAt: item.observedAt }) },
         unread: unreadIds.has(item.id), onRead: () => inbox.acknowledge([item]), timestamp: notificationTimestamp(item.observedAt),
         action: item.action ? navigationAction({ ...item.action, label: actionLabel ?? item.action.label }) : undefined
       })
@@ -265,7 +285,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       const session = sessions.find(session => session.id === item.id)
       return { key: JSON.stringify(['displaced', session?.control.hostId, item.id]), label: session?.label ?? 'Retained Session' }
     })
-    append(sessionInbox, 'agents', item => sessionSubjects.get(item.id)!, 'View Session')
+    append(sessionInbox, 'agents', item => { const session = sessionOwners.get(item.id)!; return { key: JSON.stringify(['agent', session.control.hostId, session.id, session.control.run.runId]), label: session.label, context: config?.hosts.find(host => host.id === session.control.hostId)?.label ?? session.control.hostId } }, 'View Session')
     append(storageInbox, 'operations', item => ({ key: JSON.stringify(['storage', item.id]), label: item.id === 'workbench-save' ? 'Workbench storage' : 'Name change' }))
     append(chromeInbox, 'system', system('window', 'Application window'))
     append(navigationInbox, 'operations', system('navigation', 'Workspace navigation'))
@@ -291,7 +311,10 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
           : { key: record.id, label: 'Original operation', context: 'Object not recorded' }
       currentEntries.push({ ...eventPresentation(record), id: record.id, noticeId: record.id, category: subject?.kind === 'agent' ? 'agents' : 'operations', subject: target,
         kind: notice.kind, title: notice.notice.step, impact: notice.notice.mode,
-        detail: [source, eventTimeDetails(record), notice.notice.step, notice.notice.mode, notice.notice.restore].filter(Boolean).join('\n'),
+        get detail() { return [source, eventTimeDetails(record), notice.notice.step, notice.notice.mode, notice.notice.restore].filter(Boolean).join('\n') },
+        observation: { source: 'events', get version() { return JSON.stringify(record) }, observedAt: record.lastObservedAt ?? record.firstObservedAt,
+          subject: subject?.kind === 'agent' ? { kind: 'agent', hostId: subject.hostId, agentSessionId: subject.agentSessionId, runId: subject.run.runId }
+            : lifecycle?.step === 'launch' ? { kind: 'region', regionId: lifecycle.regionId, tabId: lifecycle.tabId } : { kind: 'unknown' } },
         unread: unreadEventIds.has(record.id), onRead: () => eventInbox.acknowledge([record.id]),
         action: session ? navigationAction({ label: 'View Session', run: () => { void selectSession(session.id) } }) : undefined
       })
@@ -316,14 +339,21 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
         kind: event.context?.kind ?? 'indeterminate',
         title: event.context?.summary ?? (event.context?.kind === 'agent-broken' ? 'Agent stopped unexpectedly' : event.message),
         detail: event.message, summary: event.context?.summary,
+        observation: { source: 'events', get version() { return JSON.stringify(event) }, observedAt: event.lastObservedAt ?? event.firstObservedAt, provenance,
+          subject: subject?.kind === 'agent' ? { kind: 'agent', hostId: subject.hostId, agentSessionId: subject.agentSessionId, runId: subject.run.runId }
+            : object ? { kind: object.kind, objectKey: compactNotificationIdentity(JSON.stringify([object.kind, object.id, object.hostId, object.workspaceId])), ...(object.hostId ? { hostId: object.hostId } : {}), ...(object.workspaceId ? { workspaceId: object.workspaceId } : {}),
+              ...(object.kind === 'host' ? { hostId: object.id } : object.kind === 'workspace' ? { workspaceId: object.id } : object.kind === 'tab' ? { tabId: object.id } : object.kind === 'region' ? { regionId: object.id } : {}) } : { kind: 'unknown' } },
         impact: event.context?.summary ? event.message : undefined,
         children: provenance ? <><p className="notification-item__provenance">{provenance}</p><p>{event.message}</p></> : undefined,
         unread: unreadEventIds.has(event.id), onRead: () => eventInbox.acknowledge([event.id]),
         action: session ? navigationAction({ label: 'View Session', run: () => { void selectSession(session.id) } }) : undefined
       })
     }
+    return { current: currentEntries, activity: historyEntries, unavailableSources }
   }
-  const entries = section === 'current' ? currentEntries : historyEntries
+  useLayoutEffect(() => registerNotificationReader(buildEntries))
+  const visible = open ? buildEntries() : null
+  const entries = (section === 'current' ? visible?.current : visible?.activity) ?? []
   const shown = entries.filter(entry => category === 'all' || entry.category === category)
   const groups = groupNotifications(shown)
   const shownUnread = shown.filter(entry => entry.unread)
