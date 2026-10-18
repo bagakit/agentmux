@@ -141,6 +141,19 @@ it('does no frame or geometry work for ordinary scrolling while watching selecti
   expect(released).toHaveBeenCalledOnce(); expect(projected).not.toHaveBeenCalled(); expect(viewportRect).not.toHaveBeenCalled(); expect(recordRect).not.toHaveBeenCalled()
 })
 
+it('does not pull a new selection to the tail before its scroll event arrives', async () => {
+  const initial = frame(page(item('selected'))), pinToBottom = vi.fn(() => { host.scrollTop = 900 })
+  const readingGeometry = { viewport: () => host, following: () => true, pinToBottom }
+  await draw(initial, { readingGeometry })
+  // Browser selection and scroll position change synchronously; scroll delivery is later.
+  host.scrollTop = 400
+  const text = host.querySelector('.log-turn__body p')!.firstChild!
+  await act(async () => { select(text) })
+  expect(getSelection()!.anchorNode).toBe(text)
+  expect(pinToBottom).not.toHaveBeenCalled()
+  expect(host.scrollTop).toBe(400)
+})
+
 it('compares committed canonical revisions without hashing 300 unrelated original bodies', async () => {
   const initial = frame(page(...Array.from({ length: 300 }, (_, i) => item('record-' + i))))
   await draw(initial)

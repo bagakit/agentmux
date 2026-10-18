@@ -4,7 +4,7 @@ import { Window } from 'happy-dom'
 import { NativeProcessObservation } from '../src/components/NativeProcessObservation'
 import { recordedToolEdit } from '../../core/test/fixtures/recorded-tool-edits'
 import * as diffs from '../src/lib/conversation-tool-diff'
-import { act } from 'react'
+import { act, type ComponentProps } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import * as markdown from '../src/lib/agent-markdown'
@@ -50,10 +50,10 @@ let active = true, located: string | undefined
 const reading = () => projectConversationReading({ agentSessionId: page.agentSessionId, executionHostId: 'local', historyPage: page })
 const observer = () => Visibility.all.find(value => value.options?.rootMargin === '600px 0px')!
 const platform = () => ({ copyText: copy, overlayContainer: () => document.body, bindComposerFocus: () => () => {}, renderMessageAvatar: () => null, renderProjectIcon: () => null, renderProjectLabel: () => null, renderIcon: () => null })
-async function render() {
+async function render(readingGeometry?: ComponentProps<typeof ConversationView>['readingGeometry']) {
   const projection = reading()
   await act(async () => root.render(<ClientUiProvider platform={platform()}><ConversationView sessionId={page.agentSessionId} executionHostId="local" page={page}
-    records={projection.records} originalRecords={projection.originalRecords} coverage={projection.timeline.coverage} readHistoryResource={resources} active={active} locatedMessageKey={located} /></ClientUiProvider>))
+    records={projection.records} originalRecords={projection.originalRecords} coverage={projection.timeline.coverage} readHistoryResource={resources} active={active} locatedMessageKey={located} readingGeometry={readingGeometry} /></ClientUiProvider>))
 }
 async function frame() {
   await act(async () => { const pending = [...frames.values()]; frames.clear(); for (const callback of pending) callback(1) })
@@ -147,6 +147,21 @@ it('compensates an above-reader first mount and a later image resize without mov
   await act(async () => Sizes.all[0]!.emit())
   expect(original.getBoundingClientRect().top).toBe(offset)
   expect(host.scrollTop).toBe(6440)
+})
+
+it('continues following the tail after an actual first body mount and later resize', async () => {
+  const pinToBottom = vi.fn(() => { host.scrollTop = host.scrollHeight - host.clientHeight })
+  host.scrollTop = host.scrollHeight - host.clientHeight
+  await render({ viewport: () => host, following: () => true, pinToBottom })
+  heights.set(179, 300)
+  await near([179]); await frame()
+  expect(body(179).dataset.conversationBodyPresented).toBe('true')
+  expect(pinToBottom).toHaveBeenCalledOnce()
+  expect(host.scrollTop).toBe(host.scrollHeight - host.clientHeight)
+  heights.set(179, 500)
+  await act(async () => Sizes.all[0]!.emit())
+  expect(pinToBottom).toHaveBeenCalledTimes(2)
+  expect(host.scrollTop).toBe(host.scrollHeight - host.clientHeight)
 })
 
 it('does no pending work while hidden and ignores disconnected observer callbacks', async () => {
