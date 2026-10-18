@@ -64,12 +64,15 @@ for (const item of await readdir(join(root, 'packages'), { withFileTypes: true }
   }
 }
 aliases.sort((a, b) => Number(a.wildcard) - Number(b.wildcard) || b.name.length - a.name.length)
-const mutation = {
-  file: 'apps/desktop/src/main/browser-popup-windows.ts',
-  from: 'await this.load(popup, url)',
-  to: '/* Private proof drops the actual original-page navigation dispatch. */'
+const mutations = {
+  'omit-navigation': { file: 'apps/desktop/src/main/browser-popup-windows.ts',
+    from: 'await this.load(popup, url)', to: '/* Private proof drops the actual original-page navigation dispatch. */' },
+  'omit-native-continuation': { file: 'apps/desktop/src/main/browser-popup-windows.ts',
+    from: 'request.navigate(page)', to: '/* Private proof drops the original Chromium continuation. */' },
+  'undefined-webcontents': { file: 'apps/desktop/src/main/browser-popup-windows.ts',
+    from: '...(guest ? { webContents: guest } : {})', to: 'webContents: guest' }
 }
-const sourcePlugin = mutated => ({ name: 'actual-popup-inputs', enforce: 'pre',
+const sourcePlugin = mutationName => ({ name: 'actual-popup-inputs', enforce: 'pre',
   async resolveId(id, importer) {
     if (!importer || id.startsWith('.') || isAbsolute(id) || id.startsWith('\0') || isBuiltin(id) || id === 'electron' || id.startsWith('@agentmux/')) return
     const found = await this.resolve(id, importer, { skipSelf: true })
@@ -84,11 +87,12 @@ const sourcePlugin = mutated => ({ name: 'actual-popup-inputs', enforce: 'pre',
   async transform(code, id) {
     if (!id.startsWith(root + '/') || id.includes('/node_modules/')) return
     await bind(id)
-    if (mutated && id.split('?')[0] === join(root, mutation.file)) {
-      assert.equal(code.split(mutation.from).length, 2, 'One actual original navigation mutation anchor')
+    const mutation = mutations[mutationName]
+    if (mutation && id.split('?')[0] === join(root, mutation.file)) {
+      assert.equal(code.split(mutation.from).length, 2, 'One actual original mutation anchor: ' + mutationName)
       const changed = code.replace(mutation.from, mutation.to)
       await transform(changed, { loader: 'ts' })
-      receipt.mutation = { ...mutation, before: sha(code), after: sha(changed) }
+      ;(receipt.mutations ??= {})[mutationName] = { ...mutation, before: sha(code), after: sha(changed) }
       return { code: changed, map: null }
     }
   }
@@ -151,13 +155,13 @@ try {
     } }] } },
     build: { minify: false, outDir: join(compiled, 'renderer'), rollupOptions: { input: join(root, 'apps/desktop/src/renderer/browser-popup.html') } } })
   receipt.bundles.renderer = { directory: join(compiled, 'renderer'), files: await collect(join(compiled, 'renderer')) }
-  const variants = args.includes('--baseline-only') || captureHandoff ? [false] : [false, true]
-  for (const changed of variants) {
-    const directory = join(compiled, changed ? 'omit-navigation' : 'source')
-    await build({ configFile: false, root, logLevel: 'error', ssr: { noExternal: true }, resolve: { alias: aliases }, plugins: [sourcePlugin(changed)],
+  const variants = args.includes('--baseline-only') || captureHandoff ? ['source'] : ['source', ...Object.keys(mutations)]
+  for (const variant of variants) {
+    const directory = join(compiled, variant)
+    await build({ configFile: false, root, logLevel: 'error', ssr: { noExternal: true }, resolve: { alias: aliases }, plugins: [sourcePlugin(variant)],
       build: { ssr: true, outDir: directory, minify: false, rollupOptions: { input: join(root, fixture), external: id => id === 'electron' || isBuiltin(id),
         output: { entryFileNames: 'main.mjs', format: 'es', banner: "import{createRequire as __proofRequire}from'node:module';const require=__proofRequire(import.meta.url);" } } } })
-    const file = join(directory, 'main.mjs'); receipt.bundles[changed ? 'omit-navigation' : 'source'] = { file, sha256: sha(await readFile(file)) }
+    const file = join(directory, 'main.mjs'); receipt.bundles[variant] = { file, sha256: sha(await readFile(file)) }
   }
   assert.ok(Object.keys(receipt.sources).length > owners.length, 'Actual Main/Renderer/preload sources are nonempty')
   await currentSources(); await writeFile(join(out, 'prepared.json'), JSON.stringify(receipt, null, 2) + '\n')
@@ -166,10 +170,10 @@ try {
   assert.equal((await stat(executable)).isFile(), true, '--capture-app names the private native executable, not its App directory')
   receipt.engine = { executable, sha256: sha(await readFile(executable)), version: require('electron/package.json').version,
     captureOverride: Boolean(take('--capture-app')), versionSource: 'Installed stock Electron package; private App clone provenance belongs to its producer' }
-  for (const label of captureHandoff ? ['capture-handoff'] : args.includes('--baseline-only') ? ['baseline'] : ['baseline', 'omit-navigation', 'restored']) {
+  for (const label of captureHandoff ? ['capture-handoff'] : args.includes('--baseline-only') ? ['baseline'] : ['baseline', 'omit-native-continuation', 'undefined-webcontents', 'omit-navigation', 'restored']) {
     const directory = join(out, label); await mkdir(directory)
     const privateRoot = await mkdtemp(join(process.platform === 'darwin' ? '/private/tmp' : tmpdir(), 'amx-popup-'))
-    const main = receipt.bundles[label === 'omit-navigation' ? label : 'source'].file
+    const main = receipt.bundles[label in mutations ? label : 'source'].file
     const bootstrap = join(privateRoot, 'bootstrap.cjs')
     await writeFile(bootstrap, `const{app}=require('electron'),fs=require('node:fs'),path=require('node:path');const root=${JSON.stringify(privateRoot)};for(const key of ['home','appData','userData','sessionData']){const value=path.join(root,key);fs.mkdirSync(value,{recursive:true});app.setPath(key,value)}app.commandLine.appendSwitch('no-proxy-server');app.whenReady().then(()=>import(${JSON.stringify(pathToFileURL(main).href)})).catch(e=>{console.error(e);app.exit(1)});`)
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(AGENTMUX_|CTXMUX_)/u.test(key) && key !== 'ELECTRON_RUN_AS_NODE'))
@@ -205,15 +209,29 @@ try {
     assert.equal(row.process.timedOut, false, 'A native timeout is not owning AssertionRED')
     assert.equal(row.process.exitSignal, null); assert.equal(row.process.exitConfirmed, true); assert.deepEqual(row.remaining, [])
     assert.equal(actual.cleanupComplete, true); assert.deepEqual(actual.cleanup, [])
-    if (label === 'omit-navigation') {
+    if (label === 'omit-navigation' || label === 'omit-native-continuation' || label === 'undefined-webcontents') {
       assert.equal(row.process.exitCode, 1); assert.equal(actual.failure?.name, 'AssertionError')
-      assert.ok(actual.failure.message.includes('Actual navigation dispatch changes the original child URL'), 'Actual navigation owning AssertionRED')
-      row.owningAssertion = 'AssertionRED'
+      if (label === 'undefined-webcontents') {
+        assert.ok(actual.failure.message.includes('Actual native popup construction succeeds'), 'Actual original constructor exception reaches its owning assertion')
+        assert.ok(actual.constructionFailures?.some(row => row.name === 'TypeError' && row.message === 'options.webContents must be a WebContents'), 'Original undefined WebContents regression reproduces its exact native TypeError')
+        assert.ok(actual.uncaughtExceptions?.some(row => row.name === 'TypeError' && row.message === 'options.webContents must be a WebContents'), 'Original native exception is observed before the private fixture suppresses its modal dialog')
+        row.owningAssertion = 'OriginalExceptionRED'
+      } else {
+        assert.ok(actual.failure.message.includes(label === 'omit-navigation' ? 'Actual navigation dispatch changes the original child URL' : 'Actual native continuation navigates the original guestless child URL'), 'Actual navigation owning AssertionRED')
+        row.owningAssertion = 'AssertionRED'
+      }
     } else {
       assert.equal(row.process.exitCode, 0, JSON.stringify(actual.failure)); assert.equal(actual.passed, true)
-      assert.equal(actual.cases.length, captureHandoff ? 1 : 10, 'All nonempty original-protocol/navigation cases ran')
+      assert.equal(actual.cases.length, captureHandoff ? 1 : 15, 'All nonempty original-protocol/navigation cases ran')
       assert.ok(actual.calls.length > 0); assert.ok(actual.originalCallbacks?.length > 0, 'The real BVM callback options are nonempty');
-      assert.equal(actual.originalCallbacks.every(row => row.exactGuest && row.sameSession), true); assert.equal(actual.runtimeConnections, 0); assert.equal(actual.clipboardWrites, 0)
+      const supplied = actual.originalCallbacks.filter(row => row.guestId !== null)
+      assert.ok(supplied.length > 0); assert.equal(supplied.every(row => row.exactGuest && row.sameSession), true)
+      if (!captureHandoff) {
+        assert.equal(actual.nativeLinkObservations.length, 5, 'All native guestless input variants are nonempty')
+        assert.equal(actual.nativeLinkObservations.every(row => row.callback.guestId === null && row.events.length === 1 && row.actualURL === row.target), true)
+        assert.deepEqual(actual.uncaughtExceptions ?? [], [])
+      }
+      assert.equal(actual.runtimeConnections, 0); assert.equal(actual.clipboardWrites, 0)
       if (label === 'baseline') {
         if (!actual.visualUnavailable) assert.equal(actual.images.length, 6, 'Normal/narrow/short in light and dark actual OS window images are nonempty')
         else receipt.visualUnavailable = actual.visualUnavailable

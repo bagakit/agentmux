@@ -82,6 +82,13 @@ const fakeElectron = vi.hoisted(() => {
       return this
     }
 
+    prependListener(event: string, listener: Listener) {
+      this.listeners.set(event, [listener, ...(this.listeners.get(event) ?? [])])
+      return this
+    }
+
+    getLastWebPreferences() { return {} }
+
     once(event: string, listener: Listener) {
       const wrapped: Listener = (...args) => {
         this.removeListener(event, wrapped)
@@ -505,7 +512,16 @@ describe('BrowserViewManager', () => {
         webContents: new fakeElectron.FakeWebContentsView().webContents }
     }
     const first = popup(), second = popup()
-    const opened = original.webContents.listeners.get('did-create-window')![0]!
+    // Custom native creation does not emit did-create-window. Exercise the real
+    // handler's creation callback, replacing only the native window constructor.
+    vi.spyOn(Reflect.get(manager, 'popupWindows'), 'create').mockImplementation((options: any, creation: any) => {
+      creation.onCreated(options.fixtureWindow)
+      return options.webContents
+    })
+    const opened = (window: ReturnType<typeof popup>) => {
+      const outcome = original.webContents.windowOpenHandler!({ url: 'https://popup.example/' }) as any
+      return outcome.createWindow({ webContents: window.webContents, fixtureWindow: window })
+    }
     opened(first); opened(second)
     if (failure === 'parent-close') vi.spyOn(original.webContents, 'close').mockImplementationOnce(() => { throw new Error('Parent close failed') })
     const closedReceiptFault = vi.fn()
@@ -524,7 +540,7 @@ describe('BrowserViewManager', () => {
     if (failure === 'storage') storage.clearStorageData.mockRejectedValueOnce(new Error('Storage clear failed'))
     await expect(manager.close('private-failure')).rejects.toThrow('cleanup failures')
     if (failure === 'closed-receipt') expect(closedReceiptFault).toHaveBeenCalledExactlyOnceWith(BROWSER_EVENT_CHANNEL, { type: 'closed', id: 'private-failure' })
-    expect(original.webContents.isDestroyed()).toBe(true)
+    expect(original.webContents.isDestroyed()).toBe(failure !== 'parent-close')
     expect(first.destroy).toHaveBeenCalledTimes(1)
     expect(second.destroy).toHaveBeenCalledTimes(1)
     expect(storage.clearStorageData).toHaveBeenCalledTimes(1)
@@ -1805,7 +1821,7 @@ describe('BrowserViewManager', () => {
     // 承重的反向一半。`649df3a2` 删掉的那段正是把**每一个** window-open 都 `this.navigate(...)` 再
     // deny；回到那个形状就是把它修的 bug 重新引入。'allow' 就是「没有 handler」时的默认动作。
     for (const url of ['https://example.com/popup', 'http://localhost:4173/x', 'about:blank']) {
-      expect(handler!({ url }), `${url} 的弹窗被截走了`).toEqual({ action: 'allow' })
+      expect(handler!({ url }), `${url} 的弹窗被截走了`).toMatchObject({ action: 'allow' })
     }
     // 改道的另一个形状是偷偷把当前 view 导过去。它不会体现在返回值上，所以单独判一次。
     expect(contents.getURL(), '普通弹窗把当前页改道了').toBe('https://example.com/')
