@@ -2,9 +2,10 @@
 
 <!-- amux:content -->
 Create a saved local JavaScript ESM tool with a complete input such as:
-  {"name":"Daily summary","icon":"terminal","workspacePath":"<WORKSPACE_DIRECTORY>",
-   "script":"console.log('Ready')"}
-Creation defaults: enabled=true, statusBar="icon" (or "label"), args=[], actions=[].
+  {"name":"Summary","icon":"terminal","workspacePath":"<WORKSPACE_DIRECTORY>",
+   "enabled":true,"statusBar":"icon","script":"console.log('Ready')","args":[]}
+Inline definitions require enabled, statusBar ("icon" or "label") and args; actions is optional.
+The optional mode is "script" or "tui"; omitted means a finite JavaScript ESM script.
 Update uses {"changes":{...},"expected":{...}}; expected covers changed fields.
 Delete input uses {"expected":{...}} with complete saved editable fields.
 Revisions are owner-issued, never editable. Performance is read-only.
@@ -21,7 +22,8 @@ definition revision, content SHA256 and exact source entries. Package and execut
 are separate paths. A missing package retains its configuration and original execution facts.
 Stop still targets the retained admission; unavailable source cannot admit a new execution.
 
-Installing, saving, enabling an entry, inspect/script/ls and watch do not execute user scripts.
+Installing, saving or enabling finite-result tools does not execute their scripts.
+Inspect/script/ls and passive watch do not execute either mode.
 Run captures the definition/result baseline once in the service and admits one execution.
 Full input can pin invocationId, expectedRevision and expectedLatestExecutionId. Stop input
 pins executionId (null means no active execution). After an unknown receipt inspect the
@@ -30,6 +32,23 @@ To explicitly continue an admission without a Run ID, use run/action --input wit
 original invocationId and complete captured parameters. This reuses its execution and
 native creation key: a retained Run is returned rather than started twice. If that Run
 is no longer retained, the original script may run now. Ordinary inspect/watch never do this.
+
+For an interactive terminal tool, set mode:"tui" and put a shell command in script.
+The Host executes it with shell -lc and a fixed script name; args become $1, $2, and so on,
+without being concatenated into shell source. TUI accepts no nonempty actions or nonnull display.
+Local packages retain their JavaScript contract and do not accept TUI mode.
+Creating an enabled TUI, enabling a disabled TUI, and Host startup load the tool once.
+A running exact Run is reconnected; a confirmed ended Run starts a new execution on the next
+load cycle. An exit never causes a restart loop within the current cycle. Source edits only
+affect the next execution. Opening or closing its terminal view neither starts nor stops it.
+Disabling prevents future loads and admissions while preserving an already running TUI;
+stop remains available for that exact execution. Host shutdown releases observation only.
+An unknown creation or Run observation retains the original identity and never auto-replays.
+Inspect/watch expose the same captured execution and Host/Run binding as the UI; ls reports
+mode on inline descriptors. TUI text stays empty and there is no machine result document:
+use the existing terminal capabilities with its exact Run for bytes, input and observation.
+After an authoritative exit, the terminal and latest execution remain readable until a later
+admission safely releases the ended Run. A replacement Run is a new execution, not recovery.
 
 
 Display is a separately declared repeatable evaluation program, not a sandbox or enforced
