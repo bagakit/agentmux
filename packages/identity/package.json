@@ -35,7 +35,7 @@
     "build": "node scripts/build.mjs",
     "prepack": "pnpm build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "pnpm build && node --test test/runtime.mjs"
   },
   "dependencies": {
     "@noble/hashes": "2.4.0",
