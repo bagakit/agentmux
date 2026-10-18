@@ -82,11 +82,9 @@ const RefreshIcon = semanticIconComponent('action.refresh')
 const resultLabel = (result: ActionResult) => result.status === 'released' ? 'Released' : result.status === 'retained' ? 'Kept'
   : result.status === 'ready' ? 'Restored' : 'Unconfirmed'
 
-export function BrowserResources({ active, directory, automatic, onAutomaticChange }: {
+export function BrowserResources({ active, directory }: {
   active: boolean
   directory: ReturnType<typeof useBrowserDirectory>
-  automatic: boolean
-  onAutomaticChange(enabled: boolean): void
 }) {
   const [query, setQuery] = useState(''), [filter, setFilter] = useState('all')
   const [selected, setSelected] = useState<ReadonlyMap<string, DirectoryRow>>(new Map())
@@ -159,15 +157,16 @@ export function BrowserResources({ active, directory, automatic, onAutomaticChan
   }
 
   return <section className="settings-group browser-resources" data-settings-field="browser-resources">
-    <header><span>Browser resources</span><small>{embedded.filter(row => row.current).length} observed · {embedded.filter(row => !row.current).length} previous</small></header>
+    <header><span>Browser resources</span><small>Page actions apply immediately</small></header>
     <div className="browser-resources__overview">
-      <div data-browser-process-total><strong>{readings.measured.length ? `${readings.counts.size > readings.measured.length ? '≥ ' : ''}${memory(readings.totalKib)}` : '—'}</strong>
-        <span>{readings.measured.length ? `${readings.measured.length} unique processes` : 'Process reading unconfirmed'}</span></div>
-      <small>Observed process working set, shared pages counted once.
+      <div><span>Pages observed</span><strong>{embedded.filter(row => row.current).length}</strong><small>{embedded.filter(row => !row.current).length} previous entries retained</small></div>
+      <div data-browser-process-total><span>Memory in use</span><strong>{readings.measured.length ? `${readings.counts.size > readings.measured.length ? '≥ ' : ''}${memory(readings.totalKib)}` : '—'}</strong>
+        <small>{readings.measured.length ? `${readings.measured.length} unique processes` : 'Reading not confirmed'}</small></div>
+    </div>
+    <details className="browser-resources__measurement"><summary>About these readings</summary><p>Observed process working set, shared pages counted once.
         {readings.counts.size > readings.measured.length ? ` ${readings.counts.size - readings.measured.length} unmatched process identities.` : ''}
         {app && app.state !== 'available' ? ` ${app.state} reading.` : ''}
-        {app?.lastSuccessAt != null ? ` Read at ${new Date(app.lastSuccessAt).toLocaleTimeString()}.` : ''}</small>
-    </div>
+        {app?.lastSuccessAt != null ? ` Read at ${new Date(app.lastSuccessAt).toLocaleTimeString()}.` : ''}</p></details>
     <div className="browser-resources__controls">
       <TextInput aria-label="Find Browser resources" value={query} onChange={event => setQuery(event.target.value)} placeholder="Find a page…" />
       <select aria-label="Browser resource state" value={filter} onChange={event => setFilter(event.target.value)}><option value="all">All states</option><option value="live">Running</option><option value="released">Released</option><option value="cold">Not loaded</option><option value="unknown">Unknown</option></select>
@@ -179,10 +178,13 @@ export function BrowserResources({ active, directory, automatic, onAutomaticChan
       <button className="browser-resources__text-button" disabled={busy.size > 0} onClick={() => setSelected(new Map())}>Clear selection</button>
     </div> : null}
     {directory.notice || observation.error ? <div className="browser-resources__notices">
-      {directory.notice ? <p className="browser-resources__notice" role="status">{directory.notice}</p> : null}
-      {observation.error ? <p className="browser-resources__notice" role="status">Process observation unavailable: {observation.error}</p> : null}
+      <div role="status"><strong>{directory.notice ? 'Page directory needs attention' : 'Memory reading unavailable'}</strong><p>Refresh to check again. Previous entries are kept.</p></div>
+      <details><summary>Observation details</summary>
+        {directory.notice ? <p className="browser-resources__notice">{directory.notice}</p> : null}
+        {observation.error ? <p className="browser-resources__notice">Process observation unavailable: {observation.error}</p> : null}
+      </details>
     </div> : null}
-    {!embedded.length ? <p className="settings-group-note">{directory.pending ? 'Reading Browser owners…' : 'No embedded Browser pages observed. Refresh to inspect the current directory.'}</p> : !shown.length ? <p className="settings-group-note">No pages match this filter.</p> : <>
+    {!embedded.length ? <p className="settings-group-note">{directory.pending ? 'Checking open pages…' : 'No Browser pages observed. Refresh to check for pages in AgentMux.'}</p> : !shown.length ? <p className="settings-group-note">No pages match this filter.</p> : <>
       <div className="browser-resources__columns" aria-hidden="false">
         <input type="checkbox" aria-label="Select eligible pages in this filter" checked={allSelected} disabled={!active || !selectable.length || busy.size > 0}
           ref={input => { if (input) input.indeterminate = !allSelected && selectable.some(row => selected.has(row.target.id)) }}
@@ -229,8 +231,6 @@ export function BrowserResources({ active, directory, automatic, onAutomaticChan
     </>}
     {results.size ? <details className="browser-resources__batch-results"><summary>Recent actions · {[...results.values()].filter(result => result.status === 'released' || result.status === 'ready').length} applied · {[...results.values()].filter(result => result.status === 'retained').length} kept · {[...results.values()].filter(result => result.status === 'unknown').length} unconfirmed</summary>
       <ul>{[...results.values()].map(result => <li key={result.target.id}><strong>{pageName(result.target)} · {resultLabel(result)}</strong><span>{result.detail}</span></li>)}</ul></details> : null}
-    <div className="browser-resources__policy"><label><input type="checkbox" checked={automatic} onChange={event => onAutomaticChange(event.target.checked)} />
-      <span><strong>Automatically release safe idle pages</strong><small>Saved with Browser settings. Manual actions above apply separately.</small></span></label></div>
     <details className="browser-resources__help"><summary>What does releasing a page keep?</summary><p>Browser, Region, Profile and viewport stay. Using the page reloads it; forms and arbitrary page state are not restored. Shared processes may stay in use. Closing pages and clearing website data are separate actions; external shared tabs stay managed by their browser.</p>
       {app?.data?.omittedProcesses ? <p>{app.data.omittedProcesses} App processes omitted from this reading.</p> : null}</details>
   </section>
