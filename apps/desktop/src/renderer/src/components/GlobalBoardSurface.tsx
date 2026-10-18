@@ -1,3 +1,4 @@
+import { isCurrentGroundingAccepted } from '@agentmux/demand/goals'
 import { currentDemandIndex, currentDemandKey } from '../lib/goal-current-work'
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -104,7 +105,7 @@ export function GlobalBoardSurface() {
     const normalized = query.trim().toLocaleLowerCase()
     const matchesQuery = !normalized || `${demand.title} ${demand.description} ${demand.projectName ?? ''}`.toLocaleLowerCase().includes(normalized)
     const matchesRouting = routingFilter === 'all' || (routingFilter === 'unassigned' ? !demand.projectId || !demand.assigneeSessionIds?.length : Boolean(demand.projectId && demand.assigneeSessionIds?.length))
-    const matchesHistory = showHistory || statusFilter !== 'all' || (demand.status !== 'done' && demand.status !== 'cancelled')
+    const matchesHistory = showHistory || statusFilter !== 'all' || (demand.status !== 'cancelled' && (demand.status !== 'done' || !isCurrentGroundingAccepted(demand.alignment, demand.grounding)))
     return matchesQuery && matchesHistory && (statusFilter === 'all' || demand.status === statusFilter) && (projectFilter === 'all' || demand.projectId === projectFilter) && matchesRouting && (assigneeFilter === 'all' || demand.assigneeSessionIds?.includes(assigneeFilter))
   }), [assigneeFilter, projectFilter, query, routingFilter, statusFilter, showHistory, projectedDemands])
   const columns = useMemo(() => demandColumns(filteredDemands), [filteredDemands])

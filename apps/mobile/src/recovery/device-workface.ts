@@ -42,7 +42,7 @@ export type GoalCreationInput = { goalId: string; operationId: string; title: st
 export type GoalIntent = GoalIntentScope & { goalId: string; operationId: string; phase: 'sending' | 'unknown' | 'saved' } & (
   | { kind: 'create'; input: GoalCreationInput }
   | { kind: 'confirm'; expectedRevision: number }
-  | { kind: 'accept'; expectedAlignmentRevision: number; expectedSubmissionId: string; acceptGaps: boolean }
+  | { kind: 'accept'; expectedAlignmentRevision: number; expectedSubmissionId: string; acceptGaps: boolean; finish?: boolean }
 )
 export function sameGoalIntentScope(a: GoalIntentScope, b: GoalIntentScope): boolean {
   return a.runtimeId === b.runtimeId && a.deviceHostId === b.deviceHostId
@@ -54,7 +54,7 @@ function sameGoalIntent(a: GoalIntent, b: GoalIntent): boolean {
     return keys.length === Object.keys(b.input).length && keys.every(key => a.input[key] === b.input[key])
   }
   if (a.kind === 'confirm' && b.kind === 'confirm') return a.expectedRevision === b.expectedRevision
-  return a.kind === 'accept' && b.kind === 'accept' && a.expectedAlignmentRevision === b.expectedAlignmentRevision && a.expectedSubmissionId === b.expectedSubmissionId && a.acceptGaps === b.acceptGaps
+  return a.kind === 'accept' && b.kind === 'accept' && a.expectedAlignmentRevision === b.expectedAlignmentRevision && a.expectedSubmissionId === b.expectedSubmissionId && a.acceptGaps === b.acceptGaps && a.finish === b.finish
 }
 function sameGoalOperation(a: MobileGoalOperation, b: MobileGoalOperation): boolean {
   const keys = Object.keys(a) as Array<keyof MobileGoalOperation>
@@ -252,14 +252,14 @@ export function parseDeviceWorkface(value: unknown): DeviceWorkface {
 
 function parseGoalIntent(value: unknown): GoalIntent {
   const kind = (value as GoalIntent)?.kind
-  const v = record(value, ['runtimeId', 'deviceHostId', 'goalId', 'operationId', 'phase', 'kind', ...(kind === 'create' ? ['input'] : kind === 'confirm' ? ['expectedRevision'] : ['expectedAlignmentRevision', 'expectedSubmissionId', 'acceptGaps'])])
+  const v = record(value, ['runtimeId', 'deviceHostId', 'goalId', 'operationId', 'phase', 'kind', ...(kind === 'create' ? ['input'] : kind === 'confirm' ? ['expectedRevision'] : ['expectedAlignmentRevision', 'expectedSubmissionId', 'acceptGaps', ...(Object.hasOwn(value ?? {}, 'finish') ? ['finish'] : [])])])
   if (!id(v.runtimeId) || !(v.deviceHostId === null || id(v.deviceHostId)) || !id(v.goalId) || !id(v.operationId) || !['sending', 'unknown', 'saved'].includes(String(v.phase))) throw invalid()
   if (kind === 'create') {
     const input = record(v.input, ['goalId', 'operationId', 'title', 'description', 'status', 'risk', 'confirmation', ...(Object.hasOwn(v.input ?? {}, 'projectId') ? ['projectId'] : [])])
     if (input.goalId !== v.goalId || input.operationId !== v.operationId || !body(input.title) || !input.title || !body(input.description) || input.status !== 'backlog' || input.risk !== 'low' || input.confirmation !== 'user' || input.projectId !== undefined && (typeof input.projectId !== 'string' || !input.projectId)) throw invalid()
   } else if (kind === 'confirm') {
     if (!Number.isSafeInteger(v.expectedRevision) || Number(v.expectedRevision) < 1 || v.phase === 'saved') throw invalid()
-  } else if (kind !== 'accept' || !Number.isSafeInteger(v.expectedAlignmentRevision) || Number(v.expectedAlignmentRevision) < 1 || !id(v.expectedSubmissionId) || typeof v.acceptGaps !== 'boolean' || v.phase === 'saved') throw invalid()
+  } else if (kind !== 'accept' || !Number.isSafeInteger(v.expectedAlignmentRevision) || Number(v.expectedAlignmentRevision) < 1 || !id(v.expectedSubmissionId) || typeof v.acceptGaps !== 'boolean' || v.finish !== undefined && typeof v.finish !== 'boolean' || v.phase === 'saved') throw invalid()
   return structuredClone(value) as GoalIntent
 }
 

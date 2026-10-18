@@ -231,7 +231,15 @@
 .goals-result-note { margin: var(--sp-2) 0; color: var(--text-2); font-size: var(--fs-body); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 .goals-result-note--missing { color: var(--text-3); }
 .goals-evidence { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5); }
-.goals-evidence > span { display: inline-flex; align-items: center; max-width: 100%; min-width: 0; gap: var(--sp-3); }
+.goals-evidence > span { display: flex; flex-wrap: wrap; align-items: baseline; width: 100%; min-width: 0; gap: var(--sp-2) var(--sp-3); }
+.goals-evidence > span > code { overflow-wrap: anywhere; min-width: 0; font-size: var(--fs-meta); color: var(--text-2); }
+.goals-evidence > span > small { width: 100%; color: var(--text-3); font-size: var(--fs-meta); }
+.goals-evidence details { width: 100%; color: var(--text-3); font-size: var(--fs-meta); }
+.goals-evidence details summary { cursor: pointer; overflow-wrap: anywhere; }
+.goals-evidence details code, .goals-evidence details small { display: block; overflow-wrap: anywhere; margin-top: var(--sp-2); }
+.goals-criteria-reading { margin: var(--sp-4) 0; }
+.goals-criteria-reading > summary { cursor: pointer; font-size: var(--fs-body); color: var(--text-2); }
+.goals-criteria-reading[open] > summary { margin-bottom: var(--sp-4); }
 .goals-evidence button { display: inline-flex; align-items: center; gap: var(--sp-2); border: 0; padding: var(--sp-2) 0; background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-meta); cursor: pointer; overflow-wrap: anywhere; text-align: left; }
 .goals-evidence__open { min-width: 0; }
 .goals-evidence__open svg { flex-shrink: 0; }

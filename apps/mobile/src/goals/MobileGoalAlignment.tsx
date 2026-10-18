@@ -2,7 +2,7 @@ import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxRpcGoal, AgentMuxRpcParams } from '@agentmux/core'
-import { alignmentConfirmationIssue, groundingAcceptanceIssue } from '@agentmux/demand/goals'
+import { alignmentConfirmationIssue, groundingAcceptanceIssue, isCurrentGroundingAccepted } from '@agentmux/demand/goals'
 import type { GoalDiscussionReceipt } from './MobileGoalCreate'
 import { assertGoalIntentScope, goalIntentScope, useGoalIntents } from './goal-intents'
 import type { GoalIntent } from '../recovery/device-workface'
@@ -25,7 +25,7 @@ export function MobileGoalAlignment({ client, goal, updated, openDiscussion, beg
   const alignment = goal.alignment, grounding = goal.grounding
   const confirmIssue = alignmentConfirmationIssue(alignment)
   const acceptIssue = groundingAcceptanceIssue(alignment, grounding), gapIssue = groundingAcceptanceIssue(alignment, grounding, true)
-  const accepted = !!grounding?.acceptedAt && gapIssue === null
+  const accepted = isCurrentGroundingAccepted(alignment, grounding)
   const humanPending = pending.some(method => method === 'goal.confirm' || method === 'goal.accept') || !!retained && owner.goalIntentRunning(retained.operationId)
   const start = (method: string) => { flights.current.add(method); setPending([...flights.current]) }
   const finish = (method: string) => { flights.current.delete(method); setPending([...flights.current]) }
@@ -59,7 +59,7 @@ export function MobileGoalAlignment({ client, goal, updated, openDiscussion, beg
       if (method !== 'goal.discuss') {
         const target = goalIntentScope(client, owner)
         retainedIntent = method === 'goal.confirm' ? { ...target, goalId: goal.id, operationId: input.operationId, phase: 'sending', kind: 'confirm', expectedRevision: (params as AgentMuxRpcParams<'goal.confirm'>).expectedRevision }
-          : { ...target, goalId: goal.id, operationId: input.operationId, phase: 'sending', kind: 'accept', expectedAlignmentRevision: (params as AgentMuxRpcParams<'goal.accept'>).expectedAlignmentRevision, expectedSubmissionId: (params as AgentMuxRpcParams<'goal.accept'>).expectedSubmissionId, acceptGaps: (params as AgentMuxRpcParams<'goal.accept'>).acceptGaps }
+          : { ...target, goalId: goal.id, operationId: input.operationId, phase: 'sending', kind: 'accept', expectedAlignmentRevision: (params as AgentMuxRpcParams<'goal.accept'>).expectedAlignmentRevision, expectedSubmissionId: (params as AgentMuxRpcParams<'goal.accept'>).expectedSubmissionId, acceptGaps: (params as AgentMuxRpcParams<'goal.accept'>).acceptGaps, ...((params as AgentMuxRpcParams<'goal.accept'>).finish === true ? { finish: true } : {}) }
         await owner.retainGoalIntent(retainedIntent, recordId)
       }
       if (method === 'goal.discuss') {
@@ -79,7 +79,7 @@ export function MobileGoalAlignment({ client, goal, updated, openDiscussion, beg
         if (result.goal.id !== goal.id || result.receipt.goalId !== goal.id || result.receipt.submissionId !== grounding?.submissionId || result.receipt.alignmentRevision !== alignment?.revision || result.goal.grounding?.acceptedAt !== result.receipt.acceptedAt) throw new Error('原结果接受回执未匹配当前报告。')
         owner.releaseGoalIntent(retainedIntent!, recordId); await owner.settleGoalIntent(retainedIntent!, 'confirmed', recordId, retainedIntent!)
         if (currentGoal.current.alignment?.revision === result.receipt.alignmentRevision && currentGoal.current.grounding?.submissionId === result.receipt.submissionId) {
-          updated(result.goal, ['grounding']); setIssue(result.receipt.acceptedWithGaps ? '已接受原结果，报告差距仍保留。' : '已接受当前原结果。')
+          updated(result.goal, ['grounding', 'status']); setIssue(result.goal.status === 'done' ? '已接受并结束目标，原报告、差距与 Agent 保留。' : result.receipt.acceptedWithGaps ? '已接受原结果，报告差距仍保留；目标仍开放。' : '已接受当前原结果；目标仍开放。')
         } else setIssue('原接受回执已收到；当前已有另一提案或报告，保留当前内容，不能用旧回执认可新结果。')
       }
     } catch (error) {
@@ -98,6 +98,8 @@ export function MobileGoalAlignment({ client, goal, updated, openDiscussion, beg
     {needsRead && <button type="button" disabled={pending.includes('read')} onClick={() => void readCurrent()}>读取当前提案与报告</button>}
     {!alignment?.confirmedAt && alignment && !confirmIssue && acknowledgementAvailable && <button type="button" onClick={() => void invoke('goal.confirm', { goalId: goal.id, expectedRevision: alignment.revision })}>确认当前目标</button>}
     {confirmIssue && alignment && <p>目标待明确：{confirmIssue}</p>}
+    {alignment && grounding && gapIssue === null && goal.status !== 'done' && acknowledgementAvailable && <button type="button" onClick={() => void invoke('goal.accept', { goalId: goal.id, expectedAlignmentRevision: alignment.revision, expectedSubmissionId: grounding.submissionId, acceptGaps: grounding.checks.some(check => check.outcome === 'gap'), finish: true })}>{accepted ? '结束目标' : grounding.checks.some(check => check.outcome === 'gap') ? '接受差距并结束目标' : '接受并结束目标'}</button>}
+    {accepted && <p>{goal.status === 'done' ? '当前结果已接受，目标已结束。' : '当前结果已接受，目标仍开放。'}</p>}
     {!accepted && alignment && grounding && !acceptIssue && acknowledgementAvailable && <button type="button" onClick={() => void invoke('goal.accept', { goalId: goal.id, expectedAlignmentRevision: alignment.revision, expectedSubmissionId: grounding.submissionId, acceptGaps: false })}>接受当前结果</button>}
     {!accepted && alignment && grounding && acceptIssue && gapIssue === null && acknowledgementAvailable && <button type="button" onClick={() => void invoke('goal.accept', { goalId: goal.id, expectedAlignmentRevision: alignment.revision, expectedSubmissionId: grounding.submissionId, acceptGaps: true })}>接受结果并保留差距</button>}
     {acceptIssue && grounding && !accepted && <p>结果待核对：{acceptIssue}</p>}

@@ -1318,7 +1318,7 @@ export async function registerIpc(args: {
     return await demands.update(id, patch, { context: admitted.context, operationId: admitted.operationId, ...(participation ? { participation } : {}), ...(expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt }) })
   })
   handle('demands:confirmAlignment', async (id: string, expectedRevision: number) => await demands.confirmAlignment(id, expectedRevision))
-  handle('demands:acceptGrounding', async (id: string, expectedAlignmentRevision: number, expectedSubmissionId: string, acceptGaps?: boolean) => await demands.acceptGrounding(id, expectedAlignmentRevision, expectedSubmissionId, acceptGaps))
+  handle('demands:acceptGrounding', async (id: string, expectedAlignmentRevision: number, expectedSubmissionId: string, acceptGaps?: boolean, finish?: boolean) => await demands.acceptGrounding(id, expectedAlignmentRevision, expectedSubmissionId, acceptGaps, finish))
   handle('demands:delete', async (id: string) => await demands.delete(id))
   handle('demands:linkSession', async (id: string, sessionId: string) => await demands.linkSession(id, sessionId))
   handle('demands:unlinkSession', async (id: string, sessionId: string) => await demands.unlinkSession(id, sessionId))

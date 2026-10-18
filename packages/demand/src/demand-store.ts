@@ -984,18 +984,23 @@ export class DemandStore {
   }
 
   /** Acceptance binds the exact result shown to the user; retaining gaps is a distinct choice. */
-  async acceptGrounding(id: string, expectedAlignmentRevision: number, expectedSubmissionId: string, acceptGaps = false): Promise<DemandReceipt> {
+  async acceptGrounding(id: string, expectedAlignmentRevision: number, expectedSubmissionId: string, acceptGaps = false, finish = false): Promise<DemandReceipt> {
     return this.mutate('accept-grounding', snapshot => {
       const demand = findDemand(snapshot, id, this.storePath)
       if (demand.alignment?.revision !== expectedAlignmentRevision || demand.grounding?.submissionId !== expectedSubmissionId) {
         throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The goal or results changed. Read the current results before accepting them.')
       }
       if (typeof acceptGaps !== 'boolean') throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Accepting with gaps requires an explicit boolean choice.')
+      if (typeof finish !== 'boolean') throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Finishing a goal requires an explicit boolean choice.')
       const issue = groundingAcceptanceIssue(demand.alignment, demand.grounding, acceptGaps)
       if (issue) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, issue)
       if (demand.grounding.acceptedAt === null) {
         demand.grounding.acceptedAt = Date.now()
         demand.activities.push({ id: mintObjectId(), kind: 'results-accepted', message: acceptGaps ? 'User accepted these results while retaining the reported gaps.' : 'User accepted these results.', createdAt: demand.grounding.acceptedAt, actorId: null })
+      }
+      if (finish && demand.status !== 'done') {
+        demand.status = 'done'
+        demand.activities.push({ id: mintObjectId(), kind: 'status', message: 'User finished the goal after accepting its current results.', createdAt: Date.now(), actorId: null })
       }
       demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
       return demand

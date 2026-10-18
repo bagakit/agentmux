@@ -591,7 +591,8 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     if (!Number.isSafeInteger(revision) || (revision as number) < 1) throw new AgentMuxError('The exact positive Goal alignment revision is required.', 'INVALID_CONTROL_REQUEST')
     if (source.operation === 'demand.confirm') return { ...base, operation: source.operation, expectedRevision: revision as number }
     if (typeof source.acceptGaps !== 'boolean') throw new AgentMuxError('Result gaps require an explicit acceptance choice.', 'INVALID_CONTROL_REQUEST')
-    return { ...base, operation: source.operation, expectedAlignmentRevision: revision as number, expectedSubmissionId: id(source.expectedSubmissionId, 'Goal submission id is invalid.', 'INVALID_CONTROL_REQUEST'), acceptGaps: source.acceptGaps }
+    if (source.finish !== undefined && typeof source.finish !== 'boolean') throw new AgentMuxError('Finishing a Goal requires an explicit boolean choice.', 'INVALID_CONTROL_REQUEST')
+    return { ...base, operation: source.operation, expectedAlignmentRevision: revision as number, expectedSubmissionId: id(source.expectedSubmissionId, 'Goal submission id is invalid.', 'INVALID_CONTROL_REQUEST'), acceptGaps: source.acceptGaps, ...(source.finish === undefined ? {} : { finish: source.finish }) }
   }
   if (source.operation === 'demand.assign') {
     if (typeof source.start !== 'boolean') throw new AgentMuxError('Demand assignment start flag is invalid.', 'INVALID_CONTROL_REQUEST')
