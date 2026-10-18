@@ -1,3 +1,4 @@
+import { guideSharedRuntime } from './generated/agentmux-guides.js'
 import { guideText } from './guide-text.js'
 import { AGENTMUX_GOAL_SKILL_ENTRY } from './goal-role-guidance.js'
 import { AMUX_PROTOCOL_DEFINITIONS } from './amux-protocol-definition.js'
@@ -36,7 +37,7 @@ export type AgentMuxOptionalContext = { text: string; omittedText: string }
 
 // Bootstrap teaches discovery, not every future operation. Domain owners retain the
 // detailed contracts; reading a guide grants no permission and is not an input gate.
-const AGENTMUX_RUNTIME_GUIDE = guideText("shared/runtime", { 'self-context-verb': AGENTMUX_SELF_CONTEXT_VERB, 'goal-skill-entry': AGENTMUX_GOAL_SKILL_ENTRY })
+const AGENTMUX_RUNTIME_GUIDE = /* @__PURE__ */ guideText(guideSharedRuntime, { 'self-context-verb': AGENTMUX_SELF_CONTEXT_VERB, 'goal-skill-entry': AGENTMUX_GOAL_SKILL_ENTRY })
 
 // 引出紧随其后的用户原文——这句是 AgentMux 的引导语，不是用户的话，因此留在信封内。
 const USER_REQUEST_FOLLOWS = 'The user request follows.'

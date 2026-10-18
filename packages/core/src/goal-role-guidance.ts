@@ -1,3 +1,4 @@
+import { guideSharedGoalCommon, guideSharedGoalContract, guideSharedGoalExecutor, guideSharedGoalManager } from './generated/agentmux-guides.js'
 import { guideText } from './guide-text.js'
 /** Canonical Goal responsibility contract shared by module, handbook and input producers. */
 export const AGENTMUX_GOAL_SKILL_ENTRY = 'amux goal --skill'
@@ -20,14 +21,14 @@ export interface GoalRoleGuidanceContext {
   source?: string | GoalRoleGuidanceSource
 }
 
-const shared = guideText("shared/goal/common", { 'goal-skill-entry': AGENTMUX_GOAL_SKILL_ENTRY })
+const shared = /* @__PURE__ */ guideText(guideSharedGoalCommon, { 'goal-skill-entry': AGENTMUX_GOAL_SKILL_ENTRY })
 
-const executor = guideText("shared/goal/executor")
+const executor = /* @__PURE__ */ guideText(guideSharedGoalExecutor)
 
-const manager = guideText("shared/goal/manager")
+const manager = /* @__PURE__ */ guideText(guideSharedGoalManager)
 
 export function goalRoleGuidanceContract(): string {
-  return guideText('shared/goal/contract', { 'goal-skill-entry': AGENTMUX_GOAL_SKILL_ENTRY })
+  return guideText(guideSharedGoalContract, { 'goal-skill-entry': AGENTMUX_GOAL_SKILL_ENTRY })
 }
 
 /** Application-authored context; callers retain the original user text separately. */
