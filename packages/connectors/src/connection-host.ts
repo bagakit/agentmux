@@ -286,7 +286,11 @@ export class ConnectionHost implements ConnectionPort {
     const current = this.safe(() => this.read(input.connectionId))
     if (!current) throw new AgentMuxError('The exact connection is unknown.', 'UNKNOWN_CONNECTION')
     if (current.revision === record.revision) this.observations.set(input.connectionId, { revision: record.revision, value: observation })
-    return current.revision === record.revision ? this.safe(() => this.read(input.connectionId))! : current
+    if (current.revision !== record.revision) return current
+    const result = this.safe(() => this.read(input.connectionId))!
+    // This explicit check reports its own credential result. Current receiver
+    // transport/intake remain independent, and ordinary reads keep their native facts.
+    return parseConnectionRecord({ ...result, observation: { ...result.observation, authentication: observation.authentication } })
   }
   roomAdapter(connectionId: string): import('./room-provisioning-adapter.js').RoomProvisioningAdapter | null {
     const config = this.readConfiguration(connectionId)?.config
