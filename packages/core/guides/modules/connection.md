@@ -56,6 +56,11 @@ This separate local selection returns bounded ordered journal steps and next; co
 network:null means HTTP details were not recorded. Enrollment claimed/settled describe its journal,
 not live dispatch or request success. Do not combine trace selection with private inspection/configuration views.
 
+connection ls/inspect/test may include capabilities for the original registered adapter’s
+room discovery, creation and joining links. Missing capabilities mean unknown support.
+These implementation facts do not confirm credentials, native permissions or room visibility.
+An unsupported new operation does not revoke saved bindings, grants or healthy local input.
+
 Begin with connection ls/inspect; configuration, a successful test, an enabled
 binding, ingress and actual outgoing delivery are distinct facts. Keep the exact connection,
 binding and source identities rather than matching human labels or assuming transport trust.
