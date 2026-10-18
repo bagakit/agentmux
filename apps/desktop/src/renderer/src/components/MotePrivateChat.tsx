@@ -41,6 +41,7 @@ function MotePrivateChatPanel({ scope, target, active, reference, onOpenPath }: 
   const [executorOpen, setExecutorOpen] = useState(false), executorInvoker = useRef<HTMLButtonElement | null>(null)
   const [audienceRevision, setAudienceRevision] = useState(0)
   const executorId = useAppStore(state => moteDefaultExecutor(state, scope.workspace.id, scope.topic.id))
+  const executorLabel = useAppStore(state => executorId ? state.config?.executors[executorId]?.label ?? executorId : 'Choose an Executor')
   const edited = useRef(retainedDraft ? 1 : 0), lifetime = useRef(0), writing = useRef(false)
   const intents = useAppStore(state => state.moteChatIntents)
   const pending = target ? Object.values(intents).some(intent => intent.method === 'space.mote.chat.configure' && sameMotePreferencesTarget(intent.input.target, target)) : false
@@ -91,7 +92,7 @@ function MotePrivateChatPanel({ scope, target, active, reference, onOpenPath }: 
   return <section className="mote-private-chat" aria-label="Feishu private chat" data-mote-private-chat={scope.topic.id}>
     <header><div><h3><ChatIcon size={15} />Feishu chat</h3><p>Talk to this Mote directly in Feishu.</p></div><span role="status" data-mote-chat-saved={ready ? configuration?.values.enabled ? 'on' : 'off' : 'unknown'}>{ready ? configuration?.values.enabled ? 'On' : 'Off' : 'Not confirmed'}</span></header>
     <label className="mote-private-chat__toggle"><span>Allow private messages<small>Save to apply. A conversation starts with an incoming message.</small></span><input type="checkbox" role="switch" aria-label="Enable Feishu private chat" checked={draft.enabled} disabled={saving} onChange={event => update({ ...draft, enabled: event.target.checked })} /></label>
-    <div className="mote-private-chat__executor"><span>Executor for new chat<strong>{executorId ?? 'Choose an Executor'}</strong></span><button ref={executorInvoker} type="button" className="small-button" onClick={() => setExecutorOpen(true)}>{executorId ? 'Change' : 'Choose Executor'}</button></div>
+    <div className="mote-private-chat__executor"><span>Executor for new chat<strong title={executorId}>{executorLabel}</strong></span><button ref={executorInvoker} type="button" className="small-button" onClick={() => setExecutorOpen(true)}>{executorId ? 'Change' : 'Choose Executor'}</button></div>
     {!executorId ? <p className="mote-details__hint">Choose an Executor before enabling Feishu chat. This uses the same new-chat preference as the rest of this Mote.</p> : null}
     <div className="mote-private-chat__fields">
       <label><span>Bot identity</span><SelectionField label="Private chat bot" value={refChoice(draft.connection)} disabled={saving} searchable options={[
