@@ -5,15 +5,12 @@ import type { SessionSnapshot } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
 import { hasConnectorRoomIntent, observeConnectorTarget } from '../lib/connector-room-intent'
-import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { AgentConnectorDialog, type AgentConnectorTarget } from './AgentConnectorDialog'
 import { ServiceNoticeDisclosure } from './ServiceNoticeDisclosure'
 import { SettingsNavigation } from './SettingsNavigation'
 import { useAgentConnectorMenu } from '../lib/use-agent-connector-menu'
 import { ConnectorHeaderLinks } from './ConnectorHeaderLinks'
-
-const ConnectionIcon = semanticIconComponent('object.connection')
-const LoadingIcon = semanticIconComponent('status.loading')
+import { useConnectorRoomName } from '../lib/use-connector-room-name'
 
 /** Reads only this original Session's audiences. No input, history, lifecycle or global watcher. */
 export function ConnectorSharing({ session, tabId, regionId, visible, presentation = 'composer' }: { session: Extract<SessionSnapshot, { kind: 'agent' }>; tabId?: string | undefined; regionId?: string | undefined; visible: boolean; presentation?: 'composer' | 'header' }) {
@@ -23,18 +20,18 @@ export function ConnectorSharing({ session, tabId, regionId, visible, presentati
   const identity = JSON.stringify(target)
   const hasRetainedSetup = useAppStore(state => presentation === 'header' && hasConnectorRoomIntent(state.connectorRoomIntents, target))
   const syncEnabled = useAppStore(state => presentation === 'header' && state.connectorServiceObservation?.source === api.connections.call ? state.connectorServiceObservation.state?.enabled ?? null : null)
-  const [read, setRead] = useState<{ identity: string; bindings: RoomBinding[]; issue: string; loading: boolean } | null>(null)
+  const [read, setRead] = useState<{ identity: string; bindings: RoomBinding[]; issue: string; loading: boolean; version: number } | null>(null)
   const refreshRead = useRef<(() => void) | null>(null)
   const [dialog, setDialog] = useState<AgentConnectorTarget | null>(null), returned = useRef<HTMLElement | null>(null)
   useEffect(() => {
     if (!visible) return
     let live = true, generation = 0
     const refresh = () => { const request = ++generation
-      setRead(previous => previous?.identity === identity ? { ...previous, loading: true } : { identity, bindings: [], issue: '', loading: true })
+      setRead(previous => previous?.identity === identity ? { ...previous, loading: true } : { identity, bindings: [], issue: '', loading: true, version: 0 })
       void api.connections.call('connection.binding.ls', target).then(value => {
-        if (live && request === generation) setRead({ identity, bindings: value.bindings, issue: '', loading: false })
+        if (live && request === generation) setRead({ identity, bindings: value.bindings, issue: '', loading: false, version: request })
       }).catch(error => { if (live && request === generation) setRead(previous => ({ identity,
-        bindings: previous?.identity === identity ? previous.bindings : [], issue: presentError(error), loading: false })) }) }
+        bindings: previous?.identity === identity ? previous.bindings : [], issue: presentError(error), loading: false, version: previous?.identity === identity ? previous.version : 0 })) }) }
     refreshRead.current = refresh
     refresh(); const close = observeConnectorTarget(target, refresh)
     return () => { live = false; generation++; if (refreshRead.current === refresh) refreshRead.current = null; close() }
@@ -57,16 +54,11 @@ export function ConnectorSharing({ session, tabId, regionId, visible, presentati
   }
   const details = dialog ? <AgentConnectorDialog original={dialog} mode="details" {...(presentation === 'header' ? { initialSection: 'joining' as const } : {})} onClose={() => { setDialog(null); if (presentation === 'header') refreshRead.current?.() }} returnFocus={() => returned.current} /> : null
   if (presentation === 'header') {
-    const label = hasRetainedSetup ? 'Continue group setup' : 'Connect group'
     const checking = visible && (!current || current.loading)
-    const status = current?.issue ? 'Group status unknown. Open the original setup to check saved progress.' : checking ? 'Checking this Agent’s saved groups.' : 'Open group setup for this Agent.'
-    return <>{current?.bindings.length
-      ? <ConnectorHeaderLinks bindings={current.bindings} unconfirmed={!!current.issue} syncEnabled={syncEnabled} onOpen={openBinding} />
-      : <button type="button" className="agent-region-header__connector" data-sharing-state={current?.issue ? 'unknown' : 'unbound'}
-          aria-label={`${label}; ${status}`} title={`${label}. ${status}`} aria-busy={checking || undefined}
-          onPointerDown={event => event.stopPropagation()} onClick={event => connector.openConnect(event.currentTarget)}>
-          {checking ? <LoadingIcon size={14} animation="spin" /> : <ConnectionIcon size={14} />}<span>{label}{current?.issue ? ' · Status unknown' : ''}</span>
-        </button>}
+    return <><ConnectorHeaderLinks bindings={current?.bindings ?? []} unconfirmed={!!current?.issue} checking={checking}
+      retainedSetup={!current?.bindings.length && hasRetainedSetup} syncEnabled={syncEnabled} nameVersion={current?.version ?? 0} onOpen={openBinding} onConnect={trigger => connector.openConnect(trigger)}
+      onMenuOpen={open => { if (open) refreshRead.current?.(); connector.onOpen(open) }}
+      {...(settings ? { onSettings: () => settings.openLark({ sessionId: session.id, hostId: target.executionHostId, agentSessionId: target.agentSessionId }) } : {})} />
       {connector.issue ? <span className="connector-sharing__error" role="status">{connector.issue}</span> : null}
       {connector.dialog}{details}</>
   }
@@ -95,25 +87,7 @@ export function ConnectorSharing({ session, tabId, regionId, visible, presentati
 
 /** A visible audience has one bounded name read, never another Binding or directory store. */
 function ConnectorSharingAudience({ binding, unconfirmed, onSelect }: { binding: RoomBinding; unconfirmed: boolean; onSelect(trigger: HTMLElement): void }) {
-  const identity = JSON.stringify([binding.connectionId, binding.application, binding.externalConversationId])
-  const [name, setName] = useState<{ identity: string; value: string } | null>(null)
-  const [issue, setIssue] = useState('')
-  useEffect(() => {
-    let live = true
-    void (async () => {
-      const { connection } = await api.connections.call('connection.inspect', { connectionId: binding.connectionId })
-      if (!live) return
-      if (!connection || connection.config.application.domain !== binding.application.domain || connection.config.application.appId !== binding.application.appId) { setIssue('Group name unavailable'); return }
-      const result = await api.connections.call('connection.room.get', { connectionId: binding.connectionId, expectedConnectionRevision: connection.revision, externalConversationId: binding.externalConversationId })
-      if (live) {
-        const observed = result.observation.state === 'ready' && result.room?.externalConversationId === binding.externalConversationId
-        if (observed && result.room?.name) setName({ identity, value: result.room.name })
-        setIssue(result.observation.state !== 'ready' ? 'Group name unconfirmed' : result.room?.name && observed ? '' : 'Group name unavailable')
-      }
-    })().catch(() => { if (live) setIssue('Group name unconfirmed') })
-    return () => { live = false }
-  }, [identity, binding.revision])
-  const label = name?.identity === identity ? name.value : binding.externalConversationId
+  const { label, issue } = useConnectorRoomName(binding)
   const status = unconfirmed ? 'Last known group' : binding.state === 'active' ? 'Shared group' : 'Sharing paused'
   return <button type="button" className="connector-sharing__group" title={binding.externalConversationId + ' · ' + binding.application.domain + ' · ' + binding.application.appId}
     aria-label={`${status} ${label}; ${binding.externalConversationId}; ${binding.application.domain}; ${binding.application.appId}`} onClick={event => onSelect(event.currentTarget)}>
