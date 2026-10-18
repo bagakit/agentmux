@@ -163,7 +163,7 @@ export const ConversationView = memo(function ConversationView({
         {...(describeSpeaker ? { describeSpeaker } : {})} conversationSessionId={sessionId}
         located={locatedMessageKey === conversationMessageSourceKey(sessionId, record.source)}
         {...reading}
-        messageDetails={<>{record.original.kind === 'captured' ? [record.original.item.toolInput, record.original.item.toolOutput].map((text, index) => text === undefined ? null : <details key={index}><summary>{index ? 'Original tool output' : 'Original tool input'}</summary><ConversationToolPayload text={text} identity={record.original.item} sourceIdentity={record.original.item} copyLabel={index ? 'Copy tool output' : 'Copy tool input'} /></details>) : null}</>} />
+        messageDetails={<CapturedToolDetails record={record} />} />
   }
   function renderOriginals(record: ConversationRecord): ReactNode {
     const contributors = record.records?.filter(source => source.original.item !== record.original.item).flatMap(source => {
@@ -262,6 +262,15 @@ export const ConversationView = memo(function ConversationView({
 
 function recordTitle(item: AgentSessionHistoryItem): string {
   return item.title ?? 'Recorded activity'
+}
+
+function CapturedToolDetails({ record }: { record: ConversationRecord }) {
+  const sourceKey = conversationMessageSourceKey(record.agentSessionId, record.source)
+  const sourceIdentity = useMemo(() => ({}), [record.sourceHostId, sourceKey])
+  if (record.original.kind !== 'captured') return null
+  return <>{[record.original.item.toolInput, record.original.item.toolOutput].map((text, index) => text === undefined || text.length === 0 ? null : <details key={index}>
+    <summary>{index ? 'Original tool output' : 'Original tool input'}</summary><ConversationToolPayload text={text} identity={sourceIdentity} sourceIdentity={sourceIdentity} copyLabel={index ? 'Copy tool output' : 'Copy tool input'} />
+  </details>)}</>
 }
 
 function neverCaptured(): never { throw new Error('Captured source renderer received a native record.') }
