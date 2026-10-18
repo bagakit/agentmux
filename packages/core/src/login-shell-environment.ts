@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto'
 
 /** Total budget for the whole hydration, spent across every probe arm — not a per-arm allowance. */
 const PROFILE_SHELL_TIMEOUT_MS = 5_000
+/** Leave room for the killed child to exit before the caller's hard deadline settles. */
+const PROFILE_SHELL_REAP_MARGIN_MS = 100
 
 export type LoginShellEnvironmentHydration =
   | { ok: true; shell: string; mode: 'interactive-login' | 'login' }
@@ -54,7 +56,7 @@ function runProfileShell(
       env,
       encoding: 'utf8',
       maxBuffer: 1024 * 1024,
-      timeout: timeoutMs,
+      timeout: Math.max(1, timeoutMs - PROFILE_SHELL_REAP_MARGIN_MS),
       killSignal: 'SIGKILL'
     }, (error, stdout) => {
       if (error) reject(error)
@@ -127,33 +129,44 @@ export async function hydrateProcessEnvironmentFromLoginShell(options: {
   const command = `printf '%s\\0' '${marker}'; /usr/bin/env -0; printf '%s\\0' '${marker}'`
   const runner = options.runner ?? runProfileShell
   const budgetMs = options.timeoutMs ?? PROFILE_SHELL_TIMEOUT_MS
-  // One budget for the whole hydration, divided evenly among the arms still to come. Per-arm
-  // budgets would let a shell that hangs twice double the wait the window sits through, and the
-  // window is what this budget protects. But handing the whole budget to the first arm is just as
-  // wrong: the arm that hangs is `-ilc`, and `-lc` — which does not source `.zshrc` at all — is
-  // precisely the one that would still have worked. Splitting keeps the fallback reachable, and an
-  // arm that returns early donates its unspent share to the next.
+  // An interactive shell may need more than half the startup budget to load its exports. Start the
+  // login fallback halfway through, but keep the interactive arm alive until the shared deadline.
+  // The fallback cannot replace complete exports merely because it returned first.
   const deadlineAtMs = Date.now() + budgetMs
-  const arms = [['-ilc', command], ['-lc', command]] as const
-  let probeFailed = false
-  for (const [index, args] of arms.entries()) {
-    let stdout: string
+  type Probe = { kind: 'valid'; values: Record<string, string> } | { kind: 'invalid' | 'failed' }
+  const probe = async (mode: '-ilc' | '-lc', remainingMs: number): Promise<Probe> => {
     try {
-      const shareMs = Math.floor((deadlineAtMs - Date.now()) / (arms.length - index))
-      stdout = await withDeadline(() => runner(shell, args, env, shareMs), shareMs)
+      const stdout = await withDeadline(() => runner(shell, [mode, command], env, remainingMs), remainingMs)
+      const values = parseLoginShellEnvironment(stdout, marker)
+      return values ? { kind: 'valid', values } : { kind: 'invalid' }
     } catch {
-      probeFailed = true
-      continue
+      return { kind: 'failed' }
     }
-    const parsed = parseLoginShellEnvironment(stdout, marker)
-    if (!parsed) continue
-    if (args[0] === '-lc') parsed.PATH = mergePath(parsed.PATH ?? '', env.PATH)
-    // These belong to the probe shell, not to the application that launched it.
-    for (const key of ['_', 'SHLVL', 'PWD', 'OLDPWD']) delete parsed[key]
-    Object.assign(env, parsed)
-    return { ok: true, shell, mode: args[0] === '-ilc' ? 'interactive-login' : 'login' }
   }
-  return { ok: false, reason: probeFailed ? 'probe-failed' : 'invalid-environment' }
+  const remaining = (): number => Math.max(0, deadlineAtMs - Date.now())
+  const interactive = probe('-ilc', remaining())
+  let fallback: Promise<Probe> | undefined
+  const startFallback = (): void => {
+    const budget = remaining()
+    if (!fallback && budget > 0) fallback = probe('-lc', budget)
+  }
+  const fallbackTimer = setTimeout(startFallback, Math.floor(budgetMs / 2))
+  const interactiveResult = await interactive
+  clearTimeout(fallbackTimer)
+  if (interactiveResult.kind === 'valid') {
+    for (const key of ['_', 'SHLVL', 'PWD', 'OLDPWD']) delete interactiveResult.values[key]
+    Object.assign(env, interactiveResult.values)
+    return { ok: true, shell, mode: 'interactive-login' }
+  }
+  startFallback()
+  const loginResult = fallback ? await fallback : undefined
+  if (loginResult?.kind === 'valid') {
+    loginResult.values.PATH = mergePath(loginResult.values.PATH ?? '', env.PATH)
+    for (const key of ['_', 'SHLVL', 'PWD', 'OLDPWD']) delete loginResult.values[key]
+    Object.assign(env, loginResult.values)
+    return { ok: true, shell, mode: 'login' }
+  }
+  return { ok: false, reason: interactiveResult.kind === 'failed' || loginResult?.kind === 'failed' ? 'probe-failed' : 'invalid-environment' }
 }
 
 export function loginShellEnvironmentWarning(result: LoginShellEnvironmentHydration): string | undefined {
