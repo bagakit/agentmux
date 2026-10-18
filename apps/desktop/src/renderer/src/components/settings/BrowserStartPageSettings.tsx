@@ -1,5 +1,5 @@
 import { TextInput } from '@agentmux/client-ui/input'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { BROWSER_START_PAGE_TITLE_LIMIT, BROWSER_START_PAGE_SUBTITLE_LIMIT, resolveBrowserStartPage, validBrowserStartPageText, validBrowserStartPageImage, type BrowserStartPageConfig } from '../../../../shared/browser-start-page'
 import { useSettingDraftRecord } from './use-setting-draft'
@@ -16,6 +16,19 @@ export function BrowserStartPageSettings({ config, onSave, onOpen, children }: {
 }) {
   const draft = useSettingDraftRecord(resolveBrowserStartPage(config))
   const save = useSettingsSave()
+  const [imagePreview, setImagePreview] = useState<{ icon: string; backgroundImage: string; revision: number } | null>(null)
+  const [imageNotice, setImageNotice] = useState('')
+  const imagesCurrent = imagePreview?.icon === draft.value.icon && imagePreview?.backgroundImage === draft.value.backgroundImage
+  const hasImages = Boolean(draft.value.icon || draft.value.backgroundImage)
+  function previewImages(): void {
+    const { icon, backgroundImage } = draft.value
+    if (validBrowserStartPageImage(icon) && validBrowserStartPageImage(backgroundImage)) {
+      setImagePreview(current => ({ icon, backgroundImage, revision: (current?.revision ?? 0) + 1 }))
+      setImageNotice('')
+    } else {
+      setImageNotice('Use an HTTP(S) image URL or an inline image before previewing. Your draft is kept.')
+    }
+  }
   async function submit(): Promise<void> {
     const submitted = draft.beginSave()
     submitted.finish(await save.run(async () => {
@@ -33,21 +46,24 @@ export function BrowserStartPageSettings({ config, onSave, onOpen, children }: {
       <div className="settings-survey__workspace"><div className="settings-survey__fields">
       <label className="browser-start-settings__field" data-settings-field="start-title"><span>Title</span><TextInput aria-label="Start page title" value={draft.value.title} maxLength={BROWSER_START_PAGE_TITLE_LIMIT} onChange={event => draft.setField('title', event.target.value)} /></label>
       <label className="browser-start-settings__field" data-settings-field="start-subtitle"><span>Subtitle</span><TextInput aria-label="Start page subtitle" value={draft.value.subtitle} maxLength={BROWSER_START_PAGE_SUBTITLE_LIMIT} onChange={event => draft.setField('subtitle', event.target.value)} /></label>
-      <label className="browser-start-settings__field" data-settings-field="start-icon"><span>Icon image</span><TextInput aria-label="Start page icon" placeholder="Image URL · leave blank to hide" value={draft.value.icon} onChange={event => draft.setField('icon', event.target.value)} /></label>
-      <label className="browser-start-settings__field" data-settings-field="start-background"><span>Background image</span><TextInput aria-label="Start page background image" placeholder="Image URL · leave blank to hide" value={draft.value.backgroundImage} onChange={event => draft.setField('backgroundImage', event.target.value)} /></label>
-      <p className="settings-group-note">Use an image URL or inline image. Empty image fields turn them off.</p>
+      <label className="browser-start-settings__field" data-settings-field="start-icon"><span>Icon image</span><TextInput aria-label="Start page icon" placeholder="Image URL · leave blank to hide" value={draft.value.icon} onChange={event => { draft.setField('icon', event.target.value); setImageNotice('') }} /></label>
+      <label className="browser-start-settings__field" data-settings-field="start-background"><span>Background image</span><TextInput aria-label="Start page background image" placeholder="Image URL · leave blank to hide" value={draft.value.backgroundImage} onChange={event => { draft.setField('backgroundImage', event.target.value); setImageNotice('') }} /></label>
+      <div className="settings-survey__image-actions"><p className="settings-group-note">Image URL or inline image. Leave blank to hide.</p>{hasImages && <button type="button" className="small-button" onClick={previewImages}>Preview images</button>}</div>
       <label className="browser-automation-toggle" data-settings-field="start-history"><input type="checkbox" aria-label="Show recent input cards" checked={draft.value.showHistory} onChange={event => draft.setField('showHistory', event.target.checked)} />
         <span><strong>Show recent addresses and searches</strong><small>Cards use this Browser's saved input history. Turning them off keeps your history.</small></span></label>
       </div>
       <aside className="settings-survey__preview" aria-label="Start page draft preview">
-        <header><strong>Draft preview</strong><small>Text &amp; history layout</small></header>
+        <header><strong>Draft preview</strong><small>{draft.dirty ? 'Unsaved changes' : 'Saved settings'}</small></header>
         <div className="settings-survey__canvas">
+          {imagesCurrent && imagePreview.backgroundImage && <img key={`background-${imagePreview.revision}`} className="settings-survey__background" src={imagePreview.backgroundImage} alt="" referrerPolicy="no-referrer" onError={event => { event.currentTarget.hidden = true; setImageNotice('An image could not load. Check its address or try Preview images again.') }} />}
+          {imagesCurrent && imagePreview.icon && <img key={`icon-${imagePreview.revision}`} className="settings-survey__icon" src={imagePreview.icon} alt="Start page icon preview" referrerPolicy="no-referrer" onError={event => { event.currentTarget.hidden = true; setImageNotice('An image could not load. Check its address or try Preview images again.') }} />}
           {draft.value.title && <h3>{draft.value.title}</h3>}
           {draft.value.subtitle && <p>{draft.value.subtitle}</p>}
           <div className="settings-survey__search" aria-hidden="true"><SearchIcon size={15} /><span>Search or enter an address</span></div>
           {draft.value.showHistory && <div className="settings-survey__history"><span>Example recent input</span><div><span>Documentation</span><span>Research notes</span></div></div>}
         </div>
-        <p className="settings-survey__caption">Save to apply your changes. Images load in Survey; this preview does not read your browsing history.</p>
+        <p className="settings-survey__caption">{hasImages && !imagesCurrent ? 'Choose Preview images to load the image addresses. ' : ''}Example history only. Save to apply your changes.</p>
+        {imageNotice && <p role="status" className="settings-survey__image-notice">{imageNotice}</p>}
       </aside></div>
     </section>
     {children}
