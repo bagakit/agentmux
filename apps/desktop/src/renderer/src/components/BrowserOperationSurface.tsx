@@ -195,7 +195,7 @@ export function BrowserOperationStatus({
 
 /** Persistent service notice is separate from the optional operation disclosure. */
 export function BrowserOperationWarning({ activity }: { activity: BrowserActivityState }) {
-  const message = activity.operation?.warning ?? activity.warning
+  const message = activity.warning ?? activity.operation?.warning
   return message ? <BrowserOperationNotice message={message} className="browser-operation-warning" /> : null
 }
 
@@ -249,7 +249,7 @@ function BrowserOperationNotice({ message, className }: { message: string; class
       {hasDetails ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet"
         aria-label="Show browser warning details" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(!open)}>Details</button> : null}
     </span>
-    {open ? <pre id={panelId}>{message}</pre> : null}
+    {open && hasDetails ? <pre id={panelId}>{message}</pre> : null}
   </div>
 }
 

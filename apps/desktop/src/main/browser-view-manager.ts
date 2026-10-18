@@ -3380,10 +3380,17 @@ export class BrowserViewManager {
       isCurrent: () => this.owns(entry, view) && entry.controlFeedback === controlFeedback && this.agentOwnsInput(entry) &&
         (entry.visible || this.hasVisiblePresentation(entry)),
       preferences: this.feedbackPreferences,
-      warn: () => {
+      report: available => {
         if (!this.owns(entry, view) || entry.controlFeedback !== controlFeedback) return
         const warning = 'Browser control feedback could not be displayed. The page and Agent remain usable; show the page again or save its appearance to retry.'
-        entry.activity = { ...entry.activity, warning: entry.activity.warning ?? warning }
+        // Reconcile only this display notice. It never grants or revokes input authority.
+        const current = entry.activity.warning?.split('\n') ?? []
+        const lines = available ? current.filter(line => line !== warning)
+          : current.includes(warning) ? current : [...current, warning]
+        const next = lines.length ? lines.join('\n') : undefined
+        if (next === entry.activity.warning) return
+        const { warning: _warning, ...activity } = entry.activity
+        entry.activity = { ...activity, ...(next === undefined ? {} : { warning: next }) }
         this.emit(entry)
       } })
     // A Profile candidate does not own this Browser until the prepared view commits.
