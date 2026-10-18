@@ -1,3 +1,4 @@
+import { sessionInputOperationResult } from '../shared/session-input-result.js'
 import type { IpcMainInvokeEvent } from 'electron'
 import { connectAgentMuxRpc, type AgentMuxRpcParams, type AgentMuxRpcResult } from '@agentmux/core'
 import { isConnectionMethod, type ConnectionMethod } from '@agentmux/core/connections'
@@ -16,7 +17,7 @@ export function registerConnectorIpc(options: {
     options.assertTrusted('connections:call', event)
     if (!isConnectionMethod(method)) throw new Error('Unsupported connection operation.')
     const client = await (options.connect ?? connectAgentMuxRpc)({ endpoint: { transport: 'unix', path: options.socketPath } })
-    try { return await client.call(method, params as AgentMuxRpcParams<ConnectionMethod>) as AgentMuxRpcResult<ConnectionMethod> }
+    try { return await sessionInputOperationResult(async () => await client.call(method, params as AgentMuxRpcParams<ConnectionMethod>) as AgentMuxRpcResult<ConnectionMethod>) }
     finally { await client.dispose() }
   })
   options.handleWithEvent('connections:storeCredential', async (event, input: { operationId: string; secret: string }) => {
