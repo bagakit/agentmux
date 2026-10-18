@@ -12,7 +12,7 @@ const locale = (config:ConnectionConfig) => config.application.domain==='open.la
 function response(v:unknown):Record<string,unknown>{const p=object(v);if(!Number.isSafeInteger(p.code))throw new Error('Unconfirmed profile status');return p}
 function refusal(code:unknown):ConnectionProfileReason|undefined {
   if([210004,210005,210021].includes(code as number))return 'creation-origin-unsupported'
-  if([210006,210007,99991672,99991663,99991668].includes(code as number))return 'permission-required'
+  if([210006,210007,210508,99991672,99991663,99991668].includes(code as number))return 'permission-required'
   if(code===210010)return 'application-under-review'
   if([210002,210011].includes(code as number))return 'platform-rejected'
   return undefined
@@ -21,7 +21,7 @@ function refusal(code:unknown):ConnectionProfileReason|undefined {
 export function createFeishuProfile(withClient: WithClient): ProfileReader {
   return {
     async get(config,revision,credential,signal){
-      const observed:ConnectionProfileObservation={connectionId:config.connectionId,connectionRevision:revision,application:config.application,language:locale(config),state:'unknown',profile:null,metadata:null,botId:null,onlineVersionId:null,reviewingVersionId:null,version:null,...(config.application.domain==='open.feishu.cn'?{managementUrl:'https://open.feishu.cn/app'}:{})}
+      const observed:ConnectionProfileObservation={connectionId:config.connectionId,connectionRevision:revision,application:config.application,language:locale(config),state:'unknown',profile:null,metadata:null,creator:null,botId:null,onlineVersionId:null,reviewingVersionId:null,version:null,...(config.application.domain==='open.feishu.cn'?{managementUrl:'https://open.feishu.cn/app'}:{})}
       let botObserved=false,appObserved=false
       try{await withClient(config,credential,async client=>{
         try {
@@ -30,13 +30,16 @@ export function createFeishuProfile(withClient: WithClient): ProfileReader {
         }catch{/* Bot fields remain unknown independently of application read permissions. */}
         if(signal?.aborted)return
         try {
-          const p=response(await client.application.v6.application.get({path:{app_id:config.application.appId},params:{lang:locale(config)}}))
+          const p=response(await client.application.v6.application.get({path:{app_id:config.application.appId},params:{lang:locale(config),user_id_type:'open_id'}}))
           if(p.code!==0){observed.reason=refusal(p.code)??'online-unconfirmed';return}
           const app=object(object(p.data).app)
           if(app.app_id!==config.application.appId)throw new Error('Wrong application observation')
+          appObserved=true
+          // The requested native ID namespace belongs to this exact application, never the console account.
+          if (typeof app.creator_id === 'string' && app.creator_id.trim() && !/[\u0000-\u001f\u007f]/u.test(app.creator_id)) observed.creator={idType:'open_id',userId:app.creator_id}
           observed.metadata={...(app.description===undefined?{}:{description:description(app.description)})}
           observed.onlineVersionId=app.online_version_id?string(app.online_version_id):null
-          observed.reviewingVersionId=app.unaudit_version_id?string(app.unaudit_version_id):null;appObserved=true
+          observed.reviewingVersionId=app.unaudit_version_id?string(app.unaudit_version_id):null
           if(!observed.onlineVersionId)return
           const pver=response(await client.application.v6.applicationAppVersion.get({path:{app_id:config.application.appId,version_id:observed.onlineVersionId},params:{lang:locale(config)}}))
           if(pver.code!==0){observed.reason=refusal(pver.code)??'online-unconfirmed';return}
