@@ -7,7 +7,7 @@ const record = value => appendFileSync(trace, JSON.stringify({ ...value, pid: pr
 const color = () => process.stdout.write(environment.NO_COLOR === null && environment.FORCE_COLOR !== '0' && environment.CLICOLOR !== '0'
   ? '\x1b[31mANSI16\x1b[0m \x1b[38;5;208mANSI256\x1b[0m \x1b[38;2;10;120;240mRGB\x1b[0m\r\n'
   : 'ANSI16 ANSI256 RGB\r\n')
-record({ type: 'start', environment, cwd: process.cwd(), argv: process.argv.slice(2) })
+record({ type: 'start', environment, exported: process.env.AMX_FIXTURE_EXPORT ?? null, cwd: process.cwd(), argv: process.argv.slice(2) })
 process.stdin.setRawMode(true)
 process.stdin.setEncoding('utf8')
 process.stdin.resume()
