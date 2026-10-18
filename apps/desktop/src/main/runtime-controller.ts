@@ -2055,8 +2055,9 @@ export class RuntimeController {
         session.kind !== 'agent') return 'unconfirmed'
     const original = await client.inspectAgentPromptSubmission({ kind: 'prompt', agentSessionId: loop.agentSessionId,
       expectedRun: initial.condition.expectedRun, submissionId: initial.operationId })
-    const admission = original?.admission
+    const admission = original?.admission, inputKey = admission?.inputKey
     if (original?.agentSessionId !== loop.agentSessionId || original.run.runId !== initial.condition.expectedRun.runId ||
+        inputKey?.kind !== 'prompt' || inputKey.agentSessionId !== loop.agentSessionId || inputKey.expectedRun.runId !== initial.condition.expectedRun.runId || inputKey.submissionId !== initial.operationId ||
         admission?.submissionId !== initial.operationId || admission.intent?.run.runId !== initial.condition.expectedRun.runId ||
         admission.intent.message?.userContent !== initial.prompt) return 'unconfirmed'
     // Core owns the original authored system segment and wire encoding. Neither display text
