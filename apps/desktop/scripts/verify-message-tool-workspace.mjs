@@ -14,15 +14,21 @@ const fixture = join(desktop, 'scripts/fixtures/message-tool-workspace')
 const evidence = join(root, '.tmp/message-tool-workspace', 'attempt-' + globalThis.crypto.randomUUID())
 const privateRoot = await mkdtemp(join(tmpdir(), 'amx-message-workspace-'))
 const require = createRequire(import.meta.url), exec = promisify(execFile)
+// Compile the same public Core exports from source; never rewrite a concurrent shared dist.
+const coreExports = JSON.parse(await readFile(join(root, 'packages/core/package.json'), 'utf8')).exports
+const coreAliases = Object.entries(coreExports).map(([key, target]) => ({
+  find: new RegExp('^@agentmux/core' + (key === '.' ? '' : key.slice(1)).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'),
+  replacement: join(root, 'packages/core', target.import.replace('./dist/', './src/').replace(/\.js$/, '.ts'))
+}))
 const hash = value => createHash('sha256').update(value).digest('hex')
 const densityMutation = process.argv.includes('--density-mutation')
-const interactionStates = process.argv.includes('--interaction-states'), manualNotify = process.argv.includes('--manual-notify')
+const interactionStates = process.argv.includes('--interaction-states'), recovery = process.argv.includes('--notification-recovery'), manualNotify = process.argv.includes('--manual-notify') || recovery
 const emptyStates = process.argv.includes('--empty-states'), emptyMutation = process.argv.includes('--empty-mutation')
 assert.ok([densityMutation, interactionStates, manualNotify, emptyStates, emptyMutation, process.argv.includes('--mutations')].filter(Boolean).length <= 1, 'Renderer and mutation modes are separate')
 const selectedMutation = process.argv.includes('--mutation') ? process.argv[process.argv.indexOf('--mutation') + 1] : undefined
 assert.ok(!selectedMutation || mutations.some(item => item.name === selectedMutation), 'The named mutation exists')
 const result = { schema: 'agentmux.message-workspace-proof.v1', passed: false, userRunTouched: false, productionWritten: false,
-  mode: manualNotify ? 'manual-notify' : emptyMutation ? 'empty-mutation' : emptyStates ? 'empty-states' : densityMutation ? 'density-mutation' : interactionStates ? 'interaction-states' : process.argv.includes('--mutations') ? 'mutations' : 'renderer', aestheticReview: 'not-performed', cleanup: {} }
+  mode: recovery ? 'notification-recovery' : manualNotify ? 'manual-notify' : emptyMutation ? 'empty-mutation' : emptyStates ? 'empty-states' : densityMutation ? 'density-mutation' : interactionStates ? 'interaction-states' : process.argv.includes('--mutations') ? 'mutations' : 'renderer', aestheticReview: 'not-performed', cleanup: {} }
 await mkdir(evidence, { recursive: true })
 
 async function mounted(label, mutation) {
@@ -77,10 +83,10 @@ async function renderer({ label = 'full', density = false, mutate = false, inter
     declaration.value = mutatedValue
   } }
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error', worker: { format: 'es' },
-    resolve: { dedupe: ['react', 'react-dom'], alias: [{ find: /^@xterm\/xterm$/, replacement: wrapper }] },
+    resolve: { dedupe: ['react', 'react-dom'], alias: [{ find: /^@xterm\/xterm$/, replacement: wrapper }, ...coreAliases] },
     css: { postcss: { plugins: [cssMutation] } },
     plugins: [{ name: 'record-message-workspace-inputs', enforce: 'pre', transform(source, id) {
-      if ((id.startsWith(join(desktop, 'src') + '/') || id.startsWith(join(root, 'packages/client-ui/src') + '/') || id.startsWith(fixture + '/')) && !id.includes('?')) loaded[relative(root, id)] = hash(source)
+      if ((id.startsWith(join(desktop, 'src') + '/') || id.startsWith(join(root, 'packages/client-ui/src') + '/') || id.startsWith(join(root, 'packages/core/src') + '/') || id.startsWith(fixture + '/')) && !id.includes('?')) loaded[relative(root, id)] = hash(source)
     }, async generateBundle() {
       for (const file of this.getWatchFiles()) if (file.startsWith(root + '/') && file.endsWith('.css')) styles[relative(root, file)] = hash(await readFile(file))
     } }], define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' }, esbuild: { jsx: 'automatic' },
@@ -102,7 +108,7 @@ async function renderer({ label = 'full', density = false, mutate = false, inter
   await writeFile(join(directory, 'compilation.json'), JSON.stringify(proof.compilation, null, 2) + '\n')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const log = []
-  result.process = proof.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(outDir, 'index.html'), privateRoot, directory, manualNotify ? 'manual-notify' : empty ? mutate ? 'empty-mutation' : 'empty-states' : density ? 'density' : interactions ? 'interaction-states' : 'full'],
+  result.process = proof.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(outDir, 'index.html'), privateRoot, directory, recovery ? 'notification-recovery' : manualNotify ? 'manual-notify' : empty ? mutate ? 'empty-mutation' : 'empty-states' : density ? 'density' : interactions ? 'interaction-states' : 'full'],
     { cwd: root, env, timeoutMs: 180000, onLine: line => log.push(line) })
   await writeFile(join(directory, 'process.log'), log.join('\n'))
   proof.render = JSON.parse(await readFile(join(directory, 'render.json'), 'utf8'))
@@ -124,8 +130,9 @@ async function renderer({ label = 'full', density = false, mutate = false, inter
   result.render = proof.render
   assert.ok(result.render.frames.length > 0)
   if (manualNotify) {
-    assert.equal(result.render.frames.length, 9)
-    assert.ok(result.render.scenes.every(scene => scene.explicitNotification && scene.observationOnlyRefresh && scene.originalSurfacePreserved))
+    assert.equal(result.render.frames.length, recovery ? 15 : 9)
+    if (recovery) assert.equal(result.render.scenes.find(scene => scene.width === 640)?.reloadedIdentity, true)
+    assert.ok(result.render.scenes.every(scene => scene.explicitNotification && scene.observationOnlyRefresh && scene.originalSurfacePreserved && (!recovery || scene.retainedUnknown && scene.keyboardReceipt && scene.sentRecipient)))
   } else if (empty) {
     assert.deepEqual(result.render.frames.map(frame => [frame.width, frame.theme, frame.state]),
       ['dark', 'light'].flatMap(theme => [320, 380, 440].flatMap(width => ['empty-notices', 'empty-collaboration'].map(state => [width, theme, state]))))
