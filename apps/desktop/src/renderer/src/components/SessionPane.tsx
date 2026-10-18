@@ -518,23 +518,10 @@ export function SessionPane({
     // 表面上给两种结果，而只有其中一份有判据。
     appendAgentComposerDraft(sessionId, formatConversationAnnotation(annotation, sessionId))
   }
-  // Same two reads TerminalView makes for its path links, for the same reason: an Agent that writes
-  // `src/foo.ts` means the same file in the Activity projection as in the Terminal one. The root comes
-  // from the WorkspaceRecord (NOT session.workspacePath) so worktree/scratch sessions still relativize
-  // absolute paths against the base main actually resolves against.
-  //
-  // Keyed on THIS pane's own session, not on activeWorkspaceId. The two diverge after "Move to
-  // Workspace": that reducer relocates the display identity and deliberately never touches
-  // session.workspacePath (see move-session-view.ts), so a moved pane's session still lives under its
-  // original root while the active workspace is the target. Reading the active root there is not merely
-  // "unshortened" — when the wrong root is an ANCESTOR of the session path, the boundary guard in
-  // shortenPath matches and strips it, producing a relative path rooted at the wrong repo. Measured:
-  // session homeFixture/proj/repo/src/auth.ts under a wrong root of homeFixture/proj renders `repo/src/auth.ts`,
-  // which reads as a real answer. A wrong path that looks right is worse than a long one.
-  //
-  // workspaceRootForPath asks containment, not ownership — a subdirectory terminal (fixtureRoot/repo/sub) is
-  // owned by no workspace exactly, and answering '' there would make its absolute path links
-  // unclickable. See the same note in TerminalView.
+  // Topic/Mote Terminal and Activity links share the confirmed physical parsing root,
+  // independent of the active Workspace or a moved display. The shared opener translates
+  // parsed relative paths to the logical Scratch File address. Other Session, Project
+  // and Goal routes retain their existing owners.
   const reportError = useAppStore.getState().reportError
   const activeWorkspaceRoot = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) =>
     (session ? workspaceRootForPath(state.config ?? null, session) : undefined) ?? ''
