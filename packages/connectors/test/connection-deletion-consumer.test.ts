@@ -1,3 +1,5 @@
+import { registerConnectorIpc } from '../../../apps/desktop/src/main/connector-ipc.js'
+import { unwrapSessionInputOperationResult } from '../../../apps/desktop/src/shared/session-input-result.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -28,7 +30,7 @@ async function fixture() {
   const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
   clean.push(() => client.dispose())
   const cli = (args: string[], input = '') => runCompiledObjectCli(['--endpoint', `unix:${server.path}`, 'connection', ...args], objectCliEnvironment(root), input)
-  return { first, second, client, cli, owner, reopen: () => { owner.close(); owner = new ConnectionHost(options); return owner } }
+  return { first, second, client, cli, owner, server, reopen: () => { owner.close(); owner = new ConnectionHost(options); return owner } }
 }
 
 describe('local identity deletion through original public consumers', () => {
@@ -80,6 +82,21 @@ describe('local identity deletion through original public consumers', () => {
     })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
     expect((await f.owner.list()).connections.map(row => row.config.connectionId)).toEqual([f.first.connectionId, f.second.connectionId])
     expect(await f.owner.inspectDeletion({ operationId: 'remove-after-revocation' })).toEqual({ operation: null })
+  })
+
+  it('preserves a structured revision refusal through the actual settings IPC and Preload decoder', async () => {
+    const f = await fixture(), sender = { originalRenderer: true }
+    const handlers = new Map<string, (...args: any[]) => Promise<unknown>>()
+    registerConnectorIpc({ socketPath: f.server.path,
+      handleWithEvent: (channel, handler) => handlers.set(channel, handler),
+      assertTrusted: (_channel, event) => expect(event).toBe(sender),
+      secrets: { store: async () => { throw Error('No credentials are changed') }, inspect: async () => null } })
+    await f.owner.configure({ operationId: 'change-before-removal', expectedRevision: 1, connection: { ...f.first, label: 'New label' } })
+    const original = { operationId: 'remove-previous-revision', connectionId: f.first.connectionId, expectedRevision: 1 }
+    const envelope = await handlers.get('connections:call')!(sender, 'connection.delete', original)
+    expect(() => unwrapSessionInputOperationResult(structuredClone(envelope) as never)).toThrow(expect.objectContaining({ code: 'CONNECTION_REVISION_CONFLICT' }))
+    expect((await f.owner.list()).connections).toHaveLength(2)
+    expect(await f.owner.inspectDeletion({ operationId: original.operationId })).toEqual({ operation: null })
   })
 
 })
