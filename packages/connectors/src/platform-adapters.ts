@@ -2,6 +2,8 @@ import { AgentMuxError } from '@agentmux/core'
 import type { ConnectionAdapter } from './connection-host.js'
 import { FeishuPublicationAdapter } from './adapters/feishu/publication.js'
 import { FEISHU_ENROLLMENT_PROTOCOL } from './adapters/feishu/enrollment-protocol.js'
+import { DISCORD_PUBLICATION, prepareDiscordPublication } from './adapters/discord/render.js'
+import { readDiscordActor } from './adapters/discord/profile.js'
 import { createFeishuChannelProfiles } from './adapters/feishu/channel-profile.js'
 
 /** Built-in leaves stay unloaded until an explicit adapter operation or receiver consumes them. */
@@ -82,5 +84,22 @@ export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] 
       addMembers: async (input, credential, signal) => (await feishu()).rooms.addMembers(input, credential, signal)
     }
   }
-  return [adapter]
+  let discordLoading: Promise<import('./adapters/discord/index.js').DiscordAdapter> | undefined
+  const discord = () => discordLoading ??= import('./adapters/discord/index.js').then(({ DiscordAdapter }) => new DiscordAdapter()).catch(() => {
+    discordLoading = undefined
+    throw new AgentMuxError('The connection adapter is unavailable. Existing Agents are retained.', 'CONNECTION_ADAPTER_UNAVAILABLE')
+  })
+  const discordAdapter: ConnectionAdapter = {
+    adapterId: DISCORD_PUBLICATION.adapterId,
+    test: async (...input) => (await discord()).test(...input),
+    ingress: { adapterId: DISCORD_PUBLICATION.adapterId, verify: async (...input) => (await discord()).verify(...input), qualifyReply: async (...input) => (await discord()).qualifyReply(...input) },
+    transport: { start: async input => (await discord()).transport.start(input) },
+    publication: { ...DISCORD_PUBLICATION, supportedRenderVersions: [DISCORD_PUBLICATION.renderVersion], prepare: prepareDiscordPublication,
+      dispatch: async (...input) => (await discord()).publication.dispatch(...input), inspect: async (...input) => (await discord()).publication.inspect(...input) },
+    channelProfiles: {
+      readActor: input => readDiscordActor(input),
+      refreshActor: async (...input) => (await discord()).channelProfiles.refreshActor(...input)
+    }
+  }
+  return [adapter, discordAdapter]
 }
