@@ -27,7 +27,12 @@ app.whenReady().then(async () => {
     await new Promise(resolve=>setTimeout(resolve,40))
   }
   const hit = async (expression, scroll = true) => {
-    if (scroll) { await read(`(${expression}).scrollIntoView({behavior:'instant',block:'center',inline:'nearest'})`); await settle() }
+    if (scroll) {
+      // Scroll the real readers only. scrollIntoView also moves overflow:hidden
+      // App ancestors and can manufacture a shifted frame unrelated to this click.
+      await read(`(() => {const n=${expression};for(let p=n?.parentElement;p&&p!==document.body;p=p.parentElement){const style=getComputedStyle(p);if(!['auto','scroll'].includes(style.overflowY)||p.scrollHeight<=p.clientHeight)continue;const r=n.getBoundingClientRect(),b=p.getBoundingClientRect();if(r.top<b.top||r.bottom>b.bottom)p.scrollTop+=(r.top+r.bottom-b.top-b.bottom)/2;}})()`)
+      await settle()
+    }
     return read(`(() => { const n=${expression}; if(!n?.isConnected||!n.checkVisibility())throw Error('Expected a visible control'); const r=n.getBoundingClientRect(); return {label:n.getAttribute('aria-label')||n.textContent.trim(),x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2),width:r.width,height:r.height,hit:n.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}; })()`)
   }
   const click = async expression => {
@@ -49,6 +54,20 @@ app.whenReady().then(async () => {
     await until(`${node(selector)}?.value===${JSON.stringify(value)}`)
   }
   const choose = selector => click(`${node(selector)}.closest('label')`)
+  const chooseImageFile = async selector => {
+    // Chromium's file-input protocol supplies a real private fixture file; the
+    // production change handler and FileReader perform the actual read.
+    const alreadyAttached = win.webContents.debugger.isAttached()
+    if (!alreadyAttached) win.webContents.debugger.attach('1.3')
+    try {
+      const { root } = await win.webContents.debugger.sendCommand('DOM.getDocument')
+      const { nodeId } = await win.webContents.debugger.sendCommand('DOM.querySelector', { nodeId: root.nodeId, selector })
+      assert.ok(nodeId, 'The original image file input exists')
+      await win.webContents.debugger.sendCommand('DOM.setFileInputFiles', { nodeId, files: [path.resolve(__dirname, '../../../resources/icon-512.png')] })
+      result.interactions.push({kind:'native-file-selection',selector,fixture:'product icon PNG'})
+      await settle()
+    } finally { if (!alreadyAttached) win.webContents.debugger.detach() }
+  }
   const button = (scope, label) => `Array.from(${node(scope)}.querySelectorAll('button')).find(n=>n.checkVisibility()&&n.textContent.trim()===${JSON.stringify(label)})`
   const selectValue = async (selector, value) => {
     const index = await read(`Array.from(${node(selector)}.options).findIndex(option=>option.value===${JSON.stringify(value)})`)
@@ -73,8 +92,9 @@ app.whenReady().then(async () => {
   const resize = async (width, height) => { win.setContentSize(width,height); await until(`innerWidth===${width}&&innerHeight===${height}`); await settle() }
   const capture = async (name, page, theme, position = 'top') => {
     await settle()
-    const checks = await read(`(() => { const pane=document.querySelector('[data-settings-overview]')||document.querySelector('[data-settings-pane]:not([hidden])')||document.querySelector('.settings-search-results'); return {viewport:[innerWidth,innerHeight],horizontalOverflow:document.documentElement.scrollWidth>innerWidth,scroll: pane?{top:pane.scrollTop,height:pane.scrollHeight,viewport:pane.clientHeight}:null,innerScrolls:pane?[...pane.querySelectorAll('[data-settings-review-scroll]')].filter(n=>n.checkVisibility()).map(n=>({id:n.dataset.settingsReviewScroll,classes:n.className,top:n.scrollTop,height:n.scrollHeight,viewport:n.clientHeight})):[]}; })()`)
+    const checks = await read(`(() => { const pane=document.querySelector('[data-settings-overview]')||document.querySelector('[data-settings-pane]:not([hidden])')||document.querySelector('.settings-search-results'); return {viewport:[innerWidth,innerHeight],horizontalOverflow:document.documentElement.scrollWidth>innerWidth,frameScrolls:(()=>{const values=[];for(let p=pane?.parentElement;p;p=p.parentElement)values.push({classes:p.className,top:p.scrollTop,left:p.scrollLeft});return values})(),scroll: pane?{top:pane.scrollTop,height:pane.scrollHeight,viewport:pane.clientHeight}:null,innerScrolls:pane?[...pane.querySelectorAll('[data-settings-review-scroll]')].filter(n=>n.checkVisibility()).map(n=>({id:n.dataset.settingsReviewScroll,classes:n.className,top:n.scrollTop,height:n.scrollHeight,viewport:n.clientHeight})):[]}; })()`)
     assert.equal(checks.horizontalOverflow,false,'Settings has no document horizontal overflow')
+    assert.ok(checks.frameScrolls.every(owner=>owner.top===0&&owner.left===0),'Settings frame ancestors remain anchored around the original reader')
     const file = name + '.png'
     fs.writeFileSync(path.join(evidence,file),(await bounded(win.webContents.capturePage(undefined,{stayHidden:true}),'capture '+file)).toPNG())
     result.frames.push({file,page,theme,position,checks})
@@ -100,7 +120,7 @@ app.whenReady().then(async () => {
     await read(`${pane}.scrollTop=0`)
     for (const reader of readers) {
       const scroll = `${pane}.querySelector('[data-settings-review-scroll="${reader.id}"]')`
-      await read(`${scroll}.scrollIntoView({behavior:'instant',block:'nearest'})`)
+      await hit(scroll)
       for (let offset=reader.viewport*.85,part=1;offset<reader.height;offset+=reader.viewport*.85,part++) {
         await read(`${scroll}.scrollTo({top:${Math.round(offset)},behavior:'instant'})`)
         await settle()
@@ -189,6 +209,30 @@ app.whenReady().then(async () => {
     await capture('page-agents-compact-detail-bottom-'+color,'agents',color,'verified original editor bottom')
     assert.ok(await read(`${editor}.scrollTop`)>0,'Bottom capture retains the measured editor scroll')
   }
+  const previewRoundTrip = async (id, group, controlSelector) => {
+    const pane = `[data-settings-pane="${id}"]`, preview = id==='focus' ? '.focus-settings-preview' : '.browser-agent-preview'
+    for (const [width,height,label] of [[500,840,'compact'],[900,540,'short']]) {
+      await resize(width,height)
+      const details = pane+' .browser-agent-control__advanced'
+      if (id==='browser-agent-control') await read(`${node(details)}.open=true`)
+      for (let repeat=0;repeat<2;repeat++) {
+        await click(node(pane+' '+controlSelector))
+        if (id==='browser-agent-control') await key('ArrowRight')
+        await read(`window.settingsPreviewOrigin={control:${node(pane+' '+controlSelector)},value:${node(pane+' '+controlSelector)}.value,scrollTop:${node(pane)}.scrollTop,ancestors:(()=>{const values=[];for(let p=${node(pane)}.parentElement;p;p=p.parentElement)values.push({node:p,top:p.scrollTop,left:p.scrollLeft});return values})()}`)
+        await click(node(pane+` [data-settings-preview-open="${group}"]`))
+        const geometry=await read(`(()=>{const r=${node(pane+' '+preview)}.getBoundingClientRect(),p=${node(pane)}.getBoundingClientRect();return {top:r.top,paneTop:p.top,visible:r.top>=p.top-1&&r.top<innerHeight-80}})()`)
+        assert.equal(geometry.visible,true,'Preview navigation brings the original example into view')
+        await capture(`${id}-${label}-preview-${repeat}`,id,'dark','explicit comparison from original control')
+        await click(node(pane+' [data-settings-preview-return]'))
+        assert.equal(await read(`document.activeElement===window.settingsPreviewOrigin.control&&window.settingsPreviewOrigin.control===${node(pane+' '+controlSelector)}&&${node(pane+' '+controlSelector)}.value===window.settingsPreviewOrigin.value`),true,'Preview return preserves the original control, value and focus')
+        assert.ok(await read(`Math.abs(${node(pane)}.scrollTop-window.settingsPreviewOrigin.scrollTop)<=1`),'Preview return restores original reading position')
+        assert.equal(await read(`window.settingsPreviewOrigin.ancestors.every(p=>p.node.scrollTop===p.top&&p.node.scrollLeft===p.left)`),true,'Preview return preserves every App ancestor reading position')
+        result.interactions.push({kind:'preview-round-trip',page:id,group,viewport:[width,height],repeat,geometry,identity:true,draft:true,focus:true,readingPosition:true,ancestorPositions:true})
+        await capture(`${id}-${label}-return-${repeat}`,id,'dark','original editing control and reading position restored')
+      }
+    }
+    await resize(1440,940)
+  }
   const pageInteractions = async id => {
     const pane = `[data-settings-pane="${id}"]`
     const saves = await read('window.settingsHomeProbe.saves.length')
@@ -253,7 +297,25 @@ app.whenReady().then(async () => {
       await read(`window.retryDraft=${node('[aria-label="Additional retries"]')}`)
       await click(node('[data-continuity-retry-settings] > summary')); await click(node('[data-continuity-retry-settings] > summary'))
       assert.equal(await read(`${node('[aria-label="Additional retries"]')}===window.retryDraft&&window.retryDraft.value==='7'`),true)
+      await fill('[aria-label="Maximum retry base delay"]','5')
+      assert.deepEqual(await read(`Array.from(${node('[aria-label="Recovery retry example"]')}.querySelectorAll('li strong')).map(n=>n.textContent)`),['1 second','2 seconds','4 seconds','5 seconds','5 seconds','5 seconds'])
+      assert.match(await read(`${node('[aria-label="Recovery retry example"]')}.textContent`),/First 6 of 7/)
       await capture('continuity-retry-search',id,'dark','searched advanced draft')
+      const recheck = pane+' details:has([data-settings-field="recheckMaxAttempts"])'
+      await click(node(recheck+' > summary'))
+      await fill(pane+' [aria-label="Recheck count"]','4')
+      await fill(pane+' [aria-label="Recheck interval"]','2')
+      assert.match(await read(`${node(pane+' [aria-label="Recovery recheck example"]')}.textContent`),/4 follow-up checks, 2 seconds apart/)
+      for (const [width,height,label] of [[1440,940,'wide'],[500,840,'compact']]) {
+        await resize(width,height)
+        for (const color of ['dark','light']) {
+          await theme(color)
+          await hit(node(pane+' [aria-label="Recovery recheck example"]'))
+          await capture('continuity-recheck-'+label+'-'+color,id,color,'same-operation recheck draft')
+        }
+      }
+      await theme('dark'); await resize(1440,940)
+
     } else if (id==='browser') {
       const automation = pane+' .browser-automation-toggle input', memory = pane+' .browser-resources__policy input'
       const original = await read(`({automation:${node(automation)}.checked,memory:${node(memory)}.checked,summary:${node(pane+' [data-settings-field="agent-automation"] header')}.textContent})`)
@@ -276,6 +338,7 @@ app.whenReady().then(async () => {
       result.interactions.push({kind:'takeover-available-states',states})
       await selectValue('[aria-label="Simulation state"]','running')
       await takeoverReachability()
+      await previewRoundTrip(id,'fine-tuning','[data-settings-field="pointerDurationMs"] input')
     } else if (id==='general') {
       const field = pane+' [data-settings-field="copy-paths"] input'
       const original = await read(`${node(field)}.checked`)
@@ -356,6 +419,10 @@ app.whenReady().then(async () => {
         }
       }
       assert.equal(await read(`${node(pane)}.querySelectorAll('[data-settings-save-bar]').length`),2)
+      await fill(pane+' [aria-label="Minimum follow-up interval"]','25')
+      await fill(pane+' [aria-label="Daily follow-up budget"]','2')
+      const effect=await read(`${node(pane+' [aria-label="Quiet follow-up example"]')}.textContent`)
+      assert.match(effect,/21 hours/); assert.match(effect,/25 hours/); assert.match(effect,/2 attempts per local day/)
       await capture('automation-quiet-draft',id,'dark','separate policy owners and advanced draft')
     } else if (id==='amux-protocols') {
       assert.equal(await read(`${node(pane)}.querySelectorAll('[data-protocol-example]').length`),0)
@@ -385,6 +452,7 @@ app.whenReady().then(async () => {
       assert.equal(await read(`${node(pane+' .focus-settings-preview__links')}.dataset.destination`),'tab')
       assert.equal(await read(`${node(pane+' .focus-settings-preview__links')}.dataset.open`),'true')
       await capture('focus-link-example',id,'dark','original link destination draft')
+      await previewRoundTrip(id,'project-scanning','input[name="focus-reply-lines"][value="3"]')
     } else if (id==='goals') {
       await click(`${node(pane+' .settings-goals-view [data-view="board"]')}.closest('label')`)
       await choose(pane+' [aria-label="Show finished goals by default"]')
@@ -408,17 +476,17 @@ app.whenReady().then(async () => {
       assert.equal(await read(`${node(pane+' [aria-label="Start page draft preview"] h3')}.textContent`),'Review draft')
       assert.equal(await read(`${node(pane)}.querySelector('.settings-survey__history')===null`),true)
       await capture('survey-text-draft',id,'dark','text and history preview')
-      const image = 'data:image/png;base64,'+fs.readFileSync(path.resolve(__dirname,'../../../resources/icon-512.png')).toString('base64')
-      await fill(pane+' [aria-label="Start page icon"]',image)
-      assert.equal(await read(`${node(pane)}.querySelector('.settings-survey__icon')===null`),true,'An image draft is not loaded before Preview images')
-      await click(button(pane,'Preview images'))
+      await chooseImageFile(pane+' [aria-label="Select icon image file"]')
       await until(`${node('.settings-survey__icon')}?.naturalWidth>0`)
-      await capture('survey-image-draft',id,'dark','explicit inline image preview without saving')
-      await fill(pane+' [aria-label="Start page background image"]',image)
-      assert.equal(await read(`${node(pane)}.querySelectorAll('.settings-survey__icon,.settings-survey__background').length`),0,'Edited image addresses invalidate the old preview')
-      await click(button(pane,'Preview images'))
+      assert.equal(await read(`Array.from(${node(pane)}.querySelectorAll('input[type="text"],textarea')).some(n=>n.value.startsWith('data:'))`),false,'Inline image bytes stay out of normal text fields')
+      await capture('survey-image-draft',id,'dark','local image draft through original file input')
+      await chooseImageFile(pane+' [aria-label="Select background image file"]')
       await until(`${node('.settings-survey__background')}?.naturalWidth>0&&${node('.settings-survey__icon')}?.naturalWidth>0`)
       await capture('survey-background-draft',id,'dark','explicit draft icon and background')
+      await click(node(pane+' [aria-label="Clear icon image"]'))
+      assert.equal(await read(`${node(pane)}.querySelector('.settings-survey__icon')===null`),true)
+      await chooseImageFile(pane+' [aria-label="Select icon image file"]')
+      await until(`${node('.settings-survey__icon')}?.naturalWidth>0`)
     } else if (id==='mote') {
       await click(node(pane+' [aria-label="32px avatar"]'))
       assert.equal(await read(`${node(pane+' [aria-label="Avatar size"]')}.value`),'32')
@@ -445,6 +513,14 @@ app.whenReady().then(async () => {
       await click(node(pane+' .host-edit-disclosure > summary'))
       await capture('hosts-connection-draft',id,'dark','original host and connection options')
     } else if (id==='mobile') {
+      await click(node(pane+' [data-device-action="scan"]'))
+      await until(`!!${node(pane+' .connection-link-code svg')}`)
+      assert.equal(await read('window.settingsHomeProbe.mobileConnectionProbe.copied.length'),0,'Scanning never writes the clipboard')
+      const linkReads = await read('window.settingsHomeProbe.mobileConnectionProbe.linkReads')
+      await click(node(pane+' [data-device-action="copy"]'))
+      assert.equal(await read('window.settingsHomeProbe.mobileConnectionProbe.linkReads'),linkReads,'Copy uses the displayed original offer')
+      assert.deepEqual(await read('window.settingsHomeProbe.mobileConnectionProbe.copied'),[await read(`${node(pane+' [aria-label="Phone connection link"]')}.value`)],'Copy and QR share one exact URL')
+      await capture('mobile-scan-and-copy',id,'dark','direct QR with separate copy feedback; isolated typed offer and clipboard ports')
       const issue=pane+' .device-management__read-issue details'
       await until(`!!${node(issue)}`,'The isolated owner reports its actual device observation boundary')
       await click(node(issue+' > summary'))
@@ -523,6 +599,13 @@ app.whenReady().then(async () => {
     if (mode==='navigation') { await disclosureGeometry(); result.passed=true; return }
     if (mode==='provider-scroll') { await providerScroll(); result.passed=true; return }
     if (mode==='takeover-scroll') { await theme('dark'); await takeoverReachability(); result.passed=true; return }
+    if (mode==='preview-return') {
+      const id=selected.find(id=>id==='focus'||id==='browser-agent-control')
+      assert.ok(id,'A preview mutation selects an original preview page')
+      await nav(id); await theme('dark')
+      await previewRoundTrip(id,id==='focus'?'project-scanning':'fine-tuning',id==='focus'?'input[name="focus-reply-lines"][value="3"]':'[data-settings-field="pointerDurationMs"] input')
+      result.passed=true; return
+    }
     for (const [width,height,label] of [[1440,940,'wide'],[900,620,'short'],[500,840,'compact'],[320,700,'narrow']]) {
       await resize(width,height)
       for (const mode of ['dark','light']) {

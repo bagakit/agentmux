@@ -16,8 +16,9 @@ const navigationMutant = process.argv.includes('--navigation-mutation')
 const providerMutant = process.argv.includes('--provider-scroll-mutation')
 const takeoverMutant = process.argv.includes('--takeover-scroll-mutation')
 const appearanceMutant = process.argv.includes('--appearance-contrast-mutation')
-assert.ok([navigationMutant,providerMutant,takeoverMutant,appearanceMutant].filter(Boolean).length<=1,'One native source mutation per receipt')
-const nativeMutant = navigationMutant || providerMutant || takeoverMutant || appearanceMutant
+const previewReturnMutant = process.argv.includes('--preview-return-mutation')
+assert.ok([navigationMutant,providerMutant,takeoverMutant,appearanceMutant,previewReturnMutant].filter(Boolean).length<=1,'One native source mutation per receipt')
+const nativeMutant = navigationMutant || providerMutant || takeoverMutant || appearanceMutant || previewReturnMutant
 const pageArguments = process.argv.filter(argument => argument.startsWith('--pages='))
 assert.ok(pageArguments.length <= 1, 'One explicit page selection')
 const requestedPages = pageArguments.length ? pageArguments[0].slice('--pages='.length).split(',') : null
@@ -26,6 +27,7 @@ if (requestedPages) {
   assert.equal(new Set(requestedPages).size, requestedPages.length, 'Page selection contains no duplicate')
 }
 let navigationMutationLoads = 0, providerMutationLoads = 0, takeoverMutationLoads = 0, appearanceMutationLoads = 0
+let previewReturnMutationLoads = 0
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 await fs.mkdir(evidence,{recursive:true})
 async function bind(file) {
@@ -72,6 +74,14 @@ try {
     plugins:[{name:'bind-settings-home-product',enforce:'pre',async transform(code,id){
       const file=id.split('?')[0]
       if(file.startsWith(root+'/')&&!file.includes('/node_modules/'))await bind(file)
+      if(previewReturnMutant&&file.endsWith('/components/settings/use-settings-preview-return.tsx')) {
+        const anchor='previous.pane.scrollTop = previous.scrollTop'
+        assert.equal(code.split(anchor).length,2,'One actual preview return scroll owner')
+        previewReturnMutationLoads++
+        const mutated=code.replace(anchor,'previous.pane.scrollTop = 0')
+        await fs.writeFile(path.join(evidence,'preview-return-mutant.tsx'),mutated)
+        return {code:mutated,map:null}
+      }
       if(appearanceMutant&&file.endsWith('/components/settings/AppearanceSettingsPane.tsx')) {
         const anchor='background: theme.selectionBackground, color: theme.selectionForeground ?? theme.foreground'
         assert.equal(code.split(anchor).length,2,'One actual terminal sample color pair')
@@ -113,13 +123,18 @@ try {
   const visual = path.join(evidence,'visual'), stderr=[]
   await fs.mkdir(visual)
   if(takeoverMutant) assert.equal(takeoverMutationLoads,1,'One exact compact preview declaration is mutated')
-  const capture = await runProbeProcess(require('electron'),[path.join(fixture,'main.cjs'),path.join(compiled,'index.html'),owned,visual,navigationMutant?'navigation':providerMutant?'provider-scroll':takeoverMutant?'takeover-scroll':'full',requestedPages?.join(',')??''],{
+  const capture = await runProbeProcess(require('electron'),[path.join(fixture,'main.cjs'),path.join(compiled,'index.html'),owned,visual,previewReturnMutant?'preview-return':navigationMutant?'navigation':providerMutant?'provider-scroll':takeoverMutant?'takeover-scroll':'full',requestedPages?.join(',')??''],{
     cwd:root,env,timeoutMs:600000,onLine:line=>stderr.push(line)
   })
   await fs.writeFile(path.join(visual,'stderr.log'),stderr.join('\n'))
   const render = JSON.parse(await fs.readFile(path.join(visual,'render.json'),'utf8'))
   assert.equal(capture.timedOut,false)
-  if (appearanceMutant) {
+  if (previewReturnMutant) {
+    assert.equal(previewReturnMutationLoads,1,'The actual preview return mutant was consumed once')
+    assert.equal(capture.exitCode,1)
+    assert.equal(render.failure?.name,'AssertionError')
+    assert.match(render.failure.message,/Preview return restores original reading position/u,'Native behavior, not fixture startup, kills the mutant')
+  } else if (appearanceMutant) {
     assert.equal(appearanceMutationLoads,1,'The actual terminal sample mutant was consumed once')
     assert.equal(capture.exitCode,1)
     assert.equal(render.failure?.name,'AssertionError')

@@ -5,6 +5,15 @@ import { api } from '../../../src/renderer/src/lib/api'
 // Supply explicit valid fixture directories before the original App initializes.
 // The browser-only sample may contain logical labels, which are not durable paths.
 const before = await api.config.get()
+// The isolated public Preview has no connected desktop Host. These two typed
+// ports supply only the connection-offer and clipboard boundary for UI input;
+// they do not authorize a device or touch the user's system clipboard.
+const mobileConnectionProbe = { linkReads: 0, copied: [] }
+api.deviceManagement.link = async () => {
+  mobileConnectionProbe.linkReads++
+  return { hostId: 'preview-host', url: 'https://device.example.test/connect?offer=preview' }
+}
+api.ui.writeClipboardText = async value => { mobileConnectionProbe.copied.push(value) }
 await api.config.save({ ...before, composerShortcuts: [
   { id:'review-changes', keyword:'review', label:'Review changes', body:'Review the changes for correctness, missed edge cases and the smallest useful improvement.' },
   { id:'explain-decision', keyword:'explain', label:'Explain this decision', body:'Explain the decision in plain language. Use one concrete example and identify the assumption that matters most.', providerId:Object.values(before.executors)[0].providerId },
@@ -25,6 +34,7 @@ window.settingsHomeProbe = {
   ...window.structureProbe,
   catalog: visibleSettingsSections('').map(({ id, title, group }) => ({ id, title, group })),
   errors: [],
+  mobileConnectionProbe,
   ready: true
 }
 window.addEventListener('error', event => window.settingsHomeProbe.errors.push(event.message))
