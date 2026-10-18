@@ -51,7 +51,7 @@ function partial(method: AgentMuxRpcMethod, result: unknown): boolean {
       return phase?.status !== 'read' || phase.event?.status !== 'committed'
     })) return true
   }
-  if ((method === 'file.write' || method === 'file.create' || method === 'file.restore' || method === 'file.undo') && (body.result as { status?: string } | undefined)?.status !== 'written') return true
+  if ((method === 'file.write' || method === 'file.create' || method === 'file.import' || method === 'file.restore' || method === 'file.undo') && (body.result as { status?: string } | undefined)?.status !== 'written') return true
   if (method === 'file.history' && (body.result as { status?: string } | undefined)?.status !== 'read') return true
   if ((method === 'file.upload' || method === 'file.upload.inspect') && body.status !== 'uploaded') return true
   if (['file.build', 'file.build.inspect', 'file.build.cancel'].includes(method) && !['running', 'succeeded', 'cancelled'].includes(String(body.status))) return true

@@ -1716,6 +1716,7 @@ export type AgentMuxDesktopApi = {
     inspectSharePublic(params: import('@agentmux/core/files').FileShareInspectParams): Promise<import('@agentmux/core/files').FileShareInspectResult>
     readPublic(params: AgentMuxRpcParams<'file.read'>): Promise<AgentMuxRpcResult<'file.read'>>
     createPublic(params: AgentMuxRpcParams<'file.create'>): Promise<AgentMuxRpcResult<'file.create'>>
+    importPublic(params: AgentMuxRpcParams<'file.import'>): Promise<AgentMuxRpcResult<'file.import'>>
     historyPublic(params: AgentMuxRpcParams<'file.history'>): Promise<AgentMuxRpcResult<'file.history'>>
     restorePublic(params: AgentMuxRpcParams<'file.restore'>): Promise<AgentMuxRpcResult<'file.restore'>>
     undoPublic(params: AgentMuxRpcParams<'file.undo'>): Promise<AgentMuxRpcResult<'file.undo'>>

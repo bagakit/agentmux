@@ -42,6 +42,7 @@ export const PRIVILEGED_SENDER_LABELS = {
   'hosts:creationTrust': 'creation source identity',
   'hosts:trustCreationSource': 'creation source approval',
   'files:createPublic': 'original file creation',
+  'files:importPublic': 'original file import',
   'files:readPublic': 'original file read',
   'files:historyPublic': 'original Note history read',
   'files:restorePublic': 'original Note history restore',
