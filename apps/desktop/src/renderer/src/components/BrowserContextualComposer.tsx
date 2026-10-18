@@ -1,4 +1,5 @@
 import { mintObjectId } from '@agentmux/core/object-id'
+import type { AgentMuxBrowserControl } from '@agentmux/core'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { observeBrowserReader } from '../lib/browser-reader-position'
 import { ComposerTextarea } from '@agentmux/client-ui/input'
@@ -21,16 +22,16 @@ const CloseIcon = semanticIconComponent('action.close')
 const SendIcon = semanticIconComponent('action.submit')
 
 /** Unique canonical control, never the presentation alias, title, or first matching Host. */
-export function browserOpinionRecipient(operatorId: string | undefined, sessions: readonly SessionSnapshot[]): Extract<SessionSnapshot, { kind: 'agent' }> | undefined {
-  if (!operatorId) return
-  const matches = (agentSessionPresentationIndex(sessions).get(operatorId) ?? []).filter(item =>
-    item.control.agentSessionId === operatorId && item.hostId === item.control.hostId)
+export function browserOpinionRecipient(agent: AgentMuxBrowserControl['agent'], sessions: readonly SessionSnapshot[]): Extract<SessionSnapshot, { kind: 'agent' }> | undefined {
+  if (!agent) return
+  const matches = (agentSessionPresentationIndex(sessions).get(agent.agentSessionId) ?? []).filter(item =>
+    item.control.agentSessionId === agent.agentSessionId && item.control.hostId === agent.hostId && item.hostId === agent.hostId)
   return matches.length === 1 ? matches[0] : undefined
 }
 
 /** This draft stays with the Browser owner across page updates and presentation moves. */
-export function useBrowserContextualComposer(browserId: string, operation: BrowserOperation | null, visible: boolean, navigationId?: string) {
-  const recipient = useAppStore(state => browserOpinionRecipient(operation?.operator.id, state.sessions))
+export function useBrowserContextualComposer(browserId: string, agent: AgentMuxBrowserControl['agent'], operation: BrowserOperation | null, visible: boolean, navigationId?: string) {
+  const recipient = useAppStore(state => browserOpinionRecipient(agent, state.sessions))
   const preferences = useAppStore(state => state.config?.browser.agentControl)
   const saved = useRef(useAppStore.getState().browserOpinionDrafts[browserId])
   const [original, setOriginal] = useState<OriginalOpinion | null>(() => {
@@ -81,7 +82,7 @@ export function useBrowserContextualComposer(browserId: string, operation: Brows
       ? 'Your current opinion is kept. Start a new opinion to comment on another step.' : pending.current
         ? current ?? 'The original opinion is awaiting a confirmed queue receipt. Retry this same opinion or inspect Pending.' : null)
     if (!currentOriginal.current) {
-      if (!recipient) { setFailure('The original operator is not confirmed. Restore its Session observation; your page remains available.'); return }
+      if (!recipient) { setFailure('The Browser recipient is not confirmed. Check its Agent association and Session observation; your page and draft remain available.'); return }
       const source: OriginalOpinion = { control: structuredClone(recipient.control), name: recipient.label,
         browserId, operationId: operation?.id, ...(comment ? { comment: { ...comment } } : {}) }
       currentOriginal.current = source
@@ -163,7 +164,8 @@ export function useBrowserContextualComposer(browserId: string, operation: Brows
   }
 
   const source = original?.scene?.inputContext
-  const changed = original && (operation?.id !== original.operationId || source && navigationId !== undefined && source.browser.navigationId !== navigationId)
+  const changed = original && (operation?.id !== original.operationId || source && navigationId !== undefined && source.browser.navigationId !== navigationId ||
+    agent !== undefined && (agent === null || agent.hostId !== original.control.hostId || agent.agentSessionId !== original.control.agentSessionId))
   const dialog: ReactNode = open && visible && anchor.current?.isConnected ? <WindowOverlayPortal container={getWindowOverlayHost(anchor.current.ownerDocument)}>
     <section ref={panel} className="browser-contextual-composer" role="dialog" aria-modal="false" aria-label="Message Browser operator" style={{ visibility: 'hidden' }}
       onCompositionStartCapture={() => { composing.current = editor.current }} onCompositionEndCapture={() => { composing.current = null }}
