@@ -13,8 +13,11 @@ export function signedRoomAdapter() {
   const ledger = new Map<string, { messageId: string }>()
   let endpoint: string | undefined, server: Server | undefined, signingKey: string | undefined, authenticated = false, latestReceive: Parameters<ConnectionIngressTransport['start']>[0]['receive'] | undefined
   const publication: PublicationAdapter = { adapterId: 'signed-room', renderVersion: 'replay-text-v1', supportedRenderVersions: ['replay-text-v1'], fragmentBytes: 8_192,
-    prepare: operation => ({ adapterId: 'signed-room', renderVersion: 'replay-text-v1', requestKey: operation.operationId,
-      request: { method: 'POST', path: '/replay-records', contentType: 'application/json', body: JSON.stringify({ room: operation.target.externalConversationId, text: operation.payload.text }) } }),
+    prepare: operation => {
+      if (operation.payload.kind !== 'speech') throw new Error('Signed-room fixture supports only original speech payloads')
+      return { adapterId: 'signed-room', renderVersion: 'replay-text-v1', requestKey: operation.operationId,
+        request: { method: 'POST', path: '/replay-records', contentType: 'application/json', body: JSON.stringify({ room: operation.target.externalConversationId, text: operation.payload.text }) } }
+    },
     dispatch: async (prepared, target, credential) => {
       if (!credential) throw new Error('Missing fixture credential')
       const body = JSON.parse(prepared.request.body!)
