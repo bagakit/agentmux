@@ -3,6 +3,7 @@ import type { WorkbenchWindowDocument } from '../shared/workbench-windows.js'
 import type { BrowserInputFrameCapture } from '../shared/browser-input-context-capture.js'
 import { BROWSER_FAVICON_TIMEOUT_MS, readBrowserFavicon } from './browser-favicon.js'
 import type { BrowserColdDescriptor } from './browser-cold-descriptor.js'
+import { parseBrowserControlHandoff, type BrowserAgentAuthority } from './browser-agent-authority.js'
 import type { BrowserRecoveryPreviewStore } from './browser-recovery-preview.js'
 import { BrowserPopupWindows, type BrowserPopupHost } from './browser-popup-windows.js'
 import { BROWSER_RECOVERY_PREVIEW_JPEG_PREFIX, BROWSER_RECOVERY_PREVIEW_MAX_WIDTH, BROWSER_RECOVERY_PREVIEW_MAX_HEIGHT,
@@ -32,6 +33,7 @@ import {
   type BrowserOperator,
   type BrowserActivityState
 } from '../shared/contracts.js'
+import type { BrowserControlHandoff } from '../shared/contracts.js'
 import type {
   BrowserPresentationOccurrence, BrowserPresentationGeometry, BrowserPresentationLease,
   BrowserPresentationCapture, BrowserPresentationCaptureAck, BrowserPresentationEvent,
@@ -144,6 +146,9 @@ type BrowserEntry = {
   activeRun: { operationId: string; signal: AbortSignal; stop: () => void } | undefined
   runInFlight: boolean
   controlRevision: number
+  /** Main-owned relationship; absent legacy metadata is unknown, never inferred from the Journal. */
+  agent: AgentMuxBrowserControl['agent']
+  agentWarning: string | undefined
   inputShield?: BrowserNativeInputShield | undefined
   inputShieldCleanupNotice?: {
     shield: BrowserNativeInputShield; originalOperation: BrowserOperation | null
@@ -269,6 +274,8 @@ type ReleasedBrowser = {
   storage: BrowserStorage
   requestedUrl: string
   viewport: BrowserViewport
+  agent?: AgentMuxBrowserControl['agent']
+  agentWarning?: string | undefined
   pendingSwitch?: PendingProfileSwitch
   detachedView?: WebContentsView
   inputShield?: BrowserNativeInputShield
@@ -403,8 +410,9 @@ export class BrowserViewManager {
       navigationId: entry.navigationId,
       capabilities: workspaceId ? [...BROWSER_PAGE_CAPABILITY_NAMES] : BROWSER_PAGE_CAPABILITY_NAMES.filter(name =>
         !['uploadFiles', 'download', 'readDownload', 'extractStructured', 'readResult'].includes(name)),
-      ...(!available ? { warning: 'The embedded page surface is unavailable. Its original Region remains.' } :
-        !workspaceId ? { warning: 'This embedded page has no verified Workspace binding. Workspace file and durable result capabilities are unavailable.' } : {}) }
+      ...(!available || !workspaceId || entry.agentWarning ? { warning: [entry.agentWarning, !available
+        ? 'The embedded page surface is unavailable. Its original Region remains.' : !workspaceId
+          ? 'This embedded page has no verified Workspace binding. Workspace file and durable result capabilities are unavailable.' : ''].filter(Boolean).join(' ') } : {}) }
   }
   /** One read of the existing owners; no page acquisition or persistent resource index. */
   resourceTargets(processes: ReadonlyMap<number, number> | null): AgentMuxBrowserTarget[] {
@@ -561,7 +569,8 @@ export class BrowserViewManager {
     private readonly uploads?: BrowserUploads,
     private readonly feedbackPreferences: () => BrowserAgentControlPreferences = () => DEFAULT_BROWSER_AGENT_CONTROL,
     private readonly recoveryPreviews?: BrowserRecoveryPreviewStore,
-    popupOptions: Partial<Pick<BrowserPopupHost, 'rendererUrl' | 'preloadPath' | 'readTheme' | 'confirmLeave'>> = {}
+    popupOptions: Partial<Pick<BrowserPopupHost, 'rendererUrl' | 'preloadPath' | 'readTheme' | 'confirmLeave'>> = {},
+    private readonly agents?: BrowserAgentAuthority
   ) {
     this.popupWindows = new BrowserPopupWindows({
       appLinks,
@@ -1129,10 +1138,10 @@ export class BrowserViewManager {
     if (input?.mode !== undefined && input.mode !== saved.mode) throw new Error('The saved Browser mode does not match this Region.')
     // create rechecks the original maps and registers synchronously before loadURL. Concurrent
     // visible and public consumers therefore share one owner without a pending registry.
-    return await this.create(id, saved.url, saved.workspaceId, saved.profileId, saved.mode, saved.viewport)
+    return await this.create(id, saved.url, saved.workspaceId, saved.profileId, saved.mode, saved.viewport, saved)
   }
 
-  async create(id: string, rawUrl: string, workspaceId: string | null = null, rememberedProfileId?: string, mode?: AgentMuxBrowserMode, viewport: BrowserViewport = 'responsive'): Promise<BrowserSnapshot> {
+  async create(id: string, rawUrl: string, workspaceId: string | null = null, rememberedProfileId?: string, mode?: AgentMuxBrowserMode, viewport: BrowserViewport = 'responsive', saved?: Pick<BrowserColdDescriptor, 'agent' | 'warning'>): Promise<BrowserSnapshot> {
     if (!id.trim()) throw new Error('Browser id is required')
     if (!isBrowserViewport(viewport)) throw new Error('Unknown browser viewport or invalid dimensions')
     if (mode !== undefined && mode !== 'normal' && mode !== 'private') throw new Error('Browser mode must be normal or private')
@@ -1142,7 +1151,7 @@ export class BrowserViewManager {
     if (existing) {
       this.assertWorkspaceBinding(existing.workspaceId, workspaceId)
       if (existing.releaseAttempt?.pending) await this.prepareForConsumption(id)
-      if (this.entries.get(id) !== existing) return await this.create(id, rawUrl, workspaceId, rememberedProfileId, mode, viewport)
+      if (this.entries.get(id) !== existing) return await this.create(id, rawUrl, workspaceId, rememberedProfileId, mode, viewport, saved)
       if (mode !== undefined && existing.storage.mode !== mode) throw new Error('An existing Browser cannot change mode. Open a new Browser instead.')
       return this.snapshot(existing)
     }
@@ -1156,7 +1165,7 @@ export class BrowserViewManager {
       const profileId = rememberedProfileId ?? this.profiles.defaultProfileId()
       storage = { mode: 'normal', profileId, partition: this.resolvePartition(profileId) }
     }
-    try { return await this.createEntry(id, url, storage, viewport, workspaceId) }
+    try { return await this.createEntry(id, url, storage, viewport, workspaceId, undefined, saved) }
     catch (error) {
       if (storage.mode === 'private') await this.clearPrivateStorage(storage).catch(cleanup => {
         throw new AggregateError([error, cleanup], 'Private Browser creation and website-data cleanup failed')
@@ -1291,7 +1300,8 @@ export class BrowserViewManager {
     this.cleanupReleasedOwner(released)
     this.releasedEntries.delete(id)
     try {
-      const snapshot = await this.createEntry(id, url, storage, viewport, released.workspaceId, released.inputShield)
+      const snapshot = await this.createEntry(id, url, storage, viewport, released.workspaceId, released.inputShield, { agent: released.agent,
+        ...(released.agentWarning === undefined ? {} : { warning: released.agentWarning }) })
       return snapshot
     } catch (error) {
       this.releasedEntries.set(id, { ...released, storage, requestedUrl: url, viewport })
@@ -1305,7 +1315,8 @@ export class BrowserViewManager {
     storage: BrowserStorage,
     viewport: BrowserViewport = 'responsive',
     workspaceId: string | null = null,
-    retiredInputShield?: BrowserNativeInputShield
+    retiredInputShield?: BrowserNativeInputShield,
+    saved?: Pick<BrowserColdDescriptor, 'agent' | 'warning'>
   ): Promise<BrowserSnapshot> {
     if (!isBrowserViewport(viewport)) throw new Error('Unknown browser viewport or invalid dimensions')
     if (this.entries.has(id)) throw new Error(`Browser already exists: ${id}`)
@@ -1329,11 +1340,13 @@ export class BrowserViewManager {
       error: null,
       driving: false,
       appLinkPrompt: null,
-      activity: { operation: null, control: 'human', ...(retiredInputShield ? { warning: 'An earlier native Browser input surface could not be fully released. The original Browser has reopened; use Return to Agent to retry cleanup before starting a fresh isolated program.' } : {}) },
+      activity: { operation: null, control: 'human', ...(retiredInputShield ? { warning: 'An earlier native Browser input surface could not be fully released. The original Browser has reopened; explicitly hand it to its Agent to retry cleanup before starting a fresh isolated program.' } : {}) },
       humanControl: false,
       activeRun: undefined,
       runInFlight: false,
       controlRevision: 0,
+      agent: saved ? saved.agent : null,
+      agentWarning: saved?.warning,
       inputIsolation: retiredInputShield ? 'unconfirmed' : 'inactive',
       inputShield: retiredInputShield,
       feedbackRevision: 0,
@@ -1730,7 +1743,8 @@ export class BrowserViewManager {
    *   这里绝不再补一个 `mintObjectId()` 兜底：两个铸造点会让查询用的 id 与记录里的 id 分岔，
    *   而分岔时两边各自看起来都正常（MEMORY：读的 key 与写的 key 必须只判一次）。
    */
-  async runScript(id: string, code: string, operator?: BrowserOperator, replayOf?: string, operationId?: string, onOperationStarted?: (operation: BrowserOperation) => void | Promise<void>, privateTaskParameters = false, taskPage?: BrowserTaskPageExecution): Promise<BrowserScriptRunReport> {
+  async runScript(id: string, code: string, operator?: BrowserOperator, replayOf?: string, operationId?: string, onOperationStarted?: (operation: BrowserOperation) => void | Promise<void>, privateTaskParameters = false, taskPage?: BrowserTaskPageExecution,
+    caller?: Pick<import('@agentmux/core').AgentMuxControlCaller, 'agentSessionId'>): Promise<BrowserScriptRunReport> {
     const originalView = this.entries.get(id)?.view
     if (this.entries.get(id)?.releaseAttempt?.pending) await this.prepareForConsumption(id)
     if (originalView && this.entries.get(id)?.view !== originalView) throw new Error('Browser native page changed during release. Refresh this original Browser snapshot before running the program; it has not been dispatched.')
@@ -1827,7 +1841,18 @@ export class BrowserViewManager {
       await this.operationJournal?.finish(operation.id, 'stopped', { summary: operation.summary, warning: operation.warning })
       return { result: undefined, logs: [], outcome: { kind: 'stopped', message: operation.warning }, runOperation: operation }
     }
-    entry.activity = { operation, control: 'agent' }
+    if (caller) {
+      let agent: AgentMuxBrowserControl['agent']
+      try { agent = this.agents?.resolve(caller.agentSessionId) } catch { /* Optional actor observation cannot stop the accepted program. */ }
+      if (agent) { entry.agent = agent; entry.agentWarning = undefined }
+      else {
+        // A Core observation gap cannot revoke an existing confirmed relationship. For a fresh
+        // page this actor is unknown, rather than proof that no Agent is associated.
+        if (!entry.agent) entry.agent = undefined
+        entry.agentWarning = 'This Browser program’s Agent identity could not be confirmed from its original Core owner. The page and any confirmed Browser Agent association are retained; reconnect that owner to confirm the actor.'
+      }
+    }
+    entry.activity = { operation, control: 'agent', ...(operation.warning ? { warning: operation.warning } : {}) }
     const previousFeedback = entry.feedback
     const feedbackView = entry.view
     const feedback: BrowserOperationFeedback = showBrowserOperationFeedback({ contents: feedbackView.webContents, operationId: operation.id,
@@ -2143,7 +2168,7 @@ export class BrowserViewManager {
     return this.operationJournal ? await this.operationJournal.list() : []
   }
 
-  async runReplay(id: string, plan: BrowserReplayPlan, operator?: BrowserOperator): Promise<BrowserScriptRunReport> {
+  async runReplay(id: string, plan: BrowserReplayPlan, operator?: BrowserOperator, caller?: Pick<import('@agentmux/core').AgentMuxControlCaller, 'agentSessionId'>): Promise<BrowserScriptRunReport> {
     if (plan.schema !== 'agentmux.browser-replay.v1' || !plan.operationId || !Array.isArray(plan.steps)) {
       throw new Error('Invalid Browser replay plan')
     }
@@ -2166,7 +2191,7 @@ export class BrowserViewManager {
       throw new Error(`Replay requires review before any action: ${blocked.blockedReason}`)
     }
     const script = buildReplayScript(plan)
-    return await this.runScript(id, script, operator, plan.operationId)
+    return await this.runScript(id, script, operator, plan.operationId, undefined, undefined, false, undefined, caller)
   }
 
   /**
@@ -2254,9 +2279,10 @@ export class BrowserViewManager {
   }
 
   /** Main registers a finite condition before its sole, read-only extraction producer. */
-  async checkOutcomeFields(id: string, input: BrowserOutcomeFieldRunInput): Promise<BrowserOutcomeEvaluation> {
+  async checkOutcomeFields(id: string, input: BrowserOutcomeFieldRunInput, intent: 'human' | 'control' = 'control'): Promise<BrowserOutcomeEvaluation> {
     const entry = this.require(id)
     const view = entry.view
+    const controlRevision = entry.controlRevision
     await this.waitForInitialDocument(entry, view)
     const navigationId = entry.navigationId
     const request = parseBrowserStructuredOutputRequest(input.request)
@@ -2266,6 +2292,10 @@ export class BrowserViewManager {
     }
     let registration: BrowserOutcomeRegistration | undefined
     let registrationSaved = false
+    if (intent === 'human') {
+      if (!this.owns(entry, view) || entry.controlRevision !== controlRevision) throw Object.assign(new Error('Browser control changed while the field check was preparing. The original page is kept; start a fresh check explicitly.'), { code: 'CONTROL_REQUEST_CONFLICT' })
+      this.applyAgentControl(entry)
+    }
     const report = await this.runScript(id, `return await extractStructured(${JSON.stringify(request)})`,
       { id: 'user:outcome-check', name: 'Field verification' }, undefined, undefined, async operation => {
         registration = { context: { workspaceId: entry.workspaceId, browserId: id, operationId: operation.id, navigationId },
@@ -2465,6 +2495,7 @@ export class BrowserViewManager {
   private async executeTaskAsset(input: BrowserTaskAssetRunInput, intent: 'human' | 'control', budget?: BrowserTaskRunBudget): Promise<BrowserTaskAssetRun> {
     const entry = this.require(input.browserId)
     const view = entry.view
+    const controlRevision = entry.controlRevision
     const asset = await this.requireTaskAsset(input.browserId, input.assetId)
     const privateTaskParameters = Boolean(asset.versions.find(version => version.version === input.version)?.parameters.length)
     if (this.taskExecutions.has(entry.id) || this.taskAssets!.isBrowserExecuting(entry.id, budget?.batchId) || entry.runInFlight || entry.activeRun) throw new Error('Another operation is using this Browser.')
@@ -2499,7 +2530,10 @@ export class BrowserViewManager {
         throw new Error('The original Browser owner is unavailable; the task was not replayed.')
       }
       if (execution.stopRequested) throw new Error('This task was stopped before control returned. Its progress remains.')
-      if (intent === 'human') this.returnControl(entry.id)
+      if (intent === 'human') {
+        if (entry.controlRevision !== controlRevision) throw Object.assign(new Error('Browser control changed while the task was preparing. The original page and task are kept; continue explicitly from their current facts.'), { code: 'CONTROL_REQUEST_CONFLICT' })
+        this.applyAgentControl(entry)
+      }
       return await runBrowserTaskAsset(this.taskAssets!, input, {
         onRunPrepared: runId => { execution.runId = runId },
         control: id => { const owner = this.require(id); return owner.humanControl ? 'human' : owner.activity.control },
@@ -2608,8 +2642,40 @@ export class BrowserViewManager {
     return this.snapshot(entry)
   }
 
-  returnControl(id: string): BrowserSnapshot {
+  returnControl(id: string): BrowserSnapshot
+  returnControl(id: string, input: BrowserControlHandoff): Promise<BrowserSnapshot>
+  returnControl(id: string, input?: BrowserControlHandoff): BrowserSnapshot | Promise<BrowserSnapshot> {
     const entry = this.require(id)
+    if (input !== undefined) return this.transferControl(entry, input)
+    if (this.agentOwnsInput(entry)) return this.snapshot(entry)
+    if (!entry.agent) throw Object.assign(new Error(entry.agent === null
+      ? 'This Browser has no associated Agent. Create an Agent on its right to hand it over.'
+      : 'The original Browser Agent association is unconfirmed. Keep the page and restore its original association before returning control.'), { code: 'CONTROL_UNAVAILABLE' })
+    return this.applyAgentControl(entry)
+  }
+
+  /** A trusted click may establish one new relationship only after Core confirms its exact Run. */
+  private async transferControl(entry: BrowserEntry, input: BrowserControlHandoff): Promise<BrowserSnapshot> {
+    input = parseBrowserControlHandoff(input)
+    const { agent } = input
+    const matches = () => this.entries.get(entry.id) === entry && entry.navigationId === input.navigationId &&
+      entry.controlRevision === input.expectedRevision && !entry.view.webContents.isDestroyed()
+    if (!matches()) throw Object.assign(new Error('This Browser changed before the handoff. The original page and created Agent are kept; inspect the current page before continuing.'), { code: 'CONTROL_REQUEST_CONFLICT' })
+    if (entry.agent === undefined || entry.agent && (entry.agent.hostId !== agent.hostId || entry.agent.agentSessionId !== agent.agentSessionId)) {
+      throw Object.assign(new Error('This handoff cannot replace an unknown or different Browser Agent. The original association and created Agent are kept.'), { code: 'CONTROL_REQUEST_CONFLICT' })
+    }
+    if (!this.agents) throw Object.assign(new Error('The original Core Agent authority is unavailable. The page and created Agent are kept; retry this exact handoff after reconnecting.'), { code: 'CONTROL_UNAVAILABLE' })
+    const original = await this.agents.inspect(agent)
+    if (original.kind !== 'agent' || original.hostId !== agent.hostId || original.agentSessionId !== agent.agentSessionId || original.run.runId !== agent.run.runId) {
+      throw Object.assign(new Error('Core has not confirmed this exact Agent Session/Run. The original page and created Agent are kept; inspect the original creation without repeating it.'), { code: 'STALE_AGENT_SESSION_BINDING' })
+    }
+    if (!matches()) throw Object.assign(new Error('This Browser changed while Core confirmed the Agent. The original page and created Agent are kept; inspect the current page before continuing.'), { code: 'CONTROL_REQUEST_CONFLICT' })
+    entry.agent = { hostId: agent.hostId, agentSessionId: agent.agentSessionId }
+    entry.agentWarning = undefined
+    return this.applyAgentControl(entry)
+  }
+
+  private applyAgentControl(entry: BrowserEntry): BrowserSnapshot {
     if (this.agentOwnsInput(entry)) return this.snapshot(entry)
     entry.humanControl = false
     ++entry.controlRevision
@@ -3611,7 +3677,7 @@ export class BrowserViewManager {
       // Native destruction is authoritative even if a separate resource's cleanup throws. Retain
       // only the existing metadata: a dead WebContents cannot supply a fresh live snapshot.
       const released: ReleasedBrowser = {
-        id: entry.id, workspaceId: entry.workspaceId, storage: entry.storage, requestedUrl: entry.requestedUrl, viewport: entry.viewport
+        id: entry.id, workspaceId: entry.workspaceId, storage: entry.storage, requestedUrl: entry.requestedUrl, viewport: entry.viewport, agent: entry.agent, agentWarning: entry.agentWarning
       }
       this.releasedEntries.set(entry.id, released)
       const cleanupErrors: unknown[] = []
@@ -3772,7 +3838,7 @@ export class BrowserViewManager {
   private retainClosedInputShield(entry: BrowserEntry): void {
     if (!entry.inputShield) return
     this.releasedEntries.set(entry.id, { id: entry.id, workspaceId: entry.workspaceId, storage: entry.storage,
-      requestedUrl: entry.requestedUrl, viewport: entry.viewport, inputShield: entry.inputShield, cleanupOnly: true })
+      requestedUrl: entry.requestedUrl, viewport: entry.viewport, agent: entry.agent, agentWarning: entry.agentWarning, inputShield: entry.inputShield, cleanupOnly: true })
     entry.inputShield = undefined
   }
 
@@ -3876,7 +3942,8 @@ export class BrowserViewManager {
   private snapshot(entry: BrowserEntry): BrowserSnapshot {
     const contents = entry.view.webContents
     const persistenceWarning = this.operationJournal?.getPersistenceWarning()
-    const warning = this.closingWarning(entry.id, entry.activity.warning ?? persistenceWarning)
+    const currentWarnings = [entry.agentWarning, entry.activity.warning ?? persistenceWarning].filter(Boolean).join(' ')
+    const warning = this.closingWarning(entry.id, currentWarnings || undefined)
     return {
       id: entry.id,
       mode: entry.storage.mode,
@@ -3959,7 +4026,8 @@ export class BrowserViewManager {
   private controlState(entry: BrowserEntry): AgentMuxBrowserControl {
     return { owner: this.agentOwnsInput(entry) ? 'agent' : 'human',
       activeOperationId: entry.activeRun?.operationId ?? null, revision: entry.controlRevision,
-      inputIsolation: entry.inputIsolation === 'isolated' && !entry.inputShield?.isolated ? 'unconfirmed' : entry.inputIsolation }
+      inputIsolation: entry.inputIsolation === 'isolated' && !entry.inputShield?.isolated ? 'unconfirmed' : entry.inputIsolation,
+      ...(entry.agent === undefined ? {} : { agent: entry.agent === null ? null : { ...entry.agent } }) }
   }
 
   private async prepareInputShield(entry: BrowserEntry, view: WebContentsView): Promise<void> {

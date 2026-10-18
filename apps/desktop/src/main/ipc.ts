@@ -18,6 +18,7 @@ import { registerHeapSnapshotFileIpc } from './renderer-heap-snapshot-ipc.js'
 import { isApplicationAccessMethod, parseApplicationAccessParams, type AgentMuxApplicationAccessOwner } from '@agentmux/core'
 import { registerConversationReadIpc } from './conversation-read-ipc'
 import { registerBrowserResourceIpc } from './browser-resource-ipc.js'
+import { browserAgentAuthority } from './browser-agent-authority.js'
 import { createBrowserInputContextPorts, registerBrowserInputContextIpc } from './browser-input-context-ipc.js'
 import { RendererV8Profiler } from './renderer-v8-profile.js'
 import { RendererMemoryInspector } from './renderer-memory.js'
@@ -463,7 +464,7 @@ export async function registerIpc(args: {
   new BrowserTaskAssets(new BrowserTaskAssetFileStore(join(app.getPath('userData'), BROWSER_TASK_ASSETS_FILE)), { nameAudit }),
   new BrowserDownloads(join(app.getPath('userData'), 'browser-downloads'), files, id => workspace(config, id)),
   browserUploads, () => resolveBrowserAgentControl(configOwner.current.browser.agentControl), browserRecoveryPreviews,
-  { readTheme: () => themeBootstrap(configOwner.current.appearance, nativeTheme.shouldUseDarkColors) })
+  { readTheme: () => themeBootstrap(configOwner.current.appearance, nativeTheme.shouldUseDarkColors) }, browserAgentAuthority(args.runtime))
   const disposeBrowserFeedbackPreferences = configOwner.subscribe((saved, previous) => {
     if (JSON.stringify(saved.browser.agentControl) !== JSON.stringify(previous.browser.agentControl)) browsers.refreshAgentFeedback()
   })
@@ -2095,7 +2096,8 @@ export async function registerIpc(args: {
     id: string,
     code: string,
     operator?: import('../shared/browser-operation.js').BrowserOperator,
-    operationId?: string
+    operationId?: string,
+    caller?: Pick<import('@agentmux/core').AgentMuxControlCaller, 'agentSessionId'>
   ) => {
     requireTrustedSender('browser:runScript', event)
     return browserRunResult(async () => {
@@ -2120,7 +2122,7 @@ export async function registerIpc(args: {
         return await externalBrowsers.runScript(id, code, operator, operationId)
       }
       await ensureBrowser(id)
-      return await browsers.runScript(id, code, operator, undefined, operationId)
+      return await browsers.runScript(id, code, operator, undefined, operationId, undefined, false, undefined, caller)
     })
   })
   handleWithEvent('browser:setOperatorAvatar', async (event, input: Parameters<import('../shared/contracts.js').AgentMuxDesktopApi['browser']['setOperatorAvatar']>[0]) => {
@@ -2131,7 +2133,7 @@ export async function registerIpc(args: {
     requireTrustedSender('browser:checkOutcomeFields', event)
     if (config.browser.agentAutomation !== true) throw new Error('Browser automation is off. Turn it on in Settings › Browser.')
     await ensureBrowser(id)
-    return await browsers.checkOutcomeFields(id, input)
+    return await browsers.checkOutcomeFields(id, input, 'human')
   })
   handleWithEvent('browser:verifyOutcome', async (event, id: string, operationId: string) => {
     requireTrustedSender('browser:verifyOutcome', event)
@@ -2171,17 +2173,17 @@ export async function registerIpc(args: {
     requireTrustedSender('browser:takeControl', event)
     return browsers.takeControl(id)
   })
-  handleWithEvent('browser:returnControl', async (event, id: string) => {
+  handleWithEvent('browser:returnControl', async (event, id: string, input?: import('../shared/contracts.js').BrowserControlHandoff) => {
     requireTrustedSender('browser:returnControl', event)
-    return browsers.returnControl(id)
+    return input === undefined ? browsers.returnControl(id) : await browsers.returnControl(id, input)
   })
-  handleWithEvent('browser:runReplay', async (event, id: string, plan: import('../shared/browser-operation.js').BrowserReplayPlan, operator?: import('../shared/browser-operation.js').BrowserOperator) => {
+  handleWithEvent('browser:runReplay', async (event, id: string, plan: import('../shared/browser-operation.js').BrowserReplayPlan, operator?: import('../shared/browser-operation.js').BrowserOperator, caller?: Pick<import('@agentmux/core').AgentMuxControlCaller, 'agentSessionId'>) => {
     requireTrustedSender('browser:runReplay', event)
     if (config.browser.agentAutomation !== true) {
       throw Object.assign(new Error('Agent browser automation is off. Turn it on in Settings › Browser.'), { code: 'BROWSER_AUTOMATION_DISABLED' satisfies AgentMuxControlErrorCode })
     }
     await ensureBrowser(id)
-    return await browsers.runReplay(id, plan, operator)
+    return await browsers.runReplay(id, plan, operator, caller)
   })
   handleWithEvent('browser:selectElement', async (event, id: string) => {
     requireTrustedSender('browser:selectElement', event)

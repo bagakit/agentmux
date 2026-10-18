@@ -12,14 +12,23 @@ function text(value: unknown, limit: number, empty = false): string {
 export function parseBrowserControl(value: unknown): AgentMuxBrowserControl {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new AgentMuxError('Browser control fact is invalid.', 'CONTROL_PROTOCOL_ERROR')
   const row = value as Record<string, unknown>
-  if (Object.keys(row).some(key => !['owner', 'activeOperationId', 'revision', 'inputIsolation'].includes(key)) ||
+  if (Object.keys(row).some(key => !['owner', 'activeOperationId', 'revision', 'inputIsolation', 'agent'].includes(key)) ||
     !['agent', 'human', 'unknown'].includes(String(row.owner)) ||
     !['inactive', 'preparing', 'isolated', 'unconfirmed', 'unsupported'].includes(String(row.inputIsolation)) ||
     !Number.isSafeInteger(row.revision) || Number(row.revision) < 0) throw new AgentMuxError('Browser control fact is invalid.', 'CONTROL_PROTOCOL_ERROR')
   const activeOperationId = row.activeOperationId
   if (activeOperationId !== null && (typeof activeOperationId !== 'string' || !activeOperationId.trim())) throw new AgentMuxError('Browser control operation identity is invalid.', 'CONTROL_PROTOCOL_ERROR')
   if (['preparing', 'isolated'].includes(String(row.inputIsolation)) && row.owner !== 'agent') throw new AgentMuxError('Browser isolation requires its current Agent owner.', 'CONTROL_PROTOCOL_ERROR')
-  return { owner: row.owner as AgentMuxBrowserControl['owner'], activeOperationId, revision: Number(row.revision), inputIsolation: row.inputIsolation as AgentMuxBrowserControl['inputIsolation'] }
+  let agent: AgentMuxBrowserControl['agent']
+  if (row.agent === null) agent = null
+  else if (row.agent !== undefined) {
+    if (!row.agent || typeof row.agent !== 'object' || Array.isArray(row.agent) ||
+      Object.keys(row.agent).some(key => !['hostId', 'agentSessionId'].includes(key))) throw new AgentMuxError('Browser Agent association is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    const identity = row.agent as Record<string, unknown>
+    agent = { hostId: text(identity.hostId, 200), agentSessionId: text(identity.agentSessionId, 200) }
+  }
+  return { owner: row.owner as AgentMuxBrowserControl['owner'], activeOperationId, revision: Number(row.revision), inputIsolation: row.inputIsolation as AgentMuxBrowserControl['inputIsolation'],
+    ...(agent === undefined ? {} : { agent }) }
 }
 /** Discovery facts carry no pairing secret, profile or credential store. */
 export function parseBrowserTargetsResult(value: unknown): AgentMuxBrowserTargetsResult {
