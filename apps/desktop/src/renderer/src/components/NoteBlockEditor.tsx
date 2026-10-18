@@ -352,14 +352,28 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
   }, [editor, handleRef])
   const actionEditor = shared?.focusedEditor && !shared.focusedEditor.isDestroyed ? shared.focusedEditor : editor
   const actionAttachments = actionEditor === editor ? attachments : shared?.focusedAttachments
-  const formatting = useEditorState({ editor: actionEditor, selector: ({ editor }) => ({
-    heading: editor && !editor.isDestroyed ? editor.isActive('heading', { level: 1 }) : false,
-    list: editor && !editor.isDestroyed ? editor.isActive('bulletList') : false,
-    quote: editor && !editor.isDestroyed ? editor.isActive('blockquote') : false,
-    indent: editor && !editor.isDestroyed ? editor.can().sinkListItem('listItem') : false,
-    outdent: editor && !editor.isDestroyed ? editor.can().liftListItem('listItem') : false,
-    from: editor?.state.selection.from, to: editor?.state.selection.to
-  }) })
+  const formatting = useEditorState({ editor: actionEditor, selector: () => {
+    // The focused original is already authoritative when this render switches
+    // editors, before the new editor's next subscribed transaction.
+    const editor = actionEditor
+    let listItem: 'listItem' | 'taskItem' = 'listItem'
+    if (editor && !editor.isDestroyed) {
+      const { $from } = editor.state.selection
+      for (let depth = $from.depth; depth > 0; depth--) {
+        const type = $from.node(depth).type.name
+        if (type === 'listItem' || type === 'taskItem') { listItem = type; break }
+      }
+    }
+    return {
+      heading: editor && !editor.isDestroyed ? editor.isActive('heading', { level: 1 }) : false,
+      list: editor && !editor.isDestroyed ? editor.isActive('bulletList') : false,
+      quote: editor && !editor.isDestroyed ? editor.isActive('blockquote') : false,
+      listItem,
+      indent: editor && !editor.isDestroyed ? editor.can().sinkListItem(listItem) : false,
+      outdent: editor && !editor.isDestroyed ? editor.can().liftListItem(listItem) : false,
+      from: editor?.state.selection.from, to: editor?.state.selection.to
+    }
+  } })
   const backlinks = selected ? noteBacklinks(knowledge, { noteId: note.noteId, blockId: selected }) : []
   const foldTarget = () => {
     if (!editor || editor.isDestroyed) return null
@@ -407,8 +421,8 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
         <RovingToolbarButton type="button" className="note-tool" title="Quote" aria-label="Quote" aria-pressed={formatting?.quote ?? false} onClick={() => actionEditor?.chain().focus().toggleBlockquote().run()}><ThemeActionQuoteIcon size={15} /></RovingToolbarButton>
       </div>
       <div className="note-editor__tool-group" role="group" aria-label="Block structure">
-        <RovingToolbarButton type="button" className="note-tool" title="Indent block" aria-label="Indent block" disabled={!formatting?.indent} onClick={() => actionEditor?.chain().focus().sinkListItem('listItem').run()}><ThemeActionIndentIcon size={15} /></RovingToolbarButton>
-        <RovingToolbarButton type="button" className="note-tool" title="Outdent block" aria-label="Outdent block" disabled={!formatting?.outdent} onClick={() => actionEditor?.chain().focus().liftListItem('listItem').run()}><ThemeActionOutdentIcon size={15} /></RovingToolbarButton>
+        <RovingToolbarButton type="button" className="note-tool" title="Indent block" aria-label="Indent block" disabled={!formatting?.indent} onClick={() => actionEditor?.chain().focus().sinkListItem(formatting?.listItem ?? 'listItem').run()}><ThemeActionIndentIcon size={15} /></RovingToolbarButton>
+        <RovingToolbarButton type="button" className="note-tool" title="Outdent block" aria-label="Outdent block" disabled={!formatting?.outdent} onClick={() => actionEditor?.chain().focus().liftListItem(formatting?.listItem ?? 'listItem').run()}><ThemeActionOutdentIcon size={15} /></RovingToolbarButton>
         <RovingToolbarButton type="button" className="note-tool" title="Fold or unfold nested blocks" aria-label="Fold or unfold nested blocks" disabled={!foldId} aria-pressed={foldId ? folded.current.has(foldId) : false} onClick={() => {
           if (!editor || !foldId) return
           if (folded.current.has(foldId)) folded.current.delete(foldId); else folded.current.add(foldId)
