@@ -13,6 +13,7 @@ const edits: Record<string, [string, string, string]> = {
   focus: ['FocusSettingsPane.tsx', 'setScene(nextScene); preview.open(event.currentTarget)', 'setScene(nextScene)'],
   takeover: ['BrowserAgentControlSettingsPane.tsx', 'onClick={event => preview.open(event.currentTarget)}', 'onClick={() => {}}'],
   return: ['use-settings-preview-return.tsx', 'previous.pane.scrollTop = previous.scrollTop', 'previous.pane.scrollTop = 0'],
+  destination: ['use-settings-preview-return.tsx', 'aria-label={`Back to ${returnLabel}`}', 'aria-label="Back"'],
 }
 assert.ok(!mutant || edits[mutant], 'Only a declared owner mutation is supported')
 const sha = (input: string) => createHash('sha256').update(input).digest('hex')
