@@ -148,9 +148,46 @@ app.whenReady().then(async () => {
     await fs.writeFile(path.join(evidence, `${scene}-${phase}-${name}.png`), (await win.webContents.capturePage()).toPNG())
   }
   const click = async (expression: string) => {
-    const point = await read(`(() => { const node=${expression}; if(!node)throw new Error('Missing original click target'); const r=node.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`)
-    await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point })
-    for (const type of ['mousePressed', 'mouseReleased']) await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, button: 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: 1, ...point })
+    const action: Record<string, any> = { expression }
+    ;(result.clicks ??= []).push(action)
+    try {
+      await read(`(() => {
+        const node=${expression}; if(!node)throw new Error('Missing original click target');
+        const panel=node.closest('.composer-mailbox'), events=[];
+        const describe=n=>n instanceof Element?{tag:n.tagName,id:n.id,role:n.getAttribute('role'),control:n.getAttribute('aria-controls')}:null;
+        const facts=()=>{
+          const r=node.getBoundingClientRect(), x=r.x+r.width/2, y=r.y+r.height/2;
+          const animations=(panel??node).getAnimations({subtree:true}).filter(a=>Number.isFinite(a.effect?.getComputedTiming().endTime)&&(a.pending||a.playState==='running'||a.playState==='paused'));
+          const surface=panel?{open:panel.matches(':popover-open'),state:panel.dataset.state,inert:panel.inert,opacity:Number(getComputedStyle(panel).opacity),rect:panel.getBoundingClientRect().toJSON(),maxWidth:panel.style.maxWidth,maxHeight:panel.style.maxHeight}:null;
+          return {target:describe(node),rect:r.toJSON(),x,y,hit:node.contains(document.elementFromPoint(x,y)),
+            ready:node.isConnected&&node.checkVisibility()&&!node.matches(':disabled')&&!node.closest('[inert]')&&r.width>0&&r.height>0&&x>=0&&y>=0&&x<innerWidth&&y<innerHeight&&!animations.length&&(!surface||surface.open&&surface.state==='open'&&!surface.inert&&surface.opacity>=.999),
+            surface,animations:animations.map(a=>({state:a.playState,pending:a.pending,time:a.currentTime,end:a.effect.getComputedTiming().endTime})),
+            tabs:panel?[...panel.querySelectorAll('[role="tab"]')].map(n=>({id:n.id,selected:n.getAttribute('aria-selected'),control:n.getAttribute('aria-controls')})):[]};
+        };
+        const observe=event=>{const value={type:event.type,trusted:event.isTrusted,target:describe(event.target),contains:node.contains(event.target),pathIncludesTarget:event.composedPath().includes(node),button:event.button,buttons:event.buttons,x:event.clientX,y:event.clientY};events.push(value);readingProof.mark('native-click-input',value)};
+        for(const type of ['mousedown','mouseup','click'])document.addEventListener(type,observe,{capture:true,passive:true});
+        window.readingClick={facts,finish(){for(const type of ['mousedown','mouseup','click'])document.removeEventListener(type,observe,true);delete window.readingClick;return {events,after:facts()}}};
+      })()`)
+      const point = () => until(async () => {
+        const before = await read('readingClick.facts()')
+        if (!before.ready) return null
+        await read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+        const after = await read('readingClick.facts()')
+        return after.ready && after.hit && ['x', 'y', 'width', 'height'].every(key => after.rect[key] === before.rect[key]) ? after : null
+      }, 'Original click target has a stable native hit')
+      action.beforeHover = await point()
+      await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: action.beforeHover.x, y: action.beforeHover.y })
+      action.point = await point()
+      for (const type of ['mousePressed', 'mouseReleased']) await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',
+        { type, button: 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: 1, x: action.point.x, y: action.point.y })
+      await read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+    } finally {
+      action.receipt = await read('window.readingClick?.finish()').catch(error => { action.observationError = String(error); return null })
+    }
+    assert.ok(action.receipt, 'The original native click observation is retained')
+    assert.deepEqual(action.receipt.events.map((event: any) => event.type), ['mousedown', 'mouseup', 'click'])
+    assert.ok(action.receipt.events.every((event: any) => event.trusted && event.contains && event.pathIncludesTarget && event.button === 0),
+      'One complete trusted native click reaches the exact original target')
   }
   const selectOriginal = () => read(`(() => {
       const feed=document.querySelector('.activity-feed'), bounds=feed.getBoundingClientRect();

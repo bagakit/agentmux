@@ -66,8 +66,11 @@ export async function exerciseSurfaces({ read, click, shot, until, copies, resiz
   await copy('[data-captured-process-id="surface-captured-tool"] [aria-label="Copy tool output"]', surfaceOutput)
   await shot('captured-original')
   await control('.composer__mailbox')
-  await until(() => read(`!!document.querySelector('.composer-mailbox:popover-open')`), 'Original mailbox')
+  await until(() => read(`(()=>{const panel=document.querySelector('.composer-mailbox:popover-open');return !!panel&&panel.dataset.state==='open'&&!panel.inert})()`),
+    'Original mailbox native and rendered opening endpoint')
   await control('.composer-mailbox [role="tab"][id$="-user-tab"]')
+  assert.equal(await read(`document.querySelector('.composer-mailbox [role="tab"][id$="-user-tab"]').getAttribute('aria-selected')`), 'true',
+    'The original Inputs tab consumes the exact native choice')
   const original = await until(() => read(`readingProof.originalInput('surface-human')`), 'Original typed native input history')
   const rowSelector = `.composer-mailbox [aria-label="Recorded input history"] .composer-mailbox__row[data-record-key=${JSON.stringify(original.key)}]`
   await until(() => read(`!!document.querySelector(${JSON.stringify(rowSelector)})?.getClientRects().length`), 'Original native input row')
