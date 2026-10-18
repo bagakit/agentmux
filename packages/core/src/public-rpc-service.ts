@@ -1130,8 +1130,6 @@ export class AgentMuxRpcService {
       }
       return parseSessionHistoryResourceResult(result, input) as AgentMuxRpcResult<M>
     }
-    if (method === 'agent.conversation.release') {
-      const input = parseConversationViewReleaseInput(params), forwarded = forwardConversationInput(input)
     if (method === 'agent.conversation.record') {
       const p = rpcRecord(params, ['hostId', 'agentSessionId', 'ingressId']), hostId = rpcString(p.hostId, 'Conversation Host'), input = parseExternalConversationReference({ agentSessionId: p.agentSessionId, ingressId: p.ingressId })
       const owners = (await this.clients()).filter(entry => entry.hostId === hostId)
@@ -1139,6 +1137,8 @@ export class AgentMuxRpcService {
       const result = await owners[0]!.client.recordExternalConversationMessage(input)
       return parseExternalConversationReceipt(result, input) as AgentMuxRpcResult<M>
     }
+    if (method === 'agent.conversation.release') {
+      const input = parseConversationViewReleaseInput(params), forwarded = forwardConversationInput(input)
       const owners = (await this.clients()).filter(entry => entry.hostId === input.hostId)
       if (owners.length !== 1) throw new AgentMuxError('The exact conversation Host is unavailable or ambiguous.', 'RUNTIME_UNAVAILABLE')
       const result = await owners[0]!.client.releaseConversationView(forwarded.input)
