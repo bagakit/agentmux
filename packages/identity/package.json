@@ -18,13 +18,21 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime-entry.d.ts",
+      "import": "./dist/runtime.js"
+    },
+    "./runtime-source": {
+      "types": "./dist/runtime-source.d.ts",
+      "import": "./dist/runtime-source.js"
     }
   },
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node scripts/build.mjs",
     "prepack": "pnpm build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run"
@@ -34,6 +42,7 @@
     "@scure/base": "2.2.0"
   },
   "devDependencies": {
+    "esbuild": "^0.25.0",
     "typescript": "^5.9.0"
   }
 }
