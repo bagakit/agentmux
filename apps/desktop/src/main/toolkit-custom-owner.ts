@@ -60,7 +60,7 @@ export class CustomToolkitOwner {
     return tool.error || tool.parent && tool.sourceError ? 'unknown' as const : tool.admission?.state ?? (!definition.enabled ? 'disabled' as const : tool.latest?.state ?? 'idle' as const)
   }
   private displaySnapshot(tool: Tool, definition: ToolkitToolDefinition): ToolkitDisplaySnapshot {
-    return { state: this.state(tool, definition), reason: tool.error ?? tool.sourceError ?? tool.admission?.reason ?? tool.latest?.reason ?? null,
+    return { state: this.state(tool, definition), reason: tool.error ?? tool.sourceError ?? (tool.admission ?? tool.latest)?.reason ?? null,
       admission: tool.admission, latestConfirmed: tool.latest, sequence: tool.sequence,
       ...(tool.successful && tool.latest?.executionId !== tool.successful.executionId ? { lastSucceeded: tool.successful } : {}) }
   }
@@ -69,7 +69,7 @@ export class CustomToolkitOwner {
       ? this.displaySnapshot(this.displayTool(tool), definition) : undefined
     return structuredClone({ schema: 'agentmux.toolkit.v1', kind: 'script', toolId: tool.id, definition,
       state: this.state(tool, definition),
-      reason: tool.error ?? tool.loadError ?? tool.admission?.reason ?? tool.latest?.reason ?? null, admission: tool.admission,
+      reason: tool.error ?? tool.loadError ?? (tool.admission ?? tool.latest)?.reason ?? null, admission: tool.admission,
       latestConfirmed: tool.latest, consumerCount: tool.leases.size, sequence: tool.sequence, ...(display ? { display } : {}) })
   }
   /** Output publication consumes captured facts, never the live filesystem. */
