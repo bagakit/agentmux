@@ -221,12 +221,29 @@ it.each([false, true])('native question button and modal submit exact original a
   await nativeProof(longOriginal ? 'native-long-question' : 'native-question', { message: body, modal })
   expect(modal.components.map((component: { component: { type: number } }) => component.component.type)).toEqual([3, 4, 3, 4])
   expect(modal.components[0].component.max_values).toBe(1)
+  expect(modal.components[0].description).toBe('Select one option, or leave it blank and enter a custom answer.')
+  expect(modal.components[0].description.length).toBeLessThanOrEqual(100)
   f.wire.interaction('902', 5, { custom_id: modal.custom_id, components: [
     { type: 18, component: { type: 3, custom_id: 'o0', values: ['0', '1'] } }, { type: 18, component: { type: 4, custom_id: 't0', value: '' } },
     { type: 18, component: { type: 3, custom_id: 'o1', values: [] } }, { type: 18, component: { type: 4, custom_id: 't1', value: 'Keep the original follow-up' } }
   ] })
   await vi.waitFor(() => expect(f.wire.calls.some(call => call.path === '/interactions/902/fixture-interaction-token/callback' && JSON.parse(call.body).type === 4)).toBe(true))
   expect(send).not.toHaveBeenCalled()
+  f.wire.interaction('904', 5, { custom_id: modal.custom_id, components: [
+    { type: 18, component: { type: 3, custom_id: 'o0', values: ['0'] } }, { type: 18, component: { type: 4, custom_id: 't0', value: 'Conflicting custom answer' } },
+    { type: 18, component: { type: 3, custom_id: 'o1', values: [] } }, { type: 18, component: { type: 4, custom_id: 't1', value: 'Keep the original follow-up' } }
+  ] })
+  await vi.waitFor(() => expect(f.wire.calls.some(call => call.path === '/interactions/904/fixture-interaction-token/callback')).toBe(true))
+  const invalid = JSON.parse(f.wire.calls.find(call => call.path === '/interactions/904/fixture-interaction-token/callback')!.body)
+  expect(invalid).toMatchObject({ type: 4, data: { flags: 64 } })
+  expect(invalid.data.content).toContain('No answer was submitted.')
+  expect(invalid.data.content).toContain('leaving the other blank')
+  expect(invalid.data.content).not.toContain('original action is unavailable')
+  expect(send).not.toHaveBeenCalled()
+  expect((await f.services.ingress!.list({ connectionId: discordConfig.connectionId })).ingresses).toHaveLength(0)
+  f.wire.interaction('905', 3, { custom_id: button.custom_id, component_type: 2 }, question.mapping!.messageId)
+  await vi.waitFor(() => expect(f.wire.calls.some(call => call.path === '/interactions/905/fixture-interaction-token/callback' && JSON.parse(call.body).type === 9)).toBe(true))
+  expect(JSON.parse(f.wire.calls.find(call => call.path === '/interactions/905/fixture-interaction-token/callback')!.body).data.custom_id).toBe(modal.custom_id)
   const submitted = f.wire.interaction('903', 5, { custom_id: modal.custom_id, components: [
     { type: 18, component: { type: 3, custom_id: 'o0', values: ['1'] } }, { type: 18, component: { type: 4, custom_id: 't0', value: '' } },
     { type: 18, component: { type: 3, custom_id: 'o1', values: [] } }, { type: 18, component: { type: 4, custom_id: 't1', value: 'Keep the original follow-up' } }
