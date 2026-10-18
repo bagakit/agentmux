@@ -44,7 +44,7 @@ export type ConnectionResultMap = import('./connection-deletion-contract.js').Co
 }
 /** Borrow the Host's original connection owner. Core never constructs adapters or stores credentials. */
 export interface ConnectionPort {
-  delete?(input: import('./connection-deletion-contract.js').ConnectionDeleteInput): Promise<import('./connection-deletion-contract.js').ConnectionDeleteOperation>
+  delete?(input: import('./connection-deletion-contract.js').ConnectionDeleteInput, context?: import('./connection-enrollment-contract.js').ConnectionEnrollmentCallContext): Promise<import('./connection-deletion-contract.js').ConnectionDeleteOperation>
   inspectDeletion?(input: { operationId: string }): Promise<{ operation: import('./connection-deletion-contract.js').ConnectionDeleteOperation | null }>
   /** Original enrollment journal ownership, never a display label or credential-derived grant. */
   ownsEnrollmentConnection?(connectionId: string, agentSessionId: string): Promise<boolean>

@@ -606,7 +606,7 @@ export class AgentMuxRpcService {
       if (isConnectionDeletionMethod(method)) {
         if (caller) throw new AgentMuxError('Deleting saved identities requires the original person or device.', 'CONTROL_PERMISSION_DENIED')
         const result = method === 'connection.delete'
-          ? owner.delete ? await owner.delete(parseConnectionDeletionParams(method, params)) : undefined
+          ? owner.delete ? await owner.delete(parseConnectionDeletionParams(method, params), administration) : undefined
           : owner.inspectDeletion ? await owner.inspectDeletion(parseConnectionDeletionParams(method, params)) : undefined
         if (!result) throw new AgentMuxError('Local identity removal is unavailable on the original Host. The identity and its conversations are retained.', 'CONTROL_UNAVAILABLE')
         return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>

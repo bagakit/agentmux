@@ -211,8 +211,9 @@ export class ConnectionHost implements ConnectionPort {
       return { operation: saved?.kind === 'deletion' ? saved.operation : null }
     })
   }
-  async delete(value: ConnectionDeleteInput): Promise<ConnectionDeleteOperation> {
+  async delete(value: ConnectionDeleteInput, context?: import('@agentmux/core/connections').ConnectionEnrollmentCallContext): Promise<ConnectionDeleteOperation> {
     const input = parseConnectionDeletionParams('connection.delete', value)
+    await context?.assertCurrent?.()
     return this.safe(() => {
       this.database.exec('BEGIN IMMEDIATE')
       try {
