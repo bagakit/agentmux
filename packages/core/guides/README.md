@@ -41,7 +41,10 @@ published package. In a source checkout, build Core before following those links
 matching editable implementation is under `src/`. The content marker preserves CLI
 text verbatim, including command examples; it does not parse or execute them.
 
-`src/generated/agentmux-guides.ts` is generated data, never an editing source. Runtime
-consumers import those browser-safe strings without filesystem, project or network
-access. A source edit, build, installed CLI and a live model's actual adoption are
+`src/generated/agentmux-guides.ts` contains named static documents and their fact types;
+consumers import only their required documents. `agentmux-guides-index.ts` aggregates
+the directory for CLI and Node readers. Both are generated data, never editing sources.
+Browser readers do not import the directory or unrelated guides. Runtime consumers use
+the static strings without filesystem, project or network access. A source edit, build,
+installed CLI and a live model's actual adoption are
 separate facts; updating these files does not rewrite previously frozen inputs.
