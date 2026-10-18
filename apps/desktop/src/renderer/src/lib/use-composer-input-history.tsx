@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { AgentSessionUserMessage, AgentSessionHistoryResourceRequest } from '@agentmux/core'
-import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
+import { createCapturedInputSelector } from './session-captured-inputs'
 import { useAgentInputHistory, type InputHistoryRead } from '@agentmux/client-ui/use-agent-input-history'
 import { inputHistoryText } from '@agentmux/client-ui/input-history-text'
 import type { ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
@@ -42,7 +42,9 @@ export function useComposerInputHistory({ sessionId, control, visible, readOnly,
   const enabled = visible && Boolean(control) && (focused || mailboxOpen)
   // Reuse the existing scoped live reader. Both consumers share its original watch and page.
   const native = useSessionUserMessages(control, { enabled })
-  const captured = useMemo(() => sid ? projectSessionUserMessages({ agentSessionId: sid, timeline }) : [], [sid, timeline])
+  const selectCaptured = useMemo(createCapturedInputSelector, [])
+  const captured = useMemo(() => selectCaptured(sid, timeline, control?.hostId),
+    [selectCaptured, sid, timeline, timeline?.revision, control?.hostId])
   // The original live reader retains input facts independently of its clipped continuous page.
   const nativeMessages = native.sourceMessages.length ? native.sourceMessages : EMPTY_MESSAGES
   const initialMessages = useMemo(() => [...nativeMessages.filter(message => message.source.kind === 'native'), ...captured], [nativeMessages, captured])

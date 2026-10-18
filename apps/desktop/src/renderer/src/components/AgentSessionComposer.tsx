@@ -117,6 +117,8 @@ export function AgentSessionComposer({
   const setViewMode = useAppStore.getState().setViewMode
   const userName = useObservedAppStore('composer', visible, consumerScope, (state) => state.agentNames?.[sessionId])
   const timeline = useObservedAppStore('composer', visible, consumerScope, (state) => state.timelines?.[sessionId])
+  // A published preview revision may append to the same original timeline object.
+  useObservedAppStore('composer', visible, consumerScope, state => state.timelines?.[sessionId]?.revision)
   const inputHistory = useComposerInputHistory({ sessionId,
     control: session?.kind === 'agent' ? session.control : undefined, visible, readOnly: readOnly || disabled,
     insertion: insertionRef, ...(timeline ? { timeline } : {}) })
