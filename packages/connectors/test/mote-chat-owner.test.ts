@@ -9,7 +9,7 @@ import { parseMoteChatParams, parseMoteChatResult, type MoteChatConfigure, type 
 import { ConnectionHost } from '../src/connection-host.js'
 import { MoteChatHost, composeMoteChatBindings, type MoteChatAgentPort, type MoteChatCreatedAgent, type MoteChatIncoming, type MoteChatPreparedLaunch } from '../src/mote-chat.js'
 
-const fixtures: Awaited<ReturnType<typeof fixture>>[] = []
+const fixtures: Array<{ connections: ConnectionHost; root: string }> = []
 afterEach(async () => { for (const f of fixtures.splice(0)) { f.connections.close(); await rm(f.root, { recursive: true, force: true }) }; vi.restoreAllMocks() })
 const context = { actor: { kind: 'user' as const, id: 'original-user' } }
 const application = { domain: 'chat.example', appId: 'original-app' }
@@ -80,7 +80,9 @@ it('reserves one generation for concurrent first messages and charges each origi
   f.agents.create = vi.fn(async plan => { reached(); await gate; return await original(plan) })
   const first = f.host.prepareIncoming(f.incoming('first', guest)); await entering
   const second = f.host.prepareIncoming(f.incoming('second', guest)), duplicate = f.host.prepareIncoming(f.incoming('first', guest))
-  release(); const bindings = await Promise.all([first, second, duplicate])
+  release(); const ready = Promise.all([first, second, duplicate])
+  await expect(ready).resolves.toHaveLength(3)
+  const bindings = await ready
   expect(new Set(bindings.map(b => b?.agentSessionId)).size).toBe(1)
   expect(f.agents.prepare).toHaveBeenCalledTimes(1); expect(f.agents.create).toHaveBeenCalledTimes(1)
   expect((await f.host.audience({ target })).people).toMatchObject([{ actor: guest, used: 2, total: 2, remaining: 0 }])
@@ -163,7 +165,9 @@ it('retains the frozen creation across unknown ACK and owner replacement without
   await expect(f.host.prepareIncoming(incoming)).rejects.toThrow('Creation acknowledgement lost')
   const reserved = (await f.host.history({ target })).generations[0]!
   expect(reserved.phase).toBe('preparing')
-  const rebound = await f.restart().prepareIncoming(incoming)
+  const recovering = f.restart().prepareIncoming(incoming)
+  await expect(recovering).resolves.toMatchObject({ agentSessionId: reserved.agentSessionId })
+  const rebound = await recovering
   expect(rebound?.agentSessionId).toBe(reserved.agentSessionId)
   expect(f.agents.prepare).toHaveBeenCalledTimes(1); expect(f.agents.create).toHaveBeenCalledTimes(1); expect(f.agents.inspect).toHaveBeenCalledTimes(1)
   expect((await f.host.audience({ target })).people[0]).toMatchObject({ used: 1, total: 1 })
@@ -210,7 +214,9 @@ it('preserves the original binding when another local alias selects the same nat
 it('creates and replies through an exact Core Session without requiring a presentation Region', async () => {
   const f = await fixture(), create = f.agents.create
   f.agents.create = vi.fn(async plan => { const { regionId: _region, ...result } = await create(plan); return result })
-  const binding = (await f.host.prepareIncoming(f.incoming('background')))!
+  const creating = f.host.prepareIncoming(f.incoming('background'))
+  await expect(creating).resolves.toMatchObject({ agentSessionId: expect.any(String) })
+  const binding = (await creating)!
   expect(binding.regionAnchor).toBeUndefined()
   expect(f.host.hasAdmission('ingress-background', binding.bindingId, creator)).toBe(true)
   expect(f.host.publicationAuthority(binding.bindingId, 1).authorized).toBe(true)
