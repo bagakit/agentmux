@@ -100,7 +100,7 @@ describe('TUI toolkit product presentation', () => {
     const start = [...dom.container.querySelectorAll('button')].find(button => button.textContent === 'Start')!
     expect(start.disabled).toBe(false)
     await act(async () => start.click())
-    expect(run).toHaveBeenCalledWith(value.toolId, { invocationId: expect.any(String),
+    expect(run).toHaveBeenCalledWith(value.toolId, { invocationId: expect.stringMatching(/^[1-9A-HJ-NP-Za-km-z]{12}$/u),
       expectedRevision: value.definition.revision, expectedLatestExecutionId: null })
   })
   it('keeps an exact Stop action reachable from settings after hiding the tool', async () => {
