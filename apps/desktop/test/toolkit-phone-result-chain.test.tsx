@@ -51,7 +51,7 @@ function nodeProcessPort() {
     observedAt: _newTailFixtureEpoch(0, 0, 1), latestOutputBytes: run.bytes.length, acceptedInputBytes: 0, ...(run.state === 'exited' ? { exitCode: run.exitCode } : {}) }) as AgentMuxRun
   const snapshot = (run: ProcessRun, after: number): AgentMuxRunAttachment => ({ run: facts(run), gap: null, resizeRevision: 0, terminal: { type: 'not-requested' },
     replay: run.bytes.length > after ? [{ runId: run.id, type: 'data', startByte: after, endByte: run.bytes.length, dataBytes: run.bytes.subarray(after), data: '' }] : [] })
-  const port: ToolkitRunPort = { observe: () => () => {},
+  const port: ToolkitRunPort = { prepare: async () => { throw new Error('This finite-tool fixture does not prepare TUI Runs') }, createPrepared: async () => { throw new Error('This finite-tool fixture does not create TUI Runs') }, observe: () => () => {},
     async create(input, listener) {
       expect(input.args?.slice(0, 2)).toEqual(['--input-type=module', '--eval'])
       expect(input.workspacePath.startsWith(repository)).toBe(false)

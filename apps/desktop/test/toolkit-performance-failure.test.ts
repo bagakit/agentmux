@@ -28,7 +28,7 @@ async function fixture(options:{store?:{read():Promise<any>;save(value:any):Prom
  }}
  cleanup.push(async()=>{await Promise.allSettled([...writes])})
  let accept:(event:any)=>void=()=>{},cursor=0
- const port:ToolkitRunPort={ observe: () => () => {},create:vi.fn(async(_input,onEvent)=>{accept=onEvent;return {runId:'original-toolkit-run',pid:88,kind:'terminal'} as any}),
+ const port:ToolkitRunPort={ prepare: async () => { throw new Error('This finite-tool fixture does not prepare TUI Runs') }, createPrepared: async () => { throw new Error('This finite-tool fixture does not create TUI Runs') }, observe: () => () => {},create:vi.fn(async(_input,onEvent)=>{accept=onEvent;return {runId:'original-toolkit-run',pid:88,kind:'terminal'} as any}),
   attach:vi.fn(async()=>({replay:[],gap:null}) as any),replay:vi.fn(async()=>({replay:[],gap:null}) as any),status:vi.fn(async()=>null),stop:vi.fn(async()=>{}),release:vi.fn(async()=>{}),remove:vi.fn(async()=>{if(options.cleanupError)throw new Error('cleanup unknown')})}
  const owner=new PerformanceToolkitOwner({openRunPort:async()=>port,launch:()=>({runner:process.execPath,cli:_hygiene_fixturePath("private/fixture-cli"),script:resolve('apps/desktop/resources/toolkit/performance.mjs'),cwd:dir,env:{}}),enabled:()=>true,receipts:{read:async()=>null,save:async()=>{}},failures,now:()=>1234})
  cleanup.push(()=>owner.dispose())
