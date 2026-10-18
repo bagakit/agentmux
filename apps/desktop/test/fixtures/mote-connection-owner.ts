@@ -35,6 +35,7 @@ export async function moteConnectionOwner(
     authenticationUnknown?: boolean
     avatarChoice?: SpaceIconChoice | null
     renderAvatar?(svg: string): Promise<MoteAvatarImage>
+    chatReadiness?(): Promise<void>
   } = {}
 ) {
   const workspace = {
@@ -156,6 +157,7 @@ export async function moteConnectionOwner(
   }
   const adapter: ConnectionAdapter = {
     adapterId: 'signed-profile',
+    ingress: { adapterId: 'signed-profile', verify: async (_config, raw, proof) => { if (proof !== 'controlled-signed-proof') throw new Error('Original native proof is required'); return JSON.parse(raw) } },
     test: async () => ({
       authentication: { state: 'unknown' },
       transport: { state: 'unknown' },
@@ -221,10 +223,16 @@ export async function moteConnectionOwner(
       }
     }
   const adapters = options.generic ? [adapter] : createBuiltinConnectionAdapters()
+  const chatAgentCalls = { prepare: 0, create: 0, inspect: 0, activity: 0 }
+  const unavailableChatAgent = (kind: keyof typeof chatAgentCalls) => async () => { chatAgentCalls[kind]++; throw new Error('Profile metadata and settings must not create or borrow a Runtime') }
   const connections = await createDesktopConnections({
     directory: join(root, 'connections'),
     encryption,
-    adapters
+    adapters,
+    moteChat: { assertTarget: async target => { if ((await preferences.read({ kind: 'connection', target })).status !== 'ready') throw new Error('The exact original Mote home is unconfirmed') },
+      ...(options.chatReadiness ? { assertReady: options.chatReadiness } : {}),
+      agents: { prepare: unavailableChatAgent('prepare'), create: unavailableChatAgent('create'), inspect: unavailableChatAgent('inspect'), activity: unavailableChatAgent('activity') } },
+    ...(options.generic ? { bindings: { spatial, checkpoint: async () => { throw new Error('Profile settings must not borrow a conversation checkpoint') } }, ingress: { core: () => undefined } } : {})
   })
   const preferences = new MoteConnectionPreferences({
     files: publicFiles,
@@ -243,6 +251,7 @@ export async function moteConnectionOwner(
   }
   const source = new MoteConnectionSourceOwner(sourcePorts)
   const parent = new MoteConnectionOperations({ connections, preferences, source })
+  const moteChat = connections.moteChat!
   const server = new AgentMuxControlServer({
     socketPath: join(root, 'owner.sock'),
     files: publicFiles,
@@ -252,6 +261,7 @@ export async function moteConnectionOwner(
       throw new Error('Only original Mote preference requests are routed by this fixture')
     },
     moteConnections: parent,
+    moteChat,
     connections: connections.connections,
     coreClients: () => {
       throw new Error('No Runtime may be borrowed')
@@ -294,6 +304,8 @@ export async function moteConnectionOwner(
     source,
     sourcePorts,
     parent,
+    moteChat,
+    chatAgentCalls,
     preferences,
     connections,
     adapters,
