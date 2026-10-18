@@ -5,7 +5,7 @@ import { MarkdownCodeBlock } from '@agentmux/client-ui/components/MarkdownCodeBl
 import type { NotebookCell, NotebookMime, NotebookPreview, NotebookReply, NotebookRequest } from '../../lib/file-formats/data-notebook'
 import { FilePreviewState } from '../FilePreviewState'
 import { DataTree } from './StructuredDataPreview'
-import { StaticMarkupPreview } from './StaticMarkupPreview'
+import { StaticMarkupPreview } from '@agentmux/client-ui/components/StaticMarkupPreview'
 import './NotebookFilePreview.css'
 
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
