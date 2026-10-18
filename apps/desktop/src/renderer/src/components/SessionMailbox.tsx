@@ -22,6 +22,7 @@ import { serviceNoticeFingerprint, useReadReceipts, type useServiceNotices } fro
 import { useSessionUserMessages } from '../lib/session-user-messages'
 import { useSessionMessages } from '../lib/use-session-messages'
 import { MailboxA2A } from './MailboxA2A'
+import { useMailboxNotifications } from '../lib/use-mailbox-notifications'
 import { MailboxWorkspaceNavigation, isAgentMessageFolder, type MailboxFolder as Folder, type AgentMessageFolder } from './MailboxWorkspaceNavigation'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import type { AgentSessionControl } from '../../../shared/contracts'
@@ -330,6 +331,8 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
   // The public participant query includes self-addressed records; these two faces explicitly mean other Agents.
   const incoming = useMemo(() => incomingWindow.items.filter(item => item.envelope.senderSessionId !== item.envelope.recipientSessionId), [incomingWindow.items])
   const outgoing = useMemo(() => outgoingWindow.items.filter(item => item.envelope.senderSessionId !== item.envelope.recipientSessionId), [outgoingWindow.items])
+  const notificationMessages = useMemo(() => [...incoming, ...outgoing], [incoming, outgoing])
+  const notifications = useMailboxNotifications(messageReference, notificationMessages)
   const readMessage = useCallback(async (messageId: string) => {
     const result = await api.sessions.readMessage(messageReference, messageId)
     if (result.hostId !== messageReference.hostId) throw new Error('The original message Host changed. Reading is kept; refresh the original Host.')
@@ -562,6 +565,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
             selectedKey={wanted} active={open && visible} loading={window.loading} error={window.error} observationError={window.observationError}
             nextCursor={window.nextCursor} refresh={window.refresh} loadEarlier={window.loadEarlier} readMessage={readMessage}
             onOpen={selectRecord} reading={reading} onCopy={onCopyQueued}
+            renderNotification={message => notifications.render(message, window.refresh)} notificationAttempt={notifications.attempt}
             {...(inputHistory && inputHistory.canFill !== false ? { onFill: inputHistory.fillText } : {})}
             {...(name === 'inbox' ? { renderNavigation: renderA2ANavigation } : {})} />
             : <MailboxEmpty title="The original Agent and Host are not yet known" /> : null}
