@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createBrowserPageDispatch } from '../src/main/browser-page-dispatch.js'
 import { DEFAULT_BROWSER_AGENT_CONTROL, type BrowserAgentControlPreferences } from '../src/shared/browser-agent-control.js'
 
-const native = vi.hoisted(() => ({ views: [] as any[], mode: 'click', key: undefined as string | undefined, onFeedback: undefined as undefined | (() => void), onWaiting: undefined as undefined | (() => Promise<void>), displayFails: false, displayThrows: false, displayAllThrows: false, observe: undefined as undefined | (() => Promise<unknown>), takeover: undefined as undefined | (() => void), deferredCloseId: undefined as number | undefined,
+const native = vi.hoisted(() => ({ views: [] as any[], mode: 'click', key: undefined as string | undefined, onFeedback: undefined as undefined | (() => void), onWaiting: undefined as undefined | (() => Promise<void>), displayFails: false, displayThrows: false, displayAllThrows: false, controlDisplayFails: false, observe: undefined as undefined | (() => Promise<unknown>), takeover: undefined as undefined | (() => void), deferredCloseId: undefined as number | undefined,
   nextLoadURL: undefined as undefined | ((contents: any, url: string) => Promise<void>) }))
 vi.mock('../src/main/browser-page-dispatch.js', async importOriginal => {
   const actual = await importOriginal<typeof import('../src/main/browser-page-dispatch.js')>()
@@ -93,6 +93,7 @@ vi.mock('electron', async () => {
         return call
       })
       if (calls.some(call => call.family === 'unknown')) throw new Error('Unclassified isolated-world script')
+      if (native.controlDisplayFails && calls.some(call => call.family === 'control')) throw new Error('Native control decoration display failure')
       if (native.displayAllThrows && calls.some(call => call.family === 'action' || call.family === 'control')) throw new Error('Persistent native feedback display failure')
       const running = calls.some(call => call.family === 'action' && call.payload.phase === 'running')
       if (native.displayThrows && running) throw new Error('Synchronous native display failure')
@@ -134,7 +135,7 @@ afterEach(async () => {
     expect(view.webContents.displays.filter((call: any) => call.family === 'unknown')).toEqual([])
   }
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
-  native.views.length = 0; native.mode = 'click'; native.key = undefined; native.onFeedback = undefined; native.onWaiting = undefined; native.displayFails = false; native.displayThrows = false; native.displayAllThrows = false; native.observe = undefined; native.takeover = undefined; native.deferredCloseId = undefined; native.nextLoadURL = undefined
+  native.views.length = 0; native.mode = 'click'; native.key = undefined; native.onFeedback = undefined; native.onWaiting = undefined; native.displayFails = false; native.displayThrows = false; native.displayAllThrows = false; native.controlDisplayFails = false; native.observe = undefined; native.takeover = undefined; native.deferredCloseId = undefined; native.nextLoadURL = undefined
 })
 const actionPayloads = (contents: any, start = 0): any[] => contents.displays.slice(start).filter((call: any) => call.family === 'action').map((call: any) => call.payload)
 const controlPayloads = (contents: any): any[] => contents.displays.filter((call: any) => call.family === 'control').map((call: any) => call.payload)
@@ -332,6 +333,111 @@ describe('Browser control decoration through actual Main ownership and presentat
     expect(f.manager.returnControl('browser-one')).toMatchObject({ profileId: 'replacement-profile', navigationId: switched.navigationId,
       control: { owner: 'agent', activeOperationId: null } })
     expect(candidate.isDestroyed()).toBe(false); expect(actionPayloads(candidate)).toEqual([]); expect(candidate.actions).toBe(0)
+    expect(f.sibling.commands).toEqual(f.siblingBefore.commands); expect(f.sibling.scripts).toEqual(f.siblingBefore.scripts)
+  })
+})
+
+describe('control decoration availability through actual Main callbacks', () => {
+  const notice = 'Browser control feedback could not be displayed.'
+
+  it('restores a Return-only failure notice after real operation activity replacements without blocking the action or flooding updates', async () => {
+    const f = await managerFixture()
+    const updates = () => f.events.filter(event => event.type === 'updated' && event.browser.id === 'browser-one')
+    const current = () => updates().at(-1).browser
+    native.controlDisplayFails = true
+    f.manager.returnControl('browser-one')
+    await vi.waitFor(() => expect(current().activity.warning).toContain(notice))
+    expect(current().activity.operation).toBeNull()
+
+    const start = updates().length
+    const report = await f.manager.runScript('browser-one', 'healthy action while control decoration is unavailable')
+    expect(report.outcome.kind).toBe('completed'); expect(f.contents.actions).toBe(1); expect(f.contents.feedbackCalls).toBe(1)
+    await vi.waitFor(() => {
+      expect(current().activity.operation.phase).toBe('completed')
+      expect(current().activity.warning).toContain(notice)
+    })
+    expect(updates().slice(start).some(event => event.browser.activity.operation?.phase === 'running' && event.browser.activity.warning?.includes(notice))).toBe(true)
+    expect(current().activity.warning.split(notice)).toHaveLength(2)
+    expect(report.runOperation?.warning ?? '').not.toContain(notice)
+    expect(f.manager.target('browser-one')).toMatchObject({ status: 'ready', control: { owner: 'agent', activeOperationId: null, inputIsolation: 'isolated' } })
+    expect(f.contents.isDestroyed()).toBe(false); expect(f.contents.attached).toBe(false)
+
+    await new Promise<void>(resolve => setImmediate(resolve))
+    const beforeUpdates = updates().length, beforeDisplays = controlPayloads(f.contents).length
+    for (let attempt = 0; attempt < 3; attempt++) {
+      f.manager.refreshAgentFeedback()
+      await new Promise<void>(resolve => setImmediate(resolve))
+    }
+    expect(controlPayloads(f.contents).length - beforeDisplays).toBe(3)
+    expect(updates()).toHaveLength(beforeUpdates)
+    expect(current().activity.warning.split(notice)).toHaveLength(2)
+
+    native.controlDisplayFails = false
+    f.manager.refreshAgentFeedback()
+    await vi.waitFor(() => expect(current().activity.warning ?? '').not.toContain(notice))
+    expect(f.manager.target('browser-one')?.control?.owner).toBe('agent')
+    expect(f.contents.actions).toBe(1)
+    expect(f.sibling.commands).toEqual(f.siblingBefore.commands); expect(f.sibling.scripts).toEqual(f.siblingBefore.scripts)
+  })
+
+  it('merges control failure with the actual action service warning and clears only its recovered contribution', async () => {
+    const f = await managerFixture()
+    const current = () => f.events.filter(event => event.type === 'updated' && event.browser.id === 'browser-one').at(-1).browser
+    native.controlDisplayFails = true; native.displayThrows = true
+    const report = await f.manager.runScript('browser-one', 'healthy action with independent display failures')
+    expect(report.outcome.kind).toBe('completed'); expect(f.contents.actions).toBe(1)
+    const historyWarning = report.runOperation?.warning
+    expect(historyWarning).toContain('Browser action feedback could not be displayed')
+    await vi.waitFor(() => {
+      expect(current().activity.warning).toContain(historyWarning)
+      expect(current().activity.warning).toContain(notice)
+    })
+    expect(current().activity.warning.split(notice)).toHaveLength(2)
+    native.controlDisplayFails = false; native.displayThrows = false
+    f.manager.refreshAgentFeedback()
+    await vi.waitFor(() => expect(current().activity.warning).toBe(historyWarning))
+    expect(report.runOperation?.warning).toBe(historyWarning)
+    expect(current().activity.operation.warning).toBe(historyWarning)
+    expect(f.manager.target('browser-one')).toMatchObject({ status: 'ready', control: { owner: 'agent', activeOperationId: null } })
+    expect(f.contents.actions).toBe(1); expect(f.contents.isDestroyed()).toBe(false)
+    expect(f.sibling.commands).toEqual(f.siblingBefore.commands); expect(f.sibling.scripts).toEqual(f.siblingBefore.scripts)
+  })
+
+  it.each([true, false])('ignores a late old-view availability=%s result after Profile commit', async staleAvailable => {
+    const f = await managerFixture()
+    f.manager.returnControl('browser-one')
+    await vi.waitFor(() => expect(controlPayloads(f.contents).at(-1)?.active).toBe(true))
+    const pending: Array<() => void> = []
+    const execute = f.contents.executeJavaScriptInIsolatedWorld.bind(f.contents)
+    f.contents.executeJavaScriptInIsolatedWorld = (world: number, scripts: Array<{ code: string }>) => {
+      const result = execute(world, scripts)
+      if (!scripts.some(script => script.code.includes('__agentMuxBrowserControlFeedback')) || controlPayloads(f.contents).at(-1)?.active !== false) return result
+      return new Promise((resolve, reject) => pending.push(() => staleAvailable ? resolve(true) : reject(new Error('Late old-view clear failure'))))
+    }
+    native.deferredCloseId = f.contents.id
+    f.manager.takeControl('browser-one')
+    const switched = await f.manager.switchProfile('browser-one', 'replacement-profile')
+    const replacement = f.manager.nativeOwner('browser-one')!.view.webContents as any
+    expect(replacement).not.toBe(f.contents); expect(pending.length).toBeGreaterThan(0)
+    native.controlDisplayFails = staleAvailable
+    f.manager.returnControl('browser-one')
+    const updates = () => f.events.filter(event => event.type === 'updated' && event.browser.id === 'browser-one')
+    const current = () => updates().at(-1).browser
+    await vi.waitFor(() => {
+      expect(controlPayloads(replacement).at(-1)?.active).toBe(true)
+      if (staleAvailable) expect(current().activity.warning).toContain(notice)
+      else expect(current().activity.warning ?? '').not.toContain(notice)
+    })
+    await new Promise<void>(resolve => setImmediate(resolve))
+    const warning = current().activity.warning, count = updates().length
+    pending.forEach(finish => finish())
+    await new Promise<void>(resolve => setImmediate(resolve))
+    expect(updates()).toHaveLength(count); expect(current().activity.warning).toBe(warning)
+    expect(current()).toMatchObject({ navigationId: switched.navigationId, profileId: 'replacement-profile',
+      control: { owner: 'agent', activeOperationId: null } })
+    expect(f.manager.nativeOwner('browser-one')?.view.webContents).toBe(replacement)
+    expect(replacement.isDestroyed()).toBe(false)
+    f.contents.finishClose()
     expect(f.sibling.commands).toEqual(f.siblingBefore.commands); expect(f.sibling.scripts).toEqual(f.siblingBefore.scripts)
   })
 })

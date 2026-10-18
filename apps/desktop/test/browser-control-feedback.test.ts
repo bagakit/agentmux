@@ -82,15 +82,15 @@ describe('Browser/view feedback owner lifecycle', () => {
     let active = true, revision = 0, navigationId = 'one'
     let preferences = { ...DEFAULT_BROWSER_AGENT_CONTROL }
     const execute = vi.fn(async (_world: number, scripts: { code: string }[]) => new Function('return ' + scripts[0]!.code)())
-    const warn = vi.fn()
+    const warn = vi.fn(), report = vi.fn()
     const contents = { executeJavaScriptInIsolatedWorld: execute, isDestroyed: () => false }
     const feedback = new BrowserControlFeedback({ contents, browserId: 'original-browser', ownerId: 'original-view-epoch',
       navigationId: () => navigationId,
-      preferences: () => preferences, nextRevision: () => ++revision, isCurrent: () => active, warn })
+      preferences: () => preferences, nextRevision: () => ++revision, isCurrent: () => active, report })
     const action = showBrowserOperationFeedback({ contents, operationId: 'original-operation',
       navigationId: () => navigationId, operatorName: 'Original operator', preferences: () => preferences,
       nextRevision: () => ++revision, isCurrent: () => active, warn })
-    return { feedback, action, execute, warn, setActive: (value: boolean) => { active = value },
+    return { feedback, action, execute, warn, report, setActive: (value: boolean) => { active = value },
       setNavigation: (value: string) => { navigationId = value },
       setPreferences: (value: typeof preferences) => { preferences = value } }
   }
@@ -139,9 +139,9 @@ describe('Browser/view feedback owner lifecycle', () => {
     original.execute.mockImplementationOnce((_world, scripts) => new Promise(() => { late = () => new Function('return ' + scripts[0]!.code)() }))
     const observing = original.feedback.synchronize()
     await vi.advanceTimersByTimeAsync(121); await observing
-    expect(original.warn).toHaveBeenCalledTimes(1); expect(late?.()).toBe(false); expect(state()).toBeUndefined()
+    expect(original.report.mock.calls).toEqual([[false]]); expect(late?.()).toBe(false); expect(state()).toBeUndefined()
     await original.feedback.synchronize()
-    expect(state().host).not.toBeNull(); expect(original.warn).toHaveBeenCalledTimes(1)
+    expect(state().host).not.toBeNull(); expect(original.report.mock.calls).toEqual([[false], [true]])
   })
 
   it('does not let an old clear acknowledgement suppress cleanup of a newer active publication', async () => {
@@ -154,7 +154,9 @@ describe('Browser/view feedback owner lifecycle', () => {
     original.setActive(false); const clearing = original.feedback.synchronize()
     original.setActive(true); await original.feedback.synchronize()
     expect(state().host).not.toBeNull()
+    const reports = [...original.report.mock.calls]
     release!(); await clearing
+    expect(original.report.mock.calls).toEqual(reports)
     original.setActive(false); await original.feedback.synchronize()
     expect(state().host).toBeNull()
   })
@@ -165,7 +167,38 @@ describe('Browser/view feedback owner lifecycle', () => {
     original.execute.mockImplementationOnce(() => new Promise(() => {}))
     original.setActive(false); const clearing = original.feedback.synchronize()
     await vi.advanceTimersByTimeAsync(121); await clearing
-    expect(state().host).toBe(live); expect(original.warn).toHaveBeenCalledTimes(1)
+    expect(state().host).toBe(live); expect(original.report.mock.calls).toEqual([[true], [false]])
     await original.feedback.synchronize(); expect(state().host).toBeNull()
+    expect(original.report.mock.calls).toEqual([[true], [false], [true]])
+  })
+
+  it('reports each current failure and later recovery, including a failed explicit hide', async () => {
+    const original = owner()
+    original.execute.mockRejectedValueOnce(new Error('Control decoration unavailable'))
+    await original.feedback.synchronize()
+    original.execute.mockRejectedValueOnce(new Error('Control decoration still unavailable'))
+    await original.feedback.synchronize()
+    expect(original.report.mock.calls).toEqual([[false], [false]])
+    await original.feedback.synchronize()
+    expect(state().host).not.toBeNull(); expect(original.report.mock.calls).toEqual([[false], [false], [true]])
+    original.execute.mockRejectedValueOnce(new Error('Control clear unavailable'))
+    await original.feedback.hide()
+    expect(state().host).not.toBeNull(); expect(original.report).toHaveBeenLastCalledWith(false)
+    await original.feedback.hide()
+    expect(state().host).toBeNull(); expect(original.report).toHaveBeenLastCalledWith(true)
+    expect(original.warn).not.toHaveBeenCalled()
+  })
+
+  it.each([true, false])('does not report a superseded %s result over the current publication', async staleResult => {
+    const original = owner(); let finish!: (available: boolean) => void
+    original.execute.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const old = original.feedback.synchronize()
+    if (staleResult) original.execute.mockRejectedValueOnce(new Error('Current publication failed'))
+    await original.feedback.synchronize(true)
+    expect(original.report.mock.calls).toEqual([[!staleResult]])
+    const live = state()?.host
+    finish(staleResult); await old
+    expect(original.report.mock.calls).toEqual([[!staleResult]])
+    expect(state()?.host).toBe(live)
   })
 })
