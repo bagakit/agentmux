@@ -1,3 +1,4 @@
+import { unwrapSessionInputOperationResult } from '../shared/session-input-result.js'
 import { createPreloadConversationRead } from './conversation-read'
 import { WORKBENCH_WINDOW_REQUEST, WORKBENCH_WINDOW_RESPONSE, WORKBENCH_WINDOW_CHANGED } from '../shared/workbench-windows'
 import { createPreloadNotebookObservation } from './notebook-observation'
@@ -200,7 +201,7 @@ const api: AgentMuxPreloadApi = {
     call: (method, params) => ipcRenderer.invoke('applications:call', method, params)
   },
   connections: {
-    call: (method, params) => ipcRenderer.invoke('connections:call', method, params),
+    call: async (method, params) => unwrapSessionInputOperationResult(await ipcRenderer.invoke('connections:call', method, params)),
     storeCredential: input => ipcRenderer.invoke('connections:storeCredential', input),
     inspectCredential: operationId => ipcRenderer.invoke('connections:inspectCredential', operationId)
   },
