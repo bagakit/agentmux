@@ -25,6 +25,7 @@ import { AgentCollaborationGraph, COLLABORATION_LABELS, type CollaborationSelect
 import { MailboxA2A } from './MailboxA2A'
 import type { CollaborationMapTarget } from '../lib/collaboration-map-navigation'
 import { useFocusHistorySources } from '../lib/focus-history-sources'
+import { useCollaborationIdentities, resolveCollaborationIdentities } from '../lib/use-collaboration-identities'
 import { CollaborationMapToolbar } from './CollaborationMapToolbar'
 import { collaborationAgentPresentation, collaborationAgentName } from '../lib/collaboration-map-presentation'
 
@@ -98,15 +99,19 @@ function CollaborationReadingMap({ request, visible, onOpen, onViewInFocus }: { 
   const activityScope = useRef<ReadonlySet<string>>(new Set())
   const reading = useCollaborationReading(subjects, enabled, activityScope)
   const project = useMemo(createCollaborationProjector, [])
-  const recorded = useMemo(() => project(reading.facts), [project, reading.facts])
+  const recorded = useMemo(() => project(reading.facts, history.sources), [project, reading.facts, history.sources])
+  const metadata = useCollaborationIdentities(recorded.agents, wanted, catalog.agents, enabled, facts.config?.hosts)
+  const resolved = useMemo(() => resolveCollaborationIdentities(recorded, metadata.reads), [recorded, metadata.reads])
+  const descriptors = useMemo(() => new Map([...resolved.sources, ...catalog.history]), [resolved.sources, catalog.history])
+  const contextDemand = useMemo(() => new Set([...wanted].map(id => resolved.aliases.get(id) ?? id)), [wanted, resolved.aliases])
   const contextCache = useRef(new Map<string, { session: Facts['sessions'][number] | AgentSessionHistoryDescriptor; name: string | undefined; workspace: ReturnType<typeof workspaceForSession>; topicId: ReturnType<typeof topicIdForSession>; context: FocusContext }>())
   const previousContexts = useRef<FocusContext[]>([])
   const contexts = useMemo(() => {
     const topics = scratchTopicsForConfig(facts.config, facts.scratchTopicSnapshots)
-    const rows = [...wanted].flatMap(id => {
+    const rows = [...contextDemand].flatMap(id => {
       const session = catalog.sessions.get(id)
       if (!session || session.kind !== 'agent') {
-        const source = catalog.history.get(id)
+        const source = descriptors.get(id)
         if (!source) return []
         const key = JSON.stringify([source.hostId, source.agentSessionId]), old = contextCache.current.get(key), name = facts.names[source.agentSessionId]
         if (old?.session === source && old.name === name) return [old.context]
@@ -122,22 +127,22 @@ function CollaborationReadingMap({ request, visible, onOpen, onViewInFocus }: { 
       return [context]
     })
     const presentations = new Set([...catalog.sessions.values()].map(session => JSON.stringify([session.hostId, session.id])))
-    for (const key of contextCache.current.keys()) if (!presentations.has(key) && !catalog.history.has(key)) contextCache.current.delete(key)
+    for (const key of contextCache.current.keys()) if (!presentations.has(key) && !descriptors.has(key)) contextCache.current.delete(key)
     if (previousContexts.current.length !== rows.length || rows.some((row, index) => row !== previousContexts.current[index])) previousContexts.current = rows
     return previousContexts.current
-  }, [catalog.sessions, catalog.history, facts.config, facts.scratchTopicSnapshots, facts.names, wanted])
+  }, [catalog.sessions, descriptors, facts.config, facts.scratchTopicSnapshots, facts.names, contextDemand])
   const originals = useMemo(() => {
     const result = collaborationAgents([...contextCache.current.values()].map(value => value.context))
     for (const { context } of contextCache.current.values()) if (!context.control) {
       const id = collaborationSubjectKey({ hostId: context.hostId, agentSessionId: context.id })
-      const agent = catalog.agents.get(id)
-      if (agent && catalog.history.has(id) && !catalog.sessions.has(id)) result.set(id, { ...agent, context })
+      const agent = catalog.agents.get(id) ?? resolved.agents.get(id)
+      if (agent && descriptors.has(id) && !catalog.sessions.has(id)) result.set(id, { ...agent, context })
     }
     return result
-  }, [contexts, catalog.agents, catalog.history, catalog.sessions])
+  }, [contexts, catalog.agents, descriptors, catalog.sessions, resolved.agents])
   const overlays = useRef(new Map<string, { base: CollaborationAgent | undefined; context: FocusContext | undefined; agent: CollaborationAgent }>())
   const agents = useMemo(() => {
-    const result = new Map([...recorded.agents, ...catalog.agents])
+    const result = new Map([...resolved.agents, ...catalog.agents])
     for (const [id, agent] of originals) {
       const base = result.get(id), old = overlays.current.get(id)
       const merged = old && old.base === base && old.context === agent.context ? old.agent : { ...base, ...agent }
@@ -145,10 +150,11 @@ function CollaborationReadingMap({ request, visible, onOpen, onViewInFocus }: { 
     }
     for (const id of overlays.current.keys()) if (!originals.has(id)) overlays.current.delete(id)
     return result
-  }, [recorded.agents, catalog.agents, originals])
-  const projection = useMemo(() => ({ ...recorded, agents }), [recorded, agents])
+  }, [resolved.agents, catalog.agents, originals])
+  const projection = useMemo(() => ({ ...resolved, agents }), [resolved, agents])
   // The notification scope follows original displayed identities; it never expands history/body demand.
   activityScope.current = useMemo(() => new Set([...agents.values()].flatMap(agent => agent.subject ? [collaborationSubjectKey(agent.subject)] : [])), [agents])
+  const resolvedSelection = selection ? { ...selection, id: resolved.aliases.get(selection.id) ?? selection.id } : null
   const members = useMemo(() => new Set(areas.flatMap(area => area.members)), [areas])
   const relations = useMemo(() => visibleCollaboration(projection.relations, members, kinds), [projection, members, kinds])
   const identitySelector = useMemo(createFocusContextIdentitySelector, []), goalSelector = useMemo(createFocusGoalLinksSelector, [])
@@ -158,8 +164,9 @@ function CollaborationReadingMap({ request, visible, onOpen, onViewInFocus }: { 
     retainedIdentities.current = identitySelector(workbenchSelectionCatalog(state), state.tabs, contexts, state.config, state.layouts, agentRegionExecution)
     return retainedIdentities.current
   })), goals = useAppStore(state => goalSelector(state, enabled))
-  const selectedAgent = selection?.kind === 'agent' ? projection.agents.get(selection.id) : undefined
-  const selectedRelation = selection?.kind === 'relation' ? projection.relations.find(relation => relation.id === selection.id) : undefined
+  const selectedAgent = resolvedSelection?.kind === 'agent' ? projection.agents.get(resolvedSelection.id) : undefined
+  const selectedMetadata = selectedAgent ? [...metadata.reads].find(([id]) => (resolved.aliases.get(id) ?? id) === selectedAgent.id) : undefined
+  const selectedRelation = resolvedSelection?.kind === 'relation' ? projection.relations.find(relation => relation.id === resolvedSelection.id) : undefined
   const [navigation, setNavigation] = useState<{ context: FocusContext; locations: WorkbenchProjectionSelection[] } | null>(null)
   const open = useCallback((context: FocusContext) => {
     const locations = collaborationWorkfaces(useAppStore.getState(), context, agentRegionExecution)
@@ -167,8 +174,9 @@ function CollaborationReadingMap({ request, visible, onOpen, onViewInFocus }: { 
     else setNavigation({ context, locations })
   }, [onOpen])
   const issues = reading.sources.reduce((count, source) => count + Object.keys(source.issues).length + Number(Boolean(source.observationIssue)), Number(Boolean(history.error)))
-  const sourceIssues = issues + Number(Boolean(scope.issue)) + areas.filter(area => area.issue).length
-  const loading = history.loading || reading.sources.some(source => source.loading.length)
+  const metadataIssues = [...metadata.reads].filter(([, read]) => read.issue)
+  const sourceIssues = issues + metadataIssues.length + Number(Boolean(scope.issue)) + areas.filter(area => area.issue).length
+  const loading = history.loading || reading.sources.some(source => source.loading.length) || [...metadata.reads.values()].some(read => read.loading)
   const mapPresentation = useMemo(() => ({ active: enabled, retainedRegionId: null }), [enabled])
   const locateAgent = useCallback((id: string) => { setSelection({ kind: 'agent', id }); setLocate({ token: {}, agentId: id }); setSourcesOpen(false); setNavigation(null) }, [])
   const select = useCallback((value: CollaborationSelection) => { setSelection(value); setSourcesOpen(false); setNavigation(null) }, [])
@@ -176,8 +184,8 @@ function CollaborationReadingMap({ request, visible, onOpen, onViewInFocus }: { 
   return <WorkbenchPresentationContext.Provider value={mapPresentation}><section className="collaboration-map" data-desktop-focus-view="map" aria-label="Agent map" hidden={!visible} inert={!visible}>
       <CollaborationMapToolbar active={enabled} agents={projection.agents} selectedKinds={kinds} onToggleKind={kind => setKinds(previous => { const next = new Set(previous); if (!next.delete(kind)) next.add(kind); return next })}
         onLocate={locateAgent} sourcesOpen={sourcesOpen} onSources={() => { setSourcesOpen(value => !value); setNavigation(null) }} issues={sourceIssues} loading={loading} connections={relations.length} participants={subjects.length}
-        onRefresh={() => { history.refresh(); for (const subject of subjects) reading.act(subject, 'refresh') }} />
-      <div className="collaboration-map__body"><div className="collaboration-map__world"><button type="button" className="collaboration-map__locate" title="Locate original context" onClick={() => setLocate({ token: {}, ...(subjectKey ? { agentId: subjectKey } : { areaIds: scope.current }) })}><SemanticIcon name="action.locate" size={14} /><span>{request.kind === 'focus' ? request.name : scope.title}</span></button><AgentCollaborationGraph active={enabled} locate={locate} onVisibleAgents={reportVisible} peeked={peeked} onPreviewAgent={previewAgent} agents={projection.agents} areas={areas} relations={relations} pulses={enabled ? reading.pulses : []} selection={selection} onSelect={select} onOpen={open} identities={identities} goals={goals} /></div>
+        onRefresh={() => { history.refresh(); for (const [id] of metadataIssues) metadata.retry(id); for (const subject of subjects) reading.act(subject, 'refresh') }} />
+      <div className="collaboration-map__body"><div className="collaboration-map__world"><button type="button" className="collaboration-map__locate" title="Locate original context" onClick={() => setLocate({ token: {}, ...(subjectKey ? { agentId: subjectKey } : { areaIds: scope.current }) })}><SemanticIcon name="action.locate" size={14} /><span>{request.kind === 'focus' ? request.name : scope.title}</span></button><AgentCollaborationGraph active={enabled} locate={locate} onVisibleAgents={reportVisible} peeked={peeked} onPreviewAgent={previewAgent} agents={projection.agents} areas={areas} relations={relations} pulses={enabled ? reading.pulses : []} selection={resolvedSelection} onSelect={select} onOpen={open} identities={identities} goals={goals} /></div>
         <aside className="collaboration-inspector" aria-label="Collaboration details" hidden={!selection && !sourcesOpen && !navigation}><button type="button" className="icon-button collaboration-inspector__close" aria-label="Close map details" onClick={() => { setSelection(null); setSourcesOpen(false); setNavigation(null) }}><SemanticIcon name="action.close" size={14} /></button>
           {scope.issue || areas.some(area => area.issue) ? <section className="collaboration-area-issues" aria-label="Area membership issues" role="status">{scope.issue ? <p>{scope.issue}</p> : null}{areas.filter(area => area.issue).map(area => <p key={area.id}><strong>{area.name}</strong> · {area.issue}</p>)}</section> : null}
           {navigation ? <section className="collaboration-navigation" aria-label="Original workface locations"><h4>{navigation.context.name}</h4>{navigation.locations.length ? <><p>Choose a workface.</p>{navigation.locations.map(location => <button key={JSON.stringify(location)} type="button" className="small-button" onClick={() => {
@@ -190,6 +198,7 @@ function CollaborationReadingMap({ request, visible, onOpen, onViewInFocus }: { 
             <p>{loading ? 'Reading original records…' : `${reading.sources.length} participants observed`} · Loaded records only</p>
             {selection ? <button type="button" className="small-button" onClick={() => setSourcesOpen(false)}><SemanticIcon name="navigation.previous" size={13} />Back to selection</button> : null}
             <div className="collaboration-sources">{reading.sources.map(source => <Source key={collaborationSubjectKey(source.subject)} source={source} onAction={action => reading.act(source.subject, action)} />)}</div>
+            {metadataIssues.map(([id, read]) => <p role="status" key={id}>{read.reference.agentSessionId}: {read.issue}<button type="button" className="small-button" onClick={() => metadata.retry(id)}>Retry identity</button></p>)}
             {history.error ? <p role="status">History: {history.error}<button type="button" className="small-button" onClick={history.refresh}>Retry history</button></p> : null}
           </> : null}
           <div hidden={sourcesOpen} inert={sourcesOpen}>{selectedAgent ? <>
@@ -198,6 +207,9 @@ function CollaborationReadingMap({ request, visible, onOpen, onViewInFocus }: { 
               onClick={() => onViewInFocus(selectedAgent.subject!, selectedAgent.context?.id)}>View in Focus <SemanticIcon name="action.open-external" size={12} /></button> : null}<button type="button" className="small-button" onClick={() => locateAgent(selectedAgent.id)}><SemanticIcon name="action.locate" size={13} />Locate</button>
               {selectedAgent.context?.control ? <button type="button" className="small-button" onClick={() => open(selectedAgent.context!)}>Open workface <SemanticIcon name="action.open-external" size={12} /></button> : null}</div>
             <details className="collaboration-identity"><summary>Identity</summary><p>{selectedAgent.provenance ?? selectedAgent.subject?.hostId} · <code>{selectedAgent.sessionId}</code></p>{!selectedAgent.context?.control ? <p>Original workface is not confirmed by this record.</p> : null}</details>
+            {selectedMetadata?.[1].loading ? <p role="status">Reading original identity…</p> : selectedMetadata?.[1].issue ? <p role="status">{selectedMetadata[1].issue}<button type="button" className="small-button" onClick={() => metadata.retry(selectedMetadata[0])}>Retry identity</button></p> : null}
+            {descriptors.get(selectedAgent.id)?.history ? <dl className="collaboration-identity"><dt>Provider</dt><dd>{descriptors.get(selectedAgent.id)!.history!.providerId}</dd><dt>Workspace</dt><dd>{descriptors.get(selectedAgent.id)!.history!.workspacePath}</dd></dl> : null}
+            {!members.has(selectedAgent.id) ? <p>Area membership is unconfirmed.</p> : null}
             <h4>Relations <span>{agentRelations.length}</span></h4>{agentRelations.length ? agentRelations.map(relation => <RelationButton key={relation.id} relation={relation} agents={projection.agents} subjectId={selectedAgent.id} onSelect={select} />) : <p>No recorded relations in the loaded window.</p>}
           </> : selectedRelation ? <>
             <div className="collaboration-inspector__heading"><span className="collaboration-inspector__eyebrow">Relation</span><h3>{COLLABORATION_LABELS[selectedRelation.kind]}</h3></div>
