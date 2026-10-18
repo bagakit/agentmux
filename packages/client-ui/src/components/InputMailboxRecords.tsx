@@ -10,13 +10,15 @@ import { useClientUiPlatform } from '../platform.js'
 import { inputMailboxItemKey, type useAgentInputMailbox } from '../lib/use-agent-input-mailbox.js'
 import { AGENTMUX_SYSTEM_SPEAKER_ID, speakerOfUserMessage, externalSpeakerLabel, type ConversationSpeaker } from '../lib/conversation-speaker.js'
 
-export function inputMailboxPresentation(item: AgentInputMailboxItem): Pick<ConversationMessageProps, 'inputContext' | 'inputContextSource' | 'copyText'> & { text: string | null; contentBoundary: ConversationContentBoundary; speaker: ConversationSpeaker; source: string; state: string; a2aNotificationId?: string } {
+export function inputMailboxPresentation(item: AgentInputMailboxItem): Pick<ConversationMessageProps, 'inputContext' | 'inputContextSource' | 'copyText'> & { text: string | null; previewText?: string; contentBoundary: ConversationContentBoundary; speaker: ConversationSpeaker; source: string; state: string; a2aNotificationId?: string } {
   const author = sessionInputMailboxAuthor(item)
   const speaker = author.kind === 'system' ? { role: 'system' as const, id: AGENTMUX_SYSTEM_SPEAKER_ID } : speakerOfUserMessage({ author })
   if (item.kind === 'controlled') {
     const original = item.intent.source, sender = item.message?.sender
-    const originalWire = original.kind === 'message' ? item.receipt?.admission?.admission?.intent?.prompt : undefined
-    return { text: original.kind === 'prompt' ? original.prompt : item.message?.body ?? null, contentBoundary: 'body', speaker,
+    const originalWire = original.kind === 'message' ? original.promptWire ?? item.receipt?.admission?.admission?.intent?.prompt : undefined
+    const quoted = original.kind === 'message' && item.message?.channelQuote !== undefined
+    return { text: original.kind === 'prompt' ? original.prompt : quoted ? originalWire ?? null : item.message?.body ?? null,
+      ...(quoted ? { previewText: item.message!.body } : {}), contentBoundary: quoted ? 'wire' : 'body', speaker,
       ...(original.kind === 'prompt' ? { inputContext: original.inputContext, inputContextSource: original.inputContextSource, ...(original.promptWire === undefined ? {} : { copyText: original.promptWire }) } : originalWire === undefined ? {} : { copyText: originalWire }),
       source: sender?.kind === 'external' ? sender.actor.application.domain : original.kind === 'prompt' ? original.sourceChannel ?? '原提交' : item.sourceChannel ?? '原消息',
       state: item.receipt ? presentMessageDeliveryFailure({ error: null, inputReceipt: item.receipt }).title : '原输入观察未确认' }
@@ -50,7 +52,7 @@ export function InputMailboxRecord({ item, hostId, failed, reading, onCopy, comp
   const author = view.speaker.role === 'external' ? externalSpeakerLabel(view.speaker) : view.speaker.role === 'agent' ? view.speaker.id : view.speaker.role === 'system' ? 'AgentMux' : view.speaker.role === 'human' ? 'Human' : 'Author unknown'
   const described = compact && view.speaker.role !== 'unknown' ? reading?.describeSpeaker?.(view.speaker, 18) : undefined
   const label = described?.name || author
-  const previewText = view.text ?? group?.primary?.content ?? null
+  const previewText = view.previewText ?? view.text ?? group?.primary?.content ?? null
   const prefix = compact ? previewText?.slice(0,240) ?? '' : ''
   const preview = compact && view.text !== null && view.contentBoundary === 'wire' ? parseAgentMuxMessagePrefix(prefix)?.body?.trim() || prefix : prefix
   const detailId = `${id}-${encodeURIComponent(key)}`
