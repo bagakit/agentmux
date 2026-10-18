@@ -1,4 +1,6 @@
 import { createElement } from 'react'
+import { DEFAULT_MOTE_FACE } from '../../../src/shared/mote-avatars'
+import { topicSpaceIconTarget } from '../../../src/renderer/src/lib/space-object-appearance'
 import { createClientUiRoot } from '../../../test/helpers/client-ui-render'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { conversationRevision, parseConversationReadPage, projectConversationTimeline, type ConversationTimelineReadInput } from '@agentmux/core/conversation'
@@ -102,22 +104,25 @@ api.control.onRequest = listener => {
 const originalConfig = await api.config.get(), originalSnapshot = await api.sessions.snapshot()
 const base = originalSnapshot.sessions.find((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => session.kind === 'agent')
 if (!base || !originalConfig.workspaces[0]) throw Error('Nonempty typed platform samples required')
+const scenario = new URLSearchParams(location.search).get('scenario')
+const perception = scenario === 'perception' || scenario === 'perception-scale'
 const now = Date.now(), hostId = 'local', incarnation = 'fixture-collaboration-journal'
 const projects: WorkspaceRecord[] = [
-  { ...originalConfig.workspaces[0], id: 'fixture-protocol', hostId, name: 'Agent protocol', path: fixturePath('private/graph/protocol'), repoPath: fixturePath('private/graph/protocol'), kind: 'folder' as const },
+  { ...originalConfig.workspaces[0], id: 'fixture-protocol', hostId, name: perception ? 'AgentMux · 多 Agent 协作与持久会话' : 'Agent protocol', path: fixturePath('private/graph/protocol'), repoPath: fixturePath('private/graph/protocol'), kind: 'folder' as const },
   { ...originalConfig.workspaces[0], id: 'fixture-worktree', hostId, name: 'Delivery worktree', path: fixturePath('private/graph/protocol/.worktrees/delivery'), repoPath: fixturePath('private/graph/protocol'), kind: 'worktree' as const },
   { ...originalConfig.workspaces[0], id: SCRATCH_WORKSPACE_ID, hostId, name: 'Topics', path: fixturePath('private/graph/topics'), kind: 'folder' as const }
 ]
 const scratch = projects[2]!
-const background = Array.from({ length: 8 }, (_, index): WorkspaceRecord => ({ id: 'fixture-background-' + index, hostId, name: 'Independent work ' + (index + 1), path: fixturePath('private/graph/independent/' + index), kind: 'folder' }))
-const emptyProjects = Array.from({ length: 60 }, (_, index): WorkspaceRecord => ({ id: 'fixture-empty-' + index, hostId, name: index % 3 ? 'Unassigned project ' + (index + 1) : '归档与材料 ' + (index + 1), path: fixturePath('private/graph/empty/' + index), kind: 'folder' }))
+const background = Array.from({ length: 8 }, (_, index): WorkspaceRecord => ({ id: 'fixture-background-' + index, hostId, name: perception ? ['FlowLens 数据工作台', 'Pageville', '工作流与工具', 'Cloudflare 域名与邮件', '个人知识库', 'Farm', '设计素材', '研究记录'][index]! : 'Independent work ' + (index + 1), path: fixturePath('private/graph/independent/' + index), kind: 'folder' }))
+const emptyProjects = Array.from({ length: scenario === 'perception' ? 6 : 60 }, (_, index): WorkspaceRecord => ({ id: 'fixture-empty-' + index, hostId, name: index % 3 ? 'Unassigned project ' + (index + 1) : '归档与材料 ' + (index + 1), path: fixturePath('private/graph/empty/' + index), kind: 'folder' }))
 const singletonProjects = Array.from({ length: 12 }, (_, index): WorkspaceRecord => ({ id: 'fixture-singleton-' + index, hostId, name: 'Independent contributor ' + (index + 1), path: fixturePath('private/graph/singleton/' + index), kind: 'folder' }))
+if (perception) Object.assign(emptyProjects[0]!, { hostId: 'fixture-remote', name: 'Remote · 模型评测服务' })
 projects.push(...background, ...singletonProjects, ...emptyProjects)
 const category = { categoryId: '11111111-1111-4111-8111-111111111111', hostId,
   spaceId: directoryIdentity(hostId, fixturePath('private/graph/categories/quality')), directoryPath: fixturePath('private/graph/categories/quality'), title: 'Product quality', revision: null }
 const topics: ScratchTopicSnapshot[] = [
-  { id: 'view:graph-review', title: 'Read model notes', kind: 'topic', physicalDirectoryPath: fixturePath('private/graph/objects/read-model') },
-  { id: 'view:graph-design', title: 'Interaction design', kind: 'mote', physicalDirectoryPath: fixturePath('private/graph/objects/interaction') }
+  { id: 'view:graph-review', title: perception ? '消息协议与可观测性' : 'Read model notes', kind: 'topic', physicalDirectoryPath: fixturePath('private/graph/objects/read-model') },
+  { id: 'view:graph-design', title: perception ? '产品设计师' : 'Interaction design', kind: 'mote', physicalDirectoryPath: fixturePath('private/graph/objects/interaction') }
 ].map(value => { const directoryPath = scratchTopicDirectoryName(value.id)
   return { ...value, directoryPath, identityDirectoryPath: scratch.path + '/' + directoryPath,
     confirmedDirectoryPaths: [scratch.path + '/' + directoryPath, value.physicalDirectoryPath], topicPath: directoryPath + '/topic.md', summary: '', collaborators: [],
@@ -170,7 +175,7 @@ const timelines: Record<string, AgentTimelineSnapshot> = Object.fromEntries(iden
     stream: { epoch: 'fixture-stream-' + id, revision: 2, sequence: 2, origin: 'beginning', gaps: [],
       positions: items.map((item, at) => ({ id: item.id, firstSequence: at + 1, sequence: at + 1, revision: conversationRevision(item) })) } }]
 }))
-const config = { ...originalConfig, hosts: originalConfig.hosts.filter(host => host.id === hostId), workspaces: projects,
+const config = { ...originalConfig, hosts: [...originalConfig.hosts.filter(host => host.id === hostId), ...(perception ? [{ id: 'fixture-remote', label: 'Research Lab', kind: 'ssh' as const, hostname: 'capture.invalid' }] : [])], workspaces: projects,
   appearance: { ...originalConfig.appearance, appAppearance: 'dark' as const }, focus: { recentActivityHours: 48 as const, ...originalConfig.focus, previewTrigger: 'quick' as const } }
 const tabs = Object.fromEntries(originalSessions.map((session, at) => {
   const workspace = projects[at < 2 ? at : 2]!, topic = at < 2 ? undefined : topics[at - 2]
@@ -183,7 +188,9 @@ const layouts = Object.fromEntries(projects.map((project, area) => [project.id, 
 const initialSpatial = await api.spatial.read()
 await api.spatial.commit({ expectedRevision: initialSpatial?.revision ?? 0,
   graph: desktopSpatialGraph({ ...useAppStore.getState(), config, sessions, tabs, layouts, spaceZoneBindings: bindings, topicCategories: [category] }, topics) })
-api.config.get = async () => structuredClone(config)
+// Use the original preview ConfigOwner, including optimistic edit and change
+// publication. Map and Settings save through the same original consumer boundary.
+await api.config.save(config, originalConfig)
 api.sessions.snapshot = async () => { reads.push({ kind: 'snapshot' }); return { sessions: structuredClone(sessions), timelines: structuredClone(timelines), recoveryCandidates: [] } }
 api.sessions.timeline = async control => structuredClone(originalTimeline(control.agentSessionId))
 const relationOnly: AgentSessionHistoryDescriptor = { agentSessionId: 'fixture-relationship-only', hostId, state: 'retired', retiredAt: now - 86400000,
@@ -390,11 +397,13 @@ Object.assign(window, { graphCapture: {
   },
   prepare() {
     useAppStore.setState({ activeWorkspaceId: projects[0]!.id, mainSurface: 'workbench', toolsOpen: true, projectRailOpen: true,
+      ...(perception ? { spaceObjectIcons: { ...useAppStore.getState().spaceObjectIcons, [topicSpaceIconTarget(scratch, topics[1]!, bindings)!.key]: { ...DEFAULT_MOTE_FACE, palette: 'peach' as const, accessory: 'glasses' as const } } } : {}),
       agentNames: Object.fromEntries(identities.map(([id, name]) => [id, name])), agentComposerDrafts: { 'fixture-ui': 'Original unsent reply · retain this exact draft.' } })
     useAppStore.getState().focusRegion(projects[0]!.id, 'tab-fixture-ui', 'region-fixture-ui', 'pointer', 'group-0')
   },
   remember() { originalState = useAppStore.getState(); originalDraft = document.querySelector('[data-fixture-session="fixture-ui"] textarea'); originalDraft?.setSelectionRange(4, 12) },
-  appearance(appAppearance: 'dark' | 'light') { useAppStore.setState(state => ({ config: state.config ? { ...state.config, appearance: { ...state.config.appearance, appAppearance } } : null })) },
+  async appearance(appAppearance: 'dark' | 'light') { const before = await api.config.get(); await api.config.save({ ...before, appearance: { ...before.appearance, appAppearance } }, before) },
+  preferences() { return structuredClone(useAppStore.getState().config?.focus) },
   fail(value: boolean) { failEvents = value },
   live(live = true, sender = 'fixture-core', recipient = 'fixture-ui', kind: 'message' | 'dispatch-open' = 'message') {
     const sequence = events.at(-1)!.sequence + 1, mid = 'fixture-live-' + sequence, ref = reference(mid, sender, recipient)

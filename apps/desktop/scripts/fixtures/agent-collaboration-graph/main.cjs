@@ -1,8 +1,8 @@
 const assert = require('node:assert/strict'), fs = require('node:fs/promises'), path = require('node:path')
 const { app, BrowserWindow } = require('electron')
-const [url, privateRoot, evidence] = process.argv.slice(2)
+const [url, privateRoot, evidence, scenario = 'readability'] = process.argv.slice(2)
 for (const name of ['home', 'appData', 'userData', 'sessionData']) app.setPath(name, path.join(privateRoot, name))
-const result = { schema: 'agentmux.collaboration-map-actual.v1', scenario: 'focus-map-readability', passed: false, captureOnly: true, aestheticReview: 'not-performed', frames: [], checks: [], failures: [], rendererErrors: [], rendererMessages: [], performance: [],
+const result = { schema: 'agentmux.collaboration-map-actual.v1', scenario: 'focus-map-' + scenario, passed: false, captureOnly: true, aestheticReview: 'not-performed', frames: [], checks: [], failures: [], rendererErrors: [], rendererMessages: [], performance: [],
   conditions: { nativeRenderer: true, electron: process.versions.electron, chromium: process.versions.chrome, node: process.versions.node, platform: process.platform, arch: process.arch, privateWindowShown: false, backgroundThrottling: false, focusEmulated: true, viewport: [1440, 900], physicalDisplayRefreshQualified: false,
     instrumentation: 'Transparent real Worker traffic observer; counter in original context function; LongTask and rAF during finite windows; DOM census only at window boundaries. Callback, counter, Worker-observer and census costs are recorded. Clock-call and constructor-listener residual overhead is uncalibrated; these are instrumented results, not an uninstrumented product claim.' },
   boundary: 'Original current source App/Space/Focus/Map/Worker/cards/sole Reader/Store. Only typed platform facts and unrelated PTY/Monaco paint are controlled. No Provider, real message, user Run, installed package, durability or aesthetic qualification.' }
@@ -48,7 +48,7 @@ app.whenReady().then(async () => {
     }
     const intact = async (selection = true, focus = true) => { const state = await facts(); for (const field of ['sameTabs', 'layoutsPreserved', 'sameDrafts', ...(focus ? ['sameFocus'] : []), ...(selection ? ['selectionPreserved'] : []), 'draftMounted', 'sameDraft']) assert.equal(state[field], true, field + ': ' + JSON.stringify(state.layoutDifference ?? state.selectionDifference ?? null)); assert.equal(state.draft, 'Original unsent reply · retain this exact draft.'); assert.equal(state.storedDraft, state.draft); assert.deepEqual(state.range, [4, 12]); assert.deepEqual(state.controls, result.before.controls); assert.deepEqual(state.chrome.preferences,result.before.chrome.preferences,'Map keeps original sidebar preferences'); return state }
     const matrix = () => read(`document.querySelector('.collaboration-map .react-flow__viewport')?.getAttribute('style')`)
-    const regionSnapshot = () => read(`(()=>{const bounds=element=>{if(!element)return null;const r=element.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}},text=element=>element?{text:element.textContent,clientWidth:element.clientWidth,scrollWidth:element.scrollWidth,bounds:bounds(element)}:null;return[...document.querySelectorAll('.collaboration-region-labels .collaboration-area__summary')].map(button=>{const area=button.closest('[data-area-id]'),activity=button.querySelector('.collaboration-area__activity'),style=activity&&getComputedStyle(activity);return{id:area.dataset.areaId,kind:area.dataset.kind,label:button.getAttribute('aria-label'),title:button.title,bounds:bounds(button),name:text(button.querySelector(':scope > span')),count:text(button.querySelector('small')),type:bounds(button.querySelector('svg')),activity:activity?{bounds:bounds(activity),display:style.display,visibility:style.visibility,opacity:style.opacity,label:activity.getAttribute('aria-label')}:null}}).sort((a,b)=>a.id.localeCompare(b.id))})()`)
+    const regionSnapshot = () => read(`(()=>{const bounds=element=>{if(!element)return null;const r=element.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}},text=element=>element?{text:element.textContent,clientWidth:element.clientWidth,scrollWidth:element.scrollWidth,bounds:bounds(element)}:null;return[...document.querySelectorAll('.collaboration-region-labels .collaboration-area__summary')].map(button=>{const area=button.closest('[data-area-id]'),activity=button.querySelector('.collaboration-area__activity'),style=activity&&getComputedStyle(activity);return{id:area.dataset.areaId,kind:area.dataset.kind,label:button.getAttribute('aria-label'),title:button.title,bounds:bounds(button),name:text(button.querySelector('strong')),count:text(button.querySelector('small')),type:bounds(button.querySelector('svg')),activity:activity?{bounds:bounds(activity),display:style.display,visibility:style.visibility,opacity:style.opacity,label:activity.getAttribute('aria-label')}:null}}).sort((a,b)=>a.id.localeCompare(b.id))})()`)
     const assertStableRegions = (before, after) => {
       assert.ok(before.length>0,'Original region labels are actually present')
       assert.deepEqual(after.map(region=>region.id),before.map(region=>region.id),'Activity retains the same exact original region labels')
@@ -126,7 +126,7 @@ app.whenReady().then(async () => {
       const sample=window.graphCapture.workerSamples().filter(sample=>sample.geometry).at(-1),boxes=new Map(sample.geometry.map(box=>[box.id,box])),nodes=new Map([...document.querySelectorAll('.collaboration-map .react-flow__node')].map(node=>[node.dataset.id,node]));
       const envelopes=[],endpoints=[];
       for(const [id,node] of nodes){const path=node.querySelector('.collaboration-area__envelope path'),area=boxes.get(id);if(!path||area?.kind!=='area')continue;const members=sample.geometry.filter(box=>box.kind==='agent'&&box.areaId===area.areaId),rectangles=[area.heading,...members.map(box=>({...box,x:box.x-area.x,y:box.y-area.y}))],outside=[];for(const [index,r] of rectangles.entries())for(const x of [r.x,r.x+r.width])for(const y of [r.y,r.y+r.height])if(!path.isPointInFill(new DOMPoint(x,y)))outside.push({index,x,y});envelopes.push({id,members:members.length,corners:rectangles.length*4,rounded:path.getAttribute('d').includes(' Q '),outside})}
-      for(const edge of document.querySelectorAll('.collaboration-map .react-flow__edge')){const [kind,source,target]=JSON.parse(edge.dataset.id),path=edge.querySelector('.react-flow__edge-path'),length=path?.getTotalLength(),matrix=path?.getScreenCTM();if(!length||!matrix)continue;for(const [id,at] of [[source,0],[target,length]]){const point=nodes.get(id)?.querySelector('.collaboration-agent[data-overview="true"] .collaboration-agent__point');if(!point)continue;const r=point.getBoundingClientRect(),p=path.getPointAtLength(at),screen=new DOMPoint(p.x,p.y).matrixTransform(matrix);endpoints.push({kind,id,agent:JSON.parse(id)[0]!=='area',radius:r.width/2,error:Math.abs(Math.hypot(screen.x-r.x-r.width/2,screen.y-r.y-r.height/2)-r.width/2)})}}
+      for(const edge of document.querySelectorAll('.collaboration-map .react-flow__edge')){const [kind,source,target]=JSON.parse(edge.dataset.id),path=edge.querySelector('.react-flow__edge-path'),length=path?.getTotalLength(),matrix=path?.getScreenCTM();if(!length||!matrix)continue;for(const [id,at] of [[source,0],[target,length]]){const mark=nodes.get(id)?.querySelector('.collaboration-agent[data-overview="true"] .collaboration-agent__dot'),point=mark?.querySelector('.agent-avatar')?mark:mark?.querySelector('.collaboration-agent__point');if(!point)continue;const r=point.getBoundingClientRect(),p=path.getPointAtLength(at),screen=new DOMPoint(p.x,p.y).matrixTransform(matrix);endpoints.push({kind,id,agent:JSON.parse(id)[0]!=='area',radius:r.width/2,error:Math.abs(Math.hypot(screen.x-r.x-r.width/2,screen.y-r.y-r.height/2)-r.width/2)})}}
       return{envelopes,endpoints,unmatchedNodes:[...nodes.keys()].filter(id=>!boxes.has(id)),deliveredMembers:sample.geometry.filter(box=>box.kind==='agent').length,paths:document.querySelectorAll('.collaboration-map .react-flow__edge-path').length}
     })()`)
     const overview = async label => {
@@ -167,6 +167,27 @@ app.whenReady().then(async () => {
       }
       throw Error('Original canvas control remained outside the actual viewport after bounded pointer pans')
     }
+    const observeDenseRelations = async () => {
+      const beforeBodies = (await facts()).reads.filter(read => read.kind === 'body').length
+      for (const subject of result.distribution.denseSubjects) {
+        await locate(subject.agentSessionId)
+        await until('original participant metadata loaded ' + subject.agentSessionId, async () => (await facts()).reads.some(read => read.kind === 'events' && read.participant === subject.agentSessionId))
+        await mapReady()
+      }
+      assert.equal((await facts()).reads.filter(read => read.kind === 'body').length, beforeBodies, 'Visiting participants reads metadata without opening message bodies')
+      const previous = new Set((await read('window.graphCapture.workerSamples()')).flatMap(sample => sample.request ? [sample.request.id] : []))
+      await click('[aria-label="Arrange map"]')
+      await until('explicit arrangement has its original request', async () => (await read('window.graphCapture.workerSamples()')).some(sample => sample.request?.type === 'arrange' && !previous.has(sample.request.id)))
+      const request = (await read('window.graphCapture.workerSamples()')).find(sample => sample.request?.type === 'arrange' && !previous.has(sample.request.id)).request
+      await until('that exact explicit arrangement completes', () => read(`window.graphCapture.workerSamples().some(sample=>sample.request?.id===${JSON.stringify(request.id)}&&sample.complete&&sample.input)`))
+      const sample = (await read('window.graphCapture.workerSamples()')).find(sample => sample.request?.id === request.id)
+      const actual = new Set(sample.input.edges.filter(edge => edge.kind === 'communication').map(edge => JSON.stringify([JSON.parse(edge.source)[1], JSON.parse(edge.target)[1]])))
+      assert.equal(result.distribution.denseCommunication.length, 36)
+      for (const expected of result.distribution.denseCommunication) assert.ok(actual.has(JSON.stringify([expected.sender, expected.recipient])), 'The actual Worker receives observed cross-area message ' + expected.messageId)
+      assert.equal(sample.input.areas.filter(area => area.members === 0).length, 60)
+      result.dense = { request, actualWorkerInput: sample.input, expectedCommunication: result.distribution.denseCommunication, visited: result.distribution.denseSubjects, bodyReads: beforeBodies }
+      return beforeBodies
+    }
     phase = 'load-original-app'; await checkpoint(); await win.loadURL(url); win.webContents.debugger.attach('1.3'); await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     await until('original App initialize', () => read(`window.graphCapture?.ready&&!window.graphCapture.facts().loading&&window.graphCapture.facts().ids.includes('fixture-ui')`))
     await read('window.graphCapture.prepare();window.graphCapture.clearFocusForEntry()'); await until('original mounted workface', () => read(`Boolean(document.querySelector('[data-fixture-session="fixture-ui"] textarea'))`)); await read('window.graphCapture.remember()'); result.before = await facts(); result.entryBefore=result.before; result.distribution=await read('window.graphCapture.distribution()'); assert.deepEqual(result.before.controls, [], 'Initialization does not launch or operate a Run'); assert.equal(result.before.selectedSession,null); assert.equal(result.before.mapTarget,null); assert.ok(result.before.chrome.rail.length&&result.before.chrome.dock.length,'Original Space sidebar preferences are actually visible'); await frame('workbench-entry')
@@ -174,8 +195,8 @@ app.whenReady().then(async () => {
       await click('button.surface-navigation__focus'); await until('unselected original Focus List', () => read(`window.graphCapture.facts().focusView==='list'&&window.graphCapture.facts().selectedSession===null`)); await frame('unselected-focus-list')
       await click('[aria-label="Map"]'); await mapReady(); await read('window.graphCapture.rememberMap()'); const target=(await facts()).mapTarget; assert.equal(target.kind,'focus'); assert.deepEqual(target.subject,{hostId:'local',agentSessionId:'fixture-ui'},'An exact original Space Agent remains the real default target'); const chrome=await fullMap()
       await until('initial working area is readable', () => read(`document.querySelectorAll('.collaboration-map .focus-context[data-session-id]').length>0`)); const camera=await matrix(), sample=(await read('window.graphCapture.workerSamples()')).filter(sample=>sample.input&&sample.boxes).at(-1)
-      const canonical=[...new Set(sample.boxes.ids.map(id=>JSON.parse(id)[1]))].sort(); assert.deepEqual(canonical,result.distribution.expectedInitialAgentKeys.slice().sort()); assert.equal(sample.input.areas.filter(area=>area.members===0).length,60)
-      result.initialView={chrome,camera,areas:sample.input.areas.length,emptyAreas:60,canonicalAgents:canonical.length,entryIntent:'GUI List to Map without an explicit Agent argument',listExecutionSelection:null,target}; await intact(); await frame('map-first-context-readable')
+      const canonical=[...new Set(sample.boxes.ids.map(id=>JSON.parse(id)[1]))].sort(); assert.deepEqual(canonical,result.distribution.expectedInitialAgentKeys.slice().sort()); assert.equal(sample.input.areas.filter(area=>area.members===0).length,result.distribution.permanentEmptyAreas)
+      result.initialView={chrome,camera,areas:sample.input.areas.length,emptyAreas:result.distribution.permanentEmptyAreas,canonicalAgents:canonical.length,entryIntent:'GUI List to Map without an explicit Agent argument',listExecutionSelection:null,target}; await intact(); await frame('map-first-context-readable')
       await click('button[aria-label="Space: show terminal and file workbench"]'); await until('original sidebar presentation returned', async () => { const state=await facts(); return state.chrome.rail.length>0&&state.chrome.dock.length>0 }); await intact()
     })
     // The next scenes retain the original exact workface and its independent
@@ -237,6 +258,9 @@ app.whenReady().then(async () => {
       await click('button[aria-label="Space: show terminal and file workbench"]'); await until('original Space returned', () => read(`window.graphCapture.facts().mainSurface==='workbench'&&!window.graphCapture.facts().graph`)); assert.equal((await facts()).focusView,'map'); await intact(); await frame('workbench-return')
       await click('button.surface-navigation__focus'); await mapReady(); assert.equal((await facts()).sameMap,true); assert.equal(await matrix(),camera)
     })
+    if (scenario === 'perception' || scenario === 'perception-scale') {
+      await require('./perception.cjs')({ win, result, read, click, key, frame, check, facts, activity, motionFrame, intact, matrix, mapReady, closeReader, locate, pause, until, settle, fullMap, measure, pan, overview, observeDenseRelations, denseOnly: scenario === 'perception-scale' })
+    } else {
     await check('focus-locates-in-the-same-map', async () => {
       await click('[aria-label="List"]'); await until('original Focus Locate entry', () => read(`Boolean(document.querySelector('[aria-label="Locate Agent in map"]'))`)); await frame('focus-locate-entry')
       assert.equal((await facts()).focusAgentReveal,null,'The earlier explicit reveal has ended'); const selected = await read(`[...document.querySelectorAll('.global-focus-surface:not([hidden]) [data-focus-agent-selected="true"]')].map(e=>({hostId:e.dataset.focusAgentHost,agentSessionId:e.dataset.focusAgentSession}))`); assert.deepEqual(selected,[{hostId:'local',agentSessionId:'fixture-ui'}],'The actual original Focus card reflects the retained workface'); await click('[aria-label="Locate Agent in map"]'); await mapReady(); assert.equal((await facts()).sameMap, true); assert.deepEqual((await facts()).mapTarget.subject, selected[0]); await intact()
@@ -316,11 +340,11 @@ app.whenReady().then(async () => {
     })
     await check('folded-original-internal-relations', async () => {
       await locate('fixture-core')
-      const heading = await markByText('.collaboration-area__heading span', 'Agent protocol', 'data-capture-project-heading')
+      const heading = '[aria-label="Collapse Agent protocol"]', expanded = '[aria-label="Expand Agent protocol"]'
       await revealCanvasControl(heading); await click(heading); await until('actual internal relation badge', () => read(`Boolean(document.querySelector('.collaboration-area__internal'))`)); await revealCanvasControl('.collaboration-area__internal'); await click('.collaboration-area__internal')
       await until('all original internal relation IDs', () => read(`document.querySelectorAll('[aria-label="Grouped connections"] .collaboration-relation').length===4`))
       result.folded = await read(`({badge:document.querySelector('.collaboration-area__internal').textContent,relations:[...document.querySelectorAll('[aria-label="Grouped connections"] .collaboration-relation')].map(e=>({kind:e.dataset.kind,text:e.textContent})),selfPaths:[...document.querySelectorAll('.react-flow__edge')].filter(e=>{const id=JSON.parse(e.dataset.id);return id[1]===id[2]}).length})`)
-      assert.equal(result.folded.selfPaths,0); await frame('map-folded'); await revealCanvasControl(heading); await click(heading); await mapReady(); await locate('fixture-core'); await intact()
+      assert.equal(result.folded.selfPaths,0); await frame('map-folded'); await revealCanvasControl(expanded); await click(expanded); await mapReady(); await locate('fixture-core'); await intact()
     })
     await check('finite-live-without-camera-or-layout-reset', async () => {
       const camera = await matrix(), workers = (await read('window.graphCapture.workerSamples()')).length
@@ -475,19 +499,7 @@ app.whenReady().then(async () => {
       assert.equal((await facts()).mainSurface,'workbench'); assert.equal((await facts()).focusView,'map'); await click('button.surface-navigation__focus'); await mapReady(); await read('window.graphCapture.remember()')
     })
     await check('observed-dense-cross-area-overview-and-exact-reading', async () => {
-      const beforeBodies=(await facts()).reads.filter(read=>read.kind==='body').length
-      for (const subject of result.distribution.denseSubjects) {
-        await locate(subject.agentSessionId); await until('original participant metadata loaded '+subject.agentSessionId, async () => (await facts()).reads.some(read=>read.kind==='events'&&read.participant===subject.agentSessionId)); await mapReady()
-      }
-      assert.equal((await facts()).reads.filter(read=>read.kind==='body').length,beforeBodies,'Visiting participants reads metadata without opening message bodies')
-      const arranged=(await read('window.graphCapture.workerSamples()')).filter(sample=>sample.input).length
-      await click('[aria-label="Arrange map"]'); await until('explicit arrangement uses observed source facts', () => read(`window.graphCapture.workerSamples().filter(sample=>sample.input).length>${arranged}&&!document.querySelector('.collaboration-canvas__progress')`))
-      const sample=(await read('window.graphCapture.workerSamples()')).filter(sample=>sample.input&&sample.complete).at(-1)
-      const actual=new Set(sample.input.edges.filter(edge=>edge.kind==='communication').map(edge=>JSON.stringify([JSON.parse(edge.source)[1],JSON.parse(edge.target)[1]])))
-      assert.equal(result.distribution.denseCommunication.length,36)
-      for(const expected of result.distribution.denseCommunication)assert.ok(actual.has(JSON.stringify([expected.sender,expected.recipient])),'The actual Worker receives observed cross-area message '+expected.messageId)
-      assert.equal(sample.input.areas.filter(area=>area.members===0).length,60)
-      result.dense={actualWorkerInput:sample.input,expectedCommunication:result.distribution.denseCommunication,visited:result.distribution.denseSubjects,bodyReads:beforeBodies}
+      const beforeBodies = await observeDenseRelations()
       await overview('map-dense-observed-overview')
       // The name and count are rendered by the original area owner. Select that
       // exact public canvas action, rather than guessing a member from its label.
@@ -549,6 +561,7 @@ app.whenReady().then(async () => {
       assert.ok(metadata.identity.includes('fixture-relationship-only')); assert.ok(metadata.metadata.includes('claude')); assert.ok(metadata.affiliation?.includes('Workspace association')&&metadata.affiliation.includes('Agent protocol'),'Exact retained workspace evidence is disclosed as an association'); assert.equal(settledPoint.box.areaId,result.distribution.projectAreaNodeId,'Confirmed original project evidence reaches actual Map geometry'); assert.ok(settledPoint.world.geometry.some(area=>area.kind==='area'&&area.id===settledPoint.box.areaId),'The enriched occurrence belongs to its actual original project area node'); assert.ok(!metadata.actions.includes('Open workface'),'Retained metadata does not invent an active control target'); assert.equal((await facts()).reads.filter(read=>read.kind==='body').length,bodyReads)
       const identityReads = (await facts()).reads.filter(read=>read.kind==='identity'&&read.participant==='fixture-relationship-only'); assert.ok(identityReads.length>0&&identityReads.every(read=>read.options.hostId==='local'),'Original exact-owner bridge is consumed by the real Map'); result.relatedIdentity={before,discovered,metadata,identityReads,settledPoint}; await frame('map-related-original-identity'); await intact()
     })
+    }
     phase = 'native-visibility-capability'; await checkpoint()
     const visibility = new BrowserWindow({ width:160,height:120,x:-10000,y:-10000,show:false,webPreferences:{contextIsolation:true,sandbox:true,nodeIntegration:false,backgroundThrottling:true} })
     try {
