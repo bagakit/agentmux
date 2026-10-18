@@ -33,10 +33,16 @@ function reportConsole(error: unknown): void {
   try { console.error(error) } catch { /* Diagnostic sinks cannot take over healthy publication. */ }
 }
 
+function conversationSourceSession(event: AgentMuxClientEvent): string | undefined {
+  if (event.type === 'agent-input') return event.receipt.key.agentSessionId
+  if (event.type === 'agent-timeline' || event.type === 'agent-error' && event.code === 'AGENT_INPUT_CONVERSATION_UNCONFIRMED') return event.agentSessionId
+  return undefined
+}
+
 export class AgentMuxClientEventPublisher {
   private readonly listeners = new Map<(event: AgentMuxClientEvent) => unknown, AgentMuxClientEventListenerOptions>()
   private readonly statusListeners = new Map<(event: AgentMuxClientEvent) => unknown, AgentMuxClientEventListenerOptions>()
-  private readonly timelineListeners = new Map<string, Map<(event: AgentMuxClientEvent) => unknown, AgentMuxClientEventListenerOptions>>()
+  private readonly conversationSourceListeners = new Map<string, Map<(event: AgentMuxClientEvent) => unknown, AgentMuxClientEventListenerOptions>>()
   private publishingDiagnostic = false
   get hasEventListeners(): boolean { return this.listeners.size > 0 }
 
@@ -57,24 +63,25 @@ export class AgentMuxClientEventPublisher {
     return () => { this.listeners.delete(listener) }
   }
 
-  /** Original committed timeline invalidations, scoped before dispatch to unrelated Consumers. */
-  onTimelineEvent<Result>(agentSessionId: string, listener: AgentMuxClientEventListener<Result>): () => void {
-    const listeners = this.timelineListeners.get(agentSessionId) ?? new Map()
-    listeners.set(listener, {}); this.timelineListeners.set(agentSessionId, listeners)
-    return () => { listeners.delete(listener); if (!listeners.size) this.timelineListeners.delete(agentSessionId) }
+  /** Original Conversation source notifications, indexed before dispatch to unrelated Consumers. */
+  onConversationSourceEvent<Result>(agentSessionId: string, listener: AgentMuxClientEventListener<Result>): () => void {
+    const listeners = this.conversationSourceListeners.get(agentSessionId) ?? new Map()
+    listeners.set(listener, {}); this.conversationSourceListeners.set(agentSessionId, listeners)
+    return () => { listeners.delete(listener); if (!listeners.size) this.conversationSourceListeners.delete(agentSessionId) }
   }
 
   dispose(): void {
     this.listeners.clear()
     this.statusListeners.clear()
-    this.timelineListeners.clear()
+    this.conversationSourceListeners.clear()
   }
 
   publish(event: AgentMuxClientEvent): void {
     const listeners = event.type === 'agent-error' || event.type === 'connection-state' || event.type === 'agent-session'
       ? [...this.listeners, ...this.statusListeners] : [...this.listeners]
     this.deliver(event, listeners)
-    if (event.type === 'agent-timeline') this.deliver(event, [...(this.timelineListeners.get(event.agentSessionId) ?? [])])
+    const sourceSession = conversationSourceSession(event)
+    if (sourceSession) this.deliver(event, [...(this.conversationSourceListeners.get(sourceSession) ?? [])])
   }
 
   /** A registration-local observation failure does not invalidate other readers. */
@@ -101,7 +108,8 @@ export class AgentMuxClientEventPublisher {
       if (!failure) continue
       this.listeners.delete(listener)
       this.statusListeners.delete(listener)
-      if (event.type === 'agent-timeline') { const scoped = this.timelineListeners.get(event.agentSessionId); scoped?.delete(listener); if (!scoped?.size) this.timelineListeners.delete(event.agentSessionId) }
+      const sourceSession = conversationSourceSession(event)
+      if (sourceSession) { const scoped = this.conversationSourceListeners.get(sourceSession); scoped?.delete(listener); if (!scoped?.size) this.conversationSourceListeners.delete(sourceSession) }
       failures.push(failure)
       // Report directly to this Consumer even when it is the only subscriber. Reporting
       // itself cannot take over publication or create an unhandled rejected Promise.

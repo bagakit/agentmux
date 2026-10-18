@@ -2752,7 +2752,7 @@ export class AgentMuxClient {
       if (!controller.signal.aborted) controller.abort(new AgentMuxError('This conversation reader was released.', 'AGENT_SESSION_HISTORY_CANCELLED'))
     }
     controller.signal.addEventListener('abort', dispose, { once: true }); options.signal?.addEventListener('abort', dispose, { once: true })
-    unsubscribe = this.publisher.onTimelineEvent(input.agentSessionId, event => { if (event.type === 'agent-timeline') captured() })
+    unsubscribe = this.publisher.onConversationSourceEvent(input.agentSessionId, captured)
     try {
       const cut = await cutUnifiedConversation(ref, owner.port)
       const observed = input.view ? this.conversationReadState.observe(input.view, ref, cut.scope) : undefined
@@ -6853,7 +6853,8 @@ export class AgentMuxClient {
             signal?.throwIfAborted()
             const saved = await this.messageQueue.inspectInput({ key: pending.key })
             const original = (await this.store.readCapturedHistory(agentSessionId, { recordId: pending.recordId })).records[0]?.item
-            if (saved && original?.inputOrigin) await this.writeInputConversation(saved, original.createdAt, original.inputOrigin)
+            if (!saved || !original?.inputOrigin) throw new AgentMuxError('An original pending input projection is unavailable.', 'AGENT_INPUT_READ_UNCONFIRMED')
+            await this.writeInputConversation(saved, original.createdAt, original.inputOrigin)
           }
           if (!position.next) break
           position = await this.store.readInputConversationProjection(agentSessionId, position.next)
@@ -6922,11 +6923,17 @@ export class AgentMuxClient {
         const cut = await this.messageQueue.readConversationInputCut(receipt.key.agentSessionId)
         await this.writeInputConversation(saved, saved.recordedAt, { ...cut, sequence: saved.sequence })
       }
-    } catch (error) {
-      this.publisher.publish({ type: 'agent-error', agentSessionId: receipt.key.agentSessionId, code: 'AGENT_INPUT_CONVERSATION_UNCONFIRMED',
-        message: error instanceof Error ? error.message : String(error), failure: deliveryFailure(error),
-        evidence: { source: 'agentmux', observedAt: Date.now(), run: receipt.key.expectedRun } })
-    }
+    } catch (error) { this.publishInputConversationFailure(receipt.key, error) }
+  }
+
+  private publishInputConversationFailure(key: AgentPromptInputKey, error: unknown): void {
+    const invalidate = () => this.inputConversationRecovered.delete(key.agentSessionId)
+    invalidate()
+    const recovering = this.inputConversationTails.get(key.agentSessionId)
+    if (recovering) void recovering.then(invalidate, invalidate)
+    this.publisher.publish({ type: 'agent-error', agentSessionId: key.agentSessionId, code: 'AGENT_INPUT_CONVERSATION_UNCONFIRMED',
+      message: error instanceof Error ? error.message : String(error), failure: deliveryFailure(error),
+      evidence: { source: 'agentmux', observedAt: Date.now(), run: key.expectedRun } })
   }
 
   private async assertInputWaitingAuthor(intent: AgentInputJournalIntent, caller?: { agentSessionId: string; capability: string }): Promise<void> {
@@ -9098,12 +9105,14 @@ export class AgentMuxClient {
       return
     }
     if (message.userContent && message.authorHuman && inputRef?.kind === 'prompt') {
-      const saved = await this.messageQueue.inspectInput({ key: inputRef })
-      if (saved?.intent.source.kind === 'prompt' && saved.intent.source.authorHuman === true) {
-        const receipt = await this.inspectAgentInput({ key: inputRef })
-        if (receipt) await this.publishInputReceipt(receipt)
-        return
-      }
+      try {
+        const saved = await this.messageQueue.inspectInput({ key: inputRef })
+        if (saved?.intent.source.kind === 'prompt' && saved.intent.source.authorHuman === true) {
+          const receipt = await this.inspectAgentInput({ key: inputRef })
+          if (receipt) await this.publishInputReceipt(receipt)
+          return
+        }
+      } catch (error) { this.publishInputConversationFailure(inputRef, error); return }
     }
     if (message.userContent) await this.recordMessageAfterSideEffect(session, `prompt:${operationId}`,
       title, message.userContent, now, 'user', { status, publicContent: 'confirmed', ...(inputRef ? { inputRef } : {}),
