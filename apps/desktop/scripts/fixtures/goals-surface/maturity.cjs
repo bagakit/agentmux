@@ -145,9 +145,11 @@ app.whenReady().then(async()=>{
   await fs.mkdir(evidence,{recursive:true});win=new BrowserWindow({show:false,width:1280,height:780,webPreferences:{sandbox:false,backgroundThrottling:false}})
   win.webContents.on('console-message',details=>{if(details.level==='error')result.consoleErrors.push({message:details.message,line:details.lineNumber,source:details.sourceId})})
   await phase('loading-compiled-renderer');await win.loadFile(html);await phase('loaded-compiled-renderer');win.webContents.debugger.attach('1.3');await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
-  await phase('waiting-for-original-mounted-goals');await waitFor('Boolean(window.goalsVisual) && document.querySelectorAll("[data-demand-id]").length===6');await phase('original-goals-mounted')
+  await phase('waiting-for-original-mounted-goals');await waitFor('Boolean(window.goalsVisual) && document.querySelectorAll("[data-demand-id]").length===7');await phase('original-goals-mounted')
   const originalRuns=await evaluate('goalsVisual.facts().runs');assert.ok(originalRuns.length>0,'Original preview Runs exist')
-  if(scope==='cohesion-only'){
+  if(scope==='workflow-only'){
+   await require('./workflow.cjs')({evaluate,size,click,capture,waitFor,paint,result})
+  }else if(scope==='cohesion-only'){
    const key=async(key,windowsVirtualKeyCode)=>{for(const type of ['keyDown','keyUp'])await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type,key,windowsVirtualKeyCode});await paint()}
    await require('./cohesion.cjs')({evaluate,size,click,capture,button,key,paint,waitFor,result})
   }else if(scope==='project-links-only'||scope==='project-file-display-only'){
