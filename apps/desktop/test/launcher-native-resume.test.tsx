@@ -46,6 +46,42 @@ function nativePage(input: NativeAgentHistoryInput, text = 'The original saved a
    { id: 'saved-answer', kind: 'assistant-message', contentParts: [{ kind: 'text', text }] }], nextCursor: null }
 }
 
+it.each(['codex', 'claude'] as const)('keeps the original closed %s Agent name in the list, detail and search', async providerId => {
+ const native = catalog({ hostId: 'local', executorId: providerId }).sessions[0]!
+ native.source.nativeHandle.providerId = providerId
+ native.managed = { agentSessionId: 'closed-original', executorId: providerId, run: { runId: 'closed-run' }, state: 'retired', retiredAt: 500 }
+ vi.spyOn(api.sessions, 'nativeSessions').mockImplementation(async input => ({ ...catalog(input), providerId, sessions: [native] }))
+ vi.spyOn(api.sessions, 'nativeHistoryPage').mockImplementation(async input => nativePage(input))
+ const resume = vi.fn(async () => undefined)
+ seed({ config: { ...config, executors: { [providerId]: { ...config.executors.codex!, providerId } } },
+  agentNames: { 'closed-original': '原来的任务名', 'native-original': 'Wrong native-ID name' }, resumeNativeSession: resume })
+ await open()
+ expect(document.querySelector('[role=option]')?.textContent).toContain('原来的任务名')
+ expect(document.querySelector('[aria-label="Selected Session details"]')?.textContent).toContain('原来的任务名')
+ expect(document.body.textContent).not.toContain('Wrong native-ID name')
+ const input = document.querySelector<HTMLInputElement>('input[aria-label="Search saved Sessions"]')!
+ await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '原来的任务名'); input.dispatchEvent(new Event('input', { bubbles: true })) })
+ expect(document.querySelectorAll('[role=option]')).toHaveLength(1)
+ await click(button('Resume Session'))
+ expect(resume.mock.calls[0]![1]).toMatchObject({ managed: { agentSessionId: 'closed-original' } })
+})
+
+it('keeps unnamed closed and unmanaged conversations resumable with the Provider title', async () => {
+ const native = catalog({ hostId: 'local', executorId: 'codex' }).sessions[0]!
+ native.managed = { agentSessionId: 'closed-original', executorId: 'codex', run: { runId: 'closed-run' }, state: 'retired', retiredAt: 500 }
+ const external = { ...native, source: { ...native.source, nativeHandle: { ...native.source.nativeHandle, sessionId: 'unmanaged-native' } }, title: 'External original', managed: undefined }
+ vi.spyOn(api.sessions, 'nativeSessions').mockImplementation(async input => ({ ...catalog(input), sessions: [native, external] }))
+ vi.spyOn(api.sessions, 'nativeHistoryPage').mockImplementation(async input => nativePage(input))
+ seed({ agentNames: { 'native-original': 'Wrong identity', 'unmanaged-native': 'Wrong identity' } })
+ await open()
+ const options = [...document.querySelectorAll('[role=option]')]
+ expect(options).toHaveLength(2)
+ expect(options[0]?.textContent).toContain('Saved original')
+ expect(options[1]?.textContent).toContain('External original')
+ expect(document.body.textContent).not.toContain('Wrong identity')
+ expect(button('Resume Session').disabled).toBe(false)
+})
+
 it('publishes completed external Codex conversations while another source waits, and reads before creating a Run', async () => {
  const pending = new Promise<NativeAgentSessionsResult>(() => {})
  useAppStore.setState({ config: { ...config, executors: { ...config.executors,
