@@ -81,7 +81,7 @@ async function capture(directory) {
   const catalog = modules.agentMuxCliModuleCatalog()
   assert(catalog.length > 1, 'Module coverage cannot be empty')
   assert.equal(catalog.length, new Set(commands.AGENTMUX_CLI_COMMANDS.map(x => x.method.split('.')[0])).size)
-  const generated = await load('generated/agentmux-guides')
+  const generated = await load('generated/agentmux-guides-index')
   assert.deepEqual(Object.keys(generated.MODULE_GUIDES).sort(), catalog.map(x => x.root).sort(),
     'Unregistered or missing module guide differs from actual command registration')
   for (const entry of catalog) for (const name of ['root', 'summary', 'roles', 'when', 'readCommand'])
@@ -314,16 +314,32 @@ async function packageProof(root, expected) {
     packageOutputSha256: sha(JSON.stringify(installedOutputs)), ...links }
 }
 
-async function browserProof() {
-  const result = await esbuild.build({ stdin: { contents:
-    "export * from './src/agent-message-render.ts'; export * from './src/goal-role-guidance.ts'; export * from './src/generated/agentmux-guides.ts';",
+async function browserProof(sourceDirectory) {
+  const options = { stdin: { contents:
+    "export * from './src/agent-message-render.ts'; export * from './src/goal-role-guidance.ts';",
     resolveDir: core, sourcefile: 'guide-browser-consumer.ts', loader: 'ts' }, bundle: true, platform: 'browser',
-    format: 'iife', globalName: 'GuideProof', target: 'es2022', write: false, metafile: true, logLevel: 'silent' })
+    format: 'iife', globalName: 'GuideProof', target: 'es2022', write: false, metafile: true, logLevel: 'silent' }
+  const result = await esbuild.build(options)
   assert(result.outputFiles.length === 1 && result.outputFiles[0].text.length > 0)
   const inputs = Object.keys(result.metafile.inputs)
   assert(inputs.some(path => path.endsWith('src/generated/agentmux-guides.ts')), 'Browser proof did not consume generated guide code')
   for (const output of Object.values(result.metafile.outputs)) for (const entry of output.imports)
     assert(!entry.path.startsWith('node:'), 'Browser consumer imported a Node capability')
+  assert(!inputs.some(path => path.endsWith('src/generated/agentmux-guides-index.ts')),
+    'Browser consumer retained the CLI guide index')
+  const { GUIDE_DOCUMENTS } = await import(pathToFileURL(join(sourceDirectory, 'generated/agentmux-guides-index.js')).href)
+  const unrelated = GUIDE_DOCUMENTS['actions/mote-pmo']
+  assert(unrelated?.length > 0, 'The isolation control must be a real, nonempty unrelated guide')
+  const marker = 'UNRELATED_PMO_GUIDE_ISOLATION_WITNESS'
+  const altered = await esbuild.build({ ...options, plugins: [{ name: 'unrelated-guide-growth', setup(build) {
+    build.onLoad({ filter: /[\/]generated[\/]agentmux-guides\.ts$/ }, async ({ path }) => {
+      const source = await readFile(path, 'utf8')
+      return { contents: replaceOnce(source, JSON.stringify(unrelated), JSON.stringify(unrelated + marker.repeat(8192))), loader: 'ts' }
+    })
+  } }] })
+  assert.equal(altered.outputFiles[0].text, result.outputFiles[0].text,
+    'Growing an unrelated guide changed the real Browser consumer bundle')
+  assert(!result.outputFiles[0].text.includes(marker))
   const context = Object.assign(Object.create(null), { TextEncoder, TextDecoder })
   runInNewContext(result.outputFiles[0].text, context)
   assert.equal(typeof context.process, 'undefined')
@@ -333,7 +349,8 @@ async function browserProof() {
   assert(rendered.includes('message --skill'))
   assert(context.GuideProof.goalRoleGuidance({ role: 'executor' }).includes('Executor') ||
     context.GuideProof.goalRoleGuidance({ role: 'executor' }).includes('Bind work to the exact finite Start'))
-  return { inputCount: inputs.length, generatedConsumed: true, envelopeRendered: true, nodeGlobalsRequired: false }
+  return { inputCount: inputs.length, generatedConsumed: true, envelopeRendered: true, nodeGlobalsRequired: false,
+    unrelatedGuideIsolated: true, bundleBytes: result.outputFiles[0].contents.length }
 }
 
 function replaceOnce(text, before, after) {
@@ -503,13 +520,15 @@ async function main() {
     assert(receipt.package.cliReads > receipt.package.modules && receipt.package.commands > 0)
     assert.equal(receipt.package.endpointConnections, 0)
     assert.equal(receipt.browser.generatedConsumed, true)
+    assert.equal(receipt.browser.unrelatedGuideIsolated, true)
     assert(receipt.mutations.passed && receipt.mutations.count > 0)
     process.stdout.write(JSON.stringify({ passed: true, reused: true, receipt: relative(repository, receiptPath) }) + '\n')
     return
   }
   const root = await realpath(await mkdtemp(join(tmpdir(), 'amux-guide-proof-')))
   try {
-    const sourceOutputs = await capture(await transpileCore(join(root, 'source')))
+    const sourceDirectory = await transpileCore(join(root, 'source'))
+    const sourceOutputs = await capture(sourceDirectory)
     let baseline = { state: 'not-present; package/source parity remains required' }
     if (mode === '--prepare' || mode === '--parity') {
       try {
@@ -526,7 +545,7 @@ async function main() {
     }
     if (mode !== '--source-proof') equalOutputs(await capture(join(core, 'dist')), sourceOutputs, 'Built Core guidance is stale')
     const packed = mode === '--source-proof' ? undefined : await packageProof(root, sourceOutputs)
-    const browser = await browserProof()
+    const browser = await browserProof(sourceDirectory)
     const mutations = mode === '--package-proof' ? undefined : await mutationProof(root, sourceOutputs)
     assert.deepEqual(await hashes(includeBuilt), inputs, 'Proof inputs changed during verification')
     const receipt = { schema: 'agentmux.system-guides-verification.v1', passed: true, inputs,
