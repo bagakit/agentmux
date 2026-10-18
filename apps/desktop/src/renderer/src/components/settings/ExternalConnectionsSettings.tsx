@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -114,7 +115,7 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
     const epoch = generation.current
     try {
       if (!pending.current) {
-        const operationId = crypto.randomUUID(), connectionId = selected?.config.connectionId ?? crypto.randomUUID()
+        const operationId = mintObjectId(), connectionId = selected?.config.connectionId ?? mintObjectId()
         pending.current = { operationId, expectedRevision: selected?.revision ?? null, connection: { connectionId, adapterId: selected?.config.adapterId ?? 'feishu', application: { domain, appId: appId.trim() }, label: label.trim() || `${platform(domain)} bot`, enabled, credentialRef: selected?.config.credentialRef ?? '' } }
       }
       const input = pending.current
