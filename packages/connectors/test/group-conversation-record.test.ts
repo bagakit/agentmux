@@ -1,85 +1,9 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { join } from 'node:path'
-import { appendFile, writeFile } from 'node:fs/promises'
+import { appendFile } from 'node:fs/promises'
 import * as core from '@agentmux/core'
-import { connectHostedAgentMux } from '../../core/dist/hosted.js'
-import { AgentMuxHostedRuntimeService } from '../../core/dist/hosted-runtime-service.js'
-import { rpcOwnerFixture } from '../../core/test/helpers/public-rpc-owner.js'
-import { hostedTestOwner } from '../../core/test/helpers/hosted-runtime-port.js'
-import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
-import { createWorkspaceLayout } from '../../core/src/spatial-layout.js'
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
-import { createDesktopExternalInputAuthority } from '../../../apps/host/src/external-input-authority.js'
-import { createHostedIngressCorePort, createPublicationConversationPort, type ConnectionAdapter } from '@agentmux/connectors'
-import { signedRoomAdapter, type SignedRoomMessage } from './fixtures/signed-room-adapter.js'
-
-const cleanup: Array<() => void | Promise<void>> = []
+import { cleanup, groupConversationFixture as fixture } from './helpers/group-conversation-fixture.js'
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
-async function fixture(running = false, updatePublications = false) {
-  let bridge: ReturnType<typeof createDesktopExternalInputAuthority>
-  class Owner extends core.AgentMuxClient {
-    constructor(options: { store: core.AgentMuxAgentSessionStore }) {
-      super({ ...options, externalConversationAuthority: { resolveConversationMessage: input => bridge.resolveConversationMessage!(input) } })
-    }
-  }
-  const f = await rpcOwnerFixture(['original-agent'], { AgentMuxClient: Owner, AgentMuxFileAgentSessionStore: core.AgentMuxFileAgentSessionStore }, root => ({ providerId: 'claude', executorId: 'claude', nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'group-native', transcriptPath: join(root, 'native.jsonl') } }))
-  cleanup.push(() => f.close())
-  await writeFile(join(f.root, 'native.jsonl'), JSON.stringify({ type: 'user', sessionId: 'group-native', uuid: 'before-link', message: { role: 'user', content: 'Existing conversation' } }) + '\n')
-  f.inner.connected = running; f.inner.kernel.isConnected = () => running
-  vi.spyOn(f.client, 'connect').mockResolvedValue()
-  if (running) vi.spyOn(f.client.providers.get('claude'), 'planPromptInput').mockImplementation(text => ({ kind: 'single-phase', data: text + '\r' }))
-  const spatial = new core.AgentMuxSpatialStateStore(join(f.root, 'spatial.json'))
-  await spatial.commit({ expectedRevision: 0, graph: { spaces: [{ spaceId: 'space', kind: 'topic', name: 'Original', hostId: 'local', directoryPath: f.root, projectId: 'project' }], zones: [{ zoneId: 'zone', workspaceId: 'workspace', kind: 'directory', hostId: 'local', directoryPath: f.root, branch: null }], tabs: [{ tabId: 'tab', zoneId: 'zone', workspaceId: 'workspace', name: null, regionIds: ['region'] }], regions: [{ regionId: 'region', tabId: 'tab', kind: 'agent', agentSessionId: 'original-agent', runId: null, execution: { hostId: 'local', cwd: f.root } }], bindings: [{ zoneId: 'zone', spaceId: 'space' }], layouts: { workspace: createWorkspaceLayout('group', ['tab']) }, tabLayouts: { tab: { root: { type: 'leaf', regionId: 'region' }, activeRegionId: 'region' } }, resources: {} } })
-  const desktopPath = join(f.root, 'desktop.sock')
-  bridge = createDesktopExternalInputAuthority({ desktopSocketPath: desktopPath, executionHostId: 'local' })
-  const runtime = new AgentMuxHostedRuntimeService(f.client, f.store.path, () => hostedTestOwner(f.client), undefined, bridge)
-  cleanup.push(() => runtime.dispose())
-  const host = new core.AgentMuxControlServer({ socketPath: join(f.root, 'host.sock'), coreClients: f.coreClients, hostedRuntime: () => runtime })
-  await host.start(); cleanup.push(() => host.stop())
-  const hostRpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: host.path } }); cleanup.push(() => hostRpc.dispose())
-  const hosted = await connectHostedAgentMux({ rpc: hostRpc }); cleanup.push(() => hosted.dispose())
-  const clients = () => [{ hostId: 'local', client: hosted }]
-  const wire = signedRoomAdapter(), verify = wire.adapter.ingress!.verify
-  if (updatePublications) {
-    const original = wire.adapter.publication!.dispatch
-    wire.adapter.publication!.dispatch = async (...args) => {
-      const mapping = args[4]
-      if (!mapping) return original(...args)
-      // The controlled transport supports exact updates to its original platform message.
-      wire.ledger.set(args[0].requestKey, mapping)
-      return { state: 'confirmed', mapping }
-    }
-  }
-  const adapter: ConnectionAdapter = { ...wire.adapter, ingress: { ...wire.adapter.ingress!, verify: async (...args) => ({ ...await verify(...args), conversationKind: 'group' }) } }
-  let services: Awaited<ReturnType<typeof createDesktopConnections>>, desktop: core.AgentMuxControlServer, rpc: Awaited<ReturnType<typeof core.connectAgentMuxRpc>>
-  async function open() {
-    services = await createDesktopConnections({ directory: join(f.root, 'connectors'), adapters: [adapter],
-      encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: value.toString(), shouldReEncrypt: false }) },
-      bindings: { spatial, checkpoint: ref => hosted.conversationCheckpoint(ref) }, publication: createPublicationConversationPort(clients), ingress: { core: createHostedIngressCorePort(clients) } })
-    desktop = new core.AgentMuxControlServer({ socketPath: desktopPath, connections: services.connections, spatialState: spatial, coreClients: clients })
-    await desktop.start(); rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: desktop.path } })
-  }
-  async function close() { await rpc?.dispose(); await desktop?.stop(); services?.close() }
-  await open(); cleanup.push(close)
-  const application = { domain: 'signed.example', appId: 'group-app' }, actor = { application, idType: 'email', userId: 'member@example.test' }
-  const secret = await services!.secrets.store({ operationId: 'save-secret', secret: 'fixture-signing-key' })
-  const config = { connectionId: 'group-bot', adapterId: adapter.adapterId, application, label: 'Group bot', enabled: true, credentialRef: secret.credentialRef }
-  await rpc!.call('connection.configure', { operationId: 'configure-bot', expectedRevision: null, connection: config })
-  const binding = { operationId: 'link-group', bindingId: 'group-binding', connectionId: config.connectionId, expectedConnectionRevision: 1, expectedSource: { providerId: 'claude', nativeSessionId: 'group-native' }, executionHostId: 'local', agentSessionId: 'original-agent', regionAnchor: { regionId: 'region' }, externalConversationId: 'native-group', scope: { input: 'mentions-and-replies' as const, publication: 'future-shared-conversation' as const } }
-  expect(await rpc!.call('connection.bind', binding)).toMatchObject({ state: 'applied' })
-  await vi.waitFor(() => expect(wire.endpoint).toBeDefined())
-  const message = (changes: Partial<SignedRoomMessage> = {}): SignedRoomMessage => ({ deliveryKey: 'event', recordKey: 'message', roomKey: 'native-group', person: actor.userId, text: 'Original group message', addressing: 'broadcast', ...changes })
-  const receive = async (changes: Partial<SignedRoomMessage> = {}) => {
-    const native = message(changes)
-    expect(await wire.post(native)).toBe(202)
-    let record: Awaited<ReturnType<NonNullable<typeof services.ingress>['list']>>['ingresses'][number] | undefined
-    await vi.waitFor(async () => { record = (await services.ingress!.list({ connectionId: config.connectionId })).ingresses.find(record => record.kind !== 'action' && record.externalMessageId === native.recordKey); expect(record).toBeDefined() })
-    return record!
-  }
-  const captured = async () => (await f.store.readCapturedHistory('original-agent')).records.filter(record => record.item.authorExternal)
-  const cli = async (args: string[]) => { const result = await runCompiledObjectCli(['--endpoint', 'unix:' + desktopPath, ...args], objectCliEnvironment(f.root)); expect(result.code, result.stdout + result.stderr).toBe(0); return JSON.parse(result.stdout).result }
-  return { ...f, wire, actor, config, binding, message, receive, captured, cli, hosted, hostRpc, get services() { return services }, get rpc() { return rpc }, reopen: async () => { await close(); await open() } }
-}
 
 it('real Main receiver and Hosted Core record ordinary group messages once without an input grant or live Run', async () => {
   const f = await fixture(), submit = vi.spyOn(f.client, 'submitAgentMessage'), before = await f.store.readMetadata('original-agent'), received = await f.receive()
@@ -92,6 +16,7 @@ it('real Main receiver and Hosted Core record ordinary group messages once witho
   expect((await f.cli(['connection', 'ingress', 'ls', '--connection', f.config.connectionId, '--binding', f.binding.bindingId])).ingresses).toHaveLength(1)
   const page = await f.cli(['agent', 'conversation', 'inspect', '--host', 'local', '--session', 'original-agent'])
   expect(JSON.stringify(page)).toContain('Original group message')
+  expect(page.items.flatMap((row: {kind:string;item:{records:unknown[]}}) => row.kind === 'item' ? row.item.records : []).find((row: {original:{kind:string}}) => row.original.kind === 'captured').original.item.externalInput).toMatchObject({ ingressId: received.ingressId, state: 'refused', code: 'INGRESS_ACTOR_NOT_AUTHORIZED' })
   const receipt = await f.cli(['agent', 'conversation', 'record', '--host', 'local', '--session', 'original-agent', '--ingress', received.ingressId])
   expect(receipt.record.source.recordId).toBe(captured!.item.id)
   const diagnosis = await f.cli(['connection', 'diagnose', '--host', 'local', '--session', 'original-agent', '--binding', f.binding.bindingId])
@@ -115,9 +40,21 @@ it('authorized group processing enriches the same captured record and retains an
   await vi.waitFor(async () => expect((await f.captured())[0]?.item.inputRef?.kind).toBe('message'))
   const [record] = await f.captured()
   expect(await f.captured()).toHaveLength(1); expect(record!.item.content).toBe('Original group message')
+  await vi.waitFor(async () => expect((await f.services.ingress!.inspect({ ingressId: received.ingressId })).inputReceipt?.status).toBe('terminal-confirmed'))
   expect(f.inner.kernel.input).toHaveBeenCalledOnce()
   const inspection = await f.services.ingress!.inspect({ ingressId: received.ingressId })
   expect(inspection.ingress?.input?.messageId).toBe(record!.item.inputRef?.kind === 'message' ? record!.item.inputRef.messageId : null)
+  await vi.waitFor(async () => expect((await f.captured())[0]?.item.externalInput?.state).toBe('claimed'))
+  await f.services.ingress!.dispatch(received.ingressId)
+  await vi.waitFor(async () => expect((await f.captured())[0]?.item.inputSubmission).toEqual({ status: 'terminal-confirmed', observation: 'closed' }))
+  await f.services.ingress!.dispatch(received.ingressId)
+  const apply = vi.spyOn(f.store, 'applyTimelineMutation'), write = vi.spyOn(f.services.ingress! as never, 'write' as never)
+  const beforeNoop = (await f.captured())[0]!
+  const revision = beforeNoop.revision
+  await f.services.ingress!.dispatch(received.ingressId)
+  expect((await f.captured())[0]!.revision, JSON.stringify({before:beforeNoop,after:(await f.captured())[0],writes:apply.mock.calls})).toBe(revision)
+  expect(apply).not.toHaveBeenCalled(); expect(write).not.toHaveBeenCalled()
+  apply.mockRestore(); write.mockRestore()
   await f.receive({ deliveryKey: 'second-event', addressing: 'response' })
   expect(await f.captured()).toHaveLength(1); expect(f.inner.kernel.input).toHaveBeenCalledOnce()
 })
@@ -144,6 +81,7 @@ it('wire callers cannot inject a body, author or record resolver and original so
   await vi.waitFor(async () => expect(await f.captured()).toHaveLength(1))
   const input = { agentSessionId: 'original-agent', ingressId: received.ingressId }, identity = f.hosted.runtimeOwnerIdentity()!
   await expect(f.rpc.call('agent.conversation.record', { hostId: 'local', ...input, body: 'Injected body' } as never)).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+  await expect(f.rpc.call('agent.conversation.record', { hostId: 'local', ...input, inputMetadata: { ingressId: received.ingressId, state: 'refused', code: 'INGRESS_ACTOR_NOT_AUTHORIZED' } } as never)).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
   await expect(f.hostRpc.call('runtime.invoke', { consumerId: 'forged-record', fence: { runtimeId: identity.runtimeId, ownerInstanceId: identity.ownerInstanceId }, invocation: { method: 'recordExternalConversationMessage', args: [input, { resolveConversationMessage: true }] } } as never)).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
   await expect(f.rpc.call('agent.conversation.record', { hostId: 'local', ...input, agentSessionId: 'other-agent' })).rejects.toMatchObject({ code: 'EXTERNAL_RECORD_TARGET_UNCONFIRMED' })
   expect(await f.captured()).toHaveLength(1); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
@@ -155,12 +93,14 @@ it('concurrent public records commit one original capture and return the same re
   let arrivals = 0, release!: () => void
   const both = new Promise<void>(resolve => { release = resolve })
   vi.spyOn(f.store, 'applyTimelineMutation').mockImplementation(async (mutation, signal) => {
-    if (mutation.type === 'append' && mutation.item.authorExternal) { if (++arrivals === 2) release(); await both }
+    if (mutation.type === 'append' && mutation.item.authorExternal) { ++arrivals; await both }
     return apply(mutation, signal)
   })
   const input = { hostId: 'local', agentSessionId: 'original-agent', ingressId: received.ingress.ingressId }
-  const receipts = await Promise.all([f.rpc.call('agent.conversation.record', input), f.rpc.call('agent.conversation.record', input)])
-  expect(arrivals).toBe(2); expect(receipts[0]).toEqual(receipts[1]); expect(await f.captured()).toHaveLength(1)
+  const pending = Promise.all([f.rpc.call('agent.conversation.record', input), f.rpc.call('agent.conversation.record', input)])
+  await vi.waitFor(() => expect(arrivals).toBe(1)); release()
+  const receipts = await pending
+  expect(arrivals).toBe(1); expect(receipts[0]).toEqual(receipts[1]); expect(await f.captured()).toHaveLength(1)
   expect(f.inner.kernel.input).not.toHaveBeenCalled()
 })
 
@@ -170,6 +110,7 @@ it('recording failures cannot suppress authorized input and recover onto its ori
   const record = vi.spyOn(f.client, 'recordExternalConversationMessage').mockRejectedValue(new core.AgentMuxError('Original record owner unavailable', 'EXTERNAL_RECORD_AUTHORITY_UNAVAILABLE'))
   const received = await f.receive({ addressing: 'response' })
   await vi.waitFor(async () => expect((await f.captured())[0]?.item.inputRef?.kind).toBe('message'))
+  await vi.waitFor(async () => expect((await f.services.ingress!.inspect({ ingressId: received.ingressId })).inputReceipt?.status).toBe('terminal-confirmed'))
   expect(f.inner.kernel.input).toHaveBeenCalledOnce()
   expect((await f.services.ingress!.inspect({ ingressId: received.ingressId })).ingress).toMatchObject({ group: { recording: { state: 'unavailable' } } })
   const diagnosis = await f.cli(['connection', 'diagnose', '--host', 'local', '--session', 'original-agent', '--binding', f.binding.bindingId])
@@ -190,9 +131,12 @@ it('failed capture enrichment reports an observation error without replacing the
     return apply(mutation, signal)
   })
   const received = await f.receive({ addressing: 'response' })
-  await vi.waitFor(() => expect(errors).toContain('AGENT_TIMELINE_PERSIST_FAILED'))
+  await vi.waitFor(() => expect(errors).toContain('AGENT_INPUT_CONVERSATION_UNCONFIRMED'))
+  await f.services.ingress!.dispatch(received.ingressId)
+  await vi.waitFor(async () => expect((await f.services.ingress!.inspect({ ingressId: received.ingressId })).inputReceipt?.status).toBe('terminal-confirmed'))
   const inspection = await f.services.ingress!.inspect({ ingressId: received.ingressId })
-  expect(inspection.inputReceipt?.status).toBe('terminal-confirmed')
+  expect(inspection.inputReceipt?.status, JSON.stringify(inspection)).toBe('terminal-confirmed')
+  expect(inspection.ingress).toMatchObject({ group: { recorded: expect.any(Object), recording: { state: 'unavailable' } } })
   expect(await f.captured()).toHaveLength(1); expect(f.inner.kernel.input).toHaveBeenCalledOnce(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 })
 
