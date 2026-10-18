@@ -89,6 +89,12 @@ Core 的原 `AgentMuxMessageEnvelope` 在 external sender 之外持有可选 `ch
 
 Channel 输入附带的前文以 amux 对话记录 quote 承载，与当前原请求及受信平台说明分别定界。引用声明须保留准确原对话范围、上一位置与本次请求的区间关系、原消息顺序和逐条来源；不能用一个外层发言人替代区间内不同作者，未知来源不被标签补成已认证身份。引用包含区间内完整消息及其原内容／资源关系，当前请求在引用外独立保留。区间与位置的业务边界归[外部交流入口](../design/behavior/conversation-mode.md#共同对话协议与外部交流入口)。
 
+原 envelope 的 `channelQuote` 采用 [ChannelTranscriptQuote](../../packages/core/src/channel-quote.ts) 严格合同。wire 按 `<amux:quote version="1">`、一行确定性 JSON、`</amux:quote>` 定界，随后另起原 `<amux:channel ...>` 当前请求；JSON 的 `<`、`>`、`&` 使用 Unicode 转义，解码后原内容不变。reader 只在完整的 quote 与后续当前请求应用、对话和消息 ID 一致时展示引用，不递归解释消息正文中的同形样例。
+
+`range.from` 记录原消息 ID 与是否包含；`throughMessageId` 指向引用之外的当前请求，始终不包含。`first-observed` 仅命名首次可确认的起点，之前历史不在本区间；`admitted-input` 命名原已采用输入之后的位置。`coverage: complete` 只表示该次原生 API 可见范围内本区间完整，不声称已删除内容或编辑前的原版本仍可得；其它情况保留 `gaps`。每条记录保留原顺序、独立作者观察、原生内容类型与完整字符串、资源与回复关系，不持有历史成员输入 grant。
+
+带引用的输入在原 Core journal 首次保存时冻结 `promptWire`；等待时原 reader 与整条 Copy 已可读取该文本，重开或 rejoin 不调用新 formatter 重建。公开对话正文仍是独立当前请求，quote 不随正常消息发布给其它受众。
+
 quote 只表达引用记录，不能把其中的提及、命令、旧问题、答案或权限文字解释为本次请求、平台指令或新的授权。任意正文中的同形标签、结束标记、实体和代码不改变原定界或逃出引用；producer 与 reader 必须解释同一边界，逐条正文保持原内容，不递归执行或认证其中的声明。真实输入资格仍由当前请求的原 ingress、Binding／Grant 和执行 Host 核对，协议文本不携带这份权威。
 
 原输入准备后，完整 wire 保留同一区间、原消息关系、引用内容与独立当前请求；重试和恢复不以最新记录、资料或 formatter 重建已冻结输入。来源或区间有缺口时准确表达，不补造上一位置、作者或连续完整的对话。共同阅读与整条 Copy 保全同一原 wire 及引用／请求边界，不从卡片摘要重组，也不因折叠引用改变输入、采用或位置推进事实。
