@@ -10,10 +10,12 @@ export default defineConfig({ root, cacheDir: resolve(root, '.cache/channel-hist
       'feishu-page': ['adapters/feishu/history.ts', 'tokens.add(next); pageToken = next', "gap('mutant-truncated'); break"],
       'feishu-content': ['adapters/feishu/history.ts', 'contentType: message.msg_type, content,', "contentType: message.msg_type, content: 'Lost original content',"],
       'feishu-native-shape': ['adapters/feishu/history.ts', 'if (message.thread_id !== undefined && !text(message.thread_id))', 'if (false)'],
+      'feishu-authority': ['adapters/feishu/history.ts', 'do {\n            input.assertCurrent?.(); signal.throwIfAborted()', 'do {\n            signal.throwIfAborted()'],
       'discord-content': ['adapters/discord/history.ts', 'content: JSON.stringify(body)', "content: 'Lost native body'"],
       'discord-access': ['adapters/discord/history.ts', 'if (!contentAccess)', 'if (false && !contentAccess)'],
       'discord-boundary': ['adapters/discord/history.ts', 'if (input.range.from.inclusive)', 'if (true)'],
-      'discord-native-shape': ['adapters/discord/history.ts', "if (!Number.isSafeInteger(message.type) || typeof message.content !== 'string' || !Array.isArray(message.attachments) || !Array.isArray(message.embeds))", 'if (false)']
+      'discord-native-shape': ['adapters/discord/history.ts', "if (!Number.isSafeInteger(message.type) || typeof message.content !== 'string' || !Array.isArray(message.attachments) || !Array.isArray(message.embeds))", 'if (false)'],
+      'discord-authority': ['adapters/discord/history.ts', 'while (!reached) {\n        input.assertCurrent?.(); signal.throwIfAborted()', 'while (!reached) {\n        signal.throwIfAborted()']
     } as const
     const change = changes[process.env.CHANNEL_HISTORY_MUTANT as keyof typeof changes]
     let loaded = code, mutation: string | undefined
