@@ -57,7 +57,7 @@ import { layoutForActiveTopic } from '../lib/scratch-topic-layout'
 import { useWorkbenchObjectLayout } from '../hooks/useWorkbenchObjectLayout'
 import { projectWorkbenchProjection, workbenchZoneUnplacedGroupId, selectWorkbenchProjectionTab, sameWorkbenchProjectionSelection, workbenchProjectionMatches, workbenchProjectionSlotId, workbenchRegionProjectionSlotId, workbenchProjectionTabIds, workbenchProjectionZone, WorkbenchProjectionContext, type WorkbenchProjection } from '../lib/workbench-projection'
 import { StableWorkbenchView } from './StableWorkbenchView'
-import { workbenchDisplayTabs, workbenchDisplayReferenceMatches, workbenchDisplayOccurrenceAmbiguous } from '../lib/workbench-resource-display'
+import { workbenchDisplayTabs, workbenchDisplayReferenceMatches, workbenchDisplayOccurrenceAmbiguous, workbenchDisplayGroupMatches, workbenchProjectionSplitPath } from '../lib/workbench-resource-display'
 import { workbenchNavigationTabs } from '../lib/workbench-navigation-catalog'
 import { useWorkbenchRetainedRegionId, useWorkbenchBrowserPresentation, focusedPrimaryWorkbenchTarget, focusedSecondaryWorkbenchTarget, committedPrimaryWorkbenchTarget, committedSecondaryWorkbenchTarget, workbenchHomePresentationReferences, workbenchBrowserWindowTarget, WorkbenchBrowserTargetsContext, workbenchBrowserStageHostId, workbenchSessionStageHostId, type BrowserControlConfirmation, type WorkbenchViewTarget, type WorkbenchViewTargets } from '../lib/workbench-presentation'
 import { opensContextMenuFromKeyboard } from '../lib/context-menu-key'
@@ -247,13 +247,14 @@ function SortableWorkbenchTab({
     currentWorkspaceId: tab.workspaceId,
     move: moveSessionViewToWorkspace
   })
+  const placed = useAppStore(state => workbenchDisplayReferenceMatches(state.layouts[workspaceId], { groupId: group.id, tabId: tab.id }))
   const dirty =
     surface.kind === 'file'
       ? Boolean(dirtyDocuments[documentKey(surface.workspaceId, surface.path)])
       : false
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: tab.id,
-    disabled: projection?.placementConfirmed === false,
+    disabled: projection?.placementConfirmed === false || Boolean(projection && !placed),
     data: { kind: 'tab', tabId: tab.id, groupId: group.id } satisfies DragTabData
   })
   const switchTarget = useMemo(() => ({ presentationId: projection?.presentationId ?? (mote?.floating ? 'mote' : 'space'),
@@ -410,7 +411,7 @@ function SortableWorkbenchTab({
         canCloseOthers={otherTabs.length > 0}
         canCloseLeft={tabsToLeft.length > 0}
         canCloseRight={tabsToRight.length > 0}
-        canMoveToNewGroup={group.tabOrder.length > 1}
+        canMoveToNewGroup={(!projection || placed) && group.tabOrder.length > 1}
         tabId={tab.id}
         onOpenWindow={() => void openWorkbenchWindow({ kind: 'tab', displayWorkspaceId: workspaceId, groupId: group.id, tabId: tab.id })}
         copyableAgentSessionId={copyableAgentSessionId}
@@ -1171,9 +1172,10 @@ function PaneGroup({
   const stopSession = useAppStore.getState().stopSession
   const [pendingStopSessionId, setPendingStopSessionId] = useState<string | null>(null)
   const [stopping, setStopping] = useState(false)
+  const placed = useAppStore(state => workbenchDisplayGroupMatches(state.layouts[workspaceId], group.id))
   const { setNodeRef, isOver } = useDroppable({
     id: `pane:${group.id}`,
-    disabled: projection?.placementConfirmed === false,
+    disabled: projection?.placementConfirmed === false || Boolean(projection && !placed),
     data: { kind: 'pane', groupId: group.id } satisfies DropData
   })
   const orderedTabIds = moteTabOrder(group.tabOrder, mote?.defaultConversation, workspaceId, group.id)
@@ -1477,17 +1479,24 @@ function SplitBranch({
   recoveryNotice?: ((layout: 'inline' | 'surface') => ReactNode) | undefined
 }) {
   const projection = useContext(WorkbenchProjectionContext)
-  const updateSplitRatio = useAppStore.getState().updateSplitRatio
+  const original = useAppStore(state => state.layouts[workspaceId])
+  const originalPath = useMemo(() => original ? workbenchProjectionSplitPath(original.root, node) : null, [original?.root, node])
+  const localKey = JSON.stringify([node.direction, groupIds(node)])
+  const [localRatio, setLocalRatio] = useState<{ key: string; ratio: number } | null>(null)
   const [dragging, setDragging] = useState(false)
   const terminalResizeSuspended = interactiveResize || dragging
-  const commitRef = useRef((ratio: number) => updateSplitRatio(workspaceId, nodePath, ratio))
+  const commitRef = useRef<(ratio: number) => void>(() => {})
   commitRef.current = (ratio) => {
-    if (surfaceVisible && projection?.placementConfirmed !== false) updateSplitRatio(workspaceId, nodePath, ratio)
+    if (!surfaceVisible || projection?.placementConfirmed === false) return
+    const state = useAppStore.getState(), current = state.layouts[workspaceId]
+    const path = current ? workbenchProjectionSplitPath(current.root, node) : null
+    if (path !== null) state.updateSplitRatio(workspaceId, path, ratio)
+    else setLocalRatio({ key: localKey, ratio })
   }
   // 缺失 / 非有限 / 越界的比例只在这里判一次。`?? 0.5` 曾在本组件手抄四份，而它防的是「可能缺 ratio
   // 的历史持久化数据」——#552 坐实了那道防线接不住 NaN（`??` 只认 null/undefined），而 NaN 恰恰是
   // 上游归一化把缺失值算出来的东西。改成走 clampSplitRatio 后三种坏取值同一个出口，见它的注释。
-  const ratio = clampSplitRatio(node.ratio)
+  const ratio = clampSplitRatio(originalPath === null && localRatio?.key === localKey ? localRatio.ratio : node.ratio)
   const committerRef = useRef<SplitRatioCommitter | null>(null)
   if (committerRef.current === null) {
     committerRef.current = new SplitRatioCommitter(ratio, (value) => commitRef.current(value))
@@ -1799,7 +1808,7 @@ export function WorkspaceWorkbench({
   const objectLayout = useWorkbenchObjectLayout(workspaceId, residentLayout, viewOwnership !== 'projection' && !projection)
   const categoryWorkspace = useAppStore(state => viewOwnership === 'owner' && workspaceId === SCRATCH_WORKSPACE_ID && state.workbenchSpaceSelection?.workspaceId === workspaceId && state.workbenchSpaceSelection.zoneId === null && state.workbenchSpaceSelection.topicId === null ? state.config?.workspaces.find(workspace => workspace.id === workspaceId) : undefined)
   const projectedMemberIds = useMemo(() => projection ? workbenchProjectionTabIds(projection) : null, [projection?.entity, projection?.catalog])
-  const tabs = useAppStore(useShallow((state) => projection
+  const tabs = useAppStore(useShallow((state) => projection && viewOwnership !== 'owner'
     ? Object.fromEntries([...projectedMemberIds ?? []].flatMap(id => state.tabs[id] ? [[id, state.tabs[id]!]] : []))
     : workbenchDisplayTabs(state.tabs, workspaceId, residentLayout)))
   // Page content keeps full Tab facts; only home references use the structural projection.
@@ -1819,8 +1828,8 @@ export function WorkspaceWorkbench({
   const navigationInputPolicy = useAppStore(state => state.workbenchNavigationInputPolicy)
   const requestedInputRegionId = useAppStore(state => state.workbenchNavigationInputPolicy === 'target' ? state.workbenchSpaceSelection?.regionId : undefined)
   const mainSelection = useAppStore(state => state.workbenchSpaceSelection)
-  const zoneLayout = useMemo(() => projection ? projectWorkbenchProjection(projection.composition ?? residentLayout, tabs, projection, projectionActiveGroupId) : null,
-    [residentLayout, tabs, projection, projectionActiveGroupId])
+  const zoneLayout = useMemo(() => projection ? projectWorkbenchProjection(projection.composition ?? residentLayout, tabs, projection, projectionActiveGroupId, viewOwnership) : null,
+    [residentLayout, tabs, projection, projectionActiveGroupId, viewOwnership])
   const projectionContext = useMemo(() => projection && zoneLayout
     ? { ...projection, unsupportedTabIds: new Set([...zoneLayout.unsupportedTabIds, ...zoneLayout.layout?.groups.flatMap(group => {
         const tabId = group.activeTabId
@@ -1983,7 +1992,8 @@ export function WorkspaceWorkbench({
 
   function onDragMove(event: DragMoveEvent): void {
     const point = dragPoint(event)
-    setSplitTarget(point ? splitTargetAtPoint(point) : null)
+    const target = point ? splitTargetAtPoint(point) : null
+    setSplitTarget(target && workbenchDisplayGroupMatches(useAppStore.getState().layouts[workspaceId], target.groupId) ? target : null)
   }
 
   function onDragEnd(event: DragEndEvent): void {
@@ -1991,14 +2001,19 @@ export function WorkspaceWorkbench({
     const target = splitTarget
     setActiveDrag(null)
     setSplitTarget(null)
-    if (!drag) return
+    if (!drag || !target && !event.over) return
+    const current = committedPlacement.current
+    const original = useAppStore.getState().layouts[workspaceId]
+    const targetGroupId = target?.groupId ?? (event.over?.data.current as DropData | undefined)?.groupId
+    if (!workbenchRef.current?.isConnected || !current.visible || current.scope !== bodyScope || current.projection !== projection ||
+      !workbenchDisplayReferenceMatches(original, { groupId: drag.groupId, tabId: drag.tabId }) ||
+      !targetGroupId || !workbenchDisplayGroupMatches(original, targetGroupId)) { rejectUnconfirmedPlacement(); return }
     if (target) {
       moveTabToNewGroup(workspaceId, drag.tabId, drag.groupId, target.groupId, target.direction)
       return
     }
     const over = event.over?.data.current as DropData | undefined
     if (!over) return
-    const targetGroupId = over.groupId
     const targetGroup = groupById.get(targetGroupId)
     if (!targetGroup) return
     // 这个下标是在**用户看到的**（已按 Topic 投影的）tabOrder 上算的。store 的 moveTab 负责把它
@@ -2012,7 +2027,7 @@ export function WorkspaceWorkbench({
 
   function newTab(groupId: string): void {
     const current = committedPlacement.current
-    if (viewOwnership === 'projection' && (!workbenchRef.current?.isConnected || !current.visible || current.retainUnplacedTab ||
+    if ((projection || viewOwnership === 'projection') && (!workbenchRef.current?.isConnected || !current.visible || current.retainUnplacedTab ||
       current.scope !== bodyScope || current.projection !== projection)) { rejectUnconfirmedPlacement(); return }
     if (viewOwnership === 'projection' && !projection) {
       const currentLayout = useAppStore.getState().layouts[workspaceId]
@@ -2066,7 +2081,7 @@ export function WorkspaceWorkbench({
       !projection!.catalog.tabs.some(tab => tab.zoneId === projectedZoneId))
     : Boolean(!hasContextTabs && membersConfirmed && !moteContext?.issue && storedLayout && objectLayout.confirmed && objectLayout.choice?.zoneId && objectLayout.choice.tabId === null &&
       objectLayout.layout?.groups.every(group => group.tabOrder.length === 0))
-  const scopeIssues = viewOwnership === 'owner' ? objectLayout.issues : zoneLayout?.issues ?? []
+  const scopeIssues = viewOwnership === 'owner' && !projection ? objectLayout.issues : zoneLayout?.issues ?? []
   const projectionIssue: RenderableServiceNotice | null = scopeIssues.length ?
     { kind: 'indeterminate', notice: { step: 'Original work surface retained', mode: scopeIssues.join(' '),
       restore: 'Select a Tab in its Group, or reopen the original work surface in Space.' } }

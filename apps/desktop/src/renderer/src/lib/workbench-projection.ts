@@ -87,7 +87,7 @@ export function workbenchRegionProjectionSlotId(prefix: string, reference: Workb
 }
 
 /** Read-only projection of the original layout algebra and authoritative typed membership. */
-export function projectWorkbenchProjection(layout: WorkspaceLayout | undefined, tabs: Readonly<Record<string, WorkbenchTab>>, scope: WorkbenchProjection, activeGroupId: string | null = null): {
+export function projectWorkbenchProjection(layout: WorkspaceLayout | undefined, tabs: Readonly<Record<string, WorkbenchTab>>, scope: WorkbenchProjection, activeGroupId: string | null = null, contentOwnership: 'owner' | 'projection' = 'projection'): {
   layout: WorkspaceLayout | null
   issues: string[]
   unsupportedTabIds: ReadonlySet<string>
@@ -166,7 +166,7 @@ export function projectWorkbenchProjection(layout: WorkspaceLayout | undefined, 
     const displays = occurrences.get(group.activeTabId) ?? new Set<string>()
     displays.add(group.id); occurrences.set(group.activeTabId, displays)
   }
-  const unsupportedTabIds = new Set([...occurrences].filter(([id, displays]) => displays.size > 1).map(([id]) => id))
+  const unsupportedTabIds = new Set([...occurrences].filter(([id, displays]) => contentOwnership !== 'owner' && displays.size > 1).map(([id]) => id))
   if (unsupportedTabIds.size) issues.push('The same Tab has more than one presentation reference. Simultaneous live presentation is not available in the current content owner; every exact reference is kept.')
   const confirmedActiveGroupId = activeGroupId && selected.has(activeGroupId) && visibleGroupIds.has(activeGroupId) ? activeGroupId
     : selected.size === 1 ? [...selected.keys()][0]

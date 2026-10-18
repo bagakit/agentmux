@@ -1,4 +1,4 @@
-import { groupIds, type WorkspaceLayout } from '@agentmux/layout'
+import { groupIds, type TabGroupLayoutNode, type WorkspaceLayout } from '@agentmux/layout'
 import { workbenchProjectionSlotId, type WorkbenchProjectionSelection } from './workbench-projection'
 import type { WorkbenchViewTarget, WorkbenchViewTargets } from './workbench-presentation'
 import type { WorkbenchTab } from './workbench-tabs'
@@ -24,10 +24,37 @@ function displayMembership(layout: WorkspaceLayout) {
 }
 
 /** Confirmation is constant work after one pass over a changed display layout. */
+export function workbenchDisplayGroupMatches(layout: WorkspaceLayout | undefined, groupId: string): boolean {
+  if (!layout) return false
+  const index = displayMembership(layout)
+  return index.visible.has(groupId) && index.groups.has(groupId)
+}
+
+/** Confirmation is constant work after one pass over a changed display layout. */
 export function workbenchDisplayReferenceMatches(layout: WorkspaceLayout | undefined, reference: Pick<WorkbenchProjectionSelection, 'groupId' | 'tabId'>): boolean {
   if (!layout) return false
   const index = displayMembership(layout)
   return index.visible.has(reference.groupId) && index.groups.get(reference.groupId)?.has(reference.tabId) === true
+}
+
+/** Resolve a projected divider by its original Group identities, never its presentation path. */
+export function workbenchProjectionSplitPath(original: TabGroupLayoutNode,
+  projected: Extract<TabGroupLayoutNode, { type: 'split' }>): string | null {
+  const firstGroups = groupIds(projected.first), secondGroups = groupIds(projected.second)
+  const firstIds = new Set(firstGroups), secondIds = new Set(secondGroups)
+  if (firstIds.size !== firstGroups.length || secondIds.size !== secondGroups.length ||
+    firstGroups.some(id => secondIds.has(id))) return null
+  const matches: string[] = []
+  const visit = (node: TabGroupLayoutNode, path: string): readonly [number, number] => {
+    if (node.type === 'leaf') return [firstIds.has(node.groupId) ? 1 : 0, secondIds.has(node.groupId) ? 1 : 0]
+    const first = visit(node.first, path ? `${path}.first` : 'first')
+    const second = visit(node.second, path ? `${path}.second` : 'second')
+    if (node.direction === projected.direction && first[0] === firstIds.size && first[1] === 0 &&
+      second[0] === 0 && second[1] === secondIds.size) matches.push(path)
+    return [first[0] + second[0], first[1] + second[1]]
+  }
+  const totals = visit(original, '')
+  return totals[0] === firstIds.size && totals[1] === secondIds.size && matches.length === 1 ? matches[0]! : null
 }
 
 /** Resolve one exact physical occurrence; a resource Workspace never guesses display. */
