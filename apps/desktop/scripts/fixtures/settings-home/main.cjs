@@ -501,7 +501,7 @@ app.whenReady().then(async () => {
       const original = await read(`${node(field)}.checked`)
       await choose(field)
       assert.equal(await read(`${node('[aria-label="Project path draft preview"]')}.dataset.pathFormat`),original?'abbreviated':'absolute','The path example follows the unsaved original preference')
-      for (const [label,target] of [['Open Execution','continuity'],['Open Hosts','hosts']]) {
+      for (const [label,target] of [['Open Session recovery','continuity'],['Open Hosts','hosts']]) {
         await click(button(pane,label)); await until(`!!${node(`[data-settings-pane="${target}"]:not([hidden])`)}`)
         await nav(id); assert.equal(await read(`${node(field)}.checked`),!original)
       }
@@ -848,6 +848,51 @@ app.whenReady().then(async () => {
     }
     if (mode==='toolkit-model') { await nav('toolkit'); await theme('dark'); await pageInteractions('toolkit'); result.passed=true; return }
     if (mode==='focus-content') { await nav('focus'); await theme('dark'); await focusContentSize(); result.passed=true; return }
+    if(selected.includes('agents')&&selected.includes('continuity')) {
+      const initialSaves=await read('window.settingsHomeProbe.saves.length')
+      await resize(1440,940);await theme('dark')
+      assert.deepEqual(await read(`Array.from(document.querySelectorAll('[data-settings-group-toggle]')).slice(0,2).map(n=>n.textContent.trim())`),['Preferences','Agents'],'Agent setup is a normal group after Preferences')
+      assert.deepEqual(await read(`Array.from(document.querySelectorAll('#settings-nav-agents [data-settings-target]')).map(n=>({id:n.dataset.settingsTarget,title:n.textContent.trim()}))`),[{id:'agents',title:'Agent CLIs'},{id:'continuity',title:'Session recovery'}],'The Agent group names its original CLI and recovery editors')
+      assert.equal(await read(`${node('[data-settings-directory] [data-settings-group="agents"] header h3')}.textContent`),'Agents')
+      for(const color of ['dark','light']) { await theme(color);await capture('agents-navigation-expanded-'+color,'overview',color,'Agent group expanded') }
+      await theme('dark');await nav('continuity')
+      const pane='[data-settings-pane="continuity"]'
+      const summary=pane+' [data-continuity-retry-settings] > summary'
+      if(!await read(`${node(pane+' [data-continuity-retry-settings]')}.open`)) await click(node(summary))
+      const field='[aria-label="Additional retries"]'
+      const before=await read(`${node(field)}.value`), draft=before==='7'?'8':'7'
+      await fill(field,draft);await read(`window.originalAgentRecoveryField=${node(field)}`)
+      await click(node('[data-settings-group-toggle="agents"]'))
+      assert.equal(await read(`${node('[data-settings-group-toggle="agents"]')}.getAttribute('aria-expanded')`),'false')
+      await capture('agents-navigation-collapsed','continuity','dark','Collapsed group retains the active recovery editor')
+      await fill('[aria-label="Search settings"]','execution')
+      await until(`!!${node('[data-settings-search-section="continuity"]')}`)
+      assert.equal(await read(`${node('[data-settings-search-section="continuity"] strong')}.textContent`),'Session recovery')
+      await capture('agents-navigation-recovery-search','search','dark','Original execution search finds Session recovery')
+      await click(node('[data-settings-search-section="continuity"]'))
+      await click(node('[aria-label="Clear settings search"]'))
+      assert.equal(await read(`${node(field)}===window.originalAgentRecoveryField`),true,'Navigation retains the original recovery field')
+      assert.equal(await read(`${node(field)}.value`),draft,'Navigation retains the original recovery draft')
+      await fill(field,before)
+      await fill('[aria-label="Search settings"]','agents')
+      await until(`!!${node('[data-settings-search-section="agents"]')}`)
+      assert.equal(await read(`${node('[data-settings-search-section="agents"] strong')}.textContent`),'Agent CLIs')
+      await click(node('[data-settings-search-section="agents"]'))
+      assert.equal(await title(),'Agent CLIs')
+      await click(node('[aria-label="Clear settings search"]'))
+      await resize(500,840);await nav('agents')
+      for(const color of ['dark','light']) {
+        await theme(color);await click(node('.settings-section-picker'))
+        await until(`!!${node('[role="menuitemradio"]')}`)
+        assert.ok(await read(`Array.from(document.querySelectorAll('.settings-section-menu__label')).some(n=>n.textContent==='Agents')`),'Compact navigation includes the same Agent group heading')
+        for(const label of ['Agent CLIs','Session recovery'])assert.ok(await read(`Array.from(document.querySelectorAll('[role="menuitemradio"]')).some(n=>n.textContent.trim()===${JSON.stringify(label)})`))
+        await capture('agents-navigation-menu-'+color,'agents',color,'Compact Agent group')
+        await key('Escape')
+      }
+      assert.equal(await read('window.settingsHomeProbe.saves.length'),initialSaves,'Regrouping navigation never saves configuration')
+      result.interactions.push({kind:'agent-navigation-group',items:['agents','continuity'],labels:['Agent CLIs','Session recovery'],aliases:['agents','execution'],sameRecoveryField:true,recoveryDraftPreserved:true,implicitSaves:0})
+      await resize(1440,940);await theme('dark');await nav('overview')
+    }
     await until(`${node('.settings-overview__art')}.complete&&${node('.settings-overview__art')}.naturalWidth>0`,'The actual Overview artwork is decoded before its normal visual baseline')
     for (const [width,height,label] of [[1440,940,'wide'],[900,620,'short'],[500,840,'compact'],[320,700,'narrow']]) {
       await resize(width,height)
@@ -1010,7 +1055,7 @@ app.whenReady().then(async () => {
     await until('!!document.querySelector(".agent-identity-popover header button")')
     await click(node('.agent-identity-popover header button'))
     await until('!!document.querySelector("[data-settings-pane=agents]:not([hidden])")')
-    assert.equal(await title(),'Agents','Actual Avatar direct entry bypasses Home')
+    assert.equal(await title(),'Agent CLIs','Actual Avatar direct entry bypasses Home')
     assert.equal(await read(`${node(`[data-resource-editor="${executorId}"]`)}?.isConnected`),true,'The original exact Executor editor is reached')
     result.exactTarget = {executorId,caller:'AgentAvatar -> SettingsNavigation -> App -> SettingsPanel -> AgentSettingsPane'}
     await capture('executor-direct-entry','agents','dark')

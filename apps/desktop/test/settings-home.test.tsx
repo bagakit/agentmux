@@ -110,7 +110,7 @@ it('an external exact route during a search visit reveals the new destination gr
   expect(node('nav [data-settings-target="hosts"]').getAttribute('aria-current')).toBe('page')
 })
 
-it('every sidebar group starts expanded and specific entries have no generic wrapper', async () => {
+it('every sidebar group starts expanded with Agent CLIs and Session recovery together', async () => {
   await dom.render(<SettingsPanel onClose={() => {}} />)
   const toggles = [...dom.container.querySelectorAll('[data-settings-group-toggle]')]
   expect(toggles.length).toBeGreaterThan(0)
@@ -118,9 +118,14 @@ it('every sidebar group starts expanded and specific entries have no generic wra
   const entries = [...dom.container.querySelectorAll<HTMLElement>('nav [data-settings-target]')]
   expect(entries.map(entry => entry.dataset.settingsTarget)).toEqual(['overview', ...visibleSettingsSections('').map(item => item.id)])
   expect(entries.every(entry => !entry.closest('[hidden]'))).toBe(true)
-  expect(dom.container.querySelector('[data-settings-group-toggle="agents"]')).toBeNull()
+  expect(group('agents').getAttribute('aria-expanded')).toBe('true')
+  expect([...node('#settings-nav-agents').querySelectorAll<HTMLElement>('[data-settings-target]')].map(item => item.dataset.settingsTarget)).toEqual(['agents', 'continuity'])
+  expect([...node('[data-settings-directory] [data-settings-group="agents"]').querySelectorAll('[data-settings-section]')].map(item => item.textContent)).toEqual(expect.arrayContaining([expect.stringContaining('Agent CLIs'), expect.stringContaining('Session recovery')]))
+  expect([...dom.container.querySelectorAll('[data-settings-group-toggle]')].slice(0,2).map(item => item.textContent)).toEqual(['Preferences','Agents'])
   expect(node('nav [data-settings-target="hosts"]').textContent).toBe('Hosts')
-  expect(node('nav [data-settings-target="agents"]').closest('[data-standalone]')).not.toBeNull()
+  expect(node('nav [data-settings-target="agents"]').textContent).toBe('Agent CLIs')
+  expect(node('nav [data-settings-target="continuity"]').textContent).toBe('Session recovery')
+  expect(dom.container.querySelector('[data-standalone]')).toBeNull()
   expect(dom.container.querySelector('nav')!.textContent).not.toMatch(/Resources|Environments/)
 })
 
@@ -144,5 +149,19 @@ it('an exact field search reveals its original advanced disclosure and keeps the
   expect(node('[aria-label="Additional retries"]')).toBe(input)
   expect(input.value).toBe('7')
   expect(details.open).toBe(true)
+  await query('execution')
+  expect(node('[data-settings-search-section="continuity"] strong').textContent).toBe('Session recovery')
+  await dom.click('[data-settings-search-section="continuity"]')
+  await dom.click('[aria-label="Clear settings search"]')
+  expect(node('[aria-label="Additional retries"]')).toBe(input)
+  expect(input.value).toBe('7')
+  await query('agents')
+  expect(node('[data-settings-search-section="agents"] strong').textContent).toBe('Agent CLIs')
+  await dom.click('[data-settings-search-section="agents"]')
+  expect(node('.settings-content__header h2').textContent).toBe('Agent CLIs')
+  await dom.click('[aria-label="Clear settings search"]')
+  expect(node('[aria-label="Additional retries"]')).toBe(input)
+  expect(input.value).toBe('7')
+  expect(group('agents').getAttribute('aria-expanded')).toBe('true')
   expect(save).not.toHaveBeenCalled()
 })

@@ -93,7 +93,7 @@ it('General links open the original recovery and Host owners without saving its 
   await dom.render(<SettingsPanel initialSection="general" onClose={() => {}} />)
   const path = page().querySelector<HTMLInputElement>('[data-settings-field="copy-paths"] input')!
   await act(async () => path.click())
-  await clickText('Open Execution')
+  await clickText('Open Session recovery')
   expect(page().dataset.settingsPage).toBe('continuity')
   await dom.click('[data-settings-target="general"]')
   expect(page().querySelector('[data-settings-field="copy-paths"] input')).toBe(path)
