@@ -423,8 +423,10 @@ export function ActivityView({
     const geometry = feedGeometry()
     if (geometry) setAtLoadedTail(isNearBottom(geometry))
   }
-  function syncTailAfterLayout(): void {
-    if (followRef.current.following || atLoadedTail) syncTailPosition()
+  function syncTailAfterLayout(cause?: 'resize'): void {
+    const resized = cause === 'resize' ? feedEl : null
+    const physicalTail = resized && isNearBottom({ scrollTop: resized.scrollTop, scrollHeight: resized.scrollHeight, clientHeight: resized.clientHeight })
+    if (followRef.current.following || atLoadedTail || physicalTail) syncTailPosition()
   }
 
   function clearEarlierSpace(): void {
