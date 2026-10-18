@@ -43,15 +43,16 @@ export async function runMobile({BrowserWindow,setup,evidence,phase,scene,preloa
   const until=async(code,label=code)=>{for(let i=0;i<240;i++){if(await read(code))return;await pause(35)}throw Error('Original Mobile condition absent: '+label)}
   const sample=async name=>{await pause(80);const state=await read(`(()=>{const feed=document.querySelector('.mobile-conversation__reading'),bounds=feed.getBoundingClientRect();return {facts:mobileReading.facts(),nodes:feed.querySelectorAll('*').length,bodies:feed.querySelectorAll('.log-turn__body:not(.conversation-progressive-body__placeholder)').length,markdown:feed.querySelectorAll('[data-markdown-root],.md-paragraph').length,scroll:{top:feed.scrollTop,height:feed.scrollHeight,client:feed.clientHeight},visible:[...feed.querySelectorAll('[data-native-record-id]')].filter(n=>{const r=n.getBoundingClientRect();return r.bottom>bounds.top&&r.top<bounds.bottom}).map(n=>n.getAttribute('data-native-record-id')),editor:document.querySelector('[contenteditable=true]')?.textContent,overflow:document.querySelector('.mobile-app').scrollWidth>document.querySelector('.mobile-app').clientWidth}})()`);result.samples.push({name,...state});return state}
   const capture=async name=>{const file=`${scene}-${phase}-mobile-${name}.png`;await writeFile(join(evidence,file),(await win.webContents.capturePage()).toPNG());result.images.push(file)}
-  const tap=async selector=>{
+  const tap=async (selector,{skipDisabled=false}={})=>{
     await read(`document.querySelector(${JSON.stringify(selector)})?.scrollIntoView({block:'nearest'})`)
     const point=await read(`(()=>{const node=document.querySelector(${JSON.stringify(selector)});if(!node)throw Error('Original control missing');const r=node.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;const hit=document.elementFromPoint(x,y);if(hit!==node&&!node.contains(hit))throw Error('Original control covered');return{x,y,disabled:!!node.disabled}})()`)
+    if(skipDisabled&&point.disabled)return false
     assert.equal(point.disabled,false)
     await win.webContents.debugger.sendCommand('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:point.x,y:point.y,radiusX:1,radiusY:1,force:1,id:1}]})
     await win.webContents.debugger.sendCommand('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await pause(90)
-    result.operations.push({type:'tap',selector})
+    result.operations.push({type:'tap',selector});return true
   }
-  const button=async label=>{const id=await read(`(()=>{const n=[...document.querySelectorAll('.mobile-conversation button')].find(n=>n.getClientRects().length&&(n.textContent.trim()===${JSON.stringify(label)}||n.getAttribute('aria-label')===${JSON.stringify(label)}));if(!n)throw Error('Original named button absent: '+${JSON.stringify(label)});n.dataset.mobileProofControl='active';return '[data-mobile-proof-control=active]'})()`);await tap(id);await read(`document.querySelector('[data-mobile-proof-control=active]')?.removeAttribute('data-mobile-proof-control')`)}
+  const button=async (label,options)=>{const id=await read(`(()=>{const n=[...document.querySelectorAll('.mobile-conversation button')].find(n=>n.getClientRects().length&&(n.textContent.trim()===${JSON.stringify(label)}||n.getAttribute('aria-label')===${JSON.stringify(label)}));if(!n)throw Error('Original named button absent: '+${JSON.stringify(label)});n.dataset.mobileProofControl='active';return '[data-mobile-proof-control=active]'})()`);try{return await tap(id,options)}finally{await read(`document.querySelector('[data-mobile-proof-control=active]')?.removeAttribute('data-mobile-proof-control')`)}}
   const wheel=async dy=>{const p=await read(`(()=>{const r=document.querySelector('.mobile-conversation__reading').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseWheel',...p,deltaY:dy,deltaX:0});await pause(100)}
   try {
     win.webContents.on('console-message',event=>{if(event.level==='error')result.errors.push({kind:'console',message:event.message})})
@@ -73,13 +74,30 @@ export async function runMobile({BrowserWindow,setup,evidence,phase,scene,preloa
     }
     await capture('current')
     for(let demand=0;demand<3;demand++){
+      const before=await read(`(()=>{const receipts=mobileReading.facts().conversationReads;return {ids:[...document.querySelectorAll('[data-native-record-id]')].map(n=>n.dataset.nativeRecordId),started:performance.now(),olderCursor:receipts.findLast(r=>r.complete)?.olderCursor,receiptCount:receipts.length}})()`)
+      assert.equal(typeof before.olderCursor,'string','The original accepted source supplies the next older cursor')
       await wheel(-900);await wheel(-900)
-      const before=await read(`({ids:[...document.querySelectorAll('[data-native-record-id]')].map(n=>n.dataset.nativeRecordId).join(','),started:performance.now()})`)
-      const older=await read(`!![...document.querySelectorAll('.mobile-reading-action')].find(n=>n.textContent==='更早消息')`)
-      assert.equal(older,true,'The controlled original source provides three earlier pages')
-      await button('更早消息')
-      await until(`[...document.querySelectorAll('[data-native-record-id]')].map(n=>n.dataset.nativeRecordId).join(',')!==${JSON.stringify(before.ids)}`,'earlier source is actually readable')
-      result.operations.push({type:'earlier-readable',demand,latency:await read('performance.now()')-before.started})
+      let clicked=false,progress=null
+      for(let attempt=0;attempt<240;attempt++){
+        const state=await read(`(()=>{
+          const before=${JSON.stringify(before)},facts=mobileReading.facts(),ids=[...document.querySelectorAll('[data-native-record-id]')].map(n=>n.dataset.nativeRecordId);
+          const own=r=>r.hostId==='local'&&r.agentSessionId===${JSON.stringify(mobile.agentSessionId)};
+          const receipts=facts.conversationReads.slice(before.receiptCount);
+          const receipt=receipts.find(r=>own(r)&&r.method==='readAgentConversation'&&r.requestCursor===before.olderCursor&&r.finished>before.started);
+          const complete=receipt&&receipts.find(r=>own(r)&&r.windowId===receipt.windowId&&r.revision===receipt.revision&&r.complete);
+          const originalId=receipt&&receipts.filter(r=>own(r)&&r.windowId===receipt.windowId&&r.revision===receipt.revision).flatMap(r=>r.nativeIds).find(id=>!before.ids.includes(id)&&ids.includes(id));
+          const pending=facts.reads.filter(r=>!r.finished&&r.method==='runtime.invoke'&&['readAgentConversation','readConversationChanges'].includes(r.params?.invocation?.method)&&r.params.invocation.args[0].hostId==='local'&&r.params.invocation.args[0].agentSessionId===${JSON.stringify(mobile.agentSessionId)}).map(r=>({method:r.params.invocation.method,started:r.started}));
+          const button=[...document.querySelectorAll('.mobile-reading-action')].find(n=>n.textContent==='更早消息');
+          return {readable:!!complete&&!!originalId,receipt:complete&&originalId?{windowId:receipt.windowId,revision:receipt.revision,requestCursor:receipt.requestCursor,originalId}:null,pending,exists:!!button,disabled:button?button.disabled:null};
+        })()`)
+        result.earlierDemand={demand,before,clicked,state}
+        if(state.readable){progress=state.receipt;break}
+        assert.equal(state.exists,true,'The controlled original source provides three earlier pages')
+        if(!clicked&&!state.pending.length&&!state.disabled)clicked=await button('更早消息',{skipDisabled:true})
+        await pause(35)
+      }
+      assert.ok(progress,'This earlier demand must finish its original source read and present a new original native record')
+      result.operations.push({type:'earlier-readable',demand,mode:clicked?'manual':'already-reading',receipt:progress,latency:await read('performance.now()')-before.started})
       await sample('earlier-'+demand)
     }
     await capture('earlier')
