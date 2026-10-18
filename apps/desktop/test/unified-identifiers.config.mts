@@ -20,7 +20,8 @@ const selected = [
   'apps/desktop/test/workbench-windows.test.ts', 'apps/desktop/test/workbench-window-store.test.ts',
   'apps/desktop/test/client-incident-ipc.test.ts', 'apps/desktop/test/unified-browser-identifiers.test.ts',
   'apps/desktop/test/unified-object-id-store.test.ts', 'apps/desktop/test/message-tool-workspace.test.tsx',
-  'apps/mobile/test/native-workface-file.test.ts'
+  'apps/mobile/test/native-workface-file.test.ts', 'apps/desktop/test/client-incident-temp-cleanup.test.ts',
+  'packages/core/test/performance-input-correlation.test.ts'
 ]
 export default defineConfig({ ...original, root,
   resolve: { alias: Object.entries(aliases).map(([name, replacement]) => ({ find: new RegExp('^' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'), replacement })), conditions: ['browser', 'import', 'default'] },
