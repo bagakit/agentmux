@@ -1,8 +1,9 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { readSceneResources, type PerformanceSceneOwner } from './performance-scene.js'
 import type { RendererHeapSnapshotOwner, RendererHeapSnapshotDependencies } from './renderer-heap-snapshot.js'
 import type { RendererV8ProfileTarget, RendererSceneLoaded } from '@agentmux/core/control'
 import { hostname } from 'node:os'
-import { randomUUID } from 'node:crypto'
+
 import {
   AgentMuxError, parseMetricsRendererResult, type AgentMuxMetricsPort, type MetricsObservation,
   type MetricsWindow, type MetricsSource, type MetricsRenderer
@@ -129,7 +130,7 @@ export async function observeRendererResources(
 ) {
   const window = currentWindow(), processId = currentProcessId()
   if (!window || processId === null || processId <= 0) throw new AgentMuxError('Current Renderer is not connected.', 'CONTROL_UNAVAILABLE')
-  const result = parseMetricsRendererResult(await bridge.execute({ operation: 'metrics.renderer', requestId: randomUUID(), window }, signal))
+  const result = parseMetricsRendererResult(await bridge.execute({ operation: 'metrics.renderer', requestId: mintObjectId(), window }, signal))
   const current = currentWindow()
   if (signal.aborted || !current || currentProcessId() !== processId || result.process.pid !== processId || [current, result.window].some(value =>
     value.windowId !== window.windowId || value.webContentsId !== window.webContentsId || value.generation !== window.generation)) {

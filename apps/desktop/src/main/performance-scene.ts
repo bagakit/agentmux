@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { mintObjectId } from '@agentmux/core/object-id'
 import { mkdir, open } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { AgentMuxError, durableWriteFile, DurableWriteError } from '@agentmux/core'
@@ -141,7 +141,7 @@ export class PerformanceSceneOwner {
     const pending = new AgentMuxError('This original phase has not been requested.', 'SCENE_NOT_REQUESTED')
     const scene: RendererPerformanceScene = {
       schema: 'agentmux.performance-scene.v1',
-      captureId: randomUUID(),
+      captureId: mintObjectId(),
       target,
       durationMs: 2000,
       status: 'failed',

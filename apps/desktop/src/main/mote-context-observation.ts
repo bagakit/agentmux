@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { mintObjectId } from '@agentmux/core/object-id'
 import { AgentMuxError } from '@agentmux/core'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, parseMoteContextObservation,
   type AgentMuxControlInspectMoteContextRequest, type AgentMuxControlResult } from '@agentmux/core/control'
@@ -38,7 +38,7 @@ export function moteContextEvidencePort(hostId: string,
     if (maxBytes < 1) return missing('DIAGNOSTIC_EVIDENCE_QUERY_BUDGET')
     try {
       // The query ends caller waiting; this Promise holds the actual IPC slot until reply/disposal.
-      const result = await execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: randomUUID(),
+      const result = await execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(),
         operation: 'inspect.mote-context', target, includeRaw: bounds.includeRaw, maxBytes })
       if (result.operation !== 'inspect.mote-context') throw new AgentMuxError('Invalid Mote context operation.', 'CONTROL_PROTOCOL_ERROR')
       const observed = parseMoteContextObservation(result.observation, target, bounds.includeRaw)

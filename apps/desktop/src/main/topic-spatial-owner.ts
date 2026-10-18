@@ -1,5 +1,6 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { join, dirname } from 'node:path'
-import { randomUUID } from 'node:crypto'
+
 import { mkdir, lstat } from 'node:fs/promises'
 import { AgentMuxError, durableWriteFile } from '@agentmux/core'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
@@ -163,7 +164,7 @@ export class TopicSpatialOwner implements TopicSpatialPort {
         error('Topic discovery changed after preview. Original graph is retained; preview again.', 'TOPIC_MIGRATION_UNCONFIRMED')
       registerKnowledgeTopic(graph, this.ports.workspace(), topic, destination)
     }
-    const backupPath = state ? join(dirname(this.ports.state.path), 'backups', `topic-hierarchy-${expectedRevision}-${randomUUID()}.json`) : null
+    const backupPath = state ? join(dirname(this.ports.state.path), 'backups', `topic-hierarchy-${expectedRevision}-${mintObjectId()}.json`) : null
     if (backupPath) {
       await mkdir(dirname(backupPath), { recursive: true, mode: 0o700 })
       const directory = await lstat(dirname(backupPath))

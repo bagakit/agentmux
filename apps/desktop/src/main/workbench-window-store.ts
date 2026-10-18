@@ -1,4 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { mintObjectId } from '@agentmux/core/object-id'
+import { createHash } from 'node:crypto'
 import { mkdir, readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { durableWriteFile } from '@agentmux/core'
@@ -47,10 +48,10 @@ export class WorkbenchWindowStore {
   async load(): Promise<WorkbenchWindowLoad> {
     try { return { state: parseStoredWorkbenchWindows(JSON.parse(await readFile(this.path, 'utf8'))), issue: null, writable: true } }
     catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { state: { mainWindowId: randomUUID(), windows: [] }, issue: null, writable: true }
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { state: { mainWindowId: mintObjectId(), windows: [] }, issue: null, writable: true }
       // Keep the original corrupt/unreadable bytes. This presentation failure must
       // neither replace the original workbench nor block its healthy Agents.
-      return { state: { mainWindowId: randomUUID(), windows: [] }, writable: false,
+      return { state: { mainWindowId: mintObjectId(), windows: [] }, writable: false,
         issue: `Original window arrangement could not be read. Original workfaces and Agents remain. ${String(error)}` }
     }
   }

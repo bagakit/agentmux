@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { mintObjectId } from '@agentmux/core/object-id'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, formatAmuxObjectLink } from '@agentmux/core'
 import { isSystemWebUrl, type SystemWebUrlRequest, type SystemWebUrlResult } from '../shared/system-web-url.js'
 import type { SpatialLinkIngress } from './spatial-link-ingress.js'
@@ -16,7 +16,7 @@ export class WebUrlIngress {
   receive(url: string): void {
     if (!isSystemWebUrl(url)) {
       this.issues.push('This system link is not a valid HTTP(S) URL. Existing pages and drafts are kept.')
-    } else this.pending.push({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: randomUUID(), operation: 'browser.openFromSystem', url })
+    } else this.pending.push({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(), operation: 'browser.openFromSystem', url })
     this.drain()
   }
   ready(execute: Execute, report: (message: string) => void): void { this.execute = execute; this.report = report; this.drain() }

@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { executorEnvironmentRevision } from '../shared/executor-probe-context.js'
 import { readInputObservation, type InputObservationReference, type InputPerformanceSender, type InputPerformanceHandle } from '@agentmux/core/control'
 import { MainPerformanceDiagnostics } from './performance-diagnostics.js'
@@ -5,7 +6,7 @@ import { profileAgentContext } from '../shared/user-profile.js'
 import type { ToolkitRunPort } from './toolkit-run-port.js'
 import { AGENT_SCHEDULE_CHECK_IN_GUIDANCE, type AgentScheduleCheckInPolicy } from '@agentmux/core/schedule'
 import { checkInHumanObservation, type CheckInObservation } from './agent-schedule-check-in.js'
-import { randomUUID } from 'node:crypto'
+
 import { isAbsolute } from 'node:path'
 import {
   AgentMuxError,
@@ -1190,7 +1191,7 @@ export class RuntimeController {
         const hostIntent: AgentMuxHostAgentCreateInput | undefined = remoteCreation ? {
           executorId: request.executorId, executorRevision: request.executorRevision ?? selected!.configRevision,
           workspacePath: preparedTopic?.absolutePath ?? request.workspacePath,
-          createOperationId: request.createOperationId ?? randomUUID(),
+          createOperationId: request.createOperationId ?? mintObjectId(),
           ...(agentMuxNote ? { agentMuxNote } : {}),
           ...(preparedTopic ? { optionalContext: preparedTopic.optionalContext } : {}),
           ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
@@ -1592,7 +1593,7 @@ export class RuntimeController {
     return await this.trackHostLifecycleOperation(request.hostId, async () => {
       const client = await this.connectedClient(request.hostId, 'runtime')
       const run = await client.createTerminal({
-        createOperationId: request.createOperationId ?? randomUUID(),
+        createOperationId: request.createOperationId ?? mintObjectId(),
         workspacePath: request.workspacePath,
         ...(request.shellCommand === undefined
           ? {}
@@ -1665,7 +1666,7 @@ export class RuntimeController {
             attached.run.acceptedInputBytes
           )
         }
-        const attachmentId = refresh?.attachmentId ?? randomUUID()
+        const attachmentId = refresh?.attachmentId ?? mintObjectId()
         if (refresh?.attachmentId) this.requireSessionAttachmentLease(webContentsId, refresh.attachmentId, key)
         const owner = existing ?? { control, controlIdentity: identity, attachmentIds: new Set<string>() }
         owner.attachmentIds.add(attachmentId)
@@ -2227,7 +2228,7 @@ export class RuntimeController {
     control: SessionControl,
     config: AppConfig,
     workspacePath?: string,
-    operationId: string = randomUUID(),
+    operationId: string = mintObjectId(),
     request?: Pick<import('@agentmux/core').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'>
   ): Promise<SessionRecoveryResult> {
     return await this.trackHostLifecycleOperation(
@@ -2251,7 +2252,7 @@ export class RuntimeController {
         config
       )).workspacePath
       const run = await client.createTerminal({
-        createOperationId: randomUUID(),
+        createOperationId: mintObjectId(),
         workspacePath: cwd
       })
       this.terminalInputCursors.set(
@@ -2776,7 +2777,7 @@ export class RuntimeController {
         diagnostic.executionOwner(ownerInstanceId)
         const accepted = await diagnostic.measure('native-input', () => client.writeTerminal(control.run, {
           ownerInstanceId,
-          operationId: randomUUID(),
+          operationId: mintObjectId(),
           expectedByte,
           data
         }, parent ?? undefined))

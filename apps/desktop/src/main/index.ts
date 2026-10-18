@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { ClientIncidentArchive } from './client-incident-archive.js'
 import { PerformanceSceneOwner } from './performance-scene.js'
 import { RendererHeapSnapshotOwner } from './renderer-heap-snapshot.js'
@@ -6,7 +7,7 @@ import { WorkbenchWindows } from './workbench-windows.js'
 import { WorkbenchWindowStore } from './workbench-window-store.js'
 import { openDemandStore } from '@agentmux/demand'
 import { readLoadedPackageIdentity } from './client-observation.js'
-import { randomUUID } from 'node:crypto'
+
 import { RendererUpdates } from './renderer-updates.js'
 import { readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -51,7 +52,7 @@ import { ContinuousProgressLoopStore } from './continuous-progress-loop-store.js
 import { installRecoverySeedBeforeLoad, summarizeRecoverySessionStore, summarizeRecoveryStorage } from './recovery-probe.js'
 
 const appIconPath = join(import.meta.dirname, '../../resources/icon.png')
-const startupAttemptId = randomUUID()
+const startupAttemptId = mintObjectId()
 const packagedUserDataPath = join(app.getPath('appData'), 'dev.agentmux.desktop')
 
 // Development launches and packaged launches must address the same durable user-data root. Electron's
@@ -289,7 +290,7 @@ function startPrimaryInstance(): void {
           ? { 'agentmux-resource-probe': '1' }
           : undefined
       const loadPackagedRenderer = async (file: string) => {
-        const token = randomUUID()
+        const token = mintObjectId()
         let timer: ReturnType<typeof setTimeout> | undefined
         const ready = new Promise<void>((resolve, reject) => {
           updateReady = { token, resolve }

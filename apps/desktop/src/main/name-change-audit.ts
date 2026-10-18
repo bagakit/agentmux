@@ -1,5 +1,6 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { randomUUID } from 'node:crypto'
+
 import type { AgentMuxNameContext, AgentMuxNameChangeIntent, AgentMuxNameChangeRecord,
   AgentMuxNameChangeAdmission, AgentMuxNameChangeSettlement, AgentMuxNameTarget } from '@agentmux/core/control'
 import type { AppConfig } from '../shared/contracts.js'
@@ -46,7 +47,7 @@ export class NameChangeAudit {
       for (const [index, change] of changes.entries()) {
         const { location, ...intent } = change
         const record = await this.port.beginNameChange({ ...intent,
-          operationId: `${request?.operationId ?? randomUUID()}/name/${index}`,
+          operationId: `${request?.operationId ?? mintObjectId()}/name/${index}`,
           context: { ...context, location: { ...context.location, ...location } } })
         if (record.replayed) throw Object.assign(new Error(
           `Name operation ${record.id} is already recorded as ${record.status}. Inspect that operation and the current name before making a new edit.`

@@ -1,6 +1,7 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { cp, mkdir, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
-import { randomUUID } from 'node:crypto'
+
 import type { ToolkitPackageConfiguration } from '@agentmux/core/control'
 
 type InitialPackage = { id: string; directory: string; args: string[] }
@@ -17,7 +18,7 @@ export async function bootstrapToolkitPackages(args: { resourceRoot: string; pac
       continue
     }
     const packagePath = join(args.packageRoot, seed.directory)
-    tools.push({ kind: 'package', id: seed.id, revision: randomUUID(), packagePath, enabled: true,
+    tools.push({ kind: 'package', id: seed.id, revision: mintObjectId(), packagePath, enabled: true,
       statusBar: 'icon', args: [...seed.args], workspacePath: args.workspacePath })
     try {
       await mkdir(args.packageRoot, { recursive: true })

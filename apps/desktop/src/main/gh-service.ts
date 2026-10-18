@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { mintObjectId } from '@agentmux/core/object-id'
 import { rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -162,7 +162,7 @@ export class GhService {
       return { kind: 'refused', reason: 'Could not verify the base branch on the remote, so the pull request was not created.' }
     }
 
-    const bodyFile = join(tmpdir(), `agentmux-pr-${randomUUID()}.md`)
+    const bodyFile = join(tmpdir(), `agentmux-pr-${mintObjectId()}.md`)
     try {
       // 0o600 because this is the user's prose sitting in a world-readable shared tmpdir for as long
       // as `gh` takes to run. Every other user-content write in this app already picks that mode.

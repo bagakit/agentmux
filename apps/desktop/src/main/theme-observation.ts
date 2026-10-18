@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { mintObjectId } from '@agentmux/core/object-id'
 import { DEFAULT_THEME_ID, getThemeCatalog } from '@agentmux/client-ui/theme'
 import type { AgentMuxAppearanceObservation, AgentMuxAppearanceObservationPort, AgentMuxControlSettingsResourceFields } from '@agentmux/core'
 import { AgentMuxError } from '@agentmux/core'
@@ -32,7 +32,7 @@ function relevantChanged(next: AppConfig, previous: AppConfig): boolean {
 export function themeObservation(owner: ConfigOwner): AgentMuxAppearanceObservationPort {
   return { subscribe: async (onSnapshot, onEnd, signal) => {
     let closed = false, started = false, delivering = false, revision = 0
-    const sourceId = randomUUID()
+    const sourceId = mintObjectId()
     let release: (() => void) | undefined, latest: AgentMuxAppearanceObservation | undefined
     const dispose = () => { if (closed) return; closed = true; latest = undefined; release?.(); signal.removeEventListener('abort', dispose) }
     const pump = async () => {

@@ -1,5 +1,6 @@
 import { createMoteChatAgents } from './mote-chat-agents.js'
 import { registerMoteChatIpc } from './mote-chat-ipc.js'
+import { mintObjectId } from '@agentmux/core/object-id'
 import { ClientIncidentIpcOwner } from './client-incident-ipc.js'
 import { ClientIncidentRuntimeOwner } from './client-incident-runtime.js'
 import type { ClientIncidentArchive } from './client-incident-archive.js'
@@ -117,7 +118,7 @@ import { discoverAgentSkills, mintAgentSessionId, runProcess } from '@agentmux/c
 import { captureComposerScreenshot } from './composer-screenshot.js'
 import { readBookmark } from './bookmark-file.js'
 import { bookmarkKindForPath } from '../shared/bookmark-file.js'
-import { randomUUID } from 'node:crypto'
+
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
@@ -396,7 +397,7 @@ export async function registerIpc(args: {
   const worktrees = new WorktreeService((id) => args.runtime.executionHost(id), { save: (next, expected) => configOwner.edit(expected, next) })
   const worktreeCloseout = new WorktreeCloseoutOwner({ config: configOwner, spatial: spatialState, worktrees,
     prepare: async () => {
-      const result = await controlBridge.execute({ operation: 'worktree.closeout.prepare', requestId: randomUUID() })
+      const result = await controlBridge.execute({ operation: 'worktree.closeout.prepare', requestId: mintObjectId() })
       if (result.operation !== 'worktree.closeout.prepare' || result.diskDurability !== 'confirmed') throw new Error('Original workface save is unconfirmed. Keep the directory and retry after restoring its workface.')
     },
     executionReferences: async workspace => {
@@ -568,7 +569,7 @@ export async function registerIpc(args: {
   const closeMetrics = () => metrics.dispose()
   contents.once('destroyed', closeMetrics)
   const disposeProgressInput = args.runtime.setContinuousProgressInputObserver(async (control, signal) => {
-    const result = await controlBridge.execute({ operation: 'continuous-progress.observeInput', requestId: randomUUID(), control }, signal)
+    const result = await controlBridge.execute({ operation: 'continuous-progress.observeInput', requestId: mintObjectId(), control }, signal)
     if (result.operation !== 'continuous-progress.observeInput' || result.control.kind !== 'agent' ||
         result.control.hostId !== control.hostId || result.control.agentSessionId !== control.agentSessionId ||
         result.control.run.runId !== control.run.runId || typeof result.occupied !== 'boolean') {
@@ -661,7 +662,7 @@ export async function registerIpc(args: {
   ): void => {
     channels.push(channel)
     ipcMain.handle(channel, (event, ...values: TArgs) => nameChangeRequests.run({
-      context: desktopNameContext(channel, event.sender, contents, args.window.id), operationId: randomUUID()
+      context: desktopNameContext(channel, event.sender, contents, args.window.id), operationId: mintObjectId()
     }, () => listener(...values)))
   }
   /**
@@ -681,7 +682,7 @@ export async function registerIpc(args: {
   ): void => {
     channels.push(channel)
     ipcMain.handle(channel, (event, ...values: TArgs) => nameChangeRequests.run({
-      context: desktopNameContext(channel, event.sender, contents, args.window.id), operationId: randomUUID()
+      context: desktopNameContext(channel, event.sender, contents, args.window.id), operationId: mintObjectId()
     }, () => listener(event, ...values)))
   }
   /**
@@ -853,7 +854,7 @@ export async function registerIpc(args: {
     note: await worktrees.orphanCommitNote(workspaceId, config)
   }))
   handle('workspaces:removeWorktree', async (input: RemoveWorktreeInput): Promise<RemoveWorktreeOutcome> => {
-    return await worktreeCloseout.close(input, randomUUID())
+    return await worktreeCloseout.close(input, mintObjectId())
   })
   // One fan-out. The orchestration lives in `fanout-request` so it is reachable from a test: this
   // handler is one forwarding expression with no statement position to disable. Text guards on this
@@ -877,7 +878,7 @@ export async function registerIpc(args: {
             workspacePath: launchInput.workspacePath,
             prompt: launchInput.prompt,
             agentSessionId: mintAgentSessionId(),
-            createOperationId: randomUUID()
+            createOperationId: mintObjectId()
           }, current)
           return { sessionId: launched.created.agentSessionId }
         },
@@ -1765,7 +1766,7 @@ export async function registerIpc(args: {
 
   handleWithEvent('continuousProgress:create', async (event, target: ContinuousProgressTarget, intervalMs: number, prompt: string, taskSource?: ContinuousProgressTaskSource) => {
     requireTrustedSender('continuousProgress:create', event)
-    const observed = await args.runtime.observeContinuousProgress(target, randomUUID(), Date.now())
+    const observed = await args.runtime.observeContinuousProgress(target, mintObjectId(), Date.now())
     if (observed.inputOccupied) throw new Error('Keep your draft and queued messages. Clear them before enabling automatic progress.')
     return await args.progressLoops.create({ ...target, intervalMs, prompt, ...(taskSource !== undefined ? { taskSource } : {}) })
   })
@@ -1777,7 +1778,7 @@ export async function registerIpc(args: {
     if (action === 'pause') return await args.progressLoops.pause(loopId)
     if (action === 'stop') return await args.progressLoops.stopLoop(loopId)
     if (action !== 'resume' && action !== 'check') throw new Error('Unknown continuous progress action.')
-    const observed = await args.runtime.observeContinuousProgress(target, randomUUID(), Date.now())
+    const observed = await args.runtime.observeContinuousProgress(target, mintObjectId(), Date.now())
     if (observed.inputOccupied) throw new Error('Keep your draft and queued messages. Automatic progress remains paused.')
     return action === 'resume' ? await args.progressLoops.resume(loopId) : await args.progressLoops.checkNow(loopId)
   })

@@ -1,6 +1,7 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import type { AppConfig } from '../shared/contracts.js'
 import { validateThemeConfigEdit } from './theme-config.js'
-import { randomUUID } from 'node:crypto'
+
 import { applyConfigEdit, configValuesEqual } from '../shared/config-edit.js'
 import { configNameChanges, configNameValue, type NamedChange, type NameChangeAudit } from './name-change-audit.js'
 
@@ -56,7 +57,7 @@ export class ConfigOwner {
         let changed=false
         for (const key of new Set([...Object.keys(previousIcons),...Object.keys(nextIcons)])) {
           if (Object.hasOwn(previousIcons,key)===Object.hasOwn(nextIcons,key) && configValuesEqual(previousIcons[key],nextIcons[key])) continue
-          Object.defineProperty(versions,key,{value:randomUUID(),enumerable:true,writable:true,configurable:true});changed=true
+          Object.defineProperty(versions,key,{value:mintObjectId(),enumerable:true,writable:true,configurable:true});changed=true
         }
         const {spaceObjectIconRevisions:_callerVersions,...appearance}=next.appearance
         next={...next,appearance:{...appearance,...(changed || current.appearance.spaceObjectIconRevisions!==undefined ? {spaceObjectIconRevisions:versions}: {})}}
