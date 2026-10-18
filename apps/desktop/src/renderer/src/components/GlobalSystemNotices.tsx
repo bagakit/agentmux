@@ -4,7 +4,7 @@ import { useWorkbenchDocument } from '../lib/workbench-document'
 import { useContext, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { autoUpdate, computePosition, offset, shift, size, type VirtualElement } from '@floating-ui/dom'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { notificationEventIdentity, projectNotifications, useAppStore } from '../store'
+import { notificationEventIdentity, projectNotifications, useAppStore, type NotificationEvent, type NotificationEventObject } from '../store'
 import { useReadReceipts, useServiceNotices, type ServiceNoticeItem } from '../lib/use-service-notices'
 import { selectDisplacedAgentNotices, displacedAgentStepOutcome } from '../lib/control-spatial-commit'
 import { classifyServiceNotice, serviceNoticeToRender, serviceNoticeAriaLive } from '../lib/service-window-notice'
@@ -226,6 +226,28 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   const currentEntries: NotificationEntry[] = []
   const historyEntries: NotificationEntry[] = []
   if (open) {
+    const eventPresentation = (event: NotificationEvent) => ({
+      timestamp: notificationTimestamp(event.lastObservedAt ?? event.firstObservedAt, (event.occurrences ?? 1) > 1 ? 'Last received' : 'Received'),
+      occurrences: event.occurrences
+    })
+    const eventTimeDetails = (event: NotificationEvent) => {
+      const first = notificationTimestamp(event.firstObservedAt, 'Received')
+      const last = notificationTimestamp(event.lastObservedAt, 'Last received')
+      return [first ? `First received: ${first.dateTime}` : undefined,
+        last && last.dateTime !== first?.dateTime ? `Last received: ${last.dateTime}` : undefined].filter(Boolean).join('\n')
+    }
+    const objectSubject = (object: NotificationEventObject): NotificationSubject => {
+      const names: Record<NotificationEventObject['kind'], string> = {
+        application: 'Application', host: 'Connection', workspace: 'Workspace', document: 'Document',
+        browser: 'Browser', 'tab-group': 'Tab Group', tab: 'Tab', region: 'Region', zone: 'Zone'
+      }
+      const label = object.kind === 'host' ? config?.hosts.find(host => host.id === object.id)?.label
+        : object.kind === 'workspace' ? config?.workspaces.find(workspace => workspace.id === object.id)?.name
+        : object.kind === 'tab' ? tabs[object.id]?.name
+        : object.kind === 'application' && object.id === 'desktop' ? 'AgentMux' : undefined
+      return { key: JSON.stringify(['object', object.kind, object.id, object.hostId, object.workspaceId]),
+        label: label ?? names[object.kind], context: label ? names[object.kind] : object.id }
+    }
     const append = (inbox: typeof environmentInbox, group: NotificationCategory,
       subject: (item: ServiceNoticeItem) => NotificationSubject, actionLabel?: string) => {
       const unreadIds = new Set(inbox.unread.map(item => item.id))
@@ -276,9 +298,9 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
         : lifecycle?.step === 'launch'
           ? { key: JSON.stringify(['region', lifecycle.tabId, lifecycle.regionId]), label: launcher?.name ?? 'Original launch location', context: `Region ${lifecycle.regionId}` }
           : { key: record.id, label: 'Original operation', context: 'Object not recorded' }
-      currentEntries.push({ id: record.id, noticeId: record.id, category: subject?.kind === 'agent' ? 'agents' : 'operations', subject: target,
+      currentEntries.push({ ...eventPresentation(record), id: record.id, noticeId: record.id, category: subject?.kind === 'agent' ? 'agents' : 'operations', subject: target,
         kind: notice.kind, title: notice.notice.step, impact: notice.notice.mode,
-        detail: [source, notice.notice.step, notice.notice.mode, notice.notice.restore].filter(Boolean).join('\n'),
+        detail: [source, eventTimeDetails(record), notice.notice.step, notice.notice.mode, notice.notice.restore].filter(Boolean).join('\n'),
         unread: unreadEventIds.has(record.id), onRead: () => eventInbox.acknowledge([record.id]),
         action: session ? navigationAction({ label: 'View Session', run: () => { void selectSession(session.id) } }) : undefined
       })
@@ -286,14 +308,25 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
     for (const event of [...projection.history].reverse()) {
       const subject = event.context?.subject
       const session = subject?.kind === 'agent' ? sessionsByIdentity.get(JSON.stringify([subject.hostId, subject.agentSessionId])) : undefined
-      historyEntries.push({ id: event.id, eventId: event.id,
-        category: subject?.kind === 'agent' ? 'agents' : 'operations',
-        subject: subject?.kind === 'agent'
+      const origin = event.context?.event, object = origin?.object
+      const category: NotificationCategory = origin?.source === 'desktop-notifications' ? 'system'
+        : origin?.source === 'spatial' ? 'operations' : origin?.source === 'agent-attention' ? 'agents'
+        : object?.kind === 'host' ? 'connections' : object?.kind === 'application' ? 'system'
+        : !object && subject?.kind === 'agent' ? 'agents' : 'operations'
+      const provenance = [origin ? `Source: ${origin.source}\nEvent: ${origin.key}` : undefined,
+        object ? `Object: ${object.kind} ${object.id}${object.hostId ? `\nHost: ${object.hostId}` : ''}${object.workspaceId ? `\nWorkspace: ${object.workspaceId}` : ''}` : undefined,
+        subject?.kind === 'agent' ? `Session: ${subject.agentSessionId}\nHost: ${subject.hostId}\nRun: ${subject.run.runId}` : undefined,
+        eventTimeDetails(event)].filter(Boolean).join('\n')
+      historyEntries.push({ ...eventPresentation(event), id: event.id, eventId: event.id,
+        category,
+        subject: object ? objectSubject(object) : subject?.kind === 'agent'
           ? { key: JSON.stringify(['agent', subject.hostId, subject.agentSessionId, subject.run.runId]), label: session?.label ?? subject.agentSessionId, context: config?.hosts.find(host => host.id === subject.hostId)?.label ?? subject.hostId }
           : { key: event.id, label: 'Operation', context: 'Object not recorded' },
         kind: event.context?.kind ?? 'indeterminate',
         title: event.context?.summary ?? (event.context?.kind === 'agent-broken' ? 'Agent stopped unexpectedly' : event.message),
         detail: event.message, summary: event.context?.summary,
+        impact: event.context?.summary ? event.message : undefined,
+        children: provenance ? <><p className="notification-item__provenance">{provenance}</p><p>{event.message}</p></> : undefined,
         unread: unreadEventIds.has(event.id), onRead: () => eventInbox.acknowledge([event.id]),
         action: session ? navigationAction({ label: 'View Session', run: () => { void selectSession(session.id) } }) : undefined
       })

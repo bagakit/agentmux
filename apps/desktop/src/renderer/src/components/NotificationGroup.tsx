@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { NotificationItem, type NotificationItemProps } from './NotificationItem'
 import { notificationCategories, type GroupableNotification, type NotificationGroup as Group } from '../lib/notification-center'
+import { notificationPreview } from '../lib/notification-preview'
 
 const ChevronIcon = semanticIconComponent('navigation.disclosure')
 export type NotificationEntry = NotificationItemProps & GroupableNotification
@@ -13,7 +14,7 @@ export function NotificationGroup({ group }: { group: Group<NotificationEntry> }
   const remainingUnread = group.items.slice(1).filter(item => item.unread).length
   return <section className="notification-group" data-group-id={group.id} data-category={group.category}>
     <header className="notification-group__heading">
-      <div><strong>{group.subject.label}</strong>{group.subject.context ? <span>{group.subject.context}</span> : null}</div>
+      <div><strong title={group.subject.label}>{notificationPreview(group.subject.label, 'title')}</strong>{group.subject.context ? <span title={group.subject.context}>{notificationPreview(group.subject.context, 'title')}</span> : null}</div>
       <span className="notification-group__category">{notificationCategories[group.category]}</span>
     </header>
     {items.map(item => <NotificationItem key={item.id} {...item} />)}

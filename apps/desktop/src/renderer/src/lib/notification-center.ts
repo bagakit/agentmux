@@ -39,7 +39,7 @@ export function groupNotifications<T extends GroupableNotification>(entries: rea
 }
 
 /** Time has an explicit provenance; no render-time timestamp is invented. */
-export function notificationTimestamp(value: number | undefined, provenance: 'Observed' | 'Received' = 'Observed') {
+export function notificationTimestamp(value: number | undefined, provenance: 'Observed' | 'Received' | 'Last received' = 'Observed') {
   if (value === undefined || !Number.isFinite(value)) return undefined
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return undefined

@@ -29,11 +29,6 @@ export function NotificationSettingsPane({ notifications, onSave }: {
 
   const index = NOTIFICATION_TIERS.findIndex((tier) => tier.id === mode)
   const active = NOTIFICATION_TIERS[index] ?? NOTIFICATION_TIERS[0]!
-  // `off` raises nothing at all, so a sound choice under it has nothing to apply to. The control stays
-  // visible and disabled rather than disappearing: a toggle that vanishes reads as a feature that was
-  // removed, and the user needs to see that turning the slider up is what re-enables it.
-  const soundApplies = mode !== 'off'
-
   // The preview mirrors the terminal-theme swatch: it draws the real thing the control shapes. The
   // dwell meter fills in proportion to how long the banner stays — off collapses it, "until I dismiss"
   // fills it and breathes. The longest bounded dwell anchors the scale so the fill reads as a ratio.
@@ -63,7 +58,7 @@ export function NotificationSettingsPane({ notifications, onSave }: {
       <figure className="notification-preview" aria-label="Desktop banner preview" data-notification-mode={mode}>
         <figcaption><span>Example desktop banner</span><span>{modeDraft.dirty || soundDraft.dirty ? 'Unsaved preview' : 'Saved settings'}</span></figcaption>
         <div className="notification-preview__sample">
-        <div className="notification-preview__chrome"><b>AgentMux</b><span>{mode === 'off' ? 'Desktop banners off' : active.label}</span></div>
+        <div className="notification-preview__chrome"><b>AgentMux</b><span>{mode === 'off' ? 'Agent status banners off' : active.label}</span></div>
         <div className="notification-preview__title">
           <span className="status status--waiting" aria-hidden="true"><span className="status__dot" /></span>
           Review Agent — Needs you
@@ -109,12 +104,11 @@ export function NotificationSettingsPane({ notifications, onSave }: {
           <input
             type="checkbox"
             checked={sound}
-            disabled={!soundApplies}
             onChange={(event) => setSound(event.target.checked)}
           />
           <span>
             <strong>Play the system notification sound</strong>
-            <small>Uses your system notification sound. Silent by default.{soundApplies ? '' : ' Unavailable while desktop banners are off.'}</small>
+            <small>Applies to Agent status banners and enabled A2A message alerts. Silent by default.</small>
           </span>
         </label>
       </section>

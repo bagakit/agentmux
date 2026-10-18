@@ -41,7 +41,7 @@ export type NotificationTier = {
  * stop here and both the settings control and delivery follow, because both derive from this array.
  */
 export const NOTIFICATION_TIERS: readonly NotificationTier[] = [
-  { id: 'off', label: 'Off', description: 'No system notifications.', mode: { kind: 'off' } },
+  { id: 'off', label: 'Off', description: 'Agent status banners are off.', mode: { kind: 'off' } },
   { id: 'brief', label: 'Brief', description: 'A quick banner (about 6 seconds).', mode: { kind: 'dwell', dwellMs: 6_000 } },
   { id: 'standard', label: 'Standard', description: 'Long enough to read the summary (about 12 seconds).', mode: { kind: 'dwell', dwellMs: 12_000 } },
   { id: 'patient', label: 'Patient', description: 'Stays a while if you are away (about 30 seconds).', mode: { kind: 'dwell', dwellMs: 30_000 } },
