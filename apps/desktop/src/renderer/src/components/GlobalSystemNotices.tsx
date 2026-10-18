@@ -2,7 +2,7 @@ import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { getModalOverlayContainer, ModalAttachmentDismissal } from '@agentmux/client-ui/components/Modal'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { useContext, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { autoUpdate, computePosition, offset, shift, size, type VirtualElement } from '@floating-ui/dom'
+import { autoUpdate, computePosition, offset, shift, size } from '@floating-ui/dom'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { notificationEventIdentity, projectNotifications, useAppStore, type NotificationEvent, type NotificationEventObject } from '../store'
 import { useReadReceipts, useServiceNotices, type ServiceNoticeItem } from '../lib/use-service-notices'
@@ -13,7 +13,6 @@ import { groupNotifications, notificationCategories, notificationTimestamp, type
 import { createSessionServiceNoticeSelector } from '../lib/session-service-notices'
 import { runServiceProjection, useRunServiceHealthChanges } from '../lib/run-service-projection'
 import { agentLifecycleFailureNotice } from '../lib/agent-lifecycle-feedback'
-import { desktopElementVisible } from '../lib/desktop-presentation'
 import { SettingsNavigation } from './SettingsNavigation'
 import { executorsForHost, hostExecutorInventoryMatches } from '../lib/executors'
 import { runtimeEndpointNotice } from '../lib/runtime-endpoint-notice'
@@ -84,31 +83,23 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   useLayoutEffect(() => {
     const trigger = triggerRef.current, details = detailsRef.current
     if (!open || !trigger || !details) return
-    // Read actual visible input surfaces only while details are open. Their original
-    // editor, draft and terminal grid stay in place; the floating inbox moves instead.
-    const inputs = [...document.querySelectorAll<HTMLElement>('.agent-input-stack')].filter(desktopElementVisible)
+    // The explicit popover belongs to its bell. Overlaying the workface never
+    // resizes its editors or makes another Region's input height the anchor.
     let disposed = false
-    const reference: VirtualElement = { contextElement: trigger, getBoundingClientRect() {
-      const anchor = trigger.getBoundingClientRect()
-      const top = inputs.filter(desktopElementVisible).reduce((top, input) => Math.min(top, input.getBoundingClientRect().top), anchor.top)
-      return new window.DOMRect(anchor.left, top, anchor.width, 0)
-    } }
     const update = async () => {
-      const { x, y } = await computePosition(reference, details, {
-        strategy: 'fixed', placement: 'top-end', middleware: [offset(8), shift({ padding: 8 }), size({ padding: 8,
+      const { x, y } = await computePosition(trigger, details, {
+        strategy: 'fixed', placement: 'top-end', middleware: [offset(6), shift({ padding: 8 }), size({ padding: 8,
           apply({ availableHeight }) {
-            if (!disposed) details.style.maxHeight = `${Math.max(0, Math.min(window.innerHeight * .7, availableHeight))}px`
+            if (!disposed) details.style.maxHeight = `${Math.max(0, Math.min(560, availableHeight))}px`
           }
         })]
       })
       if (!disposed) Object.assign(details.style, { left: `${x}px`, top: `${y}px`, visibility: 'visible' })
     }
-    const stopPosition = autoUpdate(reference, details, () => { void update() })
-    const resize = new window.ResizeObserver(() => { void update() })
-    for (const input of inputs) resize.observe(input)
+    const stopPosition = autoUpdate(trigger, details, () => { void update() })
     return () => {
       disposed = true
-      stopPosition(); resize.disconnect()
+      stopPosition()
       for (const property of ['left', 'top', 'max-height', 'visibility']) details.style.removeProperty(property)
     }
   }, [open, document])
@@ -359,22 +350,22 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       {open ? <>
         <div className="global-system-notices__heading">
           <strong>Notifications</strong>
+          <div className="global-system-notices__tabs" role="tablist" aria-label="Notification view">
+            {([['current', 'Current', currentCount], ['history', 'Activity', projection.history.length]] as const).map(([value, label, total]) =>
+              <button type="button" key={value} role="tab" id={`${id}-${value}`} aria-selected={section === value}
+                aria-controls={`${id}-content`} tabIndex={section === value ? 0 : -1} data-section={value}
+                onClick={() => setSection(value)} onKeyDown={event => {
+                  if (isImeOwnedKeyboardEvent(event)) return
+                  const next = event.key === 'Home' ? 'current' : event.key === 'End' ? 'history'
+                    : event.key === 'ArrowLeft' || event.key === 'ArrowRight' ? value === 'current' ? 'history' : 'current' : undefined
+                  if (!next) return
+                  event.preventDefault()
+                  setSection(next)
+                  document.getElementById(`${id}-${next}`)?.focus()
+                }}>{label}<span>{total}</span></button>)}
+          </div>
           <button type="button" className="icon-button" aria-label="Collapse system notifications" title="Close notifications"
             popoverTarget={id} popoverTargetAction="hide"><ThemeNavigationCollapseIcon size={16} /></button>
-        </div>
-        <div className="global-system-notices__tabs" role="tablist" aria-label="Notification view">
-          {([['current', 'Current', currentCount], ['history', 'Activity', projection.history.length]] as const).map(([value, label, total]) =>
-            <button type="button" key={value} role="tab" id={`${id}-${value}`} aria-selected={section === value}
-              aria-controls={`${id}-content`} tabIndex={section === value ? 0 : -1} data-section={value}
-              onClick={() => setSection(value)} onKeyDown={event => {
-                if (isImeOwnedKeyboardEvent(event)) return
-                const next = event.key === 'Home' ? 'current' : event.key === 'End' ? 'history'
-                  : event.key === 'ArrowLeft' || event.key === 'ArrowRight' ? value === 'current' ? 'history' : 'current' : undefined
-                if (!next) return
-                event.preventDefault()
-                setSection(next)
-                document.getElementById(`${id}-${next}`)?.focus()
-              }}>{label}<span>{total}</span></button>)}
         </div>
         <div className="global-system-notices__filters" role="group" aria-label="Notification category">
           {Object.entries(notificationCategories).map(([value, label]) => <button type="button" key={value}
@@ -382,7 +373,6 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
         </div>
         <div className="global-system-notices__content" id={`${id}-content`} role="tabpanel" tabIndex={0}
           aria-labelledby={`${id}-${section}`} aria-label={section === 'current' ? 'Current issues' : 'Recent events'}>
-          {shown.length ? <p className="global-system-notices__summary">{shown.length} {section === 'current' ? 'current' : 'recorded'} {shown.length === 1 ? 'notice' : 'notices'} · {groups.length} {groups.length === 1 ? 'object' : 'objects'}</p> : null}
           {groups.map(group => <NotificationGroup key={group.id} group={group} />)}
           {!shown.length ? <div className="global-system-notices__empty"><ThemeObjectNotificationsIcon size={24} />
             <strong>{category !== 'all' ? 'No notifications in this category' : section === 'current' ? 'No current issues' : 'No recent activity'}</strong>
