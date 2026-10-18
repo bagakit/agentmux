@@ -17,7 +17,7 @@ vi.mock('electron', () => ({ app: { get isPackaged(){return fixture.packaged},ge
     on: (channel: string, handler: Function) => { const values = fixture.ipc.listeners.get(channel) ?? new Set(); values.add(handler); fixture.ipc.listeners.set(channel, values) },
     off: (channel: string, handler: Function) => fixture.ipc.listeners.get(channel)?.delete(handler),
     removeListener: (channel: string, handler: Function) => fixture.ipc.listeners.get(channel)?.delete(handler) },
-  clipboard: {}, dialog: {}, nativeImage: {}, shell: {},
+  clipboard: {}, dialog: { showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] as string[] })) }, nativeImage: {}, shell: {},
   safeStorage: { isAsyncEncryptionAvailable: async () => false },
   nativeTheme: Object.assign(new EventEmitter(), { shouldUseDarkColors: false }) }))
 vi.mock('node:os', async original => ({ ...await original(), homedir: () => fixture.directory }))
@@ -138,7 +138,7 @@ export async function nativeMain() {
     }
   })()
   cleanups.push(async()=>{await close()})
-  dispose=await registerIpc({initialConfig:config,window:{setBackgroundColor:vi.fn(),id:7,isDestroyed:()=>false,webContents:sender} as any,runtime,configStore:store,workbenchWindows:{setNativeOwner:()=>()=>{}} as any,
+  dispose=await registerIpc({initialConfig:config,window:{setBackgroundColor:vi.fn(),id:7,isDestroyed:()=>false,webContents:sender} as any,runtime,configStore:store,workbenchWindows:{setNativeOwner:()=>()=>{},windowForDocument:()=>({id:7})} as any,
     progressLoops:{subscribe:()=>()=>{}} as any,scratchTopics:{ setNameAudit() {}, async normalizeDirectoryIdentities() {} } as any,workspaceFiles:{dispose:async()=>{}, read() { throw Error('Unrelated file read outside Toolkit fixture') }, listFiles() { throw Error('Unrelated file list outside Toolkit fixture') }} as any})
   expect(owned.activation.spawned).toBe(true)
   expect(await sdk.daemonInstance()).toBe(owned.activation.runtime.daemonInstanceId)
