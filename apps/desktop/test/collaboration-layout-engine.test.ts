@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Graph, Subgraph } from '@viz-js/viz'
 import { writeFileSync } from 'node:fs'
-import { arrangeCollaboration, routeCollaborationLayout, handleCollaborationLayoutRequest, type CollaborationLayoutBox, type CollaborationLayoutInput, type CollaborationLayoutConnection, type CollaborationLayoutResponse } from '../src/renderer/src/lib/collaboration-layout-engine'
+import { arrangeCollaboration, reconcileCollaborationLayout, routeCollaborationLayout, handleCollaborationLayoutRequest, type CollaborationLayoutBox, type CollaborationLayoutInput, type CollaborationLayoutConnection, type CollaborationLayoutResponse } from '../src/renderer/src/lib/collaboration-layout-engine'
 
 const measurements = vi.hoisted(() => [] as { engine: string; nodes: string[]; edges: { source: string; target: string }[]; ms: number }[])
 const captures = vi.hoisted(() => [] as unknown[])
@@ -41,6 +41,91 @@ function intersects(a: { x: number; y: number; width: number; height: number }, 
   return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
 }
 describe('finite collaboration Worker engine', () => {
+  it('lets expanded cached members yield to current occupants of their former positions', () => {
+    const area = (id: string, x: number, folded: boolean): CollaborationLayoutBox => ({ id, areaId: id, kind: 'area', folded, x, y: -100, width: 276, height: folded ? 54 : 200, heading: { x: 0, y: 0, width: 184, height: 40 } })
+    const cached = [area('folded', 400, true), area('visible', 0, false), box('a', 0, 0, 24, 24, 'folded'), box('b', 0, 0, 24, 24, 'visible')]
+    const input: CollaborationLayoutInput = { areas: [{ id: 'folded', name: 'Unfolded now', folded: false, members: ['a'] }, { id: 'visible', name: 'Still visible', folded: false, members: ['b'] }],
+      nodes: [{ id: 'a', areaId: 'folded', width: 24, height: 24 }, { id: 'b', areaId: 'visible', width: 24, height: 24 }], connections: [] }
+    const result = reconcileCollaborationLayout(input, cached, null)
+    expect(result.find(box => box.id === 'b')).toEqual(cached[3]); expect(intersects(result.find(box => box.id === 'a')!, cached[3]!)).toBe(false)
+  })
+
+  it('lets a newly discovered area title yield to established unrelated members', () => {
+    const previous: CollaborationLayoutBox[] = [
+      { id: 'work', areaId: 'work', kind: 'area', folded: false, x: -24, y: -124, width: 700, height: 200, heading: { x: 24, y: 24, width: 184, height: 40 } },
+      box('a', 0, 0, 24, 24, 'work'), box('b', 600, 0, 24, 24, 'work')
+    ]
+    const input: CollaborationLayoutInput = { areas: [{ id: 'work', name: 'Work', members: ['a', 'b'], folded: false }, { id: 'new-area', name: 'New empty area', members: [], folded: false }],
+      nodes: ['a', 'b'].map(id => ({ id, areaId: 'work', width: 24, height: 24 })), connections: [] }
+    const result = reconcileCollaborationLayout(input, previous, 'b')
+    expect(result.find(box => box.id === 'a')).toEqual(previous[1]); expect(result.find(box => box.id === 'b')).toEqual(previous[2])
+    expect(intersects(result.find(box => box.id === 'new-area')!, previous[1]!)).toBe(false)
+  })
+
+  it('pins a growing actual reading occurrence and moves only the members its new body collides with', () => {
+    const previous: CollaborationLayoutBox[] = [
+      { id: 'work', areaId: 'work', kind: 'area', folded: false, x: -24, y: -144, width: 900, height: 240, heading: { x: 24, y: 24, width: 184, height: 40 } },
+      box('reading', 0, 0, 154, 38, 'work'), box('neighbor', 190, 0, 24, 24, 'work'), box('unrelated', 600, 0, 24, 24, 'work')
+    ]
+    const input: CollaborationLayoutInput = { areas: [{ id: 'work', name: 'Work', members: ['reading', 'neighbor', 'unrelated'], folded: false }],
+      nodes: [{ id: 'reading', areaId: 'work', width: 250, height: 94 }, ...['neighbor', 'unrelated'].map(id => ({ id, areaId: 'work', width: 24, height: 24 }))], connections: [] }
+    const result = reconcileCollaborationLayout(input, previous, 'reading'), reading = result.find(box => box.id === 'reading')!, neighbor = result.find(box => box.id === 'neighbor')!
+    expect([reading.x + reading.width / 2, reading.y + reading.height / 2]).toEqual([77, 19])
+    expect(intersects(reading, neighbor)).toBe(false); expect(neighbor).not.toEqual(previous[2])
+    expect(result.find(box => box.id === 'unrelated')).toEqual(previous[3])
+  })
+
+
+  it('locally settles new and resized members while retaining unrelated geometry and exact title positions', async () => {
+    const input: CollaborationLayoutInput = {
+      areas: [{ id: 'work', name: 'Work', members: ['a', 'b'], folded: false }, { id: 'other', name: 'Other', members: ['c'], folded: false }],
+      nodes: [{ id: 'a', areaId: 'work', width: 154, height: 38 }, { id: 'b', areaId: 'work', width: 250, height: 94 }, { id: 'c', areaId: 'other', width: 24, height: 24 }],
+      connections: [edge('a-b', 'a', 'b')]
+    }
+    const original = await arrangeCollaboration(input), before = new Map(original.map(box => [box.id, box]))
+    measurements.length = 0
+    const next = { ...input, areas: input.areas.map(area => area.id === 'work' ? { ...area, members: [...area.members, 'new'] } : area),
+      nodes: [...input.nodes.map(node => node.id === 'a' ? { ...node, width: 250, height: 94 } : node), { id: 'new', areaId: 'work', width: 154, height: 38 }],
+      connections: [...input.connections, edge('a-new', 'a', 'new')] }
+    const boxes = reconcileCollaborationLayout(next, original, 'a'), after = new Map(boxes.map(box => [box.id, box]))
+    expect(measurements).toEqual([])
+    expect(after.get('c')).toEqual(before.get('c'))
+    const a = after.get('a')!, held = before.get('a')!
+    expect([a.x + a.width / 2, a.y + a.height / 2]).toEqual([held.x + held.width / 2, held.y + held.height / 2])
+    for (const id of ['work', 'other']) {
+      const old = before.get(id)!, current = after.get(id)!
+      if (old.kind !== 'area' || current.kind !== 'area') throw Error('Original area required')
+      expect([current.x + current.heading.x, current.y + current.heading.y]).toEqual([old.x + old.heading.x, old.y + old.heading.y])
+    }
+    const obstacles = boxes.map(box => box.kind === 'area' ? { ...box, x: box.x + box.heading.x, y: box.y + box.heading.y, width: box.heading.width, height: box.heading.height } : box)
+    for (const [index, first] of obstacles.entries()) for (const second of obstacles.slice(index + 1)) expect(intersects(first, second), first.id + '/' + second.id).toBe(false)
+    const foldedInput = { ...next, areas: next.areas.map(area => area.id === 'work' ? { ...area, folded: true } : area) }
+    const folded = reconcileCollaborationLayout(foldedInput, boxes, 'work')
+    const retained = new Map([...boxes, ...folded].map(box => [box.id, box]))
+    const unfolded = reconcileCollaborationLayout(next, [...retained.values()], 'work')
+    for (const id of ['a', 'b', 'c', 'new']) expect(unfolded.find(box => box.id === id)).toEqual(after.get(id))
+  })
+
+  it('reroutes an old nonincident path blocked by a resized member and retains an unaffected original path', async () => {
+    const boxes: CollaborationLayoutBox[] = [
+      { id: 'area', areaId: 'area', kind: 'area', folded: false, x: -24, y: -120, width: 950, height: 900, heading: { x: 24, y: 24, width: 184, height: 40 } },
+      box('a', 0, 0), box('b', 650, 0), box('obstacle', 400, 70, 50, 10), box('d', 0, 600), box('e', 650, 600)
+    ]
+    const connections = [edge('a-b', 'a', 'b'), edge('d-e', 'd', 'e')], paths = await successfulRoutes(boxes, connections)
+    const input: CollaborationLayoutInput = { areas: [{ id: 'area', name: 'Work', members: ['a', 'b', 'obstacle', 'd', 'e'], folded: false }],
+      nodes: boxes.filter(box => box.kind === 'agent').map(box => ({ id: box.id, areaId: box.areaId, width: box.width, height: box.id === 'obstacle' ? 180 : box.height })), connections }
+    const responses: CollaborationLayoutResponse[] = []
+    measurements.length = 0
+    await handleCollaborationLayoutRequest({ id: 'local-update', type: 'reconcile', input, boxes, paths, anchor: 'a' }, response => responses.push(response))
+    const placement = responses.find(response => response.type === 'boxes')!
+    expect(placement.type).toBe('boxes'); if (placement.type !== 'boxes') throw Error('Updated original geometry required')
+    expect(placement.retainedPaths).toEqual(['d-e'])
+    expect(responses.filter(response => response.type === 'error')).toEqual([])
+    expect(responses.filter(response => response.type === 'paths').flatMap(response => Object.keys(response.paths))).toEqual(['a-b'])
+    expect(measurements.every(measurement => measurement.engine !== 'fdp')).toBe(true)
+    expect(responses.at(-1)?.type).toBe('complete')
+  })
+
   it('keeps empty areas as heading-sized original places while retaining isolated closed members', async () => {
     const input: CollaborationLayoutInput = { areas: [
       { id: 'empty', name: 'Empty original area', members: [], folded: false },
@@ -94,7 +179,8 @@ describe('finite collaboration Worker engine', () => {
     const paths = await successfulRoutes([compact, box('target', 320, 0)], [edge('compact-target', 'empty', 'target')])
     expect(paths).toHaveLength(1)
     expect(paths[0]!.points[0]).toEqual({ x: 184, y: 32 / 12 })
-    expect(measurements.some(item => item.engine === 'nop2')).toBe(true)
+    expect(measurements).toEqual([])
+    expect(paths[0]!.points).toHaveLength(4)
   })
 
   it('places every original mixed member and isolated area without overlap, with room for real headings', async () => {
@@ -247,9 +333,9 @@ describe('finite collaboration Worker engine', () => {
       const unrelated = Array.from({ length: count }, (_, index) => box(`unrelated-${index}`, 10000 + index % 20 * 300, 10000 + Math.floor(index / 20) * 130))
       const started = performance.now(), paths = await routeCollaborationLayout([...local, ...unrelated], Array.from({ length: count }, (_, index) => edge(`local-${index}`, 'a', 'b')))
       expect(paths).toHaveLength(count); expect(paths[0]!.path).toBe(original[0]!.path)
-      expect(measurements).toHaveLength(count)
-      expect(measurements.every(item => item.engine === 'nop2' && item.nodes.length === 4)).toBe(true)
-      console.info(JSON.stringify({ candidate: 'actual-local-wasm', unrelatedMembers: count, requestedConnections: count, elapsedMS: performance.now() - started, wasmMS: measurements.reduce((sum, item) => sum + item.ms, 0), maxWasmNodes: Math.max(...measurements.map(item => item.nodes.length)) }))
+      expect(measurements).toEqual([])
+      expect(paths.every(path => path.points.length === 4)).toBe(true)
+      console.info(JSON.stringify({ candidate: 'actual-local-wasm', unrelatedMembers: count, requestedConnections: count, elapsedMS: performance.now() - started, wasmMS: measurements.reduce((sum, item) => sum + item.ms, 0), maxWasmNodes: Math.max(0, ...measurements.map(item => item.nodes.length)) }))
     }
   })
 
@@ -257,8 +343,8 @@ describe('finite collaboration Worker engine', () => {
     const boxes = [box('a', 0, 0), box('b', 320, 0), ...Array.from({ length: 480 }, (_, index) => box(`unrelated-${index}`, 10000 + index % 20 * 300, 10000 + Math.floor(index / 20) * 130))]
     const routes = await successfulRoutes(boxes, [edge('new-edge', 'a', 'b')])
     expect(routes).toHaveLength(1)
-    expect(measurements).toHaveLength(1)
-    expect(measurements[0]!.nodes.sort()).toEqual(['__source_port__', '__target_port__', 'a', 'b'])
+    expect(measurements).toEqual([])
+    expect(routes[0]!.points).toHaveLength(4)
   })
 
   it('routes sparse actual force layouts across original areas and all three node sizes', async () => {
@@ -270,7 +356,7 @@ describe('finite collaboration Worker engine', () => {
       measurements.length = 0
       const errors: { id: string; message: string }[] = [], routing = performance.now()
       const paths = await routeCollaborationLayout(boxes, connections, { onError: (id, error) => errors.push({ id, message: String(error) }) })
-      console.info(JSON.stringify({ candidate: 'actual-force-sparse', members: count, requestedConnections: connections.length, layoutMS, routeMS: performance.now() - routing, failures: errors, maxWasmNodes: Math.max(...measurements.map(item => item.nodes.length)), wasmMS: measurements.reduce((sum, item) => sum + item.ms, 0) }))
+      console.info(JSON.stringify({ candidate: 'actual-force-sparse', members: count, requestedConnections: connections.length, layoutMS, routeMS: performance.now() - routing, failures: errors, maxWasmNodes: Math.max(0, ...measurements.map(item => item.nodes.length)), wasmMS: measurements.reduce((sum, item) => sum + item.ms, 0) }))
       if (process.env.AGENTMUX_COLLABORATION_LAYOUT_PROBE) writeFileSync(process.env.AGENTMUX_COLLABORATION_LAYOUT_PROBE, JSON.stringify({ boxes, connections, captures }))
       expect(errors).toEqual([]); expect(paths).toHaveLength(connections.length)
     }
@@ -295,7 +381,7 @@ describe('finite collaboration Worker engine', () => {
     })
     try {
       await import('../src/renderer/src/lib/collaboration-layout.worker')
-      await receive()({ data: { id: 'old', type: 'route', boxes: [box('a', 0, 0), box('b', 320, 0)], connections: Array.from({ length: 16 }, (_, index) => edge(`edge-${index}`, 'a', 'b')) } })
+      await receive()({ data: { id: 'old', type: 'route', boxes: [box('a', 0, 0), box('b', 650, 0), box('obstacle', 300, -100, 250, 300)], connections: Array.from({ length: 16 }, (_, index) => edge(`edge-${index}`, 'a', 'b')) } })
       await replacement
       expect(responses.filter(response => response.id === 'old').map(response => response.type)).toEqual(['paths'])
       expect(responses.flatMap(response => response.id === 'old' && response.type === 'paths' ? Object.keys(response.paths) : [])).toHaveLength(8)
