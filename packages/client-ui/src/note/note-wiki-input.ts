@@ -35,7 +35,7 @@ export function noteWikiInputExtension(created?: (link: NoteInlineLinkAttributes
             if (node.isTextblock) { if (node.type.name !== 'codeBlock') blocks.set(selection.$from.before(depth), node); break }
           }
         }
-        const tokens = [...blocks].flatMap(([pos, node]) => noteWikiTextTokens(node.toJSON().content ?? []).map(token => ({ ...token, from: pos + 1 + token.from, to: pos + 1 + token.to })))
+        const tokens = [...blocks].flatMap(([pos, node]) => noteWikiTextTokens(node.toJSON().content ?? [], true).map(token => ({ ...token, from: pos + 1 + token.from, to: pos + 1 + token.to })))
         const tr = state.tr.setMeta('noteWikiInput', true), pending: { link: NoteInlineLinkAttributes; previousReferenceId?: string }[] = []
         const edits: { from: number; apply(): void }[] = tokens.map(token => ({ from: token.from, apply() {
           const link = { referenceId: crypto.randomUUID(), text: token.text, target: null }

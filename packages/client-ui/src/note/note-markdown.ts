@@ -4,6 +4,7 @@ import remarkParse from 'remark-parse'
 import remarkStringify, { type Options as StringifyOptions } from 'remark-stringify'
 import remarkGfm from 'remark-gfm'
 import remarkDirective from 'remark-directive'
+import remarkMath from 'remark-math'
 import { decodeHTML, escapeAttribute } from 'entities'
 import { readNoteMarkdownHeader, NOTE_MARKDOWN_SCHEMA, isNoteWorkspaceRelativePath } from '@agentmux/core/note-format'
 import { parseNoteLinkTarget, scanNoteWikiLinks } from '@agentmux/core/note-links'
@@ -15,7 +16,7 @@ import type { NoteDocument } from './note-document.js'
 
 type Md = { type: string; children?: Md[]; value?: string; depth?: number; ordered?: boolean; start?: number | null; checked?: boolean | null; lang?: string | null; meta?: string | null; url?: string; title?: string | null; name?: string; attributes?: Record<string, string>; position?: { start: { offset?: number }; end: { offset?: number } } }
 type Mark = NonNullable<JSONContent['marks']>[number]
-const parser = unified().use(remarkParse).use(remarkGfm).use(remarkDirective)
+const parser = unified().use(remarkParse).use(remarkGfm).use(remarkDirective).use(remarkMath)
 const fail = (message: string): never => { throw new Error(message + ' The original Markdown source is preserved.') }
 // HTML comment IDs cannot contain --; URI component encoding alone leaves hyphens literal.
 const encode = (id: string) => encodeURIComponent(id).replace(/-/gu, '%2D')
@@ -68,6 +69,7 @@ function inline(nodes: readonly Md[], body: string, literalWiki = true): JSONCon
     }
     if (node.type === 'break') { emit({ type: 'hardBreak' }); continue }
     if (node.type === 'inlineCode') { emit({ type: 'text', text: node.value ?? '' }, [{ type: 'code' }]); continue }
+    if (node.type === 'inlineMath') { emit({ type: 'noteMathInline', attrs: { latex: node.value ?? '' } }); continue }
     if (['strong', 'emphasis', 'delete'].includes(node.type)) {
       const mark = { type: node.type === 'strong' ? 'bold' : node.type === 'emphasis' ? 'italic' : 'strike' }
       for (const child of inline(node.children ?? [], body, literalWiki)) emit(child, [mark, ...child.marks ?? []])
@@ -144,7 +146,7 @@ function blocks(nodes: readonly Md[], body: string, item = false): JSONContent[]
     if (node.type === 'paragraph' && node.children?.length === 1 && node.children[0]?.type === 'text' && /^\^[^\s]+$/u.test(node.children[0].value ?? '')) {
       const previous = result.at(-1)
       const raw = body.slice(node.position?.start.offset, node.position?.end.offset)
-      if (!raw.startsWith('^') || !previous || !['paragraph','heading','codeBlock','blockquote','horizontalRule'].includes(previous.type ?? '') || previous.attrs?.blockId) return fail('A standalone block identity is orphaned or duplicated.')
+      if (!raw.startsWith('^') || !previous || !['paragraph','heading','codeBlock','noteMathBlock','blockquote','horizontalRule'].includes(previous.type ?? '') || previous.attrs?.blockId) return fail('A standalone block identity is orphaned or duplicated.')
       previous.attrs = { ...previous.attrs, blockId: decode(node.children[0].value!.slice(1)) }; continue
     }
     if (listType !== null && node.type !== 'list') return fail('A list type annotation has no exact list owner.')
@@ -182,6 +184,10 @@ function blocks(nodes: readonly Md[], body: string, item = false): JSONContent[]
       result.push({ type: 'codeBlock', attrs: { blockId: null, language: codeLanguage === undefined ? node.lang ?? null : codeLanguage }, ...node.value ? { content: [{ type: 'text', text: node.value }] } : {} }); codeLanguage = undefined; continue
     }
     if (node.type === 'thematicBreak') { result.push({ type: 'horizontalRule', attrs: { blockId: null } }); continue }
+    if (node.type === 'math') {
+      if (node.meta) return fail('Math fence metadata is unsupported; preserve it in Source.')
+      result.push({ type: 'noteMathBlock', attrs: { blockId: null, latex: node.value ?? '' } }); continue
+    }
     return fail('Unsupported block Markdown: ' + node.type + '.')
   }
   if (listType !== null || listStart !== undefined || headingLevel !== undefined || codeLanguage !== undefined) return fail('A field annotation is orphaned.')
@@ -199,6 +205,9 @@ function inlineMarkdown(nodes: readonly JSONContent[]): Md[] {
   return nodes.flatMap(node => {
     let value: Md[]
     if (node.type === 'hardBreak') value = [{ type: 'break' }]
+    // An empty inline expression needs whitespace between its delimiters: $$
+    // is a block opener. Both sources represent an empty mathematical value.
+    else if (node.type === 'noteMathInline') value = [{ type: 'inlineMath', value: node.attrs!.latex || ' ' }]
     else if (node.type === 'text') {
       const text = node.text ?? '', tokens = node.marks?.some(mark => mark.type === 'code' || mark.type === 'link' || mark.type === 'noteWikiLiteral') ? [] : scanNoteWikiLinks(text)
       value = []; let from = 0
@@ -246,7 +255,8 @@ function blockMarkdown(nodes: readonly JSONContent[]): Md[] {
       if (attrs.language != null && typeof attrs.language !== 'string') return fail('The original code language cannot be represented without loss.')
       if (attrs.language === '' || /\s/u.test(attrs.language ?? '')) prelude.push(comment('code-language',encode(attrs.language)))
       block = { type: 'code', lang: prelude.length ? null : attrs.language ?? null, value: node.content?.map(child => child.text ?? '').join('') ?? '' }
-    } else if (node.type === 'horizontalRule') block = { type: 'thematicBreak' }
+    } else if (node.type === 'noteMathBlock') block = { type: 'math', value: attrs.latex }
+    else if (node.type === 'horizontalRule') block = { type: 'thematicBreak' }
     else if (node.type === 'blockquote') block = { type: 'blockquote', children: blockMarkdown(node.content ?? []) }
     else if (node.type === 'orderedList' || node.type === 'bulletList') {
       if (node.type === 'orderedList' && (typeof attrs.start !== 'number' || !Number.isFinite(attrs.start) || attrs.type != null && typeof attrs.type !== 'string')) return fail('The original list attributes cannot be represented without loss.')
@@ -278,7 +288,7 @@ export function serializeNoteDocument(note: NoteDocument): string {
         return line + (breaks[index] ?? '')
       }).join('')
     },
-  } } as StringifyOptions).use(remarkGfm).use(remarkDirective)
+  } } as StringifyOptions).use(remarkGfm).use(remarkDirective).use(remarkMath)
   const body = compiler.stringify(tree as never)
   const shared = (note.kind ? `kind: ${note.kind}\n` : '') + (note.origin ? 'origin:\n' + Object.entries(note.origin).map(([key, value]) => `  ${key}: ${JSON.stringify(value)}\n`).join('') : '')
   return `---\nschema: ${NOTE_MARKDOWN_SCHEMA}\nnote-id: ${JSON.stringify(note.noteId)}\n${note.title === undefined ? '' : `title: ${JSON.stringify(note.title)}\n`}${shared}---\n\n${body}`

@@ -1,8 +1,10 @@
 import { Extension, Mark, Node, getSchema } from '@tiptap/core'
 import UniqueID from '@tiptap/extension-unique-id'
 import StarterKit from '@tiptap/starter-kit'
+import { NoteMathInlineNode, NoteMathBlockNode } from './note-math.js'
+export { NoteMathInlineNode, NoteMathBlockNode } from './note-math.js'
 
-export const NOTE_BLOCK_TYPES = ['paragraph', 'heading', 'codeBlock', 'listItem', 'blockquote', 'horizontalRule', 'blockReference', 'noteInclude'] as const
+export const NOTE_BLOCK_TYPES = ['paragraph', 'heading', 'codeBlock', 'noteMathBlock', 'listItem', 'blockquote', 'horizontalRule', 'blockReference', 'noteInclude'] as const
 
 const BlockIdentity = Extension.create({
   name: 'noteBlockIdentity',
@@ -63,7 +65,7 @@ const NoteWikiLiteral = Mark.create({ name: 'noteWikiLiteral', inclusive: false,
 
 /** The parser and rich editor share the installed TipTap node/mark schema. */
 export function noteContentExtensions() {
-  return [StarterKit.configure({ trailingNode: false }), BlockIdentity, NoteBlockReferenceNode, NoteIncludeNode, NoteInlineLinkNode, NoteWikiLiteral]
+  return [StarterKit.configure({ trailingNode: false }), BlockIdentity, NoteBlockReferenceNode, NoteIncludeNode, NoteInlineLinkNode, NoteWikiLiteral, NoteMathInlineNode, NoteMathBlockNode]
 }
 export const noteContentSchema: ReturnType<typeof getSchema> = getSchema(noteContentExtensions())
 
