@@ -20,7 +20,7 @@ it('public Host admission uses the original Core queue and Desktop reader with s
   let timeline = await f.client.sessionTimeline(f.input.agentSessionId)
   await vi.waitFor(async () => {
     timeline = await f.client.sessionTimeline(f.input.agentSessionId)
-    expect(timeline.items.find(item => item.id === `prompt:${input.messageId}`)?.authorExternal).toEqual(input.author)
+    expect(timeline.items.find(item => item.inputRef?.kind === 'message' && item.inputRef.messageId === input.messageId)?.authorExternal).toEqual(input.author)
   }, { timeout: 4000 })
   const original = await new core.DurableAgentMuxMessageQueue(f.client.agentMessageQueuePath()).readByOperationId(input.operationId)
   expect(original!.envelope.sender).toEqual(input.author)
@@ -28,15 +28,15 @@ it('public Host admission uses the original Core queue and Desktop reader with s
   expect(original!.envelope.senderSessionId).toBeNull(); expect(original!.envelope.senderRunId).toBeNull()
   expect((await new core.DurableAgentMuxMessageQueue(f.client.agentMessageQueuePath()).inspectInput({ kind: 'message-control', originalControlOperationId: input.operationId }))!.intent.source).toEqual({ kind: 'message', messageId: input.messageId, originalControlOperationId: input.operationId })
   expect(f.inner.kernel.input).toHaveBeenCalledOnce()
-  const recorded = timeline.items.find(item => item.id === `prompt:${input.messageId}`)!
+  const recorded = timeline.items.find(item => item.inputRef?.kind === 'message' && item.inputRef.messageId === input.messageId)!
   expect(conversationAxis(timeline.items, speaksAsHuman).map(mark => mark.item)).toContain(recorded)
   expect(recorded.authorHuman).toBeUndefined(); expect(recorded.authorAgentSessionId).toBeUndefined()
-  const read = await mountedMailbox(f.client.agentSession(f.input.agentSessionId), timeline, recorded.id)
+  const read = await mountedMailbox(f.client.agentSession(f.input.agentSessionId), f.client, recorded.inputRef!, timeline)
   expect(read.detail.dataset.speakerRole).toBe('external')
   expect(read.detail.textContent).toContain(f.actor.userId)
   for (const fact of [config.application.domain, config.application.appId, f.actor.idType, f.input.externalConversationId, f.event().messageId, f.input.bindingId, f.grant.grantId]) expect(read.detail.textContent).toContain(fact)
-  expect(read.detail.dataset.conversationItemRef).toBe(JSON.stringify({ hostId: 'local', agentSessionId: f.input.agentSessionId, source: { kind: 'captured', recordId: recorded.id } }))
-  await read.copyOriginal(); expect(read.copy).toHaveBeenCalledWith(recorded.content)
+  expect(read.detail.closest<HTMLElement>('[data-record-key]')?.dataset.recordKey).toBe(read.key)
+  await read.copyOriginal(); expect(read.copy).toHaveBeenCalledWith(read.original.admission!.intent!.prompt)
   expect(recorded.content).toContain(f.event().body)
   const server = new core.AgentMuxControlServer({ socketPath: join(f.root, 'ingress.sock'), connections: f.connections, coreClients: f.coreClients })
   await server.start(); cleanup.push(() => server.stop())
@@ -68,8 +68,8 @@ it('public Host admission uses the original Core queue and Desktop reader with s
   expect(f.inner.kernel.stop).not.toHaveBeenCalled(); expect(f.inner.kernel.attach).not.toHaveBeenCalled()
   const help = await runCompiledObjectCli(['connection', 'ingress', 'inspect', '--help'], env)
   expect(help.code).toBe(0); expect(help.stdout).toContain('--ingress')
-  const skill = await runCompiledObjectCli(['--skill'], env)
-  expect(skill.code).toBe(0); expect(skill.stdout).toContain('connection ingress ls')
+  const skill = await runCompiledObjectCli(['connection', '--skill'], env)
+  expect(skill.code).toBe(0); expect(skill.stdout).toContain('name: amux-connection'); expect(skill.stdout).toContain('amux connection --help')
 }, 20_000)
 
 it('the original SDK refuses external author data without the live exact Host context', async () => {
