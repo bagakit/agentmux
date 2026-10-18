@@ -30,9 +30,9 @@ const header = () => document.querySelector<HTMLElement>('[data-workbench-region
 const trigger = () => header().querySelector<HTMLButtonElement>('.agent-region-header__connector')!
 const writes = () => f.calls.filter(call => ['connection.configure', 'connection.service.configure', 'connection.room.create', 'connection.room.link.create', 'connection.bind', 'connection.binding.relink', 'connection.binding.pause', 'connection.grant'].includes(call.method))
 async function close() { await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Close group setup"]')!.click()) }
-async function menu() {
+async function menu(reason = 'open Connections') {
   await act(async () => { trigger().focus(); trigger().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
-  await wait(() => expect(document.querySelector('.connector-header-menu')).not.toBeNull())
+  await wait(() => expect(document.querySelector('.connector-header-menu'), reason).not.toBeNull())
 }
 async function action(label: string) {
   await menu()
@@ -41,7 +41,7 @@ async function action(label: string) {
   await act(async () => item!.click())
 }
 async function openGroup(id = 'oc_header') {
-  await menu()
+  await menu('open original group ' + id)
   const item = [...document.querySelectorAll<HTMLElement>('.connector-header-menu__item')].find(node => node.getAttribute('aria-label')?.includes(id))
   expect(item, 'exact original connection row').toBeDefined()
   await act(async () => item!.click())
@@ -174,6 +174,11 @@ it('the header retains the original paused group through observation failure and
   await wait(() => expect(trigger().textContent).toBe('Original team· Status unknown'))
   expect(trigger().getAttribute('title')).toContain('oc_header'); expect(trigger().disabled).toBe(false)
   expect(document.activeElement).toBe(editor); expect(editor.getAttribute('contenteditable')).toBe('true')
+  await menu('read the current binding error')
+  await wait(() => expect(document.querySelector('.connector-header-menu')?.textContent).toContain('Original audience unavailable'))
+  expect(document.querySelector('.connector-header-menu')?.textContent).toContain('Reopen Connections')
+  await act(async () => document.querySelector('.connector-header-menu')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+  await wait(() => { expect(document.querySelector('.connector-header-menu')).toBeNull(); expect(document.activeElement).toBe(trigger()) })
   vi.mocked(api.connections.call).mockImplementation(f.forward)
   await openGroup()
   await wait(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull())
@@ -289,8 +294,8 @@ it('a late native name from a former binding revision cannot replace the current
     await act(async () => invalidateConnectorTarget(target))
     await wait(() => expect(trigger().querySelector('span')?.textContent).toBe('Current group'))
     await act(async () => releases.forEach(release => release()))
-    await wait(() => expect(document.querySelectorAll('.connector-sharing__group')).toHaveLength(2))
-    expect([...document.querySelectorAll('.connector-sharing__group')].map(node => node.textContent)).toEqual(['Shared group · Current group', 'Shared group · Current group'])
+    await wait(() => expect(document.querySelectorAll('.conversation-sharing-notice__audience')).toHaveLength(2))
+    expect([...document.querySelectorAll('.conversation-sharing-notice__audience')].map(node => node.textContent)).toEqual(['Agent replies and questions → Current group', 'Agent replies and questions → Current group'])
     expect(trigger().querySelector('span')?.textContent).toBe('Current group')
     expect(trigger().title).toContain('oc_current_header'); expect(trigger().title).not.toContain('oc_header ·')
     await openGroup('oc_current_header')
