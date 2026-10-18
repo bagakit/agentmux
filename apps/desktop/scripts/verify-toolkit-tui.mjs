@@ -57,6 +57,8 @@ if (mode === '--runtime') {
     AGENTMUX_TUI_MUTATION: 'raw-ownership', AGENTMUX_TUI_MUTATION_RECEIPT: resolve(evidence, 'raw-ownership.jsonl') }, true)
   await suite('repeat-load', 'apps/desktop/test/toolkit-tui.config.mts', ['apps/desktop/test/toolkit-tui-owner.test.ts'], {
     AGENTMUX_TUI_MUTATION: 'repeat-load', AGENTMUX_TUI_MUTATION_RECEIPT: resolve(evidence, 'repeat-load.jsonl') }, true)
+  await suite('runner-environment', 'apps/desktop/test/toolkit-tui.config.mts', ['apps/desktop/test/toolkit-tui-owner.test.ts'], {
+    AGENTMUX_TUI_MUTATION: 'runner-environment', AGENTMUX_TUI_MUTATION_RECEIPT: resolve(evidence, 'runner-environment.jsonl') }, true)
   await suite('mode-loss', 'packages/core/test/toolkit-custom.config.mts', ['apps/desktop/test/toolkit-tui-config.test.ts'], {
     AGENTMUX_TOOLKIT_CORE_MUTANT: 'tui-default-mode' }, true)
 } else if (mode === '--desktop') {
@@ -76,6 +78,8 @@ if (mode === '--runtime') {
   await suite('process-stop-on-dispose', 'apps/desktop/test/toolkit-tui-process.config.mts', [], {
     AGENTMUX_TOOLKIT_RECOVERY_MUTANT: 'stop-on-dispose' }, true)
   await suite('owner-recovery', 'apps/desktop/test/toolkit-tui.config.mts', ['apps/desktop/test/toolkit-tui-owner.test.ts', 'apps/desktop/test/toolkit-tui-runtime.test.ts'])
+  await suite('missing-intent', 'apps/desktop/test/toolkit-tui.config.mts', ['apps/desktop/test/toolkit-tui-owner.test.ts'], {
+    AGENTMUX_TUI_MUTATION: 'missing-intent', AGENTMUX_TUI_MUTATION_RECEIPT: resolve(evidence, 'missing-intent.jsonl') }, true)
   await suite('dispose-stop', 'apps/desktop/test/toolkit-tui.config.mts', ['apps/desktop/test/toolkit-tui-owner.test.ts'], {
     AGENTMUX_TUI_MUTATION: 'dispose-stop', AGENTMUX_TUI_MUTATION_RECEIPT: resolve(evidence, 'dispose-stop.jsonl') }, true)
 }
