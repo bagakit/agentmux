@@ -1,5 +1,6 @@
 import { createContext, useContext, useMemo, type ReactNode } from 'react'
-import type { AgentProviderId } from '@agentmux/core'
+import type { AgentProviderId, DurableAgentMuxMessage } from '@agentmux/core'
+import type { ConversationRef } from '@agentmux/core/conversation'
 import type { AmuxObjectLinkTarget } from '@agentmux/core/sharing'
 import type { BrowserInputImageReference } from '@agentmux/core/browser-input-context'
 import type { ConversationSenderDetails, ConversationSpeaker } from './lib/conversation-speaker.js'
@@ -30,6 +31,8 @@ export type ClientUiPlatform = {
   renderProjectIcon(project: NonNullable<ConversationSenderDetails['project']>): ReactNode
   renderProjectLabel(project: NonNullable<ConversationSenderDetails['project']>): ReactNode
   renderIcon(name: ClientUiIconName, size: number): ReactNode
+  /** Read one original Inbox message at its recorded Host/participant. Never sends or acknowledges input. */
+  readA2AMessage?(reference: ConversationRef, messageId: string): Promise<DurableAgentMuxMessage | null>
   /** Optional inline presentation of an exact Core object URI. The host owns facts and navigation. */
   renderObjectLink?(reference: ObjectLinkReference): ReactNode
   /** Optional transient diagram presentation. The host owns cancelable, isolated computation. */
@@ -44,6 +47,10 @@ export type ClientUiPlatform = {
 }
 
 const PlatformContext = createContext<ClientUiPlatform | null>(null)
+
+export function useA2AMessageReader(): ClientUiPlatform['readA2AMessage'] {
+  return useContext(PlatformContext)?.readA2AMessage
+}
 
 /** Standalone Markdown also works without a host adapter, retaining its original text. */
 export function useObjectLinkRenderer(): ClientUiPlatform['renderObjectLink'] {

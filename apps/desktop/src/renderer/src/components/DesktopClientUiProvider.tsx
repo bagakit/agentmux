@@ -13,6 +13,7 @@ import { InlineObjectLink } from './InlineObjectLink'
 import { openDesktopNoteLink } from '../lib/note-file-link'
 import { NoteImageResource } from './NoteImageResource'
 import { BrowserSelectionImage } from './BrowserSelectionImage'
+import { api } from '../lib/api'
 
 const DiagramFilePreview = lazy(() => import('./file-preview/DiagramFilePreview').then(module => ({ default: module.DiagramFilePreview })))
 const DotFilePreview = lazy(() => import('./file-preview/DotFilePreview').then(module => ({ default: module.DotFilePreview })))
@@ -60,6 +61,11 @@ const desktopPlatform: ClientUiPlatform = {
   renderProjectIcon: project => <ProjectIcon workspaceId={project.workspaceId} name={project.name} />,
   renderProjectLabel: project => <SenderProject project={project} />,
   renderIcon: (name, size) => <SemanticIcon name={`status.${name}`} size={size} />,
+  readA2AMessage: async (reference, messageId) => {
+    const result = await api.sessions.readMessage(reference, messageId)
+    if (result.hostId !== reference.hostId) throw new Error('The original message Host could not be confirmed. The reference is retained.')
+    return result.message
+  },
   renderObjectLink: reference => <InlineObjectLink {...reference} />,
   openNoteLink: openDesktopNoteLink,
   renderNoteImage: input => <NoteImageResource {...input} />,

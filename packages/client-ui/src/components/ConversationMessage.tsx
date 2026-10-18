@@ -230,6 +230,8 @@ export function ConversationMessage({
     const parsed = parseAgentMuxMessagePrefix(firstText)
     return a2aNotificationId && parsed?.kind !== 'references' ? null : parsed
   }, [contentBoundary, hasQuestionAnswers, a2aNotificationId, firstText])
+  const a2aReferenceScope = a2aNotificationId ? itemRef ?? (executionHostId && conversationSessionId
+    ? { hostId: executionHostId, agentSessionId: conversationSessionId } : undefined) : undefined
   const systemSummary = prefix?.kind === 'references' ? `${prefix.references.length} A2A Inbox reference${prefix.references.length === 1 ? '' : 's'}`
     : prefix?.protocol ? `${prefix.protocol.id ? AMUX_PROTOCOL_DEFINITIONS[prefix.protocol.id].title : 'Protocol declaration'} · ${prefix.protocol.tag}`
     : prefix?.declaredMessageId !== undefined ? AMUX_PROTOCOL_DEFINITIONS.a2a.title : rawSystemSummary
@@ -506,6 +508,7 @@ export function ConversationMessage({
               {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
             : part.kind === 'text' ? <div key={key} className="log-turn__text" tabIndex={-1}>
               <ConversationInputText visible={active} text={sessionHistoryTextForReading(part)} prefix={index === 0 ? prefix : null}
+                a2aReferenceScope={a2aReferenceScope} describeSpeaker={describeSpeaker}
                 inputContext={index === contextPartIndex ? inputContext : undefined} inputContextSource={inputContextSource}
                 inputMode={inputMarkdown} workspaceRoot={workspaceRoot} homeDir={homeDir}
                 {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
@@ -535,6 +538,7 @@ export function ConversationMessage({
               />
             ) : part.resourceType === 'text' && readHistoryResource && nativeResourceRecord ? (
               <ConversationResourceText sources={sources?.parts[index]} active={active} key={key} part={part} partIndex={index} record={nativeResourceRecord} readResource={readHistoryResource} workspaceRoot={workspaceRoot} homeDir={homeDir} inputMode={inputMarkdown} contentBoundary={hasQuestionAnswers ? 'body' : contentBoundary} {...(a2aNotificationId ? { a2aNotificationId } : {})}
+                a2aReferenceScope={a2aReferenceScope} describeSpeaker={describeSpeaker}
                 inputContext={index === contextPartIndex ? inputContext : undefined} inputContextSource={inputContextSource}
                 {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
             ) : part.resourceType === 'image' && readHistoryResource && nativeResourceRecord ? (

@@ -14,9 +14,11 @@ import { ConversationResourceImage, type ConversationHistoryResourceReader, type
 import { ConversationResourceFile } from './ConversationResourceFile.js'
 import { ConversationInputText } from './ConversationInputText.js'
 import type { ConversationContentBoundary } from './ConversationMessage.js'
+import type { ConversationRef } from '@agentmux/core/conversation'
+import type { DescribeSpeaker } from '../lib/conversation-speaker.js'
 
 export function ConversationResourceText({ sources, active = true, part, partIndex, record, readResource, workspaceRoot = '', homeDir = '', inputMode = false,
-  contentBoundary = 'wire', a2aNotificationId, inputContext, inputContextSource, openWorkspaceFile, readPastedImage, openHttpLink }: {
+  contentBoundary = 'wire', a2aNotificationId, a2aReferenceScope, describeSpeaker, inputContext, inputContextSource, openWorkspaceFile, readPastedImage, openHttpLink }: {
   sources?: ConversationSourceDisplay | undefined
   active?: boolean
   part: Extract<AgentSessionHistoryContentPart, { kind: 'resource' }>; partIndex: number
@@ -24,6 +26,8 @@ export function ConversationResourceText({ sources, active = true, part, partInd
   workspaceRoot?: string; homeDir?: string; inputMode?: boolean
   contentBoundary?: ConversationContentBoundary
   a2aNotificationId?: string
+  a2aReferenceScope?: ConversationRef | undefined
+  describeSpeaker?: DescribeSpeaker | undefined
   inputContext?: AgentSessionUserMessage['inputContext']
   inputContextSource?: AgentSessionUserMessage['inputContextSource']
   openWorkspaceFile?: OpenWorkspaceFile; readPastedImage?: ReadPastedImage; openHttpLink?: (url: string, event: LinkClickModifiers) => void
@@ -73,6 +77,7 @@ export function ConversationResourceText({ sources, active = true, part, partInd
     {content?.kind === 'text' ? <div className="log-turn__text">
       {prefix?.sourceLabel ? <span className="log-turn__declared-source">Message header: {prefix.sourceLabel}</span> : null}
       <ConversationInputText visible={active} text={text} prefix={prefix} inputMode={inputMode} workspaceRoot={workspaceRoot} homeDir={homeDir}
+        a2aReferenceScope={a2aReferenceScope} describeSpeaker={describeSpeaker}
         inputContext={inputContext} inputContextSource={inputContextSource}
         {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
     </div> :
