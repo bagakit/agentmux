@@ -19,6 +19,8 @@ export type ConnectionIngressMessage = {
   eventId: string
   externalMessageId: string
   externalConversationId: string
+  /** Original adapter protocol fact; absence does not imply a direct chat. */
+  conversationKind?: 'direct' | 'group'
   actor: ConnectionActor
   body: string
   addressing?: ConnectionIngressAddressing
