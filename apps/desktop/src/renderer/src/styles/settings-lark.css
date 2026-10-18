@@ -28,6 +28,7 @@
 .lark-settings .connector-optional > summary,
 .lark-settings .connector-diagnostics > summary,
 .lark-settings .connector-setup-help > summary { min-height: 28px; padding-block: var(--sp-1); line-height: 1.6; }
+.lark-settings .connector-profile > summary { font-size: var(--fs-meta); line-height: 1.6; color: var(--text-3); }
 .lark-settings .connector-management .bot-setup-guide { padding-block: var(--sp-2); }
 .lark-settings .connector-management .bot-setup-guide li { padding: var(--sp-2); }
 .lark-settings .connector-management .bot-task-heading { gap: var(--sp-2); }
