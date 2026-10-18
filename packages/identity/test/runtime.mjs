@@ -55,7 +55,7 @@ test('business derivation keeps opaque keys and domains independent', () => {
   assert.notEqual(deriveObjectId('object', ' a:b'), deriveObjectId('object', 'a:b'))
   assert.notEqual(deriveObjectId('object', 'a'), deriveObjectId('operation', 'a'))
   assert.ok(isObjectId(deriveObjectId('object', 'a')))
-  assert.equal(isObjectId('fc69400b-bc24-4915-b35f-01a26a085af9'), false)
+  assert.equal(isObjectId('00000000-0000-4000-8000-000000000000'), false)
 })
 
 test('actual allocator mutations fail the isolated consumer assertions', async () => {
