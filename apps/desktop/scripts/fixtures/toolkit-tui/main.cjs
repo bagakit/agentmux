@@ -10,12 +10,24 @@ app.on('window-all-closed', () => {})
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
 const raw = { phase, qualified: false, frames: [], actions: [], errors: [], sessions: { attachments: [], writes: [], detaches: [] },
   boundary: 'Real App, terminal components, ConfigOwner, ToolkitOwner, registered Toolkit IPC, product preload and RuntimeController with two private Native TUI programs. A private local Core connector replaces the product Host process; other App services use preview data. No user Run or installation.' }
-let win, toolkit, runtime, sampler, detachRuntime, detachToolkit, detachTheme, owner
+let win, toolkit, runtime, sampler, detachRuntime, detachToolkit, detachTheme, owner, native
 const ids = ['tui-monitor', 'tui-output'], created = []
+const checkpoint = step => { (raw.checkpoints ??= []).push(step); fs.writeFileSync(path.join(evidence, 'progress.json'), JSON.stringify({ steps: raw.checkpoints }) + '\n'); process.stderr.write('TUI_SCENE=' + step + '\n') }
+checkpoint('created')
 app.whenReady().then(async () => {
+  checkpoint('app-ready')
   try {
     const product = await import(pathToFileURL(ownerBundle).href)
-    const { ConfigOwner, ConfigStore, ToolkitOwner, registerToolkitIpc, RuntimeController, ProcessResourceSampler, AgentMuxMemoryAgentSessionStore, sessionSnapshotPayload, sessionObservationResult, sessionInputWriteResult, tuiProgram, localRuntimeConnector, registerThemeBootstrap } = product
+    checkpoint('owner-imported')
+    const { ConfigOwner, ConfigStore, ToolkitOwner, registerToolkitIpc, RuntimeController, ProcessResourceSampler, AgentMuxMemoryAgentSessionStore, sessionSnapshotPayload, sessionObservationResult, sessionInputWriteResult, tuiProgram, localRuntimeConnector, registerThemeBootstrap, activateRuntime } = product
+    const runtimeDirectory = path.join(privateRoot, 'runtime'), stateDir = path.join(runtimeDirectory, 'state', 'ctxmux')
+    fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 })
+    native = await activateRuntime({ executable: path.resolve(path.dirname(cli), '../vendor/ctxmux', process.platform + '-' + process.arch, 'bin/ctxmuxd'),
+      socketPath: path.join(runtimeDirectory, 'ctxmux.sock'), stateDir, timeoutMs: 5000,
+      childDisposition: { mode: 'detached', stdout: 'ignore', stderr: 'pipe' } })
+    assert.equal(native.spawned, true, 'The fixture owns its newly created private Runtime')
+    checkpoint('native-started')
+    raw.native = { childPid: native.childPid, socketPath: native.socketPath, shutdown: false }
     const store = new ConfigStore(path.join(app.getPath('userData'), 'config.json'))
     let current = await store.get(), seeded = false
     const work = path.join(privateRoot, 'work'), program = path.join(work, 'tui-program.cjs')
@@ -25,9 +37,10 @@ app.whenReady().then(async () => {
     sampler = new ProcessResourceSampler()
     runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector, undefined, sampler)
     win = new BrowserWindow({ width: 1440, height: 940, show: false, webPreferences: { preload: process.env.AGENTMUX_PERFORMANCE_PRODUCT_PRELOAD, contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } })
+    ipcMain.on('ui:nativeOverlayFocus', event => { event.returnValue = false })
     detachTheme = registerThemeBootstrap(ipcMain, win, () => owner.current.appearance, () => true)
     toolkit = new ToolkitOwner({ config: owner, receiptPath: path.join(app.getPath('userData'), 'toolkit-receipts.json'), openRunPort: () => runtime.toolkitRunPort(), enabled: () => false,
-      launch: () => ({ runner: process.execPath, cli, script: asset, cwd: work, env: { ELECTRON_RUN_AS_NODE: '1' } }) })
+      launch: () => ({ runner: process.execPath, cli, script: asset, cwd: work, env: { ELECTRON_RUN_AS_NODE: '1', HOME: app.getPath('home') } }) })
     detachToolkit = registerToolkitIpc(toolkit, (channel, handler) => ipcMain.handle(channel, handler))
     detachRuntime = runtime.attach(win.webContents)
     ipcMain.handle('sessions:snapshot', async () => sessionSnapshotPayload(await runtime.snapshot(owner.current), undefined, app.getPath('home')))
@@ -52,10 +65,11 @@ app.whenReady().then(async () => {
       runtime.commit(await runtime.prepare({ ...owner.current, hosts: owner.current.hosts.filter(host => host.kind === 'local') }))
       for (const [index, id] of ids.entries()) { await toolkit.execute({ operation: 'toolkit.add', toolId: id, value: {
         name: index ? 'Live output' : 'Workspace monitor', icon: 'terminal', mode: 'tui', enabled: true, statusBar: 'label', workspacePath: work,
-        script: index ? 'exec "$1" "$2"' : 'exec "$1" "$2" --alternate', args: [process.execPath, program]
+        script: index ? 'exec env ELECTRON_RUN_AS_NODE=1 "$1" "$2"' : 'exec env ELECTRON_RUN_AS_NODE=1 "$1" "$2" --alternate', args: [process.execPath, program]
       } }, new AbortController().signal)
         created.push(id)
       }
+      checkpoint('config-seeded')
       seeded = true
       return { workspaceId: 'tui-work' }
     })
@@ -79,9 +93,11 @@ app.whenReady().then(async () => {
       fs.writeFileSync(path.join(evidence, file), buffer)
       raw.frames.push({ file, sha256: createHash('sha256').update(buffer).digest('hex'), width: image.getSize().width, height: image.getSize().height })
     }
-    await win.loadFile(html); win.show(); win.focus(); win.webContents.focus()
+    checkpoint('loading-document')
+    await win.loadFile(html); checkpoint('document-loaded'); win.show(); win.focus(); win.webContents.focus()
     await until('window.tuiScene?.ready && !!document.querySelector("[data-toolkit-id=tui-monitor]")')
     await waitFor(async () => (await Promise.all(ids.map(snapshot))).every(value => value.admission?.run && value.state === 'running'), 'Both private TUI Runs started on load')
+    checkpoint('runs-started')
     raw.original = await Promise.all(ids.map(snapshot))
     const originalRun = raw.original[0].admission.run, streamRun = raw.original[1].admission.run
     await click('[data-toolkit-id="tui-monitor"]')
@@ -117,6 +133,25 @@ app.whenReady().then(async () => {
     await waitFor(async () => (await bytes(streamRun)).length > 70000, 'Continuous ordinary output crosses the finite script budget')
     await click('.toolkit-tui .xterm-screen'); await key('X')
     await waitFor(async () => (await bytes(streamRun)).includes('INPUT RECEIVED'), 'Ordinary terminal keeps interactive input while output grows')
+    const scrollGeometry = () => read(`(()=>{const screen=document.querySelector('.toolkit-tui .xterm-screen').getBoundingClientRect(),slider=document.querySelector('.toolkit-tui .xterm-scrollbar.xterm-vertical .xterm-slider').getBoundingClientRect();return {screen:{x:Math.ceil(screen.x),y:Math.ceil(screen.y),width:Math.floor(screen.width),height:Math.floor(screen.height)},thumbTop:slider.top,thumbHeight:slider.height}})()`)
+    const bottom = await scrollGeometry()
+    win.webContents.debugger.attach('1.3')
+    const wheel = { type: 'mouseWheel', x: bottom.screen.x + bottom.screen.width / 2, y: bottom.screen.y + bottom.screen.height / 2, deltaX: 0, deltaY: -1800 }
+    await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', wheel)
+    raw.actions.push({ type: 'native-wheel', channel: 'CDP Input.dispatchMouseEvent', ...wheel })
+    await pause(350); await settle()
+    const history = await scrollGeometry()
+    assert.ok(history.thumbTop < bottom.thumbTop - 5, 'Native wheel moves the real terminal away from its live tail')
+    const screenHash = async () => createHash('sha256').update((await win.webContents.capturePage(history.screen)).toPNG()).digest('hex')
+    const beforeBytes = (await bytes(streamRun)).length, beforeScreen = await screenHash()
+    await waitFor(async () => (await bytes(streamRun)).length > beforeBytes + 700, 'Original Run continues output while reading history')
+    await pause(250); await settle()
+    const afterScreen = await screenHash(), retained = await scrollGeometry()
+    assert.equal(afterScreen, beforeScreen, 'Live output must not pull the original history screen back to the tail')
+    assert.ok(retained.thumbTop < bottom.thumbTop - 5)
+    raw.upwardReading = { bottom, history, retained, beforeBytes, afterBytes: (await bytes(streamRun)).length, beforeScreen, afterScreen, sameRun: (await snapshot(ids[1])).admission.run.runId === streamRun.runId }
+    assert.equal(raw.upwardReading.sameRun, true)
+    win.webContents.debugger.detach()
     await frame('output-narrow')
     await click('.toolkit-tui [data-toolkit-close]')
     raw.final = await Promise.all(ids.map(snapshot))
@@ -140,6 +175,8 @@ app.whenReady().then(async () => {
       assert.equal(raw.afterDisposalLeases, 0)
       detachTheme?.(); detachRuntime?.(); await runtime?.dispose(); sampler?.dispose()
     } catch (error) { raw.cleanupError = String(error); raw.qualified = false }
+    try { if (native?.spawned) { await native.shutdown(); raw.native.shutdown = true; await native.dispose() } }
+    catch (error) { raw.nativeCleanupError = String(error); raw.qualified = false }
     fs.writeFileSync(path.join(evidence, phase + '-render.json'), JSON.stringify(raw, null, 2) + '\n')
     if (win && !win.isDestroyed()) win.destroy()
     app.exit(raw.qualified ? 0 : 1)

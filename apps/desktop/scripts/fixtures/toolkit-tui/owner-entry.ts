@@ -4,3 +4,4 @@ export { sessionObservationResult } from '../../../src/shared/session-observatio
 export { sessionInputWriteResult } from '../../../src/shared/session-input-result'
 export { localRuntimeConnector } from '../../../test/helpers/local-runtime-connector'
 export { registerThemeBootstrap } from '../../../src/main/theme-bootstrap'
+export { activateRuntime } from '@ctxmux/sdk'
