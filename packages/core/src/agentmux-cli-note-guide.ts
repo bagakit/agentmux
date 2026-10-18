@@ -24,6 +24,16 @@ math uses $$ delimiter lines. Escape literal dollars or use inline/fenced code. 
 formula source and anchors when editing; render failures do not invalidate saved source.
 Previews are client projections and are not stored SVG/HTML or graphical-editing receipts.
 
+Images use ![alternative text](relative/path "title"); attachments use ordinary Markdown links.
+Relative resources belong to the original Note file directory, including shared and Graph views.
+Read file import --help to create binary attachments through the original Files owner before
+referencing the returned resource; Agent-session upload is a different attachment destination.
+Use GFM tables and - [ ] / - [x] task items. Preserve saved cell/item annotations and anchors.
+HTML and SVG code fences offer explicit static previews. These previews do not run scripts
+or fetch external resources. Unsupported bounded regions retain readable original source in a
+note-raw fence with html or markdown metadata. Preserve that source and its outside block anchor;
+preview cleaning never rewrites it. Read docs/specs/note-markdown.md for the canonical grammar.
+
 Read the matching leaf --help for arguments and receipt fields; amux notebook --help expands
 the original content, link, follow and history contracts.`
 
