@@ -493,7 +493,7 @@ Mote 保持自己的 Space 身份并复用共同框架；其持久人格、SOUL�
 - History 进入 More 单一应用入口，继续由原读取与返回 owner 控制；复制地址、分割、交换、移至新 Tab 复用原精确 Region 回调，菜单不从当前焦点猜目标、不另建动作注册表、地址格式、配置或后台查询。打开、悬停或关闭菜单/tooltip 不改变终端容器尺寸、权威 PTY 尺寸或 xterm 实例；工作量随本格相关事实增长。
 - 从 Terminal 或 Activity 的同一 History 入口进入，原 Session 的记录都必须实际可读，并有明确返回进入前视图的动作；查看和返回不强切 Terminal，不重建原 Activity 或终端，不丢原内容、阅读位置、选区与草稿。返回后键盘能继续操作原视图，较晚主动焦点优先。阅读 History 时，被覆盖的原视图保留状态，但其不可见控件不能进入键盘焦点顺序；返回后原控件恢复可操作。隐藏后的读取和迟到结果沿现持久会话阅读合同处理，不能为入口另建 reader、缓存或消息账本。
 - 交换目标中的 Agent 名称与该格当前的语义显示名一致，用户改名与首条 prompt 变化沿[《显示名与身份》](#显示名与身份)的同一优先级链反映。重名按同一 Tab 的视觉顺序区分，唯一名不无谓编号；名称、截断与编号只用于辨认，动作仍绑定原精确 Region 身份。
-- 关闭继续走现有精确 Tab/Region、未保存确认与资源处理 owner；同一 Session 的视图切换、History、冷态内联记录及服务窗不另建 Terminal、Session 或 Run。正常与恢复状态、窄分屏、记录面和进程重启后都保持这一合同；无关 Session 不产生额外处理。
+- 关闭继续走现有精确 Tab/Region、未保存确认与资源处理 owner；关闭展示与停止 Agent 的区别，以及明确关闭后不得被后台观察补回的边界，沿[Session、Run 与 View](session-recovery.md#sessionrun-与-view)。同一 Session 的视图切换、History、冷态内联记录及服务窗不另建 Terminal、Session 或 Run。正常与恢复状态、窄分屏、记录面和进程重启后都保持这一合同；无关 Session 不产生额外处理。
 
 ### Region 移位入口
 
