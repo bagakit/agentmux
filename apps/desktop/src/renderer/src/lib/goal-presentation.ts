@@ -1,16 +1,22 @@
-import { alignmentConfirmationIssue, groundingAcceptanceIssue, isDemandEvidenceReference } from '@agentmux/demand/goals'
+import { alignmentConfirmationIssue, groundingAcceptanceIssue, isDemandEvidenceReference, isCurrentGroundingAccepted } from '@agentmux/demand/goals'
 import type { DemandRecord } from './global-demand-board'
 import { goalDelegationNextStep } from './goal-delegation-presentation'
 import { goalStartNextStep } from './goal-start-presentation'
 
 /** Display the owner facts. Business status is not an acknowledgement. */
 export function goalNextStep(demand: Pick<DemandRecord, 'alignment' | 'grounding' | 'status' | 'delegations' | 'delegationObservations' | 'delegationObservationIssue' | 'dispatches' | 'startObservations'>): string {
-  const delegated = goalDelegationNextStep(demand)
-  if (delegated) return delegated
-  const start = goalStartNextStep(demand)
-  if (start) return start
   const { alignment, grounding } = demand
+  if (isCurrentGroundingAccepted(alignment, grounding)) {
+    const result = grounding!.checks.some(check => check.outcome === 'gap') ? 'Accepted with gaps' : 'Accepted'
+    return demand.status === 'done' ? `${result} · Finished` : result
+  }
   if (demand.status === 'done' && !grounding) return 'Results not verified'
+  if (demand.status !== 'done') {
+    const delegated = goalDelegationNextStep(demand)
+    if (delegated) return delegated
+    const start = goalStartNextStep(demand)
+    if (start) return start
+  }
   if (!alignment) return 'Goal needs an outline'
   if (alignmentConfirmationIssue(alignment)) return alignment.openQuestions.length ? 'Decision needed' : 'Success criteria needed'
   if (alignment.confirmedAt === null) return 'Goal ready for confirmation'
@@ -18,7 +24,6 @@ export function goalNextStep(demand: Pick<DemandRecord, 'alignment' | 'grounding
   if (grounding.alignmentRevision !== alignment.revision) return 'Results need updating'
   const gapsAllowed = groundingAcceptanceIssue(alignment, grounding, true) === null
   const hasGaps = grounding.checks.some(check => check.outcome === 'gap')
-  if (grounding.acceptedAt !== null && gapsAllowed) return hasGaps ? 'Accepted with gaps' : 'Accepted'
   if (gapsAllowed) return hasGaps ? 'Results have known gaps' : 'Results ready for review'
   return 'Results need checking'
 }

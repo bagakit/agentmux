@@ -1019,7 +1019,7 @@ export type AppState = {
   requestDemandPmoTask(demandId: string, mode: 'grill' | 'grounding', options?: { creationOperationId?: string | undefined; onReceipt?: ((receipt: GoalPmoReceipt) => void) | undefined }): Promise<string>
   refreshDemand(demandId: string): Promise<void>
   confirmDemandGoal(demandId: string, expectedRevision: number): Promise<void>
-  acceptDemandResult(demandId: string, expectedAlignmentRevision: number, expectedSubmissionId: string, acceptGaps?: boolean): Promise<void>
+  acceptDemandResult(demandId: string, expectedAlignmentRevision: number, expectedSubmissionId: string, acceptGaps?: boolean, finish?: boolean): Promise<void>
   createDemand(input: {
     id?: string
     title: string
@@ -6205,7 +6205,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { operation: request.operation, demand, receipt: { demandId: demand.id, confirmedRevision: demand.alignment!.revision, confirmedAt: demand.alignment!.confirmedAt! } }
     }
     if (request.operation === 'demand.accept') {
-      await get().acceptDemandResult(request.demandId, request.expectedAlignmentRevision, request.expectedSubmissionId, request.acceptGaps)
+      await get().acceptDemandResult(request.demandId, request.expectedAlignmentRevision, request.expectedSubmissionId, request.acceptGaps, request.finish)
       const demand = demandRecord(request.demandId)
       return { operation: request.operation, demand, receipt: { demandId: demand.id, alignmentRevision: demand.grounding!.alignmentRevision, submissionId: demand.grounding!.submissionId, acceptedAt: demand.grounding!.acceptedAt!, acceptedWithGaps: demand.grounding!.checks.some(check => check.outcome === 'gap') } }
     }
@@ -7911,8 +7911,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     set(state => ({ demands: { ...state.demands, [id]: demandRecordFromFilesystem(receipt.demand, state.demands[id]) } }))
     refreshKnownGoalResponsibilities([id])
   },
-  async acceptDemandResult(id, expectedAlignmentRevision, expectedSubmissionId, acceptGaps) {
-    const receipt = await api.demands.acceptGrounding(id, expectedAlignmentRevision, expectedSubmissionId, acceptGaps)
+  async acceptDemandResult(id, expectedAlignmentRevision, expectedSubmissionId, acceptGaps, finish) {
+    const receipt = await api.demands.acceptGrounding(id, expectedAlignmentRevision, expectedSubmissionId, acceptGaps, finish)
     set(state => ({ demands: { ...state.demands, [id]: demandRecordFromFilesystem(receipt.demand, state.demands[id]) } }))
     refreshKnownGoalResponsibilities([id])
   },
