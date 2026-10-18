@@ -282,12 +282,24 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
   useLayoutEffect(() => {
     if (observing && context && ownWorkItems.length) observeWork({ hostId: context.hostId, agentSessionId: sessionId }, ownWorkItems, identity)
   }, [observing, context?.hostId, sessionId, ownWorkItems, identity?.name, identity?.kind, identity?.hostId, identity?.workspacePath, identity?.providerId, identity?.project?.id, identity?.project?.name, identity?.branch, identity?.topicId, observeWork])
-  const workIntervals = workHistory.segments.flatMap(segment => {
-    const matchesStart = (item: AgentTimelineItem) => item.createdAt === segment.startAt && item.activityState?.run.runId === segment.run.runId && 'state' in item.activityState && item.activityState.state === 'working'
-    const start = workItems.find(matchesStart) ?? ownWorkItems.find(matchesStart)
-    if (start && retainedHere?.identities?.has(start.id) && focusTimelineTrackKey(sessionId, retainedHere.identities.get(start.id), track.inputReference?.hostId ?? context?.hostId ?? identity?.hostId) !== track.key) return []
+  // Start provenance changes with work facts, not the playhead or viewport.
+  // Retained facts win over canonical facts, including duplicate starts.
+  const workSegments = useMemo(() => {
+    const starts = new Map<string, AgentTimelineItem>()
+    for (const items of [workItems, ownWorkItems]) for (const item of items) {
+      if (!item.activityState || !('state' in item.activityState) || item.activityState.state !== 'working') continue
+      const key = JSON.stringify([item.createdAt, item.activityState.run.runId])
+      if (!starts.has(key)) starts.set(key, item)
+    }
+    return workHistory.segments.flatMap(segment => {
+      const start = starts.get(JSON.stringify([segment.startAt, segment.run.runId]))
+      if (start && retainedHere?.identities?.has(start.id) && focusTimelineTrackKey(sessionId, retainedHere.identities.get(start.id), track.inputReference?.hostId ?? context?.hostId ?? identity?.hostId) !== track.key) return []
+      return [{ segment, identity: start ? retainedHere?.identities?.get(start.id) : undefined }]
+    })
+  }, [workHistory, workItems, ownWorkItems, retainedHere?.identities, sessionId, track.key, track.inputReference?.hostId, context?.hostId, identity?.hostId])
+  const workIntervals = workSegments.flatMap(({ segment, identity }) => {
     const clipped = clipFocusWorkInterval(segment, window, now)
-    return clipped ? [{ segment, identity: start ? retainedHere?.identities?.get(start.id) : undefined, ...clipped }] : []
+    return clipped ? [{ segment, identity, ...clipped }] : []
   })
   const work = working && !workHistory.coverage.recorded && !workHistory.segments.some(segment => segment.end === 'current')
     ? focusWorkSegment(context.workingEnteredAt, window, now) : null
