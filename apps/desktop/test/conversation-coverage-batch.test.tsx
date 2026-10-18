@@ -27,7 +27,7 @@ const HOUR = 3_600_000
 const pause = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
 const wait = (assertion: () => void) => vi.waitFor(async () => { await pause(); assertion() }, { timeout: 10000, interval: 20 })
 
-async function fixture(options: { total?: number; timed?: boolean; step?: number; pageSize?: number; bodySize?: number; initialShort?: number; process?: boolean } = {}) {
+async function fixture(options: { total?: number; timed?: boolean; step?: number; pageSize?: number; bodySize?: number; initialShort?: number; process?: boolean; renderMessageActions?: () => null } = {}) {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} })
@@ -70,7 +70,7 @@ async function fixture(options: { total?: number; timed?: boolean; step?: number
     return <div>{current.page?.items.map(item => <p key={item.id} data-original={item.id}>{item.contentParts.flatMap(part => part.kind === 'text' ? [part.text] : [])}</p>)}</div>
   }
   const render = (duration = 24 * HOUR, active = true) => act(async () => root.render(<Consumer duration={duration} active={active} />))
-  const activity = (visible = true) => act(async () => root.render(<ActivityView {...activityReadingProps({ control: { ...reference, run: { runId: 'original-run' } }, visible })} />))
+  const activity = (visible = true) => act(async () => root.render(<ActivityView {...activityReadingProps({ control: { ...reference, run: { runId: 'original-run' } }, visible, ...(options.renderMessageActions ? { renderMessageActions: options.renderMessageActions } : {}) })} />))
   const appendCaptured = async (id: string) => {
     const item: AgentTimelineItem = { id, agentSessionId: reference.agentSessionId, kind: 'assistant_message', source: 'native-hook',
       status: 'complete', title: 'Original captured record', content: id, createdAt: _followupFixtureEpoch(0, 0, 1), updatedAt: _followupFixtureEpoch(0, 0, 1) }
@@ -295,4 +295,43 @@ it.each([2, 1])('a real two-source retained window with %i slots protects both o
     await wait(() => { expect(f.calls).toHaveLength(before + 1); expect(f.current().loading).toBe(false) })
     expect(f.calls.at(-1)!.limit).toBe(100)
   }
+})
+
+
+it('actual Activity keeps ruler visibility local and measures only observed rows for a reading anchor', async () => {
+  const view = vi.fn(() => null)
+  const f = await fixture({ total: 100, renderMessageActions: view })
+  const observers: Array<{ callback: IntersectionObserverCallback; nodes: Set<Element> }> = []
+  vi.stubGlobal('IntersectionObserver', class {
+    nodes = new Set<Element>()
+    constructor(callback: IntersectionObserverCallback) { observers.push({ callback, nodes: this.nodes }) }
+    observe(node: Element) { this.nodes.add(node) }
+    unobserve(node: Element) { this.nodes.delete(node) }
+    disconnect() { this.nodes.clear() }
+  })
+  await f.activity()
+  await wait(() => expect(f.host.querySelectorAll('[data-native-record-id]')).toHaveLength(100))
+  await wait(() => expect(inspectConversationConsumers({ ...f.reference, records: [] }).consumers[0]?.loading).toBe(false))
+  const feed = f.host.querySelector<HTMLElement>('.activity-feed')!
+  const rows = [...f.host.querySelectorAll<HTMLElement>('[data-native-record-id]')]
+  const visible = rows.slice(-3)
+  const observer = observers.findLast(candidate => candidate.nodes.has(visible[0]!))!
+  expect(observer).toBeTruthy()
+  expect(view).toHaveBeenCalled()
+  const before = view.mock.calls.length
+  await act(async () => observer.callback(visible.map(target => ({ target, isIntersecting: true } as IntersectionObserverEntry)), {} as IntersectionObserver))
+  expect(view.mock.calls.length, 'Ruler visibility must not render the conversation again').toBe(before)
+  const measured = new Set<string>()
+  const rect = (top: number, height: number) => ({ top, bottom: top + height, left: 0, right: 500, width: 500, height, x: 0, y: top, toJSON() {} })
+  vi.spyOn(feed, 'getBoundingClientRect').mockReturnValue(rect(0, 200))
+  Object.defineProperties(feed, { clientHeight: { configurable: true, value: 200 }, scrollHeight: { configurable: true, value: 4000 } })
+  rows.forEach((node, index) => vi.spyOn(node, 'getBoundingClientRect').mockImplementation(() => {
+    measured.add(node.dataset.nativeRecordId!)
+    return rect((index - 97) * 50 + 10, 50)
+  }))
+  feed.scrollTop = 2000
+  await act(async () => feed.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -1 })))
+  expect(measured.has('original-97'), 'The actual wheel path must capture its first visible record').toBe(true)
+  expect([...measured].every(id => visible.some(node => node.dataset.nativeRecordId === id)), 'Anchor capture must not measure the invisible historical prefix').toBe(true)
+  expect(f.calls).toHaveLength(1)
 })
