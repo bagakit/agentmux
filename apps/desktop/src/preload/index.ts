@@ -15,7 +15,7 @@ import { NATIVE_OVERLAY_FOCUS_CHANNEL, sameNativeOverlayDocument } from '../shar
 import { unwrapSessionReopenResult } from '../shared/session-reopen-result'
 import { unwrapSessionAgentLaunchResult, unconfirmedSessionAgentLaunch } from '../shared/session-agent-launch-result'
 import { unwrapSessionLaunchResult } from '../shared/session-launch-result'
-import { unwrapSessionObservationResult } from '../shared/session-observation-result'
+import { sessionObservationResult } from '../shared/session-observation-result'
 import type { AgentExecutorId, AgentMuxControlRequest, AgentMuxRunInputData, AgentMuxAgentWriteInput, AgentSessionHistoryPageOptions } from '@agentmux/core'
 import {
   AGENT_ATTENTION_ACTIVATE_CHANNEL,
@@ -69,8 +69,6 @@ import type {
   SessionHistoryObservationEvent,
   SessionHistoryObservationReady,
   SessionControl,
-  SessionAttachResult,
-  SessionReplayResult,
   TerminalLaunchInput,
   WorkspaceFileInvalidated,
   WorkspaceFileWriteInput,
@@ -141,8 +139,8 @@ const api: AgentMuxPreloadApi = {
     onChange: listener => { const receive = (_event: unknown, snapshot: import('@agentmux/core/notebook-store').NotesStorageSnapshot) => listener(snapshot); ipcRenderer.on('notesStorage:changed', receive); return () => ipcRenderer.removeListener('notesStorage:changed', receive) }
   },
   landmarks: {
-    list: async input => unwrapSessionObservationResult(await ipcRenderer.invoke('conversationLandmarks:list', input)),
-    apply: async input => unwrapSessionObservationResult(await ipcRenderer.invoke('conversationLandmarks:apply', input))
+    list: input => ipcRenderer.invoke('conversationLandmarks:list', input),
+    apply: input => ipcRenderer.invoke('conversationLandmarks:apply', input)
   },
   notebooks: {
     ...createPreloadNotebookObservation((channel, ...values) => ipcRenderer.invoke(channel, ...values)),
@@ -574,12 +572,10 @@ const api: AgentMuxPreloadApi = {
         return { source: ready.source, dispose }
       } catch (error) { dispose(); throw error }
     },
-    attach: async (session: SessionControl, afterSequence = 0) =>
-      unwrapSessionObservationResult<SessionAttachResult>(await ipcRenderer.invoke('sessions:attach', session, afterSequence)),
-    refreshAttachment: async (session: SessionControl, attachmentId: string | null, afterByte: number) =>
-      unwrapSessionObservationResult<SessionAttachResult>(await ipcRenderer.invoke('sessions:refreshAttachment', session, attachmentId, afterByte)),
-    replay: async (attachmentId: string, afterByte: number) =>
-      unwrapSessionObservationResult<SessionReplayResult>(await ipcRenderer.invoke('sessions:replay', attachmentId, afterByte)),
+    attach: (session: SessionControl, afterSequence = 0) => ipcRenderer.invoke('sessions:attach', session, afterSequence),
+    refreshAttachment: (session: SessionControl, attachmentId: string | null, afterByte: number) =>
+      ipcRenderer.invoke('sessions:refreshAttachment', session, attachmentId, afterByte),
+    replay: (attachmentId: string, afterByte: number) => ipcRenderer.invoke('sessions:replay', attachmentId, afterByte),
     detach: (attachmentId: string) => ipcRenderer.invoke('sessions:detach', attachmentId),
     write: (session: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source'], observation?: import('@agentmux/core/control').InputObservationReference) => {
       const parent = readInputObservation(observation)
@@ -608,13 +604,14 @@ const api: AgentMuxPreloadApi = {
       unwrapSessionReopenResult(await ipcRenderer.invoke('sessions:reopen', reference, expectedRetiredAt, operationId)),
     resume: (session: AgentSessionControl, prompt: string, operationId: string, agentMuxNote?: string) =>
       ipcRenderer.invoke('sessions:resume', session, prompt, operationId, agentMuxNote),
-    restart: async (session: AgentSessionControl, operationId: string, observeOnly?: boolean) =>
-      unwrapSessionObservationResult<import('../shared/contracts.js').SessionRestartResult>(await withStopTimeout(ipcRenderer.invoke('sessions:restart', session, operationId, observeOnly), undefined, sessionRestartTimeoutError)),
+    restart: (session: AgentSessionControl, operationId: string, observeOnly?: boolean) =>
+      withStopTimeout(ipcRenderer.invoke('sessions:restart', session, operationId, observeOnly), undefined, sessionRestartTimeoutError)
+        .catch(error => sessionObservationResult(() => Promise.reject(error))),
     interrupt: (session: SessionControl) => ipcRenderer.invoke('sessions:interrupt', session),
     resize: (attachmentId: string, cols: number, rows: number) =>
       ipcRenderer.invoke('sessions:resize', attachmentId, cols, rows),
     observeStorage: (session: SessionControl) => ipcRenderer.invoke('sessions:observeStorage', session),
-    controlContinuity: async (hostId: string, input: import('@agentmux/core').AgentMuxContinuityControlInput) => unwrapSessionObservationResult<{ hostId: string; result: import('@agentmux/core').AgentMuxContinuityControlResult }>(await ipcRenderer.invoke('sessions:controlContinuity', hostId, input)),
+    controlContinuity: (hostId: string, input: import('@agentmux/core').AgentMuxContinuityControlInput) => ipcRenderer.invoke('sessions:controlContinuity', hostId, input),
     refresh: (session: SessionControl) => ipcRenderer.invoke('sessions:refresh', session),
     recover: (session: SessionControl, workspacePath?: string, operationId?: string, request?: Pick<import('@agentmux/core').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'>) =>
       ipcRenderer.invoke('sessions:recover', session, workspacePath, operationId, request),
