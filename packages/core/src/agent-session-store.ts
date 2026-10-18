@@ -2615,7 +2615,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
   async readInputConversationProjection(id: string, after = ''): Promise<ReturnType<typeof readCapturedInputProjection>> {
     const rows = [...this.memoryCaptured(id).heads.values()].filter(({ item }) => item.id > after && item.inputOrigin && item.inputRef && item.inputSubmission &&
       (item.inputSubmission.status === 'waiting' || item.inputSubmission.status === 'unknown' || item.inputSubmission.observation === 'owned'))
-      .sort((a, b) => a.item.id.localeCompare(b.item.id)).slice(0, 101)
+      .sort((a, b) => a.item.id < b.item.id ? -1 : a.item.id > b.item.id ? 1 : 0).slice(0, 101)
     return structuredClone({ cut: this.inputConversationCuts.get(id) ?? null,
       pending: rows.slice(0, 100).map(({ item }) => ({ recordId: item.id, key: item.inputRef! })), next: rows.length > 100 ? rows[99]!.item.id : null })
   }
