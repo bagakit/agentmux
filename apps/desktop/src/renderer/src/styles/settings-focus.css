@@ -55,7 +55,8 @@
 .focus-settings-preview__peek .agent-input-recall h4 small { font-weight: 400; color: var(--text-3); }
 .focus-settings-preview__peek > footer { display: flex; align-items: center; gap: var(--sp-3); padding: 8px 12px; border-top: 1px solid var(--line); }
 .focus-settings-preview__peek > footer > small { margin-left: auto; color: var(--text-3); font-size: var(--fs-micro); }
-.focus-settings-preview__idle { display: grid; justify-items: center; gap: 10px; padding: 16px 12px; color: var(--text-3); font-size: var(--fs-micro); }
+.focus-settings-preview__idle { display: flex; align-items: center; justify-content: center; gap: var(--sp-2); padding: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
+.focus-settings-preview__idle > svg { flex: none; width: 16px; height: 16px; }
 .focus-settings-preview__footnote { flex: none; margin: 0; padding: 11px var(--sp-4); border-top: 1px solid var(--line-soft); color: var(--text-3); font-size: var(--fs-micro); }
 .focus-settings-preview__tabs { display: flex; gap: 3px; padding: 6px; background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: var(--radius) var(--radius) 0 0; }
 .focus-settings-preview__tabs > span { font-size: var(--fs-micro); color: var(--text-3); padding: 5px 8px; }
