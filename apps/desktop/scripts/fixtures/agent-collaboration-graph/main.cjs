@@ -30,7 +30,7 @@ app.whenReady().then(async () => {
       ;(result.pointerTargets ??= []).push({ selector, ...point }); assert.equal(point.missing, undefined, 'Missing actual visible control ' + selector); return point
     }
     const move = async selector => { const point = await rect(selector); assert.ok(point.hit, 'Real pointer target ' + selector); await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y }) }
-    const click = async selector => { const point = await rect(selector); assert.ok(point.hit, 'Real click target ' + selector); for (const type of ['mousePressed', 'mouseReleased']) await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, x: point.x, y: point.y, button: 'left', clickCount: 1 }) }
+    const click = async selector => { const point = await rect(selector); assert.ok(point.hit, 'Real click target ' + selector); await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y }); for (const type of ['mousePressed', 'mouseReleased']) await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, x: point.x, y: point.y, button: 'left', clickCount: 1 }); await settle() }
     const key = async (value, modifiers = 0) => { for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key: value, code: value === 'a' ? 'KeyA' : value, modifiers, ...(type === 'keyDown' && value === 'a' && modifiers === 4 ? { commands: ['selectAll'] } : type === 'keyDown' && value === 'Backspace' ? { commands: ['deleteBackward'] } : {}) }) }
     const frame = async name => {
       await settle()
@@ -80,7 +80,7 @@ app.whenReady().then(async () => {
     })()`)
     const overview = async label => {
       if (await read(`Boolean(document.querySelector('.collaboration-inspector:not([hidden])'))`)) await click('[aria-label="Close map details"]')
-      await pause(350); const readCount=(await facts()).reads.length
+      await move('[aria-label="Overview"]'); await until('original transient Reader departed', () => read(`!document.querySelector('.agent-information-reader:not([data-pinned])')`)); const readCount=(await facts()).reads.length
       await click('[aria-label="Overview"]'); await pause(350); await until('original overview projection', () => read(`document.querySelectorAll('.collaboration-area[data-overview="true"]').length>0&&!document.querySelector('.collaboration-canvas__progress')`))
       const observation=await read(`({camera:document.querySelector('.collaboration-map .react-flow__viewport').getAttribute('style'),fullCards:document.querySelectorAll('.collaboration-map .focus-context[data-session-id]').length,agentLabels:document.querySelectorAll('.collaboration-agent[data-overview="true"] strong').length,areas:[...document.querySelectorAll('.collaboration-area__summary')].map(e=>({label:e.getAttribute('aria-label'),width:e.getBoundingClientRect().width,height:e.getBoundingClientRect().height})),paths:document.querySelectorAll('.collaboration-map .react-flow__edge-path').length})`)
       // Boxes commit before route completion; a later route job may supersede the original job.
@@ -183,7 +183,8 @@ app.whenReady().then(async () => {
       await click('[aria-label="Search contexts"]'); await key('a',4); await win.webContents.debugger.sendCommand('Input.insertText', { text: 'fixture-unmatched-context' })
       await click('[aria-label="Focus filters"]'); await until('original project filter choices', () => read(`Boolean(document.querySelector('[data-focus-project]:not([data-focus-project="all"])'))`))
       const project = await markByText('[data-focus-project]', 'Independent contributor 12', 'data-capture-project-filter'); await read(`document.querySelector(${JSON.stringify(project)}).scrollIntoView({block:'nearest'})`); await click(project)
-      await click('[aria-label="Focus filters"]'); await click('[data-focus-state="idle"]')
+      await until('original project selection closes menu', () => read(`!document.querySelector('[data-focus-project]')`))
+      await click('[aria-label="Focus filters"]'); await until('original state filter choices', () => read(`Boolean(document.querySelector('[data-focus-state="idle"]'))`)); await click('[data-focus-state="idle"]')
       const filters = await read(`({query:document.querySelector('[aria-label="Search contexts"]').value,summary:document.querySelector('[aria-label="Focus filters"]').getAttribute('aria-description')})`)
       assert.equal(filters.query,'fixture-unmatched-context'); assert.ok(filters.summary.startsWith('Independent contributor 12'))
       await click('[aria-label="Map"]'); await mapReady(); await locate('fixture-core'); await closeReader(); const camera=await matrix()
