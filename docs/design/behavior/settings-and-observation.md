@@ -306,7 +306,7 @@ Prompt 的当前对象、未提交修改与只读使用示意应在同一编辑�
 
 远程管理的产品范围、拓扑、Host 连接配置与测试、来源核验和维护入口由 [Remote 管理 PRD](remote-management.md) 持有；本节只持有通用设置导航、草稿与保存，以及 Agent 配置和设备模块的相邻规则。
 
-- 设置结构优化必须落到真实页面。日常 Preferences 在前（Appearance、Notifications、General），Browser 基础设置与 Agent 操作呈现归独立的 [Browser use](#browser-use-与-agent-操作呈现) 组，Message Tool 独立归组，其五个入口沿[本组职责](#message-tool-设置分组)，Agents 提供原启动配置，Hosts 工作台与 Mobile 设备管理归 Remote，Conversation Channels 仅提供 InApp 与 Lark 两个子项，分别面向 App 内对话模式和外部对话应用；原能力全部保留，Copied paths 在 General 内与本地数据／诊断分层，原单字段草稿、expected 和保存范围不扩大。统一底栏入口进入 Overview，项目管理沿 Hosts 的原项目入口进入；不新增第二齿轮，显式分区与 Executor ID 仍指向原精确对象；不保留独立 Copy Paths 页面或另造兼容路由。搜索仍能定位路径、`~`／absolute、字号、通知、日志、恢复、Provider 与设备接入。诊断或只读说明不进入偏好保存，不自动触发资源检测或更改健康 Run。
+- 设置结构优化必须落到真实页面。日常 Preferences 在前（Appearance、Notifications、General），Browser 基础设置与 Agent 操作呈现归独立的 [Browser use](#browser-use-与-agent-操作呈现) 组，Message Tool 独立归组，其五个入口沿[本组职责](#message-tool-设置分组)，Agents 提供原启动配置，Hosts 工作台与 Mobile 设备管理归 Remote，Conversation Channels 提供 InApp、Lark 与 Discord 子项，分别面向 App 内对话模式及对应外部对话应用；原能力全部保留，Copied paths 在 General 内与本地数据／诊断分层，原单字段草稿、expected 和保存范围不扩大。统一底栏入口进入 Overview，项目管理沿 Hosts 的原项目入口进入；不新增第二齿轮，显式分区与 Executor ID 仍指向原精确对象；不保留独立 Copy Paths 页面或另造兼容路由。搜索仍能定位路径、`~`／absolute、字号、通知、日志、恢复、Provider 与设备接入。诊断或只读说明不进入偏好保存，不自动触发资源检测或更改健康 Run。
 
 - 用户要求「继续，直到设置界面质量彻底满意」。设置作为辅助界面，第一眼必须是当前对象和动作；Workspace 与 Executor 可按名字、路径或身份检索，大量资源不靠逐条扫读。Executor 常用身份与外观优先，高级启动配置按需进入；已有 Provider 与 Executor ID 保持不可修改，新 Executor 创建后直接进入编辑。改变分组或检查结果不能丢失展开、输入或焦点。
 - 设置保存仍经既有公开 API，启动配置的说明应明确针对后续启动，不能冒充已改变健康 Run。高级权限动作保持显式选择，不自动批准；所有分区保留原功能、草稿、错误反馈和 status bar。
@@ -352,7 +352,7 @@ Prompt 的当前对象、未提交修改与只读使用示意应在同一编辑�
 
 用户可删除一个准确的本地已保存身份。确认面展示原应用及受影响的 Mote、群或私聊关联，删除沿当前修订和同一操作回执执行，不调用远端应用删除，不删除 Mote、原会话、历史绑定、凭据历史或未知请求。既有引用明确显示身份不可用，由原配置 owner 提供改选路径，不能静默改投另一应用；该身份的自动收发停止，独立机器人和健康 Agent 继续可用。结果未确认时保留原删除请求并提供查询，不用新 operation ID 重做。
 
-Settings 的 Conversation Channels 仅提供 InApp 与 Lark；两项与 Remote 的 Mobile 分别沿[设置页的信息架构](#设置页的信息架构)定位，不以设备连接代替 App 内对话模式。Lark 管理外部对话应用、机器人身份与群关系，页内保留准确 Feishu／Lark 平台及实际适配器能力。分组不建立统一 Channel Runtime、配置库或传输协议：设备继续由原 Host Authority 持有，应用与凭据继续由原 Connection owner 持有。产品入口变化保全已保存身份、原请求、现有接收与群绑定；打开设置或发现适配器不自动注册、建群、授权或启动 Agent。
+Settings 的 Conversation Channels 提供 InApp、Lark 与 Discord；各项与 Remote 的 Mobile 分别沿[设置页的信息架构](#设置页的信息架构)定位，不以设备连接代替 App 内对话模式。Lark 与 Discord 各自管理对应平台的应用、机器人身份与群关系，页内保留准确平台及实际适配器能力。分组不建立统一 Channel Runtime 或第二份配置库：设备继续由原 Host Authority 持有，应用与凭据继续由原 Connection owner 持有。共用本地存储、各 Channel 自有资料缓存与共同 amux 声明沿[共同对话协议](conversation-mode.md#共同对话协议与外部交流入口)，设置不另存业务事实。产品入口变化保全已保存身份、原请求、现有接收与群绑定；打开设置或发现适配器不自动注册、建群、授权或启动 Agent。
 
 Lark 页的外部对话自动同步总开关由原 Connection 服务持有，与每个机器人应用的启用偏好分开。关闭后在原准入边界停止新的自动收发，Agent 菜单仍保留连接入口、已有群详情与设置路径，明确说明自动同步已关闭；进入或查看不自动开启服务，也不批量改写各应用配置。已保存机器人、凭据、群绑定、共享起点、成员授权、投递进度与未决原请求保留，已在途施效和回执按原操作核实，不能冒作已取消或未发送。重开只恢复仍满足原应用、Binding 与授权条件的能力，不误启原本暂停的机器人，不重建群或换 ID 重放未知操作。
 
