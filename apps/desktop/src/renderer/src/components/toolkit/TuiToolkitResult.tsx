@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useCallback, useContext, useEffect, useRef, useState } from 'react'
@@ -78,7 +79,7 @@ export function TuiToolkitResult({ definition, reading, active, close, compact =
     try {
       if (operation === 'stop' && snapshot.admission?.run) await api.toolkit.stop(definition.id, snapshot.admission.executionId)
       else if (operation === 'continue' && snapshot.admission) await continueToolkitRequest(api.toolkit, definition.id, snapshot.admission)
-      else if (operation === 'start' && canStart) await api.toolkit.run(definition.id, { invocationId: crypto.randomUUID(), expectedRevision: snapshot.definition.revision, expectedLatestExecutionId: snapshot.latestConfirmed?.executionId ?? null })
+      else if (operation === 'start' && canStart) await api.toolkit.run(definition.id, { invocationId: mintObjectId(), expectedRevision: snapshot.definition.revision, expectedLatestExecutionId: snapshot.latestConfirmed?.executionId ?? null })
       await reading.check()
     } catch (cause) { setOperationError(presentError(cause)) }
     finally { setBusy(false) }
