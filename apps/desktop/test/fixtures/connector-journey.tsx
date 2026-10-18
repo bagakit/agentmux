@@ -8,6 +8,8 @@ import { roomProvisioningFixture, config, core } from '../../../../packages/conn
 import { createDesktopConnections } from '../../src/main/connector-host.js'
 import { registerConnectorIpc } from '../../src/main/connector-ipc.js'
 import { api } from '../../src/renderer/src/lib/api'
+import { unwrapSessionInputOperationResult } from '../../src/shared/session-input-result'
+import type { SessionInputOperationResult } from '../../src/shared/contracts'
 import { useAppStore } from '../../src/renderer/src/store'
 import { createWorkbenchTab, addWorkbenchRegion } from '../../src/renderer/src/lib/workbench-tabs'
 import { WorkspaceWorkbench } from '../../src/renderer/src/components/WorkspaceWorkbench'
@@ -69,7 +71,12 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
     const handlers = new Map<string, (...args: any[]) => Promise<unknown>>()
     registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) }, assertTrusted: vi.fn(), socketPath, secrets: services.secrets })
     calls = []; settings.mockReset()
-    forward = async (method, params) => { const call: typeof calls[number] = { method, input: structuredClone(params) }; calls.push(call); const result = await handlers.get('connections:call')!({}, method, params) as ConnectionResultMap[typeof method]; call.result = result; return result }
+    forward = async (method, params) => {
+      const call: typeof calls[number] = { method, input: structuredClone(params) }; calls.push(call)
+      const envelope = structuredClone(await handlers.get('connections:call')!({}, method, params)) as SessionInputOperationResult<ConnectionResultMap[typeof method]>
+      const result = unwrapSessionInputOperationResult(envelope)
+      call.result = result; return result
+    }
     vi.spyOn(api.connections, 'call').mockImplementation(forward)
     const session = { ...composerSession(original.session.agentSessionId, 'claude'), workspacePath: original.root, nativeHandle: original.session.nativeHandle!, label: 'Original Mote Agent' }
     let tab = createWorkbenchTab('ui-tab', { kind: 'agent', phase: 'attached', workspaceId: 'workspace', regionId: 'original-region', sessionId: session.id })

@@ -26,6 +26,7 @@ function unfolded(element: Element | null) {
 async function create() {
   await f.mount(); await f.journey('create'); await f.fill('Group name', 'Requested creation name'); await f.button('Create group')
   await wait(() => expect(dialog().textContent).toContain('Group created. Connect it to this Agent.'))
+  await wait(() => expect(dialog().querySelector<HTMLInputElement>('[aria-label="Sharing options"] input[type="checkbox"]')?.disabled).toBe(false))
 }
 
 it('a created group shows current platform metadata and direct joining and member sections before sharing is saved', async () => {

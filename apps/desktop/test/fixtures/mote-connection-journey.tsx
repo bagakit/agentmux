@@ -6,6 +6,7 @@ import { expect, vi } from 'vitest'
 import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
 import { AgentMuxSpatialStateStore, spatialCatalog } from '@agentmux/core/spatial-state'
 import type { MoteConnectionPreferencesReadResult, MoteConnectionPreferencesSaveParams } from '@agentmux/core/mote-preferences'
+import type { ConnectionResultMap } from '@agentmux/core/connections'
 import { createDesktopConnections } from '../../src/main/connector-host'
 import { MoteConnectionPreferences } from '../../src/main/mote-connection-preferences'
 import { registerMotePreferencesIpc } from '../../src/main/mote-preferences-ipc'
@@ -17,6 +18,8 @@ import { directoryIdentity, homeZoneId } from '../../src/shared/space-addresses'
 import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../../src/shared/scratch-topics'
 import { scratchTopicsScope } from '../../src/renderer/src/lib/scratch-topic-snapshots'
 import { api } from '../../src/renderer/src/lib/api'
+import { unwrapSessionInputOperationResult } from '../../src/shared/session-input-result'
+import type { SessionInputOperationResult } from '../../src/shared/contracts'
 import { useAppStore } from '../../src/renderer/src/store'
 import { createMoteApp, moteClick, settleMoteApp } from './mote-app'
 import { moteTopics, moteConfig } from './mote-workface'
@@ -79,7 +82,10 @@ export async function moteConnectionJourney(options: { encryption?: CredentialEn
   const forwardSave = async (input: MoteConnectionPreferencesSaveParams) => await handlers.get('motePreferences:save')!({ sender: trusted }, input)
   const reads = vi.spyOn(api.motePreferences, 'read').mockImplementation(forwardRead)
   const saves = vi.spyOn(api.motePreferences, 'save').mockImplementation(forwardSave)
-  const connections = vi.spyOn(api.connections, 'call').mockImplementation(async (method, input) => await handlers.get('connections:call')!({ sender: trusted }, method, input))
+  const connections = vi.spyOn(api.connections, 'call').mockImplementation(async (method, input) => {
+    const envelope = structuredClone(await handlers.get('connections:call')!({ sender: trusted }, method, input)) as SessionInputOperationResult<ConnectionResultMap[typeof method]>
+    return unwrapSessionInputOperationResult(envelope)
+  })
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
   const target = (index = 0) => ({ spaceId: motes[index]!.spaceId, zoneId: motes[index]!.zoneId,
     expectedResource: { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path } })
