@@ -1,0 +1,18 @@
+.note-static-markup { min-width: 0; }
+.note-static-markup__tools { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; padding: 7px 10px; color: var(--text-3); font: 11px/1.5 var(--font-sans); }
+.note-static-markup__tools > span { margin-right: auto; }
+.note-static-markup__tools button, .note-static-markup__tools select, .note-static-markup__dialog button { border: 1px solid var(--line-soft); border-radius: var(--radius-sm, 5px); background: var(--surface-1); color: var(--text-2); padding: 3px 7px; font: inherit; cursor: pointer; }
+.note-static-markup__tools button:hover, .note-static-markup__dialog button:hover { background: var(--wash-1); }
+.note-static-markup__tools button:focus-visible, .note-static-markup__tools select:focus-visible, .note-static-markup__dialog button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.note-static-markup__tools label { display: inline-flex; align-items: center; gap: 5px; }
+.note-static-markup__frame { overflow: auto; background: #fff; color: #333; }
+.note-static-markup__frame > [role] { display: block; padding: 12px; }
+.note-static-markup__overlay { position: fixed; inset: 0; background: rgb(0 0 0 / .36); }
+.note-static-markup__dialog { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(1100px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-lg, 10px); background: var(--surface-0); color: var(--text); box-shadow: var(--shadow-lg); }
+.note-static-markup__dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 16px; }
+.note-static-markup__dialog h2 { margin: 0; font: 600 14px/1.5 var(--font-sans); }
+.note-raw-block { min-width: 0; margin-block: 12px; border: 1px solid var(--line-soft); border-radius: var(--radius-sm, 5px); overflow: hidden; }
+.note-raw-block__label { padding: 8px 10px 0; color: var(--text-3); font: 11px/1.5 var(--font-sans); }
+.note-raw-block > textarea, .note-raw-block__source { box-sizing: border-box; display: block; width: 100%; margin: 0; padding: 10px; border: 0; border-radius: 0; max-height: 400px; overflow: auto; background: var(--surface-1); color: var(--text); font: 12px/1.6 var(--font-mono, monospace); white-space: pre; tab-size: 2; }
+.note-raw-block > textarea { min-height: 84px; resize: vertical; }
+.note-raw-block > textarea:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }

@@ -4,6 +4,7 @@ import { NodeViewContent, NodeViewWrapper, ReactNodeViewRenderer, useEditorState
 import { useMarkdownDiagramRenderer } from '../platform.js'
 import { useVisibleWork } from '../lib/use-visible-work.js'
 import { markdownDiagramLanguage } from './MarkdownCodeBlock.js'
+import { NoteStaticMarkup, noteStaticMarkupLanguage } from './NoteStaticMarkup.js'
 
 /** Presentation only: the inherited code node remains the original language, text and identity. */
 export const NoteCodeBlock = CodeBlock.extend({
@@ -16,6 +17,7 @@ function NoteCodeBlockView({ node, editor }: NodeViewProps) {
   const renderDiagram = useMarkdownDiagramRenderer()
   const language = typeof node.attrs.language === 'string' ? node.attrs.language : null
   const diagram = markdownDiagramLanguage(language)
+  const markup = noteStaticMarkupLanguage(language)
   const editable = useEditorState({ editor, selector: ({ editor }) => editor.isEditable })
   const [showSource, setShowSource] = useState(false)
   const { ref, visible } = useVisibleWork<HTMLDivElement>(Boolean(diagram && renderDiagram))
@@ -23,6 +25,7 @@ function NoteCodeBlockView({ node, editor }: NodeViewProps) {
   const sourceVisible = editable || !diagram || !renderDiagram || showSource
   return <NodeViewWrapper className="note-code-block" data-block-id={node.attrs.blockId ?? undefined} data-diagram-language={diagram ?? undefined}>
     <div ref={ref}>
+      {markup && <NoteStaticMarkup content={node.textContent} kind={markup} />}
       {diagram && <div className="note-code-block__header" contentEditable={false}>
         <span>{language?.trim() || diagram}</span>
         {!editable && renderDiagram && <button type="button" aria-expanded={showSource} onClick={() => setShowSource(value => !value)}>{showSource ? 'Hide source' : 'Show source'}</button>}
