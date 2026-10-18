@@ -23,7 +23,7 @@ export const publicationPartKey = (part: Pick<ConversationContentRef, 'record' |
   return JSON.stringify([conversationRecordId(part.record), selector])
 }
 
-/** Original semantic purpose is independent of public eligibility and of resolved resource bytes. */
+/** Original message and per-part Provider purpose select sharing; bytes and presentation cannot. */
 export function isConversationPublicationPart(record: ConversationSourceRecord, selector: ConversationContentRef['selector'], author: ConversationUnit['event']['author']): boolean {
   const { original } = record
   if (original.kind === 'captured') {
@@ -33,10 +33,13 @@ export function isConversationPublicationPart(record: ConversationSourceRecord, 
       !item.a2aNotificationId && !(item.kind === 'user_message' && item.authorAgentSessionId)
   }
   const item = original.item
-  if (selector.kind !== 'native-part' || !['user-message', 'assistant-message'].includes(item.kind) ||
+  if (selector.kind !== 'native-part' ||
     item.collaboration || item.conversation?.adoptedInput?.purpose === 'a2a-notification' || item.kind === 'user-message' && author.kind === 'agent') return false
   const part = item.contentParts[selector.partIndex]
   if (!part || part.contentRole === 'tool' || part.contentRole === 'reasoning') return false
+  // The Provider can give a typed artifact its own public purpose while keeping the raw tool result unconfirmed.
+  if (item.kind === 'activity') return part.kind === 'resource' && part.contentEligibility === 'public' && (!part.content || part.content.kind === 'text' || part.content.kind === 'resource')
+  if (!['user-message', 'assistant-message'].includes(item.kind)) return false
   // Typed question/answer projections can share their ordinary content without sending the raw tool envelope.
   if (part.kind === 'tool-call') return item.questionRequest !== undefined
   if (part.kind === 'tool-result') return !!item.questionAnswers?.length
