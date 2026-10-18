@@ -6,6 +6,9 @@ import type { Root } from 'react-dom/client'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { api } from '../src/renderer/src/lib/api'
+import * as conversationRecords from '@agentmux/client-ui/conversation-records'
+import { conversationPagePortFixture } from './helpers/conversation-page-port-fixture'
+import { inspectConversationConsumers } from '../src/renderer/src/lib/conversation-consumer-observation'
 
 let root: Root, host: HTMLDivElement
 const records = [{ id: 'retained-original-input', agentSessionId: 'reading-owner', kind: 'user_message' as const,
@@ -15,7 +18,8 @@ const page = { agentSessionId: 'reading-owner', source: { providerId: 'codex', n
 const reference = { hostId: 'local', agentSessionId: 'reading-owner', run: { runId: 'original-run' } }
 const observerTargets = new Set<Element>()
 let observerBuilds = 0
-beforeEach(() => {
+let source: Awaited<ReturnType<typeof conversationPagePortFixture>>
+beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   observerBuilds = 0; observerTargets.clear()
   vi.stubGlobal('IntersectionObserver', class {
@@ -26,18 +30,26 @@ beforeEach(() => {
     disconnect() { for (const node of this.targets) observerTargets.delete(node); this.targets.clear() }
   })
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
-  vi.spyOn(api.sessions, 'historyPage').mockResolvedValue({ agentSessionId: 'reading-owner', source: { providerId: 'codex', nativeSessionId: 'source-a' }, items: [], nextCursor: null })
+  source = await conversationPagePortFixture(reference, page.source, async () => page)
+  await source.publishCaptured(records)
   Element.prototype.scrollIntoView = vi.fn()
   host = document.createElement('div'); document.body.append(host); root = createClientUiRoot(host)
 })
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); window.getSelection()?.removeAllRanges(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); window.getSelection()?.removeAllRanges(); await source.close(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 async function render(enabled: boolean, facts = { nativeHandle }) {
-  await act(async () => root.render(<ActivityView sessionId="reading-owner" items={records} capability="complete-events"
-    nativeHistoryPage={page}
+  await act(async () => root.render(<ActivityView sessionId="reading-owner" executionHostId={reference.hostId} capability="complete-events"
     conversationReading={{ reference, identity: 'original-run', enabled, nativeSourceFacts: facts }} />))
+  if (enabled) await vi.waitFor(async () => {
+    await act(async () => { await Promise.resolve() })
+    expect(host.querySelector('[data-submission-id="retained-original-input"]')).not.toBeNull()
+    const consumer = inspectConversationConsumers(reference).consumers[0]
+    expect(consumer?.loading).toBe(false); expect(consumer?.inFlight).toBe(false)
+    expect(consumer?.dirty).toBe(false); expect(consumer?.watch.binding).toBe(false)
+    expect(consumer?.watch.bound).toBe(true)
+  })
 }
 it('a retained hidden reading body keeps its original DOM and Range without feed derivation or geometry; reveal restores demand', async () => {
-  const derive = vi.spyOn(records, 'filter')
+  const derive = vi.spyOn(conversationRecords, 'projectConversationWindow')
   await render(true)
   const feed = host.querySelector<HTMLElement>('.activity-feed')!
   expect(feed).not.toBeNull(); expect(derive).toHaveBeenCalled(); expect(observerBuilds).toBeGreaterThan(0)
@@ -51,11 +63,14 @@ it('a retained hidden reading body keeps its original DOM and Range without feed
   expect(observerTargets.size).toBe(0)
   const geometry = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
   const add = vi.spyOn(feed, 'addEventListener')
+  const reads = vi.mocked(api.conversation.readAgentConversation); reads.mockClear()
+  source.nativeRead.mockClear()
   derive.mockClear(); const builds = observerBuilds
   // Like the real SessionPane status-only clone, metadata identity may change without new source facts.
   for (let n = 0; n < 12; n++) await render(false, { nativeHandle: { ...nativeHandle } })
   await act(async () => feed.dispatchEvent(new Event('scroll')))
   expect(derive).not.toHaveBeenCalled(); expect(geometry).not.toHaveBeenCalled()
+  expect(reads).not.toHaveBeenCalled(); expect(source.nativeRead).not.toHaveBeenCalled()
   expect(observerBuilds).toBe(builds); expect(add.mock.calls.filter(([kind]) => kind === 'scroll')).toHaveLength(0)
   expect(feed.scrollTop).toBe(37); expect(original!.isConnected).toBe(true); expect(window.getSelection()!.toString()).toBe('Original')
   await render(true)
@@ -68,9 +83,12 @@ it('initially hidden current and historical reading do not acquire feed geometry
   const height = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
   await render(false)
   expect(host.querySelector('.activity-feed')).not.toBeNull(); expect(observerBuilds).toBe(0)
-  expect(geometry.mock.instances.map(node => node?.className)).toEqual([]); expect(height.mock.instances.filter(node => node?.classList.contains('activity-feed'))).toEqual([]); expect(api.sessions.historyPage).not.toHaveBeenCalled()
+  expect(host.textContent).not.toContain('Original retained input')
+  expect(geometry.mock.instances.map(node => node?.className)).toEqual([]); expect(height.mock.instances.filter(node => node?.classList.contains('activity-feed'))).toEqual([]); expect(source.nativeRead).not.toHaveBeenCalled()
   await render(false, { nativeHandle: { ...nativeHandle, sessionId: 'source-b' } })
-  expect(host.textContent).toContain('Native source changed')
+  expect(host.textContent).not.toContain('Original retained input')
+  expect(observerBuilds).toBe(0); expect(geometry.mock.instances.map(node => node?.className)).toEqual([]); expect(height.mock.instances.filter(node => node?.classList.contains('activity-feed'))).toEqual([]); expect(source.nativeRead).not.toHaveBeenCalled()
+  await render(true)
   expect(host.textContent).toContain('Original retained input')
-  expect(observerBuilds).toBe(0); expect(geometry.mock.instances.map(node => node?.className)).toEqual([]); expect(height.mock.instances.filter(node => node?.classList.contains('activity-feed'))).toEqual([]); expect(api.sessions.historyPage).not.toHaveBeenCalled()
+  expect(source.nativeRead).toHaveBeenCalled(); expect(observerBuilds).toBeGreaterThan(0)
 })
