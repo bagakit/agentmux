@@ -1,7 +1,6 @@
-.performance-popover:has(.toolkit-tui:not(.toolkit-tui--compact)) { width: min(760px, calc(100vw - 24px)); height: min(500px, calc(100vh - 48px)); min-width: min(360px, calc(100vw - 24px)); min-height: min(260px, calc(100vh - 48px)); max-width: calc(100vw - 24px); max-height: calc(100vh - 48px); resize: both; }
+.performance-popover:has(.toolkit-tui:not(.toolkit-tui--compact)) { width: min(760px, var(--toolkit-available-width, calc(100vw - 24px))); height: min(500px, var(--toolkit-available-height, calc(100vh - 48px))); min-width: min(360px, var(--toolkit-available-width, calc(100vw - 24px))); min-height: min(260px, var(--toolkit-available-height, calc(100vh - 48px))); max-width: var(--toolkit-available-width, calc(100vw - 24px)); max-height: var(--toolkit-available-height, calc(100vh - 48px)); resize: none; }
 .toolkit-tui { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
 .toolkit-tui__status { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); padding: var(--sp-2) var(--sp-6) var(--sp-4); color: var(--text-2); font-size: var(--fs-meta); }
-.toolkit-tui__status small { margin-left: auto; color: var(--text-3); font-size: var(--fs-micro); }
 .toolkit-tui__notices { padding: 0 var(--sp-6) var(--sp-3); max-height: 100px; overflow: auto; color: var(--amber-text); font-size: var(--fs-meta); }
 .toolkit-tui__notices p { margin: var(--sp-2) 0; overflow-wrap: anywhere; }
 .toolkit-tui__notice { margin: 0; padding: var(--sp-3) var(--sp-6); color: var(--text-3); font-size: var(--fs-meta); }
@@ -12,3 +11,23 @@
 .toolkit-tui__actions > button:disabled { color: var(--text-3); opacity: .65; cursor: default; }
 .toolkit-tui--compact { flex: none; border: 1px solid var(--line-soft); border-radius: var(--radius); }
 .toolkit-tui--compact .toolkit-tui__status { padding-top: var(--sp-4); }
+
+.toolkit-tui__header { display: flex; align-items: center; flex: none; min-width: 0; gap: var(--sp-3); padding: var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-6); }
+.toolkit-tui__header > svg { flex: none; color: var(--text-2); }
+.toolkit-tui__identity { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: var(--sp-3); }
+.toolkit-tui__identity h2 { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-body); font-weight: 620; }
+.toolkit-tui__hint { color: var(--text-3); font-size: var(--fs-micro); white-space: nowrap; }
+.toolkit-tui:has(.toolkit-tui__terminal:focus-within) .toolkit-tui__hint { display: none; }
+.toolkit-tui__state { flex: none; padding: var(--sp-1) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--text-2); font-size: var(--fs-meta); white-space: nowrap; }
+.toolkit-tui__state[data-state="running"] { color: var(--success); border-color: color-mix(in srgb, var(--success) 22%, transparent); background: color-mix(in srgb, var(--success) 7%, transparent); }
+.toolkit-tui__state[data-state="unknown"] { color: var(--amber); }
+.toolkit-tui__state[data-state="failed"] { color: var(--red); }
+.toolkit-tui__controls { display: flex; align-items: center; gap: var(--sp-1); flex: none; }
+.toolkit-tui__controls > button { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); cursor: pointer; }
+.toolkit-tui__controls > button:hover { background: var(--wash-2); color: var(--text); }
+.toolkit-tui__controls .toolkit-tui__action-label { display: none; }
+.toolkit-tui__controls > button:disabled { color: var(--text-3); opacity: .65; cursor: default; }
+.toolkit-popover-resize { position: absolute; top: 0; left: 0; z-index: 1; display: grid; place-items: start; width: 22px; height: 22px; padding: var(--sp-1); border: 0; background: transparent; color: var(--text-3); cursor: nwse-resize; touch-action: none; }
+.toolkit-popover-resize > svg { transform: rotate(180deg); }
+.toolkit-popover-resize:hover, .toolkit-popover-resize:focus-visible { color: var(--text); }
+@media (max-width: 800px) { .toolkit-tui__hint { display: none; } }
