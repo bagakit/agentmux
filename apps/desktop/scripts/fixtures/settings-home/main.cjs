@@ -712,6 +712,52 @@ app.whenReady().then(async () => {
       assert.ok((await hit(node(pane+' .toolkit-editor__script .monaco-editor'))).hit,'The original script editor is visible and unobstructed')
       result.interactions.push({kind:'toolkit-editor-ready',renderedLines:await read(`${node(pane+' .toolkit-editor__script .monaco-editor .view-lines')}.textContent`)})
       await capture('toolkit-new-draft',id,'dark','new custom draft')
+      // Only this unsaved fixture tool is edited. The original Monaco keyboard
+      // owner receives every character; changing type never runs or saves it.
+      const scriptOwner = pane+' .toolkit-editor__script .monaco-editor'
+      const scriptText = () => read(`${node(scriptOwner+' .view-lines')}.textContent.replace(/\\u00a0/g,' ').replace(/\\u200b/g,'').trim()`)
+      const originalScript = "console.log('Hello from your toolkit')\n"
+      assert.equal(await scriptText(),originalScript.trim(),'The untouched new-tool script is the production default')
+      const originalFields = await read(`Array.from(${node(pane+' .toolkit-editor')}.querySelectorAll('input:not([type=radio])')).map(n=>({type:n.type,value:n.value,checked:n.checked}))`)
+      const editScript = async value => {
+        await click(node(scriptOwner))
+        assert.equal(await read(`${node(scriptOwner)}.contains(document.activeElement)`),true,'The original Monaco input owns keyboard focus')
+        win.webContents.sendInputEvent({type:'keyDown',keyCode:'A',modifiers:['meta']})
+        win.webContents.sendInputEvent({type:'keyUp',keyCode:'A',modifiers:['meta']})
+        await win.webContents.insertText(value)
+        await until(`${node(scriptOwner+' .view-lines')}?.textContent.replace(/\\u00a0/g,' ').replace(/\\u200b/g,'').trim()===${JSON.stringify(value.trim())}`,'The original Monaco editor accepts the complete draft')
+      }
+      await choose(pane+' .toolkit-editor__mode input[value="tui"]')
+      await until(`!!${node(pane+' .toolkit-editor__script[aria-label="Shell command"] .view-lines')}`)
+      assert.equal(await read(`${node(pane+' .toolkit-editor__mode input[value="tui"]')}.checked`),true)
+      assert.equal(await read(`${node(pane+' .toolkit-editor__run')}===null`),true,'An unsaved TUI draft cannot run from the script action')
+      assert.equal(await read(`${node(pane+' .toolkit-editor__result-actions')}===null&&${node(pane+' .toolkit-editor__display')}===null`),true,'TUI uses its own command rather than script result/display actions')
+      assert.match(await read(`${node(pane+' .toolkit-editor')}.textContent`),/Saving changes does not restart the current terminal/)
+      await until(`${node(scriptOwner+' .view-lines')}?.textContent.replace(/\\u00a0/g,' ').replace(/\\u200b/g,'').trim()==='exec /bin/sh'`,'The original new-tool TUI conversion supplies its shell default')
+      const shellDraft = "printf 'Settings preview\\n'\n"
+      await editScript(shellDraft)
+      await click(node(pane+' .toolkit-editor__scope > summary'))
+      assert.match(await read(`${node(pane+' .toolkit-editor__scope')}.textContent`),/not sandboxed/)
+      await click(node(pane+' .toolkit-editor__arguments > summary'))
+      assert.match(await read(`${node(pane+' .toolkit-editor__arguments')}.textContent`),/separate shell positional arguments/)
+      for (const [width,height,size] of [[1440,940,'wide'],[500,840,'compact']]) {
+        await resize(width,height)
+        for (const color of ['dark','light']) {
+          await theme(color)
+          await captureSegments(`toolkit-tui-draft-${size}-${color}`,id,color)
+        }
+      }
+      await resize(1440,940); await theme('dark')
+      await choose(pane+' .toolkit-editor__mode input[value="script"]')
+      await until(`!!${node(pane+' .toolkit-editor__script[aria-label="JavaScript script"] .view-lines')}`)
+      await until(`${node(scriptOwner+' .view-lines')}?.textContent.replace(/\\u00a0/g,' ').replace(/\\u200b/g,'').trim()===${JSON.stringify(shellDraft.trim())}`,'Changing the type preserves the command draft until explicitly edited')
+      await editScript(originalScript)
+      await click(node(pane+' .toolkit-editor__scope > summary'))
+      await click(node(pane+' .toolkit-editor__arguments > summary'))
+      assert.equal(await read(`${node(pane+' .toolkit-editor__mode input[value="script"]')}.checked`),true)
+      assert.deepEqual(await read(`Array.from(${node(pane+' .toolkit-editor')}.querySelectorAll('input:not([type=radio])')).map(n=>({type:n.type,value:n.value,checked:n.checked}))`),originalFields,'Type review preserves the other original fields')
+      assert.equal(await read('window.settingsHomeProbe.saves.length'),saves,'TUI draft review never saves configuration')
+      result.interactions.push({kind:'toolkit-tui-draft-roundtrip',typedThrough:'original Monaco trusted keyboard',tuiDraft:shellDraft,restoredScript:originalScript,restoredMode:'script',implicitSaves:0,execution:'no run action; unsaved new tool'})
     }
     assert.equal(await read('window.settingsHomeProbe.saves.length'),saves,'Page interaction does not implicitly save configuration')
     assert.ok(result.interactions.length>before,'Every reviewed page consumes actual input: '+id)
