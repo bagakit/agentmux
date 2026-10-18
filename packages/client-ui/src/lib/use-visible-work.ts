@@ -1,6 +1,19 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useClientUiOwnerDocument } from '../platform.js'
 
+/** Shared realm fencing for one or many targets. Consumers own activity and scheduling. */
+export function observeVisibleWork(owner: Document, update: (entries: IntersectionObserverEntry[]) => void, options?: IntersectionObserverInit): IntersectionObserver | undefined {
+  const Observer = owner.defaultView?.IntersectionObserver
+  if (!Observer) return undefined
+  let alive = true
+  const observer = new Observer(entries => {
+    if (alive) update(entries.filter(entry => entry.target.ownerDocument === owner))
+  }, options)
+  const disconnect = observer.disconnect.bind(observer)
+  observer.disconnect = () => { alive = false; disconnect() }
+  return observer
+}
+
 /** Host activity and the actual viewport both own expensive block work. Source text stays mounted. */
 export function useVisibleWork<T extends HTMLElement>(active = true) {
   const platformDocument = useClientUiOwnerDocument()
@@ -24,7 +37,7 @@ export function useVisibleWork<T extends HTMLElement>(active = true) {
       update(Boolean(view && rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < view.innerHeight && rect.right > 0 && rect.left < view.innerWidth))
       return () => { alive = false }
     }
-    const observer = new Observer(entries => update(entries.some(entry => entry.target === target && entry.isIntersecting)))
+    const observer = observeVisibleWork(owner, entries => update(entries.some(entry => entry.target === target && entry.isIntersecting)))!
     observer.observe(target)
     return () => { alive = false; observer.disconnect() }
   }, [active, target, platformDocument])

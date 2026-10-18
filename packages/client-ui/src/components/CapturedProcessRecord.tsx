@@ -1,3 +1,4 @@
+import { ConversationProgressiveBody, needsProgressiveText } from './ConversationProgressiveBody.js'
 import { ConversationSourceLabels } from './ConversationSourceLabels.js'
 import { useEffect, useId, useMemo, useState } from 'react'
 import { capturedToolEdit } from '@agentmux/core/conversation'
@@ -21,11 +22,6 @@ export function CapturedProcessRecord({ record, disclosure, located = false, wor
   const item = record.original.kind === 'captured' ? record.original.item : null
   const expanded = located || ((item ? disclosure?.steps.get(item.id) : undefined) ?? localOpen)
   const shown = expanded || presented
-  const diff = useMemo(() => {
-    if (!shown || !item) return null
-    const input = item.toolInput ?? (item.kind === 'tool_call' ? item.content : undefined)
-    return toolEditDiff(capturedToolEdit(item)) ?? (input === undefined ? null : parseUnifiedDiff(input))
-  }, [shown, item])
   useEffect(() => { if (located) { setOpen(true); setPresented(true) } }, [located])
   useEffect(() => { if (expanded) setPresented(true) }, [expanded])
   if (!item) return null
@@ -37,6 +33,20 @@ export function CapturedProcessRecord({ record, disclosure, located = false, wor
       expanded={expanded} controls={bodyId} onToggle={() => { if (!expanded) setPresented(true); setOpen(!expanded); disclosure?.onStepExpandedChange(item.id, !expanded) }} />
     {prose ? <p className="log-row__prose">{prose}</p> : null}
     <div id={bodyId} className="wf-native-process__body" hidden={!expanded} inert={!expanded}>{shown ? <>
+      <ConversationProgressiveBody heavy={fields.some(text => text !== undefined && needsProgressiveText(text))} reveal={located}>
+        <CapturedProcessBody record={record} item={item} />
+      </ConversationProgressiveBody>
+    </> : null}</div>
+  </div>
+}
+
+function CapturedProcessBody({ record, item }: { record: ConversationRecord; item: Extract<ConversationRecord['original'], { kind: 'captured' }>['item'] }) {
+  const diff = useMemo(() => {
+    const input = item.toolInput ?? (item.kind === 'tool_call' ? item.content : undefined)
+    return toolEditDiff(capturedToolEdit(item)) ?? (input === undefined ? null : parseUnifiedDiff(input))
+  }, [item])
+  const fields = [item.content, item.toolInput, item.toolOutput]
+  return <>
       {diff ? <ConversationToolDiff diff={diff} /> : null}
       {fields.some(value => value !== undefined) ? fields.map((text, index) => {
         if (text === undefined) return null
@@ -45,6 +55,5 @@ export function CapturedProcessRecord({ record, disclosure, located = false, wor
           ? <details key={index}><summary>{index === 1 ? 'Original tool input' : 'Original recorded content'}</summary>{payload}</details>
           : <div key={index} className="conversation-tool-trace__payload">{payload}</div>
       }) : <ConversationToolPayload text={JSON.stringify(item, null, 2)} identity={item} sourceIdentity={item} copyLabel="Copy original record" />}
-    </> : null}</div>
-  </div>
+  </>
 }

@@ -83,7 +83,8 @@ function NativeProcessStep({ item, origin, children, expanded: controlledExpande
 }) {
   const [localExpanded, setExpanded] = useState(false)
   const expanded = controlledExpanded ?? localExpanded
-  const [readOnce, setReadOnce] = useState(false)
+  const [readOnce, setReadOnce] = useState(expanded)
+  useEffect(() => { if (expanded) setReadOnce(true) }, [expanded])
   const bodyId = useId()
   const collaboration = item.collaboration
   const receiverOccurrences = new Map<string, number>()

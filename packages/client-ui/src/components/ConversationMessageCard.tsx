@@ -31,17 +31,17 @@ export function ConversationSpeechCard({ sender, renderBody, ...slots }: Message
 export function SystemRecordCard({ identity, title, summary, hasContent, renderBody, ...slots }: MessageCardSlots & MessageCardBody & {
   identity: object; title: string; summary: string | undefined; hasContent: boolean
 }) {
-  const [expanded, setExpanded] = useState<{ identity: object; open: boolean } | null>(null)
+  const [expanded, setExpanded] = useState<{ identity: object; open: boolean; presented: boolean } | null>(null)
   const open = expanded?.identity === identity && expanded.open
   useEffect(() => { setExpanded(null) }, [identity])
   const contentId = useId()
   return <MessageCardFrame {...slots} heading={<button type="button" className="log-turn__system-toggle"
     aria-label={open ? '收起系统记录' : '展开系统记录'} aria-expanded={open} aria-controls={hasContent ? contentId : undefined}
-    disabled={!hasContent} onClick={() => setExpanded({ identity, open: !open })}>
+    disabled={!hasContent} onClick={() => setExpanded({ identity, open: !open, presented: true })}>
     {hasContent ? <SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" /> : null}
     <span className="log-turn__system-title">{title}</span>
     {summary ? <span className="log-turn__system-summary">{summary}</span> : null}
-  </button>}>{open ? renderBody(contentId) : null}</MessageCardFrame>
+  </button>}><div id={contentId} className="log-turn__system-body" hidden={!open} inert={!open}>{open || expanded?.identity === identity && expanded.presented ? renderBody() : null}</div></MessageCardFrame>
 }
 
 export function SubagentReportCard({ identity, collaboration, located, preview, hasResources, emptyText, renderBody, ...slots }: MessageCardSlots & MessageCardBody & {
