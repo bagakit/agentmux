@@ -184,13 +184,13 @@
 .collaboration-canvas__legend > span { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
 .collaboration-canvas__legend .collaboration-relation-key { position: relative; }
 .collaboration-canvas__legend .collaboration-relation-key::after { content: ''; position: absolute; width: 4px; height: 4px; top: -3px; right: 0; border-top: 1px solid currentColor; border-right: 1px solid currentColor; transform: rotate(45deg); }
-.collaboration-edge__label { position: absolute; max-width: 300px; padding: 4px 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid var(--line); border-radius: var(--radius-sm); box-shadow: var(--elev-1); background: var(--surface-1); color: var(--text); font-size: var(--fs-micro); pointer-events: none; }
 .collaboration-activity { position: absolute; top: -9px; right: 6px; z-index: 1; display: inline-flex; align-items: center; gap: 4px; min-width: 18px; height: 18px; padding: 0 5px; border: 1px solid var(--green); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--green); font-size: 10px; font-weight: 600; line-height: 16px; white-space: nowrap; pointer-events: none; animation: collaboration-activity linear 1 both; }
 .collaboration-agent:not([data-overview=true]):has(> .collaboration-activity[data-kind=communication]) { border-radius: var(--radius-sm); box-shadow: 0 0 0 2px color-mix(in srgb, var(--green) 70%, transparent), 0 0 16px color-mix(in srgb, var(--green) 12%, transparent); }
 .collaboration-activity[data-kind=supervision] { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 60%, var(--line)); }
 .collaboration-agent[data-overview=true] .collaboration-activity { top: 50%; left: 50%; right: auto; width: 26px; height: 26px; padding: 0; border-radius: 50%; transform: translate(-50%, -50%) scale(var(--collaboration-mark-scale, 1)); box-shadow: 0 0 0 4px color-mix(in srgb, var(--green) 12%, transparent); background: transparent; }
 .collaboration-agent[data-overview=true] .collaboration-activity > span { display: none; }
-.collaboration-area__activity { flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+.collaboration-area__activity { visibility: hidden; flex: 0 0 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+.collaboration-area__activity[data-kind] { visibility: visible; }
 .collaboration-area__activity[data-kind=supervision] { background: var(--amber); }
 @keyframes collaboration-activity { 0% { opacity: 0; } 8%, 88% { opacity: 1; } 100% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .collaboration-activity { animation: none; } }
