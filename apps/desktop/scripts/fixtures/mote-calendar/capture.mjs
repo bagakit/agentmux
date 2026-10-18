@@ -98,8 +98,11 @@ try {
     AGENT_SESSION_STORE: path.join(directory, 'store', 'sessions.json'), AGENTMUX_MESSAGE_QUEUE_PATH: path.join(directory, 'queue', 'private-messages.ndjson') })
   receipt.isolation = { inheritedPrefixesCleared: ['AGENTMUX_', 'CTXMUX_'], electronRunAsNodeCleared: true,
     paths: Object.fromEntries(Object.entries(env).filter(([key]) => key.startsWith('AGENTMUX_') || key === 'AGENT_SESSION_STORE')), userData: path.join(directory, 'userData'), preload: false }
+  const executable = require('electron')
+  receipt.engine = { executable, sha256: sha(await fs.readFile(executable)), version: require('electron/package.json').version,
+    override: process.env.ELECTRON_OVERRIDE_DIST_PATH ?? null }
   const logs = []
-  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'renderer-main.cjs'), path.join(compiled, 'index.html'), directory],
+  receipt.process = await runProbeProcess(executable, [path.join(fixture, 'renderer-main.cjs'), path.join(compiled, 'index.html'), directory],
     { cwd: root, env, timeoutMs: 120_000, onLine: line => logs.push(line) })
   await fs.writeFile(path.join(directory, 'renderer.log'), logs.join('\n') + '\n')
   receipt.renderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8'))

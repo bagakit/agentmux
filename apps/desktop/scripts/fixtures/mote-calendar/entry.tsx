@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import type { ContinuousProgressLoop, ContinuousProgressTarget, FileReadResult, ScheduleParamsMap } from '@agentmux/core'
 import { validateScheduleRpcResult } from '@agentmux/core/schedule-rpc'
+import { parseMoteChatResult } from '@agentmux/core/mote-chat'
+import { parseConnectionResult } from '@agentmux/core/connections'
 import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
 import { AgentSessionComposer } from '../../../src/renderer/src/components/AgentSessionComposer'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
@@ -15,7 +17,7 @@ import { api } from '../../../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { scratchTopicsScope } from '../../../src/renderer/src/lib/scratch-topic-snapshots'
 import { useMoteWorkfaceScope } from '../../../src/renderer/src/lib/mote-workface'
-import { DEFAULT_MOTE_BEHAVIOR } from '../../../src/renderer/src/lib/mote-behavior'
+import { DEFAULT_MOTE_BEHAVIOR, serializeMoteBehaviorDocument, type MoteBehaviorDraft } from '../../../src/renderer/src/lib/mote-behavior'
 import { DEFAULT_MOTE_SOUL, PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../../../src/shared/scratch-topics'
 import { DEFAULT_MOTE_MEMORY } from '../../../src/shared/topic-agent-instructions'
 import { directoryIdentity, homeZoneId } from '../../../src/shared/space-addresses'
@@ -116,7 +118,9 @@ const mutate = (action: 'pause' | 'resume' | 'cancel') => async (params: Schedul
   return validateScheduleRpcResult('schedule.' + action, { schedule: clone(schedule), diskDurability: 'confirmed' as const, executionScope: 'connected-host' as const }, params)
 }
 api.schedule.pause = mutate('pause'); api.schedule.resume = mutate('resume'); api.schedule.cancel = mutate('cancel')
-const files: Record<string, string> = { [rootPath + '/SOUL.md']: DEFAULT_MOTE_SOUL, [rootPath + '/BEHAVIOR.md']: DEFAULT_MOTE_BEHAVIOR,
+const savedPreferences = { engagement: 'I', information: 'N', decisions: 'F', approach: 'J', custom: 'Keep our decisions clear and leave room for a useful next step.' } as const
+let behaviorUnknown = false
+const files: Record<string, string> = { [rootPath + '/SOUL.md']: DEFAULT_MOTE_SOUL, [rootPath + '/BEHAVIOR.md']: serializeMoteBehaviorDocument(DEFAULT_MOTE_BEHAVIOR, savedPreferences),
   [rootPath + '/MEMORY.md']: DEFAULT_MOTE_MEMORY, [rootPath + '/experiment-notes.md']: '# 比较一个小实验\n\n来源：项目讨论。范围：本 Mote。\n\n先比较一个原型，再决定是否扩大。\n\n## 下一步值得弄清楚的事\n\n- 哪个选择能让日常协作更自然？\n- 哪些操作必须保留原来的身份与草稿？\n- 一个小实验能否给出足够清楚的证据？\n\n> 先把问题问清楚，再一起决定投入多少。\n',
   [rootPath + '/next-steps.md']: '# 下一步的几个方向\n\n保留可以直接比较的小选择。\n\n从真实工作中收集反馈，再决定是否扩大范围。\n',
   [rootPath + '/a-long-question-about-how-we-build-and-learn-together.md']: '# 关于怎样一起工作与学习的一个长问题\n\n长标题和长内容仍然属于同一个原文件，不应该挤掉编辑与返回动作。\n' }
@@ -126,6 +130,7 @@ api.files.read = async (_workspace, file) => ({ status: 'read', document: { path
 api.files.readPublic = async params => {
   const file = rootPath + '/' + params.path
   const resource = { ...params.expectedResource, zoneId: params.zoneId, zonePath: topic.directoryPath, path: file }
+  if (behaviorUnknown && file === rootPath + '/BEHAVIOR.md') return { resource, result: { status: 'unknown', code: 'PRIVATE_BEHAVIOR_READ_UNCONFIRMED', message: 'The original saved behavior could not be confirmed. Inspect or retry the same source.' } } as FileReadResult
   if (noteUnknown && file === rootPath + '/experiment-notes.md') return { resource, result: { status: 'unknown', code: 'PRIVATE_NOTE_READ_UNCONFIRMED', message: 'The original saved note could not be confirmed. Last confirmed content is kept; retry the same file.' } } as FileReadResult
   return { resource, result: files[file] === undefined ? { status: 'deleted' } : { status: 'read', document: { path: file, content: files[file], revision: await revision(files[file]) } } } as FileReadResult
 }
@@ -133,6 +138,17 @@ api.files.observe = async () => {}; api.files.unobserve = async () => {}; api.fi
 api.scratch.listTopics = async () => [topic]; api.scratch.readTopic = async () => topic
 api.demands.list = async () => [goal]
 api.sessions.historyPage = async control => ({ agentSessionId: control.agentSessionId, source: { providerId: 'fixture', nativeSessionId: 'private-' + control.agentSessionId }, nextCursor: null, items: [] })
+api.moteChat.call = async (method, params) => {
+  calls.push({ method, params: clone(params) })
+  if (method !== 'space.mote.chat.inspect') throw new Error('PRIVATE_FIXTURE_NO_CHAT_MUTATION')
+  return parseMoteChatResult(method, { configuration: null, operation: null }, params)
+}
+api.connections.call = async (method, params) => {
+  calls.push({ method, params: clone(params) })
+  if (method === 'connection.ls') return parseConnectionResult(method, { connections: [] }, params)
+  if (method === 'connection.service.get') return parseConnectionResult(method, { enabled: false, revision: 0 }, params)
+  throw new Error('PRIVATE_FIXTURE_NO_CONNECTION_MUTATION')
+}
 useAppStore.setState({ config: { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }], executors: {}, workspaces: [workspace], appearance: { terminalTheme: 'graphite' } },
   tabs: Object.fromEntries(tabs.map(tab => [tab.id, tab])), layouts: { [workspace.id]: createWorkspaceLayout(groupId, tabs.map(tab => tab.id)) }, sessions,
   activeWorkspaceId: workspace.id, mainSurface: 'workbench', agentComposerDrafts: { ...initialDrafts }, documents: {}, dirtyDocuments: {}, documentIssues: {}, demands: { [goal.id]: goal },
@@ -162,6 +178,11 @@ function Scene() {
       [workspace.id]: { ...state.scratchTopicSnapshots[workspace.id]!, topics: [{ ...topic }] } } })) },
     summary: (summary: string) => { topic.summary = summary; useAppStore.setState(state => ({ scratchTopicSnapshots: { ...state.scratchTopicSnapshots,
       [workspace.id]: { ...state.scratchTopicSnapshots[workspace.id]!, topics: [{ ...topic }] } } })) },
+    behavior: (preferences: MoteBehaviorDraft | 'unknown' | 'saved') => {
+      behaviorUnknown = preferences === 'unknown'
+      if (!behaviorUnknown) files[rootPath + '/BEHAVIOR.md'] = serializeMoteBehaviorDocument(DEFAULT_MOTE_BEHAVIOR, preferences === 'saved' ? savedPreferences : preferences as MoteBehaviorDraft)
+      useAppStore.setState(state => ({ workspaceFileRevisions: { ...state.workspaceFileRevisions, [workspace.id]: (state.workspaceFileRevisions[workspace.id] ?? 0) + 1 } }))
+    },
     presentation: (next: 'space' | 'card') => setCard(next === 'card'),
     facts: () => ({ mode, now, workspacePath, moteDirectory: topic.directoryPath, targets, initialDrafts, drafts: useAppStore.getState().agentComposerDrafts,
       selection: useAppStore.getState().workbenchSpaceSelection, tabIds: Object.keys(useAppStore.getState().tabs), sessions: useAppStore.getState().sessions.map(session => session.id), records, calls, opened })
