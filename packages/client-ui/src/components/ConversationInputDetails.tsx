@@ -41,8 +41,8 @@ export function ConversationInputDetails({ messageId, source, publicContent, exe
       aria-expanded={open} aria-controls={contentId} onClick={toggle}><SemanticIcon name="status.info" size={14} aria-hidden="true" /></button>
     {open ? <section id={contentId} className="conversation-input-details__body" aria-label="Message details">
       {source ? <dl className="conversation-input-details__facts">
-        <dt>Source</dt><dd>{source.kind === 'native' ? `Provider native input · ${source.providerId}` : 'AgentMux submitted record'}</dd>
-        <dt>{source.kind === 'native' ? 'Record' : 'Submission'}</dt><dd><code>{source.kind === 'native' ? source.recordId : source.submissionId}</code></dd>
+        <dt>Source</dt><dd>{source.kind === 'native' ? `Provider native input · ${source.providerId}` : 'AgentMux recorded message'}</dd>
+        <dt>Record</dt><dd><code>{source.kind === 'native' ? source.recordId : source.submissionId}</code></dd>
         {source.kind === 'native' ? <><dt>Native session</dt><dd><code>{source.nativeSessionId}</code></dd></> : null}
         <dt>输入渠道</dt><dd>{origin!.channelLabel}</dd>
         <dt>发送设备</dt><dd>{origin!.device?.name ?? '未记录'}</dd>
@@ -59,7 +59,7 @@ export function ConversationInputDetails({ messageId, source, publicContent, exe
         <dt>External conversation</dt><dd>{speaker.external.externalConversationId}</dd>
         <dt>External message</dt><dd>{speaker.external.externalMessageId}</dd>
         <dt>Original binding</dt><dd>{speaker.external.bindingId} · {speaker.external.bindingRevision}</dd>
-        <dt>Original grant</dt><dd>{speaker.external.grantId} · {speaker.external.grantRevision}</dd>
+        {'grantId' in speaker.external ? <><dt>Original grant</dt><dd>{speaker.external.grantId} · {speaker.external.grantRevision}</dd></> : <><dt>Processing permission</dt><dd>Recorded separately from message attribution</dd></>}
       </dl> : null}
       {children}
       {senderId ? <div className="conversation-input-details__sender">

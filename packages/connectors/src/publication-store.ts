@@ -1,3 +1,4 @@
+import { externalConversationAuthor, externalConversationRecordId } from '@agentmux/core'
 import { createHash } from 'node:crypto'
 import type { PublicationImage, PublicationFile, ResourceUploadReceipt, ResolvedPublicationPart } from './publication-resource.js'
 import { publicationContent, publicationPartKey, type PublicationContentPlan } from './publication-content.js'
@@ -278,12 +279,19 @@ export class PublicationStore {
   }
   private origin(boundary: PublicationBoundary, unit: ConversationUnit, recordId: string) {
     const r = unit.records.find(r => r.id === recordId), item = r?.original.kind === 'captured' ? r.original.item : undefined, author = item?.authorExternal
-    if (!author || item?.publicContent !== 'confirmed' || item.kind !== 'user_message' || item.source !== 'user' || item.inputRef?.kind !== 'message') return
+    if (!author || item?.publicContent !== 'confirmed' || item.kind !== 'user_message' || item.source !== 'user') return
     try {
-      const row = this.database.prepare('SELECT record_json FROM connection_ingress_message WHERE domain=? AND app_id=? AND message_id=? AND connection_id=?')
-        .get(boundary.application.domain, boundary.application.appId, author.externalMessageId, boundary.connectionId)
+      const row = this.database.prepare('SELECT record_json FROM connection_ingress_message WHERE domain=? AND app_id=? AND message_id=?')
+        .get(boundary.application.domain, boundary.application.appId, author.externalMessageId)
       if (!row) return
       const ingress = JSON.parse(String(row.record_json))
+      const target = ingress.group?.target
+      if (target && target.hostId === boundary.executionHostId && target.agentSessionId === boundary.agentSessionId && target.connectionId === boundary.connectionId && target.bindingId === boundary.bindingId && target.bindingRevision === boundary.revision &&
+        r?.reference?.source.kind === 'captured' && r.reference.source.recordId === item.id && item.id === externalConversationRecordId(author) && ingress.body === item.content &&
+        same(externalConversationAuthor(author), { kind: 'external', connectionId: target.connectionId, actor: ingress.actor, externalConversationId: ingress.externalConversationId, externalMessageId: ingress.externalMessageId, bindingId: target.bindingId, bindingRevision: target.bindingRevision })) {
+        return { connectionId: boundary.connectionId, externalConversationId: boundary.externalConversationId, externalMessageId: author.externalMessageId }
+      }
+      if (item.inputRef?.kind !== 'message') return
       if (ingress.externalConversationId !== boundary.externalConversationId || ingress.input?.hostId !== boundary.executionHostId || ingress.input?.agentSessionId !== boundary.agentSessionId || item.inputRef.agentSessionId !== ingress.input.agentSessionId || item.inputRef.messageId !== ingress.input.messageId || !same(item.inputRef.expectedRun, ingress.input.expectedRun) || !same(ingress.input.author, author) || ingress.state === 'refused') return
       // Core's original input writer records this exact Input key, author and
       // public-content boundary together. Ordinary content edits remove the key
