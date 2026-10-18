@@ -6,6 +6,7 @@ import type { ConnectionRecord, RoomGetResult, RoomListResult, RoomMembersResult
 import { api } from '../lib/api'
 import { SelectionField } from './SelectionField'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { copyTextToClipboard } from '../lib/clipboard-copy'
 
 const LoadingIcon = semanticIconComponent('status.loading')
 
@@ -76,6 +77,36 @@ export function useConnectorRoomFacts(connection: Connection | undefined, extern
   }
   useEffect(() => { current.current = identity; occurrence.current = {}; void refresh(); return () => { current.current = ''; occurrence.current = {}; flight.current = null } }, [identity])
   return { ...(read?.identity === identity ? read : { room: null, people: null, issue: '' }), pending, refresh }
+}
+
+/** Current native metadata stays separate from the name frozen in a creation request. */
+export function ConnectorRoomOverview({ facts, groupId, requestedName }: {
+  facts: ReturnType<typeof useConnectorRoomFacts>; groupId: string; requestedName?: string | undefined
+}) {
+  const room = facts.room?.room, observation = facts.room?.observation
+  const [feedback, setFeedback] = useState('')
+  useEffect(() => setFeedback(''), [groupId])
+  return <div className="agent-connector-room-overview" aria-busy={facts.pending}>
+    <div className="agent-connector-section-title"><div className="agent-connector-group-identity">
+      <strong className="agent-connector-group">{room?.name ?? 'Group name not confirmed'}</strong>
+      <small>Group ID · {groupId}</small>
+    </div><button type="button" className="agent-connector-text-action" disabled={facts.pending} onClick={() => void facts.refresh()}>
+      {facts.pending ? <LoadingIcon size={13} animation="spin" /> : null}Refresh group details
+    </button></div>
+    {facts.pending ? <p className="agent-connector-note" role="status">Reading group details…</p> : null}
+    {observation && observation.state !== 'ready' ? <p className="agent-connector-note" role="status">
+      {observation.reason === 'permission-denied' ? 'This bot cannot read the group details. Review its application permissions.' : observation.reason === 'room-unavailable' ? 'The platform could not find an accessible group for this bot.' : 'Current group details could not be confirmed. Check this original group again.'}
+    </p> : null}
+    {!room?.name && requestedName ? <p className="agent-connector-note">Requested name · {requestedName}</p> : null}
+    {room ? <div className="agent-connector-room-metadata">
+      <span>{room.state === 'active' ? 'Active group' : room.state === 'dissolved' ? 'Group dissolved' : 'Group state not confirmed'}</span>
+      {room.mode !== 'unknown' ? <span>{room.mode === 'topic' ? 'Topic group' : room.mode === 'direct' ? 'Direct conversation' : 'Group conversation'}</span> : null}
+      <span>{room.membershipApproval === 'required' ? 'Approval required to join' : room.membershipApproval === 'not-required' ? 'No approval required to join' : 'Join approval policy not confirmed'}</span>
+    </div> : null}
+    {facts.issue ? <p className="agent-connector-note" role="status">The group and member refresh could not complete. Earlier observed details are kept. {facts.issue}</p> : null}
+    <button type="button" className="agent-connector-text-action" onClick={() => void copyTextToClipboard(groupId, error => setFeedback(presentError(error))).then(copied => { if (copied) setFeedback('Group ID copied.') })}>Copy group ID</button>
+    {feedback ? <p className="agent-connector-note" role="status">{feedback}</p> : null}
+  </div>
 }
 
 export function ConnectorRoomPeople({ facts, onSelect, prominent = false }: { facts: ReturnType<typeof useConnectorRoomFacts>; onSelect?: ((idType: string, userId: string) => void) | undefined; prominent?: boolean }) {

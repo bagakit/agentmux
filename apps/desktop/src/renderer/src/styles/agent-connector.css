@@ -1,4 +1,4 @@
-.agent-connector-dialog { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(540px, calc(100vw - 24px)); display: flex; flex-direction: column; max-height: calc(100dvh - 24px); overflow: hidden; }
+.agent-connector-dialog { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(760px, calc(100vw - 24px)); display: flex; flex-direction: column; max-height: calc(100dvh - 24px); overflow: hidden; }
 .agent-connector-dialog__header { flex: none; display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-4); padding: var(--sp-5) var(--sp-6); border-bottom: 1px solid var(--line-soft); }
 .agent-connector-dialog__header > div { min-width: 0; }
 .agent-connector-dialog__header h2 { margin: 0; color: var(--text); font-size: var(--fs-title); font-weight: 600; line-height: 1.4; letter-spacing: -.015em; }
@@ -91,6 +91,19 @@
 .agent-connector-task > h3 { font-size: var(--fs-body); }
 .agent-connector-dialog__footer .primary-button { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding-inline: var(--sp-5); }
 .agent-connector-dialog__body > .agent-connector-status { padding: var(--sp-4); border-left: 2px solid var(--green); background: var(--surface-1); }
+.agent-connector-room-overview { display: grid; gap: var(--sp-3); min-width: 0; }
+.agent-connector-room-overview .agent-connector-section-title { align-items: flex-start; }
+.agent-connector-room-overview .agent-connector-group { font-size: var(--fs-title); font-weight: 600; line-height: 1.4; }
+.agent-connector-room-overview .agent-connector-section-title > button { display: inline-flex; align-items: center; flex: none; gap: var(--sp-2); }
+.agent-connector-room-metadata { display: flex; flex-wrap: wrap; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-micro); }
+.agent-connector-room-metadata > span { padding: var(--sp-1) var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); }
+.agent-connector-section-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); align-items: start; gap: var(--sp-4); }
+.agent-connector-section { display: grid; gap: var(--sp-3); min-width: 0; padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-md); background: var(--surface-1); }
+.agent-connector-section > h3, .agent-connector-section .agent-connector-fields > h3 { font-size: var(--fs-body); font-weight: 600; }
+@media (max-width: 620px) {
+  .agent-connector-section-grid { grid-template-columns: minmax(0, 1fr); }
+  .agent-connector-room-overview .agent-connector-section-title { flex-wrap: wrap; }
+}
 @media (max-width: 420px) {
   .agent-connector-dialog__header, .agent-connector-dialog__body, .agent-connector-dialog__footer { padding-inline: var(--sp-4); }
   .agent-connector-progress { gap: var(--sp-2); }
