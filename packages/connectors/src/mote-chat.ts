@@ -293,6 +293,7 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
 /** Exact native IDs do not fall through to another owner after a known Mote binding is paused. */
 export function composeMoteChatBindings(groups: RoomBindingReadPort, chat: MoteChatHost): RoomBindingReadPort {
   return {
+    readOperation: id => groups.readOperation?.(id) ?? null,
     readExact: (id, revision) => chat.readExact(id, revision) ?? groups.readExact(id, revision),
     readCurrent: id => chat.readCurrent(id) ?? groups.readCurrent(id),
     findActiveAudience: input => chat.knowsAudience(input) ? chat.findActiveAudience(input) : groups.findActiveAudience(input),

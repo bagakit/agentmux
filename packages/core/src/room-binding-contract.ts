@@ -6,7 +6,7 @@ import type { AgentSessionHistorySource } from './types.js'
 export type RoomBindingAuthority = { kind: 'user' | 'device' | 'agent'; id: string }
 export type RoomBindingScope = {
   input: 'mentions-and-replies' | 'all-messages'
-  /** Existing grants retain assistant speech. Broader content requires an explicit new Binding revision and cut. */
+  /** Existing grants retain assistant speech. Ordinary conversation sharing requires an explicit new Binding revision and cut. */
   publication: 'future-native-user-facing' | 'future-shared-conversation'
 }
 export type RoomBindingTarget = { executionHostId: string; agentSessionId: string; regionAnchor: { regionId: string } }
@@ -18,7 +18,7 @@ export type RoomBinding = Omit<RoomBindingTarget, 'regionAnchor'> & {
   regionAnchor?: RoomBindingTarget['regionAnchor']
   bindingId: string
   revision: number
-  state: 'active' | 'paused'
+  state: 'active' | 'paused' | 'detached'
   connectionId: string
   application: ConnectionApplication
   externalConversationId: string
@@ -37,17 +37,19 @@ export type RoomBindingBindInput = RoomBindingTarget & {
 }
 /** Relinking includes an explicit fresh source cut, also when continuing a paused binding to the same audience. */
 export type RoomBindingRelinkInput = RoomBindingBindInput & { expectedRevision: number }
+export type RoomBindingNoticeEvent = 'connected' | 'disconnected' | 'paused' | 'resumed' | 'updated'
+export type RoomBindingNotice = { event: RoomBindingNoticeEvent; deliveryOperationId: string }
 export type RoomBindingPauseInput = { operationId: string; bindingId: string; expectedRevision: number }
 export type RoomBindingGrantInput = {
   operationId: string; bindingId: string; expectedBindingRevision: number
   grantId: string; expectedRevision: number | null
   actor: ConnectionGrant['actor']; capabilities: ConnectionGrant['capabilities']; state: ConnectionGrant['state']
 }
-export type RoomBindingAction = 'bind' | 'pause' | 'relink' | 'grant'
+export type RoomBindingAction = 'bind' | 'pause' | 'resume' | 'detach' | 'relink' | 'grant'
 export type RoomBindingOperation =
   | { operationId: string; action: RoomBindingAction; state: 'preparing' }
   | { operationId: string; action: RoomBindingAction; state: 'refused'; code: string }
-  | { operationId: string; action: RoomBindingAction; state: 'applied'; binding: RoomBinding; grant?: ConnectionGrant; reused?: boolean }
+  | { operationId: string; action: RoomBindingAction; state: 'applied'; binding: RoomBinding; grant?: ConnectionGrant; reused?: boolean; notices?: RoomBindingNotice[] }
 export type RoomBindingInspectInput = { bindingId: string; revision?: number; operationId?: never } | { operationId: string; bindingId?: never; revision?: never }
 export type RoomBindingInspection = { binding: RoomBinding | null; current: RoomBinding | null; operation: RoomBindingOperation | null; grants: ConnectionGrant[] }
 export type RoomBindingListInput = { connectionId?: string; executionHostId?: string; agentSessionId?: string }
@@ -57,6 +59,8 @@ export interface RoomBindingsPort {
   inspect(input: RoomBindingInspectInput): Promise<RoomBindingInspection>
   list(input: RoomBindingListInput): Promise<{ bindings: RoomBinding[] }>
   pause(input: RoomBindingPauseInput, context: RoomBindingCallContext): Promise<RoomBindingOperation>
+  resume(input: RoomBindingPauseInput, context: RoomBindingCallContext): Promise<RoomBindingOperation>
+  detach(input: RoomBindingPauseInput, context: RoomBindingCallContext): Promise<RoomBindingOperation>
   relink(input: RoomBindingRelinkInput, context: RoomBindingCallContext): Promise<RoomBindingOperation>
   grant(input: RoomBindingGrantInput, context: RoomBindingCallContext): Promise<RoomBindingOperation>
 }
@@ -67,6 +71,7 @@ export type RoomPublicationAuthority = {
 }
 /** Synchronous reads can join the original connector database transaction. They never query a Region occupant. */
 export interface RoomBindingReadPort {
+  readOperation?(operationId: string): RoomBindingOperation | null
   grants?(bindingId: string, revision: number): ConnectionGrant[]
   readExact(bindingId: string, revision: number): RoomBinding | null
   readCurrent(bindingId: string): RoomBinding | null
@@ -83,6 +88,8 @@ export type RoomBindingParamsMap = {
   'connection.binding.inspect': RoomBindingInspectInput
   'connection.binding.ls': RoomBindingListInput
   'connection.binding.pause': RoomBindingPauseInput
+  'connection.binding.resume': RoomBindingPauseInput
+  'connection.binding.detach': RoomBindingPauseInput
   'connection.binding.relink': RoomBindingRelinkInput
   'connection.grant': RoomBindingGrantInput
 }
@@ -91,6 +98,8 @@ export type RoomBindingResultMap = {
   'connection.binding.inspect': RoomBindingInspection
   'connection.binding.ls': { bindings: RoomBinding[] }
   'connection.binding.pause': RoomBindingOperation
+  'connection.binding.resume': RoomBindingOperation
+  'connection.binding.detach': RoomBindingOperation
   'connection.binding.relink': RoomBindingOperation
   'connection.grant': RoomBindingOperation
 }

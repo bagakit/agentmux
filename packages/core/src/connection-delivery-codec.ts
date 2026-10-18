@@ -23,8 +23,14 @@ function mapping(value: unknown): ConnectionDeliveryMapping {
   return { messageId: text(p.messageId), ...(p.threadId === undefined ? {} : { threadId: text(p.threadId) }) }
 }
 function reference(value: unknown): import('./connection-delivery-contract.js').ConnectionDeliveryReference {
-  const p = object(value, ['hostId', 'agentSessionId', 'source']), source = object(p.source, ['kind', 'providerId', 'nativeSessionId', 'recordId', 'runId', 'requestId', 'requestDigest'])
+  const p = object(value, ['hostId', 'agentSessionId', 'source']), source = object(p.source, ['kind', 'providerId', 'nativeSessionId', 'recordId', 'runId', 'requestId', 'requestDigest', 'operationId', 'event'])
   const ref = { hostId: text(p.hostId), agentSessionId: text(p.agentSessionId) }
+  if (source.kind === 'binding-operation') {
+    object(source, ['kind', 'operationId', 'event'])
+    if (!['connected', 'disconnected', 'paused', 'resumed', 'updated'].includes(String(source.event))) fail()
+    return { ...ref, source: { kind: 'binding-operation', operationId: text(source.operationId), event: source.event as import('./room-binding-contract.js').RoomBindingNoticeEvent } }
+  }
+  if (source.operationId !== undefined || source.event !== undefined) fail()
   if (source.kind === 'interaction') { if (source.providerId !== undefined || source.nativeSessionId !== undefined || source.recordId !== undefined || !/^[a-f0-9]{64}$/u.test(text(source.requestDigest))) fail(); return { ...ref, source: { kind: 'interaction', runId: text(source.runId), requestId: text(source.requestId), requestDigest: text(source.requestDigest) } } }
   if (source.runId !== undefined || source.requestId !== undefined || source.requestDigest !== undefined) fail()
   const recordId = text(source.recordId)
@@ -40,7 +46,7 @@ function event(value: unknown): ConnectionDeliveryEvent {
 }
 function part(value: unknown): import('./conversation-timeline.js').ConversationContentRef {
   const p = object(value, ['record', 'recordRevision', 'selector']), record = reference(p.record), s = object(p.selector, ['kind', 'field', 'partIndex'])
-  if (record.source.kind === 'interaction') fail()
+  if (record.source.kind !== 'native' && record.source.kind !== 'captured') fail()
   let selector: import('./conversation-timeline.js').ConversationSelector
   if (s.kind === 'native-part' && s.field === undefined && record.source.kind === 'native') selector = { kind: 'native-part', partIndex: integer(s.partIndex, 0) }
   else if (s.kind === 'captured-field' && s.partIndex === undefined && record.source.kind === 'captured' && ['content', 'toolInput', 'toolOutput'].includes(String(s.field))) selector = { kind: 'captured-field', field: s.field as 'content' | 'toolInput' | 'toolOutput' }
@@ -49,7 +55,7 @@ function part(value: unknown): import('./conversation-timeline.js').Conversation
 }
 function relay(value: unknown, target: ConnectionDelivery['reference']): NonNullable<ConnectionDelivery['relay']> {
   const p = object(value, ['sender', 'sources'])
-  if (target.source.kind === 'interaction' || p.sender !== 'application' || !Array.isArray(p.sources) || !p.sources.length || p.sources.length > 1_000) fail()
+  if (target.source.kind !== 'native' && target.source.kind !== 'captured' || p.sender !== 'application' || !Array.isArray(p.sources) || !p.sources.length || p.sources.length > 1_000) fail()
   const sources = (p.sources as unknown[]).map(value => {
     const source = object(value, ['part', 'author']), original = part(source.part)
     if (original.record.hostId !== target.hostId || original.record.agentSessionId !== target.agentSessionId || original.record.source.kind !== 'captured' || original.selector.kind !== 'captured-field' || original.selector.field !== 'content') fail()
@@ -79,7 +85,7 @@ export function parseConnectionDeliveryCoverage(value: unknown): ConnectionDeliv
     const anchor = a && f ? parseConversationVersionedAnchor(g.anchor, { hostId: text(f.hostId), agentSessionId: text(f.agentSessionId) }) : undefined
     if (selected && anchor && (conversationRecordId(selected.record) !== conversationRecordId(anchor.record) || selected.recordRevision !== anchor.revision)) fail()
     const record = g.record === undefined ? undefined : reference(g.record)
-    if (record?.source.kind === 'interaction') fail()
+    if (record && record.source.kind !== 'native' && record.source.kind !== 'captured') fail()
     return { gapId: text(g.gapId), reason: g.reason as ConnectionDeliveryGap['reason'], ...(g.event === undefined ? {} : { event: event(g.event) }), ...(selected ? { part: selected } : {}), ...(anchor ? { anchor } : {}), ...(g.source === undefined ? {} : { source: parseConversationSource(g.source) }), ...(record ? { record: record as ConversationItemRef } : {}), ...(g.code === undefined ? {} : { code: text(g.code) }) }
   })
   const origins: ConnectionOriginRepresentation[] = (p.origins as unknown[]).map(value => {

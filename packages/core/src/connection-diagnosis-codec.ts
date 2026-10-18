@@ -51,7 +51,7 @@ function group(value: unknown, request: ConnectionDiagnosisInput): ConnectionGro
   })
   const binding = reading(p.binding, value => {
     const b = object(value, ['state', 'currentRevision', 'scope', 'activeInputGrants', 'activeAnswerGrants', 'activePermissionGrants'])
-    return { state: member(b.state, ['active', 'paused'] as const), currentRevision: nullable(b.currentRevision, value => count(value, 1)), scope: scope(b.scope), activeInputGrants: count(b.activeInputGrants), activeAnswerGrants: count(b.activeAnswerGrants), activePermissionGrants: count(b.activePermissionGrants) }
+    return { state: member(b.state, ['active', 'paused', 'detached'] as const), currentRevision: nullable(b.currentRevision, value => count(value, 1)), scope: scope(b.scope), activeInputGrants: count(b.activeInputGrants), activeAnswerGrants: count(b.activeAnswerGrants), activePermissionGrants: count(b.activePermissionGrants) }
   })
   const outgoing = reading(p.outgoing, value => {
     const o = object(value, ['after', 'afterContent', 'next', 'deliveries', 'observation', 'coverage'])

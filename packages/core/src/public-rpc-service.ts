@@ -720,6 +720,8 @@ export class AgentMuxRpcService {
           : method === 'connection.binding.inspect' ? await bindings.inspect(parseRoomBindingParams(method, params))
           : method === 'connection.binding.ls' ? await bindings.list(parseRoomBindingParams(method, params))
           : method === 'connection.binding.pause' ? await bindings.pause(parseRoomBindingParams(method, params), administration)
+          : method === 'connection.binding.resume' ? await bindings.resume(parseRoomBindingParams(method, params), administration)
+          : method === 'connection.binding.detach' ? await bindings.detach(parseRoomBindingParams(method, params), administration)
           : method === 'connection.binding.relink' ? await bindings.relink(parseRoomBindingParams(method, params), administration)
           : await bindings.grant(parseRoomBindingParams(method, params), administration)
         if (caller && method === 'connection.binding.ls') {
