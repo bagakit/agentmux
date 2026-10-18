@@ -24,6 +24,7 @@
 | 身份、能力、Agent 状态、注入上下文与消息队列 | [Agent 身份与消息的呈现](presentation/agent-capabilities-and-messaging.md) |
 | 终端字形、历史、恢复阅读和链接提示 | [Terminal 阅读的呈现](presentation/terminal-reading.md) |
 | Browser 工具、证据、控制权和确认层次 | [Browser 工作面的呈现](presentation/browser-workface.md) |
+| Capsule 设置、页面身份、待答状态与 Toolkit 成果入口 | [Capsule 的设置、页面与工具结果呈现](presentation/local-page-hosting.md) |
 | Explorer、编辑、分支、差异和留存提示 | [文件与 Git 的呈现](presentation/files-and-git.md) |
 | Settings、状态栏、Activity、通知和工具密度 | [设置与观测的呈现](presentation/settings-and-observation.md) |
 | Remote 拓扑画布、节点、监控摘要与选中详情 | [Remote 管理拓扑](presentation/settings-and-observation.md#remote-管理拓扑) |
