@@ -185,7 +185,7 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
   function enter(event: PointerEvent) {
     if (!visible || event.pointerType !== 'mouse' || event.buttons !== 0) return
     cancelClose()
-    if (open) return
+    if (popover.current!.matches(':popover-open')) return
     preview.current = true
     setViewed(false)
     // Native source retains the trigger relationship and implicit anchor. TS's DOM declaration
@@ -553,7 +553,7 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
       aria-label={mailboxLabel}
       title={mailboxLabel} popoverTarget={id} popoverTargetAction="toggle"
       onPointerEnter={enter} onPointerLeave={leave}
-      onClick={(event) => { if (preview.current && open) { event.preventDefault(); pin() } }}>
+      onClick={(event) => { if (preview.current && popover.current!.matches(':popover-open')) { event.preventDefault(); pin() } }}>
       <ThemeObjectMailIcon size={14} aria-hidden="true" />
       {progressSession && progressStatus !== 'inactive' ? <ProgressIcon size={10} className="composer-mailbox__progress" aria-hidden="true" /> : null}
       {system.unread.length ? <ThemeObjectNotificationsIcon size={10} className="composer-mailbox__attention" aria-hidden="true" /> : null}
