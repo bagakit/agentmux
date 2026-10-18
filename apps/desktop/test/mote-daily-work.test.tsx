@@ -149,13 +149,16 @@ describe('original Mote Goal composition and current-work caller', () => {
       expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled()
     } finally { finish?.(); await rm(directory, { recursive: true, force: true }) }
   })
-  it('does not apply an older cold Goal navigation after Mote A to B to A or later typing', async () => {
-    const panel = await profile(), original = useAppStore.getState()
-    let finish!: (value: typeof moteTopics) => void
-    vi.mocked(api.scratch.listTopics).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  it('does not apply an older Goal navigation after Mote A to B to A while the original request is pending', async () => {
+    const panel = await profile(), original = useAppStore.getState(), execute = original.executeControl
+    let finish!: () => void
+    vi.spyOn(original, 'executeControl').mockImplementation((request, signal, options) => request.operation === 'focus' && request.target.kind === 'goal'
+      ? new Promise((resolve, reject) => { finish = () => { void execute(request, signal, options).then(resolve, reject) } })
+      : execute(request, signal, options))
     await moteClick(panel.querySelector('[aria-label="Open goal and results: Goal ours"]')!)
+    expect(finish).toBeTypeOf('function')
     await act(async () => { useAppStore.getState().activateTab(SCRATCH_WORKSPACE_ID, 'mote-group', 'custom-tab'); useAppStore.getState().activateTab(SCRATCH_WORKSPACE_ID, 'mote-group', defaultTab.id) })
-    await act(async () => finish(moteTopics)); await settleMoteApp()
+    await act(async () => finish()); await settleMoteApp()
     expect(useAppStore.getState().mainSurface).toBe('workbench'); expect(useAppStore.getState().selectedDemandId).toBe(original.selectedDemandId)
     expect(useAppStore.getState().agentComposerDrafts).toBe(original.agentComposerDrafts)
   })
@@ -169,7 +172,7 @@ describe('bounded original Profile current work', () => {
     useAppStore.setState({ demands: Object.fromEntries(goals.map(goal => [goal.id, goal])) })
     const drafts = useAppStore.getState().agentComposerDrafts, panel = await profile()
     expect(panel.querySelectorAll('[data-mote-goal]').length).toBe(Math.min(3, count > 1 ? count - 1 : count))
-    expect(app.container.textContent).toContain('Recent ideas'); expect(app.container.textContent).toContain('Behavior')
+    expect(app.container.textContent).toContain('Recent ideas'); expect(app.container.querySelector('[aria-label="Edit behavior settings"]')).not.toBeNull()
     if (count) expect(panel.querySelector('[data-mote-goal="bounded-0"]')).not.toBeNull()
     if (count > 3) {
       const all = panel.querySelector<HTMLButtonElement>('.mote-current-work__all')!
