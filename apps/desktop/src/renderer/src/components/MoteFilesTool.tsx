@@ -24,6 +24,7 @@ export function MoteFilesTool({ visible, isScratch, scope, reference, onOpenPath
   const [createRequest, setCreateRequest] = useState<{ requestId: number; parentPath: string }>()
   const requestId = useRef(0)
   return <WorkspaceFilesFrame workspace={scope.workspace} visible={visible} presentation={contentSlotPresentation(isScratch, scope)} title={scope.topic.title}
+    showExplorer={!presentation?.expanded}
     contextPath={scratchTopicPhysicalPath(scope.workspace, scope.topic)}
     explorerKey={scope.workspace.id + scope.topic.id} explorer={{ rootPath: scope.rootPath, rootLabel: scope.topic.title,
       createRequest, onCreateRequestHandled: () => setCreateRequest(undefined), onOpenPath: open, onOpenTerminal: onOpenTerminal ?? materials.terminal }}>
@@ -36,7 +37,10 @@ export function MoteFilesTool({ visible, isScratch, scope, reference, onOpenPath
     </div> : null}
     <div className="workspace-tool-slot"><MoteDetailsPanel key={scope.topic.id} scope={scope} reference={reference} active={visible} onOpenPath={open}
       onCreateNote={() => {
-        useAppStore.getState().setExplorerCollapsed(scope.workspace.id, false)
+        const state = useAppStore.getState()
+        state.setExplorerCollapsed(scope.workspace.id, false)
+        if (!state.toolsOpen) state.toggleTools()
+        presentation?.collapse()
         setCreateRequest({ requestId: ++requestId.current, parentPath: scope.rootPath })
       }} /></div>
     </div>
