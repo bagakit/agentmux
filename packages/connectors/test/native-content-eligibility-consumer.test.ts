@@ -3,11 +3,14 @@ import { createHash } from 'node:crypto'
 import { appendFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
+import type { PublicationStore } from '../dist/publication-store.js'
 import { defaultHttpInstance } from '@larksuiteoapi/node-sdk'
 import * as core from '../../core/dist/index.js'
 import * as conversation from '../../core/dist/conversation.js'
 import type { ConnectionDeliveryGap } from '../../core/dist/connections.js'
 import { publicationContent } from '../dist/publication-content.js'
+import { PublicationHost } from '../dist/publication-host.js'
+import type { ResolvedPublicationPart } from '../dist/publication-resource.js'
 import { createWorkspaceLayout } from '../../core/src/spatial-layout.js'
 import { agentPromptCondition } from '../../core/src/agent-prompt-condition.js'
 import { rpcOwnerFixture } from '../../core/test/helpers/public-rpc-owner.js'
@@ -21,6 +24,8 @@ import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-valu
 
 
 const closes: Array<() => unknown | Promise<unknown>> = []
+const contentOperations = (store: PublicationStore, ...args: Parameters<PublicationStore['list']>) =>
+  store.list(...args).filter(operation => operation.payload.kind !== 'binding-lifecycle')
 afterEach(async () => {
   const errors: unknown[] = []
   for (const close of closes.splice(0).reverse()) try { await close() } catch (error) { errors.push(error) }
@@ -77,7 +82,7 @@ async function fixture(providerId: 'codex' | 'claude' | 'droid' = 'codex') {
     expect(result.code, result.stdout + result.stderr).toBe(0); return JSON.parse(result.stdout).result
   }
   return { ...original, transcript, spatial, remote, services, rpc, cli, port, nativeSource, adapter, openServices, credentials: (readable: boolean) => { credentialReadable = readable }, binding: bound.binding,
-    ref: { hostId: 'local', agentSessionId: 'original-agent' }, posts: () => remote.messageCalls().filter(call => call.method === 'POST') }
+    ref: { hostId: 'local', agentSessionId: 'original-agent' }, posts: () => remote.messageCalls().filter(call => call.method === 'POST' && JSON.parse(call.body).msg_type === 'post') }
 }
 
 it('original saved context and native input copies stay locally complete while the default Host publishes only independent allowed content', async () => {
@@ -99,7 +104,7 @@ it('original saved context and native input copies stay locally complete while t
     operationId: 'original-public-input', prompt: publicInput, agentMuxNote: privateContext, authorHuman: true, allowUncertainTurn: true })
   f.services.publication!.refresh()
   await vi.waitFor(() => {
-    const operations = f.services.publication!.store.list(f.binding)
+    const operations = contentOperations(f.services.publication!.store, f.binding)
     expect(operations.some(operation => operation.relay && operation.state === 'confirmed')).toBe(true)
     expect(operations.every(operation => operation.state === 'confirmed')).toBe(true)
   }, { timeout: 10_000 })
@@ -107,7 +112,7 @@ it('original saved context and native input copies stay locally complete while t
   expect(JSON.stringify(f.posts())).not.toContain(privateContext)
   expect(JSON.stringify(f.posts())).not.toContain('Opaque original native envelope')
   expect(JSON.stringify(f.posts())).toContain('Independent public Agent reply')
-  expect(JSON.stringify(f.posts())).toContain('Independent permitted tool output')
+  expect(JSON.stringify(f.posts())).not.toContain('Independent permitted tool output')
   const page = await f.rpc.call('agent.conversation.inspect', f.ref), assembled = core.consumeConversationWindowPage(page)
   expect(assembled.kind).toBe('complete'); if (assembled.kind !== 'complete') throw new Error('Original source window incomplete')
   const native = assembled.snapshot.units.flatMap(unit => unit.records).filter(record => record.original.kind === 'native')
@@ -164,11 +169,11 @@ it.each(['claude'] as const)('%s mixed native tool results cannot qualify adjace
   ]))
   f.services.publication!.refresh()
   await vi.waitFor(() => {
-    const operations = f.services.publication!.store.list(f.binding)
-    expect(operations).toHaveLength(3); expect(operations.every(operation => operation.state === 'confirmed')).toBe(true)
+    const operations = contentOperations(f.services.publication!.store, f.binding)
+    expect(operations).toHaveLength(1); expect(operations.every(operation => operation.state === 'confirmed')).toBe(true)
   }, { timeout: 10_000 })
   expect(JSON.stringify(f.posts())).not.toContain(hidden)
-  expect(JSON.stringify(f.posts())).toContain(tool); expect(JSON.stringify(f.posts())).toContain(answer)
+  expect(JSON.stringify(f.posts())).not.toContain(tool); expect(JSON.stringify(f.posts())).toContain(answer)
   const read = core.consumeConversationWindowPage(await f.rpc.call('agent.conversation.inspect', f.ref))
   expect(read.kind).toBe('complete'); if (read.kind !== 'complete') throw new Error('Original native mixed window incomplete')
   const originals = read.snapshot.units.flatMap(unit => unit.records).filter(value => value.original.kind === 'native')
@@ -202,12 +207,13 @@ it('Claude typed API error containers stay locally complete without publishing t
   f.services.publication!.refresh()
   await vi.waitFor(() => {
     const wire = JSON.stringify(f.posts())
-    expect(wire).toContain(falseReply); expect(wire).toContain(absentReply); expect(wire).toContain(failedTool)
-    expect(f.services.publication!.store.list(f.binding).every(operation => operation.state === 'confirmed')).toBe(true)
+    expect(wire).toContain(falseReply); expect(wire).toContain(absentReply)
+    expect(contentOperations(f.services.publication!.store, f.binding).every(operation => operation.state === 'confirmed')).toBe(true)
   }, { timeout: 10_000 })
   // This assertion reaches actual SDK HTTP message bodies, not merely an internal projection.
   expect(JSON.stringify(f.posts())).not.toContain(hidden)
   expect(JSON.stringify(f.posts())).not.toContain(hiddenTool)
+  expect(JSON.stringify(f.posts())).not.toContain(failedTool)
   const read = core.consumeConversationWindowPage(await f.rpc.call('agent.conversation.inspect', f.ref))
   expect(read.kind).toBe('complete'); if (read.kind !== 'complete') throw new Error('Original Claude error window incomplete')
   const originals = read.snapshot.units.flatMap(unit => unit.records).filter(record => record.original.kind === 'native')
@@ -224,12 +230,53 @@ it('Claude typed API error containers stay locally complete without publishing t
   expect(resource.original.item.contentParts).toEqual([{ kind: 'resource', resourceType: 'image', reference, contentEligibility: 'unconfirmed' }])
   const listed = await f.cli(['connection', 'delivery', 'ls', '--connection', f.binding.connectionId, '--binding', f.binding.bindingId,
     '--binding-revision', String(f.binding.revision)])
-  expect(listed.coverage.gaps.some((gap: ConnectionDeliveryGap) => gap.reason === 'public-content-unconfirmed')).toBe(true)
+  expect(listed.coverage).toMatchObject({ state: 'complete', gaps: [] })
   expect(f.client.agentSession(f.ref.agentSessionId).run).toEqual({ runId: 'run-original-agent' })
   expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 }, 20_000)
 
-it('captured Hook content purpose survives durable reading without hiding independent conversation or tool fields', async () => {
+it('the actual Droid Reader preserves deferred tool purpose before common publication resource resolution', async () => {
+  const f = await rpcOwnerFixture(['original-agent'], core, root => ({ providerId: 'droid', executorId: 'droid',
+    nativeHandle: { kind: 'provider', providerId: 'droid', sessionId: source.nativeSessionId, transcriptPath: join(root, 'droid.jsonl') } }))
+  closes.push(f.close)
+  const ref = { hostId: 'local', agentSessionId: 'original-agent' }, nativeSource = { ...source, providerId: 'droid' }
+  const port = createPublicationConversationPort(f.coreClients), readResource = vi.spyOn(port, 'resource')
+  const allowed = 'Original Droid assistant speech', hidden = ['Raw tool input canary', 'Tool metadata canary', 'Reasoning metadata canary', 'Raw reasoning canary']
+  const toolMetadata = (hidden[1] + ' ').repeat(125000)
+  await writeFile(join(f.root, 'droid.jsonl'), jsonl([{ type: 'session_start', id: source.nativeSessionId },
+    { type: 'message', id: 'droid-mixed-assistant', message: { role: 'assistant', content: [
+      { type: 'text', text: allowed },
+      { type: 'tool_use', id: 'original-tool', name: 'image_tool', input: hidden[0], thought_signature: toolMetadata },
+      { type: 'thinking', thinking: hidden[3], signature: hidden[2] },
+      { type: 'tool_result', tool_use_id: 'original-tool', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'cGlj' } }] }
+    ] } }]))
+  const page = await f.client.readAgentConversation(ref), local = core.consumeConversationWindowPage(page)
+  expect(local.kind).toBe('complete'); if (local.kind !== 'complete') throw new Error('Original Droid mixed conversation incomplete')
+  const binding = { scope: { publication: 'future-shared-conversation' } } as never
+  const adapter = createBuiltinConnectionAdapters().find(adapter => adapter.adapterId === 'feishu')!.publication!
+  // Droid has no incremental source capability. Exercise its actual Reader and the production resolver without inventing a live Binding.
+  const resolved: Map<string, ResolvedPublicationPart> = await Reflect.get(PublicationHost.prototype, 'resolve').call(
+    { options: { conversation: port } }, ref, local.snapshot.units, new AbortController().signal, binding, adapter)
+  const plans = local.snapshot.units.map(unit => publicationContent(unit, binding, page.window.checkpoint, { resolved, origin: () => undefined }))
+  expect(plans.map(plan => plan.text).join('\n')).toContain(allowed)
+  expect(readResource).not.toHaveBeenCalled()
+  for (const value of hidden) expect(JSON.stringify(plans)).not.toContain(value)
+  expect(plans.flatMap(plan => plan.gaps)).toEqual([])
+  for (const value of [hidden[0], hidden[2], hidden[3]]) expect(JSON.stringify(local.snapshot.units)).toContain(value)
+  expect(JSON.stringify(local.snapshot.units)).toContain('data:image/png;base64,cGlj')
+  const original = local.snapshot.units.flatMap(unit => unit.records).find(record => record.original.kind === 'native' && record.original.item.id === 'droid-mixed-assistant')!
+  if (original.original.kind !== 'native') throw new Error('Original Droid mixed record missing')
+  const partIndex = original.original.item.contentParts.findIndex(part => part.kind === 'resource' && part.resourceType === 'text' && part.contentRole === 'tool')
+  expect(partIndex).toBeGreaterThanOrEqual(0)
+  const part = original.original.item.contentParts[partIndex]!
+  if (part.kind !== 'resource') throw new Error('Original deferred tool metadata missing')
+  const complete = await core.readSessionHistoryTextResource(part, partIndex, { source: nativeSource, recordId: original.original.item.id }, input => f.client.sessionHistoryResource(ref.agentSessionId, input))
+  expect(complete).toMatchObject({ kind: 'text', contentRole: 'tool' })
+  expect(JSON.stringify(complete)).toContain(toolMetadata)
+  expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+}, 20_000)
+
+it('captured Hook replies remain shared while diagnostic and tool fields stay in the original conversation', async () => {
   const f = await fixture('claude'), providers = new core.AgentProviderRegistry()
   const hidden = 'Unconfirmed Hook failure canary', privateBody = 'Private captured body canary'
   const normal = 'Independent normal Stop reply', other = 'Independent other Provider reply'
@@ -259,11 +306,11 @@ it('captured Hook content purpose survives durable reading without hiding indepe
   f.services.publication!.refresh()
   await vi.waitFor(() => {
     const wire = JSON.stringify(f.remote.messageCalls())
-    for (const text of [normal, other, tool, user, 'Independent native public reply beside captured failure']) expect(wire).toContain(text)
-    expect(f.services.publication!.store.list(f.binding).every(operation => operation.state === 'confirmed')).toBe(true)
+    for (const text of [normal, other, user, 'Independent native public reply beside captured failure']) expect(wire).toContain(text)
+    expect(contentOperations(f.services.publication!.store, f.binding).every(operation => operation.state === 'confirmed')).toBe(true)
   }, { timeout: 10_000 })
   const wire = JSON.stringify(f.remote.messageCalls())
-  expect(wire).not.toContain(hidden); expect(wire).not.toContain(privateBody)
+  expect(wire).not.toContain(hidden); expect(wire).not.toContain(privateBody); expect(wire).not.toContain(tool)
   const reopened = new core.AgentMuxFileAgentSessionStore(join(f.root, 'sessions.json'))
   const saved = (await reopened.loadTimeline(f.ref.agentSessionId)).items.find(item => item.id === captured.item.id)
   expect(saved).toMatchObject({ content: hidden + '\nOriginal updated diagnostic', contentEligibility: 'unconfirmed' })
@@ -329,8 +376,8 @@ it('the physical OpenCode mixed record preserves separate original part purposes
   expect(record.original.item.contentParts.map(part => part.contentEligibility)).toEqual(['public', 'unconfirmed', 'unconfirmed', 'private', 'public', 'public'])
   expect(JSON.stringify(record.original)).toContain('Unknown synthetic mixed context')
   const plan = publicationContent(unit, { scope: { publication: 'future-shared-conversation' } } as never, page.window.checkpoint, { resolved: new Map(), origin: () => undefined })
-  expect(plan.text).toContain('Allowed original mixed answer'); expect(plan.text).toContain('Allowed original mixed tool')
-  expect(plan.text).not.toContain('Unknown'); expect(plan.excluded).toHaveLength(1); expect(plan.gaps).toHaveLength(2)
+  expect(plan.text).toContain('Allowed original mixed answer'); expect(plan.text).not.toContain('Allowed original mixed tool')
+  expect(plan.text).not.toContain('Unknown'); expect(plan.excluded).toHaveLength(3); expect(plan.gaps).toHaveLength(2)
   expect(original.inner.kernel.input).not.toHaveBeenCalled(); expect(original.inner.kernel.stop).not.toHaveBeenCalled()
 })
 
@@ -340,19 +387,19 @@ it('accepted native part evidence survives a Host restart and more than one boun
   await appendFile(f.transcript, jsonl([{ sessionId: source.nativeSessionId, uuid: 'page-only-original', type: 'assistant', message: { role: 'assistant', content: original } }]))
   f.services.publication!.refresh()
   await vi.waitFor(() => {
-    const operations = f.services.publication!.store.list(f.binding, 100)
+    const operations = contentOperations(f.services.publication!.store, f.binding, 100)
     expect(operations.length).toBeGreaterThan(16); expect(operations.every(operation => operation.state === 'pending')).toBe(true)
   }, { timeout: 10_000 })
-  const before = f.services.publication!.store.list(f.binding, 100).map(operation => operation.operationId)
+  const before = contentOperations(f.services.publication!.store, f.binding, 100).map(operation => operation.operationId)
   const inspect = vi.spyOn(f.port, 'inspect').mockRejectedValue(new core.AgentMuxError('Original page-only Provider has no exact-record lookup.', 'AGENT_SESSION_HISTORY_RECORD_UNSUPPORTED'))
   f.services.close(); f.credentials(true)
   const restarted = await f.openServices(); closes.push(() => restarted.close())
   await vi.waitFor(() => {
-    const operations = restarted.publication!.store.list(f.binding, 100)
+    const operations = contentOperations(restarted.publication!.store, f.binding, 100)
     expect(operations.map(operation => operation.operationId)).toEqual(before)
     expect(operations.every(operation => !['pending', 'dispatching'].includes(operation.state))).toBe(true)
   }, { timeout: 15_000 })
-  expect(restarted.publication!.store.list(f.binding, 100).every(operation => operation.state === 'confirmed')).toBe(true)
+  expect(contentOperations(restarted.publication!.store, f.binding, 100).every(operation => operation.state === 'confirmed')).toBe(true)
   expect(f.posts()).toHaveLength(before.length); expect(inspect).not.toHaveBeenCalled()
   expect([...f.remote.records.values()].map(record => String(record.body && (record.body as { content: string }).content)).join('')).toContain('Original public page-only')
   expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
@@ -363,48 +410,51 @@ it('an old never-claimed private pending request is cancelled precisely while an
   f.credentials(false)
   await appendFile(f.transcript, jsonl([response('old-pending-record', 'assistant', hidden), response('independent-pending-record', 'assistant', allowed)]))
   f.services.publication!.refresh()
-  await vi.waitFor(() => expect(f.services.publication!.store.list(f.binding)).toHaveLength(2), { timeout: 10_000 })
-  const pending = f.services.publication!.store.list(f.binding), old = pending.find(operation => operation.reference.source.kind !== 'interaction' && operation.reference.source.recordId === 'old-pending-record')!
+  await vi.waitFor(() => expect(contentOperations(f.services.publication!.store, f.binding)).toHaveLength(2), { timeout: 10_000 })
+  f.services.publication!.close()
+  const pending = contentOperations(f.services.publication!.store, f.binding), old = pending.find(operation => operation.reference.source.kind === 'native' && operation.reference.source.recordId === 'old-pending-record')!
   expect(old.state).toBe('pending'); expect(old.attempt).toBeUndefined()
   // Restore the original pre-qualification decision shape. The native record and frozen request keep their exact identities.
   for (const row of f.services.database!.prepare("SELECT rowid,decision_json FROM connector_publication_decision WHERE json_extract(decision_json,'$.kind')='representation' AND json_extract(decision_json,'$.projectionId')=?").all(old.projectionId)) {
-    const value = JSON.parse(String(row.decision_json)); delete value.contentEligibility
+    const value = JSON.parse(String(row.decision_json)); delete value.contentEligibility; delete value.purpose
     f.services.database!.prepare('UPDATE connector_publication_decision SET decision_json=? WHERE rowid=?').run(JSON.stringify(value), Number(row.rowid))
   }
   await writeFile(f.transcript, jsonl([{ type: 'session_meta', payload: { id: source.nativeSessionId, cwd: f.root, history_mode: 'paginated' } },
     response('old-pending-record', 'developer', hidden), response('independent-pending-record', 'assistant', allowed)]))
-  f.credentials(true); f.services.publication!.refresh()
-  await vi.waitFor(() => expect(f.services.publication!.store.inspect(old.operationId)?.state).not.toBe('pending'), { timeout: 10_000 })
-  expect(f.services.publication!.store.inspect(old.operationId)).toMatchObject({ state: 'cancelled', reason: 'private-content' })
-  await vi.waitFor(() => expect(f.services.publication!.store.inspect(pending.find(value => value.operationId !== old.operationId)!.operationId)?.state).toBe('confirmed'), { timeout: 10_000 })
+  f.services.close(); f.credentials(true)
+  const active = await f.openServices(); closes.push(() => active.close())
+  await vi.waitFor(() => expect(active.publication!.store.inspect(old.operationId)?.state).not.toBe('pending'), { timeout: 10_000 })
+  expect(active.publication!.store.inspect(old.operationId)).toMatchObject({ state: 'cancelled', reason: 'private-content' })
+  await vi.waitFor(() => expect(active.publication!.store.inspect(pending.find(value => value.operationId !== old.operationId)!.operationId)?.state).toBe('confirmed'), { timeout: 10_000 })
   expect(JSON.stringify(f.posts())).not.toContain(hidden); expect(JSON.stringify(f.posts())).toContain(allowed)
-  expect(await f.rpc.call('connection.delivery.inspect', { operationId: old.operationId })).toMatchObject({ delivery: { operationId: old.operationId, state: 'cancelled', reason: 'private-content' } })
+  expect(await active.connections.delivery!.inspect({ operationId: old.operationId }, context)).toMatchObject({ delivery: { operationId: old.operationId, state: 'cancelled', reason: 'private-content' } })
   expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 }, 20_000)
 
-it('an old mixed frozen representation keeps an exact public recovery path after its unqualified part is cancelled', async () => {
-  const f = await fixture('claude'), hidden = 'Old unqualified mixed user context', tool = 'Allowed original mixed tool survives cancellation'
+it('an old mixed frozen representation recovers ordinary conversation after excluding its public tool part', async () => {
+  const f = await fixture('claude'), hidden = 'Old public tool output stays local', allowed = 'Original ordinary reply survives cancellation'
   f.credentials(false)
   let active = f.services
-  await appendFile(f.transcript, jsonl([{ sessionId: source.nativeSessionId, uuid: 'old-mixed', type: 'user', toolUseResult: { original: true }, message: { role: 'user', content: [
-    { type: 'text', text: hidden }, { type: 'tool_result', tool_use_id: 'old-tool', content: tool }
+  await appendFile(f.transcript, jsonl([{ sessionId: source.nativeSessionId, uuid: 'old-mixed', type: 'assistant', message: { role: 'assistant', content: [
+    { type: 'text', text: allowed }, { type: 'tool_result', tool_use_id: 'old-tool', content: hidden }
   ] } }]))
   await f.store.applyTimelineMutation({ type: 'append', agentSessionId: f.ref.agentSessionId, item: { id: 'same-event-captured-public', agentSessionId: f.ref.agentSessionId, kind: 'assistant_message', source: 'native-hook', status: 'complete', title: 'Original captured output', content: 'Allowed original captured contribution survives cancellation', createdAt: _historyFixtureEpoch(0, 0, 1), updatedAt: _historyFixtureEpoch(0, 0, 1), conversation: { sameEvent: { ...f.ref, source: { kind: 'native', providerId: 'claude', nativeSessionId: source.nativeSessionId, recordId: 'old-mixed' } } } } })
   active.publication!.refresh()
   await vi.waitFor(() => {
-    const pending = active.publication!.store.list(f.binding).filter(value => value.state === 'pending')
+    const pending = contentOperations(active.publication!.store, f.binding).filter(value => value.state === 'pending')
     expect(pending).toHaveLength(1)
     expect(active.database!.prepare("SELECT rowid FROM connector_publication_decision WHERE json_extract(decision_json,'$.kind')='representation' AND json_extract(decision_json,'$.projectionId')=? AND json_extract(decision_json,'$.part.record.source.kind')='captured'").all(pending[0]!.projectionId)).toHaveLength(1)
   }, { timeout: 10_000 })
-  const old = active.publication!.store.list(f.binding).find(value => value.state === 'pending')!, db = active.database!
+  active.publication!.close()
+  const old = contentOperations(active.publication!.store, f.binding).find(value => value.state === 'pending')!, db = active.database!
+  expect(old.attempt).toBeUndefined()
   const read = core.consumeConversationWindowPage(await f.rpc.call('agent.conversation.inspect', f.ref))
   if (read.kind !== 'complete') throw new Error('Original mixed window incomplete')
   const unit = read.snapshot.units.find(unit => unit.records.some(record => record.original.kind === 'native' && record.original.item.id === 'old-mixed'))!
   const record = unit.records.find(record => record.original.kind === 'native')!
   const originalRow = db.prepare("SELECT rowid,record_id,decision_json FROM connector_publication_decision WHERE json_extract(decision_json,'$.kind')='representation' AND json_extract(decision_json,'$.projectionId')=? AND json_extract(decision_json,'$.part.record.source.kind')='native'").get(old.projectionId)!
-  const allowedPiece = JSON.parse(String(originalRow.decision_json)); delete allowedPiece.contentEligibility
-  const oldPrefix = `[${unit.event.role} · Original conversation · ${unit.event.author.kind} · read-only]\n`
-  const unqualifiedPiece = { ...allowedPiece, part: { record: record.reference, recordRevision: record.revision, selector: { kind: 'native-part', partIndex: 0 } }, text: oldPrefix + hidden }
+  const allowedPiece = JSON.parse(String(originalRow.decision_json)); delete allowedPiece.purpose
+  const unqualifiedPiece = { ...allowedPiece, part: { record: record.reference, recordRevision: record.revision, selector: { kind: 'native-part', partIndex: 1 } }, text: hidden }
   const privateKey = JSON.stringify([core.conversationRecordId(record.reference!), unqualifiedPiece.part.selector])
   const privateId = 'part-' + createHash('sha256').update(JSON.stringify(privateKey)).digest('base64url')
   db.prepare('UPDATE connector_publication_decision SET record_id=?,decision_json=? WHERE rowid=?').run(privateId, JSON.stringify(unqualifiedPiece), Number(originalRow.rowid))
@@ -417,15 +467,15 @@ it('an old mixed frozen representation keeps an exact public recovery path after
   const restored = { ...old, sourceRevision: createHash('sha256').update(encoded).digest('base64url'), payload }
   db.prepare('UPDATE connector_publication_operation SET source_revision=?,operation_json=? WHERE operation_id=?').run(restored.sourceRevision, JSON.stringify(restored), old.operationId)
   active.close(); f.credentials(true); active = await f.openServices(); closes.push(() => active.close())
-  await vi.waitFor(() => expect(active.publication!.store.inspect(old.operationId)).toMatchObject({ state: 'cancelled', reason: 'public-content-unconfirmed' }), { timeout: 10_000 })
+  await vi.waitFor(() => expect(active.publication!.store.inspect(old.operationId)).toMatchObject({ state: 'cancelled', reason: 'outside-conversation-scope' }), { timeout: 10_000 })
   const accounted = active.database!.prepare("SELECT decision_json FROM connector_publication_decision WHERE json_extract(decision_json,'$.kind')='gap'").all().map(row => JSON.parse(String(row.decision_json)).gap) as ConnectionDeliveryGap[]
-  expect(accounted.find(gap => gap.reason === 'version-unavailable' && gap.part?.selector.kind === 'native-part' && gap.part.selector.partIndex === 1)?.anchor).toBeDefined()
+  expect(accounted.find(gap => gap.reason === 'version-unavailable' && gap.part?.selector.kind === 'native-part' && gap.part.selector.partIndex === 0)?.anchor).toBeDefined()
   expect(accounted.find(gap => gap.reason === 'version-unavailable' && gap.part?.record.source.kind === 'captured')?.anchor).toBeDefined()
   // The original owner uses its existing exact recoverPart path; no new input or transcript append.
   active.publication!.refresh()
-  await vi.waitFor(() => expect(active.publication!.store.list(f.binding).some(operation => operation.state === 'confirmed')).toBe(true), { timeout: 10_000 })
+  await vi.waitFor(() => expect(contentOperations(active.publication!.store, f.binding).some(operation => operation.state === 'confirmed')).toBe(true), { timeout: 10_000 })
   await vi.waitFor(() => expect(JSON.stringify(f.remote.messageCalls())).toContain('Allowed original captured contribution survives cancellation'), { timeout: 10_000 })
-  expect(JSON.stringify(f.remote.messageCalls())).toContain(tool); expect(JSON.stringify(f.remote.messageCalls())).not.toContain(hidden)
+  expect(JSON.stringify(f.remote.messageCalls())).toContain(allowed); expect(JSON.stringify(f.remote.messageCalls())).not.toContain(hidden)
   expect(active.publication!.store.inspect(old.operationId)?.state).toBe('cancelled')
   expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 }, 25_000)
@@ -434,7 +484,7 @@ it.each(['dispatching', 'unknown'] as const)('%s original effects are inspected 
   const f = await fixture(), text = 'Original possibly applied public reply'
   f.credentials(false)
   await appendFile(f.transcript, jsonl([response('effect-original', 'assistant', text)])); f.services.publication!.refresh()
-  await vi.waitFor(() => expect(f.services.publication!.store.list(f.binding)).toHaveLength(1), { timeout: 10_000 })
+  await vi.waitFor(() => expect(contentOperations(f.services.publication!.store, f.binding)).toHaveLength(1), { timeout: 10_000 })
   for (const row of f.services.database!.prepare("SELECT rowid,decision_json FROM connector_publication_decision WHERE json_extract(decision_json,'$.kind')='representation'").all()) {
     const value = JSON.parse(String(row.decision_json)); delete value.contentEligibility
     f.services.database!.prepare('UPDATE connector_publication_decision SET decision_json=? WHERE rowid=?').run(JSON.stringify(value), Number(row.rowid))
@@ -446,7 +496,7 @@ it.each(['dispatching', 'unknown'] as const)('%s original effects are inspected 
   await vi.waitFor(() => expect(platformInspect).toHaveBeenCalled(), { timeout: 10_000 })
   expect(inspect).not.toHaveBeenCalled(); expect(f.posts()).toEqual([])
   expect(f.services.publication!.store.inspect(prepared.operationId)).toMatchObject({ operationId: prepared.operationId, attempt: prepared.attempt, prepared: prepared.prepared, state: 'unknown' })
-  expect(f.services.publication!.store.list(f.binding)).toHaveLength(1)
+  expect(contentOperations(f.services.publication!.store, f.binding)).toHaveLength(1)
 }, 20_000)
 
 it('the original Droid Reader assigns a mixed user tool block separately before the common publication consumer', async () => {
@@ -456,6 +506,8 @@ it('the original Droid Reader assigns a mixed user tool block separately before 
   await writeFile(join(original.root, 'droid.jsonl'), jsonl([{ type: 'session_start', id: source.nativeSessionId },
     { type: 'message', id: 'droid-mixed', message: { role: 'user', content: [{ type: 'text', text: 'Unknown Droid user context' },
       { type: 'tool_result', tool_use_id: 'droid-tool', content: 'Allowed Droid typed result' }] } },
+    { type: 'message', id: 'droid-public-user', message: { role: 'user', visibility: 'user_only', content: [{ type: 'text', text: 'Original visible Droid user message' }] } },
+    { type: 'message', id: 'droid-pure-image', message: { role: 'assistant', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'cGlj' } }] } },
     { type: 'message', id: 'droid-private', message: { role: 'assistant', visibility: 'llm_only', content: [{ type: 'text', text: 'Private Droid context' },
       { type: 'tool_result', tool_use_id: 'droid-hidden-tool', content: 'Private Droid hidden result' }] } },
     { type: 'message', id: 'droid-unknown-block', message: { role: 'assistant', content: [{ type: 'unrecognized', secret: 'Unknown Droid opaque block' }, 42] } },
@@ -465,9 +517,12 @@ it('the original Droid Reader assigns a mixed user tool block separately before 
   if (read.kind !== 'complete') throw new Error('Original Droid window incomplete')
   const plans = read.snapshot.units.map(unit => publicationContent(unit, { scope: { publication: 'future-shared-conversation' } } as never, page.window.checkpoint, { resolved: new Map(), origin: () => undefined }))
   const text = plans.map(plan => plan.text).join('\n')
-  expect(text).toContain('Allowed Droid typed result'); expect(text).not.toContain('Unknown Droid'); expect(text).not.toContain('Private Droid')
+  expect(text).not.toContain('Allowed Droid typed result'); expect(text).not.toContain('Unknown Droid'); expect(text).not.toContain('Private Droid')
+  expect(text).not.toContain('Original visible Droid user message')
   const items = read.snapshot.units.flatMap(unit => unit.records).flatMap(record => record.original.kind === 'native' ? [record.original.item] : [])
   expect(items.find(item => item.id === 'droid-mixed')?.contentParts.map(part => part.contentEligibility)).toEqual(['unconfirmed', 'public'])
+  expect(items.find(item => item.id === 'droid-public-user')).toMatchObject({ kind: 'activity', contentParts: [{ kind: 'text', contentEligibility: 'public' }] })
+  expect(items.find(item => item.id === 'droid-pure-image')).toMatchObject({ kind: 'assistant-message', contentParts: [{ kind: 'resource', contentEligibility: 'public', resourceType: 'image' }] })
   expect(items.find(item => item.id === 'droid-private')?.contentParts.map(part => part.contentEligibility)).toEqual(['private', 'private'])
   expect(JSON.stringify(items)).toContain('Private Droid hidden result')
   expect(text).not.toContain('Unknown Droid opaque'); expect(text).not.toContain('Private Droid opaque')
@@ -483,8 +538,10 @@ it('an old native pending record without eligibility or exact-reader support lea
   f.credentials(false)
   await appendFile(f.transcript, jsonl([response('old-unknown-source', 'assistant', 'Old unconfirmed source body'), response('new-known-source', 'assistant', 'New independently qualified source body')]))
   f.services.publication!.refresh()
-  await vi.waitFor(() => expect(f.services.publication!.store.list(f.binding)).toHaveLength(2), { timeout: 10_000 })
-  const old = f.services.publication!.store.list(f.binding).find(value => value.reference.source.kind !== 'interaction' && value.reference.source.recordId === 'old-unknown-source')!
+  await vi.waitFor(() => expect(contentOperations(f.services.publication!.store, f.binding)).toHaveLength(2), { timeout: 10_000 })
+  f.services.publication!.close()
+  const old = contentOperations(f.services.publication!.store, f.binding).find(value => value.reference.source.kind === 'native' && value.reference.source.recordId === 'old-unknown-source')!
+  expect(old.attempt).toBeUndefined()
   for (const row of f.services.database!.prepare("SELECT rowid,decision_json FROM connector_publication_decision WHERE json_extract(decision_json,'$.kind')='representation' AND json_extract(decision_json,'$.projectionId')=?").all(old.projectionId)) {
     const value = JSON.parse(String(row.decision_json)); delete value.contentEligibility
     f.services.database!.prepare('UPDATE connector_publication_decision SET decision_json=? WHERE rowid=?').run(JSON.stringify(value), Number(row.rowid))
@@ -493,7 +550,7 @@ it('an old native pending record without eligibility or exact-reader support lea
   // Restart retains the saved cut without replaying the previous temporary accepted window as a new fact.
   f.services.close(); f.credentials(true)
   const restarted = await f.openServices(); closes.push(() => restarted.close())
-  await vi.waitFor(() => expect(restarted.publication!.store.list(f.binding).some(value => value.state === 'confirmed')).toBe(true), { timeout: 10_000 })
+  await vi.waitFor(() => expect(contentOperations(restarted.publication!.store, f.binding).some(value => value.state === 'confirmed')).toBe(true), { timeout: 10_000 })
   expect(restarted.publication!.store.inspect(old.operationId)).toMatchObject({ state: 'cancelled', reason: 'version-unavailable' })
   expect(restarted.publication!.store.coverage(f.binding).gaps.some(gap => gap.reason === 'version-unavailable' && gap.part?.record.source.recordId === 'old-unknown-source' && gap.anchor)).toBe(true)
   expect(JSON.stringify(f.posts())).not.toContain('Old unconfirmed source body'); expect(JSON.stringify(f.posts())).toContain('New independently qualified source body')
@@ -505,9 +562,11 @@ it('an exact old record can assemble more than a fixed count of small legal frag
   f.credentials(false)
   await appendFile(f.transcript, jsonl([response('small-fragment-original', 'assistant', 'Original public small fragment message')]))
   f.services.publication!.refresh()
-  await vi.waitFor(() => expect(f.services.publication!.store.list(f.binding)).toHaveLength(1), { timeout: 10_000 })
-  const old = f.services.publication!.store.list(f.binding)[0]!
-  if (old.reference.source.kind === 'interaction') throw new Error('Original native reference required')
+  await vi.waitFor(() => expect(contentOperations(f.services.publication!.store, f.binding)).toHaveLength(1), { timeout: 10_000 })
+  f.services.publication!.close()
+  const old = contentOperations(f.services.publication!.store, f.binding)[0]!
+  expect(old.attempt).toBeUndefined()
+  if (old.reference.source.kind !== 'native') throw new Error('Original native reference required')
   const reference = { hostId: old.reference.hostId, agentSessionId: old.reference.agentSessionId, source: old.reference.source }
   const page = await f.client.readAgentConversation({ ...f.ref, record: reference, maxBytes: 128 * 1024 }), read = core.consumeConversationWindowPage(page)
   if (read.kind !== 'complete' || read.snapshot.units.length !== 1) throw new Error('Original exact Core unit required')
