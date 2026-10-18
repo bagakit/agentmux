@@ -244,7 +244,7 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
       const binding = parseRoomBinding({ bindingId: `mote-chat-binding:${id}`, revision: 1, state: 'active', connectionId: current.connectionId,
         application: current.generation.application, externalConversationId: current.generation.externalConversationId, executionHostId: result.executionHostId,
         agentSessionId: result.agentSessionId, ...(result.regionId ? { regionAnchor: { regionId: result.regionId } } : {}), scope: { input: 'all-messages', publication: 'future-native-user-facing' },
-        inputTarget: { kind: 'native-conversation', source: native[0]!.checkpoint.source }, sourceCheckpoints: native.map(cut => cut.checkpoint),
+        sourceCheckpoints: native.map(cut => cut.checkpoint),
         sourceFrontier: { ...checkpoint.checkpoint, frontier: { ...checkpoint.checkpoint.frontier, scope: { sources: checkpoint.scope.sources.filter(source => source.kind === 'native') }, cuts: native } }, authorizedBy: current.authorizedBy })
       const grant = parseConnectionGrant({ grantId: `mote-chat-grant:${id}`, revision: 1, bindingId: binding.bindingId, bindingRevision: 1, connectionId: binding.connectionId,
         externalConversationId: binding.externalConversationId, actor: current.generation.actor, capabilities: ['input', 'answer'], state: 'active' })
