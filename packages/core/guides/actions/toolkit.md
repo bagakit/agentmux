@@ -11,7 +11,12 @@ Delete input uses {"expected":{...}} with complete saved editable fields.
 Revisions are owner-issued, never editable. Performance is read-only.
 
 Install a local extension directory with amux toolkit install ID --path <PACKAGE_DIRECTORY>
-and optional --cwd <WORKSPACE_DIRECTORY>. Omitted cwd is chosen by the Host. The saved record
+and optional --cwd <WORKSPACE_DIRECTORY>. Omitted cwd defaults to ~/.agentmux on the Host.
+Working directories accept absolute paths, ~, ~/..., $HOME and ${HOME} prefixes;
+quote shorthand arguments to preserve them for the execution Host. The Host expands and saves
+the absolute directory for create/update/install and supplied expected values. Relative paths
+have no implicit base; arbitrary variables and command substitutions are not evaluated.
+Spaces and the path suffix are literal, including /../ through symbolic links. The saved record
 holds the directory reference and enabled/statusBar/args/cwd preferences. It does not import
 a source copy. Edit manifest.json, entry or helper files in that directory; the next explicit
 inspect/run/action/evaluate captures the current files. Manifest schema is agentmux.toolkit.package.v1,
