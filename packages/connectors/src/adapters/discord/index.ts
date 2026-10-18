@@ -13,7 +13,7 @@ import { createDiscordRooms } from './rooms.js'
 import { handleDiscordInteraction } from './actions.js'
 import { discordConfig, discordFailure, discordId, discordMessage } from './protocol.js'
 
-type Receiver = { config: ConnectionConfig; signal: AbortSignal; closed: boolean; botId: string; observed: boolean; socketFailed: boolean; cursorFailed: boolean }
+type Receiver = { config: ConnectionConfig; signal: AbortSignal; closed: boolean; botId: string; observed: boolean; socketFailed: boolean; cursorFailed: boolean; callbackFailure: string | null }
 type Witness = { receiver: Receiver; raw: string; event?: VerifiedIngressEvent }
 const owners = new Map<string, Receiver>()
 const applicationKey = (config: Pick<ConnectionConfig, 'application'>) => JSON.stringify([config.application.domain, config.application.appId])
@@ -62,7 +62,7 @@ export class DiscordAdapter implements ConnectionAdapter, IngressAuthenticator {
     if (signal.aborted) return discordFailure('DISCORD_RECEIVER_CANCELLED')
     if (owners.has(key)) return discordFailure('DISCORD_RECEIVER_ALREADY_OWNED')
     const identity = await this.clients.identity(config, credential, signal)
-    const receiver: Receiver = { config: structuredClone(config), signal, closed: false, botId: identity.botId, observed: false, socketFailed: false, cursorFailed: false }
+    const receiver: Receiver = { config: structuredClone(config), signal, closed: false, botId: identity.botId, observed: false, socketFailed: false, cursorFailed: false, callbackFailure: null }
     owners.set(key, receiver); this.stores.set(key, input.storage)
     const sessions = new Map<number, SessionInfo | null>(), failed = new AbortController()
     const storage = () => input.storage()
@@ -106,13 +106,16 @@ export class DiscordAdapter implements ConnectionAdapter, IngressAuthenticator {
           try { if (typeof payload.d.name === 'string' || payload.d.name === null) observeDiscordConversation({ config, storage: storage() }, payload.d); input.metadataChanged?.({ kind: 'conversation', externalConversationId: discordId(payload.d.id) }) } catch { /* Optional rename observations do not gate custody or Agent input. */ }
         }
         if (payload.t === 'INTERACTION_CREATE') {
-          await handleDiscordInteraction({ config, interaction: payload.d, botId: identity.botId, rest: this.clients.rest(config, credential), signal,
+          let custodyFailed = false
+          try { await handleDiscordInteraction({ config, interaction: payload.d, botId: identity.botId, rest: this.clients.rest(config, credential), signal,
             ...(input.questionForm ? { questionForm: input.questionForm } : {}),
+            callbackObservation: confirmed => { if (!confirmed) receiver.callbackFailure = payload.d.id; else if (receiver.callbackFailure === payload.d.id) receiver.callbackFailure = null },
             receive: async (event, acknowledge) => {
               const witness: Witness = { receiver, raw: JSON.stringify(payload), event }; this.witnesses.add(witness)
               try { return await input.receive({ raw: witness.raw, transportProof: witness }, acknowledge) }
+              catch (error) { custodyFailed = true; throw error }
               finally { this.witnesses.delete(witness) }
-            } })
+            } }) } catch (error) { if (custodyFailed) throw error; receiver.callbackFailure = payload.d.id }
           const user = payload.d.member?.user ?? payload.d.user
           if (payload.d.application_id === config.application.appId && user && !user.bot) observeActor(user)
         }
@@ -135,6 +138,6 @@ export class DiscordAdapter implements ConnectionAdapter, IngressAuthenticator {
     })
     try { await manager.connect() } catch { close(); return discordFailure('DISCORD_RECEIVER_UNAVAILABLE') }
     return { close, closed: failed.signal, observation: () => ({ authentication: { state: 'ready' }, transport: { state: receiver.closed ? 'disabled' : receiver.socketFailed ? 'unknown' : 'ready', ...(receiver.socketFailed ? { reason: 'check-failed' as const } : {}) },
-      intake: receiver.cursorFailed || receiver.socketFailed ? { state: 'unknown', reason: 'check-failed' } : receiver.observed ? { state: 'ready' } : { state: 'unknown', reason: 'not-started' }, delivery: { state: 'unknown', reason: 'not-started' } }) }
+      intake: receiver.cursorFailed || receiver.socketFailed || receiver.callbackFailure ? { state: 'unknown', reason: 'check-failed' } : receiver.observed ? { state: 'ready' } : { state: 'unknown', reason: 'not-started' }, delivery: { state: 'unknown', reason: 'not-started' } }) }
   }
 }
