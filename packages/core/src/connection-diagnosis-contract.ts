@@ -30,7 +30,7 @@ export type ConnectionDiagnosisIntake = {
 export type ConnectionGroupDiagnosis = {
   target: ConnectionDiagnosisTarget; window: ConnectionDiagnosisWindow; limit: number
   connection: ConnectionDiagnosisReading<{ revision: number; enabled: boolean } & ConnectionObservation>
-  binding: ConnectionDiagnosisReading<{ state: 'active' | 'paused'; currentRevision: number | null; scope: RoomBindingScope; activeInputGrants: number; activeAnswerGrants: number; activePermissionGrants: number }>
+  binding: ConnectionDiagnosisReading<{ state: 'active' | 'paused' | 'detached'; currentRevision: number | null; scope: RoomBindingScope; activeInputGrants: number; activeAnswerGrants: number; activePermissionGrants: number }>
   outgoing: ConnectionDiagnosisReading<{
     after: string | null; afterContent: string | null; next: string | null; deliveries: ConnectionDiagnosisDelivery[]
     observation: ConnectionDeliveryObservation | null

@@ -7,7 +7,7 @@ import { dequal } from 'dequal'
 import type { ConnectionActor, ConnectionApplication, ConnectionGrant } from './connections-contract.js'
 import type { RoomBinding, RoomBindingAuthority, RoomBindingMethod, RoomBindingOperation, RoomBindingParamsMap, RoomBindingResultMap, RoomBindingScope } from './room-binding-contract.js'
 
-export const ROOM_BINDING_RPC_METHODS = { 'connection.bind': 'long', 'connection.binding.inspect': 'long', 'connection.binding.ls': 'long', 'connection.binding.pause': 'long', 'connection.binding.relink': 'long', 'connection.grant': 'long' } as const
+export const ROOM_BINDING_RPC_METHODS = { 'connection.bind': 'long', 'connection.binding.inspect': 'long', 'connection.binding.ls': 'long', 'connection.binding.pause': 'long', 'connection.binding.resume': 'long', 'connection.binding.detach': 'long', 'connection.binding.relink': 'long', 'connection.grant': 'long' } as const
 export const isRoomBindingMethod = (value: unknown): value is RoomBindingMethod => typeof value === 'string' && Object.hasOwn(ROOM_BINDING_RPC_METHODS, value)
 const fail = (): never => { throw new AgentMuxError('Binding data does not describe the original authorized objects.', 'INVALID_ROOM_BINDING_DATA') }
 const object = (value: unknown, fields: string[]) => rpcRecord(value, fields, 'INVALID_ROOM_BINDING_DATA')
@@ -40,7 +40,7 @@ export function parseConnectionGrant(value: unknown): ConnectionGrant {
 }
 export function parseRoomBinding(value: unknown): RoomBinding {
   const p = object(value, ['bindingId', 'revision', 'state', 'connectionId', 'application', 'externalConversationId', 'scope', 'inputTarget', 'executionHostId', 'agentSessionId', 'regionAnchor', 'sourceCheckpoints', 'sourceFrontier', 'authorizedBy'])
-  if (p.state !== 'active' && p.state !== 'paused' || !Array.isArray(p.sourceCheckpoints) || p.sourceCheckpoints.length < 1 || p.sourceCheckpoints.length > 32) fail()
+  if (p.state !== 'active' && p.state !== 'paused' && p.state !== 'detached' || !Array.isArray(p.sourceCheckpoints) || p.sourceCheckpoints.length < 1 || p.sourceCheckpoints.length > 32) fail()
   const t = { executionHostId: id(p.executionHostId), agentSessionId: id(p.agentSessionId), ...(p.regionAnchor === undefined ? {} : { regionAnchor: target(p).regionAnchor }) }, checkpoints = (p.sourceCheckpoints as unknown[]).map(parseNativeConversationCheckpoint)
   if (checkpoints.some(c => c.agentSessionId !== t.agentSessionId) || new Set(checkpoints.map(c => JSON.stringify(c.source))).size !== checkpoints.length) fail()
   const frontier = p.sourceFrontier === undefined ? undefined : parseConversationCheckpoint(p.sourceFrontier, { hostId: t.executionHostId, agentSessionId: t.agentSessionId })
@@ -48,15 +48,32 @@ export function parseRoomBinding(value: unknown): RoomBinding {
   return { ...t, bindingId: id(p.bindingId), revision: revision(p.revision), state: p.state as RoomBinding['state'], connectionId: id(p.connectionId), application: parseConnectionApplication(p.application), externalConversationId: text(p.externalConversationId), scope: scope(p.scope), ...(p.inputTarget === undefined ? {} : { inputTarget: inputTarget(p.inputTarget) }), sourceCheckpoints: checkpoints, ...(frontier ? { sourceFrontier: frontier } : {}), authorizedBy: parseRoomBindingAuthority(p.authorizedBy) }
 }
 export function parseRoomBindingOperation(value: unknown): RoomBindingOperation {
-  const p = object(value, ['operationId', 'action', 'state', 'binding', 'grant', 'reused', 'code'])
-  if (!['bind', 'pause', 'relink', 'grant'].includes(String(p.action))) fail()
+  const p = object(value, ['operationId', 'action', 'state', 'binding', 'grant', 'reused', 'code', 'notices'])
+  if (!['bind', 'pause', 'resume', 'detach', 'relink', 'grant'].includes(String(p.action))) fail()
   const base = { operationId: id(p.operationId), action: p.action as RoomBindingOperation['action'] }
-  if (p.state === 'preparing') { if (['binding', 'grant', 'reused', 'code'].some(k => p[k] !== undefined)) fail(); return { ...base, state: 'preparing' } }
-  if (p.state === 'refused') { if (['binding', 'grant', 'reused'].some(k => p[k] !== undefined)) fail(); return { ...base, state: 'refused', code: id(p.code) } }
+  if (p.state === 'preparing') { if (['binding', 'grant', 'reused', 'code', 'notices'].some(k => p[k] !== undefined)) fail(); return { ...base, state: 'preparing' } }
+  if (p.state === 'refused') { if (['binding', 'grant', 'reused', 'notices'].some(k => p[k] !== undefined)) fail(); return { ...base, state: 'refused', code: id(p.code) } }
   if (p.state !== 'applied' || p.code !== undefined || p.reused !== undefined && typeof p.reused !== 'boolean') fail()
   const binding = parseRoomBinding(p.binding), grant = p.grant === undefined ? undefined : parseConnectionGrant(p.grant)
   if (grant && (base.action !== 'grant' || grant.bindingId !== binding.bindingId || grant.bindingRevision !== binding.revision || grant.connectionId !== binding.connectionId || grant.externalConversationId !== binding.externalConversationId || JSON.stringify(grant.actor.application) !== JSON.stringify(binding.application))) fail()
-  return { ...base, state: 'applied', binding, ...(grant ? { grant } : {}), ...(p.reused === undefined ? {} : { reused: p.reused as boolean }) }
+  const notices = p.notices === undefined ? undefined : parseRoomBindingNotices(p.notices)
+  if (notices && (base.action === 'grant' || p.reused === true)) fail()
+  if (notices) {
+    const events = notices.map(item => item.event).join(',')
+    const allowed: Partial<Record<RoomBindingOperation['action'], string[]>> = { bind: ['connected'], pause: ['paused'], resume: ['resumed'], detach: ['disconnected'], relink: ['updated', 'resumed', 'disconnected,connected'] }
+    if (!allowed[base.action]?.includes(events)) fail()
+  }
+  return { ...base, state: 'applied', binding, ...(notices ? { notices } : {}), ...(grant ? { grant } : {}), ...(p.reused === undefined ? {} : { reused: p.reused as boolean }) }
+}
+export function parseRoomBindingNotices(value: unknown): import('./room-binding-contract.js').RoomBindingNotice[] {
+  if (!Array.isArray(value) || value.length > 2) fail()
+  const notices = (value as unknown[]).map(item => {
+    const p = object(item, ['event', 'deliveryOperationId'])
+    if (!['connected', 'disconnected', 'paused', 'resumed', 'updated'].includes(String(p.event))) fail()
+    return { event: p.event as import('./room-binding-contract.js').RoomBindingNoticeEvent, deliveryOperationId: id(p.deliveryOperationId) }
+  })
+  if (new Set(notices.map(item => item.deliveryOperationId)).size !== notices.length) fail()
+  return notices
 }
 export function parseRoomBindingParams<M extends RoomBindingMethod>(method: M, value: unknown): RoomBindingParamsMap[M] {
   if (method === 'connection.binding.inspect') {
@@ -68,7 +85,7 @@ export function parseRoomBindingParams<M extends RoomBindingMethod>(method: M, v
     const p = object(value, ['connectionId', 'executionHostId', 'agentSessionId'])
     return Object.fromEntries(Object.entries(p).map(([k, v]) => [k, id(v)])) as RoomBindingParamsMap[M]
   }
-  if (method === 'connection.binding.pause') { const p = object(value, ['operationId', 'bindingId', 'expectedRevision']); return { operationId: id(p.operationId), bindingId: id(p.bindingId), expectedRevision: revision(p.expectedRevision) } as RoomBindingParamsMap[M] }
+  if (method === 'connection.binding.pause' || method === 'connection.binding.resume' || method === 'connection.binding.detach') { const p = object(value, ['operationId', 'bindingId', 'expectedRevision']); return { operationId: id(p.operationId), bindingId: id(p.bindingId), expectedRevision: revision(p.expectedRevision) } as RoomBindingParamsMap[M] }
   if (method === 'connection.grant') {
     const p = object(value, ['operationId', 'bindingId', 'expectedBindingRevision', 'grantId', 'expectedRevision', 'actor', 'capabilities', 'state'])
     if (p.state !== 'active' && p.state !== 'revoked') fail()
@@ -93,14 +110,14 @@ export function parseRoomBindingResult<M extends RoomBindingMethod>(method: M, v
     return { binding, current, operation, grants } as RoomBindingResultMap[M]
   }
   const op = parseRoomBindingOperation(value), expected = input as RoomBindingParamsMap['connection.bind'] & RoomBindingParamsMap['connection.grant'] & RoomBindingParamsMap['connection.binding.relink']
-  const action = method === 'connection.bind' ? 'bind' : method === 'connection.grant' ? 'grant' : method === 'connection.binding.pause' ? 'pause' : 'relink'
+  const action = method === 'connection.bind' ? 'bind' : method === 'connection.grant' ? 'grant' : method === 'connection.binding.pause' ? 'pause' : method === 'connection.binding.resume' ? 'resume' : method === 'connection.binding.detach' ? 'detach' : 'relink'
   if (op.operationId !== expected.operationId || op.action !== action) fail()
   if (op.state === 'applied') {
     const b = op.binding
     if (b.bindingId !== expected.bindingId && !op.reused || action !== 'bind' && op.reused) fail()
     if (action === 'bind' || action === 'relink') {
       if (b.connectionId !== expected.connectionId || b.executionHostId !== expected.executionHostId || b.agentSessionId !== expected.agentSessionId || b.externalConversationId !== expected.externalConversationId || JSON.stringify(b.scope) !== JSON.stringify(expected.scope) || !dequal(b.inputTarget, expected.inputTarget) || b.sourceCheckpoints.some(c => JSON.stringify(c.source) !== JSON.stringify(expected.expectedSource)) || action === 'relink' && b.revision !== expected.expectedRevision + 1) fail()
-    } else if (action === 'pause' && (b.state !== 'paused' || b.revision !== expected.expectedRevision + 1)) fail()
+    } else if (['pause', 'resume', 'detach'].includes(action) && (b.state !== ({ pause: 'paused', resume: 'active', detach: 'detached' } as Record<string, string>)[action] || b.revision !== expected.expectedRevision + 1)) fail()
     else if (action === 'grant' && (!op.grant || b.revision !== expected.expectedBindingRevision || op.grant.grantId !== expected.grantId || op.grant.revision !== (expected.expectedRevision ?? 0) + 1 || JSON.stringify(op.grant.actor) !== JSON.stringify(expected.actor) || JSON.stringify(op.grant.capabilities) !== JSON.stringify(expected.capabilities) || op.grant.state !== expected.state)) fail()
   }
   return op as RoomBindingResultMap[M]

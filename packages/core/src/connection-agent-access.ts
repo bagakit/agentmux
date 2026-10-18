@@ -57,8 +57,8 @@ export async function assertAgentConnectionAccess(owner: ConnectionPort, method:
     if (p.connectionId !== undefined) await connection(p.connectionId)
     return
   }
-  if (method === 'connection.binding.inspect' || method === 'connection.binding.pause') {
-    const original = await owner.bindings?.inspect(method === 'connection.binding.pause'
+  if (method === 'connection.binding.inspect' || method === 'connection.binding.pause' || method === 'connection.binding.resume' || method === 'connection.binding.detach') {
+    const original = await owner.bindings?.inspect(method !== 'connection.binding.inspect'
       ? { bindingId: p.bindingId as string } : input as ConnectionParamsMap['connection.binding.inspect'])
     const binding = original?.binding ?? original?.current
     if (binding) { self(binding); await connection(binding.connectionId) }

@@ -1,12 +1,14 @@
 import { AgentMuxError } from '@agentmux/core'
 import { parseConversationCheckpointPage, type ConversationCheckpointPage, type ConversationRef } from '@agentmux/core/conversation'
 import type { AgentMuxSpatialState } from '@agentmux/core/spatial-graph'
-import { parseConnectionActor, parseConnectionGrant, parseRoomBinding, parseRoomBindingAuthority, parseRoomBindingOperation, parseRoomBindingParams, type ConnectionGrant, type RoomBinding, type RoomBindingAuthority, type RoomBindingBindInput, type RoomBindingCallContext, type RoomBindingGrantInput, type RoomBindingInspectInput, type RoomBindingListInput, type RoomBindingOperation, type RoomBindingPauseInput, type RoomBindingReadPort, type RoomBindingRelinkInput, type RoomBindingsPort, type RoomPublicationAuthority } from '@agentmux/core/connections'
+import { parseConnectionActor, parseConnectionGrant, parseRoomBinding, parseRoomBindingAuthority, parseRoomBindingOperation, parseRoomBindingParams, type ConnectionGrant, type RoomBinding, type RoomBindingAuthority, type RoomBindingBindInput, type RoomBindingCallContext, type RoomBindingGrantInput, type RoomBindingInspectInput, type RoomBindingListInput, type RoomBindingOperation, type RoomBindingPauseInput, type RoomBindingReadPort, type RoomBindingRelinkInput, type RoomBindingNoticeEvent, type RoomBindingNotice, type RoomBindingsPort, type RoomPublicationAuthority } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import { readRoomTarget } from './room-target.js'
 
 export type RoomBindingHostOptions = {
   connections: ConnectionHost
+  /** Synchronous enqueue joins this original Binding transaction; no network effects. */
+  lifecycle?: { queueBindingNotice(operationId: string, binding: RoomBinding, event: RoomBindingNoticeEvent, synchronization: boolean | null): string }
   spatial: { read(): Promise<AgentMuxSpatialState | null> }
   /** Borrow the original Core client for the exact Host, never a new Runtime or focused occupant. */
   checkpoint(reference: ConversationRef): Promise<ConversationCheckpointPage>
@@ -17,7 +19,7 @@ type Saved = { intent: string; operation: RoomBindingOperation }
 class Refusal extends Error { constructor(readonly code: string) { super(code) } }
 function refuse(code: string): never { throw new Refusal(code) }
 const equal = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right)
-const method = { bind: 'connection.bind', relink: 'connection.binding.relink', pause: 'connection.binding.pause', grant: 'connection.grant' } as const
+const method = { bind: 'connection.bind', relink: 'connection.binding.relink', pause: 'connection.binding.pause', resume: 'connection.binding.resume', detach: 'connection.binding.detach', grant: 'connection.grant' } as const
 
 /** Binding, grant and operation snapshots belong to the original connector database. No topology is copied. */
 export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
@@ -51,7 +53,7 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
     return this.safe(() => { const row = this.database.prepare('SELECT snapshot_json FROM room_binding_revision WHERE binding_id=? AND revision=?').get(bindingId, revision); return row ? parseRoomBinding(JSON.parse(String(row.snapshot_json))) : null })
   }
   readCurrent(bindingId: string): RoomBinding | null {
-    return this.safe(() => { const row = this.database.prepare('SELECT revision FROM room_binding_head WHERE binding_id=?').get(bindingId); return row ? this.readExact(bindingId, Number(row.revision)) : null })
+    return this.safe(() => { const row = this.database.prepare('SELECT max(revision) AS revision FROM room_binding_revision WHERE binding_id=?').get(bindingId); return row?.revision ? this.readExact(bindingId, Number(row.revision)) : null })
   }
   private audience(input: { application: RoomBinding['application']; externalConversationId: string }): RoomBinding | null {
     const row = this.database.prepare('SELECT binding_id FROM room_binding_head WHERE domain=? AND app_id=? AND room_id=?').get(input.application.domain, input.application.appId, input.externalConversationId)
@@ -102,6 +104,7 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
     if (!binding) return []
     return this.safe(() => this.database.prepare('SELECT grant_id FROM room_grant_head WHERE connection_id=? AND room_id=? AND binding_id=?').all(binding.connectionId, binding.externalConversationId, binding.bindingId).map(row => this.readGrant(String(row.grant_id))!).filter(grant => grant.bindingRevision === binding.revision))
   }
+  readOperation(operationId: string): RoomBindingOperation | null { return this.safe(() => this.saved(operationId)?.operation ?? null) }
   private saved(operationId: string): Saved | null {
     const row = this.database.prepare('SELECT intent_json, result_json FROM room_binding_operation WHERE operation_id=?').get(operationId)
     return row ? { intent: String(row.intent_json), operation: parseRoomBindingOperation(JSON.parse(String(row.result_json))) } : null
@@ -117,7 +120,25 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
   private writeBinding(binding: RoomBinding): void {
     const b = parseRoomBinding(binding)
     this.database.prepare('INSERT INTO room_binding_revision (binding_id,revision,snapshot_json) VALUES (?,?,?)').run(b.bindingId, b.revision, JSON.stringify(b))
+    if (b.state === 'detached') { this.database.prepare('DELETE FROM room_binding_head WHERE binding_id=?').run(b.bindingId); return }
     this.database.prepare('INSERT INTO room_binding_head (binding_id,revision,connection_id,domain,app_id,room_id,host_id,session_id) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(binding_id) DO UPDATE SET revision=excluded.revision,connection_id=excluded.connection_id,domain=excluded.domain,app_id=excluded.app_id,room_id=excluded.room_id,host_id=excluded.host_id,session_id=excluded.session_id').run(b.bindingId, b.revision, b.connectionId, b.application.domain, b.application.appId, b.externalConversationId, b.executionHostId, b.agentSessionId)
+  }
+  private notices(operationId: string, entries: Array<{ binding: RoomBinding; event: RoomBindingNoticeEvent }>): RoomBindingNotice[] | undefined {
+    if (!this.options.lifecycle) return undefined
+    let synchronization: boolean | null = null
+    try { synchronization = this.options.connections.readService().enabled } catch { /* Notification describes the observation gap; it cannot block ending this relationship. */ }
+    return entries.map(({ binding, event }) => ({ event, deliveryOperationId: this.options.lifecycle!.queueBindingNotice(operationId, binding, event, synchronization) }))
+  }
+  private sameAudience(left: RoomBinding, right: RoomBinding): boolean {
+    return left.connectionId === right.connectionId && equal(left.application, right.application) && left.externalConversationId === right.externalConversationId && left.executionHostId === right.executionHostId && left.agentSessionId === right.agentSessionId && equal(left.scope, right.scope) && equal(left.inputTarget, right.inputTarget)
+  }
+  private carryGrants(previous: RoomBinding, binding: RoomBinding): void {
+    if (!this.sameAudience(previous, binding)) return
+    for (const original of this.bindingGrants(previous)) {
+      const grant = { ...original, revision: original.revision + 1, bindingRevision: binding.revision }
+      this.database.prepare('INSERT INTO room_grant_revision (grant_id,revision,snapshot_json) VALUES (?,?,?)').run(grant.grantId, grant.revision, JSON.stringify(grant))
+      this.database.prepare('UPDATE room_grant_head SET revision=? WHERE grant_id=?').run(grant.revision, grant.grantId)
+    }
   }
   private finish(operation: RoomBindingOperation): RoomBindingOperation {
     this.database.prepare('UPDATE room_binding_operation SET result_json=? WHERE operation_id=?').run(JSON.stringify(parseRoomBindingOperation(operation)), operation.operationId)
@@ -163,7 +184,7 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
   private async region(input: RoomBindingBindInput): Promise<void> {
     if (!await readRoomTarget(this.options.spatial, input)) refuse('ROOM_BINDING_TARGET_CHANGED')
   }
-  private async cut(input: RoomBindingBindInput): Promise<Pick<RoomBinding, 'sourceCheckpoints' | 'sourceFrontier'>> {
+  private async cut(input: Pick<RoomBindingBindInput, 'executionHostId' | 'agentSessionId' | 'scope' | 'expectedSource'>): Promise<Pick<RoomBinding, 'sourceCheckpoints' | 'sourceFrontier'>> {
     const ref = { hostId: input.executionHostId, agentSessionId: input.agentSessionId }
     let page: ConversationCheckpointPage
     try { page = parseConversationCheckpointPage(await this.options.checkpoint(ref), ref) }
@@ -194,14 +215,15 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
         if (saved.state !== 'preparing') return saved
         const connection = this.connection(input), current = this.readCurrent(input.bindingId) ?? this.matching('session', input)
         if (current) {
-          if (current.state !== 'active') refuse('ROOM_BINDING_PAUSED')
+          if (current.state !== 'active') refuse(current.state === 'detached' ? 'ROOM_BINDING_DETACHED' : 'ROOM_BINDING_PAUSED')
           if (current.connectionId !== input.connectionId || current.executionHostId !== input.executionHostId || current.agentSessionId !== input.agentSessionId || current.externalConversationId !== input.externalConversationId || !equal(current.scope, input.scope) || !equal(current.inputTarget, input.inputTarget) || current.sourceCheckpoints.some(c => !equal(c.source, input.expectedSource))) refuse('ROOM_BINDING_MAPPING_CONFLICT')
           return this.finish({ operationId: input.operationId, action: 'bind', state: 'applied', binding: current, reused: true })
         }
         this.conflicts(input, input.bindingId)
         const binding: RoomBinding = { bindingId: input.bindingId, revision: 1, state: 'active', connectionId: input.connectionId, application: connection.config.application, externalConversationId: input.externalConversationId, scope: input.scope, ...(input.inputTarget ? { inputTarget: input.inputTarget } : {}), executionHostId: input.executionHostId, agentSessionId: input.agentSessionId, regionAnchor: input.regionAnchor, ...cut, authorizedBy: authority }
         this.writeBinding(binding)
-        return this.finish({ operationId: input.operationId, action: 'bind', state: 'applied', binding })
+        const notices = this.notices(input.operationId, [{ binding, event: 'connected' }])
+        return this.finish({ operationId: input.operationId, action: 'bind', state: 'applied', binding, ...(notices ? { notices } : {}) })
       })
     })
   }
@@ -217,27 +239,54 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
         const saved = this.saved(input.operationId)!.operation
         if (saved.state !== 'preparing') return saved
         const connection = this.connection(input), current = this.readCurrent(input.bindingId)
-        if (!current || current.revision !== input.expectedRevision) refuse('ROOM_BINDING_REVISION_CONFLICT')
+        if (!current || current.state === 'detached' || current.revision !== input.expectedRevision) refuse('ROOM_BINDING_REVISION_CONFLICT')
         this.conflicts(input, input.bindingId)
         const { inputTarget: _previousInputTarget, ...previous } = current
         const binding: RoomBinding = { ...previous, revision: current.revision + 1, state: 'active', connectionId: input.connectionId, application: connection.config.application, externalConversationId: input.externalConversationId, scope: input.scope, ...(input.inputTarget ? { inputTarget: input.inputTarget } : {}), executionHostId: input.executionHostId, agentSessionId: input.agentSessionId, regionAnchor: input.regionAnchor, ...cut, authorizedBy: authority }
         this.writeBinding(binding)
-        return this.finish({ operationId: input.operationId, action: 'relink', state: 'applied', binding })
+        this.carryGrants(current, binding)
+        const sameRoute = equal(current.application, binding.application) && current.externalConversationId === binding.externalConversationId && current.agentSessionId === binding.agentSessionId && current.executionHostId === binding.executionHostId
+        const notices = this.notices(input.operationId, sameRoute ? [{ binding, event: current.state === 'paused' ? 'resumed' : 'updated' }] : [{ binding: current, event: 'disconnected' }, { binding, event: 'connected' }])
+        return this.finish({ operationId: input.operationId, action: 'relink', state: 'applied', binding, ...(notices ? { notices } : {}) })
       })
     })
   }
-  async pause(value: RoomBindingPauseInput, context: RoomBindingCallContext): Promise<RoomBindingOperation> {
-    return this.operate('pause', value, context, async (raw, authority) => {
+  async resume(value: RoomBindingPauseInput, context: RoomBindingCallContext): Promise<RoomBindingOperation> {
+    return this.operate('resume', value, context, async raw => {
+      const input = raw as RoomBindingPauseInput, previous = this.readCurrent(input.bindingId)
+      if (!previous || previous.state !== 'paused' || previous.revision !== input.expectedRevision) refuse('ROOM_BINDING_REVISION_CONFLICT')
+      const cut = await this.cut({ ...previous, expectedSource: previous.sourceCheckpoints[0]!.source })
+      await context.assertCurrent?.()
+      return this.transaction(() => {
+        const saved = this.saved(input.operationId)!.operation
+        if (saved.state !== 'preparing') return saved
+        const current = this.readCurrent(input.bindingId)
+        if (!current || current.state !== 'paused' || current.revision !== input.expectedRevision) refuse('ROOM_BINDING_REVISION_CONFLICT')
+        const connection = this.options.connections.readConfiguration(current.connectionId)
+        if (!connection?.config.enabled || !equal(connection.config.application, current.application)) refuse('ROOM_BINDING_CONNECTION_UNAVAILABLE')
+        const binding: RoomBinding = { ...current, state: 'active', revision: current.revision + 1, ...cut }
+        this.writeBinding(binding); this.carryGrants(current, binding)
+        const notices = this.notices(input.operationId, [{ binding, event: 'resumed' }])
+        return this.finish({ operationId: input.operationId, action: 'resume', state: 'applied', binding, ...(notices ? { notices } : {}) })
+      })
+    })
+  }
+  async pause(value: RoomBindingPauseInput, context: RoomBindingCallContext): Promise<RoomBindingOperation> { return this.end('pause', value, context) }
+  async detach(value: RoomBindingPauseInput, context: RoomBindingCallContext): Promise<RoomBindingOperation> { return this.end('detach', value, context) }
+  private async end(action: 'pause' | 'detach', value: RoomBindingPauseInput, context: RoomBindingCallContext): Promise<RoomBindingOperation> {
+    return this.operate(action, value, context, async raw => {
       const input = raw as RoomBindingPauseInput
       await context.assertCurrent?.()
       return this.transaction(() => {
         const saved = this.saved(input.operationId)!.operation
         if (saved.state !== 'preparing') return saved
         const current = this.readCurrent(input.bindingId)
-        if (!current || current.revision !== input.expectedRevision) refuse('ROOM_BINDING_REVISION_CONFLICT')
-        const binding: RoomBinding = { ...current, state: 'paused', revision: current.revision + 1 }
+        if (!current || current.state === 'detached' || current.revision !== input.expectedRevision) refuse('ROOM_BINDING_REVISION_CONFLICT')
+        const binding: RoomBinding = { ...current, state: action === 'pause' ? 'paused' : 'detached', revision: current.revision + 1 }
         this.writeBinding(binding)
-        return this.finish({ operationId: input.operationId, action: 'pause', state: 'applied', binding })
+        if (action === 'pause') this.carryGrants(current, binding)
+        const notices = this.notices(input.operationId, [{ binding, event: action === 'pause' ? 'paused' : 'disconnected' }])
+        return this.finish({ operationId: input.operationId, action, state: 'applied', binding, ...(notices ? { notices } : {}) })
       })
     })
   }
