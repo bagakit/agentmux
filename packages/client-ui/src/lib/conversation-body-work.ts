@@ -1,5 +1,6 @@
 import { observeVisibleWork } from './use-visible-work.js'
 import { markProgrammaticReadingScroll } from './reading-scroll.js'
+import { selectedConversationReadingNode } from './conversation-reading-anchor.js'
 
 /** Host follow policy is read-only here. No layout event grants a reading intent. */
 export type ConversationReadingGeometry = {
@@ -116,6 +117,15 @@ export class ConversationBodyWork {
     const viewport = this.viewport
     if (!viewport) return
     const bounds = viewport.getBoundingClientRect()
+    const selected = this.root && selectedConversationReadingNode(this.root, '[data-conversation-layout-key]', shell => {
+      const rect = conversationReadingNode(shell)?.getBoundingClientRect()
+      return Boolean(rect && rect.height > 0 && rect.bottom > bounds.top && rect.top < bounds.bottom)
+    }, () => this.near)
+    const selectedNode = selected && conversationReadingNode(selected)
+    const selectedRect = selectedNode?.getBoundingClientRect()
+    if (selectedNode && selectedRect && selectedRect.height > 0 && selectedRect.bottom > bounds.top && selectedRect.top < bounds.bottom) {
+      this.anchor = { node: selectedNode, viewport, offset: selectedRect.top - bounds.top }; this.anchorCaptured = true; return
+    }
     let first: Anchor | null = null
     for (const shell of this.near) {
       if (!this.shells.has(shell)) continue
