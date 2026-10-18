@@ -44,12 +44,13 @@ beforeEach(() => {
   vi.spyOn(api.sessions, 'historyPage').mockResolvedValue({ agentSessionId: session.id,
     source: { providerId: 'codex', nativeSessionId: 'workspace-native' }, items: [], nextCursor: null })
   vi.spyOn(api.sessions, 'observeHistory').mockResolvedValue({ source: { providerId: 'codex', nativeSessionId: 'workspace-native' }, dispose() {} })
+  vi.spyOn(api.sessions, 'messageEvents').mockImplementation(async (reference, query) => notificationEvents(reference, query))
   vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValue(new Error('Reading must not dispatch input'))
   vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   vi.spyOn(api.continuousProgress, 'list').mockResolvedValue([])
   Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() })
   useAppStore.setState({ timelines: {}, noticeReadReceipts: {}, agentComposerHistory: {}, agentSteerQueues: {},
-    agentComposerDrafts: { [session.id]: 'Keep my draft' }, agentSteerInFlight: {} })
+    agentComposerDrafts: { [session.id]: 'Keep my draft' }, agentSteerInFlight: {}, mailboxNotificationIntents: {}, mailboxNotificationFeedback: {}, mailboxNotificationHistory: {} })
 })
 
 it('validates the native scene through the original Core mailbox codec, including its launch receipt', () => {
@@ -373,18 +374,18 @@ it('manually notifies the original MID through the production Composer and keeps
   await received()
   const original = notificationOriginal()
   expect(panel().textContent).toContain('Notification unconfirmed')
-  await click(panel().querySelector('[aria-label="Notify now"]'))
+  await click(panel().querySelector('[data-mailbox-notification-action="notify"]'))
   expect(notify).toHaveBeenCalledTimes(1)
   const [reference, mid, operation] = notify.mock.calls[0]!
   expect(reference).toEqual({ hostId: 'local', agentSessionId: session.id }); expect(mid).toBe(original.envelope.messageId)
   expect(operation).toBeTruthy(); expect(operation).not.toBe(original.notification.notificationId)
-  expect(panel().textContent).toContain('This notification: submitted'); expect(panel().textContent).toContain('Earlier notification unconfirmed'); expect(panel().textContent).not.toContain('Agent has read')
+  expect(panel().textContent).toContain('This notification: submitted'); expect(panel().textContent).toContain('Other notification unconfirmed'); expect(panel().textContent).not.toContain('Agent has read')
   await click(panel().querySelector('[data-record-key="a2a:manual-original"]'))
   expect(panel().querySelector('.log-turn__body')?.textContent).toContain(original.envelope.body)
   expect(panel().querySelector('[data-notification-operation]')?.getAttribute('data-notification-operation')).toBe(operation)
   await click(panel().querySelector('[id$="-user-tab"]')); await click(panel().querySelector('[id$="-agents-tab"]'))
   expect(panel().querySelector('[data-notification-operation]')?.getAttribute('data-notification-operation')).toBe(operation)
-  await click(panel().querySelector('[aria-label="Notify now"]'))
+  await click(panel().querySelector('[data-mailbox-notification-action="notify"]'))
   expect(notify).toHaveBeenCalledTimes(2); expect(notify.mock.calls[1]![2]).not.toBe(operation)
   expect(dom.draft()).toBe('Keep my draft'); expect(api.sessions.submitPrompt).not.toHaveBeenCalled()
   expect(api.ui.writeClipboardText).not.toHaveBeenCalled()
@@ -398,10 +399,10 @@ it('keeps the original uncertain action and refreshes only its exact input recei
       intent: { run: key.expectedRun, execution: 'immediate', admissionIntent: { kind: 'manual-actor', expectedRun: key.expectedRun },
         prompt: 'Original Core reference notice', message: { systemContext: 'Original Core reference notice', a2aNotificationId: key.kind === 'prompt' ? key.submissionId : '' } } }
   } as never }))
-  await received(); await click(panel().querySelector('[aria-label="Notify now"]'))
+  await received(); await click(panel().querySelector('[data-mailbox-notification-action="notify"]'))
   const operation = notify.mock.calls[0]![2]
-  expect(panel().querySelector<HTMLButtonElement>('[aria-label="Notify now"]')?.disabled).toBe(true)
-  await click(panel().querySelector('[aria-label="Notify now"]')); expect(notify).toHaveBeenCalledTimes(1)
+  expect(panel().querySelector<HTMLButtonElement>('[data-mailbox-notification-action="notify"]')?.getAttribute('aria-disabled')).toBe('true')
+  await click(panel().querySelector('[data-mailbox-notification-action="notify"]')); expect(notify).toHaveBeenCalledTimes(1)
   await act(async () => resolve(notificationReceipt(operation, 'unconfirmed')))
   await click(panel().querySelector('[aria-label="Refresh receipt"]'))
   expect(inspect).toHaveBeenCalledExactlyOnceWith({ hostId: 'local', agentSessionId: session.id }, 'manual-original', notificationKey(operation))
@@ -416,7 +417,7 @@ it('retains a lost notification response and refuses a receipt from another inpu
       intent: { run: key.expectedRun, execution: 'immediate', admissionIntent: { kind: 'manual-actor', expectedRun: key.expectedRun },
         prompt: 'Original Core reference notice', message: { systemContext: 'Original Core reference notice', a2aNotificationId: 'unrelated-operation' } } }
   } as never }))
-  await received(); await click(panel().querySelector('[aria-label="Notify now"]'))
+  await received(); await click(panel().querySelector('[data-mailbox-notification-action="notify"]'))
   const operation = notify.mock.calls[0]![2]
   expect(panel().textContent).toContain('Original Host response lost')
   await click(panel().querySelector('[aria-label="Refresh receipt"]'))
@@ -435,7 +436,7 @@ it.each(['host', 'message', 'operation', 'recipient-run'] as const)('keeps notif
     if (mismatch === 'recipient-run') receipt.notification.key.expectedRun = { runId: 'another-run' }
     return receipt
   })
-  await received(); await click(panel().querySelector('[aria-label="Notify now"]'))
+  await received(); await click(panel().querySelector('[data-mailbox-notification-action="notify"]'))
   expect(panel().textContent).toContain('This notification: unconfirmed')
   expect(panel().textContent).toContain('does not match this original notification')
   expect(panel().textContent).not.toContain('This notification: submitted')
@@ -450,15 +451,15 @@ it('uses the Core whole-input refusal fact when refreshing an original notificat
         admissionIntent: { kind: 'manual-actor', expectedRun: key.expectedRun }, plan: { kind: 'single-phase', data: 'original' },
         prompt: 'Original Core reference notice', message: { systemContext: 'Original Core reference notice', a2aNotificationId: key.kind === 'prompt' ? key.submissionId : '' } } }
   } as never }))
-  await received(); await click(panel().querySelector('[aria-label="Notify now"]')); await click(panel().querySelector('[aria-label="Refresh receipt"]'))
+  await received(); await click(panel().querySelector('[data-mailbox-notification-action="notify"]')); await click(panel().querySelector('[aria-label="Refresh receipt"]'))
   expect(panel().textContent).toContain('This notification: not applied')
   expect(api.sessions.notifyMessage).toHaveBeenCalledTimes(1)
 })
 
 it('uses a newer receipt for the same notification while keeping an earlier independent notification distinguishable', async () => {
   const notify = vi.spyOn(api.sessions, 'notifyMessage').mockImplementation(async (_reference, _mid, operationId) => notificationReceipt(operationId))
-  await received(); await click(panel().querySelector('[aria-label="Notify now"]'))
-  expect(panel().textContent).toContain('Earlier notification unconfirmed')
+  await received(); await click(panel().querySelector('[data-mailbox-notification-action="notify"]'))
+  expect(panel().textContent).toContain('Other notification unconfirmed')
   const operationId = notify.mock.calls[0]![2]
   await journal.publish([{ ...notificationOriginal(), notification: { state: 'unconfirmed', notificationId: operationId, reason: 'Stale observation of the same notification' } }])
   await flush()
@@ -471,7 +472,7 @@ it('uses a newer receipt for the same notification while keeping an earlier inde
 
 it('adopts a later confirmed Core metadata receipt for the same locally unknown notification', async () => {
   const notify = vi.spyOn(api.sessions, 'notifyMessage').mockRejectedValue(new Error('Notification response lost'))
-  await received(); await click(panel().querySelector('[aria-label="Notify now"]'))
+  await received(); await click(panel().querySelector('[data-mailbox-notification-action="notify"]'))
   expect(panel().textContent).toContain('This notification: unconfirmed')
   const operationId = notify.mock.calls[0]![2]
   await journal.publish([{ ...notificationOriginal(), notification: { state: 'submitted', notificationId: operationId, key: notificationKey(operationId) } }]); await flush()
@@ -485,8 +486,202 @@ it('adopts a later confirmed Core metadata receipt for the same locally unknown 
 it('keeps an earlier inbox observation without inventing an earlier notification operation', async () => {
   vi.spyOn(api.sessions, 'notifyMessage').mockImplementation(async (_reference, _mid, operationId) => notificationReceipt(operationId))
   await received(); await journal.publish([{ ...notificationOriginal(), notification: { state: 'pending' } }]); await flush()
-  await click(panel().querySelector('[aria-label="Notify now"]'))
+  await click(panel().querySelector('[data-mailbox-notification-action="notify"]'))
   expect(panel().textContent).toContain('Prior inbox observation: awaiting notification')
-  expect(panel().textContent).not.toContain('Earlier notification')
+  expect(panel().textContent).not.toContain('Other notification')
   expect(panel().textContent).toContain('This notification: submitted')
+})
+
+
+function notificationEvents(reference: { hostId: string; agentSessionId: string }, query: import('../src/shared/contracts').SessionMessageEventsOptions = {},
+  events: import('@agentmux/core').AgentMuxMessageEvent[] = []) {
+  return { hostId: reference.hostId, participantSessionId: reference.agentSessionId, afterSequence: query.afterSequence ?? 0,
+    latest: query.latest ?? false, beforeSequence: query.beforeSequence ?? null, throughSequence: query.throughSequence ?? 100,
+    incarnation: query.incarnation ?? 'notification-journal', messageId: query.messageId ?? null, broadcastOperationId: null,
+    events, nextAfterSequence: null, nextBeforeSequence: null }
+}
+function notificationEvent(operationId: string, state: 'submitted' | 'not-applied' | 'unconfirmed', sequence = 40) {
+  const e = notificationOriginal().envelope
+  return { sequence, kind: 'a2a-notification-result' as const, at: null, notificationId: operationId, state,
+    ...(state === 'not-applied' ? { reason: 'Original input refused before admission' } : {}),
+    messages: [{ messageId: e.messageId, senderSessionId: e.senderSessionId!, recipientSessionId: e.recipientSessionId!, threadId: e.threadId, replyTo: e.replyTo }] }
+}
+const notifyAction = () => panel().querySelector<HTMLButtonElement>('[data-mailbox-notification-action="notify"]')!
+const receiptAction = (operation: string) => panel().querySelector<HTMLButtonElement>(`[data-notification-operation="${operation}"] [data-mailbox-notification-action="inspect"]`)!
+
+it('persists the original notification request identity and restores its receipt action without replay after a real Composer remount', async () => {
+  const notify = vi.spyOn(api.sessions, 'notifyMessage').mockRejectedValue(new Error('Response lost before intake can be confirmed'))
+  await received(); await click(notifyAction())
+  const operation = notify.mock.calls[0]![2]
+  const options = useAppStore.persist.getOptions(), saved = JSON.parse(JSON.stringify(options.partialize!(useAppStore.getState())))
+  expect(Object.values(saved.mailboxNotificationIntents)).toHaveLength(1)
+  expect(JSON.stringify(saved.mailboxNotificationIntents)).toContain(operation)
+  expect(JSON.stringify(saved.mailboxNotificationIntents)).not.toContain(notificationOriginal().envelope.body)
+  expect(saved.mailboxNotificationFeedback).toBeUndefined()
+  await dom.render(null)
+  useAppStore.setState({ mailboxNotificationIntents: {}, mailboxNotificationFeedback: {}, mailboxNotificationHistory: {} })
+  const merged = options.merge!(saved, useAppStore.getState()) as ReturnType<typeof useAppStore.getState>
+  useAppStore.setState(merged)
+  await received()
+  expect(receiptAction(operation)).toBeTruthy()
+  expect(panel().textContent).toContain('receipt not checked')
+  expect(notify).toHaveBeenCalledTimes(1)
+  vi.spyOn(api.sessions, 'inspectMessageNotification').mockResolvedValue({ record: null })
+  await click(receiptAction(operation))
+  expect(api.sessions.messageEvents).toHaveBeenCalledWith({ hostId: 'local', agentSessionId: session.id }, expect.objectContaining({ messageId: 'manual-original', latest: true, limit: 50 }))
+  expect(panel().textContent).not.toContain('not applied')
+  expect(receiptAction(operation)).toBeTruthy(); expect(notify).toHaveBeenCalledTimes(1)
+})
+
+it('offers an explicit Notify again and retains both unknown operations and their original read-only checks', async () => {
+  const notify = vi.spyOn(api.sessions, 'notifyMessage').mockRejectedValue(new Error('Original response lost'))
+  const inspect = vi.spyOn(api.sessions, 'inspectMessageNotification').mockResolvedValue({ record: null })
+  await received(); await click(notifyAction()); const first = notify.mock.calls[0]![2]
+  expect(notifyAction().textContent).toContain('Notify again')
+  expect(receiptAction(first)).toBeTruthy()
+  await click(notifyAction()); const second = notify.mock.calls[1]![2]
+  expect(first).not.toBe(second)
+  expect(panel().querySelectorAll('[data-notification-operation]')).toHaveLength(2)
+  expect(receiptAction(first)).toBeTruthy(); expect(receiptAction(second)).toBeTruthy()
+  await click(receiptAction(first))
+  expect(inspect).toHaveBeenCalledWith({ hostId: 'local', agentSessionId: session.id }, 'manual-original', notificationKey(first))
+  expect(notify).toHaveBeenCalledTimes(2); expect(dom.draft()).toBe('Keep my draft')
+})
+
+it('settles pending notification UI from its exact Core confirmation and keeps a later action independent of a late old response', async () => {
+  let resolve!: (result: ReturnType<typeof notificationReceipt>) => void
+  const notify = vi.spyOn(api.sessions, 'notifyMessage').mockImplementationOnce(() => new Promise(done => { resolve = done }))
+    .mockRejectedValue(new Error('Second action response lost'))
+  await received(); await click(notifyAction()); const first = notify.mock.calls[0]![2]
+  expect(panel().textContent).toContain('sending')
+  await journal.publish([{ ...notificationOriginal(), notification: { state: 'submitted', notificationId: first, key: notificationKey(first) } }]); await flush()
+  expect(panel().textContent).toContain('This notification: submitted'); expect(notifyAction().disabled).toBe(false)
+  await click(notifyAction()); const second = notify.mock.calls[1]![2]
+  await act(async () => resolve(notificationReceipt(first, 'unconfirmed'))); await flush()
+  expect(receiptAction(second)).toBeTruthy()
+  expect(panel().querySelector(`[data-notification-operation="${first}"]`)?.textContent).toContain('submitted')
+  expect(panel().querySelector(`[data-notification-operation="${second}"]`)?.textContent).toContain('unconfirmed')
+})
+
+it('reads a Core preclaim not-applied event even when no prompt input record exists', async () => {
+  const notify = vi.spyOn(api.sessions, 'notifyMessage').mockRejectedValue(new Error('Input was refused before claim'))
+  const inspect = vi.spyOn(api.sessions, 'inspectMessageNotification').mockResolvedValue({ record: null })
+  await received(); await click(notifyAction()); const operation = notify.mock.calls[0]![2]
+  vi.mocked(api.sessions.messageEvents).mockImplementation(async (reference, query) => notificationEvents(reference, query, [notificationEvent(operation, 'not-applied')]))
+  await click(receiptAction(operation))
+  expect(panel().textContent).toContain('This notification: not applied')
+  expect(panel().textContent).toContain('Original input refused before admission')
+  expect(notify).toHaveBeenCalledTimes(1)
+  expect(inspect.mock.results.every(result => result.type === 'return')).toBe(true)
+})
+
+it('retains original unknown receipts when a message event page belongs to another Host or MID', async () => {
+  const notify = vi.spyOn(api.sessions, 'notifyMessage').mockRejectedValue(new Error('Response lost'))
+  vi.spyOn(api.sessions, 'inspectMessageNotification').mockResolvedValue({ record: null })
+  await received(); await click(notifyAction()); const operation = notify.mock.calls[0]![2]
+  vi.mocked(api.sessions.messageEvents).mockImplementation(async (reference, query) => ({ ...notificationEvents(reference, query, [notificationEvent(operation, 'submitted')]), hostId: 'another-host' }))
+  await click(receiptAction(operation)); expect(panel().textContent).not.toContain('This notification: submitted')
+  vi.mocked(api.sessions.messageEvents).mockImplementation(async (reference, query) => ({ ...notificationEvents(reference, query, [notificationEvent(operation, 'submitted')]), messageId: 'another-mid' }))
+  await click(receiptAction(operation)); expect(panel().textContent).not.toContain('This notification: submitted')
+  expect(receiptAction(operation)).toBeTruthy(); expect(notify).toHaveBeenCalledTimes(1)
+})
+
+it('continues earlier notification receipts at the original journal boundary and retains a separate older operation', async () => {
+  const notify = vi.spyOn(api.sessions, 'notifyMessage').mockRejectedValue(new Error('Response lost'))
+  vi.spyOn(api.sessions, 'inspectMessageNotification').mockResolvedValue({ record: null })
+  await received(); await click(notifyAction()); const operation = notify.mock.calls[0]![2]
+  vi.mocked(api.sessions.messageEvents).mockImplementation(async (reference, query = {}) => query.beforeSequence === undefined
+    ? { ...notificationEvents(reference, query, [notificationEvent('later-independent-operation', 'unconfirmed', 60)]), nextBeforeSequence: 60 }
+    : notificationEvents(reference, query, [notificationEvent(operation, 'not-applied', 40)]))
+  await click(receiptAction(operation))
+  const earlier = [...panel().querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.includes('Read earlier receipts'))
+  await click(earlier)
+  expect(api.sessions.messageEvents).toHaveBeenLastCalledWith({ hostId: 'local', agentSessionId: session.id }, expect.objectContaining({ messageId: 'manual-original', beforeSequence: 60, throughSequence: 100, incarnation: 'notification-journal' }))
+  expect(panel().querySelector(`[data-notification-operation="${operation}"]`)?.textContent).toContain('not applied')
+  expect(notify).toHaveBeenCalledTimes(1)
+})
+
+it('shares one in-flight original notification across two mounted consumers of the same Session', async () => {
+  const notify = vi.spyOn(api.sessions, 'notifyMessage').mockImplementation(() => new Promise(() => {}))
+  journal.set([notificationOriginal()])
+  await dom.render(<><AgentSessionComposer sessionId={session.id} /><AgentSessionComposer sessionId={session.id} /></>)
+  for (const mailbox of dom.container.querySelectorAll<HTMLElement>('.composer-mailbox')) {
+    const event = new Event('toggle'); Object.defineProperty(event, 'newState', { value: 'open' })
+    await act(async () => mailbox.dispatchEvent(event)); await flush()
+    await click(mailbox.querySelector('[id$="-agents-tab"]')); await click(mailbox.querySelector('[id$="-inbox-tab"]'))
+  }
+  const buttons = [...dom.container.querySelectorAll<HTMLButtonElement>('[data-mailbox-notification-action="notify"]')]
+  expect(buttons).toHaveLength(2)
+  await act(async () => { buttons[0]!.click(); buttons[1]!.click() }); await flush()
+  expect(notify).toHaveBeenCalledTimes(1)
+  const ids = [...dom.container.querySelectorAll<HTMLElement>('[data-notification-operation]')].map(node => node.dataset.notificationOperation)
+  expect(ids).toHaveLength(2); expect(new Set(ids).size).toBe(1)
+})
+
+it('names the original Sent recipient rather than the mailbox owner in the notification action', async () => {
+  const message = { ...notificationOriginal(), envelope: { ...notificationOriginal().envelope, senderSessionId: session.id,
+    sender: { kind: 'agent-session' as const, agentSessionId: session.id }, recipientSessionId: 'other-recipient', recipientRunId: 'other-original-run',
+    recipient: { kind: 'agent-session' as const, agentSessionId: 'other-recipient' } } }
+  journal.set([message]); await open(); await click(panel().querySelector('[id$="-agents-tab"]')); await click(panel().querySelector('[id$="-outbox-tab"]'))
+  expect(notifyAction().getAttribute('aria-label')).toContain('other-recipient')
+  expect(notifyAction().title).toContain('other-recipient')
+  await click(panel().querySelector('[data-record-key="a2a:manual-original"]'))
+  expect(notifyAction().getAttribute('aria-label')).toContain('other-recipient')
+  expect(api.sessions.submitPrompt).not.toHaveBeenCalled()
+})
+
+it('captures the A2A Fill caret before reading the original body and maps it through later editing', async () => {
+  useAppStore.setState({ agentComposerDrafts: { [session.id]: 'left right' } })
+  await received()
+  const editor = dom.container.querySelector<HTMLElement>('[role="textbox"]')! as HTMLElement & { editor: import('@tiptap/core').Editor }
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  vi.mocked(api.sessions.readMessage).mockImplementationOnce(async (reference, messageId) => { await gate; return { hostId: reference.hostId, message: notificationOriginal() } })
+  await act(async () => editor.editor.commands.setTextSelection(5))
+  await click(panel().querySelector('[aria-label="填入草稿"]'))
+  await act(async () => { editor.editor.commands.setTextSelection(editor.editor.state.doc.content.size - 1); editor.editor.commands.insertContent(' + later edit') })
+  expect(dom.draft()).toBe('left right + later edit')
+  await act(async () => release()); await flush()
+  expect(dom.draft()).toBe('left ' + notificationOriginal().envelope.body + ' right + later edit')
+  await act(async () => { expect(editor.editor.commands.undo()).toBe(true) })
+  expect(dom.draft()).toBe('left right + later edit')
+  expect(api.sessions.submitPrompt).not.toHaveBeenCalled()
+})
+
+
+it('discovers earlier journal notifications without inventing a local human request or replaying the original message', async () => {
+  await received()
+  const history = panel().querySelector<HTMLDetailsElement>('.composer-mailbox__notification-journal')!
+  expect(history).toBeTruthy()
+  expect(api.sessions.messageEvents).not.toHaveBeenCalled()
+  vi.mocked(api.sessions.messageEvents).mockImplementation(async (reference, query) => notificationEvents(reference, query, [
+    notificationEvent('earlier-core-notification', 'not-applied', 30), notificationEvent('another-window-notification', 'unconfirmed', 40)
+  ]))
+  await act(async () => { history.open = true; history.dispatchEvent(new Event('toggle')) }); await flush()
+  expect(api.sessions.messageEvents).toHaveBeenCalledWith({ hostId: 'local', agentSessionId: session.id }, expect.objectContaining({ messageId: 'manual-original', latest: true, limit: 50 }))
+  expect(history.querySelector('[data-notification-history-operation="earlier-core-notification"]')?.textContent).toContain('not applied')
+  expect(history.querySelector('[data-notification-history-operation="another-window-notification"]')?.textContent).toContain('unconfirmed')
+  expect(useAppStore.getState().mailboxNotificationIntents).toEqual({})
+  expect(api.sessions.submitPrompt).not.toHaveBeenCalled()
+  expect(dom.draft()).toBe('Keep my draft')
+})
+
+
+it('keeps each operation earlier-receipt boundary when another notification refreshes the shared message history', async () => {
+  const notify = vi.spyOn(api.sessions, 'notifyMessage').mockRejectedValue(new Error('Response lost'))
+  vi.spyOn(api.sessions, 'inspectMessageNotification').mockResolvedValue({ record: null })
+  await received(); await click(notifyAction()); const first = notify.mock.calls[0]![2]
+  await click(notifyAction()); const second = notify.mock.calls[1]![2]
+  let latest = 0
+  vi.mocked(api.sessions.messageEvents).mockImplementation(async (reference, query = {}) => {
+    if (query.beforeSequence !== undefined) return notificationEvents(reference, query, [notificationEvent(first, 'not-applied', 40)])
+    latest++
+    return { ...notificationEvents(reference, { ...query, throughSequence: latest === 1 ? 100 : 200 }, [notificationEvent('independent-op', 'unconfirmed', latest === 1 ? 60 : 160)]), nextBeforeSequence: latest === 1 ? 60 : 160 }
+  })
+  await click(receiptAction(first)); await click(receiptAction(second))
+  const firstRecord = panel().querySelector(`[data-notification-operation="${first}"]`)!
+  await click(firstRecord.querySelector('[data-mailbox-notification-action="earlier"]'))
+  expect(api.sessions.messageEvents).toHaveBeenLastCalledWith({ hostId: 'local', agentSessionId: session.id }, expect.objectContaining({ beforeSequence: 60, throughSequence: 100, incarnation: 'notification-journal' }))
+  expect(firstRecord.textContent).toContain('not applied')
+  expect(notify).toHaveBeenCalledTimes(2)
 })

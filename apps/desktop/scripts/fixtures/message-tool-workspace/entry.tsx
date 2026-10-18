@@ -26,6 +26,13 @@ api.sessions.inspectMessageNotification = async (reference, messageId, key) => {
       admissionIntent: { kind: 'manual-actor', expectedRun: key.expectedRun }, prompt: 'Private original Core reference notification',
       message: { systemContext: 'Private original Core reference notification', a2aNotificationId: key.submissionId } } } } as never }
 }
+api.sessions.messageEvents = async (reference, query = {}) => {
+  calls.push({ action: 'notification-events', reference, query })
+  return { hostId: reference.hostId, participantSessionId: reference.agentSessionId, afterSequence: query.afterSequence ?? 0,
+    latest: query.latest ?? false, beforeSequence: query.beforeSequence ?? null, throughSequence: query.throughSequence ?? 0,
+    incarnation: 'private-notification-journal', messageId: query.messageId ?? null, broadcastOperationId: null,
+    events: [], nextAfterSequence: null, nextBeforeSequence: null }
+}
 const observers = new Set<(event: AgentSessionHistoryObservation) => void>()
 const readDispatches = api.sessions.dispatches
 let emptyViews = false
@@ -54,7 +61,7 @@ api.sessions.submitPrompt = async () => { calls.push({ action: 'dispatch' }); th
 api.continuousProgress.create = async () => { calls.push({ action: 'automation-create' }); throw new Error('Reading cannot create automation') }
 api.continuousProgress.action = async () => { calls.push({ action: 'automation-action' }); throw new Error('Reading cannot operate automation') }
 Object.assign(window, { messageWorkspace: {
-  seed(theme: 'dark' | 'light', tag: string, empty = false) {
+  seed(theme: 'dark' | 'light', tag: string, empty = false, retainNotificationIntents = false) {
     emptyViews = empty
     base.appearance(theme)
     const generation = base.mode('terminal')
@@ -67,7 +74,7 @@ Object.assign(window, { messageWorkspace: {
       flushSync(() => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === original.id ? available : session) })))
     }
     base.progress('inactive')
-    flushSync(() => useAppStore.setState({ timelines: {}, agentComposerDrafts: { [original.id]: '保留这份尚未发送的草稿。' },
+    flushSync(() => useAppStore.setState({ timelines: {}, mailboxNotificationIntents: retainNotificationIntents ? useAppStore.getState().mailboxNotificationIntents : {}, mailboxNotificationFeedback: {}, mailboxNotificationHistory: {}, agentComposerDrafts: { [original.id]: '保留这份尚未发送的草稿。' },
       agentSteerQueues: { [original.id]: [{ operationId: 'workspace-pending', runId: original.control.run.runId,
         text: '待发：确认消息边界后，再逐项完成设计核对。', status: 'queued', promptCondition: null,
         enqueuedAt: fixtureEpoch(0, 0, 5000), awaitingExplicitSend: true }] } }))
@@ -75,6 +82,8 @@ Object.assign(window, { messageWorkspace: {
     notificationKeys.clear()
     return { generation, ...a2a, journalWire, draft: '保留这份尚未发送的草稿。' }
   },
-  facts() { return { ...base.facts(), calls: [...calls], historyObservers: observers.size, progress: base.progressFacts() } },
+  async restore(theme: 'dark' | 'light', tag: string) { await useAppStore.persist.rehydrate(); return this.seed(theme, tag, false, true) },
+  facts() { return { ...base.facts(), notificationIntents: useAppStore.getState().mailboxNotificationIntents, calls: [...calls], historyObservers: observers.size, progress: base.progressFacts() } },
+  originalMessage: (messageId: string) => api.sessions.readMessage({ hostId: original.hostId, agentSessionId: original.id }, messageId),
   terminal: () => base.terminal()
 } })

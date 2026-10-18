@@ -5,10 +5,15 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
 const root = resolve(import.meta.dirname, '../../..'), exec = promisify(execFile)
-const base = join(root, '.tmp/a2a-manual-notify'), verified = join(base, 'verified.json')
+const recovery = process.argv.includes('--recovery')
+const base = join(root, recovery ? '.tmp/a2a-notification-recovery' : '.tmp/a2a-manual-notify'), verified = join(base, 'verified.json')
 const hash = value => createHash('sha256').update(value).digest('hex')
 const runtime = { node: process.version, platform: process.platform, arch: process.arch }
-const cases = [
+const cases = recovery ? [
+  ['renderer', null, 'candidate'],
+  ...['notification-intent-not-persisted', 'notification-history-replaced', 'notification-confirmation-still-busy', 'notification-refusal-event-ignored', 'a2a-fill-caret-captured-late'].map(name => ['renderer', name, 'mutation']),
+  ['renderer', null, 'restored']
+] : [
   ['renderer', null, 'candidate'], ['bridge', null, 'candidate'],
   ...['notify-original-mid-replaced', 'notify-action-id-reused', 'notify-refresh-replays', 'notify-unrelated-producer-ack'].map(name => ['renderer', name, 'mutation']),
   ...['notifyHost', 'notifyMid', 'notifyTrust', 'notifyInspectRun'].map(name => ['bridge', name, 'mutation']),
@@ -22,7 +27,7 @@ const sameFiles = async files => {
   return true
 }
 function activeInventory(kind, mutation, report, inventories) {
-  const count = kind === 'renderer' ? 25 : 1
+  const count = kind === 'renderer' ? 36 : 1
   const file = kind === 'renderer' ? 'apps/desktop/test/message-tool-workspace.test.tsx' : 'apps/desktop/test/a2a-message-data-bridge.test.tsx'
   assert.equal(report.testResults.length, 1); assert.equal(resolve(report.testResults[0].name), resolve(root, file))
   const inventory = report.testResults[0].assertionResults.map(test => ({ name: test.fullName, status: test.status })).sort((a, b) => a.name.localeCompare(b.name))

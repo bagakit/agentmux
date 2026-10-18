@@ -221,9 +221,9 @@ async function interactionStates(width, theme, original, before, geometry) {
 async function manualNotification(width, theme, original, before) {
   await choose('Agent messages'); await choose('Received')
   await waitFor(`${visiblePanel}.querySelectorAll('button[data-record-key^="a2a:"]').length===25`)
-  const selected = `${visiblePanel}.querySelector('.composer-mailbox__record:has([aria-label="Notify now"])')`
+  const selected = `${visiblePanel}.querySelector('.composer-mailbox__record:has([data-mailbox-notification-action="notify"])')`
   const mid = await evaluate(`${selected}.querySelector('[data-record-key]').dataset.recordKey.slice(4)`)
-  const target = `${selected}.querySelector('[aria-label="Notify now"]')`
+  const target = `${selected}.querySelector('[data-mailbox-notification-action="notify"]')`
   await evaluate(`${selected}.scrollIntoView({block:'nearest'})`)
   await frame(width, theme, 'notify-list')
   await click(target)
@@ -246,6 +246,92 @@ async function manualNotification(width, theme, original, before) {
   await originalSurfacePreserved(original, before)
   result.scenes.push({width,theme,mid,operationId,explicitNotification:true,observationOnlyRefresh:true,originalSurfacePreserved:true})
 }
+async function notificationRecovery(width, theme, original, before) {
+  await choose('Agent messages'); await choose('Received')
+  await waitFor(`${visiblePanel}.querySelectorAll('button[data-record-key^="a2a:"]').length===25`)
+  const selected = `${visiblePanel}.querySelector('.composer-mailbox__record:has([data-mailbox-notification-action="notify"])')`
+  const mid = await evaluate(`${selected}.querySelector('[data-record-key]').dataset.recordKey.slice(4)`)
+  await evaluate(`${selected}.scrollIntoView({block:'nearest'})`)
+  await layout({ secondary: true });
+  await frame(width, theme, 'recovery-list')
+  await click(`${selected}.querySelector('[data-mailbox-notification-action="notify"]')`)
+  await waitFor(`${selected}.textContent.includes('This notification: unconfirmed')`)
+  const operation = await evaluate(`${selected}.querySelector('[data-notification-operation]').dataset.notificationOperation`)
+  assert.equal(await evaluate(`${selected}.querySelector('[data-mailbox-notification-action="notify"]').textContent.includes('Notify again')`), true)
+  await layout({ secondary: true });
+  await frame(width, theme, 'recovery-unconfirmed')
+  await key('Escape', 'Escape', 27)
+  await waitFor(`!${panel}.matches(':popover-open')`)
+  assert.equal(await evaluate(`document.activeElement===${surface}.querySelector('.composer__mailbox')`), true)
+  await key('Enter', 'Enter', 13); await waitFor(`${panel}.matches(':popover-open')`)
+  await choose('Agent messages'); await choose('Received')
+  await click(`${visiblePanel}.querySelector('[data-record-key="a2a:${mid}"]')`)
+  await waitFor(`${visiblePanel}.querySelector('.log-turn__body')`)
+  assert.equal(await evaluate(`${visiblePanel}.querySelector('[data-notification-operation]').dataset.notificationOperation`), operation)
+  await click(`${visiblePanel}.querySelector('[data-mailbox-notification-action="notify"]')`)
+  await waitFor(`${visiblePanel}.querySelectorAll('[data-notification-operation]').length===2`)
+  const current = await evaluate(`${visiblePanel}.querySelector('[data-notification-operation]').dataset.notificationOperation`)
+  assert.notEqual(current, operation)
+  const history = `([...${visiblePanel}.querySelectorAll('summary')].find(n=>n.textContent.includes('Other notification attempts')))`
+  const latestSummary=`${visiblePanel}.querySelector('[data-notification-operation] > .composer-mailbox__notification-feedback > details > summary')`
+  await click(latestSummary)
+  await click(history)
+  const previous = `${visiblePanel}.querySelector('[data-notification-operation="${operation}"]')`
+  assert.equal(await evaluate(`${previous}.textContent.includes('unconfirmed')`), true)
+  await frame(width, theme, 'recovery-history')
+  const inspect = `${previous}.querySelector('[data-mailbox-notification-action="inspect"]')`
+  let reached = false
+  for (let index=0;index<40;index++) {
+    await key('Tab','Tab',9)
+    if (await evaluate(`document.activeElement===${inspect}`)) { reached=true;break }
+  }
+  assert.equal(reached,true,'Original receipt is reachable with actual Tab navigation')
+  assert.equal(await evaluate(`${inspect}.matches(':focus-visible')`),true)
+  await key('Enter','Enter',13)
+  await waitFor(`${previous}.textContent.includes('submitted')`)
+  const calls=await evaluate('messageWorkspace.facts().calls')
+  assert.equal(calls.filter(call=>call.action==='notify-reference').length,2)
+  assert.equal(calls.filter(call=>call.action==='inspect-notification').length,1)
+  assert.equal(calls.find(call=>call.action==='inspect-notification').query.key.submissionId,operation)
+  await frame(width, theme, 'recovery-checked')
+  await click(buttons('Back to Received')); await choose('Sent')
+  await waitFor(`${visiblePanel}.querySelector('[data-mailbox-notification-action="notify"]')`)
+  const sentRow=`${visiblePanel}.querySelector('.composer-mailbox__record:has([data-mailbox-notification-action="notify"])')`
+  const sentMid=await evaluate(`${sentRow}.querySelector('[data-record-key]').dataset.recordKey.slice(4)`)
+  const sentOriginal=await evaluate(`messageWorkspace.originalMessage(${JSON.stringify(sentMid)})`)
+  await click(`${sentRow}.querySelector('[data-record-key]')`)
+  await waitFor(`${visiblePanel}.querySelector('.log-turn__body')`)
+  const label=await evaluate(`${visiblePanel}.querySelector('[data-mailbox-notification-action="notify"]').getAttribute('aria-label')`)
+  const title=await evaluate(`${visiblePanel}.querySelector('[data-mailbox-notification-action="notify"]').title`)
+  assert.ok(label.includes(':'),'Sent notification names the recipient')
+  assert.ok(title.includes(original.hostId),'Sent notification keeps its exact Host')
+  assert.ok(title.includes(sentOriginal.message.envelope.recipientSessionId),'Sent notification names its original recipient ID')
+  assert.notEqual(sentOriginal.message.envelope.recipientSessionId,original.agentSessionId)
+  const sentLayout=await evaluate(`(()=>{const p=${visiblePanel},title=p.querySelector('.log-turn__title').getBoundingClientRect(),actions=p.querySelector('.log-turn__actions').getBoundingClientRect();return{titleBottom:title.bottom,actionsTop:actions.top}})()`)
+  assert.ok(sentLayout.actionsTop>=sentLayout.titleBottom-1,'Notification actions use their own row and retain the original author width')
+  await frame(width,theme,'recovery-sent')
+  await key('Escape','Escape',27)
+  await originalSurfacePreserved(original,before)
+  let reloadedIdentity = false
+  if (width===640) {
+    const loaded=new Promise(resolve=>win.webContents.once('did-finish-load',resolve))
+    win.webContents.reload(); await loaded
+    await waitFor('Boolean(window.messageWorkspace)')
+    assert.equal((await evaluate('messageWorkspace.facts().calls')).filter(call=>call.action==='notify-reference').length,0)
+    await evaluate(`messageWorkspace.restore(${JSON.stringify(theme)},${JSON.stringify(theme+'-'+width)})`)
+    await waitFor(`${surface}?.querySelector('.xterm')`)
+    await click(`${surface}.querySelector('.composer__mailbox')`); await waitFor(`${panel}.matches(':popover-open')`)
+    await choose('Agent messages'); await choose('Received')
+    await click(`${visiblePanel}.querySelector('[data-record-key="a2a:${mid}"]')`)
+    await waitFor(`${visiblePanel}.querySelector('[data-notification-operation="${operation}"]')`)
+    assert.ok(await evaluate(`${visiblePanel}.querySelector('[data-notification-operation="${current}"]')!==null`),'Reload retains both original operations')
+    assert.equal((await evaluate('messageWorkspace.facts().calls')).filter(call=>call.action==='notify-reference').length,0,'Reload does not replay')
+    reloadedIdentity=true
+    await key('Escape','Escape',27)
+  }
+  result.scenes.push({width,theme,mid,operationId:operation,explicitNotification:true,observationOnlyRefresh:true,
+    retainedUnknown:true,keyboardReceipt:true,sentRecipient:{label,title},reloadedIdentity,originalSurfacePreserved:true})
+}
 async function scenario(width, theme, short = false) {
   result.stage = { width, theme, short, action: 'seed' }
   await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width: width * 2 + 1, height: short ? 540 : 800, deviceScaleFactor: 1, mobile: false })
@@ -256,6 +342,7 @@ async function scenario(width, theme, short = false) {
   const before = await evaluate('({terminal:messageWorkspace.terminal(),facts:messageWorkspace.facts()})')
   await click(`${surface}.querySelector('.composer__mailbox')`)
   await waitFor(`${panel}.matches(':popover-open')`)
+  if (mode === 'notification-recovery') { await notificationRecovery(width, theme, original, before); return }
   if (mode === 'manual-notify') { await manualNotification(width, theme, original, before); return }
   await choose('Inputs')
   await waitFor(`${visiblePanel}.querySelectorAll('button[data-record-key]').length===5`)
@@ -391,7 +478,7 @@ app.whenReady().then(async () => {
     win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     await waitFor('Boolean(window.messageWorkspace)')
-    if (mode === 'manual-notify') { for (const [width, theme] of [[380,'dark'],[320,'dark'],[640,'light']]) await scenario(width, theme) }
+    if (mode === 'manual-notify' || mode === 'notification-recovery') { for (const [width, theme] of [[380,'dark'],[320,'dark'],[640,'light']]) await scenario(width, theme, mode === 'notification-recovery' && width === 320) }
     else if (mode === 'empty-mutation') await scenario(320, 'dark')
     else if (mode === 'empty-states') for (const theme of ['dark', 'light']) for (const width of [320, 380, 440]) await scenario(width, theme)
     else if (mode === 'density') await scenario(320, 'dark', true)
