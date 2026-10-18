@@ -112,7 +112,7 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
         if (event.key !== 'Escape' || event.nativeEvent.isComposing || event.keyCode === 229 || !picker.current?.open) return
         event.preventDefault(); event.stopPropagation(); picker.current.open = false; picker.current.querySelector('summary')?.focus()
       }}>
-        <summary aria-label="Choose tool icon"><ToolkitIcon icon={tool.icon} size={24} /></summary>
+        <summary aria-label="Choose tool icon"><ToolkitIcon icon={tool.icon} size={20} /><span>Icon</span></summary>
         <fieldset><legend>Tool icon</legend><div className="toolkit-icon-picker__grid">
           {TOOLKIT_ICON_IDS.map(icon => <label key={icon} data-selected={tool.icon === icon} title={toolkitIconLabels[icon]}>
             <input type="radio" name={`${uid}-icon`} value={icon} checked={tool.icon === icon} aria-label={toolkitIconLabels[icon]} onChange={() => onEdit({ icon })} />

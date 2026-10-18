@@ -74,7 +74,8 @@
 .toolkit-editor__name input:hover { border-color: var(--line); background: var(--surface-1); }
 .toolkit-editor__name input:focus { border-color: var(--focus-line); background: var(--surface-1); }
 .toolkit-icon-picker { flex: none; }
-.toolkit-icon-picker summary { display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid var(--line); border-radius: var(--radius); color: var(--green); background: var(--surface-1); cursor: pointer; list-style: none; }
+.toolkit-icon-picker summary { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-1); width: 44px; height: 44px; border: 1px solid var(--line); border-radius: var(--radius); color: var(--green); background: var(--surface-1); cursor: pointer; list-style: none; }
+.toolkit-icon-picker summary > span { color: var(--text-2); font-size: var(--fs-meta); line-height: 1; }
 .toolkit-icon-picker summary::-webkit-details-marker { display: none; }
 .toolkit-icon-picker fieldset { margin: var(--sp-3) 0 0; padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius); }
 .toolkit-icon-picker legend { color: var(--text-3); font-size: var(--fs-meta); }
