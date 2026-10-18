@@ -3,17 +3,18 @@ import { fixtureEpoch as _newTailFixtureEpoch, fixtureIso as _newTailFixtureIso,
 import { act, type ReactNode } from 'react'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentMuxClient, AgentMuxFileAgentSessionStore, type AgentSessionHistoryPage, type AgentMuxStoredAgentSession } from '@agentmux/core'
-import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
+import { activityReadingProps } from './helpers/activity-reading-props'
+import { desktopConversationReadBridge } from './helpers/conversation-read-bridge'
 
 // Keep the real SessionPane, ActivityView and shared image consumers; isolate unrelated paint/input.
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => <div data-original-terminal /> }))
@@ -30,7 +31,8 @@ const reference = `data:image/png;base64,${png}`
 const prose = `Keep **selected original prose** and <image name=[Image #1] path="${_newTailFixturePath('native/clipboard.png')}">`
 const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private host' }], executors: {}, workspaces: [], appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
 const initial = useAppStore.getState()
-let home: string, store: AgentMuxFileAgentSessionStore, client: AgentMuxClient, originalStore: Buffer
+let home: string, store: AgentMuxFileAgentSessionStore, client: AgentMuxClient, originalStore: readonly unknown[]
+const bridgeCloses: Array<() => unknown | Promise<unknown>> = []
 let host: HTMLDivElement, root: Root, page: AgentSessionHistoryPage
 let guards: ReturnType<typeof vi.spyOn>[]
 
@@ -49,15 +51,16 @@ beforeEach(async () => {
     expect(target).toEqual({ hostId: 'local', agentSessionId: sid })
     return client.sessionHistoryResource(target.agentSessionId, request)
   })
-  vi.spyOn(api.sessions, 'historySources').mockImplementation(() => client.sessionHistorySources())
+  vi.spyOn(api.sessions, 'historySources').mockImplementation(async () => ({ sources: await client.sessionHistorySources(), warnings: [] }))
   vi.spyOn(api.sessions, 'timeline').mockImplementation(target => client.sessionTimeline(target.agentSessionId))
-  vi.spyOn(api.sessions, 'observeHistory').mockImplementation(async () => ({ source: page.source, dispose() {} }))
+  await desktopConversationReadBridge({ root: home, client }, bridgeCloses)
   host = document.createElement('div'); document.body.append(host); root = createClientUiRoot(host)
 })
 afterEach(async () => {
   await act(async () => root.unmount()); host.remove()
   expect(guards.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0, 0])
-  expect(await readFile(join(home, 'sessions.json'))).toEqual(originalStore)
+  expect(await store.load()).toEqual(originalStore)
+  for (const close of bridgeCloses.splice(0).reverse()) await close()
   await client.dispose(); await rm(home, { recursive: true }); useAppStore.setState(initial, true)
   vi.restoreAllMocks(); vi.unstubAllGlobals(); window.getSelection()?.removeAllRanges()
 })
@@ -76,16 +79,19 @@ async function seed(providerId: 'codex' | 'claude', retired = false) {
       stopOperation: { daemonInstance: 'private-unconnected', operationKey: 'retire', runId: control.run.runId } }
     await store.reserveLifecycle(reservation); await store.commitLifecycle(reservation, null)
   }
-  originalStore = await readFile(join(home, 'sessions.json'))
+  originalStore = await store.load()
   page = await client.sessionHistoryPage(sid)
-  expect(page.items).toHaveLength(1); expect(page.items[0]!.contentParts[1]).toEqual({ kind: 'resource', resourceType: 'image', reference })
+  expect(page.items).toHaveLength(1); expect(page.items[0]!.contentParts[1]).toEqual({ kind: 'resource', resourceType: 'image', reference, contentEligibility: 'unconfirmed' })
   const session: Extract<SessionSnapshot, { kind: 'agent' }> = { id: sid, kind: 'agent', hostId: 'local', workspacePath: stored.workspacePath, label: 'Original Agent', providerId, executorId: providerId, agentSessionUpdatedAt: _newTailFixtureEpoch(0, 0, 1), promptSubmissionPredecessor: null, createdAt: _newTailFixtureEpoch(0, 0, 1), updatedAt: _newTailFixtureEpoch(0, 0, 1), processState: 'running', status: { state: 'running', source: 'run-process', observedAt: _newTailFixtureEpoch(0, 0, 1) }, latestOutputBytes: 0,
     capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' }, control }
   useAppStore.setState({ config: { ...config, workspaces: [{ id: 'ws', name: 'Private project', hostId: 'local', path: stored.workspacePath, kind: 'folder' }] }, sessions: retired ? [] : [session], pendingAgentLaunches: {}, recoveryCandidates: [], runtimeOwnershipWarnings: [], viewModes: { [sid]: 'activity' }, timelines: { [sid]: await client.sessionTimeline(sid) }, agentNames: {}, agentSteerQueues: {} })
 }
 async function render(node: ReactNode) {
   await act(async () => root.render(node))
-  await flush()
+  await vi.waitFor(async () => {
+    await act(async () => { await Promise.resolve() })
+    expect(host.querySelector('[data-native-record-id="original-image-record"]'), host.textContent ?? '').not.toBeNull()
+  })
 }
 async function flush() {
   for (let n = 0; n < 6; n++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
@@ -102,9 +108,15 @@ function assertImage() {
   expect(host.textContent).not.toContain(png)
   expect(api.sessions.historyResource).toHaveBeenCalledExactlyOnceWith({ hostId: 'local', agentSessionId: sid }, expectedRequest())
 }
+async function showOriginalImageBody() {
+  const show = host.querySelector<HTMLButtonElement>('[data-native-record-id="original-image-record"] .conversation-progressive-body__placeholder button')
+  expect(show).not.toBeNull()
+  await act(async () => show!.click())
+  await flush()
+}
 
 it.each(['codex', 'claude'] as const)('the actual SessionPane reads %s images through original public Core history', async provider => {
-  await seed(provider); await render(pane()); assertImage()
+  await seed(provider); await render(pane()); await showOriginalImageBody(); assertImage()
   const draft = host.querySelector('textarea')!
   await act(async () => host.querySelector<HTMLButtonElement>('.md-conversation-image')!.click())
   expect(document.querySelector('[role="dialog"] .md-conversation-image__full')).not.toBeNull()
@@ -112,7 +124,7 @@ it.each(['codex', 'claude'] as const)('the actual SessionPane reads %s images th
   expect(document.querySelector('.md-conversation-image__full')).toBeNull(); expect(host.querySelector('textarea')).toBe(draft); expect(draft.value).toBe('Keep this unsent draft')
 })
 it('retired Session reading retains the exact original resource reader without restoring a Run', async () => {
-  await seed('codex', true); await render(pane()); assertImage()
+  await seed('codex', true); await render(pane()); await showOriginalImageBody(); assertImage()
   expect(useAppStore.getState().sessions).toHaveLength(0); expect(await store.loadRetiredAgentSessions()).toHaveLength(1)
 })
 it('an additional presentation reads from the original execution Host and Session', async () => {
@@ -122,7 +134,7 @@ it('an additional presentation reads from the original execution Host and Sessio
     presentations={[{ visible: true, active: true, surface: 'space', hostId: 'additional-image-location',
       reference: { displayWorkspaceId: 'ws', groupId: 'additional-group', tabId: 'additional-tab', regionId: 'additional-region' } }]}
     renderPresentationFrame={content => <div data-additional-image-location>{content}</div>} />)
-  assertImage(); expect(host.querySelector('[data-additional-image-location] img')).not.toBeNull()
+  await showOriginalImageBody(); assertImage(); expect(host.querySelector('[data-additional-image-location] img')).not.toBeNull()
 })
 it('copy retains the complete original prose, marker and image reference', async () => {
   await seed('codex')
@@ -134,13 +146,15 @@ it('copy retains the complete original prose, marker and image reference', async
 it('a native user supplement retains its own source, record, turn and content position', async () => {
   await seed('codex')
   const read = (input: Parameters<typeof api.sessions.historyResource>[1]) => api.sessions.historyResource({ hostId: 'local', agentSessionId: sid }, input)
-  await render(<ActivityView sessionId={sid} items={[]} capability="complete-events" userMessages={projectSessionUserMessages({ agentSessionId: sid, historyPage: page })} readHistoryResource={read} />)
+  await render(<ActivityView {...activityReadingProps({ control })} readHistoryResource={read} />)
+  await showOriginalImageBody()
   assertImage()
 })
 it('temporary read failure retries the same exact resource and preserves selected prose', async () => {
   await seed('codex')
   vi.mocked(api.sessions.historyResource).mockResolvedValueOnce({ agentSessionId: sid, ...expectedRequest(), reference, result: { status: 'unavailable', code: 'OFFLINE', message: 'Original resource temporarily unavailable.' } })
   await render(pane())
+  await showOriginalImageBody()
   const selected = host.querySelector('.log-turn__body strong')!, range = document.createRange(); range.selectNodeContents(selected); window.getSelection()!.addRange(range)
   expect(host.querySelector('img')).toBeNull(); expect(host.textContent).toContain('temporarily unavailable')
   await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Retry image"]')!.click())
@@ -150,8 +164,9 @@ it('temporary read failure retries the same exact resource and preserves selecte
 })
 it('wrong-resource and decode failures stay in the original card without replacing prose', async () => {
   await seed('codex')
-  vi.mocked(api.sessions.historyResource).mockResolvedValueOnce({ agentSessionId: sid, ...expectedRequest(), recordId: 'foreign-record', reference, result: { status: 'read', mimeType: 'image/png', dataBase64: png, byteLength: 70 } })
+  vi.mocked(api.sessions.historyResource).mockResolvedValueOnce({ agentSessionId: sid, ...expectedRequest(), recordId: 'foreign-record', reference, result: { status: 'read', mimeType: 'image/png', dataBase64: png, byteLength: 70, width: 1, height: 1 } })
   await render(pane())
+  await showOriginalImageBody()
   const selected = host.querySelector('.log-turn__body strong')!
   expect(host.querySelector('img')).toBeNull(); expect(host.textContent).toContain('another recorded resource')
   await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Retry image"]')!.click())
