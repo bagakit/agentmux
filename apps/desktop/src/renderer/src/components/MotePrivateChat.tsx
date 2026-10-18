@@ -73,18 +73,18 @@ function MotePrivateChatPanel({ scope, target, active, reference, onOpenPath }: 
     if (!minutes.trim() || !Number.isSafeInteger(idle) || idle <= 0 || !strangers.trim() || !Number.isSafeInteger(limit) || limit < 0) { setIssue('Enter a positive conversation interval and a whole message allowance of zero or more.'); return }
     if (draft.enabled && (!selected || !selected.config.enabled || connectionNeedsInitialSetup(selected))) { setIssue('Choose an enabled bot and finish any incomplete original setup before enabling private chat.'); return }
     if (draft.connection && !selected) { setIssue('The selected saved identity is unavailable. Choose another bot or clear the selection before saving.'); return }
-    const revision = edited.current, epoch = ++lifetime.current
+    const operationId = crypto.randomUUID(), revision = edited.current, epoch = ++lifetime.current
     setReading(false)
     writing.current = true; setSaving(true); setIssue(''); setNotice('')
     try {
       const operation = await submitMoteChatIntent({ method: 'space.mote.chat.configure', phase: 'not-dispatched', input: {
-        operationId: crypto.randomUUID(), target, expectedRevision: configuration?.revision ?? null, expectedConnectionRevision: selected?.revision ?? null,
+        operationId, target, expectedRevision: configuration?.revision ?? null, expectedConnectionRevision: selected?.revision ?? null,
         values: { ...draft, conversationIdleMs: idle, strangerMessageLimit: limit } } })
       if (lifetime.current !== epoch) return
       confirmed(operation)
       if (edited.current === revision) { useValues(operation.configuration.values); edited.current = 0 }
       else setNotice('Original settings saved. Your newer draft is kept.')
-    } catch (error) { if (lifetime.current === epoch) setIssue('Chat settings were not confirmed. Your draft and original request are kept. ' + presentError(error)) }
+    } catch (error) { if (lifetime.current === epoch) setIssue((useAppStore.getState().moteChatIntents[operationId] ? 'Chat settings were not confirmed. Your draft and original request are kept. ' : 'Chat settings were not saved. Your draft is kept. ') + presentError(error)) }
     finally { writing.current = false; setSaving(false) }
   }
   const openSettings = () => settings?.openMoteLark({ target, topicId: scope.topic.id, moteName: scope.topic.title })
