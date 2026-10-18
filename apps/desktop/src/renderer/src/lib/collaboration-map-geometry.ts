@@ -43,21 +43,48 @@ export function collaborationOverviewHitBounds(box: CollaborationLayoutBounds, z
 /** Keep the original obstacle-safe route; connect its terminal stems to visible overview marks.
  * This is a cheap projection at the camera layer, never a new Worker route or relationship. */
 export function collaborationOverviewPath(route: CollaborationPath, source: CollaborationLayoutBox, target: CollaborationLayoutBox, zoom: number, sourceRadius: number, targetRadius: number) {
-  const mark = (box: CollaborationLayoutBox, port: CollaborationLayoutPoint, radius: number) => {
-    const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
-    const length = Math.hypot(port.x - center.x, port.y - center.y)
-    const ratio = length ? Math.min(1, radius * collaborationOverviewScale(box, zoom) / length) : 0
-    return { x: center.x + (port.x - center.x) * ratio, y: center.y + (port.y - center.y) * ratio }
+  const split = (curve: readonly CollaborationLayoutPoint[], t: number) => {
+    const mix = (a: CollaborationLayoutPoint, b: CollaborationLayoutPoint) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t })
+    const [a, b, c, d] = curve as [CollaborationLayoutPoint, CollaborationLayoutPoint, CollaborationLayoutPoint, CollaborationLayoutPoint]
+    const ab = mix(a, b), bc = mix(b, c), cd = mix(c, d), abc = mix(ab, bc), bcd = mix(bc, cd), at = mix(abc, bcd)
+    return [[a, ab, abc, at], [at, bcd, cd, d]] as const
   }
-  const points = [...route.points]
-  if (source.kind === 'agent') {
-    const start = points[0]!, visible = mark(source, start, sourceRadius)
-    points.unshift(visible, visible, start)
+  const projectStart = (points: readonly CollaborationLayoutPoint[], box: CollaborationLayoutBox, radius: number): CollaborationLayoutPoint[] => {
+    if (box.kind !== 'agent') return [...points]
+    const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 }, visibleRadius = radius * collaborationOverviewScale(box, zoom)
+    const distance = (point: CollaborationLayoutPoint) => Math.hypot(point.x - center.x, point.y - center.y)
+    const port = points[0]!, length = distance(port)
+    if (length >= visibleRadius) {
+      const ratio = length ? visibleRadius / length : 0
+      const visible = { x: center.x + (port.x - center.x) * ratio, y: center.y + (port.y - center.y) * ratio }
+      return [visible, visible, port, ...points]
+    }
+    // A short top/bottom port (and even its 8px stem) can lie inside the
+    // overview avatar. Clip that hidden prefix along the original Bezier,
+    // preserving its outgoing tangent and every later obstacle detour.
+    const exit = (curve: readonly CollaborationLayoutPoint[], low = 0, high = 1, depth = 0): [number, number] | undefined => {
+      if (curve.every(point => distance(point) <= visibleRadius)) return
+      if (depth === 16) return distance(curve[3]!) > visibleRadius ? [low, high] : undefined
+      const [left, right] = split(curve, .5), middle = (low + high) / 2
+      return exit(left, low, middle, depth + 1) ?? exit(right, middle, high, depth + 1)
+    }
+    for (let index = 0; index < points.length - 1; index += 3) {
+      const curve = points.slice(index, index + 4), bracket = exit(curve)
+      if (!bracket) continue
+      let [low, high] = bracket
+      for (let iteration = 0; iteration < 24; iteration++) {
+        const middle = (low + high) / 2
+        if (distance(split(curve, middle)[1][0]!) <= visibleRadius) low = middle; else high = middle
+      }
+      return [...split(curve, (low + high) / 2)[1], ...points.slice(index + 4)]
+    }
+    // No part of this original curve leaves the visible endpoint body.
+    return []
   }
-  if (target.kind === 'agent') {
-    const end = points.at(-1)!, visible = mark(target, end, targetRadius)
-    points.push(end, visible, visible)
-  }
+  const from = projectStart(route.points, source, sourceRadius)
+  if (!from.length) return ''
+  const points = projectStart([...from].reverse(), target, targetRadius).reverse()
+  if (!points.length) return ''
   const path = [`M ${points[0]!.x} ${points[0]!.y}`]
   for (let index = 1; index < points.length; index += 3) path.push(`C ${points.slice(index, index + 3).map(point => `${point.x} ${point.y}`).join(' ')}`)
   return path.join(' ')
