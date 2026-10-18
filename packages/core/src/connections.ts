@@ -32,3 +32,6 @@ export * from './connection-request-trace.js'
 export * from './connection-diagnosis-contract.js'
 export * from './connection-diagnosis-codec.js'
 export { groupTarget, groupWindowLimit, deliveryFacts, deliveryMatches, formatGroupDiagnosis, retainGroupDiagnosis } from './connection-diagnosis.js'
+
+export * from './connection-deletion-contract.js'
+export * from './connection-deletion-codec.js'

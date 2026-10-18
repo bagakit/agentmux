@@ -1,3 +1,4 @@
+import { isConnectionDeletionMethod, parseConnectionDeletionParams } from './connection-deletion-codec.js'
 import { readConnectionDiagnosis } from './connection-diagnosis.js'
 import { parseFileImportParams, parseFileImportResult } from './public-rpc-file-import.js'
 import { runAgentMessageBroadcast, normalizeBroadcastInput } from './agent-message-broadcast.js'
@@ -602,6 +603,14 @@ export class AgentMuxRpcService {
       }
       const administration = { actor: caller ? { kind: 'agent' as const, id: caller.agentSessionId } : { kind: context.principal!.kind as 'user' | 'device', id: context.principal!.id }, assertCurrent: async () => { context.signal?.throwIfAborted(); await context.assertCurrent?.(); if (caller) await this.authenticated(context) } }
       if (caller) await assertAgentConnectionAccess(owner, method, input, caller.agentSessionId)
+      if (isConnectionDeletionMethod(method)) {
+        if (caller) throw new AgentMuxError('Deleting saved identities requires the original person or device.', 'CONTROL_PERMISSION_DENIED')
+        const result = method === 'connection.delete'
+          ? owner.delete ? await owner.delete(parseConnectionDeletionParams(method, params)) : undefined
+          : owner.inspectDeletion ? await owner.inspectDeletion(parseConnectionDeletionParams(method, params)) : undefined
+        if (!result) throw new AgentMuxError('Local identity removal is unavailable on the original Host. The identity and its conversations are retained.', 'CONTROL_UNAVAILABLE')
+        return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
+      }
       if (isConnectionServiceMethod(method)) {
         const service = owner.service
         if (!service) throw new AgentMuxError('Connector service policy is unavailable on this Host. Existing connection management and Agents remain available.', 'CONTROL_UNAVAILABLE')
