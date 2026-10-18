@@ -1,3 +1,4 @@
+import { parseConnectionDeletionParams, parseConnectionDeletionResult, type ConnectionDeleteInput, type ConnectionDeleteOperation } from '@agentmux/core/connections'
 import { ConnectionSetupHost } from './connection-setup.js'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
@@ -61,7 +62,7 @@ export class ConnectionHost implements ConnectionPort {
       if (!options.database && !options.databasePath) throw new Error('Missing original connection database.')
       if (!options.database && options.databasePath !== ':memory:') mkdirSync(dirname(options.databasePath!), { recursive: true, mode: 0o700 })
       this.database = options.database ?? (ownedDatabase = new DatabaseSync(options.databasePath!))
-      this.database.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS connection_configuration (connection_id TEXT PRIMARY KEY, config_json TEXT NOT NULL, revision INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS connection_configuration_operation (operation_id TEXT PRIMARY KEY, input_json TEXT NOT NULL, result_json TEXT NOT NULL); CREATE TABLE IF NOT EXISTS connection_room_link_operation (operation_id TEXT PRIMARY KEY, operation_json TEXT NOT NULL);')
+      this.database.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS connection_configuration (connection_id TEXT PRIMARY KEY, config_json TEXT NOT NULL, revision INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS connection_configuration_operation (operation_id TEXT PRIMARY KEY, input_json TEXT NOT NULL, result_json TEXT NOT NULL); CREATE TABLE IF NOT EXISTS connection_room_link_operation (operation_id TEXT PRIMARY KEY, operation_json TEXT NOT NULL); CREATE UNIQUE INDEX IF NOT EXISTS connection_deleted_identity ON connection_configuration_operation(json_extract(input_json,\'$.deletion.connectionId\')) WHERE json_extract(input_json,\'$.deletion.connectionId\') IS NOT NULL;')
     } catch {
       try { ownedDatabase?.close() } catch { /* Preserve the original initialization failure without exposing storage details. */ }
       throw new AgentMuxError('Connection configuration storage is unavailable. Existing Agents are retained.', 'CONNECTION_STORAGE_UNAVAILABLE')
@@ -151,10 +152,15 @@ export class ConnectionHost implements ConnectionPort {
   private storedOperation(operationId: string):
     | { kind: 'application'; input: ConnectionConfigureInput; operation: ConnectionOperation }
     | { kind: 'service'; input: ConnectionServiceConfigure; operation: ConnectionServiceOperation }
+    | { kind: 'deletion'; input: ConnectionDeleteInput; operation: ConnectionDeleteOperation }
     | null {
     const row = this.database.prepare('SELECT input_json, result_json FROM connection_configuration_operation WHERE operation_id = ?').get(operationId)
     if (!row) return null
     const raw = JSON.parse(row.input_json as string), result = JSON.parse(row.result_json as string)
+    if (Object.hasOwn(raw, 'deletion')) {
+      const input = parseConnectionDeletionParams('connection.delete', raw.deletion)
+      return { kind: 'deletion', input, operation: parseConnectionDeletionResult('connection.delete', result, input) }
+    }
     if (Object.hasOwn(raw, 'service')) {
       const input = parseConnectionServiceParams('connection.service.configure', raw)
       return { kind: 'service', input, operation: parseConnectionServiceResult('connection.service.configure', result, input) }
@@ -198,6 +204,33 @@ export class ConnectionHost implements ConnectionPort {
       return { connection: this.read(input.connectionId ?? saved?.operation.connection.config.connectionId ?? ''), operation: saved?.operation ?? null }
     })
   }
+  async inspectDeletion(value: { operationId: string }): Promise<{ operation: ConnectionDeleteOperation | null }> {
+    const input = parseConnectionDeletionParams('connection.delete.inspect', value)
+    return this.safe(() => {
+      const saved = this.storedOperation(input.operationId)
+      return { operation: saved?.kind === 'deletion' ? saved.operation : null }
+    })
+  }
+  async delete(value: ConnectionDeleteInput): Promise<ConnectionDeleteOperation> {
+    const input = parseConnectionDeletionParams('connection.delete', value)
+    return this.safe(() => {
+      this.database.exec('BEGIN IMMEDIATE')
+      try {
+        const saved = this.storedOperation(input.operationId)
+        if (saved) {
+          if (saved.kind !== 'deletion' || JSON.stringify(saved.input) !== JSON.stringify(input)) throw new AgentMuxError('This original operation has another identity or intent. Inspect its original receipt.', 'CONNECTION_OPERATION_CONFLICT')
+          this.database.exec('COMMIT'); return saved.operation
+        }
+        const current = this.readConfiguration(input.connectionId)
+        if (!current || current.revision !== input.expectedRevision) throw new AgentMuxError('This local identity changed or was removed before deletion. No identity was deleted by this operation; read the original identity before choosing another intent.', 'CONNECTION_REVISION_CONFLICT')
+        const operation: ConnectionDeleteOperation = { operationId: input.operationId, status: 'deleted', connectionId: input.connectionId, application: current.config.application, deletedRevision: current.revision }
+        this.database.prepare('DELETE FROM connection_configuration WHERE connection_id=? AND revision=?').run(input.connectionId, input.expectedRevision)
+        this.database.prepare('INSERT INTO connection_configuration_operation (operation_id,input_json,result_json) VALUES (?,?,?)').run(input.operationId, JSON.stringify({ deletion: input }), JSON.stringify(operation))
+        this.database.exec('COMMIT'); this.observations.delete(input.connectionId)
+        return operation
+      } catch (error) { try { this.database.exec('ROLLBACK') } catch { /* The same original deletion receipt remains the recovery target. */ } throw error }
+    })
+  }
   async configure(value: ConnectionConfigureInput): Promise<ConnectionOperation> {
     const input = parseConnectionParams('connection.configure', value)
     return this.safe(() => {
@@ -208,6 +241,7 @@ export class ConnectionHost implements ConnectionPort {
           if (saved.kind !== 'application' || JSON.stringify(saved.input) !== JSON.stringify(input)) throw new AgentMuxError('The original configuration operation has different input. Inspect it without replacing its identity.', 'CONNECTION_OPERATION_CONFLICT')
           this.database.exec('COMMIT'); return saved.operation
         }
+        if (this.database.prepare("SELECT 1 FROM connection_configuration_operation WHERE json_extract(input_json,'$.deletion.connectionId')=?").get(input.connection.connectionId)) throw new AgentMuxError('This original local identity was deleted. Connect the application with a new identity; its old receipts and conversations are retained.', 'CONNECTION_IDENTITY_DELETED')
         const current = this.read(input.connection.connectionId)
         if ((current?.revision ?? null) !== input.expectedRevision) throw new AgentMuxError('Connection configuration changed. Read the original connection before saving.', 'CONNECTION_REVISION_CONFLICT')
         if (current && (current.config.adapterId !== input.connection.adapterId || JSON.stringify(current.config.application) !== JSON.stringify(input.connection.application))) throw new AgentMuxError('An existing connection cannot be reassigned to another application. Create a new connection explicitly.', 'CONNECTION_IDENTITY_CONFLICT')

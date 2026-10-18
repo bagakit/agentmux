@@ -116,6 +116,8 @@ export async function createDesktopConnections(options: { directory: string; enc
         list: async input => (await ensure()).ingress!.list(input),
         authority: async input => (await ensure()).ingress!.authority(input)
       } satisfies import('@agentmux/core/connections').ConnectionIngressReadPort } : {}),
+      delete: async input => { const owner = await ensure(); const result = await owner.connections.delete(input); owner.receivers?.refresh(); owner.publication?.refresh(); return result },
+      inspectDeletion: async input => (await ensure()).connections.inspectDeletion(input),
       list: async () => (await ensure()).connections.list(),
       inspect: async input => (await ensure()).connections.inspect(input),
       configure: async input => { const owner = await ensure(); const result = await owner.connections.configure(input); owner.publication?.refresh(); owner.receivers?.refresh(); return result },
