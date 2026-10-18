@@ -27,10 +27,11 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
   const privateRoot=await fs.mkdtemp(path.join(os.tmpdir(),'amx-performance-ui-'))
   await fs.mkdir(evidence,{recursive:true})
   const compiled=path.join(evidence,'compiled'),inputs=new Map(),artifacts=[],cssInputs=[]
+  let nativeCleanupConfirmed = !tuiFixture
   const receipt={schema:'agentmux.performance-ui-native.v1',completed:false,captureScope,prepareOnly,cssMutant,evidence,privateRoot,processes:[],frames:[],rawInputs:[],
     actualApp:!prepareOnly,actualSettings:!prepareOnly,actualTerminalView:!prepareOnly,contextIsolation:true,officialOwnerQualification:false,aestheticReview:'not-performed',
     boundary:'Actual mounted product Renderer, original TerminalView input handler, ConfigOwner/ConfigStore and product isolated preload/registered Toolkit IPC. Explicit controlled Metrics DTO port and original preview Session facts; not official Toolkit CLI/Native execution or user performance.'}
-  if(captureScope==='attribution'||captureScope==='agent-cards'||captureScope==='epoch-peak'||captureScope==='diagnostic')await fs.writeFile(path.join(evidence,'capture-start.json'),JSON.stringify({privateRoot,captureScope,prepareOnly,startedAt:Date.now()})+'\n')
+  if(captureScope==='attribution'||captureScope==='agent-cards'||captureScope==='epoch-peak'||captureScope==='diagnostic'||tuiFixture)await fs.writeFile(path.join(evidence,'capture-start.json'),JSON.stringify({privateRoot,captureScope,prepareOnly,startedAt:Date.now()})+'\n')
   const bind=async file=>{const bytes=await fs.readFile(file),key=path.relative(root,file);if(inputs.has(key))assert.equal(sha(inputs.get(key)),sha(bytes),'实际输入构建漂移: '+key);else inputs.set(key,bytes);return bytes}
   try {
     for(const file of [configFile,path.join(desktop,'electron.vite.config.ts'),path.join(desktop,'scripts/fixtures/performance-panel/capture.mjs'),path.join(root,'package.json'),path.join(root,'pnpm-lock.yaml'),path.join(desktop,'package.json'),path.join(desktop,'scripts/probe-process.mjs'),
@@ -89,7 +90,7 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
       fixedSdkEntry=path.join(sdkDirectory,'package/dist/index.js')
       const sdk=await import(pathToFileURL(fixedSdkEntry).href)
       assert.equal(sdk.PROTOCOL_VERSION,manifest.product.protocol,'The actual private SDK matches the bound native artifact protocol')
-      receipt.sdkClosure={archive:path.relative(root,archive),archiveSHA256:sha(await bind(archive)),entry:path.relative(evidence,fixedSdkEntry),entrySHA256:sha(await fs.readFile(fixedSdkEntry)),actualProtocol:sdk.PROTOCOL_VERSION,manifestProtocol:manifest.product.protocol,boundary:tuiFixture?'Native TUI consumes the current public Core dist bundle. Its SDK archive and binary are hash-bound build inputs; this extracted SDK is only checked for protocol identity.':'Only this run uses its bound SDK archive; shared node_modules and product protocol checks remain unchanged.'}
+      receipt.sdkClosure={archive:path.relative(root,archive),archiveSHA256:sha(await bind(archive)),entry:path.relative(evidence,fixedSdkEntry),entrySHA256:sha(await fs.readFile(fixedSdkEntry)),actualProtocol:sdk.PROTOCOL_VERSION,manifestProtocol:manifest.product.protocol,boundary:tuiFixture?'Native TUI consumes the current public Core dist bundle. The verified private SDK owns only fixture Runtime activation and shutdown; its archive and native binary are hash-bound.':'Only this run uses its bound SDK archive; shared node_modules and product protocol checks remain unchanged.'}
     }
     await fs.symlink(path.join(desktop,'node_modules'),path.join(compiled,'node_modules'),'dir')
     // Core's createRequire(import.meta.url) also needs its native dependencies at runtime.
@@ -147,7 +148,6 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
       ...(captureScope==='buttons'?{css:{postcss:{plugins:[cssPlugin]}}}:{}),
       plugins:[bindRendererSource()],worker:{format:'es',plugins:()=>[bindRendererSource()]},
       build:{target:'esnext',outDir:path.join(compiled,'renderer'),sourcemap:false,emptyOutDir:false}})
-    if(tuiFixture)receipt.sdkClosure.boundary='The private Native TUI consumer uses current bundled Core dist; the verified SDK archive is retained as a build input, not a replacement module.'
     if(captureScope==='buttons'){
       assert.equal(cssInputs.length,4,'实际PostCSS owning规则四个非空唯一')
       assert.equal(cssInputs.filter(item=>item.mutated).length,cssMutant==='baseline'?0:2,'只有实际两处状态或焦点owning声明变异')
@@ -175,6 +175,7 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
       await fs.writeFile(path.join(evidence,phase+'-stderr.log'),stderr.join('\n')+'\n')
       receipt.processes.push({...process,phase})
       const rawFile=phase+'-render.json',rawBytes=await fs.readFile(path.join(evidence,rawFile));const raw=JSON.parse(rawBytes)
+      if(tuiFixture){nativeCleanupConfirmed=raw.native?.shutdown===true;receipt.nativeCleanupConfirmed=nativeCleanupConfirmed;assert.equal(nativeCleanupConfirmed,true,'The original private Native child shutdown must be confirmed')}
       receipt.rawInputs.push({phase,file:rawFile,bytes:rawBytes.length,sha256:sha(rawBytes)})
       receipt.frames.push(...raw.frames)
       assert.equal(process.exitCode,0,phase+': private product Renderer退出必须成功')
@@ -205,7 +206,7 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
     const collect=async directory=>{for(const entry of await fs.readdir(directory,{withFileTypes:true})){if(entry.isSymbolicLink())continue;const file=path.join(directory,entry.name);if(entry.isDirectory())await collect(file);else{const bytes=await fs.readFile(file);artifacts.push({file:path.relative(evidence,file),bytes:bytes.length,sha256:sha(bytes)})}}}
     await collect(compiled).catch(()=>{})
     receipt.compiled=artifacts;receipt.remainingPrivateProcesses=await listProbeProcesses(-1,privateRoot)
-    if(receipt.remainingPrivateProcesses.length===0){await fs.rm(privateRoot,{recursive:true,force:true});receipt.privateRootRemoved=true}else{receipt.privateRootRemoved=false;receipt.completed=false}
+    if(receipt.remainingPrivateProcesses.length===0&&nativeCleanupConfirmed){await fs.rm(privateRoot,{recursive:true,force:true});receipt.privateRootRemoved=true}else{receipt.privateRootRemoved=false;receipt.completed=false}
     await fs.writeFile(path.join(evidence,'receipt.json'),JSON.stringify(receipt,null,2)+'\n')
     console.log(JSON.stringify({completed:receipt.completed,evidence,sourceIdentity:receipt.sourceIdentity,frames:receipt.frames.length,failure:receipt.failure,drift:receipt.changedAfterCapture,remainingPrivateProcesses:receipt.remainingPrivateProcesses}))
   }
