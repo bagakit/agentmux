@@ -6,6 +6,8 @@
 
 常用入口：[Terminal 调用](#terminal-调用) · [Agent 调用与输入](#agent-调用与输入) · [原生对话读取](#原生对话读取) · [Runtime 边界](#runtime-边界)。
 
+系统用法直接阅读 [guides](guides/README.md)，也可用 `amux --skill`／`amux MODULE --skill` 按需读取同源内容。修改指南后运行 `pnpm generate:guides`，用 `pnpm check:guides` 核对生成结果；正文、共享片段和代码事实的维护边界见该目录说明。
+
 当前 Local Run 只由随包 [Darwin manifest](vendor/ctxmux/darwin-arm64/manifest.json) 与 [Linux manifest](vendor/ctxmux/linux-x64/manifest.json) 绑定的固定 CtxMux 产物持有。包内携带 exact-commit manifest、同一 SDK tarball 和 darwin-arm64 / linux-x64 binaries；开发期依赖只从这份 tarball 取得官方类型，构建再把同一 SDK 私有 bundle 进唯一 `CtxmuxRunAdapter`，不保留手写 wire 声明。公共 API 不导出 CtxMux SDK/wire 类型，发布后的 runtime 也不需要相邻仓库、外部 `@ctxmux/sdk`、全局 `ctxmux` 或运行时下载。
 
 Core 使用 Node 24+，包不设 OS 安装门，portable API 可独立使用；随包原生 Runtime 支持 macOS arm64 与 Linux x64。`ctxmux` / `ctxmuxd` 的 npm bin 按宿主选择固定原生产物；正常 npm 安装的 `postinstall` 先校验 manifest、字节数与 SHA-256，再恢复原生文件的执行位。校验所需的唯一合同随包携带，源码依赖安装与独立包安装均不要求先构建 Core。`--ignore-scripts` 会跳过这个必要安装步骤，Runtime 无法执行；请启用 lifecycle scripts 重新安装。安装脚本只处理包内固定产物，不访问网络、宿主配置或已有 Run。
