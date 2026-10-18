@@ -84,5 +84,5 @@ export async function handleDiscordInteraction(input: {
     try { submitted = answers(form.questions, interaction.data.components) } catch { return await rejected() }
     event = { kind: 'action', eventId: 'interaction:' + discordId(interaction.id), actor, externalConversationId: interaction.channel_id, sourceMessageId, actionRef, answers: submitted }
   } else return
-  await input.receive(event, () => callback({ type: 5, data: { flags: 64 } }))
+  await input.receive(event, () => callback({ type: 6 }))
 }
