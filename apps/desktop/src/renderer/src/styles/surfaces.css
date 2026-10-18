@@ -186,10 +186,10 @@
 
 @media (max-width: 560px) {
   .settings-page { display: flex; flex-direction: column; overflow: hidden; }
-  .settings-sidebar { flex: 0 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); padding: 34px var(--sp-4) var(--sp-4); border-right: 0; border-bottom: 1px solid var(--line-soft); }
+  .settings-sidebar { flex: 0 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .9fr); align-items: center; gap: var(--sp-3); padding: 34px var(--sp-4) var(--sp-4); border-right: 0; border-bottom: 1px solid var(--line-soft); }
   .settings-sidebar > header { grid-column: 1 / -1; padding: 0; }
   .settings-sidebar nav { display: none; }
-  .settings-section-picker { display: flex; width: 100%; white-space: normal; text-align: left; }
+  .settings-section-picker { display: flex; width: 100%; min-width: 0; white-space: normal; text-align: left; }
   .settings-search { height: 32px; margin: 0; }
   .settings-content { min-height: 0; flex: 1 1 auto; padding-top: 0; }
   .settings-content__header { position: relative; top: auto; padding: var(--sp-5) var(--sp-4); }
