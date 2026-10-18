@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
-import { readFileSync, realpathSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import path from 'node:path'
 
 /** Follow declared exports in this checkout, including public subpath patterns. */
-export function candidateResolve(root, specifier, { browser = false, source = false, onManifest } = {}) {
+export function candidateResolve(root, specifier, { browser = false, source = false, types = false, onManifest } = {}) {
   root = realpathSync(root)
   const [, name, ...parts] = specifier.split('/'), directory = path.join(root, 'packages', name)
   const manifestPath = realpathSync(path.join(directory, 'package.json'))
@@ -21,10 +21,14 @@ export function candidateResolve(root, specifier, { browser = false, source = fa
       })
     if (pattern) { const [before, after] = pattern.split('*'); wildcard = key.slice(before.length, key.length - after.length); entry = manifest.exports[pattern] }
   }
-  let target = typeof entry === 'string' ? entry : (browser || name === 'client-ui') && entry?.browser || entry?.import
+  let target = typeof entry === 'string' ? entry : types && entry?.types || (browser || name === 'client-ui') && entry?.browser || entry?.import
   assert.equal(typeof target, 'string', 'Missing declared candidate export: ' + specifier)
   if (wildcard !== undefined) target = target.replace('*', wildcard)
-  if (source && target.startsWith('./dist/')) target = target.replace(/^\.\/dist\/(?:src\/)?/u, './src/').replace(/\.js$/u, '.ts')
+  if (source && target.startsWith('./dist/')) {
+    const implementation = target.replace(/^\.\/dist\/(?:src\/)?/u, './src/').replace(/(?:\.d\.ts|\.js)$/u, '.ts')
+    // Generated-only exports retain the manifest's exact artifact in this checkout.
+    if (existsSync(path.join(directory, implementation))) target = implementation
+  }
   const file = realpathSync(path.join(directory, target))
   assert.ok(file.startsWith(root + path.sep), 'Candidate export escaped its checkout: ' + specifier)
   return file
