@@ -9,6 +9,7 @@ import { AgentCollaborationGraph, type CollaborationSelection } from '../src/ren
 import { agentContextForSession } from '../src/renderer/src/lib/focus-context'
 import { collaborationAgents, collaborationSubjectKey, type CollaborationAgent, type CollaborationArea, type CollaborationRelation } from '../src/renderer/src/lib/agent-collaboration'
 import { collaborationAgentNode } from '../src/renderer/src/lib/collaboration-presentation'
+import { CollaborationBoundsIndex, collaborationBoundsOverlap } from '../src/renderer/src/lib/collaboration-spatial-index'
 import * as engine from '../src/renderer/src/lib/collaboration-layout-engine'
 import type { CollaborationPulse } from '../src/renderer/src/lib/use-collaboration-reading'
 import { agentInformationPreview } from '../src/renderer/src/lib/agent-information-preview'
@@ -745,6 +746,36 @@ it('retains exact region context when reading a member with its original heading
   expect(label.querySelector('button')!.getAttribute('title')).toContain('Project')
   expect(Number.parseFloat(label.style.left)).toBeGreaterThanOrEqual(0)
   expect(Number.parseFloat(label.style.top) + Number.parseFloat(label.style.height)).toBeLessThanOrEqual(180)
+  expect(captured.nodes).toBe(before); expect(requests).toHaveLength(operations)
+})
+
+it('keeps projected region labels clear of original Agent hit targets through camera LOD', async () => {
+  const scene = scenario(24); await loaded(scene)
+  const area = renderedBox(JSON.stringify(['area', 'area-0'])) as Extract<engine.CollaborationLayoutBox, { kind: 'area' }>
+  const members = scene.areas[0]!.members.map(id => renderedBox(collaborationAgentNode('area-0', id)))
+  const distant = [...members].sort((a, b) => b.y - a.y)[0]!
+  const before = captured.nodes, operations = requests.length
+  const query = vi.spyOn(CollaborationBoundsIndex.prototype, 'query')
+  for (const [x, y, zoom, width, height] of [[-distant.x + 20, -distant.y + 52, 1, 420, 320], [-area.x * .12 + 40, -area.y * .12 + 60, .12, 640, 400]]) {
+    await viewport(x!, y!, width!, height!, zoom!)
+    const labels = [...dom.container.querySelectorAll<HTMLElement>('.collaboration-area__overview-label')]
+    expect(labels.some(label => label.dataset.areaId === area.id)).toBe(true)
+    const hits = captured.nodes.filter(node => node.type === 'agent').flatMap(node => {
+      const element = nodeElement(node.id)?.querySelector<HTMLElement>('.collaboration-agent')
+      if (!element) return []
+      const box = node.data.box as engine.CollaborationLayoutBox
+      const dot = element.querySelector<HTMLButtonElement>('.collaboration-agent__dot')
+      const size = dot ? Number.parseFloat(dot.style.width) * Number.parseFloat(element.style.getPropertyValue('--collaboration-mark-scale')) : undefined
+      const hit = size ? { x: box.x + (box.width - size) / 2, y: box.y + (box.height - size) / 2, width: size, height: size } : box
+      return { x: hit.x * zoom! + x!, y: hit.y * zoom! + y!, width: hit.width * zoom!, height: hit.height * zoom! }
+    })
+    expect(hits.length).toBeGreaterThan(0)
+    for (const label of labels) {
+      const rect = { x: Number.parseFloat(label.style.left), y: Number.parseFloat(label.style.top), width: Number.parseFloat(label.style.width), height: Number.parseFloat(label.style.height) }
+      expect(hits.some(hit => collaborationBoundsOverlap(rect, hit))).toBe(false)
+    }
+  }
+  expect(query).toHaveBeenCalled()
   expect(captured.nodes).toBe(before); expect(requests).toHaveLength(operations)
 })
 

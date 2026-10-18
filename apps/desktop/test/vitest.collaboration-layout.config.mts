@@ -40,7 +40,7 @@ const hash = (source: string) => createHash('sha256').update(source).digest('hex
 let loaded = false
 export default defineConfig({ plugins: [{ name: 'collaboration-layout-source-proof', enforce: 'pre', transform(source, id) {
   const path = relative(process.cwd(), id.split('?')[0]!)
-  if (!/^apps\/desktop\/src\/renderer\/src\/lib\/collaboration-layout(?:-engine|\.worker)\.ts$/u.test(path)) return
+  if (!/^apps\/desktop\/src\/renderer\/src\/lib\/collaboration-(?:layout(?:-engine|\.worker)|spatial-index)\.ts$/u.test(path)) return
   const applied = mutation && path.endsWith('/' + mutation.file)
   let code = source
   if (applied) {
