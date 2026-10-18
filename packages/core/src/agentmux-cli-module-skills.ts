@@ -291,6 +291,11 @@ Identify the original Host, Zone/workspace and literal path independently from t
 display Tab/Region. file read/ls access resources; file open/view access presentation. Opening
 does not save or overwrite a file. Inspect the original view and preserve unsaved user drafts.
 
+Import ordinary attachment bytes with file import at an exactly read absent destination; use its
+original resource, operation ID, byte length and SHA-256. This is separate from Session upload and
+never writes a Note draft. After unknown, read that same target; current bytes do not prove a lost
+operation receipt. Remote byte writes remain unsupported. Keep the source and never replay blindly.
+
 Pin file write/create to the original resource and observed revision; retain the original result. A save
 request is not a confirmed disk write. Partial results certify only their explicitly confirmed
 stages; unknown stages remain unconfirmed. Upload

@@ -1331,6 +1331,8 @@ export class WorkspaceFiles {
   async readPreview(workspace: WorkspaceRecord, requestedPath: string, options: WorkspaceFilePreviewReadOptions & { signal?: AbortSignal } = {}): Promise<WorkspaceFilePreviewResult> {
     try {
       options.signal?.throwIfAborted()
+      if (options.expectedResource && (options.expectedResource.hostId !== workspace.hostId || options.expectedResource.workspacePath !== workspace.path))
+        return { status: 'unavailable', code: 'FILE_RESOURCE_MISMATCH', message: 'The original image Workspace changed. Its source reference is retained.' }
       if (this.hostFor(workspace.hostId).kind !== 'local') {
         return { status: 'unavailable', code: 'REMOTE_WORKSPACE_PREVIEW_UNAVAILABLE', message: 'Binary preview is unavailable for this remote workspace. Remote file execution is not available.' }
       }

@@ -8,6 +8,7 @@ import type { WorkspaceFiles } from './workspace-files'
 import type { WorkspaceFileReadBudget } from '../shared/workspace-file-bytes'
 import { parseFileHistoryParams, type FileHistoryParams, type FileHistoryResult, parseFileRestoreParams, parseFileUndoParams, type FileRestoreParams, type FileRestoreResult, type FileUndoParams, type FileUndoResult } from '@agentmux/core/files'
 import type { NoteHistoryQuery, NoteHistorySnapshot } from '@agentmux/core/note-history'
+import { fileUploadRevision, parseFileImportParams, type FileImportParams, type FileImportResult } from '@agentmux/core/files'
 
 const publicWrite = (value: WorkspaceFileWriteResult): WorkspaceFileWriteResult => { if (value.status !== 'written') return value; const { fileWitness: _internal, ...receipt } = value; return receipt }
 
@@ -21,6 +22,7 @@ export class FileReadOwner implements AgentMuxRpcFilesOwner {
     topicForDirectory?(workspace: WorkspaceRecord, directory: string): Promise<ScratchDirectoryFact | null>
     workspace(id: string): WorkspaceRecord | undefined
     files: Pick<WorkspaceFiles, 'read' | 'listFiles'> & {
+      writeBytes?(workspace: WorkspaceRecord, input: Parameters<WorkspaceFiles['writeBytes']>[1]): ReturnType<WorkspaceFiles['writeBytes']>
       write(workspace: WorkspaceRecord, input: Parameters<WorkspaceFiles['write']>[1], context?: FileWriteContext): ReturnType<WorkspaceFiles['write']>
       writeSharedUndo?(workspace: WorkspaceRecord, input: Parameters<WorkspaceFiles['write']>[1], context: FileWriteContext | undefined, action: import('./note-history-actions.js').NoteHistoryWriteAction, transferred?: Record<string, import('@agentmux/core/note-provenance').NoteBlockProvenance>): Promise<WorkspaceFileWriteResult>
       createShared?(workspace: WorkspaceRecord, input: Parameters<WorkspaceFiles['write']>[1], context: FileWriteContext | undefined, source: { workspace: WorkspaceRecord; input: Parameters<WorkspaceFiles['write']>[1] }): Promise<WorkspaceFileWriteResult>
@@ -135,6 +137,25 @@ export class FileReadOwner implements AgentMuxRpcFilesOwner {
     try {
       return { resource, result: publicWrite(await this.ports.files.write(workspace, { path: resource.path, content: params.content, expectedRevision: null }, context)) }
     } catch (error) { return { resource, result: { status: 'unknown', code: 'FILE_CREATE_UNCONFIRMED', message: error instanceof Error ? error.message : String(error) } } }
+  }
+  async import(input: FileImportParams): Promise<FileImportResult> {
+    const params = parseFileImportParams(input), resolved = await this.resolve(params)
+    const operationId = params.operationId
+    if ('message' in resolved) return { operationId, resource: null, result: { status: 'unknown', code: 'FILE_IMPORT_UNCONFIRMED', message: resolved.message } }
+    const { resource, workspace } = resolved
+    if (['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(key => resource[key as keyof FileReadResource] !== params.expectedResource[key as keyof FileReadResource])) throw new AgentMuxError('The original import mapping changed. Keep the selected file and draft; inspect that exact target.', 'FILE_RESOURCE_MISMATCH')
+    const bytes = Buffer.from(params.dataBase64, 'base64')
+    if (bytes.byteLength !== params.byteLength || bytes.toString('base64') !== params.dataBase64 || fileUploadRevision(bytes) !== params.revision)
+      return { operationId, resource, result: { status: 'error', code: 'FILE_IMPORT_CONTENT_MISMATCH', message: 'The selected bytes differ from their original revision. Nothing was written.' } }
+    if (!this.ports.files.writeBytes) return { operationId, resource, result: { status: 'error', code: 'FILE_IMPORT_UNAVAILABLE', message: 'This Host has no byte import owner. Your selected file and Note draft are retained.' } }
+    try {
+      const result = await this.ports.files.writeBytes(workspace, { path: resource.path, bytes })
+      if (result.status === 'written') {
+        if (result.revision !== params.revision) return { operationId, resource, result: { status: 'unknown', code: 'FILE_IMPORT_UNCONFIRMED', message: 'The returned revision differs from the selected bytes. Inspect this original file before another import.' } }
+        return { operationId, resource, result: { status: 'written', revision: result.revision, byteLength: bytes.byteLength } }
+      }
+      return { operationId, resource, result }
+    } catch (error) { return { operationId, resource, result: { status: 'unknown', code: 'FILE_IMPORT_UNCONFIRMED', message: error instanceof Error ? error.message : String(error) } } }
   }
   async restore(input: FileRestoreParams, context?: FileWriteContext): Promise<FileRestoreResult> {
     const params = parseFileRestoreParams(input), resolved = await this.resolve(params)

@@ -1,3 +1,4 @@
+import { parseFileImportParams, parseFileImportResult } from './public-rpc-file-import.js'
 import { runAgentMessageBroadcast, normalizeBroadcastInput } from './agent-message-broadcast.js'
 import { parseAgentInputContextCaptureReference, parseAgentInputContextCaptureRead, type AgentInputContextCaptureReader } from './agent-input-context-capture.js'
 import { parseFileShareParams, parseFileShareResult, parseFileShareInspectParams, parseFileShareInspectResult, parseFileShareUndoParams, parseFileShareUndoResult } from './public-rpc-file-share.js'
@@ -930,6 +931,14 @@ export class AgentMuxRpcService {
         const result = this.ports.files?.inspectShare ? await this.ports.files.inspectShare(input, { actor: caller ? { kind: 'agent', id: caller.agentSessionId } : context.principal }) : await this.ports.forwardControl!('file.share.inspect', input, context)
         const parsed = parseFileShareInspectResult(result, input)
         return (parsed.mode === 'request' ? { mode: 'request', result: boundedFileShareResult(parsed.result, context.responseId, true) } : parsed.mode === 'undo' ? { mode: 'undo', result: boundedFileShareUndoResult(parsed.result, context.responseId, true) } : parsed) as AgentMuxRpcResult<M>
+      }
+
+      if (method === 'file.import') {
+        const input = parseFileImportParams(params)
+        context.signal?.throwIfAborted()
+        if (!this.ports.files?.import && !this.ports.forwardControl) throw new AgentMuxError('The original Files import owner is unavailable. Original files and Agents remain available.', 'CONTROL_UNAVAILABLE')
+        const result = this.ports.files?.import ? await this.ports.files.import(input) : await this.ports.forwardControl!('file.import', input, context)
+        return parseFileImportResult(result, input) as AgentMuxRpcResult<M>
       }
 
       if (method === 'file.create') {
