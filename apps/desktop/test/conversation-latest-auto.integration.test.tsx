@@ -13,18 +13,19 @@ import { createClientUiRoot } from './helpers/client-ui-render'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
-import { useSessionUserMessages } from '../src/renderer/src/lib/session-user-messages'
+import { desktopConversationReadBridge } from './helpers/conversation-read-bridge'
 import { markProgrammaticReadingScroll } from '@agentmux/client-ui/reading-scroll'
-import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
+import { inspectConversationConsumers } from '../src/renderer/src/lib/conversation-consumer-observation'
 
 
 const sid = 'automatic-current-session', native = 'automatic-native-source'
 const control: AgentSessionControl = { kind: 'agent', hostId: 'local', agentSessionId: sid, run: { runId: 'healthy-original-run' } }
 const initial = useAppStore.getState()
 let container: HTMLDivElement, root: Root, directory: string, transcript: string, client: AgentMuxClient
-let originalStore: Buffer, stored: AgentMuxStoredAgentSession
-let requests: { cursor?: string; limit?: number }[], reads: Promise<AgentSessionHistoryPage>[], observation: Parameters<typeof api.sessions.observeHistory>[1] | null
+let originalStore: Buffer, expectedTranscript: Buffer, stored: AgentMuxStoredAgentSession
+let requests: { cursor?: string; limit?: number }[], reads: Promise<AgentSessionHistoryPage>[], observation: Parameters<AgentMuxClient['observeSessionHistory']>[1] | null
 let controls: ReturnType<typeof vi.spyOn>[]
+let bridgeCloses: Array<() => unknown | Promise<unknown>>
 let commits: boolean[]
 let extent: number, viewportHeight: number, physicalTop: number
 let resizeObservers: { targets: Set<Element>; invoke: () => void }[]
@@ -34,15 +35,14 @@ function record(n: number) {
   message: { role, content: role === 'user' ? `Original input ${n}` : [{ type: 'thinking', thinking: `Original thought ${n}` }, { type: 'text', text: `Original reply ${n}` }] } }
 }
 function Reading({ visible = true, identity = control.run.runId, facts = stored, opened = false }: { visible?: boolean; identity?: string; facts?: AgentNativeSourceFacts; opened?: boolean }) {
- const read = useSessionUserMessages(control, { enabled: visible })
- return <Profiler id="current-reading" onRender={() => commits.push(currentButton() !== null)}><ActivityView sessionId={sid} executionHostId="local" items={[]} capability="complete-events" displayState="working"
-  nativeHistoryPage={read.nativeHistoryPage} nativeContextItems={read.nativeContextItems} userMessages={read.messages}
+ return <Profiler id="current-reading" onRender={() => commits.push(currentButton() !== null)}><ActivityView sessionId={sid} executionHostId="local" capability="complete-events" displayState="working"
   conversationReading={{ reference: control, identity, enabled: visible, opened, nativeSourceFacts: facts }} /></Profiler>
 }
 async function flush() { for (let i = 0; i < 8; i++) await act(async () => { await Promise.allSettled([...reads]); await new Promise(resolve => setTimeout(resolve, 15)) }) }
 async function render(visible = true, identity = control.run.runId, facts: AgentNativeSourceFacts = stored, opened = false) { await act(async () => root.render(<Reading visible={visible} identity={identity} facts={facts} opened={opened} />)); await flush() }
 async function publish(from: number, count = 100, makeRecord = record) {
  await appendFile(transcript, Array.from({ length: count }, (_, n) => JSON.stringify(makeRecord(from + n))).join('\n') + '\n')
+ expectedTranscript = await readFile(transcript)
  await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' })); await flush()
 }
 function ids() { return [...container.querySelectorAll<HTMLElement>('[data-native-record-id]')].map(node => node.dataset.nativeRecordId!) }
@@ -57,6 +57,11 @@ function installGeometry() {
  })
  return feed
 }
+function resizeGeometry(height: number, viewport = viewportHeight) {
+ extent = height; viewportHeight = viewport
+ // A browser layout clamp changes its stored physical offset, independently of host scroll writes.
+ physicalTop = Math.max(0, Math.min(physicalTop, extent - viewportHeight))
+}
 async function followAt(top: number) {
  const feed = installGeometry(); feed.scrollTop = top
  await act(async () => feed.dispatchEvent(new Event('scroll')))
@@ -64,7 +69,7 @@ async function followAt(top: number) {
 async function resizeReadingViewport() {
  const callbacks = resizeObservers.filter(observer => observer.targets.has(viewport()))
  expect(callbacks.length, 'the actual reading observer must watch this viewport').toBeGreaterThan(0)
- await act(async () => { for (const observer of callbacks) observer.invoke() })
+ await act(async () => { for (const observer of callbacks) observer.invoke() }); await flush()
 }
 function tailDistance() { const feed = viewport(); return feed.scrollHeight - feed.clientHeight - feed.scrollTop }
 async function restoreCurrentTail() {
@@ -74,7 +79,7 @@ async function restoreCurrentTail() {
 async function shortenNativeTail() {
  const rows = (await readFile(transcript, 'utf8')).trimEnd().split('\n').map(line => JSON.parse(line))
  rows.at(-1).message.content = [{ type: 'text', text: 'Shorter actual source reply' }]
- await writeFile(transcript, rows.map(row => JSON.stringify(row)).join('\n') + '\n')
+ await appendFile(transcript, JSON.stringify(rows.at(-1)) + '\n'); expectedTranscript = await readFile(transcript)
  await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' })); await flush()
  expect(container.textContent).toContain('Shorter actual source reply')
 }
@@ -112,15 +117,18 @@ beforeEach(async () => {
  stored = { kind: 'agent', agentSessionId: sid, providerId: 'claude', executorId: 'claude', hostId: 'local', workspacePath: directory, run: control.run,
   retiredRuns: [], hookBindingId: 'private-binding', hookToken: 'private-token', createdAt: 1, updatedAt: 1,
   nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: native, transcriptPath: transcript } }
- await store.compareAndSwap(null, stored); originalStore = await readFile(join(directory, 'sessions.json'))
+ await store.compareAndSwap(null, stored); await store.readCapturedHistory(sid)
+ originalStore = await readFile(join(directory, 'sessions.json')); expectedTranscript = await readFile(transcript)
  client = new AgentMuxClient({ store }); const kernel = Reflect.get(client, 'kernel')
  controls = ['connect', 'start', 'input', 'resize', 'stop', 'attach', 'status'].map(name => vi.spyOn(kernel, name).mockImplementation(() => { throw Error('Reading cannot control Runtime ' + name) }))
- requests = []; reads = []; observation = null; commits = []; extent = 1500; viewportHeight = 600; physicalTop = 0
- vi.spyOn(api.sessions, 'historyPage').mockImplementation((reference, options) => {
-  expect(reference).toMatchObject({ hostId: 'local', agentSessionId: sid }); requests.push(options ?? {})
-  const read = client.sessionHistoryPage(reference.agentSessionId, options); reads.push(read); return read
+ bridgeCloses = []; requests = []; reads = []; observation = null; commits = []; extent = 1500; viewportHeight = 600; physicalTop = 0
+ const historyPage = client.sessionHistoryPage.bind(client), observeHistory = client.observeSessionHistory.bind(client)
+ vi.spyOn(client, 'sessionHistoryPage').mockImplementation((agentSessionId, options) => {
+  expect(agentSessionId).toBe(sid); requests.push(options ?? {})
+  const read = historyPage(agentSessionId, options); reads.push(read); return read
  })
- vi.spyOn(api.sessions, 'observeHistory').mockImplementation(async (_reference, listener) => { observation = listener; return { source: { providerId: 'claude', nativeSessionId: native }, dispose() {} } })
+ vi.spyOn(client, 'observeSessionHistory').mockImplementation((agentSessionId, listener, options) => { observation = listener; return observeHistory(agentSessionId, listener, options) })
+ await desktopConversationReadBridge({ root: directory, client }, bridgeCloses)
  useAppStore.setState({ sessions: [], timelines: {}, agentComposerDrafts: { [sid]: 'Original unsent draft' } })
  container = document.createElement('div'); document.body.append(container); root = createClientUiRoot(container)
  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
@@ -137,44 +145,46 @@ afterEach(async () => {
  expect(controls.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0, 0])
  expect(requests.length).toBeGreaterThan(0); expect(requests.every(input => input.limit !== undefined && input.limit > 0 && input.limit <= 100)).toBe(true)
  expect(await readFile(join(directory, 'sessions.json'))).toEqual(originalStore)
+ expect(await readFile(transcript)).toEqual(expectedTranscript)
  expect(useAppStore.getState().agentComposerDrafts[sid]).toBe('Original unsent draft')
  } finally {
+ for (const close of bridgeCloses.reverse()) await close()
  await client.dispose(); await rm(directory, { recursive: true }); useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals()
  }
 })
 
-it('automatically reads a same-source no-overlap current tail without requiring Show latest messages', async () => {
+it('automatically accepts all 60 retained and 100 appended same-source records without requiring Show latest messages', async () => {
  await render(); expect(ids()).toHaveLength(60); expect(ids().at(-1)).toBe('original-59')
  await followAt(900); const before = requests.filter(input => input.limit === 100).length
  await publish(60)
  expect(ids().at(-1), 'the latest actual native reply should be readable without clicking Current').toBe('original-159')
- expect(ids()).toHaveLength(100); expect(currentButton()).toBeNull()
- expect(requests.filter(input => input.limit === 100)).toHaveLength(before + 1)
+ expect(ids()).toEqual(Array.from({ length: 160 }, (_, n) => `original-${n}`)); expect(currentButton()).toBeNull()
+ expect(requests.filter(input => input.limit === 100), 'same-source changes do not reopen a raw latest page').toHaveLength(before)
  const count = requests.length; await render(); await render()
  expect(requests).toHaveLength(count)
 })
-it('keeps upward reading and its original expanded body/scroll when recent native facts have a gap', async () => {
+it('keeps upward reading and its original expanded body/scroll while accepting a non-destructive append', async () => {
  await render(); await followAt(900); await followAt(300)
  const body = container.querySelector<HTMLElement>('[data-native-record-id="original-1"] .log-turn__body')!
  const details = body.querySelector<HTMLDetailsElement>('details')!; await act(async () => { details.open = true })
  const before = ids(), count = requests.filter(input => input.limit === 100).length
  await publish(60)
- expect(ids()).toEqual(before); expect(body.isConnected).toBe(true); expect(details.open).toBe(true)
+ expect(ids()).toEqual([...before, ...Array.from({ length: 100 }, (_, n) => `original-${60+n}`)]); expect(body.isConnected).toBe(true); expect(details.open).toBe(true)
  expect(viewport().scrollTop).toBe(300); expect(currentButton()).not.toBeNull()
  expect(requests.filter(input => input.limit === 100)).toHaveLength(count)
  await followAt(900); await flush(); expect(ids().at(-1)).toBe('original-159')
 })
-it('does not auto-replace a real noncollapsed Range even when the original follow intent is current', async () => {
+it('a non-destructive append keeps the original noncollapsed Range without forcing follow', async () => {
  await render(); await followAt(900)
  const body = container.querySelector<HTMLElement>('[data-native-record-id="original-1"] .log-turn__body p')!
  const range = document.createRange(); range.selectNodeContents(body); const selection = window.getSelection()!; selection.addRange(range)
  expect(selection.toString()).toBe('Original reply 1')
  const count = requests.filter(input => input.limit === 100).length; await publish(60)
  expect(body.isConnected).toBe(true); expect(selection.getRangeAt(0)).toBe(range); expect(selection.toString()).toBe('Original reply 1')
- expect(ids().at(-1)).toBe('original-59'); expect(requests.filter(input => input.limit === 100)).toHaveLength(count)
+ expect(ids().at(-1)).toBe('original-159'); expect(requests.filter(input => input.limit === 100)).toHaveLength(count)
  await act(async () => { selection.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) }); await flush()
  expect(ids().at(-1), 'clearing this feed selection resumes its retained current-tail intent').toBe('original-159')
- expect(requests.filter(input => input.limit === 100)).toHaveLength(count + 1)
+ expect(requests.filter(input => input.limit === 100)).toHaveLength(count)
 })
 it('selection clear in the same event batch as upward scrolling cannot reuse stale follow permission', async () => {
  await render(); await followAt(900)
@@ -182,7 +192,7 @@ it('selection clear in the same event batch as upward scrolling cannot reuse sta
  const range = document.createRange(); range.selectNodeContents(body); const selection = window.getSelection()!; selection.addRange(range)
  await publish(60); const count = requests.filter(input => input.limit === 100).length
  await act(async () => { viewport().scrollTop = 300; viewport().dispatchEvent(new Event('scroll')); selection.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) }); await flush()
- expect(ids().at(-1)).toBe('original-59'); expect(body.isConnected).toBe(true)
+ expect(ids().at(-1)).toBe('original-159'); expect(body.isConnected).toBe(true); expect(viewport().scrollTop).toBe(300)
  expect(requests.filter(input => input.limit === 100), 'selection clear must read the current follow intent before effect cleanup').toHaveLength(count)
 })
 it('resumes the original tail on visible return after hidden native updates without a click', async () => {
@@ -191,59 +201,77 @@ it('resumes the original tail on visible return after hidden native updates with
  await render(); expect(ids().at(-1), 'visible return at the retained current tail should catch up automatically').toBe('original-159')
  expect(currentButton()).toBeNull()
 })
-it('discards a hidden automatic reply and resumes that interrupted attempt once on visible return', async () => {
+it('discards an actual delayed changes reply while hidden and resumes once through the retained view', async () => {
  await render(); await followAt(900)
- const original = vi.mocked(api.sessions.historyPage).getMockImplementation()!
- let release: (() => void) | undefined, held = false
- vi.mocked(api.sessions.historyPage).mockImplementation(async (reference, options) => {
-  const page = await original(reference, options)
-  if (options?.limit === 100 && !held) { held = true; await new Promise<void>(resolve => { release = resolve }) }
+ const original = vi.mocked(api.conversation.readConversationChanges).getMockImplementation()!
+ let release!: () => void, held = false
+ vi.mocked(api.conversation.readConversationChanges).mockImplementation(async (...args) => {
+  const page = await original(...args)
+  if (!held) { held = true; await new Promise<void>(resolve => { release = resolve }) }
   return page
  })
- await publish(60); expect(held).toBe(true); expect(release).toBeTypeOf('function')
- await render(false); await act(async () => release!()); await flush()
- expect(ids().at(-1)).toBe('original-59')
- const before = requests.filter(input => input.limit === 100).length
- await render(); expect(ids().at(-1)).toBe('original-159'); expect(requests.filter(input => input.limit === 100)).toHaveLength(before + 1)
- const done = requests.length; await render(); expect(requests).toHaveLength(done)
+ try {
+  await publish(60); await vi.waitFor(() => expect(held).toBe(true))
+  await render(false); await act(async () => release()); await flush()
+  expect(ids().at(-1)).toBe('original-59')
+  const before = requests.length
+  await render(); await vi.waitFor(async () => { await flush(); expect(ids().at(-1)).toBe('original-159') })
+  expect(requests, 'resume replays the accepted view rather than opening a raw latest page').toHaveLength(before)
+  const done = requests.length; await render(); expect(requests).toHaveLength(done)
+ } finally { release?.() }
 })
-it('retains the old window after a genuine read failure and never render-retries that request', async () => {
- await render(); await followAt(900); const original = vi.mocked(api.sessions.historyPage).getMockImplementation()!
- let attempts = 0
- vi.mocked(api.sessions.historyPage).mockImplementation((reference, options) => {
-  if (options?.limit === 100) { attempts++; return Promise.reject(new Error('Actual latest read unavailable')) }
-  return original(reference, options)
+it('a genuine public changes failure retains the original frame, avoids render retries and recovers through its original Retry', async () => {
+ await render(); await followAt(900)
+ const original = vi.mocked(api.conversation.readConversationChanges).getMockImplementation()!
+ let attempts = 0, fail = true
+ vi.mocked(api.conversation.readConversationChanges).mockImplementation((...args) => {
+  attempts++
+  if (fail) return Promise.reject(new Error('Actual latest read unavailable'))
+  return original(...args)
  })
- await publish(60); expect(ids().at(-1)).toBe('original-59'); expect(container.textContent).toContain('Actual latest read unavailable')
- expect(attempts).toBe(1); const count = requests.length; await render(); await render(); expect(requests).toHaveLength(count)
- expect(currentButton(), 'read failure uses its own Retry rather than a scroll prompt at the bottom').toBeNull()
- expect([...container.querySelectorAll('button')].some(button => button.textContent === 'Retry')).toBe(true)
- await publish(160); expect(attempts).toBe(1); expect(ids().at(-1)).toBe('original-59')
+ await publish(60)
+ await vi.waitFor(async () => { await flush(); expect(container.textContent).toContain('Actual latest read unavailable') })
+ expect(ids().at(-1)).toBe('original-59'); expect(attempts).toBe(1)
+ await render(); await render(); expect(attempts).toBe(1)
+ const retry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'Retry conversation records')!
+ expect(retry).toBeDefined(); fail = false
+ await act(async () => retry.click()); await flush()
+ await vi.waitFor(async () => { await flush(); expect(ids().at(-1)).toBe('original-159') })
+ expect(container.textContent).not.toContain('Actual latest read unavailable')
+ expect(inspectConversationConsumers({ hostId: 'local', agentSessionId: sid }).consumers[0]?.accepted?.recordCount).toBe(160)
 })
-it('a new native binding keeps the old conversation and never auto-reads it as the new source', async () => {
+it('new source facts never relabel accepted original-source records or grant another native identity', async () => {
  await render(); await followAt(900); const count = requests.filter(input => input.limit === 100).length
  const newFacts: AgentNativeSourceFacts = { nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'different-native-source' } }
  await render(true, control.run.runId, newFacts); await publish(60)
- expect(ids().at(-1)).toBe('original-59'); expect(requests.filter(input => input.limit === 100)).toHaveLength(count)
- expect(container.textContent).toContain('Native source changed'); expect(currentButton()).not.toBeNull()
+ expect(ids().at(-1)).toBe('original-159'); expect(requests.filter(input => input.limit === 100)).toHaveLength(count)
+ const accepted = inspectConversationConsumers({ hostId: 'local', agentSessionId: sid }).consumers[0]!.accepted!
+ expect(accepted.scope.sources.find(item => item.kind === 'native')).toMatchObject({ providerId: 'claude', nativeSessionId: native })
+ expect(accepted.scope.sources.some(item => item.kind === 'native' && item.nativeSessionId === 'different-native-source')).toBe(false)
 })
 
-it('a late automatic page cannot overwrite a newly established reading identity', async () => {
+it('a late actual changes reply cannot overwrite a newly established reading identity', async () => {
  await render(); await followAt(900)
- const original = vi.mocked(api.sessions.historyPage).getMockImplementation()!
- let release: (() => void) | undefined, held = false
- vi.mocked(api.sessions.historyPage).mockImplementation(async (reference, options) => {
-  const page = await original(reference, options)
-  if (options?.limit === 100 && !held) { held = true; await new Promise<void>(resolve => { release = resolve }) }
+ const original = vi.mocked(api.conversation.readConversationChanges).getMockImplementation()!
+ let release!: () => void, held = false
+ vi.mocked(api.conversation.readConversationChanges).mockImplementation(async (...args) => {
+  const page = await original(...args)
+  if (!held) { held = true; await new Promise<void>(resolve => { release = resolve }) }
   return page
  })
- await publish(60); expect(held).toBe(true)
- await appendFile(transcript, Array.from({ length: 100 }, (_, n) => JSON.stringify(record(160 + n))).join('\n') + '\n')
- await render(true, 'new-reading-identity'); expect(ids().at(-1)).toBe('original-259')
- await act(async () => release!()); await flush(); expect(ids().at(-1)).toBe('original-259')
- expect(ids()).not.toContain('original-159')
+ try {
+  await publish(60, 2); await vi.waitFor(() => expect(held).toBe(true))
+  await appendFile(transcript, Array.from({ length: 2 }, (_, n) => JSON.stringify(record(62 + n))).join('\n') + '\n')
+  expectedTranscript = await readFile(transcript)
+  await render(true, 'new-reading-identity')
+  await vi.waitFor(async () => { await flush(); expect(ids().at(-1)).toBe('original-63') })
+  const accepted = ids(), frame = inspectConversationConsumers({ hostId: 'local', agentSessionId: sid }).consumers[0]!.accepted!
+  await act(async () => release()); await flush()
+  expect(ids()).toEqual(accepted)
+  expect(inspectConversationConsumers({ hostId: 'local', agentSessionId: sid }).consumers[0]!.accepted!.id).toBe(frame.id)
+  expect(inspectConversationConsumers({ hostId: 'local', agentSessionId: sid }).consumers[0]!.readingIdentity).toBe('new-reading-identity')
+ } finally { release?.() }
 })
-
 
 it('an opened current window at the bottom stays quiet, and returning to its loaded tail only scrolls', async () => {
  await render(true, control.run.runId, stored, true); await followAt(900)
@@ -259,9 +287,8 @@ it('an opened current window at the bottom stays quiet, and returning to its loa
 
 it('ordinary same-tail, overlapping and non-overlapping updates never flash a latest control in any commit', async () => {
  await render(); await followAt(900); commits = []
- const updated = record(_historyFixtureEpoch(0, 0, 59)); updated.message.content = [{ type: 'text', text: 'The same original reply grows in place.' }]
- const lines = (await readFile(transcript, 'utf8')).trimEnd().split('\n'); lines[lines.length - 1] = JSON.stringify(updated)
- await writeFile(transcript, lines.join('\n') + '\n')
+ const updated = record(59); updated.message.content = [{ type: 'text', text: 'The same original reply grows in place.' }]
+ await appendFile(transcript, JSON.stringify(updated) + '\n'); expectedTranscript = await readFile(transcript)
  await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' })); await flush()
  expect(container.textContent).toContain('The same original reply grows in place.')
  await publish(60, 2); expect(ids().at(-1)).toBe('original-61')
@@ -285,7 +312,7 @@ it('off-tail updates keep the same scroll control and reading position until exp
 
 
 it('retaining earlier records does not turn a return to the loaded current tail into a refresh', async () => {
- await writeFile(transcript, Array.from({ length: 150 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
+ await writeFile(transcript, Array.from({ length: 150 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n'); expectedTranscript = await readFile(transcript)
  await render(); await followAt(900)
  const earlier = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'Earlier')!
  expect(earlier).toBeDefined(); await act(async () => earlier.click()); await flush()
@@ -305,14 +332,14 @@ it('hides the affordance when collapsing an expanded trace finishes at the loade
 
 it('a plain browser layout clamp hides the affordance through its ordinary scroll event', async () => {
  await render(); await followAt(900); await followAt(600); expect(currentButton()).not.toBeNull()
- extent = 900; await act(async () => viewport().dispatchEvent(new Event('scroll')))
+ resizeGeometry(900); await act(async () => viewport().dispatchEvent(new Event('scroll')))
  expect(tailDistance()).toBe(0); expect(currentButton()).toBeNull()
 })
 
 it.each([{ name: 'content shrink', extent: 900, viewport: 600 }, { name: 'viewport growth', extent: 1500, viewport: 1200 }])
  ('hides the affordance after $name clamps an upward reader to the tail during native restoration', async shape => {
  await render(); await followAt(900); await followAt(600); expect(currentButton()).not.toBeNull()
- extent = shape.extent; viewportHeight = shape.viewport; await shortenNativeTail()
+ resizeGeometry(shape.extent, shape.viewport); await shortenNativeTail()
  await act(async () => viewport().dispatchEvent(new Event('scroll')))
  expect(tailDistance()).toBe(0); expect(currentButton()).toBeNull()
 })
@@ -326,86 +353,56 @@ it('hides the affordance after programmatic restoration reaches the loaded curre
 it('actual ResizeObserver callbacks hide at the tail without scroll or page changes and never grant follow after growth', async () => {
  await render(); await followAt(900); await followAt(600); expect(currentButton()).not.toBeNull()
  const originalIds = ids(), before = requests.length
- extent = 900; await resizeReadingViewport()
- expect(tailDistance()).toBe(0); expect(currentButton()).toBeNull(); expect(requests).toHaveLength(before); expect(ids()).toEqual(originalIds)
- extent = 1500; await resizeReadingViewport()
- expect(viewport().scrollTop).toBe(600); expect(tailDistance()).toBeGreaterThan(64); expect(currentButton()).not.toBeNull()
+ resizeGeometry(900); await resizeReadingViewport()
+ expect(viewport().scrollTop).toBe(300); expect(tailDistance()).toBe(0); expect(currentButton()).toBeNull(); expect(requests).toHaveLength(before); expect(ids()).toEqual(originalIds)
+ resizeGeometry(1500); await resizeReadingViewport()
+ expect(viewport().scrollTop).toBe(300); expect(tailDistance()).toBeGreaterThan(64); expect(currentButton()).not.toBeNull()
  expect(requests).toHaveLength(before)
  await publish(60, 2)
- expect(ids().at(-1)).toBe('original-61'); expect(viewport().scrollTop, 'geometry updates do not resume the original detached follow intent').toBe(600)
+ expect(ids().at(-1)).toBe('original-61'); expect(viewport().scrollTop, 'geometry updates do not resume the original detached follow intent').toBe(300)
  expect(currentButton()).not.toBeNull()
 })
 
-it('keeps the return path for a real no-overlap gap at a detached loaded tail and resumes only on a user return', async () => {
+it('a detached loaded tail accepts the complete append without silently granting follow', async () => {
  await render(); await collapseLastTraceAtTail()
  expect(tailDistance()).toBe(0); expect(currentButton()).toBeNull()
- const before = requests.filter(input => input.limit === 100).length
+ const before = requests.length
+ // The source now occupies additional layout, independently of the fixed source sequence.
+ resizeGeometry(2000)
  await publish(60)
- expect(ids().at(-1)).toBe('original-59'); expect(tailDistance()).toBe(0)
- expect(currentButton(), 'the actual current source is now outside this retained loaded window').not.toBeNull()
- expect(requests.filter(input => input.limit === 100)).toHaveLength(before)
- await followAt(700); await followAt(900); await flush()
- expect(ids().at(-1)).toBe('original-159'); expect(currentButton()).toBeNull()
- expect(requests.filter(input => input.limit === 100)).toHaveLength(before + 1)
+ expect(ids()).toEqual(Array.from({ length: 160 }, (_, n) => `original-${n}`))
+ expect(viewport().scrollTop).toBe(900); expect(tailDistance()).toBe(500)
+ expect(currentButton()).not.toBeNull(); expect(requests).toHaveLength(before)
+ await followAt(1400); await flush()
+ expect(currentButton()).toBeNull(); expect(requests).toHaveLength(before)
 })
 
-const coverageNotice = 'The requested time range exceeds this bounded reading window. Loaded records are kept; scroll earlier to continue.'
-function denseRecord(n: number) { return { ...record(n), timestamp: new Date(_hygiene_fixtureTime(0) + n * 1000).toISOString() } }
-async function denseHistory() {
- await writeFile(transcript, Array.from({ length: 1300 }, (_, n) => JSON.stringify(denseRecord(n))).join('\n') + '\n')
- await render()
- await vi.waitFor(async () => { await flush(); expect(container.textContent).toContain(coverageNotice) }, { timeout: 8000, interval: 25 })
- expect(ids().at(-1)).toBe('original-1299')
- await followAt(900)
-}
-
-it('an older coverage record bound keeps the independent current tail connected without a button or repeated reads', async () => {
- await denseHistory(); const before = requests.filter(input => input.limit === 100).length
- expect(before).toBe(12)
- await publish(1300, 100, denseRecord)
- expect(ids().at(-1)).toBe('original-1399'); expect(currentButton()).toBeNull()
- await vi.waitFor(async () => { await flush(); expect(requests.filter(input => input.limit === 100)).toHaveLength(before + 12) }, { timeout: 8000, interval: 25 })
- expect(container.textContent).toContain(coverageNotice)
- const count = requests.length; await render(); await render()
- expect(requests).toHaveLength(count)
-})
-
-it.each(['upward reading', 'selection'] as const)('coverage bounds preserve %s before permitting a current-tail replacement', async protection => {
- await denseHistory()
- extent = 30000; await followAt(extent - viewportHeight)
- const body = container.querySelector<HTMLElement>('[data-native-record-id="original-1299"] .log-turn__body p')!
- expect(body).not.toBeNull()
- if (protection === 'selection') {
-  const range = document.createRange(); range.selectNodeContents(body); window.getSelection()!.addRange(range)
- } else await followAt(extent - viewportHeight - 200)
- const before = requests.filter(input => input.limit === 100).length
- await publish(1300, 100, denseRecord)
- expect(ids().at(-1)).toBe('original-1299'); expect(body.isConnected).toBe(true)
- expect(requests.filter(input => input.limit === 100)).toHaveLength(before)
- if (protection === 'selection') await act(async () => { window.getSelection()!.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) })
- else await followAt(extent - viewportHeight)
- await flush(); expect(ids().at(-1)).toBe('original-1399')
-})
-
-it.each(['same display text', 'source change', 'position change'] as const)('a real %s failure during older coverage retains Retry and cannot borrow range-bound permission', async failure => {
- const original = vi.mocked(api.sessions.historyPage).getMockImplementation()!
- let head: AgentSessionHistoryPage | undefined
- vi.mocked(api.sessions.historyPage).mockImplementation(async (reference, options) => {
-  const page = await original(reference, options)
-  if (options?.limit !== 100) return page
-  head ??= page
-  if (requests.filter(input => input.limit === 100).length !== 4) return page
-  if (failure === 'same display text') throw new Error(coverageNotice)
-  if (failure === 'source change') return { ...page, source: { ...page.source, nativeSessionId: 'different-original-source' } }
-  return { ...page, items: [head.items.at(-1)!, ...page.items.slice(1)] }
- })
- await writeFile(transcript, Array.from({ length: 1300 }, (_, n) => JSON.stringify(denseRecord(n))).join('\n') + '\n')
+it.each(['same display text', 'foreign source', 'duplicate original position'] as const)('a real %s public read failure retains the original frame and explicit Retry without granting range-bound permission', async failure => {
  await render(); await followAt(900)
- expect(container.textContent).toContain(failure === 'same display text' ? coverageNotice : failure === 'source change' ? 'Native source changed' : 'original page range changed')
- const before = requests.filter(input => input.limit === 100).length
- expect(before).toBe(4)
- await publish(1300, 100, denseRecord)
- expect(ids().at(-1)).toBe('original-1299')
- expect(requests.filter(input => input.limit === 100)).toHaveLength(before)
- expect([...container.querySelectorAll('button')].some(button => button.textContent === 'Retry')).toBe(true)
+ const before = inspectConversationConsumers({ hostId: 'local', agentSessionId: sid }).consumers[0]!.accepted!
+ const body = container.querySelector('[data-native-record-id="original-59"]')!
+ const original = vi.mocked(api.conversation.readConversationChanges).getMockImplementation()!
+ const rangeNotice = 'The requested time range exceeds this bounded reading window. Loaded records are kept; scroll earlier to continue.'
+ let failing = true, attempts = 0
+ vi.mocked(api.conversation.readConversationChanges).mockImplementation(async (...args) => {
+  attempts++
+  if (failing && failure === 'same display text') throw new Error(rangeNotice)
+  const page = await original(...args)
+  if (!failing) return page
+  if (failure === 'foreign source') return { ...page, sourceHostId: 'foreign-original-host' }
+  expect(page.items.length).toBeGreaterThan(0)
+  return { ...page, items: [...page.items, page.items[0]!], window: { ...page.window, itemCount: page.window.itemCount + 1 } }
+ })
+ await publish(60, 2)
+ await vi.waitFor(async () => { await flush(); expect(inspectConversationConsumers({ hostId: 'local', agentSessionId: sid }).consumers[0]?.error).not.toBeNull() })
+ const failed = inspectConversationConsumers({ hostId: 'local', agentSessionId: sid }).consumers[0]!
+ expect(failed.accepted).toMatchObject({ id: before.id, revision: before.revision, recordCount: 60 })
+ expect(ids().at(-1)).toBe('original-59'); expect(body.isConnected).toBe(true)
+ if (failure === 'same display text') expect(container.textContent).toContain(rangeNotice)
+ await render(); await render(); expect(attempts).toBe(1)
+ const retry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'Retry conversation records')!
+ expect(retry).toBeDefined(); failing = false
+ await act(async () => retry.click())
+ await vi.waitFor(async () => { await flush(); expect(ids().at(-1)).toBe('original-61') })
+ expect(inspectConversationConsumers({ hostId: 'local', agentSessionId: sid }).consumers[0]!.error).toBeNull()
 })
