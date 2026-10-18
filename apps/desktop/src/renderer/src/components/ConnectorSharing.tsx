@@ -4,12 +4,16 @@ import type { RoomBinding } from '@agentmux/core/connections'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
-import { observeConnectorTarget } from '../lib/connector-room-intent'
+import { hasConnectorRoomIntent, observeConnectorTarget } from '../lib/connector-room-intent'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { AgentConnectorDialog, type AgentConnectorTarget } from './AgentConnectorDialog'
 import { ServiceNoticeDisclosure } from './ServiceNoticeDisclosure'
 import { SettingsNavigation } from './SettingsNavigation'
 import { useAgentConnectorMenu } from '../lib/use-agent-connector-menu'
 import { ConnectorHeaderLinks } from './ConnectorHeaderLinks'
+
+const ConnectionIcon = semanticIconComponent('object.connection')
+const LoadingIcon = semanticIconComponent('status.loading')
 
 /** Reads only this original Session's audiences. No input, history, lifecycle or global watcher. */
 export function ConnectorSharing({ session, tabId, regionId, visible, presentation = 'composer' }: { session: Extract<SessionSnapshot, { kind: 'agent' }>; tabId?: string | undefined; regionId?: string | undefined; visible: boolean; presentation?: 'composer' | 'header' }) {
@@ -17,6 +21,8 @@ export function ConnectorSharing({ session, tabId, regionId, visible, presentati
   const settings = useContext(SettingsNavigation)
   const target = { executionHostId: session.control.hostId, agentSessionId: session.control.agentSessionId }
   const identity = JSON.stringify(target)
+  const hasRetainedSetup = useAppStore(state => presentation === 'header' && hasConnectorRoomIntent(state.connectorRoomIntents, target))
+  const syncEnabled = useAppStore(state => presentation === 'header' && state.connectorServiceObservation?.source === api.connections.call ? state.connectorServiceObservation.state?.enabled ?? null : null)
   const [read, setRead] = useState<{ identity: string; bindings: RoomBinding[]; issue: string; loading: boolean } | null>(null)
   const refreshRead = useRef<(() => void) | null>(null)
   const [dialog, setDialog] = useState<AgentConnectorTarget | null>(null), returned = useRef<HTMLElement | null>(null)
@@ -33,6 +39,11 @@ export function ConnectorSharing({ session, tabId, regionId, visible, presentati
     refresh(); const close = observeConnectorTarget(target, refresh)
     return () => { live = false; generation++; if (refreshRead.current === refresh) refreshRead.current = null; close() }
   }, [identity, visible])
+  const setupWasOpen = useRef(false)
+  useEffect(() => {
+    if (presentation === 'header' && setupWasOpen.current && !connector.dialogOpen) refreshRead.current?.()
+    setupWasOpen.current = connector.dialogOpen
+  }, [connector.dialogOpen, presentation])
   const current = read?.identity === identity ? read : null
   const notice = current?.issue ? { kind: 'indeterminate' as const, notice: {
     step: 'Sharing status could not be read', mode: 'The current audience is unconfirmed. Last known groups are kept.',
@@ -45,7 +56,20 @@ export function ConnectorSharing({ session, tabId, regionId, visible, presentati
       target: { ...target, regionAnchor: { regionId: regionId ?? binding.regionAnchor.regionId } } })
   }
   const details = dialog ? <AgentConnectorDialog original={dialog} mode="details" {...(presentation === 'header' ? { initialSection: 'joining' as const } : {})} onClose={() => { setDialog(null); if (presentation === 'header') refreshRead.current?.() }} returnFocus={() => returned.current} /> : null
-  if (presentation === 'header') return <><ConnectorHeaderLinks bindings={current?.bindings ?? []} unconfirmed={!!current?.issue} onOpen={openBinding} />{details}</>
+  if (presentation === 'header') {
+    const label = hasRetainedSetup ? 'Continue group setup' : 'Connect group'
+    const checking = visible && (!current || current.loading)
+    const status = current?.issue ? 'Group status unknown. Open the original setup to check saved progress.' : checking ? 'Checking this Agent’s saved groups.' : 'Open group setup for this Agent.'
+    return <>{current?.bindings.length
+      ? <ConnectorHeaderLinks bindings={current.bindings} unconfirmed={!!current.issue} syncEnabled={syncEnabled} onOpen={openBinding} />
+      : <button type="button" className="agent-region-header__connector" data-sharing-state={current?.issue ? 'unknown' : 'unbound'}
+          aria-label={`${label}; ${status}`} title={`${label}. ${status}`} aria-busy={checking || undefined}
+          onPointerDown={event => event.stopPropagation()} onClick={event => connector.openConnect(event.currentTarget)}>
+          {checking ? <LoadingIcon size={14} animation="spin" /> : <ConnectionIcon size={14} />}<span>{label}{current?.issue ? ' · Status unknown' : ''}</span>
+        </button>}
+      {connector.issue ? <span className="connector-sharing__error" role="status">{connector.issue}</span> : null}
+      {connector.dialog}{details}</>
+  }
   const canConnect = current && !current.loading && !current.bindings.length && !current.issue && (regionId || settings)
   if (!current?.bindings.length && !current?.issue && !canConnect && !connector.dialogOpen && !dialog) return null
   return <div className="connector-sharing" aria-label="Group sharing before sending">
