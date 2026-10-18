@@ -1,3 +1,4 @@
+import { parseExternalConversationAuthor } from './external-conversation.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseConversationVersionedAnchor, parseConversationSource } from './conversation-changes.js'
@@ -54,7 +55,7 @@ function relay(value: unknown, target: ConnectionDelivery['reference']): NonNull
     if (original.record.hostId !== target.hostId || original.record.agentSessionId !== target.agentSessionId || original.record.source.kind !== 'captured' || original.selector.kind !== 'captured-field' || original.selector.field !== 'content') fail()
     const a = object(source.author, ['kind', 'agentSessionId', 'connectionId', 'actor', 'externalConversationId', 'externalMessageId', 'bindingId', 'bindingRevision', 'grantId', 'grantRevision'])
     let author: NonNullable<ConnectionDelivery['relay']>['sources'][number]['author']
-    if (a.kind === 'external') { try { author = parseAgentExternalMessageAuthor(a) } catch { return fail() } }
+    if (a.kind === 'external') { try { author = 'grantId' in a ? parseAgentExternalMessageAuthor(a) : parseExternalConversationAuthor(a) } catch { return fail() } }
     else {
       object(a, a.kind === 'agent' ? ['kind', 'agentSessionId'] : ['kind'])
       if (a.kind === 'agent') author = { kind: 'agent', agentSessionId: text(a.agentSessionId) }

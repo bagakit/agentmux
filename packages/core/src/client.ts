@@ -1,3 +1,4 @@
+import { parseExternalConversationReference, parseExternalConversationAuthority, externalConversationAuthor, externalConversationRecordId, type AgentExternalConversationAuthorityPort, type AgentExternalConversationReceipt, type AgentExternalConversationReference } from './external-conversation.js'
 import { mintObjectId } from './object-id.js'
 import type { ReadingDiagnosticRecord, ReadingDiagnosticReason } from './reading-diagnostic.js'
 import { CoreReadingDiagnosticSource } from './reading-diagnostic-source.js'
@@ -501,6 +502,7 @@ function rawInputCancellationDetail(session: AgentMuxAgentSession, data: AgentMu
 }
 
 export type AgentMuxClientOptions = {
+  externalConversationAuthority?: AgentExternalConversationAuthorityPort
   hostExecutorOwner?: AgentMuxHostExecutorOwner
   creationAuthority?: AgentMuxCreationAuthority
   /** Exact local public owner endpoint inherited by managed CLI callers. */
@@ -889,6 +891,7 @@ export class AgentMuxClient {
   private readonly inputWaitingUnsubscribe: () => void
   private readonly continuityInputs: AgentSessionContinuityInputs
   private readonly continuityInputsUnsubscribe: () => void
+  private readonly externalConversationAuthority: AgentExternalConversationAuthorityPort | undefined
   private readonly publisher = new AgentMuxClientEventPublisher()
   private messageReadUsed = false
   private messageEventReaders = 0
@@ -1026,6 +1029,7 @@ export class AgentMuxClient {
   }
 
   constructor(options: AgentMuxClientOptions = {}) {
+    this.externalConversationAuthority = options.externalConversationAuthority
     this.hostExecutorOwner = options.hostExecutorOwner
     this.creationAuthority = options.creationAuthority
     this.controlSocketPath = options.controlSocketPath ?? defaultAgentMuxControlSocketPath()
@@ -8961,6 +8965,15 @@ export class AgentMuxClient {
     const now = Date.now()
     if (message.systemContext) await this.recordMessageAfterSideEffect(session, `system-context:${operationId}`,
       'AgentMux context', message.systemContext, now, 'agentmux', { status, ...(message.a2aNotificationId ? { a2aNotificationId: message.a2aNotificationId, ...(inputRef ? { inputRef } : {}) } : {}) })
+    if (message.userContent && message.authorExternal && inputRef?.kind === 'message') {
+      const submitted = await this.messageQueue.readByMessageId(inputRef.messageId)
+      if (!submitted || submitted.envelope.sender.kind !== 'external' || !isDeepStrictEqual(submitted.envelope.sender, message.authorExternal)) throw new AgentMuxError('Submitted input does not match its original external author.', 'EXTERNAL_RECORD_CONFLICT')
+      const recordId = externalConversationRecordId(message.authorExternal), original = (await this.store.readCapturedHistory(session.agentSessionId, { recordId })).records[0]
+      if (original && (original.item.content !== submitted.envelope.body || !original.item.authorExternal || !isDeepStrictEqual(externalConversationAuthor(original.item.authorExternal), externalConversationAuthor(message.authorExternal)))) throw new AgentMuxError('Submitted input does not match the original recorded group message.', 'EXTERNAL_RECORD_CONFLICT')
+      const item: AgentTimelineItem = original?.item ?? { id: recordId, agentSessionId: session.agentSessionId, kind: 'user_message', source: 'user', status: 'complete', createdAt: now, updatedAt: now, title: 'External message', content: submitted.envelope.body, publicContent: 'confirmed', authorExternal: message.authorExternal, ...(message.sourceChannel ? { sourceChannel: message.sourceChannel } : {}) }
+      await this.persistAndPublishTimeline({ type: 'upsert', agentSessionId: session.agentSessionId, item: { ...item, inputRef, updatedAt: now } }, { source: 'user', observedAt: now, run: session.run }, session.hostId)
+      return
+    }
     if (message.userContent) await this.recordMessageAfterSideEffect(session, `prompt:${operationId}`,
       title, message.userContent, now, 'user', { status, publicContent: 'confirmed', ...(inputRef ? { inputRef } : {}),
         ...(message.inputContext ? { inputContext: message.inputContext, inputContextSource: message.inputContextSource, ...(message.inputContextCaptureProof ? { inputContextCaptureProof: message.inputContextCaptureProof } : {}) } : {}),
@@ -8969,6 +8982,31 @@ export class AgentMuxClient {
         ...(message.authorExternal ? { authorExternal: message.authorExternal } : {}),
         ...(message.sourceDevice ? { sourceDevice: message.sourceDevice } : {}),
         ...(message.sourceChannel ? { sourceChannel: message.sourceChannel } : {}) })
+  }
+
+  /** Append authenticated platform observation to the original history; never dispatch or wake a Run. */
+  async recordExternalConversationMessage(value: AgentExternalConversationReference, owner = this.externalConversationAuthority): Promise<AgentExternalConversationReceipt> {
+    const input = parseExternalConversationReference(value)
+    if (!owner) throw new AgentMuxError('The original external conversation owner is unavailable. Retain the original message; local input remains available.', 'EXTERNAL_RECORD_AUTHORITY_UNAVAILABLE')
+    const observed = parseExternalConversationAuthority(await owner.resolveConversationMessage(input)), message = observed.message
+    if (!message || message.agentSessionId !== input.agentSessionId || message.ingressId !== input.ingressId) throw new AgentMuxError('The original external conversation target is unconfirmed.', 'EXTERNAL_RECORD_TARGET_UNCONFIRMED')
+    const session = await this.currentStoredAgentSession(input.agentSessionId)
+    if (message.hostId !== session.hostId) throw new AgentMuxError('The original message belongs to another Host.', 'EXTERNAL_RECORD_TARGET_UNCONFIRMED')
+    const recordId = externalConversationRecordId(message.author), page = await this.store.readCapturedHistory(input.agentSessionId, { recordId }), existing = page.records[0]
+    const receipt = (revision: string): AgentExternalConversationReceipt => ({ ...input, record: { hostId: session.hostId, agentSessionId: input.agentSessionId, source: { kind: 'captured', recordId } }, revision })
+    if (existing) {
+      if (existing.item.content !== message.body || !existing.item.authorExternal || !isDeepStrictEqual(externalConversationAuthor(existing.item.authorExternal), message.author)) throw new AgentMuxError('The original external message conflicts with retained content.', 'EXTERNAL_RECORD_CONFLICT')
+      return receipt(existing.revision)
+    }
+    const current = parseExternalConversationAuthority(await owner.resolveConversationMessage(input))
+    if (current.authority !== 'current' || !isDeepStrictEqual(current.message, message)) throw new AgentMuxError('This original group relationship cannot admit a new conversation record. Its source and local Agent remain available.', current.code ?? 'EXTERNAL_RECORD_AUTHORITY_UNAVAILABLE')
+    const now = Date.now(), mutation: AgentTimelineMutation = { type: 'append', agentSessionId: input.agentSessionId, item: {
+      id: recordId, agentSessionId: input.agentSessionId, kind: 'user_message', source: 'user', status: 'complete', createdAt: now, updatedAt: now,
+      title: 'Group message', content: message.body, publicContent: 'confirmed', authorExternal: message.author, sourceChannel: 'agent-message'
+    } }
+    const commit = await this.store.applyTimelineMutation(mutation)
+    if (commit.changed) this.publisher.publishTimeline(commit, { source: 'user', observedAt: now, run: session.run }, session.hostId)
+    return receipt(commit.position.revision)
   }
 
   /** Transport owner records an operation on its exact Session without duplicating Runtime state. */

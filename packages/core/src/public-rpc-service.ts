@@ -1,3 +1,4 @@
+import { parseExternalConversationReference, parseExternalConversationReceipt } from './external-conversation.js'
 import { isMoteChatMethod, parseMoteChatParams, parseMoteChatResult } from './mote-chat-codec.js'
 import type { MoteChatPort, MoteChatMethod, MoteChatParamsMap } from './mote-chat-contract.js'
 import { isConnectionDeletionMethod, parseConnectionDeletionParams } from './connection-deletion-codec.js'
@@ -110,7 +111,7 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMu
 
 /** A structural slice of the original public SDK; hosted clients need no private fields. */
 export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
-  'restartAgent' | 'inspectAgentRestart' | 'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentSession' | 'readAgentSessions' | 'readAgentSessionHistory' | 'readAgentConversation' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
+  'restartAgent' | 'inspectAgentRestart' | 'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentSession' | 'readAgentSessions' | 'readAgentSessionHistory' | 'recordExternalConversationMessage' | 'readAgentConversation' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
   'ensureAgentContinuity' | 'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
   'inspectAgentInteractionOperation' | 'respondAgentInteraction' | 'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'notifyMessages' | 'inspectMessageNotification' | 'inspectAgentPromptSubmission' | 'startDiscussion' | 'checkDeliveries' |
   'submitAgentPrompt' | 'readAgentInputMailbox' | 'inspectAgentInput' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' | 'listAgentSpawns' |
@@ -272,6 +273,7 @@ const NATIVE_FIELDS = {
   'agent.interaction.inspect': ['agentSessionId', 'operationId'],
   'agent.question.reply': ['agentSessionId', 'source', 'turnId', 'recordId', 'answers', 'operationId', 'expectedRun', 'afterSubmissionId', 'allowUncertainTurn', 'sourceChannel'],
   'agent.history.resource': ['hostId', 'agentSessionId', 'source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes', 'offsetBytes', 'representation'],
+  'agent.conversation.record': ['hostId', 'agentSessionId', 'ingressId'],
   'agent.conversation.checkpoint': ['hostId', 'agentSessionId'],
   'agent.conversation.changes': ['hostId', 'agentSessionId', 'checkpoint', 'limit', 'cursor', 'maxBytes', 'view'],
   'agent.conversation.release': ['hostId', 'agentSessionId', 'view'],
@@ -703,9 +705,10 @@ export class AgentMuxRpcService {
           : await delivery.retry(parseConnectionDeliveryParams(method, params), administration)
         return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
       }
-      if (method === 'connection.ingress.inspect' || method === 'connection.ingress.ls' || method === 'connection.ingress.authority') {
+      if (method === 'connection.ingress.inspect' || method === 'connection.ingress.ls' || method === 'connection.ingress.authority' || method === 'connection.ingress.record-authority') {
         if (!owner.ingress) throw new AgentMuxError('Ingress observation is unavailable on this Host. Existing Agents and inputs remain available.', 'CONTROL_UNAVAILABLE')
-        const result = method === 'connection.ingress.inspect' ? await owner.ingress.inspect(parseConnectionParams(method, params))
+        const result = method === 'connection.ingress.record-authority' ? await owner.ingress.recordAuthority(parseConnectionParams(method, params))
+          : method === 'connection.ingress.inspect' ? await owner.ingress.inspect(parseConnectionParams(method, params))
           : method === 'connection.ingress.authority' ? await owner.ingress.authority(parseConnectionParams(method, params))
           : await owner.ingress.list(parseConnectionParams(method, params))
         return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
@@ -1127,6 +1130,13 @@ export class AgentMuxRpcService {
     }
     if (method === 'agent.conversation.release') {
       const input = parseConversationViewReleaseInput(params), forwarded = forwardConversationInput(input)
+    if (method === 'agent.conversation.record') {
+      const p = rpcRecord(params, ['hostId', 'agentSessionId', 'ingressId']), hostId = rpcString(p.hostId, 'Conversation Host'), input = parseExternalConversationReference({ agentSessionId: p.agentSessionId, ingressId: p.ingressId })
+      const owners = (await this.clients()).filter(entry => entry.hostId === hostId)
+      if (owners.length !== 1) throw new AgentMuxError('The exact conversation Host is unavailable or ambiguous.', 'RUNTIME_UNAVAILABLE')
+      const result = await owners[0]!.client.recordExternalConversationMessage(input)
+      return parseExternalConversationReceipt(result, input) as AgentMuxRpcResult<M>
+    }
       const owners = (await this.clients()).filter(entry => entry.hostId === input.hostId)
       if (owners.length !== 1) throw new AgentMuxError('The exact conversation Host is unavailable or ambiguous.', 'RUNTIME_UNAVAILABLE')
       const result = await owners[0]!.client.releaseConversationView(forwarded.input)

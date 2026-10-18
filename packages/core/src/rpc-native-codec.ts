@@ -1,3 +1,4 @@
+import { parseExternalConversationReceipt } from './external-conversation.js'
 import { isMoteChatMethod, parseMoteChatParams, parseMoteChatResult } from './mote-chat-codec.js'
 import { parseFileImportParams, parseFileImportResult } from './public-rpc-file-import.js'
 import { parseBroadcastReceipt, normalizeBroadcastInput } from './agent-message-broadcast.js'
@@ -471,6 +472,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         break
       }
       case 'agent.history.resource': return parseSessionHistoryResourceResult(value, input as AgentSessionHistoryResourceParams)
+      case 'agent.conversation.record': return parseExternalConversationReceipt(value, input as import('./external-conversation.js').AgentExternalConversationReference)
       case 'agent.conversation.release': return parseConversationViewReleaseResult(value, input as import('./conversation.js').ConversationRef)
       case 'agent.conversation.checkpoint': return parseConversationCheckpointPage(value, input as import('./conversation.js').ConversationRef)
       case 'agent.conversation.changes': return parseConversationChangesPage(value, input as import('./conversation-changes.js').ConversationChangesInput)
