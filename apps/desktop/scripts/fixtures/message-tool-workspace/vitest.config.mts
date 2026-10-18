@@ -8,6 +8,7 @@ import type { Reporter } from 'vitest/reporters'
 import type { Task } from '@vitest/runner'
 import sourceConfig from '../settings-overview/vitest.config.mts'
 import { mutations } from './mutations.mjs'
+import { noteLinkBoundaryFile, noteLinkStructure } from './proof-boundary.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../..')
 const exported = JSON.parse(readFileSync(resolve(root, 'packages/client-ui/package.json'), 'utf8')).exports
@@ -22,6 +23,7 @@ const selected = mutations.find(item => item.name === mutation)
 assert.ok(!mutation || selected, 'The requested behavior mutation is declared')
 const applied: Array<{ file: string; original: string; changed: string }> = []
 const sources: Record<string, string> = {}
+let noteLinkBoundary: ReturnType<typeof noteLinkStructure> | undefined
 const sha = (value: string) => createHash('sha256').update(value).digest('hex')
 const requested = process.argv.filter(argument => /^apps\/desktop\/test\/.+\.test\.tsx$/.test(argument))
 const directory = resolve(root, process.env.AGENTMUX_MESSAGE_WORKSPACE_EVIDENCE ?? '.tmp/message-tool-workspace/mounted')
@@ -29,7 +31,7 @@ const count = (task: Task): number => task.type === 'test' ? ['pass', 'fail'].in
 const discovery: Reporter = { onFinished(files = []) {
   const discovered = files.map(file => ({ file: relative(root, file.filepath), tests: count(file) }))
   mkdirSync(directory, { recursive: true })
-  writeFileSync(resolve(directory, 'discovery.json'), JSON.stringify({ requested, discovered, mutation: mutation ?? null, applied, sources }, null, 2) + '\n')
+  writeFileSync(resolve(directory, 'discovery.json'), JSON.stringify({ requested, discovered, mutation: mutation ?? null, applied, sources, noteLinkBoundary }, null, 2) + '\n')
   assert.ok(requested.length > 0, 'The requested behavior suites are nonempty')
   assert.deepEqual(discovered.map(item => item.file).sort(), [...requested].sort(), 'Every requested suite is actually discovered')
   assert.ok(discovered.every(item => item.tests > 0), 'Every discovered suite executes tests')
@@ -41,6 +43,7 @@ export default defineConfig({ ...sourceConfig, esbuild: { jsx: 'automatic' },
   plugins: [{ name: 'message-workspace-private-mutation', enforce: 'pre', transform(code, id) {
     const file = id.split('?')[0]!
     if (file.startsWith(root + '/') && !file.includes('/node_modules/') && !file.includes('/.tmp/')) sources[relative(root, file)] = sha(readFileSync(file, 'utf8'))
+    if (file === resolve(root, noteLinkBoundaryFile)) { noteLinkBoundary = noteLinkStructure(code); sources[noteLinkBoundaryFile] = sha(code) }
     if (!selected || file !== resolve(root, selected.file)) return
     assert.equal(code.split(selected.before).length, 2, 'The actual consumer mutation anchor is unique')
     const changed = code.replace(selected.before, selected.after)

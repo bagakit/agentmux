@@ -292,7 +292,7 @@ async function notificationRecovery(width, theme, original, before) {
   const calls=await evaluate('messageWorkspace.facts().calls')
   assert.equal(calls.filter(call=>call.action==='notify-reference').length,2)
   assert.equal(calls.filter(call=>call.action==='inspect-notification').length,1)
-  assert.equal(calls.find(call=>call.action==='inspect-notification').query.key.submissionId,operation)
+  assert.equal(calls.find(call=>call.action==='inspect-notification').query.operationId,operation)
   await frame(width, theme, 'recovery-checked')
   await click(buttons('Back to Received')); await choose('Sent')
   await waitFor(`${visiblePanel}.querySelector('[data-mailbox-notification-action="notify"]')`)
@@ -332,6 +332,64 @@ async function notificationRecovery(width, theme, original, before) {
   result.scenes.push({width,theme,mid,operationId:operation,explicitNotification:true,observationOnlyRefresh:true,
     retainedUnknown:true,keyboardReceipt:true,sentRecipient:{label,title},reloadedIdentity,originalSurfacePreserved:true})
 }
+async function resumedNotification(width, theme, original, before) {
+  await choose('Agent messages'); await choose('Received')
+  await waitFor(`${visiblePanel}.querySelector('[data-mailbox-notification-action="notify"]')`)
+  const selected = `${visiblePanel}.querySelector('.composer-mailbox__record:has([data-mailbox-notification-action="notify"])')`
+  const mid = await evaluate(`${selected}.querySelector('[data-record-key]').dataset.recordKey.slice(4)`)
+  const message = await evaluate(`messageWorkspace.originalMessage(${JSON.stringify(mid)})`)
+  await evaluate('messageWorkspace.resumed()')
+  await click(`${selected}.querySelector('[data-mailbox-notification-action="notify"]')`)
+  await waitFor(`${selected}.textContent.includes('This notification: unconfirmed')`)
+  const operation = await evaluate(`${selected}.querySelector('[data-notification-operation]').dataset.notificationOperation`)
+  const reason = `${selected}.querySelector('.composer-mailbox__notification-reason')`
+  assert.equal(await evaluate(`${reason}.textContent.includes('response was lost')`), true)
+  assert.equal(await evaluate(`${reason}.closest('details')===null`), true, 'The precise failure reason is visible without opening details')
+  await layout({ secondary: true })
+  await frame(width, theme, 'resumed-response-lost')
+  await key('Escape', 'Escape', 27); await originalSurfacePreserved(original, before)
+  let reloadedIdentity = false
+  if (width === 640) {
+    const loaded = new Promise(resolve => win.webContents.once('did-finish-load', resolve))
+    win.webContents.reload(); await loaded; await waitFor('Boolean(window.messageWorkspace)')
+    await evaluate(`messageWorkspace.restore(${JSON.stringify(theme)},${JSON.stringify(theme+'-'+width)})`)
+    await waitFor(`${surface}?.querySelector('.xterm')`)
+    assert.equal((await evaluate('messageWorkspace.facts().calls')).filter(call=>call.action==='notify-reference').length,0,'Reload does not replay an unknown notification')
+    reloadedIdentity = true
+  }
+  await click(`${surface}.querySelector('.composer__mailbox')`); await waitFor(`${panel}.matches(':popover-open')`)
+  await choose('Agent messages'); await choose('Received')
+  await click(`${visiblePanel}.querySelector('[data-record-key="a2a:${mid}"]')`)
+  await waitFor(`${visiblePanel}.querySelector('[data-notification-operation="${operation}"]')`)
+  const inspect = `${visiblePanel}.querySelector('[data-notification-operation="${operation}"] [data-mailbox-notification-action="inspect"]')`
+  await click(inspect)
+  await waitFor(`${visiblePanel}.textContent.includes('This notification: submitted')`)
+  const details = `${visiblePanel}.querySelector('[data-notification-operation] > .composer-mailbox__notification-feedback > details')`
+  await click(`${details}.querySelector('summary')`)
+  const inputRun = 'private-resumed-' + message.message.envelope.recipientSessionId
+  assert.notEqual(inputRun, message.message.envelope.recipientRunId)
+  assert.equal(await evaluate(`${details}.textContent.includes(${JSON.stringify('Original message Run '+message.message.envelope.recipientRunId)})`), true)
+  assert.equal(await evaluate(`${details}.textContent.includes(${JSON.stringify('Notification input Run '+inputRun)})`), true)
+  const calls = await evaluate('messageWorkspace.facts().calls')
+  assert.equal(calls.filter(call=>call.action==='notify-reference').length,reloadedIdentity?0:1)
+  assert.deepEqual(calls.filter(call=>call.action==='inspect-notification').map(call=>call.query),[{messageId:mid,operationId:operation}])
+  await frame(width, theme, 'resumed-confirmed')
+  await evaluate('messageWorkspace.resumed()')
+  await click(`${visiblePanel}.querySelector('[data-mailbox-notification-action="notify"]')`)
+  const second = await evaluate(`${visiblePanel}.querySelector('[data-notification-operation]').dataset.notificationOperation`)
+  assert.notEqual(second, operation)
+  await evaluate(`messageWorkspace.forgetNotification(${JSON.stringify(second)})`)
+  await click(`${visiblePanel}.querySelector('[data-notification-operation="${second}"] [data-mailbox-notification-action="inspect"]')`)
+  const nullReason = `${visiblePanel}.querySelector('.composer-mailbox__notification-reason')`
+  await waitFor(`${nullReason}.textContent.includes('No original notification record was found')`)
+  assert.equal(await evaluate(`${nullReason}.closest('details')===null`), true)
+  assert.equal(await evaluate(`${visiblePanel}.textContent.includes('This notification: unconfirmed')`), true)
+  assert.equal((await evaluate('messageWorkspace.facts().calls')).filter(call=>call.action==='notify-reference').length,reloadedIdentity?1:2)
+  await frame(width, theme, 'resumed-not-found')
+  await key('Escape', 'Escape', 27)
+  result.scenes.push({ width, theme, mid, operationId: operation, explicitNotification: true, observationOnlyRefresh: true,
+    historicalRun: message.message.envelope.recipientRunId, inputRun, reloadedIdentity, nullIsNotRefusal: true, visibleFailureReason: true, originalSurfacePreserved: true })
+}
 async function scenario(width, theme, short = false) {
   result.stage = { width, theme, short, action: 'seed' }
   await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width: width * 2 + 1, height: short ? 540 : 800, deviceScaleFactor: 1, mobile: false })
@@ -342,6 +400,7 @@ async function scenario(width, theme, short = false) {
   const before = await evaluate('({terminal:messageWorkspace.terminal(),facts:messageWorkspace.facts()})')
   await click(`${surface}.querySelector('.composer__mailbox')`)
   await waitFor(`${panel}.matches(':popover-open')`)
+  if (mode === 'notification-resumed') { await resumedNotification(width, theme, original, before); return }
   if (mode === 'notification-recovery') { await notificationRecovery(width, theme, original, before); return }
   if (mode === 'manual-notify') { await manualNotification(width, theme, original, before); return }
   await choose('Inputs')
@@ -478,7 +537,7 @@ app.whenReady().then(async () => {
     win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     await waitFor('Boolean(window.messageWorkspace)')
-    if (mode === 'manual-notify' || mode === 'notification-recovery') { for (const [width, theme] of [[380,'dark'],[320,'dark'],[640,'light']]) await scenario(width, theme, mode === 'notification-recovery' && width === 320) }
+    if (mode === 'manual-notify' || mode === 'notification-recovery' || mode === 'notification-resumed') { for (const [width, theme] of [[380,'dark'],[320,'dark'],[640,'light']]) await scenario(width, theme, mode === 'notification-recovery' && width === 320) }
     else if (mode === 'empty-mutation') await scenario(320, 'dark')
     else if (mode === 'empty-states') for (const theme of ['dark', 'light']) for (const width of [320, 380, 440]) await scenario(width, theme)
     else if (mode === 'density') await scenario(320, 'dark', true)

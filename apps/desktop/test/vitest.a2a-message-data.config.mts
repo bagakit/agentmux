@@ -3,6 +3,7 @@ import { readFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { relative, resolve } from 'node:path'
+import { noteLinkBoundaryFile, noteLinkStructure } from '../scripts/fixtures/message-tool-workspace/proof-boundary.mjs'
 const root = resolve(import.meta.dirname, '../../..')
 const exports = JSON.parse(readFileSync(resolve(root, 'packages/core/package.json'), 'utf8')).exports
 const alias = Object.entries(exports).map(([key, value]) => ({ find: key === '.' ? '@agentmux/core' : `@agentmux/core/${key.slice(2)}`,
@@ -11,7 +12,9 @@ const mutations: Record<string, [string, string, string]> = {
   notifyHost: ['src/main/runtime-controller.ts', 'this.configuredClient(reference.hostId).notifyMessages(', "this.configuredClient('replacement-host').notifyMessages("],
   notifyMid: ['src/main/runtime-controller.ts', 'messageIds: [messageId]', "messageIds: ['replacement-mid']"],
   notifyTrust: ['src/main/ipc.ts', "handleWithEvent('sessions:notifyMessage', async (event, session: import('../shared/contracts.js').SessionHistoryReference, messageId: string, operationId: string) => {\n    assertManualPromptSenderTrusted(event.sender, contents)", "handleWithEvent('sessions:notifyMessage', async (event, session: import('../shared/contracts.js').SessionHistoryReference, messageId: string, operationId: string) => {\n    void event"],
-  notifyInspectRun: ['src/main/runtime-controller.ts', 'key.expectedRun.runId !== message.envelope.recipientRunId', 'false'],
+  notifyInspectMid: ['src/main/runtime-controller.ts', '!notice.messageIds.includes(messageId)', 'false'],
+  notifyInspectHost: ['src/main/runtime-controller.ts', 'this.configuredClient(reference.hostId).inspectMessageNotification(', "this.configuredClient('replacement-host').inspectMessageNotification("],
+  notifyInspectReplay: ['src/main/runtime-controller.ts', '.inspectMessageNotification({ operationId })', '.notifyMessages({ operationId, messageIds: [messageId] })'],
 
   participant: ['src/main/runtime-controller.ts', '.listMessages({ ...options, participantSessionId: reference.agentSessionId })', ".listMessages({ ...options, participantSessionId: 'other' })"],
   readParticipant: ['src/main/runtime-controller.ts', 'if (message && message.envelope.senderSessionId !== reference.agentSessionId && message.envelope.recipientSessionId !== reference.agentSessionId)', 'if (false && message && message.envelope.senderSessionId !== reference.agentSessionId && message.envelope.recipientSessionId !== reference.agentSessionId)'],
@@ -30,6 +33,7 @@ const mutations: Record<string, [string, string, string]> = {
 }
 const applied: Array<{ file: string; original: string; changed: string }> = []
 const sources: Record<string, string> = {}
+let noteLinkBoundary: ReturnType<typeof noteLinkStructure> | undefined
 const evidence = process.env.AGENTMUX_MESSAGE_DATA_EVIDENCE
 const mutation = process.env.AGENTMUX_TEST_MESSAGE_DATA_MUTATION
 if (mutation && !mutations[mutation]) throw new Error(`Unknown message data mutation: ${mutation}`)
@@ -37,6 +41,7 @@ export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'false' 
   plugins: [{ name: 'message-data-proof-mutation', enforce: 'pre', transform(code, id) {
     const sourceFile = id.split('?')[0]!
     if (sourceFile.startsWith(root + '/') && !sourceFile.includes('/node_modules/') && !sourceFile.includes('/.tmp/')) sources[relative(root, sourceFile)] = createHash('sha256').update(readFileSync(sourceFile)).digest('hex')
+    if (sourceFile === resolve(root, noteLinkBoundaryFile)) { noteLinkBoundary = noteLinkStructure(code); sources[noteLinkBoundaryFile] = createHash('sha256').update(code).digest('hex') }
     if (!mutation) return
     const [file, before, after] = mutations[mutation]!
     if (!id.endsWith(file)) return
@@ -45,4 +50,4 @@ export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'false' 
     applied.push({ file, original: createHash('sha256').update(code).digest('hex'), changed: createHash('sha256').update(changed).digest('hex') })
     return changed
   } }],
-  test: { ...(evidence ? { reporters: ['default', 'json', { onFinished() { mkdirSync(evidence, { recursive: true }); writeFileSync(resolve(evidence, 'mutation.json'), JSON.stringify({ mutation: mutation ?? null, applied, sources })); if (mutation) assert.equal(applied.length, 1) } }], outputFile: { json: resolve(evidence, 'results.json') } } : {}), include: ['apps/desktop/test/a2a-message-data-bridge.test.tsx'], setupFiles: [resolve(root, 'vitest.setup.ts')], passWithNoTests: false, maxWorkers: 1, fileParallelism: false } })
+  test: { ...(evidence ? { reporters: ['default', 'json', { onFinished() { mkdirSync(evidence, { recursive: true }); writeFileSync(resolve(evidence, 'mutation.json'), JSON.stringify({ mutation: mutation ?? null, applied, sources, noteLinkBoundary })); if (mutation) assert.equal(applied.length, 1) } }], outputFile: { json: resolve(evidence, 'results.json') } } : {}), include: ['apps/desktop/test/a2a-message-data-bridge.test.tsx'], setupFiles: [resolve(root, 'vitest.setup.ts')], passWithNoTests: false, maxWorkers: 1, fileParallelism: false } })
