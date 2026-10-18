@@ -5,6 +5,7 @@ import {
 } from '../../../shared/notification-presentation'
 import { api } from '../lib/api'
 import { createAttentionNotifier } from '../lib/attention-notifier'
+import { notificationDeliveryNotice } from '../lib/notification-delivery-notice'
 import { summarizeAgentAttention } from '../lib/agent-attention'
 import { createVisibleSessionIdsSelector } from '../lib/session-visibility'
 import { useAppStore } from '../store'
@@ -21,14 +22,15 @@ export function useAgentAttentionNotifications(): void {
   useEffect(() => {
     const notifier = createAttentionNotifier({
       notify: (input) => api.ui.notifyAgentAttention(input),
-      // Surfaced through the same error seam as everything else, so a platform that will not notify says
-      // so once instead of the feature silently doing nothing.
-      onUnsupported: (reason) => reportError(new Error(`Agent notifications are unavailable: ${reason}`)),
-      // A downgrade is not a failure — the banner showed — but the user asked for a persistent one and
-      // did not get it, so tell them once through the same seam instead of quietly not honouring it.
-      onDowngraded: () => reportError(new Error(
-        'This platform cannot keep a notification open until dismissed; it was shown as a normal banner.'
-      ))
+      // Both channels use one typed platform identity; localized prose never drives deduplication.
+      onUnsupported: reason => {
+        const notice = notificationDeliveryNotice({ status: 'unsupported', reason })!
+        reportError(notice.message, notice.context)
+      },
+      onDowngraded: () => {
+        const notice = notificationDeliveryNotice({ status: 'shown', presentation: 'downgraded' })!
+        reportError(notice.message, notice.context)
+      }
     })
 
     // Seed from whatever is already projected, WITHOUT notifying: Agents that finished before this window
@@ -39,6 +41,7 @@ export function useAgentAttentionNotifications(): void {
     // status observations don't repeat IPC and a failed setter never masquerades as a delivered badge.
     let disposed = false
     let badgeCount: number | undefined
+    let badgeFailureKey: string | undefined
     let publishingBadge = false
     const publishBadge = async (): Promise<void> => {
       if (disposed || publishingBadge) return
@@ -48,12 +51,16 @@ export function useAgentAttentionNotifications(): void {
       try {
         // false explicitly means this platform has no Dock; it is handled without inventing delivery.
         await api.ui.setAgentAttentionCount(count)
-        if (!disposed) badgeCount = count
+        if (!disposed) { badgeCount = count; badgeFailureKey = undefined }
       } catch (error) {
-        if (!disposed) reportError(new Error(
-          'Updating the Dock badge did not complete. Agent attention remains visible in this window; the next Agent status update will retry.',
-          { cause: error }
-        ))
+        if (!disposed) {
+          badgeFailureKey ??= crypto.randomUUID()
+          reportError(new Error(
+            'Updating the Dock badge did not complete. Agent attention remains visible in this window; the next Agent status update will retry.',
+            { cause: error }
+          ), { kind: 'process-degraded', summary: 'Dock attention badge could not update',
+            event: { source: 'desktop-notifications', key: `dock-badge-update:${badgeFailureKey}`, object: { kind: 'application', id: 'desktop' } } })
+        }
       } finally {
         publishingBadge = false
       }
@@ -117,7 +124,7 @@ export function useAgentAttentionNotifications(): void {
             .filter(Boolean).join(', ')
           reportError(new Error(
             `Agent "${session.label}" crashed${facts ? ` (${facts})` : ''}. Its Session and history are kept. Open the Session to review its available recovery actions.`
-          ), { kind: 'agent-broken', subject: session.control })
+          ), { kind: 'agent-broken', subject: session.control, event: { source: 'agent-attention', key: 'run-crashed' } })
         }
       }
       void publishBadge()
