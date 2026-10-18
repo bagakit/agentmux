@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentMuxRpcResult, AgentMuxMessageEvent } from '@agentmux/core'
 import { api } from './api'
 import { collaborationSubjectKey, type CollaborationReading, type CollaborationSubject } from './agent-collaboration'
+import { COLLABORATION_ACTIVITY_MS } from './collaboration-map-presentation'
 
 type Events = AgentMuxRpcResult<'message.events'>
 type Spawns = AgentMuxRpcResult<'agent.spawn.ls'>
@@ -26,8 +27,48 @@ const reason = (error: unknown) => error instanceof Error ? error.message : Stri
 type Action = 'refresh' | 'updates' | 'resume' | 'earlier' | 'created'
 export type CollaborationPulse = { id: number; startedAt: number; hostId: string; sender: string; recipient: string; kind: 'communication' | 'supervision' }
 
+/** Observe existing typed notifications independently of history/body demand. No reads or traffic are created here. */
+function useCollaborationActivity(scope: { current: ReadonlySet<string> }, enabled: boolean) {
+  const latestScope = useRef(scope); latestScope.current = scope
+  const [pulses, setPulses] = useState<CollaborationPulse[]>([])
+  const activity = useRef({ through: new Map<string, number>(), sequence: 0, pulses: [] as CollaborationPulse[] })
+  const expire = useRef<() => void>(() => {})
+  const resetHost = useCallback((hostId: string) => {
+    activity.current.through.delete(hostId)
+    activity.current.pulses = activity.current.pulses.filter(pulse => pulse.hostId !== hostId)
+    expire.current()
+  }, [])
+  useEffect(() => {
+    if (!enabled) { activity.current.pulses = []; setPulses([]); return }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    function flush() {
+      clearTimeout(timer)
+      const current = activity.current
+      current.pulses = current.pulses.filter(pulse => pulse.startedAt + COLLABORATION_ACTIVITY_MS > Date.now())
+      setPulses(current.pulses)
+      if (current.pulses.length) timer = setTimeout(flush, Math.max(1, current.pulses[0]!.startedAt + COLLABORATION_ACTIVITY_MS - Date.now()))
+    }
+    expire.current = flush; flush()
+    const unsubscribe = api.sessions.onEvent(({ hostId, event }) => {
+      if (event.type === 'agent-message-observation' && event.state !== 'available') { resetHost(hostId); return }
+      if (event.type !== 'agent-message-changed' || !event.live || event.recordKind !== 'message' && !event.recordKind.startsWith('dispatch-')) return
+      const known = latestScope.current.current
+      if (!known.has(collaborationSubjectKey({ hostId, agentSessionId: event.senderSessionId })) && !known.has(collaborationSubjectKey({ hostId, agentSessionId: event.recipientSessionId }))) return
+      const current = activity.current
+      if (event.sequence <= (current.through.get(hostId) ?? 0)) return
+      current.through.set(hostId, event.sequence)
+      current.pulses = [...current.pulses.slice(-15), { id: ++current.sequence, startedAt: Date.now(), hostId,
+        sender: event.senderSessionId, recipient: event.recipientSessionId, kind: event.recordKind === 'message' ? 'communication' : 'supervision' }]
+      flush()
+    })
+    return () => { expire.current = () => {}; clearTimeout(timer); unsubscribe() }
+  }, [enabled, resetHost])
+  return { pulses, resetHost }
+}
+
 /** A visible reading window, never a second queue. Every fetch is scoped to requested participants. */
-export function useCollaborationReading(subjects: readonly CollaborationSubject[], enabled: boolean) {
+export function useCollaborationReading(subjects: readonly CollaborationSubject[], enabled: boolean, activityScope: { current: ReadonlySet<string> }) {
+  const activity = useCollaborationActivity(activityScope, enabled)
   const scope = JSON.stringify(subjects.map(collaborationSubjectKey).sort())
   const [sources, setSources] = useState<Record<string, CollaborationSource>>({})
   const [facts, setFacts] = useState<readonly CollaborationReading[]>([])
@@ -35,14 +76,12 @@ export function useCollaborationReading(subjects: readonly CollaborationSubject[
   const eventIndexes = useRef(new Map<string, { incarnation: string; events: Map<number, AgentMuxMessageEvent> }>())
   const spawnIndexes = useRef(new Map<string, Map<string, CollaborationReading['spawns'][number]>>())
   const previousActive = useRef(new Set<string>())
-  const [pulses, setPulses] = useState<CollaborationPulse[]>([])
-  const activity = useRef({ through: new Map<string, number>(), sequence: 0, pulses: [] as CollaborationPulse[] })
   const generation = useRef(0), state = useRef(sources), wasEnabled = useRef(false), observedThrough = useRef(new Map<string, number>())
   const runner = useRef<(key: string, action: Action) => void>(() => {})
   useEffect(() => {
     const token = ++generation.current, restarting = !wasEnabled.current
     wasEnabled.current = enabled
-    if (!enabled) { activity.current.pulses = []; setPulses([]); return }
+    if (!enabled) return
     const originals = new Map(subjects.map(subject => [collaborationSubjectKey(subject), subject]))
     const previousSources = state.current, entering = new Set([...originals.keys()].filter(key => !previousActive.current.has(key)))
     previousActive.current = new Set(originals.keys())
@@ -51,19 +90,9 @@ export function useCollaborationReading(subjects: readonly CollaborationSubject[
     for (const [key, source] of Object.entries(held)) if (source.loading.length) held[key] = { ...source, loading: [] }
     for (const [key, subject] of originals) if (!held[key]) held[key] = empty(subject)
     state.current = held; setSources(held)
-    const pending = new Set<string>(), wanted = observedThrough.current, pulseThrough = activity.current.through
+    const pending = new Set<string>(), wanted = observedThrough.current
     for (const key of wanted.keys()) if (!originals.has(key)) wanted.delete(key)
-    let pulseTimer: ReturnType<typeof setTimeout> | undefined
-    let livePulses = activity.current.pulses
     const current = () => token === generation.current
-    function expirePulses() {
-      clearTimeout(pulseTimer)
-      if (!current()) return
-      livePulses = livePulses.filter(pulse => pulse.startedAt + 1800 > Date.now())
-      activity.current.pulses = livePulses; setPulses(livePulses)
-      if (livePulses.length) pulseTimer = setTimeout(expirePulses, Math.max(1, livePulses[0]!.startedAt + 1800 - Date.now()))
-    }
-    expirePulses()
     function patch(key: string, update: (source: CollaborationSource) => CollaborationSource) {
       if (!current() || !state.current[key]) return
       const previous = state.current[key]!, next = update(previous)
@@ -102,7 +131,7 @@ export function useCollaborationReading(subjects: readonly CollaborationSubject[
           if (page.hostId !== subject.hostId || page.participantSessionId !== subject.agentSessionId) throw new Error('The original message Host or participant did not match.')
           const latest = 'latest' in options
           if (latest && previous.incarnation !== null && previous.incarnation !== page.incarnation) {
-            wanted.delete(key); pulseThrough.delete(subject.hostId); livePulses = livePulses.filter(pulse => pulse.hostId !== subject.hostId); expirePulses()
+            wanted.delete(key); activity.resetHost(subject.hostId)
           }
           if (!latest && previous.incarnation !== page.incarnation) throw new Error('The original journal identity changed. Refresh this source to read its current window.')
           let index = eventIndexes.current.get(key)
@@ -155,17 +184,12 @@ export function useCollaborationReading(subjects: readonly CollaborationSubject[
       const matching = [...originals].filter(([, subject]) => subject.hostId === hostId && (subject.agentSessionId === event.senderSessionId || subject.agentSessionId === event.recipientSessionId))
       if (!matching.length) return
       for (const [key] of matching) { wanted.set(key, Math.max(wanted.get(key) ?? 0, event.sequence)); run(key, 'updates') }
-      if (event.live && event.sequence > (pulseThrough.get(hostId) ?? 0) && (event.recordKind === 'message' || event.recordKind.startsWith('dispatch-'))) {
-        pulseThrough.set(hostId, event.sequence)
-        const id = ++activity.current.sequence
-        livePulses = [...livePulses.slice(-15), { id, startedAt: Date.now(), hostId, sender: event.senderSessionId, recipient: event.recipientSessionId, kind: event.recordKind === 'message' ? 'communication' : 'supervision' }]
-        expirePulses()
-      }
+
     })
-    return () => { ++generation.current; runner.current = () => {}; clearTimeout(pulseTimer); unsubscribe() }
+    return () => { ++generation.current; runner.current = () => {}; unsubscribe() }
   }, [scope, enabled])
   const act = useCallback((subject: CollaborationSubject, action: Action) => runner.current(collaborationSubjectKey(subject), action), [])
   const active = useMemo(() => new Set(subjects.map(collaborationSubjectKey)), [scope])
   const visibleSources = useMemo(() => Object.entries(sources).filter(([key]) => active.has(key)).map(([, source]) => source), [sources, active])
-  return { sources: visibleSources, facts, pulses: enabled ? pulses : [], act }
+  return { sources: visibleSources, facts, pulses: enabled ? activity.pulses : [], act }
 }
