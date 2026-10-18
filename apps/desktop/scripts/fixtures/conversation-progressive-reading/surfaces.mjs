@@ -49,7 +49,17 @@ export async function exerciseSurfaces({ read, click, shot, until, copies }) {
     await read(`document.querySelectorAll('[data-reading-proof-group]').forEach(node=>delete node.dataset.readingProofGroup)`)
   }
   await control('[data-captured-process-id="surface-captured-tool"] .log-row[aria-expanded]')
-  assert.equal(await read(`document.querySelectorAll('[data-captured-process-id="surface-captured-tool"] .log-diff__line').length`), 2)
+  assert.deepEqual(await read(`([...document.querySelectorAll('[data-captured-process-id="surface-captured-tool"] .log-diff__line')].map(line=>{
+    const marker=line.querySelector('.log-diff__marker');return {
+      kind:['hunk','removed','added','context'].find(kind=>line.classList.contains('log-diff__line--'+kind)),
+      marker:marker?.textContent,text:[...line.childNodes].filter(node=>node!==marker).map(node=>node.textContent).join('')
+    }}))`), [
+    { kind: 'hunk', marker: ' ', text: '--- a/example.ts' },
+    { kind: 'hunk', marker: ' ', text: '+++ b/example.ts' },
+    { kind: 'hunk', marker: ' ', text: '@@ -1 +1 @@' },
+    { kind: 'removed', marker: '-', text: 'const value = false' },
+    { kind: 'added', marker: '+', text: 'const value = true' }
+  ])
   await shot('captured-diff')
   await control('[data-captured-process-id="surface-captured-tool"] details summary')
   await copy('[data-captured-process-id="surface-captured-tool"] [aria-label="Copy tool input"]', surfaceInput)
