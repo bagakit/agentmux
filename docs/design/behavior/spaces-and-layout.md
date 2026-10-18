@@ -88,7 +88,7 @@ The stable spatial graph is part of amux and is maintained by Core even on a rem
 
 ### 产品实体 ID 分配
 
-AgentMux 自主发号的可寻址产品实体统一使用固定12位 Base58 新 ID，包括 AgentSession、Tab、TabGroup、Region，以及自主创建的目录／知识／目标／消息／资源记录。项目自主创建的 operation、request、lease、观察代次、阅读视图和临时关联身份也复用同一分配组件，不各自生成 UUID 或复制随机编码算法；身份用途与 owner 仍独立，不能由共同编码合并。对象类型由类型字段或 URI 路径表达。目录 `[host,path]` 的 Space／Project 身份、Zone 资源坐标、文档键与 Git 对象坐标继续按原资源合同确定，不为统一发号改写资源寻址。外部 Provider 身份、ctxmux Run、外部协议规定的 UUID、内容哈希和确定性协议映射沿各自 owner 透传，不改造成短 ID。
+AgentMux 自主发号的可寻址产品实体统一使用固定12位 Base58 新 ID，包括 AgentSession、Tab、TabGroup、Region，以及自主创建的目录／知识／目标／消息／资源记录。项目自主创建的 operation、request、lease、观察代次、阅读视图和临时关联身份也复用同一分配组件，不各自生成 UUID 或复制随机编码算法；身份用途与 owner 仍独立，不能由共同编码合并。对象类型由类型字段或 URI 路径表达。目录 `[host,path]` 的 Space／Project 身份、Zone 资源坐标、文档键与 Git 对象坐标继续按原资源合同确定，不为统一发号改写资源寻址。外部 Provider 身份、ctxmux Run、外部协议规定的 UUID、内容哈希和确定性协议映射沿各自 owner 透传，不改造成短 ID。 外部写请求的格式接受合同尚不明确时，保留其原 wire 身份格式并明确未知，不以相邻 API 或本地测试接受代签，也不另造一份身份映射。
 
 编码与安全随机分配由同一无 UI、无宿主依赖的工具持有，Core 提供公开出口，依赖 Core 的领域包也消费同一底层工具，不复制实现或增加发号服务；隔离脚本、Hook 与 Browser extension 消费从该实现构建的产物。普通随机 ID 分配取9字节密码学安全样本；确定性分配按无歧义的业务域及原业务键派生。两者共用整样本溢出拒绝与左补 `1` 至12位规则，空间为 `58^12`（约70.3bit），不截断或取模。ID 不能充当权限凭证；确实以不可猜测值授予一次性准入或持有者能力的 nonce 使用同一组件的安全随机出口，保留至少128bit熵及原授权边界，不能因统一外观而降为普通短 ID。既有密钥、认证令牌、HMAC 和协议 nonce 继续由安全 owner 持有。
 
