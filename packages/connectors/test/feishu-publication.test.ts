@@ -1,3 +1,5 @@
+import { mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { FeishuAdapter } from '@agentmux/connectors/adapters/feishu'
 import type { PublicationOperation } from '../src/publication-store.js'
@@ -40,13 +42,46 @@ it('actual SDK and Axios send the exact frozen native card bytes with a stable o
 })
 
 it.each([
-  [undefined, 'Conversation message'], ['progress', 'Agent progress'], ['final', 'Agent reply']
+  [undefined, 'Conversation message'], ['progress', null], ['final', 'Agent reply']
 ] as const)('represents original public %s speech as a native card without changing its complete text', async (phase, title) => {
   const f = await fixture(), text = 'Original public message\nEvery line remains.\n<at user_id="all">literal text</at>'
   const prepared = f.publisher.prepare(operation({ payload: { kind: 'speech', text, ...(phase ? { phase } : {}) } }))
   const body = JSON.parse(prepared.request.body!), card = JSON.parse(body.content)
-  expect(body.msg_type).toBe('interactive'); expect(card.header.title).toEqual({ tag: 'plain_text', content: title })
-  expect(card.elements).toEqual([{ tag: 'div', text: { tag: 'plain_text', content: text } }])
+  expect(body.msg_type).toBe('interactive')
+  if (phase === 'progress') {
+    expect(card.header).toBeUndefined(); expect(card.schema).toBe('2.0')
+    expect(card.body.padding).toBe('8px 12px 8px 12px'); expect(card.body.vertical_spacing).toBe('4px')
+    expect(card.body.elements).toEqual([{ tag: 'div', text_size: 'notation', text: { tag: 'plain_text', content: text } }])
+    expect(card.config.summary.content).toContain('Original public message')
+  } else {
+    expect(card.header.title).toEqual({ tag: 'plain_text', content: title })
+    expect(card.elements).toEqual([{ tag: 'div', text: { tag: 'plain_text', content: text } }])
+  }
+})
+
+it('delivers, replaces and inspects compact progress through the native SDK without changing original text or request bytes', async () => {
+  const f = await fixture(), text = '正在检查群消息的投递链路。\n先核对原始回执，再确认 Agent 是否采用。\n<at user_id="all">保持原文</at>'
+  const original = operation({ payload: { kind: 'speech', phase: 'progress', text } }), prepared = f.publisher.prepare(original)
+  const frozen = JSON.stringify(prepared), signal = new AbortController().signal
+  const created = await f.publisher.dispatch(prepared, original.target, 'fixture-credential', signal)
+  expect(created.state).toBe('confirmed'); if (created.state !== 'confirmed') throw Error('Compact progress did not reach native create')
+  expect(await f.publisher.inspect(prepared, original.target, 'fixture-credential', signal, created.mapping)).toEqual(created)
+  expect(JSON.stringify(prepared)).toBe(frozen)
+  const card = JSON.parse(JSON.parse(f.remote.messageCalls()[0]!.body).content)
+  expect(card.header).toBeUndefined(); expect(card.body.elements[0].text.content).toBe(text)
+  expect(card.config.summary.content.length).toBeGreaterThanOrEqual(8); expect(Array.from(card.config.summary.content)).toHaveLength(60)
+  const updated = f.publisher.prepare(operation({ operationId: 'original-progress-update', mapping: created.mapping,
+    payload: { kind: 'speech', phase: 'progress', text: text + '\n原请求已确认，继续处理。' } }))
+  expect(await f.publisher.dispatch(updated, original.target, 'fixture-credential', signal, created.mapping)).toEqual(created)
+  expect(await f.publisher.inspect(updated, original.target, 'fixture-credential', signal, created.mapping)).toEqual(created)
+  expect(f.remote.messageCalls().map(call => call.method)).toEqual(['POST', 'GET', 'PATCH', 'GET'])
+  expect(f.remote.messageCalls()[2]!.body).toBe(updated.request.body)
+  if (process.env.AGENTMUX_COMPACT_CARD_OUTPUT) {
+    await mkdir(process.env.AGENTMUX_COMPACT_CARD_OUTPUT, { recursive: true })
+    await writeFile(join(process.env.AGENTMUX_COMPACT_CARD_OUTPUT, 'card.json'), JSON.stringify(card, null, 2))
+    await writeFile(join(process.env.AGENTMUX_COMPACT_CARD_OUTPUT, 'native-consumer.json'), JSON.stringify({ originalOperationId: original.operationId,
+      receipt: created, frozenUnchanged: JSON.stringify(prepared) === frozen, calls: f.remote.messageCalls() }, null, 2))
+  }
 })
 
 it('updates, inspects and withdraws the exact original mapping when successful ACK omits its thread', async () => {

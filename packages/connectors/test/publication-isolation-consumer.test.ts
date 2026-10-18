@@ -64,7 +64,8 @@ it.each([false, true])('independent public final follows progress without replay
   await vi.waitFor(() => expect(operations()[0]?.state).toBe(lost ? 'unknown' : 'confirmed'))
   const original = operations()[0]!
   expect([...remote.records.values()].some(message => JSON.stringify(message).includes(progress))).toBe(true)
-  expect(JSON.parse(JSON.parse(posts()[0]!.body).content).header.title.content).toBe('Agent progress')
+  expect(JSON.parse(JSON.parse(posts()[0]!.body).content)).toMatchObject({ schema: '2.0', body: { elements: [{ tag: 'div', text_size: 'notation', text: { tag: 'plain_text', content: progress } }] } })
+  expect(JSON.parse(JSON.parse(posts()[0]!.body).content).header).toBeUndefined()
   await appendFile(transcript, native('independent-final', 'final_answer', final)); services.publication!.refresh()
   await vi.waitFor(() => expect(operations()).toHaveLength(2))
   const next = operations()[1]!
