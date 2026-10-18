@@ -1,4 +1,4 @@
-import { noteShareRange } from '../shared/note-share-range.js'
+import { noteShareRange, noteShareRangeContent } from '../shared/note-share-range.js'
 import type { NoteSharedUndoOwner } from './note-shared-undo-owner.js'
 import type { FileShareUndoParams, FileShareUndoResult } from '@agentmux/core/files'
 import type { NoteHistoryWriteAction } from './note-history-actions.js'
@@ -151,11 +151,10 @@ export class NoteSharedBlockOwner {
       if (!nodes(destinationNote.content, node => node.type === 'noteInclude' && node.attrs?.referenceId === promotion.referenceId && node.attrs.noteId === promotion.shared.noteId && node.attrs.path === promotion.shared.expectedResource.path && (node.attrs.workspaceId === promotion.shared.expectedResource.workspaceId || node.attrs.workspaceId == null && promotion.shared.expectedResource.workspaceId === params.destination.expectedResource.workspaceId)).length) throw new AgentMuxError('This staged occurrence was removed or changed before save. No shared file was created.', 'NOTE_SHARE_OCCURRENCE_REMOVED')
       if (key(promotion.source) === key(promotion.shared)) throw new AgentMuxError('A shared file must be a distinct absent Markdown resource.', 'NOTE_SHARE_TARGET_INVALID')
       if (selected.nodes.some(node => nodes(node, node => node.type === 'noteInclude' && node.attrs?.noteId === promotion.shared.noteId).length)) throw new AgentMuxError('The proposed extraction would include itself. Keep the original source and draft.', 'NOTE_SHARE_CYCLE')
-      const extracted = ['listItem', 'taskItem'].includes(selected.nodes[0]!.type!) ? { type: selected.parent.type!, ...(selected.parent.type === 'orderedList' ? { attrs: { ...selected.parent.attrs, start: Number(selected.parent.attrs?.start ?? 1) + selected.index } } : selected.parent.attrs ? { attrs: selected.parent.attrs } : {}), content: structuredClone(selected.nodes) } : null
       const note: NoteDocument = { schema: original.schema, noteId: promotion.shared.noteId, kind: 'shared-block', ...(promotion.shared.title ? { title: promotion.shared.title } : {}),
         origin: { operationId: promotion.operationId, sourceNoteId: promotion.sourceNoteId, sourcePath: promotion.source.expectedResource.path, sourceRevision: promotion.source.expectedRevision, sourceBlockId: promotion.sourceBlockId, sourceOperationId: key(promotion.source) === key(params.destination) ? params.destination.operationId! : fileShareSourceOperation(params, promotion.source),
           requestFingerprint: fingerprint, destination: { noteId: destinationNote.noteId, path: params.destination.expectedResource.path, operationId: params.destination.operationId!, expectedRevision: params.destination.expectedRevision } },
-        content: { type: 'doc', content: extracted ? [extracted] : structuredClone(selected.nodes) } }
+        content: noteShareRangeContent(selected) }
       const { noteId: _noteId, title: _title, ...target } = promotion.shared
       const content = serializeRange(note)
       shared.set(promotion.operationId, { request: { ...target, expectedRevision: null, content }, promotion })
