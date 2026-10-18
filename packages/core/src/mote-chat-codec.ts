@@ -8,6 +8,9 @@ export const MOTE_CHAT_RPC_METHODS = {
   'space.mote.chat.configure': 'long', 'space.mote.chat.inspect': 'short', 'space.mote.chat.history': 'short',
   'space.mote.chat.audience': 'short', 'space.mote.chat.allocate': 'short'
 } as const
+export function isMoteChatMethod(value: unknown): value is MoteChatMethod {
+  return typeof value === 'string' && Object.hasOwn(MOTE_CHAT_RPC_METHODS, value)
+}
 type Code = 'INVALID_CONTROL_REQUEST' | 'CONTROL_PROTOCOL_ERROR'
 const fail = (code: Code): never => { throw new AgentMuxError('Mote chat requires exact original identities, revisions and JSON facts.', code) }
 const fields = (v: unknown, allowed: string[], required: string[], code: Code) => {

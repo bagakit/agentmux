@@ -11,6 +11,10 @@ export type MoteChatValues = {
   /** Total allowance seeded once for each new guest; zero declines new guests. */
   strangerMessageLimit: number
 }
+/** Editable product defaults, not a runtime expiry or a limit on retained conversations. */
+export const MOTE_CHAT_DEFAULT_VALUES: Readonly<MoteChatValues> = Object.freeze({
+  enabled: false, connection: null, conversationIdleMs: 30 * 60_000, strangerMessageLimit: 0
+})
 export type MoteChatConfiguration = {
   target: MoteChatTarget
   revision: number
