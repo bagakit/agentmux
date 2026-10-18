@@ -22,7 +22,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { PerformanceOverview } from '../src/renderer/src/components/performance/PerformanceOverview'
 import { currentPerformanceCaptureTarget } from '../src/renderer/src/components/performance/PerformanceCapture'
-import { analyseV8Profile } from '../../../packages/core/src/v8-profile-analysis'
+import { analyseV8Profile, parseV8ProfileBytes, summariseV8Profile } from '../../../packages/core/src/v8-profile-analysis'
 import { profileFlameRows } from '../src/renderer/src/lib/renderer-profile-analysis'
 import { registerPerformanceCaptureIpc } from '../src/main/performance-capture-ipc'
 import { ProcessResourceSampler, type ResourceSample } from '../src/main/process-resource-sampler'
@@ -356,6 +356,111 @@ it('keeps an anonymous script distinct from a literal runtime display label when
   expect(node('.performance-frame-detail').textContent).toContain('renderWorkspace')
   expect(node('.performance-frame-detail').textContent).toContain('(no source URL)')
   expect(node('.performance-frame-detail').textContent).not.toContain('(runtime / no script)')
+})
+
+const localProfileFile = (name = 'saved.cpuprofile', profile = originalProfile()) => new File(['\n', JSON.stringify(profile, null, 2), '\n'], name, { type: 'application/json' })
+async function chooseLocalProfile(file: File | null) {
+  await act(async () => {
+    const input = node<HTMLInputElement>('[aria-label="Choose saved CPU profile"]')
+    Object.defineProperty(input, 'files', { configurable: true, value: file ? [file] : [] })
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+}
+async function waitForLocalProfile(name: string) {
+  await vi.waitFor(async () => {
+    await act(async () => {})
+    expect(node('[aria-label="Imported CPU profile"]').textContent).toContain(name)
+  })
+}
+
+it('imports through the real Tool and exports exact original bytes and the shared CLI technical report without capture', async () => {
+  const downloads: { name: string; blob: Blob }[] = [], create = vi.fn((_blob: Blob) => 'blob:original-local-file')
+  vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: create, revokeObjectURL: vi.fn() }))
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+    downloads.push({ name: this.download, blob: create.mock.calls.at(-1)![0] as Blob })
+  })
+  await render()
+  const file = localProfileFile()
+  await chooseLocalProfile(file); await waitForLocalProfile(file.name)
+  const result = node('[aria-label="Imported CPU profile"]')
+  expect(result.textContent).toContain('process and build unverified')
+  expect(result.querySelector('.performance-capture-result')).toBeNull()
+  await click('[aria-label="Imported CPU profile"] .performance-capture-actions > button:first-child')
+  await click('[aria-label="Imported CPU profile"] .performance-capture-actions > button:last-child')
+  expect(downloads.map(item => item.name)).toEqual([file.name, 'profile-analysis.json'])
+  const raw = Buffer.from(await file.arrayBuffer())
+  expect(Buffer.from(await downloads[0]!.blob.arrayBuffer())).toEqual(raw)
+  const source = { sha256: createHash('sha256').update(raw).digest('hex'), bytes: raw.length, captureIdentity: 'unavailable-in-bare-profile' as const }
+  const report = JSON.parse(await downloads[1]!.blob.text())
+  expect(report).toEqual(summariseV8Profile(analyseV8Profile(parseV8ProfileBytes(raw)), source))
+  expect(report.source).toEqual(source)
+  expect(report.timing.weightedMs).toBe(5)
+  expect(profilePort).not.toHaveBeenCalled(); expect(tracePort).not.toHaveBeenCalled(); expect(scenePort).not.toHaveBeenCalled()
+})
+
+it('keeps local analysis available without an observation or target while the Tool is paused and a capture is busy', async () => {
+  await act(async () => root.render(<PerformanceOverview snapshot={null} paused singleCaptureBusy close={() => {}} onConfigure={() => {}} onViewScript={() => {}} />))
+  expect(node<HTMLButtonElement>('[data-performance-profile-import] .performance-capture-actions > button').disabled).toBe(false)
+  await chooseLocalProfile(localProfileFile()); await waitForLocalProfile('saved.cpuprofile')
+  expect(profilePort).not.toHaveBeenCalled(); expect(tracePort).not.toHaveBeenCalled()
+  await click('[data-performance-profile-import] > .performance-capture-actions > button:last-child')
+  expect(document.querySelector('[aria-label="Imported CPU profile"]')).toBeNull()
+})
+
+it('preserves a usable import after bad JSON, empty samples or picker cancellation and allows same-file reselection', async () => {
+  await render(); const original = localProfileFile()
+  await chooseLocalProfile(original); await waitForLocalProfile(original.name)
+  await chooseLocalProfile(new File(['{"private-fragment'], 'broken.cpuprofile'))
+  await vi.waitFor(async () => { await act(async () => {}); expect(node('[data-performance-profile-import] [role="alert"]').textContent).toContain('not valid profile JSON') })
+  expect(node('[aria-label="Imported CPU profile"]').textContent).toContain(original.name)
+  expect(node('[data-performance-profile-import] [role="alert"]').textContent).not.toContain('private-fragment')
+  const empty = originalProfile(); empty.samples = []; empty.timeDeltas = []
+  await chooseLocalProfile(localProfileFile('empty.cpuprofile', empty))
+  await vi.waitFor(async () => { await act(async () => {}); expect(node('[data-performance-profile-import] [role="alert"]').textContent).toContain('No weighted V8 samples') })
+  expect(node('[aria-label="Imported CPU profile"]').textContent).toContain(original.name)
+  await chooseLocalProfile(null)
+  expect(node('[aria-label="Imported CPU profile"]').textContent).toContain(original.name)
+  await chooseLocalProfile(original)
+  await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('[data-performance-profile-import] [role="alert"]')).toBeNull() })
+  expect(node<HTMLInputElement>('[aria-label="Choose saved CPU profile"]').value).toBe('')
+})
+
+it('resets the imported flame zoom when a different original replaces the same filename', async () => {
+  await render(); await chooseLocalProfile(localProfileFile()); await waitForLocalProfile('saved.cpuprofile')
+  await click('[aria-label="Imported CPU profile"] .performance-module-row')
+  expect(node('[aria-label="Imported CPU profile"] .performance-frame-detail').textContent).not.toContain('(root)')
+  const next = originalProfile()
+  for (const item of next.nodes) { item.id += 100; item.children = item.children?.map(id => id + 100) }
+  next.samples = next.samples!.map(id => id + 100)
+  await chooseLocalProfile(localProfileFile('saved.cpuprofile', next))
+  await vi.waitFor(async () => { await act(async () => {}); expect(node('[aria-label="Imported CPU profile"] .performance-frame-detail').textContent).toContain('(root)') })
+})
+
+it('clearing a pending hash prevents its late material from replacing a later import', async () => {
+  await render()
+  let finish!: (bytes: ArrayBuffer) => void
+  const digest = vi.spyOn(crypto.subtle, 'digest').mockImplementationOnce(() => new Promise<ArrayBuffer>(resolve => { finish = resolve }))
+  await chooseLocalProfile(localProfileFile('old.cpuprofile'))
+  await vi.waitFor(() => expect(digest).toHaveBeenCalledOnce())
+  await click('[data-performance-profile-import] > .performance-capture-actions > button:last-child')
+  await chooseLocalProfile(localProfileFile('new.cpuprofile')); await waitForLocalProfile('new.cpuprofile')
+  await act(async () => { finish(new Uint8Array(32).buffer); await Promise.resolve() })
+  expect(node('[aria-label="Imported CPU profile"]').textContent).toContain('new.cpuprofile')
+  expect(node('[aria-label="Imported CPU profile"]').textContent).not.toContain('old.cpuprofile')
+})
+
+it('unmount aborts the exact pending local reader and removes its callbacks', async () => {
+  await render()
+  let reading: FileReader | null = null
+  vi.spyOn(FileReader.prototype, 'readAsArrayBuffer').mockImplementation(function (this: FileReader) {
+    reading = this; Object.defineProperty(this, 'readyState', { configurable: true, value: FileReader.LOADING })
+  })
+  const abort = vi.spyOn(FileReader.prototype, 'abort').mockImplementation(() => {})
+  await chooseLocalProfile(localProfileFile())
+  expect(reading).not.toBeNull()
+  await act(async () => root.render(null))
+  expect(abort).toHaveBeenCalledOnce()
+  expect(reading!.onload).toBeNull(); expect(reading!.onerror).toBeNull(); expect(reading!.onabort).toBeNull()
 })
 
 
