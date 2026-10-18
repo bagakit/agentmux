@@ -52,7 +52,6 @@ export async function channelMetadataFixture(cleanup: Array<() => void | Promise
   await vi.waitFor(() => expect(transport.sockets).toHaveLength(1))
   const get = (subject = actorSubject) => opened.sdk.call('connection.metadata.get', { connectionId: config.connectionId, subject })
   const submit = async (suffix: string) => {
-    if (process.env.AGENTMUX_METADATA_DIAG) console.error('[native-test-socket]', transport.sockets.at(-1)?.getConnectionStatus())
     const payload = feishuPayload({ message_id: 'metadata-message-' + suffix }); payload.header.event_id = 'metadata-event-' + suffix
     await transport.receive(payload)
     expect(transport.ack().at(-1)).toEqual({ code: 200 })
