@@ -1,13 +1,13 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { buildBrowserControlFeedbackScript } from '../src/main/browser-control-feedback'
+import { BrowserControlFeedback, buildBrowserControlFeedbackScript } from '../src/main/browser-control-feedback'
 import { showBrowserOperationFeedback } from '../src/main/browser-operation-feedback'
 import { DEFAULT_BROWSER_AGENT_CONTROL } from '../src/shared/browser-agent-control'
 
 const globals = globalThis as any
 const state = () => globals.__agentMuxBrowserControlFeedback
-const apply = (revision: number, operationId: string, active = true) => new Function('return ' + buildBrowserControlFeedbackScript({
-  revision, operationId, navigationId: 'original-navigation', active, deadline: Number.MAX_SAFE_INTEGER
+const apply = (revision: number, ownerId: string, active = true) => new Function('return ' + buildBrowserControlFeedbackScript({
+  revision, browserId: 'original-browser', ownerId, navigationId: 'original-navigation', active, deadline: Number.MAX_SAFE_INTEGER
 }, { ...DEFAULT_BROWSER_AGENT_CONTROL, glowBlend: 'screen', glowColor: '#2299cc' }))()
 
 afterEach(() => {
@@ -29,6 +29,9 @@ describe('coordinate-free Browser ownership decoration', () => {
     expect(state().host.style.getPropertyValue('isolation')).toBe('auto')
     expect(state().host.style.getPropertyValue('contain')).toBe('none')
     expect(state().host.style.pointerEvents).toBe('none')
+    expect(state().host.getAttribute('data-browser-id')).toBe('original-browser')
+    expect(state().host.getAttribute('data-owner-id')).toBe('one')
+    expect(state().host.hasAttribute('data-operation-id')).toBe(false)
     expect(state().shadow.querySelectorAll('button,input,a,[tabindex]')).toHaveLength(0)
     expect(state().shadow.querySelector('.amux-browser-agent-glow')).not.toBeNull()
     expect(document.activeElement).toBe(input); expect(input.value).toBe('Original page draft')
@@ -74,78 +77,95 @@ describe('coordinate-free Browser ownership decoration', () => {
   })
 })
 
-describe('original feedback owner lifecycle', () => {
+describe('Browser/view feedback owner lifecycle', () => {
   function owner() {
     let active = true, revision = 0, navigationId = 'one'
     let preferences = { ...DEFAULT_BROWSER_AGENT_CONTROL }
     const execute = vi.fn(async (_world: number, scripts: { code: string }[]) => new Function('return ' + scripts[0]!.code)())
     const warn = vi.fn()
-    const feedback = showBrowserOperationFeedback({ contents: { executeJavaScriptInIsolatedWorld: execute, isDestroyed: () => false },
-      operationId: 'original-operation', navigationId: () => navigationId, operatorName: 'Original operator',
+    const contents = { executeJavaScriptInIsolatedWorld: execute, isDestroyed: () => false }
+    const feedback = new BrowserControlFeedback({ contents, browserId: 'original-browser', ownerId: 'original-view-epoch',
+      navigationId: () => navigationId,
       preferences: () => preferences, nextRevision: () => ++revision, isCurrent: () => active, warn })
-    return { feedback, execute, warn, setActive: (value: boolean) => { active = value },
+    const action = showBrowserOperationFeedback({ contents, operationId: 'original-operation',
+      navigationId: () => navigationId, operatorName: 'Original operator', preferences: () => preferences,
+      nextRevision: () => ++revision, isCurrent: () => active, warn })
+    return { feedback, action, execute, warn, setActive: (value: boolean) => { active = value },
       setNavigation: (value: string) => { navigationId = value },
       setPreferences: (value: typeof preferences) => { preferences = value } }
   }
 
   it('keeps ownership across action/observation clears and releases it only on the actual owner edge', async () => {
     const original = owner()
-    await original.feedback.synchronizeControl(); const live = state().host
-    await original.feedback.begin('js'); await original.feedback.clear()
+    await original.feedback.synchronize(); const live = state().host
+    expect(state()).toMatchObject({ browserId: 'original-browser', ownerId: 'original-view-epoch' })
+    expect(state().operationId).toBeUndefined()
+    await original.action.begin('js'); await original.action.clear(); await original.action.end(true)
     expect(state().host).toBe(live)
-    await original.feedback.synchronizeControl(); expect(state().host).toBe(live)
-    original.setActive(false); await original.feedback.synchronizeControl()
+    await original.feedback.synchronize(); expect(state().host).toBe(live)
+    original.setActive(false); await original.feedback.synchronize()
     expect(state().host).toBeNull()
   })
 
   it('consumes saved preferences without polling or replaying an action', async () => {
     const original = owner()
-    await original.feedback.synchronizeControl(); await original.feedback.synchronizeControl()
+    await original.feedback.synchronize(); await original.feedback.synchronize()
     expect(original.execute).toHaveBeenCalledTimes(1)
     original.setPreferences({ ...DEFAULT_BROWSER_AGENT_CONTROL, glowBlend: 'multiply', glowColor: '#cc3366' })
-    await original.feedback.synchronizeControl()
+    await original.feedback.synchronize()
     expect(original.execute).toHaveBeenCalledTimes(2); expect(state().host.style.mixBlendMode).toBe('multiply')
     expect(globals.__agentMuxBrowserOperationFeedback).toBeUndefined()
-    original.setNavigation('two'); await original.feedback.synchronizeControl()
+    original.setNavigation('two'); await original.feedback.synchronize()
     expect(state().navigationId).toBe('two')
     const live = state().host
-    await original.feedback.end(true, true); expect(state().host).toBe(live)
-    original.setActive(false); await original.feedback.synchronizeControl(); expect(state().host).toBeNull()
+    await original.feedback.synchronize(); expect(state().host).toBe(live)
+    original.setActive(false); await original.feedback.synchronize(); expect(state().host).toBeNull()
+  })
+
+  it('reconciles a new document after pagehide without creating an operation', async () => {
+    const original = owner(); await original.feedback.synchronize()
+    const previous = state().host
+    window.dispatchEvent(new Event('pagehide')); expect(state().host).toBeNull()
+    original.setNavigation('next-document'); await original.feedback.synchronize(true)
+    expect(state().host).not.toBeNull(); expect(state().host).not.toBe(previous)
+    expect(state().navigationId).toBe('next-document')
+    expect(globals.__agentMuxBrowserOperationFeedback).toBeUndefined()
+    await original.feedback.hide(); expect(state().host).toBeNull()
   })
 
   it('bounds a failed display observation and rejects its late script without taking control from the Agent', async () => {
     vi.useFakeTimers()
     const original = owner(); let late: (() => unknown) | undefined
     original.execute.mockImplementationOnce((_world, scripts) => new Promise(() => { late = () => new Function('return ' + scripts[0]!.code)() }))
-    const observing = original.feedback.synchronizeControl()
+    const observing = original.feedback.synchronize()
     await vi.advanceTimersByTimeAsync(121); await observing
     expect(original.warn).toHaveBeenCalledTimes(1); expect(late?.()).toBe(false); expect(state()).toBeUndefined()
-    await original.feedback.synchronizeControl()
+    await original.feedback.synchronize()
     expect(state().host).not.toBeNull(); expect(original.warn).toHaveBeenCalledTimes(1)
   })
 
   it('does not let an old clear acknowledgement suppress cleanup of a newer active publication', async () => {
-    const original = owner(); await original.feedback.synchronizeControl()
+    const original = owner(); await original.feedback.synchronize()
     let release: (() => void) | undefined
     original.execute.mockImplementationOnce((_world, scripts) => {
       const result = new Function('return ' + scripts[0]!.code)()
       return new Promise(resolve => { release = () => resolve(result) })
     })
-    original.setActive(false); const clearing = original.feedback.synchronizeControl()
-    original.setActive(true); await original.feedback.synchronizeControl()
+    original.setActive(false); const clearing = original.feedback.synchronize()
+    original.setActive(true); await original.feedback.synchronize()
     expect(state().host).not.toBeNull()
     release!(); await clearing
-    original.setActive(false); await original.feedback.synchronizeControl()
+    original.setActive(false); await original.feedback.synchronize()
     expect(state().host).toBeNull()
   })
 
   it('keeps a failed clear eligible for the next original owner observation', async () => {
-    vi.useFakeTimers(); const original = owner(); await original.feedback.synchronizeControl()
+    vi.useFakeTimers(); const original = owner(); await original.feedback.synchronize()
     const live = state().host
     original.execute.mockImplementationOnce(() => new Promise(() => {}))
-    original.setActive(false); const clearing = original.feedback.synchronizeControl()
+    original.setActive(false); const clearing = original.feedback.synchronize()
     await vi.advanceTimersByTimeAsync(121); await clearing
     expect(state().host).toBe(live); expect(original.warn).toHaveBeenCalledTimes(1)
-    await original.feedback.synchronizeControl(); expect(state().host).toBeNull()
+    await original.feedback.synchronize(); expect(state().host).toBeNull()
   })
 })
