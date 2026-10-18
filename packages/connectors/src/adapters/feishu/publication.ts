@@ -20,9 +20,9 @@ function ownSender(value: unknown, application: ConnectionApplication): boolean 
 function requestCard(prepared: PreparedPublication): Record<string, unknown> | null {
   try {
     const body = object(JSON.parse(prepared.request.body!)), card = typeof body?.content === 'string' ? object(JSON.parse(body.content)) : null
-    if (!card || object(card.config)?.update_multi !== true || object(object(card.header)?.title)?.tag !== 'plain_text') return null
-    if (card.schema === '2.0') return Array.isArray(object(card.body)?.elements) ? card : null
-    if (!Array.isArray(card.elements)) return null
+    if (!card || object(card.config)?.update_multi !== true) return null
+    if (card.schema === '2.0') return (card.header === undefined || object(object(card.header)?.title)?.tag === 'plain_text') && Array.isArray(object(card.body)?.elements) ? card : null
+    if (object(object(card.header)?.title)?.tag !== 'plain_text' || !Array.isArray(card.elements)) return null
     for (const element of card.elements) {
       const value = object(element)
       if (value?.tag === 'div') { if (object(value.text)?.tag !== 'plain_text' || typeof object(value.text)?.content !== 'string') return null }
@@ -216,9 +216,16 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
           ...(inputStatus ? [{ tag: 'div', text: { tag: 'plain_text', content: inputStatus } }] : [])] }
     } else if (operation.payload.kind === 'speech') {
       if (!publicationSpeechText(operation.payload)) feishuFailure('FEISHU_PUBLICATION_CONTENT_UNSUPPORTED')
-      const title = operation.payload.phase === 'progress' ? 'Agent progress' : operation.payload.phase === 'final' ? 'Agent reply' : 'Conversation message'
-      card = { config: { update_multi: true }, header: { title: { tag: 'plain_text', content: title }, template: operation.payload.phase === 'progress' ? 'grey' : 'blue' },
-        elements: [{ tag: 'div', text: { tag: 'plain_text', content: publicationSpeechText(operation.payload) } }] }
+      const text = publicationSpeechText(operation.payload)
+      if (operation.payload.phase === 'progress') {
+        card = { schema: '2.0', config: { update_multi: true, summary: { content: 'Agent · ' + Array.from(text.replace(/\s+/gu, ' ')).slice(0, 52).join('') } },
+          body: { padding: '8px 12px 8px 12px', vertical_spacing: '4px',
+            elements: [{ tag: 'div', text_size: 'notation', text: { tag: 'plain_text', content: text } }] } }
+      } else {
+        const title = operation.payload.phase === 'final' ? 'Agent reply' : 'Conversation message'
+        card = { config: { update_multi: true }, header: { title: { tag: 'plain_text', content: title }, template: 'blue' },
+          elements: [{ tag: 'div', text: { tag: 'plain_text', content: text } }] }
+      }
     } else if (operation.payload.kind === 'image') {
       const uploaded = operation.uploads?.at(-1)
       if (uploaded?.state !== 'confirmed' || !('imageKey' in uploaded)) feishuFailure('FEISHU_IMAGE_UPLOAD_UNCONFIRMED')
@@ -284,7 +291,7 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
   }
   async inspect(prepared: PreparedPublication, target: PublicationTarget, credential: string, signal: AbortSignal, mapping?: Readonly<PublicationMapping>): Promise<PublicationReceipt | null> {
     // No supported lookup by uuid exists. A missing create ID, including after dedup expiry, stays unknown.
-    if (!mapping || !(this.valid(prepared, target, mapping) || requestFile(prepared) !== null && this.valid(prepared, target))) return null
+    if (!mapping || !(this.valid(prepared, target, mapping) || this.valid(prepared, target))) return null
     try {
       feishuIdentity(mapping.messageId)
       let status: number | undefined
