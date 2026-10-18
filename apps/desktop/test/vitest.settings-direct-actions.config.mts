@@ -13,6 +13,7 @@ const edits: Record<string, [string, string, string]> = {
   surveyClear: ['StartPageImageField.tsx', "change(''); choose.current?.focus()", 'choose.current?.focus()'],
   surveyLateRead: ['StartPageImageField.tsx', 'if (selected !== request.current) return', 'if (false) return'],
   surveyPreview: ['BrowserStartPageSettings.tsx', 'if (validBrowserStartPageImage(icon) && validBrowserStartPageImage(backgroundImage))', 'if (true)'],
+  surveyAction: ['BrowserStartPageSettings.tsx', 'onClick={previewImages}', 'onClick={() => {}}'],
   mobileScanCopies: ['DeviceManagementSettings.tsx', "if (action === 'scan')", 'if (false)'],
   mobileCopyReissues: ['DeviceManagementSettings.tsx', "action === 'copy' && url ? url : (await api.deviceManagement.link({})).url", '(await api.deviceManagement.link({})).url'],
   mobileLateLink: ['DeviceManagementSettings.tsx', 'if (epoch !== generation.current) return', 'if (false) return']
