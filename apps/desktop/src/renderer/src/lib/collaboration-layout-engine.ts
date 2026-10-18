@@ -7,11 +7,12 @@ export type CollaborationLayoutInput = {
   nodes: readonly { id: string; areaId: string; width: number; height: number }[]
   connections: readonly CollaborationLayoutConnection[]
 }
-export type CollaborationLayoutBox = {
-  id: string; areaId: string; kind: 'area' | 'agent'; x: number; y: number; width: number; height: number; folded: boolean
-}
 export type CollaborationLayoutPoint = { x: number; y: number }
 export type CollaborationLayoutBounds = { x: number; y: number; width: number; height: number }
+export type CollaborationLayoutBox = CollaborationLayoutBounds & { id: string; areaId: string; folded: boolean } & (
+  | { kind: 'agent' }
+  | { kind: 'area'; heading: CollaborationLayoutBounds }
+)
 export type CollaborationPath = {
   id: string; path: string; labelX: number; labelY: number; sourceHandle: string; targetHandle: string
   bounds: CollaborationLayoutBounds; points: readonly CollaborationLayoutPoint[]
@@ -26,7 +27,7 @@ export type CollaborationLayoutResponse =
   | { id: string; type: 'complete' }
 
 export const COLLABORATION_AREA_HEADER = 40
-const padding = 24, gap = 28
+const padding = 24, gap = 28, headingWidth = 184
 const kinds = ['communication', 'creation', 'supervision'] as const
 let engine: Promise<Viz> | undefined
 async function graphviz(signal?: AbortSignal) {
@@ -37,7 +38,7 @@ async function graphviz(signal?: AbortSignal) {
   return viz
 }
 type Draw = { op: string; points?: number[][] }
-type RenderedGraph = { objects?: { name: string; pos?: string }[]; edges?: { id?: string; _draw_?: Draw[] }[] }
+type RenderedGraph = { objects?: { name: string; pos?: string; bb?: string; lp?: string }[]; edges?: { id?: string; _draw_?: Draw[] }[] }
 function render(viz: Viz, graph: Graph, layout: string): RenderedGraph {
   try { return viz.renderJSON(graph, { engine: layout, yInvert: true }) as RenderedGraph }
   catch (error) { engine = undefined; throw error }
@@ -68,27 +69,7 @@ export function translateCollaborationPath(path: CollaborationPath, offset: Coll
 function fixedNodes(nodes: readonly { id: string; width: number; height: number }[]) {
   return nodes.map(node => ({ name: node.id, attributes: { width: node.width / 72, height: node.height / 72 } }))
 }
-function positions(viz: Viz, nodes: readonly { id: string; width: number; height: number }[], edges: readonly { source: string; target: string }[], layout: 'sfdp' | 'fdp') {
-  if (!nodes.length) return new Map<string, CollaborationLayoutPoint>()
-  const original = new Set(nodes.map(node => node.id)), pairs = new Set<string>()
-  const result = render(viz, { directed: false,
-    graphAttributes: { start: 42, overlap: 'prism', sep: `+${gap}`, splines: false, pack: gap },
-    nodeAttributes: { shape: 'box', fixedsize: true, label: '', margin: 0 }, nodes: fixedNodes(nodes),
-    edges: edges.flatMap(edge => {
-      const key = JSON.stringify([edge.source, edge.target].sort())
-      if (edge.source === edge.target || !original.has(edge.source) || !original.has(edge.target) || pairs.has(key)) return []
-      pairs.add(key); return [{ tail: edge.source, head: edge.target }]
-    }) }, layout)
-  const output = new Map<string, CollaborationLayoutPoint>()
-  for (const item of result.objects ?? []) {
-    const [x, y] = (item.pos ?? '').split(',').map(Number)
-    if (original.has(item.name) && Number.isFinite(x) && Number.isFinite(y)) output.set(item.name, { x: x!, y: y! })
-  }
-  if (output.size !== nodes.length) throw Error('Layout did not return every original member. Existing map positions are kept.')
-  return output
-}
-
-/** Finite structural work only. The caller owns membership, size tiers, retained positions and camera. */
+/** Finite structural work only. Every real member and cross-area endpoint participates in one solve. */
 export async function arrangeCollaboration(input: CollaborationLayoutInput, signal?: AbortSignal): Promise<CollaborationLayoutBox[]> {
   signal?.throwIfAborted()
   if (!input.areas.length && !input.nodes.length) return []
@@ -96,16 +77,13 @@ export async function arrangeCollaboration(input: CollaborationLayoutInput, sign
   const areas = new Map(input.areas.map(area => [area.id, area])), seen = new Set<string>()
   if (nodes.size !== input.nodes.length || areas.size !== input.areas.length || input.nodes.some(node => areas.has(node.id) || !dimension(node.width) || !dimension(node.height)))
     throw Error('Original map identities or dimensions are inconsistent. Existing map positions are kept.')
-  const within = new Map<string, CollaborationLayoutConnection[]>(), between: { source: string; target: string }[] = []
-  for (const edge of input.connections) {
-    const source = nodes.get(edge.source)?.areaId ?? (areas.has(edge.source) ? edge.source : undefined)
-    const target = nodes.get(edge.target)?.areaId ?? (areas.has(edge.target) ? edge.target : undefined)
-    if (!source || !target) continue
-    if (source === target) { const list = within.get(source) ?? []; list.push(edge); within.set(source, list) }
-    else between.push({ source, target })
-  }
-  const local = new Map<string, CollaborationLayoutBox[]>(), groups: { id: string; width: number; height: number }[] = []
-  const emptyAreas: typeof input.areas[number][] = []
+  const emptyAreas: typeof input.areas[number][] = [], occupiedAreas: typeof input.areas[number][] = []
+  const clusterNames = new Map<string, string>(), usedNames = new Set([...nodes.keys(), ...areas.keys()])
+  const visible = new Map<string, { id: string; width: number; height: number }>(), endpoints = new Map<string, string>()
+  const graph: Graph = { directed: false,
+    graphAttributes: { start: 42, overlap: 'prism', sep: `+${gap}`, splines: false, pack: gap },
+    nodeAttributes: { shape: 'box', fixedsize: true, label: '', margin: 0 }, nodes: [], subgraphs: [], edges: [] }
+  const labelWidth = headingWidth + padding * 2, labelHeight = COLLABORATION_AREA_HEADER + padding
   for (const area of input.areas) {
     signal?.throwIfAborted()
     const members = area.members.map(id => {
@@ -114,46 +92,88 @@ export async function arrangeCollaboration(input: CollaborationLayoutInput, sign
       seen.add(id); return node
     })
     if (!members.length) { emptyAreas.push(area); continue }
+    occupiedAreas.push(area)
     if (area.folded) {
-      local.set(area.id, []); groups.push({ id: area.id, width: 276, height: 54 }); continue
+      const shell = { id: area.id, width: 276, height: 54 }
+      visible.set(shell.id, shell); graph.nodes!.push(...fixedNodes([shell]))
+      endpoints.set(area.id, area.id)
+      for (const member of members) endpoints.set(member.id, area.id)
+      continue
     }
-    const placed = positions(await graphviz(signal), members, within.get(area.id) ?? [], 'sfdp')
-    const boxes = members.map(node => ({ id: node.id, areaId: area.id, kind: 'agent' as const, folded: false,
-      x: placed.get(node.id)!.x - node.width / 2, y: placed.get(node.id)!.y - node.height / 2, width: node.width, height: node.height }))
-    const extent = bounds(boxes.flatMap(box => [{ x: box.x, y: box.y }, { x: box.x + box.width, y: box.y + box.height }]))
-    for (const box of boxes) { box.x += padding - extent.x; box.y += padding + COLLABORATION_AREA_HEADER - extent.y }
-    local.set(area.id, boxes); groups.push({ id: area.id, width: Math.max(276, extent.width + padding * 2), height: extent.height + padding * 2 + COLLABORATION_AREA_HEADER })
+    let name = 'cluster_' + area.id
+    while (usedNames.has(name)) name += '_'
+    usedNames.add(name); clusterNames.set(area.id, name)
+    for (const member of members) { visible.set(member.id, member); endpoints.set(member.id, member.id) }
+    graph.subgraphs!.push({ name, graphAttributes: { margin: padding, labeljust: 'l', labelloc: 't', fontsize: 1,
+      // This blank label reserves the real title, not a synthetic Agent or a relationship.
+      label: { html: `<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD WIDTH="${labelWidth}" HEIGHT="${labelHeight}" FIXEDSIZE="TRUE"> </TD></TR></TABLE>` } }, nodes: fixedNodes(members) })
   }
   if (seen.size !== nodes.size) throw Error('Some original members have no original area. Existing map positions are kept.')
+  const pairs = new Set<string>()
+  for (const edge of input.connections) {
+    const source = endpoints.get(edge.source), target = endpoints.get(edge.target)
+    if (!source || !target || source === target) continue
+    const key = JSON.stringify([source, target].sort())
+    if (pairs.has(key)) continue
+    pairs.add(key); graph.edges!.push({ tail: source, head: target })
+  }
   signal?.throwIfAborted()
-  const arranged = groups.length ? positions(await graphviz(signal), groups, between, 'fdp') : new Map<string, CollaborationLayoutPoint>()
+  const result = occupiedAreas.length ? render(await graphviz(signal), graph, 'fdp') : { objects: [] }
+  const objects = new Map((result.objects ?? []).map(item => [item.name, item]))
+  const placed = new Map<string, CollaborationLayoutPoint>()
+  for (const id of visible.keys()) {
+    const [x, y] = (objects.get(id)?.pos ?? '').split(',').map(Number)
+    if (Number.isFinite(x) && Number.isFinite(y)) placed.set(id, { x: x!, y: y! })
+  }
+  if (placed.size !== visible.size) throw Error('Layout did not return every original member. Existing map positions are kept.')
   const output: CollaborationLayoutBox[] = []
-  for (const group of groups) {
-    const point = arranged.get(group.id)!, x = point.x - group.width / 2, y = point.y - group.height / 2
-    output.push({ ...group, areaId: group.id, kind: 'area', x, y, folded: areas.get(group.id)!.folded })
-    for (const box of local.get(group.id)!) output.push({ ...box, x: box.x + x, y: box.y + y })
+  for (const area of occupiedAreas) {
+    signal?.throwIfAborted()
+    if (area.folded) {
+      const shell = visible.get(area.id)!, point = placed.get(area.id)!
+      output.push({ ...shell, areaId: area.id, kind: 'area', folded: true, x: point.x - shell.width / 2, y: point.y - shell.height / 2,
+        heading: { x: 0, y: 0, width: shell.width, height: shell.height } })
+      continue
+    }
+    const cluster = objects.get(clusterNames.get(area.id)!)
+    const [left, bottom, right, top] = (cluster?.bb ?? '').split(',').map(Number)
+    const [labelX, labelY] = (cluster?.lp ?? '').split(',').map(Number)
+    if (![left, bottom, right, top, labelX, labelY].every(value => Number.isFinite(value)))
+      throw Error('Layout did not return an original area or its title. Existing map positions are kept.')
+    const x = Math.min(left!, right!), y = Math.min(top!, bottom!), width = Math.abs(right! - left!), height = Math.abs(bottom! - top!)
+    const heading = { x: labelX! - x - labelWidth / 2 + padding, y: labelY! - y - labelHeight / 2 + padding,
+      width: headingWidth, height: COLLABORATION_AREA_HEADER }
+    output.push({ id: area.id, areaId: area.id, kind: 'area', folded: false, x, y, width, height, heading })
+    for (const id of area.members) {
+      const node = nodes.get(id)!, point = placed.get(id)!
+      output.push({ id, areaId: area.id, kind: 'agent', folded: false,
+        x: point.x - node.width / 2, y: point.y - node.height / 2, width: node.width, height: node.height })
+    }
   }
   // Empty original places remain discoverable without exerting force on occupied work areas.
   const occupied = output.length ? bounds(output.filter(box => box.kind === 'area').flatMap(box => [{ x: box.x, y: box.y }, { x: box.x + box.width, y: box.y + box.height }])) : { x: 0, y: 0, width: 0, height: 0 }
   const emptyWidth = 184, emptyHeight = 32, shelfGap = 12
-  const columns = groups.length ? Math.max(1, Math.floor((occupied.width + shelfGap) / (emptyWidth + shelfGap))) : 4
-  const shelfY = occupied.y + occupied.height + (groups.length ? gap : 0)
+  const columns = occupiedAreas.length ? Math.max(1, Math.floor((occupied.width + shelfGap) / (emptyWidth + shelfGap))) : 4
+  const shelfY = occupied.y + occupied.height + (occupiedAreas.length ? gap : 0)
   for (const [index, area] of emptyAreas.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0).entries()) {
     signal?.throwIfAborted()
     output.push({ id: area.id, areaId: area.id, kind: 'area', folded: area.folded,
-      x: occupied.x + index % columns * (emptyWidth + shelfGap), y: shelfY + Math.floor(index / columns) * (emptyHeight + shelfGap), width: emptyWidth, height: emptyHeight })
+      x: occupied.x + index % columns * (emptyWidth + shelfGap), y: shelfY + Math.floor(index / columns) * (emptyHeight + shelfGap), width: emptyWidth, height: emptyHeight,
+      heading: { x: 0, y: 0, width: emptyWidth, height: emptyHeight } })
   }
   return output
 }
 
+type Obstacle = CollaborationLayoutBounds & Pick<CollaborationLayoutBox, 'id' | 'kind'>
 /** Coarse broad phase shared by this bounded route job, never a second map fact store. */
 class Obstacles {
-  readonly byId = new Map<string, CollaborationLayoutBox>()
-  private cells = new Map<string, CollaborationLayoutBox[]>()
+  readonly byId = new Map<string, Obstacle>()
+  private cells = new Map<string, Obstacle[]>()
   private extent: CollaborationLayoutBounds
   constructor(boxes: readonly CollaborationLayoutBox[]) {
     for (const original of boxes) {
-      const box = original.kind === 'area' && !original.folded ? { ...original, height: Math.min(original.height, COLLABORATION_AREA_HEADER) } : original
+      const box: Obstacle = original.kind === 'area' ? { id: original.id, kind: original.kind,
+        x: original.x + original.heading.x, y: original.y + original.heading.y, width: original.heading.width, height: original.heading.height } : original
       if (this.byId.has(box.id) || !dimension(box.width) || !dimension(box.height) || !Number.isFinite(box.x) || !Number.isFinite(box.y)) throw Error('Original fixed map geometry is inconsistent. Existing connections are kept.')
       this.byId.set(box.id, box)
       for (const key of this.keys(box)) { const values = this.cells.get(key) ?? []; values.push(box); this.cells.set(key, values) }
@@ -168,16 +188,16 @@ class Obstacles {
     const x = Math.max(box.x, this.extent.x), y = Math.max(box.y, this.extent.y)
     const clipped = { x, y, width: Math.min(box.x + box.width, this.extent.x + this.extent.width) - x, height: Math.min(box.y + box.height, this.extent.y + this.extent.height) - y }
     if (clipped.width < 0 || clipped.height < 0) return []
-    const result = new Set<CollaborationLayoutBox>()
+    const result = new Set<Obstacle>()
     for (const key of this.keys(clipped)) for (const value of this.cells.get(key) ?? []) if (overlap(box, value)) result.add(value)
     return [...result]
   }
 }
 const expand = (box: CollaborationLayoutBounds, amount: number) => ({ x: box.x - amount, y: box.y - amount, width: box.width + amount * 2, height: box.height + amount * 2 })
-function routeNode(box: CollaborationLayoutBox) {
+function routeNode(box: Obstacle) {
   return { name: box.id, attributes: { pos: `${box.x + box.width / 2},${-box.y - box.height / 2}!`, width: box.width / 72, height: box.height / 72 } }
 }
-function pointAt(box: CollaborationLayoutBox, kind: CollaborationLayoutKind, outgoing: boolean, right: boolean) {
+function pointAt(box: Obstacle, kind: CollaborationLayoutKind, outgoing: boolean, right: boolean) {
   return { x: box.x + (right ? box.width : 0), y: box.y + (kinds.indexOf(kind) * 2 + (outgoing ? .5 : 1.5)) / 6 * box.height }
 }
 const midpoint = (a: CollaborationLayoutPoint, b: CollaborationLayoutPoint) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })
