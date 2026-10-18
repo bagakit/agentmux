@@ -5,7 +5,7 @@ import { resolveFocusLinkDestination } from '../../../shared/focus-preferences'
 import { useAppStore } from '../store'
 import { api } from './api'
 import { mainFocusPresentation } from './focus-tab-projection'
-import { createSessionProjectFileContextSelector, type SessionProjectFileContext } from './session-project-file-context'
+import { createSessionProjectFileContextSelector, sessionFileResourcePath, type SessionProjectFileContext } from './session-project-file-context'
 import { spatialCatalog, spatialDestination } from './space-agent-control'
 import { scratchTopicsForWorkspace } from './scratch-topic-snapshots'
 import { fileWorkbenchIdentity } from './file-workbench-state'
@@ -155,6 +155,7 @@ export function useSessionLinkOpening(origin: OpenHttpLinkOrigin, onService?: (m
   const activateFile = (path: string, location?: FileLocation, event?: LinkClickModifiers) => {
     flushSync(() => selectRegion?.())
     if (selector(useAppStore.getState()) !== context) { failure(new Error('The rendered file resource or occurrence changed. The Agent is kept.')); return }
+    path = sessionFileResourcePath(context, path)
     const state = useAppStore.getState()
     if (event && terminalLinkModifierOpensSystemBrowser(event, isMacPlatform())) {
       void openSessionFileLink(origin, context, path, location, 'system', surface, filePresentation).catch(failure)

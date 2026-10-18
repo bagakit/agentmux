@@ -41,7 +41,7 @@ import { terminalPathLinksInBuffer } from '../lib/terminal-link-range'
 import { terminalContextPathAtBufferCell } from '../lib/terminal-context-path'
 import { terminalLinkReadoutOverlapsText } from '../lib/terminal-link-readout'
 import { openTerminalFileLink, terminalFileMenuActions } from '../lib/terminal-file-action'
-import { createSessionProjectFileContextSelector } from '../lib/session-project-file-context'
+import { createSessionProjectFileContextSelector, sessionFileResourcePath } from '../lib/session-project-file-context'
 import { openSessionFileLink } from '../lib/session-link-opening'
 import { sameWorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { resolveFocusLinkDestination } from '../../../shared/focus-preferences'
@@ -381,28 +381,17 @@ export function TerminalView({
   const regionCaretFocus = useAppStore((state) =>
     regionCaretFocusTargets(state.regionCaretFocus, linkOrigin?.regionId) ? state.regionCaretFocus : null)
   const clearRegionCaretFocus = useAppStore((state) => state.clearRegionCaretFocus)
-  // The on-disk root this pane's paths are relative to — the base main resolves openFile against.
-  // Read from the WorkspaceRecord (NOT session.workspacePath) so worktree/scratch terminals still
-  // relativize absolute paths against the base main actually uses.
-  //
-  // Keyed on THIS pane's own session, not on activeWorkspaceId — same reasoning as SessionPane, and it
-  // has to be the same answer: a path link in the terminal and the same path in the Activity timeline
-  // are the same file, so they cannot disagree about what the root is. After "Move to Workspace" the
-  // active workspace is the target while the session still runs under its original root; when the
-  // active root happens to be an ancestor of the session path, the prefix strip succeeds and points at
-  // the wrong repo.
-  //
-  // workspaceRootForPath, not workspaceForSession: the question here is containment ("which repo is
-  // this absolute path inside"), not ownership. A subdirectory terminal — FileExplorer's "Open in
-  // Terminal" on a folder — has workspacePath fixtureRoot/repo/sub, which no workspace owns EXACTLY. Resolving
-  // that to '' would take away a capability the user has today: resolveWorkspaceRelativePath returns
-  // null for every absolute path when the root is empty, so path links in that terminal stop being
-  // clickable. Long is bad; dead is worse.
-  //
-  // A ref keeps it fresh for the attach-effect closure, which does not re-run on config change.
-  const activeWorkspaceRoot = useMemo(() =>
-    workspaceRootForPath(terminalConfig ?? null, session) ?? '',
-  [terminalConfig, session.kind, session.hostId, session.workspacePath])
+  const selectFileContext = useMemo(() => createSessionProjectFileContextSelector(session.id,
+    { ...displayOrigin, workspaceId: displayOrigin?.workspaceId ?? '', sessionId: session.id }),
+  [session.id, displayOrigin?.workspaceId, displayOrigin?.tabGroupId, displayOrigin?.tabId, displayOrigin?.regionId])
+  const fileContext = useAppStore(selectFileContext)
+  const fileContextRef = useRef(fileContext)
+  fileContextRef.current = fileContext
+  // Parse against the original physical directory, then translate to the File owner's
+  // logical address. Conversation and Terminal share the same confirmed directory facts.
+  const activeWorkspaceRoot = useMemo(() => fileContext.pathPrefix ? fileContext.workspaceRoot
+    : workspaceRootForPath(terminalConfig ?? null, session) ?? '',
+  [fileContext.pathPrefix, fileContext.workspaceRoot, terminalConfig, session.kind, session.hostId, session.workspacePath])
   const activeWorkspaceRootRef = useRef(activeWorkspaceRoot)
   activeWorkspaceRootRef.current = activeWorkspaceRoot
   const isMac = isMacPlatform()
@@ -787,6 +776,7 @@ export function TerminalView({
     const pathLinks = terminal.registerLinkProvider({
       provideLinks: (bufferLineNumber, callback) => {
         if (!linkOriginRef.current) return callback(undefined)
+        const context = fileContextRef.current
         const matches = terminalPathLinksInBuffer(terminal.buffer.active, bufferLineNumber, activeWorkspaceRootRef.current)
         if (matches.length === 0) return callback(undefined)
         callback(matches.map(({ link: match, range }) => {
@@ -819,13 +809,12 @@ export function TerminalView({
               const linkOrigin = linkOriginRef.current, displayOrigin = displayOriginRef.current
               if (!linkOrigin || !displayOrigin) return
               void openTerminalFileLink({
-                link: match,
+                link: { ...match, path: sessionFileResourcePath(context, match.path) },
                 local: workspaceIsLocalRef.current,
                 openSystem: (path) => api.files.openSystem(linkOrigin.workspaceId, path),
                 openFile: async (link) => {
                   const origin = { ...displayOrigin, sessionId: displayOrigin.sessionId ?? session.id }
                   const state = useAppStore.getState()
-                  const context = createSessionProjectFileContextSelector(origin.sessionId, origin)(state)
                   const presentation = presentationRef.current
                   const local = presentation.surface === 'mote' || presentation.surface === 'survey'
                   const focus = presentation.surface === 'focus' || presentation.surface === undefined && state.mainSurface === 'agents'
@@ -2121,6 +2110,10 @@ export function TerminalView({
       onOpenSystem: path => { void api.files.openSystem(origin.workspaceId, path).catch(reportError) } })
   }
 
+  function resourcePathLink(link: TerminalPathLink | null): TerminalPathLink | null {
+    return link ? { ...link, path: sessionFileResourcePath(fileContextRef.current, link.path) } : null
+  }
+
   function captureMenuSelection(): boolean {
     const text = terminalRef.current?.getSelection() ?? ''
     if (text) rememberedSelectionRef.current = text
@@ -2228,9 +2221,9 @@ export function TerminalView({
           read: point => ({
             hasSelection: captureMenuSelection(),
             mouseTrackingMode: terminalRef.current?.modes.mouseTrackingMode ?? mouseTrackingMode,
-            pathActions: pathMenuActions(point && rootRef.current ? terminalPathAtPointer(
+            pathActions: pathMenuActions(resourcePathLink(point && rootRef.current ? terminalPathAtPointer(
               terminalRef.current, rootRef.current, point.clientX, point.clientY, activeWorkspaceRootRef.current
-            ) : null)
+            ) : null))
           })
         }}
         identityActions={terminalIdentityMenuActions({
@@ -2275,13 +2268,13 @@ export function TerminalView({
                 // 需要解释「为什么 Copy 是灰的」的情形，若只在有选区时采样，提示永远不会出现。
                 const mode = terminalRef.current?.modes.mouseTrackingMode
                 if (mode) setMouseTrackingMode(mode)
-                setPathActions(terminalPathAtPointer(
+                setPathActions(resourcePathLink(terminalPathAtPointer(
                   terminalRef.current,
                   event.currentTarget,
                   event.clientX,
                   event.clientY,
                   activeWorkspaceRootRef.current
-                ))
+                )))
               } else {
                 setPathActions(null)
               }
