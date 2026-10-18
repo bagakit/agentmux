@@ -30,6 +30,7 @@ import {
   type AttachmentEvent,
   type AttachmentGapEvent,
   type RunInfo,
+  type RunSpec,
   type NativeServiceSnapshot,
   type NativeServiceFailure,
   type RuntimeIdentity
@@ -1158,26 +1159,29 @@ export class CtxmuxRunAdapter {
     return { program: command.program, argsDigest: createHash('sha256').update(JSON.stringify(command.args)).digest('base64url') }
   }
 
+  /** Materialize every Native request value once; the result is safe to retain privately. */
+  prepareStart(input: {
+    program: string; args: readonly string[]; cwd: string
+    env?: Readonly<Record<string, string>>; cols?: number; rows?: number
+  }): RunSpec {
+    const command = this.launchCommand(input)
+    return defineRun(command.program, {
+      args: command.args, cwd: input.cwd, env: command.env,
+      initialSize: { cols: input.cols ?? 80, rows: input.rows ?? 24 }
+    })
+  }
+
   async start(input: {
-    operationKey: string
-    program: string
-    args: readonly string[]
-    cwd: string
-    env?: Readonly<Record<string, string>>
-    cols?: number
-    rows?: number
+    operationKey: string; program: string; args: readonly string[]; cwd: string
+    env?: Readonly<Record<string, string>>; cols?: number; rows?: number
   }): Promise<CtxmuxAdapterRun> {
+    return await this.startPrepared(this.prepareStart(input), input.operationKey)
+  }
+
+  /** Replay the original complete request, without reading the current Host environment. */
+  async startPrepared(request: RunSpec, operationKey: string): Promise<CtxmuxAdapterRun> {
     try {
-      const command = this.launchCommand(input)
-      const run = await this.requireClient().start(defineRun(command.program, {
-        args: command.args,
-        cwd: input.cwd,
-        // The daemon can outlive this application. Every new local Run receives the current
-        // client environment; explicit Run overrides remain authoritative.
-        env: command.env,
-        initialSize: { cols: input.cols ?? 80, rows: input.rows ?? 24 }
-      }), createOperationKey(input.operationKey))
-      return this.projectRun(run)
+      return this.projectRun(await this.requireClient().start(request, createOperationKey(operationKey)))
     } catch (error) {
       throw translateCtxmuxError(error)
     }
