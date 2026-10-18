@@ -2,15 +2,19 @@ import { AgentMuxError } from '@agentmux/core'
 import { parseConnectionObservation, type ConnectionConfig, type ConnectionObservation, type ConnectionRecord } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import type { DurableIngressHost } from './durable-ingress.js'
+import type { ChannelStoragePort } from './channel-storage.js'
+import type { ChannelMetadataSubject } from '@agentmux/core/connections'
 
 /** Private transport proof is owned by the registered adapter, never accepted through public RPC. */
 export type ConnectionTransportEvent = { raw: string; transportProof?: unknown }
-export type ConnectionIngressReceiver = { close(): void; observation(): ConnectionObservation }
+export type ConnectionIngressReceiver = { close(): void; observation(): ConnectionObservation; closed?: AbortSignal }
 export interface ConnectionIngressTransport {
   start(input: {
     config: ConnectionConfig
     credential: string
     signal: AbortSignal
+    storage(): ChannelStoragePort
+    metadataChanged?(subject: ChannelMetadataSubject): void
     receive(input: ConnectionTransportEvent, acknowledge: () => void | Promise<void>): ReturnType<DurableIngressHost['receive']>
   }): Promise<ConnectionIngressReceiver>
 }
@@ -47,6 +51,7 @@ export class ConnectionReceivers {
       for (const [id, lane] of this.lanes) if (current.get(id)?.revision !== lane.record.revision || !current.get(id)?.config.enabled) {
         this.release(lane); this.lanes.delete(id)
       }
+      for (const [id, lane] of this.lanes) if (lane.receiver?.closed?.aborted) { this.release(lane); this.lanes.delete(id) }
       for (const record of connections) {
         const adapter = this.connections.registeredAdapter(record.config.adapterId)
         if (!record.config.enabled || !adapter?.ingress || !adapter.transport) continue
@@ -93,6 +98,7 @@ export class ConnectionReceivers {
       if (!this.current(lane)) return
       const receiver = await transport.start({ config: structuredClone(lane.record.config), credential,
         signal: lane.abort.signal,
+        storage: () => this.connections.channelStorage(lane.record.config),
         receive: async (input, acknowledge) => {
           this.connections.assertServiceEnabled()
           if (!this.current(lane)) throw new AgentMuxError('This original connection receiver is no longer current. Existing Agents are retained.', 'INGRESS_CONNECTION_REVISED')
