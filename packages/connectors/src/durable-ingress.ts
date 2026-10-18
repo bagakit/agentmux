@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { ConversationActions, externalActionIntentDigest } from './conversation-actions.js'
 import { parseConnectionQuestionAnswerSubmissions } from '@agentmux/core/connections'
 import { mintObjectId, AgentMuxError, parseAgentExternalMessageAuthor, agentInteractionIntentDigest, type AgentInputCallContext, type AgentMuxClient, type AgentMuxMessageEnvelope } from '@agentmux/core'
-import { CONNECTION_INGRESS_AUTHORITY_CODES, parseConnectionActor, parseConnectionIngressRecord, parseIngressParams, parseIngressResult, type ConnectionConfig, type ConnectionIngressAuthority, type ConnectionIngressAuthorityCode, type ConnectionIngressInspection, type ConnectionIngressListInput, type ConnectionIngressMessage, type ConnectionIngressAction, type ConnectionIngressReadPort, type ConnectionIngressRecord, type RoomBinding, type RoomBindingReadPort } from '@agentmux/core/connections'
+import { CONNECTION_INGRESS_AUTHORITY_CODES, connectionDiagnosisIntakeCodes, parseConnectionActor, parseConnectionIngressRecord, parseIngressParams, parseIngressResult, type ConnectionConfig, type ConnectionIngressAuthority, type ConnectionIngressAuthorityCode, type ConnectionIngressInspection, type ConnectionIngressListInput, type ConnectionIngressMessage, type ConnectionIngressAction, type ConnectionIngressReadPort, type ConnectionIngressRecord, type RoomBinding, type RoomBindingReadPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 
 /** Returned only by a Host-registered adapter after verifying the original transport proof. */
@@ -183,7 +183,8 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       return this.safe(() => {
         const record = this.read(input.ingressId), target = record?.kind !== 'action' ? record?.group?.target : undefined
         if (!record || record.kind === 'action' || !target || target.agentSessionId !== input.agentSessionId || record.code === 'INGRESS_CONTENT_UNSUPPORTED') return { message, authority: 'refused', code: 'INGRESS_BINDING_UNAVAILABLE' }
-        message = { ...input, hostId: target.hostId, body: record.body, author: {
+        message = { ...input, hostId: target.hostId, body: record.body,
+          inputMetadata: { ingressId: record.ingressId, state: record.state, ...(record.code && connectionDiagnosisIntakeCodes.includes(record.code as never) ? { code: record.code as typeof connectionDiagnosisIntakeCodes[number] } : {}) }, author: {
           kind: 'external', connectionId: target.connectionId, actor: record.actor, externalConversationId: record.externalConversationId, externalMessageId: record.externalMessageId, bindingId: target.bindingId, bindingRevision: target.bindingRevision
         } }
         this.assertService()
@@ -207,6 +208,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     return this.transaction(() => {
       const current = this.read(record.ingressId)
       if (!current || current.kind === 'action' || !current.group || !equal(current.group.target, target)) fail('INGRESS_AUTHORITY_REVISED')
+      if (!current.group.recording && isDeepStrictEqual(current.group.recorded, receipt)) return current
       const { recording: _recording, ...group } = current.group
       return this.write({ ...current, group: { ...group, recorded: receipt } })
     })
@@ -284,7 +286,22 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
   async dispatch(ingressId: string): Promise<ConnectionIngressInspection> {
     const active = this.pending.get(ingressId)
     if (active) return await active
-    const work = this.deliver(ingressId).finally(() => this.pending.delete(ingressId))
+    const work = this.deliver(ingressId).then(async result => {
+      try {
+        const record = this.read(ingressId)
+        if (record && record.kind !== 'action' && record.group?.recorded) await this.recordGroup(record)
+      } catch (error) {
+        const recording = { state: 'unavailable' as const, code: error instanceof AgentMuxError ? error.code : 'EXTERNAL_RECORD_UNAVAILABLE' }
+        try {
+          this.transaction(() => {
+            const current = this.read(ingressId)
+            if (current && current.kind !== 'action' && current.group) this.write({ ...current, group: { ...current.group, recording } })
+          })
+        } catch { /* The returned original inspection retains this failed observation when storage cannot. */ }
+        if (result.ingress && result.ingress.kind !== 'action' && result.ingress.group) return { ...result, ingress: { ...result.ingress, group: { ...result.ingress.group, recording } } }
+      }
+      return result
+    }).finally(() => this.pending.delete(ingressId))
     this.pending.set(ingressId, work)
     return await work
   }
