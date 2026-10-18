@@ -9,7 +9,7 @@ import type { SessionSnapshot, AppConfig, AgentSessionControl } from '../src/sha
 import { nativeHistoryFixture, jsonl } from '../../../packages/core/test/fixtures/native-history-session'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
-import * as activityDiff from '../src/renderer/src/lib/activity-diff'
+import * as activityDiff from '@agentmux/client-ui/conversation-tool-diff'
 import { WorkflowCard } from '../src/renderer/src/components/workflow/WorkflowCard'
 import { WorkflowToolRow } from '../src/renderer/src/components/workflow/WorkflowToolRow'
 import { writeFile } from 'node:fs/promises'
@@ -33,7 +33,7 @@ function step(id:string,overrides:Partial<AgentTimelineItem>={}):AgentTimelineIt
 function prompt():AgentTimelineItem{const item=step('prompt',{kind:'user_message',source:'user',authorHuman:true,title:'User prompt',content:'Keep this actual prompt readable.',createdAt:start,updatedAt:start});delete item.toolName;delete item.toolInput;return item}
 // Controlled legal FileStore records → actual public Client.sessionTimeline → actual renderer Store.
 // PTY/composer/chrome are isolated leaves; no Provider execution or user Runtime is claimed.
-let fixture:Awaited<ReturnType<typeof nativeHistoryFixture>>,host:HTMLDivElement,root:Root,writes:MockInstance[],diff:MockInstance<typeof activityDiff.toolCallToDiff>
+let fixture:Awaited<ReturnType<typeof nativeHistoryFixture>>,host:HTMLDivElement,root:Root,writes:MockInstance[],diff:MockInstance<typeof activityDiff.toolEditDiff>
 const initial=useAppStore.getState()
 beforeEach(async()=>{
  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubGlobal('ResizeObserver',class{observe(){}disconnect(){}});vi.stubGlobal('IntersectionObserver',class{observe(){}disconnect(){}})
@@ -41,7 +41,7 @@ beforeEach(async()=>{
  fixture=await nativeHistoryFixture('claude',jsonl([]))
  vi.spyOn(api.sessions,'historyPage').mockImplementation((c,o)=>fixture.client.sessionHistoryPage(c.agentSessionId,o))
  writes=['submitPrompt','write','resume','recover','stop'].map(name=>vi.spyOn(api.sessions,name as 'write'))
- diff=vi.spyOn(activityDiff,'toolCallToDiff')
+ diff=vi.spyOn(activityDiff,'toolEditDiff')
  useAppStore.setState({config,sessions:[session],pendingAgentLaunches:{},recoveryCandidates:[],runtimeOwnershipWarnings:[],viewModes:{[ID]:'activity'},timelines:{},agentNames:{},agentComposerDrafts:{[ID]:DRAFT},agentSteerQueues:{}})
 })
 afterEach(async()=>{
