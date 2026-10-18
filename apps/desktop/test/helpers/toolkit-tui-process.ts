@@ -14,6 +14,7 @@ const config = JSON.parse(await readFile(join(directory, 'config.json'), 'utf8')
 const client = new AgentMuxClient({ store: new AgentMuxMemoryAgentSessionStore(), providers: [] })
 await client.connect()
 const port: ToolkitRunPort = {
+  prepare: async input => client.prepareTerminal(input), createPrepared: async input => client.createPreparedTerminal(input),
   create: async input => await client.createTerminal(input),
   observe: (ref, listener) => client.onEvent(event => {
     if (event.type === 'connection-state' || 'run' in event && event.run?.runId === ref.runId &&

@@ -28,7 +28,7 @@ export function fixture(output = '工具_ACK', initialState: 'running' | 'exited
     observedAt: fixtureEpoch(1), acceptedInputBytes: 0, nativeService: null, latestOutputBytes: finalBytes })
   const snapshot = (): AgentMuxRunAttachment => ({ run: run(), replay: bytes.length ? [{ type: 'data', runId: 'exact-tool-run',
     startByte: 0, endByte: bytes.length, dataBytes: bytes, data: bytes.toString('utf8') }] : [], gap: null, terminal: { type: 'not-requested' }, resizeRevision: 0 })
-  const port: ToolkitRunPort = { observe: () => () => {}, create: vi.fn(async (_input, listener) => { accept = listener; return run() }),
+  const port: ToolkitRunPort = { prepare: async () => { throw new Error('This finite-tool fixture does not prepare TUI Runs') }, createPrepared: async () => { throw new Error('This finite-tool fixture does not create TUI Runs') }, observe: () => () => {}, create: vi.fn(async (_input, listener) => { accept = listener; return run() }),
     attach: vi.fn(async (_ref, _after, listener) => {
       if (listener) accept = listener
       // Production attach publishes state before returning replay. This cannot recurse into another attach.

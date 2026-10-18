@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { fixturePath } from '../scripts/lib/fixture-values.mjs'
 import { fixtureEpoch } from '../../../test/fixture-values.mjs'
 import { randomUUID } from 'node:crypto'
-import type { AgentMuxClientEvent, AgentMuxRun, AgentMuxTerminalCreateInput } from '@agentmux/core'
+import type { AgentMuxClientEvent, AgentMuxRun, AgentMuxTerminalCreateInput, AgentMuxPreparedTerminal } from '@agentmux/core'
 import { parseToolkitSnapshot, type ToolkitRunInput, type ToolkitScriptSnapshot, type ToolkitInlineToolConfiguration } from '@agentmux/core/control'
 import { DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { ConfigOwner } from '../src/main/config-owner.js'
@@ -35,7 +35,19 @@ function fixture(tools: ToolkitInlineToolConfiguration[] = [definition], env: Re
     runs.set(runId, run)
     return structuredClone(run)
   })
-  const port: ToolkitRunPort = { create,
+  const shell = { command: '/bin/sh' }
+  const prepare = vi.fn(async (input: AgentMuxTerminalCreateInput): Promise<AgentMuxPreparedTerminal> => ({
+    createOperationId: input.createOperationId!, workspacePath: input.workspacePath, launch: JSON.stringify({ createOperationId: input.createOperationId, request: { program: input.command ?? shell.command,
+      args: [...input.args ?? []], cwd: input.workspacePath, env: { ...input.env },
+      initial_size: { cols: input.cols ?? 80, rows: input.rows ?? 24 }, declared_inputs: [] } })
+  }))
+  const createPrepared = vi.fn(async (input: AgentMuxPreparedTerminal) => {
+    const request = JSON.parse(input.launch).request
+    return create({ createOperationId: input.createOperationId,
+      command: request.program, args: request.args, workspacePath: input.workspacePath, env: request.env,
+      cols: request.initial_size.cols, rows: request.initial_size.rows }, () => {}, 'terminal')
+  })
+  const port: ToolkitRunPort = { create, prepare, createPrepared,
     observe: vi.fn((ref, listener) => {
       const group = listeners.get(ref.runId) ?? new Set(); group.add(listener); listeners.set(ref.runId, group)
       return () => { group.delete(listener); if (!group.size) listeners.delete(ref.runId) }
@@ -67,7 +79,7 @@ function fixture(tools: ToolkitInlineToolConfiguration[] = [definition], env: Re
     return { invocationId: randomUUID(), expectedRevision: snapshot.definition.revision,
       expectedLatestExecutionId: snapshot.admission?.executionId ?? snapshot.latestConfirmed?.executionId ?? null }
   }
-  return { owner, storage, receipts, runs, listeners, port, openRunPort, create, snapshot, input, emit,
+  return { owner, storage, receipts, runs, listeners, port, openRunPort, create, prepare, createPrepared, shell, snapshot, input, emit,
     get custom() { return custom }, get config() { return config },
     reopen: async () => { await custom.dispose(); custom = makeOwner(); return custom },
     edit: async (change: Partial<ToolkitInlineToolConfiguration>) => {
@@ -81,6 +93,65 @@ function fixture(tools: ToolkitInlineToolConfiguration[] = [definition], env: Re
 }
 
 describe('Toolkit TUI lifecycle on the existing admission owner', () => {
+  it.each(['', ' \n\t '])('captures the Host default shell before creating a blank TUI %j', async script => {
+    const args = ['-i', 'literal argument'], command = fixturePath('shell with spaces')
+    const f = fixture([{ ...definition, script, args }])
+    f.shell.command = command
+    let beforeCreate: unknown
+    f.create.mockImplementationOnce(async () => {
+      beforeCreate = structuredClone(f.receipts.get(definition.id))
+      throw new Error('Exact creation receipt is unavailable')
+    })
+    await f.custom.loadConfigured()
+    expect(beforeCreate).toMatchObject({ createIntent: { hostId: 'local', prepared: f.createPrepared.mock.calls[0]![0] } })
+    expect(f.create.mock.calls[0]![0]).toMatchObject({ command, args, workspacePath: definition.workspacePath })
+    expect(f.prepare.mock.calls[0]![0]).not.toHaveProperty('command')
+    expect(f.prepare).toHaveBeenCalledOnce()
+    expect(f.create).toHaveBeenCalledOnce()
+    expect(await f.snapshot()).toMatchObject({ state: 'unknown', admission: { run: null } })
+    await f.custom.dispose()
+  })
+
+  it('continues the captured default after a lost receipt despite Host and definition changes', async () => {
+    const command = fixturePath('original-shell'), args = ['-i']
+    const f = fixture([{ ...definition, script: '', args }]), create = f.create.getMockImplementation()!
+    f.shell.command = command
+    f.create.mockImplementationOnce(async (...input) => { await create(...input); throw new Error('creation reply lost') })
+    await f.custom.loadConfigured()
+    const original = (await f.snapshot()).admission!, intent = structuredClone(f.create.mock.calls[0]![0])
+    expect(original).toMatchObject({ state: 'unknown', run: null })
+    f.shell.command = fixturePath('changed-shell')
+    await f.edit({ script: 'printf changed', args: ['changed'], workspacePath: fixturePath('changed-cwd') })
+    await f.reopen(); await f.custom.loadConfigured()
+    expect(f.create).toHaveBeenCalledOnce()
+    await f.custom.run(definition.id, { invocationId: original.invocationId, expectedRevision: original.definition.revision,
+      expectedLatestExecutionId: original.expectedLatestExecutionId }, new AbortController().signal)
+    expect(f.prepare).toHaveBeenCalledOnce()
+    expect(f.create.mock.calls.map(([input]) => input)).toEqual([intent, intent])
+    expect(f.runs.size).toBe(1)
+    expect(await f.snapshot()).toMatchObject({ state: 'running', admission: { executionId: original.executionId,
+      definition: original.definition, target: original.target } })
+    await f.custom.dispose()
+  })
+
+  it('does not select a new shell when an unknown retained intent lost its captured choice', async () => {
+    const f = fixture([{ ...definition, script: '' }]), create = f.create.getMockImplementation()!
+    f.create.mockImplementationOnce(async (...input) => { await create(...input); throw new Error('creation reply lost') })
+    await f.custom.loadConfigured()
+    const original = (await f.snapshot()).admission!
+    const receipt = structuredClone(f.receipts.get(definition.id)) as { createIntent: { prepared: { launch?: string } } }
+    delete receipt.createIntent.prepared.launch
+    f.receipts.set(definition.id, receipt)
+    await f.reopen(); await f.custom.loadConfigured()
+    await expect(f.custom.run(definition.id, { invocationId: original.invocationId, expectedRevision: original.definition.revision,
+      expectedLatestExecutionId: original.expectedLatestExecutionId }, new AbortController().signal)).resolves.toMatchObject({
+        state: 'unknown', reason: expect.stringContaining('original terminal preparation is invalid') })
+    expect(f.prepare).toHaveBeenCalledOnce()
+    expect(f.create).toHaveBeenCalledOnce(); expect(f.port.stop).not.toHaveBeenCalled(); expect(f.port.remove).not.toHaveBeenCalled()
+    expect([...f.runs.values()]).toMatchObject([{ state: 'running' }])
+    await f.custom.dispose()
+  })
+
   it('loads once, preserves the shell arguments, and never collects terminal bytes', async () => {
     const f = fixture([definition], { ELECTRON_RUN_AS_NODE: '1', HOST_TOOL_CONTEXT: 'captured',
       AGENTMUX_TOOLKIT_RESULT_PATH: fixturePath('tmp'), AGENTMUX_TOOLKIT_RESULT_TOKEN: 'finite-result-token' })
@@ -108,6 +179,43 @@ describe('Toolkit TUI lifecycle on the existing admission owner', () => {
     await f.custom.dispose()
     expect(f.port.stop).not.toHaveBeenCalled(); expect(f.port.release).not.toHaveBeenCalled()
     expect(f.listeners.size).toBe(0)
+  })
+
+  it('recovers a known healthy Run even when its historical raw intent has no preparation', async () => {
+    const f = fixture()
+    await f.custom.loadConfigured()
+    const original = (await f.snapshot()).admission!
+    const receipt = structuredClone(f.receipts.get(definition.id)) as Record<string, unknown>
+    receipt.createIntent = { ...f.create.mock.calls[0]![0] }
+    f.receipts.set(definition.id, receipt)
+    await f.reopen(); await f.custom.loadConfigured()
+    expect(await f.snapshot()).toMatchObject({ state: 'running', admission: { run: original.run, executionId: original.executionId } })
+    expect(f.prepare).toHaveBeenCalledOnce(); expect(f.create).toHaveBeenCalledOnce()
+    await f.custom.stop(definition.id, original.executionId)
+    expect(f.port.stop).toHaveBeenCalledExactlyOnceWith({ runId: original.run!.runId })
+    await f.custom.dispose()
+  })
+
+  it.each(['raw', 'host', 'operation', 'cwd'] as const)('retains unknown creation when its original preparation has a wrong %s binding', async kind => {
+    const f = fixture(), create = f.create.getMockImplementation()!
+    f.create.mockImplementationOnce(async (...args) => { await create(...args); throw new Error('creation reply lost') })
+    await f.custom.loadConfigured()
+    const original = (await f.snapshot()).admission!
+    const receipt = structuredClone(f.receipts.get(definition.id)) as any
+    if (kind === 'raw') receipt.createIntent = f.create.mock.calls[0]![0]
+    if (kind === 'host') receipt.createIntent.hostId = 'another-host'
+    if (kind === 'operation') receipt.createIntent.prepared.createOperationId = 'another-operation'
+    if (kind === 'cwd') receipt.createIntent.prepared.workspacePath = fixturePath('another-directory')
+    f.receipts.set(definition.id, receipt)
+    await f.reopen(); await f.custom.loadConfigured()
+    expect(await f.custom.run(definition.id, { invocationId: original.invocationId, expectedRevision: original.definition.revision,
+      expectedLatestExecutionId: original.expectedLatestExecutionId }, new AbortController().signal)).toMatchObject({
+        state: 'unknown', admission: { executionId: original.executionId, run: null } })
+    expect(f.prepare).toHaveBeenCalledOnce(); expect(f.create).toHaveBeenCalledOnce()
+    expect(f.receipts.get(definition.id)).toMatchObject({ createIntent: receipt.createIntent, admission: {
+      executionId: original.executionId, invocationId: original.invocationId, target: original.target, run: null } })
+    expect(f.port.stop).not.toHaveBeenCalled(); expect(f.port.remove).not.toHaveBeenCalled()
+    await f.custom.dispose()
   })
 
   it('keeps captured cwd and mode while disabled and allows an exact stop', async () => {
@@ -181,7 +289,7 @@ describe('Toolkit TUI lifecycle on the existing admission owner', () => {
       expectedLatestExecutionId: original.expectedLatestExecutionId }, new AbortController().signal)
     expect(continued).toMatchObject({ state: 'unknown', admission: { executionId: original.executionId,
       invocationId: original.invocationId, definition: original.definition, run: null, state: 'unknown' } })
-    expect(continued.reason).toContain('Original TUI creation intent is missing')
+    expect(continued.reason).toContain('Original TUI preparation is missing')
     expect(f.create).toHaveBeenCalledOnce(); expect(f.port.stop).not.toHaveBeenCalled()
     expect([...f.runs.values()]).toMatchObject([{ state: 'running' }])
     expect(f.receipts.get(definition.id)).not.toHaveProperty('createIntent')

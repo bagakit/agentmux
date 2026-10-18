@@ -22,7 +22,7 @@ const record = (operation: string, target: unknown) => appendFileSync(log, JSON.
 const run = (runId = 'private-performance-run') => ({ runId, pid: 0, kind: 'terminal', state: 'running', latestOutputBytes: 0,
   firstAvailableByte: 0, acceptedInputBytes: 0, cols: 80, rows: 24, observedAt: 1000 } as any)
 function port(create: ToolkitRunPort['create'] = async input => { record('create', input.createOperationId); return run() }): ToolkitRunPort {
-  return { create, attach: async ref => ({ run: run(ref.runId), replay: [], gap: null } as any),
+  return { prepare: async () => { throw new Error('This finite-tool fixture does not prepare TUI Runs') }, createPrepared: async () => { throw new Error('This finite-tool fixture does not create TUI Runs') }, create, attach: async ref => ({ run: run(ref.runId), replay: [], gap: null } as any),
     replay: async ref => ({ run: run(ref.runId), replay: [], gap: null } as any),
     stop: async ref => { record('stop', ref.runId) }, release: async ref => { record('release', ref.runId) },
     remove: async ref => { record('remove', ref.runId) } }
