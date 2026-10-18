@@ -15,6 +15,7 @@ export type ConversationSourceRead = { reference: ConversationRef; nativeSource:
 type Selection = Pick<ConversationTimelineReadInput, 'nativeSource' | 'anchor' | 'limit' | 'preserveCurrent'>
 type ObservedConversation = { view: ConversationWindowSnapshot['window']['view']; frame: ReturnType<typeof conversationDiagnosticFrame> }
 type PendingFrame = { snapshot: ConversationWindowSnapshot; historical: boolean; operation: Operation; selection: Selection }
+type ReadAttempt = { id: string; operation: Operation; superseded: boolean; error: Error | null }
 type ViewState = { snapshot: ConversationWindowSnapshot | null; loading: boolean; operation: Operation | null; sourceRead: ConversationSourceRead | null; error: Error | null; errorOperation: Operation | null; sourceError: Error | null; observationError: Error | null; held: boolean; historical: boolean; newerAvailable: boolean }
 const empty = (): ViewState => ({ snapshot: null, loading: false, operation: null, sourceRead: null, error: null, errorOperation: null, sourceError: null, observationError: null, held: false, historical: false, newerAvailable: false })
 const errorOf = (error: unknown) => error instanceof Error ? error : new Error(String(error))
@@ -51,7 +52,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
     retryTimer: ReturnType<typeof setTimeout> | null; retryDelay: number; historical: boolean; dirty: boolean; held: boolean;
     binding: ConversationWindowSnapshot | null; failures: Map<string, Error>; pending: PendingFrame | null; invalidations: number; unavailable: number;
     note(event: ConversationDiagnosticEvent): void; flush(trigger: 'progress' | 'held' | 'failure' | 'recovered' | 'release'): void;
-    attempt: { id: string; operation: Operation; superseded: boolean } | null; diagnosticWatchId: string | null } | null>(null)
+    attempt: ReadAttempt | null; diagnosticWatchId: string | null } | null>(null)
   const retained = useRef<{ client: ConversationViewClient; key: string; snapshot: ConversationWindowSnapshot; historical: boolean; pending: PendingFrame | null } | null>(null)
   const beforeCommit = useRef(options.beforeCommit); beforeCommit.current = options.beforeCommit
   const heldReason = useRef(options.heldReason); heldReason.current = options.heldReason
@@ -79,7 +80,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
       timer: null as ReturnType<typeof setTimeout> | null, retryTimer: null as ReturnType<typeof setTimeout> | null, retryDelay: 100,
       historical: parked?.historical ?? false, dirty: false, held: Boolean(parked?.pending), pending: parked?.pending ?? null,
       binding: null as ConversationWindowSnapshot | null, failures: new Map<string, Error>(), invalidations: 0, unavailable: 0,
-      note, flush, attempt: null as { id: string; operation: Operation; superseded: boolean } | null, diagnosticWatchId: null as string | null }
+      note, flush, attempt: null as ReadAttempt | null, diagnosticWatchId: null as string | null }
     owner.current = current
     note({ phase: 'consumer-started' })
     setState(value => value.snapshot?.hostId === reference.hostId && value.snapshot.agentSessionId === reference.agentSessionId
@@ -211,7 +212,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
       if (current.timer) { clearTimeout(current.timer); current.timer = null }
       const requestController = new AbortController(), requestSignal = requestController.signal
       current.request = requestController
-      const attempt = { id: String(++attempts), operation: kind, superseded: false }
+      const attempt: ReadAttempt = { id: String(++attempts), operation: kind, superseded: false, error: null }
       current.attempt = attempt
       publishedDeferral = null
       const abortRead = () => requestController.abort(signal.reason)
@@ -298,6 +299,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
           current.pending = current.held ? frame : null
           retained.current = { client, key, snapshot: complete, historical: current.historical, pending: current.pending }
           const sourceError = sourceReadError(complete)
+          attempt.error = sourceError
           if (sourceError) { note({ phase: 'read-failed', attemptId: attempt.id, operation: kind, reason: 'source-unavailable', ...conversationDiagnosticFrame(complete) }); flush('failure') }
           // Resume replays the retained frame. It cannot replace the failed cut's
           // retry intent with another replay of that same unavailable coverage.
@@ -311,6 +313,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
             newerAvailable: kind === 'latest' || kind === 'changes' && !more && !current.held && !current.historical ? false : value.newerAvailable }))
           if (more) current.dirty = true
         } catch (error) { if (isCurrent()) {
+          attempt.error = errorOf(error)
           note({ phase: 'read-failed', attemptId: attempt.id, operation: kind, reason: diagnosticErrorReason(error) })
           flush('failure')
           if (complete && complete.window.id !== current.snapshot?.window.id) release(complete.window.view)
@@ -372,7 +375,13 @@ export function useConversationView(client: ConversationViewClient | null, refer
   const reveal = useCallback((anchor: NonNullable<ConversationTimelineReadInput['anchor']>) => operation.current('latest', { anchor }), [])
   const refresh = useCallback(() => operation.current('latest'), [])
   const resume = useCallback(() => operation.current(owner.current?.snapshot ? 'resume' : 'latest'), [])
-  const settle = useCallback(async () => { const current = owner.current; await current?.inFlight; return owner.current === current ? current?.snapshot ?? null : null }, [])
+  const settle = useCallback(async () => {
+    const current = owner.current, request = current?.request, attempt = current?.attempt, pending = current?.inFlight
+    await pending
+    if (!current || owner.current !== current || current.request !== request || request?.signal.aborted || attempt?.superseded) return null
+    return { snapshot: current.snapshot, error: pending && attempt ? attempt.error : committed.current.state.error ?? committed.current.state.sourceError,
+      historical: current.historical }
+  }, [])
   const changes = useCallback(() => operation.current('changes'), [])
   /** Instantaneous pointers to this mounted consumer; no read, retry or copied frame store. */
   const inspect = useCallback(() => {

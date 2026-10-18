@@ -239,6 +239,10 @@ export function SessionPane({
   const currentPresentations = useRef(presentations)
   currentPresentations.current = presentations
   const navigation = useRef({ generation: 0, cancel: null as (() => void) | null, isCurrent: null as (() => boolean) | null })
+  const [revealRead, setRevealRead] = useState<{
+    generation: number; started: boolean
+    start(read: ReturnType<typeof useSessionUserMessages>['readForReveal']): Promise<void>
+  } | null>(null)
   const [revealRequest, setRevealRequest] = useState<(ConversationRevealRequest & { displayId: string | null }) | null>(null)
   useEffect(() => () => { navigation.current.cancel?.() }, [activitySourceKey])
   if (activityLifetime.current.sourceKey !== activitySourceKey) {
@@ -331,7 +335,7 @@ export function SessionPane({
   })
   // One fact/observation owner, with demand from every actually visible reading stage.
   const activityDemand = !pendingAgentRestore &&
-    (visible && (viewMode !== 'terminal' || historyOpen) || presentations.some(target => target.visible !== false && (viewMode !== 'terminal' || presentationHistory?.displayId === workbenchSessionStageHostId(target, linkOrigin.regionId!))) || !!incomingReveal && observationVisible)
+    (visible && (viewMode !== 'terminal' || historyOpen) || presentations.some(target => target.visible !== false && (viewMode !== 'terminal' || presentationHistory?.displayId === workbenchSessionStageHostId(target, linkOrigin.regionId!))) || (!!incomingReveal || !!revealRead) && observationVisible)
   const {
     messages: userMessages,
     nativeHistoryPage,
@@ -395,6 +399,7 @@ export function SessionPane({
       finished = true
       for (const event of ['pointerdown', 'keydown', 'wheel', 'touchmove', 'focusin']) document.removeEventListener(event, changedIntent, true)
       if (navigation.current.cancel === cancel) { navigation.current.cancel = null; navigation.current.isCurrent = null }
+      setRevealRead(previous => previous?.generation === generation ? null : previous)
       setRevealRequest(previous => previous?.generation === generation ? null : previous)
       resolveResult(outcome)
     }
@@ -410,31 +415,40 @@ export function SessionPane({
     navigation.current.cancel = cancel
     navigation.current.isCurrent = current
     for (const event of ['pointerdown', 'keydown', 'wheel', 'touchmove', 'focusin']) document.addEventListener(event, changedIntent, true)
-    void (async () => {
-    let present = false
-    const read = await readForReveal(itemRef.source)
-    if (!current()) { finish({ kind: 'cancelled' }); return result }
-    if (itemRef.source.kind === 'native' && (read.sourceChanged || read.page &&
-      (read.page.source.providerId !== itemRef.source.providerId || read.page.source.nativeSessionId !== itemRef.source.nativeSessionId))) {
-      finish(unavailable('原生来源已变化，当前阅读窗口保留；请刷新来源后再定位。')); return result
-    }
-    if (read.error) { finish(unavailable(`读取对话失败：${read.error.message}`)); return result }
-    present = read.records.some(record => (mailboxInputId || record.sourceHostId === itemRef.hostId) &&
-      (!mailboxInputId || record.input?.id === mailboxInputId) && conversationMessageSourceKey(record.agentSessionId, record.source) === sourceKey)
-    if (!current()) { finish({ kind: 'cancelled' }); return result }
-    if (!present) { finish(unavailable('当前有界对话窗口中没有这条记录，无法确认位置。')); return result }
-    switched = true
-    setHistoryOpen(false)
-    setRevealRequest({ generation, sourceKey, displayId, isCurrent: current, complete: located => {
-      if (!current()) { finish({ kind: 'cancelled' }); return }
-      finish(located ? { kind: 'located' } : unavailable('准确记录尚未呈现在对话中，无法确认位置。'))
+    setRevealRead({ generation, started: false, start: async readForReveal => {
+      try {
+        if (!current()) { finish({ kind: 'cancelled' }); return }
+        const read = await readForReveal(itemRef.source)
+        if (!current() || read.cancelled) { finish({ kind: 'cancelled' }); return }
+        if (itemRef.source.kind === 'native' && (read.sourceChanged || read.page &&
+          (read.page.source.providerId !== itemRef.source.providerId || read.page.source.nativeSessionId !== itemRef.source.nativeSessionId))) {
+          finish(unavailable('原生来源已变化，当前阅读窗口保留；请刷新来源后再定位。')); return
+        }
+        if (read.error) { finish(unavailable(`读取对话失败：${read.error.message}`)); return }
+        const present = read.records.some(record => (mailboxInputId || record.sourceHostId === itemRef.hostId) &&
+          (!mailboxInputId || record.input?.id === mailboxInputId) && conversationMessageSourceKey(record.agentSessionId, record.source) === sourceKey)
+        if (!current()) { finish({ kind: 'cancelled' }); return }
+        if (!present) { finish(unavailable('当前有界对话窗口中没有这条记录，无法确认位置。')); return }
+        switched = true
+        setHistoryOpen(false)
+        setRevealRequest({ generation, sourceKey, displayId, isCurrent: current, complete: (located, error) => {
+          if (!current()) { finish({ kind: 'cancelled' }); return }
+          finish(located ? { kind: 'located' } : unavailable(error ? `读取对话失败：${error}` : '准确记录尚未呈现在对话中，无法确认位置。'))
+        } })
+        useAppStore.getState().setViewMode(sessionId, 'activity', { focus: false })
+      } catch (error) {
+        finish(current() ? unavailable(`读取对话失败：${error instanceof Error ? error.message : String(error)}`) : { kind: 'cancelled' })
+      }
     } })
-    useAppStore.getState().setViewMode(sessionId, 'activity', { focus: false })
-    })().catch(error => {
-      finish(current() ? unavailable(`读取对话失败：${error instanceof Error ? error.message : String(error)}`) : { kind: 'cancelled' })
-    })
     return result
-  }, [activitySourceKey, sessionId, session, pendingAgentRestore, readForReveal, linkOrigin.regionId])
+  }, [activitySourceKey, sessionId, session, pendingAgentRestore, linkOrigin.regionId])
+  // The original Reader's effect runs before this intent is consumed. No window
+  // from a different Mailbox consumer can substitute this Pane's read receipt.
+  useEffect(() => {
+    if (!activityDemand || !revealRead || revealRead.started) return
+    revealRead.started = true
+    void revealRead.start(readForReveal)
+  }, [activityDemand, revealRead, readForReveal])
   // Mailbox keeps its original user-input identity contract; Focus may reveal genuine replies.
   const revealMailboxMessage = useCallback((message: AgentSessionUserMessage, presentation?: WorkbenchViewTarget) => {
     if (session?.kind !== 'agent') return Promise.resolve<MailboxMessageNavigationResult>({ kind: 'unavailable', message: 'Original Session is unconfirmed. Recorded text remains readable.' })
