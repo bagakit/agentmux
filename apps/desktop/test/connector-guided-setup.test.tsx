@@ -94,7 +94,7 @@ async function click(selector: string) {
   let button: HTMLButtonElement | null = null
   await ready(() => { button = dom.container.querySelector(selector); expect(button, selector).not.toBeNull(); expect(button!.hasAttribute('disabled'), selector).toBe(false) })
   const details = button!.closest<HTMLDetailsElement>('details:not([open])')
-  if (details) await act(async () => details.querySelector<HTMLElement>('summary')!.click())
+  if (details && details.querySelector('summary') !== button) await act(async () => details.querySelector<HTMLElement>('summary')!.click())
   expect(button!.closest('[hidden], [inert]')).toBeNull()
   await act(async () => button!.click())
 }
@@ -111,7 +111,7 @@ async function open() {
   await click('[data-management-confirm]')
   await ready(() => expect(dom.container.querySelector('[data-guided-primary]')).not.toBeNull())
   expect(dom.container.querySelectorAll('[data-bot-setup-guide]')).toHaveLength(1)
-  expect(dom.container.querySelector('[data-management-setup] > [data-bot-setup-guide]')?.getAttribute('data-bot-setup-guide')).toBe('connect')
+  expect(dom.container.querySelector('[data-configuration-progress] [data-bot-setup-guide]')?.getAttribute('data-bot-setup-guide')).toBe('connect')
 }
 
 async function fill(label: string, value: string) {
@@ -577,6 +577,10 @@ it('the primary check reads the frozen version after an unknown submit without c
 
 it('keeps all milestones and reads the exact original request trace without platform effects or private data', async () => {
   await open()
+  const beforeProgress = native.length
+  await click('[data-configuration-progress] > summary')
+  expect(document.querySelector<HTMLDetailsElement>('[data-configuration-progress]')?.open).toBe(true)
+  expect(native.length).toBe(beforeProgress)
   const progress = document.querySelector('[aria-label="Bot setup progress"]')!
   expect(progress.querySelectorAll('li')).toHaveLength(4)
   expect(progress.querySelector('[data-step="3"]')?.textContent).toContain('Already saved')
