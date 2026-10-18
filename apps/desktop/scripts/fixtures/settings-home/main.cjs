@@ -30,7 +30,7 @@ app.whenReady().then(async () => {
     if (scroll) {
       // Scroll the real readers only. scrollIntoView also moves overflow:hidden
       // App ancestors and can manufacture a shifted frame unrelated to this click.
-      await read(`(() => {const n=${expression};for(let p=n?.parentElement;p&&p!==document.body;p=p.parentElement){const style=getComputedStyle(p);if(!['auto','scroll'].includes(style.overflowY)||p.scrollHeight<=p.clientHeight)continue;const r=n.getBoundingClientRect(),b=p.getBoundingClientRect();if(r.top<b.top||r.bottom>b.bottom)p.scrollTop+=(r.top+r.bottom-b.top-b.bottom)/2;}})()`)
+      await read(`(() => {const n=${expression};for(let p=n?.parentElement;p&&p!==document.body;p=p.parentElement){const style=getComputedStyle(p);if(!['auto','scroll'].includes(style.overflowY)||p.scrollHeight<=p.clientHeight)continue;const r=n.getBoundingClientRect(),b=p.getBoundingClientRect();p.scrollTop+=(r.top+r.bottom-b.top-b.bottom)/2;}})()`)
       await settle()
     }
     return read(`(() => { const n=${expression}; if(!n?.isConnected||!n.checkVisibility())throw Error('Expected a visible control'); const r=n.getBoundingClientRect(); return {label:n.getAttribute('aria-label')||n.textContent.trim(),x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2),width:r.width,height:r.height,hit:n.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}; })()`)
