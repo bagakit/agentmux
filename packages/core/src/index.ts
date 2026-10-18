@@ -157,3 +157,6 @@ export { parseAgentInputSubmit } from './agent-input-submit.js'
 export type { AgentInputSubmit, AgentInputSubmitResult } from './agent-input-submit.js'
 export * from './agent-input-context-capture.js'
 export * from './client-incident.js'
+
+export * from './mote-chat.js'
+export { agentDiscoveryActivity } from './agent-discovery.js'

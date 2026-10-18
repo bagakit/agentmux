@@ -14,6 +14,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./mote-chat": { "types": "./dist/mote-chat.d.ts", "import": "./dist/mote-chat.js" },
     "./browser-page-capability": {
       "types": "./dist/browser-page-capability.d.ts",
       "import": "./dist/browser-page-capability.js"
