@@ -8,7 +8,7 @@ function object(value: unknown, fields: readonly string[]): Record<string, unkno
   if (Object.keys(p).some(key => !fields.includes(key))) return fail()
   return p
 }
-function text(value: unknown): string { if (typeof value !== 'string' || !value.trim() || value.length > 4096 || /[\u0000-\u001f\u007f]/u.test(value)) return fail(); return value }
+function text(value: unknown): string { if (typeof value !== 'string' || !value.trim() || value.length > 16_384 || /[\u0000-\u001f\u007f]/u.test(value)) return fail(); return value }
 function id(value: unknown): string { const s = text(value); if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(s)) return fail(); return s }
 function count(value: unknown, minimum = 0): number { if (!Number.isSafeInteger(value) || (value as number) < minimum) return fail(); return value as number }
 function bool(value: unknown): boolean { if (typeof value !== 'boolean') return fail(); return value }
