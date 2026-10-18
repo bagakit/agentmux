@@ -277,6 +277,7 @@ export async function copyRuntimeApplication(appPath, source) {
     join(demandRuntime, 'node_modules')
   )
   await materializeDependency(desktopRoot, '@agentmux/git', join(appResources, 'node_modules', '@agentmux', 'git'))
+  await materializeDependency(desktopRoot, '@agentmux/identity', join(appResources, 'node_modules', '@agentmux', 'identity'))
   await materializeDependency(desktopRoot, '@noble/hashes', join(appResources, 'node_modules', '@noble', 'hashes'))
   await materializeDependency(desktopRoot, 'react', join(appResources, 'node_modules', 'react'))
   await materializeDependency(desktopRoot, 'react-dom', join(appResources, 'node_modules', 'react-dom'))
