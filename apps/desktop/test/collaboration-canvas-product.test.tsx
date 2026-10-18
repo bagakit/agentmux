@@ -61,7 +61,8 @@ async function loaded(scene: Scene) {
     expect(captured.nodes).toHaveLength(scene.areas.reduce((sum, area) => sum + area.members.length + 1, 0))
     expect(dom.container.querySelector('.collaboration-canvas__progress')).toBeNull()
     expect(dom.container.querySelector('.collaboration-canvas__issue')).toBeNull()
-    expect(paths.size).toBeGreaterThan(0)
+    if (scene.relations.length) expect(paths.size).toBeGreaterThan(0)
+    else expect(paths.size).toBe(0)
   })
 }
 async function focusNode(id: string) {
@@ -364,7 +365,7 @@ it('keeps explicit Zoom and Fit intent when original Worker placement arrives af
   }
 })
 
-it('anchors the clicked exact occurrence through a real size transition and translates every original curve consistently', async () => {
+it('keeps unrelated occurrences and paths stable through an actual activity size transition', async () => {
   const original = scenario(24), shared = subject('canvas-0')
   const scene = { ...original, areas: original.areas.map((area, index) => index === 3 ? { ...area, members: [...area.members, shared] } : area) }
   await loaded(scene)
@@ -382,8 +383,10 @@ it('anchors the clicked exact occurrence through a real size transition and tran
   const raw = heldResponses.find(item => item.response.type === 'boxes')!.response
   expect(raw.type).toBe('boxes'); if (raw.type !== 'boxes') throw Error('Actual Worker boxes required')
   const placed = new Map(raw.boxes.map(box => [box.id, box])), offset = { x: previous.get(reading)!.x - placed.get(reading)!.x, y: previous.get(reading)!.y - placed.get(reading)!.y }
-  expect(Math.abs(offset.x) + Math.abs(offset.y)).toBeGreaterThan(.1)
-  expect(Math.abs(previous.get(first)!.x - placed.get(first)!.x - offset.x) + Math.abs(previous.get(first)!.y - placed.get(first)!.y - offset.y)).toBeGreaterThan(.1)
+  expect(offset).toEqual({ x: 0, y: 0 })
+  expect(placed.get(first)).toEqual(previous.get(first))
+  expect(requests.map(request => request.type)).toEqual(['arrange', 'reconcile'])
+  for (const [id, before] of previous) if (before.kind === 'agent' && id !== collaborationAgentNode('area-3', subject('canvas-7'))) expect(placed.get(id)).toEqual(before)
   await releasePlacement()
   expect(renderedBox(reading).x).toBeCloseTo(previous.get(reading)!.x, 8); expect(renderedBox(reading).y).toBeCloseTo(previous.get(reading)!.y, 8)
   expect(nodeElement(reading)!.querySelector('.focus-context')).toBe(body); expect(captured.store!.getState().transform).toBe(camera)
@@ -437,7 +440,7 @@ it('keeps keyboard reading anchored then honors the last actual pointer during a
   const camera = captured.store!.getState().transform
   await releasePlacement()
   expect(renderedBox(reading).x).toBeCloseTo(previous.get(reading)!.x, 8); expect(renderedBox(reading).y).toBeCloseTo(previous.get(reading)!.y, 8)
-  expect(captured.store!.getState().transform).toBe(camera); expect(requests.map(request => request.type)).toEqual(['arrange', 'arrange', 'arrange'])
+  expect(captured.store!.getState().transform).toBe(camera); expect(requests.map(request => request.type)).toEqual(['arrange', 'reconcile', 'reconcile'])
 })
 
 it('preserves the clicked area heading through folding and unfolding without resurrecting the prior Agent anchor', async () => {
@@ -594,4 +597,108 @@ it('keeps every selected original relation emphasized when an explicitly folded 
   expect(selected.every(edge => edge.dataset.emphasis === 'related')).toBe(true)
   expect(edges.filter(edge => edge.dataset.emphasis === 'muted')).toHaveLength(scene.relations.length - selected.length)
   expect(requests).toHaveLength(operations)
+})
+
+
+it('adopts parent-relative positions when a local resize expands the original area toward the left', async () => {
+  const initial = scenario(24), agents = new Map([...initial.agents].map(([id, agent]) => [id, { ...agent, tier: 'idle' as const }]))
+  const scene = { ...initial, agents }; await loaded(scene)
+  const areaId = JSON.stringify(['area', 'area-0']), area = renderedBox(areaId)
+  const members = captured.nodes.filter(node => node.type === 'agent' && node.parentId === areaId).sort((a, b) => renderedBox(a.id).x - renderedBox(b.id).x)
+  const reading = members[0]!, agent = reading.data.agent as CollaborationAgent
+  await pointAt(reading.id)
+  const changed = new Map(agents); changed.set(agent.id, { ...agent, tier: 'active' })
+  await dom.render(graph(scene, null, scene.relations, [], changed))
+  await settleCollaborationCanvas(() => {
+    expect(requests).toHaveLength(2); expect(dom.container.querySelector('.collaboration-canvas__progress')).toBeNull()
+    expect(renderedBox(areaId).x).toBeLessThan(area.x)
+  })
+  for (const node of captured.nodes) {
+    const world = captured.store!.getState().nodeLookup.get(node.id)!.internals.positionAbsolute, expected = renderedBox(node.id)
+    expect(world.x, node.id).toBeCloseTo(expected.x, 6); expect(world.y, node.id).toBeCloseTo(expected.y, 6)
+  }
+})
+
+
+it('rebuilds the real envelope when current members change inside identical enclosing bounds', async () => {
+  // Controlled Worker receipts isolate the renderer cache; the finite engine has its own real tests.
+  vi.mocked(engine.handleCollaborationLayoutRequest).mockImplementation(async (request, publish) => {
+    if (request.type === 'route') throw Error('This geometry-only scene has no connections')
+    const area = request.input.areas[0]!, points = [[0, 0], [600, 0], [0, 600], [400, 400]]
+    publish({ id: request.id, type: 'boxes', retainedPaths: request.type === 'reconcile' ? [] : undefined, boxes: [
+      { id: area.id, areaId: area.id, kind: 'area', folded: false, x: -24, y: -104, width: 672, height: 752, heading: { x: 24, y: 24, width: 184, height: 40 } },
+      ...request.input.nodes.map((node, index) => ({ ...node, kind: 'agent' as const, folded: false, x: points[index]![0]!, y: points[index]![1]! }))
+    ] })
+    publish({ id: request.id, type: 'complete' })
+  })
+  const initial = scenario(3), agents = new Map([...initial.agents].map(([id, agent]) => [id, { ...agent, tier: 'closed' as const }]))
+  const area: CollaborationArea = { id: 'triangle', name: 'Original members', kind: 'project', members: [...agents.keys()] }
+  const scene = { ...initial, agents, areas: [area], relations: [] }; await loaded(scene)
+  const areaId = JSON.stringify(['area', 'triangle']), before = renderedBox(areaId)
+  const originalPath = dom.container.querySelector('.collaboration-area__envelope path')!.getAttribute('d')!
+  const fourth = scenario(4).agents.get(subject('canvas-3'))!, nextAgents = new Map(agents)
+  nextAgents.set(fourth.id, { ...fourth, tier: 'closed' })
+  const next = { ...scene, agents: nextAgents, areas: [{ ...area, members: [...area.members, fourth.id] }] }
+  await dom.render(graph(next))
+  await settleCollaborationCanvas(() => {
+    expect(captured.nodes.filter(node => node.type === 'agent')).toHaveLength(4)
+    expect(dom.container.querySelector('.collaboration-area__envelope path')!.getAttribute('d')).not.toBe(originalPath)
+  })
+  expect(renderedBox(areaId)).toBe(before)
+})
+
+it('shows immediate source and recipient activity while the original new path is still arriving', async () => {
+  const original = scenario(24), scene = { ...original, relations: [] }; await loaded(scene)
+  const source = collaborationAgentNode('area-0', subject('canvas-0')), target = collaborationAgentNode('area-1', subject('canvas-1'))
+  await focusNode(source)
+  const pulse = { id: 1, startedAt: Date.now(), hostId: 'local', sender: 'canvas-0', recipient: 'canvas-1', kind: 'communication' as const }
+  const relation: CollaborationRelation = { id: 'new-message', source: subject('canvas-0'), target: subject('canvas-1'), kind: 'communication', evidence: [] }
+  holdResponses = true
+  await dom.render(graph(scene, null, [relation], [pulse]))
+  expect(nodeElement(source)!.querySelector('[aria-label="Message sent"]')).not.toBeNull()
+  expect(dom.container.querySelector('[aria-label="Relation legend"]')!.textContent).toContain('Messages')
+  expect(dom.container.querySelector('.collaboration-edge__pulse')).toBeNull()
+  await settleCollaborationCanvas(() => expect(heldResponses.some(item => item.response.type === 'complete')).toBe(true))
+  await releasePlacement()
+  await settleCollaborationCanvas(() => expect(dom.container.querySelector('.collaboration-edge__pulse')).not.toBeNull())
+  const flow = dom.container.querySelector<SVGPathElement>('.collaboration-edge__pulse')!
+  expect(Number.parseFloat(flow.style.animationDelay)).toBeLessThan(0)
+  await focusNode(target)
+  expect(nodeElement(target)!.querySelector('[aria-label="Message received"]')).not.toBeNull()
+  const edge = dom.container.querySelector<SVGGElement>('.collaboration-connections .react-flow__edge')!
+  await act(async () => edge.dispatchEvent(new FocusEvent('focusin', { bubbles: true })))
+  expect(dom.container.querySelector('.collaboration-edge__label')!.textContent).toContain('Messages: Agent 0 → Agent 1')
+})
+
+
+it('keeps the exact reading occurrence and translates all curves through an explicit rearrangement', async () => {
+  const initial = scenario(24), scene = { ...initial, areas: initial.areas.map((area, index) => index === 3 ? { ...area, members: [...area.members, subject('canvas-0')] } : area) }; await loaded(scene)
+  const reading = collaborationAgentNode('area-3', subject('canvas-0'))
+  await pointAt(reading)
+  await act(async () => nodeElement(reading)!.querySelector<HTMLButtonElement>('.focus-context')!.click())
+  const extra: CollaborationRelation[] = Array.from({ length: 6 }, (_, index) => ({ id: 'observed-' + index, source: subject('canvas-1'), target: subject('canvas-' + (index * 3 + 2)), kind: 'communication', evidence: [] }))
+  await dom.render(graph(scene, null, [...scene.relations, ...extra]))
+  await settleCollaborationCanvas(() => { expect(requests).toHaveLength(2); expect(dom.container.querySelector('.collaboration-canvas__progress')).toBeNull() })
+  const before = renderedBox(reading), camera = captured.store!.getState().transform
+  holdResponses = true
+  await act(async () => dom.container.querySelector<HTMLButtonElement>('[aria-label="Arrange map"]')!.click())
+  await settleCollaborationCanvas(() => expect(heldResponses.some(item => item.response.type === 'complete')).toBe(true))
+  const placement = heldResponses.find(item => item.response.type === 'boxes')!.response
+  if (placement.type !== 'boxes') throw Error('Original force placement required')
+  const raw = placement.boxes.find(box => box.id === reading)!, offset = { x: before.x - raw.x, y: before.y - raw.y }
+  expect(Math.abs(offset.x) + Math.abs(offset.y)).toBeGreaterThan(.1)
+  await releasePlacement()
+  expect([renderedBox(reading).x, renderedBox(reading).y]).toEqual([before.x, before.y]); expect(captured.store!.getState().transform).toBe(camera)
+  const all = [...boxes.values()], left = Math.min(...all.map(box => box.x + offset.x)), top = Math.min(...all.map(box => box.y + offset.y))
+  await viewport(-left + 20, -top + 20, 20000, 20000, 1)
+  const edges = [...dom.container.querySelectorAll<SVGGElement>('.collaboration-connections .react-flow__edge')]
+  expect(edges).toHaveLength(paths.size)
+  for (const edge of edges) {
+    const rawPath = paths.get(edge.dataset.id!)!, curve = curvePoints(edge.querySelector('.react-flow__edge-path')!.getAttribute('d')!)
+    const translated = engine.translateCollaborationPath(rawPath, offset)
+    expect(curve).toEqual(translated.points)
+    for (const [index, point] of curve.entries()) { expect(point.x).toBeCloseTo(rawPath.points[index]!.x + offset.x, 8); expect(point.y).toBeCloseTo(rawPath.points[index]!.y + offset.y, 8) }
+    expect(translated.bounds).toEqual({ ...rawPath.bounds, x: rawPath.bounds.x + offset.x, y: rawPath.bounds.y + offset.y })
+    expect([translated.labelX, translated.labelY]).toEqual([rawPath.labelX + offset.x, rawPath.labelY + offset.y])
+  }
 })
