@@ -1,3 +1,4 @@
+import { fixtureEpoch as _privacyFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { createHash } from 'node:crypto'
 import { fixtureIso as _hygiene_fixtureIso } from "../scripts/lib/fixture-values.mjs"
 import { activityReadingProps } from './helpers/activity-reading-props'
@@ -6,7 +7,7 @@ import { act } from 'react'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, writeFile, readFile } from 'node:fs/promises'
+import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentMuxClient, AgentMuxFileAgentSessionStore } from '@agentmux/core'
@@ -17,10 +18,13 @@ import { StaticActivityView as ActivityView } from './helpers/conversation-stati
 import { ActivityView as ReaderActivityView } from '../src/renderer/src/components/ActivityView'
 import { parseTraceDisclosureKey } from '@agentmux/client-ui/components/ConversationMessage'
 import { api } from '../src/renderer/src/lib/api'
+import { inspectConversationConsumers } from '../src/renderer/src/lib/conversation-consumer-observation'
 
 let host: HTMLDivElement
 let root: Root
 const clients: AgentMuxClient[] = []
+const roots: string[] = []
+const physicalReads: Array<Promise<readonly unknown[]>> = []
 const controls: { name: string; spy: ReturnType<typeof vi.spyOn> }[] = []
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
@@ -29,17 +33,23 @@ beforeEach(() => {
   host = document.createElement('div'); document.body.append(host); root = createRoot(host)
 })
 afterEach(async () => {
-  await act(async () => root.unmount()); host.remove()
-  expect(controls.length).toBeGreaterThan(0)
-  expect(controls.map(({ name, spy }) => [name, spy.mock.calls.length])).toEqual(controls.map(({ name }) => [name, 0]))
-  console.log('SHARED_READING_ACTUAL_KERNEL_CONTROLS', JSON.stringify(controls.map(({ name, spy }) => [name, spy.mock.calls.length])))
-  controls.splice(0).forEach(({ spy }) => spy.mockRestore())
-  vi.restoreAllMocks(); vi.unstubAllGlobals()
-  for (const client of clients.splice(0)) await client.dispose()
+  try {
+    await act(async () => root.unmount()); host.remove()
+    expect(controls.length).toBeGreaterThan(0)
+    expect(controls.map(({ name, spy }) => [name, spy.mock.calls.length])).toEqual(controls.map(({ name }) => [name, 0]))
+    console.log('SHARED_READING_ACTUAL_KERNEL_CONTROLS', JSON.stringify(controls.map(({ name, spy }) => [name, spy.mock.calls.length])))
+  } finally {
+    controls.splice(0).forEach(({ spy }) => spy.mockRestore())
+    vi.restoreAllMocks(); vi.unstubAllGlobals()
+    for (const client of clients.splice(0)) await client.dispose()
+    await Promise.allSettled(physicalReads.splice(0))
+    for (const path of roots.splice(0)) await rm(path, { recursive: true })
+  }
 })
 
 async function fixture() {
   const workspacePath = await mkdtemp(join(tmpdir(), 'shared-reading-public-'))
+  roots.push(workspacePath)
   const transcriptPath = join(workspacePath, 'native.jsonl')
   const storePath = join(workspacePath, 'sessions.json')
   const control = { kind: 'agent' as const, hostId: 'local', agentSessionId: 'shared-reading-recipient', run: { runId: 'private-fixture-without-pid' } }
@@ -47,13 +57,15 @@ async function fixture() {
   const rawId = 'native:input:tool-result:opaque'
   async function writeInput(text: string): Promise<void> {
     await writeFile(transcriptPath, JSON.stringify({ sessionId: nativeSessionId, uuid: rawId, type: 'user',
-      timestamp: _hygiene_fixtureIso(-1767225597000), message: { role: 'user', content: [
+      timestamp: _hygiene_fixtureIso(-_privacyFixtureEpoch(20453, 86397)), message: { role: 'user', content: [
         { type: 'tool_result', tool_use_id: 'opaque:call:0', content: 'Private native tool result' },
         { type: 'text', text }
       ] } }) + '\n')
   }
   await writeInput('Native tail initial')
   const store = new AgentMuxFileAgentSessionStore(storePath)
+  const load = store.load.bind(store)
+  vi.spyOn(store, 'load').mockImplementation(() => { const read = load(); physicalReads.push(read); return read })
   await store.compareAndSwap(null, { kind: 'agent', agentSessionId: control.agentSessionId, providerId: 'claude', executorId: 'claude',
     hostId: control.hostId, workspacePath, run: control.run, retiredRuns: [], createdAt: 1, updatedAt: 1,
     hookBindingId: 'private-shared-reading', hookToken: 'private-token',
@@ -93,7 +105,7 @@ describe('shared native presentation preserves the existing reading owner', () =
       expect(control).toEqual(f.control); const read = f.page(); pending.push(read); const result = await read; pages.push(result); return result
     })
     const acceptedPage = await api.sessions.historyPage(f.control)
-    await act(async () => root.render(<ActivityView nativeHistoryPage={acceptedPage} {...activityReadingProps({ control: f.control, label: "Recipient", visible: true, workspaceRoot: f.workspacePath, openWorkspaceFile: vi.fn(), openHttpLink: vi.fn() })} />))
+    await act(async () => root.render(<ActivityView items={[]} nativeHistoryPage={acceptedPage} {...activityReadingProps({ control: f.control, label: "Recipient", visible: true, workspaceRoot: f.workspacePath, openWorkspaceFile: vi.fn(), openHttpLink: vi.fn() })} />))
     await act(async () => { await Promise.all(pending) })
     await settledHistory()
     expect(pages.map(page => page.items.map(item => item.id))).toEqual([[f.rawId]])
@@ -109,7 +121,7 @@ describe('shared native presentation preserves the existing reading owner', () =
     expect(host.querySelector('[data-message-tool-control="jump-to-latest"]'), 'an opened current window is already current').toBeNull()
     await f.writeInput('Native tail refreshed')
     const refreshed = await f.page(); pages.push(refreshed)
-    await act(async () => root.render(<ActivityView {...activityReadingProps({ control: f.control, label: "Recipient", visible: true, workspaceRoot: f.workspacePath, openWorkspaceFile: vi.fn(), openHttpLink: vi.fn() })} nativeHistoryPage={refreshed} />))
+    await act(async () => root.render(<ActivityView items={[]} {...activityReadingProps({ control: f.control, label: "Recipient", visible: true, workspaceRoot: f.workspacePath, openWorkspaceFile: vi.fn(), openHttpLink: vi.fn() })} nativeHistoryPage={refreshed} />))
     expect(history).toHaveBeenCalledTimes(1)
     await act(async () => { await Promise.all(pending) })
     await settledHistory()
@@ -186,6 +198,8 @@ describe('shared native presentation preserves the existing reading owner', () =
         await act(async () => root.render(<ActivityView sessionId={f.control.agentSessionId} items={timeline} nativeHistoryPage={page}
           capability="complete-events" displayState="done" onContinue={onContinue} />))
         for(const disclosure of host.querySelectorAll<HTMLButtonElement>('[data-captured-reply-observation] [aria-expanded=false]'))await act(async()=>disclosure.click())
+        const originalSubmission = host.querySelector<HTMLDetailsElement>('.conversation-submission-record .message-disclosure')
+        if (originalSubmission) await act(async () => { originalSubmission.open = true; originalSubmission.dispatchEvent(new Event('toggle')) })
         const turns = [...host.querySelectorAll<HTMLElement>('.log-turn')]
         expect(turns.map(turn => turn.querySelector('.log-turn__body p')?.textContent)).toEqual([
           collision ? 'Earlier captured input' : 'Earlier agent answer', 'Native tail initial', 'Do not leak this future answer'
@@ -228,17 +242,32 @@ it('the original Desktop window pages retained captured records beyond the recen
   vi.spyOn(api.conversation,'releaseConversationView').mockImplementation(f.client.releaseConversationView.bind(f.client))
   const rawReads=[vi.spyOn(api.sessions,'historyPage'),vi.spyOn(api.sessions,'readHistory'),vi.spyOn(api.sessions,'timeline')]
   await act(async () => root.render(<ReaderActivityView {...activityReadingProps({ control: f.control })} />))
-  for(let turn=0;turn<200&&!host.querySelector('[data-message-id^="captured:captured-original:"]');turn++)
-    await act(async()=>{await new Promise(resolve=>setTimeout(resolve,10))})
-  for (let turn = 0; turn < 12 && !host.querySelector('[data-message-id="captured:captured-original:0"]'); turn++) {
-    const earlier = [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Earlier')
-    expect(earlier).toBeDefined()
-    await act(async () => { earlier!.click(); await new Promise(resolve => setTimeout(resolve, 20)) })
-    await vi.waitFor(() => expect([...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Earlier')?.getAttribute('aria-busy')).not.toBe('true'), { timeout: 8000 })
+  const ready = () => {
+    const consumer = inspectConversationConsumers(f.control).consumers[0]
+    return Boolean(host.querySelector('[data-submission-id^="captured-original:"]') && consumer && !consumer.loading && !consumer.inFlight)
   }
-  const rows = [...host.querySelectorAll<HTMLElement>('[data-message-id^="captured:captured-original:"]')]
-  expect(rows.map(row => row.dataset.messageId)).toEqual(original.map(item => 'captured:' + item.id))
-  const large = host.querySelector<HTMLElement>('[data-message-id="captured:captured-original:1"]')!
+  for(let turn=0;turn<200&&!ready();turn++)
+    await act(async()=>{await new Promise(resolve=>setTimeout(resolve,10))})
+  for (let turn = 0; turn < 12 && !host.querySelector('[data-submission-id="captured-original:0"]'); turn++) {
+    const earlier = [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Earlier')
+    expect(earlier, JSON.stringify({ text: host.textContent?.slice(0, 2000), rows: host.querySelectorAll('[data-submission-id]').length,
+      consumer: inspectConversationConsumers(f.control).consumers })).toBeDefined()
+    expect(earlier!.disabled).toBe(false)
+    const before = inspectConversationConsumers(f.control).consumers[0]!.accepted!
+    await act(async () => { earlier!.click(); await new Promise(resolve => setTimeout(resolve, 20)) })
+    await vi.waitFor(async () => {
+      await act(async () => { await Promise.resolve() })
+      const consumer = inspectConversationConsumers(f.control).consumers[0]
+      expect(consumer?.loading).toBe(false); expect(consumer?.inFlight).toBe(false)
+      expect(consumer?.accepted).toBeTruthy()
+      expect([consumer!.accepted!.id, consumer!.accepted!.revision]).not.toEqual([before.id, before.revision])
+    }, { timeout: 8000 })
+  }
+  const rows = [...host.querySelectorAll<HTMLElement>('[data-submission-id^="captured-original:"]')]
+  expect(rows.map(row => row.dataset.submissionId)).toEqual(original.map(item => item.id))
+  const large = host.querySelector<HTMLElement>('[data-submission-id="captured-original:1"]')!
+  const originalBody = large.querySelector<HTMLDetailsElement>('.message-disclosure')!
+  await act(async () => { originalBody.open = true; originalBody.dispatchEvent(new Event('toggle')) })
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue()
   await act(async () => large.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!.click())
   expect(createHash('sha256').update(copy.mock.calls.at(-1)?.[0] ?? '').digest('hex')).toBe(createHash('sha256').update(original[1]!.content!).digest('hex'))
