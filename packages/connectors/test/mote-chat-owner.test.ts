@@ -198,6 +198,31 @@ it('uses durable accepted activity when an extra observation fails and isolates 
   expect(f.agents.create).toHaveBeenCalledTimes(2)
 })
 
+it('keeps a known private audience from borrowing a manual binding while paused or preparing and leaves unrelated groups available', async () => {
+  const f = await fixture(), binding = (await f.host.prepareIncoming(f.incoming('first')))!
+  const manual = { ...binding, bindingId: 'manual-private-binding', agentSessionId: 'manual-agent' }
+  const group = { ...manual, bindingId: 'unrelated-group', externalConversationId: 'original-group' }
+  const find = vi.fn((input: { application: typeof application; externalConversationId: string }) => input.externalConversationId === group.externalConversationId ? group : { ...manual, externalConversationId: input.externalConversationId })
+  const groups = { readExact: () => manual, readCurrent: () => manual, findActiveAudience: find, listActive: () => [manual, group],
+    publicationAuthority: () => ({ binding: manual, authorized: true }), readGrant: () => null, findGrant: () => null }
+  const combined = composeMoteChatBindings(groups, f.host), audience = { application, externalConversationId: binding.externalConversationId }
+  expect(combined.findActiveAudience(audience)?.bindingId).toBe(binding.bindingId)
+  expect(find).not.toHaveBeenCalled()
+  f.agents.create = vi.fn(async () => { throw new Error('Original creation not confirmed') })
+  await expect(f.host.prepareIncoming(f.incoming('pending', creator, 'pending-private'))).rejects.toThrow('Original creation not confirmed')
+  expect(combined.findActiveAudience({ application, externalConversationId: 'pending-private' })).toBeNull()
+  expect(find).not.toHaveBeenCalled()
+  await f.host.configure({ ...f.input, operationId: 'pause-known-audience', expectedRevision: 1, values: { ...f.input.values, enabled: false } }, context)
+  expect(combined.findActiveAudience(audience)).toBeNull()
+  expect(find).not.toHaveBeenCalled()
+  expect(combined.findActiveAudience({ application, externalConversationId: group.externalConversationId })).toBe(group)
+  expect(find).toHaveBeenCalledOnce()
+  const other = { ...application, appId: 'another-original-app' }
+  expect(combined.findActiveAudience({ application: other, externalConversationId: binding.externalConversationId })?.bindingId).toBe(manual.bindingId)
+  expect(find).toHaveBeenCalledTimes(2)
+  expect(f.restart().knowsAudience(audience)).toBe(true)
+})
+
 it('preserves the original binding when another local alias selects the same native application', async () => {
   const f = await fixture(), first = (await f.host.prepareIncoming(f.incoming('first')))!
   const alias = { ...f.connection, connectionId: 'connection-alias' }
