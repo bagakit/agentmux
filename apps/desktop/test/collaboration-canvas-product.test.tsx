@@ -65,6 +65,30 @@ async function loaded(scene: Scene) {
     else expect(paths.size).toBe(0)
   })
 }
+async function loadedDetourScene() {
+  const scene = scenario(24); scene.relations = []
+  await loaded(scene)
+  const source = boxes.get(collaborationAgentNode('area-0', subject('canvas-0')))!
+  const target = boxes.get(collaborationAgentNode('area-3', subject('canvas-3')))!
+  const obstacle = boxes.get(collaborationAgentNode('area-0', subject('canvas-12')))!
+  // Add a connection after real placement, through an explicitly verified original card. Do not prescribe a curve or depend on force-layout routing accidents.
+  expect(source.x).toBe(target.x)
+  expect(obstacle.y).toBeGreaterThan(target.y + target.height)
+  expect(obstacle.y + obstacle.height).toBeLessThan(source.y)
+  expect(obstacle.x).toBeLessThan(source.x + source.width / 4)
+  expect(obstacle.x + obstacle.width).toBeGreaterThan(source.x + source.width / 4)
+  const originalBoxes = boxes
+  scene.relations = [{ id: 'original-obstructed-message', kind: 'communication', source: subject('canvas-0'), target: subject('canvas-3'), evidence: [] }]
+  await dom.render(graph(scene))
+  await settleCollaborationCanvas(() => {
+    expect(requests.at(-1)?.type).toBe('route'); expect(paths.size).toBe(1)
+    expect(dom.container.querySelector('.collaboration-canvas__progress')).toBeNull()
+    expect(dom.container.querySelector('.collaboration-canvas__issue')).toBeNull()
+  })
+  expect(boxes).toBe(originalBoxes)
+  expect([...paths.values()][0]!.points.length).toBeGreaterThan(4)
+  return scene
+}
 async function focusNode(id: string) {
   const box = renderedBox(id)
   await viewport(-box.x + 20, -box.y + 20, 520, 300)
@@ -91,10 +115,8 @@ function curvePoints(path: string) {
 }
 /** Read the real curve and original Worker boxes; never prescribe a layout or substitute a route. */
 function detour() {
-  const input = requests.find(request => request.type === 'arrange')!
-  expect(input.type).toBe('arrange')
-  if (input.type !== 'arrange') throw Error('Expected original arrangement request')
-  for (const connection of input.input.connections) {
+  const connections = requests.flatMap(request => request.type === 'route' ? request.connections : request.input.connections)
+  for (const connection of connections) {
     const route = paths.get(connection.id)!, points = curvePoints(route.path), from = boxes.get(connection.source)!, to = boxes.get(connection.target)!
     const first = points[0]!, last = points.at(-1)!, left = Math.min(first.x, last.x), right = Math.max(first.x, last.x), top = Math.min(first.y, last.y), bottom = Math.max(first.y, last.y)
     for (let segment = 0; segment < points.length - 1; segment += 3) for (let sample = 1; sample < 100; sample++) {
@@ -230,7 +252,7 @@ it('keeps every world member through viewport LOD while mounting full shared car
 })
 
 it('renders and selects an actual Worker detour while both original endpoint cards are offscreen', async () => {
-  const scene = scenario(24); await loaded(scene)
+  const scene = await loadedDetourScene()
   const candidate = detour(); expect(candidate, 'The actual force scene must contain a curve outside the endpoint rectangle').toBeDefined()
   const { connection, route, x, y } = candidate!
   await viewport(-x + 4, -y + 4, 8, 8)
@@ -254,7 +276,7 @@ it('renders and selects an actual Worker detour while both original endpoint car
 })
 
 it('keeps an original pulse phase through selection and resumes only its elapsed phase after viewport remount', async () => {
-  const scene = scenario(24); await loaded(scene)
+  const scene = await loadedDetourScene()
   const candidate = detour(); expect(candidate).toBeDefined()
   const { connection, x, y } = candidate!, relation = selectedRelation(scene, connection.source, connection.target, connection.kind)
   expect(relation.kind).not.toBe('creation')
