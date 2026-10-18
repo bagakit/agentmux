@@ -206,8 +206,14 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       const kinds = new Set(authors), human = authors.length > 0 && authors.every(kind => kind === 'human')
       const title = human ? 'User' : kinds.size > 1 ? 'Mixed authors' : kinds.has('external') ? 'External message'
         : kinds.has('agent') ? 'Agent input' : 'Unknown author'
+      const input = human ? operation.payload.inputSubmission : undefined
+      const inputStatus = input ? ({ waiting: 'Waiting for the original Agent', stopped: 'Input waiting stopped',
+        'terminal-confirmed': 'Input bytes confirmed; Agent acceptance unconfirmed', admitted: 'Accepted by the original Agent; work completion unconfirmed',
+        'not-applied': 'Input not applied', unknown: 'Input result unknown' }[input.status]
+        + (input.observation === 'rejoin-needed' ? '\nInput observation needs reconnection' : '')) : undefined
       card = { config: { update_multi: true }, header: { title: { tag: 'plain_text', content: title + ' · via amux' }, template: human ? 'green' : 'grey' },
-        elements: [{ tag: 'div', text: { tag: 'plain_text', content: publicationSpeechText(operation.payload) } }] }
+        elements: [{ tag: 'div', text: { tag: 'plain_text', content: publicationSpeechText(operation.payload) } },
+          ...(inputStatus ? [{ tag: 'div', text: { tag: 'plain_text', content: inputStatus } }] : [])] }
     } else if (operation.payload.kind === 'speech') {
       if (!publicationSpeechText(operation.payload)) feishuFailure('FEISHU_PUBLICATION_CONTENT_UNSUPPORTED')
       const title = operation.payload.phase === 'progress' ? 'Agent progress' : operation.payload.phase === 'final' ? 'Agent reply' : 'Conversation message'
