@@ -29,7 +29,8 @@ export async function runNative(requestedEvidence, options = {}) {
   const out = join(privateRoot, 'renderer'), sourceBefore = {}, styleBefore = {}, logs = []
   const receipt = { schema: 'agentmux.session-takeover-native.v1', passed: false, frames: [], processes: [],
     userSessionTouched: false, independentVisualReview: 'pending',
-    scope: 'Actual production WorkspaceWorkbench, SessionPane, shared picker and product styles in two ordinary Electron processes. Real public Core spatial file owner and Chromium profile storage. Native session facts/creation API remain controlled preview; actual Core/ctxmux Agent processes are proved separately.',
+    scope: 'Actual production WorkspaceWorkbench, SessionPane, shared picker and product styles in two ordinary Electron processes. Real public Core spatial file owner and Chromium profile storage. A controlled Native retirement challenges a stale Renderer projection; trusted user choices create a distinct successor operation and both requests remain inspectable after restart. Native session facts/creation API remain controlled preview; this receipt does not prove vendor CLI or ctxmux process execution; Core exact Store/Hosted creation inspection has separate source-test evidence.',
+    controlledRecovery: 'The same exact Native snapshot owns refresh/recover. For a matching healthy running Host/Session/Run it returns the Core reattachable protocol (packages/core/src/client.ts, recoverAgentSession running branch); the generic apps/desktop/src/renderer/src/lib/api.ts preview recover unconditionally mints a Run and is not the Native owner of this fixture. Per-process nativeReads record request and returned identities; unknown or mismatched targets fail.',
     fixtureAssetCompatibility: 'A deleted unrelated settings-banner.png import is privately aliased to existing icon-128.png. Region takeover scenes never render that banner; this proof makes no full application build/install claim.' }
   let failure
   try {
@@ -45,6 +46,7 @@ export async function runNative(requestedEvidence, options = {}) {
     const banner = join(desktop, 'resources/settings-banner.png'), icon = join(desktop, 'resources/icon-128.png')
     await build({ configFile: false, root: fixture, base: './', logLevel: 'error',
       resolve: { alias: [{ find: /^.*settings-banner\.png$/, replacement: icon }], dedupe: ['react', 'react-dom'] },
+      worker: { format: 'es' },
       plugins: [{ name: 'bind-current-takeover-renderer-inputs', enforce: 'pre', async transform(_source, id) {
         if (!id.includes('?') && (id.startsWith(join(desktop, 'src') + '/') || id.startsWith(join(repo, 'packages/client-ui/src') + '/') || id.startsWith(join(core, 'dist') + '/') || id.startsWith(fixture)))
           sourceBefore[id.slice(repo.length + 1)] = hash(await readFile(id))
@@ -79,6 +81,10 @@ export async function runNative(requestedEvidence, options = {}) {
     }
     assert.notEqual(receipt.processes[0].rendered.processId, receipt.processes[1].rendered.processId)
     assert.ok(receipt.processes[1].rendered.restart.noWorkfaceReseed)
+    assert.ok(receipt.processes[0].rendered.closedTarget.staleProjectionIgnored)
+    assert.ok(receipt.processes[0].rendered.closedTarget.inspectedWithoutLaunch)
+    assert.ok(receipt.processes[1].rendered.restart.closedTarget.requestsPreserved)
+    assert.ok(receipt.processes[1].rendered.restart.closedTarget.noReplay)
     receipt.sourceAfter = Object.fromEntries(await Promise.all(Object.keys(sourceBefore).map(async path => [path, hash(await readFile(join(repo, path)))])))
     receipt.stylesAfter = Object.fromEntries(await Promise.all(Object.keys(styleBefore).map(async path => [path, hash(await readFile(join(repo, path)))])))
     assert.deepEqual(receipt.sourceAfter, sourceBefore, 'Actual product and fixture inputs did not change during capture')

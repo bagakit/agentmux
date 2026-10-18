@@ -112,6 +112,11 @@ async function pauseMotion(name) {
   const motion = await evaluate(`(()=>{const animation=document.getAnimations().find(a=>a.animationName===${JSON.stringify(name)});if(!animation)throw new Error('Actual production animation missing');const duration=animation.effect.getTiming().duration;animation.pause();animation.currentTime=duration/2;window.takeoverPausedAnimation=animation;return{name:animation.animationName,duration,currentTime:animation.currentTime,playState:animation.playState}})()`)
   assert.ok(Number.isFinite(motion.duration)); assert.equal(motion.playState, 'paused')
   assert.equal(motion.currentTime, motion.duration / 2)
+  // Seeking a paused animation updates its timeline before the compositor has
+  // painted that frame. Keep the exact midpoint frozen while painting catches up.
+  const paintedMotion = await evaluate(`(async()=>{await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame);const animation=window.takeoverPausedAnimation;return{currentTime:animation.currentTime,playState:animation.playState}})()`)
+  assert.equal(paintedMotion.playState, 'paused')
+  assert.equal(paintedMotion.currentTime, motion.currentTime)
   return motion
 }
 async function resumeMotion() { await evaluate(`{window.takeoverPausedAnimation?.play();delete window.takeoverPausedAnimation}`) }
@@ -143,9 +148,9 @@ app.whenReady().then(async () => {
         await evaluate(`void takeoverProbe.appearance(${JSON.stringify(theme)})`); await size(width)
         await open(0, theme === 'light')
         await frame(`02-${theme}-${width}-picker`)
-        const available = await evaluate(`${picker}.querySelector('[data-executor-id="cursor"]')?.disabled===false`)
+        const available = await evaluate(`${picker}.querySelector('.agent-pick[data-executor-id="cursor"]')?.disabled===false`)
         assert.equal(available, true, 'Unknown discovery remains an available configured choice')
-        assert.equal(await evaluate(`${picker}.querySelector('[data-executor-id="pi"]')===null`), true, 'Only an authoritative missing command is excluded')
+        assert.equal(await evaluate(`${picker}.querySelector('.agent-pick[data-executor-id="pi"]')===null`), true, 'Only an authoritative missing command is excluded')
         await cancel(0)
       }
       await evaluate(`void takeoverProbe.appearance('dark')`); await size(940)
@@ -172,11 +177,11 @@ app.whenReady().then(async () => {
       assert.equal(await evaluate(`document.activeElement===${more(0)}`), true)
       result.motion = { entering, leaving, immediateRelease, shortRegion: { width: 360, height: 420 } }
       await size(940)
-      result.stage = 'focus-header-portal'
+      result.stage = 'focus-region-entry'
       await evaluate('takeoverProbe.focusProjection(true)')
-      await wait(`Boolean(document.querySelector('#takeover-focus-slot-header .agent-region-header__more'))`)
+      await wait(`Boolean(document.querySelector('#takeover-focus-slot .agent-region-header__more'))`)
       await open(0, true); await frame('03-focus-original-picker'); await cancel(0)
-      result.focus = { actualWorkbenchProjection: true, headerPortalled: true, menuEntryOperated: true, cancelReturnsOriginalMore: true }
+      result.focus = { actualWorkbenchProjection: true, regionHeaderEntry: true, menuEntryOperated: true, cancelReturnsOriginalMore: true }
       await evaluate('takeoverProbe.focusProjection(false)')
       await painted()
       await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
@@ -193,7 +198,7 @@ app.whenReady().then(async () => {
       // successful source's durable request identity is never erased or reused.
       result.stage = 'unconfirmed-creation'
       await evaluate('takeoverProbe.failure(true)'); await open(1)
-      await click(`${picker}.querySelector('[data-executor-id="codex"]')`)
+      await click(`${picker}.querySelector('.agent-pick[data-executor-id="codex"]')`)
       await wait(`Boolean(${picker}?.querySelector('.session-takeover__issue'))`)
       await frame('05-unconfirmed-creation')
       const unknownBefore = await evaluate('takeoverProbe.facts()')
@@ -243,16 +248,69 @@ app.whenReady().then(async () => {
       assert.deepEqual(retainedTerminal.buffer, result.originalTerminalBefore.buffer, 'Retained original terminal text and viewport remain unchanged')
       assert.deepEqual(retainedTerminal.screen, result.originalTerminalBefore.screen, 'Retained original terminal returns to the same visible coordinates')
       result.originalTerminalRetained = retainedTerminal
+      result.stage = 'closed-target-and-explicit-new-intent'
+      const previousRequestId = launched.createOperationId
+      const previousTarget = Object.values(afterLaunch.requests).find(request => request.requestId === previousRequestId)?.agentSessionId
+      assert.ok(previousTarget, 'The original confirmed request retains its exact created target')
+      const retirement = await evaluate(`takeoverProbe.retire(${JSON.stringify(previousTarget)})`)
+      const retiredBefore = await evaluate('takeoverProbe.facts()')
+      assert.ok(retiredBefore.sessions.some(session => session.id === previousTarget), 'The private Native retirement leaves a deliberately stale Renderer projection')
+      assert.ok(!retiredBefore.nativeSessions.some(session => session.id === previousTarget), 'The controlled Native active snapshot no longer advertises the retired target')
+      await open(0)
+      await click(`${picker}.querySelector('.agent-pick[data-executor-id="codex"]')`)
+      await wait(`${picker}?.querySelector('.session-takeover__issue')?.textContent.includes('Takeover Agent was closed')`)
+      const closed = await evaluate('takeoverProbe.facts()')
+      assert.equal(closed.launches.length, retiredBefore.launches.length, 'Inspecting a retired target cannot repeat creation')
+      assert.deepEqual(Object.keys(closed.requests), Object.keys(retiredBefore.requests), 'Inspection preserves the exact original request')
+      const priorReport = await evaluate(`takeoverProbe.inspect(${JSON.stringify(previousRequestId)})`)
+      assert.equal(priorReport.request.report.outcome, 'retired')
+      assert.equal(priorReport.request.report.agent.agentSessionId, previousTarget)
+      assert.equal(priorReport.request.report.agent.runId, retirement.run.runId)
+      assert.deepEqual(priorReport.request.report.agent.retirement, { source: retirement.source, observedAt: retirement.observedAt })
+      assert.ok(priorReport.request.report.issues.every(issue => !['AGENT_CREATION_UNKNOWN', 'SPACE_PLACEMENT_UNKNOWN'].includes(issue.code)), 'Confirmed retirement is not reported as missing creation or placement')
+      await frame('10-closed-target-dark')
+      await evaluate(`void takeoverProbe.appearance('light')`); await size(360)
+      await frame('10-closed-target-light-narrow')
+      await evaluate(`void takeoverProbe.appearance('dark')`); await size(940)
+      const chooseAnother = `([...${picker}.querySelectorAll('button')].find(button=>button.textContent.trim()==='Choose another Agent'))`
+      await click(chooseAnother)
+      await wait(`${picker}.querySelector('.agent-pick[data-executor-id="claude"]')?.disabled===false`)
+      await frame('11-new-intent-choice')
+      assert.equal((await evaluate('takeoverProbe.facts()')).launches.length, retiredBefore.launches.length, 'Choosing to select again does not launch until the user submits a specific Agent')
+      await click(`${picker}.querySelector('.agent-pick[data-executor-id="claude"]')`)
+      await wait(`takeoverProbe.facts().launches.length===${retiredBefore.launches.length + 1}`)
+      await wait(`!${picker}`)
+      await painted()
+      const successor = await evaluate('takeoverProbe.facts()'), nextLaunch = successor.launches.at(-1)
+      assert.notEqual(nextLaunch.createOperationId, previousRequestId, 'An explicit new takeover has a distinct operation identity')
+      assert.equal(Object.keys(successor.requests).length, Object.keys(retiredBefore.requests).length + 1, 'The old request survives alongside exactly one new request')
+      assert.deepEqual(successor.drafts, beforeLaunch.drafts, 'The second takeover preserves original unsent drafts')
+      assert.deepEqual(successor.tabs[originalSource.tabId].regions[originalSource.regionId], beforeLaunch.tabs[originalSource.tabId].regions[originalSource.regionId], 'The second takeover preserves the exact original Region')
+      const oldInspection = await evaluate(`takeoverProbe.inspect(${JSON.stringify(previousRequestId)})`)
+      const newInspection = await evaluate(`takeoverProbe.inspect(${JSON.stringify(nextLaunch.createOperationId)})`)
+      assert.equal(oldInspection.request.report.outcome, 'retired')
+      assert.equal(newInspection.request.report.outcome, 'opened')
+      assert.notEqual(newInspection.request.report.agent.agentSessionId, previousTarget)
+      assert.equal(newInspection.request.report.agent.createOperationId, nextLaunch.createOperationId)
+      await frame('11-new-successor-tab')
+      await evaluate('takeoverProbe.focus(0)'); await painted(); await frame('12-original-after-new-intent')
+      const originalAfterNew = result.frameObservations.at(-1).terminal.terminals.find(t => t.regionId === originalSource.regionId)
+      assert.deepEqual(originalAfterNew.options, result.originalTerminalBefore.options, 'An explicit new takeover retains the original terminal font options')
+      assert.deepEqual(originalAfterNew.buffer, result.originalTerminalBefore.buffer, 'An explicit new takeover retains the original terminal text and reading position')
+      result.closedTarget = { retirement, previousRequestId, nextRequestId: nextLaunch.createOperationId,
+        staleProjectionIgnored: true, inspectedWithoutLaunch: true, oldInspection, newInspection }
       // Wait for the real Renderer debounced persistence writer, then commit the
       // current spatial owner and Chromium localStorage, not a synthetic export.
-      await wait(`(()=>{const f=takeoverProbe.facts();const p=JSON.parse(f.persisted??'null');return p?.state?.agentComposerDrafts?.[f.origins[0].sessionId]===f.drafts[f.origins[0].sessionId]})()`)
+      await wait('takeoverProbe.saved()', 'Actual Core layouts and Chromium requests/drafts match the current workface before process shutdown')
       result.sealed = await evaluate('takeoverProbe.seal()')
       result.spatial = await spatial.read()
+      assert.deepEqual(result.spatial.graph.layouts, result.sealed.layouts, 'The actual Core writer persisted the selected original workface before shutdown')
       assert.ok(result.spatial.graph.tabs.some(tab => tab.tabId === result.launch.newTabId), 'Production spatial persistence owns the successor Tab')
       assert.ok(result.spatial.graph.regions.some(region => region.regionId === originalSource.regionId), 'Production spatial persistence owns the original Region')
       await fs.writeFile(path.join(evidence, 'restart-baseline.json'), JSON.stringify({
         tabs: result.sealed.tabs, layouts: result.sealed.layouts, drafts: result.sealed.drafts, sessions: result.sealed.sessions,
-        spatial: result.spatial, newTabId: result.launch.newTabId, origins: result.sealed.origins
+        nativeSessions: result.sealed.nativeSessions, spatial: result.spatial, newTabId: result.launch.newTabId,
+        origins: result.sealed.origins, requests: result.sealed.requests, closedTarget: result.closedTarget
       }, null, 2))
     } else {
       const baseline = JSON.parse(await fs.readFile(path.join(evidence, 'restart-baseline.json'), 'utf8'))
@@ -261,7 +319,9 @@ app.whenReady().then(async () => {
       assert.deepEqual(restored.tabs, baseline.tabs, 'Second actual Renderer loads saved original and new Tabs without workface reseeding')
       assert.deepEqual(restored.layouts, baseline.layouts, 'Second actual Renderer loads saved layout and selection')
       assert.deepEqual(restored.drafts, baseline.drafts, 'Second actual Renderer loads original unsent drafts from Chromium profile')
-      assert.deepEqual(restored.sessions, baseline.sessions)
+      const byIdentity = sessions => [...sessions].sort((a, b) => a.id.localeCompare(b.id))
+      assert.deepEqual(byIdentity(restored.sessions), byIdentity(baseline.nativeSessions), 'Restart uses every exact preserved active Native identity without resurrecting the retired target')
+      assert.deepEqual(restored.requests, baseline.requests, 'Both the retired and new takeover requests survive the real process restart')
       assert.equal(restored.launches.length, 0, 'Cold restart sends and creates nothing')
       result.restored = restored
       result.spatial = await spatial.read()
@@ -269,6 +329,14 @@ app.whenReady().then(async () => {
       result.restartVisibleBaseline = await originalTerminalReady()
       await frame('08-restart-original')
       await open(0); await frame('09-restart-picker'); await cancel(0)
+      const oldInspection = await evaluate(`takeoverProbe.inspect(${JSON.stringify(baseline.closedTarget.previousRequestId)})`)
+      const newInspection = await evaluate(`takeoverProbe.inspect(${JSON.stringify(baseline.closedTarget.nextRequestId)})`)
+      assert.equal(oldInspection.request.report.outcome, 'retired', 'The old creation remains exactly inspectable after process restart')
+      assert.equal(newInspection.request.report.outcome, 'opened', 'The new creation remains independently inspectable after process restart')
+      assert.equal(oldInspection.request.report.agent.agentSessionId, baseline.closedTarget.retirement.agentSessionId)
+      assert.equal(newInspection.request.report.agent.agentSessionId, baseline.closedTarget.newInspection.request.report.agent.agentSessionId)
+      assert.equal((await evaluate('takeoverProbe.facts()')).launches.length, 0, 'Neither exact request inspection creates or replays on restart')
+      result.restart.closedTarget = { oldInspection, newInspection, requestsPreserved: true, noReplay: true }
     }
     result.consoleErrors = errors
     result.passed = true
