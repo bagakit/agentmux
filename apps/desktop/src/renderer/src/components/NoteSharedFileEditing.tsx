@@ -1,6 +1,6 @@
 import { NoteFileContext } from '@agentmux/client-ui/components/NoteFileContext'
 import type { Editor } from '@tiptap/core'
-import { noteShareSiblingRange } from '../../../shared/note-share-range'
+import { notePendingSharePreview } from '../lib/note-pending-share-preview'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { FileReadParams } from '@agentmux/core/files'
 import type { NoteInclude } from '../../../shared/note-document'
@@ -8,7 +8,7 @@ import { closeHistory } from '../../../shared/note-content-schema'
 import { parseNoteFile, type NoteKnowledge, type NoteSource } from '../lib/note-knowledge'
 import type { NoteFileTarget } from '../lib/file-document-consumers'
 import { NoteSharedContext, type NoteEditorAttachments } from '../lib/note-shared-context'
-import { clearPendingNoteShares, copyNoteBlock, focusIncludedNoteDraft, noteBlockFingerprint, noteNodeAtPath, pendingNoteShares, readNoteShareClipboard, stageNoteShare, writeNoteShareClipboard } from '../lib/note-share-staging'
+import { clearPendingNoteShares, copyNoteBlock, focusIncludedNoteDraft, noteNodeAtPath, pendingNoteShares, readNoteShareClipboard, stageNoteShare, writeNoteShareClipboard } from '../lib/note-share-staging'
 import { documentKey } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 import { setNoteComposition } from '../lib/note-live-merge'
@@ -91,14 +91,7 @@ function PendingSharedFile({ include, scope, remove, graph, trail, owner }: { in
   const unconfirmed = sharing?.references.includes(include.referenceId) ?? false
   const node = useMemo(() => {
     if (read?.status !== 'valid' || !ticket || read.note.noteId !== ticket.copy.source.noteId) return undefined
-    if (!ticket.copy.block.blockId) {
-      const promoted: import('@tiptap/core').JSONContent[] = [], visit = (value: import('@tiptap/core').JSONContent) => { if (value.type === 'noteInclude' && value.attrs?.noteId === ticket.include.noteId && !original?.noteEditing?.shares?.[value.attrs?.referenceId]) promoted.push(value); value.content?.forEach(visit) }; visit(read.note.content)
-      if (promoted.length === 1) return promoted[0]
-      const parent = noteNodeAtPath(read.note.content, ticket.copy.block.path.slice(0, -1)), index = ticket.copy.block.path.at(-1)!
-      const at = parent?.content?.[index]; return parent && at && noteBlockFingerprint(at) === ticket.copy.block.fingerprint ? at.type === 'heading' ? { type: 'doc', content: noteShareSiblingRange(parent, index) } : at : undefined
-    }
-    const found: import('@tiptap/core').JSONContent[] = [], visit = (value: import('@tiptap/core').JSONContent) => { value.content?.forEach((child, index) => { if (child.attrs?.blockId === ticket.copy.block.blockId) found.push(child.type === 'heading' ? { type: 'doc', content: noteShareSiblingRange(value, index) } : child); visit(child) }) }; visit(read.note.content)
-    return found.length === 1 ? found[0] : undefined
+    return notePendingSharePreview(read.note, ticket, new Set(Object.keys(original?.noteEditing?.shares ?? {})))
   }, [read, ticket])
   useEffect(() => {
     // This same clipboard proposal was already promoted in the original source.

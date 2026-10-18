@@ -4,8 +4,9 @@ import { NoteReader, type NoteLinkOpenRequest } from '@agentmux/client-ui/compon
 import { NoteFileLinkContext } from '@agentmux/client-ui/components/NoteFileContext'
 import { useDesktopNoteLinkOpener } from '../lib/note-file-link'
 import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
-import type { NotebookPage } from '@agentmux/core/notebook-catalog'
-import { projectNoteBlocks, type NoteSource } from '@agentmux/client-ui/note/note-knowledge'
+import type { NotebookPage, NoteResource } from '@agentmux/core/notebook-catalog'
+import { noteKnowledge, parseNoteFile, projectNoteBlocks, type NoteSource } from '@agentmux/client-ui/note/note-knowledge'
+import { useNoteCanvasDraftIncludes } from '../lib/use-note-canvas-draft-includes'
 import { useNoteCanvasContent, type CanvasContent } from '../lib/use-note-canvas-content'
 import { noteContentMatchesGraph, type NotebookGraphSnapshot } from '../../../shared/notebook-observation'
 import { projectNoteCanvas, canvasSharedObservation, canvasNoteTitle, initialCanvasPositions, attachNoteCanvasRelationships, noteCanvasBlockHandle, type CanvasNote, type CanvasAttachedRelationship, type CanvasReference } from '../lib/note-canvas-model'
@@ -33,52 +34,79 @@ const ArrangeIcon = semanticIconComponent('action.arrange-graph'), PlusIcon = se
 const FocusIcon = semanticIconComponent('action.focus')
 const OpenIcon = semanticIconComponent('action.open-external'), CloseIcon = semanticIconComponent('action.close')
 type OpenNote = (page: NotebookPage, blockId?: string) => void
-type OpenOriginal = (noteId: string, blockId?: string) => void
+type OpenOriginal = (noteId: string, blockId?: string, resource?: NoteResource) => void
 export type CanvasFileTarget = Pick<NotebookPage, 'noteId' | 'resource'>
 type NoteNodeData = { selectedBlockIds: readonly string[]; pageSelected: boolean; content?: CanvasContent | undefined; documents: Parameters<typeof NoteReader>[0]['documents']; source?: NoteSource | undefined; onRead(id: string): void; onVisible(id: string, visible: boolean): void; item: CanvasNote; snapshot: NotebookGraphSnapshot; active: boolean; expanded: boolean; preview: boolean; blockIds: readonly string[]; onPorts(noteId: string, snapshot: NotebookGraphSnapshot, blockIds: readonly string[]): void; onOpen: OpenOriginal; onOpenLink(link: NoteLinkOpenRequest): void; onNeighbors(id: string): void; onPreview(id: string): void; onUnbound(id: string): void; refresh(): void }
 type CanvasNode = Node<NoteNodeData, 'note'>
 type CanvasEdge = Edge<{ selected: boolean; focused: boolean; relationship: CanvasAttachedRelationship; inspect(relationship: CanvasAttachedRelationship): void; offset: number; labelBaseline: number; sourceTitle: string; targetTitle: string; targetShared: boolean }, 'relationship'>
 const NO_BLOCK_IDS: readonly string[] = [], NO_PORTS: NoteCanvasBlockPort[] = []
 
-function SavedBody({ item, snapshot, active, blockIds, source, content: result, documents, selectedBlockIds, preview, onRead, onPorts, onOpen, onOpenLink, refresh }: Pick<NoteNodeData, 'item' | 'snapshot' | 'active' | 'blockIds' | 'source' | 'content' | 'documents' | 'selectedBlockIds' | 'preview' | 'onRead' | 'onOpen' | 'onOpenLink' | 'refresh'> & { onPorts(ports: NoteCanvasBlockPort[]): void }) {
+function NoteBody({ item, snapshot, active, blockIds, source, content: result, documents, selectedBlockIds, pageSelected, preview, onRead, onPorts, onOpen, onOpenLink, refresh }: Pick<NoteNodeData, 'item' | 'snapshot' | 'active' | 'blockIds' | 'source' | 'content' | 'documents' | 'selectedBlockIds' | 'pageSelected' | 'preview' | 'onRead' | 'onOpen' | 'onOpenLink' | 'refresh'> & { onPorts(ports: NoteCanvasBlockPort[]): void }) {
   const body = useRef<HTMLDivElement>(null)
   const agentNames = useAppStore(state => state.agentNames)
   const resource = item.page?.resource ?? (item.observation?.status === 'read' ? item.observation.resource : undefined)
-  const dirty = useAppStore(state => {
+  const key = resource ? documentKey(resource.workspaceId, resource.path) : ''
+  const dirty = useAppStore(state => Boolean(resource && state.dirtyDocuments[key]))
+  const mapped = useAppStore(state => {
     const workspace = resource && state.config?.workspaces.find(value => value.id === resource.workspaceId)
-    return Boolean(resource && workspace?.hostId === resource.hostId && workspace.path === resource.workspacePath && state.dirtyDocuments[documentKey(resource.workspaceId, resource.path)])
+    return Boolean(resource && workspace?.hostId === resource.hostId && workspace.path === resource.workspacePath)
   })
+  // Read the existing accepted File draft, never a retained alternative or an editing input.
+  const original = useAppStore(state => active && dirty ? state.documents[key] : undefined)
+  const draft = useMemo(() => {
+    if (!dirty) return null
+    if (!mapped || !original || original.path !== resource?.path || snapshot.graph.duplicateNoteIds.includes(item.id)) return { issue: 'Current draft resource is unconfirmed. Open the original to inspect its retained input.' }
+    const { noteProvenance, ...bytes } = original
+    const document: NonNullable<typeof original> = !noteProvenance || (['hostId', 'workspaceId', 'workspacePath', 'path'] as const).every(field => noteProvenance.resource[field] === resource![field]) ? original : bytes
+    const read = parseNoteFile(document)
+    if (read.status !== 'valid') return { issue: 'Current draft is invalid for rich reading. Open the original Source to inspect the retained bytes.' }
+    if (read.note.noteId !== item.id) return { issue: 'Current draft has a different Note identity. Open the original to inspect its retained input.' }
+    return { document, source: noteKnowledge([{ location: { workspaceId: resource!.workspaceId, path: resource!.path }, document }]).sources[0]! }
+  }, [dirty, mapped, original, resource, item.id, snapshot])
+  const selectionKey = JSON.stringify([pageSelected, selectedBlockIds])
+  const [choice, choose] = useState<{ selection: string; saved: boolean } | null>(null)
+  // Inspecting a saved occurrence starts with its exact saved evidence. The user may still compare the current draft.
+  const savedView = choice?.selection === selectionKey ? choice.saved : pageSelected || selectedBlockIds.length > 0
+  useEffect(() => { if (!dirty) choose(null) }, [dirty])
+  const draftView = dirty && !savedView
+  const readingSource = draftView ? draft?.source : source
+  const draftTarget = useMemo(() => resource ? { ...resource, noteId: item.id } : null, [resource, item.id])
+  const draftIncludes = useNoteCanvasDraftIncludes(active && draftView && Boolean(draft?.document), draftTarget, draft?.document?.content)
   const [all, showAll] = useState(false), [selected, setSelected] = useState<string | undefined>()
   const ready = result?.snapshot === snapshot ? result : null, content = ready?.value
   const ambiguous = snapshot.graph.duplicateNoteIds.includes(item.id)
   const confirmed = content?.status === 'read' && noteContentMatchesGraph(snapshot, content) && !ambiguous && (item.kind !== 'shared-block' || item.observation?.status === 'read' && item.observation.fileIdentity === 'confirmed') ? content : null
-  const empty = confirmed && source && (source.note.content.content ?? []).every(node => node.type === 'paragraph' && !node.content?.length)
+  const readable = draftView ? draft?.document : confirmed
+  const empty = readable && readingSource && (readingSource.note.content.content ?? []).every(node => node.type === 'paragraph' && !node.content?.length)
   const whole = preview || item.kind === 'shared-block'
-  const summary = !whole && selectedBlockIds.length === 0 && (blockIds.length === 0 || Boolean(source) && blockIds.every(id => source!.blocks.get(id)?.content.type === 'noteInclude'))
+  const summary = draftView || !whole && selectedBlockIds.length === 0 && (blockIds.length === 0 || Boolean(source) && blockIds.every(id => source!.blocks.get(id)?.content.type === 'noteInclude'))
   const related = useMemo(() => source ? projectNoteBlocks(source, blockIds).rootBlockIds : NO_BLOCK_IDS, [source, blockIds])
   const shown = useMemo(() => [...new Set([...(all ? related : related.slice(0, 3)), ...selectedBlockIds])], [related, all, selectedBlockIds])
   const displayedIds = useMemo(() => source ? projectNoteBlocks(source, shown).shownBlockIds : NO_BLOCK_IDS, [source, shown])
   const remaining = useMemo(() => related.filter(id => !displayedIds.includes(id)), [related, displayedIds])
   const confirmedIds = useMemo(() => {
-    if (!confirmed || !source) return NO_BLOCK_IDS
+    if (!confirmed || !source || draftView) return NO_BLOCK_IDS
     if (whole || summary) return blockIds
     const displayed = new Set(displayedIds)
     return blockIds.filter(id => displayed.has(id))
-  }, [confirmed, source, whole, summary, blockIds, displayedIds])
-  useNoteCanvasBlockPorts(body, active && Boolean(confirmed), confirmedIds, onPorts)
-  return <div className="note-canvas-saved-body"><div ref={body} className="note-canvas-body nodrag nopan nowheel" data-reading-mode={whole ? 'document' : summary ? 'summary' : 'related'} onDoubleClick={event => event.stopPropagation()}>
-    {dirty && <p className="note-canvas-draft" role="status">Unsaved changes in original · showing saved content.</p>}
-    {confirmed ? <><div className="note-canvas-saved-heading"><span>{whole ? item.kind === 'shared-block' ? 'Saved original' : 'Full saved note' : summary ? 'Summary' : `${related.length} related block${related.length === 1 ? '' : 's'}`}</span>{item.kind !== 'shared-block' && <span>Saved original</span>}</div>
-      {empty && <p className="note-canvas-empty-body">No saved content yet.</p>}
-      <div className="note-canvas-reader" data-selected-block={selected} onClick={event => {
+  }, [confirmed, source, whole, summary, blockIds, displayedIds, draftView])
+  useNoteCanvasBlockPorts(body, active && Boolean(confirmed) && !draftView, confirmedIds, onPorts)
+  // Retire the saved row endpoints before a draft body can be painted in their place.
+  useLayoutEffect(() => { if (draftView) onPorts(NO_PORTS) }, [draftView, onPorts])
+  return <div className="note-canvas-saved-body"><div ref={body} className="note-canvas-body nodrag nopan nowheel" data-reading-mode={whole ? 'document' : summary ? 'summary' : 'related'} data-body-version={draftView ? 'draft' : 'saved'} onDoubleClick={event => event.stopPropagation()}>
+    {dirty && <><p className="note-canvas-draft" role="status">{draftView ? 'Unsaved draft · links show saved relationships' : 'Unsaved draft retained · viewing saved original'}</p>
+      <div className="note-canvas-versions" role="group" aria-label="Compare original versions"><button type="button" aria-label="Current draft" aria-pressed={draftView} onClick={() => choose({ selection: selectionKey, saved: false })}>Current draft</button><button type="button" aria-label="Saved original" aria-pressed={!draftView} onClick={() => choose({ selection: selectionKey, saved: true })}>Saved original</button></div></>}
+    {readable ? <><div className="note-canvas-saved-heading"><span>{draftView ? whole ? 'Full note' : 'Summary' : whole ? item.kind === 'shared-block' ? 'Saved original' : 'Full saved note' : summary ? 'Summary' : `${related.length} related block${related.length === 1 ? '' : 's'}`}</span>{item.kind !== 'shared-block' && <span>{draftView ? 'Not saved' : 'Saved original'}</span>}</div>
+      {empty ? <p className="note-canvas-empty-body">{draftView ? 'No content in current draft.' : 'No saved content yet.'}</p> : <div className="note-canvas-reader" data-selected-block={selected} onClick={event => {
         const block = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-block-id]') : null
         if (block && block.closest('.mobile-note-body') === event.currentTarget.querySelector('.mobile-note-body')) setSelected(block.dataset.blockId)
-      }}><NoteReader resource={confirmed.resource} agentNames={agentNames} noteProvenance={confirmed.noteProvenance} content={confirmed.content} path={confirmed.resource.path} workspaceId={confirmed.resource.workspaceId} revision={confirmed.revision} documents={documents} graph={snapshot.graph} readInclude={target => onRead(target.noteId)} blockIds={whole || summary ? undefined : shown} previewBlockCount={summary ? 3 : undefined} compactIncludes highlightBlockIds={selectedBlockIds} readReference={target => onRead(target.noteId)} onOpenLink={onOpenLink} /></div>
-      {selected && (item.page || item.kind === 'shared-block') ? <button type="button" className="note-canvas-open-block" onClick={() => onOpen(item.id, selected)}><OpenIcon size={12} />Open selected block</button> : null}</>
-      : <div className="note-canvas-body-state" role="status">{ambiguous ? 'Multiple original files share this Note identity. Open the registered original or refresh to confirm the source.' : item.kind === 'shared-block' && !canvasSharedObservation(snapshot, item.id) ? 'The shared file identity is unconfirmed. Refresh the graph to confirm its original.' : ready?.pending ? 'Reading saved original…' : !ready ? 'This original is outside the automatic reading window for the current view. Read it to continue.' : content?.status === 'read' ? 'Saved snapshot changed. Refresh the graph to read the current original.' : ready.issue ?? (content && 'message' in content ? content.message : 'Original body is unconfirmed.')}
-        {!ready?.pending && <button type="button" onClick={content?.status === 'read' ? refresh : () => onRead(item.id)}>{content?.status === 'read' ? 'Refresh graph' : blockIds.length ? 'Read related blocks' : 'Read original'}</button>}
+      }}><NoteReader key={draftView ? 'draft' : 'saved'} resource={resource!} agentNames={agentNames} noteProvenance={readable.noteProvenance} content={readable.content} path={resource!.path} workspaceId={resource!.workspaceId} revision={readable.revision} documents={documents} graph={snapshot.graph} draftIncludes={draftView ? draftIncludes : undefined} onOpenDraftSource={target => onOpen(target.noteId, target.blockId, target.resource)} readInclude={target => onRead(target.noteId)} blockIds={whole || summary ? undefined : shown} previewBlockCount={!whole && summary ? 3 : undefined} compactIncludes highlightBlockIds={draftView ? NO_BLOCK_IDS : selectedBlockIds} readReference={target => onRead(target.noteId)} onOpenLink={onOpenLink} /></div>}
+      {selected && readingSource?.blocks.has(selected) && (item.page || item.kind === 'shared-block') ? <button type="button" className="note-canvas-open-block" onClick={() => onOpen(item.id, selected)}><OpenIcon size={12} />Open selected block</button> : null}</>
+      : <div className="note-canvas-body-state" role="status">{draftView ? draft?.issue ?? 'Current draft is unavailable. Open the original to inspect its retained input.' : ambiguous ? 'Multiple original files share this Note identity. Open the registered original or refresh to confirm the source.' : item.kind === 'shared-block' && !canvasSharedObservation(snapshot, item.id) ? 'The shared file identity is unconfirmed. Refresh the graph to confirm its original.' : ready?.pending ? 'Reading saved original…' : !ready ? 'This original is outside the automatic reading window for the current view. Read it to continue.' : content?.status === 'read' ? 'Saved snapshot changed. Refresh the graph to read the current original.' : ready.issue ?? (content && 'message' in content ? content.message : 'Original body is unconfirmed.')}
+        {draftView ? <button type="button" onClick={() => onOpen(item.id)}>Open original</button> : !ready?.pending && <button type="button" onClick={content?.status === 'read' ? refresh : () => onRead(item.id)}>{content?.status === 'read' ? 'Refresh graph' : blockIds.length ? 'Read related blocks' : 'Read original'}</button>}
       </div>}
-  </div>{confirmed && !whole && !summary && remaining.length > 0 && <div className="note-canvas-reading-actions nodrag nopan"><button type="button" className="note-canvas-more" onClick={() => showAll(true)}>More {remaining.length} related blocks</button></div>}</div>
+  </div>{confirmed && !draftView && !whole && !summary && remaining.length > 0 && <div className="note-canvas-reading-actions nodrag nopan"><button type="button" className="note-canvas-more" onClick={() => showAll(true)}>More {remaining.length} related blocks</button></div>}</div>
+
 }
 
 function EndpointHandles({ kind, blockId }: { kind: 'page' | 'block'; blockId?: string }) {
@@ -130,7 +158,7 @@ const NoteCard = memo(function NoteCard({ data, selected }: NodeProps<CanvasNode
         : <strong className="note-canvas-title" title={item.id}>{title}</strong>}
       {!openable || item.observation?.status !== 'read' ? <span className="note-canvas-note-state" title={item.observation && 'message' in item.observation ? item.observation.message : item.id}>{item.observation?.status ?? 'Target not observed'}</span> : null}
     </header>
-    {readable ? <SavedBody {...data} onPorts={reportPorts} /> : <p className="note-canvas-page-target">Original file identity unconfirmed</p>}
+    {readable ? <NoteBody {...data} active={data.active && inView} onPorts={reportPorts} /> : <p className="note-canvas-page-target">Original file identity unconfirmed</p>}
     {mountedPorts.map(port => <div key={port.blockId} className="note-canvas-row-endpoint note-canvas-endpoint" data-port-block-id={port.blockId} title={`Original block: ${port.blockId}`} style={{ top: port.top, visibility: ports.some(visible => visible.blockId === port.blockId) ? 'visible' : 'hidden' }}><EndpointHandles kind="block" blockId={port.blockId} /></div>)}
     <div className="note-canvas-block-summary note-canvas-endpoint" data-empty={data.blockIds.length === 0} aria-hidden={data.blockIds.length === 0} data-endpoint-kind="block" title="Some relationships attach here until their exact passage is visible. Inspect a relationship to read its original content."><EndpointHandles kind="block" /><span>Referenced passages</span><span>{data.blockIds.length}</span></div>
     <div className="note-canvas-degrees" aria-label={`${item.incoming} incoming, ${item.outgoing} outgoing occurrences in the saved graph`} title="Saved links and references, including notes outside this view. Unmatched links count only as outgoing."><span><SemanticIcon name="note.reference-incoming" size={10} /> {item.incoming} incoming</span><span><SemanticIcon name="note.reference-outgoing" size={10} /> {item.outgoing} outgoing</span></div>
@@ -261,15 +289,15 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, s
   const [navigationIssue, setNavigationIssue] = useState<string | null>(null)
   const navigation = useRef<AbortController | null>(null)
   useEffect(() => () => navigation.current?.abort(), [active, snapshot])
-  const openOriginal = useCallback((noteId: string, blockId?: string) => {
+  const openOriginal = useCallback((noteId: string, blockId?: string, expectedResource?: NoteResource) => {
     navigation.current?.abort()
     if (!active) return
     const page = snapshot?.catalog.pages[noteId]
-    if (page) { onOpen(page, blockId); return }
+    if (page && (!expectedResource || (['hostId', 'workspaceId', 'workspacePath', 'path'] as const).every(field => page.resource[field] === expectedResource[field]))) { onOpen(page, blockId); return }
     const observation = snapshot && canvasSharedObservation(snapshot, noteId)
-    if (!active || !observation) { setNavigationIssue('The exact original file is unconfirmed. Refresh the graph and retry; its reference is kept.'); return }
+    if (!observation && !expectedResource) { setNavigationIssue('The exact original file is unconfirmed. Refresh the graph and retry; its reference is kept.'); return }
     const controller = new AbortController(); navigation.current = controller
-    const resource = observation.resource, before = useAppStore.getState(), selected = fileNavigationSelection(before)
+    const resource = expectedResource ?? observation!.resource, before = useAppStore.getState(), selected = fileNavigationSelection(before)
     const matches = () => { const workspace = useAppStore.getState().config?.workspaces.find(value => value.id === resource.workspaceId); return workspace?.hostId === resource.hostId && workspace.path === resource.workspacePath }
     if (!matches()) { setNavigationIssue('The original workspace mapping changed. Refresh its directory before opening this shared file.'); return }
     setNavigationIssue(null)
@@ -279,7 +307,7 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, s
         if (controller.signal.aborted) return
         if (read.status !== 'read') throw new Error('The original shared file could not be read. Its reference is kept; retry after reconnecting its Host.')
         const parsed = readNoteDocument(read.document.content)
-        if (read.document.path !== resource.path || parsed.status !== 'valid' || parsed.note.noteId !== noteId || parsed.note.kind !== 'shared-block') throw new Error('The shared file identity changed. Refresh the graph to confirm its original.')
+        if (read.document.path !== resource.path || parsed.status !== 'valid' || parsed.note.noteId !== noteId || !expectedResource && parsed.note.kind !== 'shared-block') throw new Error('The shared file identity changed. Refresh the graph to confirm its original.')
         if (!matches()) throw new Error('The original workspace mapping changed. Refresh its directory before opening this shared file.')
         if (fileNavigationSelection(useAppStore.getState()) !== selected) throw new Error('Your later navigation is kept. Select this original again to open it.')
         if (onOpenFile) {

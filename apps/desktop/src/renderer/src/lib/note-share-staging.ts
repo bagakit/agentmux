@@ -1,5 +1,6 @@
 import { Decoration, type Editor, type JSONContent } from '@tiptap/core'
-import { noteShareSiblingRange } from '../../../shared/note-share-range'
+import { noteShareSiblingRange, noteBlockFingerprint, noteNodeAtPath } from '../../../shared/note-share-range'
+export { noteBlockFingerprint, noteNodeAtPath } from '../../../shared/note-share-range'
 import { parseFileReadParams, type FileReadParams } from '@agentmux/core/files'
 import { validateNoteDocument } from '@agentmux/client-ui/note/note-document-validation'
 import { noteHistoryRevision } from '@agentmux/core/note-history'
@@ -11,10 +12,6 @@ const MIME = 'application/x-agentmux-note-share'
 export type { NoteShareCopy, PendingNoteShare } from '../../../shared/note-file-editing'
 import type { NoteShareCopy, PendingNoteShare } from '../../../shared/note-file-editing'
 import { useAppStore } from '../store'
-export function noteBlockFingerprint(node: JSONContent): string {
-  const strip = (value: JSONContent): JSONContent => ({ ...value, ...(value.attrs ? { attrs: Object.fromEntries(Object.entries(value.attrs).filter(([key]) => key !== 'blockId' && key !== 'provenance')) } : {}), ...(value.content ? { content: value.content.map(strip) } : {}) })
-  return noteHistoryRevision(JSON.stringify(strip(node)))
-}
 function matchingPendingCopy(copy: NoteShareCopy): PendingNoteShare | undefined {
   return Object.values(useAppStore.getState().documents).flatMap(document => Object.values(document.noteEditing?.shares ?? {})).find(value => {
     const other = value.copy
@@ -116,11 +113,6 @@ export function clearPendingNoteShares(key: string, references: readonly string[
     const shares = Object.fromEntries(Object.entries(document.noteEditing.shares).filter(([id]) => !references.includes(id)))
     return { documents: { ...state.documents, [key]: { ...document, noteEditing: { ...document.noteEditing, shares } } } }
   })
-}
-export function noteNodeAtPath(content: JSONContent, path: readonly number[]): JSONContent | undefined {
-  let current: JSONContent | undefined = content
-  for (const index of path) current = current?.content?.[index]
-  return current
 }
 
 /** Live editor capabilities, for the explicit first-use identity transaction before its canonical echo. */
