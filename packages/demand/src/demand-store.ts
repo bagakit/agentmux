@@ -7,7 +7,6 @@ import { parseDemandParticipations, parseDemandCreationOrigin, parseDemandPartic
 import { appendDemandContentReferences, parseDemandContentReferences } from './content-references.js'
 import { demandExecutionReferences, demandExecutionKey, demandHandoffDestinations, demandResponsibilityScope, parseDemandProgressInput, parseDemandProgressUpdates,
   parseDemandResponsibilityBasis, sameDemandExecution, type DemandProgressInput, type DemandProgress, type DemandResponsibilityBasis } from './responsibility.js'
-import { randomUUID } from 'node:crypto'
 import { mintObjectId } from '@agentmux/identity'
 import { promises as fs, type BigIntStats } from 'node:fs'
 import path from 'node:path'
@@ -399,7 +398,7 @@ export class DemandStore {
   async create(input: CreateDemandInput, options: DemandCreateOptions = {}): Promise<DemandReceipt> {
     rejectProvenanceInput(input)
     if (Object.hasOwn(input, 'dispatches')) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Only the actual Goal Start input owner records dispatch facts.')
-    const operationId = options.operationId ?? `demand-create-${randomUUID()}`
+    const operationId = options.operationId ?? mintObjectId()
     return this.mutate('create', (snapshot) => {
       const title = inputString(input.title, 'title')
       if (!title) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'title is required')
@@ -913,7 +912,7 @@ export class DemandStore {
       } catch (error) {
         throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, error instanceof Error ? error.message : String(error), error)
       }
-      if (options.participation) appendParticipation(demand, options.participation, options.operationId ?? `demand-participation-${randomUUID()}`, Date.now())
+      if (options.participation) appendParticipation(demand, options.participation, options.operationId ?? mintObjectId(), Date.now())
       demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
       validateNewDemand(demand, this.storePath)
       return demand
@@ -1134,7 +1133,7 @@ export class DemandStore {
       const release = await this.acquireLock()
       try {
         let snapshot = await this.readSnapshot()
-        const operationId = titleAttempt?.operationId ?? requestedOperationId ?? `demand-op-${snapshot.revision + 1}-${randomUUID()}`
+        const operationId = titleAttempt?.operationId ?? requestedOperationId ?? mintObjectId()
         if (activityAttempt) {
           const originalDemand = snapshot.demands.find(demand => demand.activities.some(activity => activity.operationId === operationId))
           const previousActivity = originalDemand?.activities.find(activity => activity.operationId === operationId)
@@ -1243,7 +1242,7 @@ export class DemandStore {
   }
 
   private async writeSnapshot(snapshot: DemandStoreSnapshot): Promise<void> {
-    const tempPath = `${this.storePath}.tmp-${process.pid}-${randomUUID()}`
+    const tempPath = `${this.storePath}.tmp-${process.pid}-${mintObjectId()}`
     const data = `${JSON.stringify(snapshot, null, 2)}\n`
     let replacementApplied = false
     try {

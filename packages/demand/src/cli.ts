@@ -1,5 +1,5 @@
 import { parseDemandContentReferences } from './content-references.js'
-import { randomUUID } from 'node:crypto'
+import { mintObjectId } from '@agentmux/identity'
 import { DemandNameChangeError, openDemandStore } from './demand-store.js'
 import { DEMAND_CLI_SCHEMA, DEMAND_PRIORITIES, DEMAND_STATUSES, type CreateDemandInput, type DemandNameContext, type DemandPriority, type DemandStatus, type UpdateDemandInput } from './demand-types.js'
 import { DemandStoreError } from './errors.js'
@@ -20,7 +20,7 @@ export async function runDemandCli(argv: readonly string[], io: DemandCliIO = {}
   const stdout = io.stdout ?? ((text: string) => process.stdout.write(`${text}\n`))
   const stderr = io.stderr ?? ((text: string) => process.stderr.write(`${text}\n`))
   const env = io.env ?? process.env
-  const requestId = randomUUID()
+  const requestId = mintObjectId()
   try {
     const parsed = parseArgs(argv)
     for (const key of ['revision', 'submission-id', 'confirmed-at', 'accepted-at', 'executor-id', 'to-executor', 'from-executor', 'participations', 'creation-origin', 'requester-as-supervisor']) {
