@@ -1,6 +1,14 @@
 .general-settings .browser-automation-toggle { align-items: flex-start; }
 .general-settings .browser-automation-toggle input { margin-top: 3px; }
 .general-settings .browser-automation-toggle small { max-width: 74ch; }
+.general-settings__path-choice { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, .8fr); gap: var(--sp-5); align-items: center; }
+.general-settings__path-preview { display: grid; gap: var(--sp-3); margin: 0; padding: var(--sp-5); border-radius: var(--radius); border: 1px solid var(--line-soft); background: var(--surface-1); }
+.general-settings__path-preview figcaption { display: flex; justify-content: space-between; gap: var(--sp-3); color: var(--text-2); font-size: var(--fs-meta); }
+.general-settings__path-preview code { color: var(--text); font: var(--fs-body)/1.6 var(--font-mono); overflow-wrap: anywhere; }
+.general-settings__path-preview code span { color: var(--green); }
+.general-settings__path-preview code b { color: var(--text-3); font-weight: 400; }
+.general-settings__path-preview small, .general-settings__scope { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.6; }
+.general-settings__scope { margin: var(--sp-4) 0 0; }
 .general-settings__data dl { margin: 0; }
 .general-settings__data dl > div { display: grid; grid-template-columns: minmax(110px, 0.26fr) minmax(0, 1fr); gap: var(--sp-4); padding: var(--sp-4) 0; border-top: 1px solid var(--line-soft); }
 .general-settings__data dl > div:first-child { border-top: 0; padding-top: 0; }
@@ -12,6 +20,7 @@
 .general-settings .settings-diagnostics > button { flex: none; }
 .general-settings .settings-crash-log-status code { overflow-wrap: anywhere; }
 @media (max-width: 560px) {
+  .general-settings__path-choice { grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); }
   .general-settings__data dl > div { grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); }
   .general-settings .settings-diagnostics { flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
   .general-settings .settings-diagnostics > span { flex: 0 1 auto; }
