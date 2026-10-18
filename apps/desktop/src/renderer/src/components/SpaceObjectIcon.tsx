@@ -109,6 +109,6 @@ function SpaceObjectIconContents({ kind, name, manualIcon, workspaceId, folderId
   const monogram = kind === 'topic' && !topicGlyph ? projectMonogram(name) : ''
   return <span className="project-rail-row__icon space-object-icon" data-space-icon-kind={kind} data-space-icon-source="automatic"
     {...(monogram ? { 'data-monogram': '' } : {})} title={kind === 'mote' ? 'Mote' : kind === 'category' ? 'Category' : 'Topic'} aria-hidden="true">
-    {kind === 'mote' ? <MoteIcon size={14} data-mote-icon-source="automatic" /> : monogram ? <span>{monogram}</span> : <FallbackIcon size={14} />}
+    {kind === 'mote' ? <MoteIcon size={14} interactive={visible !== false} data-mote-icon-source="automatic" /> : monogram ? <span>{monogram}</span> : <FallbackIcon size={14} />}
   </span>
 }

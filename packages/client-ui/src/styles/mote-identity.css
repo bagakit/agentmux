@@ -91,3 +91,36 @@
 .mote-face__model { position: relative; width: 64px; height: 64px; overflow: visible; }
 .mote-face__bone { position: absolute; left: 0; top: 0; width: 64px; height: 64px; overflow: visible; transform-box: border-box; }
 .mote-face__drawing { display: block; position: absolute; left: 0; top: 0; overflow: visible; }
+
+/* The default companion articulates inside its original 24-unit slot. The root
+   sprite selects the resolved theme asset; explicit overrides never acquire this rig. */
+.mote-companion > use { display: var(--mote-companion-rest-display, inline); }
+.mote-companion__rig { display: var(--mote-companion-rig-display, none); }
+.mote-companion__head, .mote-companion__press, .mote-companion__eyes { transform-box: view-box; }
+.mote-companion__head { transform-origin: 12px 18px; }
+.mote-companion__press { transform-origin: 12px 21px; }
+.mote-companion__eyes { transform-origin: 12px 12px; }
+.mote-identity-motion[data-mote-visible="on"] .mote-companion__head {
+  transform: rotate(var(--mote-head-turn, 0deg));
+  transition: transform calc(var(--dur-fast) * 1.5) ease-out;
+}
+.mote-identity-motion[data-mote-visible="on"] .mote-companion__gaze {
+  /* The shared pointer owner uses a 64-unit face; this drawing uses 24 units. */
+  transform: translate(calc(var(--mote-gaze-x, 0px) * .375), calc(var(--mote-gaze-y, 0px) * .375));
+  transition: transform var(--dur-fast) ease-out;
+}
+.mote-identity-motion[data-mote-visible="on"] .mote-companion__press { transition: transform calc(var(--dur-fast) * 2) ease-out; }
+.mote-identity-motion[data-mote-visible="on"]:hover .mote-companion__eyes,
+:is(button:enabled, a[href], [role="button"]:not([aria-disabled="true"])):is(:hover, :focus-visible) .mote-identity-motion[data-mote-visible="on"] .mote-companion__eyes {
+  animation: mote-companion-hello calc(var(--dur-fast) * 3) ease-in-out;
+}
+.mote-identity-motion[data-mote-visible="on"][data-mote-press="on"] .mote-companion__press,
+.mote-identity-motion[data-mote-visible="on"]:active .mote-companion__press,
+:is(button:enabled, a[href], [role="button"]:not([aria-disabled="true"])):active .mote-identity-motion[data-mote-visible="on"] .mote-companion__press {
+  transform: scale(1.035, .92);
+  transition-duration: var(--dur-fast);
+}
+@keyframes mote-companion-hello { 0%, 20%, 100% { transform: scaleY(1); } 48%, 62% { transform: scaleY(.12); } }
+@media (prefers-reduced-motion: reduce) {
+  .mote-identity-motion :is(.mote-companion__head, .mote-companion__gaze, .mote-companion__press, .mote-companion__eyes) { transform: none !important; transition: none !important; animation: none !important; }
+}

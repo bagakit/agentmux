@@ -16,6 +16,13 @@ type AuthoredIconDefinition = {
   design: AuthoredIconDesign
 }
 
+/** Static mark and interactive avatar use the same 24-unit rest geometry. */
+export const MOTE_COMPANION_PARTS = {
+  "body": "M4.7 2.8C7.1 3.05 9.1 4.05 10.45 5.3C11.55 4.95 12.75 4.75 14.05 4.8C18.65 4.95 21.2 8.25 21.2 12.7C21.2 17.65 17.5 21 11.95 21C6.45 21 2.8 17.8 2.8 13.15C2.8 11.05 3.4 9.25 4.3 7.8L4.7 2.8Z",
+  "leftEye": "M8.45 10.45C7.65 10.45 7.05 11.2 7.05 12.2C7.05 13.2 7.65 13.95 8.45 13.95C9.25 13.95 9.85 13.2 9.85 12.2C9.85 11.2 9.25 10.45 8.45 10.45Z",
+  "rightEye": "M15.55 9.9C14.65 9.9 14 10.75 14 11.85C14 12.95 14.65 13.8 15.55 13.8C16.45 13.8 17.1 12.95 17.1 11.85C17.1 10.75 16.45 9.9 15.55 9.9Z"
+} as const
+
 /** AgentMux drawings on the original 24-unit grid. Keep the theme pen, complete
  * still silhouette and negative space at 12–14px. Only declared parts can move. */
 export const AUTHORED_ICON_DEFINITIONS = {
@@ -160,10 +167,10 @@ export const AUTHORED_ICON_DEFINITIONS = {
     }
   },
   "mote-companion": {
-    shapes: [["path",{"d":"M4.7 2.8C7.1 3.05 9.1 4.05 10.45 5.3C11.55 4.95 12.75 4.75 14.05 4.8C18.65 4.95 21.2 8.25 21.2 12.7C21.2 17.65 17.5 21 11.95 21C6.45 21 2.8 17.8 2.8 13.15C2.8 11.05 3.4 9.25 4.3 7.8L4.7 2.8ZM8.45 10.45C7.65 10.45 7.05 11.2 7.05 12.2C7.05 13.2 7.65 13.95 8.45 13.95C9.25 13.95 9.85 13.2 9.85 12.2C9.85 11.2 9.25 10.45 8.45 10.45ZM15.55 9.9C14.65 9.9 14 10.75 14 11.85C14 12.95 14.65 13.8 15.55 13.8C16.45 13.8 17.1 12.95 17.1 11.85C17.1 10.75 16.45 9.9 15.55 9.9Z","fill":"currentColor","stroke":"none","fill-rule":"evenodd"}]],
+    shapes: [["path",{"d":MOTE_COMPANION_PARTS.body + MOTE_COMPANION_PARTS.leftEye + MOTE_COMPANION_PARTS.rightEye,"fill":"currentColor","stroke":"none","fill-rule":"evenodd"}]],
     design: {
       rest: "单侧抬起的安定轮廓与两枚偏置眼孔，表达专注、机灵而克制的持久搭档；12–24px保持完整",
-      motion: { kind: "still", animation: "none", description: "类型与自动默认身份保持静止；已选头像姿态仍由原外观来源和宿主持有。", trigger: "身份不推导工作、在线、权限或完成事实。" }
+      motion: { kind: "still", animation: "none", description: "类型、历史与导出静止；可见自动头像的靠近、聚焦和按下回应由原头像 owner 驱动局部部件。", trigger: "身份不推导工作、在线、权限或完成事实。" }
     }
   },
   "mote-identity": {
