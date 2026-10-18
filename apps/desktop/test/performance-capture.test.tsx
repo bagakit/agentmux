@@ -22,7 +22,8 @@ import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { PerformanceOverview } from '../src/renderer/src/components/performance/PerformanceOverview'
 import { currentPerformanceCaptureTarget } from '../src/renderer/src/components/performance/PerformanceCapture'
-import { analyseRendererProfile, profileFlameRows } from '../src/renderer/src/lib/renderer-profile-analysis'
+import { analyseV8Profile } from '../../../packages/core/src/v8-profile-analysis'
+import { profileFlameRows } from '../src/renderer/src/lib/renderer-profile-analysis'
 import { registerPerformanceCaptureIpc } from '../src/main/performance-capture-ipc'
 import { ProcessResourceSampler, type ResourceSample } from '../src/main/process-resource-sampler'
 import { RendererV8Profiler } from '../src/main/renderer-v8-profile'
@@ -245,6 +246,9 @@ it('a refused capture keeps ordinary readings and the last original material; ma
   await render(); await click(sampleButton); profilePort.mockRejectedValueOnce(new Error('Original debugger is owned'))
   await click(sampleButton)
   expect(node('[data-performance-capture]').textContent).toContain('Original debugger is owned')
+  expect(node('[aria-label="V8 sample interpretation"]').textContent).toContain('Original profile 5.0 ms')
+  expect(node('[aria-label="V8 sample interpretation"]').textContent).toContain('weighted samples 5.0 ms')
+  expect(node('[aria-label="V8 sample interpretation"]').textContent).toContain('not process CPU')
   expect(node('[aria-label="Module sample heatmap"]').textContent).toContain('workspace.js')
   expect(node('.performance-metrics').textContent).toContain('1.48 cores')
   const input = { target: currentPerformanceCaptureTarget(samples.fresh.observation)!, durationMs: 2000 }
@@ -275,10 +279,10 @@ it('export preserves original profile and omits profile payload from its receipt
 })
 
 
-it('synthetic runtime module names remain whole while actual script names use their basename', async () => {
+it('empty source URLs stay explicit while actual script names use their basename', async () => {
   profilePort.mockImplementation(async input => { const result = capture(input); result.profile!.nodes[1]!.callFrame.url = ''; const json = JSON.stringify(result.profile); return { ...result, profileBytes: Buffer.byteLength(json), sha256: createHash('sha256').update(json).digest('hex') } })
   await render(); await click(sampleButton)
-  expect(node('.performance-module-row').textContent).toContain('(runtime / no script)')
+  expect(node('.performance-module-row').textContent).toContain('(no source URL)')
   expect(node('[aria-label="Module sample heatmap"]').textContent).toContain('long-module.js')
 })
 
@@ -328,13 +332,30 @@ it.each(['unknown', 'failed'] as const)('a %s V8 result keeps the last completed
 })
 
 it('self time and inclusive tree weights stay separate; malformed trees and empty weights stay unanalysable', () => {
-  const analysis = analyseRendererProfile(originalProfile()); expect(analysis.reason).toBeNull(); if (!analysis.data) throw Error('nonempty analysis required')
+  const analysis = analyseV8Profile(originalProfile()); expect(analysis.reason).toBeNull(); if (!analysis.data) throw Error('nonempty analysis required')
+  expect(analysis.data.profileDurationMs).toBe(5); expect(analysis.data.lastSampleTailMs).toBe(0);
   expect(analysis.data.sampledMs).toBe(5); expect(analysis.data.frames.get(2)).toMatchObject({ selfMs: 2.5, totalMs: 5 })
   expect(analysis.data.modules.map(module => module.selfMs)).toEqual([2.5, 2.5])
   expect(profileFlameRows(analysis.data, 1).rows).toEqual(expect.arrayContaining([{ id: 3, depth: 2, left: 0, width: 50 }]))
   const cyclic = originalProfile(); cyclic.nodes[2]!.children = [1]
-  expect(analyseRendererProfile(cyclic).data).toBeNull()
-  expect(analyseRendererProfile({ ...originalProfile(), timeDeltas: [0, 0, 0] }).reason).toContain('zero')
+  expect(analyseV8Profile(cyclic).data).toBeNull()
+  expect(analyseV8Profile({ ...originalProfile(), timeDeltas: [0, 0, 0] }).reason).toContain('zero')
+})
+
+it('keeps an anonymous script distinct from a literal runtime display label when selecting a module', async () => {
+  profilePort.mockImplementationOnce(async input => {
+    const result = capture(input), profile = result.profile!
+    profile.nodes[1]!.callFrame.url = ''
+    profile.nodes[2]!.callFrame.url = '(runtime / no script)'
+    const json = JSON.stringify(profile)
+    return { ...result, profile, profileBytes: Buffer.byteLength(json), sha256: createHash('sha256').update(json).digest('hex') }
+  })
+  await render(); await click(sampleButton)
+  expect(document.querySelectorAll('.performance-module-row')).toHaveLength(2)
+  await click('.performance-module-row')
+  expect(node('.performance-frame-detail').textContent).toContain('renderWorkspace')
+  expect(node('.performance-frame-detail').textContent).toContain('(no source URL)')
+  expect(node('.performance-frame-detail').textContent).not.toContain('(runtime / no script)')
 })
 
 
