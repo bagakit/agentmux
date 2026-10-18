@@ -13,7 +13,7 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin({ exclude: [
       '@agentmux/connectors', '@agentmux/client-ui', '@tiptap/core', '@tiptap/extension-unique-id', '@tiptap/starter-kit',
       'unified', 'remark-parse', 'remark-gfm', 'remark-directive', 'remark-stringify'
-    ], include: ['@larksuiteoapi/node-sdk'] })],
+    ], include: ['@larksuiteoapi/node-sdk', '@discordjs/ws', '@discordjs/rest', 'discord-api-types'] })],
     resolve: {
       // Main consumes this pure module from the same source as Renderer, without a UI runtime dependency.
       alias: {
