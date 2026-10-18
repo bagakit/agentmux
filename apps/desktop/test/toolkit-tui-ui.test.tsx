@@ -90,6 +90,19 @@ describe('TUI toolkit product presentation', () => {
     expect(dom.container.querySelector('[data-toolkit-output]')?.textContent).toBe('Original script result')
     expect(terminal).not.toHaveBeenCalled(); expect(refresh).not.toHaveBeenCalled()
   })
+  it('offers an explicit start after loading failed before execution admission', async () => {
+    const value: ToolkitScriptSnapshot = { ...running(), state: 'idle', admission: null,
+      reason: 'TUI loading was not admitted: configuration changed.' }
+    observe(value)
+    const run = vi.spyOn(api.toolkit, 'run').mockResolvedValue(value)
+    await dom.render(<UserToolkitResult definition={value.definition} active close={vi.fn()} />)
+    expect(dom.container.textContent).toContain(value.reason)
+    const start = [...dom.container.querySelectorAll('button')].find(button => button.textContent === 'Start')!
+    expect(start.disabled).toBe(false)
+    await act(async () => start.click())
+    expect(run).toHaveBeenCalledWith(value.toolId, { invocationId: expect.any(String),
+      expectedRevision: value.definition.revision, expectedLatestExecutionId: null })
+  })
   it('keeps an exact Stop action reachable from settings after hiding the tool', async () => {
     const value = { ...running(), definition: { ...definition(), enabled: false } }
     observe(value)
