@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { join } from 'node:path'
-import { writeFile } from 'node:fs/promises'
+import { appendFile, writeFile } from 'node:fs/promises'
 import * as core from '@agentmux/core'
 import { connectHostedAgentMux } from '../../core/dist/hosted.js'
 import { AgentMuxHostedRuntimeService } from '../../core/dist/hosted-runtime-service.js'
@@ -15,7 +15,7 @@ import { signedRoomAdapter, type SignedRoomMessage } from './fixtures/signed-roo
 
 const cleanup: Array<() => void | Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
-async function fixture(running = false) {
+async function fixture(running = false, updatePublications = false) {
   let bridge: ReturnType<typeof createDesktopExternalInputAuthority>
   class Owner extends core.AgentMuxClient {
     constructor(options: { store: core.AgentMuxAgentSessionStore }) {
@@ -40,6 +40,16 @@ async function fixture(running = false) {
   const hosted = await connectHostedAgentMux({ rpc: hostRpc }); cleanup.push(() => hosted.dispose())
   const clients = () => [{ hostId: 'local', client: hosted }]
   const wire = signedRoomAdapter(), verify = wire.adapter.ingress!.verify
+  if (updatePublications) {
+    const original = wire.adapter.publication!.dispatch
+    wire.adapter.publication!.dispatch = async (...args) => {
+      const mapping = args[4]
+      if (!mapping) return original(...args)
+      // The controlled transport supports exact updates to its original platform message.
+      wire.ledger.set(args[0].requestKey, mapping)
+      return { state: 'confirmed', mapping }
+    }
+  }
   const adapter: ConnectionAdapter = { ...wire.adapter, ingress: { ...wire.adapter.ingress!, verify: async (...args) => ({ ...await verify(...args), conversationKind: 'group' }) } }
   let services: Awaited<ReturnType<typeof createDesktopConnections>>, desktop: core.AgentMuxControlServer, rpc: Awaited<ReturnType<typeof core.connectAgentMuxRpc>>
   async function open() {
@@ -231,3 +241,43 @@ it('an input grant does not turn an ordinary unaddressed group message into an A
   expect(await f.captured()).toHaveLength(1); expect(f.inner.kernel.input).not.toHaveBeenCalled()
   expect((await f.services.ingress!.inspect({ ingressId: received.ingressId })).ingress?.code).toBe('INGRESS_INPUT_OUTSIDE_SCOPE')
 })
+
+
+it('joined group conversation records once, reaches the original Agent and shares new speech with independent audiences without origin echoes', async () => {
+  const f = await fixture(true, true)
+  const second = { ...f.binding, operationId: 'join-second-group', bindingId: 'second-binding', externalConversationId: 'second-group' }
+  // The original owner permits one audience per bot/Agent mapping; use an exact independent identity for the second group.
+  const alias = { ...f.config, connectionId: 'second-bot' }
+  expect(await f.rpc.call('connection.configure', { operationId: 'configure-second-bot', expectedRevision: null, connection: alias })).toMatchObject({ status: 'configured' })
+  expect(await f.rpc.call('connection.bind', { ...second, connectionId: alias.connectionId })).toMatchObject({ state: 'applied' })
+  expect(await f.rpc.call('connection.grant', { operationId: 'join-authorize', bindingId: f.binding.bindingId, expectedBindingRevision: 1, grantId: 'join-member', expectedRevision: null, actor: f.actor, capabilities: ['input'], state: 'active' })).toMatchObject({ state: 'applied' })
+  const receive = async (deliveryKey: string) => {
+    const intake = await f.services.ingress!.receive({ connectionId: f.config.connectionId, ...f.wire.encode(f.message({ deliveryKey, addressing: 'response' })) }, async () => {})
+    await f.services.ingress!.dispatch(intake.ingress.ingressId)
+  }
+  await receive('join-original')
+  await vi.waitFor(async () => expect((await f.captured())[0]?.item.inputRef?.kind).toBe('message'))
+  expect(f.inner.kernel.input).toHaveBeenCalledOnce()
+  const native = (id: string, text: string) => JSON.stringify({ type: 'assistant', sessionId: 'group-native', uuid: id, message: { role: 'assistant', content: [{ type: 'text', text }] } }) + '\n'
+  await appendFile(join(f.root, 'native.jsonl'), native('joint-reply', 'Public answer from original Agent'))
+  f.services.publication!.refresh()
+  await vi.waitFor(() => expect(f.wire.effects.filter(effect => effect.text.includes('Public answer from original Agent')).map(effect => effect.room).sort(), JSON.stringify({ operations: f.services.publication!.store.list({ bindingId: second.bindingId, revision: 1 }), coverage: f.services.publication!.store.coverage({ bindingId: second.bindingId, revision: 1 }), observation: f.services.publication!.observation(second.bindingId, 1) })).toEqual(['native-group', 'second-group']), { timeout: 5000 })
+  expect(f.wire.effects.filter(effect => effect.room === 'native-group' && effect.text.includes('Original group message'))).toHaveLength(0)
+  expect(f.wire.effects.filter(effect => effect.room === 'second-group' && effect.text.includes('Original group message'))).toHaveLength(1)
+  await f.client.submitAgentPrompt({ agentSessionId: 'original-agent', ...core.agentPromptCondition((await f.client.readAgentSession('original-agent'))!), operationId: 'join-local-human', prompt: 'Local human conversation', authorHuman: true, allowUncertainTurn: true })
+  f.services.publication!.refresh()
+  await vi.waitFor(() => expect(f.wire.effects.filter(effect => effect.text.includes('Local human conversation')).map(effect => effect.room).sort()).toEqual(['native-group', 'second-group']))
+  expect(await f.captured()).toHaveLength(1)
+  await receive('join-duplicate')
+  expect(await f.captured()).toHaveLength(1)
+  expect(f.wire.effects.filter(effect => effect.text.includes('Public answer from original Agent'))).toHaveLength(2)
+  const detached = await f.rpc.call('connection.binding.detach', { operationId: 'join-detach-one', bindingId: f.binding.bindingId, expectedRevision: 1 })
+  expect(detached).toMatchObject({ state: 'applied', binding: { state: 'detached' } })
+  await appendFile(join(f.root, 'native.jsonl'), native('independent-reply', 'Other group keeps working'))
+  f.services.publication!.refresh()
+  await vi.waitFor(() => expect(f.wire.effects.filter(effect => effect.text.includes('Other group keeps working')).map(effect => effect.room)).toEqual(['second-group']))
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+  await f.reopen()
+  expect(await f.captured()).toHaveLength(1)
+  await vi.waitFor(() => expect(f.wire.effects.filter(effect => effect.text.includes('Public answer from original Agent'))).toHaveLength(2))
+}, 30_000)
