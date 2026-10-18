@@ -23,6 +23,7 @@ import { createNotebookObservationServices } from '../src/main/notebook-observat
 import { createPreloadNotebookObservation } from '../src/preload/notebook-observation'
 import { createRendererNotebookObservation } from '../src/renderer/src/lib/notebook-observation-api'
 import { WorkspaceFiles } from '../src/main/workspace-files'
+import { useNoteCanvasContent } from '../src/renderer/src/lib/use-note-canvas-content'
 import { NoteCanvas } from '../src/renderer/src/components/NoteCanvas'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
@@ -121,7 +122,7 @@ it('bounds default original reads and preserves an explicit continuation beyond 
   const continuation = [...dom.container.querySelectorAll<HTMLButtonElement>('.note-canvas-body-state button')].find(button => button.textContent === 'Read related blocks')!
   expect(continuation).toBeDefined()
   const card = continuation.closest('.note-canvas-card')!
-  expect(card.textContent).toContain('up to 6 notes')
+  expect(card.textContent).toContain('current view')
   await act(async () => continuation.click())
   await vi.waitFor(() => expect(card.querySelector('.note-canvas-reader')).not.toBeNull())
   expect(api.notebooks.content).toHaveBeenCalledTimes(7)
@@ -332,7 +333,7 @@ it('reads one independent shared node for two hosts with whole-file include and 
   const includes = [...dom.container.querySelectorAll<HTMLButtonElement>('[data-target-note="shared-content"][data-relationship-kind="embed"]')]
   expect(includes).toHaveLength(2)
   expect(includes.every(edge => edge.dataset.targetKind === 'page' && edge.dataset.targetAttachment === 'page' && !edge.dataset.targetBlock)).toBe(true)
-  expect(includes.every(edge => edge.textContent?.includes('shared block'))).toBe(true)
+  expect(includes.every(edge => edge.textContent?.includes('Uses shared content'))).toBe(true)
   await act(async () => includes[0]!.click())
   await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-comparison-to .note-canvas-reader')?.textContent).toContain('Reusable research conclusion'))
   expect(dom.container.querySelector('.note-canvas-comparison-to')?.textContent).toContain('Research conclusion')
@@ -376,4 +377,81 @@ it('opens the accurate unregistered shared Markdown after its body changes on di
   expect((await store.read()).pages['shared-content']).toBeUndefined()
   expect(Object.keys(useAppStore.getState().tabs)).toEqual(['shared-file-tab'])
   expect(dom.container.querySelector('.note-canvas-reader')?.textContent).not.toContain('Latest evidence remains a healthy original')
+})
+
+it('continues automatic original reading when panning past the first six notes', async () => {
+  const positions: Record<string, {x:number;y:number}> = {target:{x:0,y:0},'closed-source':{x:5000,y:0}}
+  for(let i=0;i<5;i++) {
+    const id='window-extra-'+i
+    await writeFile(join(directory,id+'.note.md'),body(id,'Window paragraph '+i+' [[Original target]]'))
+    await store.apply({expectedRevision:(await store.read()).revision,operationId:'register-window-'+i,change:{kind:'register',noteId:id,title:id,resource:{hostId:'local',workspaceId:'notes',workspacePath:directory,path:id+'.note.md'}}},{kind:'user',id:'ui-test'})
+    positions[id]={x:0,y:0}
+  }
+  useAppStore.setState({noteCanvasLayouts:{[noteCanvasScopeKey(scope)]:{positions,viewport:{x:0,y:0,zoom:1},expandedNoteIds:['target'],previewNoteIds:[]}}})
+  await dom.render(<ReactFlowProvider><PanControls/><NoteCanvas scope={scope} onOpen={()=>{}}/></ReactFlowProvider>)
+  await vi.waitFor(()=>expect(dom.container.querySelectorAll('.note-canvas-reader')).toHaveLength(6))
+  expect(api.notebooks.content).toHaveBeenCalledTimes(6)
+  await dom.click('.pan-source')
+  await vi.waitFor(()=>expect(dom.container.querySelector('.react-flow__node[data-id="closed-source"] .note-canvas-reader')).not.toBeNull())
+  expect(api.notebooks.graph).toHaveBeenCalledTimes(1)
+})
+
+function ReadingWindow({ snapshot, visible, active = true }: { snapshot: NotebookGraphSnapshot; visible: string[]; active?: boolean }) {
+  const reading = useNoteCanvasContent(snapshot, active, visible, [])
+  return <output className="reading-window">{JSON.stringify(Object.fromEntries(Object.entries(reading.results).map(([id, value]) => [id, value.pending ? 'pending' : value.value?.status ?? value.issue])))}</output>
+}
+it('bounds retained bodies across a long reading session and rereads evicted originals through the same owner', async () => {
+  const ids = ['target', 'closed-source']
+  for (let i = 0; i < 11; i++) {
+    const id = 'cache-' + i; ids.push(id)
+    await writeFile(join(directory, id + '.note.md'), body(id, 'Saved window ' + i))
+    await store.apply({ expectedRevision: (await store.read()).revision, operationId: 'register-cache-' + i, change: { kind: 'register', noteId: id, title: id, resource: { hostId: 'local', workspaceId: 'notes', workspacePath: directory, path: id + '.note.md' } } }, { kind: 'user', id: 'ui-test' })
+  }
+  const snapshot = await api.notebooks.graph({})
+  const state = () => JSON.parse(dom.container.querySelector('.reading-window')!.textContent!)
+  for (const id of ids) {
+    await dom.render(<ReadingWindow snapshot={snapshot} visible={[id]} />)
+    await vi.waitFor(() => expect(state()[id]).toBe('read'))
+    expect(Object.keys(state()).length).toBeLessThanOrEqual(12)
+  }
+  expect(state().target).toBeUndefined()
+  expect(api.notebooks.content).toHaveBeenCalledTimes(13)
+  await dom.render(<ReadingWindow snapshot={snapshot} visible={['cache-9']} />)
+  expect(state()['cache-9']).toBe('read')
+  expect(api.notebooks.content).toHaveBeenCalledTimes(13)
+  await dom.render(<ReadingWindow snapshot={snapshot} visible={['target']} />)
+  await vi.waitFor(() => expect(state().target).toBe('read'))
+  expect(api.notebooks.content).toHaveBeenCalledTimes(14)
+  expect(api.notebooks.graph).toHaveBeenCalledTimes(1)
+})
+
+it('cancels a pending original that leaves the reading window and ignores its late receipt', async () => {
+  const snapshot = await api.notebooks.graph({}), original = vi.mocked(api.notebooks.content).getMockImplementation()!
+  const pending: { id: string; signal: AbortSignal; resolve(): Promise<void> }[] = []
+  vi.mocked(api.notebooks.content).mockImplementation((id, options) => new Promise(resolve => { pending.push({ id, signal: options!.signal!, resolve: async () => resolve(await original(id, {})) }) }))
+  const state = () => JSON.parse(dom.container.querySelector('.reading-window')!.textContent!)
+  await dom.render(<ReadingWindow snapshot={snapshot} visible={['target']} />)
+  await vi.waitFor(() => expect(pending).toHaveLength(1))
+  await dom.render(<ReadingWindow snapshot={snapshot} visible={['closed-source']} />)
+  await vi.waitFor(() => expect(pending).toHaveLength(2))
+  expect(pending[0]!.signal.aborted).toBe(true)
+  expect(pending[1]!.signal.aborted).toBe(false)
+  await act(async () => { await pending[0]!.resolve(); await pending[1]!.resolve() })
+  await vi.waitFor(() => expect(state()['closed-source']).toBe('read'))
+  expect(state().target).toBeUndefined()
+  expect(api.notebooks.content).toHaveBeenCalledTimes(2)
+})
+
+it('distinguishes saved empty content from an unsaved original draft and keeps technical source details secondary', async () => {
+  await writeFile(join(directory, 'target.note.md'), serializeNoteDocument({ schema: 'agentmux.note.v1', noteId: 'target', content: { type: 'doc', content: [{ type: 'paragraph', attrs: { blockId: 'saved-empty' } }] } }))
+  const key = documentKey('notes', 'target.note.md')
+  useAppStore.setState({ config: { ...composerConfig, workspaces: [{ id: 'notes', hostId: 'local', path: directory, name: 'Notes', kind: 'folder' }] }, dirtyDocuments: { [key]: true }, documents: { [key]: { path: 'target.note.md', content: body('target', 'Private unsaved draft'), revision: 'local-draft' } } })
+  await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
+  await vi.waitFor(() => expect(dom.container.querySelector('.react-flow__node[data-id="target"] .note-canvas-empty-body')?.textContent).toBe('No saved content yet.'))
+  expect(dom.container.querySelector('.react-flow__node[data-id="target"] .note-canvas-draft')?.textContent).toContain('Unsaved changes in original')
+  expect(dom.container.textContent).not.toContain('Private unsaved draft')
+  expect(dom.container.querySelector<HTMLDetailsElement>('.note-canvas-source-details')!.open).toBe(false)
+  expect(dom.container.querySelector('.note-canvas-source-details')!.textContent).toContain('2/2 originals read')
+  expect(useAppStore.getState().documents[key]!.content).toContain('Private unsaved draft')
+  expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
 })

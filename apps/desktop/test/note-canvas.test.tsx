@@ -328,12 +328,21 @@ it('persists completed keyboard moves through the same presentation owner and re
 })
 
 it('keeps a missing target explicit and inspects its registered original without guessing an exact block', async () => {
+  installNoteCanvasBlockRows()
   const original = noteFromMarkdown(body('target', 'Original target')); original.content.content![0]!.attrs!.blockId = 'another-original-block'
   await writeFile(join(directory, 'target.note.md'), serializeNoteDocument(original))
   const open = vi.fn()
   await dom.render(<NoteCanvas scope={scope} onOpen={open} />); await ready()
-  await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Inspect 2 references: Block → block"]')).not.toBeNull())
-  await dom.click('[aria-label="Inspect 2 references: Block → block"]')
+  // Automatic reading splits the source occurrences once their actual paragraph handles are ready.
+  // Inspect an exact settled occurrence instead of depending on a transient two-reference bundle.
+  const missingReference = () => dom.container.querySelector<HTMLButtonElement>('[data-relationship-kind="reference"][data-source-block="source-reference-0"]')
+  await vi.waitFor(() => expect(missingReference()).not.toBeNull())
+  expect(missingReference()!.dataset.targetAttachment).toBe('summary')
+  const target = dom.container.querySelector('.react-flow__node[data-id="target"]')!
+  expect(target.querySelector<HTMLElement>('.note-canvas-block-summary')!.dataset.empty).toBe('false')
+  expect(target.querySelector('.note-canvas-reader')?.textContent).not.toContain('Original target')
+  expect(dom.container.querySelector('[data-relationship-kind="reference"][data-source-block="source-reference-1"]')).not.toBeNull()
+  await act(async () => missingReference()!.click())
   await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-inspector')?.textContent).toContain('Target missing.'))
   expect(dom.container.querySelector('.note-canvas-inspector')?.textContent).not.toContain('Open target block')
   const inspect = [...dom.container.querySelectorAll<HTMLButtonElement>('.note-canvas-inspector-actions button')].find(button => button.textContent === 'Inspect registered original')!
@@ -374,15 +383,15 @@ it('connects page targets and hierarchy to card headers while keeping block endp
   const label = (name: string) => dom.container.querySelector<HTMLElement>(`[aria-label="${name}"]`)!
   const handle = (edge: HTMLElement, end: 'source' | 'target') => dom.container.querySelector<HTMLElement>(`.react-flow__node[data-id="${edge.dataset[end + 'Note']}"] [data-handleid="${edge.dataset[end + 'Handle']}"]`)!
   const page = label('Inspect 1 link: Block → page'), block = label('Inspect 1 link: Block → block'), hierarchy = label('Inspect parent and subpage relationship: Page → page')
-  expect(page.textContent).toContain('Block → page')
+  expect(page.textContent).toContain('Links to note')
   expect(page.dataset.sourceHandle).toMatch(/^block-out-/)
   expect(page.dataset.targetHandle).toMatch(/^page-in-/)
-  expect(handle(page, 'source').closest('.note-canvas-block-summary')?.textContent).toContain('Grouped endpoints')
+  expect(handle(page, 'source').closest('.note-canvas-block-summary')?.textContent).toContain('Referenced passages')
   expect(handle(page, 'target').closest('header')?.textContent).toContain('Original target')
-  expect(block.textContent).toContain('Block → block')
+  expect(block.textContent).toContain('Links to passage')
   expect(block.dataset.targetHandle).toMatch(/^block-in-/)
   expect(handle(block, 'target').closest('.note-canvas-block-summary')).not.toBeNull()
-  expect(hierarchy.textContent).toContain('Page → page')
+  expect(hierarchy.textContent).toContain('Subpage')
   expect(handle(hierarchy, 'source').closest('header')?.textContent).toContain('Original target')
   expect(handle(hierarchy, 'target').closest('header')?.textContent).toContain('Original closed-source')
   expect(dom.container.querySelector('[data-note-id="target"]')!.closest('article')!.querySelector('.note-canvas-degrees')?.textContent).toContain('5 incoming')
