@@ -5,6 +5,7 @@ import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraftRecord } from './use-setting-draft'
 import { executionSettings, type ExecutionSettings } from './continuity-settings-fields'
 import '../../styles/settings-continuity.css'
+import './settings-recovery.css'
 
 const defaults = DEFAULT_AGENT_CONTINUITY_POLICY
 function readableDuration(value: number): string {
@@ -108,28 +109,38 @@ export function ContinuitySettingsPane({ preferences, onSave }: {
       await onSave(policyValue(submitted.value), policyValue(submitted.expected))
     }))
   }
-  return <div className="settings-pane-stack continuity-settings">
-    <p className="continuity-scope">Choose how this desktop restores ended or missing sessions. New recovery intents use these preferences; current recovery, inputs and drafts stay unchanged.</p>
+  return <div className="settings-pane-stack continuity-settings recovery-settings">
     <section className="settings-group">
       <header><span>Session recovery</span><small>Saved: {saved.activeRecovery === 'automatic' ? 'Automatic' : 'On demand'}</small></header>
-      <div className="continuity-setting-row" data-settings-field="activeRecovery"><label htmlFor={`${id}-active`}><strong>Automatic native recovery</strong><small>Restore ended or missing Runs automatically, or wait until you send a request or choose Resume. Healthy Runs reconnect as usual.</small></label>
-        <select id={`${id}-active`} aria-label="Automatic native recovery" value={draft.value.activeRecovery} onChange={event => draft.setField('activeRecovery', event.target.value as AgentMuxContinuityPolicy['activeRecovery'])}>
-          <option value="automatic">Automatic</option><option value="manual">On demand</option>
-        </select></div>
-      {duration('activeRecoveryDelayMs', 'Recovery wait', 'Delay from the recovery decision to automatic resume. Zero starts immediately.')}
-      {duration('confirmedIdleWindowMs', 'Automatic recovery window', 'The previous main session’s confirmed activity or idle start must be within this window. Older or unknown activity stays on demand.')}
+      <fieldset className="recovery-mode" data-settings-field="activeRecovery">
+        <legend>Automatic native recovery</legend>
+        <div className="recovery-mode-options">
+          <label><input type="radio" name={`${id}-recovery`} value="automatic" checked={draft.value.activeRecovery === 'automatic'} onChange={() => draft.setField('activeRecovery', 'automatic')} />
+            <span><strong>Automatic</strong><small>Resume eligible ended or missing sessions.</small></span></label>
+          <label><input type="radio" name={`${id}-recovery`} value="manual" checked={draft.value.activeRecovery === 'manual'} onChange={() => draft.setField('activeRecovery', 'manual')} />
+            <span><strong>On demand</strong><small>Wait for your next request or Resume.</small></span></label>
+        </div>
+      </fieldset>
+      <p className="recovery-mode-effect" role="status">{draft.value.activeRecovery === 'automatic'
+        ? 'Automatic recovery uses the timing and exit preferences below.'
+        : 'Recovery waits for you. The timing and exit preferences below are kept for automatic mode.'} Healthy Runs reconnect in either mode.</p>
+      <div className="recovery-timing">
+        {duration('activeRecoveryDelayMs', 'Recovery wait', 'Wait after the recovery decision. Zero starts immediately.')}
+        {duration('confirmedIdleWindowMs', 'Automatic recovery window', 'Recover recent sessions automatically; older or unknown activity stays on demand.')}
+      </div>
       <label className="browser-automation-toggle" data-settings-field="resumeAfterExit"><input type="checkbox" aria-label="Resume after confirmed exit" checked={draft.value.resumeAfterExit} onChange={event => draft.setField('resumeAfterExit', event.target.checked)} />
-        <span><strong>Resume after confirmed exit</strong><small>Allow automatic native resume after Core confirms the previous Run ended or is missing. Manual Resume stays available when this is off.</small></span></label>
+        <span><strong>Resume after confirmed exit</strong><small>Allow automatic recovery when Core confirms a Run ended or is missing. Manual Resume stays available.</small></span></label>
     </section>
     <details className="continuity-disclosure" data-continuity-retry-settings>
       <summary><span>Retry a failed recovery<small>Restore the same conversation without replaying input</small></span><span className="continuity-disclosure-value">Saved: {saved.retryMaxAttempts} retries</span></summary>
       <div className="continuity-disclosure-body">
-      <p className="continuity-hint">After a recovery process is confirmed to have failed, another attempt restores the same conversation without resending earlier input. A healthy or unconfirmed process is not restarted.</p>
-      {duration('retryInitialDelayMs', 'First retry base delay', 'Wait before retrying a confirmed failed recovery. Later base delays double up to the configured maximum.')}
-      {duration('retryMaxDelayMs', 'Maximum retry base delay', 'Upper limit for the base delay. Each schedule adds a small offset of at most one second and at most one quarter of its base delay.')}
+      <p className="continuity-hint">Retry only a confirmed failed recovery, without resending earlier input. Healthy or unconfirmed processes are not restarted.</p>
+      {duration('retryInitialDelayMs', 'First retry base delay', 'Later base delays double up to the configured maximum.')}
+      {duration('retryMaxDelayMs', 'Maximum retry base delay', 'Upper limit before the small scheduling offset described below.')}
       <div className="continuity-setting-row" data-settings-field="retryMaxAttempts"><label htmlFor={`${id}-retries`}><strong>Additional retries</strong><small>Attempts after the initial recovery. Zero disables automatic retries. Reaching the limit pauses recovery and keeps the original Session available.</small></label>
         <TextInput id={`${id}-retries`} className="continuity-count" aria-label="Additional retries" inputMode="numeric" value={draft.value.retryMaxAttempts}
           aria-invalid={!/^\d+$/.test(draft.value.retryMaxAttempts) || !Number.isSafeInteger(Number(draft.value.retryMaxAttempts))} onChange={event => draft.setField('retryMaxAttempts', event.target.value)} /></div>
+      <p className="continuity-hint">Each schedule adds a small offset of at most one second and at most one quarter of its base delay.</p>
       </div>
     </details>
     <details className="continuity-disclosure">
@@ -158,7 +169,13 @@ export function ContinuitySettingsPane({ preferences, onSave }: {
         ] as const).map(([key, label, value]) => <div key={key}><dt>{label}</dt><dd><span>{value}</span><small>{source(key)}</small></dd></div>)}
       </dl>
     </details>
-    <p className="continuity-hint">Saving preferences starts no Agent and sends no message.</p>
+    <details className="continuity-disclosure recovery-behavior">
+      <summary><span>When these preferences apply<small>New recovery decisions on this desktop</small></span></summary>
+      <div className="continuity-disclosure-body">
+        <p className="continuity-hint">The automatic recovery window is measured from the previous main session’s confirmed activity or idle start. Older or unknown activity stays on demand. Turning off resume after confirmed exit keeps manual Resume available.</p>
+        <p className="continuity-hint">Changes apply to new recovery intents. Current recovery, inputs and drafts stay unchanged. Saving preferences starts no Agent and sends no message.</p>
+      </div>
+    </details>
     {!valid && <p className="settings-inline-error" role="alert">Enter nonnegative durations with whole millisecond precision and whole-number counts within the safe integer range. The maximum retry base delay must be at least the initial retry base delay.</p>}
     <SettingsSaveBar save={saveState} dirty={draft.dirty} label="Save recovery preferences" onSave={() => void save()} disabled={!valid} />
   </div>
