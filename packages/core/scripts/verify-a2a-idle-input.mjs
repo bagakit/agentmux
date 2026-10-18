@@ -24,7 +24,7 @@ const hashes = async () => Object.fromEntries(await Promise.all(inputs.map(async
 const receipt = { schema: 'agentmux.a2a-idle-input-owning-proof.v1', sourceOnly: true, sharedTreeMutations: 0, passed: false, cases: [] }
 
 await mkdir(evidence, { recursive: true })
-async function run(label, mutation, selected = tests, count = 23) {
+async function run(label, mutation, selected = tests, count = 37) {
   const output = join(evidence, label + '.json'), loaded = join(evidence, label + '.loaded.jsonl')
   await writeFile(loaded, '')
   const env = { ...process.env, AGENTMUX_IDLE_INPUT_LOADED: loaded }
