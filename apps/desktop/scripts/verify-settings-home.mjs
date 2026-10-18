@@ -19,8 +19,9 @@ const appearanceMutant = process.argv.includes('--appearance-contrast-mutation')
 const previewReturnMutant = process.argv.includes('--preview-return-mutation')
 const larkNavigationMutant = process.argv.includes('--lark-navigation-mutation')
 const focusContentMutant = process.argv.includes('--focus-content-mutation')
-assert.ok([navigationMutant,providerMutant,takeoverMutant,appearanceMutant,previewReturnMutant,larkNavigationMutant,focusContentMutant].filter(Boolean).length<=1,'One native source mutation per receipt')
-const nativeMutant = navigationMutant || providerMutant || takeoverMutant || appearanceMutant || previewReturnMutant || larkNavigationMutant || focusContentMutant
+const toolkitModelMutant = process.argv.includes('--toolkit-model-mutation')
+assert.ok([navigationMutant,providerMutant,takeoverMutant,appearanceMutant,previewReturnMutant,larkNavigationMutant,focusContentMutant,toolkitModelMutant].filter(Boolean).length<=1,'One native source mutation per receipt')
+const nativeMutant = navigationMutant || providerMutant || takeoverMutant || appearanceMutant || previewReturnMutant || larkNavigationMutant || focusContentMutant || toolkitModelMutant
 const pageArguments = process.argv.filter(argument => argument.startsWith('--pages='))
 assert.ok(pageArguments.length <= 1, 'One explicit page selection')
 const requestedPages = pageArguments.length ? pageArguments[0].slice('--pages='.length).split(',') : null
@@ -30,6 +31,7 @@ if (requestedPages) {
 }
 let navigationMutationLoads = 0, providerMutationLoads = 0, takeoverMutationLoads = 0, appearanceMutationLoads = 0
 let previewReturnMutationLoads = 0, larkNavigationMutationLoads = 0
+let toolkitModelMutationLoads = 0
 let focusContentMutationLoads = 0
 const focusContentMutationOwners = new Set()
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -78,6 +80,23 @@ try {
     plugins:[{name:'bind-settings-home-product',enforce:'pre',async transform(code,id){
       const file=id.split('?')[0]
       if(file.startsWith(root+'/')&&!file.includes('/node_modules/'))await bind(file)
+      if(file.endsWith('/components/settings/ToolkitScriptEditor.tsx')) {
+        const original = code
+        const stable = "${display ? '/display' : actionId === null ? '/main' : `/actions/${encodeURIComponent(actionId)}`}"
+        if(toolkitModelMutant) {
+          assert.equal(code.split(stable).length,2,'One original Toolkit document identity')
+          code=code.replace(stable,"${display ? '/display' : actionId === null ? '' : `/actions/${encodeURIComponent(actionId)}`}.${mode === 'tui' ? 'sh' : 'mjs'}")
+          toolkitModelMutationLoads++
+        }
+        const theme = '  const theme = useMonacoTheme()'
+        assert.equal(code.split(theme).length,2,'One committed Toolkit draft observer')
+        code="import { useLayoutEffect } from 'react'\n"+code.replace(theme,theme+"\n  useLayoutEffect(() => { window.settingsHomeProbe.toolkitDraft = { id, actionId, display, mode, value } }, [id, actionId, display, mode, value])")
+        const editor = '<Editor height="260px"'
+        assert.equal(code.split(editor).length,2,'One actual Toolkit Monaco consumer')
+        code=code.replace(editor,editor+' onMount={editor => { window.settingsHomeProbe.toolkitEditor = { value: () => editor.getValue(), uri: () => editor.getModel()?.uri.toString(), node: () => editor.getDomNode(), focused: () => editor.hasTextFocus(), selectedAll: () => { const range=editor.getModel()?.getFullModelRange(), selection=editor.getSelection(); return !!range && !!selection && range.startLineNumber===selection.startLineNumber && range.startColumn===selection.startColumn && range.endLineNumber===selection.endLineNumber && range.endColumn===selection.endColumn } } }}')
+        await fs.writeFile(path.join(evidence,'toolkit-model-observation.json'),JSON.stringify({file:path.relative(root,file),original:sha(original),consumed:sha(code),mutant:toolkitModelMutant,observation:'Committed props and exact original Monaco model; no writes'},null,2))
+        return {code,map:null}
+      }
       if(larkNavigationMutant&&file.endsWith('/components/settings/useConnectionManagementSetup.ts')) {
         const start=code.indexOf('  function inspectOriginal('),end=code.indexOf('  function inspect()',start)
         assert.ok(start>=0&&end>start,'Exact original setup inspection owner is present')
@@ -144,13 +163,18 @@ try {
   const visual = path.join(evidence,'visual'), stderr=[]
   await fs.mkdir(visual)
   if(takeoverMutant) assert.equal(takeoverMutationLoads,1,'One exact compact preview declaration is mutated')
-  const capture = await runProbeProcess(require('electron'),[path.join(fixture,'main.cjs'),path.join(compiled,'index.html'),owned,visual,focusContentMutant?'focus-content':larkNavigationMutant?'lark-navigation':previewReturnMutant?'preview-return':navigationMutant?'navigation':providerMutant?'provider-scroll':takeoverMutant?'takeover-scroll':'full',requestedPages?.join(',')??''],{
+  const capture = await runProbeProcess(require('electron'),[path.join(fixture,'main.cjs'),path.join(compiled,'index.html'),owned,visual,toolkitModelMutant?'toolkit-model':focusContentMutant?'focus-content':larkNavigationMutant?'lark-navigation':previewReturnMutant?'preview-return':navigationMutant?'navigation':providerMutant?'provider-scroll':takeoverMutant?'takeover-scroll':'full',requestedPages?.join(',')??''],{
     cwd:root,env,timeoutMs:1200000,onLine:line=>stderr.push(line)
   })
   await fs.writeFile(path.join(visual,'stderr.log'),stderr.join('\n'))
   const render = JSON.parse(await fs.readFile(path.join(visual,'render.json'),'utf8'))
   assert.equal(capture.timedOut,false)
-  if (focusContentMutant) {
+  if (toolkitModelMutant) {
+    assert.equal(toolkitModelMutationLoads,1,'One actual Toolkit document owner was reverted')
+    assert.equal(capture.exitCode,1)
+    assert.equal(render.failure?.name,'AssertionError')
+    assert.match(render.failure.message,/Changing the type preserves the command draft until explicitly edited|The original settings draft receives the complete editor text/u,'The original editor roundtrip kills its model mutation')
+  } else if (focusContentMutant) {
     assert.equal(focusContentMutationOwners.size,1,'One original content-sized canvas rule was mutated across its CSS bundle copies')
     assert.ok(focusContentMutationLoads>0,'The original content-sized canvas mutation was consumed')
     assert.equal(capture.exitCode,1)
