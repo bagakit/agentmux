@@ -1,0 +1,4 @@
+/* Native Discord setup reuses the original settings controls and task canvas. */
+@container connector (width < 560px) {
+  .discord-settings .connector-setup__fields { grid-template-columns: minmax(0, 1fr); }
+}
