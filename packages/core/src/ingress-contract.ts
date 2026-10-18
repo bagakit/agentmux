@@ -13,6 +13,7 @@ export type ConnectionIngressAddressing = { replyToMessageId: string } & (
 export type ConnectionIngressMessage = {
   kind?: never
   ingressId: string
+  /** Original authenticated receiver configuration, retained even when the Binding uses another local alias. */
   connectionId: string
   application: ConnectionApplication
   eventId: string
@@ -25,6 +26,7 @@ export type ConnectionIngressMessage = {
   code?: string
   input?: {
     hostId: string; agentSessionId: string; expectedRun: { runId: string }
+    /** The author identifies the exact authorized Binding connection, not the transport alias. */
     operationId: string; messageId: string; author: AgentExternalMessageAuthor
     /** Original first claim only; missing historical intent is unknown and never reconstructed. */
     admissionIntent?: Exclude<import('./agent-prompt-condition.js').AgentPromptAdmissionIntent, { kind: 'exact-condition' }>

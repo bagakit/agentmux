@@ -52,12 +52,18 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
   readCurrent(bindingId: string): RoomBinding | null {
     return this.safe(() => { const row = this.database.prepare('SELECT revision FROM room_binding_head WHERE binding_id=?').get(bindingId); return row ? this.readExact(bindingId, Number(row.revision)) : null })
   }
+  private audience(input: { application: RoomBinding['application']; externalConversationId: string }): RoomBinding | null {
+    const row = this.database.prepare('SELECT binding_id FROM room_binding_head WHERE domain=? AND app_id=? AND room_id=?').get(input.application.domain, input.application.appId, input.externalConversationId)
+    return row ? this.readCurrent(String(row.binding_id)) : null
+  }
+  findActiveAudience(input: { application: RoomBinding['application']; externalConversationId: string }): RoomBinding | null {
+    return this.safe(() => { const binding = this.audience(input); return binding?.state === 'active' ? binding : null })
+  }
   private matching(column: 'audience' | 'session', input: RoomBindingBindInput): RoomBinding | null {
     const connection = this.options.connections.readConfiguration(input.connectionId)
     if (!connection) return null
-    const row = column === 'audience'
-      ? this.database.prepare('SELECT binding_id FROM room_binding_head WHERE domain=? AND app_id=? AND room_id=?').get(connection.config.application.domain, connection.config.application.appId, input.externalConversationId)
-      : this.database.prepare('SELECT binding_id FROM room_binding_head WHERE connection_id=? AND host_id=? AND session_id=?').get(input.connectionId, input.executionHostId, input.agentSessionId)
+    if (column === 'audience') return this.audience({ application: connection.config.application, externalConversationId: input.externalConversationId })
+    const row = this.database.prepare('SELECT binding_id FROM room_binding_head WHERE connection_id=? AND host_id=? AND session_id=?').get(input.connectionId, input.executionHostId, input.agentSessionId)
     return row ? this.readCurrent(String(row.binding_id)) : null
   }
   private heads(input: RoomBindingListInput, activeOnly: boolean): RoomBinding[] {
