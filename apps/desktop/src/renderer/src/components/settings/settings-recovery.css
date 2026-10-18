@@ -1,0 +1,20 @@
+.recovery-mode { min-width: 0; margin: var(--sp-3) 0 0; padding: 0; border: 0; }
+.recovery-mode legend { margin-bottom: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
+.recovery-mode-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); }
+.recovery-mode-options label { display: flex; align-items: flex-start; gap: var(--sp-3); padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); cursor: pointer; }
+.recovery-mode-options label:has(input:checked) { border-color: var(--green); background: var(--surface-2); }
+.recovery-mode-options label:has(input:focus-visible) { outline: 2px solid var(--green); outline-offset: 2px; }
+.recovery-mode-options input { flex: none; margin: 3px 0 0; accent-color: var(--green); }
+.recovery-mode-options span { display: grid; gap: var(--sp-1); }
+.recovery-mode-options small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.recovery-mode-effect { margin: var(--sp-3) 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; }
+.recovery-timing { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-5); }
+.recovery-timing .continuity-setting-row { align-items: stretch; flex-direction: column; gap: var(--sp-2); }
+.recovery-timing .continuity-duration { justify-items: start; }
+.recovery-settings .browser-automation-toggle { padding-inline: 0; }
+.recovery-behavior .continuity-hint + .continuity-hint { margin-top: var(--sp-2); }
+@media (max-width: 620px) {
+  .recovery-mode-options { gap: var(--sp-2); }
+  .recovery-mode-options label { gap: var(--sp-2); padding: var(--sp-2); }
+  .recovery-timing { grid-template-columns: minmax(0, 1fr); gap: 0; }
+}
