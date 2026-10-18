@@ -181,10 +181,23 @@ function side(value: unknown, code: string): GitDiffSide {
 export function parseGitResult<M extends GitMethod>(method: M, value: unknown, params: GitParameterMap[M]): GitResultMap[M] {
   const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, undefined, code)
   if (method === 'git.worktrees') {
-    rpcRecord(p, ['kind', 'hostId', 'workspacePath', 'checkedAt', ...(p.kind === 'ready' ? ['repoPath', 'worktrees', 'warnings'] : p.kind === 'unavailable' ? ['reason'] : [])], code)
+    rpcRecord(p, ['kind', 'hostId', 'workspacePath', 'checkedAt', 'directories', ...(p.kind === 'ready' ? ['repoPath', 'worktrees', 'warnings'] : p.kind === 'unavailable' ? ['reason'] : [])], code)
     identity(p.hostId, code); absolutePath(p.workspacePath, code)
     if (p.hostId !== params.expectedResource.hostId || p.workspacePath !== params.expectedResource.workspacePath ||
       typeof p.checkedAt !== 'number' || !Number.isFinite(p.checkedAt)) invalid('Git worktrees belong to another resource or invalid observation.', code)
+    array(p.directories, code, item => {
+      const directory = rpcRecord(item, undefined, code)
+      rpcRecord(directory, ['path', 'kind', ...(directory.kind === 'directory' ? ['canonicalPath'] : directory.kind === 'unavailable' ? ['reason'] : [])], code)
+      absolutePath(directory.path, code)
+      if (directory.kind === 'directory') absolutePath(directory.canonicalPath, code)
+      else if (directory.kind === 'unavailable') {
+        text(directory.reason, code)
+        if (!directory.reason) invalid('Directory observation needs an unavailable reason.', code)
+      } else if (directory.kind !== 'missing' && directory.kind !== 'not-directory') invalid('Directory observation kind is invalid.', code)
+    })
+    const directories = p.directories as GitWorktreesResult['directories']
+    const directoryPaths = new Set(directories.map(value => value.path))
+    if (directoryPaths.size !== directories.length || !directoryPaths.has(params.expectedResource.workspacePath)) invalid('Directory observations are duplicated or omit the original target.', code)
     if (p.kind === 'ready') {
       absolutePath(p.repoPath, code)
       array(p.worktrees, code, item => {
@@ -200,6 +213,15 @@ export function parseGitResult<M extends GitMethod>(method: M, value: unknown, p
       })
       const paths = (p.worktrees as { path: string; aliases: string[] }[]).flatMap(item => [item.path, ...item.aliases])
       if (!paths.length || new Set(paths).size !== paths.length) invalid('Git worktree collection is incomplete or duplicated.', code)
+      const byPath = new Map(directories.map(value => [value.path, value]))
+      for (const entry of p.worktrees as { path: string; aliases: string[] }[]) {
+        if (!byPath.has(entry.path)) invalid('Directory observations omit a registered worktree.', code)
+        const original = byPath.get(entry.path)
+        for (const alias of entry.aliases) {
+          const directory = byPath.get(alias)
+          if (original?.kind !== 'directory' || directory?.kind !== 'directory' || original.canonicalPath !== directory.canonicalPath) invalid('Worktree alias has no confirmed directory relationship.', code)
+        }
+      }
       array(p.warnings, code, item => text(item, code))
     } else if (p.kind === 'unavailable') text(p.reason, code)
     else if (p.kind !== 'not-a-git-repository') invalid('Git worktree observation is invalid.', code)

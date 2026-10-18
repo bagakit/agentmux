@@ -218,10 +218,17 @@ export interface GitHistoryApi {
 /** Readonly observation at the exact registered resource; never inferred from saved branch labels. */
 export type GitWorktreesTarget = { workspaceId: string; expectedResource: { hostId: string; workspacePath: string } }
 export type GitWorktreeEntry = { path: string; branch: string | null; kind: 'main' | 'linked' | 'bare'; detached: boolean; aliases: string[] }
+/** Same-Host filesystem observation, independent of registration in the Git collection. */
+export type GitDirectoryObservation =
+  | { path: string; kind: 'directory'; canonicalPath: string }
+  | { path: string; kind: 'missing' }
+  | { path: string; kind: 'not-directory' }
+  | { path: string; kind: 'unavailable'; reason: string }
+export type GitWorktreesObservation = { hostId: string; workspacePath: string; checkedAt: number; directories: GitDirectoryObservation[] }
 export type GitWorktreesResult =
-  | { kind: 'ready'; hostId: string; workspacePath: string; repoPath: string; checkedAt: number; worktrees: GitWorktreeEntry[]; warnings: string[] }
-  | { kind: 'not-a-git-repository'; hostId: string; workspacePath: string; checkedAt: number }
-  | { kind: 'unavailable'; hostId: string; workspacePath: string; checkedAt: number; reason: string }
+  | (GitWorktreesObservation & { kind: 'ready'; repoPath: string; worktrees: GitWorktreeEntry[]; warnings: string[] })
+  | (GitWorktreesObservation & { kind: 'not-a-git-repository' })
+  | (GitWorktreesObservation & { kind: 'unavailable'; reason: string })
 export interface GitWorktreesApi { worktrees(input: GitWorktreesTarget): Promise<GitWorktreesResult> }
 
 /** One immutable commit and the direct parent selected for its file comparison. */

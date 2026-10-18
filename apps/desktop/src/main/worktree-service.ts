@@ -25,7 +25,7 @@ import {
   parseOrphanCommitCount
 } from '../shared/lane-orphan-commits.js'
 import { findWorkspaceByLocation } from './workspace-location.js'
-import type { GitWorktreeEntry, GitWorktreesResult } from '@agentmux/git/types'
+import type { GitDirectoryObservation, GitWorktreeEntry, GitWorktreesResult } from '@agentmux/git/types'
 
 type ConfigWriter = {
   save(value: AppConfig, expected: AppConfig): Promise<AppConfig>
@@ -205,67 +205,73 @@ export class WorktreeService {
   async observe(workspaceId: string, config: AppConfig): Promise<GitWorktreesResult> {
     const workspace = this.workspace(config, workspaceId)
     const target = { hostId: workspace.hostId, workspacePath: workspace.path }
+    let host: ExecutionHost | undefined
+    let observation: GitWorktreesResult
     try {
-      const host = this.hostFor(workspace.hostId)
+      host = this.hostFor(workspace.hostId)
       // Resolve the actual directory each time; saved repoPath/branch are registration history.
       const repoPath = await this.resolveRepoPath(host, workspace.path)
-      if (repoPath === null) return { kind: 'not-a-git-repository', ...target, checkedAt: Date.now() }
-      const result = await host.run('git', ['-C', repoPath, 'worktree', 'list', '--porcelain', '-z'], GIT_ENUMERATION_OPTIONS)
-      this.assertGit(result, 'Could not observe Git worktrees')
-      const worktrees = parseGitWorktreePorcelain(result.stdout)
-      // Validation belongs only to this observation; unrelated existing worktree operations retain their contract.
-      if (!worktrees.length || new Set(worktrees.map(item => item.path)).size !== worktrees.length ||
-        worktrees.some(item => !(item.path.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(item.path) || item.path.startsWith('\\\\')) ||
-          (item.kind === 'bare' ? item.branch !== null || item.detached : item.detached ? item.branch !== null : !item.branch))) {
-        throw new Error('Git returned invalid worktree records')
-      }
-      const warnings: string[] = []
-      // Registration selects a bounded candidate set only. The original Host proves each alias;
-      // neither a saved repoPath nor a lexical prefix can establish actual Git membership.
-      const project = workspace.repoPath ?? workspace.path
-      const candidates = [...new Set(config.workspaces.filter(value => value.hostId === workspace.hostId &&
-        (value.id === workspace.id || (value.repoPath ?? value.path) === project)).map(value => value.path))]
-      try {
-        const paths = [...worktrees.map(value => value.path), ...candidates]
-        const aliases = await host.run('node', ['-e',
-          'const fs=require("node:fs");process.stdout.write(JSON.stringify(JSON.parse(process.argv[1]).map(path=>{try{return {path,canonicalPath:fs.realpathSync(path),errorCode:null}}catch(error){return {path,canonicalPath:null,errorCode:typeof error?.code==="string"?error.code:null}}})))',
-          JSON.stringify(paths)], { ...GIT_DISCOVERY_OPTIONS, env: { ...GIT_NONINTERACTIVE_ENV, NODE_OPTIONS: undefined, NODE_PATH: undefined } })
-        this.assertGit(aliases, 'Directory alias observation is unavailable')
-        const values: unknown = JSON.parse(aliases.stdout)
-        if (!Array.isArray(values) || values.length !== paths.length || values.some((value, index) => !value || value.path !== paths[index] ||
-          (value.canonicalPath !== null && typeof value.canonicalPath !== 'string') ||
-          (value.errorCode !== null && typeof value.errorCode !== 'string') ||
-          (value.canonicalPath !== null && value.errorCode !== null))) throw new Error('Invalid directory alias observation')
-        // Resolve both native and registered spellings on the same Host: no slash replacement,
-        // POSIX filename guessing, or Windows drive/case assumptions in the client.
-        const records = values as { path: string; canonicalPath: string | null; errorCode: string | null }[]
-        const registeredPaths = new Set(worktrees.map(value => value.path))
-        const byPath = new Map<string, GitWorktree>(), ambiguous = new Set<string>()
-        records.slice(0, worktrees.length).forEach((value, index) => {
-          if (value.canonicalPath === null) return
-          if (byPath.has(value.canonicalPath)) ambiguous.add(value.canonicalPath)
-          byPath.set(value.canonicalPath, worktrees[index]!)
-        })
-        for (const value of records.slice(worktrees.length)) {
-          if (value.canonicalPath === null) {
-            // An absent optional spelling cannot add an alias. This says nothing about
-            // the saved workspace or its workface; Git-listed missing paths still warn.
-            if ((value.errorCode === 'ENOENT' || value.errorCode === 'ENOTDIR') && !registeredPaths.has(value.path)) continue
-            warnings.push(`Directory alias is unconfirmed: ${value.path}. Refresh to retry.`)
-            continue
-          }
-          if (ambiguous.has(value.canonicalPath)) { warnings.push(`Directory alias is ambiguous: ${value.path}. Refresh to retry.`); continue }
-          const match = byPath.get(value.canonicalPath)
-          if (match && value.path !== match.path) match.aliases.push(value.path)
+      if (repoPath === null) observation = { kind: 'not-a-git-repository', ...target, checkedAt: Date.now(), directories: [] }
+      else {
+        const result = await host.run('git', ['-C', repoPath, 'worktree', 'list', '--porcelain', '-z'], GIT_ENUMERATION_OPTIONS)
+        this.assertGit(result, 'Could not observe Git worktrees')
+        const worktrees = parseGitWorktreePorcelain(result.stdout)
+        if (!worktrees.length || new Set(worktrees.map(item => item.path)).size !== worktrees.length ||
+          worktrees.some(item => !(item.path.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(item.path) || item.path.startsWith('\\\\')) ||
+            (item.kind === 'bare' ? item.branch !== null || item.detached : item.detached ? item.branch !== null : !item.branch))) {
+          throw new Error('Git returned invalid worktree records')
         }
-      } catch (error) {
-        warnings.push(`Directory aliases unavailable. Canonical Git worktrees remain readable. Refresh to retry: ${gitFailureError({ exitCode: 1, stdout: '', stderr: error instanceof Error ? error.message : String(error) }, 'Alias observation failed').message}`)
+        observation = { kind: 'ready', ...target, repoPath, checkedAt: Date.now(), worktrees, warnings: [], directories: [] }
       }
-      return { kind: 'ready', ...target, repoPath, checkedAt: Date.now(), worktrees, warnings }
     } catch (error) {
       const reason = gitFailureError({ exitCode: 1, stdout: '', stderr: error instanceof Error ? error.message : String(error) }, 'Git worktree observation is unavailable').message
-      return { kind: 'unavailable', ...target, checkedAt: Date.now(), reason }
+      observation = { kind: 'unavailable', ...target, checkedAt: Date.now(), reason, directories: [] }
     }
+    // Directory state is independent of Git availability. Registration selects candidates only;
+    // native paths are retained even if their directories have disappeared.
+    const project = workspace.repoPath ?? workspace.path
+    const candidates = config.workspaces.filter(value => value.hostId === workspace.hostId &&
+      (value.id === workspace.id || (value.repoPath ?? value.path) === project)).map(value => value.path)
+    const worktrees = observation.kind === 'ready' ? observation.worktrees : []
+    const paths = [...new Set([...worktrees.map(value => value.path), ...candidates])]
+    try {
+      if (!host) throw new Error(observation.kind === 'unavailable' ? observation.reason : 'The original Host is unavailable')
+      const result = await host.run('node', ['-e',
+        'const fs=require("node:fs");process.stdout.write(JSON.stringify(JSON.parse(process.argv[1]).map(path=>{try{if(!fs.statSync(path).isDirectory())return {path,kind:"not-directory"};return {path,kind:"directory",canonicalPath:fs.realpathSync(path)}}catch(error){return error?.code==="ENOENT"||error?.code==="ENOTDIR"?{path,kind:"missing"}:{path,kind:"unavailable",reason:typeof error?.code==="string"?error.code+": "+error.message:String(error)}}})))',
+        JSON.stringify(paths)], { ...GIT_DISCOVERY_OPTIONS, env: { ...GIT_NONINTERACTIVE_ENV, NODE_OPTIONS: undefined, NODE_PATH: undefined } })
+      this.assertGit(result, 'Directory observation is unavailable')
+      const values: unknown = JSON.parse(result.stdout)
+      if (!Array.isArray(values) || values.length !== paths.length || values.some((value, index) => !value || value.path !== paths[index] ||
+        !['directory', 'missing', 'not-directory', 'unavailable'].includes(value.kind) ||
+        Object.keys(value).sort().join(',') !== (value.kind === 'directory' ? 'canonicalPath,kind,path' : value.kind === 'unavailable' ? 'kind,path,reason' : 'kind,path') ||
+        (value.kind === 'directory' ? typeof value.canonicalPath !== 'string' || value.canonicalPath.includes('\0') ||
+          !(value.canonicalPath.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(value.canonicalPath) || value.canonicalPath.startsWith('\\\\')) : Object.hasOwn(value, 'canonicalPath')) ||
+        (value.kind === 'unavailable' ? typeof value.reason !== 'string' || !value.reason || value.reason.includes('\0') : Object.hasOwn(value, 'reason')))) {
+        throw new Error('Invalid directory observation')
+      }
+      observation.directories = values as GitDirectoryObservation[]
+      const directories = new Map(observation.directories.map(value => [value.path, value]))
+      const byCanonical = new Map<string, GitWorktree>(), ambiguous = new Set<string>()
+      for (const entry of worktrees) {
+        const directory = directories.get(entry.path)
+        if (directory?.kind !== 'directory') continue
+        if (byCanonical.has(directory.canonicalPath)) ambiguous.add(directory.canonicalPath)
+        byCanonical.set(directory.canonicalPath, entry)
+      }
+      if (observation.kind === 'ready' && ambiguous.size) {
+        observation.warnings.push('Directory alias relationships are ambiguous. Native worktree paths remain readable; refresh to confirm their relationships.')
+      }
+      for (const directory of observation.directories) {
+        if (directory.kind !== 'directory' || ambiguous.has(directory.canonicalPath)) continue
+        const match = byCanonical.get(directory.canonicalPath)
+        if (match && directory.path !== match.path) match.aliases.push(directory.path)
+      }
+    } catch (error) {
+      const reason = gitFailureError({ exitCode: 1, stdout: '', stderr: error instanceof Error ? error.message : String(error) }, 'Directory observation failed').message.replaceAll('\0', '�')
+      observation.directories = paths.map(path => ({ path, kind: 'unavailable', reason }))
+      if (observation.kind === 'ready') observation.warnings.push(`Directory observations unavailable. Canonical Git worktrees remain readable. Refresh to retry: ${reason}`)
+    }
+    return { ...observation, checkedAt: Date.now() }
   }
 
   async isRegistered(workspace: WorkspaceRecord): Promise<boolean> {
