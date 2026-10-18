@@ -11,6 +11,7 @@ import { collaborationAgents, collaborationSubjectKey, type CollaborationAgent, 
 import { collaborationAgentNode } from '../src/renderer/src/lib/collaboration-presentation'
 import * as engine from '../src/renderer/src/lib/collaboration-layout-engine'
 import type { CollaborationPulse } from '../src/renderer/src/lib/use-collaboration-reading'
+import { agentInformationPreview } from '../src/renderer/src/lib/agent-information-preview'
 const captured = vi.hoisted(() => ({ nodes: [] as Node[], store: null as ReturnType<typeof useStoreApi> | null, cardRenders: [] as string[], moveStart: undefined as ReactFlowProps['onMoveStart'] }))
 vi.mock('../src/renderer/src/components/FocusContextCardBody', async importOriginal => {
   const actual = await importOriginal<typeof import('../src/renderer/src/components/FocusContextCardBody')>()
@@ -47,7 +48,7 @@ function scenario(count = 480) {
 type Scene = ReturnType<typeof scenario>
 let requests: engine.CollaborationLayoutRequest[], boxes: Map<string, engine.CollaborationLayoutBox>, paths: Map<string, engine.CollaborationPath>
 let holdResponses = false, heldResponses: { response: engine.CollaborationLayoutResponse; deliver(): void }[] = []
-function graph(scene: Scene, selection: CollaborationSelection = null, relations: readonly CollaborationRelation[] = scene.relations, pulses: readonly CollaborationPulse[] = [], agents: ReadonlyMap<string, CollaborationAgent> = scene.agents, options: Pick<ComponentProps<typeof AgentCollaborationGraph>, 'ready' | 'locate' | 'onPreviewAgent'> = {}) {
+function graph(scene: Scene, selection: CollaborationSelection = null, relations: readonly CollaborationRelation[] = scene.relations, pulses: readonly CollaborationPulse[] = [], agents: ReadonlyMap<string, CollaborationAgent> = scene.agents, options: Pick<ComponentProps<typeof AgentCollaborationGraph>, 'ready' | 'locate' | 'onPreviewAgent' | 'peeked'> = {}) {
   return <AgentCollaborationGraph agents={agents} areas={scene.areas} relations={relations} pulses={pulses} selection={selection} onSelect={select} onOpen={open} ready={false} {...options} />
 }
 async function viewport(x: number, y: number, width = 600, height = 400, zoom = 1) {
@@ -120,6 +121,22 @@ beforeEach(() => {
     }
     if (holdResponses) heldResponses.push({ response, deliver }); else deliver()
   }, signal))
+})
+
+it('overview remount never replays a retained relationship highlight as a new reading intent', async () => {
+  const scene = scenario(24); await loaded(scene)
+  const id = subject('canvas-0'), node = collaborationAgentNode('area-0', id)
+  await focusNode(node)
+  await dom.render(graph(scene, null, scene.relations, [], scene.agents, { peeked: id }))
+  const schedule = vi.spyOn(agentInformationPreview, 'schedule')
+  const box = renderedBox(node)
+  await viewport(-box.x * .25 + 20, -box.y * .25 + 20, 520, 300, .25)
+  const mark = nodeElement(node)!.querySelector<HTMLButtonElement>('.collaboration-agent__dot')!
+  expect(mark).not.toBeNull()
+  expect(schedule).not.toHaveBeenCalled()
+  await act(async () => mark.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })))
+  expect(schedule).toHaveBeenCalledTimes(1)
+  expect(requests).toHaveLength(1)
 })
 
 it('the actual Graph and original xyflow mount only visible production cards from a large Worker world', async () => {
