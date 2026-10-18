@@ -71,7 +71,7 @@ export async function captureA2aOriginalReading({ root, evidence, layout = false
     await writeFile(resolve(evidence, 'process.log'), lines.join('\n') + '\n')
     receipt.render = JSON.parse(await readFile(resolve(evidence, 'render.json')))
     assert.equal(receipt.process.exitCode, 0, JSON.stringify(receipt.render.failure)); assert.equal(receipt.process.timedOut, false)
-    assert.equal(receipt.render.passed, true); assert.equal(receipt.render.frames.length, layout ? 5 : 8)
+    assert.equal(receipt.render.passed, true); assert.equal(receipt.render.frames.length, layout ? 11 : 8)
     receipt.frames = receipt.render.frames.map(frame => ({ ...frame, path: resolve(evidence, frame.file) }))
     receipt.sourceIdentity = hash(JSON.stringify(Object.fromEntries(Object.entries(inputs).sort(([a], [b]) => a.localeCompare(b)))))
     receipt.completed = true

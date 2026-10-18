@@ -4,8 +4,8 @@ export const messageSlotMutations = ['incoming-slot-scope', 'progress-body-scope
 export function mutateMessageSlotScope(styles, name, owner) {
   assert.ok(messageSlotMutations.includes(name), 'Known slot-boundary mutation')
   const from = name === 'progress-body-scope'
-    ? ".log-turn[data-message-phase='progress'] > .conversation-progressive-body > .log-turn__body,\n.log-turn[data-message-phase='progress'] > .conversation-progressive-body > .message-disclosure > .message-disclosure__body > .log-turn__body,\n.log-turn[data-message-phase='progress'] > .log-turn__system-body > .conversation-progressive-body > .log-turn__body,\n.log-turn[data-message-phase='progress'] > .log-turn__collaboration-content > .conversation-progressive-body > .log-turn__body {"
-    : ".log-turn[data-speaker-role='system'] > .log-turn__system-body > .conversation-progressive-body > .log-turn__body {"
+    ? ".log-turn[data-message-phase='progress'] > .log-turn__body,\n.log-turn[data-message-phase='progress'] > .message-disclosure > .message-disclosure__body > .log-turn__body,\n.log-turn[data-message-phase='progress'] > .log-turn__system-body > .log-turn__body,\n.log-turn[data-message-phase='progress'] > .log-turn__collaboration-content > .log-turn__body {"
+    : ".log-turn[data-speaker-role='system'] > .log-turn__system-body > .log-turn__body {"
   const to = name === 'progress-body-scope'
     ? ".log-turn[data-message-phase='progress'] .log-turn__body {"
     : ".log-turn[data-speaker-role='system'] .log-turn__body {"
