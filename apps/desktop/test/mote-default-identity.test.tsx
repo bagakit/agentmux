@@ -55,6 +55,8 @@ it('real Desktop and Mobile automatic primary and ordinary identities share one 
   </>)
   const nodes = [...dom.container.querySelectorAll('section')].map(node => node.querySelector('svg'))
   expect(nodes).toHaveLength(4)
+  expect(dom.container.querySelectorAll('.mote-companion__rig')).toHaveLength(4)
+  expect(document.documentElement.style.getPropertyValue('--mote-companion-rig-display')).toBe('inline')
   for (const node of nodes) {
     expect(href(node)).toBe(semanticIconHref('object.mote'))
     expect(node?.getAttribute('data-mote-icon-source')).toBe('automatic')
@@ -67,8 +69,14 @@ it('real Desktop and Mobile automatic primary and ordinary identities share one 
   await act(async () => { expect(previewTheme(custom).applied).toBe(true) })
   expect([...dom.container.querySelectorAll('section')].map(node => node.querySelector('svg'))).toEqual(nodes)
   expect(symbol('object.mote').querySelector('path')?.getAttribute('d')).toBe(path)
+  expect(document.documentElement.style.getPropertyValue('--mote-companion-rig-display')).toBe('none')
+  expect(document.documentElement.style.getPropertyValue('--mote-companion-rest-display')).toBe('inline')
   expect(symbol('avatar.badge-spark').querySelector('path')?.getAttribute('d')).not.toBe(path)
   expect(useAppStore.getState().agentComposerDrafts['agent-1']).toBe('Keep my draft')
+  await act(async () => { expect(previewTheme(GRAPHITE_THEME).applied).toBe(true) })
+  expect(document.documentElement.style.getPropertyValue('--mote-companion-rig-display')).toBe('inline')
+  expect(document.documentElement.style.getPropertyValue('--mote-companion-rest-display')).toBe('none')
+  expect([...dom.container.querySelectorAll('section')].map(node => node.querySelector('svg'))).toEqual(nodes)
 })
 
 it('spark decoration keeps original Provider and node identity under bidirectional exact theme overrides', async () => {
@@ -88,6 +96,7 @@ it('spark decoration keeps original Provider and node identity under bidirection
     custom.icons = { 'object.mote': { kind: 'glyph', glyph } }
     await act(async () => { expect(previewTheme(custom).applied).toBe(true) })
     expect(symbol('object.mote').querySelector('path')?.getAttribute('d')).toBe(AUTHORED_ICON_GLYPHS[glyph][0]![1].d)
+    expect(document.documentElement.style.getPropertyValue('--mote-companion-rig-display')).toBe('none')
   }
   expect(symbol('avatar.badge-spark').querySelector('path')?.getAttribute('d')).not.toBe(path)
   expect(dom.container.querySelector('[data-avatar-badge="spark"]')).toBe(badge)
