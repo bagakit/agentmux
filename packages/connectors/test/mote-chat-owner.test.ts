@@ -112,6 +112,23 @@ it('shows a zero-allowance guest without a launch, preserves used on allocation 
   expect((await f.host.audience({ target })).people.find(p => p.creator)).toMatchObject({ actor: creator, total: null, used: 1, remaining: null })
 })
 
+it('does not write an allowance after the original management authorization is revoked during target verification', async () => {
+  const f = await fixture(0)
+  await expect(f.host.prepareIncoming(f.incoming('declined', guest))).rejects.toMatchObject({ code: 'MOTE_CHAT_QUOTA_EXHAUSTED' })
+  const person = (await f.host.audience({ target })).people[0]!
+  let authorized = true
+  f.assertTarget.mockImplementationOnce(async () => { authorized = false })
+  const assertCurrent = vi.fn(async () => { if (!authorized) throw new Error('Original management access revoked') })
+  const input = { operationId: 'revoked-allocation', target, expectedConfigurationRevision: 1, actor: guest, expectedPersonRevision: person.revision, total: 2 }
+  await expect(f.host.allocate(input, { ...context, assertCurrent })).rejects.toThrow('Original management access revoked')
+  expect(assertCurrent).toHaveBeenCalledTimes(2)
+  expect((await f.host.audience({ target })).people).toEqual([person])
+  expect((await f.host.inspect({ operationId: input.operationId })).operation).toBeNull()
+  authorized = true
+  expect((await f.host.allocate(input, { ...context, assertCurrent })).person).toMatchObject({ total: 2, used: 0 })
+  expect(f.agents.create).not.toHaveBeenCalled()
+})
+
 it('reuses at the exact interval, rolls strictly above it, keeps older reply authority and injects only the recent three same-lane Agents', async () => {
   const f = await fixture(10), first = (await f.host.prepareIncoming(f.incoming('first')))!; f.time(110)
   expect((await f.host.prepareIncoming(f.incoming('equal')))!.agentSessionId).toBe(first.agentSessionId)
