@@ -27,10 +27,10 @@ export function ConnectorHeaderLinks({ bindings, issue, checking, retainedSetup,
   const only = bindings.length === 1 ? bindings[0]! : null, name = useConnectorRoomName(only, nameVersion, visible)
   const platformCounts = new Map<string, number>()
   for (const binding of bindings) platformCounts.set(platform(binding), (platformCounts.get(platform(binding)) ?? 0) + 1)
-  const state = (binding: RoomBinding) => unconfirmed ? 'Status unknown' : binding.state === 'paused' ? 'Sharing paused' : syncEnabled === false ? 'Sync off' : syncEnabled === null ? 'Sync unknown' : 'Group connected'
+  const state = (binding: RoomBinding) => unconfirmed ? 'Status unknown' : binding.state === 'paused' ? 'Sharing paused' : syncEnabled === false ? 'Sync off' : syncEnabled === null ? 'Sync unknown' : 'Group linked'
   const summary = only ? name.label : bindings.length ? `Connections · ${bindings.length}` : 'Connections'
   const status = only ? state(only) : unconfirmed ? 'Status unknown' : ''
-  const description = (binding: RoomBinding) => `${platform(binding)} · ${state(binding)} · ${binding.externalConversationId} · ${binding.application.domain} · ${binding.application.appId} · ${binding.connectionId}`
+  const description = (binding: RoomBinding) => `${platform(binding)} · ${unconfirmed ? 'Saved link unconfirmed' : binding.state === 'paused' ? 'Sharing paused' : 'Group linked'} · Automatic sync ${syncEnabled === null ? 'unknown' : syncEnabled ? 'On' : 'Off'} · ${binding.externalConversationId} · ${binding.application.domain} · ${binding.application.appId} · ${binding.connectionId}`
   const title = only ? `${name.label}. ${description(only)}${name.issue ? '. ' + name.issue : ''}. Open Connections for group details and automatic sync settings.` :
     `${summary}. ${unconfirmed ? 'Saved group status is unconfirmed. ' : ''}${checking ? 'Checking this Agent’s saved groups. ' : ''}Connect a Lark group or open automatic sync settings.`
   return <DropdownMenu.Root onOpenChange={open => {
@@ -46,7 +46,7 @@ export function ConnectorHeaderLinks({ bindings, issue, checking, retainedSetup,
       aria-label={`Connections; ${title}`} title={title} aria-busy={checking || name.loading || undefined}
       onPointerDown={event => event.stopPropagation()}>
       {only ? <PlatformIcon binding={only} /> : checking ? <LoadingIcon size={14} animation="spin" /> : <ConnectionIcon size={14} />}
-      <span>{summary}</span>{status && status !== 'Group connected' ? <small className="agent-region-header__connector-status">· {status}</small> : null}<DownIcon size={10} />
+      <span>{summary}</span>{status && status !== 'Group linked' ? <small className="agent-region-header__connector-status">· {status}</small> : null}<DownIcon size={10} />
     </DropdownMenu.Trigger>
     <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu connector-header-menu" align="end" side="bottom" sideOffset={4} collisionPadding={8}
       onCloseAutoFocus={event => { if (handingOff.current) event.preventDefault(); handingOff.current = false }}>
