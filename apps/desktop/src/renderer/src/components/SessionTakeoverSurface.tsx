@@ -40,6 +40,8 @@ export function SessionTakeoverSurface({ source, active, onClose, returnTrigger 
   const [busy, setBusy] = useState(false)
   const [issue, setIssue] = useState<string | null>(null)
   const [unconfirmed, setUnconfirmed] = useState(false)
+  const [closedRequest, setClosedRequest] = useState<string | null>(null)
+  const [previousRequest, setPreviousRequest] = useState<string | undefined>()
   const [closing, setClosing] = useState(false)
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
@@ -102,6 +104,13 @@ export function SessionTakeoverSurface({ source, active, onClose, returnTrigger 
       close(false)
       return
     }
+    if (report.outcome === 'retired') {
+      setClosedRequest(report.requestId)
+      setUnconfirmed(false)
+      setIssue('The takeover Agent was created and later closed. Your original session and work are kept. Choose another Agent to start a new takeover.')
+      return
+    }
+    setClosedRequest(null)
     setUnconfirmed(true)
     setIssue(report.issues.map(item => item.message).join('\n') || 'The creation result is unconfirmed. Your original work is kept.')
   }
@@ -112,7 +121,7 @@ export function SessionTakeoverSurface({ source, active, onClose, returnTrigger 
     // inside the workface rather than letting Chromium drop focus to BODY.
     surface.current?.querySelector<HTMLButtonElement>('[aria-label="Cancel takeover"]')?.focus({ preventScroll: true })
     setSelected(id); setBusy(true); setIssue(null)
-    try { await accept(await takeOverSession(source, id, () => mounted.current && activeRef.current)) }
+    try { await accept(await takeOverSession(source, id, () => mounted.current && activeRef.current, previousRequest)) }
     catch (error) {
       if (mounted.current) {
         setIssue(presentError(error))
@@ -129,9 +138,17 @@ export function SessionTakeoverSurface({ source, active, onClose, returnTrigger 
     try {
       const report = await inspectTakeover(source)
       if (report) await accept(report)
-      else { admitted.current = false; setUnconfirmed(false); setSelected(null); setIssue(null) }
+      else { admitted.current = false; setUnconfirmed(false); setSelected(null); setIssue(null); setClosedRequest(null); setPreviousRequest(undefined) }
     } catch (error) { if (mounted.current) setIssue(presentError(error)) }
     finally { if (mounted.current) setBusy(false) }
+  }
+  function chooseAnother() {
+    if (busy || !activeRef.current || !closedRequest) return
+    setPreviousRequest(closedRequest)
+    setClosedRequest(null)
+    admitted.current = false
+    setUnconfirmed(false); setSelected(null); setIssue(null)
+    requestAnimationFrame(() => { if (mounted.current && activeRef.current) surface.current?.querySelector<HTMLButtonElement>('.agent-pick:not(:disabled)')?.focus({ preventScroll: true }) })
   }
   const sourceExecutor = source.executorId ? config?.executors[source.executorId] : undefined
   return <section ref={surface} className="session-takeover" aria-label="Take over this work" hidden={!active} inert={closing || !active}
@@ -146,19 +163,22 @@ export function SessionTakeoverSurface({ source, active, onClose, returnTrigger 
         <span className="session-takeover__destination">Next Agent</span>
       </div>
       <header className="session-takeover__heading">
-        <div><h2>Keep the work moving.</h2><p>Choose an Agent to take over.</p></div>
+        <div><h2>Keep the work moving.</h2><p>{previousRequest ? 'Choose an Agent to take over again.' : 'Choose an Agent to take over.'}</p></div>
         <button type="button" className="icon-button session-takeover__cancel" aria-label="Cancel takeover" title="Cancel · Esc" onClick={() => close()}><ThemeActionCancelIcon size={16} /></button>
       </header>
-      <AgentExecutorPicker executors={executors} selected={selected} active={active && !closing} disabled={busy || unconfirmed}
+      <AgentExecutorPicker executors={executors} selected={selected} active={active && !closing} disabled={busy || unconfirmed || closedRequest !== null}
         onSelect={id => { void choose(id) }} />
       <div className="session-takeover__footer" aria-live="polite">
-        {busy ? <span><ThemeStatusLoadingIcon size={13} animation="spin" />{unconfirmed ? 'Checking the original request…' : 'Passing the work to your Agent…'}</span>
+        {busy ? <span><ThemeStatusLoadingIcon size={13} animation="spin" />{unconfirmed || closedRequest ? 'Checking the original request…' : 'Passing the work to your Agent…'}</span>
           : <span>Context follows automatically. Your original session stays here.</span>}
         <button type="button" className="session-takeover__back" onClick={() => close()}>Back<span aria-hidden="true">Esc</span></button>
       </div>
       {issue ? <div className="session-takeover__issue" role="status">
-        <strong>{unconfirmed ? 'Takeover is not confirmed' : 'Could not take over'}</strong><p>{issue}</p>
-        <button type="button" className="small-button" disabled={busy} onClick={() => { void check() }}><ThemeActionRefreshIcon size={12} /> Check again</button>
+        <strong>{closedRequest ? 'Takeover Agent was closed' : unconfirmed ? 'Takeover is not confirmed' : 'Could not take over'}</strong><p>{issue}</p>
+        <div className="session-takeover__issue-actions">
+          {closedRequest ? <button type="button" className="small-button" disabled={busy} onClick={chooseAnother}>Choose another Agent</button> : null}
+          <button type="button" className="small-button" disabled={busy} onClick={() => { void check() }}><ThemeActionRefreshIcon size={12} /> Check again</button>
+        </div>
       </div> : null}
     </div>
   </section>

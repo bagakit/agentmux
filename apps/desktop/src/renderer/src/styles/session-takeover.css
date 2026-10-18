@@ -25,6 +25,7 @@
 .session-takeover__issue { margin-top: 20px; padding: 14px 16px; border: 1px solid var(--line-soft); border-left: 2px solid var(--amber); border-radius: var(--radius); color: var(--text-2); background: var(--surface-1); font-size: var(--fs-meta); line-height: 1.6; }
 .session-takeover__issue strong { color: var(--text); font-weight: 600; }
 .session-takeover__issue p { margin: 4px 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.session-takeover__issue-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 @keyframes takeover-enter { from { opacity: 0; transform: translateY(10px) scale(.985); } to { opacity: 1; transform: none; } }
 @keyframes takeover-leave { to { opacity: 0; transform: translateY(4px); } }
 @media (prefers-reduced-motion: reduce) { .session-takeover, .session-takeover__content { animation: none !important; } }
