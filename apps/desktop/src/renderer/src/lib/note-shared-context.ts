@@ -13,6 +13,6 @@ export const NoteSharedContext = createContext<{
   focusedAttachments?: NoteEditorAttachments | undefined
   focusEditor(editor: Editor, attachments?: NoteEditorAttachments): void
   renderInclude(include: NoteInclude, remove: () => void, readOnly?: boolean): ReactNode
-  copyBlock(editor: Editor, position: number): Promise<void>
+  copyBlock(editor: Editor, position: number): Promise<string>
   paste(editor: Editor, event: ClipboardEvent): boolean
 } | null>(null)

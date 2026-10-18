@@ -24,8 +24,11 @@ function matchingPendingCopy(copy: NoteShareCopy): PendingNoteShare | undefined 
 }
 export function copyNoteBlock(editor: Editor, position: number, source: NoteFileTarget, read: FileReadParams): NoteShareCopy {
   let at = editor.state.doc.resolve(position)
-  // A list's first paragraph cannot be replaced by an include without its required item container.
-  for (let depth = at.depth; depth > 0; depth--) if (at.node(depth).type.name === 'listItem') { position = at.before(depth); at = editor.state.doc.resolve(position); break }
+  // A cell owns one paragraph flow; share the whole table rather than replacing
+  // that flow with an invalid include. List items similarly own their first paragraph.
+  const table = Array.from({ length: at.depth }, (_, index) => at.depth - index).find(depth => at.node(depth).type.name === 'table')
+  if (table !== undefined) { position = at.before(table); at = editor.state.doc.resolve(position) }
+  else for (let depth = at.depth; depth > 0; depth--) if (['listItem', 'taskItem'].includes(at.node(depth).type.name)) { position = at.before(depth); at = editor.state.doc.resolve(position); break }
   const node = editor.state.doc.nodeAt(position)
   if (!node || !node.isBlock) throw Error('Choose the current content block again.')
   const path = Array.from({ length: at.depth + 1 }, (_, depth) => at.index(depth))

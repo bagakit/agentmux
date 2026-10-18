@@ -52,10 +52,12 @@ function SharedScope({ children, graph, trail, owner, ...scope }: Scope & { chil
     renderInclude: (include: NoteInclude, remove: () => void, readOnly = false) => <SharedFile readOnly={readOnly} remove={remove} include={include} scope={scope} graph={graph} trail={trail} owner={owner} />,
     async copyBlock(editor: import('@tiptap/core').Editor, position: number) {
       const state = current.current
-      if (state.include) { writeNoteShareClipboard(editor.view.dom.ownerDocument, { version: 1, source: state.target, block: { path: [], fingerprint: '' }, include: state.include }, editor.getText()); return }
+      if (state.include) { writeNoteShareClipboard(editor.view.dom.ownerDocument, { version: 1, source: state.target, block: { path: [], fingerprint: '' }, include: state.include }, editor.getText()); return 'Copied shared content · paste to reuse' }
       if (!state.read) throw Error('The original Note file mapping is unconfirmed. Your content is kept; restore this file position and retry.')
       const copy = copyNoteBlock(editor, position, state.target, state.read)
       writeNoteShareClipboard(editor.view.dom.ownerDocument, copy, editor.state.doc.nodeAt(position)?.textContent ?? 'Shared Note content')
+      const type = noteNodeAtPath(editor.getJSON(), copy.block.path)?.type
+      return type === 'table' ? 'Copied whole table · paste to share' : type === 'taskItem' ? 'Copied task item · paste to share' : 'Copied · paste to share'
     },
     paste(editor: import('@tiptap/core').Editor, event: ClipboardEvent) {
       const copy = readNoteShareClipboard(event, editor.view.dom.ownerDocument)
