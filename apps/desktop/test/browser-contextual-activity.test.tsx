@@ -39,7 +39,7 @@ async function fixture() {
     try {
       expect(f.controls.flatMap(control => control.mock.calls)).toEqual([])
       expect((await f.bytes()).native.equals(before.native)).toBe(true)
-      const original = (await f.store.load()).find(session => session.agentSessionId === f.session.agentSessionId)
+      const original = (await f.store.loadMetadata()).find(session => session.agentSessionId === f.session.agentSessionId)
       expect(original).toMatchObject({ run: f.session.run, nativeHandle: f.session.nativeHandle })
     }
     finally { await f.close() }
