@@ -29,7 +29,12 @@ const aliases = ['core', 'demand', 'layout', 'identity', 'client-ui'].flatMap(na
     if (name !== 'layout' && (!target.import.startsWith('./dist/') || !target.import.endsWith('.js')))
       throw new Error(`Unmapped ${name} Source export: ${subpath}`)
     const specifier = '@agentmux/' + name + (subpath === '.' ? '' : subpath.slice(1))
-    const source = target.import.replace('./dist/', name === 'core' || name === 'identity' ? './src/' : './').replace(/\.js$/, '.ts')
+    if (name === 'identity' && subpath === './runtime-source') return {
+      find: /^@agentmux\/identity\/runtime-source$/, replacement: specifier,
+      customResolver() { throw new Error('Generated identity runtime source requires a build-qualified consumer fixture') }
+    }
+    const source = name === 'identity' && subpath === './runtime' ? './src/runtime-entry.ts'
+      : target.import.replace('./dist/', name === 'core' || name === 'identity' ? './src/' : './').replace(/\.js$/, '.ts')
     const replacement = resolve(directory, source)
     if (!existsSync(replacement)) throw new Error(`Missing current Source for ${specifier}: ${replacement}`)
     return { find: new RegExp('^' + specifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'), replacement }

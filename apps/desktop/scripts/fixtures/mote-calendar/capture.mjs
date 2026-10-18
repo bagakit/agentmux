@@ -66,16 +66,22 @@ try {
       return { loader: 'js', contents: `export default class OriginalMonacoWorker extends Worker {constructor(){super(URL.createObjectURL(new Blob([${JSON.stringify(output.outputFiles[0].text)}],{type:'text/javascript'})))}}` }
     })
   } }
+  const generatedIdentity = { name: 'generated-identity-source-boundary', setup(plugin) {
+    plugin.onResolve({ filter: /^@agentmux\/identity\/runtime-source$/ }, () => {
+      throw new Error('Generated identity runtime source requires a build-qualified consumer fixture')
+    })
+  } }
   for (const name of ['core', 'layout', 'demand', 'identity']) {
     const folder = path.join(root, 'packages', name), manifest = JSON.parse((await readBound(path.join(folder, 'package.json'))).toString('utf8'))
     for (const [subpath, target] of Object.entries(manifest.exports)) {
-      if (subpath.includes('*')) continue
-      const source = target.import.replace('./dist/', ['core', 'identity'].includes(name) ? './src/' : './').replace(/\.js$/, '.ts')
+      if (subpath.includes('*') || name === 'identity' && subpath === './runtime-source') continue
+      const source = name === 'identity' && subpath === './runtime' ? './src/runtime-entry.ts'
+        : target.import.replace('./dist/', ['core', 'identity'].includes(name) ? './src/' : './').replace(/\.js$/, '.ts')
       alias['@agentmux/' + name + (subpath === '.' ? '' : subpath.slice(1))] = path.join(folder, source)
     }
   }
   const built = await build({ absWorkingDir: root, entryPoints: [path.join(fixture, 'entry.tsx')], outdir: compiled, bundle: true,
-    format: 'esm', platform: 'browser', conditions: ['browser', 'production'], target: 'esnext', jsx: 'automatic', logLevel: 'silent', metafile: true, alias, plugins: [clientSources, workers, captureInputs],
+    format: 'esm', platform: 'browser', conditions: ['browser', 'production'], target: 'esnext', jsx: 'automatic', logLevel: 'silent', metafile: true, alias, plugins: [generatedIdentity, clientSources, workers, captureInputs],
     loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' },
     define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
   const inputs = Object.keys({ ...built.metafile.inputs, ...workerInputs }).filter(file => !/^original-(worker|url|raw):/.test(file))
