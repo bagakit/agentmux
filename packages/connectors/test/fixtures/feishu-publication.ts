@@ -4,6 +4,17 @@ import { feishuConfig, botOpenId } from './feishu.js'
 
 export type FeishuHttpCall = { method: string; path: string; query: Record<string, string>; body: string }
 export type FeishuHttpResponse = { status: number; body: unknown }
+// The native message reading format is not the authored card JSON. Retain the
+// original in the fixture so only an explicit original-card GET can return it.
+function receivedMessage(message: Record<string, unknown>): Record<string, unknown> {
+  if (message.msg_type !== 'interactive' || !message.body) return message
+  const card = JSON.parse((message.body as { content: string }).content)
+  const elements = (card.elements ?? card.body?.elements ?? []) as Array<{ tag: string; text?: { content?: string }; content?: string }>
+  return { ...message, body: { content: JSON.stringify({ title: card.header?.title?.content ?? '', elements: elements.flatMap(element => {
+    const text = element.tag === 'div' ? element.text?.content : element.tag === 'markdown' ? element.content : undefined
+    return text === undefined ? [] : [[{ tag: 'text', text }]]
+  }) }) } }
+}
 /** Actual SDK/Axios serialization reaches this loopback server; only the remote platform port is substituted. */
 export async function feishuPublicationHttp(override?: (call: FeishuHttpCall) => FeishuHttpResponse | undefined) {
   const calls: FeishuHttpCall[] = [], origins: string[] = [], records = new Map<string, Record<string, unknown>>(), uuids = new Map<string, string>()
@@ -20,7 +31,7 @@ export async function feishuPublicationHttp(override?: (call: FeishuHttpCall) =>
       else if (call.path.endsWith('/callback/ws/endpoint')) result = { status: 200, body: { code: 0, data: { URL: 'wss://msg-frontier.feishu.cn/ws/v2?device_id=original&service_id=1', ClientConfig: { PingInterval: 30, ReconnectCount: 0, ReconnectInterval: 1, ReconnectNonce: 0 } } } }
       else {
         const id = decodeURIComponent(call.path.split('/').at(-1)!), original = records.get(id)
-        if (call.method === 'GET') result = original ? { status: 200, body: { code: 0, data: { items: [original] } } } : { status: 404, body: { code: 230050 } }
+        if (call.method === 'GET') result = original ? { status: 200, body: { code: 0, data: { items: [call.query.card_msg_content_type === 'user_card_content' ? original : receivedMessage(original)] } } } : { status: 404, body: { code: 230050 } }
         else if (call.method === 'DELETE') {
           if (original) { records.set(id, { ...original, deleted: true, body: undefined }); result = { status: 200, body: { code: 0, data: {} } } }
           else result = { status: 404, body: { code: 230050 } }
@@ -30,17 +41,17 @@ export async function feishuPublicationHttp(override?: (call: FeishuHttpCall) =>
           const native = interactive ? content : { title: content.zh_cn.title, content: content.zh_cn.content.map((paragraph: Array<{ tag: string; text: string }>) => paragraph.map(node => ({ tag: node.tag, text: node.text, style: [] }))) }
           if (call.method === 'POST') {
             const known = uuids.get(body.uuid)
-            if (known) result = { status: 200, body: { code: 0, data: records.get(known) } }
+            if (known) result = { status: 200, body: { code: 0, data: receivedMessage(records.get(known)!) } }
             else {
               const messageId = 'platform-message-' + ++next
               const message = { message_id: messageId, chat_id: body.receive_id, thread_id: 'original-platform-thread', msg_type: body.msg_type, deleted: false,
                 sender: { sender_type: 'app', id_type: 'app_id', id: feishuConfig.application.appId }, body: { content: JSON.stringify(native) } }
-              records.set(messageId, message); uuids.set(body.uuid, messageId); result = { status: 200, body: { code: 0, data: message } }
+              records.set(messageId, message); uuids.set(body.uuid, messageId); result = { status: 200, body: { code: 0, data: receivedMessage(message) } }
             }
           } else if ((call.method === 'PUT' || call.method === 'PATCH') && original) {
             const updated: Record<string, unknown> = { ...original, body: { content: JSON.stringify(native) } }; records.set(id, updated)
             const { thread_id: _threadId, ...acknowledged } = updated
-            result = { status: 200, body: { code: 0, data: acknowledged } }
+            result = { status: 200, body: { code: 0, data: receivedMessage(acknowledged) } }
           } else result = { status: 404, body: { code: 230050 } }
         }
       }

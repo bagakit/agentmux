@@ -19,6 +19,7 @@ async function fixture(override?: (call: FeishuHttpCall) => FeishuHttpResponse |
 
 it('actual SDK and Axios send the exact frozen native card bytes with a stable original operation key', async () => {
   const f = await fixture(), original = operation(), prepared = f.publisher.prepare(original)
+  const nativeResponses = vi.spyOn(f.remote.http, 'request')
   expect(f.publisher.addressing).toBe('group'); expect(prepared.request.path).toBe('/open-apis/im/v1/messages')
   expect(f.publisher.prepare(original)).toEqual(prepared)
   const body = JSON.parse(prepared.request.body!), node = JSON.parse(body.content).elements[0]
@@ -26,6 +27,11 @@ it('actual SDK and Axios send the exact frozen native card bytes with a stable o
   expect(node).toEqual({ tag: 'div', text: { tag: 'plain_text', content: original.payload.text } })
   const sent = await f.publisher.dispatch(prepared, original.target, 'fixture-credential', new AbortController().signal)
   expect(sent).toEqual({ state: 'confirmed', mapping: { messageId: 'platform-message-1', threadId: 'original-platform-thread' } })
+  const create = nativeResponses.mock.calls.findIndex(([request]) => request.url?.endsWith('/open-apis/im/v1/messages'))
+  expect(create).toBeGreaterThanOrEqual(0)
+  const acknowledged = await nativeResponses.mock.results[create]!.value as { data: { body: { content: string } } }
+  expect(acknowledged.data.body.content).not.toBe(body.content)
+  expect(JSON.parse(acknowledged.data.body.content)).toMatchObject({ title: 'Conversation message', elements: [[{ tag: 'text', text: original.payload.text }]] })
   expect(f.remote.messageCalls()[0]).toMatchObject({ method: 'POST', query: { receive_id_type: 'chat_id' }, body: prepared.request.body })
   const next = f.publisher.prepare(operation({ operationId: 'another-original-operation' }))
   expect(JSON.parse(next.request.body!).uuid).not.toBe(body.uuid)
@@ -53,6 +59,7 @@ it('updates, inspects and withdraws the exact original mapping when successful A
   expect(await f.publisher.dispatch(prepared, original.target, 'fixture-credential', signal, created.mapping)).toEqual(created)
   expect(f.remote.messageCalls()[1]!.body).toBe(prepared.request.body)
   expect(await f.publisher.inspect(prepared, original.target, 'fixture-credential', signal, created.mapping)).toEqual(created)
+  expect(f.remote.messageCalls().find(call => call.method === 'GET')!.query).toEqual({ user_id_type: 'open_id', card_msg_content_type: 'user_card_content' })
   const withdrawal = f.publisher.prepare({ ...update, effect: 'withdraw' })
   expect(await f.publisher.dispatch(withdrawal, original.target, 'fixture-credential', signal, created.mapping)).toEqual(created)
   expect(await f.publisher.inspect(withdrawal, original.target, 'fixture-credential', signal, created.mapping)).toEqual(created)
@@ -67,7 +74,11 @@ it.each([
   [400, { code: 230027 }, { state: 'not-applied', reason: 'platform-rejected' }],
   [500, { code: 0 }, { state: 'unknown', reason: 'platform-unavailable' }],
   [200, { code: 0, data: {} }, { state: 'unknown', reason: 'effect-unconfirmed' }],
-  [200, { code: 0, data: { message_id: 'foreign', chat_id: 'another-room' } }, { state: 'unknown', reason: 'effect-unconfirmed' }]
+  [200, { code: 0, data: { message_id: 'foreign', chat_id: 'another-room' } }, { state: 'unknown', reason: 'effect-unconfirmed' }],
+  [200, { data: { message_id: 'platform-message', chat_id: 'original-room' } }, { state: 'unknown', reason: 'effect-unconfirmed' }],
+  [200, { code: 0, data: { message_id: '', chat_id: 'original-room' } }, { state: 'unknown', reason: 'effect-unconfirmed' }],
+  [200, { code: 0, data: { message_id: 'platform-message', chat_id: 'original-room', sender: { sender_type: 'app', id_type: 'app_id', id: 'another-application' } } }, { state: 'unknown', reason: 'effect-unconfirmed' }],
+  [200, { code: 0, data: { message_id: 'platform-message', chat_id: 'original-room', msg_type: 'text' } }, { state: 'unknown', reason: 'effect-unconfirmed' }]
 ] as const)('maps original machine HTTP/API outcomes without guessing or fallback: %s %j', async (status, body, expected) => {
   const f = await fixture(call => call.path === '/open-apis/im/v1/messages' ? { status, body } : undefined), original = operation()
   expect(await f.publisher.dispatch(f.publisher.prepare(original), original.target, 'fixture-credential', new AbortController().signal)).toEqual(expected)
