@@ -67,7 +67,8 @@ async function readGroup(owner: ConnectionPort, target: GroupTarget, window: Gro
       scope: relation ? current ? 'current-binding' as const : 'other-binding' as const : 'group-event' as const, recording,
       inputOperationId: ingress.input?.operationId ?? null, coreStatus: receipt?.status ?? interaction?.delivery ?? null,
       coreObservation: inspected.issue || !valid ? 'unavailable' as const : inspected.value!.observation,
-      nativeAdoption: interaction?.nativeAdoption ?? null }
+      nativeAdoption: interaction?.nativeAdoption ?? null,
+      ...(valid && current && inspected.value?.context ? { context: inspected.value.context } : {}) }
   }))
   const scopedOutgoing = outgoing.value && outgoing.value.deliveries.every(delivery => deliveryMatches(delivery, target))
   return { target: { ...target }, window: { ...(window.after ? { after: window.after } : {}), ...(window.afterContent ? { afterContent: window.afterContent } : {}), ...(window.beforeIngressId ? { beforeIngressId: window.beforeIngressId } : {}) }, limit: groupWindowLimit,
@@ -140,7 +141,7 @@ export function formatGroupDiagnosis(report: GroupDiagnosis) {
   if (input) {
     lines.push(`Incoming group window before: ${input.beforeIngressId ?? 'latest'} · records ${input.rows.length} · has next ${input.next !== null}`, 'Incoming platform acknowledgement: not recorded by this read API.')
     if (!input.rows.length) lines.push('No intake in this exact group window; this is not a complete-history or platform-receipt claim.')
-    for (const i of input.rows) lines.push(`Incoming ${i.ingressId}: ${i.kind} · receiver ${i.sourceConnectionId} · target connection ${i.targetConnectionId ?? 'unclaimed'} · intake ${i.state} · code ${i.code ?? (i.codeRecorded ? 'recorded code withheld' : 'unrecorded')} · scope ${i.scope} · original binding ${i.bindingId ?? 'unclaimed'} / ${i.bindingRevision ?? 'unclaimed'} · conversation record ${i.recording?.state ?? 'not-applicable'}${i.recording?.code ? ' / ' + i.recording.code : ''} · Core operation ${i.inputOperationId ?? 'not-started'} · Core input ${i.coreStatus ?? (i.inputOperationId ? 'unconfirmed' : 'not-started')} · waiting ${i.waiting ? i.waiting.phase + ' / ' + i.waiting.reason + ' / ' + i.waiting.wake : 'unrecorded'} · read ${i.coreObservation} · native adoption ${i.nativeAdoption ?? 'not-recorded'}`)
+    for (const i of input.rows) lines.push(`Incoming ${i.ingressId}: ${i.kind} · receiver ${i.sourceConnectionId} · target connection ${i.targetConnectionId ?? 'unclaimed'} · intake ${i.state} · code ${i.code ?? (i.codeRecorded ? 'recorded code withheld' : 'unrecorded')} · scope ${i.scope} · original binding ${i.bindingId ?? 'unclaimed'} / ${i.bindingRevision ?? 'unclaimed'} · conversation record ${i.recording?.state ?? 'not-applicable'}${i.recording?.code ? ' / ' + i.recording.code : ''} · Core operation ${i.inputOperationId ?? 'not-started'} · Core input ${i.coreStatus ?? (i.inputOperationId ? 'unconfirmed' : 'not-started')} · waiting ${i.waiting ? i.waiting.phase + ' / ' + i.waiting.reason + ' / ' + i.waiting.wake : 'unrecorded'} · read ${i.coreObservation} · native adoption ${i.nativeAdoption ?? 'not-recorded'}${i.context ? ` · quoted context ${i.context.coverage} / ${i.context.quotedMessages} messages / ${i.context.gapCount} gaps · confirmed position ${i.context.positionMessageId ?? 'unestablished'} · context read ${i.context.observation}` : ''}`)
   }
   lines.push('Core terminal-confirmed/bytes-accepted means ordered input bytes, not Native acceptance. Observing or copying never retries a message or input.')
   return lines.join('\n')
