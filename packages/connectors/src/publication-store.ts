@@ -33,6 +33,7 @@ export type BindingLifecyclePayload = {
 export type PublicationPayload = PermissionPublicationPayload | QuestionPublicationPayload | BindingLifecyclePayload | ImagePublicationPayload | FilePublicationPayload | {
   kind: 'speech'
   text: string
+  inputSubmission?: import('@agentmux/core').AgentInputSubmissionObservation
   phase?: 'progress' | 'final'
   questions?: NonNullable<AgentSessionHistoryItem['questionRequest']>['questions']
   relay?: NonNullable<ConnectionDelivery['relay']>
