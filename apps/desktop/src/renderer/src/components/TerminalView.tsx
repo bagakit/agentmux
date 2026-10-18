@@ -1752,7 +1752,7 @@ export function TerminalView({
       incidents?.begin(refresh ? 'refresh-requested' : 'attach-requested')
       // Freeze the old state before refreshSession or any output connection replacement runs.
       const refreshOccurrence = refresh ? incidents?.capture('terminal-refresh', 'refresh-requested', undefined,
-        automatic ? initialFailureOccurrence : null) : undefined
+        automatic ? initialFailureOccurrence : undefined) : undefined
       const preserve = refresh && readyForLiveOutput
       let applyingReplay = false
       let readingMarker: ReturnType<Terminal['registerMarker']> | undefined
