@@ -10,7 +10,7 @@ import { readNoteBlockProvenance, type NoteBlockAuthorship, type NoteBlockProven
 import { useModalOverlayContainer } from './Modal.js'
 
 type AgentNames = Readonly<Record<string, string>>
-type OpenAuthor = { anchor: HTMLButtonElement; provenance: NoteBlockProvenance | null; reference: boolean }
+type OpenAuthor = { anchor: HTMLButtonElement; provenance: NoteBlockProvenance | null; reference: boolean; item: boolean }
 const EMPTY_NAMES: AgentNames = {}
 const authorsKey = new PluginKey<DecorationSet>('noteBlockAuthors')
 const authorName = (entry: NoteBlockAuthorship | null | undefined, names: AgentNames) => !entry ? 'Author unconfirmed'
@@ -26,6 +26,7 @@ export function NoteBlockAuthors({ editor, agentNames = EMPTY_NAMES }: { editor:
     if (!editor || editor.isDestroyed) return
     const decorate = (doc: typeof editor.state.doc) => {
       const decorations: Decoration[] = []
+      const widgets = new Map<number, { key: string; human: boolean; create: (document: Document) => HTMLButtonElement }[]>()
       doc.descendants((node, position) => {
         if (!NOTE_BLOCK_TYPES.includes(node.type.name as typeof NOTE_BLOCK_TYPES[number]) || !node.attrs.blockId) return
         const provenance = readNoteBlockProvenance(node.attrs.provenance)
@@ -34,21 +35,40 @@ export function NoteBlockAuthors({ editor, agentNames = EMPTY_NAMES }: { editor:
         const unknown = !provenance?.created || !provenance?.lastEdited
         const human = !unknown && provenance?.created?.actor.kind !== 'agent' && provenance?.lastEdited?.actor.kind !== 'agent'
         const reference = node.type.name === 'noteInclude' || node.type.name === 'blockReference'
+        const item = node.type.name === 'taskItem' || node.type.name === 'listItem'
         const afterBlock = ['codeBlock', 'table', 'noteRawBlock'].includes(node.type.name)
-        decorations.push(Decoration.widget(position + node.nodeSize - (node.isLeaf || afterBlock ? 0 : 1), view => {
-          const button = view.dom.ownerDocument.createElement('button')
+        // An item's structure/checked state has its own author. Keep that exact entry
+        // beside its first paragraph, rather than adding a line after its nested list.
+        const anchor = item && node.firstChild?.type.name === 'paragraph' ? position + node.firstChild.nodeSize
+          : position + node.nodeSize - (node.isLeaf || afterBlock ? 0 : 1)
+        const entries = widgets.get(anchor) ?? []
+        entries.push({ key: JSON.stringify([node.attrs.blockId, provenance, label, reference, item]), human, create: document => {
+          const button = document.createElement('button')
           button.type = 'button'; button.contentEditable = 'false'; button.className = 'note-block-author nodrag nopan'
           button.dataset.authorBlock = node.attrs.blockId
+          if (item) button.dataset.authorScope = 'item'
           if (afterBlock) button.dataset.authorPlacement = 'block-end'
           if (human) button.dataset.humanOnly = ''
-          button.textContent = unknown && entry?.actor.kind !== 'agent' ? 'Author unconfirmed' : label
-          button.setAttribute('aria-label', `${reference ? 'Reference' : 'Block'} authors: ${label}${unknown && entry ? ' · some attribution is unconfirmed' : ''}`)
+          button.textContent = `${item ? 'Item · ' : ''}${unknown && entry?.actor.kind !== 'agent' ? 'Author unconfirmed' : label}`
+          button.setAttribute('aria-label', `${item ? 'Item' : reference ? 'Reference' : 'Block'} authors: ${label}${unknown && entry ? ' · some attribution is unconfirmed' : ''}`)
           button.setAttribute('aria-haspopup', 'dialog'); button.setAttribute('aria-expanded', 'false')
           button.addEventListener('mousedown', event => event.preventDefault())
-          button.addEventListener('click', event => { event.stopPropagation(); open({ anchor: button, provenance, reference }) })
+          button.addEventListener('click', event => { event.stopPropagation(); open({ anchor: button, provenance, reference, item }) })
           return button
-        }, { key: JSON.stringify([node.attrs.blockId, provenance, label, reference]), side: -1, marks: [], stopEvent: () => true, ignoreSelection: true }))
+        } })
+        widgets.set(anchor, entries)
       })
+      for (const [position, entries] of widgets) decorations.push(Decoration.widget(position, view => {
+        const document = view.dom.ownerDocument
+        if (entries.length === 1) return entries[0]!.create(document)
+        const group = document.createElement('span')
+        group.className = 'note-block-author-group'; group.contentEditable = 'false'
+        if (entries.every(entry => entry.human)) group.dataset.humanOnly = ''
+        // Visible Agent/unknown labels precede the non-flow human controls, so
+        // revealing a person's entry cannot cover another author's label.
+        for (const entry of [...entries].sort((a, b) => Number(a.human) - Number(b.human))) group.append(entry.create(document))
+        return group
+      }, { key: JSON.stringify(entries.map(entry => entry.key)), side: -1, marks: [], stopEvent: () => true, ignoreSelection: true }))
       return DecorationSet.create(doc, decorations)
     }
     editor.registerPlugin(new Plugin<DecorationSet>({ key: authorsKey,
@@ -77,8 +97,8 @@ export function NoteBlockAuthors({ editor, agentNames = EMPTY_NAMES }: { editor:
   const close = (restoreFocus = false) => { if (restoreFocus) opened?.anchor.focus({ preventScroll: true }); open(null) }
   return opened && container ? createPortal(<DismissableLayer asChild onEscapeKeyDown={event => { event.preventDefault(); close(true) }} onPointerDownOutside={() => close()} onFocusOutside={() => close()}>
     <div ref={panel} id={id} role="dialog" aria-label="Block authors" tabIndex={-1} className="note-authorship" style={{ visibility: 'hidden' }}>
-      <header><strong>{opened.reference ? 'Reference authors' : 'Block authors'}</strong><button type="button" aria-label="Close block authors" onClick={() => close(true)}>×</button></header>
-      <p>{opened.reference ? 'Recorded for this saved reference occurrence.' : 'Recorded for the saved content.'}</p>
+      <header><strong>{opened.item ? 'Item authors' : opened.reference ? 'Reference authors' : 'Block authors'}</strong><button type="button" aria-label="Close block authors" onClick={() => close(true)}>×</button></header>
+      <p>{opened.item ? 'Recorded for this saved list item, including its structure and checked state.' : opened.reference ? 'Recorded for this saved reference occurrence.' : 'Recorded for the saved content.'}</p>
       <dl>{(['created', 'lastEdited'] as const).map(kind => {
         const entry = opened.provenance?.[kind]
         return <div key={kind}><dt>{kind === 'created' ? 'Created by' : 'Last edited by'}</dt><dd>

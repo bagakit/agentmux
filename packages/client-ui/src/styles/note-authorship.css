@@ -1,8 +1,11 @@
 .note-block-author { display: inline-block; max-width: min(160px, 100%); margin-inline-start: 7px; padding: 0 3px; border: 0; border-radius: 3px; background: transparent; color: var(--text-3); font: 10px/1.5 var(--font-sans, sans-serif); font-weight: 400; letter-spacing: 0; vertical-align: baseline; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; user-select: none; }
 .note-block-author:hover, .note-block-author[aria-expanded="true"] { color: var(--text); background: var(--wash-1); }
 .note-block-author:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
-.note-block-author[data-human-only] { opacity: 0; }
-[data-block-id]:hover > .note-block-author, .note-block-author[data-human-only]:focus-visible, .note-block-author[aria-expanded="true"] { opacity: 1; }
+.note-block-author[data-human-only] { position: absolute; opacity: 0; }
+.note-block-author-group { display: inline-flex; align-items: baseline; max-width: 100%; vertical-align: baseline; }
+.note-block-author-group[data-human-only] { position: absolute; }
+.note-block-author-group[data-human-only] > .note-block-author { position: static; flex: none; }
+[data-block-id]:hover > .note-block-author, [data-block-id]:hover > .note-block-author-group .note-block-author, .note-block-author[data-human-only]:focus-visible, .note-block-author[aria-expanded="true"] { opacity: 1; }
 .note-authorship { position: fixed; z-index: var(--layer-popover, 180); pointer-events: auto; box-sizing: border-box; width: 292px; padding: 12px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-1); color: var(--text); box-shadow: 0 8px 28px #0002; font: 12px/1.5 var(--font-sans, sans-serif); outline: none; }
 .note-authorship header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .note-authorship header strong { font-weight: 600; }
