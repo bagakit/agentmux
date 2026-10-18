@@ -430,6 +430,7 @@ async function observeProgressRead<T>(signal: AbortSignal | undefined, read: () 
 export class RuntimeController {
   private readonly hosts = new Map<string, RuntimeHost>()
   private readonly toolkitRuns = new Map<string, (event: AgentMuxClientEvent) => void>()
+  private readonly toolkitRunObservers = new Map<string, Set<(event: AgentMuxClientEvent) => void>>()
   private readonly clients = new Set<WebContents>()
   private readonly sessionAttachmentOwners = new Map<string, SessionAttachmentOwner>()
   private readonly sessionAttachmentLeases = new Map<string, SessionAttachmentLease>()
@@ -1569,17 +1570,27 @@ export class RuntimeController {
     const hostId = 'local'
     const client = await this.connectedClient(hostId, 'runtime')
     return {
-      create: async (input, onEvent) => await this.trackHostLifecycleOperation(hostId, async () => {
+      create: async (input, onEvent, output = 'raw') => await this.trackHostLifecycleOperation(hostId, async () => {
         const run = await client.createTerminal(input)
-        this.toolkitRuns.set(terminalInputKey(hostId, run.runId), onEvent)
+        if (output === 'raw') this.toolkitRuns.set(terminalInputKey(hostId, run.runId), onEvent)
         return run
       }),
+      observe: (ref, onEvent) => {
+        const key = terminalInputKey(hostId, ref.runId)
+        let listeners = this.toolkitRunObservers.get(key)
+        if (!listeners) this.toolkitRunObservers.set(key, listeners = new Set())
+        listeners.add(onEvent)
+        return () => {
+          listeners.delete(onEvent)
+          if (!listeners.size) this.toolkitRunObservers.delete(key)
+        }
+      },
       attach: async (ref, afterByte, onEvent) => {
         if (onEvent) this.toolkitRuns.set(terminalInputKey(hostId, ref.runId), onEvent)
         return await client.attachTerminal(ref.runId, afterByte, 'raw')
       },
       replay: async (ref, afterByte) => await client.readRunReplay(ref, afterByte, 'raw'),
-      status: async ref => (await client.listRuns()).find(run => run.runId === ref.runId) ?? null,
+      status: async ref => (await client.runtimeSubject({ kind: 'terminal-run', runId: ref.runId })).run,
       release: async ref => await client.releaseRunAttachment(ref),
       stop: async ref => await client.stopTerminal(ref),
       remove: async ref => {
@@ -2847,6 +2858,14 @@ export class RuntimeController {
   private publish(hostId: string, event: AgentMuxClientEvent, connectionWarning?: RuntimeEndpointWarning): void {
     for (const observer of this.coreEventObservers.get(event.type) ?? []) observer(hostId, event)
     const ref = 'run' in event ? event.run : ('evidence' in event ? event.evidence?.run : undefined)
+    if (ref && (event.type === 'process-state' || event.type === 'run-removed')) {
+      for (const observer of this.toolkitRunObservers.get(terminalInputKey(hostId, ref.runId)) ?? []) observer(event)
+    } else if (event.type === 'connection-state') {
+      for (const [key, observers] of this.toolkitRunObservers) {
+        if (JSON.parse(key)[0] !== hostId) continue
+        for (const observer of observers) observer(event)
+      }
+    }
     const toolkit = ref ? this.toolkitRuns.get(terminalInputKey(hostId, ref.runId)) : undefined
     if (toolkit && (event.type === 'terminal-output' || event.type === 'terminal-snapshot')) { toolkit(event); return }
     if (event.type === 'terminal-output' || event.type === 'terminal-snapshot') {
