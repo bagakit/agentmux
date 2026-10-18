@@ -14,7 +14,7 @@ if (previous) { assert.equal(previous.status, 'passed'); assert.equal(previous.n
 const hash = value => createHash('sha256').update(value).digest('hex')
 const files = ['apps/desktop/src/renderer/src/components/settings/ToolkitToolEditor.tsx', 'apps/desktop/src/renderer/src/components/settings/ToolkitScriptEditor.tsx',
   'apps/desktop/src/renderer/src/lib/monaco-theme.ts', 'apps/desktop/src/renderer/src/styles/settings-toolkit.css', 'apps/desktop/test/toolkit-custom-identity.test.tsx',
-  'apps/desktop/src/main/config-owner.ts', 'apps/desktop/src/main/config-store.ts', 'apps/desktop/src/main/toolkit-config.ts',
+  'apps/desktop/src/shared/config-edit.ts', 'packages/core/src/toolkit.ts', 'apps/desktop/src/main/config-owner.ts', 'apps/desktop/src/main/config-store.ts', 'apps/desktop/src/main/toolkit-config.ts',
   'apps/desktop/src/renderer/src/components/settings/use-toolkit-drafts.ts', 'apps/desktop/src/renderer/src/components/settings/ToolkitSettingsPane.tsx',
   'apps/desktop/src/renderer/src/components/settings/ToolkitWorkingDirectoryField.tsx', 'apps/desktop/src/shared/toolkit-preferences.ts',
   'apps/desktop/scripts/fixtures/settings-overview/vitest.config.mts', 'apps/desktop/test/helpers/composer-dom-fixture.tsx', 'vitest.setup.ts',
