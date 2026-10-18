@@ -55,6 +55,11 @@ export function useComposerInputHistory({ sessionId, control, visible, readOnly,
   const userMessages = useMemo(() => userInputHistoryMessages(history.messages, native.messages,
     { hostId: control?.hostId ?? '', agentSessionId: sid }), [history.messages, native.messages, control?.hostId, sid])
   const userHistory = { ...history, messages: userMessages, loading: history.loading || native.loading }
+  // Recheck both original source-query records and their canonical membership.
+  const refresh = useCallback(() => {
+    history.refresh()
+    return native.refresh()
+  }, [history.refresh, native.refresh])
   const sourceHosts = new Set([history.sourceHostId, native.conversation?.reading?.timeline.reference?.hostId,
     ...native.messages.map(input => input.sourceHostId)].filter((host): host is string => Boolean(host)))
   const sourceHostId = sourceHosts.size === 1 ? [...sourceHosts][0] : undefined
@@ -118,5 +123,6 @@ export function useComposerInputHistory({ sessionId, control, visible, readOnly,
   }
   return { history: userHistory, localEntries: local.map((text, index) => ({ id: `local:${scope}:${index}`, text })).reverse(),
     fill, fillText, fillLocal, copy, canFill: visible && !readOnly, resourceReader,
+    nativeReading: { error: native.error, observationError: native.observationError, windowFrozen: native.windowFrozen, refresh },
     entries, messages: userMessages, sourceMessages: history.messages, inputs: native.messages, sourceHostId, setMailboxOpen, setFocused }
 }

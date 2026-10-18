@@ -300,13 +300,18 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
     conversation: hookConversation,
     hasMore,
     loadEarlier,
-    refresh,
-    error: historyError,
-    observationError,
-    windowFrozen
-  } = useSessionUserMessages(effectiveControl, { enabled: open && visible && folder === 'user' })
+    refresh: refreshStandalone,
+    error: standaloneHistoryError,
+    observationError: standaloneObservationError,
+    windowFrozen: standaloneWindowFrozen
+  } = useSessionUserMessages(effectiveControl, { enabled: !inputHistory && open && visible && folder === 'user' })
+  // Composer owns the original native window when supplied. Notices and recovery
+  // must describe that same window rather than opening an independent reader.
+  const { error: historyError, observationError, windowFrozen, refresh } = inputHistory?.nativeReading ?? {
+    error: standaloneHistoryError, observationError: standaloneObservationError, windowFrozen: standaloneWindowFrozen, refresh: refreshStandalone
+  }
 
-  const effectiveUserMessages = propUserMessages ?? hookSourceMessages
+  const effectiveUserMessages = propUserMessages ?? inputHistory?.sourceMessages ?? hookSourceMessages
 
   const mailboxSessionId = effectiveControl?.agentSessionId ?? timeline?.agentSessionId
   const inputMailboxHost = effectiveControl?.hostId ?? ''
@@ -628,16 +633,16 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
             historyResourceReader={historyResourceReader} renderContributions={renderContributions} /> : <>
             {observationError ? <SourceNotice title="Automatic native updates are unavailable" message={observationError.message} action="Refresh source" onAction={() => void refresh()} /> : null}
             {windowFrozen ? <SourceNotice title="The native source changed" message="This reading window is kept." action="Read latest records" onAction={() => void refresh()} /> : null}
+            {historyError && !historyError.message.includes('unavailable in the web preview') ? <SourceNotice title="Failed to read native conversation history" message={historyError.message} action="Retry" onAction={() => void refresh()} /> : null}
             {inputHistory ? <InputHistoryList history={inputHistory.history}
               localEntries={inputHistory.localEntries} onCopy={inputHistory.copy} {...(inputHistory.canFill !== false ? { onFill: inputHistory.fill, onFillLocal: inputHistory.fillLocal } : {})}
-              onRefresh={() => { void inputMailbox.refresh(); inputHistory.history.refresh() }}
+              onRefresh={() => { void inputMailbox.refresh(); void refresh() }}
               refreshing={inputMailbox.loading || inputHistory.history.loading}
               coverage={<>{inputMailbox.loading || inputHistory.history.loading ? 'Reading inputs…' : 'Loaded inputs'} · Partial history
                 <details className="composer-mailbox__coverage-details"><summary>Sources</summary>
                   <span>Journal: {journalRows.length} loaded; earlier coverage unconfirmed. {inputHistory.history.complete ? 'Available history checked for this read.' : 'History is a partial reading window.'}{inputHistory.history.examined ? ` Examined ${inputHistory.history.examined} history records.` : ''}</span>
                 </details></>}
               beforeRecords={renderPending()}>{renderRecorded()}</InputHistoryList> : <>
-              {historyError && !historyError.message.includes('unavailable in the web preview') ? <SourceNotice title="Failed to read native conversation history" message={historyError.message} action="Retry" onAction={() => void refresh()} /> : null}
               {renderPending()}{renderRecorded()}
               {hasMore ? <div className="composer-mailbox__boundary"><button type="button" className="composer-tool" onClick={() => void loadEarlier()}>Load earlier messages</button></div> : null}
             </>}
