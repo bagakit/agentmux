@@ -1,5 +1,5 @@
 import { AgentMuxError } from './errors.js'
-import { connectionDiagnosisIntakeCodes, connectionDiagnosisWindowLimit, type ConnectionDiagnosis, type ConnectionDiagnosisInput, type ConnectionDiagnosisReading, type ConnectionGroupDiagnosis } from './connection-diagnosis-contract.js'
+import { connectionDiagnosisIntakeCodes, connectionDiagnosisRecordingCodes, connectionDiagnosisWindowLimit, type ConnectionDiagnosis, type ConnectionDiagnosisInput, type ConnectionDiagnosisReading, type ConnectionGroupDiagnosis } from './connection-diagnosis-contract.js'
 
 function fail(): never { throw new AgentMuxError('The bounded connection diagnosis is malformed or belongs to another target.', 'INVALID_CONNECTION_DIAGNOSIS') }
 function object(value: unknown, fields: readonly string[]): Record<string, unknown> {
@@ -57,10 +57,10 @@ function group(value: unknown, request: ConnectionDiagnosisInput): ConnectionGro
     const o = object(value, ['after', 'afterContent', 'next', 'deliveries', 'observation', 'coverage'])
     if (o.after !== (request.after ?? null) || o.afterContent !== (request.afterContent ?? null)) return fail()
     return { after: nullable(o.after, text), afterContent: nullable(o.afterContent, text), next: nullable(o.next, text), deliveries: array(o.deliveries, value => {
-      const d = object(value, ['operationId', 'state', 'receipt', 'platformMessageId', 'reason', 'resourceUpload'])
+      const d = object(value, ['kind', 'operationId', 'state', 'receipt', 'platformMessageId', 'reason', 'resourceUpload'])
       const receipt = nullable(d.receipt, value => member(value, ['confirmed', 'unknown', 'not-applied'] as const))
       if (receipt !== 'confirmed' && d.platformMessageId !== null) return fail()
-      return { operationId: id(d.operationId), state: member(d.state, ['pending', 'dispatching', 'unknown', 'confirmed', 'not-applied', 'cancelled', 'superseded'] as const), receipt, platformMessageId: nullable(d.platformMessageId, text), reason: nullable(d.reason, value => member(value, deliveryReasons)), resourceUpload: nullable(d.resourceUpload, value => member(value, ['pending', 'dispatching', 'unknown', 'confirmed'] as const)) }
+      return { kind: member(d.kind, ['conversation', 'permission', 'binding-notice'] as const), operationId: id(d.operationId), state: member(d.state, ['pending', 'dispatching', 'unknown', 'confirmed', 'not-applied', 'cancelled', 'superseded'] as const), receipt, platformMessageId: nullable(d.platformMessageId, text), reason: nullable(d.reason, value => member(value, deliveryReasons)), resourceUpload: nullable(d.resourceUpload, value => member(value, ['pending', 'dispatching', 'unknown', 'confirmed'] as const)) }
     }), observation: nullable(o.observation, value => {
       const s = object(value, ['state', 'reason']); return { state: member(s.state, stageStates), ...(s.reason === undefined ? {} : { reason: member(s.reason, ['not-started', 'source-unconfirmed', 'source-gap', 'content-unconfirmed', 'storage-unconfirmed', 'adapter-unavailable', 'credential-missing', 'effect-unconfirmed'] as const) }) }
     }), coverage: nullable(o.coverage, value => {
@@ -71,11 +71,16 @@ function group(value: unknown, request: ConnectionDiagnosisInput): ConnectionGro
   const incoming = reading(p.incoming, value => {
     const page = object(value, ['beforeIngressId', 'next', 'rows']); if (page.beforeIngressId !== (request.beforeIngressId ?? null)) return fail()
     const rows = array(page.rows, value => {
-      const i = object(value, ['ingressId', 'sourceConnectionId', 'kind', 'state', 'code', 'codeRecorded', 'bindingId', 'bindingRevision', 'targetConnectionId', 'scope', 'inputOperationId', 'coreStatus', 'coreObservation', 'nativeAdoption', 'waiting'])
+      const i = object(value, ['ingressId', 'sourceConnectionId', 'kind', 'state', 'code', 'codeRecorded', 'bindingId', 'bindingRevision', 'targetConnectionId', 'scope', 'inputOperationId', 'coreStatus', 'coreObservation', 'nativeAdoption', 'waiting', 'recording'])
       const bindingId = nullable(i.bindingId, id), bindingRevision = nullable(i.bindingRevision, value => count(value, 1)), targetConnectionId = nullable(i.targetConnectionId, id), inputOperationId = nullable(i.inputOperationId, id)
       const rowScope = member(i.scope, ['current-binding', 'other-binding', 'group-event'] as const)
-      if (rowScope === 'group-event' ? bindingId !== null || bindingRevision !== null || targetConnectionId !== null || inputOperationId !== null : !bindingId || !bindingRevision || !targetConnectionId || !inputOperationId) return fail()
+      if (rowScope === 'group-event' ? bindingId !== null || bindingRevision !== null || targetConnectionId !== null || inputOperationId !== null : !bindingId || !bindingRevision || !targetConnectionId) return fail()
       if (rowScope === 'current-binding' && (bindingId !== target.bindingId || bindingRevision !== target.bindingRevision || targetConnectionId !== target.connectionId)) return fail()
+      const recording = nullable(i.recording, value => {
+        const r = object(value, ['state', 'code']), state = member(r.state, ['recorded', 'unavailable', 'refused', 'not-started'] as const)
+        if (i.kind !== 'message' || (state === 'recorded' || state === 'not-started') && r.code !== undefined || state === 'recorded' && !bindingId) return fail()
+        return { state, ...(r.code === undefined ? {} : { code: member(r.code, connectionDiagnosisRecordingCodes) }) }
+      })
       const waiting = nullable(i.waiting, value => {
         const w = object(value, ['phase', 'reason', 'wake']), phase = member(w.phase, ['runtime', 'authorization', 'observer', 'native-environment', 'input-environment', 'service'] as const)
         const reasons = { runtime: ['runtime-unavailable'], authorization: ['author-authorization-needed'], observer: ['observer-stopped'], 'native-environment': ['original-environment-unconfirmed', 'original-target-changed'], 'input-environment': ['original-input-unconfirmed', 'original-target-changed'], service: ['observation-failed'] } as const
@@ -84,8 +89,8 @@ function group(value: unknown, request: ConnectionDiagnosisInput): ConnectionGro
         return { phase, reason, wake }
       })
       const coreStatus = nullable(i.coreStatus, value => member(value, ['waiting', 'stopped', 'terminal-confirmed', 'admitted', 'not-applied', 'unknown', 'saved', 'bytes-accepted', 'hook-written', 'acp-acknowledged'] as const))
-      if (rowScope !== 'current-binding' && (coreStatus !== null || waiting !== null || i.nativeAdoption !== null)) return fail()
-      return { ingressId: id(i.ingressId), sourceConnectionId: id(i.sourceConnectionId), kind: member(i.kind, ['message', 'action'] as const), state: member(i.state, ['received', 'refused', 'claimed'] as const), code: nullable(i.code, value => member(value, connectionDiagnosisIntakeCodes)), codeRecorded: bool(i.codeRecorded), bindingId, bindingRevision, targetConnectionId, scope: rowScope, inputOperationId, coreStatus, waiting, coreObservation: member(i.coreObservation, ['not-started', 'observed', 'unavailable'] as const), nativeAdoption: nullable(i.nativeAdoption, value => member(value, ['unknown'] as const)) }
+      if ((rowScope !== 'current-binding' || inputOperationId === null) && (coreStatus !== null || waiting !== null || i.nativeAdoption !== null)) return fail()
+      return { ingressId: id(i.ingressId), sourceConnectionId: id(i.sourceConnectionId), kind: member(i.kind, ['message', 'action'] as const), state: member(i.state, ['received', 'refused', 'claimed'] as const), code: nullable(i.code, value => member(value, connectionDiagnosisIntakeCodes)), codeRecorded: bool(i.codeRecorded), bindingId, bindingRevision, targetConnectionId, scope: rowScope, inputOperationId, recording, coreStatus, waiting, coreObservation: member(i.coreObservation, ['not-started', 'observed', 'unavailable'] as const), nativeAdoption: nullable(i.nativeAdoption, value => member(value, ['unknown'] as const)) }
     })
     if (new Set(rows.map(row => row.ingressId)).size !== rows.length) return fail()
     return { beforeIngressId: nullable(page.beforeIngressId, id), next: nullable(page.next, id), rows }

@@ -2,7 +2,7 @@ import type { ConnectionDelivery } from './connection-delivery-contract.js'
 import type { ConnectionIngressRecord } from './ingress-contract.js'
 import type { RoomBinding } from './room-binding-contract.js'
 import type { ConnectionPort } from './connections-contract.js'
-import { connectionDiagnosisIntakeCodes, connectionDiagnosisWindowLimit, type ConnectionDiagnosisInput, type ConnectionDiagnosis, type ConnectionGroupDiagnosis, type ConnectionDiagnosisTarget, type ConnectionDiagnosisWindow, type ConnectionDiagnosisReading, type GroupDiagnosis } from './connection-diagnosis-contract.js'
+import { connectionDiagnosisIntakeCodes, connectionDiagnosisRecordingCodes, connectionDiagnosisWindowLimit, type ConnectionDiagnosisInput, type ConnectionDiagnosis, type ConnectionGroupDiagnosis, type ConnectionDiagnosisTarget, type ConnectionDiagnosisWindow, type ConnectionDiagnosisReading, type GroupDiagnosis } from './connection-diagnosis-contract.js'
 
 export const groupWindowLimit = connectionDiagnosisWindowLimit
 export function groupTarget(binding: RoomBinding) {
@@ -22,7 +22,8 @@ export function deliveryMatches(delivery: ConnectionDelivery, target: GroupTarge
     delivery.target.externalConversationId === target.externalConversationId && applicationMatches(delivery.target.application, target)
 }
 export function deliveryFacts(delivery: ConnectionDelivery) {
-  return { operationId: delivery.operationId, state: delivery.state, receipt: delivery.receipt?.state ?? null,
+  const kind = delivery.reference.source.kind === 'binding-operation' ? 'binding-notice' as const : delivery.reference.source.kind === 'interaction' ? 'permission' as const : 'conversation' as const
+  return { kind, operationId: delivery.operationId, state: delivery.state, receipt: delivery.receipt?.state ?? null,
     platformMessageId: delivery.receipt?.state === 'confirmed' ? delivery.receipt.mapping.messageId : null,
     reason: delivery.receipt && delivery.receipt.state !== 'confirmed' ? delivery.receipt.reason : delivery.reason ?? null,
     resourceUpload: delivery.resourceUpload?.state ?? null }
@@ -31,6 +32,7 @@ const ingressMatches = (ingress: ConnectionIngressRecord, target: GroupTarget) =
 // Original owner codes only. Arbitrary error text, body and exception properties are never diagnosis inputs.
 const intakeCodes = connectionDiagnosisIntakeCodes
 const intakeCode = (value?: string) => intakeCodes.find(code => code === value) ?? null
+const recordingCode = (value?: string) => connectionDiagnosisRecordingCodes.find(code => code === value)
 
 /** One explicit bounded local window. None of these original read ports dispatches an effect. */
 async function readGroup(owner: ConnectionPort, target: GroupTarget, window: GroupWindow = {}): Promise<ConnectionGroupDiagnosis> {
@@ -50,13 +52,19 @@ async function readGroup(owner: ConnectionPort, target: GroupTarget, window: Gro
     const observed = inspected.value?.ingress
     const valid = observed?.ingressId === original.ingressId && ingressMatches(observed, target)
     const ingress = valid ? observed : original, author = ingress.input?.author
-    const current = !!author && author.bindingId === target.bindingId && author.bindingRevision === target.bindingRevision && author.connectionId === target.connectionId && ingress.input?.hostId === target.executionHostId && ingress.input?.agentSessionId === target.agentSessionId
+    const frozen = ingress.kind !== 'action' ? ingress.group?.target : null
+    const relation = author ? { bindingId: author.bindingId, bindingRevision: author.bindingRevision, connectionId: author.connectionId, hostId: ingress.input!.hostId, agentSessionId: ingress.input!.agentSessionId } : frozen
+    const current = !!relation && relation.bindingId === target.bindingId && relation.bindingRevision === target.bindingRevision && relation.connectionId === target.connectionId && relation.hostId === target.executionHostId && relation.agentSessionId === target.agentSessionId
     const receipt = valid && current ? inspected.value?.inputReceipt : null
     const interaction = valid && current ? inspected.value?.interactionReceipt : null
     const waiting = receipt?.control.waiting
-    return { ingressId: ingress.ingressId, sourceConnectionId: ingress.connectionId, targetConnectionId: author?.connectionId ?? null, waiting: waiting ? { phase: waiting.phase, reason: waiting.reason, wake: waiting.wake } : null, kind: ingress.kind === 'action' ? 'action' as const : 'message' as const, state: ingress.state,
-      code: intakeCode(ingress.code), codeRecorded: ingress.code !== undefined, bindingId: author?.bindingId ?? null, bindingRevision: author?.bindingRevision ?? null,
-      scope: author ? current ? 'current-binding' as const : 'other-binding' as const : 'group-event' as const,
+    const recording = ingress.kind !== 'action' && ingress.group ? ingress.group.recorded ? { state: 'recorded' as const }
+      : ingress.group.recording ? { state: ingress.group.recording.state, ...(recordingCode(ingress.group.recording.code) ? { code: recordingCode(ingress.group.recording.code)! } : {}) }
+      : ingress.code === 'INGRESS_CONTENT_UNSUPPORTED' ? { state: 'refused' as const, code: 'INGRESS_CONTENT_UNSUPPORTED' as const }
+      : { state: 'not-started' as const } : null
+    return { ingressId: ingress.ingressId, sourceConnectionId: ingress.connectionId, targetConnectionId: relation?.connectionId ?? null, waiting: waiting ? { phase: waiting.phase, reason: waiting.reason, wake: waiting.wake } : null, kind: ingress.kind === 'action' ? 'action' as const : 'message' as const, state: ingress.state,
+      code: intakeCode(ingress.code), codeRecorded: ingress.code !== undefined, bindingId: relation?.bindingId ?? null, bindingRevision: relation?.bindingRevision ?? null,
+      scope: relation ? current ? 'current-binding' as const : 'other-binding' as const : 'group-event' as const, recording,
       inputOperationId: ingress.input?.operationId ?? null, coreStatus: receipt?.status ?? interaction?.delivery ?? null,
       coreObservation: inspected.issue || !valid ? 'unavailable' as const : inspected.value!.observation,
       nativeAdoption: interaction?.nativeAdoption ?? null }
@@ -123,7 +131,7 @@ export function formatGroupDiagnosis(report: GroupDiagnosis) {
   if (out) {
     lines.push(`Source observation: ${out.observation?.state ?? 'unrecorded'} · ${out.observation?.reason ?? 'no recorded reason'} (not platform readiness)`, `Delivery window after: ${out.after ?? 'start'} · content after: ${out.afterContent ?? 'start'}`, `Delivery has next: ${out.next !== null} · content has next: ${out.coverage?.nextContent !== null && out.coverage?.nextContent !== undefined}`)
     if (!out.deliveries.length) lines.push('No delivery in this reading window; this is not an empty-history or platform-availability claim.')
-    for (const d of out.deliveries) lines.push(`Outgoing ${d.operationId}: queue ${d.state} · platform receipt ${d.receipt ?? 'unrecorded'} · message ${d.platformMessageId ?? 'unrecorded'} · reason ${d.reason ?? 'unrecorded'} · resource upload ${d.resourceUpload ?? 'unrecorded'}`)
+    for (const d of out.deliveries) lines.push(`Outgoing ${d.operationId}: ${d.kind} · queue ${d.state} · platform receipt ${d.receipt ?? 'unrecorded'} · message ${d.platformMessageId ?? 'unrecorded'} · reason ${d.reason ?? 'unrecorded'} · resource upload ${d.resourceUpload ?? 'unrecorded'}`)
     lines.push(`Content coverage: ${out.coverage?.state ?? 'unrecorded'} · observed origins ${out.coverage?.originCount ?? 'unrecorded'}`)
     if (out.coverage?.omittedGapCount) lines.push(`Additional gaps in this owner page: ${out.coverage.omittedGapCount}`)
     for (const gap of out.coverage?.gaps ?? []) lines.push(`Content gap ${gap.gapId}: ${gap.reason}`)
@@ -132,7 +140,7 @@ export function formatGroupDiagnosis(report: GroupDiagnosis) {
   if (input) {
     lines.push(`Incoming group window before: ${input.beforeIngressId ?? 'latest'} · records ${input.rows.length} · has next ${input.next !== null}`, 'Incoming platform acknowledgement: not recorded by this read API.')
     if (!input.rows.length) lines.push('No intake in this exact group window; this is not a complete-history or platform-receipt claim.')
-    for (const i of input.rows) lines.push(`Incoming ${i.ingressId}: ${i.kind} · receiver ${i.sourceConnectionId} · target connection ${i.targetConnectionId ?? 'unclaimed'} · intake ${i.state} · code ${i.code ?? (i.codeRecorded ? 'recorded code withheld' : 'unrecorded')} · scope ${i.scope} · original binding ${i.bindingId ?? 'unclaimed'} / ${i.bindingRevision ?? 'unclaimed'} · Core operation ${i.inputOperationId ?? 'not-started'} · Core input ${i.coreStatus ?? (i.inputOperationId ? 'unconfirmed' : 'not-started')} · waiting ${i.waiting ? i.waiting.phase + ' / ' + i.waiting.reason + ' / ' + i.waiting.wake : 'unrecorded'} · read ${i.coreObservation} · native adoption ${i.nativeAdoption ?? 'not-recorded'}`)
+    for (const i of input.rows) lines.push(`Incoming ${i.ingressId}: ${i.kind} · receiver ${i.sourceConnectionId} · target connection ${i.targetConnectionId ?? 'unclaimed'} · intake ${i.state} · code ${i.code ?? (i.codeRecorded ? 'recorded code withheld' : 'unrecorded')} · scope ${i.scope} · original binding ${i.bindingId ?? 'unclaimed'} / ${i.bindingRevision ?? 'unclaimed'} · conversation record ${i.recording?.state ?? 'not-applicable'}${i.recording?.code ? ' / ' + i.recording.code : ''} · Core operation ${i.inputOperationId ?? 'not-started'} · Core input ${i.coreStatus ?? (i.inputOperationId ? 'unconfirmed' : 'not-started')} · waiting ${i.waiting ? i.waiting.phase + ' / ' + i.waiting.reason + ' / ' + i.waiting.wake : 'unrecorded'} · read ${i.coreObservation} · native adoption ${i.nativeAdoption ?? 'not-recorded'}`)
   }
   lines.push('Core terminal-confirmed/bytes-accepted means ordered input bytes, not Native acceptance. Observing or copying never retries a message or input.')
   return lines.join('\n')
