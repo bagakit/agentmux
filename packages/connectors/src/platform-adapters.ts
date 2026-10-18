@@ -70,7 +70,8 @@ export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] 
     ingress: {
       adapterId: 'feishu',
       verify: async (config, raw, proof) => (await feishu()).verify(config, raw, proof),
-      qualifyReply: async (config, event, raw, credential, signal) => (await feishu()).qualifyReply(config, event, raw, credential, signal)
+      qualifyReply: async (config, event, raw, credential, signal) => (await feishu()).qualifyReply(config, event, raw, credential, signal),
+      readHistory: async (...input) => (await feishu()).readHistory(...input)
     },
     transport: { start: async input => (await feishu()).transport.start(input) },
     roomDiscovery: {
@@ -94,7 +95,7 @@ export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] 
   const discordAdapter: ConnectionAdapter = {
     adapterId: DISCORD_PUBLICATION.adapterId,
     test: async (...input) => (await discord()).test(...input),
-    ingress: { adapterId: DISCORD_PUBLICATION.adapterId, verify: async (...input) => (await discord()).verify(...input), qualifyReply: async (...input) => (await discord()).qualifyReply(...input) },
+    ingress: { adapterId: DISCORD_PUBLICATION.adapterId, verify: async (...input) => (await discord()).verify(...input), qualifyReply: async (...input) => (await discord()).qualifyReply(...input), readHistory: async (...input) => (await discord()).readHistory(...input) },
     transport: { start: async input => (await discord()).transport.start(input) },
     publication: { ...DISCORD_PUBLICATION, supportedRenderVersions: [DISCORD_PUBLICATION.renderVersion], prepare: prepareDiscordPublication,
       images: { maxBytes: 16 * 1024 * 1024, accepts: () => true }, files: { maxBytes: 16 * 1024 * 1024, accepts: () => true },

@@ -131,7 +131,7 @@ export class ConnectionReceivers {
   private defer(lane: Lane, ingressId: string): void {
     setImmediate(() => {
       if (this.closed || lane.abort.signal.aborted) return
-      void this.ingress.dispatch(ingressId).then(() => { lane.dispatchFailures.delete(ingressId) }, () => { if (!lane.abort.signal.aborted) lane.dispatchFailures.add(ingressId) })
+      void this.ingress.dispatch(ingressId, lane.abort.signal).then(() => { lane.dispatchFailures.delete(ingressId) }, () => { if (!lane.abort.signal.aborted) lane.dispatchFailures.add(ingressId) })
     }).unref()
   }
   observation(connectionId: string, revision: number): ReceiverObservation | null {

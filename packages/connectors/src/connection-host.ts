@@ -366,7 +366,8 @@ export class ConnectionHost implements ConnectionPort {
       const ingress = adapter.ingress
       if (!ingress) return []
       return [{ adapterId: adapter.adapterId, verify: (config: ConnectionConfig, raw: string, proof?: unknown) => ingress.verify(config, raw, proof),
-        ...(ingress.qualifyReply ? { qualifyReply: (config: ConnectionConfig, event: Readonly<import('./durable-ingress.js').VerifiedIngressEvent>, raw: string, credential: string, signal: AbortSignal) => ingress.qualifyReply!(config, event, raw, credential, signal) } : {}) }]
+        ...(ingress.qualifyReply ? { qualifyReply: (config: ConnectionConfig, event: Readonly<import('./durable-ingress.js').VerifiedIngressEvent>, raw: string, credential: string, signal: AbortSignal) => ingress.qualifyReply!(config, event, raw, credential, signal) } : {}),
+        ...(ingress.readHistory ? { readHistory: (config: ConnectionConfig, input: Parameters<NonNullable<import('./durable-ingress.js').IngressAuthenticator['readHistory']>>[1], credential: string, signal: AbortSignal) => ingress.readHistory!(config, input, credential, signal) } : {}) }]
     })
   }
   async resolveCredential(connectionId: string): Promise<string | null> {

@@ -2,7 +2,7 @@ import type { ChannelQuoteRecord, ChannelQuoteResource, ChannelTranscriptQuote, 
 import type { FeishuAdapter } from './index.js'
 import { feishuIdentity } from './message.js'
 
-type Request = { externalConversationId: string; range: ChannelTranscriptQuote['range']; knownThreadIds?: string[] }
+type Request = { externalConversationId: string; range: ChannelTranscriptQuote['range']; knownThreadIds?: string[]; assertCurrent?(): void }
 type Message = { message_id?: unknown; chat_id?: unknown; msg_type?: unknown; create_time?: unknown; update_time?: unknown; deleted?: unknown; root_id?: unknown; parent_id?: unknown; thread_id?: unknown; mentions?: unknown; sender?: { id?: unknown; id_type?: unknown; sender_type?: unknown }; body?: { content?: unknown } }
 const timestamp = (value: unknown): number | undefined => typeof value === 'string' && /^\d+$/u.test(value) && Number.isSafeInteger(Number(value)) ? Number(value) : undefined
 const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && !/[\u0000-\u001f\u007f]/u.test(value)
@@ -44,7 +44,7 @@ export function createFeishuHistory(adapter: Pick<FeishuAdapter, 'withClient'>) 
       feishuIdentity(input.externalConversationId); feishuIdentity(input.range.from.messageId); feishuIdentity(input.range.throughMessageId)
       await adapter.withClient(config, credential, async client => {
         const get = async (id: string): Promise<Message> => {
-          signal.throwIfAborted()
+          input.assertCurrent?.(); signal.throwIfAborted()
           const response = await client.request<{ code?: number; data?: { items?: Message[] } }>({ url: '/open-apis/im/v1/messages/' + encodeURIComponent(id), method: 'GET', params: { card_msg_content_type: 'user_card_content' }, signal })
           const message = response.data?.items?.find(message => message.message_id === id)
           if (response.code !== 0 || !message || message.chat_id !== input.externalConversationId || timestamp(message.create_time) === undefined || message.thread_id !== undefined && !text(message.thread_id)) throw Error('Native anchor unavailable')
@@ -81,7 +81,7 @@ export function createFeishuHistory(adapter: Pick<FeishuAdapter, 'withClient'>) 
           let previousTime = Number.POSITIVE_INFINITY
           const tokens = new Set<string>(), pageEnds = new Set<string>()
           do {
-            signal.throwIfAborted()
+            input.assertCurrent?.(); signal.throwIfAborted()
             let pastThreadRange = false
             const response = await client.request<{ code?: number; data?: { items?: Message[]; has_more?: boolean; page_token?: string } }>({ url: '/open-apis/im/v1/messages', method: 'GET',
               params: { container_id_type: kind, container_id: id, sort_type: 'ByCreateTimeDesc', page_size: 50, card_msg_content_type: 'user_card_content', ...(pageToken ? { page_token: pageToken } : {}) }, signal })

@@ -74,7 +74,7 @@ export async function createDesktopConnections(options: { directory: string; enc
         if (publication) connections.delivery = publication
         if (ingress) connections.ingress = ingress
         receivers = ingress ? new ConnectionReceivers(connections, ingress) : undefined
-        if (closed) { receivers?.close(); publication?.close(); database.close(); throw new Error('Owner closed while opening.') }
+        if (closed) { receivers?.close(); ingress?.close(); publication?.close(); database.close(); throw new Error('Owner closed while opening.') }
         return live = { database, connections, secrets, ...(bindings ? { bindings } : {}), ...(rooms ? { rooms } : {}), ...(publication ? { publication } : {}), ...(ingress ? { ingress } : {}), ...(receivers ? { receivers } : {}), ...(moteChat ? { moteChat } : {}) }
       } catch {
         receivers?.close(); publication?.close()
@@ -177,6 +177,6 @@ export async function createDesktopConnections(options: { directory: string; enc
       test: async input => (await ensure()).connections.test(input)
     },
     secrets: { store: async input => (await ensure()).secrets.store(input), inspect: async operationId => (await ensure()).secrets.inspect(operationId) },
-    close: () => { closed = true; metadataListeners.clear(); live?.receivers?.close(); live?.publication?.close(); live?.connections.close(); live?.database.close(); live = undefined }
+    close: () => { closed = true; metadataListeners.clear(); live?.receivers?.close(); live?.ingress?.close(); live?.publication?.close(); live?.connections.close(); live?.database.close(); live = undefined }
   }
 }
