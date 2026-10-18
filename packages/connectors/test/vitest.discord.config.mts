@@ -20,6 +20,7 @@ export default defineConfig({ root, cacheDir: resolve(root, '.cache/discord-chan
       hash: ['publication-resource.ts', 'Object.keys(expected).some(key =>', "Object.keys(expected).filter(key => key !== 'sha256').some(key =>"],
       length: ['publication-resource.ts', 'Object.keys(expected).some(key =>', "Object.keys(expected).filter(key => key !== 'byteLength').some(key =>"],
       source: ['publication-wire.ts', "file.source !== undefined && file.source !== 'public-interaction-text' ||", 'false ||'],
+      reconnect: ['adapters/discord/index.ts', 'manager.on(WebSocketShardEvents.Closed, () => { receiver.socketFailed = true })', 'void 0'],
       resume: ['adapters/discord/index.ts', 'const saved = readSession(id)', 'const saved = null']
     } as const
     const change = changes[mutant as keyof typeof changes]

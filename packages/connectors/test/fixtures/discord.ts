@@ -8,6 +8,7 @@ export const discordBotId = '200', discordUserId = '400', discordRoomId = '300'
 export async function discordTransport() {
   const calls: Array<{ method: string; path: string; body: string; contentType: string }> = [], messages = new Map<string, Record<string, unknown>>()
   const sessions: Array<{ op: number; data: Record<string, unknown> }> = [], sockets = new Set<WebSocket>()
+  const paused = new Set<WebSocket>(); let pauseHello = false
   const uploads: Buffer[] = []
   let channelName = 'Original channel', applicationId = '100'
   const nativeComponents = (value: unknown): unknown => { let id = 0; const assign = (item: unknown): unknown => Array.isArray(item) ? item.map(assign) : item && typeof item === 'object' ? { ...(typeof (item as { type?: unknown }).type === 'number' ? { id: ++id } : {}), ...Object.fromEntries(Object.entries(item).map(([key, child]) => [key, assign(child)])) } : item; return assign(value) }
@@ -68,8 +69,9 @@ export async function discordTransport() {
   const websocket = new WebSocketServer({ server })
   let gateway = ''
   websocket.on('connection', socket => {
-    sockets.add(socket); socket.on('close', () => sockets.delete(socket))
-    socket.send(JSON.stringify({ op: 10, d: { heartbeat_interval: 60000 } }))
+    sockets.add(socket); socket.on('close', () => { sockets.delete(socket); paused.delete(socket) })
+    if (pauseHello) paused.add(socket)
+    else socket.send(JSON.stringify({ op: 10, d: { heartbeat_interval: 60000 } }))
     socket.on('message', raw => {
       const payload = JSON.parse(raw.toString())
       if (payload.op === 1) socket.send(JSON.stringify({ op: 11, d: null }))
@@ -88,6 +90,9 @@ export async function discordTransport() {
     return await fetch(origin + original.pathname + original.search, init as RequestInit)
   } }
   return { http, calls, sessions, messages, emit, uploads,
+    get pausedConnections() { return paused.size },
+    disconnect() { pauseHello = true; for (const socket of sockets) if (socket.readyState === 1) socket.close(4000) },
+    resumeGateway() { pauseHello = false; for (const socket of paused) if (socket.readyState === 1) socket.send(JSON.stringify({ op: 10, d: { heartbeat_interval: 60000 } })); paused.clear() },
     changeApplication(id: string) { applicationId = id },
     interaction(id: string, type: 3 | 5, data: Record<string, unknown>, messageId?: string, userId = discordUserId) {
       const value = { id, application_id: discordConfig.application.appId, type, version: 1, token: 'fixture-interaction-token', channel_id: discordRoomId, guild_id: '500', member: { user: { id: userId, username: 'Original person' } }, data, ...(messageId ? { message: messages.get(messageId) } : {}) }
