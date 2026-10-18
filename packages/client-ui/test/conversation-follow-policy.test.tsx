@@ -125,8 +125,12 @@ it.each(['Desktop', 'Mobile'])('%s follows an original accepted replacement thro
   const observe = f.client.observeConversation.bind(f.client)
   vi.spyOn(f.client, 'observeConversation').mockImplementation(async (...args) => { notify = args[1]; return observe(...args) })
   const changes = vi.spyOn(f.client, 'readConversationChanges')
-  if (kind === 'Desktop') for (const method of ['readAgentConversation', 'readConversationChanges', 'observeConversation', 'releaseConversationView'] as const)
-    vi.spyOn(api.conversation, method).mockImplementation(f.client[method])
+  if (kind === 'Desktop') {
+    vi.spyOn(api.conversation, 'readAgentConversation').mockImplementation(f.client.readAgentConversation)
+    vi.spyOn(api.conversation, 'readConversationChanges').mockImplementation(f.client.readConversationChanges)
+    vi.spyOn(api.conversation, 'observeConversation').mockImplementation(f.client.observeConversation)
+    vi.spyOn(api.conversation, 'releaseConversationView').mockImplementation(f.client.releaseConversationView)
+  }
   const x = mounted(kind === 'Desktop')
   const content = kind === 'Desktop'
     ? <ActivityView {...activityReadingProps({ control: { hostId: 'local', agentSessionId: 'session-original', run: { runId: 'run-original' } } })} />
