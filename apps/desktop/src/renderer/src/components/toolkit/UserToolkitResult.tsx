@@ -16,6 +16,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { SettingsNavigation } from '../SettingsNavigation'
 import { TuiToolkitResult } from './TuiToolkitResult'
 import { ToolkitIcon } from './ToolkitIcon'
+import { ToolkitActions } from './ToolkitActions'
 import type { ToolkitToolIdentity } from './use-toolkit-packages'
 import { ToolkitResultLink } from './ToolkitResultLink'
 import { ToolkitAgentCards } from './ToolkitAgentCards'
@@ -180,12 +181,16 @@ function ScriptToolkitResult({ definition, active, close, official = false, runL
   const resultStatus = unknown ? 'status.toolkit-unknown' : reading.pending && !snapshot ? 'status.toolkit-reading' : lane ? `status.toolkit-${lane.state}` as const : showDisplay ? 'status.toolkit-preparing-display' : 'status.toolkit-unloaded'
   const source = snapshot?.latestConfirmed
   const document = execution?.document
+  const refreshButton = <button type="button" className="small-button" disabled={!canEvaluate} onClick={() => void evaluate()}><ThemeActionRefreshIcon size={13} animation={displayMotion ? 'spin' : 'none'} /><span>{display?.admission ? 'Continue display request' : 'Refresh display'}</span></button>
+  const runButton = <button type="button" className="small-button" disabled={!canRun || busy || connecting} onClick={() => void primary()}>{connecting ? <ThemeActionRefreshIcon size={13} animation="spin" /> : <ThemeActionStartIcon size={13} />}<span>{connecting ? 'Generating & copying…' : runLabel ?? 'Run saved tool'}</span></button>
+  const stopButton = <button type="button" className="small-button" disabled={!canStop || busy} onClick={() => void operate('stop')}><ThemeActionStopIcon size={12} /><span>Stop</span></button>
+  const continueButton = snapshot?.state === 'unknown' && snapshot.admission?.run === null ? <button type="button" className="small-button" disabled={busy} onClick={() => void continueOriginal()}><ThemeActionStartIcon size={13} /><span>Continue original request</span></button> : null
+  const checkButton = unknown || ordinaryUnknown || reading.sourceReason ? <button type="button" className="small-button" disabled={reading.pending || busy} onClick={() => void reading.check()}><ThemeActionRefreshIcon size={13} /><span>Check status</span></button> : null
+  const primaryButton = showDisplay ? refreshButton : continueButton ?? (snapshot?.admission && canStop ? stopButton : checkButton ?? runButton)
   return <>
-    <header className="performance-header"><div className="performance-title"><ToolkitIcon icon={icon} size={17} /><div className="toolkit-result__identity"><small>{official ? 'Official toolkit' : 'Custom tool'}</small><h2>{name}</h2></div></div><button type="button" className="performance-icon-button" data-toolkit-close aria-label={`Close ${name}`} onClick={close}><ThemeActionCloseIcon size={14} /></button></header>
-    <div className="performance-observation"><span className="performance-status" data-state={unknown ? 'unknown' : lane?.state ?? 'idle'}><SemanticIcon name={resultStatus} size={5} />{reading.error ? 'Result unconfirmed' : reading.pending && !snapshot ? 'Reading result…' : lane ? showDisplay && lane.state === 'succeeded' ? display?.latestConfirmed?.document === null ? 'Display result unavailable' : 'Display checked' : stateLabel[lane.state] : showDisplay ? 'Preparing display…' : 'Result not loaded'}</span>
-      {execution ? <time dateTime={new Date('endedAt' in execution ? execution.endedAt : execution.startedAt).toISOString()}>{new Date('endedAt' in execution ? execution.endedAt : execution.startedAt).toLocaleTimeString()}</time> : null}
-    </div>
+    <header className="performance-header"><div className="performance-title"><ToolkitIcon icon={icon} size={17} /><h2>{name}</h2></div><span className="performance-status" data-state={unknown ? 'unknown' : lane?.state ?? 'idle'}><SemanticIcon name={resultStatus} size={5} />{reading.error ? 'Result unconfirmed' : reading.pending && !snapshot ? 'Reading result…' : lane ? showDisplay && lane.state === 'succeeded' ? display?.latestConfirmed?.document === null ? 'Display result unavailable' : 'Display checked' : stateLabel[lane.state] : showDisplay ? 'Preparing display…' : 'Result not loaded'}</span><button type="button" className="performance-icon-button" data-toolkit-close aria-label={`Close ${name}`} onClick={close}><ThemeActionCloseIcon size={14} /></button></header>
     <div className="performance-body toolkit-result">
+      {execution ? <time className="performance-reading-time" dateTime={new Date('endedAt' in execution ? execution.endedAt : execution.startedAt).toISOString()}>{new Date('endedAt' in execution ? execution.endedAt : execution.startedAt).toLocaleTimeString()}</time> : null}
       {scriptOpen ? <><button type="button" className="small-button" onClick={() => setScriptOpen(false)}><ThemeNavigationBackIcon size={13} /> Back to result</button><p className="settings-hint">{execution ? `Captured ${showDisplay ? 'display' : execution.action ? 'action' : 'entry'} script for this execution. ${capturedDefinition?.package ? 'Local package files are captured; external files and the environment remain live.' : 'Imports, local files and environment are not frozen.'}` : 'Current entry script · read only'}</p><Textarea className="toolkit-result__script" aria-label="Read-only toolkit script" value={capturedScript ?? ''} readOnly /><p className="settings-hint">Arguments · {capturedArgs?.length ? JSON.stringify(capturedArgs) : 'None'}</p></> : <>
         {reading.error ? <p className="toolkit-result__notice" role="status">{reading.error} The last confirmed facts are kept. Check status before starting again.</p> : null}
         {reading.sourceReason ? <p className="toolkit-result__notice" role="status">Package source unavailable: {reading.sourceReason} Captured requests and confirmed results are kept.</p> : null}
@@ -209,15 +214,15 @@ function ScriptToolkitResult({ definition, active, close, official = false, runL
       {copyNotice ? <p className="settings-hint" role="status">{copyNotice}</p> : null}
       {operationError ? <p className="toolkit-result__notice" role="alert">{operationError}</p> : null}
     </div>
-    <footer className="performance-actions toolkit-result__actions">
-      {showDisplay ? <button type="button" className="small-button" disabled={!canEvaluate} onClick={() => void evaluate()}><ThemeActionRefreshIcon size={13} animation={displayMotion ? 'spin' : 'none'} /> {display?.admission ? 'Continue display request' : 'Refresh display'}</button> : null}
-      <button type="button" className="small-button" disabled={!canRun || busy || connecting} onClick={() => void primary()}>{connecting ? <ThemeActionRefreshIcon size={13} animation="spin" /> : <ThemeActionStartIcon size={13} />} {connecting ? 'Generating & copying…' : runLabel ?? 'Run saved tool'}</button>
+    <ToolkitActions primary={primaryButton}>
+      {showDisplay && primaryButton !== refreshButton ? refreshButton : null}
+      {primaryButton !== runButton ? runButton : null}
       {primaryActionId ? <button type="button" className="small-button" disabled={!canRun || busy || connecting} onClick={() => void operate('run')}><ThemeActionRefreshIcon size={13} /> {entryLabel ?? 'Run saved tool'}</button> : null}
-      {snapshot?.admission ? <button type="button" className="small-button" disabled={!canStop || busy} onClick={() => void operate('stop')}><ThemeActionStopIcon size={12} /> Stop</button> : null}
-      {snapshot?.state === 'unknown' && snapshot.admission?.run === null ? <button type="button" className="small-button" disabled={busy} onClick={() => void continueOriginal()}><ThemeActionStartIcon size={13} /> Continue original request</button> : null}
-      {unknown || ordinaryUnknown || reading.sourceReason ? <button type="button" className="small-button" disabled={reading.pending || busy} onClick={() => void reading.check()}><ThemeActionRefreshIcon size={13} /> Check status</button> : null}
+      {snapshot?.admission && primaryButton !== stopButton ? stopButton : null}
+      {primaryButton !== continueButton ? continueButton : null}
+      {primaryButton !== checkButton ? checkButton : null}
       {capturedScript && !scriptOpen ? <button type="button" className="small-button" onClick={() => setScriptOpen(true)}><ThemeObjectSourceCodeIcon size={13} /> Script</button> : null}
-      <button type="button" className="small-button" onClick={() => { close(); navigation.openToolkit(definition.id) }}><ThemeObjectSettingsIcon size={13} /> Configure</button>
-    </footer>
+      <button type="button" className="small-button" onClick={() => { close(); navigation.openToolkit(definition.id) }}><ThemeObjectSettingsIcon size={13} /><span>Configure</span></button>
+    </ToolkitActions>
   </>
 }

@@ -8,6 +8,7 @@ import { useAppStore } from '../../store'
 import { TerminalView } from '../TerminalView'
 import { SettingsNavigation } from '../SettingsNavigation'
 import { ToolkitIcon } from './ToolkitIcon'
+import { ToolkitActions } from './ToolkitActions'
 import { ToolkitPopoverResizeHandle } from '../performance/ToolkitPopoverResizeHandle'
 import type { ToolkitToolIdentity } from './use-toolkit-packages'
 import { useToolkitScriptObservation } from './use-toolkit-script-observation'
@@ -101,11 +102,9 @@ export function TuiToolkitResult({ definition, reading, active, close, compact =
     catch { /* The latest refresh already owns its visible error. */ }
   }
   const status = reading.error ? 'Observation unavailable' : snapshot ? stateLabel[snapshot.state] : 'Reading terminal status…'
-  const actions = <>
-    {!snapshot?.admission ? <button type="button" disabled={!canStart || busy} title={snapshot?.latestConfirmed ? 'Run saved command' : 'Start'} aria-label={snapshot?.latestConfirmed ? 'Run saved command' : 'Start'} onClick={() => void operate('start')}><StartIcon size={13} /><span className="toolkit-tui__action-label">{snapshot?.latestConfirmed ? 'Run saved command' : 'Start'}</span></button> : snapshot.admission.run ? <button type="button" disabled={busy} title="Stop command" aria-label="Stop command" onClick={() => void operate('stop')}><StopIcon size={13} /><span className="toolkit-tui__action-label">Stop</span></button> : snapshot.state === 'unknown' ? <button type="button" disabled={busy} title="Continue original request" aria-label="Continue original request" onClick={() => void operate('continue')}><StartIcon size={13} /><span className="toolkit-tui__action-label">Continue original request</span></button> : null}
-    <button type="button" disabled={reading.pending || busy} title="Check status" aria-label="Check status" onClick={() => void check()}><RefreshIcon size={13} /><span className="toolkit-tui__action-label">Check status</span></button>
-    {!compact && navigation ? <button type="button" title="Configure" aria-label="Configure" onClick={() => { close?.(); navigation.openToolkit(definition.id) }}><SettingsIcon size={13} /><span className="toolkit-tui__action-label">Configure</span></button> : null}
-  </>
+  const mainAction = !snapshot?.admission ? <button type="button" disabled={!canStart || busy} title={snapshot?.latestConfirmed ? 'Run saved command' : 'Start'} aria-label={snapshot?.latestConfirmed ? 'Run saved command' : 'Start'} onClick={() => void operate('start')}><StartIcon size={13} /><span className="toolkit-tui__action-label">{snapshot?.latestConfirmed ? 'Run saved command' : 'Start'}</span></button> : snapshot.admission.run ? <button type="button" disabled={busy} title="Stop command" aria-label="Stop command" onClick={() => void operate('stop')}><StopIcon size={13} /><span className="toolkit-tui__action-label">Stop</span></button> : snapshot.state === 'unknown' ? <button type="button" disabled={busy} title="Continue original request" aria-label="Continue original request" onClick={() => void operate('continue')}><StartIcon size={13} /><span className="toolkit-tui__action-label">Continue original request</span></button> : null
+  const checkAction = <button type="button" disabled={reading.pending || busy} title="Check status" aria-label="Check status" onClick={() => void check()}><RefreshIcon size={13} /><span className="toolkit-tui__action-label">Check status</span></button>
+  const actions = <>{mainAction}{checkAction}{!compact && navigation ? <button type="button" title="Configure" aria-label="Configure" onClick={() => { close?.(); navigation.openToolkit(definition.id) }}><SettingsIcon size={13} /><span className="toolkit-tui__action-label">Configure</span></button> : null}</>
   return <section className={compact ? 'toolkit-tui toolkit-tui--compact' : 'toolkit-tui'} aria-label={compact ? 'TUI execution' : undefined}>
     {!compact ? <><ToolkitPopoverResizeHandle /><header className="toolkit-tui__header">
       <ToolkitIcon icon={icon} size={17} />
@@ -125,6 +124,6 @@ export function TuiToolkitResult({ definition, reading, active, close, compact =
       {terminal ? <TerminalView session={terminal} themeId={themeId} {...(fontSize ? { fontSize } : {})} interactiveResize={false} visible={active} autoFocus={false} {...(workspaceId ? { linkOrigin: { workspaceId } } : {})} onRefreshSession={refreshSession} onObservationRefresh={observeTerminalRefresh} /> : <p className="toolkit-tui__empty">{run ? 'Connecting to the original terminal…' : snapshot?.admission ? 'Waiting for the original launch receipt…' : 'Start the saved command to open its terminal.'}</p>}
     </div> : null}
     {snapshot?.state === 'unknown' && snapshot.admission?.run === null ? <p className="toolkit-tui__notice">{CONTINUE_TOOLKIT_NOTICE}</p> : null}
-    {compact ? <footer className="performance-actions toolkit-tui__actions">{actions}</footer> : null}
+    {compact ? <ToolkitActions primary={mainAction ?? checkAction}>{mainAction ? checkAction : null}</ToolkitActions> : null}
   </section>
 }

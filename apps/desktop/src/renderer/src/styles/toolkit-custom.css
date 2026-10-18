@@ -1,7 +1,7 @@
 .toolkit-statusbar { position: relative; display: flex; flex-direction: row-reverse; align-items: center; gap: 2px; min-width: 0; }
 .toolkit-statusbar__measure { position: absolute; top: 0; left: 0; display: flex; visibility: hidden; pointer-events: none; width: max-content; }
 .toolkit-statusbar__measure .performance-trigger { flex: none; width: max-content; }
-.toolkit-result { padding-top: var(--sp-4); }
+.toolkit-result { padding-top: var(--sp-2); }
 .toolkit-result__text { margin: 0 0 var(--sp-5); color: var(--text); font: var(--fs-meta)/1.8 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .toolkit-result__empty { margin: var(--sp-3) 0 var(--sp-6); color: var(--text-2); line-height: 1.6; }
 .toolkit-result__notice { padding: var(--sp-3) 0; margin: 0 0 var(--sp-3); color: var(--amber-text); font-size: var(--fs-meta); line-height: 1.6; }
@@ -17,7 +17,6 @@
 .toolkit-result__details dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-3) var(--sp-5); }
 .toolkit-result__details dt { color: var(--text-3); }
 .toolkit-result__details dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
-.toolkit-result__actions { flex-wrap: wrap; justify-content: flex-start; }
 .toolkit-result__script { display: block; width: 100%; height: 260px; margin-block: var(--sp-4); padding: var(--sp-4); resize: vertical; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-1); color: var(--text-2); font: var(--fs-meta)/1.8 var(--font-mono); }
 .toolkit-overflow__list { display: grid; gap: var(--sp-1); padding-top: var(--sp-2); }
 .toolkit-overflow__item { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-4); width: 100%; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); text-align: left; font: var(--fs-body)/1.5 var(--font-sans); cursor: pointer; }
@@ -26,9 +25,6 @@
 .toolkit-overflow__item > span { min-width: 0; overflow-wrap: anywhere; }
 .toolkit-overflow__back { align-self: flex-start; margin: var(--sp-4) var(--sp-6) 0; }
 .toolkit-result summary:focus-visible, .toolkit-overflow__item:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
-.toolkit-result__identity { min-width: 0; }
-.toolkit-result__identity > small { display: block; margin-bottom: var(--sp-1); color: var(--text-3); font-size: var(--fs-meta); }
-.toolkit-result__identity > h2 { overflow-wrap: anywhere; }
 
 /* Data-only documents use the same compact result surface as other Toolkits. */
 .toolkit-result__document { display: grid; gap: var(--sp-4); margin-bottom: var(--sp-4); }
@@ -45,7 +41,6 @@
 .toolkit-result__link > button { flex: none; }
 .toolkit-result__link details[open] { flex-basis: 100%; }
 .toolkit-result__url { box-sizing: border-box; width: 100%; min-width: 0; max-height: 160px; overflow: auto; margin-top: var(--sp-3); padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-2); font: var(--fs-meta)/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; cursor: text; }
-.toolkit-result__actions > .small-button:first-child { color: var(--text); }
 .toolkit-result__document + .toolkit-result__details { margin-top: var(--sp-2); }
 
 .toolkit-result__url { display: block; box-sizing: border-box; width: 100%; resize: vertical; }
