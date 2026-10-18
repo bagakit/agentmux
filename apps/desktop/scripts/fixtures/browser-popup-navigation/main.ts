@@ -16,6 +16,9 @@ assert.ok(home && out && assets, 'This fixture needs its own explicit private na
 const receipt: any = { schema: 'agentmux.browser-popup-navigation.native.v1', passed: false, pid: process.pid,
   cases: [], requests: [], windows: [], calls: [], images: [], cleanup: [], clipboardWrites: 0, runtimeConnections: 0,
   boundary: 'Actual BVM native window-open consumer, dedicated preload and original navigation Renderer. Native programmatic input is not physical OS input. No user App, Agent, Runtime or clipboard writer.' }
+// Electron's default uncaught handler opens a modal crash dialog. Retain the exact
+// exception for the negative constructor proof, then let the owning assertion clean up.
+process.on('uncaughtException', error => { (receipt.uncaughtExceptions ??= []).push({ name: error.name, message: error.message }); console.error(error) })
 const hash = (value: Uint8Array | string) => createHash('sha256').update(value).digest('hex')
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 let rootWindow: BrowserWindow | undefined, manager: BrowserViewManager | undefined, server: Server | undefined
@@ -50,10 +53,14 @@ function actualPage(window: BrowserWindow): WebContents | undefined {
   return window.contentView.children.flatMap(view => 'webContents' in view ? [(view as WebContentsView).webContents] : [])
     .find(contents => contents !== window.webContents && !contents.isDestroyed())
 }
-async function opened(parent: WebContents, code: string, name: string) {
+async function openedAction(action: () => Promise<unknown>, name: string) {
   const before = new Set(children)
-  await parent.executeJavaScript(code, true)
-  const window = await until(name + ' creates an actual native child', () => [...children].find(child => !before.has(child) && !child.isDestroyed()) || false)
+  const failuresBefore = receipt.constructionFailures?.length ?? 0
+  await action()
+  const window = await until(name + ' creates an actual native child', () => {
+    assert.equal(receipt.constructionFailures?.length ?? 0, failuresBefore, 'Actual native popup construction succeeds without the original undefined-WebContents exception')
+    return [...children].find(child => !before.has(child) && !child.isDestroyed()) || false
+  })
   const page = await until(name + ' attaches its original native page', () => actualPage(window) || false)
   await until(name + ' loads actual production navigation', async () => {
     if (window.webContents.isDestroyed()) return false
@@ -61,6 +68,69 @@ async function opened(parent: WebContents, code: string, name: string) {
   })
   assert.notEqual(page, window.webContents, 'The website stays outside the trusted navigation document')
   return { window, page }
+}
+async function opened(parent: WebContents, code: string, name: string) {
+  return openedAction(() => parent.executeJavaScript(code, true), name)
+}
+async function nativeLink(parent: WebContents, path: string, name: string, button: 'left' | 'middle' = 'left', modified = true, frame?: Electron.WebFrameMain) {
+  const target = origin + path, owner = frame ?? parent.mainFrame
+  const beforeURL = parent.getURL(), beforeDraft = await parent.executeJavaScript('document.querySelector("#original-draft")?.value ?? null')
+  const callbacksBefore = receipt.originalCallbacks?.length ?? 0, eventsBefore = receipt.nativeWindowOpens?.length ?? 0
+  const point = await owner.executeJavaScript(`(()=>{const input=[];window.__nativeInputEvents=input;for(const type of ['mousedown','mouseup','click','auxclick'])document.addEventListener(type,e=>input.push({type,target:e.target.id,button:e.button,meta:e.metaKey,control:e.ctrlKey,x:e.clientX,y:e.clientY}),{once:true,capture:true});const a=document.createElement('a');a.id='native-link';a.href=${JSON.stringify(target)};a.textContent='Open original native child';a.style.cssText='display:block;padding:16px';document.body.append(a);a.scrollIntoView();const r=a.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+  if (frame) {
+    const offset = await parent.executeJavaScript('(()=>{const r=document.querySelector("#sandbox-frame").getBoundingClientRect();return{x:r.x+2,y:r.y+2}})()')
+    point.x += offset.x; point.y += offset.y
+  }
+  const zoom = parent.getZoomFactor()
+  const cssPoint = { ...point }
+  point.x = Math.round(point.x * zoom); point.y = Math.round(point.y * zoom)
+  rootWindow!.show(); app.focus({ steal: true }); rootWindow!.focus(); parent.focus()
+  const modifiers = modified ? [process.platform === 'darwin' ? 'meta' : 'control'] : []
+  await delay(50)
+  const child = await openedAction(async () => {
+    if (frame) {
+      const attached = parent.debugger.isAttached()
+      if (!attached) parent.debugger.attach('1.3')
+      try {
+        const cdpModifiers = modified ? process.platform === 'darwin' ? 4 : 2 : 0
+        await parent.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...cssPoint })
+        await parent.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', ...cssPoint, button, clickCount: 1, modifiers: cdpModifiers })
+        await parent.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', ...cssPoint, button, clickCount: 1, modifiers: cdpModifiers })
+      } finally { if (!attached) parent.debugger.detach() }
+    } else {
+      parent.sendInputEvent({ type: 'mouseMove', ...point })
+      parent.sendInputEvent({ type: 'mouseDown', ...point, button, clickCount: 1, modifiers: [...modifiers, button === 'middle' ? 'middleButtonDown' : 'leftButtonDown'] })
+      parent.sendInputEvent({ type: 'mouseUp', ...point, button, clickCount: 1, modifiers })
+    }
+    await delay(100)
+    ;(receipt.nativeInputEvents ??= []).push({ name, point, cssPoint, zoom, inputSource: frame ? 'Chromium Input.dispatchMouseEvent for actual OOPIF' : 'Electron WebContents.sendInputEvent',
+      sourceProcessId: parent.mainFrame.processId, frameProcessId: owner.processId,
+      hit: await parent.executeJavaScript(`document.elementFromPoint(${cssPoint.x},${cssPoint.y})?.id`), input: await owner.executeJavaScript('window.__nativeInputEvents') })
+  }, name)
+  // Observe the actual native page for a bounded interval, then assert its URL.
+  // A dropped continuation is an owning assertion failure, never a timeout prerequisite.
+  const deadline = performance.now() + 2500
+  while (performance.now() < deadline && (child.page.isLoading() || child.page.getURL() !== target)) await delay(15)
+  const callback = receipt.originalCallbacks.slice(callbacksBefore).find((row: any) => row.pageId === child.page.id)
+  const events = receipt.nativeWindowOpens.slice(eventsBefore).filter((row: any) => row.sourceId === parent.id && row.url === target)
+  ;(receipt.nativeLinkObservations ??= []).push({ name, target, sourceId: parent.id, childId: child.page.id, button, modifiers, callback, events, actualURL: child.page.getURL(), sourceURL: parent.getURL() })
+  await checkpoint('native-link-observed-' + name)
+  assert.equal(child.page.getURL(), target, 'Actual native continuation navigates the original guestless child URL: ' + name)
+  assert.equal(events.length, 1, 'One original native OpenURLFromTab event belongs to the exact source and target: ' + name)
+  assert.equal(events[0].hasNavigate, true, 'The native input supplies its original Chromium continuation: ' + name)
+  assert.equal(callback.guestId, null, 'This actual native link exercises the guestless creation branch: ' + name)
+  assert.equal(callback.navigations.filter((row: any) => row.url === target).length, 1, 'The original guestless child starts its exact target navigation once: ' + name)
+  const input = receipt.nativeInputEvents.find((row: any) => row.name === name).input
+  assert.ok(input.some((row: any) => row.target === 'native-link' && row.type === 'mousedown' && row.button === (button === 'middle' ? 1 : 0) &&
+    (!modified || (process.platform === 'darwin' ? row.meta : row.control))), 'The original page receives the exact native mouse input: ' + name)
+  assert.equal(child.page.session, parent.session, 'Guestless native input retains the original source Session: ' + name)
+  assert.equal(parent.getURL(), beforeURL, 'Opening a native child preserves the original source URL: ' + name)
+  assert.equal(await parent.executeJavaScript('document.querySelector("#original-draft")?.value ?? null'), beforeDraft, 'Opening a native child preserves the unsent source draft: ' + name)
+  const prefs = (child.page as WebContents & { getLastWebPreferences(): Electron.WebPreferences }).getLastWebPreferences()
+  assert.equal(prefs.sandbox, true); assert.equal(prefs.contextIsolation, true); assert.equal(prefs.nodeIntegration, false)
+  assert.equal(await child.page.executeJavaScript('typeof window.agentmux'), 'undefined')
+  assert.equal(await child.page.executeJavaScript('typeof window.browserPopup'), 'undefined')
+  return child
 }
 async function settlePage(page: WebContents, path: string) {
   await until('exact original native document ' + path, async () => !page.isDestroyed() && !page.isLoading() && new URL(page.getURL()).pathname === path)
@@ -131,18 +201,20 @@ function serve() {
     request.on('data', chunk => chunks.push(chunk))
     request.on('end', () => {
       const url = new URL(request.url!, origin || 'http://localhost'), body = Buffer.concat(chunks).toString()
-      receipt.requests.push({ method: request.method, path: url.pathname, cookie: request.headers.cookie ?? '', referrer: request.headers.referer ?? '', body })
+      receipt.requests.push({ method: request.method, path: url.pathname, cookie: request.headers.cookie ?? '', referrer: request.headers.referer ?? '', body,
+        fetchSite: request.headers['sec-fetch-site'] ?? null, fetchMode: request.headers['sec-fetch-mode'] ?? null, fetchDest: request.headers['sec-fetch-dest'] ?? null })
       response.setHeader('content-type', 'text/html; charset=utf-8')
       if (url.pathname === '/opener') {
-        response.setHeader('set-cookie', `fixture=${url.searchParams.get('mode') ?? 'normal'}; Path=/; SameSite=Lax`)
-        response.end(html('Original browser page', '<p>Independent windows retain this original page and session.</p><input value="Original unsent page draft"><script>window.messages=[];addEventListener("message",e=>messages.push({data:e.data,origin:e.origin}));</script>'))
+        const mode = url.searchParams.get('mode') ?? 'normal'
+        response.setHeader('set-cookie', [`fixture=${mode}; Path=/; SameSite=Lax`, `strict_fixture=${mode}; Path=/; SameSite=Strict`])
+        response.end(html('Original browser page', '<p>Independent windows retain this original page and session.</p><input id="original-draft" value="Original unsent page draft"><script>window.messages=[];addEventListener("message",e=>messages.push({data:e.data,origin:e.origin}));</script>'))
       } else if (url.pathname === '/slow') {
         response.write(html('Loading page', '<p>Waiting for the server response.</p>'))
         // The original response stays unfinished until native Stop or final server cleanup.
       } else {
         const context = /^\/capture-(normal|narrow|short)-(light|dark)$/u.exec(url.pathname)
-        const title = context ? `Popup ${context[1]} ${context[2]}` : url.pathname === '/two' ? 'Second page' : 'Child browser page'
-        response.end(html(title, '<p>A real native child document. Address and navigation above belong to AgentMux.</p><input value="A page remains interactive"><script>window.fixtureReady=true</script>'))
+        const title = context ? `Popup ${context[1]} ${context[2]}` : url.pathname === '/two' ? 'Second page' : url.pathname === '/javascript-disabled' ? 'JavaScript initially disabled' : 'Child browser page'
+        response.end(html(title, '<p>A real native child document. Address and navigation above belong to AgentMux.</p><input value="A page remains interactive"><script>window.fixtureReady=true;' + (url.pathname === '/javascript-disabled' ? 'document.title="Unexpected enabled script"' : '') + '</script>'))
       }
     })
   })
@@ -319,6 +391,14 @@ async function run() {
   app.setPath('userData', join(home, 'user-data'))
   app.commandLine.appendSwitch('no-proxy-server')
   await app.whenReady()
+  app.on('web-contents-created', (_event, source) => {
+    // Read original native events without replacing, emitting or wrapping their continuation.
+    ;(source as any).prependListener('-new-window', (_event: Electron.Event, url: string, frameName: string, disposition: string,
+      _features: string, referrer: unknown, postData: unknown, sandboxFlags: number, navigate: unknown) => {
+      ;(receipt.nativeWindowOpens ??= []).push({ sourceId: source.id, url, frameName, disposition, referrer,
+        hasPostData: Boolean(postData), sandboxFlags, hasNavigate: typeof navigate === 'function' })
+    })
+  })
   app.on('window-all-closed', () => { /* The original fixture owns its receipt and final exit status. */ })
   rootWindow = new BrowserWindow({ width: 900, height: 650, show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } })
   await rootWindow.loadURL('data:text/html,<title>Private popup source</title>')
@@ -327,15 +407,21 @@ async function run() {
   const originalCreatePopup = BrowserPopupWindows.prototype.create
   BrowserPopupWindows.prototype.create = function(options, creation) {
     const supplied = (options as typeof options & { webContents?: WebContents }).webContents
-    const actual = originalCreatePopup.call(this, options, creation)
-    assert.ok(supplied, 'Electron supplies its original native guest to the real callback')
-    assert.equal(actual, supplied, "The actual BVM callback returns Electron's exact original child WebContents")
+    let actual: WebContents
+    try { actual = originalCreatePopup.call(this, options, creation) }
+    catch (error: any) {
+      ;(receipt.constructionFailures ??= []).push({ name: error.name, message: error.message, guestId: supplied?.id ?? null })
+      throw error
+    }
+    if (supplied) assert.equal(actual, supplied, "The actual BVM callback returns Electron's exact original child WebContents")
     const projection = Object.fromEntries(Object.entries(options).map(([key, value]) => [key,
-      key === 'webContents' ? { id: supplied.id } : key === 'webPreferences' ? Object.fromEntries(Object.entries(value).map(([name, item]) => [name,
+      key === 'webContents' ? supplied ? { id: supplied.id } : null : key === 'webPreferences' ? Object.fromEntries(Object.entries(value).map(([name, item]) => [name,
         item === null || ['string', 'number', 'boolean', 'undefined'].includes(typeof item) ? item : '[native object]'])) :
       value === null || ['string', 'number', 'boolean', 'undefined'].includes(typeof value) ? value : '[native object]']))
-    ;(receipt.originalCallbacks ??= []).push({ pageId: actual.id, guestId: supplied.id, exactGuest: actual === supplied,
-      sameSession: actual.session === supplied.session, options: projection, optionsSha256: hash(JSON.stringify(projection)), mode: creation.mode })
+    const callback = { pageId: actual.id, guestId: supplied?.id ?? null, exactGuest: supplied ? actual === supplied : null,
+      sameSession: supplied ? actual.session === supplied.session : null, options: projection, optionsSha256: hash(JSON.stringify(projection)), mode: creation.mode, navigations: [] as Array<{ url: string }> }
+    actual.on('did-start-navigation', event => { if (event.isMainFrame) callback.navigations.push({ url: event.url }) })
+    ;(receipt.originalCallbacks ??= []).push(callback)
     return actual
   }
   manager = new BrowserViewManager(rootWindow, { defaultProfileId: () => 'popup-normal-profile', resolvePartition: () => 'persist:popup-normal-profile' }, new BrowserRefLedgerStore(join(home, 'refs.json')),
@@ -352,6 +438,47 @@ async function run() {
   await settlePage(opener, '/opener')
   await checkpoint('real-bvm-source-ready')
   if (process.env.AGENTMUX_POPUP_CAPTURE_HANDOFF === '1') { await captureHandoff(opener); receipt.passed = true; return }
+  const modifiedChild = await nativeLink(opener, '/modifier-native', 'command-control-click')
+  const middleChild = await nativeLink(opener, '/middle-native', 'middle-click', 'middle', false)
+  for (const [name, page] of [['/modifier-native', modifiedChild.page], ['/middle-native', middleChild.page]] as const) {
+    const requests = receipt.requests.filter((row: any) => row.path === name)
+    assert.equal(requests.length, 1, 'Original native continuation sends its target request exactly once: ' + name)
+    assert.equal(requests[0].method, 'GET'); assert.equal(requests[0].referrer, origin + '/opener?mode=normal')
+    assert.equal(requests[0].fetchSite, 'same-origin', 'Original initiating frame identity survives the native continuation')
+    assert.equal(requests[0].fetchMode, 'navigate'); assert.equal(requests[0].fetchDest, 'document')
+    assert.match(requests[0].cookie, /strict_fixture=normal/u, 'SameSite=Strict uses the original native source context')
+    assert.equal(await page.executeJavaScript('document.referrer'), origin + '/opener?mode=normal')
+  }
+  receipt.cases.push({ name: 'native-command-and-middle-original-request-session-security', pages: [modifiedChild.page.id, middleChild.page.id] })
+
+  const noopener = await opened(opener, `(()=>{const a=document.createElement('a');a.href=${JSON.stringify(origin + '/noopener')};a.target='_blank';a.rel='noopener';document.body.append(a);a.click();return true})()`, 'native target blank noopener')
+  await settlePage(noopener.page, '/noopener')
+  assert.equal(await noopener.page.executeJavaScript('window.opener===null'), true, 'Target blank noopener keeps its original detached opener policy')
+  assert.equal(noopener.page.session, opener.session)
+  receipt.cases.push({ name: 'native-target-blank-noopener' })
+
+  const sandboxFrame = await opener.executeJavaScript(`(()=>{const f=document.createElement('iframe');f.id='sandbox-frame';f.sandbox='allow-scripts allow-popups';f.style.cssText='position:fixed;left:20px;top:100px;width:650px;height:350px;z-index:99999;background:white';f.src=${JSON.stringify(origin + '/sandbox-source')};document.body.append(f);return true})()`)
+  assert.equal(sandboxFrame, true)
+  const sourceFrame = await until('the real sandbox source frame loads', () => opener.mainFrame.frames.find(frame => !frame.isDestroyed() && frame.url.startsWith(origin + '/sandbox-source')) || false)
+  await until('the real sandbox frame completes its original document', async () => await sourceFrame.executeJavaScript('document.readyState === "complete"'))
+  const sandboxChild = await nativeLink(opener, '/sandbox-native', 'sandbox-command-click', 'left', true, sourceFrame)
+  assert.equal(await sandboxChild.page.executeJavaScript('(()=>{try{localStorage.getItem("native-sandbox-proof");return "allowed"}catch(e){return e.name}})()'), 'SecurityError', 'Guestless child preserves its initiating opaque sandbox restrictions')
+  assert.ok(receipt.nativeWindowOpens.find((row: any) => row.url === origin + '/sandbox-native').sandboxFlags > 0)
+  const sandboxNative = receipt.nativeLinkObservations.find((row: any) => row.name === 'sandbox-command-click')
+  assert.equal(sandboxNative.callback.options.webPreferences.openerSandboxFlags, sandboxNative.events[0].sandboxFlags, 'Native constructor retains the exact original sandbox flags')
+  await opener.executeJavaScript('document.querySelector("#sandbox-frame").remove();true')
+  receipt.cases.push({ name: 'native-sandbox-frame-retains-original-restrictions', pageId: sandboxChild.page.id })
+
+  const nativeNested = await nativeLink(middleChild.page, '/nested-modifier-native', 'nested-command-click')
+  let nestedDestroyed = 0, middleDestroyed = 0
+  nativeNested.page.on('destroyed', () => nestedDestroyed++)
+  middleChild.page.on('destroyed', () => middleDestroyed++)
+  middleChild.window.close()
+  await until('the exact native source close destroys its original guestless nested page and shell', () => middleChild.page.isDestroyed() && nativeNested.page.isDestroyed() && nativeNested.window.isDestroyed())
+  assert.equal(nestedDestroyed, 1); assert.equal(middleDestroyed, 1)
+  assert.equal(modifiedChild.page.isDestroyed(), false, 'Native nested owner closure preserves the unrelated healthy child')
+  receipt.cases.push({ name: 'native-guestless-nested-source-lifecycle-exactly-once', nestedDestroyed, middleDestroyed })
+
   const child = await opened(opener, `window.originalChild=window.open(${JSON.stringify(origin + '/one')},'original-child','width=800,height=600'); Boolean(originalChild)`, 'normal popup')
   await settlePage(child.page, '/one')
   assert.equal(child.page.session, opener.session, 'Native popup consumes the complete original same-session request')
@@ -359,18 +486,29 @@ async function run() {
   await child.page.executeJavaScript('opener.postMessage("original-child-ready",location.origin)')
   await until('original opener receives real postMessage', async () => await opener.executeJavaScript('messages.some(e=>e.data==="original-child-ready")'))
   assert.match(await child.page.executeJavaScript('document.cookie'), /fixture=normal/u)
+  assert.equal(await child.page.executeJavaScript('window.fixtureReady'), true, 'The normal native child executes the fixture inline script')
+  const namedBefore = children.size
+  assert.equal(await opener.executeJavaScript('window.open("", "original-child") === originalChild', true), true, 'An existing named native child retains its original renderer identity')
+  assert.equal(children.size, namedBefore, 'Reusing an original named child creates no duplicate shell')
   receipt.cases.push({ name: 'normal-original-opener-session-postmessage', pageId: child.page.id, shellId: child.window.webContents.id })
   await checkpoint('normal-child-confirmed')
 
   const blank = await opened(opener, `window.blankChild=window.open('about:blank','synchronous-child');blankChild.document.write('<title>Synchronous child</title><h1 id="sync">Original synchronous content</h1>');blankChild.document.close();true`, 'synchronous aboutblank')
   assert.equal(await blank.page.executeJavaScript('document.getElementById("sync")?.textContent'), 'Original synchronous content', 'about:blank synchronous script uses original returned child')
   receipt.cases.push({ name: 'aboutblank-original-synchronous-document', pageId: blank.page.id })
+  const noScript = await opened(opener, `window.noScriptChild=window.open(${JSON.stringify(origin + '/javascript-disabled')},'javascript-disabled-child','javascript=no');true`, 'native child with JavaScript disabled')
+  await settlePage(noScript.page, '/javascript-disabled')
+  assert.equal((noScript.page as WebContents & { getLastWebPreferences(): Electron.WebPreferences }).getLastWebPreferences().javascript, false, 'Guestful native child retains its original javascript=no preference')
+  assert.equal(noScript.page.getTitle(), 'JavaScript initially disabled', 'Native page scripts remain disabled by the original child request')
+  receipt.cases.push({ name: 'guestful-native-child-javascript-disabled', pageId: noScript.page.id })
   const post = await opened(opener, `(()=>{const f=document.createElement('form');f.method='POST';f.target='_blank';f.action=${JSON.stringify(origin + '/posted')};const i=document.createElement('input');i.name='payload';i.value='original-body';f.append(i);document.body.append(f);f.submit();return true})()`, 'native target blank form')
   await settlePage(post.page, '/posted')
   const posted = receipt.requests.find((row: any) => row.path === '/posted')
   assert.ok(posted, 'The real server observes the original target=_blank request')
   assert.equal(posted.method, 'POST', 'Original window-open options preserve POST rather than replaying GET')
   assert.equal(posted.body, 'payload=original-body'); assert.equal(posted.referrer, origin + '/opener?mode=normal')
+  assert.equal(receipt.requests.filter((row: any) => row.path === '/posted').length, 1, 'Native form submission sends the original body exactly once')
+  assert.equal(posted.fetchSite, 'same-origin'); assert.match(posted.cookie, /strict_fixture=normal/u)
   receipt.cases.push({ name: 'native-form-post-and-referrer', request: posted })
 
   child.window.show(); app.focus({ steal: true }); child.window.focus()
@@ -477,15 +615,27 @@ async function run() {
   assert.equal(privateChild.page.session, privateOpener.session)
   assert.notEqual(privateChild.page.session, opener.session)
   assert.match(await privateChild.page.executeJavaScript('document.cookie'), /fixture=private/u)
+  const privateModified = await nativeLink(privateOpener, '/private-modifier-native', 'private-command-click')
+  assert.notEqual(privateModified.page.session, opener.session)
+  assert.match(await privateModified.page.executeJavaScript('document.cookie'), /strict_fixture=private/u)
+  const privateRequest = receipt.requests.filter((row: any) => row.path === '/private-modifier-native')
+  assert.equal(privateRequest.length, 1); assert.equal(privateRequest[0].fetchSite, 'same-origin')
+  assert.doesNotMatch(privateRequest[0].cookie, /(?:^|; )fixture=normal(?:;|$)/u)
+  let privateDestroyed = 0
+  privateModified.page.on('destroyed', () => privateDestroyed++)
   const privateNested = await opened(privateChild.page, `window.nestedPrivate=window.open(${JSON.stringify(origin + '/private-nested')},'nested-private-child');true`, 'nested private popup')
   await settlePage(privateNested.page, '/private-nested')
   assert.equal(privateNested.page.session, privateOpener.session, 'Nested private child retains the original temporary session')
   await manager.close('popup-private')
-  await until('private owner close destroys its actual child', () => privateChild.window.isDestroyed() && privateChild.page.isDestroyed() && privateNested.window.isDestroyed() && privateNested.page.isDestroyed())
+  await until('private owner close destroys its actual child', () => privateChild.window.isDestroyed() && privateChild.page.isDestroyed() && privateNested.window.isDestroyed() && privateNested.page.isDestroyed() && privateModified.window.isDestroyed() && privateModified.page.isDestroyed())
+  assert.equal(privateDestroyed, 1, 'Closing the original private owner destroys its exact guestless child once')
   assert.equal(opener.isDestroyed(), false, 'Closing a private owner preserves unrelated healthy normal Browser')
-  receipt.cases.push({ name: 'private-original-session-and-owner-close' })
+  receipt.cases.push({ name: 'private-original-session-and-owner-close', privateDestroyed })
 
-  await pictures(child.window, child.page)
+  await address(modifiedChild.window, origin + '/two'); await settlePage(modifiedChild.page, '/two')
+  receipt.nativeTriggerCapture = { sourceId: opener.id, pageId: modifiedChild.page.id, trigger: 'command-control-click', target: origin + '/modifier-native' }
+  await pictures(modifiedChild.window, modifiedChild.page)
+  assert.deepEqual(receipt.uncaughtExceptions ?? [], [], 'The real native popup input has no uncaught process exception')
   assert.ok(receipt.calls.length > 0, 'The actual dedicated preload invokes the production Main handlers')
   assert.equal(await child.page.executeJavaScript('typeof window.agentmux'), 'undefined', 'Untrusted website never gains Desktop APIs')
   assert.equal(await child.page.executeJavaScript('typeof window.browserPopup'), 'undefined', 'Dedicated navigation bridge never leaks into the original website')
