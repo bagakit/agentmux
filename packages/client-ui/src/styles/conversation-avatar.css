@@ -34,7 +34,8 @@
 }
 
 /* Unknown native user / unrecorded author. Neutral text tone, never guessing human blue. */
-.conversation-avatar--unknown {
+.conversation-avatar--unknown,
+.conversation-avatar--external {
   color: var(--text-2);
   background: color-mix(in srgb, var(--text-2) 16%, var(--surface-0));
 }

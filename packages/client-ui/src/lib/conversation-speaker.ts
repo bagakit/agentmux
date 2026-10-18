@@ -10,6 +10,7 @@
  */
 
 import type { AgentProviderId, AgentSessionUserMessage } from '@agentmux/core'
+import { channelActorKey, type ChannelActorProfileObservation } from '@agentmux/core/connections'
 import { parseAgentMuxMessagePrefix, type AgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import type { ReactNode } from 'react'
 
@@ -68,6 +69,8 @@ export type ConversationSenderDetails = {
  */
 export type DescribeSpeaker = (speaker: ConversationSpeaker, avatarSize?: number) => {
   name: string
+  channelProfile?: ChannelActorProfileObservation
+  channelProfileReadIssue?: string
   avatar?: ReactNode
   project?: ConversationSenderDetails['project']
   providerId?: AgentProviderId
@@ -80,6 +83,7 @@ export type DescribeSpeaker = (speaker: ConversationSpeaker, avatarSize?: number
  * 不用收件人当前资料代填发件人。
  */
 export function createSpeakerResolver(options?: {
+  lookupExternal?: (author: NonNullable<ConversationSpeaker['external']>) => { observation?: ChannelActorProfileObservation; issue?: string } | undefined
   lookupAgent?: (agentSessionId: string) => {
     label?: string
     project?: ConversationSenderDetails['project']
@@ -91,7 +95,12 @@ export function createSpeakerResolver(options?: {
   return (recordedSpeaker: ConversationSpeaker) => {
     const speaker = speakerForDisplay(recordedSpeaker)
     if (speaker.role === 'human') return { name: 'You' }
-    if (speaker.role === 'external') return { name: externalSpeakerLabel(speaker) }
+    if (speaker.role === 'external') {
+      const read = speaker.external ? options?.lookupExternal?.(speaker.external) : undefined
+      const observation = read?.observation
+      const exact = observation && speaker.external && channelActorKey(observation.actor) === channelActorKey(speaker.external.actor) ? observation : undefined
+      return { name: exact?.profile?.name ?? externalSpeakerLabel(speaker), ...(exact ? { channelProfile: exact } : {}), ...(read?.issue ? { channelProfileReadIssue: read.issue } : {}) }
+    }
     if (speaker.role === 'system') return { name: speaker.id === AGENTMUX_SYSTEM_SPEAKER_ID ? 'AgentMux' : speaker.id }
     if (options?.lookupAgent) {
       const found = options.lookupAgent(speaker.id)

@@ -10,6 +10,7 @@ import { isSessionSurface } from '../../lib/workbench-surface-kinds'
 import { sessionPresentationById } from '../../lib/session-presentation'
 import { api } from '../../lib/api'
 import { BotEnrollmentPane, useBotEnrollment } from './BotEnrollmentPane'
+import { ChannelMetadataPanel } from './ChannelMetadataPanel'
 import { ConnectionProfilePanel } from './ConnectionProfilePanel'
 import { ConnectionSetupResult, connectionSummary } from './ConnectionSetupResult'
 import { ConnectionIdentityFacts } from './ConnectionIdentityFacts'
@@ -274,6 +275,7 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
       </> : current ? <>
         <header className="connector-setup__heading"><span className="connector-setup__mark"><GroupIcon size={22} /></span><div><h3 className="connector-editor-title">{current.config.label}</h3><p>{platform(current.config.application.domain)} bot application</p></div></header>
         {discord ? <dl className="connector-identity"><div><dt>Application ID</dt><dd><code>{current.config.application.appId}</code></dd></div></dl> : <ConnectionIdentityFacts record={current} readings={identities} />}
+        <ChannelMetadataPanel key={JSON.stringify([current.config.connectionId, current.config.application])} connection={current} active={active} />
         {saveNotice ? <p className="settings-group-note" role="status">{saveNotice}</p> : null}
         {!discord && (management.selectedId || management.supported || management.choices.length || management.catalog?.issue) ? <div className="connector-next-step"><div><strong>Bot setup</strong><p>Account, messages, permissions and publishing.</p></div><button className="primary-button" data-management-open onClick={() => { if (management.selectedId) setBotTaskSelection(managementTaskScope(current), management.selectedId); setView('management') }}>Manage setup</button></div> : null}
         {discord ? <ConnectionSetupResult record={current} active={active} /> : <details className="connector-optional"><summary>Connection status and checks</summary><ConnectionSetupResult record={current} active={active} /></details>}

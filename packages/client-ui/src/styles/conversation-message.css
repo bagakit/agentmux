@@ -252,7 +252,7 @@
 .log-turn[data-message-bubble='true'] > .log-turn__head > .log-turn__time { font-size: var(--fs-micro); }
 /* The identity spans the text rows instead of making an empty, avatar-height header. */
 .log-turn[data-message-bubble='true'] > .log-turn__node { grid-row: 1 / span 3; align-self: start; }
-.log-turn[data-message-bubble='true'][data-speaker-role='human'] > .log-turn__node { margin-top: var(--sp-1); }
+.log-turn[data-message-bubble='true']:is([data-speaker-role='human'], [data-speaker-role='external']) > .log-turn__node { margin-top: var(--sp-1); }
 .log-turn[data-message-bubble='true'][data-speaker-role='agent'] {
   grid-template-columns: 32px minmax(0, 1fr);
 }
@@ -261,7 +261,7 @@
   height: 32px;
   background: transparent;
 }
-.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) {
+.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-role='external'], [data-speaker-relation='other-agent']) {
   grid-template-columns: minmax(0, 1fr) 20px;
   margin-inline-start: auto;
   background: color-mix(in srgb, var(--blue) 4%, var(--surface-1));
@@ -270,8 +270,8 @@
   grid-template-columns: minmax(0, 1fr) 32px;
   background: var(--surface-1);
 }
-/* Incoming human text keeps a natural measure; Agent surfaces retain their own layout. */
-.log-turn[data-message-bubble='true'][data-speaker-role='human'] {
+/* Incoming user text keeps a natural measure; Agent surfaces retain their own layout. */
+.log-turn[data-message-bubble='true']:is([data-speaker-role='human'], [data-speaker-role='external']) {
   width: fit-content;
   max-width: min(calc(100% - var(--sp-4)), 72ch);
   height: auto;
@@ -280,19 +280,19 @@
   background: color-mix(in srgb, var(--blue) 5%, var(--surface-1));
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue) 10%, transparent);
 }
-.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) > .log-turn__head,
-.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) > .log-turn__meta,
-.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) > .log-turn__body,
-.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) > .log-turn__continue,
-.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) > .conversation-progressive-body > .log-turn__body {
+.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-role='external'], [data-speaker-relation='other-agent']) > .log-turn__head,
+.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-role='external'], [data-speaker-relation='other-agent']) > .log-turn__meta,
+.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-role='external'], [data-speaker-relation='other-agent']) > .log-turn__body,
+.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-role='external'], [data-speaker-relation='other-agent']) > .log-turn__continue,
+.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-role='external'], [data-speaker-relation='other-agent']) > .conversation-progressive-body > .log-turn__body {
   grid-column: 1;
 }
-.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) > .log-turn__node {
+.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-role='external'], [data-speaker-relation='other-agent']) > .log-turn__node {
   grid-column: 2;
   grid-row: 1;
   background: transparent;
 }
-.log-turn[data-message-bubble='true']:is([data-speaker-role='human'], [data-speaker-relation='other-agent']) > .log-turn__node { grid-row: 1 / span 3; }
+.log-turn[data-message-bubble='true']:is([data-speaker-role='human'], [data-speaker-role='external'], [data-speaker-relation='other-agent']) > .log-turn__node { grid-row: 1 / span 3; }
 .log-turn__context { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-micro); }
 .log-turn__source-caption { color: var(--text-3); font-weight: 400; }
 .log-turn__declared-source { color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
