@@ -216,8 +216,10 @@ const WorkspaceAgentListView = memo(function WorkspaceAgentListView({ workspace,
 
 function WorkspaceGitSlot({ workspace, visible }: { workspace: WorkspaceRecord; visible: boolean }) {
   const context = useWorkspaceZoneContext(workspace)
+  const view = useAppStore(state => state.workspaceGitView)
   const [retained, setRetained] = useState<WorkspaceRecord[]>([])
-  const resource = context.resource
+  // Branches manages the Folder repository inventory. Changes/History keep the selected exact resource.
+  const resource = view === 'branches' ? workspace : context.resource
   useEffect(() => {
     if (visible && resource) setRetained(previous => previous.some(value => gitWorkspaceKey(value) === gitWorkspaceKey(resource)) ? previous : [...previous, resource])
   }, [resource, visible])

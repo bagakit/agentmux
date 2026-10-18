@@ -429,6 +429,7 @@ const mockApi: AgentMuxDesktopApi = {
   },
   git: {
     worktrees: async input => ({ kind: 'unavailable', ...input.expectedResource, checkedAt: Date.now(),
+      directories: [{ path: input.expectedResource.workspacePath, kind: 'unavailable', reason: 'Directory observation requires the desktop Host.' }],
       reason: 'Git worktree observation requires the desktop Host. Existing Zones remain available.' }),
     projectIdentity: async (workspaceId) => {
       const workspace = mockConfig.workspaces.find(item => item.id === workspaceId)

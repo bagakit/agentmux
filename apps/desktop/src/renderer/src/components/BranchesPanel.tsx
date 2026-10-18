@@ -9,6 +9,10 @@ import type {
   WorkspaceSelectionResult
 } from '../../../shared/contracts'
 import { useWorkspaceBranches } from '../hooks/useWorkspaceBranches'
+import { useZoneWorktrees } from '../hooks/useZoneWorktrees'
+import { directoryStatus, unrepresentedWorktrees, worktreeAtPath, worktreeKind, worktreeZones } from '../lib/zone-worktree-observation'
+import type { WorkspaceZoneContext } from '../lib/workspace-zone-context'
+import type { GitWorktreeEntry } from '@agentmux/git/types'
 import { useGitAheadBehind } from '../hooks/useGitAheadBehind'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { summarizeRelatedPath } from '../lib/copy-path-display'
@@ -75,7 +79,7 @@ function WorktreeAgentPresence({ hostId, path }: { hostId: string; path: string 
                   }))} />
 }
 
-export function BranchesPanel({ workspace, active = true }: { workspace: WorkspaceRecord; active?: boolean }) {
+export function BranchesPanel({ workspace, active = true, zoneContext }: { workspace: WorkspaceRecord; active?: boolean; zoneContext?: Pick<WorkspaceZoneContext, 'spaceId' | 'zones'> }) {
   const activeRef = useRef(active)
   activeRef.current = active
   const displayPath = usePathDisplay()
@@ -149,6 +153,9 @@ export function BranchesPanel({ workspace, active = true }: { workspace: Workspa
   const pendingCloseouts = config?.workspaces.filter(item => item.closeout?.targetWorkspaceId === workspace.id) ?? []
   const closedWorkspaceIds = useMemo(() => new Set(config?.workspaces.filter(item => item.closeout).map(item => item.id)), [config?.workspaces])
   const { snapshot, loading, error: loadError, refresh } = useWorkspaceBranches(workspace.id, active)
+  const inventory = useZoneWorktrees(zoneContext?.spaceId ?? pinScope, workspace, active)
+  const native = inventory.snapshot?.kind === 'ready' ? inventory.snapshot : null
+  const notHere = native && !inventory.stale && zoneContext ? unrepresentedWorktrees(native, zoneContext.zones, inventory.directories) : null
   // ahead/behind 是 **HEAD** 相对它自己 upstream 的事实，不是逐分支的——所以下面只把它画在
   // `isCurrent` 那一行。画到别的行上会是谎：那些分支各有各的 upstream，这一个计数说不了它们的事。
   const { facts: syncFacts } = useGitAheadBehind(workspace.id, active)
@@ -176,8 +183,17 @@ export function BranchesPanel({ workspace, active = true }: { workspace: Workspa
       .some(value => value !== null && value.toLowerCase().includes(query))
   }) : []
   // Filtering is a projection of the original snapshot; the worktree predicate and row actions stay shared.
-  const bound = matches.filter(branchHasWorktree)
-  const unbound = matches.filter((branch) => !branchHasWorktree(branch))
+  const bound = native?.worktrees.filter(entry => {
+    if (search.filter === 'current' && !worktreeAtPath(entry, workspace.path)) return false
+    if (search.filter === 'pinned' && (!entry.branch || !pinnedBranches.includes(entry.branch))) return false
+    return query.length === 0 || [entry.branch, entry.path, ...entry.aliases, pathSummary(entry.path), entry.detached ? 'Detached HEAD' : worktreeKind(entry)]
+      .some(value => value !== null && value.toLowerCase().includes(query))
+  }) ?? []
+  const alignedRepository = native && snapshot?.kind === 'git-repository' && snapshot.hostId === native.hostId &&
+    (snapshot.repoPath === native.repoPath || native.worktrees.some(value => value.kind === 'main' && worktreeAtPath(value, snapshot.repoPath)))
+  // The new inventory is a weak read dependency: original branch-owner actions remain reachable.
+  const unbound = matches.filter(branch => !alignedRepository || inventory.stale ||
+    !native.worktrees.some(entry => entry.branch === branch.name && entry.path === branch.worktreePath))
 
   function updateSearch(next: typeof search): void {
     if (!filtering && (next.query.trim().length > 0 || next.filter !== 'all')) {
@@ -201,11 +217,11 @@ export function BranchesPanel({ workspace, active = true }: { workspace: Workspa
   }
 
   function locateFirstMatch(): void {
-    const first = pinFirst(bound)[0] ?? pinFirst(unbound)[0]
+    const first = bound[0] ?? pinFirst(unbound)[0]
     if (!first) return
-    if (branchHasWorktree(first)) setWorktreesExpanded(true)
+    if ('path' in first) setWorktreesExpanded(true)
     else setBranchesExpanded(true)
-    setLocatingBranch(first.name)
+    setLocatingBranch('path' in first ? first.path : first.name)
   }
 
   function navigateRows(event: React.KeyboardEvent<HTMLDivElement>): void {
@@ -361,7 +377,7 @@ export function BranchesPanel({ workspace, active = true }: { workspace: Workspa
     }
   }
 
-  function branchRow(branch: WorkspaceBranchRecord) {
+  function branchRow(branch: WorkspaceBranchRecord, entry?: GitWorktreeEntry) {
     const selectedRow = selectedBranch === branch.name
     const pinned = pinnedBranches.includes(branch.name)
     // 一次判断给出标志与取值。分开算两次是这一族缺陷的来源，所以这里也不许再判第二次。
@@ -427,7 +443,7 @@ export function BranchesPanel({ workspace, active = true }: { workspace: Workspa
           <button
             type="button"
             className="branch-row__open"
-            ref={button => { if (button) rowButtons.current.set(branch.name, button); else rowButtons.current.delete(branch.name) }}
+            ref={button => { const key = entry?.path ?? branch.name; if (button) rowButtons.current.set(key, button); else rowButtons.current.delete(key) }}
             aria-pressed={selectedRow}
             onClick={() => void openBranch(branch)}
           >
@@ -479,6 +495,36 @@ export function BranchesPanel({ workspace, active = true }: { workspace: Workspa
     )
   }
 
+  function inventoryRow(entry: GitWorktreeEntry) {
+    const branch = alignedRepository && !inventory.stale && entry.branch ? snapshot.branches.find(value => value.name === entry.branch && value.worktreePath === entry.path) : undefined
+    const current = worktreeAtPath(entry, workspace.path)
+    const relations = native && zoneContext ? worktreeZones(entry, native.hostId, zoneContext.zones) : []
+    const directory = inventory.directories.find(value => value.path === entry.path)
+    const status = directoryStatus(directory)
+    return <div className="worktree-inventory-entry" data-worktree-path={entry.path} key={entry.path}>
+      {branch ? branchRow({ ...branch, isCurrent: current }, entry) : <div className="branch-row">
+        <button type="button" className="branch-row__open" title={`${entry.path}\n${entry.branch ?? (entry.detached ? 'Detached HEAD' : worktreeKind(entry))}`}
+          ref={button => { if (button) rowButtons.current.set(entry.path, button); else rowButtons.current.delete(entry.path) }}
+          aria-label={`Copy worktree path: ${entry.path}`} onClick={() => { void copyText(displayPath(entry.path, workspace.hostId)) }}>
+          <SelectorRow leading={<ThemeObjectRepositoryIcon size={12} />} title={entry.branch ?? (entry.detached ? 'Detached HEAD' : 'Bare repository')}
+            subtitle={pathSummary(entry.path)} subtitleTooltip={displayPath(entry.path, workspace.hostId)}
+            trailing={current ? <ThemeStatusSelectedIcon size={12} aria-label="Current working directory" /> : null} />
+        </button></div>}
+      <div className="worktree-inventory-meta"><span>{worktreeKind(entry)}</span>{inventory.stale ? <span>Last observed</span> : null}{status ? <span>{status}{inventory.directoryStale ? ' · Last checked' : ''}</span> : null}</div>
+      <div className="worktree-inventory-relations">{relations.length ? <><span>In this Space</span>{relations.map((zone, index) => {
+        const saved = config?.workspaces.find(value => value.id === zone.workspaceId && value.hostId === zone.hostId && value.path === zone.directoryPath)
+        const label = saved?.name ?? zone.directoryPath?.split(/[\\/]/).filter(Boolean).at(-1) ?? 'Saved workface'
+        return <button key={zone.zoneId} type="button" title={zone.zoneId} onClick={() => {
+          void useAppStore.getState().executeControl({ schemaVersion: 5, requestId: crypto.randomUUID(), operation: 'focus',
+            target: { kind: 'space', spaceId: zoneContext!.spaceId, zoneId: zone.zoneId }, inputPolicy: 'preserve' })
+            .then(result => { if (result.operation !== 'focus' || result.navigation.state === 'rejected' || result.navigation.state === 'unconfirmed') setActionError('The saved workface navigation is unconfirmed. Your original workface is kept; retry this directory.') })
+            .catch(error => setActionError(message(error)))
+        }}>{label}{relations.length > 1 ? ` ${index + 1}` : ''}</button>
+      })}</> : <span>{notHere === null ? 'Space relationship unconfirmed' : 'Not in this Space'}</span>}</div>
+      {directory?.kind === 'unavailable' ? <details className="worktree-inventory-detail"><summary>Directory details</summary><p>{directory.reason}</p></details> : null}
+    </div>
+  }
+
   return (
     <section className="branches-panel branches-panel--branches">
       <header className="branches-header branches-header--tools" aria-label="Branch actions">
@@ -501,12 +547,12 @@ export function BranchesPanel({ workspace, active = true }: { workspace: Workspa
                 <ThemeObjectWorkflowIcon size={13} />
               </button>
             ) : null}
-            <button type="button" title="Refresh branches" onClick={() => void refresh()} disabled={loading}>
+            <button type="button" title="Refresh branches" onClick={() => { void refresh(); void inventory.refresh() }} disabled={loading}>
               {loading ? <ThemeStatusLoadingIcon animation="spin" size={13} /> : <ThemeActionRefreshIcon size={13} />}
             </button>
         </div>
       </header>
-      {snapshot?.kind === 'git-repository' && !comparisonOpen ? (
+      {(snapshot?.kind === 'git-repository' || native) && !comparisonOpen ? (
         <div className="branch-search">
           <div className="branch-search__field">
             <ThemeActionSearchIcon size={12} aria-hidden="true" />
@@ -537,6 +583,7 @@ export function BranchesPanel({ workspace, active = true }: { workspace: Workspa
         <BranchComparisonPanel key={JSON.stringify([workspace.id, snapshot.hostId, snapshot.repoPath])} workspaceId={workspace.id} branches={snapshot.branches} />
       ) : null}
       <div ref={list} className="branches-scroll" hidden={comparisonOpen && snapshot?.kind === 'git-repository'} onKeyDown={navigateRows}>
+        {inventory.issue || native?.warnings.length ? <details className="worktree-inventory-detail" role="status"><summary>Worktree update is incomplete. {native ? 'Last available registration is shown. ' : ''}Refresh to retry.</summary><p>{[inventory.issue, ...native?.warnings ?? []].filter(Boolean).join('\n')}</p></details> : null}
         {pendingCloseouts.length > 0 && <details className="worktree-cleanup" open>
           <summary>Cleanup pending <span>{pendingCloseouts.length}</span></summary>
           <div className="worktree-cleanup__list">{pendingCloseouts.map(item => <div className="worktree-cleanup__item" key={item.id}>
@@ -549,17 +596,17 @@ export function BranchesPanel({ workspace, active = true }: { workspace: Workspa
             <p>{item.closeout!.reason}</p>
           </div>)}</div>
         </details>}
-        {bound.length > 0 ? <div className={`branch-group${worktreesExpanded ? ' branch-group--expanded' : ''}`} data-branch-group="worktrees">
+        {native ? <div className={`branch-group${worktreesExpanded ? ' branch-group--expanded' : ''}`} data-branch-group="worktrees">
           <button className="branch-group__heading" type="button" aria-expanded={worktreesExpanded} onClick={() => setWorktreesExpanded(expanded => !expanded)}>
-            <ThemeNavigationDownIcon size={12} /><span>Worktrees</span><span className="branch-group__count">{bound.length}</span>
+            <ThemeNavigationDownIcon size={12} /><span>Worktrees</span><span className="branch-group__count">{filtering ? `${bound.length} / ` : ''}{native.worktrees.length}</span>
           </button>
-          {worktreesExpanded && <div ref={worktreeRows} className="branch-group__rows">{pinFirst(bound).map(branchRow)}</div>}
+          {worktreesExpanded && <div ref={worktreeRows} className="branch-group__rows">{[...bound].sort((a, b) => Number(Boolean(b.branch && pinnedBranches.includes(b.branch))) - Number(Boolean(a.branch && pinnedBranches.includes(a.branch)))).map(inventoryRow)}</div>}
         </div> : null}
         {unbound.length > 0 ? <div className={`branch-group${branchesExpanded ? ' branch-group--expanded' : ''}`} data-branch-group="branches">
           <button className="branch-group__heading" type="button" aria-expanded={branchesExpanded} title="Branches without a worktree" onClick={() => setBranchesExpanded(expanded => !expanded)}>
             <ThemeNavigationDownIcon size={12} /><span>Branches</span><span className="branch-group__count">{unbound.length}</span>
           </button>
-          {branchesExpanded && <div ref={branchRows} className="branch-group__rows">{pinFirst(unbound).map(branchRow)}</div>}
+          {branchesExpanded && <div ref={branchRows} className="branch-group__rows">{pinFirst(unbound).map(branch => branchRow(branch))}</div>}
         </div> : null}
         {!loading && snapshot?.kind === 'not-a-git-repository' ? (
           <div className="branches-empty"><strong>Not a Git repository</strong><span>This workspace is not linked to a Git repository.</span></div>
@@ -567,7 +614,7 @@ export function BranchesPanel({ workspace, active = true }: { workspace: Workspa
         {!loading && snapshot?.kind === 'git-repository' && snapshot.branches.length === 0 ? (
           <div className="branches-empty"><strong>No local branches</strong><span>Create a branch with Git, then refresh.</span></div>
         ) : null}
-        {snapshot?.kind === 'git-repository' && snapshot.branches.length > 0 && matches.length === 0 ? (
+        {(native || snapshot?.kind === 'git-repository') && matches.length === 0 && bound.length === 0 && filtering ? (
           <div className="branches-empty"><strong>No matching branches</strong><span>Try another name, path or filter.</span><button className="small-button" onClick={clearSearch}>Clear search and filter</button></div>
         ) : null}
         {!loading && loadError && !snapshot ? (
