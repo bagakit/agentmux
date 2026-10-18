@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { mutateMessageSlotScope } from './layout-mutations.mjs'
+import { candidateResolve, candidateModule } from '../../candidate-package-resolve.mjs'
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 export async function captureA2aOriginalReading({ root, evidence, layout = false, styleMutation = null }) {
@@ -17,37 +18,31 @@ export async function captureA2aOriginalReading({ root, evidence, layout = false
   const privateRoot = await mkdtemp(resolve(tmpdir(), 'amx-a2a-original-reading-')), compiled = resolve(privateRoot, 'compiled')
   const inputs = {}, artifacts = [], receipt = { schema: 'agentmux.a2a-original-reading-capture.v1', completed: false,
     captureOnly: true, aestheticReview: 'not-performed', privateRoot, inputs, artifacts, transforms: [], userRunTouched: false }
-  async function bind(file) {
-    const bytes = await readFile(file), key = relative(root, file)
+  function bindBytes(file, bytes) {
+    const key = relative(root, file)
     assert.ok(bytes.length > 0, 'Nonempty consumed source: ' + key)
     if (inputs[key]) assert.equal(inputs[key].sha256, hash(bytes), 'Consumed source remains fixed: ' + key)
     else inputs[key] = { sha256: hash(bytes), bytes: bytes.length }
     return bytes
   }
+  async function bind(file) { return bindBytes(file, await readFile(file)) }
   try {
     await mkdir(evidence, { recursive: true })
-    for (const file of ['package.json', 'pnpm-lock.yaml', 'apps/desktop/package.json', 'apps/desktop/scripts/probe-process.mjs']) await bind(resolve(root, file))
+    for (const file of ['package.json', 'pnpm-lock.yaml', 'apps/desktop/package.json', 'apps/desktop/scripts/probe-process.mjs', 'apps/desktop/scripts/candidate-package-resolve.mjs']) await bind(resolve(root, file))
     for (const entry of await readdir(fixture, { withFileTypes: true })) if (entry.isFile()) await bind(resolve(fixture, entry.name))
     const alias = []
-    for (const pkg of ['core', 'relay', 'demand', 'layout', 'client-ui', 'identity', 'diagnostic-evidence']) {
-      const manifest = JSON.parse(await bind(resolve(root, `packages/${pkg}/package.json`)))
-      for (const [key, value] of Object.entries(manifest.exports)) {
-        const target = typeof value === 'string' ? value : value.types ?? value.import
-        if (!target) continue
-        const file = resolve(root, `packages/${pkg}/` + target.replace(/^\.\/dist\/(src\/)?/u, 'src/').replace(/\.d\.ts$/u, '.ts').replace(/\.js$/u, '.ts'))
-        if (!existsSync(file.includes('*') ? file.slice(0, file.indexOf('*')) : file)) continue
-        const name = '@agentmux/' + pkg + (key === '.' ? '' : key.slice(1))
-        alias.push({ find: new RegExp('^' + name.replace(/[.+?^${}()|[\]\\]/gu, '\\$&').replace('*', '(.+)') + '$'), replacement: file.replace('*', '$1') })
-      }
-    }
-    alias.sort((a, b) => String(b.find).length - String(a.find).length)
     for (const name of ['react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom/client']) alias.push({ find: new RegExp('^' + name + '$'), replacement: require.resolve(name) })
-    await build({ configFile: false, root: fixture, base: './', logLevel: 'error', resolve: { alias, dedupe: ['react', 'react-dom'] }, esbuild: { jsx: 'automatic' }, worker: { format: 'es' },
-      define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' },
-      plugins: [{ name: 'bind-actual-a2a-original-renderer', enforce: 'pre', async transform(code, id) {
+    const candidate = { name: 'bind-actual-a2a-original-renderer', enforce: 'pre', resolveId(specifier) {
+        if (specifier.startsWith('@agentmux/')) return candidateResolve(root, specifier, { browser: true, source: true, onManifest: bindBytes })
+      }, async transform(code, id) {
         const file = id.split('?')[0]
-        if (file.startsWith(root + '/') && !file.includes('/node_modules/')) await bind(file)
-      } }],
+        if (resolve(file) === file) {
+          const actual = candidateModule(root, file)
+          if (actual.startsWith(root + '/') && !actual.includes('/node_modules/')) await bind(actual)
+        }
+      } }
+    await build({ configFile: false, root: fixture, base: './', logLevel: 'error', resolve: { alias, dedupe: ['react', 'react-dom'] }, esbuild: { jsx: 'automatic' }, worker: { format: 'es', plugins: () => [candidate] },
+      define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' }, plugins: [candidate],
       css: { postcss: { plugins: [{ postcssPlugin: 'bind-actual-a2a-original-css', async Once(styles) {
         const files = new Set(); styles.walk(node => { if (node.source?.input.file) files.add(node.source.input.file.split('?')[0]) })
         await Promise.all([...files].filter(file => file.startsWith(root + '/') && !file.includes('/node_modules/')).map(bind))
