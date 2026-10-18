@@ -47,7 +47,7 @@ vi.mock('electron', async () => {
     async loadURL(url: string) {
       await this.beforeLoad?.()
       this.emit('did-start-navigation', { url, isMainFrame: true, isSameDocument: false })
-      this.url = url; this.emit('did-finish-load')
+      this.url = url; this.emit('did-navigate', {}, url); this.emit('did-finish-load'); this.emit('did-stop-loading')
     }
     close() { this.destroyed = true; this.emit('destroyed') }
   }
@@ -86,10 +86,12 @@ async function fixture(beforeTaskSave?: (value: BrowserTaskAssetDocument) => Pro
   const events: any[] = []
   const children: any[] = []
   const window = { contentView: { children, addChildView: (view: any) => children.push(view), removeChildView: (view: any) => children.splice(children.indexOf(view), 1) },
+    getContentBounds: () => ({ x: 0, y: 0, width: 900, height: 700 }),
     isDestroyed: () => false, webContents: { isDestroyed: () => false, send(_channel: string, event: unknown) { events.push(structuredClone(event)) } } }
   const manager = new BrowserViewManager(window as never, { defaultProfileId: () => 'default', resolvePartition: () => 'persist:private' },
     new BrowserRefLedgerStore(join(root, 'refs.json')), { rememberedSchemes: async () => ({}), rememberScheme: async () => {}, openExternal() {} },
-    journal, new BrowserStepEvidenceStore(join(root, 'evidence')), new BrowserResultArtifactStore(join(root, 'results')), undefined, taskAssets)
+    journal, new BrowserStepEvidenceStore(join(root, 'evidence')), new BrowserResultArtifactStore(join(root, 'results')), undefined, taskAssets,
+    undefined, undefined, undefined, undefined, { preloadPath: join(root, 'preload.cjs') })
   managers.push(manager)
   await manager.create('browser-a', 'https://generic.invalid/form', 'workspace-a')
   return { manager, journal, path, view: children[0], taskAssets, taskPath,
@@ -105,6 +107,52 @@ async function savedCheckpoint(assets: BrowserTaskAssets) {
   ] })
   return await assets.saveVersion(edited.id, edited.revision)
 }
+
+describe('Browser exact Agent boundary preserves explicit human tools', () => {
+  it('runs a trusted field check on an unassociated human page without a false Return or Agent identity', async () => {
+    const f = await fixture()
+    f.manager.takeControl('browser-a')
+    await expect(f.manager.checkOutcomeFields('browser-a', input)).rejects.toMatchObject({ code: 'BROWSER_HUMAN_CONTROL_ACTIVE' })
+    const checked = await f.manager.checkOutcomeFields('browser-a', input, 'human')
+    expect(checked.status).toBe('passed')
+    expect(f.manager.target('browser-a')?.control?.agent).toBeNull()
+    expect(f.manager.target('browser-a')?.warning ?? '').not.toContain('identity could not be confirmed')
+    expect(f.view.webContents.reads).toBe(1)
+  }, 30_000)
+
+  it('keeps a newer Take control authoritative while the trusted field check awaits its document', async () => {
+    const f = await fixture()
+    let ready!: () => void, release!: () => void
+    const entered = new Promise<void>(resolve => { ready = resolve }), gate = new Promise<void>(resolve => { release = resolve })
+    vi.spyOn(f.manager as any, 'waitForInitialDocument').mockImplementationOnce(async () => { ready(); await gate })
+    const pending = f.manager.checkOutcomeFields('browser-a', input, 'human')
+    const refused = expect(pending).rejects.toMatchObject({ code: 'CONTROL_REQUEST_CONFLICT' })
+    await entered
+    f.manager.takeControl('browser-a'); release()
+    await refused
+    expect(f.manager.target('browser-a')?.control).toMatchObject({ owner: 'human', agent: null })
+    expect(f.view.webContents.reads).toBe(0)
+    expect((await f.manager.checkOutcomeFields('browser-a', input, 'human')).status).toBe('passed')
+  }, 30_000)
+
+  it('keeps a newer Take control authoritative while the trusted task awaits its original asset', async () => {
+    const f = await fixture(), asset = await savedCheckpoint(f.taskAssets)
+    let ready!: () => void, release!: () => void
+    const entered = new Promise<void>(resolve => { ready = resolve }), gate = new Promise<void>(resolve => { release = resolve })
+    const original = Reflect.get(f.manager, 'requireTaskAsset').bind(f.manager)
+    vi.spyOn(f.manager as any, 'requireTaskAsset').mockImplementationOnce(async (...args: unknown[]) => { ready(); await gate; return original(...args) })
+    const request = { browserId: 'browser-a', assetId: asset.id, version: 1, parameters: {} }
+    const pending = f.manager.runTaskAsset(request)
+    const refused = expect(pending).rejects.toMatchObject({ code: 'CONTROL_REQUEST_CONFLICT' })
+    await entered
+    f.manager.takeControl('browser-a'); release()
+    await refused
+    expect(f.manager.target('browser-a')?.control).toMatchObject({ owner: 'human', agent: null })
+    expect((await f.taskAssets.state('browser-a')).runs).toEqual([])
+    expect((await f.manager.runTaskAsset(request)).status).toBe('waiting-human')
+    expect(f.manager.target('browser-a')?.control?.agent).toBeNull()
+  }, 30_000)
+})
 
 describe('finite field checks through the real Main execution owner', () => {
   it('saves registration before real extraction and joins journal evidence and T003 bytes, then verifies without repeating the producer', async () => {

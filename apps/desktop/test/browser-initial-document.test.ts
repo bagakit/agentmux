@@ -191,7 +191,7 @@ describe('the original initial Browser document',()=>{
   })
   it('detaches stopped real runs while retaining one pending document for a later healthy consumer',async()=>{
     const f=fixture(),load=deferred();native.Contents.beforeLoad=()=>load.promise
-    await f.manager.create('original-browser',url,'workspace');const document=f.entry().initialDocument
+    await f.manager.create('original-browser',url,'workspace',undefined,undefined,'responsive',{agent:{hostId:'original-host',agentSessionId:'original-agent'}});const document=f.entry().initialDocument
     for(let n=0;n<3;n++) {
       f.manager.returnControl('original-browser')
       const operation='stopped-observation-'+n,pending=f.manager.runScript('original-browser','return await js("document.body.innerText")',undefined,undefined,operation)
