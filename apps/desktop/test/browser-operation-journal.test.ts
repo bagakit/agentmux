@@ -517,3 +517,14 @@ describe('BrowserOperationJournal 的进度订阅', () => {
     subscription.dispose()
   })
 })
+
+it('mints operation identities through the shared component and retains explicitly supplied original identities', async () => {
+  const journal = new BrowserOperationJournal(new MemoryStore())
+  const input = { browserId: 'original-browser', operator: { id: 'original-agent', name: 'Agent', providerId: 'codex' as const }, summary: 'Original operation', url: 'https://fixture.invalid/' }
+  const fresh = await journal.start(input)
+  expect(fresh.id).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
+  const oldId = '11111111-1111-4111-8111-111111111111'
+  const retained = await journal.start({ ...input, id: oldId })
+  expect(retained.id).toBe(oldId)
+  expect((await journal.list()).map(item => item.id)).toContain(oldId)
+})
