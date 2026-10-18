@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 const incoming = ".log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-role='external'], [data-speaker-relation='other-agent'])"
-export const messageSlotMutations = ['incoming-slot-scope', 'progress-body-scope', 'system-body-scope']
+export const messageSlotMutations = ['incoming-slot-scope', 'progress-body-scope', 'system-body-scope', 'identity-no-wrap']
 export function mutateMessageSlotScope(styles, name, owner) {
   assert.ok(messageSlotMutations.includes(name), 'Known slot-boundary mutation')
   const from = name === 'progress-body-scope'
@@ -13,7 +13,11 @@ export function mutateMessageSlotScope(styles, name, owner) {
   let changes = 0
   styles.walkRules(rule => {
     if (rule.source?.input.file?.split('?')[0] !== owner) return
-    if (name === 'incoming-slot-scope') {
+    if (name === 'identity-no-wrap') {
+      if (rule.selector === '.log-turn__sender-id') {
+        rule.walkDecls('flex-wrap', declaration => { assert.equal(declaration.value, 'wrap'); declaration.value = 'nowrap'; changes++ })
+      }
+    } else if (name === 'incoming-slot-scope') {
       const prefix = incoming + ' > ', count = rule.selector.split(prefix).length - 1
       if (count) { rule.selector = rule.selector.replaceAll(prefix, incoming + ' '); changes += count }
     } else if (normalize(rule.selector) === normalize(from.slice(0, -2))) {
