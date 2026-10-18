@@ -1,3 +1,4 @@
+import { expectConnectionAllocations } from './helpers/unified-identifiers.js'
 import { join } from 'node:path'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -26,6 +27,7 @@ function result(output: { code: number | null; stdout: string; stderr: string })
 
 it('compiled room CLI and typed public SDK reach the original Desktop Host, credential owner and controlled adapter', async () => {
   const f = await fixture(), saved = result(await f.cli(['room', 'create', '--input', '-'], f.createInput))
+  expectConnectionAllocations(saved)
   expect(saved).toMatchObject({ input: f.createInput, authorizedBy: { kind: 'user' }, application: config.application, creation: { state: 'created', externalConversationId: 'created-room' }, membership: { state: 'settled' } })
   expect(f.create).toHaveBeenCalledTimes(1); expect(f.addMembers).toHaveBeenCalledTimes(1)
   expect(f.create.mock.calls[0]![1]).toBe('private-fixture-credential')

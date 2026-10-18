@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
+import { mintObjectId, isObjectId } from '@agentmux/core'
 import type { RoomMember } from '@agentmux/core/connections'
 import { creation, membership, feishuRoomsHttp } from './fixtures/feishu-rooms.js'
 
@@ -26,10 +27,12 @@ it.each([
 })
 
 it('uses the original durable attempt as native UUID and creates only a private ordinary group', async () => {
-  const f = feishuRoomsHttp(), result = await f.adapter.rooms.create(creation, 'private-fixture-credential')
+  const attemptId = mintObjectId(), input = { ...creation, attemptId }
+  const f = feishuRoomsHttp(), result = await f.adapter.rooms.create(input, 'private-fixture-credential')
+  expect(isObjectId(attemptId)).toBe(true)
   expect(result).toEqual({ kind: 'created', externalConversationId: 'original-created-room' })
   expect(f.calls).toHaveLength(1)
-  expect(f.calls[0]).toMatchObject({ url: 'https://open.feishu.cn/open-apis/im/v1/chats', method: 'POST', params: { uuid: creation.attemptId },
+  expect(f.calls[0]).toMatchObject({ url: 'https://open.feishu.cn/open-apis/im/v1/chats', method: 'POST', params: { uuid: attemptId },
     data: { name: creation.name, chat_mode: 'group', chat_type: 'private', group_message_type: 'chat' } })
   expect(f.calls[0]!.params!.uuid).not.toBe(creation.operationId)
   expect(f.calls[0]!.data).not.toHaveProperty('user_id_list'); expect(f.calls[0]!.data).not.toHaveProperty('owner_id')
