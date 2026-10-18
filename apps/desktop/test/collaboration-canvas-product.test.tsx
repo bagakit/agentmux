@@ -50,11 +50,15 @@ function scenario(count = 480) {
 type Scene = ReturnType<typeof scenario>
 let requests: engine.CollaborationLayoutRequest[], boxes: Map<string, engine.CollaborationLayoutBox>, paths: Map<string, engine.CollaborationPath>
 let holdResponses = false, heldResponses: { response: engine.CollaborationLayoutResponse; deliver(): void }[] = []
-function graph(scene: Scene, selection: CollaborationSelection = null, relations: readonly CollaborationRelation[] = scene.relations, pulses: readonly CollaborationPulse[] = [], agents: ReadonlyMap<string, CollaborationAgent> = scene.agents, options: Pick<ComponentProps<typeof AgentCollaborationGraph>, 'ready' | 'locate' | 'onPreviewAgent' | 'peeked'> = {}) {
+function graph(scene: Scene, selection: CollaborationSelection = null, relations: readonly CollaborationRelation[] = scene.relations, pulses: readonly CollaborationPulse[] = [], agents: ReadonlyMap<string, CollaborationAgent> = scene.agents, options: Pick<ComponentProps<typeof AgentCollaborationGraph>, 'ready' | 'active' | 'locate' | 'onPreviewAgent' | 'peeked'> = {}) {
   return <AgentCollaborationGraph agents={agents} areas={scene.areas} relations={relations} pulses={pulses} selection={selection} onSelect={select} onOpen={open} ready={false} {...options} />
 }
 async function viewport(x: number, y: number, width = 600, height = 400, zoom = 1) {
   await act(async () => captured.store!.setState({ width, height, transform: [x, y, zoom] }))
+}
+async function revealWorld() {
+  const extent = [...boxes.values()]
+  await viewport(-Math.min(...extent.map(box => box.x)) + 20, -Math.min(...extent.map(box => box.y)) + 20, 20000, 20000)
 }
 async function loaded(scene: Scene) {
   await dom.render(graph(scene))
@@ -698,7 +702,7 @@ it('shows immediate source and recipient activity while the original new path is
   expect(nodeElement(target)!.querySelector('[aria-label="Message received"]')).not.toBeNull()
   const edge = dom.container.querySelector<SVGGElement>('.collaboration-connections .react-flow__edge')!
   await act(async () => edge.dispatchEvent(new FocusEvent('focusin', { bubbles: true })))
-  expect(dom.container.querySelector('.collaboration-edge__label')!.textContent).toContain('Messages: Agent 0 → Agent 1')
+  expect(document.getElementById(edge.getAttribute('aria-describedby')!)!.textContent).toContain('Messages: Agent 0 → Agent 1')
   const operations = requests.length, camera = captured.store!.getState().transform
   await viewport(camera[0] * .25, camera[1] * .25, 20000, 20000, .25)
   const overviewPacket = dom.container.querySelector<SVGCircleElement>('.collaboration-edge__packet')!
@@ -777,6 +781,92 @@ it('keeps projected region labels clear of original Agent hit targets through ca
   }
   expect(query).toHaveBeenCalled()
   expect(captured.nodes).toBe(before); expect(requests).toHaveLength(operations)
+})
+
+it('reads the complete original relation in the window tooltip and releases it when the retained map hides', async () => {
+  const scene = await loadedDetourScene(), connection = detour()!.connection
+  await revealWorld()
+  const edge = edgeElement(connection.id)!, label = edge.getAttribute('aria-label')!, before = captured.nodes, operations = requests.length
+  expect(label).toContain('Messages:'); expect(label).toContain('→'); expect(label).toContain('original records')
+  expect(edge.querySelector('title')).toBeNull()
+  await dom.render(graph(scene, { kind: 'relation', id: scene.relations[0]!.id }))
+  expect(dom.container.querySelector('.collaboration-edge__label')).toBeNull()
+  expect(edge.getAttribute('aria-describedby')).toBeNull()
+  expect(document.querySelector('[role="tooltip"]')).toBeNull()
+  await act(async () => edge.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
+  const description = document.getElementById(edge.getAttribute('aria-describedby')!)!
+  expect(description).not.toBeNull(); expect(description.getAttribute('role')).toBe('tooltip'); expect(description.textContent).toBe(label)
+  expect(description.closest('[data-overlay-layer="tooltip"]')).not.toBeNull()
+  expect(dom.container.contains(description)).toBe(false)
+  await act(async () => edge.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })))
+  await act(async () => new Promise(resolve => setTimeout(resolve, 150)))
+  expect(description.isConnected).toBe(false)
+  await act(async () => edge.focus())
+  expect(document.activeElement).toBe(edge)
+  expect(document.getElementById(edge.getAttribute('aria-describedby')!)?.textContent).toBe(label)
+  await act(async () => edge.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })))
+  await act(async () => new Promise(resolve => setTimeout(resolve, 150)))
+  expect(document.getElementById(edge.getAttribute('aria-describedby')!)?.textContent).toBe(label)
+  await act(async () => edge.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  await act(async () => new Promise(resolve => setTimeout(resolve, 150)))
+  expect(document.querySelector('[role="tooltip"]')).toBeNull()
+  expect(select).toHaveBeenLastCalledWith(null)
+  await act(async () => { edge.blur(); edge.focus() })
+  expect(document.getElementById(edge.getAttribute('aria-describedby')!)?.textContent).toBe(label)
+  await dom.render(graph(scene, null, scene.relations, [], scene.agents, { active: false }))
+  expect(document.querySelector('[role="tooltip"]')).toBeNull(); expect(edgeElement(connection.id)).toBe(edge)
+  await dom.render(graph(scene)); expect(document.querySelector('[role="tooltip"]')).toBeNull()
+  expect(captured.nodes).toBe(before); expect(requests).toHaveLength(operations)
+})
+
+it('tracks a transformed original SVG path through real FloatingUI without following its live packet', async () => {
+  const scene = await loadedDetourScene(), connection = detour()!.connection
+  const original = selectedRelation(scene, connection.source, connection.target, connection.kind), from = scene.agents.get(original.source)!, to = scene.agents.get(original.target)!
+  await dom.render(graph(scene, null, scene.relations, [{ id: 1, startedAt: Date.now(), hostId: 'local', sender: from.sessionId!, recipient: to.sessionId!, kind: 'communication' }]))
+  await revealWorld()
+  const edge = edgeElement(connection.id)!, path = edge.querySelector<SVGPathElement>('.react-flow__edge-path')!
+  const packet = edge.querySelector<SVGCircleElement>('.collaboration-edge__packet')!
+  expect(packet).not.toBeNull()
+  const readPacket = vi.spyOn(packet, 'getBoundingClientRect').mockImplementation(() => new DOMRect(900, 80, 8, 8))
+  let screen = new DOMRect(120, 100, 160, 40)
+  const readPath = vi.spyOn(path, 'getBoundingClientRect').mockImplementation(() => screen)
+  vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(1200)
+  vi.spyOn(document.documentElement, 'clientHeight', 'get').mockReturnValue(800)
+  await act(async () => edge.dispatchEvent(new FocusEvent('focusin', { bubbles: true })))
+  const panel = document.getElementById(edge.getAttribute('aria-describedby')!)!
+  Object.defineProperties(panel, { offsetWidth: { configurable: true, get: () => 180 }, offsetHeight: { configurable: true, get: () => 52 } })
+  vi.spyOn(panel, 'getBoundingClientRect').mockImplementation(() => new DOMRect(Number.parseFloat(panel.style.left) || 0, Number.parseFloat(panel.style.top) || 0, 180, 52))
+  screen = new DOMRect(160, 160, 160, 40)
+  await act(async () => vi.waitFor(() => { expect(panel.style.visibility).toBe('visible'); expect(Number.parseFloat(panel.style.top)).toBeCloseTo(208) }))
+  const initial = { x: Number.parseFloat(panel.style.left), y: Number.parseFloat(panel.style.top) }, reads = readPath.mock.calls.length, operations = requests.length
+  screen = new DOMRect(300, 230, 160, 40)
+  await act(async () => vi.waitFor(() => { expect(Number.parseFloat(panel.style.left)).toBeCloseTo(initial.x + 140); expect(Number.parseFloat(panel.style.top)).toBeCloseTo(initial.y + 70) }))
+  expect(readPath.mock.calls.length).toBeGreaterThan(reads)
+  expect(readPacket).not.toHaveBeenCalled()
+  expect(document.getElementById(edge.getAttribute('aria-describedby')!)).toBe(panel)
+  expect(requests).toHaveLength(operations)
+  await dom.render(graph(scene, null, scene.relations, [], scene.agents, { active: false }))
+  const stopped = readPath.mock.calls.length
+  await act(async () => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+  expect(readPath).toHaveBeenCalledTimes(stopped); expect(panel.isConnected).toBe(false)
+})
+
+it('reserves the same region activity slot and geometry before during and after an original pulse', async () => {
+  const scene = scenario(24); await loaded(scene)
+  const area = boxes.get(JSON.stringify(['area', 'area-0']))!
+  await viewport(-area.x * .25 + 20, -area.y * .25 + 20, 1600, 1200, .25)
+  const label = dom.container.querySelector<HTMLElement>(`[data-area-id='${area.id}']`)!, slot = label.querySelector<HTMLElement>('.collaboration-area__activity')!
+  expect(slot).not.toBeNull(); expect(slot.getAttribute('aria-hidden')).toBe('true'); expect(slot.hasAttribute('data-kind')).toBe(false)
+  const before = label.getAttribute('style'), name = label.querySelector('button > span')!, count = label.querySelector('small')!, geometry = captured.nodes.map(node => [node.id, node.position, node.data.box]), operations = requests.length
+  const pulse: CollaborationPulse = { id: 1, startedAt: Date.now(), hostId: 'local', sender: 'canvas-0', recipient: 'canvas-1', kind: 'communication' }
+  await dom.render(graph(scene, null, scene.relations, [pulse]))
+  expect(label.getAttribute('style')).toBe(before); expect(label.querySelector('.collaboration-area__activity')).toBe(slot)
+  expect(slot.getAttribute('data-kind')).toBe('communication'); expect(slot.getAttribute('aria-label')).toBe('Recent message activity'); expect(slot.getAttribute('aria-hidden')).toBeNull()
+  expect(label.querySelector('button > span')).toBe(name); expect(label.querySelector('small')).toBe(count)
+  await dom.render(graph(scene))
+  expect(label.getAttribute('style')).toBe(before); expect(label.querySelector('.collaboration-area__activity')).toBe(slot)
+  expect(slot.getAttribute('aria-hidden')).toBe('true'); expect(slot.hasAttribute('data-kind')).toBe(false)
+  expect(captured.nodes.map(node => [node.id, node.position, node.data.box])).toEqual(geometry); expect(requests).toHaveLength(operations)
 })
 
 
