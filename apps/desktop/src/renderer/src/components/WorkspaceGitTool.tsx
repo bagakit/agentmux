@@ -13,6 +13,7 @@ import { BranchesPanel } from './BranchesPanel'
 import { ChangesPanel } from './ChangesPanel'
 import { GitHistoryPanel } from '../features/git/history/GitHistoryPanel'
 import { SurfaceModeSwitch } from './SurfaceModeSwitch'
+import { useWorkspaceZoneContext } from '../lib/workspace-zone-context'
 
 const ThemeObjectRepositoryIcon = semanticIconComponent('object.repository')
 const ThemeNavigationForwardIcon = semanticIconComponent('navigation.forward')
@@ -32,6 +33,7 @@ function SourceControl({ workspace, visible, history, shared, viewportState }: {
   history: ReturnType<typeof useGitHistory>; shared: ReturnType<typeof useSharedGitHistory>
   viewportState: React.RefObject<GitHistoryViewportState | null>
 }) {
+  const zoneContext = useWorkspaceZoneContext(workspace)
   const view = useAppStore(state => state.workspaceGitView)
   const setView = useAppStore(state => state.setWorkspaceGitView)
   const displayPath = usePathDisplay()
@@ -62,7 +64,7 @@ function SourceControl({ workspace, visible, history, shared, viewportState }: {
     <div className="workspace-git-path" title={displayPath(workspace.path, workspace.hostId)}>{displayPath(workspace.path, workspace.hostId)}</div>
     <SurfaceModeSwitch value={view} options={VIEWS} onChange={(next: WorkspaceGitView) => setView(next)} active={visible} ariaLabel="Git view" />
     <div className="workspace-git-panel" hidden={view !== 'branches'}>
-      <BranchesPanel workspace={workspace} active={visible && view === 'branches'} />
+      <BranchesPanel workspace={workspace} zoneContext={zoneContext} active={visible && view === 'branches'} />
     </div>
     <div className="workspace-git-panel" hidden={view !== 'changes'}>
       <ChangesPanel workspace={workspace} active={visible && view === 'changes'} />

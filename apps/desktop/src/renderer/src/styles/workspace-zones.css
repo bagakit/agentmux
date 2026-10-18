@@ -4,6 +4,14 @@
 .workspace-zones-panel > .selector-list__header { flex: 0 0 auto; }
 .workspace-zones-manage { display: inline-flex; align-items: center; gap: var(--sp-1); min-height: 24px; padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); font-size: var(--fs-micro); cursor: pointer; }
 .workspace-zones-manage:hover { background: var(--surface-2); color: var(--text); }
+.workspace-zones-scope { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--sp-3); padding: 0 var(--sp-4) var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
+.workspace-zones-scope > span { white-space: nowrap; }
+.workspace-zone-details { margin: 0 var(--sp-4) var(--sp-2) 28px; font-size: var(--fs-micro); line-height: 1.4; color: var(--text-3); }
+.workspace-zone-details > summary { cursor: pointer; }
+.workspace-zone-details > summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
+.workspace-zone-details > p, .workspace-zones-notice > p { white-space: pre-wrap; }
+.workspace-zone-details > p { margin: var(--sp-2) 0; overflow-wrap: anywhere; }
+.workspace-zones-notice--issue { color: var(--amber-text); }
 .workspace-zones-list { flex: 1; min-height: 0; overflow: auto; padding: var(--sp-2); }
 .workspace-zone-entry { width: 100%; min-width: 0; min-height: 42px; display: flex; align-items: center; margin: 0; padding: var(--sp-3) var(--sp-4); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; text-align: left; cursor: pointer; }
 .workspace-zone-entry:hover { background: var(--surface-2); }
