@@ -125,6 +125,13 @@ person's system handoff while the original page stays unchanged.`
     when: 'Inspect or operate an exact external communication connection',
     guide: `The connection owner holds configured adapters, bindings, grants, ingress and delivery
 receipts. Managed Agents authenticate with their original Session capability, never as a user.
+For a human-selected exact Session, use connection diagnose --host ID --session ID [--binding ID].
+This bounded local read is available with the original managed caller. It exposes service,
+transport, binding scope/grant counts and newest application/group intake with original Core
+outcome/waiting reasons, including receiver aliases. It returns no bodies, member identities,
+credentials or private setup data. Partial sections stay explicit; an empty page is not an
+absence proof. Follow original cursors for older observations; diagnosis never retries or
+rejoins input, reads the platform, or changes existing administration and grant permissions.
 Start with connection enrollment ls to discover adapterId/domain and your own original operations.
 Use connection enrollment begin --input FILE|- with exact operationId, connectionId, adapterId,
 domain, label and preset {name,avatar:{pngDataUrl}}. Only a person can scan/authorize the platform

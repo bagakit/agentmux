@@ -75,7 +75,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       for (const [name, type] of [['record_json', 'TEXT'], ['connection_id', 'TEXT'], ['intake_sequence', 'INTEGER']]) {
         if (!columns.includes(name)) this.database.exec(`ALTER TABLE connection_ingress_event ADD COLUMN ${name} ${type}`)
       }
-      this.database.exec('CREATE UNIQUE INDEX IF NOT EXISTS connection_ingress_action_sequence ON connection_ingress_event(intake_sequence) WHERE record_json IS NOT NULL; CREATE UNIQUE INDEX IF NOT EXISTS connection_ingress_action_identity ON connection_ingress_event(ingress_id) WHERE record_json IS NOT NULL; CREATE INDEX IF NOT EXISTS connection_ingress_action_connection ON connection_ingress_event(connection_id,intake_sequence) WHERE record_json IS NOT NULL; CREATE INDEX IF NOT EXISTS connection_ingress_message_connection ON connection_ingress_message(connection_id,sequence);')
+      this.database.exec(`CREATE UNIQUE INDEX IF NOT EXISTS connection_ingress_action_sequence ON connection_ingress_event(intake_sequence) WHERE record_json IS NOT NULL; CREATE UNIQUE INDEX IF NOT EXISTS connection_ingress_action_identity ON connection_ingress_event(ingress_id) WHERE record_json IS NOT NULL; CREATE INDEX IF NOT EXISTS connection_ingress_action_connection ON connection_ingress_event(connection_id,intake_sequence) WHERE record_json IS NOT NULL; CREATE INDEX IF NOT EXISTS connection_ingress_message_connection ON connection_ingress_message(connection_id,sequence); CREATE INDEX IF NOT EXISTS connection_ingress_message_audience ON connection_ingress_message(domain,app_id,json_extract(record_json,'$.externalConversationId'),sequence); CREATE INDEX IF NOT EXISTS connection_ingress_event_audience ON connection_ingress_event(domain,app_id,json_extract(record_json,'$.externalConversationId'),intake_sequence) WHERE record_json IS NOT NULL;`)
     })
   }
   private safe<T>(read: () => T): T {
@@ -346,6 +346,20 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       await client.rejoinAgentInputWaiting({ ref: original.inputReceipt.ref }, this.context(original.ingress))
     }
     return await this.inspect({ ingressId })
+  }
+  /** Read newest original group events, independently of local receiver aliases or claim success. */
+  async listAudience(input: import('@agentmux/core/connections').ConnectionIngressAudienceInput): Promise<import('@agentmux/core/connections').ConnectionIngressAudiencePage> {
+    const application = input.application, limit = input.limit ?? 5
+    if (!application || ![application.domain, application.appId, input.externalConversationId].every(value => typeof value === 'string' && value.length > 0) || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) fail('INVALID_CONNECTION_INGRESS')
+    return this.safe(() => {
+      const fields = [application.domain, application.appId, input.externalConversationId]
+      const audienceRows = "SELECT sequence,ingress_id,record_json FROM connection_ingress_message WHERE domain=? AND app_id=? AND json_extract(record_json,'$.externalConversationId')=? UNION ALL SELECT intake_sequence AS sequence,ingress_id,record_json FROM connection_ingress_event WHERE domain=? AND app_id=? AND json_extract(record_json,'$.externalConversationId')=? AND record_json IS NOT NULL"
+      const before = input.beforeIngressId ? this.database.prepare('SELECT sequence FROM (' + audienceRows + ') WHERE ingress_id=?').get(...fields, ...fields, input.beforeIngressId) : undefined
+      if (input.beforeIngressId && !before) fail('INGRESS_CURSOR_MISMATCH')
+      const rows = this.database.prepare('SELECT record_json FROM (' + audienceRows + ')' + (before ? ' WHERE sequence<?' : '') + ' ORDER BY sequence DESC LIMIT ?').all(...fields, ...fields, ...(before ? [Number(before.sequence)] : []), limit + 1)
+      const ingresses = rows.slice(0, limit).map(row => parseConnectionIngressRecord(JSON.parse(String(row.record_json))))
+      return { ingresses, nextBeforeIngressId: rows.length > limit ? ingresses.at(-1)!.ingressId : null }
+    })
   }
   async list(value: ConnectionIngressListInput) {
     const input = parseIngressParams('connection.ingress.ls', value)

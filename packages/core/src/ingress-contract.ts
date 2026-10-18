@@ -68,7 +68,11 @@ export type ConnectionIngressAuthority = {
   authority: 'current' | 'refused' | 'unavailable'
   code?: ConnectionIngressAuthorityCode
 }
+export type ConnectionIngressAudienceInput = { application: ConnectionApplication; externalConversationId: string; beforeIngressId?: string; limit?: number }
+export type ConnectionIngressAudiencePage = { ingresses: ConnectionIngressRecord[]; nextBeforeIngressId: string | null }
 export interface ConnectionIngressReadPort {
+  /** Local latest-first audience window across receiver aliases. Never dispatches or reads a platform. */
+  listAudience?(input: ConnectionIngressAudienceInput): Promise<ConnectionIngressAudiencePage>
   inspect(input: ConnectionIngressInspectInput): Promise<ConnectionIngressInspection>
   list(input: ConnectionIngressListInput): Promise<ConnectionIngressPage>
   authority(input: { operationId: string }): Promise<ConnectionIngressAuthority>

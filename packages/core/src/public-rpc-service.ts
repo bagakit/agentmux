@@ -1,3 +1,4 @@
+import { readConnectionDiagnosis } from './connection-diagnosis.js'
 import { parseFileImportParams, parseFileImportResult } from './public-rpc-file-import.js'
 import { runAgentMessageBroadcast, normalizeBroadcastInput } from './agent-message-broadcast.js'
 import { parseAgentInputContextCaptureReference, parseAgentInputContextCaptureRead, type AgentInputContextCaptureReader } from './agent-input-context-capture.js'
@@ -590,6 +591,14 @@ export class AgentMuxRpcService {
       }
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
       const owner = this.ports.connections
+      // Deliberate safe-read contract for authenticated managed callers. Keep their original context;
+      // the projection cannot configure, grant, read private setup data or return conversation bodies.
+      if (method === 'connection.diagnose') {
+        const result = await readConnectionDiagnosis(owner, input as import('./connection-diagnosis-contract.js').ConnectionDiagnosisInput)
+        context.signal?.throwIfAborted(); await context.assertCurrent?.()
+        if (caller) await this.authenticated(context)
+        return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
+      }
       const administration = { actor: caller ? { kind: 'agent' as const, id: caller.agentSessionId } : { kind: context.principal!.kind as 'user' | 'device', id: context.principal!.id }, assertCurrent: async () => { context.signal?.throwIfAborted(); await context.assertCurrent?.(); if (caller) await this.authenticated(context) } }
       if (caller) await assertAgentConnectionAccess(owner, method, input, caller.agentSessionId)
       if (isConnectionServiceMethod(method)) {

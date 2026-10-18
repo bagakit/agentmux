@@ -1,3 +1,4 @@
+import { parseConnectionDiagnosisInput, parseConnectionDiagnosis } from './connection-diagnosis-codec.js'
 import { CONNECTION_SETUP_RPC_METHODS, isConnectionSetupMethod, parseConnectionSetupParams, parseConnectionSetupResult } from './connection-setup-codec.js'
 import { CONNECTION_SERVICE_RPC_METHODS, isConnectionServiceMethod, parseConnectionServiceParams, parseConnectionServiceResult } from './connection-service-codec.js'
 import { parseConnectionConfig, parseConnectionRecord } from './connection-record-codec.js'
@@ -12,7 +13,7 @@ import { ROOM_DISCOVERY_RPC_METHODS, isRoomDiscoveryMethod, parseRoomDiscoveryPa
 import { AgentMuxError } from './errors.js'
 import type { ConnectionMethod, ConnectionOperation, ConnectionParamsMap, ConnectionResultMap } from './connections-contract.js'
 
-export const CONNECTION_RPC_METHODS = { ...CONNECTION_SETUP_RPC_METHODS, ...CONNECTION_SERVICE_RPC_METHODS, ...CONNECTION_PROFILE_RPC_METHODS, ...CONNECTION_ENROLLMENT_RPC_METHODS, ...ROOM_DISCOVERY_RPC_METHODS, ...ROOM_PROVISIONING_RPC_METHODS, ...ROOM_BINDING_RPC_METHODS, ...CONNECTION_DELIVERY_RPC_METHODS, ...INGRESS_RPC_METHODS, 'connection.ls': 'long', 'connection.inspect': 'long', 'connection.configure': 'long', 'connection.test': 'long' } as const
+export const CONNECTION_RPC_METHODS = { ...CONNECTION_SETUP_RPC_METHODS, ...CONNECTION_SERVICE_RPC_METHODS, ...CONNECTION_PROFILE_RPC_METHODS, ...CONNECTION_ENROLLMENT_RPC_METHODS, ...ROOM_DISCOVERY_RPC_METHODS, ...ROOM_PROVISIONING_RPC_METHODS, ...ROOM_BINDING_RPC_METHODS, ...CONNECTION_DELIVERY_RPC_METHODS, ...INGRESS_RPC_METHODS, 'connection.diagnose': 'long', 'connection.ls': 'long', 'connection.inspect': 'long', 'connection.configure': 'long', 'connection.test': 'long' } as const
 export const isConnectionMethod = (value: unknown): value is ConnectionMethod => typeof value === 'string' && Object.hasOwn(CONNECTION_RPC_METHODS, value)
 const fail = (): never => { throw new AgentMuxError('Connection data is malformed or belongs to another original object.', 'INVALID_CONNECTION_DATA') }
 function object(value: unknown, fields: string[]): Record<string, unknown> {
@@ -30,6 +31,7 @@ function operation(value: unknown): ConnectionOperation {
   return { operationId: identity(p.operationId), status: 'configured', connection: parseConnectionRecord(p.connection) }
 }
 export function parseConnectionParams<M extends ConnectionMethod>(method: M, value: unknown): ConnectionParamsMap[M] {
+  if (method === 'connection.diagnose') return parseConnectionDiagnosisInput(value) as ConnectionParamsMap[M]
   if (isConnectionSetupMethod(method)) return parseConnectionSetupParams(method, value) as ConnectionParamsMap[M]
   if (isConnectionServiceMethod(method)) return parseConnectionServiceParams(method, value) as ConnectionParamsMap[M]
   if (isConnectionProfileMethod(method)) return parseConnectionProfileParams(method, value) as ConnectionParamsMap[M]
@@ -50,6 +52,7 @@ export function parseConnectionParams<M extends ConnectionMethod>(method: M, val
   return (p.connectionId === undefined ? { operationId: identity(p.operationId) } : { connectionId: identity(p.connectionId) }) as ConnectionParamsMap[M]
 }
 export function parseConnectionResult<M extends ConnectionMethod>(method: M, value: unknown, input: ConnectionParamsMap[M]): ConnectionResultMap[M] {
+  if (method === 'connection.diagnose') return parseConnectionDiagnosis(value, input as ConnectionParamsMap['connection.diagnose']) as ConnectionResultMap[M]
   if (isConnectionSetupMethod(method)) return parseConnectionSetupResult(method, value, input as never) as ConnectionResultMap[M]
   if (isConnectionServiceMethod(method)) return parseConnectionServiceResult(method, value, input as never) as ConnectionResultMap[M]
   if (isConnectionProfileMethod(method)) return parseConnectionProfileResult(method, value, input as never) as ConnectionResultMap[M]

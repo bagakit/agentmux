@@ -111,6 +111,7 @@ export async function createDesktopConnections(options: { directory: string; enc
         retry: async (input, context) => (await ensure()).publication!.retry(input, context)
       } satisfies import('@agentmux/core/connections').ConnectionDeliveryPort } : {}),
       ...(options.ingress && options.bindings ? { ingress: {
+        listAudience: async input => (await ensure()).ingress!.listAudience(input),
         inspect: async input => (await ensure()).ingress!.inspect(input),
         list: async input => (await ensure()).ingress!.list(input),
         authority: async input => (await ensure()).ingress!.authority(input)

@@ -28,3 +28,7 @@ export { connectionSetupPublicationSubjects, connectionSetupPermissionActionPurp
 export * from './connection-setup-codec.js'
 
 export * from './connection-request-trace.js'
+
+export * from './connection-diagnosis-contract.js'
+export * from './connection-diagnosis-codec.js'
+export { groupTarget, groupWindowLimit, deliveryFacts, deliveryMatches, formatGroupDiagnosis, retainGroupDiagnosis } from './connection-diagnosis.js'
