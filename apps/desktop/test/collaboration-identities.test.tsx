@@ -64,10 +64,12 @@ it('joins only a confirmed Runtime creator while retaining one original creation
   expect(parent.subject).toBeNull(); expect(parent.reference).toEqual({ runtimeId: 'semantic-runtime', agentSessionId: 'parent' })
   const peer: SessionHistorySourceReference = { runtimeId: 'semantic-runtime', agentSessionId: 'parent' }
   const resolved = resolveCollaborationIdentities(original, new Map([[parent.id, { reference: peer, loading: false, issue: null,
-    source: { hostId: 'original-parent-owner', agentSessionId: 'parent', state: 'active' } }]]))
+    source: { hostId: 'original-parent-owner', agentSessionId: 'parent', state: 'active',
+      history: { providerId: 'parent-provider', executorId: 'parent-executor', workspacePath: 'original-parent-workspace', createdAt: 1 } } }]]))
   expect(resolved.relations).toHaveLength(1)
   expect(resolved.relations[0]!.source).toBe(collaborationSubjectKey({ hostId: 'original-parent-owner', agentSessionId: 'parent' }))
   expect(resolved.agents.has(collaborationSubjectKey({ hostId: 'child-owner', agentSessionId: 'parent' }))).toBe(false)
+  expect(resolved.agents.get(resolved.relations[0]!.source)).toMatchObject({ providerId: 'parent-provider', executorId: 'parent-executor' })
   expect(resolved.relations[0]!.evidence[0]).toBe(original.relations[0]!.evidence[0])
   expect(project([], []).relations).toEqual([])
 })
