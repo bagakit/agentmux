@@ -306,7 +306,7 @@ function lastSlowEventId(): number {
 }
 
 it('records cleanup spans while hide and reveal preserve the same Terminal, Run, ordered bytes and healthy input', async () => {
-  let mono = performance.now()
+  let mono = Math.ceil(performance.now())
   const clock = vi.spyOn(performance, 'now').mockImplementation(() => mono)
   const observation = vi.spyOn(rendererPerformance, 'terminalCleanup')
   try {
@@ -352,7 +352,7 @@ it('records cleanup spans while hide and reveal preserve the same Terminal, Run,
 })
 
 it('keeps retiring xterm cleanup on the original Run and instance while its Region accepts the replacement Run', async () => {
-  let mono = performance.now()
+  let mono = Math.ceil(performance.now())
   const clock = vi.spyOn(performance, 'now').mockImplementation(() => mono)
   try {
     await render(true)
@@ -399,7 +399,7 @@ it('keeps retiring xterm cleanup on the original Run and instance while its Regi
 })
 
 it('records a throwing WebGL dispose without swallowing its original error or revoking the retained Terminal', async () => {
-  let mono = performance.now()
+  let mono = Math.ceil(performance.now())
   const clock = vi.spyOn(performance, 'now').mockImplementation(() => mono)
   try {
     await render(true)
