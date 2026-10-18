@@ -6,18 +6,9 @@ import { useSettingDraftRecord } from './use-setting-draft'
 import { executionSettings, type ExecutionSettings } from './continuity-settings-fields'
 import '../../styles/settings-continuity.css'
 import './settings-recovery.css'
+import { readableSettingsDuration as readableDuration, settingsDurationSeconds as seconds } from './settings-duration'
 
 const defaults = DEFAULT_AGENT_CONTINUITY_POLICY
-function readableDuration(value: number): string {
-  if (!Number.isSafeInteger(value) || value < 0) return 'Enter a valid duration'
-  if (value === 0) return 'No delay'
-  const hours = Math.floor(value / 3_600_000), minutes = Math.floor((value % 3_600_000) / 60_000), remainder = value % 60_000
-  return [hours ? `${hours} ${hours === 1 ? 'hour' : 'hours'}` : '', minutes ? `${minutes} ${minutes === 1 ? 'minute' : 'minutes'}` : '', remainder ? `${seconds(remainder)} ${remainder === 1000 ? 'second' : 'seconds'}` : ''].filter(Boolean).join(' ')
-}
-function seconds(milliseconds: number): string {
-  const fraction = String(milliseconds % 1000).padStart(3, '0').replace(/0+$/, '')
-  return `${Math.floor(milliseconds / 1000)}${fraction ? `.${fraction}` : ''}`
-}
 function milliseconds(value: string): number {
   if (!/^\d+(\.\d{1,3})?$/.test(value)) return NaN
   const [whole = '0', fraction = ''] = value.split('.')
@@ -98,7 +89,7 @@ function RetryExample({ policy }: { policy: ExecutionSettings }) {
       <p>Each additional retry waits after the previous failure. Earlier input is never replayed.</p>
       <ol>{Array.from({ length: count }, (_, index) => <li key={index}><span>Retry {index + 1}</span><strong>{readableDuration(agentContinuityRetryBaseDelay(policy, index + 1))}</strong></li>)}</ol>
       <p className="continuity-hint">{count < policy.retryMaxAttempts ? `First ${count} of ${policy.retryMaxAttempts} retries shown. ` : ''}Base waits double up to {readableDuration(policy.retryMaxDelayMs)}. Confirmed process-exit retries add up to 25% of the base, capped at one second; frontend reconnection uses the base alone.</p>
-      <p>After {policy.retryMaxAttempts} {policy.retryMaxAttempts === 1 ? 'retry' : 'retries'}, automatic recovery pauses. You can still resume the original Session.</p>
+      <p>If recovery still fails after {policy.retryMaxAttempts} {policy.retryMaxAttempts === 1 ? 'retry' : 'retries'}, automatic retries pause. You can still resume the original Session.</p>
     </>}
   </aside>
 }
