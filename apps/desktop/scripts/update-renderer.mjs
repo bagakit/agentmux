@@ -1,7 +1,8 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { cp, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { homedir } from 'node:os'
-import { randomUUID } from 'node:crypto'
+
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { canonicalInstallPath } from './package-identity.mjs'
@@ -27,7 +28,7 @@ if (process.argv.includes('--rollback')) {
   const candidate = JSON.parse(await readFile(join(source, 'release.json'), 'utf8'))
   if (updateRoute(installed.identity, candidate.identity) !== 'renderer') throw new Error('Host or runtime changed: use application installation, not frontend update.')
   if (candidate.id === previous.current) { process.stdout.write('frontend_already_active=true\n'); process.exit(0) }
-  const staged = join(directory, `.staging-${randomUUID()}`)
+  const staged = join(directory, `.staging-${mintObjectId()}`)
   await cp(source, staged, { recursive: true })
   const destination = join(directory, candidate.id)
   try { await rename(staged, destination) } catch (error) {
@@ -36,7 +37,7 @@ if (process.argv.includes('--rollback')) {
   }
   next = { current: candidate.id, previous: previous.current }
 }
-const temporary = join(directory, `.active-${randomUUID()}.json`)
+const temporary = join(directory, `.active-${mintObjectId()}.json`)
 await writeFile(temporary, JSON.stringify(next), { mode: 0o600 })
 await rename(temporary, activePath)
 process.stdout.write(`frontend_update_requested=${next.current ?? 'bundled'}\n`)

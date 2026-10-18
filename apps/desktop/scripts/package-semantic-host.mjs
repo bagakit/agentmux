@@ -1,9 +1,10 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { lstat, readFile } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { randomUUID } from 'node:crypto'
+
 import { observeApplicationProcesses } from './package-process-scope.mjs'
 
 const exec = promisify(execFile)
@@ -165,7 +166,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1] && pro
   // Observe the installed App through the public contract it actually ships. A new owner
   // requires its exact semantic fence; observing the outgoing App cannot upgrade its API.
   const { AGENTMUX_RPC_NATIVE_METHODS } = await import(new URL('./public-rpc.js', pathToFileURL(process.argv[3])))
-  const rpc = await connectAgentMuxRpc(), consumerId = `package-host-${randomUUID()}`
+  const rpc = await connectAgentMuxRpc(), consumerId = `package-host-${mintObjectId()}`
   let fence
   try {
     if (Object.hasOwn(AGENTMUX_RPC_NATIVE_METHODS, 'runtime.owner.identity')) {

@@ -1,6 +1,7 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { X509Certificate, randomUUID, randomBytes, generateKeyPairSync } from 'node:crypto'
+import { X509Certificate, randomBytes, generateKeyPairSync } from 'node:crypto'
 import { mkdir, readFile, writeFile, rm, access } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -51,7 +52,7 @@ export async function setupLocalSigningIdentity({ home = homedir(), run = runNat
     await mkdir(pending, { mode: 0o700 })
     const pair = generateKeyPairSync('rsa', { modulusLength: 3072, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } })
     await writeFile(join(pending, 'key.pem'), pair.privateKey, { mode: 0o600, flag: 'wx' })
-    await writeFile(join(pending, 'openssl.cnf'), `[req]\nprompt = no\ndistinguished_name = subject\nx509_extensions = signing\n[subject]\nCN = AgentMux Local ${randomUUID()}\n[signing]\nbasicConstraints = critical,CA:false\nkeyUsage = critical,digitalSignature\nextendedKeyUsage = critical,codeSigning\n`, { mode: 0o600, flag: 'wx' })
+    await writeFile(join(pending, 'openssl.cnf'), `[req]\nprompt = no\ndistinguished_name = subject\nx509_extensions = signing\n[subject]\nCN = AgentMux Local ${mintObjectId()}\n[signing]\nbasicConstraints = critical,CA:false\nkeyUsage = critical,digitalSignature\nextendedKeyUsage = critical,codeSigning\n`, { mode: 0o600, flag: 'wx' })
   }
   const key = join(pending, 'key.pem'), certificate = join(pending, 'certificate.pem'), archive = join(pending, 'identity.p12')
   if (!await exists(key) || !await exists(join(pending, 'openssl.cnf'))) throw new Error('Local signing setup is incomplete. Its original private identity is preserved when available; review the pending directory instead of replacing it.')
