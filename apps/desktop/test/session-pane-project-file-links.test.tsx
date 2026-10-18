@@ -12,6 +12,7 @@ import type { AppConfig, SessionSnapshot, WorkspaceRecord } from '../src/shared/
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { directoryIdentity, workspaceZoneId } from '../src/shared/space-addresses'
 import { WorkspaceFiles } from '../src/main/workspace-files'
+import { ScratchTopics } from '../src/main/scratch-topics'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
 import { App } from '../src/renderer/src/App'
 import { api } from '../src/renderer/src/lib/api'
@@ -20,7 +21,9 @@ import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
 import { createWorkbenchTab, fileTabId, documentKey } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
 import { workbenchProjectionSlotId } from '../src/renderer/src/lib/workbench-projection'
+import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { installNativePopover } from './fixtures/mote-workface'
+import { conversationPagePortFixture } from './helpers/conversation-page-port-fixture'
 
 // The complete Pane → Activity → Conversation → Markdown chain, Store and File reducer stay real.
 // Unrelated terminal/composer leaves and remote I/O are bounded test doubles. Local reads use Main.
@@ -48,6 +51,7 @@ const origin = { workspaceId: SCRATCH_WORKSPACE_ID, tabGroupId: 'pmo-group', tab
 let tinyRoot: string, project: WorkspaceRecord, scratch: WorkspaceRecord, config: AppConfig
 let root: Root, container: HTMLDivElement, files: WorkspaceFiles
 let commits = 0, restorePopover: (() => void) | undefined
+let reading: Awaited<ReturnType<typeof conversationPagePortFixture>>, seededContent = ''
 function agent(id = 'pmo', workspacePath = scratch.path): Extract<SessionSnapshot, { kind: 'agent' }> {
   return { id, kind: 'agent', providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath,
     label: id, createdAt: 1, updatedAt: 1, agentSessionUpdatedAt: 1, processState: 'running',
@@ -60,6 +64,7 @@ function goal(id = 'goal', projectId = directoryIdentity(project.hostId, project
     projectName: project.name, sessionIds: [], createdAt: 1, updatedAt: 1, source: 'session' }
 }
 function seed(content: string, mapped = true) {
+  seededContent = content
   const tab = createWorkbenchTab(origin.tabId, { kind: 'agent', phase: 'attached', regionId: origin.regionId,
     workspaceId: scratch.id, sessionId: 'pmo' })
   useAppStore.setState({ ...initial, config, localHome: homedir(), sessions: [agent()], viewModes: { pmo: 'activity' },
@@ -73,11 +78,18 @@ function seed(content: string, mapped = true) {
     retainedSpatialFocus: null, workbenchNavigationInputPolicy: null, error: null })
 }
 async function flush() { await act(async () => { for (let n = 0; n < 12; n++) await Promise.resolve() }) }
+async function waitReading() {
+  for (let step = 0; step < 200; step++) {
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)) })
+    if (container.querySelector('.conversation-native-thread__record')) return
+  }
+  expect(container.querySelector('.conversation-native-thread__record'), container.textContent).not.toBeNull()
+}
 async function mount() {
   await act(async () => root.render(<Profiler id="original-pane" onRender={() => { commits++ }}>
     <SessionPane sessionId="pmo" surfaceKind="agent" visible interactiveResize={false} linkOrigin={origin} />
   </Profiler>))
-  await flush()
+  await waitReading()
 }
 function buttons() { return [...container.querySelectorAll<HTMLButtonElement>('button.md-link--file')] }
 async function click(button: HTMLButtonElement) {
@@ -117,6 +129,14 @@ beforeEach(async () => {
   files = new WorkspaceFiles(id => ({ id, kind: 'local' }) as never)
   vi.spyOn(api.sessions, 'historyPage').mockImplementation(async control => ({ agentSessionId: control.agentSessionId,
     source: { providerId: 'codex', nativeSessionId: 'proof' }, items: [], nextCursor: null }))
+  // Replies come from the original native page through the real Core Reader/IPC,
+  // not the old unused historyPage prop or an inert captured-reply preview.
+  reading = await conversationPagePortFixture({ hostId: 'local', agentSessionId: 'pmo' },
+    { providerId: 'codex', nativeSessionId: 'proof' }, async (_id, options) => {
+      const page = await api.sessions.historyPage(agent().control, options)
+      return { ...page, items: [{ id: 'seeded-reply', kind: 'assistant-message', messagePhase: 'final',
+        contentParts: [{ kind: 'text', text: seededContent }] }, ...page.items] }
+    })
   vi.spyOn(api.files, 'observe').mockResolvedValue(undefined)
   vi.spyOn(api.files, 'unobserve').mockResolvedValue(undefined)
   vi.spyOn(api.files, 'read').mockImplementation(async (workspaceId, path) => {
@@ -134,7 +154,7 @@ describe('original App resource owner and ordinary display', () => {
       layouts: { [scratch.id]: state.layouts[scratch.id]! }, toolsOpen: false, projectRailOpen: false }))
     restorePopover = installNativePopover()
     await act(async () => { await import('../src/renderer/src/components/FileSurfaceView'); await import('../src/renderer/src/components/EditorPane') })
-    await act(async () => root.render(<App />)); await flush()
+    await act(async () => root.render(<App />)); await waitReading()
     expect(buttons()).toHaveLength(1); await click(buttons()[0]!)
     await vi.waitFor(async () => { await flush(); expect(container.querySelector('[data-project-file-editor]')).not.toBeNull() })
     const id = fileTabId(project.id, 'src/a.ts'), tab = useAppStore.getState().tabs[id]!
@@ -198,6 +218,7 @@ describe('original App resource owner and ordinary display', () => {
     expect(displaySlot.contains(editor)).toBe(true); expect(fileLifetime.mounts).toBe(1); expect(fileLifetime.unmounts).toBe(0)
     await act(async () => useAppStore.setState({ layouts: { [scratch.id]: createWorkspaceLayout(origin.tabGroupId, [origin.tabId]), [project.id]: resourceLayout } }))
     expect(displaySlot.contains(editor)).toBe(false)
+    await act(async () => useAppStore.getState().activateTab(project.id, 'resource-home', id))
     expect(editor.closest('[data-workbench-group-id]')?.getAttribute('data-workbench-group-id')).toBe('resource-home')
     expect(useAppStore.getState().tabs[id]).toBe(state.tabs[id]); expect(fileLifetime.mounts).toBe(1); expect(fileLifetime.unmounts).toBe(0)
   })
@@ -221,6 +242,7 @@ describe('original App resource owner and ordinary display', () => {
 afterEach(async () => {
   await act(async () => root.unmount()); container.remove()
   restorePopover?.(); restorePopover = undefined
+  await reading.close()
   await files.dispose(); await rm(tinyRoot, { recursive: true, force: true })
   useAppStore.setState(initial, true); vi.restoreAllMocks(); localStorage.clear()
 })
@@ -309,14 +331,15 @@ describe('current mapped Goal project links through the original mounted Pane', 
     const home = `~/${relative(homedir(), project.path)}/src/a.ts:9:4`
     seed('Read src/a.ts.')
     vi.mocked(api.sessions.historyPage).mockImplementation(async control => ({ agentSessionId: control.agentSessionId,
-      source: { providerId: 'codex', nativeSessionId: 'reasoning-proof' }, items: [{ id: 'thinking', kind: 'assistant-message',
+      source: { providerId: 'codex', nativeSessionId: 'proof' }, items: [{ id: 'thinking', kind: 'assistant-message',
         contentParts: [{ kind: 'reasoning', text: `Inspect ${home}.` }] }], nextCursor: null }))
     await mount()
-    expect(container.querySelectorAll('.conversation-native-thread__record')).toHaveLength(1)
-    const trace = container.querySelector<HTMLDetailsElement>('.conversation-native-thread details')!
+    expect(container.querySelectorAll('.conversation-native-thread__record')).toHaveLength(2)
+    const trace = container.querySelector<HTMLDetailsElement>('.conversation-native-thread details[data-trace-kind="reasoning"]')!
+    expect(trace, container.innerHTML).not.toBeNull()
     await act(async () => { trace.open = true; trace.dispatchEvent(new Event('toggle')) })
     expect(buttons()).toHaveLength(2)
-    const nativeButton = container.querySelector<HTMLButtonElement>('.conversation-native-thread button.md-link--file')!
+    const nativeButton = container.querySelector<HTMLButtonElement>('.conversation-native-thread .log-turn__trace-body button.md-link--file')!
     await click(nativeButton)
     expect(useAppStore.getState().documentRevealTargets[documentKey(project.id, 'src/a.ts')]).toEqual({ line: 9, column: 4 })
     expect(container.querySelectorAll('.conversation-native-thread .log-turn__trace-body button.md-link--file')).toHaveLength(1)
@@ -328,16 +351,23 @@ describe('current mapped Goal project links through the original mounted Pane', 
     expect(buttons()).toEqual([]); expect(container.textContent).toContain('Goal association')
     expect(vi.mocked(api.files.read).mock.calls).toEqual([]); retained()
   })
-  it('reports ordinary Session file misses with its own context', async () => {
+  it('reports an ordinary Session file miss through the original File owner and keeps the Session', async () => {
     seed('Read src/a.ts.', false)
+    useAppStore.setState({ initialize: async () => () => {}, loading: false, toolsOpen: false, projectRailOpen: false })
+    restorePopover = installNativePopover()
     vi.mocked(api.files.read).mockResolvedValue({ status: 'deleted' })
-    await mount()
-    await act(async () => { buttons()[0]!.click(); await vi.waitFor(() => expect(vi.mocked(api.files.read).mock.calls).toEqual([[scratch.id, 'src/a.ts']])) })
+    await act(async () => root.render(<App />)); await waitReading()
+    await act(async () => { buttons()[0]!.click(); await vi.waitFor(() => expect(useAppStore.getState().error).toBe('File was deleted: src/a.ts')) })
     await flush()
-    expect(container.querySelector('.service-window')).not.toBeNull()
-    expect(container.querySelector('.service-window')?.textContent).toContain('original Session keeps running')
-    expect(container.querySelector('.service-window')?.textContent).toContain('Session’s original Workspace and Host')
-    expect(container.querySelector('.service-window')?.textContent).not.toContain('Goal')
+    expect(vi.mocked(api.files.read).mock.calls).toEqual([[scratch.id, 'src/a.ts']])
+    const notices = container.querySelector<HTMLButtonElement>('button[title="System notifications"]')!
+    expect(notices).not.toBeNull()
+    // happy-dom does not perform a declarative popoverTarget button's native default action.
+    const details = document.getElementById(notices.getAttribute('aria-controls')!)!
+    await act(async () => { notices.click(); details.showPopover() })
+    await act(async () => details.querySelector<HTMLButtonElement>('button[data-section="history"]')!.click())
+    expect(document.querySelector('.global-system-notices__details')?.textContent).toContain('File was deleted: src/a.ts')
+    expect(useAppStore.getState().documents[documentKey(scratch.id, 'src/a.ts')]).toBeUndefined()
     retained()
   })
   it('retains ordinary non-Goal Session’s own host/path route', async () => {
@@ -360,5 +390,44 @@ describe('current mapped Goal project links through the original mounted Pane', 
     expect(commits).toBeGreaterThan(baseline.commits)
     expect(context.mock.calls.length).toBeGreaterThan(baseline.context)
     expect(buttons()).toEqual([]); expect(container.textContent).toContain('unconfirmed')
+  })
+})
+
+describe('confirmed Topic and Mote reply file resources', () => {
+  it.each(['topic', 'mote'] as const)('opens %s physical href and relative native reply references through the same logical File owner', async kind => {
+    const topics = new ScratchTopics()
+    const topic = kind === 'mote' ? await topics.ensureMote(scratch, 'view:reply-files') : await topics.ensure(scratch, 'view:reply-files')
+    const physical = topic.physicalDirectoryPath!, path = 'outcome/knowledge/README.md'
+    const logicalPath = `${topic.directoryPath}/${path}`
+    expect(physical.startsWith(`${scratch.path}/`)).toBe(false)
+    expect(topic.confirmedDirectoryPaths).toContain(physical)
+    await mkdir(join(physical, 'outcome/knowledge'), { recursive: true })
+    await writeFile(join(physical, path), 'ORIGINAL TOPIC KNOWLEDGE\n')
+    const content = `直接看 [知识库总入口](${physical}/${path}:12:3)。也可看 ${path}:12:3 和 \`${path}:12:3\`。`
+    seed('Native reply follows.', false)
+    const originalSession = agent('pmo', physical)
+    useAppStore.setState(state => ({ sessions: [originalSession],
+      tabs: { ...state.tabs, [origin.tabId]: { ...state.tabs[origin.tabId]!, topicId: topic.id } },
+      scratchTopicSnapshots: { [scratch.id]: { scope: scratchTopicsScope(scratch), revision: 1,
+        topics: [{ ...topic, ...(kind === 'mote' ? { readError: 'Optional SOUL detail could not be read.' } : {}) }], error: null, reading: false } } }))
+    vi.mocked(api.sessions.historyPage).mockImplementation(async control => ({ agentSessionId: control.agentSessionId,
+      source: { providerId: 'codex', nativeSessionId: 'proof' }, nextCursor: null,
+      items: [{ id: 'knowledge-reply', kind: 'assistant-message', messagePhase: 'final', contentParts: [{ kind: 'text', text: content }] }] }))
+    const originalOpen = useAppStore.getState().openFile, open = vi.fn(originalOpen)
+    useAppStore.setState({ openFile: open })
+    const originalRegion = useAppStore.getState().tabs[origin.tabId]!.regions[origin.regionId]
+    await mount()
+    const references = [...container.querySelectorAll<HTMLButtonElement>('.conversation-native-thread button.md-link--file')]
+    expect(references, container.textContent).toHaveLength(3)
+    for (const reference of references) await click(reference)
+    expect(open.mock.calls.map(call => [call[0], call[2], call[3]])).toEqual(Array.from({ length: 3 }, () =>
+      [logicalPath, { line: 12, column: 3 }, scratch.id]))
+    expect(vi.mocked(api.files.read).mock.calls).toEqual([[scratch.id, logicalPath]])
+    expect(useAppStore.getState().documents[documentKey(scratch.id, logicalPath)]?.content).toBe('ORIGINAL TOPIC KNOWLEDGE\n')
+    expect(useAppStore.getState().documentRevealTargets[documentKey(scratch.id, logicalPath)]).toEqual({ line: 12, column: 3 })
+    expect(useAppStore.getState().sessions).toEqual([originalSession])
+    expect(useAppStore.getState().tabs[origin.tabId]!.regions[origin.regionId]).toBe(originalRegion)
+    expect(useAppStore.getState().agentComposerDrafts.pmo).toBe('KEEP DRAFT')
+    expect(container.querySelector('[data-composer]')).not.toBeNull()
   })
 })

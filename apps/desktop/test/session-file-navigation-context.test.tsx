@@ -1,4 +1,6 @@
 // @vitest-environment happy-dom
+// @vitest-environment-options {"settings":{"navigator":{"userAgent":"Mozilla/5.0 AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36"}}}
+// Desktop runs Chromium; happy-dom's WebKit default triggers Monaco's Safari clipboard workaround.
 import { createRequire } from 'node:module'
 import { act, useEffect } from 'react'
 import type { Root } from 'react-dom/client'
@@ -11,8 +13,9 @@ import { useAppStore } from '../src/renderer/src/store'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { addWorkbenchRegion, createWorkbenchTab, documentKey, fileTabId, workbenchSurfaces } from '../src/renderer/src/lib/workbench-tabs'
 import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
-import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
 import { requestPmoTeamsTopicFloatingOpen, requestPmoTeamsTopicFloatingClose, readPmoTeamsTopicFloatingState } from '../src/renderer/src/lib/pmo-teams-topic-floating'
+import { conversationPagePortFixture } from './helpers/conversation-page-port-fixture'
 import { defaultAgent, defaultTab, neighborAgent, neighborTab, moteTopics, seedMoteWorkface, installNativePopover } from './fixtures/mote-workface'
 
 vi.mock('react-resizable-panels', () => createRequire(import.meta.url)(
@@ -36,7 +39,10 @@ let root: Root, container: HTMLDivElement, restorePopover: () => void
 let read: ReturnType<typeof vi.spyOn>
 let receipts: FileOpenResult[]
 let sourceBody: string
-beforeEach(() => {
+let reading: Awaited<ReturnType<typeof conversationPagePortFixture>>
+const topicPath = (path: string) => `${scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID)}/${path}`
+const notesPath = topicPath('notes.txt')
+beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   localStorage.clear(); terminal.mounts = 0; sourceBody = 'Read notes.txt:2:3.'; restorePopover = installNativePopover()
@@ -65,18 +71,26 @@ beforeEach(() => {
   vi.spyOn(api.scratch, 'readTopic').mockImplementation(async (_workspace, id) => moteTopics.find(topic => topic.id === id) ?? null)
   vi.spyOn(api.sessions, 'historyPage').mockImplementation(async control => ({ agentSessionId: control.agentSessionId,
     source: { providerId: 'fixture', nativeSessionId: 'original-native' },
-    items: control.agentSessionId === defaultAgent.id ? [{ id: 'original-native-response', kind: 'assistant-message', phase: 'final',
+    items: control.agentSessionId === defaultAgent.id ? [{ id: 'original-native-response', kind: 'assistant-message', messagePhase: 'final',
       contentParts: [{ kind: 'text', text: sourceBody }] }] : [], nextCursor: null }))
+  reading = await conversationPagePortFixture({ hostId: 'local', agentSessionId: defaultAgent.id },
+    { providerId: 'fixture', nativeSessionId: 'original-native' }, (_id, options) => api.sessions.historyPage(defaultAgent.control, options))
   vi.spyOn(api.files, 'observe').mockResolvedValue(undefined); vi.spyOn(api.files, 'unobserve').mockResolvedValue(undefined)
   read = vi.spyOn(api.files, 'read').mockImplementation(async (_workspace, path) => ({ status: 'read', document: {
     path, content: 'ORIGINAL RESOURCE FILE', revision: 'original-file-revision' } }))
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
 afterEach(async () => {
-  await act(async () => root.unmount()); container.remove(); restorePopover()
+  await act(async () => root.unmount()); await reading.close(); container.remove(); restorePopover()
   useAppStore.setState(baseline, true); localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
 async function settle() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)) }) }
+async function waitReply() {
+  await vi.waitFor(async () => {
+    await settle()
+    expect(container.querySelectorAll('.conversation-native-thread button.md-link').length, container.textContent).toBeGreaterThan(0)
+  })
+}
 async function mount(surface: 'survey' | 'mote', selectedRegionId = reference.regionId) {
   const state = useAppStore.getState(), catalog = spatialCatalog(state, moteTopics)
   const zoneId = catalog.tabs.find(tab => tab.tabId === defaultTab.id)!.zoneId
@@ -87,7 +101,7 @@ async function mount(surface: 'survey' | 'mote', selectedRegionId = reference.re
     useAppStore.setState({ mainSurface: surface === 'survey' ? 'survey' : 'board' })
     root.render(<App />)
   })
-  await settle()
+  await settle(); await waitReply()
 }
 function localHost(surface: 'survey' | 'mote') {
   const host = container.querySelector<HTMLElement>(surface === 'mote' ? '[data-pmo-teams-topic-floating]' : '.global-survey-surface')
@@ -108,13 +122,13 @@ function snapshot() {
 }
 function openedFile() {
   const surfaces = workbenchSurfaces(useAppStore.getState().tabs[defaultTab.id]!).filter(surface => surface.kind === 'file')
-  expect(surfaces).toHaveLength(1); expect(surfaces[0]).toMatchObject({ workspaceId: SCRATCH_WORKSPACE_ID, path: 'notes.txt' })
-  expect(useAppStore.getState().documents[documentKey(SCRATCH_WORKSPACE_ID, 'notes.txt')]?.content).toBe('ORIGINAL RESOURCE FILE')
+  expect(surfaces).toHaveLength(1); expect(surfaces[0]).toMatchObject({ workspaceId: SCRATCH_WORKSPACE_ID, path: notesPath })
+  expect(useAppStore.getState().documents[documentKey(SCRATCH_WORKSPACE_ID, notesPath)]?.content).toBe('ORIGINAL RESOURCE FILE')
   expect(receipts).toHaveLength(1)
   expect(receipts[0]).toMatchObject({ placement: { status: 'created', tabId: defaultTab.id, regionId: surfaces[0]!.regionId }, data: { kind: 'text' } })
   return surfaces[0]!
 }
-function expectRetained(before: ReturnType<typeof snapshot>, fileRead = true, path = 'notes.txt') {
+function expectRetained(before: ReturnType<typeof snapshot>, fileRead = true, path = notesPath) {
   const after = snapshot()
   for (const key of ['work', 'workspace', 'main', 'layouts', 'sessions', 'drafts', 'source', 'tabActive'] as const) expect(after[key]).toEqual(before[key])
   expect(after.sessions.find(session => session.id === defaultAgent.id)?.control).toBe(defaultAgent.control)
@@ -154,7 +168,7 @@ it.each(['survey', 'mote'] as const)('%s delayed File completion keeps a later l
         reference: { ...reference, tabId: neighborTab.id, regionId: 'neighbor-region' } })
       requestPmoTeamsTopicFloatingOpen({ targetTopicId: PMO_TEAMS_TOPIC_ID, reference })
     }
-    complete({ status: 'read', document: { path: 'notes.txt', content: 'ORIGINAL RESOURCE FILE', revision: 'original-file-revision' } })
+    complete({ status: 'read', document: { path: notesPath, content: 'ORIGINAL RESOURCE FILE', revision: 'original-file-revision' } })
   })
   await settle(); openedFile(); expectRetained(before)
   expect(useAppStore.getState().surveyZoneSelection).toEqual(before.survey)
@@ -176,7 +190,7 @@ it.each(['survey', 'mote'] as const)('%s explicit File Tab choice hands off to W
   })
   try {
     await act(async () => destination[0]!.click()); await settle()
-    const state = useAppStore.getState(), id = fileTabId(SCRATCH_WORKSPACE_ID, 'notes.txt'), tab = state.tabs[id]
+    const state = useAppStore.getState(), id = fileTabId(SCRATCH_WORKSPACE_ID, notesPath), tab = state.tabs[id]
     expect(tab).toBeDefined()
     expect(state.mainSurface).toBe('workbench')
     expect(state.workbenchSpaceSelection).toMatchObject({ workspaceId: SCRATCH_WORKSPACE_ID, tabId: id, regionId: tab!.layout.activeRegionId })
@@ -187,7 +201,7 @@ it.each(['survey', 'mote'] as const)('%s explicit File Tab choice hands off to W
     expect(readPmoTeamsTopicFloatingState()?.reference).toEqual(reference)
     expect(state.tabs[defaultTab.id]).toBe(defaultTab)
     expect(state.sessions).toEqual(before.sessions); expect(state.agentComposerDrafts).toEqual(before.drafts)
-    expect(read).toHaveBeenCalledExactlyOnceWith(SCRATCH_WORKSPACE_ID, 'notes.txt')
+    expect(read).toHaveBeenCalledExactlyOnceWith(SCRATCH_WORKSPACE_ID, notesPath)
   } finally { unsubscribe() }
 })
 
@@ -197,7 +211,7 @@ it.each([['survey', false], ['mote', false], ['survey', true], ['mote', true]] a
   const mixed = addWorkbenchRegion(defaultTab, reference.regionId, 'right', { kind: 'agent', phase: 'attached',
     workspaceId: SCRATCH_WORKSPACE_ID, sessionId: neighborAgent.id, regionId: peerRegion })
   useAppStore.setState(state => ({ tabs: { ...state.tabs, [mixed.id]: mixed },
-    ...(cached ? { documents: { [documentKey(SCRATCH_WORKSPACE_ID, 'notes.txt')]: { path: 'notes.txt', content: 'ORIGINAL RESOURCE FILE', revision: 'cached-revision' } } } : {}),
+    ...(cached ? { documents: { [documentKey(SCRATCH_WORKSPACE_ID, notesPath)]: { path: notesPath, content: 'ORIGINAL RESOURCE FILE', revision: 'cached-revision' } } } : {}),
     viewModes: { ...state.viewModes, [neighborAgent.id]: 'activity' } }))
   await mount(surface, peerRegion); const before = snapshot()
   expect(before.tabActive).toBe(peerRegion)
@@ -232,11 +246,11 @@ it.each(['survey', 'mote'] as const)('%s late explicit File Tab result keeps the
         reference: { ...reference, tabId: neighborTab.id, regionId: 'neighbor-region' } })
       requestPmoTeamsTopicFloatingOpen({ targetTopicId: PMO_TEAMS_TOPIC_ID, reference })
     }
-    complete({ status: 'read', document: { path: 'notes.txt', content: 'ORIGINAL RESOURCE FILE', revision: 'original-file-revision' } })
+    complete({ status: 'read', document: { path: notesPath, content: 'ORIGINAL RESOURCE FILE', revision: 'original-file-revision' } })
   })
   await settle()
-  const state = useAppStore.getState(), id = fileTabId(SCRATCH_WORKSPACE_ID, 'notes.txt')
-  expect(state.documents[documentKey(SCRATCH_WORKSPACE_ID, 'notes.txt')]?.content).toBe('ORIGINAL RESOURCE FILE')
+  const state = useAppStore.getState(), id = fileTabId(SCRATCH_WORKSPACE_ID, notesPath)
+  expect(state.documents[documentKey(SCRATCH_WORKSPACE_ID, notesPath)]?.content).toBe('ORIGINAL RESOURCE FILE')
   expect(state.tabs[id]).toBeDefined()
   expect(receipts).toHaveLength(1)
   expect(receipts[0]).toMatchObject({ placement: { status: 'created', tabId: id }, data: { kind: 'text' }, navigation: 'cancelled' })
@@ -282,7 +296,7 @@ it.each(['survey', 'mote'] as const)('%s HTTP click in an unselected Agent Regio
     expect(readPmoTeamsTopicFloatingState()?.reference).toEqual({ ...reference, regionId: browsers[0]!.regionId })
     expect(useAppStore.getState().surveyZoneSelection).toEqual(before.survey)
   }
-  expect(create).toHaveBeenCalledExactlyOnceWith(browsers[0]!.regionId, url, SCRATCH_WORKSPACE_ID)
+  expect(create).toHaveBeenCalledExactlyOnceWith(browsers[0]!.regionId, url, SCRATCH_WORKSPACE_ID, undefined, undefined)
   expect(read).not.toHaveBeenCalled(); expect(receipts).toEqual([])
 })
 
@@ -305,7 +319,7 @@ it('Mote HTTP uses its own chooser while background Focus prefers Tab, then sele
   expectRetained(before, false)
   expect(readPmoTeamsTopicFloatingState()?.reference).toEqual({ ...reference, regionId: browsers[0]!.regionId })
   expect(useAppStore.getState().surveyZoneSelection).toEqual(before.survey)
-  expect(create).toHaveBeenCalledExactlyOnceWith(browsers[0]!.regionId, url, SCRATCH_WORKSPACE_ID)
+  expect(create).toHaveBeenCalledExactlyOnceWith(browsers[0]!.regionId, url, SCRATCH_WORKSPACE_ID, undefined, undefined)
 })
 
 it.each(['file', 'http'] as const)('the actual Mote secondary Activity consumes its shared %s link opener beside the original Work primary', async kind => {
@@ -336,7 +350,7 @@ it.each(['file', 'http'] as const)('the actual Mote secondary Activity consumes 
   expect(opened).toBeDefined()
   if (kind === 'http') {
     expect(opened).toMatchObject({ kind: 'browser', workspaceId: SCRATCH_WORKSPACE_ID, url })
-    expect(create).toHaveBeenCalledExactlyOnceWith(opened!.regionId, url, SCRATCH_WORKSPACE_ID)
+    expect(create).toHaveBeenCalledExactlyOnceWith(opened!.regionId, url, SCRATCH_WORKSPACE_ID, undefined, undefined)
   }
   expectRetained(before, kind === 'file')
   expect(readPmoTeamsTopicFloatingState()?.reference).toEqual({ ...reference, regionId: opened!.regionId })
@@ -345,12 +359,12 @@ it.each(['file', 'http'] as const)('the actual Mote secondary Activity consumes 
 
 
 it.each(['survey', 'mote'] as const)('%s bookmark File link opens its original URL as a local Browser and retains the exact source origin', async surface => {
-  const path = 'original.url', url = 'https://navigation.example/bookmark'
-  sourceBody = '[' + path + '](' + path + ')'
+  const name = 'original.url', path = topicPath(name), url = 'https://navigation.example/bookmark'
+  sourceBody = '[' + name + '](' + name + ')'
   const bookmark = vi.spyOn(api.files, 'readBookmark').mockResolvedValue({ url, binary: false })
   const create = vi.spyOn(api.browser, 'create')
   await mount(surface); const before = snapshot()
-  await act(async () => fileLink(surface, path).click()); await settle()
+  await act(async () => fileLink(surface, name).click()); await settle()
   const browsers = workbenchSurfaces(useAppStore.getState().tabs[defaultTab.id]!).filter(surface => surface.kind === 'browser')
   expect(browsers).toHaveLength(1)
   expect(browsers[0]).toMatchObject({ workspaceId: SCRATCH_WORKSPACE_ID, url, bookmarkOrigin: { path, binary: false } })
@@ -366,17 +380,17 @@ it.each(['survey', 'mote'] as const)('%s bookmark File link opens its original U
     expect(useAppStore.getState().surveyZoneSelection).toEqual(before.survey)
   }
   expect(bookmark).toHaveBeenCalledExactlyOnceWith(SCRATCH_WORKSPACE_ID, path)
-  expect(create).toHaveBeenCalledExactlyOnceWith(browsers[0]!.regionId, url, SCRATCH_WORKSPACE_ID)
+  expect(create).toHaveBeenCalledExactlyOnceWith(browsers[0]!.regionId, url, SCRATCH_WORKSPACE_ID, undefined, undefined)
 })
 
 it.each(['survey', 'mote'] as const)('%s a directory-shaped File result retains all navigation instead of jumping to the Work file tree', async surface => {
-  const path = 'directory.txt'
-  sourceBody = '[' + path + '](' + path + ')'
+  const name = 'directory.txt', path = topicPath(name)
+  sourceBody = '[' + name + '](' + name + ')'
   read.mockResolvedValue({ status: 'directory' })
   const create = vi.spyOn(api.browser, 'create')
   await mount(surface); const before = snapshot(), tabs = useAppStore.getState().tabs
   const files = { toolsOpen: useAppStore.getState().toolsOpen, explorer: useAppStore.getState().fileExplorerStates }
-  await act(async () => fileLink(surface, path).click()); await settle()
+  await act(async () => fileLink(surface, name).click()); await settle()
   const after = snapshot()
   for (const key of ['work', 'workspace', 'main', 'layouts', 'sessions', 'drafts', 'source', 'tabActive', 'survey', 'mote'] as const) expect(after[key]).toEqual(before[key])
   expect(useAppStore.getState().tabs).toBe(tabs)
@@ -390,8 +404,8 @@ it.each(['survey', 'mote'] as const)('%s a directory-shaped File result retains 
 
 
 it.each(['workbench', 'agents'] as const)('%s delayed bookmark Browser attach retains later Work navigation through A to B to A', async mainSurface => {
-  const path = 'late-bookmark.url', url = 'https://navigation.example/late-bookmark'
-  sourceBody = '[' + path + '](' + path + ')'
+  const name = 'late-bookmark.url', path = topicPath(name), url = 'https://navigation.example/late-bookmark'
+  sourceBody = '[' + name + '](' + name + ')'
   vi.spyOn(api.files, 'readBookmark').mockResolvedValue({ url, binary: false })
   const mixed = addWorkbenchRegion(defaultTab, reference.regionId, 'right', { kind: 'launcher',
     workspaceId: SCRATCH_WORKSPACE_ID, regionId: 'later-work-region' })
@@ -399,9 +413,9 @@ it.each(['workbench', 'agents'] as const)('%s delayed bookmark Browser attach re
     activeWorkspaceId: SCRATCH_WORKSPACE_ID }))
   requestPmoTeamsTopicFloatingClose({ restoreFocus: false })
   expect(useAppStore.getState().selectMainRegion(reference)).toBe(true)
-  await act(async () => root.render(<App />)); await settle()
+  await act(async () => root.render(<App />)); await settle(); await waitReply()
   const links = [...container.querySelectorAll<HTMLButtonElement>('button.md-link--file')].filter(link => !link.closest('[hidden], [inert]'))
-  expect(links).toHaveLength(1); expect(links[0]!.textContent).toContain(path)
+  expect(links).toHaveLength(1); expect(links[0]!.textContent).toContain(name)
   let complete!: () => void
   const wait = new Promise<void>(resolve => { complete = resolve }), original = api.browser.create
   const create = vi.spyOn(api.browser, 'create').mockImplementation(async (...args) => { await wait; return original(...args) })
@@ -432,8 +446,8 @@ it.each(['workbench', 'agents'] as const)('%s delayed bookmark Browser attach re
 })
 
 it('ordinary bookmark opening retains the existing dirty canonical File and creates an independent Browser Tab', async () => {
-  const path = 'dirty-bookmark.url', url = 'https://navigation.example/dirty-bookmark', key = documentKey(SCRATCH_WORKSPACE_ID, path)
-  sourceBody = '[' + path + '](' + path + ')'
+  const name = 'dirty-bookmark.url', path = topicPath(name), url = 'https://navigation.example/dirty-bookmark', key = documentKey(SCRATCH_WORKSPACE_ID, path)
+  sourceBody = '[' + name + '](' + name + ')'
   vi.spyOn(api.files, 'readBookmark').mockResolvedValue({ url, binary: false })
   const id = fileTabId(SCRATCH_WORKSPACE_ID, path)
   const file = { ...createWorkbenchTab(id, { kind: 'file', workspaceId: SCRATCH_WORKSPACE_ID, path, regionId: 'retained-dirty-file' }), topicId: PMO_TEAMS_TOPIC_ID }
@@ -444,9 +458,9 @@ it('ordinary bookmark opening retains the existing dirty canonical File and crea
     mainSurface: 'workbench', activeWorkspaceId: SCRATCH_WORKSPACE_ID }))
   requestPmoTeamsTopicFloatingClose({ restoreFocus: false })
   expect(useAppStore.getState().selectMainRegion(reference)).toBe(true)
-  await act(async () => root.render(<App />)); await settle()
+  await act(async () => root.render(<App />)); await settle(); await waitReply()
   const links = [...container.querySelectorAll<HTMLButtonElement>('button.md-link--file')].filter(link => !link.closest('[hidden], [inert]'))
-  expect(links).toHaveLength(1); expect(links[0]!.textContent).toBe(path)
+  expect(links).toHaveLength(1); expect(links[0]!.textContent).toBe(name)
   await act(async () => links[0]!.click()); await settle()
   const state = useAppStore.getState(), browsers = Object.values(state.tabs).filter(tab => workbenchSurfaces(tab).some(surface => surface.kind === 'browser'))
   expect(browsers).toHaveLength(1); expect(browsers[0]!.id).not.toBe(id)
@@ -459,13 +473,13 @@ it('ordinary bookmark opening retains the existing dirty canonical File and crea
 })
 
 it.each([['survey', false], ['mote', false], ['survey', true], ['mote', true]] as const)('%s Browser toolbar View bookmark source preserves the Browser and selects a real local File (cached=%s)', async (surface, cached) => {
-  const path = 'view-source.url', url = 'https://navigation.example/view-source'
-  sourceBody = '[' + path + '](' + path + ')'
+  const name = 'view-source.url', path = topicPath(name), url = 'https://navigation.example/view-source'
+  sourceBody = '[' + name + '](' + name + ')'
   const bookmark = vi.spyOn(api.files, 'readBookmark').mockResolvedValue({ url, binary: false })
   const create = vi.spyOn(api.browser, 'create')
   await mount(surface)
   if (surface === 'survey') { await act(async () => requestPmoTeamsTopicFloatingClose({ restoreFocus: false })); await settle() }
-  await act(async () => fileLink(surface, path).click()); await settle()
+  await act(async () => fileLink(surface, name).click()); await settle()
   const browser = workbenchSurfaces(useAppStore.getState().tabs[defaultTab.id]!).filter(surface => surface.kind === 'browser')
   expect(browser).toHaveLength(1); expect(browser[0]).toMatchObject({ url, bookmarkOrigin: { path, binary: false } })
   const document = { path, content: 'ORIGINAL RESOURCE FILE', revision: 'cached-source-revision' }
@@ -506,12 +520,12 @@ it.each([['survey', false], ['mote', false], ['survey', true], ['mote', true]] a
 })
 
 it.each(['survey', 'mote'] as const)('%s delayed Browser View bookmark source retains later local A to B to A navigation', async surface => {
-  const path = 'late-source.url', url = 'https://navigation.example/late-source'
-  sourceBody = '[' + path + '](' + path + ')'
+  const name = 'late-source.url', path = topicPath(name), url = 'https://navigation.example/late-source'
+  sourceBody = '[' + name + '](' + name + ')'
   vi.spyOn(api.files, 'readBookmark').mockResolvedValue({ url, binary: false })
   await mount(surface)
   if (surface === 'survey') { await act(async () => requestPmoTeamsTopicFloatingClose({ restoreFocus: false })); await settle() }
-  await act(async () => fileLink(surface, path).click()); await settle()
+  await act(async () => fileLink(surface, name).click()); await settle()
   const browser = workbenchSurfaces(useAppStore.getState().tabs[defaultTab.id]!).filter(surface => surface.kind === 'browser')
   expect(browser).toHaveLength(1)
   const buttons = [...localHost(surface).querySelectorAll<HTMLButtonElement>('button[aria-label="View bookmark source"]')].filter(button => !button.closest('[hidden], [inert]'))
@@ -522,6 +536,7 @@ it.each(['survey', 'mote'] as const)('%s delayed Browser View bookmark source re
   await act(async () => buttons[0]!.click())
   await vi.waitFor(() => expect(read).toHaveBeenCalledExactlyOnceWith(SCRATCH_WORKSPACE_ID, path))
   const before = snapshot()
+  let laterMote = before.mote
   await act(async () => {
     if (surface === 'survey') {
       const selected = useAppStore.getState().surveyZoneSelection!
@@ -532,6 +547,7 @@ it.each(['survey', 'mote'] as const)('%s delayed Browser View bookmark source re
       requestPmoTeamsTopicFloatingOpen({ targetTopicId: PMO_TEAMS_TOPIC_ID, reference })
       requestPmoTeamsTopicFloatingOpen({ targetTopicId: PMO_TEAMS_TOPIC_ID, reference: { ...reference, regionId: browser[0]!.regionId } })
     }
+    laterMote = readPmoTeamsTopicFloatingState()
     complete({ status: 'read', document: { path, content: 'LATE RETAINED SOURCE', revision: 'late-source-revision' } })
   })
   await settle()
@@ -540,5 +556,5 @@ it.each(['survey', 'mote'] as const)('%s delayed Browser View bookmark source re
   expect(state.documents[documentKey(SCRATCH_WORKSPACE_ID, path)]?.content).toBe('LATE RETAINED SOURCE')
   expect(state.tabs[defaultTab.id]!.regions[browser[0]!.regionId]).toBe(browser[0])
   expectRetained(before, true, path)
-  expect(state.surveyZoneSelection).toEqual(before.survey); expect(readPmoTeamsTopicFloatingState()).toEqual(before.mote)
+  expect(state.surveyZoneSelection).toEqual(before.survey); expect(readPmoTeamsTopicFloatingState()).toEqual(laterMote)
 })
