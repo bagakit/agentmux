@@ -297,7 +297,10 @@ app.whenReady().then(async () => {
     await read('readingProof.holdEarlier()')
     await read(`document.querySelector('.activity-feed__reading-action[title="Read earlier conversation and process records in the original sequence"]').scrollIntoView({block:'nearest'})`)
     const earlierPoint = await read('(() => { const r=document.querySelector(".activity-feed").getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2} })()')
+    const wheelCount = await read('readingProof.events.filter(event => event.type === "wheel").length')
     await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...earlierPoint, deltaX: 0, deltaY: -620 })
+    await ready(`(() => { const events=readingProof.events.filter(event=>event.type==='wheel').slice(${wheelCount}); return events.length===1&&events[0].detail.trusted&&events[0].detail.deltaY===-620 })()`)
+    await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => { readingProof.mark("delayed-wheel-painted"); resolve(true) })))')
     await ready('readingProof.heldEarlier()')
     result.delayedPageSelection = { before: await selectOriginal() }
     await read('readingProof.releaseEarlier()')
