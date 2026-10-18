@@ -5,6 +5,7 @@ import { fileNavigationSelection, useAppStore } from '../store'
 import { fileWorkbenchIdentity } from './file-workbench-state'
 import { fileExplorerContains } from './file-explorer-scope'
 import { spatialCatalog } from './space-agent-control'
+import { workbenchNavigationCatalog } from './workbench-navigation-catalog'
 import { sameWorkbenchProjectionSelection, type WorkbenchProjectionSelection } from './workbench-projection'
 import type { MoteWorkfaceScope } from './mote-workface'
 import { scratchTopicIdentityPath, scratchTopicLogicalPath, scratchWorkspaceFilePath } from '../../../shared/scratch-topics'
@@ -42,7 +43,7 @@ export function confirmedMoteReference(state: ReturnType<typeof useAppStore.getS
     }
   }
   const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, owner.workspace) ?? [owner.topic]
-  const catalog = spatialCatalog(state, topics)
+  const catalog = workbenchNavigationCatalog(state, topics)
   const spaceId = directoryIdentity(owner.workspace.hostId, scratchTopicIdentityPath(owner.workspace, owner.topic))
   return catalog.locations.some(location => location.workspaceId === owner.workspace.id && location.spaceId === spaceId &&
     sameWorkbenchProjectionSelection(location, reference!)) ? reference : null

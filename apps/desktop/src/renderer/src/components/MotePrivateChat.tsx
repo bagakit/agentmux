@@ -61,7 +61,11 @@ function MotePrivateChatPanel({ scope, target, active, reference, onOpenPath }: 
     if (policy.status === 'fulfilled') setService(policy.value)
     setIssue([chat, connections, policy].flatMap(result => result.status === 'rejected' ? [presentError(result.reason)] : []).join(' ')); setReading(false)
   }
-  useEffect(() => { if (active) void read(); return () => { lifetime.current++ } }, [active])
+  const inspected = useRef(false)
+  useEffect(() => { if (active && !inspected.current) { inspected.current = true; void read() } }, [active])
+  // A local page switch retains the original read/save lifecycle. The explicit
+  // Refresh action reads newer settings; only removing this owner retires it.
+  useEffect(() => () => { lifetime.current++; inspected.current = false }, [])
   const confirmed = (operation: MoteChatOperation) => {
     setConfiguration(current => current && current.revision > operation.configuration.revision ? current : operation.configuration)
     if (operation.action === 'allocate') setAudienceRevision(value => value + 1)
