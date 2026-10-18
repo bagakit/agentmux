@@ -648,7 +648,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
       : method === 'goal.report' ? 'Reply under the original dispatch with every delegated criterion and retain its report; this does not accept results.'
       : 'Collect an actual original worker report into this Goal results; human acceptance remains a separate action.',
     { '--input': 'data' }, async f => await readControlJsonInput(value(f, '--input', true)!, method) as Record<string, unknown>,
-    'Keep the same operation/message/thread and frozen input after an unknown receipt. Read goal delegations to reconcile before retrying; never replace an unknown logical message.')),
+    'Keep the same operation/message/thread and frozen input after an unknown receipt. Read goal delegations to reconcile before retrying; never replace an unknown logical message. Report evidence accepts original strings or {kind:"file",resource:the complete file.read resource,revision:the returned sha256 revision,location?:{line,column?}}. Read goal --skill for the file read to report example; never infer a local evidence source from Project or cwd.')),
   command('goal.delegations', '--goal ID', 'Read original Goal delegation intents and reports without sending input.', { '--goal': 'data' }, f => ({ goalId: id(f, '--goal', true) })),
   command('goal.progress', '--input FILE|-', 'Record source-qualified progress or a waiting/result/handoff declaration for one exact original execution.',
     { '--input': 'data' }, async f => await readControlJsonInput(value(f, '--input', true)!, 'Original Goal responsibility') as Record<string, unknown>,
