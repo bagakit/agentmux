@@ -2,6 +2,7 @@ import type { AgentSessionHistoryContentPart, AgentSessionHistoryItem, AgentSess
 import { projectSessionUserMessages } from './session-user-messages.js'
 import { projectConversationTimeline, projectConversationEventFacts, conversationRecordRole, conversationRecordAuthor, type ConversationAuthor, type ConversationEvent, type ConversationSourceRecord, type ConversationProjectionInput, type ConversationTimeline } from './conversation-timeline.js'
 export { projectSessionInputs, sessionInputMailboxAuthor, type SessionInputGroup } from './session-inputs.js'
+export { capturedToolEdit, type ConversationToolEdit } from './conversation-tool-edit.js'
 
 export type AgentConversationRecordSource =
   | (AgentSessionHistorySource & { kind: 'native'; recordId: string })
