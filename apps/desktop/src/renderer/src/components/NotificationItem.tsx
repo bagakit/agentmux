@@ -11,6 +11,7 @@ const InfoIcon = semanticIconComponent('status.info')
 const UnknownIcon = semanticIconComponent('status.unknown')
 const FailureIcon = semanticIconComponent('status.failed')
 const ReadIcon = semanticIconComponent('status.selected')
+const ChevronIcon = semanticIconComponent('navigation.disclosure')
 
 export type NotificationItemProps = {
   title: string
@@ -26,10 +27,11 @@ export type NotificationItemProps = {
   onRead?: (() => void) | undefined
   timestamp?: ReturnType<typeof notificationTimestamp>
   occurrences?: number | undefined
+  subjectHeading?: ReactNode
 }
 
 /** Shared compact presentation. Reading, copying and navigation never settle the original issue. */
-export function NotificationItem({ title, kind, detail, summary, impact, children, action, eventId, noticeId, unread, onRead, timestamp, occurrences }: NotificationItemProps) {
+export function NotificationItem({ title, kind, detail, summary, impact, children, action, eventId, noticeId, unread, onRead, timestamp, occurrences, subjectHeading }: NotificationItemProps) {
   const Icon = kind === 'agent-broken' ? FailureIcon : kind === 'process-degraded' ? WarningIcon : kind === 'indeterminate' ? UnknownIcon : InfoIcon
   const [copy, setCopy] = useState<{ detail: string; label: string } | null>(null)
   const [expanded, setExpanded] = useState(false)
@@ -48,24 +50,29 @@ export function NotificationItem({ title, kind, detail, summary, impact, childre
   const heading = useMemo(() => notificationPreview(title, 'title'), [title])
   return <article className="notification-item" data-kind={kind} data-unread={unread ?? false} data-event-id={eventId} data-notice-id={noticeId}
     role={volume === 'assertive' ? 'alert' : 'status'} aria-live={volume}>
-    <Icon size={14} className="notification-item__icon" aria-hidden="true" />
     <div className="notification-item__body">
-      <div className="notification-item__headline"><strong className="notification-item__title">{heading}</strong>
-        {unread ? <span className="notification-item__unread" aria-label="Unread" title="Unread" /> : null}
-      </div>
-      <div className="notification-item__controls">
-        <div className="notification-item__meta"><span className="notification-item__level">{notificationLevels[kind].label}</span>
-          {timestamp ? <time dateTime={timestamp.dateTime} title={timestamp.title}>{timestamp.label}</time> : null}
-          {occurrences && occurrences > 1 ? <span title="Repeated observations of this original event">{occurrences} observations</span> : null}
+      {subjectHeading || action ? <div className="notification-item__toolbar">
+        {subjectHeading}
+        <div className="notification-item__actions">
+          {action ? <button type="button" className="notification-item__action" title={`${action.label}: ${heading}`} onClick={action.run}>{action.label}</button> : null}
         </div>
+      </div> : null}
+      <div className="notification-item__reading">
         <details className="notification-item__details" onToggle={event => {
           if (event.target === event.currentTarget) {
             setExpanded(event.currentTarget.open)
             if (event.currentTarget.open) onRead?.()
           }
         }}>
-          <summary>Details</summary>
+          <summary className="notification-item__headline" aria-label={`${notificationLevels[kind].label}. Details: ${heading}`} title={heading}>
+            <Icon size={14} className="notification-item__icon" aria-hidden="true" />
+            <span className="notification-item__level">{notificationLevels[kind].label}</span>
+            <strong className="notification-item__title">{heading}</strong>
+            {unread ? <span className="notification-item__unread" aria-label="Unread" title="Unread" /> : null}
+            <ChevronIcon size={12} className="notification-item__disclosure" aria-hidden="true" />
+          </summary>
           {expanded ? <div className="notification-item__original" tabIndex={0} aria-label={`Complete details: ${heading}`}>
+            {title !== summary && !detail.includes(title) ? <p>{title}</p> : null}
             {summary && !detail.includes(summary) ? <p>{summary}</p> : null}
             {impact && !detail.includes(impact) ? <p>{impact}</p> : null}
             {children ?? <p>{detail}</p>}
@@ -73,11 +80,12 @@ export function NotificationItem({ title, kind, detail, summary, impact, childre
             {copy?.detail === detail ? <span role="status">{copy.label}</span> : null}
           </div> : null}
         </details>
-        <div className="notification-item__actions">
-          {unread && onRead ? <button type="button" className="notification-item__read" aria-label={`Mark read: ${heading}`} title="Mark read" onClick={onRead}><ReadIcon size={14} /></button> : null}
-          {action ? <button type="button" className="notification-item__action" onClick={action.run}>{action.label}</button> : null}
-        </div>
+        {unread && onRead ? <button type="button" className="notification-item__read" aria-label={`Mark read: ${heading}`} title={`Mark read: ${heading}`} onClick={onRead}><ReadIcon size={14} /></button> : null}
       </div>
+      {timestamp || occurrences && occurrences > 1 ? <div className="notification-item__meta">
+        {timestamp ? <time dateTime={timestamp.dateTime} title={timestamp.title}>{timestamp.label}</time> : null}
+        {occurrences && occurrences > 1 ? <span title="Repeated observations of this original event">{occurrences} observations</span> : null}
+      </div> : null}
     </div>
   </article>
 }
