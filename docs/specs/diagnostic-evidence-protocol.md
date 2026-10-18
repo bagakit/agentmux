@@ -78,9 +78,14 @@ reader 生命周期归原宿主；复用一个 query 实例承担 service 总在
 | mote.context.client | client route hostId、原 resource scope、prepare/open-space action；open-space 另含完整 reference | 原 client action owner 的 latest-per-scope-action 事实；无 logId、持久化或健康结论 |
 | reading.lifecycle | hostId、logId、可选原 Core instance authority，或 recent 范围 | 原 Core read／watch 的有限阶段；仅当前实例，metadata-only，原 scope 与访问路线分开 |
 | client.incident | client route hostId、logId、可选原 archive authority，或 recent 范围 | 原 client 档案的有限 Terminal／连接／探测／读取阶段；[公共类型](../../packages/core/src/client-incident.ts) 持字段全集，保原 producer 和原 reading ID，确认状态逐记录表达 |
+| client.notifications | client route hostId、原通知 ID，或有界列表筛选 | 原通知 client 当前问题和保留活动；[公共类型](../../packages/core/src/client-notifications.ts)持字段与严格解析，无日志档案，读取不标读或恢复 |
 | native-recorder-failure | hostId、agentSessionId、runId | 当前缺原 producer，not-exposed/null 原引用；不冒根因已取得 |
 
 managed Agent 沿原 capability 认证，受自身 Host 路线限定，不能借 user/device 或 Runtime 私有权限读其他 Host。局部拒绝不关闭原健康 Agent。GUI 继续沿原领域消费事实，既有 message.delivery.inspect、toolkit.inspect/watch 语义和原件能力不被替换。
+
+通知查询沿原 client 已提交的投影，面板收起时仍可读，不为请求重新挂载阅读 owner。每项保原来源、对象、Current／Activity、等级和阅读状态，准确 ID 与内容版本分别沿原身份压缩；不是 logId、操作身份或权限。`recordRef`、authority、persistence 与 envelope observedAt 均为空，scope 是 point-observation；实际接收或观察时间只在原条目中保留，缺失时不补造。原 document 的 instanceId 限定本次范围，未注册、已卸载或加载代次不匹配不能返回另一窗口或假空列表。
+
+通知列表的总数是筛选后分页前的原条目数；cursor 绑定原 document、列表快照和筛选范围，不另留快照 Store。原内容或阅读事实变化后旧 cursor 返回 expired，调用者须从新列表开始；准确 ID 查询返回原条目当前版本，缺席为 not-found，不代表问题从未发生。默认只返回有限结构字段，任意标题、原因、对象名称或路径只在显式 includeRaw 中返回；原文超过当前预算则整项 withheld，保安全条目、raw-query-budget 与 partial，不能裁掉正文却声明完整。来源尚不完整时 coverage 保原不可用来源，零条目不冒充没有通知；读取不标读、清理、focus、探测或重试，健康 Run 与用户工作面不受影响。
 
 `recent` 是有界发现，不指一条原记录，因此 `recordRef=null`；每个候选保自己的准确引用，再以其原 authority 和 route 读取。cursor 只续接原来源、namespace 和筛选范围，不跨重启猜测重用。`reading.lifecycle` 的来源仅有 instance authority，不能声明 durable；exact 的 observedAt 和 completeness 与原事件时间和覆盖缺口一致。`client.incident` 的原档案 authority 不等于当时 Renderer producer；接收时间不能覆盖内嵌 reading 的来源时间。两种目标都沿原公共入口，不提供任意 payload 或本地文件读面。
 

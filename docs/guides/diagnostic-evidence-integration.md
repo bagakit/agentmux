@@ -49,6 +49,9 @@ amux system diagnostics inspect --domain reading.lifecycle --host-id HOST --logi
 amux system diagnostics inspect --domain client.incident --host-id local --recent --session-id SID --limit 8
 amux system diagnostics inspect --domain client.incident --host-id local --recent --limit 16
 amux system diagnostics inspect --domain client.incident --host-id local --logid LOGID --authority ARCHIVE_ID
+amux system diagnostics inspect --domain client.notifications --host-id local
+amux system diagnostics inspect --domain client.notifications --host-id local --section current --unread --limit 16 --include-raw
+amux system diagnostics inspect --domain client.notifications --host-id local --notification-id NOTIFICATION_ID --include-raw
 amux system diagnostics inspect --input mote-context-query.json
 ```
 
@@ -59,6 +62,8 @@ amux system diagnostics inspect --input mote-context-query.json
 先查看 availability、失败阶段、已确认事实、issue、completeness 与原目标，再看关系的 verification。Native not-exposed 表示根因材料缺失，不能以关联成功补造根因。raw 明确请求且来源有权限才读取；retained 不等于本次 included，也不代表无限保留。
 
 对话更新延迟先查原 Core `reading.lifecycle` 与 client `client.incident` 的近期候选，再按各自引用准确读取；同 Session 只构成背景关联，不能把不同消费生命周期或跨进程 wall 时间拼成同一次耗时。Core 元数据仅覆盖当前实例；Renderer 消费阶段沿原 client 档案留存，卸载后是否可查取决于实际保存、预算和覆盖。`confirmed` 是原写入确认，重启后 `observed` 只说明现有原字节可读；近期为空、候选已淘汰或采集未覆盖均不能证明业务没有更新。无需通过重发、重开页面或恢复原工作面制造诊断材料。
+
+通知面板的事实使用 `client.notifications`，默认列当前问题与该 client 保留的活动，不读取 A2A Inbox 或全局日志档案。可按 current／activity、类别及未读筛选，沿返回的 notificationId 精查；原文须显式 `--include-raw`。同一页序列保留原筛选、limit 与 cursor，expired 时重新列举；不要把新旧快照拼成完整结果。查看 coverage 与 omissions，原 client 不可用或加载中不能当作空列表。查询使用同一通知 owner，不打开面板、不标读，也不执行通知中描述的恢复动作；字段、范围与游标合同见[原领域类型](../../packages/core/src/client-notifications.ts)和[诊断协议](../specs/diagnostic-evidence-protocol.md)。
 ## 客户端故障档案与原来源引用
 
 `client.incident` 由宿主显式注入 [Main archive](../../apps/desktop/src/main/client-incident-archive.ts)，保留自动报告的有限阶段、计数、原尝试和来源身份。先用 `--recent` 在当前 archive Host 发现候选，再以返回的原 `recordRef.logId` 和 authority 精查；archive 路线与报告中的执行 Host 分别保真。recent 的 coverage、persistence 和 cursor 均沿 [公共类型](../../packages/core/src/client-incident.ts)，空结果不能证明此前没有异常。`--include-raw` 不会给事件记录添加终端正文、错误文本、路径或截图。
