@@ -9,7 +9,6 @@ import { GoalEvidence } from '../src/renderer/src/components/GoalEvidence'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { documentKey } from '../src/renderer/src/lib/workbench-tabs'
-import type { AppConfig } from '../src/shared/contracts'
 import { goalEvidenceSource } from './helpers/goal-evidence-source'
 
 const initial = useAppStore.getState()
@@ -17,7 +16,7 @@ let source: Awaited<ReturnType<typeof goalEvidenceSource>>, root: Root, element:
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   source = await goalEvidenceSource(); element = document.createElement('div'); document.body.append(element); root = createRoot(element)
-  const config = { ...initial.config, workspaces: source.workspaces, hosts: [], executors: {}, appearance: {} } as AppConfig
+  const config = { ...await api.config.get(), workspaces: source.workspaces, hosts: [{ id: 'source-host', kind: 'ssh' as const, label: 'Original Host', hostname: 'fixture' }] }
   useAppStore.setState({ ...initial, config, activeWorkspaceId: 'main', tabs: {}, documents: {}, documentIssues: {}, dirtyDocuments: {},
     layouts: Object.fromEntries(source.workspaces.map(workspace => [workspace.id, createWorkspaceLayout(workspace.id)])) })
   vi.spyOn(api.files, 'readPublic').mockImplementation(params => source.owner.read(params))
@@ -33,7 +32,10 @@ async function click(label: string) {
   await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)) }); expect(element.querySelector('button:disabled')).toBeNull() })
 }
 it('opens the exact worktree through Files and the real editor store while another same-name file is active', async () => {
-  await mount(); await click('result.log:2')
+  await mount();
+  expect(element.querySelector('summary')?.textContent).toBe('Original Host · Project worktree')
+  expect(element.querySelector('details')?.open).toBe(false)
+  await click('result.log:2')
   expect(api.files.readPublic).toHaveBeenCalledExactlyOnceWith(source.target)
   expect(api.files.read).toHaveBeenCalledExactlyOnceWith('worktree', 'result.log')
   expect(useAppStore.getState().documents[documentKey('worktree', 'result.log')]?.content).toBe('ORIGINAL worktree evidence')
