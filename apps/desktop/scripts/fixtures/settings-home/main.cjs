@@ -718,14 +718,31 @@ app.whenReady().then(async () => {
       const scriptText = () => read(`${node(scriptOwner+' .view-lines')}.textContent.replace(/\\u00a0/g,' ').replace(/\\u200b/g,'').trim()`)
       const originalScript = "console.log('Hello from your toolkit')\n"
       assert.equal(await scriptText(),originalScript.trim(),'The untouched new-tool script is the production default')
+      const originalToolId = await read('window.settingsHomeProbe.toolkitDraft.id')
+      const originalModelCount = await read('window.__agentmuxMonacoModelCount()')
+      const originalModelUri = await read('window.settingsHomeProbe.toolkitEditor.uri()')
+      const inspectDraft = async (expectedMode, value) => {
+        await until(`window.settingsHomeProbe.toolkitDraft.mode===${JSON.stringify(expectedMode)}&&window.settingsHomeProbe.toolkitDraft.value===${JSON.stringify(value)}`,'The committed original settings draft retains the complete text')
+        assert.equal(await read('window.settingsHomeProbe.toolkitDraft.id'),originalToolId)
+        assert.equal(await read(`${node(scriptOwner)}===window.settingsHomeProbe.toolkitEditor.node()`),true,'The observed model belongs to the exact Toolkit editor')
+        assert.equal(await read('window.settingsHomeProbe.toolkitEditor.value()'),value,'The actual Monaco model matches the original settings draft')
+        assert.equal(await read('window.settingsHomeProbe.toolkitEditor.uri()'),originalModelUri,'Language changes retain the original document identity')
+        assert.equal(await read('window.__agentmuxMonacoModelCount()'),originalModelCount,'Mode changes do not retain additional models')
+      }
       const originalFields = await read(`Array.from(${node(pane+' .toolkit-editor')}.querySelectorAll('input:not([type=radio])')).map(n=>({type:n.type,value:n.value,checked:n.checked}))`)
       const editScript = async value => {
         await click(node(scriptOwner))
         assert.equal(await read(`${node(scriptOwner)}.contains(document.activeElement)`),true,'The original Monaco input owns keyboard focus')
+        await until('window.settingsHomeProbe.toolkitEditor.focused()','The original Monaco text input is focused')
         win.webContents.sendInputEvent({type:'keyDown',keyCode:'A',modifiers:['meta']})
         win.webContents.sendInputEvent({type:'keyUp',keyCode:'A',modifiers:['meta']})
+        await until('window.settingsHomeProbe.toolkitEditor.selectedAll()','Trusted Select All covers the current model before replacement')
         await win.webContents.insertText(value)
-        await until(`${node(scriptOwner+' .view-lines')}?.textContent.replace(/\\u00a0/g,' ').replace(/\\u200b/g,'').trim()===${JSON.stringify(value.trim())}`,'The original Monaco editor accepts the complete draft')
+        await settle()
+        const observed = await read('({draft:window.settingsHomeProbe.toolkitDraft,model:window.settingsHomeProbe.toolkitEditor.value(),uri:window.settingsHomeProbe.toolkitEditor.uri()})')
+        result.interactions.push({kind:'toolkit-draft-observation',...observed})
+        assert.equal(observed.model,value,'The original Monaco editor accepts the complete draft')
+        assert.equal(observed.draft.value,value,'The original settings draft receives the complete editor text')
       }
       await choose(pane+' .toolkit-editor__mode input[value="tui"]')
       await until(`!!${node(pane+' .toolkit-editor__script[aria-label="Shell command"] .view-lines')}`)
@@ -736,11 +753,12 @@ app.whenReady().then(async () => {
       await until(`${node(scriptOwner+' .view-lines')}?.textContent.replace(/\\u00a0/g,' ').replace(/\\u200b/g,'').trim()==='exec /bin/sh'`,'The original new-tool TUI conversion supplies its shell default')
       const shellDraft = "printf 'Settings preview\\n'\n"
       await editScript(shellDraft)
+      if(mode!=='toolkit-model') await inspectDraft('tui',shellDraft)
       await click(node(pane+' .toolkit-editor__scope > summary'))
       assert.match(await read(`${node(pane+' .toolkit-editor__scope')}.textContent`),/not sandboxed/)
       await click(node(pane+' .toolkit-editor__arguments > summary'))
       assert.match(await read(`${node(pane+' .toolkit-editor__arguments')}.textContent`),/separate shell positional arguments/)
-      for (const [width,height,size] of [[1440,940,'wide'],[500,840,'compact']]) {
+      for (const [width,height,size] of mode==='toolkit-model'?[]:[[1440,940,'wide'],[500,840,'compact']]) {
         await resize(width,height)
         for (const color of ['dark','light']) {
           await theme(color)
@@ -750,14 +768,29 @@ app.whenReady().then(async () => {
       await resize(1440,940); await theme('dark')
       await choose(pane+' .toolkit-editor__mode input[value="script"]')
       await until(`!!${node(pane+' .toolkit-editor__script[aria-label="JavaScript script"] .view-lines')}`)
-      await until(`${node(scriptOwner+' .view-lines')}?.textContent.replace(/\\u00a0/g,' ').replace(/\\u200b/g,'').trim()===${JSON.stringify(shellDraft.trim())}`,'Changing the type preserves the command draft until explicitly edited')
+      await until(`window.settingsHomeProbe.toolkitDraft.mode==='script'&&window.settingsHomeProbe.toolkitEditor.node()?.isConnected`)
+      await settle()
+      assert.equal(await read('window.settingsHomeProbe.toolkitEditor.value()'),shellDraft,'Changing the type preserves the command draft until explicitly edited')
+      await inspectDraft('script',shellDraft)
+      for(let round=0;round<2;round++) {
+        await choose(pane+' .toolkit-editor__mode input[value="tui"]'); await inspectDraft('tui',shellDraft)
+        await choose(pane+' .toolkit-editor__mode input[value="script"]'); await inspectDraft('script',shellDraft)
+      }
+      const continuedDraft = shellDraft+"// draft retained\n"
+      await editScript(continuedDraft); await inspectDraft('script',continuedDraft)
+      await click(node('[data-tool-id="performance"]'))
+      await click(node(`[data-tool-id="${originalToolId}"]`))
+      await until(`!!window.settingsHomeProbe.toolkitEditor.node()?.isConnected`)
+      await inspectDraft('script',continuedDraft)
       await editScript(originalScript)
+      await inspectDraft('script',originalScript)
       await click(node(pane+' .toolkit-editor__scope > summary'))
       await click(node(pane+' .toolkit-editor__arguments > summary'))
       assert.equal(await read(`${node(pane+' .toolkit-editor__mode input[value="script"]')}.checked`),true)
       assert.deepEqual(await read(`Array.from(${node(pane+' .toolkit-editor')}.querySelectorAll('input:not([type=radio])')).map(n=>({type:n.type,value:n.value,checked:n.checked}))`),originalFields,'Type review preserves the other original fields')
       assert.equal(await read('window.settingsHomeProbe.saves.length'),saves,'TUI draft review never saves configuration')
-      result.interactions.push({kind:'toolkit-tui-draft-roundtrip',typedThrough:'original Monaco trusted keyboard',tuiDraft:shellDraft,restoredScript:originalScript,restoredMode:'script',implicitSaves:0,execution:'no run action; unsaved new tool'})
+      assert.deepEqual(await read('window.settingsHomeProbe.toolkitOperations'),[],'Reviewing a Toolkit draft does not execute or persist it')
+      result.interactions.push({kind:'toolkit-tui-draft-roundtrip',typedThrough:'original Monaco trusted keyboard',tuiDraft:shellDraft,restoredScript:originalScript,restoredMode:'script',implicitSaves:0,toolkitOperations:await read('window.settingsHomeProbe.toolkitOperations'),modelCount:originalModelCount,documentUri:originalModelUri,execution:'no run action; unsaved new tool'})
     }
     assert.equal(await read('window.settingsHomeProbe.saves.length'),saves,'Page interaction does not implicitly save configuration')
     assert.ok(result.interactions.length>before,'Every reviewed page consumes actual input: '+id)
@@ -813,6 +846,7 @@ app.whenReady().then(async () => {
       await previewRoundTrip(id,id==='focus'?'agent-reading':'fine-tuning',id==='focus'?'input[name="focus-recent-inputs"][value="6"]':'[data-settings-field="pointerDurationMs"] input')
       result.passed=true; return
     }
+    if (mode==='toolkit-model') { await nav('toolkit'); await theme('dark'); await pageInteractions('toolkit'); result.passed=true; return }
     if (mode==='focus-content') { await nav('focus'); await theme('dark'); await focusContentSize(); result.passed=true; return }
     await until(`${node('.settings-overview__art')}.complete&&${node('.settings-overview__art')}.naturalWidth>0`,'The actual Overview artwork is decoded before its normal visual baseline')
     for (const [width,height,label] of [[1440,940,'wide'],[900,620,'short'],[500,840,'compact'],[320,700,'narrow']]) {
@@ -958,7 +992,7 @@ app.whenReady().then(async () => {
       }
       result.interactions.push({kind:'page-disclosure-audit',page:id,opened,actions:opened.length,implicitSaves:0})
       assert.equal(await read('window.settingsHomeProbe.saves.length'),saves,'Reviewing disclosures never saves configuration')
-      if (opened.length) for (const [width,height,size] of [[1440,940,'wide'],[500,840,'compact']]) {
+      if (opened.length) for (const [width,height,size] of mode==='toolkit-model'?[]:[[1440,940,'wide'],[500,840,'compact']]) {
         await resize(width,height)
         for (const color of ['dark','light']) {
           await theme(color)

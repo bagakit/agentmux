@@ -26,6 +26,12 @@ await api.config.save({ ...before, composerShortcuts: [
 })) }, before)
 await import('../settings-structure/entry.mjs')
 
+const toolkitOperations = []
+for (const operation of ['add','update','remove','run','action','stop']) {
+  const original = api.toolkit[operation]
+  api.toolkit[operation] = async (...args) => { toolkitOperations.push({ operation, args }); return original(...args) }
+}
+
 // Fixture setup uses the original Store and Preview objects; navigation under test
 // still goes through trusted input into App, SettingsPanel and its original editors.
 const initial = useAppStore.getState()
@@ -38,6 +44,7 @@ window.settingsHomeProbe = {
   catalog: visibleSettingsSections('').map(({ id, title, group }) => ({ id, title, group })),
   errors: [],
   mobileConnectionProbe,
+  toolkitOperations,
   larkPreview,
   ready: true
 }
