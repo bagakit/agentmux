@@ -2534,12 +2534,15 @@ export class RuntimeController {
     return { ...await this.configuredClient(reference.hostId).notifyMessages({ operationId, messageIds: [messageId] }), hostId: reference.hostId }
   }
 
-  async inspectSessionMessageNotification(reference: SessionHistoryReference, messageId: string, key: import('@agentmux/core').AgentPromptInputKey) {
+  async inspectSessionMessageNotification(reference: SessionHistoryReference, messageId: string, operationId: string) {
     const { message } = await this.sessionMessage(reference, messageId)
-    if (!message || key.kind !== 'prompt' || key.agentSessionId !== message.envelope.recipientSessionId ||
-        key.expectedRun.runId !== message.envelope.recipientRunId) throw new AgentMuxError(
+    if (!message) throw new AgentMuxError('The original Inbox message is unavailable.', 'MESSAGE_NOT_FOUND')
+    const result = await this.configuredClient(reference.hostId).inspectMessageNotification({ operationId })
+    const notice = result.notification
+    if (notice && (notice.notificationId !== operationId || notice.key.kind !== 'prompt' || notice.key.submissionId !== operationId ||
+        !notice.messageIds.includes(messageId) || notice.key.agentSessionId !== message.envelope.recipientSessionId)) throw new AgentMuxError(
       'This notification input names another original recipient. The message, Agent and original operation are retained.', 'MESSAGE_RECIPIENT_MISMATCH')
-    return { record: await this.configuredClient(reference.hostId).inspectAgentPromptSubmission(key) }
+    return { ...result, hostId: reference.hostId }
   }
 
   async observeOriginalRun(hostId: string, runId: string): Promise<Pick<AgentMuxRun, 'runId' | 'state'>> {

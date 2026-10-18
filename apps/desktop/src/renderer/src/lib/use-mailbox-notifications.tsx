@@ -1,6 +1,5 @@
 import { useEffect, useMemo } from 'react'
-import type { AgentMuxMessageMetadata, AgentPromptInputKey } from '@agentmux/core'
-import { agentPromptNotApplied } from '@agentmux/core/prompt-condition'
+import type { AgentMuxMessageMetadata, AgentMuxMessageNotification, AgentPromptInputKey } from '@agentmux/core'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { SessionHistoryReference } from '../../../shared/contracts'
 import { retainMailboxNotificationIntent, useAppStore } from '../store'
@@ -16,9 +15,6 @@ const EMPTY_FEEDBACK: Readonly<Record<string, MailboxNotificationFeedback>> = Ob
 const EMPTY_HISTORY: Readonly<Record<string, MailboxNotificationHistory>> = Object.freeze({})
 const sameKey = (a: AgentPromptInputKey, b: AgentPromptInputKey) => a.kind === 'prompt' && b.kind === 'prompt' &&
   a.agentSessionId === b.agentSessionId && a.expectedRun.runId === b.expectedRun.runId && a.submissionId === b.submissionId
-const originalKey = (intent: MailboxNotificationIntent): AgentPromptInputKey | undefined => intent.recipientRunId ? {
-  kind: 'prompt', agentSessionId: intent.recipientSessionId, expectedRun: { runId: intent.recipientRunId }, submissionId: intent.operationId
-} : undefined
 const settled = (state: Attempt['state']) => state === 'submitted' || state === 'not-applied'
 const status = (attempt: Attempt) => attempt.checking ? 'checking…' : attempt.sending ? 'sending…'
   : attempt.state === 'unchecked' ? 'receipt not checked' : attempt.state === 'not-applied' ? 'not applied' : attempt.state
@@ -29,6 +25,16 @@ function patchFeedback(intent: MailboxNotificationIntent, patch: Partial<Mailbox
   useAppStore.setState(state => ({ mailboxNotificationFeedback: { ...state.mailboxNotificationFeedback, [subject]: {
     ...state.mailboxNotificationFeedback[subject],
     [key]: { state: 'pending', ...state.mailboxNotificationFeedback[subject]?.[key], ...patch } } } }))
+}
+/** The original Core notice owns the input Run; the message envelope holds historical facts. */
+function originalNotice(intent: MailboxNotificationIntent, result: { hostId: string; notification: AgentMuxMessageNotification | null }) {
+  const notice = result.notification, previousKey = feedback(intent)?.key
+  if (result.hostId !== intent.hostId || !notice || notice.notificationId !== intent.operationId || notice.key.kind !== 'prompt' ||
+      notice.key.submissionId !== intent.operationId || notice.mode !== 'steer' || notice.messageIds.length !== 1 ||
+      notice.messageIds[0] !== intent.messageId || notice.key.agentSessionId !== intent.recipientSessionId ||
+      notice.key.expectedRun.runId !== notice.condition.expectedRun.runId || previousKey && !sameKey(notice.key, previousKey)) throw new Error(
+    'The returned receipt does not match this original notification. Check its original operation.')
+  return notice
 }
 /** A late transport error cannot undo an already observed result of the same original operation. */
 function observe(intent: MailboxNotificationIntent, result: MailboxNotificationFeedback) {
@@ -87,16 +93,12 @@ export function useMailboxNotifications(reference: SessionHistoryReference, mess
     const intent: MailboxNotificationIntent = { hostId: reference.hostId, participantSessionId: reference.agentSessionId, messageId,
       recipientSessionId: message.envelope.recipientSessionId!, operationId: crypto.randomUUID(), createdAt: Date.now(),
       ...(message.envelope.recipientRunId ? { recipientRunId: message.envelope.recipientRunId } : {}) }
-    const key = originalKey(intent)
-    patchFeedback(intent, { state: 'pending', sending: true, ...(key ? { key } : {}) })
+    patchFeedback(intent, { state: 'pending', sending: true })
     try {
       const preserved = await retainMailboxNotificationIntent(intent)
       if (preserved.reason) patchFeedback(intent, { preservationIssue: `Saving this request locally is unconfirmed: ${preserved.reason}` })
       const result = await api.sessions.notifyMessage(reference, messageId, intent.operationId)
-      const notice = result.notification
-      if (result.hostId !== reference.hostId || notice.notificationId !== intent.operationId || notice.key.submissionId !== intent.operationId || notice.mode !== 'steer' || notice.messageIds.length !== 1 ||
-          notice.messageIds[0] !== messageId || notice.key.agentSessionId !== intent.recipientSessionId ||
-          (key && !sameKey(notice.key, key))) throw new Error('The returned receipt does not match this original notification. Check its original operation.')
+      const notice = originalNotice(intent, result)
       observe(intent, { state: notice.state, key: notice.key, wire: notice.wire, sending: false, reason: notice.reason })
     } catch (error) {
       observe(intent, { state: 'unconfirmed', sending: false, reason: error instanceof Error ? error.message : String(error) })
@@ -161,38 +163,15 @@ export function useMailboxNotifications(reference: SessionHistoryReference, mess
           beforeSequence: page.nextBeforeSequence, throughSequence: page.throughSequence, incarnation: page.incarnation } })
         const results = page.events.filter(event => event.kind === 'a2a-notification-result' && event.notificationId === intent.operationId)
         const result = results.find(event => event.state === 'submitted') ?? results.at(-1)
-        if (result && (result.state === 'submitted' || result.state === 'not-applied')) {
-          observe(intent, { state: result.state, reason: result.reason }); return
-        }
         if (result?.state === 'unconfirmed') eventIssue = result.reason ?? 'The original notification result is unconfirmed.'
       } catch (error) { eventIssue = error instanceof Error ? error.message : String(error) }
-      let key = previous?.key ?? originalKey(intent)
-      if (!key) {
-        const originalMessage = await api.sessions.readMessage(original, intent.messageId)
-        const notification = originalMessage.message?.notification, envelope = originalMessage.message?.envelope
-        if (originalMessage.hostId !== intent.hostId || envelope?.messageId !== intent.messageId || envelope.recipientSessionId !== intent.recipientSessionId ||
-            envelope.senderSessionId !== intent.participantSessionId && envelope.recipientSessionId !== intent.participantSessionId ||
-            notification?.notificationId !== intent.operationId || !notification.key) throw new Error('The original notification key is not yet confirmed. Keep this operation ID and check its receipt.')
-        key = notification.key
-      }
-      if (key.kind !== 'prompt' || key.submissionId !== intent.operationId || key.agentSessionId !== intent.recipientSessionId ||
-          intent.recipientRunId && key.expectedRun.runId !== intent.recipientRunId) throw new Error('The input key does not belong to this original notification target.')
-      const { record } = await api.sessions.inspectMessageNotification(original, intent.messageId, key)
-      const claim = record?.admission, admission = claim?.intent, content = admission?.message
-      if (!record || record.agentSessionId !== key.agentSessionId || record.run.runId !== key.expectedRun.runId ||
-          !claim?.inputKey || !sameKey(claim.inputKey, key) || claim.submissionId !== intent.operationId ||
-          admission?.run.runId !== key.expectedRun.runId || admission.execution !== 'immediate' || admission.admissionIntent?.kind !== 'manual-actor' ||
-          admission.admissionIntent.expectedRun.runId !== key.expectedRun.runId || content?.a2aNotificationId !== intent.operationId ||
-          typeof content.systemContext !== 'string' || !content.systemContext || admission.prompt !== content.systemContext ||
-          Object.keys(content).some(name => name !== 'a2aNotificationId' && name !== 'systemContext') ||
-          (previous?.wire !== undefined && content.systemContext !== previous.wire)) throw new Error('The original notification input receipt is still unconfirmed. No notification was replayed.')
-      const submitted = claim.acknowledged === true || record.terminalPromptSubmission?.submit.acknowledged === true
-      const notApplied = agentPromptNotApplied({ run: record.run, promptCompletionAdmission: claim,
-        ...(record.terminalPromptSubmission ? { terminalPromptSubmission: record.terminalPromptSubmission } : {}) }) !== undefined
-      observe(intent, { key, state: submitted ? 'submitted' : notApplied ? 'not-applied' : 'unconfirmed', sending: false,
-        reason: submitted || notApplied ? undefined : eventIssue ?? 'The original input has no confirmed submission receipt. Check this same operation.' })
+      const result = await api.sessions.inspectMessageNotification(original, intent.messageId, intent.operationId)
+      if (!result.notification) throw new Error('No original notification record was found in this read. Nothing was replayed; the original outcome remains unconfirmed.')
+      const notice = originalNotice(intent, result)
+      observe(intent, { key: notice.key, wire: notice.wire, state: notice.state, sending: false,
+        reason: notice.reason ?? (settled(notice.state) ? undefined : eventIssue ?? 'The original input has no confirmed submission receipt. Check this same operation.') })
     } catch (error) {
-      observe(intent, { state: 'unconfirmed', sending: false, reason: eventIssue ?? (error instanceof Error ? error.message : String(error)) })
+      observe(intent, { state: 'unconfirmed', sending: false, reason: error instanceof Error ? error.message : eventIssue ?? String(error) })
     } finally {
       if (feedback(intent)?.checking === request) patchFeedback(intent, { checking: undefined })
       void refresh()
@@ -207,7 +186,9 @@ export function useMailboxNotifications(reference: SessionHistoryReference, mess
       title={`${earlier ? 'Read earlier results for' : 'Check'} original operation ${item.operationId} · ${target}`} aria-disabled={Boolean(item.checking)}
       onClick={() => void inspect(item, refresh, earlier ? item.older : undefined)}><RefreshIcon size={14} aria-hidden="true" /><span>{earlier ? 'Read earlier receipts' : item.state === 'unchecked' ? 'Check receipt' : 'Refresh receipt'}</span></button>
     const attemptDetails = (item: Attempt) => <><p>Operation <code>{item.operationId}</code></p>
-      <p>To {target}{item.recipientRunId ? <> · Run <code>{item.recipientRunId}</code></> : null}</p>
+      <p>To {target}</p>
+      {item.recipientRunId ? <p>Original message Run <code>{item.recipientRunId}</code></p> : null}
+      {item.key ? <p>Notification input Run <code>{item.key.expectedRun.runId}</code></p> : null}
       <p>{item.reason ?? (item.state === 'unchecked' ? 'The original request is retained. Check its result; no notification will be sent.'
         : 'This is the notification input receipt. Reading and task acceptance are separate.')}</p>
       {item.preservationIssue ? <p>{item.preservationIssue}</p> : null}{item.older ? inspectButton(item, true) : null}</>
@@ -245,6 +226,7 @@ export function useMailboxNotifications(reference: SessionHistoryReference, mess
         <span className="composer-mailbox__notification-target" title={target}>To {recipientName}</span>
       </div>
       {attempt ? <div className="composer-mailbox__action-feedback composer-mailbox__notification-feedback" role="status">
+        {attempt.reason ? <p className="composer-mailbox__notification-reason" title={attempt.reason}>{attempt.reason}</p> : null}
         <details><summary>This notification: {status(attempt)}</summary>{attemptDetails(attempt)}{settled(attempt.state) ? inspectButton(attempt) : null}
           {attempts.length > 1 ? <details className="composer-mailbox__notification-history"><summary>Other notification attempts ({attempts.length - 1})</summary>
             {attempts.slice(1).map(item => <section key={item.operationId} data-notification-operation={item.operationId}><p>Notification: {status(item)}</p>

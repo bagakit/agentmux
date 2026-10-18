@@ -6,6 +6,7 @@ export type MailboxNotificationIntent = {
   participantSessionId: string
   messageId: string
   recipientSessionId: string
+  /** Historical message recipient Run, never a notification input key. */
   recipientRunId?: string
   operationId: string
   createdAt: number
