@@ -1,36 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo } from 'react'
+import { useContentCopyAction } from '../lib/use-content-copy-action.js'
 import { useMarkdownCopyText } from '../platform.js'
 import { SemanticIcon } from '../theme/icons.js'
 
 /** Copy original content through the host; feedback belongs to this source and attempt. */
 export function ContentCopyButton({ text, identity, label, actionLabel = 'Copy', className = '', onCopyError }: { text: string; identity: unknown; label: string; actionLabel?: string; className?: string; onCopyError?: ((error: unknown) => void) | undefined }) {
   const copyText = useMarkdownCopyText()
-  const owner = useMemo(() => ({}), [text, identity, copyText])
-  const latestOwner = useRef(owner); latestOwner.current = owner
-  const mounted = useRef(true)
-  const actionRef = useRef<{ owner: object; pending: boolean } | null>(null)
-  const [copy, setCopy] = useState<{ owner: object; state: 'copying' | 'copied' | 'failed' } | null>(null)
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; actionRef.current = null } }, [])
-  const copyState = copy?.owner === owner ? copy.state : 'idle'
-  async function copyContent() {
-    if (!copyText || !mounted.current || latestOwner.current !== owner || (actionRef.current?.owner === owner && actionRef.current.pending)) return
-    const action = { owner, pending: true }; actionRef.current = action
-    const current = () => latestOwner.current === owner && actionRef.current === action
-    let failed = false, accepted = false
-    setCopy({ owner, state: 'copying' })
-    try {
-      accepted = await copyText(text, error => {
-        onCopyError?.(error)
-        failed = true
-        action.pending = false
-        if (current()) setCopy({ owner, state: 'failed' })
-      }) === true
-    } catch (error) { failed = true; onCopyError?.(error) }
-    action.pending = false
-    if (current()) setCopy({ owner, state: accepted && !failed ? 'copied' : 'failed' })
-  }
+  const identityScope = useMemo(() => ({}), [text, identity])
+  const copy = useContentCopyAction(identityScope, copyText)
+  const copyState = copy.state
   if (!copyText) return null
-  return <button type="button" className={`content-copy ${className}`} data-copy-state={copyState} aria-label={label} aria-disabled={copyState === 'copying' || undefined} aria-busy={copyState === 'copying' || undefined} onClick={() => { void copyContent() }}>
+  return <button type="button" className={`content-copy ${className}`} data-copy-state={copyState} aria-label={label} aria-disabled={copyState === 'copying' || undefined} aria-busy={copyState === 'copying' || undefined} onClick={() => { void copy.copy(text, onCopyError) }}>
     <SemanticIcon name={copyState === 'copied' ? 'action.confirm' : copyState === 'failed' ? 'status.failed' : 'action.copy'} size={13} aria-hidden="true" />
     <span role="status" aria-live="polite">{copyState === 'copying' ? 'Copying…' : copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Retry copy' : actionLabel}</span>
   </button>

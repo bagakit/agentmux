@@ -6,7 +6,8 @@ import { readSessionHistoryTextResource } from '@agentmux/core/session-history-c
 import { SemanticIcon } from '../theme/icons.js'
 import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { formatClock, formatOffset } from '../lib/conversation-time.js'
-import { useClientUiPlatform } from '../platform.js'
+import { useContentCopyAction, ContentCopyIntentContext } from '../lib/use-content-copy-action.js'
+import { useClientUiPlatform, useMarkdownCopyText } from '../platform.js'
 import { externalSpeakerLabel, conversationAgentReference, speakerForDisplay, type ConversationSpeaker, type DescribeSpeaker } from '../lib/conversation-speaker.js'
 import { describeConversationInputSource } from '../lib/conversation-input-source.js'
 import { ConversationInputDetails } from './ConversationInputDetails.js'
@@ -178,8 +179,6 @@ export function ConversationMessage({
   openWorkspaceFile, readPastedImage, readHistoryResource, nativeResourceRecord, openHttpLink, onContinue, onSelectAnnotation, expandedTraces: controlledTraces, onToggleTrace: controlledToggle, traceDisclosure
 }: ConversationMessageProps) {
   const platform = useClientUiPlatform()
-  const completeCopy = useRef<AbortController | null>(null)
-  useEffect(() => { if (!active) completeCopy.current?.abort() }, [active])
   const renderClock = timeFormatter ?? formatClock
   const isStringContent = typeof content === 'string'
   const parts: readonly AgentSessionHistoryContentPart[] = isStringContent
@@ -253,21 +252,15 @@ export function ConversationMessage({
     : described?.name ?? name ?? (speaker?.role === 'human' ? 'You' : isPeerAgent ? speaker.id : isSystemContext ? 'AgentMux' : speaker ? 'Assistant' : 'Activity')
   const canAnnotate = onSelectAnnotation !== undefined && messageId.length > 0
   const bodyRef = useRef<HTMLDivElement>(null)
-  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
-  const [copyReadError, setCopyReadError] = useState<string | null>(null)
-  const [idCopyState, setIdCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
-  const activeCopyActionRef = useRef(0)
-  const copyTimerRef = useRef<number | null>(null)
-
-  useEffect(() => {
-    return () => {
-      if (copyTimerRef.current !== null) {
-        window.clearTimeout(copyTimerRef.current)
-        copyTimerRef.current = null
-      }
-      ++activeCopyActionRef.current
-    }
-  }, [])
+  const platformCopy = useMarkdownCopyText()
+  const messageWriter = useMemo(() => onCopy ? (text: string) => onCopy(text) : platformCopy, [onCopy, platformCopy])
+  const copyIdentity = useMemo(() => ({}), [readingIdentity, content, copyText, readHistoryResource, nativeResourceRecord?.recordId,
+    nativeResourceRecord?.source.providerId, nativeResourceRecord?.source.nativeSessionId, nativeResourceRecord?.turnId])
+  const messageCopy = useContentCopyAction(copyIdentity, messageWriter, active)
+  const idCopyIdentity = useMemo(() => ({}), [readingIdentity, agentReference?.speaker.id])
+  const idCopy = useContentCopyAction(idCopyIdentity, platformCopy, active)
+  const copyState = messageCopy.state, idCopyState = idCopy.state
+  const copyReadError = messageCopy.error instanceof Error ? messageCopy.error.message : undefined
 
   function captureSelection(): void {
     if (!canAnnotate || !onSelectAnnotation) return
@@ -283,75 +276,24 @@ export function ConversationMessage({
     onSelectAnnotation({ messageId, quote, range: range.cloneRange(), contextElement: start })
   }
 
-  async function copyValue(text: string, target: 'message' | 'agent-id', signal?: AbortSignal): Promise<void> {
-    const setResult = target === 'agent-id' ? setIdCopyState : setCopyState
-    setCopyState('idle')
-    setIdCopyState('idle')
-    const actionId = ++activeCopyActionRef.current
-    if (copyTimerRef.current !== null) {
-      window.clearTimeout(copyTimerRef.current)
-      copyTimerRef.current = null
-    }
-    if (!text) return
-    let accepted = false
-    try {
-      accepted = (target === 'message' && onCopy ? await onCopy(text) : await platform.copyText(text, () => {
-        if (!signal?.aborted && activeCopyActionRef.current === actionId) setResult('failed')
-      })) === true
-    } catch {
-      // The client owns error feedback; an unknown clipboard result never becomes success.
-      accepted = false
-    }
-    if (signal?.aborted || activeCopyActionRef.current !== actionId) return
-    if (accepted) {
-      setResult('copied')
-      copyTimerRef.current = window.setTimeout(() => {
-        if (activeCopyActionRef.current === actionId) {
-          setResult('idle')
-          copyTimerRef.current = null
-        }
-      }, 1600)
-    } else {
-      setResult('failed')
-    }
-  }
-
   async function copyMessage(): Promise<void> {
-    if (!active) return
-    setCopyReadError(null)
-    completeCopy.current?.abort()
-    const controller = new AbortController(); completeCopy.current = controller
-    try {
-      // An explicit whole-message Copy retains every original part, including deferred bodies.
+    await messageCopy.copy(async signal => {
+      // Explicit whole-message Copy retains every original part, including deferred bodies.
       const complete: AgentSessionHistoryContentPart[] = []
       for (const [index, part] of parts.entries()) {
-        controller.signal.throwIfAborted()
+        signal.throwIfAborted()
         if (part.kind !== 'resource' || part.resourceType !== 'text') complete.push(part)
         else {
           if (!readHistoryResource || !nativeResourceRecord) throw new Error('Complete recorded content is not available. Retry from the original history.')
-          complete.push(await readSessionHistoryTextResource(part, index, nativeResourceRecord, readHistoryResource, controller.signal))
+          complete.push(await readSessionHistoryTextResource(part, index, nativeResourceRecord, readHistoryResource, signal))
         }
       }
-      controller.signal.throwIfAborted()
-      await copyValue(complete.some((part, index) => part !== parts[index])
+      signal.throwIfAborted()
+      return complete.some((part, index) => part !== parts[index])
         ? complete.map(partText).filter(t => t.length > 0).join('\n')
-        : copyText ?? complete.map(partText).filter(t => t.length > 0).join('\n'), 'message', controller.signal)
-    } catch (error) { if (!controller.signal.aborted) {
-      setCopyState('failed'); setCopyReadError(error instanceof Error ? error.message : 'Complete recorded content could not be read. Retry.')
-    } }
+        : copyText ?? complete.map(partText).filter(t => t.length > 0).join('\n')
+    })
   }
-
-  useEffect(() => () => { completeCopy.current?.abort() }, [messageId, content, readHistoryResource, nativeResourceRecord?.recordId,
-    nativeResourceRecord?.source.providerId, nativeResourceRecord?.source.nativeSessionId, nativeResourceRecord?.turnId])
-
-  useEffect(() => {
-    ++activeCopyActionRef.current
-    if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current)
-    copyTimerRef.current = null
-    setCopyState('idle')
-    setIdCopyState('idle')
-    setCopyReadError(null)
-  }, [messageId, agentReference?.speaker.id])
 
   useEffect(() => { setSystemContextOpen(false) }, [messageId])
 
@@ -382,7 +324,7 @@ export function ConversationMessage({
               <code>{agentReference.speaker.id}</code>
               <button type="button" className="log-turn__id-copy" title={idCopyState === 'copied' ? 'Agent ID copied' : idCopyState === 'failed' ? 'Copy Agent ID failed; retry' : 'Copy Agent ID'}
                 aria-label={idCopyState === 'copied' ? 'Agent ID copied' : 'Copy Agent ID'}
-                onClick={() => { void copyValue(agentReference.speaker.id, 'agent-id') }}>
+                onClick={() => { messageCopy.cancelPreparation(); void idCopy.copy(agentReference.speaker.id) }}>
                 {idCopyState === 'copied' ? <SemanticIcon name="action.confirm" size={12} aria-hidden="true" /> : <SemanticIcon name="action.copy" size={12} aria-hidden="true" />}
               </button>
               {idCopyState === 'failed' ? <span className="log-turn__id-copy-error" role="alert">Copy failed · retry</span> : null}
@@ -400,7 +342,7 @@ export function ConversationMessage({
       </div> : null
 
   return (
-    <div
+    <ContentCopyIntentContext.Provider value={messageCopy.cancelPreparation}><div
       className="log-turn"
       data-compact={compact || undefined}
       data-native-collaboration={nativeCollaboration ? true : undefined}
@@ -492,7 +434,7 @@ export function ConversationMessage({
       </div> : renderBody()}
       {questionDiagnostic ? <p className="agent-interaction__error" role="status" data-question-reply-diagnostic={questionDiagnostic.code}>{questionDiagnostic.message}</p> : null}
       {onContinue ? <button type="button" className="log-turn__continue" onClick={onContinue}>Continue from here</button> : null}
-    </div>
+    </div></ContentCopyIntentContext.Provider>
   )
   function renderBody(): ReactNode {
     return hasContent && (!isSystemContext || systemContextOpen) ? discloseBody(
