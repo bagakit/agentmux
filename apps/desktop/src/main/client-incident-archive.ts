@@ -232,7 +232,7 @@ export class ClientIncidentArchive {
     try {
       for await (const entry of directory) {
         if (++entries > CLIENT_INCIDENT_LIMITS.records * 2 + 8) { this.writeBlocked = true; this.counters.cleanupFailures++; break }
-        if (!/^(?:index\.json|[1-9A-HJ-NP-Za-km-z]{12}\.candidate)\.[0-9]+\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/u.test(entry.name)) continue
+        if (!/^(?:index\.json|[1-9A-HJ-NP-Za-km-z]{12}\.candidate)\.[0-9]+\.(?:[1-9A-HJ-NP-Za-km-z]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.tmp$/u.test(entry.name)) continue
         try { await (this.dependencies.remove ?? unlink)(join(this.directory, entry.name)) }
         catch (error) {
           if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { this.writeBlocked = true; this.counters.cleanupFailures++ }
