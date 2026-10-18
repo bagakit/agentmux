@@ -167,8 +167,8 @@ describe('finite collaboration Worker engine', () => {
     for (const route of routes) {
       const connection = connections.find(edge => edge.id === route.id)!, kind = ['communication', 'creation', 'supervision'].indexOf(connection.kind)
       const reverse = connection.source === 'c', source = boxes.find(box => box.id === connection.source)!, target = boxes.find(box => box.id === connection.target)!
-      expect(route.points[0]).toEqual({ x: source.x + (reverse ? 0 : source.width), y: source.y + (kind * 2 + .5) / 6 * source.height })
-      expect(route.points.at(-1)).toEqual({ x: target.x + (reverse ? target.width : 0), y: target.y + (kind * 2 + 1.5) / 6 * target.height })
+      expect(route.points[0]).toEqual({ x: source.x + (reverse ? 0 : source.width), y: source.y + (kind * 2 + (reverse ? 1.5 : .5)) / 6 * source.height })
+      expect(route.points.at(-1)).toEqual({ x: target.x + (reverse ? target.width : 0), y: target.y + (kind * 2 + (reverse ? 1.5 : .5)) / 6 * target.height })
       expect(route.path.replace(/[-+]?(?:\d*\.)?\d+(?:e[-+]?\d+)?/giu, '').replace(/[MC\s]/gu, '')).toBe('')
       const numbers = route.path.match(/[-+]?(?:\d*\.)?\d+(?:e[-+]?\d+)?/giu)!.map(Number)
       const controls = numbers.flatMap((number, index) => index % 2 ? [] : [{ x: number, y: numbers[index + 1]! }])
@@ -188,6 +188,38 @@ describe('finite collaboration Worker engine', () => {
         }
       }
     }
+  })
+
+  it('separates reciprocal roles across facing top and bottom ports for vertical neighbors', async () => {
+    const boxes = [box('lower', 0, 190), box('upper', 280, 0)]
+    const connections = (['communication', 'creation', 'supervision'] as const).flatMap(kind => [
+      edge(`${kind}-up`, 'lower', 'upper', kind), edge(`${kind}-down`, 'upper', 'lower', kind)])
+    const routes = await successfulRoutes(boxes, connections)
+    expect(routes).toHaveLength(6)
+    const crossings: number[] = []
+    for (const route of routes) {
+      const up = route.id.endsWith('-up')
+      expect(route.sourceHandle.endsWith(up ? '-top' : '-bottom')).toBe(true)
+      expect(route.targetHandle.endsWith(up ? '-bottom' : '-top')).toBe(true)
+      expect(route.points[0]!.y).toBe(up ? 190 : 94)
+      expect(route.points.at(-1)!.y).toBe(up ? 94 : 190)
+      let previous = route.points[0]!
+      for (let segment = 0; segment < route.points.length - 1; segment += 3) {
+        const p = route.points.slice(segment, segment + 4)
+        for (let sample = 1; sample <= 100; sample++) {
+          const t = sample / 100, u = 1 - t
+          const point = { x: u**3*p[0]!.x + 3*u*u*t*p[1]!.x + 3*u*t*t*p[2]!.x + t**3*p[3]!.x,
+            y: u**3*p[0]!.y + 3*u*u*t*p[1]!.y + 3*u*t*t*p[2]!.y + t**3*p[3]!.y }
+          if ((previous.y < 142) !== (point.y < 142)) crossings.push(previous.x + (point.x - previous.x) * (142 - previous.y) / (point.y - previous.y))
+          for (const obstacle of boxes) expect(point.x > obstacle.x + .25 && point.x < obstacle.x + obstacle.width - .25 && point.y > obstacle.y + .25 && point.y < obstacle.y + obstacle.height - .25).toBe(false)
+          previous = point
+        }
+      }
+    }
+    // Six physically distinguishable paths through the gap, not six IDs on one trunk.
+    expect(crossings).toHaveLength(6)
+    crossings.sort((a, b) => a - b)
+    for (let index = 1; index < crossings.length; index++) expect(crossings[index]! - crossings[index - 1]!).toBeGreaterThan(12)
   })
 
   it('publishes original boxes before paths and isolates a failed connection without discarding others', async () => {
