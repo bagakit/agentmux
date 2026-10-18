@@ -36,8 +36,7 @@ function next(p: Record<string, unknown>): string | null {
 }
 function summary(value: unknown): RoomSummary {
   const p = object(value)
-  if (p.chat_status !== undefined && !['normal', 'dissolved', 'dissolved_save'].includes(p.chat_status as string)) throw new Error('Unconfirmed native room status')
-  return { externalConversationId: feishuIdentity(p.chat_id), name: text(p.name, true), state: p.chat_status === 'normal' ? 'active' : p.chat_status === undefined ? 'unknown' : 'dissolved' }
+  return { externalConversationId: feishuIdentity(p.chat_id), name: text(p.name, true), state: p.chat_status === 'normal' ? 'active' : p.chat_status === 'dissolved' || p.chat_status === 'dissolved_save' ? 'dissolved' : 'unknown' }
 }
 function page(value: unknown): RoomAdapterPage {
   const response = object(value)
@@ -62,8 +61,9 @@ export function createFeishuRoomDiscovery(withClient: WithClient): RoomDiscovery
         const response = await client.im.chat.get({ path: { chat_id: encodeURIComponent(input.externalConversationId) }, params: { user_id_type: 'open_id' } })
         if (object(response).code !== 0) return { observation: failure(response), room: null }
         const p = data(response)
-        if (p.chat_mode !== undefined && !['group', 'topic', 'p2p'].includes(p.chat_mode as string) || p.membership_approval !== undefined && !['approval_required', 'no_approval_required'].includes(p.membership_approval as string)) throw new Error('Unconfirmed native room detail')
-        const room: RoomDetails = { ...summary({ ...p, chat_id: input.externalConversationId }), mode: p.chat_mode === 'group' ? 'group' : p.chat_mode === 'topic' ? 'topic' : p.chat_mode === 'p2p' ? 'direct' : 'unknown', membershipApproval: p.membership_approval === 'approval_required' ? 'required' : p.membership_approval === 'no_approval_required' ? 'not-required' : 'unknown' }
+        // Native group_message_type identifies threaded groups; optional metadata cannot discard a confirmed name.
+        const mode = p.chat_mode === 'p2p' ? 'direct' : p.chat_mode === 'topic' || p.group_message_type === 'thread' ? 'topic' : p.chat_mode === 'group' ? 'group' : 'unknown'
+        const room: RoomDetails = { ...summary({ ...p, chat_id: input.externalConversationId }), mode, membershipApproval: p.membership_approval === 'approval_required' ? 'required' : p.membership_approval === 'no_approval_required' ? 'not-required' : 'unknown' }
         return { observation: ready, room }
       }, signal) } catch { return { observation: unknown, room: null } }
     },
