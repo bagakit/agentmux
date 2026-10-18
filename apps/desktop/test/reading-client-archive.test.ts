@@ -138,7 +138,7 @@ describe('reading evidence in the sole client incident archive', () => {
     await owner.flush()
     const first = record()
     owner.enqueue(readingClientIncident(first, 0), producer()); await started
-    for (let index = 0; index < 7; index++) {
+    for (let index = 0; index < CLIENT_INCIDENT_LIMITS.readingProducerQueue - 1; index++) {
       const independent = record(); independent.scope.consumerId = `consumer-${index}`
       expect(owner.enqueue(readingClientIncident(independent, 0), producer()).accepted).toBe(true)
     }
@@ -148,6 +148,7 @@ describe('reading evidence in the sole client incident archive', () => {
     for (let group = 0; group < 3; group++) for (let index = 0; index < 8; index++) {
       expect(owner.enqueue(terminal(), producer(`other-${group}`)).accepted).toBe(true)
     }
+    for (let index = 0; index < 4; index++) expect(owner.enqueue(terminal(), producer('extra')).accepted).toBe(true)
     const independentFailure = record('failure')
     expect(owner.enqueue(readingClientIncident(independentFailure, 0), producer('independent')).accepted).toBe(true)
     expect(owner.enqueue(readingClientIncident(first, 0), producer('collision'))).toEqual({ accepted: false })
