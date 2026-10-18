@@ -12,6 +12,10 @@ export const AMUX_PROTOCOL_DEFINITIONS = {
     tag: 'amux:a2a', form: 'envelope', title: 'A2A message',
     description: 'One unchanged message body with declared sender and message IDs. The original journal owns authentication and delivery.',
   },
+  channel: {
+    tag: 'amux:channel', form: 'envelope', title: 'Channel message',
+    description: 'One unchanged external message with declared application, actor, conversation and original message IDs. Display profiles are observations; the original intake owns authentication and grants.',
+  },
   'a2a-reference': {
     tag: 'amux:a2a', form: 'envelope', title: 'A2A Inbox references',
     description: 'References to originals, individually or in an amux container. Reading this card does not fetch or acknowledge them.',

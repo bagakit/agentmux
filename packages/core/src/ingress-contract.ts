@@ -32,6 +32,8 @@ export type ConnectionIngressMessage = {
     hostId: string; agentSessionId: string; expectedRun: { runId: string }
     /** The author identifies the exact authorized Binding connection, not the transport alias. */
     operationId: string; messageId: string; author: AgentExternalMessageAuthor
+    /** First-claim display snapshot; cache refresh never changes this original input. */
+    channelProfile?: import('./channel-profile.js').ChannelActorProfileObservation
     /** Original first claim only; missing historical intent is unknown and never reconstructed. */
     admissionIntent?: Exclude<import('./agent-prompt-condition.js').AgentPromptAdmissionIntent, { kind: 'exact-condition' }>
   }
