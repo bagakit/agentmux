@@ -357,6 +357,10 @@
 .log-turn__references li > span { display: block; }
 .log-turn__references code { font-size: var(--fs-micro); white-space: pre-wrap; overflow-wrap: anywhere; }
 .log-turn__references-hint { color: var(--text-3); }
+.conversation-a2a-originals { min-width: 0; }
+.conversation-a2a-originals__pending { padding-block: var(--sp-2); font-size: var(--fs-meta); color: var(--text-2); }
+.conversation-a2a-originals__pending code { overflow-wrap: anywhere; }
+.conversation-a2a-originals__pending p { margin-block: var(--sp-1); }
 
 /* Authored context remains in its original record and is never an identity fact. */
 :is(.log-turn__declared-context, .log-turn__reminder) { margin-block: var(--sp-1) var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
