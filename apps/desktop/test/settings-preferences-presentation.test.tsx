@@ -35,10 +35,10 @@ it('the original Appearance pane follows the selected theme with its complete de
 it('the original Notifications preview distinguishes a changed draft and the off choice without saving', async () => {
   const save = vi.spyOn(api.config, 'save').mockResolvedValue(composerConfig)
   await dom.render(<SettingsPanel initialSection="notifications" onClose={() => {}} />)
-  const preview = dom.container.querySelector<HTMLElement>('[aria-label="Notification preview"]')!
-  expect(preview.textContent).toContain('Example notification')
+  const preview = dom.container.querySelector<HTMLElement>('[aria-label="Desktop banner preview"]')!
+  expect(preview.textContent).toContain('Example desktop banner')
   expect(preview.textContent).toContain('Saved settings')
-  const range = dom.container.querySelector<HTMLInputElement>('[aria-label="Notification dwell"]')!
+  const range = dom.container.querySelector<HTMLInputElement>('[aria-label="Desktop banner duration"]')!
   const off = NOTIFICATION_TIERS.findIndex(tier => tier.id === 'off')
   expect(off).toBeGreaterThanOrEqual(0)
   await act(async () => {
@@ -48,7 +48,7 @@ it('the original Notifications preview distinguishes a changed draft and the off
   })
   expect(preview.dataset.notificationMode).toBe('off')
   expect(preview.textContent).toContain('Unsaved preview')
-  expect(preview.textContent).toContain('No banners are shown')
+  expect(preview.textContent).toContain('Agent status banners are off')
   expect(dom.container.querySelector<HTMLInputElement>('.notification-sound-toggle input')!.disabled).toBe(true)
   expect(save).not.toHaveBeenCalled()
 })

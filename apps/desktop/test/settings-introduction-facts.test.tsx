@@ -46,12 +46,11 @@ it.each([false, true])('Browser has one introduction and preserves full scope wi
 
 it('Notifications retains its complete trigger conditions and real controls', async () => {
   await dom.render(<SettingsPanel initialSection="notifications" onClose={() => {}} />)
-  const pane = section('notifications', 'Notifications', 'Choose when and how agents get your attention.')
-  expect(pane.querySelectorAll('.settings-lead')).toHaveLength(1)
-  expect(pane.querySelector('.settings-lead')!.textContent).toBe('Get a notification when an agent finishes, needs your attention or runs into trouble while you are elsewhere.')
+  const pane = section('notifications', 'Notifications', 'Desktop banner duration and sound. In-app issues and Focus requests stay available.')
+  expect(pane.querySelector('.settings-hint')!.textContent).toContain('Current issues in the notification center and requests in Focus stay available when banners are off')
   expect(pane.querySelectorAll('input[type=range]')).toHaveLength(1)
   expect(pane.querySelectorAll('input[type=checkbox]')).toHaveLength(1)
-  expect(pane.querySelector('[aria-label="Notification preview"]')!.isConnected).toBe(true)
+  expect(pane.querySelector('[aria-label="Desktop banner preview"]')!.isConnected).toBe(true)
 })
 
 it.each([false, true])('Prompts retains usage and user decision with resources=%s', async resources => {
