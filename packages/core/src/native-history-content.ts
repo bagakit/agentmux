@@ -134,6 +134,7 @@ export async function materializeNativeContent(
       partIndex: contentParts.length, ...(item.turnId === undefined ? {} : { turnId: item.turnId }), segments, byteLength, sha256 }, context.contentSigningSecret)
     contentParts.push({ kind: 'resource', resourceType: 'text', reference,
       ...(part.contentEligibility === undefined ? {} : { contentEligibility: part.contentEligibility }),
+      ...(part.contentRole === undefined ? {} : { contentRole: part.contentRole }),
       label: `Complete ${part.kind}`, content: { encoding: 'json-utf8', kind: part.kind, byteLength, sha256 } })
   }
   return { ...item, contentParts }

@@ -6,7 +6,7 @@ import { rpcRecord } from './rpc-data.js'
 import { decodeBase64, encodeBase64 } from './hosted-value.js'
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
-import { normalizeSessionHistoryContentEligibility, normalizeSessionHistoryMetrics, normalizeSessionHistoryPage, sessionHistoryWithoutMetrics } from './session-history.js'
+import { normalizeSessionHistoryContentEligibility, normalizeSessionHistoryContentRole, normalizeSessionHistoryMetrics, normalizeSessionHistoryPage, sessionHistoryWithoutMetrics } from './session-history.js'
 import { normalizeAgentTimelineMutation } from './session-timeline.js'
 import { parseConversationLandmarkRef } from './conversation-landmarks.js'
 import { parseConversationProvenance } from './conversation-provenance.js'
@@ -102,7 +102,7 @@ export function parseAgentSessionHistoryReadPage(value: unknown, input: AgentSes
       if (!text(item.id) || input.source === 'captured' && item.agentSessionId !== input.agentSessionId) return bad()
       if (input.source === 'native') {
         if (!Array.isArray(item.contentParts)) return bad()
-        try { for (const part of item.contentParts) normalizeSessionHistoryContentEligibility(rpcRecord(part, undefined, 'CONTROL_PROTOCOL_ERROR').contentEligibility) } catch { return bad() }
+        try { for (const part of item.contentParts) { const value = rpcRecord(part, undefined, 'CONTROL_PROTOCOL_ERROR'); normalizeSessionHistoryContentEligibility(value.contentEligibility); normalizeSessionHistoryContentRole(value.contentRole) } } catch { return bad() }
       }
       const { metrics: _metrics, metricsDiagnostic: _diagnostic, ...original } = item
       items.push(input.source === 'native' ? { kind: 'item', item: { ...original, ...normalizeSessionHistoryMetrics(item) } as AgentSessionHistoryItem }

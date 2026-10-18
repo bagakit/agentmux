@@ -1,6 +1,6 @@
 import { nativeConversationProvenance } from '../conversation-provenance.js'
 import type { ProviderConversationChangesContext, ProviderConversationChangesPage } from '../session-history-changes.js'
-// Native record/role interpretation follows Paseo's convertClaudeHistoryEntry / normalizeHistoryBlocks.
+// Native record and role interpretation preserves the upstream conversion and block normalization.
 // Source: Paseo 3c6e4e39 (Apache-2.0, Copyright (c) 2025-present Mohamed Boudra). Modified for bounded, read-only pages,
 // exact ordered content/resources, neutral unknown activities and native UUID identity.
 import { AgentMuxError } from '../errors.js'
@@ -81,6 +81,7 @@ function convert(record: Record<string, unknown>, start: number): AgentSessionHi
     isNativeText(attachment.prompt)
   const content = queuedInput ? attachment.prompt : message?.content
   const blocks = Array.isArray(content) ? content : []
+  const messageParts = message ? parts(content) : undefined
 
   // Generated records remain neutral even when they carry a prompt-shaped attachment.
   const isGenerated = record.isCompactSummary === true || record.isSynthetic === true || record.isMeta === true || record.isApiErrorMessage === true
@@ -102,12 +103,11 @@ function convert(record: Record<string, unknown>, start: number): AgentSessionHi
     kind = isToolResultTurn ? 'activity' : 'user-message'
   } else {
     // record.type === 'assistant'
-    // Keep pure tool/reasoning-only records as activity; mixed records with genuine assistant text are assistant-message.
-    const hasAssistantText = blocks.some((b) => {
-      const obj = object(b)
-      return obj?.type === 'text' && isNativeText(obj.text) && obj.text.length > 0
-    }) || (isNativeText(content) && content.length > 0)
-    kind = hasAssistantText ? 'assistant-message' : 'activity'
+    // A native image is conversation content even without a text caption.
+    // Pure tool/reasoning records retain their activity purpose.
+    const hasAssistantContent = messageParts?.some(part => part.contentEligibility !== 'unconfirmed' &&
+      (part.kind === 'text' && part.text.length > 0 || part.kind === 'resource' && part.resourceType === 'image'))
+    kind = hasAssistantContent ? 'assistant-message' : 'activity'
   }
 
   const time = typeof record.timestamp === 'string' ? Date.parse(record.timestamp) : NaN
@@ -121,7 +121,7 @@ function convert(record: Record<string, unknown>, start: number): AgentSessionHi
   return {
     id: typeof record.uuid === 'string' && record.uuid ? record.uuid : `claude-record:${start}`,
     kind,
-    contentParts: (message || queuedInput && kind === 'user-message' ? parts(content) : [{ kind: 'text' as const, text: nativeJsonStringify(record) }])
+    contentParts: (messageParts ?? (queuedInput && kind === 'user-message' ? parts(content) : [{ kind: 'text' as const, text: nativeJsonStringify(record) }]))
       .map(part => ({ ...part, contentEligibility: contentEligibility === 'private' || isGenerated ? contentEligibility : part.contentEligibility ?? contentEligibility })),
     // Native message.usage covers this response, even when several responses share a turn.
     // Claude does not report one total_tokens value here; preserve that absence.
