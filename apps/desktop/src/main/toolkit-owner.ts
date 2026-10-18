@@ -587,13 +587,15 @@ export class ToolkitOwner implements AgentMuxToolkitPort {
     return prepareToolkitConfig(current, next, id => this.custom.guardDelete(id))
   }
   configurationChanged() { this.custom.configurationChanged() }
+  /** Load enabled TUI intents once; passive list/get/watch remain observations. */
+  async load(): Promise<void> { await this.custom.loadConfigured() }
   async execute(request: ToolkitRequest, signal: AbortSignal): Promise<ToolkitResult> {
     if (request.operation === 'toolkit.list') return { operation: request.operation, tools: [
       { kind: 'metrics', toolId: 'performance', name: 'Performance', readonly: true },
-      ...bundledToolkitTools(this.args.launch(), this.args.config.current).map(tool => ({ kind: 'script' as const, toolId: tool.id, name: tool.name, readonly: true, revision: tool.revision, icon: tool.icon, enabled: tool.enabled, statusBar: tool.statusBar, ...(tool.display ? { display: true } : {}) })),
+      ...bundledToolkitTools(this.args.launch(), this.args.config.current).map(tool => ({ kind: 'script' as const, toolId: tool.id, name: tool.name, readonly: true, revision: tool.revision, icon: tool.icon, enabled: tool.enabled, statusBar: tool.statusBar, ...(tool.mode ? { mode: tool.mode } : {}), ...(tool.display ? { display: true } : {}) })),
       ...await Promise.all(toolkitTools(this.args.config.current).map(async tool => {
         if (!('kind' in tool)) return { kind: 'script' as const, toolId: tool.id, name: tool.name, readonly: false as const,
-          revision: tool.revision, icon: tool.icon, enabled: tool.enabled, statusBar: tool.statusBar, ...(tool.display ? { display: true } : {}) }
+          revision: tool.revision, icon: tool.icon, enabled: tool.enabled, statusBar: tool.statusBar, ...(tool.mode ? { mode: tool.mode } : {}), ...(tool.display ? { display: true } : {}) }
         const base = { kind: 'package' as const, toolId: tool.id, readonly: false as const, configRevision: tool.revision,
           path: tool.packagePath, enabled: tool.enabled, statusBar: tool.statusBar }
         try {
@@ -607,7 +609,9 @@ export class ToolkitOwner implements AgentMuxToolkitPort {
       }))
     ] }
     if (request.operation === 'toolkit.add' || request.operation === 'toolkit.update' || request.operation === 'toolkit.remove') {
-      return await executeToolkitConfig(request, this.args.config)
+      const result = await executeToolkitConfig(request, this.args.config)
+      await this.load()
+      return result
     }
     if (request.toolId === 'performance') return await this.performance.execute(request, signal)
     if (request.operation === 'toolkit.get') return { operation: request.operation, snapshot: await this.custom.get(request.toolId) }
