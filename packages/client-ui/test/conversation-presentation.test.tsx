@@ -274,22 +274,24 @@ it.each(['body', 'parent'])('retains the original when its %s changes after a la
   expect(host.textContent).toContain(kind === 'body' ? 'Revised selected body' : 'between')
 })
 
-it('anchors the visible selected leaf when a cross-record Range starts offscreen before a stable group', async () => {
+it.each(['visible', 'offscreen'])('anchors the visible selected leaf when a cross-record Range ends %s before observation', async endPosition => {
   host.setAttribute('data-workbench-reading-scroll', '')
   Object.defineProperties(host, { clientHeight: { configurable: true, value: 400 }, scrollHeight: { configurable: true, value: 6000 } })
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     if (this === host) return new DOMRect(0, 0, 600, 400)
     if (this.matches('.wf-head')) return new DOMRect(0, 30 - host.scrollTop, 600, 32)
     if (this.dataset.nativeRecordId === 'start') return new DOMRect(0, -200 - host.scrollTop, 600, 80)
+    if (this.dataset.nativeRecordId === 'end') return new DOMRect(0, 5000 - host.scrollTop, 600, 80)
     if (this.dataset.nativeRecordId === 'selected') return new DOMRect(0, 150 + (host.querySelector('[data-native-record-id="earlier"]') ? 1040 : 0) - host.scrollTop, 600, 80)
     return new DOMRect()
   })
-  const start = item('start'), header = item('leading', 'activity'), selected = item('selected')
-  await draw(frame(page(start, header, selected)))
+  const start = item('start'), header = item('leading', 'activity'), selected = item('selected'), end = item('end')
+  await draw(frame(page(start, header, selected, end)))
   const row = host.querySelector<HTMLElement>('[data-native-record-id="selected"]')!
-  const first = host.querySelector('[data-native-record-id="start"] p')!.firstChild!, last = row.querySelector('p')!.firstChild!
+  const first = host.querySelector('[data-native-record-id="start"] p')!.firstChild!
+  const last = (endPosition === 'visible' ? row : host.querySelector('[data-native-record-id="end"]')!).querySelector('p')!.firstChild!
   const range = document.createRange(); range.setStart(first, 1); range.setEnd(last, 3); getSelection()!.addRange(range)
-  await draw(frame(page(start, header, item('earlier'), selected)))
+  await draw(frame(page(start, header, item('earlier'), selected, end)))
   expect(host.querySelector('[data-native-record-id="earlier"]')).not.toBeNull()
   expect(row.getBoundingClientRect().top, 'The offscreen Range start cannot return ownership to the stable group').toBe(150)
   expect(host.scrollTop).toBe(1040); expect(getSelection()!.getRangeAt(0)).toBe(range)

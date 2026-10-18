@@ -6,7 +6,8 @@ import { relative, resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '../../..')
 const mutation = process.env.AGENTMUX_PRESENTATION_MUTATION
 const file = 'packages/client-ui/src/lib/use-conversation-record-layout.ts'
-const owner = mutation === 'ignore-precommit-selection' ? 'packages/client-ui/src/lib/use-conversation-reading-selection.ts'
+const owner = mutation === 'ignore-cold-selected-candidates' ? 'packages/client-ui/src/lib/conversation-body-work.ts'
+  : mutation === 'ignore-precommit-selection' ? 'packages/client-ui/src/lib/use-conversation-reading-selection.ts'
   : mutation === 'ignore-commit-anchor' || mutation === 'restore-without-capture' ? 'packages/client-ui/src/components/ConversationReadingCommit.tsx' : file
 const edits: Record<string, [string, string]> = {
   'ignore-parent-change': ['prior.parent === next.parent', 'true'],
@@ -16,7 +17,8 @@ const edits: Record<string, [string, string]> = {
   'ignore-anchor': ["if (anchor && !incoming.has(anchor.key)) return 'anchor'", "if (false) return 'anchor'"],
   'ignore-precommit-selection': ['const getSnapshot = useCallback(() => readSnapshot(), [readSnapshot, candidate])', 'const getSnapshot = useCallback(() => emptySelection, [candidate])'],
   'ignore-commit-anchor': ['return this.props.work.capture(true)', 'return false'],
-  'restore-without-capture': ['return this.props.work.capture(true)', 'this.props.work.capture(true); return true']
+  'restore-without-capture': ['return this.props.work.capture(true)', 'this.props.work.capture(true); return true'],
+  'ignore-cold-selected-candidates': ['}, () => candidates)', '}, () => this.near)']
 }
 if (mutation && !edits[mutation]) throw new Error('Unknown presentation mutation')
 export default defineConfig({ ...base, cacheDir: '.cache/conversation-presentation-' + (mutation ?? 'base'), plugins: [...base.plugins ?? [], {
