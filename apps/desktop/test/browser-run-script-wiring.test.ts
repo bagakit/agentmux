@@ -72,7 +72,7 @@ const fakeElectron = vi.hoisted(() => {
   class FakeWebContents {
     static nextId = 1
     readonly id = FakeWebContents.nextId++
-    emitMainNavigation = false
+    emitMainNavigation = true
     url = 'https://example.invalid/'
     title = 'Example'
     destroyed = false
@@ -98,8 +98,7 @@ const fakeElectron = vi.hoisted(() => {
       return this
     }
     once(event: string, listener: (...args: unknown[]) => void): this { return this.on(event, listener) }
-    // 真的摘掉，不是 no-op：`input-event` 的判据之一就是「run 结束后监听器不再留着」，
-    // 而一个 no-op 的假件会让那条判据永远为假、看起来像实现的错。
+    // 真正摘掉监听器，避免假件掩盖原生输入与录制监听的泄漏。
     removeListener(event: string, listener: (...args: unknown[]) => void): this {
       this.listeners.set(event, (this.listeners.get(event) ?? []).filter((item) => item !== listener))
       return this
@@ -120,7 +119,11 @@ const fakeElectron = vi.hoisted(() => {
     isDestroyed(): boolean { return this.destroyed }
     async loadURL(url: string): Promise<void> {
       this.url = url
-      if (this.emitMainNavigation) for (const listener of this.listeners.get('did-start-navigation') ?? []) listener({ url, isMainFrame: true, isSameDocument: false })
+      if (this.emitMainNavigation) {
+        for (const listener of this.listeners.get('did-start-navigation') ?? []) listener({ url, isMainFrame: true, isSameDocument: false })
+        for (const listener of this.listeners.get('did-navigate') ?? []) listener({}, url)
+        for (const listener of this.listeners.get('dom-ready') ?? []) listener({})
+      }
       for (const listener of this.listeners.get('did-stop-loading') ?? []) listener({})
     }
     close(): void { this.destroyed = true }
@@ -143,16 +146,29 @@ vi.mock('electron', () => ({
 }))
 // This suite owns manager/runner/dispatch wiring. Native hit-testing and CDP
 // coexistence are exercised by verify-browser-agent-input-isolation.mjs.
-vi.mock('../src/main/browser-native-input-shield.js', () => ({ BrowserNativeInputShield: class {
-  constructor(private readonly page: unknown) {}
-  isCurrentFor(page: unknown) { return page === this.page && this.isolated }
-  prepare = () => Promise.resolve()
-  isolated = true
-  view = { webContents: { on() {}, once() {}, focus() {}, isDestroyed: () => false, mainFrame: { framesInSubtree: [] } } }
-  contents = this.view.webContents
-  synchronize() {}
-  dispose() { this.isolated = false }
-} }))
+const inputShields = vi.hoisted(() => {
+  class FakeInputShield {
+    static instances: FakeInputShield[] = []
+    static failNextConstruction = false
+    constructor(private readonly page: unknown) {
+      if (FakeInputShield.failNextConstruction) {
+        FakeInputShield.failNextConstruction = false
+        throw new Error('Native shield constructor unavailable')
+      }
+      FakeInputShield.instances.push(this)
+    }
+    isCurrentFor(page: unknown) { return page === this.page && this.isolated }
+    prepare = vi.fn(async () => {})
+    isolated = true
+    view = { webContents: { on() {}, once() {}, focus() {}, isDestroyed: () => false, mainFrame: { framesInSubtree: [] } } }
+    contents = this.view.webContents
+    synchronize = vi.fn()
+    refreshAppearance = vi.fn(async () => {})
+    dispose = vi.fn(() => { this.isolated = false })
+  }
+  return { FakeInputShield }
+})
+vi.mock('../src/main/browser-native-input-shield.js', () => ({ BrowserNativeInputShield: inputShields.FakeInputShield }))
 
 // 只替换派发层。CDP 会话用真的——`endedReason` 那条判据要的就是它真实的记账行为。
 // 走 vi.hoisted 是因为 vi.mock 的工厂会被提到文件顶部，直接引用下面的 const 会撞到 TDZ。
@@ -216,6 +232,8 @@ async function managerWithBrowser(journal?: BrowserOperationJournal, evidence?: 
   dispatchCalls.length = 0
   createDispatch.mockClear()
   fakeElectron.FakeWebContentsView.instances.length = 0
+  inputShields.FakeInputShield.instances.length = 0
+  inputShields.FakeInputShield.failNextConstruction = false
   // ref 账本给临时路径：本文件 mock 掉了派发层，账本根本不会被读，但真路径会往 userData 里写文件。
   const window = fakeWindow()
   const manager = new BrowserViewManager(window, profiles, new BrowserRefLedgerStore(
@@ -421,9 +439,10 @@ describe('human demonstration via the actual Manager → capture → recorder ch
       const restored = await managerWithBrowser(undefined, undefined, undefined, null,
         new BrowserDemonstrationRecorder(new BrowserDemonstrationFileStore(storePath)))
       try {
-        await expect(restored.manager.getDemonstration('b1')).resolves.toEqual(stopped)
+        const retained = await restored.manager.getDemonstration('b1')
+        expect(retained.draft).toEqual(stopped.draft)
         expect(restored.contents.debugger.isAttached()).toBe(false)
-        expect(restored.sentEvents().at(-1)?.browser.demonstration).toEqual(stopped)
+        expect(restored.sentEvents().at(-1)?.browser.demonstration).toEqual(retained)
       } finally { restored.manager.dispose() }
     } finally { manager.dispose(); await rm(directory, { recursive: true, force: true }) }
   }, 30_000)
@@ -536,6 +555,7 @@ describe('runScript waiting follows the Core capability effects', () => {
       return true
     })
     try {
+      const initialDisplayCalls = contents.executeJavaScriptInIsolatedWorld.mock.calls.length
       const running = manager.runScript('b1', `await ${name}(); return await js('true')`)
       await ready
       expect(sentEvents().at(-1)?.browser.activity.operation.phase).toBe('waiting')
@@ -544,9 +564,9 @@ describe('runScript waiting follows the Core capability effects', () => {
       expect(phases).toEqual(['waiting', 'running'])
       expect(report.outcome.kind).toBe('completed')
       expect(sentEvents().at(-1)?.browser.activity.operation.phase).toBe('completed')
-      // Existing operation feedback uses its own isolated world; waiting must not
-      // execute a second business script through this native boundary.
-      expect(contents.executeJavaScriptInIsolatedWorld.mock.calls
+      // Initial navigation has its own selection cleanup. Waiting adds only
+      // operation feedback, without another page business script.
+      expect(contents.executeJavaScriptInIsolatedWorld.mock.calls.slice(initialDisplayCalls)
         .filter(([worldId]: [number]) => worldId !== BROWSER_OPERATION_FEEDBACK_WORLD_ID)).toEqual([])
     } finally { release(); manager.dispose() }
   }, 30_000)
@@ -578,7 +598,7 @@ describe('runScript waiting follows the Core capability effects', () => {
       const report = await manager.runScript('b1', 'await waitForElement(); return await pageInfo()')
       expect(phases).toEqual(['stopped'])
       expect(report.outcome.kind).toBe('stopped')
-      expect(sentEvents().at(-1)?.browser.activity.control).toBe('human')
+      expect(sentEvents().at(-1)?.browser.activity.control).toBe('agent')
     } finally { manager.dispose() }
   }, 30_000)
 
@@ -683,6 +703,128 @@ describe('runScript 把页面调用交给派发层', () => {
 })
 
 describe('explicit Browser control', () => {
+  it('Agent ownership and the same native shield survive completion, failure, Stop and ordinary input between programs', async () => {
+    const { manager, contents, sentEvents } = await managerWithBrowser()
+    try {
+      const completed = await manager.runScript('b1', 'return 17')
+      expect(completed).toMatchObject({ result: 17, outcome: { kind: 'completed' },
+        runOperation: { control: { owner: 'agent', activeOperationId: null, inputIsolation: 'isolated' } } })
+      expect(inputShields.FakeInputShield.instances).toHaveLength(1)
+      const shield = inputShields.FakeInputShield.instances[0]!
+      expect(shield.prepare).toHaveBeenCalledTimes(1)
+      expect(shield.dispose).not.toHaveBeenCalled()
+      const assertRetained = () => {
+        expect(inputShields.FakeInputShield.instances).toEqual([shield])
+        expect(shield.isCurrentFor(fakeElectron.FakeWebContentsView.instances[0])).toBe(true)
+        expect(shield.dispose).not.toHaveBeenCalled()
+        expect(sentEvents().at(-1)?.browser).toMatchObject({ driving: false,
+          control: { owner: 'agent', activeOperationId: null, inputIsolation: 'isolated' }, activity: { control: 'agent' } })
+      }
+      assertRetained()
+      for (const type of ['mouseDown', 'mouseWheel', 'keyDown', 'touchStart']) {
+        contents.emit('input-event', { type })
+        assertRetained()
+      }
+      expect(await manager.runScript('b1', 'throw new Error("program failed")')).toMatchObject({ outcome: { kind: 'script-failed' } })
+      assertRetained()
+      const calls = stopOnFirstCall(manager, sentEvents)
+      expect(await manager.runScript('b1', 'await snapshot(); await click("@e1")', undefined, undefined, 'op:retained-shield-stop')).toMatchObject({ outcome: { kind: 'stopped' } })
+      expect(calls).toEqual(['snapshot'])
+      assertRetained()
+      expect(await manager.runScript('b1', 'return 23')).toMatchObject({ outcome: { kind: 'completed' }, result: 23 })
+      assertRetained()
+      expect(shield.prepare).toHaveBeenCalledTimes(1)
+    } finally { manager.dispose() }
+  }, 30_000)
+
+  it('explicit Take control also works after completion; Return prepares a fresh shield without replaying', async () => {
+    const { manager, contents, sentEvents } = await managerWithBrowser()
+    try {
+      expect(await manager.runScript('b1', 'return 31')).toMatchObject({ outcome: { kind: 'completed' }, result: 31 })
+      const originalShield = inputShields.FakeInputShield.instances[0]!
+      const taken = manager.takeControl('b1')
+      expect(taken).toMatchObject({ driving: false, control: { owner: 'human', activeOperationId: null, inputIsolation: 'inactive' },
+        activity: { control: 'human', operation: { phase: 'completed' } } })
+      expect(originalShield.dispose).toHaveBeenCalledTimes(1)
+      contents.emit('input-event', { type: 'mouseDown' })
+      expect(sentEvents().at(-1)?.browser.control.owner).toBe('human')
+      await expect(manager.runScript('b1', 'return 99')).rejects.toMatchObject({ code: 'BROWSER_HUMAN_CONTROL_ACTIVE' })
+      const returned = manager.returnControl('b1')
+      expect(returned).toMatchObject({ control: { owner: 'agent', activeOperationId: null }, activity: { operation: { phase: 'completed' } } })
+      await vi.waitFor(() => expect(sentEvents().at(-1)?.browser.control.inputIsolation).toBe('isolated'))
+      expect(inputShields.FakeInputShield.instances).toHaveLength(2)
+      const freshShield = inputShields.FakeInputShield.instances[1]!
+      expect(freshShield.prepare).toHaveBeenCalledTimes(1)
+      expect(dispatchCalls).toEqual([])
+      manager.returnControl('b1')
+      expect(inputShields.FakeInputShield.instances).toEqual([originalShield, freshShield])
+      expect(await manager.runScript('b1', 'return 37')).toMatchObject({ outcome: { kind: 'completed' }, result: 37 })
+      expect(inputShields.FakeInputShield.instances).toEqual([originalShield, freshShield])
+      expect(freshShield.dispose).not.toHaveBeenCalled()
+    } finally { manager.dispose() }
+  }, 30_000)
+
+  it('an unavailable native shield constructor keeps the healthy program, Agent owner and persistent unknown-isolation notice', async () => {
+    const { manager, contents, sentEvents } = await managerWithBrowser()
+    try {
+      inputShields.FakeInputShield.failNextConstruction = true
+      const report = await manager.runScript('b1', 'return 43')
+      expect(report).toMatchObject({ result: 43, outcome: { kind: 'completed' }, runOperation: {
+        warning: expect.stringContaining('isolation is unconfirmed'), control: { owner: 'agent', activeOperationId: null, inputIsolation: 'unconfirmed' } } })
+      expect(sentEvents().at(-1)?.browser).toMatchObject({ control: { owner: 'agent', inputIsolation: 'unconfirmed' },
+        activity: { warning: expect.stringContaining('isolation is unconfirmed') } })
+      expect(contents.isDestroyed()).toBe(false)
+      expect(await manager.runScript('b1', 'return 47')).toMatchObject({ result: 47, outcome: { kind: 'completed' },
+        runOperation: { control: { owner: 'agent', inputIsolation: 'isolated' } } })
+    } finally { manager.dispose() }
+  }, 30_000)
+
+  it('a hidden idle Agent owner remains retained and cannot be reclaimed by the resource release request', async () => {
+    const { manager, contents } = await managerWithBrowser()
+    try {
+      await manager.runScript('b1', 'return 53')
+      manager.setBounds('b1', null)
+      const target = manager.resourceTargets(null).find(target => target.id === 'b1')!
+      expect(target.control).toMatchObject({ owner: 'agent', activeOperationId: null })
+      expect(target.resource?.retention?.reasons).toContain('operation')
+      const release = await manager.release('b1', target.navigationId!)
+      expect(release.reasons).toContain('operation')
+      expect(release.status).not.toBe('released')
+      expect(contents.isDestroyed()).toBe(false)
+      expect(manager.target('b1')?.control?.owner).toBe('agent')
+      expect(await manager.runScript('b1', 'return 59')).toMatchObject({ result: 59, outcome: { kind: 'completed' } })
+    } finally { manager.dispose() }
+  }, 30_000)
+
+  it('Take then Return while journal start is pending fences the admitted program without dispatch or activity overwrite', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'amx-browser-admitted-'))
+    const journal = new BrowserOperationJournal(new BrowserOperationFileStore(join(directory, 'operations.json')))
+    const actualStart = journal.start.bind(journal)
+    let release!: () => void, entered!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const ready = new Promise<void>(resolve => { entered = resolve })
+    vi.spyOn(journal, 'start').mockImplementationOnce(async input => { entered(); await gate; return await actualStart(input) })
+    const { manager, contents, sentEvents } = await managerWithBrowser(journal)
+    const marker = join(directory, 'worker-ran.txt')
+    const pending = manager.runScript('b1', `await import('node:fs/promises').then(fs => fs.writeFile(${JSON.stringify(marker)}, 'ran')); return await snapshot()`,
+      undefined, undefined, 'op:admitted-before-take')
+    try {
+      await ready
+      expect(manager.takeControl('b1')).toMatchObject({ control: { owner: 'human', activeOperationId: null } })
+      const returned = manager.returnControl('b1')
+      expect(returned).toMatchObject({ control: { owner: 'agent', activeOperationId: null }, activity: { operation: null } })
+      release()
+      expect(await pending).toMatchObject({ outcome: { kind: 'stopped' }, runOperation: { id: 'op:admitted-before-take', phase: 'stopped' } })
+      expect(createDispatch).not.toHaveBeenCalled()
+      expect(dispatchCalls).toEqual([])
+      await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' })
+      expect(contents.debugger.isAttached()).toBe(false)
+      expect(sentEvents().at(-1)?.browser).toMatchObject({ control: { owner: 'agent', activeOperationId: null }, activity: { operation: null } })
+      expect(await journal.get('op:admitted-before-take')).toMatchObject({ id: 'op:admitted-before-take', phase: 'stopped' })
+      expect(await manager.runScript('b1', 'return 41')).toMatchObject({ outcome: { kind: 'completed' }, result: 41 })
+    } finally { release(); await pending; manager.dispose(); await rm(directory, { recursive: true, force: true }) }
+  }, 30_000)
+
   it('the built CLI stops the exact live operation through the public socket and actual client branch', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'amx-explicit-cli-'))
     const journal = new BrowserOperationJournal(new BrowserOperationFileStore(join(directory, 'operations.json')))
@@ -717,13 +859,14 @@ describe('explicit Browser control', () => {
       const reply = await runCompiledObjectCli(['--endpoint', `unix:${socketPath}`, 'browser', 'stop', '--operation-id', operationId], objectCliEnvironment(directory))
       expect(reply.code, reply.stderr).toBe(0)
       expect(JSON.parse(reply.stdout).result.runOperation).toMatchObject({ id: operationId, browserId: 'b1', phase: 'stopped' })
-      expect(sentEvents().at(-1)?.browser.activity.control).toBe('human')
+      expect(sentEvents().at(-1)?.browser.activity.control).toBe('agent')
       expect((await pending).outcome.kind).toBe('stopped')
       expect(calls).toEqual(['snapshot'])
       const inspect = await runCompiledObjectCli(['--endpoint', `unix:${socketPath}`, 'browser', 'inspect', '--operation-id', operationId], objectCliEnvironment(directory))
       expect(inspect.code, inspect.stderr).toBe(0)
       expect(JSON.parse(inspect.stdout).result.runOperation).toMatchObject({ id: operationId, phase: 'stopped' })
-      await expect(manager.runScript('b1', 'return 1')).rejects.toMatchObject({ code: 'BROWSER_HUMAN_CONTROL_ACTIVE' })
+      expect(JSON.parse(reply.stdout).result.runOperation.control).toMatchObject({ owner: 'agent' })
+      expect(await manager.runScript('b1', 'return 1')).toMatchObject({ outcome: { kind: 'completed' }, result: 1 })
     } finally {
       release(); await pending; await server.stop()
       // Stop ends the child before its held page call finishes. Preserve the real journal write.
@@ -762,15 +905,21 @@ describe('explicit Browser control', () => {
       const report = await manager.runScript('b1', 'await click("@e1"); try { await click("@e2") } catch {} return "done"', undefined, undefined, 'op:explicit-catch')
       expect(report.outcome.kind).toBe('stopped')
       expect(calls).toEqual(['click'])
-      expect(sentEvents().at(-1)?.browser.activity.control).toBe('human')
+      expect(sentEvents().at(-1)?.browser.activity.control).toBe('agent')
       expect(report.runOperation.phase).toBe('stopped')
       expect(report.outcome.kind === 'stopped' && report.outcome.message).toMatch(/stopped explicitly/i)
     } finally { manager.dispose() }
   }, 30_000)
 
-  it('a fresh run requires explicit Return; Return does not replay the old program', async () => {
+  it('explicit Take control fences an active program; only Return permits a fresh run without replay', async () => {
     const { manager, sentEvents } = await managerWithBrowser()
-    const calls = stopOnFirstCall(manager, sentEvents)
+    const calls: string[] = []
+    createDispatch.mockImplementationOnce(() => async name => {
+      calls.push(name)
+      const taken = manager.takeControl('b1')
+      expect(taken).toMatchObject({ driving: false, control: { owner: 'human' }, activity: { control: 'human', operation: { phase: 'stopped' } } })
+      return null
+    })
     try {
       const stopped = await manager.runScript('b1', 'await click("@e1"); await click("@e2"); return "old"', undefined, undefined, 'op:explicit-return')
       expect(stopped.outcome.kind).toBe('stopped')
@@ -1501,8 +1650,10 @@ describe('Browser RSI：operation 凭 id 可查可停，与发起它的那条连
     await manager.runScript('b1', 'return await snapshot()', undefined, undefined, id)
     const listed = (await manager.listOperationHistory()).find((operation) => operation.id === id)
     expect(listed, 'history 里没有这条——下面的比对在对空气生效').toBeDefined()
-    expect(await manager.getOperation(id), '按 id 查和按 Browser 列给出了两份不同的事实')
-      .toEqual(listed)
+    const inspected = await manager.getOperation(id)
+    const { control, ...durable } = inspected!
+    expect(durable, '按 id 查和按 Browser 列给出了两份不同的持久事实').toEqual(listed)
+    expect(control).toMatchObject({ owner: 'agent', activeOperationId: null, inputIsolation: 'isolated' })
   }, 30_000)
 })
 
@@ -1524,7 +1675,7 @@ describe('Browser RSI：及时交接与单一运行者', () => {
     return { calls, entered, release }
   }
 
-  it('显式停止立即推送 control=human，不等挂起的 page call 结束', async () => {
+  it('显式 Stop 立即推送 stopped 并保持 Agent 控制，不等挂起的 page call 结束', async () => {
     const { manager, contents, sentEvents } = await managerWithBrowser()
     const held = holdNextCall()
     const pending = manager.runScript('b1', 'await wait(1000); await click("@e1")')
@@ -1535,7 +1686,7 @@ describe('Browser RSI：及时交接与单一运行者', () => {
       const handoffEvents = sentEvents().slice(before)
       expect(handoffEvents).toHaveLength(1)
       expect(handoffEvents[0]).toMatchObject({
-        type: 'updated', browser: { driving: false, activity: { control: 'human', operation: { phase: 'stopped' } } }
+        type: 'updated', browser: { driving: false, control: { owner: 'agent' }, activity: { control: 'agent', operation: { phase: 'stopped' } } }
       })
     } finally {
       held.release()
@@ -1545,11 +1696,11 @@ describe('Browser RSI：及时交接与单一运行者', () => {
     expect(held.calls).toEqual(['wait'])
   }, 30_000)
 
-  it('显式 Stop 立即交还控制并停止后续动作，直到人明确交还', async () => {
+  it('显式 Stop 停止后续动作并保留 Agent 控制，新的程序无需 Return', async () => {
     const { manager, sentEvents } = await managerWithBrowser()
     const held = holdNextCall()
     // 寻址走 operationId（T-008 之后那是取消的唯一入口；按 browserId 的 `stopOperation` 已删）。
-    // 这条断言的不变量没变：人停下之后控制归人、后续动作不再发生、直到人明确交还。
+    // Stop 只取消准确 operation；它不表示人已接管，也不重放后续动作。
     const mine = 'op:explicit-stop'
     const pending = manager.runScript('b1', 'await wait(1000); await click("@e1")', undefined, undefined, mine)
     try {
@@ -1557,9 +1708,9 @@ describe('Browser RSI：及时交接与单一运行者', () => {
       const before = sentEvents().length
       const stopped = await manager.stopOperationById(mine)
       expect(stopped?.phase, '显式停止没把这条操作判成 stopped').toBe('stopped')
-      // 控制交还给人这件事只在 snapshot 事件里可见（stopOperationById 答的是操作事实，不是页面快照）。
+      // 操作回执与实时快照必须同时保留 Agent 所有权。
       expect(sentEvents().slice(before)).toEqual(expect.arrayContaining([
-        expect.objectContaining({ browser: expect.objectContaining({ driving: false, activity: expect.objectContaining({ control: 'human' }) }) })
+        expect.objectContaining({ browser: expect.objectContaining({ driving: false, control: expect.objectContaining({ owner: 'agent' }), activity: expect.objectContaining({ control: 'agent' }) }) })
       ]))
     } finally {
       held.release()
@@ -1567,9 +1718,7 @@ describe('Browser RSI：及时交接与单一运行者', () => {
     }
     expect((await pending).outcome.kind).toBe('stopped')
     expect(held.calls).toEqual(['wait'])
-    await expect(manager.runScript('b1', 'return "cannot take control"')).rejects.toThrow(/return control/i)
-    manager.returnControl('b1')
-    expect((await manager.runScript('b1', 'return "resumed"')).result).toBe('resumed')
+    expect((await manager.runScript('b1', 'return "fresh"')).result).toBe('fresh')
   }, 30_000)
 
   it('已有程序挂起时拒绝重入，旧程序和 operation identity 继续有效', async () => {
@@ -1629,7 +1778,7 @@ describe('durable result via the actual Manager → dispatch → runner chain', 
     }
   }, 30_000)
 
-  it('continues original result after navigation and native release/restart without replaying its action', async () => {
+  it('continues original result after navigation, retained native release and restart without replaying its action', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'agentmux-result-manager-'))
     const journalPath = join(directory, 'operations.json')
     const storePath = join(directory, 'results')
@@ -1665,7 +1814,9 @@ describe('durable result via the actual Manager → dispatch → runner chain', 
       expect(continued.runOperation!.steps).toEqual([expect.objectContaining({ method: 'readResult' })])
       expect(actions).toBe(1)
       await expect(manager.create('b1', 'https://ignored.invalid/', 'foreign-workspace')).rejects.toThrow(/another Workspace/)
-      await manager.release('b1')
+      const release = await manager.release('b1', manager.target('b1')!.navigationId!)
+      expect(release.status).not.toBe('released')
+      expect(release.reasons).toContain('operation')
       await expect(manager.restore('b1', { workspaceId: 'foreign-workspace' })).rejects.toThrow(/another Workspace/)
       await manager.restore('b1', { workspaceId: null })
       const resumed = await manager.runScript('b1', `return await readResult(${JSON.stringify(reference)}, {offset:0,maxBytes:11})`)
@@ -2292,15 +2443,17 @@ describe('native downloads via the actual Manager → dispatch → Workspace own
     const dispatchModule = await vi.importActual<typeof import('../src/main/browser-page-dispatch.js')>('../src/main/browser-page-dispatch.js')
     const payload = Buffer.from([0, 255, 128, 13, 10, 2])
     let clicks = 0
+    const downloadListenerBaseline = f.contents.session.listenerCount('will-download')
     const install = (mode: 'complete' | 'cancel' | 'none' = 'complete', afterSnapshot?: () => Promise<unknown>) => {
-      f.contents.debugger.sendCommandImpl = async (method: string) => {
+      f.contents.debugger.sendCommandImpl = async (method: string, params?: Record<string, unknown>) => {
         if (method === 'Accessibility.getFullAXTree') return { nodes: [{ nodeId: '1', backendDOMNodeId: 11,
           role: { value: 'link' }, name: { value: 'Export file' }, childIds: [] }] }
         if (method === 'Runtime.evaluate') return { result: { value: '[]' } }
         if (method === 'DOM.resolveNode') return { object: { objectId: 'object-download' } }
         if (method === 'Runtime.callFunctionOn') {
+          if (!String(params?.functionDeclaration).includes('this.click()')) return { result: { value: null } }
           clicks += 1
-          expect(f.contents.session.listenerCount('will-download')).toBe(1)
+          expect(f.contents.session.listenerCount('will-download')).toBe(downloadListenerBaseline + 1)
           if (mode !== 'none') {
             const item = new Download(payload.length)
             f.contents.session.emit('will-download', {}, item, f.contents)
@@ -2321,7 +2474,7 @@ describe('native downloads via the actual Manager → dispatch → Workspace own
         } : dispatch
       })
     }
-    return { ...f, root, workspace, files, downloads, resolve, journal, payload, install, actualDispatch: dispatchModule.createBrowserPageDispatch, clicks: () => clicks,
+    return { ...f, root, workspace, files, downloads, resolve, journal, payload, install, downloadListenerBaseline, actualDispatch: dispatchModule.createBrowserPageDispatch, clicks: () => clicks,
       close: async () => { f.manager.dispose(); await rm(root, { recursive: true, force: true }) } }
   }
 
@@ -2330,7 +2483,7 @@ describe('native downloads via the actual Manager → dispatch → Workspace own
     try {
       f.install()
       const report = await f.manager.runScript('b1', 'const page = await snapshot(); return await download(page.nodes[0].ref, {path:"published.bin", timeoutMs:2000})')
-      expect(report.outcome).toEqual({ kind: 'completed' })
+      expect(report.outcome, JSON.stringify(report)).toEqual({ kind: 'completed' })
       const receipt = report.result as BrowserDownloadReceipt
       expect(receipt).toMatchObject({ status: 'completed', workspaceId: f.workspace.id, browserId: 'b1', operationId: report.runOperation.id })
       expect(receipt.reference).toMatchObject({ path: 'published.bin', operationId: report.runOperation.id, byteLength: f.payload.length })
@@ -2345,7 +2498,9 @@ describe('native downloads via the actual Manager → dispatch → Workspace own
       expect(foreign.outcome.kind).toBe('script-failed')
       expect(foreign.runOperation.summary).toEqual(expect.stringContaining('does not belong to this Workspace and Browser'))
       expect(f.clicks()).toBe(1)
+      f.manager.takeControl('b1')
       await f.manager.navigate('b1', 'https://example.invalid/another-document')
+      f.manager.returnControl('b1')
       f.install('none')
       const read = await f.manager.runScript('b1', `return await readDownload(${JSON.stringify(receipt.reference)}, {offset:1,maxBytes:3})`)
       expect(read.outcome).toEqual({ kind: 'completed' })
@@ -2370,14 +2525,18 @@ describe('native downloads via the actual Manager → dispatch → Workspace own
     const f = await fixture()
     try {
       const waits = vi.spyOn(f.downloads, 'wait')
-      f.install('none', async () => await f.manager.switchProfile('b1', 'another-profile'))
+      f.install('none', async () => {
+        f.manager.takeControl('b1')
+        await f.manager.switchProfile('b1', 'another-profile')
+        f.manager.returnControl('b1')
+      })
       const report = await f.manager.runScript('b1', 'const page=await snapshot(); return await download(page.nodes[0].ref,{path:"wrong-owner.bin",timeoutMs:100})')
       const replacement = fakeElectron.FakeWebContentsView.instances.at(-1)!.webContents
       expect(replacement.id).not.toBe(f.contents.id)
       expect(f.contents.isDestroyed()).toBe(true)
       expect(waits).toHaveBeenCalledTimes(0)
       expect(f.clicks()).toBe(0)
-      expect(replacement.session.listenerCount('will-download')).toBe(0)
+      expect(replacement.session.listenerCount('will-download')).toBe(f.downloadListenerBaseline)
       expect(report.outcome.kind).not.toBe('completed')
       await expect(readFile(join(f.root, 'wrong-owner.bin'))).rejects.toMatchObject({code:'ENOENT'})
       expect(await f.manager.runScript('b1','return 58')).toMatchObject({result:58,outcome:{kind:'completed'}})
@@ -2399,7 +2558,7 @@ describe('native downloads via the actual Manager → dispatch → Workspace own
       const invalid = await f.manager.runScript('b1', 'return await download("@e1", {path:"unsafe.bin",signal:{aborted:false}})')
       expect(invalid.outcome.kind).toBe('script-failed')
       expect(f.clicks()).toBe(0)
-      expect(f.contents.session.listenerCount('will-download')).toBe(0)
+      expect(f.contents.session.listenerCount('will-download')).toBe(f.downloadListenerBaseline)
     } finally { await f.close() }
   }, 30_000)
 
@@ -2417,7 +2576,7 @@ describe('native downloads via the actual Manager → dispatch → Workspace own
         if (receipt.warning) expect(report.runOperation.warning).toBe(receipt.warning)
         expect(f.sentEvents().at(-1)?.browser.activity.warning).toBe(report.runOperation.warning)
         await expect(readFile(join(f.root, `${mode}.bin`))).rejects.toMatchObject({ code: 'ENOENT' })
-        expect(f.contents.session.listenerCount('will-download')).toBe(0)
+        expect(f.contents.session.listenerCount('will-download')).toBe(f.downloadListenerBaseline)
         expect(await f.manager.runScript('b1', 'return 94')).toMatchObject({ result: 94, outcome: { kind: 'completed' } })
       }
     } finally { await f.close() }
@@ -2429,10 +2588,10 @@ describe('native downloads via the actual Manager → dispatch → Workspace own
       f.install('none')
       const pending = f.manager.runScript('b1', 'const page = await snapshot(); return await download(page.nodes[0].ref, {path:"stopped.bin",timeoutMs:2000})', undefined, undefined, 'download-stop')
       await vi.waitFor(() => expect(f.clicks()).toBe(1))
-      expect(f.contents.session.listenerCount('will-download')).toBe(1)
+      expect(f.contents.session.listenerCount('will-download')).toBe(f.downloadListenerBaseline + 1)
       await f.manager.stopOperationById('download-stop')
       expect((await pending).outcome.kind).toBe('stopped')
-      expect(f.contents.session.listenerCount('will-download')).toBe(0)
+      expect(f.contents.session.listenerCount('will-download')).toBe(f.downloadListenerBaseline)
       await expect(readFile(join(f.root, 'stopped.bin'))).rejects.toMatchObject({ code: 'ENOENT' })
       f.manager.returnControl('b1')
       expect(await f.manager.runScript('b1', 'return 37')).toMatchObject({ result: 37, outcome: { kind: 'completed' } })
@@ -2458,7 +2617,7 @@ describe('native downloads via the actual Manager → dispatch → Workspace own
       expect(blocked.outcome.kind).toBe('stopped')
       expect(f.clicks()).toBe(1)
       expect(blocked.runOperation.steps).toEqual([expect.objectContaining({ method: 'snapshot' })])
-      expect(f.contents.session.listenerCount('will-download')).toBe(0)
+      expect(f.contents.session.listenerCount('will-download')).toBe(f.downloadListenerBaseline)
       await expect(readFile(join(f.root, 'must-not-publish.bin'))).rejects.toMatchObject({ code: 'ENOENT' })
     } finally { await f.close() }
   }, 30_000)
@@ -2543,7 +2702,9 @@ describe('file upload via exact current ref and sole Workspace snapshot owner', 
       fakeElectron.FakeWebContentsView.instances.at(-1)!.webContents.emitMainNavigation = true
       await f.manager.navigate('b2', 'https://example.invalid/unrelated')
       await expect(readFile(f.staged()[0]!)).resolves.toEqual(f.payload)
+      f.manager.takeControl('b1')
       await f.manager.navigate('b1', 'https://example.invalid/next')
+      f.manager.returnControl('b1')
       await vi.waitFor(async () => await expect(readFile(f.staged()[0]!)).rejects.toMatchObject({ code: 'ENOENT' }))
       expect(await f.manager.runScript('b1', 'return 31')).toMatchObject({ result: 31, outcome: { kind: 'completed' } })
     } finally { await f.close() }
@@ -2560,7 +2721,9 @@ describe('file upload via exact current ref and sole Workspace snapshot owner', 
         return async (name, args) => {
           const value = await dispatch(name, args)
           if (name === 'snapshot') {
+            f.manager.takeControl('b1')
             await f.manager.switchProfile('b1', 'another-profile')
+            f.manager.returnControl('b1')
             try { context.uploads!.context() } catch (error) { rejectionFacts.push((error as Error).message) }
             try { originalSource.currentNavigationId() } catch (error) { rejectionFacts.push((error as Error).message) }
           }
@@ -2572,7 +2735,7 @@ describe('file upload via exact current ref and sole Workspace snapshot owner', 
       expect(f.contents.isDestroyed()).toBe(true)
       expect(replacement.id).not.toBe(f.contents.id)
       expect(rejectionFacts).toEqual(['The Browser view changed before upload.', 'The Browser view changed during upload.'])
-      expect(report.outcome.kind).toBe('script-failed')
+      expect(report.outcome.kind).toBe('stopped')
       expect(assignments).toHaveBeenCalledTimes(0)
       expect(f.assignments()).toBe(0)
       expect(f.staged()).toEqual([])
@@ -2599,7 +2762,7 @@ describe('file upload via exact current ref and sole Workspace snapshot owner', 
         const dispatch = f.actualDispatch(context)
         return async (name,args) => {
           const result = await dispatch(name,args)
-          if (name === 'snapshot') await f.manager.navigate('b1','https://example.invalid/cross-document')
+          if (name === 'snapshot') await context.gotoUrl('https://example.invalid/cross-document')
           return result
         }
       })
@@ -2704,7 +2867,7 @@ describe('file upload via exact current ref and sole Workspace snapshot owner', 
         expect(f.assignments()).toBe(0)
         expect(f.staged()).toEqual([])
         expect(report.outcome.kind).toBe('stopped')
-        expect(f.sentEvents().at(-1)?.browser.activity.control).toBe(boundary === 'return-during-IO' ? 'agent' : 'human')
+        expect(f.sentEvents().at(-1)?.browser.activity.control).toBe('agent')
         expect(f.contents.isDestroyed()).toBe(false)
         f.manager.returnControl('b1')
         expect(await f.manager.runScript('b1', 'return 67')).toMatchObject({result:67,outcome:{kind:'completed'}})
@@ -2736,8 +2899,10 @@ describe('file upload via exact current ref and sole Workspace snapshot owner', 
       const report = await f.manager.runScript('b1','const page=await snapshot(); return await uploadFiles(page.nodes[0].ref,["attachment.bin"])')
       expect(report.outcome.kind).toBe('completed')
       vi.spyOn(f.uploads,'releaseBrowser').mockRejectedValueOnce(new Error('Owned cleanup IO failed'))
+      f.manager.takeControl('b1')
       await f.manager.navigate('b1','https://example.invalid/retry-cleanup')
       await vi.waitFor(() => expect(f.sentEvents().at(-1)?.browser.activity.warning).toEqual(expect.stringContaining('staging could not be fully released')))
+      f.manager.returnControl('b1')
       expect(await f.manager.runScript('b1','return 47')).toMatchObject({result:47,outcome:{kind:'completed'}})
     } finally { await f.close() }
   }, 30_000)

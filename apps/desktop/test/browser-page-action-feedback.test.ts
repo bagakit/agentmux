@@ -224,10 +224,11 @@ describe('actual BrowserViewManager consumer', () => {
     native.onWaiting = async () => {
       shield = f.manager.nativeOwner('browser-one')!.inputShield
       native.deferredCloseId = shield.webContents.id
-      if (ending === 'takeover') await f.manager.stopOperationById(operationId)
+      if (ending === 'takeover') f.manager.takeControl('browser-one')
     }
     const report = await f.manager.runScript('browser-one', 'actual worker with delayed native close', undefined, undefined, operationId)
     expect(report.outcome.kind).toBe(ending === 'completed' ? 'completed' : 'stopped')
+    if (ending === 'completed') f.manager.takeControl('browser-one')
     expect(f.manager.target('browser-one')?.control?.inputIsolation).toBe('unconfirmed')
     expect(f.manager.target('browser-one')?.status).toBe('ready'); expect(f.contents.isDestroyed()).toBe(false)
     expect(report.runOperation?.warning?.match(/could not be fully released/gu)).toHaveLength(1)
@@ -249,6 +250,7 @@ describe('actual BrowserViewManager consumer', () => {
     let shield: any
     native.onWaiting = async () => { shield = f.manager.nativeOwner('browser-one')!.inputShield; native.deferredCloseId = shield.webContents.id }
     const original = await f.manager.runScript('browser-one', 'original delayed native close', undefined, undefined, 'original-close')
+    f.manager.takeControl('browser-one'); f.manager.returnControl('browser-one')
     expect(original.runOperation?.warning).toContain('could not be fully released')
     native.onWaiting = async () => {
       const before = f.events.at(-1).browser.activity.operation
@@ -260,7 +262,7 @@ describe('actual BrowserViewManager consumer', () => {
     }
     const next = await f.manager.runScript('browser-one', 'new healthy program with retained input observation', undefined, undefined, 'new-operation')
     expect(next.outcome.kind).toBe('completed'); expect(next.runOperation?.warning).toContain('Native Browser input isolation is unconfirmed')
-    expect(original.runOperation?.warning).toBeUndefined()
+    expect(original.runOperation?.warning).toContain('Native Browser input isolation is unconfirmed')
   })
   it('consumes the saved pointer preferences and dispatch acknowledgement through the original target callback', async () => {
     const preferences = { ...DEFAULT_BROWSER_AGENT_CONTROL, pointerDurationMs: 530, clickRadius: 33, glowColor: '#3366cc' }
@@ -284,10 +286,11 @@ describe('actual BrowserViewManager consumer', () => {
     expect(f.contents.attached).toBe(false); expect(f.contents.destroyed).toBe(false)
     expect(f.contents.scripts.length).toBeGreaterThan(0)
     expect(actionPayloads(f.contents).at(-1).phase).toBe('completed')
-    expect(controlPayloads(f.contents).at(-1).active).toBe(false)
+    expect(controlPayloads(f.contents).at(-1).active).toBe(true)
     expect(f.sibling.commands).toEqual(f.siblingBefore.commands); expect(f.sibling.scripts).toEqual(f.siblingBefore.scripts); expect(f.sibling.destroyed).toBe(false)
     const count = f.contents.displays.length; f.manager.setBounds('browser-one', null)
     expect(actionPayloads(f.contents, count)).toMatchObject([{ phase: 'clear' }])
+    expect(f.manager.target('browser-one')?.control?.owner).toBe('agent')
   })
   it('the same operation binds each action to its actual new navigation and a fresh decoration token', async () => {
     const f = await managerFixture(); native.mode = 'navigation'
@@ -300,7 +303,8 @@ describe('actual BrowserViewManager consumer', () => {
     expect(f.contents.getURL()).toBe('https://generic.invalid/next'); expect(f.contents.attached).toBe(false)
     const count = f.contents.displays.length
     f.contents.emit('input-event', {}, { type: 'mouseDown' })
-    expect(actionPayloads(f.contents, count)).toMatchObject([{ phase: 'clear' }])
+    expect(actionPayloads(f.contents, count)).toEqual([])
+    expect(f.manager.target('browser-one')?.control?.owner).toBe('agent')
     expect(f.contents.attached).toBe(false); expect(report.runOperation?.phase).toBe('completed')
     expect(f.sibling.commands).toEqual(f.siblingBefore.commands); expect(f.sibling.scripts).toEqual(f.siblingBefore.scripts)
   })
@@ -315,7 +319,7 @@ describe('actual BrowserViewManager consumer', () => {
   })
   it('a concurrent readonly call cannot replace the action guard before explicit takeover', async () => {
     const f = await managerFixture(); native.mode = 'concurrent-observe'
-    native.takeover = () => { void f.manager.stopOperationById('concurrent-observe') }
+    native.takeover = () => { f.manager.takeControl('browser-one') }
     const report = await f.manager.runScript('browser-one', 'actual concurrent worker double', undefined, undefined, 'concurrent-observe')
     expect(report.outcome.kind).toBe('stopped'); expect(f.contents.feedbackCalls).toBe(1)
     expect(f.contents.commands.filter((name: string) => name === 'Accessibility.getFullAXTree')).toHaveLength(2)
@@ -325,7 +329,7 @@ describe('actual BrowserViewManager consumer', () => {
   })
   it('explicit takeover during feedback stops the original late action while preserving both healthy pages', async () => {
     const f = await managerFixture()
-    native.onFeedback = () => { void f.manager.stopOperationById('feedback-takeover') }
+    native.onFeedback = () => { f.manager.takeControl('browser-one') }
     const report = await f.manager.runScript('browser-one', 'actual worker double', undefined, undefined, 'feedback-takeover')
     expect(f.contents.feedbackCalls).toBe(1); expect(f.contents.actions).toBe(0)
     expect(report.outcome.kind).toBe('stopped'); expect(report.runOperation?.phase).toBe('stopped')
@@ -384,15 +388,16 @@ describe('actual BrowserViewManager consumer', () => {
       expect(f.manager.target('browser-one')?.control?.owner).toBe('agent')
       expect(f.sibling.commands).toEqual(f.siblingBefore.commands); expect(f.sibling.scripts).toEqual(f.siblingBefore.scripts); expect(f.sibling.focusCalls).toBe(0)
       observed = true
-      if (end === 'takeover') await f.manager.stopOperationById(operationId)
+      if (end === 'takeover') f.manager.takeControl('browser-one')
     }
     const report = await f.manager.runScript('browser-one', 'actual waiting worker', { id: 'original-agent', name: 'Original Agent' }, undefined, operationId)
     expect(observed, JSON.stringify(report)).toBe(true)
     expect(report.outcome.kind).toBe(end === 'takeover' ? 'stopped' : 'completed')
-    expect(controlPayloads(f.contents).at(-1)).toMatchObject({ operationId, active: false })
-    expect(f.manager.target('browser-one')?.control).toMatchObject({ owner: 'human', activeOperationId: null, inputIsolation: 'inactive' })
-    expect(shield.webContents.isDestroyed()).toBe(true); expect(f.children).not.toContain(shield)
-    expect(f.contents.isFocused()).toBe(true)
+    expect(controlPayloads(f.contents).at(-1)).toMatchObject({ operationId, active: end !== 'takeover' })
+    expect(f.manager.target('browser-one')?.control).toMatchObject({ owner: end === 'takeover' ? 'human' : 'agent', activeOperationId: null, inputIsolation: end === 'takeover' ? 'inactive' : 'isolated' })
+    expect(shield.webContents.isDestroyed()).toBe(end === 'takeover')
+    expect(f.children.includes(shield)).toBe(end !== 'takeover')
+    expect(f.contents.isFocused()).toBe(end === 'takeover')
     expect(f.contents.attached).toBe(false); expect(f.contents.destroyed).toBe(false)
     expect(f.sibling.commands).toEqual(f.siblingBefore.commands); expect(f.sibling.scripts).toEqual(f.siblingBefore.scripts); expect(f.sibling.focusCalls).toBe(0)
   })
@@ -461,6 +466,7 @@ describe('native shield presentation ownership through the real manager', () => 
     }
     const operation = await f.manager.runScript('browser-one', 'original delayed-close operation', undefined, undefined, 'cleanup-before-restore')
     expect(operation.outcome.kind).toBe('completed')
+    f.manager.takeControl('browser-one')
     expect(retired.webContents.isDestroyed()).toBe(false)
     expect(retired.getVisible()).toBe(false) // Cleanup uncertainty must not leave a false control edge on screen.
     expect(f.children).not.toContain(retired)

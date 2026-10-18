@@ -48,6 +48,21 @@ describe('coordinate-free Browser ownership decoration', () => {
     expect(state().host).toBeNull(); expect(state().revision).toBe(revision)
   })
 
+  it('restores the same ownership glow after website root replacement without reviving a released owner', async () => {
+    apply(1, 'one'); const host = state().host, shadow = state().shadow
+    document.documentElement.replaceChildren(document.createElement('head'), document.createElement('body'))
+    await vi.waitFor(() => expect(host.isConnected).toBe(true))
+    expect(state().host).toBe(host); expect(state().shadow).toBe(shadow)
+    const oldRoot = document.documentElement, replacement = document.createElement('html')
+    replacement.append(document.createElement('head'), document.createElement('body'))
+    document.removeChild(oldRoot); document.appendChild(replacement)
+    await vi.waitFor(() => expect(host.parentElement).toBe(replacement))
+    expect(state().host).toBe(host); expect(state().shadow).toBe(shadow)
+    host.remove(); apply(2, 'one', false)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(host.isConnected).toBe(false); expect(state().host).toBeNull()
+  })
+
   it('retains the same owned DOM across document visibility changes without replaying an old cue', () => {
     apply(1, 'one'); const host = state().host
     const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
@@ -93,7 +108,9 @@ describe('original feedback owner lifecycle', () => {
     expect(globals.__agentMuxBrowserOperationFeedback).toBeUndefined()
     original.setNavigation('two'); await original.feedback.synchronizeControl()
     expect(state().navigationId).toBe('two')
-    await original.feedback.end(true); expect(state().host).toBeNull()
+    const live = state().host
+    await original.feedback.end(true, true); expect(state().host).toBe(live)
+    original.setActive(false); await original.feedback.synchronizeControl(); expect(state().host).toBeNull()
   })
 
   it('bounds a failed display observation and rejects its late script without taking control from the Agent', async () => {
