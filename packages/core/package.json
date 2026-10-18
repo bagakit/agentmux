@@ -346,6 +346,7 @@
     "dist",
     "src/ctxmux-artifact-contract.json",
     "examples",
+    "guides",
     "vendor",
     "THIRD_PARTY_NOTICES.md"
   ],
@@ -372,9 +373,11 @@
     "luxon": "3.7.2"
   },
   "scripts": {
+    "generate:guides": "node scripts/generate-guides.mjs",
+    "check:guides": "node scripts/generate-guides.mjs --check && tsc --noEmit --incremental false --composite false -p tsconfig.build.json && node scripts/check-guides.mjs",
     "build": "node scripts/build.mjs",
     "prepack": "pnpm build",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "node scripts/generate-guides.mjs --check && tsc --noEmit -p tsconfig.json && node scripts/check-guides.mjs",
     "test": "pnpm build && vitest run --exclude test/reliability-stress.integration.test.ts --exclude test/security-fuzz.test.ts",
     "test:real-codex": "pnpm build && AGENTMUX_REAL_CODEX_E2E=1 vitest run --maxWorkers=1 test/real-codex.integration.test.ts",
     "test:security": "pnpm build && vitest run test/acp-adapter.test.ts test/agent-session-store-limits.test.ts test/client-event-publisher.test.ts test/control-host.test.ts test/hook-server.test.ts test/managed-hook-installer.test.ts",

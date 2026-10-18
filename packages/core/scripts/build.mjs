@@ -39,6 +39,10 @@ async function verify(path, descriptor, mode) {
 await rm(buildRoot, { recursive: true, force: true })
 await mkdir(buildRoot, { recursive: true })
 try {
+  await execFileAsync(process.execPath, [join(packageRoot, 'scripts/generate-guides.mjs')], {
+    cwd: packageRoot,
+    maxBuffer: 1024 * 1024
+  })
   const manifestPath = join(artifactRoot, 'manifest.json')
   if (await sha256(manifestPath) !== expectedManifestSha256) {
     throw new Error('CtxMux build input manifest digest does not match the pinned consumer contract.')
@@ -84,6 +88,10 @@ try {
   await execFileAsync('pnpm', ['exec', 'tsc', '-p', 'tsconfig.build.json'], {
     cwd: packageRoot,
     maxBuffer: 4 * 1024 * 1024
+  })
+  await execFileAsync(process.execPath, [join(packageRoot, 'scripts/check-guides.mjs'), '--dist'], {
+    cwd: packageRoot,
+    maxBuffer: 1024 * 1024
   })
   const bundledAdapter = join(buildRoot, 'ctxmux-run-adapter.js')
   await execFileAsync('pnpm', [
