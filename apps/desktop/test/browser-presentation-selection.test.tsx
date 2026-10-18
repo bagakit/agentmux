@@ -1,4 +1,3 @@
-import { appendFile } from 'node:fs/promises'
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -264,4 +263,95 @@ it('restores the currently selected visible lease when Main releases a foreign o
     ['lease-focus', { kind: 'select', focus: 'preserve' }], ['lease-focus', { kind: 'select', focus: 'preserve' }]
   ])
   expect(capture).toHaveBeenCalledTimes(1)
+})
+
+function previewStream(id: string) {
+  const track = new EventTarget() as EventTarget & { id: string; kind: string; readyState: string; stop: ReturnType<typeof vi.fn> }
+  Object.assign(track, { id, kind: 'video', readyState: 'live', stop: vi.fn(() => { track.readyState = 'ended' }) })
+  const stream = new MediaStream([track as unknown as MediaStreamTrack])
+  Object.defineProperty(stream, 'getTracks', { value: () => stream.getVideoTracks() })
+  return { stream, track }
+}
+const agentRefusal = { outcome: 'input-unconfirmed' as const, reason: 'agent-control-active' as const,
+  message: 'Native input stays with its current Agent. This text is not a control protocol.' }
+function AgentPreview({ visible = true, owner = 'agent' }: { visible?: boolean; owner?: 'agent' | 'human' }) {
+  const media = useBrowserPresentationCapture('browser')
+  return createElement('div', { 'data-capture-phase': media.capturePhase },
+    createElement(BrowserPresentationStage, { browserId: 'browser', navigationId: 'nav',
+      presentation: { ...make('focus'), visible }, inputSelected: true, blocked: false, media,
+      control: { owner, activeOperationId: null, revision: owner === 'agent' ? 3 : 4, inputIsolation: owner === 'agent' ? 'isolated' : 'inactive' } }))
+}
+const renderPreview = async (visible = true, owner: 'agent' | 'human' = 'agent') => {
+  await act(async () => { root.render(createElement(AgentPreview, { visible, owner })); await new Promise(resolve => setTimeout(resolve, 0)) })
+}
+
+it('keeps an idle Agent preview readable after its native selection is refused and reconciles explicit human takeover', async () => {
+  const held = previewStream('agent-preview-track')
+  bridge.activatePresentation.mockResolvedValue(agentRefusal); capture.mockResolvedValue(held.stream)
+  await renderPreview()
+  await vi.waitFor(() => expect(bridge.ackPresentationCapture).toHaveBeenCalledWith('capture', { outcome: 'ready', trackIds: [held.track.id] }))
+  expect(container.querySelector('video')?.srcObject).toBe(held.stream)
+  expect(container.textContent).not.toContain('Page preview needs attention')
+  expect(container.textContent).not.toContain(agentRefusal.message)
+  const originalStage = container.querySelector('[data-native-browser-stage]')
+  const refusedSelections = bridge.activatePresentation.mock.calls.length
+  expect(refusedSelections).toBeGreaterThan(0)
+  bridge.activatePresentation.mockResolvedValue({ outcome: 'selected' })
+  await renderPreview(true, 'human')
+  await vi.waitFor(() => expect(bridge.activatePresentation).toHaveBeenCalledTimes(refusedSelections + 1))
+  expect(bridge.activatePresentation.mock.calls.at(-1)).toEqual(['lease-focus', { kind: 'select', focus: 'preserve' }])
+  expect(container.querySelector('[data-native-browser-stage]')).toBe(originalStage)
+  expect(capture).toHaveBeenCalledTimes(1)
+  expect(held.track.stop).not.toHaveBeenCalled()
+})
+
+it('reacquires the same Agent Browser preview after hiding retires its capture without a false retry notice', async () => {
+  const first = previewStream('before-hide'), next = previewStream('after-show')
+  bridge.activatePresentation.mockResolvedValue(agentRefusal); capture.mockResolvedValueOnce(first.stream).mockResolvedValue(next.stream)
+  await renderPreview()
+  await vi.waitFor(() => expect(container.querySelector('video')?.srcObject).toBe(first.stream))
+  await renderPreview(false)
+  await act(async () => events({ type: 'capture-revoked', browserId: 'browser', captureId: 'capture', reason: 'no-visible-presentations' }))
+  expect(first.track.stop).toHaveBeenCalledOnce()
+  bridge.armPresentationCapture.mockResolvedValue({ captureId: 'returned-capture', browserId: 'browser' })
+  await renderPreview(true)
+  await vi.waitFor(() => expect(bridge.ackPresentationCapture).toHaveBeenCalledWith('returned-capture', { outcome: 'ready', trackIds: [next.track.id] }))
+  expect(container.querySelector('video')?.srcObject).toBe(next.stream)
+  expect(capture).toHaveBeenCalledTimes(2)
+  expect(bridge.registerPresentation).toHaveBeenCalledTimes(1)
+  expect(bridge.removePresentation).not.toHaveBeenCalled()
+  expect(bridge.activatePresentation.mock.calls.every(([id, intent]) => id === 'lease-focus' && intent.kind === 'select' && intent.focus === 'preserve')).toBe(true)
+  expect(container.textContent).not.toContain('Page preview needs attention')
+  expect(container.textContent).not.toContain(agentRefusal.message)
+})
+
+it('keeps one healthy capture while navigating between Agent-owned presentations', async () => {
+  const held = previewStream('two-presentations')
+  bridge.activatePresentation.mockResolvedValue(agentRefusal); capture.mockResolvedValue(held.stream)
+  await render(false, true)
+  await vi.waitFor(() => expect(bridge.ackPresentationCapture).toHaveBeenCalledWith('capture', { outcome: 'ready', trackIds: [held.track.id] }))
+  await render(true, true)
+  await vi.waitFor(() => expect(bridge.activatePresentation.mock.calls.some(([id]) => id === 'lease-focus')).toBe(true))
+  expect(bridge.activatePresentation.mock.calls.some(([id]) => id === 'lease-space')).toBe(true)
+  expect(capture).toHaveBeenCalledTimes(1)
+  expect([...container.querySelectorAll('video')].every(video => video.srcObject === held.stream)).toBe(true)
+  expect(container.textContent).not.toContain('Page preview needs attention')
+})
+
+it('preserves a genuine media failure after the normal Agent selection refusal', async () => {
+  bridge.activatePresentation.mockResolvedValue(agentRefusal)
+  await renderPreview()
+  await vi.waitFor(() => expect(container.textContent).toContain('Timeout starting video source'))
+  expect(capture).toHaveBeenCalledTimes(1)
+  expect(container.textContent).toContain('Page preview needs attention')
+  expect([...container.querySelectorAll('button')].some(button => button.textContent?.includes('Retry preview'))).toBe(true)
+  expect(container.textContent).not.toContain(agentRefusal.message)
+})
+
+it('retains a different selection refusal even when its display message matches normal Agent control', async () => {
+  bridge.activatePresentation.mockResolvedValue({ ...agentRefusal, reason: 'hidden' })
+  await renderPreview()
+  await vi.waitFor(() => expect(container.textContent).toContain(agentRefusal.message))
+  expect(container.textContent).toContain('Page preview needs attention')
+  expect(capture).not.toHaveBeenCalled()
 })

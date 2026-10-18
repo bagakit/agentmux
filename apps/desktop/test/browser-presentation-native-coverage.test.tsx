@@ -201,7 +201,9 @@ it('fits the agent boundary to actual mirrored frames and releases it on human h
   expect(stage('stage-b').querySelector<SVGElement>('[data-browser-control-boundary]')?.style.opacity).toBe('0')
   await mount({ control: { ...control, owner: 'human', activeOperationId: null, revision: 2, inputIsolation: 'inactive' }, preferences })
   expect(container.querySelector('[data-browser-control-boundary]')).toBeNull()
-  expect(controlCounts()).toEqual(counts)
+  // Explicit ownership changes reconcile the visible geometry without recapture.
+  expect(controlCounts()).toEqual({ ...counts, update: counts.update + 1, geometry: expect.any(Number) })
+  expect(controlCounts().geometry).toBeGreaterThan(counts.geometry)
   expect(stopTrack).not.toHaveBeenCalled()
 })
 

@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client'
+import { useState } from 'react'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
 import { BrowserPane } from '../../../src/renderer/src/components/BrowserPane'
@@ -26,6 +27,8 @@ const phaseMarkers: Record<Phase, [number, number, number]> = { waiting: [30, 70
   observe: [30, 155, 170], completed: [40, 145, 55], failed: [185, 50, 50], stopped: [135, 125, 25], human: [155, 100, 45] }
 let sourcePhase: Phase = 'waiting'
 let currentBrowser: BrowserSnapshot
+let denyAgentSelection = false, selectedInputLease: string | null = null
+let setPrimaryVisible: ((visible: boolean) => void) | undefined
 function paint(phase: Phase) {
   sourcePhase = phase
   context.fillStyle = '#f2f0e9'; context.fillRect(0, 0, 960, 540)
@@ -48,7 +51,15 @@ api.browser.updatePresentation = async (leaseId, geometry) => { calls.push({ met
 api.browser.removePresentation = async leaseId => { calls.push({ method: 'remove', leaseId }) }
 api.browser.armPresentationCapture = async leaseId => { calls.push({ method: 'arm', leaseId }); return { browserId, captureId } }
 api.browser.ackPresentationCapture = async (id, ack) => { calls.push({ method: 'ack', captureId: id, ack }) }
-api.browser.activatePresentation = async (leaseId, intent) => { calls.push({ method: 'select', leaseId, intent }); return { outcome: 'selected' } }
+api.browser.activatePresentation = async (leaseId, intent) => {
+  if (denyAgentSelection && currentBrowser?.control?.owner === 'agent') {
+    const receipt = { outcome: 'input-unconfirmed' as const, reason: 'agent-control-active' as const,
+      message: 'The Agent retains the original Browser input owner. The preview remains readable.' }
+    calls.push({ method: 'select', leaseId, intent, receipt }); return receipt
+  }
+  const receipt = { outcome: 'selected' as const }; selectedInputLease = leaseId
+  calls.push({ method: 'select', leaseId, intent, receipt }); return receipt
+}
 api.browser.onPresentationEvent = listener => { listeners.add(listener); return () => { listeners.delete(listener) } }
 api.browser.takeControl = async id => { calls.push({ method: 'takeControl', browserId: id }); return phase('human') }
 api.browser.returnControl = async id => { calls.push({ method: 'returnControl', browserId: id }); return phase('stopped') }
@@ -62,11 +73,14 @@ const presentations: WorkbenchBrowserPresentation[] = (['space', 'survey'] as co
 }))
 function Fixture() {
   const surface = useAppStore(state => state.tabs[tabId]?.regions[regionId])
+  const [primaryVisible, changePrimaryVisible] = useState(true)
+  setPrimaryVisible = changePrimaryVisible
+  const shownPresentations = presentations.map((presentation, index) => index === 0 ? { ...presentation, visible: primaryVisible } : presentation)
   return <DesktopClientUiProvider><main className="continuity-renderer">
     <header><strong>Browser control continuity</strong><span>Renderer proof · one simulated page source</span></header>
     <div className="continuity-renderer__layout">
-      <article><h2>Original position</h2><section className="continuity-renderer__pane" data-workbench-region-id={regionId}>
-        {surface?.kind === 'browser' ? <BrowserPane tab={surface} visible presentations={presentations} presentationTargetId="space-continuity-host"
+      <article><h2>Original position</h2><section className="continuity-renderer__pane" data-workbench-region-id={regionId} style={{ visibility: primaryVisible ? 'visible' : 'hidden' }}>
+        {surface?.kind === 'browser' ? <BrowserPane tab={surface} visible={primaryVisible} presentations={shownPresentations} presentationTargetId="space-continuity-host"
           renderPresentationFrame={content => <section className="continuity-renderer__pane" data-workbench-region-id={regionId}>{content}</section>} /> : null}
       </section></article>
       <article><h2>Same page · second position</h2><div className="continuity-renderer__slot" id="survey-continuity-slot" /></article>
@@ -81,14 +95,16 @@ function facts() {
   const sampleContext = sample.getContext('2d', { willReadFrequently: true })!
   return { errors: errors.slice(), acquisitions, sourceFrames, sourcePhase, sourceMarker: phaseMarkers[sourcePhase], viewport: { width: innerWidth, height: innerHeight },
     trackIds: stream.getTracks().map(track => track.id), trackStates: stream.getTracks().map(track => track.readyState),
-    calls: calls.slice(), currentBrowser, stages: [...document.querySelectorAll<HTMLElement>('[data-browser-presentation-id]')].map(stage => {
+    calls: calls.slice(), currentBrowser, selectedInputLease, stages: [...document.querySelectorAll<HTMLElement>('[data-browser-presentation-id]')].map(stage => {
       const video = stage.querySelector('video'), boundary = stage.querySelector<SVGSVGElement>('[data-browser-control-boundary]'), rect = boundary?.querySelector('rect')
       const matrix = rect?.getScreenCTM(), box = stage.getBoundingClientRect(), chrome = stage.closest('.browser-surface')?.querySelector('.browser-operation-status')
+      const notice = stage.parentElement?.querySelector('.browser-presentation-notice')
       let marker: number[] | null = null
       if (video && video.readyState >= 2 && video.videoWidth === 960 && video.videoHeight === 540 && video.srcObject) {
         sampleContext.drawImage(video, 938, 22, 1, 1, 0, 0, 1, 1); marker = [...sampleContext.getImageData(0, 0, 1, 1).data].slice(0, 3)
       }
       return { id: stage.dataset.browserPresentationId, bounds: { x: box.x, y: box.y, width: box.width, height: box.height },
+        notice: { text: notice?.textContent ?? '', retryButtons: notice?.querySelectorAll('button.small-button').length ?? 0 },
         video: video ? { width: video.videoWidth, height: video.videoHeight, readyState: video.readyState, paused: video.paused, marker, streamId: (video.srcObject as MediaStream | null)?.id ?? null } : null,
         boundary: boundary ? { viewBox: boundary.getAttribute('viewBox'), opacity: getComputedStyle(boundary).opacity,
           matrix: matrix ? { a: matrix.a, d: matrix.d, e: matrix.e, f: matrix.f } : null } : null,
@@ -113,7 +129,8 @@ function phase(phase: Phase): BrowserSnapshot {
     return browser
 }
 Object.assign(window, { continuityRenderer: {
-  async setup() {
+  async setup(options?: { denyAgentSelection?: boolean }) {
+    denyAgentSelection = options?.denyAgentSelection ?? false
     const config = await api.config.get(); appearance = config.appearance
     config.browser.agentControl = { ...config.browser.agentControl, glowEnabled: true, glowColor: '#22cc66', glowOpacity: 1 }
     base = await api.browser.create(browserId, 'https://example.invalid/field-notes', workspaceId)
@@ -133,6 +150,7 @@ Object.assign(window, { continuityRenderer: {
     }, 80)
   },
   phase,
+  visibility(visible: boolean) { setPrimaryVisible?.(visible) },
   coverage(presentationId: string | null) {
     const event: BrowserPresentationEvent = { type: 'native-coverage-changed', browserId,
       coverage: presentationId ? { leaseId: presentationId + '-lease', captureId } : null }
