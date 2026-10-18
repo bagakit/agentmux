@@ -14,6 +14,7 @@ export function monacoTheme(theme: ResolvedTheme): editor.IStandaloneThemeData {
       { token: '', foreground: c.text.slice(1) }, { token: 'comment', foreground: c.textSubtle.slice(1) },
       { token: 'keyword', foreground: c.special.slice(1) }, { token: 'string', foreground: c.success.slice(1) },
       { token: 'number', foreground: c.warning.slice(1) }, { token: 'regexp', foreground: c.warning.slice(1) },
+      { token: 'variable', foreground: c.info.slice(1) }, { token: 'variable.predefined', foreground: c.info.slice(1) },
       { token: 'tag', foreground: c.info.slice(1) }, { token: 'attribute.name', foreground: c.special.slice(1) },
       { token: 'attribute.value', foreground: c.success.slice(1) }, { token: 'metatag', foreground: c.textMuted.slice(1) }, { token: 'type', foreground: c.info.slice(1) },
       { token: 'delimiter', foreground: c.textMuted.slice(1) }, { token: 'invalid', foreground: c.danger.slice(1) }
