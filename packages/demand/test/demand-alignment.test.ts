@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
+import { isObjectId } from '@agentmux/identity'
 import { openDemandStore } from '../src/demand-store.js'
 import type { UpdateDemandInput } from '../src/demand-types.js'
 import { isDemandEvidenceReference, type DemandAlignmentProposal, type DemandGroundingProposal } from '../src/goals.js'
@@ -33,7 +34,7 @@ describe('durable Goal alignment and result acceptance', () => {
     const confirmed = await store.confirmAlignment('goal', 1)
     expect(confirmed.demand.alignment!.confirmedAt).toBeGreaterThan(0)
     const grounded = await store.proposeGrounding('goal', result)
-    expect(grounded.demand.grounding!.submissionId).toMatch(/^grounding_/u)
+    expect(isObjectId(grounded.demand.grounding!.submissionId)).toBe(true)
     const accepted = await store.acceptGrounding('goal', 1, grounded.demand.grounding!.submissionId)
     expect(accepted.demand.grounding!.acceptedAt).toBeGreaterThan(0)
     const output = await execute(process.execPath, [cli, '--root', root, 'show', '--id', 'goal'])
@@ -133,6 +134,59 @@ describe('durable Goal alignment and result acceptance', () => {
     await expect(run('confirm-alignment', '--id', 'goal')).rejects.toThrow()
     expect(await store.snapshot()).toEqual(before)
   }, 30_000)
+
+  it('finishes only by explicit acceptance, retaining original relationships and the same acceptance across owner restarts', async () => {
+    const { root, store } = await owner()
+    await store.proposeAlignment('goal', goal); await store.confirmAlignment('goal', 1)
+    const submitted = await store.proposeGrounding('goal', result), submission = submitted.demand.grounding!.submissionId
+    const accepted = await store.acceptGrounding('goal', 1, submission, false, false)
+    expect(accepted.demand.status).toBe('in_progress')
+    const finished = await openDemandStore({ root }).acceptGrounding('goal', 1, submission, false, true)
+    expect(finished.demand.status).toBe('done')
+    expect(finished.demand.grounding).toEqual(accepted.demand.grounding)
+    expect(finished.demand.sessionIds).toEqual(accepted.demand.sessionIds)
+    expect(finished.demand.assigneeSessionIds).toEqual(accepted.demand.assigneeSessionIds)
+    expect(finished.demand.activities.filter(activity => activity.kind === 'results-accepted')).toHaveLength(1)
+    expect(finished.demand.activities).toHaveLength(accepted.demand.activities.length + 1)
+    const repeated = await openDemandStore({ root }).acceptGrounding('goal', 1, submission, false, true)
+    expect(repeated.demand.activities).toEqual(finished.demand.activities)
+    expect(repeated.demand.grounding).toEqual(finished.demand.grounding)
+    const output = await execute(process.execPath, [cli, '--root', root, 'show', '--id', 'goal'])
+    expect(JSON.parse(output.stdout).demand).toEqual(repeated.demand)
+  }, 30_000)
+
+  it('accepts and finishes the exact gap report atomically without rewriting a gap as met', async () => {
+    const { store } = await owner()
+    await store.proposeAlignment('goal', goal); await store.confirmAlignment('goal', 1)
+    const gap = { ...result, checks: [{ ...result.checks[0]!, outcome: 'gap' as const, note: 'A known limitation remains.' }] }
+    const submitted = await store.proposeGrounding('goal', gap), before = await store.snapshot()
+    await expect(store.acceptGrounding('goal', 1, submitted.demand.grounding!.submissionId, false, true)).rejects.toThrow(/remaining gaps/u)
+    expect(await store.snapshot()).toEqual(before)
+    const accepted = await store.acceptGrounding('goal', 1, submitted.demand.grounding!.submissionId, true, true)
+    expect(accepted.demand).toMatchObject({ status: 'done', grounding: { checks: gap.checks, acceptedAt: expect.any(Number) } })
+    const repeated = await store.acceptGrounding('goal', 1, submitted.demand.grounding!.submissionId, true, true)
+    expect(repeated.demand.activities).toEqual(accepted.demand.activities)
+  })
+
+  it.each(['results', 'goal'] as const)('a stale finish cannot accept or close concurrently replaced %s', async changed => {
+    const { store } = await owner()
+    await store.proposeAlignment('goal', goal); await store.confirmAlignment('goal', 1)
+    const submitted = await store.proposeGrounding('goal', result)
+    if (changed === 'results') await store.proposeGrounding('goal', { ...result, summary: 'Revised report requiring a new review' })
+    else await store.proposeAlignment('goal', { ...goal, summary: 'A different outcome' })
+    const before = await store.snapshot()
+    await expect(store.acceptGrounding('goal', 1, submitted.demand.grounding!.submissionId, false, true)).rejects.toThrow(/changed/u)
+    expect(await store.snapshot()).toEqual(before)
+    expect((await store.get('goal'))!.status).toBe('in_progress')
+  })
+
+  it('rejects a non-boolean finish without acknowledging or changing status', async () => {
+    const { store } = await owner()
+    await store.proposeAlignment('goal', goal); await store.confirmAlignment('goal', 1)
+    const submitted = await store.proposeGrounding('goal', result), before = await store.snapshot()
+    await expect(store.acceptGrounding('goal', 1, submitted.demand.grounding!.submissionId, false, 'yes' as unknown as boolean)).rejects.toThrow()
+    expect(await store.snapshot()).toEqual(before)
+  })
 
   it.each(['README.md', 'package.json', 'verification.log:12', 'Dockerfile:12', 'src/main.ts:4:2', fixturePath('receipt.txt'), 'https://example.org/result', new URL('result', import.meta.url).href])('recognizes generic locatable references without claiming verification: %s', reference => {
     expect(isDemandEvidenceReference(reference)).toBe(true)
