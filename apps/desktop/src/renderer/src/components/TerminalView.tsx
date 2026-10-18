@@ -1934,62 +1934,58 @@ export function TerminalView({
         !terminal.element.closest('[inert]')) terminal.focus()
     })
     return () => {
-      focusWindow.cancelAnimationFrame(focusFrame)
-      incidents?.mark('observation-unavailable')
       disposed = true
-      initialRecovery.dispose()
+      let disposalFailure: { error: unknown } | undefined
+      const cleanup = (release: () => void): void => {
+        try { release() } catch (error) { disposalFailure ??= { error } }
+      }
+      cleanup(() => focusWindow.cancelAnimationFrame(focusFrame))
+      cleanup(() => incidents?.mark('observation-unavailable'))
+      cleanup(() => initialRecovery.dispose())
       if (initialObservationVisibilityRef.current === observeInitialVisibility) initialObservationVisibilityRef.current = null
-      incidentRender.dispose()
-      interaction.dispose()
+      cleanup(() => incidentRender.dispose())
+      cleanup(() => interaction.dispose())
       if (refreshObservationRef.current === refreshObservation) {
         refreshObservationRef.current = null
-        onObservationRefreshRef.current?.(null)
+        cleanup(() => onObservationRefreshRef.current?.(null))
       }
       if (observationReaderRef.current === readObservation) observationReaderRef.current = null
       if (switchReaderRef.current === readSwitch) switchReaderRef.current = null
       if (inputGeometryRef.current === inputGeometry) inputGeometryRef.current = null
-      clearTimeout(revealDeadline)
-      clearLinkPreview()
-      setLinkRequest((current) => {
+      cleanup(() => clearTimeout(revealDeadline))
+      cleanup(clearLinkPreview)
+      cleanup(() => setLinkRequest((current) => {
         const next = current?.terminalGeneration === terminalGeneration ? null : current
         linkRequestRef.current = next
         return next
-      })
+      }))
       if (terminalRef.current === terminal) { terminalRef.current = null; terminalDocumentRef.current = null }
       if (viewportRef.current === viewport) viewportRef.current = null
       if (searchAddonRef.current === search) searchAddonRef.current = null
-      viewport.dispose()
-      renderReady?.dispose()
+      cleanup(() => viewport.dispose())
+      cleanup(() => renderReady?.dispose())
       if (webglVisibilityRef.current === synchronizeWebglVisibility) webglVisibilityRef.current = null
-      // A native disposal failure must remain observable after this retired view's
-      // independent attachment and diagnostic owners have been released.
-      let disposalFailure: { error: unknown } | undefined
-      try { releaseWebgl() } catch (error) { disposalFailure = { error } }
-      try {
-        oscHandlers.dispose()
-        searchCounter.dispose()
-        selection.dispose()
-        linkPreviewScroll.dispose()
-        pathLinks.dispose()
-        pasteSanitizer()
-        disposeEvents()
-        input.dispose()
-        resize.disconnect()
-        if (attachmentId !== null) {
-          void api.sessions.detach(attachmentId).catch((error) => {
-            console.warn('[terminal] Attachment release was not acknowledged', error)
-          })
-        }
-        if (pasteTargetRef.current === pasteInput) pasteTargetRef.current = null
-        releaseViewportMemoryMarker(terminal)
-        observeDisposal('xterm-dispose', () => terminal.dispose())
-      } catch (error) { disposalFailure ??= { error } }
-      try {
-        releasePerformance()
-      } catch (error) { disposalFailure ??= { error } }
-      try {
-        resourceOwners.release()
-      } catch (error) { disposalFailure ??= { error } }
+      // Each retired owner releases independently; preserve the first original failure.
+      cleanup(releaseWebgl)
+      cleanup(() => oscHandlers.dispose())
+      cleanup(() => searchCounter.dispose())
+      cleanup(() => selection.dispose())
+      cleanup(() => linkPreviewScroll.dispose())
+      cleanup(() => pathLinks.dispose())
+      cleanup(pasteSanitizer)
+      cleanup(disposeEvents)
+      cleanup(() => input.dispose())
+      cleanup(() => resize.disconnect())
+      cleanup(() => {
+        if (attachmentId !== null) void api.sessions.detach(attachmentId).catch((error) => {
+          console.warn('[terminal] Attachment release was not acknowledged', error)
+        })
+      })
+      if (pasteTargetRef.current === pasteInput) pasteTargetRef.current = null
+      cleanup(() => releaseViewportMemoryMarker(terminal))
+      cleanup(() => observeDisposal('xterm-dispose', () => terminal.dispose()))
+      cleanup(releasePerformance)
+      cleanup(() => resourceOwners.release())
       if (disposalFailure) throw disposalFailure.error
     }
   }, [session.control.run.runId, session.id])
