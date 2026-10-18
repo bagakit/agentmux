@@ -19,7 +19,7 @@ import '../styles/collaboration.css'
 
 export type CollaborationSelection = { kind: 'agent' | 'relation'; id: string; relatedIds?: readonly string[] } | null
 type AgentData = { box: CollaborationBox; agent: CollaborationAgent; selected: boolean; identity?: FocusContextIdentity | undefined; goals?: FocusGoalLinks | undefined; onPreview(enter: boolean): void; onSelect(): void; onOpen(id: string): void }
-type AreaData = { box: Extract<CollaborationBox, { kind: 'area' }>; envelope: string; area: CollaborationArea; folded: boolean; internal: readonly CollaborationRelation[]; onInspect(): void; onLocate(): void; onToggle(): void }
+type AreaData = { box: Extract<CollaborationBox, { kind: 'area' }>; envelope: string; memberGeometry: readonly CollaborationBox[]; area: CollaborationArea; folded: boolean; internal: readonly CollaborationRelation[]; onInspect(): void; onLocate(): void; onToggle(): void }
 type AgentNode = Node<AgentData, 'agent'>
 type AreaNode = Node<AreaData, 'area'>
 type GraphNode = AgentNode | AreaNode
@@ -118,11 +118,13 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
       const areaId = collaborationAreaNode(area.id), box = geometry.get(areaId), previous = nodeCache.current.get(areaId)
       if (box?.kind !== 'area') continue
       const internal = presentation.internal.get(area.id) ?? [], old = previous?.type === 'area' ? previous.data : undefined
-      const envelope = old?.box === box ? old.envelope : collaborationEnvelope(box, area.members.flatMap(id => { const member = geometry.get(collaborationAgentNode(area.id, id)); return member ? [member] : [] }))
-      const areaNode: AreaNode = old?.box === box && old.area === area && sameItems(old.internal, internal) ? previous as AreaNode : {
+      const memberGeometry = area.members.flatMap(id => { const member = geometry.get(collaborationAgentNode(area.id, id)); return member ? [member] : [] })
+      const sameGeometry = old && sameItems(old.memberGeometry, memberGeometry)
+      const envelope = old?.box === box && sameGeometry ? old.envelope : collaborationEnvelope(box, memberGeometry)
+      const areaNode: AreaNode = old?.box === box && sameGeometry && old.area === area && sameItems(old.internal, internal) ? previous as AreaNode : {
         id: areaId, type: 'area', position: { x: box.x, y: box.y }, width: box.width, height: box.height, measured: { width: box.width, height: box.height }, handles: emptyHandles,
         style: { width: box.width, height: box.height }, selectable: false, draggable: false,
-        data: { box, envelope, area, folded: box.folded, internal,
+        data: { box, envelope, memberGeometry, area, folded: box.folded, internal,
           onLocate: old?.onLocate ?? (() => {
             setFolded(previous => { if (!previous.has(area.id)) return previous; const next = new Set(previous); next.delete(area.id); return next })
             setAreaLocate({ source: actions.current.locate, request: { token: {}, areaIds: [area.id] } })
@@ -139,7 +141,7 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
         const old = previous?.type === 'agent' ? previous.data : undefined, context = agent.context
         const presentationKey = context && JSON.stringify([context.hostId, context.id]), identity = presentationKey ? identities?.get(presentationKey) : undefined, links = presentationKey ? goals?.get(presentationKey) : undefined
         const selected = selection?.kind === 'agent' && selection.id === id
-        const node: AgentNode = old?.box === card && old.agent === agent && old.selected === selected && old.identity === identity && old.goals === links ? previous as AgentNode : {
+        const node: AgentNode = old?.box === card && previous?.position.x === card.x - box.x && previous.position.y === card.y - box.y && old.agent === agent && old.selected === selected && old.identity === identity && old.goals === links ? previous as AgentNode : {
           id: nodeId, type: 'agent', parentId: areaId, position: { x: card.x - box.x, y: card.y - box.y }, width: card.width, height: card.height,
           measured: { width: card.width, height: card.height }, handles: emptyHandles, style: { width: card.width, height: card.height, pointerEvents: 'all' }, draggable: false, selectable: false,
           data: { box: card, agent, selected, identity, goals: links,
