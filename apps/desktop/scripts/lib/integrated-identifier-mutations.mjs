@@ -2,6 +2,7 @@ const notificationTest = 'apps/desktop/test/integrated-notification-identifiers.
 const heapTest = 'apps/desktop/test/performance-heap-snapshot.test.tsx'
 const profileTest = 'apps/desktop/test/mote-private-chat-profile.test.tsx'
 export const integratedIdentityMutations = {
+  'toolkit-invocation': { file: 'apps/desktop/src/renderer/src/components/toolkit/TuiToolkitResult.tsx', before: 'invocationId: mintObjectId()', test: 'apps/desktop/test/toolkit-tui-ui.test.tsx' },
   'notification-request': { file: 'apps/desktop/src/main/notification-observation.ts', before: 'requestId: mintObjectId()', test: notificationTest },
   'notification-document': { file: 'apps/desktop/src/renderer/src/lib/notification-observation.ts', before: 'const instanceId = mintObjectId()', test: notificationTest },
   'heap-export': { file: 'apps/desktop/src/main/renderer-heap-snapshot.ts', before: '${mintObjectId()}', test: heapTest },

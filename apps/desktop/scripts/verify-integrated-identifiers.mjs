@@ -51,7 +51,7 @@ async function consumer(name, mutation) {
 }
 try {
   const paths = [...new Set(Object.values(integratedIdentityMutations).map(value => value.file))]
-  assert.equal(paths.length, 9, 'The integration slice must cover eight new owners and their capture parser')
+  assert.equal(paths.length, 10, 'The integration slice must cover nine new owners and their capture parser')
   for (const path of paths) {
     const source = await readFile(join(root, path), 'utf8')
     assert.doesNotMatch(source, /\brandomUUID\s*\(/u, 'An ordinary allocator bypass remains: ' + path)
