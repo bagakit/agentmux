@@ -9,7 +9,7 @@ export function discordQuestionComponents(questions: readonly AgentSessionHistor
   const fields: unknown[] = []
   for (const [index, question] of questions.entries()) {
     if (question.options.length > 25 || !question.acceptsText && !question.options.length) return null
-    if (question.options.length) fields.push({ type: 18, label: `Question ${index + 1} · options`, component: { type: 3, custom_id: 'o' + index,
+    if (question.options.length) fields.push({ type: 18, label: `Question ${index + 1} · options`, ...(question.acceptsText ? { description: 'Select one option, or leave it blank and enter a custom answer.' } : {}), component: { type: 3, custom_id: 'o' + index,
       required: !question.acceptsText, min_values: question.acceptsText ? 0 : 1, max_values: 1,
       options: question.options.map((option, ordinal) => ({ label: option.label.length <= 100 ? option.label : `Option ${ordinal + 1} (see original question)`, value: String(ordinal) })) } })
     if (question.acceptsText) fields.push({ type: 18, label: `Question ${index + 1} · text`, component: { type: 4, custom_id: 't' + index, style: 2, required: !question.options.length, max_length: 4000 } })
@@ -81,7 +81,8 @@ export async function handleDiscordInteraction(input: {
     const form = input.questionForm?.({ connectionId: input.config.connectionId, application: input.config.application, actor, externalConversationId: interaction.channel_id, sourceMessageId, actionRef })
     if (!form) return await rejected()
     let submitted: NonNullable<VerifiedIngressAction['answers']>
-    try { submitted = answers(form.questions, interaction.data.components) } catch { return await rejected() }
+    try { submitted = answers(form.questions, interaction.data.components) }
+    catch { return await callback({ type: 4, data: { flags: 64, content: 'No answer was submitted. For each question, select one option or enter text, leaving the other blank. Reopen the original question to check its current status and try again.' } }) }
     event = { kind: 'action', eventId: 'interaction:' + discordId(interaction.id), actor, externalConversationId: interaction.channel_id, sourceMessageId, actionRef, answers: submitted }
   } else return
   await input.receive(event, () => callback({ type: 6 }))
