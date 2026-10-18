@@ -17,13 +17,13 @@ async function fixture(override?: (call: FeishuHttpCall) => FeishuHttpResponse |
   return { remote, adapter, publisher }
 }
 
-it('actual SDK and Axios send the exact frozen post bytes with a stable original operation key', async () => {
+it('actual SDK and Axios send the exact frozen native card bytes with a stable original operation key', async () => {
   const f = await fixture(), original = operation(), prepared = f.publisher.prepare(original)
   expect(f.publisher.addressing).toBe('group'); expect(prepared.request.path).toBe('/open-apis/im/v1/messages')
   expect(f.publisher.prepare(original)).toEqual(prepared)
-  const body = JSON.parse(prepared.request.body!), node = JSON.parse(body.content).zh_cn.content[0][0]
+  const body = JSON.parse(prepared.request.body!), node = JSON.parse(body.content).elements[0]
   expect(body.receive_id).toBe(original.target.externalConversationId); expect(body.uuid).toMatch(/^[A-Za-z0-9_-]{43}$/u)
-  expect(node).toEqual({ tag: 'text', text: original.payload.text, un_escape: false })
+  expect(node).toEqual({ tag: 'div', text: { tag: 'plain_text', content: original.payload.text } })
   const sent = await f.publisher.dispatch(prepared, original.target, 'fixture-credential', new AbortController().signal)
   expect(sent).toEqual({ state: 'confirmed', mapping: { messageId: 'platform-message-1', threadId: 'original-platform-thread' } })
   expect(f.remote.messageCalls()[0]).toMatchObject({ method: 'POST', query: { receive_id_type: 'chat_id' }, body: prepared.request.body })
@@ -33,12 +33,22 @@ it('actual SDK and Axios send the exact frozen post bytes with a stable original
   expect(f.remote.calls.filter(call => call.path.includes('/auth/v3/'))).toHaveLength(1)
 })
 
+it.each([
+  [undefined, 'Conversation message'], ['progress', 'Agent progress'], ['final', 'Agent reply']
+] as const)('represents original public %s speech as a native card without changing its complete text', async (phase, title) => {
+  const f = await fixture(), text = 'Original public message\nEvery line remains.\n<at user_id="all">literal text</at>'
+  const prepared = f.publisher.prepare(operation({ payload: { kind: 'speech', text, ...(phase ? { phase } : {}) } }))
+  const body = JSON.parse(prepared.request.body!), card = JSON.parse(body.content)
+  expect(body.msg_type).toBe('interactive'); expect(card.header.title).toEqual({ tag: 'plain_text', content: title })
+  expect(card.elements).toEqual([{ tag: 'div', text: { tag: 'plain_text', content: text } }])
+})
+
 it('updates, inspects and withdraws the exact original mapping when successful ACK omits its thread', async () => {
   const f = await fixture(), original = operation(), signal = new AbortController().signal
   const created = await f.publisher.dispatch(f.publisher.prepare(original), original.target, 'fixture-credential', signal)
   expect(created.state).toBe('confirmed'); if (created.state !== 'confirmed') throw new Error('Controlled original create unconfirmed')
   const update = operation({ operationId: 'original-update', mapping: created.mapping, payload: { kind: 'speech', text: 'Updated exact original text\n完整原文' } }), prepared = f.publisher.prepare(update)
-  expect(prepared.request.method).toBe('PUT'); expect(prepared.request.path).toBe('/open-apis/im/v1/messages/' + created.mapping.messageId)
+  expect(prepared.request.method).toBe('PATCH'); expect(prepared.request.path).toBe('/open-apis/im/v1/messages/' + created.mapping.messageId)
   expect(JSON.parse(prepared.request.body!)).not.toHaveProperty('uuid'); expect(JSON.parse(prepared.request.body!)).not.toHaveProperty('receive_id')
   expect(await f.publisher.dispatch(prepared, original.target, 'fixture-credential', signal, created.mapping)).toEqual(created)
   expect(f.remote.messageCalls()[1]!.body).toBe(prepared.request.body)
@@ -66,13 +76,13 @@ it.each([
 
 it.each(['message', 'thread', 'author'] as const)('does not replace the original mapping after an explicit contradictory %s response', async kind => {
   const original = operation({ mapping: { messageId: 'original-platform-message', threadId: 'original-platform-thread' } })
-  const f = await fixture(call => call.method === 'PUT' ? { status: 200, body: { code: 0, data: {
+  const f = await fixture(call => call.method === 'PATCH' ? { status: 200, body: { code: 0, data: {
     message_id: kind === 'message' ? 'another-message' : original.mapping!.messageId, chat_id: original.target.externalConversationId,
     thread_id: kind === 'thread' ? 'another-thread' : original.mapping!.threadId,
     ...(kind === 'author' ? { sender: { sender_type: 'app', id_type: 'app_id', id: 'another-application' } } : {})
   } } } : undefined)
   expect(await f.publisher.dispatch(f.publisher.prepare(original), original.target, 'fixture-credential', new AbortController().signal, original.mapping)).toEqual({ state: 'unknown', reason: 'effect-unconfirmed' })
-  expect(f.remote.messageCalls().map(call => call.method)).toEqual(['PUT'])
+  expect(f.remote.messageCalls().map(call => call.method)).toEqual(['PATCH'])
 })
 
 it('keeps missing create IDs unknown without UUID lookup or a second create, including after the documented dedup window', async () => {
@@ -89,10 +99,10 @@ it('bounds the actual double-encoded request without silently clipping complete 
   expect(Buffer.byteLength(prepared.request.body!)).toBeLessThanOrEqual(30 * 1024)
   expect((await f.publisher.dispatch(prepared, original.target, 'fixture-credential', new AbortController().signal)).state).toBe('confirmed')
   expect(f.remote.messageCalls()[0]!.body).toBe(prepared.request.body)
-  expect(JSON.parse(JSON.parse(f.remote.messageCalls()[0]!.body).content).zh_cn.content[0][0].text).toBe(text)
+  expect(JSON.parse(JSON.parse(f.remote.messageCalls()[0]!.body).content).elements[0].text.content).toBe(text)
   expect(() => f.publisher.prepare(operation({ payload: { kind: 'speech', text: '\u0000'.repeat(8_192) } }))).toThrowError(expect.objectContaining({ code: 'FEISHU_PUBLICATION_REQUEST_TOO_LARGE' }))
   const question = f.publisher.prepare(operation({ payload: { kind: 'speech', text: '', questions: [{ id: 'opaque-original-question', prompt: 'Choose an original option', options: [{ id: 'opaque-option', label: 'Original option' }], acceptsText: true }] } }))
-  const rendered = JSON.parse(JSON.parse(question.request.body!).content).zh_cn.content[0][0].text
+  const rendered = JSON.parse(JSON.parse(question.request.body!).content).elements[0].text.content
   expect(rendered).toContain('Choose an original option'); expect(rendered).toContain('Original option')
   expect(rendered).not.toMatch(/opaque-original-question|opaque-option|button|actionRef/)
 })
@@ -105,15 +115,31 @@ it('the exact canonical Lark application chooses its own authenticated SDK origi
   expect(new Set(f.remote.origins)).toEqual(new Set(['https://open.larksuite.com']))
 })
 
+it('inspects the exact original saved native card across a renderer upgrade without preparing another effect', async () => {
+  const original = operation({ mapping: { messageId: 'original-permission-card' }, payload: { kind: 'permission', disclosure: 'shared', title: 'Original permission', status: 'pending', options: [{ label: 'Original option', actionRef: 'original-action' }] } })
+  let savedCard: string
+  const f = await fixture(call => call.method === 'GET' ? { status: 200, body: { code: 0, data: { items: [{
+    message_id: original.mapping!.messageId, chat_id: original.target.externalConversationId, msg_type: 'interactive',
+    sender: { sender_type: 'app', id_type: 'app_id', id: original.target.application.appId }, body: { content: savedCard }
+  }] } } } : undefined)
+  const prepared = { ...f.publisher.prepare(original), renderVersion: 'feishu-group-v2' }
+  savedCard = JSON.parse(prepared.request.body!).content
+  const frozen = JSON.stringify(prepared)
+  expect(await f.publisher.inspect(prepared, original.target, 'fixture-credential', new AbortController().signal, original.mapping)).toEqual({ state: 'confirmed', mapping: original.mapping })
+  expect(JSON.stringify(prepared)).toBe(frozen)
+  expect(f.remote.messageCalls().map(call => call.method)).toEqual(['GET'])
+})
+
 it.each([
   ['array', []], ['string', 'false'], ['null', null], ['object', {}], ['literal-false', false], ['literal-true', true], ['absent', undefined]
 ] as const)('only literal deletion facts can settle the original SDK message: %s', async (_name, deleted) => {
   const original = operation({ mapping: { messageId: 'original-platform-message', threadId: 'original-platform-thread' } })
+  const expectedCard = { config: { update_multi: true }, header: { title: { tag: 'plain_text', content: 'Conversation message' }, template: 'blue' }, elements: [{ tag: 'div', text: { tag: 'plain_text', content: original.payload.text } }] }
   const message = { message_id: original.mapping!.messageId, chat_id: original.target.externalConversationId, thread_id: original.mapping!.threadId,
-    msg_type: 'post', sender: { sender_type: 'app', id_type: 'app_id', id: original.target.application.appId },
-    body: { content: JSON.stringify({ title: '', content: [[{ tag: 'text', text: original.payload.text }]] }) },
+    msg_type: 'interactive', sender: { sender_type: 'app', id_type: 'app_id', id: original.target.application.appId },
+    body: { content: JSON.stringify(expectedCard) },
     ...(deleted === undefined ? {} : { deleted }) }
-  const f = await fixture(call => call.method === 'PUT' || call.method === 'GET' ? { status: 200, body: { code: 0, data: call.method === 'GET' ? { items: [message] } : message } } : undefined)
+  const f = await fixture(call => call.method === 'PATCH' || call.method === 'GET' ? { status: 200, body: { code: 0, data: call.method === 'GET' ? { items: [message] } : message } } : undefined)
   const signal = new AbortController().signal, prepared = f.publisher.prepare(original), confirming = deleted === false || deleted === undefined
   expect(await f.publisher.dispatch(prepared, original.target, 'fixture-credential', signal, original.mapping)).toEqual(confirming
     ? { state: 'confirmed', mapping: original.mapping } : { state: 'unknown', reason: 'effect-unconfirmed' })
@@ -122,5 +148,5 @@ it.each([
   const withdrawal = f.publisher.prepare({ ...original, effect: 'withdraw' })
   expect(await f.publisher.inspect(withdrawal, original.target, 'fixture-credential', signal, original.mapping)).toEqual(deleted === true
     ? { state: 'confirmed', mapping: original.mapping } : null)
-  expect(f.remote.messageCalls().map(call => call.method)).toEqual(['PUT', 'GET', 'GET'])
+  expect(f.remote.messageCalls().map(call => call.method)).toEqual(['PATCH', 'GET', 'GET'])
 })

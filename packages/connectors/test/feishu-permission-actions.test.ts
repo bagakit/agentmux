@@ -323,14 +323,15 @@ it('an adapter without an explicit permission declaration retains original local
   f.services.publication!.refresh()
   await vi.waitFor(async () => { const lane = Reflect.get(f.services.publication!, 'lanes').get(f.binding.bindingId); expect(lane, 'The exact original Binding lane is present').toBeDefined(); await lane!.work; expect(lane!.work, 'The original publication cycle has settled before checking absence').toBeUndefined() })
   expect(f.effects).toEqual([])
-  expect((await f.cli(['connection', 'delivery', 'ls', '--connection', 'feishu-connection', '--binding', f.binding.bindingId, '--binding-revision', '1'])).deliveries).toEqual([])
+  expect((await f.cli(['connection', 'delivery', 'ls', '--connection', 'feishu-connection', '--binding', f.binding.bindingId, '--binding-revision', '1'])).deliveries.filter(value => value.reference.source.kind !== 'binding-operation')).toEqual([])
   const result = await f.hosted.respondAgentInteraction({ agentSessionId: 'original-agent', expectedRun: { runId: 'run-original-agent' }, operationId: 'local-on-unsupported-adapter', expectedRequest: original.request,
     response: { kind: 'permission', requestId: original.request.id, decision: { outcome: 'selected', optionId: 'reject-once' } } })
   expect(result.delivery).toBe('hook-written'); await original.callback
   await appendFile(join(f.original.root, 'native.jsonl'), JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Original ordinary reply' }] } }) + '\n')
-  await vi.waitFor(() => expect(f.effects.some(value => value.body.msg_type === 'post')).toBe(true), { timeout: 6_000 })
+  await vi.waitFor(() => expect(f.effects.some(value => value.body.msg_type === 'interactive' && JSON.parse(value.body.content).elements?.[0]?.text?.content === 'Original ordinary reply')).toBe(true), { timeout: 6_000 })
   const deliveries = await f.cli(['connection', 'delivery', 'ls', '--connection', 'feishu-connection', '--binding', f.binding.bindingId, '--binding-revision', '1'])
-  expect(deliveries.deliveries).toHaveLength(1); expect(deliveries.deliveries[0].state).toBe('confirmed')
+  const conversation = deliveries.deliveries.filter(value => value.reference.source.kind !== 'binding-operation')
+  expect(conversation).toHaveLength(1); expect(conversation[0].state).toBe('confirmed')
   expect(f.original.inner.kernel.stop).not.toHaveBeenCalled()
 }, 20_000)
 
