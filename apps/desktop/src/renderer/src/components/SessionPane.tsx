@@ -336,14 +336,7 @@ export function SessionPane({
     messages: userMessages,
     nativeHistoryPage,
     nativeContextItems,
-    loading: userMessagesLoading,
-    error: userMessagesError,
-    observationError: userMessagesObservationError,
-    windowFrozen: userMessagesWindowFrozen,
-    windowIncomplete: userMessagesWindowIncomplete,
     sourceChanged: userMessagesSourceChanged,
-    hasMore: hasEarlierUserRecords,
-    refresh: refreshUserMessages,
     readForReveal
   } = useSessionUserMessages(
     session?.kind === 'agent' ? session.control : undefined,
@@ -1042,15 +1035,11 @@ export function SessionPane({
     ...(!inlineHistory && historyOpen ? { onClose: closeHistory, returnLabel: pendingAgentRestore ? 'Session' : viewMode === 'terminal' ? 'Terminal' : 'Activity' } : {})
   } : undefined
   const activityProps: ComponentProps<typeof ActivityView> = {
-    sessionId: session.id, userMessages, nativeHistoryPage, nativeContextItems,
+    sessionId: session.id, nativeHistoryPage, nativeContextItems,
     ...(session.kind === 'agent' ? { executionHostId: session.control.hostId, ...(conversationReading ? { conversationReading } : {}) } : {}),
     ...(restorePresentation ? { readingNotice: <div className="activity-feed__read-notice" role="status"><strong>{restorePresentation.title}</strong><span>{restorePresentation.detail}</span></div> } : {}),
     ...(!restorePresentation && detachedFrontendNotice ? { readingNotice: <div className="activity-feed__read-notice" role="status"><strong>{detachedFrontendNotice.title}</strong><span>{detachedFrontendNotice.detail}</span></div> } : {}),
     ...(pendingAgentRestore || detachedFrontendNotice ? { readingAction: agentRecoveryAction } : {}),
-    userMessageRead: { loading: userMessagesLoading, error: userMessagesError,
-      observationError: userMessagesObservationError, windowFrozen: userMessagesWindowFrozen,
-      windowIncomplete: userMessagesWindowIncomplete,
-      hasMore: hasEarlierUserRecords, onRetry: () => { void refreshUserMessages() }, onReadEarlier: openHistory },
     capability: session.kind === 'agent' ? session.capabilities.timeline : 'unavailable',
     displayState: session.status.state, activitySemantic: session.kind === 'agent' ? observeAgentSession(session, Date.now()).semantic : 'unsupported',
     workspaceRoot: fileContext.workspaceRoot, homeDir: fileContext.homeDir,
