@@ -1,4 +1,3 @@
-import { mintObjectId } from '@agentmux/core/object-id'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { X509Certificate, randomBytes, generateKeyPairSync } from 'node:crypto'
@@ -48,6 +47,7 @@ export async function setupLocalSigningIdentity({ home = homedir(), run = runNat
   }
   await mkdir(join(home, '.agentmux'), { recursive: true, mode: 0o700 })
   if (!existing && !await exists(directory)) {
+    const { mintObjectId } = await import('@agentmux/core/object-id')
     await mkdir(directory, { mode: 0o700 })
     await mkdir(pending, { mode: 0o700 })
     const pair = generateKeyPairSync('rsa', { modulusLength: 3072, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } })
