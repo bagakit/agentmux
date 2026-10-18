@@ -46,6 +46,8 @@ export type DurableIngressOptions = {
   authenticators: readonly IngressAuthenticator[]
   /** Resolve only an authenticated, retained, unclaimed input before borrowing Core. */
   prepareInput?(record: ConnectionIngressMessage): Promise<{ state: 'ready' } | { state: 'refused'; code: string }>
+  /** Borrow original confirmed publication identities; never a second history or authority owner. */
+  contextPublications?: Pick<import('./publication-store.js').PublicationStore, 'knownContextMessages'>
   /** Return the original executing Host's client; Region occupants and focus are not routes. */
   core(hostId: string): DurableIngressCore | undefined
 }
@@ -399,7 +401,16 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     if (!exact || exact.agentSessionId !== original.binding.agentSessionId || exact.hostId !== original.binding.executionHostId) fail('INGRESS_TARGET_UNCONFIRMED')
     const expectedRun = { ...exact.run }
     const contextSource = this.nativeContextSource(original.binding, exact)
-    const channelQuote = record.conversationKind === 'group' ? await this.prepareQuote(record, original.binding, client, contextSource, receiverSignal) : undefined
+    let channelQuote = record.conversationKind === 'group' ? await this.prepareQuote(record, original.binding, client, contextSource, receiverSignal) : undefined
+    let contextObservation: 'known-publications-unavailable' | undefined
+    if (channelQuote && contextSource && this.options.contextPublications) {
+      try {
+        const known = this.options.contextPublications.knownContextMessages({ application: record.application,
+          externalConversationId: record.externalConversationId, hostId: original.binding.executionHostId,
+          agentSessionId: original.binding.agentSessionId, source: contextSource }, channelQuote.records.map(item => item.messageId))
+        channelQuote = { ...channelQuote, records: channelQuote.records.filter(item => !known.has(item.messageId)) }
+      } catch { contextObservation = 'known-publications-unavailable' }
+    }
     if (this.historyAbort.signal.aborted || receiverSignal?.aborted) return await this.inspect({ ingressId })
     const currentTarget = channelQuote ? await client.readAgentSession(original.binding.agentSessionId) : exact
     if (!currentTarget || !isDeepStrictEqual(currentTarget.run, expectedRun) || !isDeepStrictEqual(this.nativeContextSource(original.binding, currentTarget), contextSource)) fail('INGRESS_TARGET_UNCONFIRMED')
@@ -408,7 +419,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       if (current.kind === 'action') fail('INGRESS_EVENT_CONFLICT')
       if (current.state !== 'received') return { record: current, own: false as const }
       const channelProfile = this.options.connections.readChannelActor(current.connectionId, current.actor)
-      const frozen = { hostId: original.binding.executionHostId, agentSessionId: original.binding.agentSessionId, expectedRun: expectedRun!, operationId: mintObjectId(), messageId: mintObjectId(), author: original.author, channelProfile, ...(channelQuote ? { channelQuote, ...(contextSource ? { contextSource } : {}) } : {}), admissionIntent: { ...(original.binding.inputTarget ?? { kind: 'manual-actor' as const }), expectedRun } }
+      const frozen = { hostId: original.binding.executionHostId, agentSessionId: original.binding.agentSessionId, expectedRun: expectedRun!, operationId: mintObjectId(), messageId: mintObjectId(), author: original.author, channelProfile, ...(channelQuote ? { channelQuote, ...(contextSource ? { contextSource } : {}), ...(contextObservation ? { contextObservation } : {}) } : {}), admissionIntent: { ...(original.binding.inputTarget ?? { kind: 'manual-actor' as const }), expectedRun } }
       this.authorize(current, frozen)
       const next = this.write({ ...current, state: 'claimed', input: frozen })
       this.contextPositions?.claimed(next)
@@ -460,7 +471,8 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
   private inspectContext(ingress: ConnectionIngressMessage, receipt: import('@agentmux/core').AgentInputSubmissionReceipt | null): import('@agentmux/core/connections').ConnectionIngressContextObservation | undefined {
     const input = ingress.input, quote = input?.channelQuote
     if (!input || !quote) return undefined
-    const summary = { coverage: quote.coverage, quotedMessages: quote.records.length, gapCount: quote.gaps.length }
+    const summary = { coverage: quote.coverage, quotedMessages: quote.records.length, gapCount: quote.gaps.length,
+      ...(input.contextObservation ? { code: input.contextObservation } : {}) }
     if (!this.contextPositions || !input.contextSource) return { ...summary, positionMessageId: null, observation: 'unavailable' }
     try {
       if (receipt) this.contextPositions.observe(ingress, receipt)

@@ -63,6 +63,7 @@ export async function createDesktopConnections(options: { directory: string; enc
         const rooms = options.bindings ? new RoomProvisioningHost({ connections, spatial: options.bindings.spatial }) : undefined
         if (rooms) connections.rooms = { ...connections.rooms, create: (input, context) => rooms.create(input, context), inspect: input => rooms.inspect(input) }
         const ingress = routing && options.ingress ? new DurableIngressHost({ connections, bindings: routing, authenticators: connections.ingressAuthenticators(), core: options.ingress.core,
+          ...(publicationStore ? { contextPublications: publicationStore } : {}),
           ...(moteChat ? { prepareInput: async (record: import('@agentmux/core/connections').ConnectionIngressMessage) => {
             if (record.conversationKind === 'direct') {
               try { const binding = await moteChat.prepareIncoming({ ...record, conversationKind: 'direct' }); if (binding) publication?.refresh() }

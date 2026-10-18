@@ -81,18 +81,20 @@ export function parseConnectionIngressRecord(value: unknown): ConnectionIngressR
   if (p.state === 'refused') { if (p.input !== undefined) fail(); return { ...projected, state: 'refused', code: text(p.code) } }
   if (p.code !== undefined) fail()
   if (p.state === 'received') { if (p.input !== undefined) fail(); return { ...projected, state: 'received' } }
-  const input = object(p.input, ['hostId', 'agentSessionId', 'expectedRun', 'operationId', 'messageId', 'author', 'admissionIntent', 'channelProfile', 'channelQuote', 'contextSource']), run = object(input.expectedRun, ['runId'])
+  const input = object(p.input, ['hostId', 'agentSessionId', 'expectedRun', 'operationId', 'messageId', 'author', 'admissionIntent', 'channelProfile', 'channelQuote', 'contextSource', 'contextObservation']), run = object(input.expectedRun, ['runId'])
   const channelProfile = input.channelProfile === undefined ? undefined : parseChannelActorProfileObservation(input.channelProfile)
   const contextSource = input.contextSource === undefined ? undefined : (() => { const s = object(input.contextSource, ['providerId', 'nativeSessionId']); return { providerId: text(s.providerId), nativeSessionId: text(s.nativeSessionId) } })()
+  if (input.contextObservation !== undefined && input.contextObservation !== 'known-publications-unavailable') fail()
   const channelQuote = input.channelQuote === undefined ? undefined : parseChannelTranscriptQuote(input.channelQuote)
   if (channelQuote && (!equal(channelQuote.application, application) || channelQuote.externalConversationId !== base.externalConversationId || channelQuote.range.throughMessageId !== base.externalMessageId)) fail()
+  if (input.contextObservation && (!channelQuote || !contextSource)) fail()
   if (channelProfile && channelActorKey(channelProfile.actor) !== channelActorKey(actor)) fail()
   const admissionIntent = input.admissionIntent === undefined ? undefined : validateAgentPromptAdmissionIntent(input.admissionIntent)
   if (admissionIntent && (admissionIntent.kind === 'exact-condition' || admissionIntent.expectedRun.runId !== run.runId)) fail()
   const author = parseAgentExternalMessageAuthor(input.author), operationId = text(input.operationId), messageId = text(input.messageId)
   // Intake retains its receiver alias; the author names the independently authorized Binding connection.
   if (operationId === messageId || !equal(author.actor, actor) || author.externalMessageId !== base.externalMessageId || author.externalConversationId !== base.externalConversationId) fail()
-  return { ...projected, state: 'claimed', input: { hostId: text(input.hostId), agentSessionId: text(input.agentSessionId), expectedRun: { runId: text(run.runId) }, operationId, messageId, author, ...(channelProfile ? { channelProfile } : {}), ...(channelQuote ? { channelQuote } : {}), ...(contextSource ? { contextSource } : {}), ...(admissionIntent === undefined ? {} : { admissionIntent: admissionIntent as Exclude<typeof admissionIntent, { kind: 'exact-condition' }> }) } }
+  return { ...projected, state: 'claimed', input: { hostId: text(input.hostId), agentSessionId: text(input.agentSessionId), expectedRun: { runId: text(run.runId) }, operationId, messageId, author, ...(channelProfile ? { channelProfile } : {}), ...(channelQuote ? { channelQuote } : {}), ...(contextSource ? { contextSource } : {}), ...(input.contextObservation ? { contextObservation: 'known-publications-unavailable' as const } : {}), ...(admissionIntent === undefined ? {} : { admissionIntent: admissionIntent as Exclude<typeof admissionIntent, { kind: 'exact-condition' }> }) } }
 }
 export function parseIngressParams<M extends ConnectionIngressMethod>(method: M, value: unknown): ConnectionIngressParamsMap[M] {
   if (method === 'connection.ingress.record-authority') return parseExternalConversationReference(value) as ConnectionIngressParamsMap[M]
@@ -111,7 +113,7 @@ export function parseIngressResult<M extends ConnectionIngressMethod>(method: M,
     if (p.authority === 'current' ? !ingress || p.code !== undefined : !CONNECTION_INGRESS_AUTHORITY_CODES.includes(p.code as never)) fail()
     const unavailable = p.code === 'INGRESS_SERVICE_UNCONFIRMED' || p.code === 'INGRESS_STORAGE_UNCONFIRMED' || p.code === 'INGRESS_ADDRESSING_UNCONFIRMED'
     if (p.authority === 'unavailable' ? !unavailable : unavailable) fail()
-    return { ingress, authority: p.authority, ...(p.code === undefined ? {} : { code: p.code }) } as ConnectionIngressResultMap[M]
+    return { ingress, authority: p.authority, ...(p.code === undefined ? {} : { code: 'known-publications-unavailable' as const }) } as ConnectionIngressResultMap[M]
   }
   if (method === 'connection.ingress.inspect') {
     const p = object(value, ['ingress', 'inputReceipt', 'interactionReceipt', 'questionReceipt', 'observation', 'context']), ingress = p.ingress === null ? null : parseConnectionIngressRecord(p.ingress)
@@ -161,7 +163,8 @@ export function parseIngressResult<M extends ConnectionIngressMethod>(method: M,
 }
 
 export function parseIngressContextObservation(value: unknown): import('./ingress-contract.js').ConnectionIngressContextObservation {
-  const p = object(value, ['coverage', 'quotedMessages', 'gapCount', 'positionMessageId', 'observation'])
+  const p = object(value, ['coverage', 'quotedMessages', 'gapCount', 'positionMessageId', 'observation', 'code'])
+  if (p.code !== undefined && p.code !== 'known-publications-unavailable') fail()
   if (typeof p.coverage !== 'string' || !['complete', 'partial', 'unavailable'].includes(p.coverage) ||
       typeof p.observation !== 'string' || !['observed', 'unavailable'].includes(p.observation) ||
       !Number.isSafeInteger(p.quotedMessages) || Number(p.quotedMessages) < 0 ||
@@ -171,5 +174,5 @@ export function parseIngressContextObservation(value: unknown): import('./ingres
   return { coverage: p.coverage as import('./ingress-contract.js').ConnectionIngressContextObservation['coverage'],
     quotedMessages: Number(p.quotedMessages), gapCount: Number(p.gapCount),
     positionMessageId: p.positionMessageId === null ? null : text(p.positionMessageId),
-    observation: p.observation as 'observed' | 'unavailable' }
+    observation: p.observation as 'observed' | 'unavailable', ...(p.code ? { code: 'known-publications-unavailable' as const } : {}) }
 }

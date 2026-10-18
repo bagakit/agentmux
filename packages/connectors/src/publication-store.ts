@@ -10,6 +10,11 @@ import { parseConversationChangesPage, parseConversationUnit, parseConversationC
 
 /** The immutable authorized audience; presentation and current focus are deliberately absent. */
 export type PublicationBoundary = Pick<RoomBinding, 'bindingId' | 'revision' | 'connectionId' | 'application' | 'executionHostId' | 'agentSessionId' | 'externalConversationId' | 'sourceCheckpoints' | 'sourceFrontier' | 'scope'>
+/** Exact original recipient, independent of current connection aliases and Binding generations. */
+export type PublicationContextRecipient = {
+  application: PublicationBoundary['application']; externalConversationId: string; hostId: string; agentSessionId: string
+  source: import('@agentmux/core').AgentSessionHistorySource
+}
 export type PermissionPublicationPayload = {
   kind: 'permission'; disclosure: 'shared' | 'redacted'; title: string; context?: string; status: 'pending' | 'response-sent' | 'unconfirmed' | 'unavailable'
   options: Array<{ label: string; actionRef: string }>
@@ -172,6 +177,15 @@ export class PublicationStore {
       CREATE INDEX IF NOT EXISTS connector_publication_intent_record ON connector_publication_decision(binding_id,binding_revision,json_extract(decision_json,'$.part.record'))
       WHERE json_extract(decision_json,'$.kind')='representation';`)
 
+    try { database.exec(`CREATE INDEX IF NOT EXISTS connector_publication_context_message
+      ON connector_publication_operation(
+        json_extract(operation_json,'$.target.application.domain'),json_extract(operation_json,'$.target.application.appId'),
+        json_extract(operation_json,'$.target.externalConversationId'),json_extract(operation_json,'$.reference.hostId'),
+        json_extract(operation_json,'$.reference.agentSessionId'),json_extract(operation_json,'$.reference.source.providerId'),
+        json_extract(operation_json,'$.reference.source.nativeSessionId'),json_extract(operation_json,'$.mapping.messageId'))
+      WHERE state='confirmed' AND json_extract(operation_json,'$.effect')='upsert';`) }
+    catch { /* This optional observation must not prevent original input or Outbox ownership. Exact lookup reports it. */ }
+
   }
   private transaction<T>(action: () => T): T {
     let begun = false
@@ -187,6 +201,32 @@ export class PublicationStore {
   }
   inspect(operationId: string): PublicationOperation | null {
     return this.read(this.database.prepare('SELECT operation_json, state FROM connector_publication_operation WHERE operation_id=?').get(operationId))
+  }
+  /** Only original confirmed messages wholly sourced from this native conversation are already known.
+   * Captured/relay/mixed or missing source facts remain useful context; no body or bot name is inspected. */
+  knownContextMessages(recipient: PublicationContextRecipient, messageIds: readonly string[]): ReadonlySet<string> {
+    const known = new Set<string>()
+    if (!messageIds.length) return known
+    const read = this.database.prepare(`SELECT candidate.value AS message_id FROM json_each(?) candidate WHERE EXISTS (
+      SELECT 1 FROM connector_publication_operation original INDEXED BY connector_publication_context_message
+      WHERE original.state='confirmed' AND json_extract(original.operation_json,'$.effect')='upsert'
+        AND json_extract(original.operation_json,'$.target.application.domain')=? AND json_extract(original.operation_json,'$.target.application.appId')=?
+        AND json_extract(original.operation_json,'$.target.externalConversationId')=? AND json_extract(original.operation_json,'$.reference.hostId')=?
+        AND json_extract(original.operation_json,'$.reference.agentSessionId')=? AND json_extract(original.operation_json,'$.reference.source.providerId')=?
+        AND json_extract(original.operation_json,'$.reference.source.nativeSessionId')=? AND json_extract(original.operation_json,'$.mapping.messageId')=candidate.value
+        AND json_extract(original.operation_json,'$.reference.source.kind')='native'
+        AND json_extract(original.operation_json,'$.payload.relay') IS NULL
+        AND json_type(original.operation_json,'$.sourceRecords')='array' AND json_array_length(original.operation_json,'$.sourceRecords')>0
+        AND NOT EXISTS (SELECT 1 FROM json_each(original.operation_json,'$.sourceRecords') source
+          WHERE json_extract(source.value,'$.hostId') IS NOT ? OR json_extract(source.value,'$.agentSessionId') IS NOT ?
+            OR json_extract(source.value,'$.source.kind') IS NOT 'native' OR json_extract(source.value,'$.source.providerId') IS NOT ?
+            OR json_extract(source.value,'$.source.nativeSessionId') IS NOT ?))`)
+    for (let offset = 0; offset < messageIds.length; offset += 100) {
+      for (const row of read.all(JSON.stringify(messageIds.slice(offset, offset + 100)), recipient.application.domain, recipient.application.appId,
+        recipient.externalConversationId, recipient.hostId, recipient.agentSessionId, recipient.source.providerId, recipient.source.nativeSessionId,
+        recipient.hostId, recipient.agentSessionId, recipient.source.providerId, recipient.source.nativeSessionId)) known.add(String(row.message_id))
+    }
+    return known
   }
   /** A new relationship boundary skips only ordinary effects that never crossed the dispatch boundary. */
   retireBindingPending(boundary: RoomBinding): void {
