@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { fixturePath } from '../../../test/fixture-values.mjs'
 import type { AppConfig, ScratchTopicSnapshot, SessionSnapshot, WorkspaceRecord } from '../src/shared/contracts'
+import type { AgentSessionHistoryDescriptor } from '@agentmux/core'
 import { directoryIdentity, homeZoneId, workspaceZoneId, type SpaceZoneBindings } from '../src/shared/space-addresses'
 import { scratchTopicDirectoryName } from '../src/shared/scratch-topics'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
@@ -242,5 +243,29 @@ describe('Topic and Mote Agent membership uses original object facts', () => {
     expect(cost).toEqual({ passes: 2, filters: 0 })
     const next = { ...state, sessions: source.map(session => session.id === 'outside-0' ? { ...session, latestOutputBytes: 200 } : session) }
     selectors.forEach((select, at) => expect(select(next, f.scratch)).toBe(first[at]))
+  })
+
+  it('shares one observed metadata path index and retains unchanged original member references', () => {
+    const f = fixture(), cost = { passes: 0 }
+    class ObservedMetadata extends Map<string, AgentSessionHistoryDescriptor> {
+      override *values(): MapIterator<AgentSessionHistoryDescriptor> { cost.passes++; yield* super.values() }
+    }
+    const sources = new ObservedMetadata(Array.from({ length: 500 }, (_, index) => {
+      const id = 'retained-' + index, value: AgentSessionHistoryDescriptor = { agentSessionId: id, hostId: 'local', state: 'retired',
+        history: { providerId: 'codex', executorId: 'codex', workspacePath: index ? fixturePath('scope/irrelevant-' + index) : f.project.path, createdAt: 1 } }
+      return [JSON.stringify(['local', id]), value] as const
+    }))
+    const state = { ...f.state, workbenchSpaceSelection: null }, selectors = Array.from({ length: 8 }, () => createWorkspaceAgentListSelector(f.resolve))
+    const before = selectors.map(select => select(state, f.project, state.sessions, sources))
+    for (let index = 0; index < 20; index++) selectors.forEach((select, at) => expect(select({ ...state }, f.project, state.sessions, sources)).toBe(before[at]))
+    expect(cost.passes).toBe(1)
+    expect(before.every(list => list.members.some(member => member.subject.agentSessionId === 'retained-0' && member.basis === 'workspace'))).toBe(true)
+    expect(before.every(list => !list.sessions.some(session => session.id.startsWith('retained-')))).toBe(true)
+    const updated = state.sessions.map(session => session.id === 'project-agent' ? { ...session, updatedAt: 3 } : session)
+    for (const [at, select] of selectors.entries()) {
+      const after = select({ ...state, sessions: updated }, f.project, updated, sources)
+      expect(after.members).toBe(before[at]!.members)
+    }
+    expect(cost.passes).toBe(1)
   })
 })

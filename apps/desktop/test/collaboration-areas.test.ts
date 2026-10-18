@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, expect, it } from 'vitest'
 import type { AgentMuxDesktopSpaceSelection } from '@agentmux/core/control'
+import type { AgentSessionHistoryDescriptor } from '@agentmux/core'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { fixturePath } from '../scripts/lib/fixture-values.mjs'
 import { useAppStore } from '../src/renderer/src/store'
@@ -24,12 +25,12 @@ beforeEach(() => {
   useAppStore.setState({ spaceZoneBindings: {}, spatialRequests: {}, topicCategories: [], projectGroups: [], workbenchSpaceSelection: null })
 })
 
-it('uses the original Mote membership across display Workspaces and includes visible members in reorder validation', () => {
+it('uses the original Mote membership across display Workspaces without granting public Project ordering membership', () => {
   const state = useAppStore.getState(), project = moteConfig.workspaces.find(value => value.id === 'project')!
   const selection = choice(customMoteId, project.id), facts = { ...state, workbenchSpaceSelection: selection }
   const original = createWorkspaceAgentListSelector(resolve)(facts, project)
   expect(original.issue).toBeNull(); expect(original.sessions.map(value => value.id)).toEqual([customAgent.id])
-  expect(workspaceAgentListMembers(facts, project, resolve).map(value => value.id)).toContain(customAgent.id)
+  expect(workspaceAgentListMembers(facts, project, resolve).map(value => value.id)).not.toContain(customAgent.id)
   const graph = createCollaborationAreasSelector(resolve)(facts, { workspaceId: project.id, choice: selection })
   expect(graph.current).toEqual([original.key]); expect(graph.issue).toBeNull()
   expect(graph.areas.find(value => value.id === graph.current[0])?.members).toEqual([key(customAgent.id)])
@@ -106,4 +107,75 @@ it('keeps the captured request independent from background selection and coalesc
   expect(changed).toBe(initial)
   expect(initial.areas.filter(value => value.kind === 'project').map(value => value.id)).toEqual([workspaceProjectId(project), workspaceProjectId(other)])
   expect(initial.current).toHaveLength(1); expect(initial.areas.find(value => value.id === initial.current[0])?.members).toEqual([key(customAgent.id)])
+})
+
+function retained(id: string, workspacePath: string, hostId = 'local', providerId = 'fixture'): AgentSessionHistoryDescriptor {
+  return { hostId, agentSessionId: id, state: 'retired', history: { providerId, executorId: providerId, workspacePath, createdAt: 1 } }
+}
+const metadata = (...sources: AgentSessionHistoryDescriptor[]) => new Map(sources.map(source => [key(source.agentSessionId, source.hostId), source]))
+
+it('associates retained exact workspaces and worktrees with the original project without live Sessions', () => {
+  const state = useAppStore.getState(), project = moteConfig.workspaces.find(value => value.id === 'project')!
+  const worktree = { ...project, id: 'retained-worktree', path: fixturePath('worktree'), repoPath: project.path, kind: 'worktree' as const }
+  const facts = { ...state, config: { ...moteConfig, workspaces: [...moteConfig.workspaces, worktree] }, sessions: [], tabs: {}, layouts: {} }
+  const originals = metadata(retained('retained-root', project.path), retained('retained-worktree', worktree.path), retained('not-a-child-guess', project.path + '/unregistered-child'))
+  const select = createCollaborationAreasSelector(resolve), graph = select(facts, undefined, originals)
+  const area = graph.areas.find(value => value.id === workspaceProjectId(project))!
+  expect(area.members).toEqual([key('retained-root'), key('retained-worktree')])
+  expect(area.affiliations?.get(key('retained-root'))).toMatchObject({ basis: 'workspace', workspacePath: project.path })
+  expect(area.affiliations?.get(key('retained-worktree'))).toMatchObject({ basis: 'workspace', workspacePath: worktree.path })
+  expect(graph.areas.some(value => value.members.includes(key('not-a-child-guess')))).toBe(false)
+  expect(facts.sessions).toEqual([]); expect(facts.tabs).toEqual({})
+  expect(select(facts, undefined, originals)).toBe(graph)
+  const list = createWorkspaceAgentListSelector(resolve)(facts, project, [], originals)
+  expect(list.sessions).toEqual([]); expect(list.members.map(member => member.subject.agentSessionId)).toEqual(['retained-root'])
+})
+
+it('retains original spatial and collaborator membership without live presentation or an active Run', () => {
+  const state = useAppStore.getState(), topic = moteTopics.find(value => value.id === customMoteId)!
+  const topics = moteTopics.map(value => value.id === customMoteId ? { ...value, collaborators: [
+    { fileName: 'retained.md', sessionId: 'historical-collaborator', providerId: 'fixture' },
+    { fileName: 'conflicting.md', sessionId: 'provider-conflict', providerId: 'fixture' }
+  ] } : value)
+  const facts = { ...state, sessions: [], scratchTopicSnapshots: { ...state.scratchTopicSnapshots,
+    [scratchWorkspace.id]: { ...state.scratchTopicSnapshots[scratchWorkspace.id]!, topics } } }
+  const sources = metadata(retained(customAgent.id, fixturePath('other-execution-directory')),
+    retained('historical-collaborator', fixturePath('other-execution-directory')),
+    retained('provider-conflict', fixturePath('other-execution-directory'), 'local', 'different-provider'))
+  const graph = createCollaborationAreasSelector(resolve)(facts, undefined, sources), area = graph.areas.find(value => value.name === topic.title)!
+  expect(area.members).toEqual([key('historical-collaborator'), key(customAgent.id)])
+  expect(area.affiliations?.get(key(customAgent.id))?.basis).toBe('spatial')
+  expect(area.affiliations?.get(key('historical-collaborator'))?.basis).toBe('collaborator')
+  expect(area.members).not.toContain(key('provider-conflict'))
+  expect(area.members).not.toContain(key('historical-collaborator', 'remote'))
+  expect(facts.sessions).toEqual([])
+})
+
+it('qualifies exact resource association by Host and rejects ambiguous Topic directory evidence', () => {
+  const state = useAppStore.getState(), project = moteConfig.workspaces.find(value => value.id === 'project')!
+  const remote = { ...project, id: 'remote', hostId: 'remote' }, physical = fixturePath('relocated-topic')
+  const topics = moteTopics.map(value => value.id === ordinaryTopicId ? { ...value, physicalDirectoryPath: physical, confirmedDirectoryPaths: [physical] } : value)
+  const facts = { ...state, config: { ...moteConfig, workspaces: [...moteConfig.workspaces, remote] }, sessions: [], tabs: {}, layouts: {},
+    scratchTopicSnapshots: { ...state.scratchTopicSnapshots, [scratchWorkspace.id]: { ...state.scratchTopicSnapshots[scratchWorkspace.id]!, topics } } }
+  const sources = metadata(retained('same-id', project.path), retained('same-id', project.path, 'remote'), retained('topic-history', physical),
+    retained('foreign-topic', physical, 'remote'))
+  const select = createCollaborationAreasSelector(resolve), graph = select(facts, undefined, sources)
+  expect(graph.areas.find(value => value.id === workspaceProjectId(project))!.members).toEqual([key('same-id')])
+  expect(graph.areas.find(value => value.id === workspaceProjectId(remote))!.members).toEqual([key('same-id', 'remote')])
+  const area = graph.areas.find(value => value.name === topics.find(value => value.id === ordinaryTopicId)!.title)!
+  expect(area.members).toEqual([key('topic-history')]); expect(area.affiliations?.get(key('topic-history'))?.workspacePath).toBe(physical)
+  const ambiguous = { ...facts, scratchTopicSnapshots: { ...facts.scratchTopicSnapshots, [scratchWorkspace.id]: {
+    ...facts.scratchTopicSnapshots[scratchWorkspace.id]!, topics: topics.map(value => value.id === customMoteId ? { ...value, physicalDirectoryPath: physical, confirmedDirectoryPaths: [physical] } : value) } } }
+  expect(select(ambiguous, undefined, sources).areas.some(value => value.members.includes(key('topic-history')))).toBe(false)
+})
+
+it('preserves all original multi-area bindings without adding an execution-directory occurrence', () => {
+  const state = useAppStore.getState(), project = moteConfig.workspaces.find(value => value.id === 'project')!
+  const twoTabs = Object.fromEntries(Object.entries(state.tabs).map(([id, tab]) => [id, id === 'ordinary-tab' ? {
+    ...tab, regions: Object.fromEntries(Object.entries(tab.regions).map(([regionId, surface]) => [regionId, surface.kind === 'agent' ? { ...surface, sessionId: customAgent.id } : surface])) } : tab]))
+  const graph = createCollaborationAreasSelector(resolve)({ ...state, sessions: [], tabs: twoTabs }, undefined, metadata(retained(customAgent.id, project.path)))
+  const occurrences = graph.areas.filter(area => area.members.includes(key(customAgent.id)))
+  expect(occurrences.map(area => area.name)).toEqual([moteTopics.find(value => value.id === customMoteId)!.title, moteTopics.find(value => value.id === ordinaryTopicId)!.title])
+  expect(occurrences.every(area => area.affiliations?.get(key(customAgent.id))?.basis === 'spatial')).toBe(true)
+  expect(graph.areas.find(area => area.id === workspaceProjectId(project))!.members).not.toContain(key(customAgent.id))
 })
