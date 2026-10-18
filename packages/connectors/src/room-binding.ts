@@ -130,14 +130,15 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
     return entries.map(({ binding, event }) => ({ event, deliveryOperationId: this.options.lifecycle!.queueBindingNotice(operationId, binding, event, synchronization) }))
   }
   private sameAudience(left: RoomBinding, right: RoomBinding): boolean {
-    return left.connectionId === right.connectionId && equal(left.application, right.application) && left.externalConversationId === right.externalConversationId && left.executionHostId === right.executionHostId && left.agentSessionId === right.agentSessionId && equal(left.scope, right.scope) && equal(left.inputTarget, right.inputTarget)
+    return equal(left.application, right.application) && left.externalConversationId === right.externalConversationId && left.executionHostId === right.executionHostId && left.agentSessionId === right.agentSessionId && equal(left.scope, right.scope) && equal(left.inputTarget, right.inputTarget)
   }
   private carryGrants(previous: RoomBinding, binding: RoomBinding): void {
     if (!this.sameAudience(previous, binding)) return
     for (const original of this.bindingGrants(previous)) {
-      const grant = { ...original, revision: original.revision + 1, bindingRevision: binding.revision }
+      const grant = { ...original, revision: original.revision + 1, bindingRevision: binding.revision, connectionId: binding.connectionId }
       this.database.prepare('INSERT INTO room_grant_revision (grant_id,revision,snapshot_json) VALUES (?,?,?)').run(grant.grantId, grant.revision, JSON.stringify(grant))
-      this.database.prepare('UPDATE room_grant_head SET revision=? WHERE grant_id=?').run(grant.revision, grant.grantId)
+      this.database.prepare('DELETE FROM room_grant_head WHERE connection_id=? AND room_id=? AND actor_json=? AND grant_id<>?').run(grant.connectionId, grant.externalConversationId, JSON.stringify(grant.actor), grant.grantId)
+      this.database.prepare('UPDATE room_grant_head SET revision=?,connection_id=? WHERE grant_id=?').run(grant.revision, grant.connectionId, grant.grantId)
     }
   }
   private finish(operation: RoomBindingOperation): RoomBindingOperation {
