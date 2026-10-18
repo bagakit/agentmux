@@ -113,7 +113,7 @@ export function parseIngressResult<M extends ConnectionIngressMethod>(method: M,
   const p = object(value, ['ingresses', 'nextAfterIngressId']), expected = input as ConnectionIngressParamsMap['connection.ingress.ls']
   if (!Array.isArray(p.ingresses) || p.ingresses.length > (expected.limit ?? 25)) fail()
   const ingresses = (p.ingresses as unknown[]).map(parseConnectionIngressRecord)
-  if (new Set(ingresses.map(i => i.ingressId)).size !== ingresses.length || ingresses.some(i => i.connectionId !== expected.connectionId || expected.bindingId !== undefined && i.input?.author.bindingId !== expected.bindingId || i.ingressId === expected.afterIngressId)) fail()
+  if (new Set(ingresses.map(i => i.ingressId)).size !== ingresses.length || ingresses.some(i => i.connectionId !== expected.connectionId || expected.bindingId !== undefined && (i.kind !== 'action' ? i.group?.target?.bindingId ?? i.input?.author.bindingId : i.input?.author.bindingId) !== expected.bindingId || i.ingressId === expected.afterIngressId)) fail()
   const nextAfterIngressId = p.nextAfterIngressId === null ? null : text(p.nextAfterIngressId)
   if (nextAfterIngressId !== null && nextAfterIngressId !== ingresses.at(-1)?.ingressId) fail()
   return { ingresses, nextAfterIngressId } as ConnectionIngressResultMap[M]
