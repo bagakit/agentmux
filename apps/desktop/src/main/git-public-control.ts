@@ -28,7 +28,8 @@ export class GitPublicControl implements AgentMuxRpcGitOwner {
     let result: GitResultMap[GitMethod]
     if (method === 'git.worktrees') {
       result = this.ports.worktrees ? await this.ports.worktrees.observe(params.workspaceId, config)
-        : { kind: 'unavailable', ...params.expectedResource, checkedAt: Date.now(), reason: 'Git worktree observation is unavailable. Existing Zones and workfaces remain available.' }
+        : { kind: 'unavailable', ...params.expectedResource, checkedAt: Date.now(), reason: 'Git worktree observation is unavailable. Existing Zones and workfaces remain available.',
+          directories: [{ path: params.expectedResource.workspacePath, kind: 'unavailable', reason: 'The original Host directory observer is unavailable. Refresh to retry.' }] }
     } else if (method === 'git.history') {
       const { workspaceId, expectedResource: _resource, ...input } = params as GitParameterMap['git.history']
       result = await this.ports.git.history(workspaceId, input, config)
