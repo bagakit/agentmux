@@ -289,4 +289,18 @@ describe('Toolkit TUI lifecycle on the existing admission owner', () => {
     expect(f.create).toHaveBeenCalledOnce()
     reader.dispose(); await f.custom.dispose()
   })
+
+  it('keeps explicit Start available when automatic loading fails before admission', async () => {
+    const f = fixture()
+    vi.spyOn(f.owner, 'inspect').mockRejectedValueOnce(new Error('configuration read unavailable'))
+    await f.custom.loadConfigured()
+    const before = await f.snapshot()
+    expect(before).toMatchObject({ state: 'idle', admission: null, latestConfirmed: null })
+    expect(before.reason).toContain('configuration read unavailable')
+    expect(f.create).not.toHaveBeenCalled()
+    await f.custom.run(definition.id, f.input(before), new AbortController().signal)
+    expect(await f.snapshot()).toMatchObject({ state: 'running', reason: null, admission: { state: 'running' } })
+    expect(f.create).toHaveBeenCalledOnce()
+    await f.custom.dispose()
+  })
 })
