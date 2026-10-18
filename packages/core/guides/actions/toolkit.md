@@ -38,9 +38,12 @@ original invocationId and complete captured parameters. This reuses its executio
 native creation key: a retained Run is returned rather than started twice. If that Run
 is no longer retained, the original script may run now. Ordinary inspect/watch never do this.
 
-For an interactive terminal tool, set mode:"tui" and put a shell command in script.
-The Host executes it with shell -lc and a fixed script name; args become $1, $2, and so on,
-without being concatenated into shell source. TUI accepts no nonempty actions or nonnull display.
+For an interactive terminal tool, set mode:"tui". An empty or whitespace-only script opens
+the execution Host's default interactive shell; args pass directly to that shell. The Host
+prepares the complete launch request before creation. Explicitly continuing an unknown
+original request retains that shell and environment even after the Host environment changes. A nonempty script executes
+with shell -lc and a fixed script name; args become $1, $2, and so on, without being
+concatenated into shell source. TUI accepts no nonempty actions or nonnull display.
 Local packages retain their JavaScript contract and do not accept TUI mode.
 Creating an enabled TUI, enabling a disabled TUI, and Host startup load the tool once.
 A running exact Run is reconnected; a confirmed ended Run starts a new execution on the next
