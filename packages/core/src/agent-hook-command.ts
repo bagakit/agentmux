@@ -1,6 +1,6 @@
+import { mintObjectId } from './object-id.js'
 import process from 'node:process'
 import { sendHookReceipt, requestHookPermissionDecision } from './agent-hook-delivery.js'
-import { randomUUID } from 'node:crypto'
 import {
   HOOK_PAYLOAD_USAGE_KEY,
   readTurnUsageFromTranscript
@@ -225,7 +225,7 @@ export async function runAgentHookCommand(): Promise<void> {
           if (usage) payload = { ...payload, [HOOK_PAYLOAD_USAGE_KEY]: usage }
         }
       }
-      const receiptId = randomUUID()
+      const receiptId = mintObjectId()
       // 无法解析的 eventName 在 body 中省略（不能写 null，Ingress validator 只接受 undefined 或 string）。
       const bodyObj: Record<string, unknown> = {
         receiptId,
