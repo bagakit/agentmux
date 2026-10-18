@@ -12,6 +12,7 @@ import { collaborationAgentNode } from '../src/renderer/src/lib/collaboration-pr
 import { CollaborationBoundsIndex, collaborationBoundsOverlap } from '../src/renderer/src/lib/collaboration-spatial-index'
 import * as engine from '../src/renderer/src/lib/collaboration-layout-engine'
 import type { CollaborationPulse } from '../src/renderer/src/lib/use-collaboration-reading'
+import { COLLABORATION_ACTIVITY_MS } from '../src/renderer/src/lib/collaboration-map-presentation'
 import { agentInformationPreview } from '../src/renderer/src/lib/agent-information-preview'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
@@ -668,8 +669,18 @@ it('overview keeps exact Agent endpoints without relayout and enters a named reg
   expect(areaBox.kind).toBe('area')
   expect(Number(area.dataset.labelWidth)).toBeGreaterThanOrEqual(104)
   expect(area.closest('.collaboration-region-labels')).not.toBeNull()
-  const originalHeading = (areaBox as Extract<engine.CollaborationLayoutBox, { kind: 'area' }>).heading
-  expect(Number.parseFloat(area.style.top) + Number(area.dataset.labelHeight)).toBeCloseTo((areaBox.y + originalHeading.y + originalHeading.height - top) * .25 + 20)
+  const labelBounds = regionLabelBounds('area-0')
+  // At overview scale, another original area's avatar can intersect the natural
+  // heading position. The visible identity yields to those actual hit targets.
+  const marks = [...dom.container.querySelectorAll<HTMLElement>('.collaboration-agent__dot')]
+  expect(marks.length).toBeGreaterThan(0)
+  for (const mark of marks) {
+    const node = mark.closest<HTMLElement>('.react-flow__node')!, box = renderedBox(node.dataset.id!)
+    const size = Number.parseFloat(mark.style.width) * Number.parseFloat(mark.parentElement!.style.getPropertyValue('--collaboration-mark-scale'))
+    expect(Number.isFinite(size) && size > 0).toBe(true)
+    const hit = { x: (box.x + (box.width - size) / 2 - left) * .25 + 20, y: (box.y + (box.height - size) / 2 - top) * .25 + 20, width: size * .25, height: size * .25 }
+    expect(collaborationBoundsOverlap(labelBounds, hit)).toBe(false)
+  }
   await dom.render(graph(scene, null, scene.relations, [], scene.agents, { ready: true }))
   // Locate is an explicit control intent, so it is allowed to replace this already-set camera.
   await viewport(-left * .25 + 20, -top * .25 + 20, 1600, 1200, .25)
@@ -677,6 +688,21 @@ it('overview keeps exact Agent endpoints without relayout and enters a named reg
   await settleCollaborationCanvas(() => expect(captured.store!.getState().transform[2]).toBeGreaterThanOrEqual(.7))
   expect(requests).toHaveLength(operations)
   expect(open).not.toHaveBeenCalled()
+})
+
+it('anchors an unobstructed overview identity to the original Worker heading baseline', async () => {
+  const scene = scenario(0); scene.areas = [scene.areas[0]!]; scene.relations = []
+  await loaded(scene)
+  const box = renderedBox(JSON.stringify(['area', 'area-0'])) as Extract<engine.CollaborationLayoutBox, { kind: 'area' }>
+  const zoom = .25, x = 100 - (box.x + box.heading.x) * zoom, y = 100 - (box.y + box.heading.y) * zoom
+  await viewport(x, y, 600, 400, zoom)
+  expect(dom.container.querySelectorAll('[data-region-id]')).toHaveLength(1)
+  expect(dom.container.querySelectorAll('.collaboration-agent')).toHaveLength(0)
+  const label = regionLabelBounds('area-0')
+  expect(label.element.dataset.context).toBeUndefined()
+  expect(label.x).toBeCloseTo(100, 6)
+  expect(label.y + label.height).toBeCloseTo(100 + box.heading.height * zoom, 6)
+  expect(requests).toHaveLength(1)
 })
 
 it('selecting an Agent highlights only its original relations while preserving every other connection', async () => {
@@ -794,7 +820,7 @@ it('shows immediate source and recipient activity while the original new path is
   expect(packet.getAttribute('data-kind')).toBe('communication')
   expect(packet.style.offsetPath).toBe(`path("${flow.getAttribute('d')}")`)
   expect(packet.style.animationDelay).toBe(flow.style.animationDelay)
-  expect(packet.style.animationDuration).toBe(flow.style.animationDuration)
+  expect(dom.container.querySelector<HTMLElement>('.collaboration-canvas')!.style.getPropertyValue('--collaboration-activity-duration')).toBe(`${COLLABORATION_ACTIVITY_MS}ms`)
   expect(Number(packet.getAttribute('r'))).toBe(4)
   await focusNode(target)
   expect(nodeElement(target)!.querySelector('[aria-label="Message received"]')).not.toBeNull()
