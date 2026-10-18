@@ -1,5 +1,6 @@
+// @vitest-environment node
 import { afterEach, expect, it, vi } from 'vitest'
-import { mkdtemp, readdir, rm } from 'node:fs/promises'
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -34,8 +35,9 @@ vi.mock('@agentmux/core', async original => {
   return { ...actual, durableWriteFile: source.durableWriteFile, DurableWriteError: source.DurableWriteError }
 })
 import { durableWriteFile, DurableWriteError } from '../../../packages/core/src/durable-write'
-const { ClientIncidentArchive }: typeof import('../src/main/client-incident-archive') = await import(
-  process.env.AGENTMUX_TEST_INCIDENT_ARCHIVE_ENTRY ?? new URL('../src/main/client-incident-archive.ts', import.meta.url).href)
+const { ClientIncidentArchive }: typeof import('../src/main/client-incident-archive') = process.env.AGENTMUX_TEST_INCIDENT_ARCHIVE_ENTRY
+  ? await import(process.env.AGENTMUX_TEST_INCIDENT_ARCHIVE_ENTRY)
+  : await import('../src/main/client-incident-archive')
 
 const directories: string[] = []
 afterEach(async () => { failure.enabled = false; failure.cleanupFails = true; failure.creates = 0; await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
@@ -44,6 +46,16 @@ const report = (): AgentMuxClientIncidentReport => ({ occurrenceId: randomUUID()
   agentSessionId: 'agent', runId: 'run', observedAt: 1, elapsedMs: 0, metadata: {}, stages: [], references: [] })
 const producer = { kind: 'main' as const, appInstanceId: 'application', producerInstanceId: 'producer', windowId: null, documentGeneration: null, buildId: null }
 const bounds = () => ({ signal: new AbortController().signal, maxBytes: 256 * 1024 })
+
+it('recovers original UUID temporary names while preserving files outside the durable writer format', async () => {
+  const path = await mkdtemp(join(tmpdir(), 'client-incident-cleanup-')); directories.push(path)
+  const legacy = '00000000-0000-4000-8000-000000000000'
+  const owned = [`index.json.123.${legacy}.tmp`, `111111111111.candidate.123.${legacy}.tmp`]
+  const foreign = ['index.json.123.000000000000.tmp', 'foreign.123.111111111111.tmp', 'index.json.123.unknown.tmp']
+  for (const name of [...owned, ...foreign]) await writeFile(join(path, name), 'retained')
+  const archive = new ClientIncidentArchive(path); await archive.flush()
+  expect((await readdir(path)).sort()).toEqual(foreign.sort())
+})
 
 it.each(['candidate', 'index'] as const)('bounds original helper temporary-file cleanup failure at the %s write across restart', async stage => {
   failure.stage = stage
@@ -55,6 +67,8 @@ it.each(['candidate', 'index'] as const)('bounds original helper temporary-file 
   } })
   await archive.flush()
   const original = archive.enqueue(report(), producer); await archive.flush()
+  expect(original.accepted).toBe(true)
+  expect(await archive.read({ domain: 'client.incident', hostId: 'local', logId: original.logId! }, bounds())).toMatchObject({ availability: 'found' })
   failure.enabled = true
   archive.enqueue(report(), producer); await archive.flush()
   expect(failures.at(-1)).toBeInstanceOf(DurableWriteError)
