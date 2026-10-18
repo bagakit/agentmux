@@ -25,25 +25,27 @@ export function prepareDiscordPublication(operation: Readonly<PublicationOperati
     : discordFailure('DISCORD_REPRESENTATION_UNSUPPORTED')
   const localAgent = 'amux://agent/' + encodeURIComponent(operation.reference.agentSessionId)
   const buttons: Array<{ type: number; components: Array<{ type: number; style: number; label: string; custom_id: string }> }> = []
+  let statusText = '', includeAgent = false
   if (p.kind === 'permission') {
-    text += '\n\n' + (p.status === 'pending' ? 'Awaiting an authorized decision' : p.status === 'response-sent' ? 'Response sent to the original Agent' : 'Original response ' + p.status)
+    statusText = p.status === 'pending' ? 'Awaiting an authorized decision' : p.status === 'response-sent' ? 'Response sent to the original Agent' : 'Original response ' + p.status
     if (p.status === 'pending' && p.options.length <= 25) for (let index = 0; index < p.options.length; index += 5) buttons.push({ type: 1, components: p.options.slice(index, index + 5).map((option, offset) => ({ type: 2, style: 2, label: option.label.length <= 80 ? option.label : `Option ${index + offset + 1}`, custom_id: 'p:' + option.actionRef })) })
-    else if (p.status === 'pending') text += '\nThis request exceeds Discord component capacity. Respond in AgentMux.'
-    if (p.status !== 'pending' || p.options.length > 25) text += '\n' + localAgent
+    else if (p.status === 'pending') statusText += '\nThis request exceeds Discord component capacity. Respond in AgentMux.'
+    includeAgent = p.status !== 'pending' || p.options.length > 25
   }
   if (p.kind === 'question') {
     const actionable = p.status === 'pending' && p.actionRef && discordQuestionComponents(p.questions)
     if (p.answers?.length) text += '\n\n' + p.answers.map(answer => `${p.questions.find(question => question.id === answer.questionId)?.prompt ?? 'Original answer'}\n${answer.answer}`).join('\n\n')
-    if (p.unavailableReason) text += '\n\n' + p.unavailableReason
-    text += '\n\n' + (p.status === 'response-sent' ? 'Answer submitted to the original Agent' : actionable ? 'Answer the original questions' : 'Open the original conversation in AgentMux to continue. ' + (p.status === 'pending' ? 'This question exceeds Discord modal capacity.' : p.status))
-    if (!actionable) text += '\n' + localAgent
+    statusText = [p.unavailableReason, p.status === 'response-sent' ? 'Answer submitted to the original Agent' : actionable ? 'Answer the original questions' : 'Open the original conversation in AgentMux to continue. ' + (p.status === 'pending' ? 'This question exceeds Discord modal capacity.' : p.status)].filter(Boolean).join('\n\n')
+    includeAgent = !actionable
     if (actionable) buttons.push({ type: 1, components: [{ type: 2, style: 1, label: 'Answer questions', custom_id: 'q:' + p.actionRef }] })
   }
+  if (statusText) text += '\n\n' + statusText
+  if (includeAgent) text += '\n' + localAgent
   const content = ('phase' in p && p.phase === 'progress' ? '**Progress**\n' : '') + text
   if (content.length > 4000 && (p.kind === 'question' || p.kind === 'permission' && p.disclosure === 'shared')) {
     const file = publicationResourceDescriptor(operation, 'public-interaction-text')
     const payloadJson = JSON.stringify({ flags: 32768, components: [{ type: 17, components: [
-      { type: 10, content: `The complete original ${p.kind === 'question' ? 'question and recorded answers' : 'permission request'} is in the attached text file. Read it before responding.\n${localAgent}` },
+      { type: 10, content: `The complete original ${p.kind === 'question' ? 'question and recorded answers' : 'shared permission request'} is in the attached text file.\n\n${statusText}\n${localAgent}` },
       { type: 13, file: { url: 'attachment://' + file.name } }, ...buttons] }], attachments: [{ id: 0, filename: file.name }], allowed_mentions: { parse: [] }, ...(!mapping ? { nonce: discordNonce(operation.operationId), enforce_nonce: true } : {}) })
     return { adapterId: DISCORD_PUBLICATION.adapterId, renderVersion: DISCORD_PUBLICATION.renderVersion, requestKey: operation.operationId, request: { method: mapping ? 'PATCH' : 'POST', path, multipart: { payloadJson, files: [file] } } }
   }
