@@ -1,6 +1,8 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Background, BackgroundVariant, BaseEdge, EdgeLabelRenderer, Handle, MarkerType, Position, ReactFlow, applyNodeChanges, useStore, useUpdateNodeInternals, type Edge, type EdgeProps, type Node, type NodeProps, type NodeChange, type Viewport, type ReactFlowInstance } from '@xyflow/react'
 import { NoteReader, type NoteLinkOpenRequest } from '@agentmux/client-ui/components/NoteReader'
+import { NoteFileLinkContext } from '@agentmux/client-ui/components/NoteFileContext'
+import { useDesktopNoteLinkOpener } from '../lib/note-file-link'
 import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { NotebookPage } from '@agentmux/core/notebook-catalog'
 import { projectNoteBlocks, type NoteSource } from '@agentmux/client-ui/note/note-knowledge'
@@ -62,7 +64,7 @@ function SavedBody({ item, snapshot, active, blockIds, source, content: result, 
       <div className="note-canvas-reader" data-selected-block={selected} onClick={event => {
         const block = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-block-id]') : null
         if (block && block.closest('.mobile-note-body') === event.currentTarget.querySelector('.mobile-note-body')) setSelected(block.dataset.blockId)
-      }}><NoteReader agentNames={agentNames} noteProvenance={confirmed.noteProvenance} content={confirmed.content} path={confirmed.resource.path} workspaceId={confirmed.resource.workspaceId} revision={confirmed.revision} documents={documents} graph={snapshot.graph} readInclude={target => onRead(target.noteId)} blockIds={whole || summary ? undefined : shown} previewBlockCount={summary ? 3 : undefined} compactIncludes highlightBlockIds={selectedBlockIds} readReference={target => onRead(target.noteId)} onOpenLink={onOpenLink} /></div>
+      }}><NoteReader resource={confirmed.resource} agentNames={agentNames} noteProvenance={confirmed.noteProvenance} content={confirmed.content} path={confirmed.resource.path} workspaceId={confirmed.resource.workspaceId} revision={confirmed.revision} documents={documents} graph={snapshot.graph} readInclude={target => onRead(target.noteId)} blockIds={whole || summary ? undefined : shown} previewBlockCount={summary ? 3 : undefined} compactIncludes highlightBlockIds={selectedBlockIds} readReference={target => onRead(target.noteId)} onOpenLink={onOpenLink} /></div>
       {selected && (item.page || item.kind === 'shared-block') ? <button type="button" className="note-canvas-open-block" onClick={() => onOpen(item.id, selected)}><OpenIcon size={12} />Open selected block</button> : null}</>
       : <div className="note-canvas-body-state" role="status">{ambiguous ? 'Multiple original files share this Note identity. Open the registered original or refresh to confirm the source.' : item.kind === 'shared-block' && !canvasSharedObservation(snapshot, item.id) ? 'The shared file identity is unconfirmed. Refresh the graph to confirm its original.' : ready?.pending ? 'Reading saved original…' : !ready ? 'Automatic reading covers up to 6 notes in this saved graph. Read this original to continue.' : content?.status === 'read' ? 'Saved snapshot changed. Refresh the graph to read the current original.' : ready.issue ?? (content && 'message' in content ? content.message : 'Original body is unconfirmed.')}
         {!ready?.pending && <button type="button" onClick={content?.status === 'read' ? refresh : () => onRead(item.id)}>{content?.status === 'read' ? 'Refresh graph' : blockIds.length ? 'Read related blocks' : 'Read original'}</button>}
@@ -152,7 +154,7 @@ function EndpointContent({ noteId, blockId, snapshot, bodies, refresh, onOpenLin
   const agentNames = useAppStore(state => state.agentNames)
   const held = bodies.results[noteId], value = held?.snapshot === snapshot ? held.value : undefined
   const confirmed = value?.status === 'read' && noteContentMatchesGraph(snapshot, value) && !snapshot.graph.duplicateNoteIds.includes(noteId) && (value.kind !== 'shared-block' || canvasSharedObservation(snapshot, noteId)) ? value : null
-  return confirmed ? <div className="note-canvas-reader note-canvas-comparison-content"><NoteReader agentNames={agentNames} noteProvenance={confirmed.noteProvenance} content={confirmed.content} path={confirmed.resource.path} workspaceId={confirmed.resource.workspaceId} revision={confirmed.revision} documents={bodies.documents} graph={snapshot.graph} readInclude={target => bodies.request(target.noteId)} blockIds={blockId ? [blockId] : undefined} highlightBlockIds={blockId ? [blockId] : undefined} clipBlocks={!complete} readReference={target => bodies.request(target.noteId)} onOpenLink={onOpenLink} /></div>
+  return confirmed ? <div className="note-canvas-reader note-canvas-comparison-content"><NoteReader resource={confirmed.resource} agentNames={agentNames} noteProvenance={confirmed.noteProvenance} content={confirmed.content} path={confirmed.resource.path} workspaceId={confirmed.resource.workspaceId} revision={confirmed.revision} documents={bodies.documents} graph={snapshot.graph} readInclude={target => bodies.request(target.noteId)} blockIds={blockId ? [blockId] : undefined} highlightBlockIds={blockId ? [blockId] : undefined} clipBlocks={!complete} readReference={target => bodies.request(target.noteId)} onOpenLink={onOpenLink} /></div>
     : <div className="note-canvas-body-state" role="status">{value?.status === 'read' ? 'Saved snapshot changed. Refresh the graph to compare this original.' : held?.pending ? 'Reading original block…' : held?.issue ?? (value && 'message' in value ? value.message : 'This original has not been confirmed in the current reading window.')}
       {!held?.pending && <button type="button" onClick={value?.status === 'read' ? refresh : () => bodies.request(noteId)}>{value?.status === 'read' ? 'Refresh graph' : 'Read original block'}</button>}
     </div>
@@ -189,8 +191,9 @@ function ReferenceDetails({ references, notes, snapshot, bodies, onOpen, refresh
 
 export type NoteCanvasProps = { scope: NoteCanvasScope; active?: boolean; onOpen: OpenNote; onOpenFile?: ((file: CanvasFileTarget, blockId: string | undefined, signal: AbortSignal) => Promise<boolean>) | undefined; onTalk?: NoteTalkHandler | undefined; seedNoteIds?: readonly string[] | undefined; expandOnFirstView?: boolean }
 export function NoteCanvas(props: NoteCanvasProps) {
+  const openAttachment = useDesktopNoteLinkOpener()
   // Scope owns a separate viewport and asynchronous lifetime; changing it never repurposes an old request.
-  return <NoteCanvasSurface key={noteCanvasScopeKey(props.scope)} {...props} />
+  return <NoteFileLinkContext.Provider value={openAttachment}><NoteCanvasSurface key={noteCanvasScopeKey(props.scope)} {...props} /></NoteFileLinkContext.Provider>
 }
 function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, seedNoteIds, expandOnFirstView = true }: NoteCanvasProps) {
   const { snapshot, issue, stale, busy, refresh } = useNoteCanvasObservation(active)

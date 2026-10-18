@@ -10,3 +10,26 @@
 .note-formula__edit > input, .note-formula__edit > textarea { min-width: 0; width: 16em; max-width: 100%; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--text); padding: var(--sp-2); font: inherit; font-family: var(--font-mono); }
 .note-formula__edit > textarea { flex: 1; resize: vertical; }
 .note-formula__done { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-2); padding: var(--sp-1) var(--sp-2); font: inherit; cursor: pointer; }
+
+.note-image-insert { flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: end; gap: 8px; margin: 0; padding: 12px; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-1); font-size: 12px; }
+.note-image-insert label { flex: 1 1 160px; display: grid; gap: 4px; color: var(--text-2); }
+.note-image-insert label:first-child { flex-basis: 100%; }
+.note-image-insert input { min-width: 0; width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--text); padding: 6px 8px; font: inherit; }
+.note-image-insert > div { display: flex; gap: 8px; }
+.note-image-insert button { min-height: 28px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--text); padding: 4px 8px; font: inherit; cursor: pointer; }
+.note-table-tools { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+:where(.note-block-content, .note-embedded-content, .mobile-note-body) .tableWrapper { max-width: 100%; overflow-x: auto; margin-block: 12px; }
+:where(.note-block-content, .note-embedded-content, .mobile-note-body) table { border-collapse: collapse; table-layout: fixed; width: 100%; margin-block: 12px; }
+:where(.note-block-content, .note-embedded-content, .mobile-note-body) th,
+:where(.note-block-content, .note-embedded-content, .mobile-note-body) td { position: relative; min-width: 96px; padding: 8px 10px; border: 1px solid var(--line); vertical-align: top; }
+:where(.note-block-content, .note-embedded-content, .mobile-note-body) th { background: var(--surface-1); font-weight: 600; }
+:where(.note-block-content, .note-embedded-content, .mobile-note-body) :is(th, td) > p { margin: 0; }
+:where(.note-block-content, .note-embedded-content, .mobile-note-body) .selectedCell::after { position: absolute; inset: 0; content: ''; pointer-events: none; background: var(--wash-1); box-shadow: inset 0 0 0 1px var(--green); }
+:where(.note-block-content, .note-embedded-content, .mobile-note-body) ul[data-type="taskList"] { list-style: none; padding-left: 0; }
+:where(.note-block-content, .note-embedded-content, .mobile-note-body) li[data-checked] { display: flex; gap: 8px; align-items: flex-start; }
+:where(.note-block-content, .note-embedded-content, .mobile-note-body) li[data-checked] > label { flex: none; display: inline-flex; align-items: center; min-height: 28px; cursor: pointer; }
+:where(.note-block-content, .note-embedded-content, .mobile-note-body) li[data-checked] > div { flex: 1; min-width: 0; }
+:where(.note-block-content, .note-embedded-content, .mobile-note-body) li[data-checked] input { margin: 0; accent-color: var(--green); width: 16px; height: 16px; }
+:where(.note-block-content, .note-embedded-content, .mobile-note-body) img { max-width: 100%; height: auto; }
+
+:where(.note-block-content, .note-embedded-content, .mobile-note-body) li[data-checked] > div > p:first-child { margin-block-start: 0; }

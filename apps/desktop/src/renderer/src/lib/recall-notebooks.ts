@@ -1,4 +1,4 @@
-import type { Notebook, NotebookPage } from '@agentmux/core/notebook-catalog'
+import type { Notebook, NotebookPage, NoteResource } from '@agentmux/core/notebook-catalog'
 import { fileNavigationSelection, useAppStore } from '../store'
 import { api } from './api'
 import { changeNotebook, notebookPageResourceMatches } from './notebook-library'
@@ -35,8 +35,23 @@ export async function openNotebookPage(page: NotebookPage, onSelectReference?: (
 /** Shared Markdown uses the same original file and workface navigation as a catalog page. */
 export async function openNotebookFile(page: Pick<NotebookPage, 'noteId' | 'resource' | 'workface'>, onSelectReference?: (reference: WorkbenchProjectionSelection) => void, selectedReference?: WorkbenchProjectionSelection | null, target?: NoteBlockTarget, origin?: NotePageOpenOrigin, signal?: AbortSignal): Promise<boolean> {
   if (signal?.aborted) return false
-  const before = useAppStore.getState()
   if (target && target.noteId !== page.noteId) throw new Error('The requested block belongs to another Note. The original page is kept; choose its exact source.')
+  return openNotebookResource(page, onSelectReference, selectedReference, target ? { line: 1, noteBlock: target } : undefined, origin, signal, async () => {
+    const observed = await api.files.read(page.resource.workspaceId, page.resource.path)
+    if (signal?.aborted) return
+    const read = observed.status === 'read' ? readNoteDocument(observed.document.content) : null
+    if (read?.status !== 'valid' || read.note.noteId !== page.noteId) throw new Error('The original Note file could not be confirmed. Its directory entry and sources are kept; reconnect or restore this same file.')
+  }, true)
+}
+
+/** Attachments retain the same Files owner without claiming a Note identity. */
+export function openNotebookAttachment(resource: NoteResource, workface: NonNullable<Notebook['workface']>, onSelectReference?: (reference: WorkbenchProjectionSelection) => void, selectedReference?: WorkbenchProjectionSelection | null, location?: { line: number; column?: number }, signal?: AbortSignal, origin?: NotePageOpenOrigin): Promise<boolean> {
+  return openNotebookResource({ resource, workface }, onSelectReference, selectedReference, location, origin, signal)
+}
+
+async function openNotebookResource(page: Pick<NotebookPage, 'resource' | 'workface'>, onSelectReference?: (reference: WorkbenchProjectionSelection) => void, selectedReference?: WorkbenchProjectionSelection | null, location?: { line: number; column?: number; noteBlock?: NoteBlockTarget }, origin?: NotePageOpenOrigin, signal?: AbortSignal, confirm?: () => Promise<void>, openAsText?: boolean): Promise<boolean> {
+  if (signal?.aborted) return false
+  const before = useAppStore.getState()
   if (!notebookPageResourceMatches(page, before.config)) throw new Error('The Note’s original Host or folder is unavailable. Its page and history are kept; reconnect this resource.')
   const catalog = catalogNow(), zone = catalog.zones.find(z => z.zoneId === (origin?.space.zoneId ?? page.workface?.zoneId))
   if (!zone) throw new Error('This page’s work surface is unavailable. Its saved Note and history remain in this Notebook.')
@@ -56,10 +71,8 @@ export async function openNotebookFile(page: Pick<NotebookPage, 'noteId' | 'reso
   // The layout's active sibling is not an intermediate navigation destination.
   if (!origin) before.setRecallZoneSelection(reference ? surveySelectReference(initial, reference) : initial)
   const heldSelection = useAppStore.getState().recallZoneSelection
-  const observed = await api.files.read(page.resource.workspaceId, page.resource.path)
+  if (confirm) await confirm()
   if (signal?.aborted) return false
-  const read = observed.status === 'read' ? readNoteDocument(observed.document.content) : null
-  if (read?.status !== 'valid' || read.note.noteId !== page.noteId) throw new Error('The original Note file could not be confirmed. Its directory entry and sources are kept; reconnect or restore this same file.')
   if (matches.length && !reference) throw new Error('This page is already open in multiple locations. Choose its Tab in the work surface, then reopen from this Notebook. Your page and all locations are kept.')
   const current = useAppStore.getState()
   if (signal?.aborted || current.mainSurface !== before.mainSurface) return false
@@ -80,7 +93,7 @@ export async function openNotebookFile(page: Pick<NotebookPage, 'noteId' | 'reso
       : origin.projection.entity.kind === 'tab' ? { kind: 'tab', tabId: reference.tabId }
         : { kind: 'region', regionId: reference.regionId }
   } : origin?.projection
-  return current.openFile(page.resource.path, groupId, target ? { line: 1, noteBlock: target } : undefined, page.resource.workspaceId, true,
+  return current.openFile(page.resource.path, groupId, location, page.resource.workspaceId, openAsText,
     { displayWorkspaceId, ...(reference ? { reference } : {}), space: { zoneId: zone.zoneId, spaceId: zoneContext(current, scratchTopicsForWorkspace(current.scratchTopicSnapshots, current.config?.workspaces.find(w => w.id === SCRATCH_WORKSPACE_ID)) ?? [], zone) },
       resource: { hostId: page.resource.hostId, path: page.resource.workspacePath }, ...(origin ? { ...(targetProjection ? { projection: targetProjection } : {}),
         ...(origin.onResult || origin.onPlaced ? { onResult(result) {

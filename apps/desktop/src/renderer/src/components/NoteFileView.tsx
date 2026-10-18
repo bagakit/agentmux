@@ -1,3 +1,5 @@
+import { NoteFileContext, NoteFileLinkContext, useNoteFileResource } from '@agentmux/client-ui/components/NoteFileContext'
+import { useDesktopNoteLinkOpener } from '../lib/note-file-link'
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { NoteViewToolbarContext } from '../lib/note-view-toolbar'
@@ -48,10 +50,12 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
 }) {
   const catalog = useNotebookLibrary(state => state.state)
   const presentation = useWorkbenchBrowserPresentation()
+  const openAttachment = useDesktopNoteLinkOpener()
   const toolbar = useContext(NoteViewToolbarContext)
   const [canvasOpen, setCanvasOpen] = useState(false)
   const [canvasBlock, setCanvasBlock] = useState<(NoteBlockTarget & { sourceIdentity: string }) | null>(null)
   const read = useMemo(() => parseNoteFile(document), [document])
+  const parentResource = useNoteFileResource()
   const savedEditors = useMemo(() => noteSavedEditors(document, read.status === 'valid' ? read.note.noteId : '', resource),
     [document.noteProvenance, document.path, document.revision, read.status === 'valid' ? read.note.noteId : null, resource?.hostId, resource?.workspaceId, resource?.workspacePath, resource?.path])
   const sourceIdentity = JSON.stringify([resource?.hostId, resource?.workspaceId, resource?.workspacePath, document.path, read.status === 'valid' ? read.note.noteId : null])
@@ -167,7 +171,7 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
   if (read.status === 'invalid') return <div className="note-file-view"><div className="note-invalid" role="status"><strong>Note source needs attention</strong>
     <p>{read.message}</p><p>The original source is preserved. Use Source to inspect it; no block identities have been repaired.</p></div>{footer}</div>
   const identityIcon = <NoteFileIdentity key={sourceIdentity} scope={sourceIdentity} document={document} resource={resource} dirty={dirty} active={presentation.active && !canvasOpen} />
-  return <div className="note-file-view">
+  return <NoteFileLinkContext.Provider value={openAttachment}><NoteFileContext.Provider value={resource ?? parentResource}><div className="note-file-view">
     {restoreIssue || issue ? <div className="note-knowledge-notice" role="status">{restoreIssue || issue}</div> : null}
     {resource && catalog?.pages[read.note.noteId] && sameNoteResource(catalog.pages[read.note.noteId]!.resource, resource) ? <NotebookPageDetails key={read.note.noteId} page={catalog.pages[read.note.noteId]!} savedEditors={savedEditors}
       {...(read.note.title === undefined ? {} : { sourceTitle: read.note.title })} {...(dirty === undefined ? {} : { sourceDirty: dirty })} {...(onCheckOriginal ? { onCheckOriginal } : {})} /> : null}
@@ -195,5 +199,5 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
     </WorkbenchPresentationContext.Provider></div>
     {links.dialog}
     {footer}
-  </div>
+  </div></NoteFileContext.Provider></NoteFileLinkContext.Provider>
 }

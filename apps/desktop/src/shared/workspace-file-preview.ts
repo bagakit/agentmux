@@ -29,7 +29,7 @@ export const WORKSPACE_FILE_PREVIEW_FORMATS = {
 
 export type WorkspaceFilePreviewFormat = (typeof WORKSPACE_FILE_PREVIEW_FORMATS)[keyof typeof WORKSPACE_FILE_PREVIEW_FORMATS]
 export type WorkspaceFilePreviewKind = WorkspaceFilePreviewFormat['kind']
-export type WorkspaceFilePreviewReadOptions = { expectedRevision?: string }
+export type WorkspaceFilePreviewReadOptions = { expectedRevision?: string; expectedResource?: { hostId: string; workspacePath: string } }
 
 export function workspaceFileExtension(path: string): string {
   const name = path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1)

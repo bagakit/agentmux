@@ -3,11 +3,13 @@ import type { AgentProviderId } from '@agentmux/core'
 import type { AmuxObjectLinkTarget } from '@agentmux/core/sharing'
 import type { BrowserInputImageReference } from '@agentmux/core/browser-input-context'
 import type { ConversationSenderDetails, ConversationSpeaker } from './lib/conversation-speaker.js'
+import type { NoteResource } from '@agentmux/core/notebook-catalog'
 
 export type ClientUiIconName = 'neutral' | 'working' | 'failed'
 export type ObjectLinkReference = { uri: string; target: AmuxObjectLinkTarget; label?: string }
 export type MarkdownDiagramInput = { code: string; language: 'mermaid' | 'dot' | 'gv' | 'drawio' | 'plantuml'; visible: boolean }
 export type BrowserSelectionImageInput = { reference: BrowserInputImageReference; visible: boolean; interactive: boolean }
+export type NoteImageInput = { resource: NoteResource | null; src: string; alt: string; title?: string }
 
 /** Client-owned IO and presentation. Nothing here discovers a Runtime or retains its facts. */
 export type ClientUiPlatform = {
@@ -32,6 +34,10 @@ export type ClientUiPlatform = {
   renderObjectLink?(reference: ObjectLinkReference): ReactNode
   /** Optional transient diagram presentation. The host owns cancelable, isolated computation. */
   renderMarkdownDiagram?(input: MarkdownDiagramInput): ReactNode
+  /** Original Note resource owns relative image reads; no inferred local filesystem. */
+  renderNoteImage?(input: NoteImageInput): ReactNode
+  /** Resolve an authored link against its original Note resource; false keeps it visible in place. */
+  openNoteLink?(resource: NoteResource | null, href: string): Promise<boolean>
   /** Exact saved selection image. The host validates Host, confined path, hash and dimensions;
    * the shared reader never falls back to path-only local or network IO. */
   renderBrowserSelectionImage?(input: BrowserSelectionImageInput): ReactNode
@@ -47,6 +53,8 @@ export function useObjectLinkRenderer(): ClientUiPlatform['renderObjectLink'] {
 export function useMarkdownDiagramRenderer(): ClientUiPlatform['renderMarkdownDiagram'] {
   return useContext(PlatformContext)?.renderMarkdownDiagram
 }
+export function useNoteLinkOpener(): ClientUiPlatform['openNoteLink'] { return useContext(PlatformContext)?.openNoteLink }
+export function useNoteImageRenderer(): ClientUiPlatform['renderNoteImage'] { return useContext(PlatformContext)?.renderNoteImage }
 
 export function useBrowserSelectionImageRenderer(): ClientUiPlatform['renderBrowserSelectionImage'] {
   return useContext(PlatformContext)?.renderBrowserSelectionImage

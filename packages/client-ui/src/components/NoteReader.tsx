@@ -1,3 +1,7 @@
+import { NoteLinkActions } from './NoteLinkActions.js'
+import type { NoteResource } from '@agentmux/core/notebook-catalog'
+import { NoteFileContext, useNoteFileResource, resolveNoteSourceResource } from './NoteFileContext.js'
+import { NoteTableTools } from './NoteTableTools.js'
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { EditorContent, NodeViewContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, type NodeViewProps, useEditorState } from '@tiptap/react'
 import type { NoteProvenanceSnapshot } from '@agentmux/core/note-provenance'
@@ -26,7 +30,7 @@ function InlineLink({ node, editor }: NodeViewProps) {
   return <NoteInlineLinkView node={node} editor={editor} onOpen={scope?.onOpenLink} />
 }
 function Reference({ node }: NodeViewProps) {
-  const scope = useContext(Scope)
+  const scope = useContext(Scope), parentResource = useNoteFileResource()
   const reference = node.attrs as NoteBlockReference
   if (!scope || !reference.target) return <NodeViewWrapper className="mobile-note-reference" role="status">引用目标尚未确认；当前输入保留，可撤销这次粘贴后继续编辑。</NodeViewWrapper>
   const result = resolveNoteBlock(scope.knowledge, reference.target)
@@ -34,7 +38,7 @@ function Reference({ node }: NodeViewProps) {
   return <NodeViewWrapper className="mobile-note-reference" data-block-id={node.attrs.blockId}>
     <strong>{reference.mode === 'embed' ? '引用原块' : '块引用'}</strong>
     {scope.trail.includes(key) ? <p role="status">循环引用，原引用保留。</p>
-      : result.status === 'resolved' ? <Scope.Provider value={{ ...scope, workspaceId: result.source.location.workspaceId, trail: [...scope.trail, key] }}><RichContent content={projectNoteBlocks(result.source, [result.block.blockId]).content} /></Scope.Provider>
+      : result.status === 'resolved' ? <Scope.Provider value={{ ...scope, workspaceId: result.source.location.workspaceId, trail: [...scope.trail, key] }}><NoteFileContext.Provider value={resolveNoteSourceResource(parentResource, result.source.location, scope.graph)}><RichContent content={projectNoteBlocks(result.source, [result.block.blockId]).content} /></NoteFileContext.Provider></Scope.Provider>
         : <><p role="status">引用正文尚未读取，原引用保留。</p>{scope.readReference && <button type="button" onClick={() => scope.readReference!(reference.target)}>读取引用原文</button>}</>}
     <details><summary>引用来源</summary><code>{reference.target.noteId} / {reference.target.blockId}</code></details>
   </NodeViewWrapper>
@@ -42,7 +46,7 @@ function Reference({ node }: NodeViewProps) {
 
 /** Pure reading of already observed original bytes; the host owns every File read. */
 function Include({ node }: NodeViewProps) {
-  const scope = useContext(Scope), include = node.attrs as NoteInclude
+  const scope = useContext(Scope), parentResource = useNoteFileResource(), include = node.attrs as NoteInclude
   if (!scope) return <NodeViewWrapper className="mobile-note-reference" role="status">共享内容的原文件范围尚未确认。</NodeViewWrapper>
   const candidates = scope.graph?.observations.filter(item => item.noteId === include.noteId) ?? []
   const observed = candidates.length === 1 && !scope.graph?.duplicateNoteIds.includes(include.noteId) ? candidates[0] : undefined
@@ -56,7 +60,7 @@ function Include({ node }: NodeViewProps) {
   return <NodeViewWrapper className="mobile-note-reference note-include" contentEditable={false} data-block-id={node.attrs.blockId} data-shared-note-id={include.noteId}>
     <strong>{resolved.status === 'resolved' ? resolved.source.note.title ?? '共享内容' : '共享内容'}</strong>
     {cycle ? <p role="status">循环引用，原共享内容与引用保留。</p> : resolved.status === 'resolved'
-      ? <Scope.Provider value={{ ...scope, workspaceId: resolved.source.location.workspaceId, trail: [...scope.trail, key] }}><RichContent content={resolved.source.note.content} /></Scope.Provider>
+      ? <Scope.Provider value={{ ...scope, workspaceId: resolved.source.location.workspaceId, trail: [...scope.trail, key] }}><NoteFileContext.Provider value={resolveNoteSourceResource(parentResource, resolved.source.location, scope.graph)}><RichContent content={resolved.source.note.content} /></NoteFileContext.Provider></Scope.Provider>
       : <><p role="status">共享原文尚未确认，原引用保留。{resolved.message}</p>{scope.readInclude && <button type="button" onClick={() => scope.readInclude!({ noteId: include.noteId, path: include.path, ...(typeof include.workspaceId === 'string' ? { workspaceId: include.workspaceId } : {}) })}>读取共享原文</button>}</>}
     <details><summary>共享来源</summary><code>{include.noteId} · {resolved.status === 'resolved' ? resolved.source.location.path : include.path}</code></details>
   </NodeViewWrapper>
@@ -164,7 +168,7 @@ function RichContent({ content, onChange, onCompositionChange, onSnapshotIssue, 
     <button type="button" aria-pressed={state?.heading} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>标题</button>
     <button type="button" aria-pressed={state?.list} onClick={() => editor.chain().focus().toggleBulletList().run()}>列表</button>
     <button type="button" aria-pressed={state?.code} onClick={() => editor.chain().focus().toggleCodeBlock().run()}>代码</button>
-    <NoteInsertMenu editor={editor} />
+    <NoteInsertMenu editor={editor} /><NoteTableTools editor={editor} />
     <button type="button" onClick={() => editor.chain().focus().undo().run()}>撤销</button>
     <button type="button" onClick={() => editor.chain().focus().redo().run()}>重做</button>
   </div>}{issue && <section role="status" aria-label="Incoming update recovery"><p>{issue}</p>
@@ -178,7 +182,7 @@ function RichContent({ content, onChange, onCompositionChange, onSnapshotIssue, 
       }}>Keep editing displayed draft</button>}
       {compareIncoming && <div aria-label="Draft comparison, read only"><h4>Displayed draft</h4><RichContent content={mappingDrafts.displayed} /><h4>Incoming draft</h4><RichContent content={mappingDrafts.incoming} /></div>}
     </>}
-  </section>}<EditorContent editor={editor} /><NoteBlockAuthors editor={editor} agentNames={scope?.agentNames} /></>
+  </section>}<NoteLinkActions editor={editor} /><EditorContent editor={editor} /><NoteBlockAuthors editor={editor} agentNames={scope?.agentNames} /></>
 }
 export type NoteEditing = {
   initial?: NoteEditState | undefined
@@ -189,7 +193,7 @@ export type NoteEditing = {
   save(content: string, expectedRevision: string): Promise<FileWriteReceipt>
   readCurrent(): Promise<FileReadResult>
 }
-export type NoteReaderProps = { agentNames?: Readonly<Record<string, string>> | undefined; noteProvenance?: NoteProvenanceSnapshot | undefined; content: string; path: string; workspaceId: string; revision: string | null;
+export type NoteReaderProps = { resource?: NoteResource | undefined; agentNames?: Readonly<Record<string, string>> | undefined; noteProvenance?: NoteProvenanceSnapshot | undefined; content: string; path: string; workspaceId: string; revision: string | null;
   documents?: Parameters<typeof noteKnowledge>[0] | undefined
   graph?: NotebookGraph | undefined
   readInclude?: ((target: Pick<NoteInclude, 'noteId' | 'path' | 'workspaceId'>) => void) | undefined
@@ -208,7 +212,9 @@ export type NoteReaderProps = { agentNames?: Readonly<Record<string, string>> | 
 }
 const EMPTY_IDS: readonly string[] = []
 const EMPTY_DOCUMENTS: NonNullable<NoteReaderProps['documents']> = []
-export function NoteReader({ agentNames, content, path, workspaceId, revision, noteProvenance, documents = EMPTY_DOCUMENTS, graph, readInclude, blockIds, highlightBlockIds = EMPTY_IDS, clipBlocks = true, previewBlockCount, compactIncludes, readReference, editing, target, onOpenLink }: NoteReaderProps) {
+export function NoteReader({ resource, agentNames, content, path, workspaceId, revision, noteProvenance, documents = EMPTY_DOCUMENTS, graph, readInclude, blockIds, highlightBlockIds = EMPTY_IDS, clipBlocks = true, previewBlockCount, compactIncludes, readReference, editing, target, onOpenLink }: NoteReaderProps) {
+  const parentResource = useNoteFileResource()
+  const originalResource = resource ?? resolveNoteSourceResource(parentResource, { workspaceId, path }, graph)
   const observed = useMemo(() => ({ path, content, revision: revision ?? '', ...noteProvenance ? { noteProvenance } : {} }), [path, content, revision, noteProvenance])
   const [written, setWritten] = useState<{ source: NoteFileDocument; document: NoteFileDocument } | null>(null)
   // Consume this original write receipt while its input observation is still current.
@@ -233,13 +239,13 @@ export function NoteReader({ agentNames, content, path, workspaceId, revision, n
     const element = [...body.current?.querySelectorAll<HTMLElement>('[data-block-id]') ?? []].find(element => element.dataset.blockId === target.blockId)
     element?.scrollIntoView?.({ block: 'center' })
   }, [target?.noteId, target?.blockId, block?.status])
-  return parsed.status === 'valid' ? <Scope.Provider value={{ knowledge, workspaceId, agentNames, graph, trail: [], compactIncludes, readInclude, readReference, onOpenLink }}><div ref={body} data-note-id={parsed.note.noteId} data-target-block={block?.status === 'resolved' ? target?.blockId : undefined}>
+  return parsed.status === 'valid' ? <NoteFileContext.Provider value={originalResource}><Scope.Provider value={{ knowledge, workspaceId, agentNames, graph, trail: [], compactIncludes, readInclude, readReference, onOpenLink }}><div ref={body} data-note-id={parsed.note.noteId} data-target-block={block?.status === 'resolved' ? target?.blockId : undefined}>
     {original.noteProvenance?.status === 'unconfirmed' && <p role="status">块作者未确认：{original.noteProvenance.reason} 正文仍可阅读和编辑；重新读取同一原文件可核对元数据。</p>}
     {target && <section aria-label="原块定位" data-block-target-status={block?.status}>
       {block?.status === 'resolved' ? <><strong>引用的原块</strong><p>{block.block.text}</p></> : <p role="status">原块未确认：{block?.message} 原引用保留，仍可阅读完整笔记。</p>}
     </section>}
     {editing && original.revision ? <EditableNote key={parsed.note.noteId} note={parsed.note} content={original.content} revision={original.revision} original={original} onWritten={document => setWritten({ source: observed, document })} editing={{ ...editing, subscribe: editing.subscribe ? listener => editing.subscribe!(state => { setWorking({ noteId: state.noteId, content: state.draft }); listener(state) }) : undefined, onDraft: state => { setWorking({ noteId: state.noteId, content: state.draft }); editing.onDraft(state) } }} /> : <RichContent key={readingScope} highlightBlockIds={highlightBlockIds} content={excerpt ? { type: 'doc', content: clipBlocks ? excerpt.content.content?.map(node => readingExcerpt(node, highlightBlockIds)) ?? [] : (excerpt.content.content ?? []) } : previewBlockCount === undefined ? parsed.note.content : { ...parsed.note.content, content: parsed.note.content.content?.slice(0, previewBlockCount).map(node => readingExcerpt(node, highlightBlockIds)) ?? [] }} />}
-  </div></Scope.Provider> : <><p role="status">原笔记读取问题：{parsed.message}</p><pre>{content}</pre></>
+  </div></Scope.Provider></NoteFileContext.Provider> : <><p role="status">原笔记读取问题：{parsed.message}</p><pre>{content}</pre></>
 }
 function EditableNote({ note, content, revision, editing, original, onWritten }: { note: NoteDocument; content: string; revision: string; editing: NoteEditing; original: NoteFileDocument; onWritten(document: NoteFileDocument): void }) {
   const alive = useRef(true)

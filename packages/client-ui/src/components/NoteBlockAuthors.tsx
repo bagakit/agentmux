@@ -34,7 +34,7 @@ export function NoteBlockAuthors({ editor, agentNames = EMPTY_NAMES }: { editor:
         const unknown = !provenance?.created || !provenance?.lastEdited
         const human = !unknown && provenance?.created?.actor.kind !== 'agent' && provenance?.lastEdited?.actor.kind !== 'agent'
         const reference = node.type.name === 'noteInclude' || node.type.name === 'blockReference'
-        const afterBlock = node.type.name === 'codeBlock'
+        const afterBlock = ['codeBlock', 'table', 'noteRawBlock'].includes(node.type.name)
         decorations.push(Decoration.widget(position + node.nodeSize - (node.isLeaf || afterBlock ? 0 : 1), view => {
           const button = view.dom.ownerDocument.createElement('button')
           button.type = 'button'; button.contentEditable = 'false'; button.className = 'note-block-author nodrag nopan'
@@ -47,7 +47,7 @@ export function NoteBlockAuthors({ editor, agentNames = EMPTY_NAMES }: { editor:
           button.addEventListener('mousedown', event => event.preventDefault())
           button.addEventListener('click', event => { event.stopPropagation(); open({ anchor: button, provenance, reference }) })
           return button
-        }, { key: JSON.stringify([node.attrs.blockId, provenance, label, reference]), side: -1, stopEvent: () => true, ignoreSelection: true }))
+        }, { key: JSON.stringify([node.attrs.blockId, provenance, label, reference]), side: -1, marks: [], stopEvent: () => true, ignoreSelection: true }))
       })
       return DecorationSet.create(doc, decorations)
     }

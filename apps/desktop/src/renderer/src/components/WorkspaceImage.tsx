@@ -1,9 +1,10 @@
+import type { WorkspaceFilePreviewReadOptions } from '../../../shared/workspace-file-preview'
 import { useEffect, useRef, useState } from 'react'
 import { usePreviewObjectUrl, useWorkspaceFilePreview } from '../lib/use-workspace-file-preview'
 
 /** Local Markdown image bytes use the same Main authority and resource fence as file media. */
-export function WorkspaceImage({ workspaceId, path, alt, openFile, linked = false }: {
-  workspaceId: string; path: string; alt: string; openFile: () => void; linked?: boolean
+export function WorkspaceImage({ workspaceId, path, alt, openFile, linked = false, expectedResource, title }: {
+  workspaceId: string; path: string; alt: string; openFile: () => void; linked?: boolean; title?: string; expectedResource?: WorkspaceFilePreviewReadOptions['expectedResource']
 }) {
   const element = useRef<HTMLSpanElement>(null)
   const [visible, setVisible] = useState(false)
@@ -16,7 +17,7 @@ export function WorkspaceImage({ workspaceId, path, alt, openFile, linked = fals
     observer.observe(target)
     return () => observer.disconnect()
   }, [])
-  const { preview, failure, reload } = useWorkspaceFilePreview(workspaceId, path, visible)
+  const { preview, failure, reload } = useWorkspaceFilePreview(workspaceId, path, visible, expectedResource)
   const url = usePreviewObjectUrl(preview?.kind === 'image' ? preview : null)
   const [failedUrl, setFailedUrl] = useState<string | null>(null)
   const unavailable = failure || preview && preview.kind !== 'image' || url && failedUrl === url
@@ -25,7 +26,7 @@ export function WorkspaceImage({ workspaceId, path, alt, openFile, linked = fals
       <span>{alt || path}: {failure?.message ?? 'Image could not be decoded.'}</span>
       {!linked ? <><button className="small-button" onClick={() => { setFailedUrl(null); reload() }}>Retry</button>
       <button className="small-button" onClick={openFile}>Open file</button></> : null}
-    </span> : url ? <img src={url} alt={alt} title={path} onLoad={event => setHeight(event.currentTarget.getBoundingClientRect().height)} onError={() => setFailedUrl(url)} />
+    </span> : url ? <img src={url} alt={alt} title={title ?? path} onLoad={event => setHeight(event.currentTarget.getBoundingClientRect().height)} onError={() => setFailedUrl(url)} />
       : visible ? <span className="file-markdown-image__loading" role="status">Loading {alt || path}…</span> : null}
   </span>
 }

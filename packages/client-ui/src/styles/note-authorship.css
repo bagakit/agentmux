@@ -19,4 +19,4 @@
 .note-authorship summary { width: fit-content; cursor: pointer; }
 .note-authorship code { display: block; margin-top: 4px; overflow-wrap: anywhere; white-space: normal; user-select: text; }
 .note-block-author[data-author-placement="block-end"] { display: block; margin-inline-start: 0; margin-block-start: var(--sp-1); }
-.node-codeBlock:hover + .note-block-author[data-human-only] { opacity: 1; }
+:is(.node-codeBlock, .node-noteRawBlock, .tableWrapper):hover + .note-block-author[data-human-only] { opacity: 1; }
