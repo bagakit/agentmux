@@ -14,6 +14,7 @@ import { notificationsSettingsModule } from '../src/renderer/src/components/sett
 import { providerCatalogReader, historySourcesReader } from './helpers/startup-observation-api-fixture'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
 import { createClientUiRoot } from './helpers/client-ui-render'
+import { configOwnerFixture } from './helpers/config-owner-fixture'
 
 const initial = useAppStore.getState()
 const config = { ...composerConfig, notifications: { mode: 'standard' as const, sound: false }, a2a: { notifications: 'follow-global' as const } }
@@ -190,4 +191,29 @@ it('the real Notifications settings module scopes banners, saves only its draft 
   expect(useAppStore.getState().sessions).toBe(before.sessions)
   expect(useAppStore.getState().notificationEvents).toBe(before.notificationEvents)
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+})
+
+it('saves shared sound with Agent status banners off and delivers enabled A2A alerts with that exact preference', async () => {
+  const owner = await configOwnerFixture({ ...config, notifications: { mode: 'off', sound: false }, a2a: { notifications: 'notify' } })
+  const offConfig = owner.owner.current
+  const publish = owner.publish.getMockImplementation()!
+  owner.publish.mockImplementation(next => { publish(next); useAppStore.getState().setConfig(next) })
+  await act(async () => useAppStore.setState({ config: offConfig }))
+  const save = vi.spyOn(api.config, 'save').mockImplementation((next, expected) => owner.owner.edit(expected, next))
+  const settings = document.createElement('div'); container.append(settings); settingsRoot = createClientUiRoot(settings)
+  await act(async () => settingsRoot!.render(<notificationsSettingsModule.Pane config={offConfig} active={true} onClose={() => {}} onNavigate={() => {}} />))
+  const checkbox = settings.querySelector<HTMLInputElement>('input[type="checkbox"]')!
+  expect(checkbox.disabled).toBe(false)
+  expect(settings.textContent).toContain('Applies to Agent status banners and enabled A2A message alerts')
+  await act(async () => checkbox.click())
+  await act(async () => settings.querySelector<HTMLButtonElement>('.primary-button')!.click())
+  await act(async () => { await save.mock.results.at(-1)!.value })
+  expect(save).toHaveBeenCalledExactlyOnceWith({ ...offConfig, notifications: { mode: 'off', sound: true } }, offConfig)
+  expect((await owner.disk()).notifications).toEqual({ mode: 'off', sound: true })
+  const notify = vi.mocked(api.ui.notifyAgentAttention)
+  notify.mockClear()
+  await transition('done')
+  expect(notify).not.toHaveBeenCalled()
+  await act(async () => emit(message(1)))
+  expect(notify).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ title: 'New Agent message', mode: 'standard', sound: true }))
 })

@@ -22,6 +22,7 @@ import { sessionNameMetadataKey } from '../src/renderer/src/lib/session-name-met
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
+import { currentNotificationRows, toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
 
 // The retained product chain stays real through SessionPane and Composer. Only
 // the native Terminal leaf is unavailable in happy-dom; Native proof owns it.
@@ -194,6 +195,15 @@ it.each([1, 32, 100])('reuses unrelated global Session notice projections and fi
   await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === 'owned-0' ? {
     ...session, timelineObservation: { code: 'ORIGINAL_HISTORY_FAULT', message: 'New original Session history fault', run: session.control.run }
   } : session) })))
+  await toggleNotificationCenter(dom.container, 'open')
+  const groupId = JSON.stringify(['agents', JSON.stringify(['agent', 'local', 'owned-0', 'run-owned-0'])])
+  const group = [...dom.container.querySelectorAll<HTMLElement>('.notification-group')].find(item => item.dataset.groupId === groupId)
+  expect(group).toBeDefined()
+  const more = group!.querySelector<HTMLButtonElement>('.notification-group__more[aria-expanded="false"]')
+  if (more) await act(async () => more.click())
+  const notice = currentNotificationRows(dom.container).find(row => row.dataset.noticeId === JSON.stringify(['local', 'owned-0', 'timeline-observation']))
+  expect(notice).toBeDefined()
+  await toggleNotificationDetails(notice!)
   expect(dom.container.textContent).toContain('New original Session history fault')
   await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => {
     if (session.kind !== 'agent' || session.id !== 'owned-0') return session

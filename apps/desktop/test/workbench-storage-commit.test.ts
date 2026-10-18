@@ -5,6 +5,7 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import type { AppConfig, RuntimeEvent, SessionSnapshot } from '../src/shared/contracts'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { providerCatalogReader } from './helpers/startup-observation-api-fixture'
+import { toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
 
 const storageName = 'agentmux-workbench-v1'
 const sessionId = 'storage-commit-agent'
@@ -184,6 +185,15 @@ describe('actual workbench writes request native storage commit', () => {
     let html: string
     try {
       await act(async () => root.render(createElement(GlobalSystemNotices)))
+      // The mounted passive notification must not create another save. Reading
+      // Details is an explicit durable acknowledgement, measured separately.
+      await act(async () => { await vi.advanceTimersByTimeAsync(800) })
+      expect(trace.map(item => item.kind)).toEqual(['write'])
+      expect(api.ui.requestStorageFlush).toHaveBeenCalledTimes(1)
+      await toggleNotificationCenter(container, 'open')
+      const notice = container.querySelector<HTMLElement>('[data-notice-id="workbench-save"]')
+      expect(notice).not.toBeNull()
+      await toggleNotificationDetails(notice!)
       html = container.innerHTML
     } finally {
       await act(async () => root.unmount())
@@ -196,9 +206,6 @@ describe('actual workbench writes request native storage commit', () => {
     expect(store.getState().sessions).toEqual([healthy])
     expect(store.getState().agentComposerDrafts).toEqual({ [sessionId]: 'Kept unsent draft' })
     expect(saved().state.agentComposerDrafts).toEqual({ [sessionId]: 'Kept unsent draft' })
-    await vi.advanceTimersByTimeAsync(800)
-    expect(trace.map(item => item.kind)).toEqual(['write'])
-    expect(api.ui.requestStorageFlush).toHaveBeenCalledTimes(1)
     expect(store.getState().send(sessionId, 'Healthy Agent can still work')).toBe(true)
     await store.getState().flushAgentSteerQueue(sessionId)
     expect(vi.mocked(api.sessions.submitPrompt).mock.calls.map(call => [call[0].run.runId, call[1]])).toEqual([
@@ -294,7 +301,12 @@ describe('actual workbench writes request native storage commit', () => {
     const root = createRoot(host)
     try {
       await act(async () => root.render(createElement(GlobalSystemNotices)))
-      expect([...host.querySelectorAll('[role="status"]')].some(node => node.textContent?.includes('Private bound-input save rejection'))).toBe(true)
+      await toggleNotificationCenter(host, 'open')
+      const notice = host.querySelector<HTMLElement>('[data-notice-id="workbench-save"]')
+      expect(notice).not.toBeNull()
+      await toggleNotificationDetails(notice!)
+      expect(notice!.getAttribute('role')).toBe('status')
+      expect(notice!.textContent).toContain('Private bound-input save rejection')
       expect(host.textContent).toContain('Retry saving')
     } finally { await act(async () => root.unmount()); host.remove() }
     await store.getState().flushAgentSteerQueue(sessionId)

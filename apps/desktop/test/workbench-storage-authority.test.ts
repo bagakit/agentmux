@@ -18,7 +18,7 @@ import { api } from '../src/renderer/src/lib/api.js'
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices.js'
-import { currentNotificationRows, toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
+import { toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
 
 const roots: string[] = []
 afterEach(async () => { vi.restoreAllMocks(); vi.useRealTimers(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
@@ -145,23 +145,23 @@ it('keeps the real save service notice through workspace changes, another error 
     useAppStore.getState().reportWorkbenchSaveFailure(new Error('database missing'))
     await act(async () => root.render(createElement(GlobalSystemNotices)))
     await toggleNotificationCenter(element, 'open')
-    const notice = currentNotificationRows(element).find(row => row.textContent?.includes('Saving the workbench is unconfirmed'))!
-    expect(notice).toBeDefined()
-    await toggleNotificationDetails(notice)
-    expect(notice.querySelector('.service-window')?.getAttribute('role')).toBe('status')
+    const notice = element.querySelector<HTMLElement>('[data-notice-id="workbench-save"]')
+    expect(notice).not.toBeNull()
+    await toggleNotificationDetails(notice!)
+    expect(notice!.textContent).toContain('database missing')
+    expect(notice!.getAttribute('role')).toBe('status')
     expect(element.textContent).toContain('Saving the workbench is unconfirmed')
     const first = useAppStore.getState().workbenchSaveWarning
+    await toggleNotificationCenter(element, 'closed')
     await act(async () => {
       useAppStore.setState({ activeWorkspaceId: 'different-workspace' })
       useAppStore.getState().reportError(new Error('unrelated workflow error'))
       useAppStore.getState().dismissError()
     })
     expect(useAppStore.getState().workbenchSaveWarning).toBe(first)
-    expect(element.textContent).toContain('Saving the workbench is unconfirmed')
-    await toggleNotificationCenter(element, 'closed')
     expect(element.querySelector('.global-system-notices__details')?.getAttribute('data-state')).toBe('closed')
-    expect(useAppStore.getState().workbenchSaveWarning).toBe(first)
     await toggleNotificationCenter(element, 'open')
+    expect(element.textContent).toContain('Saving the workbench is unconfirmed')
     const retry = [...element.querySelectorAll('button')].find(button => button.textContent === 'Retry saving')
     expect(retry).toBeDefined()
     await act(async () => retry!.click())

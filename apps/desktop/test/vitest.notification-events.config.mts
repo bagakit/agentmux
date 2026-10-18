@@ -1,6 +1,6 @@
 import { defineConfig } from 'vitest/config'
 import { relative, resolve } from 'node:path'
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import source from './performance-capture.config.mts'
 const root = resolve(import.meta.dirname, '../../..')
@@ -13,6 +13,13 @@ export default defineConfig({ ...source,
   cacheDir: resolve(import.meta.dirname, '../../../.cache/notification-events'),
   plugins: [...(source.plugins ?? []), { name: 'notification-test-inputs', enforce: 'pre', transform(code, id) {
     const path = relative(root, id.split('?')[0]!), log = process.env.AGENTMUX_PERFORMANCE_LOADED
+    // Vite's explicit ?url module contains a generated URL, not the referenced file's source.
+    // Keep both identities and bind the actual asset bytes instead of calling that transform drift.
+    if (log && new URLSearchParams(id.split('?')[1] ?? '').has('url') && path.startsWith('packages/')) {
+      const asset = readFileSync(resolve(root, path))
+      appendFileSync(log, JSON.stringify({ path, sha256: createHash('sha256').update(asset).digest('hex'),
+        compilationKind: 'asset-url', compiledSHA256: createHash('sha256').update(code).digest('hex') }) + '\n')
+    }
     if (log && path.startsWith('apps/desktop/test/')) appendFileSync(log,
       JSON.stringify({ path, sha256: createHash('sha256').update(code).digest('hex') }) + '\n')
   } }],

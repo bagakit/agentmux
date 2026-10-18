@@ -58,8 +58,10 @@ app.whenReady().then(async () => {
     receipt.consoleErrors = []
     win.webContents.on('console-message', details => { if (details.level === 'error') receipt.consoleErrors.push(details.message) })
     win.webContents.debugger.attach('1.3')
-    await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false })
     await win.loadFile(html)
+    // The native view must exist before Chromium emulation is configured.
+    // Set the scale before seeding original terminals so it stays fixed throughout capture.
+    await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false })
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     await waitFor('window.notificationScene?.initialized()')
     await evaluate('notificationScene.seed()'); await waitFor(`document.querySelector('[data-workbench-region-id="notification-primary"] .xterm-helper-textarea')`)
@@ -99,7 +101,7 @@ app.whenReady().then(async () => {
     await click(section('history'))
     const repeatedRow = `Array.from(document.querySelectorAll('.notification-item')).find(row=>row.textContent.includes('2 observations'))`
     await waitFor(repeatedRow)
-    assert.ok(await evaluate(`${repeatedRow}.querySelector('time')?.textContent.includes('Received')`), 'Client receipt time is explicitly identified as Received')
+    assert.ok(await evaluate(`${repeatedRow}.querySelector('time')?.textContent.toLowerCase().includes('received')`), 'Client receipt time is explicitly identified as Received')
     await click(`${repeatedRow}.querySelector('.notification-item__details summary')`)
     assert.ok(await evaluate(`${repeatedRow}.querySelector('.notification-item__original').textContent.includes('desktop-notifications')`), 'Original typed event source is readable in its exact Details')
     assert.ok(await evaluate(`${repeatedRow}.querySelector('.notification-item__original').textContent.includes('desktop')`), 'Original application object identity is retained')
@@ -116,9 +118,17 @@ app.whenReady().then(async () => {
     const detailViewport = await evaluate(`(()=>{const e=${originalDetail},r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+Math.min(40,r.height/2),height:r.height,scrollHeight:e.scrollHeight,clientHeight:e.clientHeight}})()`)
     assert.ok(detailViewport.height > 0, 'The original long diagnostic is actually visible for review')
     await frame('dark-narrow-long-details')
+    const tailGeometry = `(()=>{const e=${originalDetail},walker=document.createTreeWalker(e,NodeFilter.SHOW_TEXT);let node;while(node=walker.nextNode()){const start=node.textContent.indexOf('FINAL ORIGINAL RECEIPT');if(start<0)continue;const range=document.createRange();range.setStart(node,start);range.setEnd(node,start+'FINAL ORIGINAL RECEIPT'.length);const r=range.getBoundingClientRect(),v=${panel}.querySelector('.global-system-notices__content').getBoundingClientRect();return{top:r.top,bottom:r.bottom,left:r.left,right:r.right,viewportTop:v.top,viewportBottom:v.bottom,viewportLeft:v.left,viewportRight:v.right}}return null})()`
+    const originalTail = await evaluate(tailGeometry)
+    assert.ok(originalTail, 'The actual original diagnostic tail has measurable text')
     await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', x: detailViewport.x, y: detailViewport.y,
-      deltaY: detailViewport.scrollHeight, deltaX: 0 })
-    await painted(); await frame('dark-narrow-long-details-tail')
+      deltaY: Math.max(0, originalTail.bottom - originalTail.viewportBottom + 24), deltaX: 0 })
+    await painted()
+    const visibleTail = await evaluate(tailGeometry)
+    assert.ok(visibleTail.top >= visibleTail.viewportTop && visibleTail.bottom <= visibleTail.viewportBottom &&
+      visibleTail.left >= visibleTail.viewportLeft && visibleTail.right <= visibleTail.viewportRight,
+      'Native wheel exposes the complete original diagnostic tail inside the actual reader viewport')
+    await frame('dark-narrow-long-details-tail')
     const selected = await evaluate(`${section('history')}.getAttribute('aria-selected')`)
     const expandedId = await evaluate(`${longRow}.getAttribute('data-event-id')`)
     const scroll = await evaluate(`(()=>{const p=${panel};const s=[p,...p.querySelectorAll('*')].find(e=>e.scrollHeight>e.clientHeight+30 && ['auto','scroll'].includes(getComputedStyle(e).overflowY));if(!s)return null;s.scrollTop=Math.min(80,s.scrollHeight-s.clientHeight);return{className:s.className,top:s.scrollTop}})()`)
@@ -141,6 +151,24 @@ app.whenReady().then(async () => {
     assert.equal(facts.writes.length, 0, 'Notification reading never submits or pastes Agent input')
     assert.ok(facts.trustedEvents.some(event => event.trusted && event.type === 'click'), 'Actual native pointer input reaches production controls')
     receipt.scenarios.push({ wide, narrow, originalGeometry: geometry, finalGeometry: afterGeometry, originalSurface: before, finalFacts: facts, scroll })
+    await resize(1280, 900)
+    await click(`document.querySelector('[data-shortcut-help-open]')`)
+    await waitFor(`document.querySelector('.settings-page:not([hidden])')`)
+    await click(`document.querySelector('[data-settings-target="notifications"]')`)
+    await waitFor(`document.querySelector('[data-settings-page="notifications"] .settings-notifications')`)
+    await frame('light-wide-desktop-banner-settings')
+    await click(`document.querySelector('input[aria-label="Desktop banner duration"]')`)
+    for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key: 'Home', code: 'Home', windowsVirtualKeyCode: 36 })
+    await waitFor(`document.querySelector('.notification-preview[data-notification-mode="off"]')`)
+    assert.ok(await evaluate(`document.querySelector('.settings-notifications').textContent.includes('Current issues')`), 'OS Off keeps the in-app scope explicit')
+    const sound = `document.querySelector('.notification-sound-toggle input')`
+    assert.equal(await evaluate(`${sound}.disabled`), false, 'Shared sound remains editable for enabled A2A alerts while Agent status banners are off')
+    await click(sound)
+    assert.equal(await evaluate(`${sound}.checked`), true, 'Native input changes the shared sound draft while Agent status banners are off')
+    await resize(720, 780); await frame('light-narrow-desktop-banners-off')
+    await evaluate(`notificationScene.theme('dark')`); await frame('dark-narrow-desktop-banners-off')
+    await click(`document.querySelector('[aria-label="Close settings"]')`)
+    assert.deepEqual(await surface(), before, 'Desktop banner preview preserves original workfaces and drafts')
     receipt.passed = true
   } catch (error) {
     receipt.failure = { name: error.name, message: error.message, stack: error.stack }

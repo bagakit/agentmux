@@ -17,6 +17,7 @@ import { composerSession } from './helpers/composer-dom-fixture'
 import { composerConfig } from './helpers/composer-dom-fixture'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 import type { RenderableServiceNotice } from '../src/renderer/src/lib/service-window-notice'
+import { toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
 
 let container: HTMLDivElement, root: Root
 const initial = useAppStore.getState()
@@ -147,10 +148,14 @@ it('global and lifecycle consumers retain their complete three facts, polite ARI
   useAppStore.setState({ sessions: [], loading: false, environmentWarning: 'Original shell cause', runtimeOwnershipWarnings: [],
     displacedAgentSessionIds: [], error: null, errorNoticeContext: undefined })
   await act(async () => root.render(<GlobalSystemNotices />))
-  const global = container.querySelector('.service-window')!
-  expect(global.querySelector('.surface-state__title')!.textContent).toBe('Local shell environment is incomplete')
-  expect(global.querySelector('.service-window__mode')!.textContent).toBe('Original shell cause')
-  expect(global.querySelector('.service-window__restore')!.textContent).toContain('Check your shell startup scripts')
+  await toggleNotificationCenter(container, 'open')
+  const global = container.querySelector<HTMLElement>('.notification-item[data-notice-id="shell"]')!
+  await toggleNotificationDetails(global)
+  expect(global.querySelector('.notification-item__title')!.textContent).toBe('Local shell environment is incomplete')
+  expect(global.querySelector('.notification-item__original > p')!.textContent).toBe([
+    'Local shell environment is incomplete', 'Original shell cause',
+    'Check your shell startup scripts, then restart AgentMux and create a new Agent or terminal. Existing processes keep their original environment.'
+  ].join('\n'))
   expect(global.getAttribute('aria-live')).toBe('polite')
   expect(container.querySelector('.notification-item__action')).toBeNull()
   await act(async () => useAppStore.getState().reportError('Original lifecycle cause', { kind: 'indeterminate', lifecycle: failure }))

@@ -9,6 +9,7 @@ import { act } from 'react'
 import { type Root } from 'react-dom/client'
 import '../src/preload/index'
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices'
+import { currentNotificationRows, toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxClient, AgentMuxError, AgentMuxMemoryAgentSessionStore, AgentProviderRegistry, defineAgentProvider,
@@ -296,8 +297,14 @@ it('Native persistence refusal is visible through actual creation while the orig
   await api.sessions.write(sibling.session!.control, 'still available', 'user')
   expect(writes).toEqual(['still available'])
   await act(async () => root.render(<GlobalSystemNotices />))
-  expect(container.querySelector('[role="status"]')?.getAttribute('aria-live')).toBe('polite')
-  expect(container.textContent).toContain(refusal.message)
+  await toggleNotificationCenter(container, 'open')
+  const record = useAppStore.getState().notificationEvents.find(event => event.context?.lifecycle?.step === 'launch' && event.context.lifecycle.regionId === regionId)
+  expect(record).toBeDefined()
+  const notice = currentNotificationRows(container).find(row => row.dataset.noticeId === record!.id)
+  expect(notice).toBeDefined()
+  await toggleNotificationDetails(notice!)
+  expect(notice!.getAttribute('aria-live')).toBe('polite')
+  expect(notice!.textContent).toContain(refusal.message)
 })
 it('Native persistence refusal during original Session recovery retains the same Session, Region and draft', async () => {
   const id = await launch()

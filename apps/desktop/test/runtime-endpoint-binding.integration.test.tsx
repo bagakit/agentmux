@@ -12,6 +12,8 @@ import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystem
 import { HostSettingsPane } from '../src/renderer/src/components/settings/HostSettingsPane'
 import { createWorkbenchTab, addWorkbenchRegion } from '../src/renderer/src/lib/workbench-tabs'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
+import { currentNotificationRows, toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
+import { providerCatalogReader } from './helpers/startup-observation-api-fixture'
 
 const dom = composerDOM()
 const subscriptions: Array<() => void> = []
@@ -45,6 +47,15 @@ function gap(): RuntimeEvent {
     evidence: { source: 'agentmux', observedAt: 3 } } }
 }
 async function settled() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) }) }
+async function readEndpointDetails(warning: RuntimeEndpointWarning) {
+  const row = currentNotificationRows(dom.container).find(item => item.dataset.noticeId === JSON.stringify([warning.hostId, warning.step]))
+  expect(row, 'The original endpoint warning must be visible').toBeDefined()
+  expect(row!.closest('.notification-group')?.querySelector('.notification-group__heading strong')?.textContent).toBe('Build host')
+  await toggleNotificationDetails(row!)
+  expect(row!.querySelector('.notification-item__original')?.textContent).toContain(warning.message)
+  expect(row!.querySelector('.notification-item__original')?.textContent).toContain(warning.recovery)
+  return row!
+}
 beforeEach(() => {
   let tab = createWorkbenchTab('original', { regionId: 'agent-region', kind: 'agent', phase: 'attached', sessionId: agent.id, workspaceId: 'remote-space' })
   tab = addWorkbenchRegion(tab, 'agent-region', 'right', { regionId: 'terminal-region', kind: 'terminal', phase: 'attached', sessionId: terminal.id, workspaceId: 'remote-space' })
@@ -59,6 +70,7 @@ it('keeps failed-owner Agent, Terminal and unknown-owner saved surface when the 
   const original = useAppStore.getState()
   const read = vi.spyOn(api.sessions, 'snapshot').mockResolvedValue(snapshot([local], [warning]))
   await dom.render(<GlobalSystemNotices />)
+  await toggleNotificationCenter(dom.container, 'open')
   await act(async () => useAppStore.getState().applyEvent(gap()))
   await settled()
   expect(read).toHaveBeenCalledTimes(1)
@@ -75,14 +87,16 @@ it('keeps failed-owner Agent, Terminal and unknown-owner saved surface when the 
   expect(unverified.processState).toBe(agent.processState)
   expect(unverified.updatedAt).toBe(agent.updatedAt)
   expect(unverified.kind === 'agent' ? unverified.semanticStatus : undefined).toBe(agent.semanticStatus)
-  const notices = [...dom.container.querySelectorAll('.service-window__step')].map(item => item.textContent)
-  expect(notices).toEqual(['Build host: Connection could not be verified'])
-  expect(dom.container.querySelector('details')?.textContent).toContain('Build host: Reading Runtime sessions')
+  const notices = [...dom.container.querySelectorAll('.notification-group[data-category="connections"] .notification-item__title')].map(item => item.textContent)
+  expect(notices).toEqual(['Connection could not be verified'])
+  const row = await readEndpointDetails(warning)
+  expect(row.querySelector('.notification-item__original')?.textContent).toContain('Build host: Reading Runtime sessions')
   expect(dom.container.textContent).toContain('current status is unconfirmed')
 })
 
 it('retains the endpoint notice across hot events and reconnect until a fresh complete snapshot arrives', async () => {
   await dom.render(<GlobalSystemNotices />)
+  await toggleNotificationCenter(dom.container, 'open')
   await act(async () => useAppStore.getState().applyEvent(connection('lost', warning)))
   const retained = useAppStore.getState().runtimeEndpointWarnings
   await act(async () => useAppStore.getState().applyEvent({ type: 'core', hostId: 'local', event: {
@@ -94,6 +108,7 @@ it('retains the endpoint notice across hot events and reconnect until a fresh co
   await act(async () => useAppStore.getState().applyEvent(connection('restored', null)))
   expect(read).toHaveBeenCalledTimes(1)
   expect(useAppStore.getState().runtimeEndpointWarnings).toEqual([warning])
+  await readEndpointDetails(warning)
   expect(dom.container.textContent).toContain('Build host: Reading Runtime sessions')
   await act(async () => finish(snapshot([local, agent, terminal])))
   await settled()
@@ -114,6 +129,7 @@ it('does not replay a prepared uncertain mutation on reconnect; leaves its origi
   const submit = vi.spyOn(api.sessions, 'submitPrompt')
   const flush = vi.spyOn(useAppStore.getState(), 'flushAgentSteerQueue')
   await dom.render(<GlobalSystemNotices />)
+  await toggleNotificationCenter(dom.container, 'open')
   await act(async () => useAppStore.getState().flushAgentSteerQueue(agent.id))
   expect(submit).not.toHaveBeenCalled()
   flush.mockClear()
@@ -123,11 +139,15 @@ it('does not replay a prepared uncertain mutation on reconnect; leaves its origi
   expect(flush).not.toHaveBeenCalled()
   expect(useAppStore.getState().agentSteerQueues[agent.id]).toEqual([{ operationId: 'original-operation', text: 'Unconfirmed mutation', runId: agent.control.run.runId,
     status: 'deferred', promptCondition: originalCondition, error: 'The original message delivery is unconfirmed after reconnect. Inspect the outbox before retrying.' }])
+  const row = currentNotificationRows(dom.container).find(item => item.dataset.noticeId === JSON.stringify([remote.id, agent.id, 'queue']))
+  expect(row).toBeDefined()
+  await toggleNotificationDetails(row!)
   expect(dom.container.textContent).toContain('original message delivery is unconfirmed after reconnect')
 })
 
 it('requires a later complete cut when reconnect arrives during an unavailable snapshot read', async () => {
   await dom.render(<GlobalSystemNotices />)
+  await toggleNotificationCenter(dom.container, 'open')
   let first!: (value: RuntimeSnapshot) => void, second!: (value: RuntimeSnapshot) => void
   const read = vi.spyOn(api.sessions, 'snapshot')
     .mockReturnValueOnce(new Promise(resolve => { first = resolve }))
@@ -139,6 +159,7 @@ it('requires a later complete cut when reconnect arrives during an unavailable s
   expect(read).toHaveBeenCalledTimes(2)
   expect(useAppStore.getState().runtimeEndpointWarnings).toEqual([warning])
   expect(useAppStore.getState().sessions.map(item => item.id)).toEqual([local.id, agent.id, terminal.id])
+  await readEndpointDetails(warning)
   expect(dom.container.textContent).toContain('Build host: Reading Runtime sessions')
   await act(async () => second(snapshot([local, agent, terminal])))
   await settled()
@@ -172,6 +193,7 @@ it('keeps a connected binding-save notice beside authoritative healthy facts and
     message: 'The Runtime is connected. Its binding could not be saved.', recovery: 'Retry saving the binding.' }
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue(snapshot([local, agent, terminal], [connected]))
   await dom.render(<GlobalSystemNotices />)
+  await toggleNotificationCenter(dom.container, 'open')
   await act(async () => useAppStore.getState().applyEvent(gap()))
   await settled()
   const current = useAppStore.getState()
@@ -179,6 +201,7 @@ it('keeps a connected binding-save notice beside authoritative healthy facts and
   expect(current.sessions.find(item => item.id === agent.id)?.status).toEqual(agent.status)
   expect(Object.keys(current.tabs.original!.regions)).toEqual(['agent-region', 'terminal-region'])
   expect(current.runtimeEndpointWarnings).toEqual([connected])
+  await readEndpointDetails(connected)
   expect(dom.container.textContent).toContain('Build host: Saving Runtime binding')
   const condition = { expectedRun: agent.control.run, afterSubmissionId: null }
   await act(async () => useAppStore.setState({ agentSteerQueues: { [agent.id]: [{ operationId: 'healthy-explicit', text: 'New explicit input', runId: agent.control.run.runId,
@@ -243,13 +266,15 @@ it('saves existing service configuration from mounted settings while keeping the
 it('initializes and mounts the unavailable endpoint notice through the actual App footer', async () => {
   vi.spyOn(useAppStore.persist, 'hasHydrated').mockReturnValue(true)
   vi.spyOn(api.config, 'get').mockResolvedValue(config)
-  vi.spyOn(api.providers, 'list').mockResolvedValue([])
+  vi.spyOn(api.providers, 'list').mockImplementation(providerCatalogReader())
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue(snapshot([local], [warning]))
   useAppStore.setState({ loading: true, tabs: {}, layouts: {}, sessions: [] })
   await dom.render(<App />)
   for (let attempt = 0; attempt < 50 && useAppStore.getState().loading; attempt++) await settled()
   expect(useAppStore.getState().loading).toBe(false)
   expect(dom.container.querySelector('main.main-shell')).not.toBeNull()
+  await toggleNotificationCenter(dom.container, 'open')
+  await readEndpointDetails(warning)
   expect(dom.container.querySelector('footer.window-status-bar')?.textContent).toContain('Build host: Reading Runtime sessions')
   expect(dom.container.textContent).toContain('current status is unconfirmed')
 })

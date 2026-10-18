@@ -15,6 +15,7 @@ import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { providerCatalogReader, historySourcesReader } from './helpers/startup-observation-api-fixture'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
 import { createClientUiRoot } from './helpers/client-ui-render'
+import { toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
 
 const initial = useAppStore.getState()
 let config: AppConfig, directory: string, dispose: (() => void) | undefined
@@ -124,6 +125,9 @@ it('a failed check settles the startup observation and preserves its cause and h
   const root = createClientUiRoot(container)
   try {
     await act(async () => root.render(<GlobalSystemNotices />))
+    await toggleNotificationCenter(container, 'open')
+    const notice = container.querySelector<HTMLElement>('.notification-item[data-notice-id="local"]')!
+    await toggleNotificationDetails(notice)
     expect(container.textContent).toContain('Agent availability check needs attention')
     expect(container.textContent).toContain('PROBE_IO: Original executable check failed')
     const retry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Check Agents again')!

@@ -27,7 +27,7 @@ api.connections.call = (async (method, input) => method === 'connection.binding.
 const writes: unknown[] = [], notices: unknown[] = []
 api.sessions.write = async (...args) => { writes.push(args) }
 api.sessions.paste = async (...args) => { writes.push(args) }
-api.ui.notifyAgentAttention = async input => { notices.push(input); return { kind: 'shown' } as never }
+api.ui.notifyAgentAttention = async input => { notices.push(input); return { status: 'shown', presentation: 'as-requested' } }
 const trustedEvents: unknown[] = []
 for (const type of ['click', 'input', 'keydown']) document.addEventListener(type, event => {
   const target = event.target as HTMLElement

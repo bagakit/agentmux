@@ -6,6 +6,8 @@ vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { api } from '../src/renderer/src/lib/api.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices.js'
+import { toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
+import { providerCatalogReader } from './helpers/startup-observation-api-fixture'
 
 const initial = useAppStore.getState()
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
@@ -17,7 +19,7 @@ describe('Runtime launch provenance notice', () => {
     const runtimeOwnershipWarnings = ['local']
     vi.spyOn(useAppStore.persist, 'hasHydrated').mockReturnValue(true)
     vi.spyOn(api.config, 'get').mockResolvedValue(config)
-    vi.spyOn(api.providers, 'list').mockResolvedValue([])
+    vi.spyOn(api.providers, 'list').mockImplementation(providerCatalogReader())
     vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [], runtimeOwnershipWarnings })
     const element = document.createElement('div')
     document.body.append(element)
@@ -29,13 +31,17 @@ describe('Runtime launch provenance notice', () => {
         root.render(<GlobalSystemNotices />)
       })
       expect(useAppStore.getState().loading).toBe(false)
-      expect(element.querySelector('[role="status"]')?.textContent).toContain('Existing Agents remain usable')
+      await toggleNotificationCenter(element, 'open')
+      const notice = element.querySelector<HTMLElement>('.notification-item[data-notice-id="ownership"]')!
+      await toggleNotificationDetails(notice)
+      expect(notice.getAttribute('role')).toBe('status')
+      expect(notice.textContent).toContain('Existing Agents remain usable')
       expect(element.textContent).toContain('restarting the app is not required')
       await act(async () => useAppStore.getState().selectWorkspace(config.workspaces[0]!.id))
-      expect(element.querySelector('[role="status"]')?.textContent).toContain('Existing Agents remain usable')
+      expect(element.querySelector('.notification-item[data-notice-id="ownership"]')?.textContent).toContain('Existing Agents remain usable')
       expect(element.querySelector('.global-system-notices__trigger')).not.toBeNull()
       await act(async () => useAppStore.setState({ runtimeOwnershipWarnings: [] }))
-      expect(element.querySelector('.service-window')).toBeNull()
+      expect(element.querySelector('.notification-item[data-notice-id="ownership"]')).toBeNull()
     } finally {
       await act(async () => { dispose?.(); root.unmount() })
       element.remove()
