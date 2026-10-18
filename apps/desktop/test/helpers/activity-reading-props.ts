@@ -15,7 +15,7 @@ export function activityReadingProps({ control, visible = true, readingKey, labe
   returnLabel?: string
   describeSpeaker?: Props['describeSpeaker']
 }): Props {
-  return { ...content, sessionId: control.agentSessionId, executionHostId: control.hostId, items: [], capability: 'complete-events',
+  return { ...content, sessionId: control.agentSessionId, executionHostId: control.hostId, capability: 'complete-events',
     conversationReading: { reference: control, identity: readingKey ?? control.run?.runId ?? control.agentSessionId,
       enabled: visible, opened: true, ...(onClose ? { onClose } : {}), ...(returnLabel ? { returnLabel } : {}) },
     describeSpeaker: describeSpeaker ?? createSpeakerResolver({ currentSession: { id: control.agentSessionId, label: label ?? 'Original Agent' } }) }
