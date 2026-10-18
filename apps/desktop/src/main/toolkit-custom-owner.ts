@@ -1,7 +1,7 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { createHash } from 'node:crypto'
 import { isAbsolute, join, resolve, sep } from 'node:path'
-import { AgentMuxError, type AgentMuxClientEvent, type AgentMuxRun, type AgentMuxRunAttachment, type AgentMuxTerminalCreateInput } from '@agentmux/core'
+import { AgentMuxError, parsePreparedTerminal, type AgentMuxPreparedTerminal, type AgentMuxClientEvent, type AgentMuxRun, type AgentMuxRunAttachment, type AgentMuxTerminalCreateInput } from '@agentmux/core'
 import { openToolkitResultChannel } from '@agentmux/core/toolkit-result-channel'
 import { parseToolkitResultDocument, TOOLKIT_RESULT_DOCUMENT_MAX_BYTES, type ToolkitResultDocument } from '@agentmux/core/toolkit-result-document'
 import { AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS } from '@agentmux/core/control'
@@ -180,9 +180,7 @@ export class CustomToolkitOwner {
     const first = Object.getOwnPropertyDescriptor(args, '0'), entry = this.packageEntry(admission, display)
     if (definition.package && (!entry || !first?.enumerable || !('value' in first) || typeof first.value !== 'string' ||
         !isAbsolute(first.value) || first.value.includes('\0') || resolve(first.value) !== first.value || !first.value.endsWith(sep + join(admission.executionId, 'files', entry)))) invalid()
-    if (definition.mode === 'tui' && source.command !== '/bin/sh') invalid()
-    const expectedArgs = definition.mode === 'tui' ? ['-lc', program.script, 'agentmux-toolkit', ...program.args]
-      : definition.package ? [first!.value, ...program.args] : ['--input-type=module', '--eval', program.script, '--', ...program.args]
+    const expectedArgs = definition.package ? [first!.value, ...program.args] : ['--input-type=module', '--eval', program.script, '--', ...program.args]
     if (args.length !== expectedArgs.length) invalid()
     for (let index = 0; index < expectedArgs.length; index++) {
       const descriptor = Object.getOwnPropertyDescriptor(args, String(index))
@@ -575,16 +573,29 @@ export class CustomToolkitOwner {
       const env = { ...this.args.env }
       delete env.ELECTRON_RUN_AS_NODE
       delete env.AGENTMUX_TOOLKIT_RESULT_PATH; delete env.AGENTMUX_TOOLKIT_RESULT_TOKEN
-      const intent = retained ? this.parseCreateIntent(execution.tool.createIntent, execution.admission, false) : null
-      if (retained && !intent) throw new AgentMuxError('Original TUI creation intent is missing. The original request and outcome remain unconfirmed.', 'CONTROL_PROTOCOL_ERROR')
-      const createIntent = intent ?? { createOperationId: execution.admission.executionId,
-        workspacePath: definition.workspacePath, command: '/bin/sh',
-        args: ['-lc', definition.script, 'agentmux-toolkit', ...definition.args], env, cols: 80, rows: 24 }
-      execution.tool.createIntent = createIntent
+      const saved = execution.tool.createIntent as { hostId?: unknown; prepared?: unknown } | undefined
+      let prepared: AgentMuxPreparedTerminal
+      if (retained) {
+        if (!saved || saved.hostId !== 'local' || Object.keys(saved).some(key => !['hostId', 'prepared'].includes(key))) {
+          throw new AgentMuxError('Original TUI preparation is missing. The original request and outcome remain unconfirmed.', 'CONTROL_PROTOCOL_ERROR')
+        }
+        prepared = parsePreparedTerminal(saved.prepared)
+      } else {
+        prepared = await execution.port.prepare({ createOperationId: execution.admission.executionId,
+          workspacePath: definition.workspacePath,
+          ...(definition.script.trim()
+            ? { command: '/bin/sh', args: ['-lc', definition.script, 'agentmux-toolkit', ...definition.args] }
+            : { args: definition.args }),
+          env, cols: 80, rows: 24 })
+      }
+      if (prepared.createOperationId !== execution.admission.executionId || prepared.workspacePath !== execution.admission.target.workspacePath) {
+        throw new AgentMuxError('Original TUI preparation belongs to another operation or directory; the receipt is retained.', 'CONTROL_PROTOCOL_ERROR')
+      }
+      execution.tool.createIntent = { hostId: 'local', prepared }
       await this.save(execution.tool)
       if (this.closed) { this.unknown(execution, 'Owner closed before this TUI creation could be confirmed.'); return }
       execution.creating = true
-      const run = await execution.port.create(structuredClone(createIntent), () => {}, 'terminal')
+      const run = await execution.port.createPrepared(structuredClone(prepared))
       execution.admission.run = { hostId: 'local', runId: run.runId }; execution.creating = false
       await this.save(execution.tool)
       if (this.closed) return

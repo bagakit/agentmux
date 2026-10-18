@@ -170,7 +170,7 @@ function runRef(v: unknown) {
   if (v !== null) { const r = record(v, ['hostId', 'runId']); identity(r.hostId); identity(r.runId) }
 }
 const TOOL_FIELDS = ['name', 'icon', 'enabled', 'statusBar', 'workspacePath', 'script', 'args', 'actions', 'display', 'mode'] as const
-function field(key: typeof TOOL_FIELDS[number], value: unknown, code: string) {
+function field(key: typeof TOOL_FIELDS[number], value: unknown, code: string, allowBlankScript = false) {
   if (key === 'mode') { if (value !== 'script' && value !== 'tui') invalid(code); return }
   if (key === 'display') {
     if (value === null) return
@@ -206,13 +206,13 @@ function field(key: typeof TOOL_FIELDS[number], value: unknown, code: string) {
   if (key === 'icon') encodedText(value, 192, code)
   if (key === 'workspacePath') encodedText(value, 4096, code)
   if (key !== 'script' && (!(value as string).trim() || (value as string).includes('\0'))) invalid(code)
-  if (key === 'script' && (!(value as string).trim() || (value as string).includes('\0'))) invalid(code)
+  if (key === 'script' && (!allowBlankScript && !(value as string).trim() || (value as string).includes('\0'))) invalid(code)
 }
 /** Pure data validation; the host owns paths, icon choices, persistence and revision issuance. */
 export function parseToolkitToolFields(value: unknown, partial = false, code = 'CONTROL_PROTOCOL_ERROR'): ToolkitToolFields | Partial<ToolkitToolFields> {
   const r = record(value, partial ? [] : TOOL_FIELDS.filter(key => key !== 'actions' && key !== 'display' && key !== 'mode'), partial ? TOOL_FIELDS : ['actions', 'display', 'mode'], code)
   if (Buffer.byteLength(JSON.stringify(r)) > TOOLKIT_TOOL_FIELDS_MAX_BYTES) invalid(code)
-  for (const key of Object.keys(r)) field(key as typeof TOOL_FIELDS[number], r[key], code)
+  for (const key of Object.keys(r)) field(key as typeof TOOL_FIELDS[number], r[key], code, partial || r.mode === 'tui')
   if (r.mode === 'tui' && ((r.actions as ToolkitAction[] | undefined)?.length || r.display != null)) invalid(code)
   return r as ToolkitToolFields | Partial<ToolkitToolFields>
 }
