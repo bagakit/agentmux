@@ -29,8 +29,15 @@ export function sameFocusWorkItems(a: readonly AgentTimelineItem[], b: readonly 
 }
 export function createFocusWorkSelector(sessionId: string) {
   let retained = EMPTY_FOCUS_WORK_ITEMS
+  let sourceItems: readonly AgentTimelineItem[] | undefined
+  let revision: number | undefined
   return (state: { timelines: Record<string, AgentTimelineSnapshot> }) => {
-    const items = state.timelines[sessionId]?.items.filter(item => item.activityState !== undefined) ?? EMPTY_FOCUS_WORK_ITEMS
+    const timeline = state.timelines[sessionId]
+    // Preview appends in place; a snapshot refresh may replace an equal revision.
+    if (timeline?.items === sourceItems && timeline?.revision === revision) return retained
+    sourceItems = timeline?.items
+    revision = timeline?.revision
+    const items = sourceItems?.filter(item => item.activityState !== undefined) ?? EMPTY_FOCUS_WORK_ITEMS
     if (!sameFocusWorkItems(retained, items)) retained = items
     return retained
   }
