@@ -8,7 +8,14 @@
 .settings-survey__preview > header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--line-soft); }
 .settings-survey__preview > header strong { font-size: var(--fs-meta); font-weight: 500; }
 .settings-survey__preview > header small { color: var(--text-3); font-size: var(--fs-micro); }
-.settings-survey__canvas { padding: var(--sp-6) var(--sp-4); display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); min-width: 0; }
+.settings-survey__canvas { position: relative; isolation: isolate; padding: var(--sp-6) var(--sp-4); display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); min-width: 0; overflow: hidden; }
+.settings-survey__background { position: absolute; z-index: -2; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.settings-survey__canvas:has(.settings-survey__background)::before { position: absolute; z-index: -1; inset: 0; content: ''; background: color-mix(in srgb, var(--surface-1) 86%, transparent); }
+.settings-survey__icon { width: 40px; height: 40px; object-fit: contain; }
+.settings-survey__image-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-3); }
+.settings-survey__image-actions p { flex: 1; min-width: 160px; margin: 0; }
+.settings-survey__image-actions button { flex: none; }
+.settings-survey__image-notice { margin: 0; padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--line-soft); color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; }
 .settings-survey__canvas h3 { margin: 0; max-width: 100%; color: var(--text); font-size: var(--fs-title); font-weight: 550; letter-spacing: -.02em; text-align: center; overflow-wrap: anywhere; }
 .settings-survey__canvas > p { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; text-align: center; overflow-wrap: anywhere; }
 .settings-survey__search { display: flex; align-items: center; gap: var(--sp-2); width: 100%; box-sizing: border-box; padding: var(--sp-3); margin-top: var(--sp-2); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-0); color: var(--text-3); font-size: var(--fs-meta); }
