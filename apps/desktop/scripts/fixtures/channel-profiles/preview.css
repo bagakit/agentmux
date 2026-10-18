@@ -1,0 +1,10 @@
+html, body, #root { margin: 0; min-height: 100%; background: var(--surface-0); color: var(--text); }
+.channel-profiles-preview { max-width: 800px; margin: 0 auto; padding: 24px; display: grid; gap: 24px; }
+.channel-profiles-preview > section { min-width: 0; }
+.channel-profiles-preview > header { display: flex; justify-content: space-between; align-items: center; gap: 12px; min-width: 0; }
+.channel-profiles-preview h1 { font-size: 18px; margin: 5px 0 0; }
+.channel-profiles-preview small, .channel-profiles-preview p { color: var(--text-3); }
+.channel-profiles-preview__settings { border-top: 1px solid var(--line-soft); padding-top: 16px; }
+.channel-profiles-preview__settings h2 { margin: 0 0 6px; font-size: 16px; }
+.channel-profiles-preview__settings > p { margin: 0 0 12px; font-size: 12px; }
+@media (max-width: 420px) { .channel-profiles-preview { padding: 16px; } .channel-profiles-preview > header { flex-wrap: wrap; } }
