@@ -50,9 +50,10 @@ app.whenReady().then(async () => {
         calendarControls:visible(calendar)?[...calendar.querySelectorAll('.mote-calendar__toolbar button')].map(control):[],
         canvas:visible(calendar)?rect(calendar.querySelector('.mote-calendar__canvas')):null,agenda:visible(calendar)?rect(calendar.querySelector('.mote-calendar__day')):null,
         nameRect:rect(n.querySelector('.mote-details__name')),close:visible(close)?control(close):null,coarse:matchMedia('(pointer: coarse)').matches,
-        densityPolicy:matchMedia('(pointer: coarse)').matches?'coarse: 44px targets and unobstructed readable content':'fine: rail beside main content, first useful content visible, original Calendar density',
+        densityPolicy:matchMedia('(pointer: coarse)').matches?'coarse: 44px targets and unobstructed readable content':'fine: finite identity card beside personality, first useful content visible, original Calendar density',
         tabs:[...tabs?.querySelectorAll('[role="tab"]')??[]].map(control),
         identity:[...n.querySelectorAll('[aria-label="Change Mote avatar"],[aria-label="Rename Mote"]')].map(control),
+        axes:[...n.querySelectorAll('[data-behavior-axis]')].filter(visible).map(e=>({axis:e.dataset.behaviorAxis,rect:rect(e)})),
         fonts:fonts.map(e=>({prose:e.classList.contains('mote-details__prose'),size:parseFloat(getComputedStyle(e).fontSize),lineHeight:getComputedStyle(e).lineHeight})),
         overflow:[n,content,visible(calendar)?calendar.querySelector('.mote-calendar__toolbar'):null].filter(visible).map(e=>({className:e.className,clientWidth:e.clientWidth,scrollWidth:e.scrollWidth})),
         scenario:window.moteCalendarScene.facts().mode};
@@ -60,13 +61,15 @@ app.whenReady().then(async () => {
     const headerBudget = facts => {
       assert.equal(facts.coarse, false, 'The compact height budget is defined for the default fine pointer')
       assert.ok(facts.panel.width > 0 && facts.contentOffset > 0, 'A nonempty actual Mote content position is required')
-      const rail = facts.section === 'profile' && facts.panel.width >= 720
-      if (rail) {
-        assert.ok(facts.main.left >= facts.header.right - 1, 'The identity rail must sit beside the working content')
-        assert.ok(facts.header.width < facts.panel.width / 3, 'The identity rail must leave the majority of Space for work')
+      const card = facts.section === 'profile' && facts.panel.width >= 720
+      if (card) {
+        assert.ok(facts.main.left >= facts.header.right + 12, 'The identity card must leave space beside the working content')
+        assert.ok(facts.header.width <= 241 && facts.header.width < facts.panel.width / 3, 'The identity card must keep its compact width')
+        assert.ok(facts.header.top >= facts.panel.top + 12 && facts.header.left >= facts.panel.left + 12, 'The identity card must be visibly inset')
+        assert.ok(facts.header.bottom <= facts.panel.bottom - 32, 'Identity card density budget exceeded: the card must leave visible space below it')
       }
-      const budget = rail ? 72 : facts.panel.height * 0.55
-      if (!rail) assert.ok(facts.header.height <= facts.panel.height * 0.45 + 1, 'The compact identity must leave most of the height for work')
+      const budget = card ? 72 : facts.panel.height * 0.55
+      if (!card) assert.ok(facts.header.height <= facts.panel.height * 0.45 + 1, 'The compact identity must leave most of the height for work')
       assert.ok(facts.contentOffset <= budget, 'Mote header density budget exceeded: ' + facts.contentOffset + ' > ' + budget)
     }
     const calendarBudget = facts => {
@@ -158,6 +161,10 @@ app.whenReady().then(async () => {
       await fs.writeFile(path.join(evidence, name + '.png'), (await win.webContents.capturePage()).toPNG())
       result.images.push(name + '.png'); result.operations.push({ action: 'capture', name, ...facts })
     }
+    const firstViewport = async () => {
+      await read(`(()=>{const e=${inPanel('.mote-details__content')};e.scrollTop=0;e.dispatchEvent(new Event('scroll',{bubbles:true}))})()`)
+      result.operations.push({ action: 'scene-preparation', property: 'original Profile reading position', value: 0 })
+    }
     const showCalendar = async () => {
       await until(`!!(${button('Calendar')})`, 'Original Mote Calendar tab')
       await click(button('Calendar'), 'Calendar')
@@ -165,9 +172,18 @@ app.whenReady().then(async () => {
       await until(`window.moteCalendarScene.facts().calls.some(c=>c.method==='schedule.list'&&c.params.scope)`, 'Mote-wide scope read')
     }
     await until('!!window.moteCalendarScene&&!!document.querySelector("[data-mote-details]")', 'Original Mote frame')
-    await until(`(${panel}).textContent.includes('What shall we work on?')`, 'Companion profile')
+    await until(`(${panel}).textContent.includes('Personality & working style')&&(${inPanel('.mote-behavior-summary__choices')})?.children.length===4`, 'Confirmed original personality axes')
     await until(`!(${panel}).textContent.includes('Reading original goals')`, 'Original Goal data ready')
     await capture('profile-wide-dark')
+    await densityMutation('identity-card-full-height', '.mote-details[data-section="profile"] > .mote-details__profile { height: 100% !important; max-height: none !important; }', headerBudget)
+    await read(`window.moteCalendarScene.behavior({engagement:'I',custom:'Keep this partial preference.'})`)
+    await until(`(${inPanel('.mote-behavior-summary__choices')})?.textContent.includes('Not selected')`, 'Partial original personality')
+    await capture('profile-partial-personality-dark')
+    await read(`window.moteCalendarScene.behavior('unknown')`)
+    await until(`(${panel}).textContent.includes('Saved behavior is unconfirmed')`, 'Unconfirmed original personality')
+    await capture('profile-unconfirmed-personality-dark')
+    await read(`window.moteCalendarScene.behavior('saved')`)
+    await until(`(${panel}).textContent.includes('MBTI style · INFJ')`, 'Same original personality recovered')
     await click(inPanel('.mote-memory > summary'), 'Original memory entry')
     await until(`(${inPanel('.mote-memory')})?.textContent.includes('Saved in MEMORY.md')`, 'Original saved memory')
     await capture('profile-memory-wide-dark')
@@ -179,7 +195,13 @@ app.whenReady().then(async () => {
     await capture('profile-upcoming-to-calendar-dark')
     await click(button('Profile'), 'Return to original companion home')
     await densityMutation('navigation-excess-height', '.mote-details__navigation-bar { padding-block: 90px !important; }', headerBudget)
-    win.setContentSize(332, 900); await capture('profile-narrow-dark')
+    await read(`document.querySelector('.calendar-fixture').dataset.wideProof=''`)
+    win.setContentSize(1600, 900); await firstViewport(); await capture('profile-expanded-dark')
+    const employee = await geometry()
+    assert.equal(employee.axes.length, 4, 'All four original axes remain visible in the expanded Profile')
+    assert.ok(Math.abs(employee.axes[0].rect.top - employee.axes[1].rect.top) < 1 && employee.axes[1].rect.left >= employee.axes[0].rect.right, 'Wide Profile must present two readable personality columns')
+    await read(`delete document.querySelector('.calendar-fixture').dataset.wideProof`)
+    win.setContentSize(332, 900); await firstViewport(); await capture('profile-narrow-dark')
     win.webContents.debugger.attach('1.3')
     try {
       await win.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 })
@@ -229,7 +251,7 @@ app.whenReady().then(async () => {
     win.setContentSize(1240, 900); await capture('ideas-reader-wide-dark')
     await read(`window.moteCalendarScene.theme('light')`); await capture('ideas-reader-wide-light')
     await click(button('Profile'), 'Return to companion profile')
-    await capture('profile-wide-light')
+    await firstViewport(); await capture('profile-wide-light')
     await read(`window.moteCalendarScene.name('一起做研究与设计的长期搭档 Mote')`)
     win.setContentSize(332, 700); await capture('profile-long-name-short-light')
     await read(`window.moteCalendarScene.name('Mote');window.moteCalendarScene.summary('We keep original decisions, sources and unsent thoughts together. '.repeat(24))`)
