@@ -22,10 +22,10 @@ export function noteInlineQuery(text: string): string | null {
   return tokens.length === 1 && token?.from === 0 && token.to === text.length ? token.text : null
 }
 /** Shared indexes include the same text that a person can select and edit. */
-export function noteSemanticText(node: ProseMirrorNode): string {
+export function noteSemanticText(node: ProseMirrorNode, blockSeparator = ''): string {
   if (node.type.name === 'noteRawBlock') return node.attrs.source
   if (node.type.name === 'noteMathInline' || node.type.name === 'noteMathBlock') return node.attrs.latex
-  return node.textBetween(0, node.content.size, '', leaf => leaf.type.name === 'noteLink' ? `[[${String(leaf.attrs.text)}]]` : leaf.type.name === 'noteMathInline' ? String(leaf.attrs.latex) : leaf.type.name === 'image' ? String(leaf.attrs.alt ?? '') : leaf.type.name === 'hardBreak' ? '\n' : '')
+  return node.textBetween(0, node.content.size, blockSeparator, leaf => leaf.type.name === 'noteLink' ? `[[${String(leaf.attrs.text)}]]` : leaf.type.name === 'noteMathInline' ? String(leaf.attrs.latex) : leaf.type.name === 'image' ? String(leaf.attrs.alt ?? '') : leaf.type.name === 'hardBreak' ? '\n' : '')
 }
 const eligible = (node: JSONContent) => node.type === 'text' && !node.marks?.some(mark => mark.type === 'code' || mark.type === 'link' || mark.type === 'noteWikiLiteral')
 /** One text-run adapter for the writer and saved-file index; marks never create another lexer. */

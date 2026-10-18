@@ -80,6 +80,15 @@ export function noteKnowledge(documents: readonly { location: NoteLocation; docu
   return { scope: unanchored && scope === 'complete' ? 'partial' : scope, fileScope: invalid.length && scope === 'complete' ? 'partial' : scope, sources, invalid, references, ...(confirmedIncludes.length ? { confirmedIncludes } : {}) }
 }
 
+/** Compact display text preserves structure without changing canonical indexed text or the original file. */
+export function noteContentSummary(note: NoteDocument): string {
+  for (const block of note.content.content ?? []) {
+    const text = noteSemanticText(noteContentSchema.nodeFromJSON(block), ' · ').replace(/\s+/gu, ' ').trim()
+    if (text) return text
+  }
+  return ''
+}
+
 export function resolveNoteBlock(knowledge: NoteKnowledge, target: NoteBlockTarget): NoteBlockResolution {
   const sources = knowledge.sources.filter(source => source.note.noteId === target.noteId)
   if (sources.length > 1) return { status: 'ambiguous', message: 'This Note identity exists in multiple files. Choose the original source before editing.' }

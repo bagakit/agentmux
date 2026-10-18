@@ -1,4 +1,4 @@
-import type { NoteSource } from '@agentmux/client-ui/note/note-knowledge'
+import { noteContentSummary, type NoteSource } from '@agentmux/client-ui/note/note-knowledge'
 import type { NotebookPage } from '@agentmux/core/notebook-catalog'
 import type { NotebookGraph, NoteContentMetadata } from '@agentmux/core'
 import type { NotebookGraphSnapshot } from '../../../shared/notebook-observation'
@@ -20,7 +20,7 @@ export function canvasSharedObservation(snapshot: NotebookGraphSnapshot, noteId:
 
 export function canvasNoteTitle(item: CanvasNote, source?: NoteSource): string {
   if (item.kind !== 'shared-block' || !source) return item.title
-  const text = source.note.title?.trim() || [...source.blocks.values()].find(block => block.text.trim())?.text.trim()
+  const text = source.note.title?.trim() || noteContentSummary(source.note)
   return text ? text.length > 72 ? text.slice(0, 71) + '…' : text : 'Shared block'
 }
 
