@@ -6,6 +6,7 @@ import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
+import type { AgentMuxBrowserControl } from '@agentmux/core'
 import type { BrowserActivityState, BrowserOperation, BrowserOperationPhase } from '../src/shared/browser-operation'
 import { BrowserOperationStatus, BrowserOperationWarning } from '../src/renderer/src/components/BrowserOperationSurface'
 
@@ -17,45 +18,51 @@ const operation: BrowserOperation = {
     status: 'running', target: { role: 'button', name: 'Settings', ordinal: 1, count: 1 } }]
 }
 
-async function renderStatus(activity: BrowserActivityState, handlers = {}) {
+const currentControl = (owner: AgentMuxBrowserControl['owner'], activeOperationId: string | null = null): AgentMuxBrowserControl => ({
+  owner, activeOperationId, revision: 3, inputIsolation: owner === 'agent' ? 'isolated' : owner === 'human' ? 'inactive' : 'unconfirmed'
+})
+type StatusProps = Parameters<typeof BrowserOperationStatus>[0]
+type Handlers = Pick<StatusProps, 'onStop' | 'onTakeControl' | 'onReturnControl' | 'onOpenTimeline'>
+async function renderStatus(activity: BrowserActivityState, control: AgentMuxBrowserControl | undefined, handlers: Handlers = {}, browserId = operation.browserId) {
   const host = document.createElement('div')
   document.body.append(host)
   const root = createRoot(host)
-  await act(async () => root.render(createElement(BrowserOperationStatus, { activity, ...handlers })))
-  return { host, root, trigger: host.querySelector<HTMLButtonElement>('button')!,
+  await act(async () => root.render(createElement(BrowserOperationStatus, { activity, browserId, control, ...handlers })))
+  return { host, root, trigger: host.querySelector<HTMLButtonElement>('[aria-label^="Browser activity:"]')!,
     async close() { await act(async () => root.unmount()); host.remove() } }
 }
 
 describe('Browser operation status in existing controls', () => {
   it('renders four nonempty observed states with distinct glyphs and accessible facts', async () => {
-    const cases: [BrowserOperationPhase, BrowserActivityState['control'], string, string][] = [
-      ['running', 'agent', 'Operating page', '[data-semantic-icon="status.browser-running"]'],
-      ['waiting', 'agent', 'Waiting for page', '[data-semantic-icon="status.waiting"]'],
-      ['human', 'human', 'Human has control', '[data-semantic-icon="object.user"]'],
-      ['failed', 'human', 'Failed', '[data-semantic-icon="status.failed"]']
+    const cases: [BrowserOperationPhase, AgentMuxBrowserControl['owner'], string, string, string][] = [
+      ['running', 'agent', 'Operating page', '[data-semantic-icon="status.browser-running"]', 'Operating'],
+      ['waiting', 'agent', 'Waiting for page', '[data-semantic-icon="status.waiting"]', 'Waiting'],
+      ['human', 'human', 'Human has control', '[data-semantic-icon="object.user"]', 'Your turn'],
+      ['failed', 'human', 'Failed', '[data-semantic-icon="status.failed"]', 'Failed']
     ]
     expect(cases.map(([phase]) => phase)).toEqual(['running', 'waiting', 'human', 'failed'])
-    for (const [phase, control, label, glyph] of cases) {
-      const view = await renderStatus({ operation: { ...operation, phase }, control })
+    for (const [phase, owner, label, glyph, cue] of cases) {
+      const view = await renderStatus({ operation: { ...operation, phase }, control: owner === 'agent' ? 'agent' : 'human' },
+        currentControl(owner, owner === 'agent' ? operation.id : null))
       try {
         expect(view.host.querySelector('.browser-operation-status')!.getAttribute('data-phase')).toBe(phase)
-        expect(view.trigger.getAttribute('aria-label')).toContain(`Navigator · ${label} · button “Settings”`)
+        for (const fact of ['Navigator', label, 'button “Settings”']) expect(view.trigger.getAttribute('aria-label')).toContain(fact)
         expect(view.trigger.getAttribute('title')).toContain(label)
         expect(view.trigger.querySelector(glyph), phase).not.toBeNull()
         expect(view.host.querySelectorAll('button')).toHaveLength(1)
         expect(document.querySelector('.browser-operation-menu')).toBeNull()
-        expect(view.host.textContent).toBe('')
+        expect(view.host.querySelector('.browser-operation-status__cue')?.textContent).toBe(cue)
       } finally { await view.close() }
     }
   })
 
   it('uses control ownership before a nonterminal phase projection catches up, and never calls unknown healthy', async () => {
-    const human = await renderStatus({ operation, control: 'human' })
+    const human = await renderStatus({ operation, control: 'agent' }, currentControl('human'))
     try {
       expect(human.trigger.getAttribute('aria-label')).toContain('Human has control')
       expect(human.trigger.querySelector('[data-semantic-icon="object.user"]')).not.toBeNull()
     } finally { await human.close() }
-    const unknown = await renderStatus({ operation: null, control: 'agent' })
+    const unknown = await renderStatus({ operation: null, control: 'human' }, currentControl('agent', operation.id))
     try {
       expect(unknown.host.querySelector('.browser-operation-status')!.getAttribute('data-phase')).toBe('unknown')
       expect(unknown.trigger.getAttribute('aria-label')).toContain('Activity details are loading')
@@ -64,9 +71,30 @@ describe('Browser operation status in existing controls', () => {
     } finally { await unknown.close() }
   })
 
+  it.each(['absent', 'unknown', 'different-operation', 'different-browser'] as const)('does not borrow handoff or busy authority from historical control when current control is %s', async source => {
+    const take = vi.fn(), resume = vi.fn()
+    const retained = { ...operation, control: currentControl('human') }
+    const control = source === 'absent' ? undefined : source === 'unknown' ? currentControl('unknown')
+      : currentControl('agent', source === 'different-operation' ? 'other-operation' : operation.id)
+    const view = await renderStatus({ operation: retained, control: 'human' }, control,
+      { onTakeControl: take, onReturnControl: resume }, source === 'different-browser' ? 'other-browser' : operation.browserId)
+    try {
+      expect(view.host.querySelector('[aria-label="Return to Agent"]')).toBeNull()
+      expect(view.host.querySelector('[data-icon-animation="execute"],[data-icon-animation="wait"],[data-icon-animation="spin"]')).toBeNull()
+      const agent = control?.owner === 'agent'
+      expect(Boolean(view.host.querySelector('[aria-label="Take control of Browser"]'))).toBe(agent)
+      if (agent) {
+        expect(view.host.querySelector('.browser-operation-status')!.getAttribute('data-phase')).toBe('unknown')
+        expect(view.trigger.getAttribute('aria-label')).toContain('Activity details are loading')
+      }
+      expect(take).not.toHaveBeenCalled(); expect(resume).not.toHaveBeenCalled()
+    } finally { await view.close() }
+  })
+
   it('opens actions on hover and invokes the actual stop callback with keyboard selection', async () => {
     const stop = vi.fn(), take = vi.fn(), history = vi.fn()
-    const view = await renderStatus({ operation, control: 'agent' }, { onStop: stop, onTakeControl: take, onOpenTimeline: history })
+    const view = await renderStatus({ operation, control: 'human' }, currentControl('agent', operation.id),
+      { onStop: stop, onTakeControl: take, onOpenTimeline: history })
     try {
       expect(document.querySelector('[aria-label="Stop browser operation"]')).toBeNull()
       await act(async () => view.trigger.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
@@ -87,8 +115,9 @@ describe('Browser operation status in existing controls', () => {
   })
 
   it.each(['running', 'human'] as const)('opens with keyboard and keeps Return separate from Stop on an active %s operation', async (phase) => {
-    const resume = vi.fn()
-    const view = await renderStatus({ operation: { ...operation, phase }, control: 'human' }, { onReturnControl: resume, onStop: vi.fn() })
+    const resume = vi.fn(), stop = vi.fn()
+    const view = await renderStatus({ operation: { ...operation, phase }, control: 'agent' }, currentControl('human'),
+      { onReturnControl: resume, onStop: stop })
     try {
       await act(async () => { view.trigger.focus(); view.trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
       const menu = document.querySelector('.browser-operation-menu')!
@@ -97,6 +126,7 @@ describe('Browser operation status in existing controls', () => {
       expect(items.map(item => item.textContent)).toEqual(['Return to Agent', 'Stop operation'])
       await act(async () => items[0]!.click())
       expect(resume).toHaveBeenCalledExactlyOnceWith()
+      expect(stop).not.toHaveBeenCalled()
     } finally { await view.close() }
   })
 
@@ -104,7 +134,8 @@ describe('Browser operation status in existing controls', () => {
     const resume = vi.fn(), stop = vi.fn(), take = vi.fn()
     const activity: BrowserActivityState = { operation: phase ? { ...operation, phase, finishedAt: _hygiene_fixtureTime(-67225599800) } : null, control: 'human' }
     const original = structuredClone(activity)
-    const view = await renderStatus(activity, { onReturnControl: resume, onStop: stop, onTakeControl: take, onOpenTimeline: vi.fn() })
+    const view = await renderStatus(activity, currentControl('human'),
+      { onReturnControl: resume, onStop: stop, onTakeControl: take, onOpenTimeline: vi.fn() })
     try {
       await act(async () => { view.trigger.focus(); view.trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
       const items = Array.from(document.querySelectorAll<HTMLElement>('.browser-operation-menu [role="menuitem"]'))
@@ -120,17 +151,39 @@ describe('Browser operation status in existing controls', () => {
     } finally { await view.close() }
   })
 
-  it.each(['completed', 'failed', 'stopped', 'indeterminate', null] as const)('does not offer Return or Stop with agent control after %s', async (phase) => {
+  it.each(['completed', 'failed', 'stopped', 'indeterminate', null] as const)('keeps Take reachable without Return or Stop while Agent retains control after %s', async (phase) => {
     const resume = vi.fn(), stop = vi.fn(), take = vi.fn()
-    const view = await renderStatus({ operation: phase ? { ...operation, phase } : null, control: 'agent' }, { onReturnControl: resume, onStop: stop, onTakeControl: take, onOpenTimeline: vi.fn() })
+    const view = await renderStatus({ operation: phase ? { ...operation, phase } : null, control: 'human' }, currentControl('agent'),
+      { onReturnControl: resume, onStop: stop, onTakeControl: take, onOpenTimeline: vi.fn() })
     try {
       await act(async () => view.trigger.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
       const items = Array.from(document.querySelectorAll<HTMLElement>('.browser-operation-menu [role="menuitem"]'))
-      expect(items.map(item => item.textContent)).toEqual(['Activity'])
+      expect(items.map(item => item.textContent)).toEqual(['Take control', 'Activity'])
+      expect(view.trigger.getAttribute('aria-label')).toContain(phase ? 'Agent retains control' : 'Agent has control')
+      await act(async () => items[0]!.click())
       expect(resume).not.toHaveBeenCalled()
       expect(stop).not.toHaveBeenCalled()
-      expect(take).not.toHaveBeenCalled()
+      expect(take).toHaveBeenCalledExactlyOnceWith()
     } finally { await view.close() }
+  })
+
+  it.each(['running', 'completed', null] as const)('keeps both direct handoff paths focusable without opening a menu for %s', async phase => {
+    for (const owner of ['agent', 'human'] as const) {
+      const take = vi.fn(), resume = vi.fn(), stop = vi.fn(), history = vi.fn()
+      const view = await renderStatus({ operation: phase ? { ...operation, phase } : null, control: owner === 'agent' ? 'human' : 'agent' },
+        currentControl(owner, owner === 'agent' && phase === 'running' ? operation.id : null),
+        { onTakeControl: take, onReturnControl: resume, onStop: stop, onOpenTimeline: history })
+      try {
+        const direct = view.host.querySelector<HTMLButtonElement>(owner === 'agent' ? '[aria-label="Take control of Browser"]' : '[aria-label="Return to Agent"]')
+        expect(direct).not.toBeNull(); expect(direct!.disabled).toBe(false); expect(direct!.tabIndex).toBe(0)
+        await act(async () => { direct!.focus(); direct!.click() })
+        expect(document.activeElement).toBe(direct)
+        expect(owner === 'agent' ? take : resume).toHaveBeenCalledExactlyOnceWith()
+        expect(owner === 'agent' ? resume : take).not.toHaveBeenCalled()
+        expect(stop).not.toHaveBeenCalled(); expect(history).not.toHaveBeenCalled()
+        expect(document.querySelector('.browser-operation-menu')).toBeNull()
+      } finally { await view.close() }
+    }
   })
 
   it('keeps the reported failure and recovery line persistent while raw diagnostics mount only on demand', async () => {
@@ -148,18 +201,23 @@ describe('Browser operation status in existing controls', () => {
     } finally { await act(async () => root.unmount()) }
   })
 
-  it('mounts the real status inside the original toolbar and retains the standalone service notice', () => {
+  it('mounts the actual presence consumer with current control and trusted actions inside the original toolbar', () => {
     const text = readFileSync(resolve(__dirname, '../src/renderer/src/components/BrowserPane.tsx'), 'utf8')
     const source = ts.createSourceFile('BrowserPane.tsx', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
     const status: ts.JsxSelfClosingElement[] = [], warnings: ts.JsxSelfClosingElement[] = []
     const visit = (node: ts.Node) => {
-      if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(source) === 'BrowserOperationStatus') status.push(node)
+      if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(source) === 'BrowserOperatorPresence') status.push(node)
       if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(source) === 'BrowserOperationWarning') warnings.push(node)
       ts.forEachChild(node, visit)
     }
     visit(source)
     expect(status).toHaveLength(1)
     expect(warnings).toHaveLength(1)
+    const props = Object.fromEntries(status[0]!.attributes.properties.filter(ts.isJsxAttribute).map(attribute =>
+      [attribute.name.getText(source), attribute.initializer && ts.isJsxExpression(attribute.initializer) ? attribute.initializer.expression?.getText(source) : undefined]))
+    expect(props).toMatchObject({ activity: 'browserActivity', control: 'tab.control', browserId: 'tab.browserId',
+      onTakeControl: '() => void takeBrowserControl()', onStop: '() => void stopBrowserOperation()',
+      onReturnControl: '() => void run(() => api.browser.returnControl(tab.browserId))' })
     let ancestor: ts.Node | undefined = status[0]!.parent
     while (ancestor && !(ts.isJsxElement(ancestor) && ancestor.openingElement.tagName.getText(source) === 'form')) ancestor = ancestor.parent
     expect(ancestor).toBeDefined()
@@ -172,5 +230,52 @@ describe('Browser operation status in existing controls', () => {
     expect(trigger![1]).toMatch(/height:\s*27px/)
     expect(styles).toMatch(/prefers-reduced-motion:\s*reduce[^}]*browser-operation-status[^}]*animation:\s*none/)
     expect(styles).not.toContain('browser-rsi-rail')
+  })
+
+  it('forwards typed control and distinct trusted handoff/Stop actions through the actual BrowserPane wrapper', async () => {
+    const [{ BrowserPane }, { createClientUiRoot }, { api }, { useAppStore }] = await Promise.all([
+      import('../src/renderer/src/components/BrowserPane'), import('./helpers/client-ui-render'),
+      import('../src/renderer/src/lib/api'), import('../src/renderer/src/store')
+    ])
+    const previous = useAppStore.getState(), host = document.createElement('div')
+    document.body.append(host)
+    const root = createClientUiRoot(host), execute = vi.fn().mockResolvedValue(undefined)
+    const page = await api.browser.create('density-browser', 'https://example.test/density', 'density-workspace')
+    const take = vi.spyOn(api.browser, 'takeControl').mockResolvedValue(page)
+    const resume = vi.spyOn(api.browser, 'returnControl').mockResolvedValue(page)
+    vi.spyOn(api.browser, 'setAnnotationMarkers').mockResolvedValue(undefined)
+    vi.spyOn(api.browser, 'cancelElementSelection').mockResolvedValue(undefined)
+    useAppStore.setState({ toolsOpen: false, sessions: [], executeControl: execute })
+    const active = { ...operation, browserId: page.id }, activity: BrowserActivityState = { operation: active, control: 'human' }
+    const render = async (control: AgentMuxBrowserControl, nextActivity = activity) => await act(async () => root.render(<BrowserPane
+      tab={{ ...page, kind: 'browser', browserId: page.id, regionId: 'density-region', workspaceId: 'density-workspace', control, activity: nextActivity }} visible />))
+    try {
+      await render(currentControl('agent', active.id))
+      const status = host.querySelector('.browser-operation-status')!
+      expect(status.getAttribute('data-control')).toBe('agent'); expect(status.getAttribute('data-operation-id')).toBe(active.id)
+      expect(status.closest('form')?.classList.contains('browser-toolbar')).toBe(true)
+      const direct = status.querySelector<HTMLButtonElement>('[aria-label="Take control of Browser"]')!
+      expect(direct).not.toBeNull()
+      await act(async () => direct.click())
+      expect(take).toHaveBeenCalledExactlyOnceWith(page.id); expect(execute).not.toHaveBeenCalled(); expect(resume).not.toHaveBeenCalled()
+      const trigger = status.querySelector<HTMLButtonElement>('[aria-label^="Browser activity:"]')!
+      await act(async () => trigger.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
+      const stop = document.querySelector<HTMLElement>('.browser-operation-menu [aria-label="Stop browser operation"]')!
+      expect(stop).not.toBeNull()
+      await act(async () => stop.click())
+      expect(execute).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ operation: 'browser.stop', operationId: active.id }))
+      expect(take).toHaveBeenCalledTimes(1)
+
+      await render(currentControl('human'), { operation: { ...active, phase: 'completed' }, control: 'agent' })
+      const returned = host.querySelector<HTMLButtonElement>('[aria-label="Return to Agent"]')!
+      expect(returned).not.toBeNull()
+      await act(async () => returned.click())
+      expect(resume).toHaveBeenCalledExactlyOnceWith(page.id)
+      expect(execute).toHaveBeenCalledTimes(1); expect(take).toHaveBeenCalledTimes(1)
+    } finally {
+      await act(async () => root.unmount()); host.remove()
+      useAppStore.setState(previous, true); vi.restoreAllMocks()
+      document.getElementById('agentmux-window-overlay-host')?.remove()
+    }
   })
 })
