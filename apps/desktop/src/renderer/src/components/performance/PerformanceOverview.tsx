@@ -6,6 +6,7 @@ import type { ToolkitMetricsSnapshot } from '../../../../shared/toolkit'
 import { PerformanceAttribution, cpuCoreLabel } from './PerformanceAttribution'
 import { PerformanceTrend } from './PerformanceTrend'
 import { PerformanceCapture } from './PerformanceCapture'
+import { PerformanceProfileImport } from './PerformanceProfileImport'
 import { PerformanceScene } from './PerformanceScene'
 import { PerformanceHeapSnapshot } from './PerformanceHeapSnapshot'
 import type { PerformanceHeapSnapshotState } from '../../lib/use-performance-heap-snapshot'
@@ -222,6 +223,7 @@ export function PerformanceOverview({ snapshot, close, paused = false, pending =
         {scope === 'app' && app && app.cpuPercent === null ? <p className="performance-state">CPU unavailable · waiting for a valid interval</p> : null}
         {scope === 'app' ? <>{scene ? <PerformanceScene state={scene} observation={observation} externalBusy={singleCaptureBusy || heap?.busy === true} /> : null}
           <PerformanceCapture observation={observation} externalBusy={scene?.busy || heap?.busy} onBusyChange={onSingleCaptureBusyChange} />
+          <PerformanceProfileImport />
           {heap ? <PerformanceHeapSnapshot state={heap} observation={observation} externalBusy={singleCaptureBusy || scene?.busy === true} /> : null}
           <PerformanceAttribution observation={observation} paused={paused} /></> : <>
           <div className="performance-section-heading"><strong>Run processes</strong><div className="performance-sort" role="group" aria-label="Sort contributors">
