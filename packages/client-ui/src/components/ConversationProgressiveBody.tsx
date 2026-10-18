@@ -1,5 +1,6 @@
 import { createContext, useContext, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { ConversationBodyWork } from '../lib/conversation-body-work.js'
+import { ConversationReadingCommit } from './ConversationReadingCommit.js'
 
 export const ConversationBodyWorkContext = createContext<{ work: ConversationBodyWork; active: boolean } | null>(null)
 
@@ -21,7 +22,7 @@ export function ConversationProgressiveBody({ heavy, reveal = false, children }:
   const show = () => {
     if (!active) return
     focusBody.current = Boolean(node.current?.contains(node.current.ownerDocument.activeElement))
-    work?.capture(); setMounted(true)
+    setMounted(true)
   }
   useLayoutEffect(() => {
     if (!mounted && reveal && active) show()
@@ -43,7 +44,8 @@ export function ConversationProgressiveBody({ heavy, reveal = false, children }:
     observed.current = target
     return work.register(target, () => setMounted(true))
   }, [mounted, work])
-  return <div ref={node} className="conversation-progressive-body" data-conversation-body-presented={mounted}>
+  const body = <div ref={node} className="conversation-progressive-body" data-conversation-body-presented={mounted}>
     {mounted ? children : <div className="log-turn__body conversation-progressive-body__placeholder"><button type="button" onClick={show}>显示正文</button></div>}
   </div>
+  return work ? <ConversationReadingCommit work={work} preserve={active && mounted && !committed.current}>{body}</ConversationReadingCommit> : body
 }

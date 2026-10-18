@@ -1,4 +1,3 @@
-import { markProgrammaticReadingScroll } from './reading-scroll.js'
 import { selectedConversationReadingNode } from './conversation-reading-anchor.js'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useClientUiOwnerDocument } from '../platform.js'
@@ -6,6 +5,7 @@ import { ConversationBodyWork, conversationReadingNode, conversationScrollParent
 import { conversationRecordId, conversationRevision } from '@agentmux/core/conversation'
 import type { ConversationRecord } from './conversation-records.js'
 import { conversationPresentationKey, projectConversationRecordSequence, type ConversationSequence, type ConversationSequenceInsertion } from './conversation-record-sequence.js'
+import { useConversationReadingSelection } from './use-conversation-reading-selection.js'
 
 export type ConversationPresentationFrame = { records: readonly ConversationRecord[]; originalRecords: readonly ConversationRecord[] }
 type Placement = { version: string; parent: string | undefined }
@@ -100,8 +100,8 @@ export function useConversationRecordLayout<T extends ConversationPresentationFr
   const incoming = useMemo(() => placements(frame, sequence), [frame.records, frame.originalRecords, sequence])
   const changedFrame = prior !== null && prior.frame !== frame
   const document = root.current?.ownerDocument
-  const anchor = active && changedFrame && prior && Object.is(prior.intent, intent) ? currentAnchor(root.current) : null
-  const reason = prior && active && changedFrame ? protection(root.current, prior.placements, incoming, Boolean(anchor)) : null
+  const preserve = Boolean(active && prior && Object.is(prior.intent, intent))
+  const reason = prior && active && changedFrame ? protection(root.current, prior.placements, incoming, preserve) : null
   const held = reason !== null
   const accepted = held && prior ? prior : { source: sourceKey, frame, sequence, placements: incoming, intent }
   useLayoutEffect(() => { bodyWork.connect(root.current, active, geometry) })
@@ -120,28 +120,22 @@ export function useConversationRecordLayout<T extends ConversationPresentationFr
         return pendingReason.current === null
       }
     }
-    if (held || !anchor) return
-    const node = [...root.current?.querySelectorAll<HTMLElement>('[data-conversation-layout-key]') ?? []]
-      .find(node => node.dataset.conversationLayoutKey === anchor.key)
-    const target = node ? readingNode(node) : null
-    if (target) {
-      const delta = target.getBoundingClientRect().top - anchor.viewport.getBoundingClientRect().top - anchor.offset
-      if (delta) { anchor.viewport.scrollTop += delta; markProgrammaticReadingScroll(anchor.viewport) }
-    }
+  })
+  useConversationReadingSelection(root, incoming, active, () => {
+    if ((held || presentation?.pending || presentation?.watchSelection)
+      && (held || presentation?.pending || root.current?.ownerDocument.defaultView?.getSelection()?.isCollapsed !== false)) presentation?.onRelease()
   })
   useEffect(() => {
-    const ownerDocument = root.current?.ownerDocument
-    if ((!held && !presentation?.pending && !presentation?.watchSelection) || !ownerDocument || !active) return
+    if (!active) return
+    const viewport = reason === 'anchor' || presentation?.pending && pendingReason.current === 'anchor' ? scrollParent(root.current) : null
+    if (!viewport) return
     const update = () => {
       if (held) changed(value => value + 1)
-      if (held || presentation?.pending || ownerDocument.defaultView?.getSelection()?.isCollapsed !== false) presentation?.onRelease()
+      presentation?.onRelease()
     }
-    ownerDocument.addEventListener('selectionchange', update)
-    ownerDocument.addEventListener('focusout', update)
-    const viewport = reason === 'anchor' || presentation?.pending && pendingReason.current === 'anchor' ? scrollParent(root.current) : null
-    viewport?.addEventListener('scroll', update)
-    return () => { ownerDocument.removeEventListener('selectionchange', update); ownerDocument.removeEventListener('focusout', update); viewport?.removeEventListener('scroll', update) }
+    viewport.addEventListener('scroll', update)
+    return () => viewport.removeEventListener('scroll', update)
   }, [held, reason, document, active, presentation?.pending, presentation?.watchSelection, presentation?.onRelease])
   useLayoutEffect(() => () => { if (presentation) presentation.controller.current = null }, [presentation?.controller])
-  return { ...accepted.frame, sequence: accepted.sequence, root, bodyWork, held: held || Boolean(presentation?.pending), reason: reason ?? (presentation?.pending ? pendingReason.current : null) }
+  return { ...accepted.frame, sequence: accepted.sequence, root, bodyWork, preserve, held: held || Boolean(presentation?.pending), reason: reason ?? (presentation?.pending ? pendingReason.current : null) }
 }
