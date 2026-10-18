@@ -218,8 +218,12 @@ profile operation never creates another application. The existing published incl
 ranges are retained. Other pending changes require explicit review through the returned
 publicationDraft and the original create-application-version action. Inspect remains local;
 unknown native writes are not replayed, and original historical Profile receipts stay queryable.
+connection profile get --connection ID --revision N reads current profile and a qualified typed creator
+when the exact application exposes one. A creator has idType and userId; null means no qualified creator
+was returned, while an absent field in an original saved observation means it was not recorded.
+Use that exact member with room.create.members only after reviewing the invitation. It grants no Agent access.
 For necessary permissions select --application-configuration add-application-permissions with
---permission-purpose agent-conversation (messages and create/bind groups)
+--permission-purpose agent-conversation (messages, create/bind groups and this application’s creator lookup)
 Consume offered read-permission-catalog and
 read-application-permissions separately. Each original read owns its receipt and recovery; an incomplete
 review cannot authorize additions. Confirm only the exact offered add-application-permissions action;
