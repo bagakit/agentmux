@@ -1,19 +1,21 @@
 // @vitest-environment happy-dom
 import { act, useEffect } from 'react'
-import { createRoot } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { expect, it, vi } from 'vitest'
 import { mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentMuxClient, AgentMuxFileAgentSessionStore, type AgentMuxStoredAgentSession } from '@agentmux/core'
+import { composeOutboundMessage } from '@agentmux/core/agent-outbound-message'
 import type { AgentSessionControl } from '../src/shared/contracts'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
 import { useSessionUserMessages } from '../src/renderer/src/lib/session-user-messages'
 import { useAppStore } from '../src/renderer/src/store'
-import { api } from '../src/renderer/src/lib/api'
+import { activityReadingProps } from './helpers/activity-reading-props'
+import { desktopConversationReadBridge } from './helpers/conversation-read-bridge'
 
 const BODY = 'Same native input body.'
-const DECLARED_BODY = '<amux from="amux">\nOriginal declared context.\n</amux>\n\n' + BODY
+const DECLARED_BODY = composeOutboundMessage({ amux: 'Original declared context.', user: BODY })
 const DRAFT = 'Keep the unsent original draft.'
 const SID = 'open-writer-conversation'
 const row = (id: string, body = BODY) => JSON.stringify({ uuid: id, type: 'user', sessionId: 'native-open-writer', message: { role: 'user', content: body } }) + '\n'
@@ -22,10 +24,8 @@ let current: Read | undefined
 function Conversation({ control, enabled }: { control: AgentSessionControl; enabled: boolean }) {
   const read = useSessionUserMessages(control, { enabled })
   useEffect(() => { current = read }, [read])
-  return <ActivityView sessionId={control.agentSessionId} items={[]} userMessages={read.messages} nativeHistoryPage={read.nativeHistoryPage}
-    capability="complete-events" displayState="working" userMessageRead={{ loading: read.loading, error: read.error,
-      observationError: read.observationError, windowFrozen: read.windowFrozen, hasMore: read.hasMore,
-      onRetry: () => void read.refresh(), onReadEarlier: () => {} }} />
+  return <ActivityView {...activityReadingProps({ control, visible: enabled })} nativeHistoryPage={read.nativeHistoryPage}
+    displayState="working" />
 }
 
 it('held-open native writer reaches shared Conversation and preserves original nodes/Range/draft; hidden and unrelated files do not read', async () => {
@@ -44,24 +44,30 @@ it('held-open native writer reaches shared Conversation and preserves original n
     hookBindingId: 'private-binding', hookToken: 'private-token', nativeHandle: { kind: 'provider', providerId: 'claude',
       sessionId: 'native-open-writer', transcriptPath: path } }
   await store.compareAndSwap(null, session)
-  const before = await readFile(storePath)
+  const before = await store.load()
   const client = new AgentMuxClient({ store })
+  const bridgeCloses: Array<() => unknown | Promise<unknown>> = []
+  await desktopConversationReadBridge({ root: directory, client }, bridgeCloses)
   const kernel = Reflect.get(client, 'kernel')
   const controls = ['connect', 'start', 'input', 'resize', 'stop', 'attach', 'status'].map(name => vi.spyOn(kernel, name)
     .mockImplementation(() => { throw new Error('Forbidden healthy Run control: ' + name) }))
-  const reads = vi.spyOn(api.sessions, 'historyPage').mockImplementation((control, options) => client.sessionHistoryPage(control.agentSessionId, options))
-  const observe = vi.spyOn(api.sessions, 'observeHistory').mockImplementation((control, listener, options) => client.observeSessionHistory(control.agentSessionId, listener, options))
+  const reads = vi.spyOn(client, 'sessionHistoryPage')
+  const observe = vi.spyOn(client, 'observeSessionHistory')
   const control: AgentSessionControl = { kind: 'agent', hostId: 'local', agentSessionId: SID, run: session.run! }
   useAppStore.setState({ timelines: {}, agentComposerDrafts: { [SID]: DRAFT } })
   const host = document.createElement('div'); document.body.append(host)
   const root = createRoot(host)
   const render = async (enabled: boolean) => act(async () => root.render(<Conversation control={control} enabled={enabled} />))
-  const wait = async (check: () => void) => act(async () => vi.waitFor(check, { timeout: 3000, interval: 10 }))
+  const wait = async (check: () => void) => vi.waitFor(async () => {
+    await act(async () => { await Promise.resolve() })
+    check()
+  }, { timeout: 3000, interval: 10 })
   const ids = () => [...host.querySelectorAll<HTMLElement>('[data-native-record-id]')].map(node => node.dataset.nativeRecordId)
   try {
     await render(true)
     await wait(() => expect(ids()).toEqual(['original']))
-    expect(reads).toHaveBeenCalledTimes(1); expect(observe).toHaveBeenCalledTimes(1)
+    // The input summary and visible Activity each own their original public window.
+    expect(reads).toHaveBeenCalledTimes(2); expect(observe).toHaveBeenCalledTimes(2)
     expect(current?.observationError).toBeNull()
     const body = host.querySelector<HTMLElement>('[data-native-record-id="original"] .log-turn__body p')!
     expect(body.textContent).toBe(BODY)
@@ -101,12 +107,14 @@ it('held-open native writer reaches shared Conversation and preserves original n
     expect(host.querySelector('[data-native-record-id="original"] .log-turn__body p')).toBe(body)
     expect(context.open).toBe(true); expect(context.isConnected).toBe(true)
     expect(useAppStore.getState().agentComposerDrafts[SID]).toBe(DRAFT)
-    expect(await readFile(storePath)).toEqual(before)
+    expect(await store.load()).toEqual(before)
     expect(controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0, 0])
     expect(await readFile(path, 'utf8')).toBe(row('original', DECLARED_BODY) + row('same-body', DECLARED_BODY) + row('latest', '这条也不会') + row('hidden'))
   } finally {
     await act(async () => root.unmount()); host.remove(); document.getSelection()?.removeAllRanges()
-    await writer.close(); await client.dispose(); await rm(directory, { recursive: true })
+    await writer.close()
+    for (const close of bridgeCloses.reverse()) await close()
+    await client.dispose(); await rm(directory, { recursive: true })
     useAppStore.setState(original, true); current = undefined; vi.restoreAllMocks(); vi.unstubAllGlobals()
   }
 })
