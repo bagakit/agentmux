@@ -9,7 +9,8 @@ export function useFileTreeViewport(
   projection: FileExplorerRowProjection,
   scrollRef: RefObject<HTMLDivElement | null>,
   retainedPaths: readonly (string | null | undefined)[],
-  scope: string
+  scope: string,
+  active: boolean
 ) {
   const prefixRef = useRef<HTMLDivElement>(null)
   const rowsRef = useRef<HTMLDivElement>(null)
@@ -32,6 +33,7 @@ export function useFileTreeViewport(
     rangeExtractor,
     overscan: 8,
     scrollMargin,
+    useCachedMeasurements: !active,
     useFlushSync: false
   })
 
@@ -40,6 +42,8 @@ export function useFileTreeViewport(
     const rows = rowsRef.current
     if (!scrollElement || !rows) return
     const measure = () => {
+      // A retained hidden tree has no layout; zero is not its visible prefix size.
+      if (rows.getClientRects().length === 0) return
       const next = rows.offsetTop
       setScrollMargin(current => current === next ? current : next)
     }

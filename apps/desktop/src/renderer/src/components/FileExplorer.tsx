@@ -474,6 +474,7 @@ export function FileExplorer({
   const editSubmissionRef = useRef<InlineEdit | null>(null)
   const workspacePath = workspace?.path ?? ''
   useEffect(() => () => { fileRevealRef.current?.abort() }, [workspaceId, workspace?.hostId, workspacePath, rootPath])
+  useEffect(() => { if (!active) fileRevealRef.current?.abort() }, [active])
   const editContextRef = useRef({ workspaceId, workspacePath, rootPath })
   editContextRef.current = { workspaceId, workspacePath, rootPath }
   const [deleteRequest, setDeleteRequest] = useState<{ node: TreeNode; workspaceId: string; rootPath: string } | null>(null)
@@ -632,11 +633,11 @@ export function FileExplorer({
     [visibleRows]
   )
   const viewport = useFileTreeViewport(rowProjection, treeRootRef, retainedPaths,
-    `${workspaceId}\0${workspacePath}\0${rootPath}`)
+    `${workspaceId}\0${workspacePath}\0${rootPath}`, active)
   useEffect(() => {
     if (!active || !scrollTarget || !rowProjection.hasPath(scrollTarget.path)) return
     viewport.scrollToPath(scrollTarget.path)
-    if (!scrollTarget.focus) return
+    if (!scrollTarget.focus) { setScrollTarget(null); return }
     const frame = requestAnimationFrame(() => {
       const row = treeRootRef.current?.querySelector<HTMLElement>(
         `[data-tree-path="${CSS.escape(scrollTarget.path)}"]`
@@ -646,6 +647,7 @@ export function FileExplorer({
         const rect = row.getBoundingClientRect()
         row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: rect.left, clientY: rect.top }))
       }
+      if (row) setScrollTarget(current => current === scrollTarget ? null : current)
     })
     return () => cancelAnimationFrame(frame)
   }, [active, scrollTarget, rowProjection, viewport.scrollToPath])
