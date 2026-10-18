@@ -37,7 +37,7 @@ export function ConversationSubmissionFacts({ record }: { record: ConversationSo
     ...(item.sourceChannel ? { channel: item.sourceChannel } : {}), ...(item.sourceDevice ? { device: item.sourceDevice } : {}) })
   return <dl className="conversation-input-details__facts">
     <dt>发送来源</dt><dd>{origin.caption}</dd>
-    <dt>原提交</dt><dd><code>{item.id}</code></dd>
+    <dt>{item.inputRef ? '原提交' : '原记录'}</dt><dd><code>{item.id}</code></dd>
     <dt>原记录引用</dt><dd><code>{record.reference ? JSON.stringify(record.reference) : '未知'}</code></dd>
     <dt>原记录版本</dt><dd><code>{record.revision}</code></dd>
     {item.inputRef ? <><dt>原输入</dt><dd><code>{JSON.stringify(item.inputRef)}</code></dd></> : null}
@@ -49,7 +49,7 @@ export function ConversationSubmissionFacts({ record }: { record: ConversationSo
         : '在当前 Agent 的 Connections 打开此群，查看原收件回执与共享范围。查看不会重新提交这条消息。'}</dd></> : null}</> : null}
     {item.inputSubmission ? <><dt>处理状态</dt><dd><code>{item.inputSubmission.status}</code> · {inputStatus[item.inputSubmission.status]}</dd>
       <dt>输入观察</dt><dd>{item.inputSubmission.observation === 'rejoin-needed' ? '需重新接入原输入观察' : item.inputSubmission.observation === 'owned' ? '原 Core 正在观察' : '原输入回执已记录'}</dd></> : null}
-    <dt>时间口径</dt><dd>原提交记录时间，不是原生接纳或执行完成时间。</dd>
+    <dt>时间口径</dt><dd>{item.inputRef ? '原提交记录时间，不是原生接纳或执行完成时间。' : '原记录时间，不是已提交、原生接纳或执行完成时间。'}</dd>
   </dl>
 }
 
