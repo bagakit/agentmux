@@ -19,16 +19,38 @@ import { useAppStore } from '../src/renderer/src/store'
 import type { BrowserActivityState } from '../src/shared/browser-operation'
 import { MobileConversationSurface } from '../../mobile/src/conversation/MobileConversationSurface'
 import { createBrowserPlatform } from '../../mobile/src/platform/browser'
-import { fixture as mobileFixture, history } from '../../mobile/test/conversation-fixture'
+import { fixture as mobileFixture } from '../../mobile/test/conversation-fixture'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
+import { conversationPagePortFixture } from './helpers/conversation-page-port-fixture'
+import { activityReadingProps } from './helpers/activity-reading-props'
+import { inspectConversationConsumers } from '../src/renderer/src/lib/conversation-consumer-observation'
 
 const dom = composerDOM()
 let releaseTheme: () => void
+const readingCloses: Array<() => Promise<void>> = []
 beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   releaseTheme = mountThemeRuntime(window)
 })
-afterEach(() => { releaseTheme(); vi.unstubAllGlobals() })
+afterEach(async () => { for (const close of readingCloses.splice(0).reverse()) await close(); releaseTheme(); vi.unstubAllGlobals() })
+
+async function settledReading() {
+  await vi.waitFor(async () => {
+    await act(async () => { await Promise.resolve() })
+    const consumer = inspectConversationConsumers({ hostId: 'local', agentSessionId: 'agent-1' }).consumers[0]
+    expect(consumer?.accepted).not.toBeNull(); expect(consumer?.loading).toBe(false)
+    expect(consumer?.inFlight).toBe(false); expect(consumer?.dirty).toBe(false)
+    expect(consumer?.watch.binding).toBe(false); expect(consumer?.watch.bound).toBe(true)
+  })
+}
+async function openCapturedReply(id: string) {
+  await vi.waitFor(async () => {
+    await act(async () => { await Promise.resolve() })
+    expect(dom.container.querySelector(`[data-captured-reply-observation="${id}"]`)).not.toBeNull()
+  })
+  const disclosure = dom.container.querySelector<HTMLButtonElement>(`[data-captured-reply-observation="${id}"] [aria-expanded]`)!
+  if (disclosure.getAttribute('aria-expanded') === 'false') await act(async () => disclosure.click())
+}
 
 const roles = ['status.working', 'status.streaming', 'status.browser-running', 'object.activity', 'status.loading'] as const
 const drawings = Object.fromEntries(roles.map((role, index) => [role, `M${index + 2} 3H20V${index + 14}H${index + 2}Z`]))
@@ -40,6 +62,7 @@ async function customize(names: readonly SemanticIconId[] = roles) {
   for (const name of names) expect(document.getElementById(semanticIconHref(name).slice(1))?.querySelector('path')?.getAttribute('d')).toBe(drawings[name])
 }
 function glyph(scope: ParentNode | null, name: SemanticIconId, size: number) {
+  expect(scope, `Actual nonempty consumer of ${name}`).toBeDefined()
   expect(scope, `Actual nonempty consumer of ${name}`).not.toBeNull()
   const svg = scope!.querySelector<SVGSVGElement>('svg')
   expect(svg, `Actual drawing of ${name}`).not.toBeNull()
@@ -58,11 +81,20 @@ it('Desktop Activity keeps captured Streaming separate from current Agent work a
   const item = captured(), original = structuredClone(item)
   const session = composerSession(); session.status = { state: 'working', source: 'native-hook', observedAt: _newTailFixtureEpoch(0, 0, 11) }
   useAppStore.setState({ sessions: [session] })
-  const render = (items = [item]) => dom.render(<>
-    <ActivityView sessionId="agent-1" items={items} capability="complete-events" displayState="working" />
-    <ResolvedAgentAvatar label="Original working Agent" providerId="codex" state="working" />
-  </>)
+  const source = { providerId: 'codex', nativeSessionId: 'original-icon-source' }
+  const f = await conversationPagePortFixture(session.control, source, async () => ({ agentSessionId: session.id, source, items: [], nextCursor: null }))
+  readingCloses.push(f.close)
+  const render = async (items = [item]) => {
+    const stream = await f.publishCaptured(items)
+    await dom.render(<>
+      <ActivityView {...activityReadingProps({ control: session.control })} displayState="working" />
+      <ResolvedAgentAvatar label="Original working Agent" providerId="codex" state="working" />
+    </>)
+    await vi.waitFor(async () => { await act(async () => { await Promise.resolve() }); expect(f.acceptedCaptured(stream)).toBe(true) })
+    await settledReading()
+  }
   await render()
+  await openCapturedReply(item.id)
   const message = dom.container.querySelector<HTMLElement>('[data-message-id="original-streaming-reply"]')!
   const chip = message.querySelector<HTMLElement>('.log-row__chip[role="status"]')!
   const stream = glyph(chip, 'status.streaming', 12)
@@ -86,11 +118,21 @@ it('Desktop Activity keeps captured Streaming separate from current Agent work a
 
 it('the actual Mobile surface and browser platform share Streaming without changing the original hosted Session, Run or input capability', async () => {
   const f = mobileFixture(), item = captured('session-original'), session = f.sessions.get('session-original')!
-  f.setPage({ ...history(), items: [], nextCursor: null })
-  f.setTimeline({ agentSessionId: 'session-original', revision: 2, items: [item] })
+  const source = { providerId: 'codex', nativeSessionId: 'original-mobile-icon-source' }
+  const reader = await conversationPagePortFixture({ hostId: session.hostId, agentSessionId: session.agentSessionId }, source,
+    async () => ({ agentSessionId: session.agentSessionId, source, items: [], nextCursor: null }))
+  readingCloses.push(reader.close)
+  await reader.publishCaptured([item])
+  Object.assign(f.client, {
+    readAgentConversation: reader.client.readAgentConversation.bind(reader.client),
+    readConversationChanges: reader.client.readConversationChanges.bind(reader.client),
+    observeConversation: reader.client.observeConversation.bind(reader.client),
+    releaseConversationView: reader.client.releaseConversationView.bind(reader.client)
+  })
   await dom.render(<MobileConversationSurface client={f.client} agentSessionId="session-original"
     connection={{ state: 'connected', message: 'Connected' }} platform={createBrowserPlatform()} />)
-  const message = dom.container.querySelector<HTMLElement>('.mobile-conversation__captured [data-message-id="original-streaming-reply"]')!
+  await openCapturedReply(item.id)
+  const message = dom.container.querySelector<HTMLElement>('[data-message-id="original-streaming-reply"]')!
   const chip = message?.querySelector<HTMLElement>('.log-row__chip[role="status"]')!
   const stream = glyph(chip, 'status.streaming', 12)
   const input = dom.container.querySelector('[contenteditable="true"]')
@@ -150,14 +192,15 @@ it('Browser running has its own role and keeps exact operation, control, semanti
       target: { role: 'button', name: 'Open settings', ordinal: 1, count: 1 } }]
   } }
   const original = structuredClone(activity), stop = vi.fn(), take = vi.fn()
-  await dom.render(<BrowserOperationStatus activity={activity} onTakeControl={take} onStop={stop} />)
+  const control = { owner: 'agent' as const, activeOperationId: activity.operation!.id, revision: 1, inputIsolation: 'isolated' as const }
+  await dom.render(<BrowserOperationStatus activity={activity} browserId={activity.operation!.browserId} control={control} onTakeControl={take} onStop={stop} />)
   const status = dom.container.querySelector<HTMLElement>('.browser-operation-status')!
-  const trigger = status.querySelector<HTMLButtonElement>('button')!, icon = glyph(trigger, 'status.browser-running', 13)
+  const trigger = status.querySelector<HTMLButtonElement>('button')!, icon = glyph(trigger.querySelector('.browser-operation-status__phase'), 'status.browser-running', 13)
   const label = trigger.getAttribute('aria-label')
   expect(label).toContain('Navigator'); expect(label).toContain('button “Open settings”')
   await customize()
   expect(dom.container.querySelector('.browser-operation-status')).toBe(status)
-  expect(status.querySelector('button')).toBe(trigger); expect(trigger.querySelector('svg')).toBe(icon)
+  expect(status.querySelector('button')).toBe(trigger); expect(trigger.querySelector('.browser-operation-status__phase svg')).toBe(icon)
   expect(trigger.getAttribute('aria-label')).toBe(label)
   expect(status.dataset).toMatchObject({ phase: 'running', control: 'agent', operationId: 'original-operation' })
   await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })))
@@ -200,22 +243,36 @@ it('real Board work and historical Working observations remain distinct meanings
 })
 
 it('real Activity Reading uses loading while retaining the existing message/feed and its read action target', async () => {
-  const item = { ...captured(), status: 'complete' as const }, earlier = vi.fn()
-  const read = { loading: true, error: null, hasMore: true, onRetry: vi.fn(), onReadEarlier: earlier }
-  const render = (loading: boolean) => dom.render(<ActivityView sessionId="agent-1" items={[item]} capability="complete-events" userMessageRead={{ ...read, loading }} />)
-  await render(true)
+  const item = { ...captured(), status: 'complete' as const }, session = composerSession()
+  const source = { providerId: 'codex', nativeSessionId: 'original-icon-source' }
+  let release: (() => void) | undefined
+  const f = await conversationPagePortFixture(session.control, source, async (_id, options) => {
+    if (options?.cursor === 'original-earlier-icons') {
+      await new Promise<void>(resolve => { release = resolve })
+      return { agentSessionId: session.id, source, items: [{ id: 'original-earlier-input', kind: 'user-message', contentParts: [{ kind: 'text', text: 'Original earlier input' }] }], nextCursor: null }
+    }
+    return { agentSessionId: session.id, source, items: [{ id: 'original-current-input', kind: 'user-message', contentParts: [{ kind: 'text', text: 'Original current input' }] }], nextCursor: 'original-earlier-icons' }
+  })
+  readingCloses.push(async () => { release?.(); await f.close() })
+  await f.publishCaptured([item])
+  await dom.render(<ActivityView {...activityReadingProps({ control: session.control })} />)
+  await settledReading(); await openCapturedReply(item.id)
   const feed = dom.container.querySelector('.activity-feed')!, message = feed.querySelector('[data-message-id="original-streaming-reply"]')!
-  const loading = dom.container.querySelector('.activity-feed__loading-layer [role="status"]')!, icon = glyph(loading, 'status.loading', 12)
-  const button = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Read earlier records')!
-  expect(button).toBeDefined(); expect(loading.textContent).toContain('Reading records…')
+  const button = [...dom.container.querySelectorAll<HTMLButtonElement>('.activity-feed__reading-action')].find(node => node.textContent === 'Earlier')!
+  expect(button).toBeDefined()
+  await act(async () => button.click())
+  await vi.waitFor(async () => { await act(async () => { await Promise.resolve() }); expect(release).toBeTypeOf('function') })
+  const loading = button, icon = glyph(loading, 'status.loading', 12)
+  expect(loading.textContent).toBe('Loading earlier…')
   expect(loading.querySelector('.semantic-icon--working')).toBeNull()
   await customize()
   expect(dom.container.querySelector('.activity-feed')).toBe(feed); expect(feed.querySelector('[data-message-id="original-streaming-reply"]')).toBe(message)
   expect(loading.querySelector('svg')).toBe(icon); expect(message.textContent).toContain(item.content)
-  await act(async () => button.click())
-  expect(earlier).toHaveBeenCalledExactlyOnceWith(button)
-  await render(false)
-  expect(dom.container.querySelector('.activity-feed__loading-layer')).toBeNull()
+  expect(f.nativeRead.mock.calls.filter(([, options]) => options?.cursor === 'original-earlier-icons')).toHaveLength(1)
+  expect(dom.container.querySelector('.activity-feed__reading-action')).toBe(button)
+  await act(async () => release!())
+  await settledReading()
+  expect(feed.querySelector('.activity-feed__reading-action [data-semantic-icon="status.loading"]')).toBeNull()
   expect(dom.container.querySelector('.activity-feed')).toBe(feed); expect(message.isConnected).toBe(true)
   expect(item.status).toBe('complete'); expect(dom.draft()).toBe('Keep my draft')
 })
