@@ -134,7 +134,7 @@ describe('public Desktop spatial Control owner', () => {
     expect(record.browserAgent?.inputStarted).toBeUndefined()
     vi.spyOn(api.sessions, 'creation').mockResolvedValue({ ...agentCreationFixture(agent(record.agentSessionId)), creation: { createOperationId: record.requestId, initialPrompt: 'not-requested' } })
     vi.spyOn(useAppStore.getState(), 'sendQueuedAgentSteer').mockResolvedValue('submitted')
-    expect(await createBrowserAgent(browser.id, source)).toBe('')
+    expect(await createBrowserAgent(browser.id, source)).toEqual({ kind: 'confirmed' })
     expect(enqueue).toHaveBeenCalledTimes(2)
     expect(enqueue.mock.calls[0]![3]).toBe(enqueue.mock.calls[1]![3])
     expect(created).toHaveBeenCalledTimes(1); expect(handoff).toHaveBeenCalledTimes(1)
@@ -188,7 +188,7 @@ describe('public Desktop spatial Control owner', () => {
     })
     const first = createBrowserAgent(browser.id, source), duplicate = createBrowserAgent(browser.id, source)
     expect(duplicate).toBe(first)
-    expect(await first).toBe('')
+    expect(await first).toEqual({ kind: 'confirmed' })
     expect(stages).toEqual(['create', 'handoff', 'input']); expect(created).toHaveBeenCalledTimes(1); expect(handoff).toHaveBeenCalledTimes(1); expect(send).toHaveBeenCalledTimes(1)
     const record = Object.values(useAppStore.getState().spatialRequests).find(item => item.purpose === 'browser-agent')!
     expect(record.target).toMatchObject(source)
@@ -197,7 +197,8 @@ describe('public Desktop spatial Control owner', () => {
     expect(placed.regions[source.regionId]).toMatchObject({ browserId: browser.id, url: browser.url, agentCreationRequestId: record.requestId })
     vi.spyOn(api.sessions, 'creation').mockResolvedValue({ ...agentCreationFixture(agent(record.agentSessionId)), creation: { createOperationId: record.requestId, initialPrompt: 'not-requested' } })
     vi.spyOn(api.sessions, 'inspectInput').mockResolvedValue(null)
-    expect(await createBrowserAgent(browser.id, source)).toContain('No input was resent')
+    expect(await createBrowserAgent(browser.id, source)).toMatchObject({ kind: 'input-unconfirmed', message: expect.stringContaining('No input was resent'),
+      messageOperationId: record.browserAgent!.messageOperationId, agentSessionId: record.agentSessionId, runId: agent(record.agentSessionId).control.run.runId })
     expect(created).toHaveBeenCalledTimes(1); expect(send).toHaveBeenCalledTimes(1)
   })
   it('generates a fixed-width Base58 identity at the real Desktop launch boundary', async () => {
