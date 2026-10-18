@@ -18,7 +18,7 @@ import { COLLABORATION_ACTIVITY_MS } from '../../../src/renderer/src/lib/collabo
 import '../../../src/renderer/src/styles/index.css'
 
 // Transparent instrumentation: actual browser Workers and original context code execute.
-const nativeWorkers: Array<{ request?: { type: CollaborationLayoutRequest['type']; id: string; queuedAt: number; sentAt?: number; delayMS: number }; input?: { nodes: number; connections: number; ids: string[]; sizes: Record<string, number>; areas: Array<{ id: string; members: number }>; edges: Array<{ id: string; source: string; target: string; kind: string }> }; boxes?: { agents: number; ids: string[]; areas: Array<{ id: string; width: number; height: number }> }; geometry?: readonly CollaborationLayoutBox[]; pathIds?: string[]; responses?: Array<{ type: CollaborationLayoutResponse['type']; at: number }>; complete?: boolean; terminated?: boolean; observerMS: number }> = []
+const nativeWorkers: Array<{ request?: { type: CollaborationLayoutRequest['type']; id: string; queuedAt: number; sentAt?: number; delayMS: number; connectionIds: string[] }; errors?: Array<Extract<CollaborationLayoutResponse, { type: 'error' }> & { at: number }>; retainedPathIds?: string[]; input?: { nodes: number; connections: number; ids: string[]; sizes: Record<string, number>; areas: Array<{ id: string; members: number }>; edges: Array<{ id: string; source: string; target: string; kind: string }> }; boxes?: { agents: number; ids: string[]; areas: Array<{ id: string; width: number; height: number }> }; geometry?: readonly CollaborationLayoutBox[]; pathIds?: string[]; responses?: Array<{ type: CollaborationLayoutResponse['type']; at: number }>; complete?: boolean; terminated?: boolean; observerMS: number }> = []
 let delayedRoute: { milliseconds: number; sender: string; recipient: string } | undefined
 const OriginalWorker = window.Worker
 class ObservedWorker extends OriginalWorker {
@@ -30,7 +30,8 @@ class ObservedWorker extends OriginalWorker {
       const start = performance.now()
       ;(this.sample.responses ??= []).push({ type: event.data.type, at: start })
       if (event.data?.type === 'boxes' && Array.isArray(event.data.boxes)) this.sample.boxes = { agents: event.data.boxes.filter(box => box.kind === 'agent').length, ids: event.data.boxes.filter(box => box.kind === 'agent').map(box => box.id), areas: event.data.boxes.filter(box => box.kind === 'area').map(({ id, width, height }) => ({ id, width, height })) }
-      if (event.data?.type === 'boxes' && Array.isArray(event.data.boxes)) this.sample.geometry = event.data.boxes
+      if (event.data?.type === 'boxes' && Array.isArray(event.data.boxes)) { this.sample.geometry = event.data.boxes; this.sample.retainedPathIds = [...event.data.retainedPaths ?? []] }
+      if (event.data?.type === 'error') (this.sample.errors ??= []).push({ ...event.data, at: start })
       if (event.data?.type === 'complete') this.sample.complete = true
       if (event.data?.type === 'paths') this.sample.pathIds = [...this.sample.pathIds ?? [], ...Object.keys(event.data.paths)]
       this.sample.observerMS += performance.now() - start
@@ -48,7 +49,7 @@ class ObservedWorker extends OriginalWorker {
     const subject = (id: string) => JSON.parse(id)[1] as string
     const delayMS = request?.type === 'route' && delayedRoute && request.connections.some(connection => connection.kind === 'communication' &&
       subject(connection.source) === JSON.stringify(['local', delayedRoute!.sender]) && subject(connection.target) === JSON.stringify(['local', delayedRoute!.recipient])) ? delayedRoute.milliseconds : 0
-    if (request && ['arrange', 'reconcile', 'route'].includes(request.type)) this.sample.request = { type: request.type, id: request.id, queuedAt: performance.now(), delayMS }
+    if (request && ['arrange', 'reconcile', 'route'].includes(request.type)) this.sample.request = { type: request.type, id: request.id, queuedAt: performance.now(), delayMS, connectionIds: (request.type === 'route' ? request.connections : request.input.connections).map(connection => connection.id) }
     this.sample.observerMS += performance.now() - start
     const send = () => { if (this.sample.request) this.sample.request.sentAt = performance.now(); if (Array.isArray(options)) super.postMessage(message, options); else super.postMessage(message, options) }
     // A finite transport delay preserves the original request, Worker and routing result.
@@ -353,15 +354,17 @@ Object.assign(window, { graphCapture: {
     const index = sessions.findIndex(session => session.kind === 'agent' && session.control.agentSessionId === id), original = sessions[index]
     if (!original || original.kind !== 'agent') throw Error('Only an original fixture Session can receive a metadata update')
     const observedAt = Date.now(), sequence = (original.currentActivity?.sequence ?? 0) + 1
-    const session = { ...original, label: 'Reviewed identity · ' + id, updatedAt: observedAt, agentSessionUpdatedAt: observedAt,
+    const session = { ...original, updatedAt: observedAt, agentSessionUpdatedAt: observedAt,
       status: { state: 'working' as const, source: 'native-hook' as const, observedAt },
       semanticStatus: { state: 'working' as const, source: 'native-hook' as const, observedAt, stateEnteredAt: observedAt, currentActivityRevision: sequence },
       currentActivity: { state: 'active' as const, source: 'native-hook' as const, run: original.control.run, nativeSessionId: original.nativeSessionId!, nativeTurnId: 'turn-' + id, sourceId: 'source-' + id, sequence, hookReceiptId: 'receipt-' + id + '-' + sequence, observedAt } }
     sessions = [...sessions.slice(0, index), session, ...sessions.slice(index + 1)]
+    const catalogIndex = extraSessions.findIndex(candidate => candidate.id === id)
+    if (catalogIndex >= 0) extraSessions[catalogIndex] = session
     const record: AgentMuxAgentSession = { kind: 'agent', agentSessionId: id, providerId: session.providerId, executorId: session.executorId, hostId,
       workspacePath: session.workspacePath, run: session.control.run, retiredRuns: [], createdAt: session.createdAt, updatedAt: observedAt, semanticStatus: session.semanticStatus, currentActivity: session.currentActivity, ...(session.nativeHandle ? { nativeHandle: session.nativeHandle } : {}) }
     for (const listener of listeners) listener({ type: 'core', hostId, event: { type: 'agent-session', session: record } })
-    return { id, label: session.label, observedAt }
+    return { id, observedAt, currentActivityRevision: sequence }
   },
   grow(total: 240 | 480) {
     const start = performance.now()
@@ -408,7 +411,7 @@ Object.assign(window, { graphCapture: {
     draftMounted: originalDraft?.isConnected, sameDraft: originalDraft === document.querySelector('[data-fixture-session="fixture-ui"] textarea'),
     draft: originalDraft?.value, storedDraft: state.agentComposerDrafts['fixture-ui'], range: [originalDraft?.selectionStart, originalDraft?.selectionEnd], reads: [...reads], controls: [...controls],
     selectedSession: state.agentFocus.execution.sessionId, originalRun: sessions[0]!.control.run.runId,
-    metadata: state.sessions.map(session => ({ id: session.id, label: session.label, activity: session.kind === 'agent' ? session.currentActivity?.state : undefined })),
+    metadata: state.sessions.map(session => ({ id: session.id, label: session.label, agentSessionUpdatedAt: session.kind === 'agent' ? session.agentSessionUpdatedAt : undefined, currentActivityRevision: session.kind === 'agent' ? session.semanticStatus?.currentActivityRevision : undefined, activity: session.kind === 'agent' ? session.currentActivity?.state : undefined })),
     sameMap: originalMap === document.querySelector('.collaboration-map'), census: census(),
     activeWorkspaceId: state.activeWorkspaceId, choice: structuredClone(state.workbenchSpaceSelection),
     documentHidden: document.hidden, visibilityState: document.visibilityState,
