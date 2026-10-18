@@ -138,6 +138,33 @@ describe('BrowserOperationStatus', () => {
     expect(markup).toContain('data-phase="human"')
     expect(markup).not.toContain('Take control')
   })
+
+  it.each(['running', 'completed', 'absent'] as const)('returns a human-owned %s Browser directly without opening its menu or replaying work', async phase => {
+    const host = document.createElement('div'), root = createRoot(host)
+    const onReturnControl = vi.fn(), onTakeControl = vi.fn(), onStop = vi.fn()
+    try {
+      await act(async () => root.render(createElement(BrowserOperationStatus, {
+        activity: { operation: phase === 'absent' ? null : { ...operation, phase }, control: 'human' },
+        control: humanControl, onReturnControl, onTakeControl, onStop
+      })))
+      const button = host.querySelector<HTMLButtonElement>('button[aria-label="Return to Agent"]')
+      expect(button).not.toBeNull()
+      expect(button?.closest('[role="menu"]')).toBeNull()
+      expect(host.querySelector('[aria-haspopup="menu"]')?.getAttribute('aria-expanded')).toBe('false')
+      await act(async () => button!.click())
+      expect(onReturnControl).toHaveBeenCalledTimes(1)
+      expect(onTakeControl).not.toHaveBeenCalled(); expect(onStop).not.toHaveBeenCalled()
+    } finally { await act(async () => root.unmount()) }
+  })
+
+  it.each(['agent', 'unknown', 'human-without-callback'] as const)('does not offer a direct Return for %s', owner => {
+    const control = owner === 'human-without-callback' ? humanControl : owner === 'agent' ? agentControl
+      : { owner: 'unknown' as const, activeOperationId: null, revision: 3, inputIsolation: 'unconfirmed' as const }
+    const markup = renderToStaticMarkup(createElement(BrowserOperationStatus, {
+      activity, control, ...(owner === 'human-without-callback' ? {} : { onReturnControl: vi.fn() })
+    }))
+    expect(markup).not.toContain('aria-label="Return to Agent"')
+  })
 })
 
 describe('BrowserOperationHistory', () => {
