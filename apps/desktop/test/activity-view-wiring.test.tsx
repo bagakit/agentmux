@@ -33,11 +33,13 @@ async function fixture() {
   if (accepted.kind !== 'complete') throw new Error('Missing complete public window')
   const projection = projectConversationWindow(accepted.snapshot)
   expect(projection.records).toHaveLength(1)
+  const locatedMessageKey = conversationMessageSourceKey(reference.agentSessionId, { kind: 'captured', recordId: item.id })
+  if (!locatedMessageKey) throw new Error('Missing original captured location key')
   const draw = async (desktop: boolean, located = false) => act(async () => root.render(desktop
     ? <ActivityView {...activityReadingProps({ control: reference })} />
-    : <ConversationView page={projection.historyPage} records={projection.records} originalRecords={projection.originalRecords}
+    : <ConversationView {...(projection.historyPage ? { page: projection.historyPage } : {})} records={projection.records} originalRecords={projection.originalRecords}
         coverage={projection.timeline.coverage} sessionId={reference.agentSessionId} renderProcess={props => <NativeProcessObservation {...props} compact />}
-        {...(located ? { locatedMessageKey: conversationMessageSourceKey(reference.agentSessionId, { kind: 'captured', recordId: item.id }) } : {})} />))
+        {...(located ? { locatedMessageKey } : {})} />))
   const openGroup = async () => {
     await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) }); expect(host.querySelector('.wf-head')).not.toBeNull() })
     await act(async () => host.querySelector<HTMLButtonElement>('.wf-head')!.click())
