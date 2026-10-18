@@ -22,7 +22,7 @@ import { readToolkitPackageMetadata } from './toolkit-package.js'
 
 type Lease = { includeFailureEvidence: boolean; snapshot(value: ToolkitSnapshot): void; end(error?: Error): void; release(): void }
 type Execution = { id: string; ref: AgentMuxRunRef | null; port: ToolkitRunPort | null; ended: boolean
-  creationPending: boolean; admissionSaved: boolean; receiptUnconfirmed: boolean; cleanupConfirmed: boolean
+  creationPending: boolean; admissionSaved: boolean; receiptUnconfirmed: boolean; cleanupConfirmed: boolean; terminalConfirmed: boolean
   captureFailure: boolean; stage: ToolkitPerformanceFailureStage; frame: ToolkitFailureCapture | null
   failureDetails: ToolkitPerformanceFailureDetails | null; frameStart: number
   channel: Awaited<ReturnType<typeof openToolkitResultChannel>> | null; runReady: Promise<void>; ready(): void
@@ -84,7 +84,7 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
     let ready!: () => void
     const runReady = new Promise<void>(resolve => { ready = resolve })
     return { id, ref: null, port: null, ended: false, creationPending: false, admissionSaved: false,
-      receiptUnconfirmed: false, cleanupConfirmed: false, captureFailure: false, stage: 'launch', frame: null,
+      receiptUnconfirmed: false, cleanupConfirmed: false, terminalConfirmed: false, captureFailure: false, stage: 'launch', frame: null,
       channel: null, runReady, ready, drainTimer: null, exit: null, terminalCursor: 0, terminalCapture: null,
       failureDetails: null, frameStart: 0, lastAppObservedAt: null,
       cursor: 0, buffer: '', decoder: new TextDecoder('utf-8', { fatal: true }), sequence: 0 }
@@ -166,6 +166,7 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
     }
     if (request.operation === 'toolkit.run') {
       this.allowed(signal)
+      await this.reconcileUnknown()
       if (this.value.state === 'unknown') throw new AgentMuxError('Previous tool outcome is unconfirmed: ' + this.value.reason, 'CONTROL_UNAVAILABLE')
       // Admission is the explicit write. A lost receipt is unknown, not an implicit undo.
       this.manual = true
@@ -201,6 +202,7 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
   private async ensure(captureFailure = false): Promise<void> {
     if (this.stopping) await this.stopping
     if (!this.wanted()) return
+    await this.reconcileUnknown()
     if (this.value.state === 'unknown') throw new AgentMuxError('Previous tool cleanup is unconfirmed: ' + this.value.reason, 'CONTROL_UNAVAILABLE')
     if (this.starting) return await this.starting
     if (this.execution?.ref && !this.execution.ended) return
@@ -469,6 +471,22 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
     for (const lease of [...this.leases]) { lease.release(); lease.end(new AgentMuxError(this.value.reason, 'CONTROL_FAILED')) }
     void this.quiesce()
   }
+  private async reconcileUnknown(): Promise<void> {
+    const execution = this.execution
+    if (this.value.state !== 'unknown' || !execution?.ref || execution.creationPending) return
+    try {
+      execution.port ??= await this.args.openRunPort()
+      const run = await execution.port.status(execution.ref)
+      if (run?.state === 'exited' || run?.state === 'interrupted') {
+        execution.terminalConfirmed = true
+        await this.quiesce(true)
+      }
+    } catch (error) {
+      this.value.diagnostics.cleanupIssue = this.issue('stop', error)
+      this.value.reason = 'Previous Run status or cleanup is unconfirmed: ' + String(error instanceof Error ? error.message : error).slice(0,4000)
+      this.publish()
+    }
+  }
   private async quiesce(explicit = false): Promise<void> {
     if (this.starting) { try { await this.starting } catch { /* Cleanup the exact partial creation below. */ } }
     if (this.wanted() && !this.execution?.ended) return
@@ -489,6 +507,7 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
     if (execution.drainTimer) { clearTimeout(execution.drainTimer); execution.drainTimer = null }
     execution.ready()
     const failed = this.value.state === 'failed'
+    const wasUnknown = this.value.state === 'unknown'
     this.value.state = 'stopping'; this.publish()
     this.stopping = (async () => {
       let operation: ToolkitPerformanceIssue['operation'] = 'close-result-channel'
@@ -500,7 +519,22 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
           if (!execution.port) execution.port = await this.args.openRunPort()
           if (!execution.cleanupConfirmed) {
             operation = 'stop'
-            try { if (execution.exit === null) await execution.port.stop(execution.ref) } finally {
+            try {
+              if (execution.exit === null && !execution.terminalConfirmed) {
+                let run: Awaited<ReturnType<ToolkitRunPort['status']>> = null
+                try { run = await execution.port.status(execution.ref) }
+                catch (error) { if (wasUnknown) throw error }
+                if (run?.state === 'exited' || run?.state === 'interrupted') execution.terminalConfirmed = true
+                if (!execution.terminalConfirmed) {
+                  try { await execution.port.stop(execution.ref) }
+                  catch (error) {
+                    const afterStop = await execution.port.status(execution.ref).catch(() => null)
+                    if (afterStop?.state !== 'exited' && afterStop?.state !== 'interrupted') throw error
+                    execution.terminalConfirmed = true
+                  }
+                }
+              }
+            } finally {
               const primaryOperation = operation
               operation = 'release'
               await execution.port.release(execution.ref)

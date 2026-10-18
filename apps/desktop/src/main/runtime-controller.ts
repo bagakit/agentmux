@@ -1548,6 +1548,7 @@ export class RuntimeController {
         return await client.attachTerminal(ref.runId, afterByte, 'raw')
       },
       replay: async (ref, afterByte) => await client.readRunReplay(ref, afterByte, 'raw'),
+      status: async ref => (await client.listRuns()).find(run => run.runId === ref.runId) ?? null,
       release: async ref => await client.releaseRunAttachment(ref),
       stop: async ref => await client.stopTerminal(ref),
       remove: async ref => {
