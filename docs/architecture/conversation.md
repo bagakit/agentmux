@@ -110,7 +110,9 @@ Desktop 与 Mobile 共用 [`CapturedProcessRecord`](../../packages/client-ui/src
 
 [`ConversationReadingRuler`](../../apps/desktop/src/renderer/src/components/ConversationReadingRuler.tsx) 独立持有可见区状态，IntersectionObserver 更新只重绘标尺；原已观察节点同时作为 [`conversationReadingAnchor`](../../packages/client-ui/src/lib/conversation-reading-anchor.ts) 的候选，wheel／scroll 优先测量可见节点，不逐条测量历史前缀。观察尚未建立或候选失效时仍可从当前实际 DOM 取得锚点。
 
-Sequence 仍遍历整个已载序列，过程详情部分在首次展开后保留节点；这尚不是按视口挂载／回收的完整虚拟列表。上述边界解释当前源码的工作范围，不代表已经测定用户现场卡顿根因或全部阅读环境的性能；重正文渐进挂载、节点保留及验收边界见[目标设计](../design/conversation-client-architecture.md#数据准备与渐进呈现)。
+共同布局为每个阅读位置持有一个 [`ConversationBodyWork`](../../packages/client-ui/src/lib/conversation-body-work.ts)，经原 `ownerDocument` 的 IntersectionObserver 维护邻近候选，每次动画帧最多启动一个重正文的首次挂载，等待实际组件提交后再继续。短正文即时呈现，重 Markdown、代码、图片及已展开工具载荷通过 [`ConversationProgressiveBody`](../../packages/client-ui/src/components/ConversationProgressiveBody.tsx) 延后首次工作；原记录壳、来源与 Copy 仍可达。未自动呈现的正文保留显式展开入口，键盘焦点所在占位不被后台挂载替换。
+
+Desktop 将原滚动锚点及跟随动作交给共同布局，Mobile 复用原跟随意图；尺寸变化与首次正文提交只恢复原屏幕位置，不产生新的跟随或读取意图。已读正文离屏、隐藏或收起后保留节点，换原内容或离开 Core 窗口时才随所属组件释放；隐藏及换 document 解除相应观察，旧回调不能更新新的阅读位置。Sequence 仍遍历完整已载序列，因此这是有界窗口内的渐进首次挂载，不是固定 DOM 数量的完整虚拟列表。实际性能与选区、返程的验证责任见[渐进阅读设计](../design/conversation-client-architecture.md#数据准备与渐进呈现)，源码机制不代签用户现场测量。
 
 来源标签集中在 [`conversation-sources`](../../packages/client-ui/src/lib/conversation-sources.ts)，只索引已接受 Core records 和精确关系；同一事件可有多个来源，invocation 来源按 Core 归属与唯一调用身份只标对应 selector。Focus、搜索与 Mobile 复用该映射；来源标签不产生关联、作者、采用或完成事实。
 
