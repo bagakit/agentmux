@@ -1,8 +1,9 @@
 import { createRequire, findPackageJSON, isBuiltin } from 'node:module'
-import { existsSync, readFileSync, realpathSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync, realpathSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { join, relative, resolve, dirname } from 'node:path'
 import { spawn } from 'node:child_process'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, symlink, writeFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 
 /** The original listener worker is a shipped asset; stage only that current Source asset for this WT. */
@@ -31,15 +32,64 @@ export async function moteRendererImportGraph() {
 }
 
 /** Build and invoke the actual CLI entry, with the same Source variants as the Vite consumer. */
-export async function sourceMoteDiagnosticsCli(directory: string) {
+export async function sourceMoteDiagnosticsCli(directory: string, options: { mutations?: string; loaded?: string; ssr?: boolean } = {}) {
   const root = resolve(import.meta.dirname, '../../../..'), deps = dirname(realpathSync(join(root, 'node_modules')))
   const vitestRequire = createRequire(realpathSync(join(root, 'node_modules/vitest/package.json')))
   const viteRequire = createRequire(vitestRequire.resolve('vite/package.json'))
   const { build } = viteRequire('esbuild') as typeof import('esbuild')
-  const changed: Record<string, string> = process.env.AGENTMUX_MOTE_DIAGNOSTICS_MUTATIONS
-    ? JSON.parse(readFileSync(process.env.AGENTMUX_MOTE_DIAGNOSTICS_MUTATIONS, 'utf8')) : {}
+  const mutations = options.mutations ?? process.env.AGENTMUX_MOTE_DIAGNOSTICS_MUTATIONS
+  const changed: Record<string, string> = mutations ? JSON.parse(readFileSync(mutations, 'utf8')) : {}
   const cli = join(directory, 'mote-diagnostics-cli.mjs')
-  const built = await build({ entryPoints: [join(root, 'packages/core/src/agentmux.ts')], outfile: cli,
+  const dependency = (specifier: string, original: string): string => {
+    try { return createRequire(original).resolve(specifier) }
+    catch (error) {
+      // Import-only installed packages still use their actual declared ESM export.
+      const manifestPath = findPackageJSON(specifier, pathToFileURL(original).href)
+      if (!manifestPath) throw error
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+      const packageName = specifier.startsWith('@') ? specifier.split('/').slice(0, 2).join('/') : specifier.split('/')[0]
+      const entry = specifier === packageName ? '.' : '.' + specifier.slice(packageName!.length)
+      let target = Object.hasOwn(manifest.exports, entry) ? manifest.exports[entry] : entry === '.' ? manifest.exports : undefined
+      while (target && typeof target === 'object') target = target.import ?? target.node ?? target.default
+      if (typeof target !== 'string') throw error
+      return resolve(dirname(manifestPath), target)
+    }
+  }
+  const ssrInputs: string[] = []
+  const built = options.ssr ? await (async () => {
+    // Dynamic native dependencies retain the original Core dependency root.
+    await symlink(join(deps, 'packages/core/node_modules'), join(directory, 'node_modules'))
+    const vite = await import(pathToFileURL(viteRequire.resolve('vite')).href) as typeof import('vite')
+    await vite.build({ configFile: false, root, logLevel: 'silent', plugins: [{ name: 'original-public-diagnostic-cli', enforce: 'pre',
+      resolveId(specifier, importer) {
+        if (specifier.startsWith('@agentmux/')) {
+          const [, name] = /^@agentmux\/([^/]+)/.exec(specifier)!
+          const directory = join(root, 'packages', name!), manifest = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8'))
+          const entry = specifier === `@agentmux/${name}` ? '.' : '.' + specifier.slice(`@agentmux/${name}`.length)
+          const target = manifest.exports[entry]?.import
+          if (!target) throw new Error('Missing current public CLI export: ' + specifier)
+          const path = resolve(directory, target.replace('./dist/src/', './src/').replace('./dist/', './src/').replace(/\.js$/, '.ts'))
+          if (!existsSync(path)) throw new Error('Missing current public CLI source: ' + path)
+          return path
+        }
+        if (!/^[^./]/.test(specifier) || specifier.startsWith('\0')) return
+        if (isBuiltin(specifier)) return { id: specifier, external: true }
+        const original = join(deps, relative(root, importer || join(root, 'packages/core/src/agentmux.ts')))
+        return { id: dependency(specifier, original), external: true }
+      },
+      transform(source, id) {
+        const absolute = id.split('?')[0]!, path = relative(root, absolute)
+        if (!/\.[cm]?tsx?$/.test(absolute) || id.includes('?') || !(path.startsWith('packages/') || path.startsWith('apps/')) || path.includes('node_modules/')) return
+        ssrInputs.push(path)
+        const code = changed[absolute] ?? changed[path] ?? source
+        if (options.loaded) appendFileSync(options.loaded, JSON.stringify({ consumer: 'actual-source-cli', path,
+          originalSha256: createHash('sha256').update(source).digest('hex'), sha256: createHash('sha256').update(code).digest('hex') }) + '\n')
+        return code === source ? undefined : { code, map: null }
+      }
+    }], build: { ssr: true, minify: false, emptyOutDir: false, outDir: directory, target: 'node24',
+      rollupOptions: { input: join(root, 'packages/core/src/agentmux.ts'), output: { format: 'es', entryFileNames: 'mote-diagnostics-cli.mjs' } } } })
+    return { metafile: { inputs: Object.fromEntries(ssrInputs.map(path => [path, {}])) } }
+  })() : await build({ entryPoints: [join(root, 'packages/core/src/agentmux.ts')], outfile: cli,
     platform: 'node', target: 'node24', format: 'esm', bundle: true, metafile: true, logLevel: 'silent',
     plugins: [{ name: 'current-workspace-public-source', setup(builder) {
       builder.onResolve({ filter: /^@agentmux\// }, args => {
@@ -57,22 +107,15 @@ export async function sourceMoteDiagnosticsCli(directory: string) {
       builder.onResolve({ filter: /^[^./]/ }, args => {
         if (isBuiltin(args.path)) return { path: args.path, external: true }
         const original = join(deps, relative(root, args.importer || join(root, 'packages/core/src/agentmux.ts')))
-        try { return { path: createRequire(original).resolve(args.path), external: true } }
-        catch (error) {
-          // Import-only installed packages still use their actual declared ESM export.
-          const manifestPath = findPackageJSON(args.path, pathToFileURL(original).href)
-          if (!manifestPath) throw error
-          const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
-          const packageName = args.path.startsWith('@') ? args.path.split('/').slice(0, 2).join('/') : args.path.split('/')[0]
-          const entry = args.path === packageName ? '.' : '.' + args.path.slice(packageName!.length)
-          let target = Object.hasOwn(manifest.exports, entry) ? manifest.exports[entry] : entry === '.' ? manifest.exports : undefined
-          while (target && typeof target === 'object') target = target.import ?? target.node ?? target.default
-          if (typeof target !== 'string') throw error
-          return { path: resolve(dirname(manifestPath), target), external: true }
-        }
+        return { path: dependency(args.path, original), external: true }
       })
-      builder.onLoad({ filter: /\.[cm]?tsx?$/ }, args => changed[args.path] === undefined ? undefined : {
-        contents: changed[args.path], loader: args.path.endsWith('tsx') ? 'tsx' : 'ts', resolveDir: dirname(args.path)
+      builder.onLoad({ filter: /\.[cm]?tsx?$/ }, args => {
+        const source = readFileSync(args.path, 'utf8'), path = relative(root, args.path)
+        const contents = changed[args.path] ?? changed[path] ?? source
+        if (options.loaded && !path.startsWith('..') && !path.includes('node_modules/')) appendFileSync(options.loaded,
+          JSON.stringify({ consumer: 'actual-source-cli', path, originalSha256: createHash('sha256').update(source).digest('hex'),
+            sha256: createHash('sha256').update(contents).digest('hex') }) + '\n')
+        return contents === source ? undefined : { contents, loader: args.path.endsWith('tsx') ? 'tsx' : 'ts', resolveDir: dirname(args.path) }
       })
     } }] })
   const clean = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_')))
