@@ -625,6 +625,8 @@ const manualSteerAttempts = new Map<string, SteerDeliveryAttempt>()
 
 export type AgentSteerReaction = { code: string; replySource: ConversationReplySource }
 export type AgentSteerOptions = {
+  /** Admit to the existing queue without letting background drains dispatch before the explicit Send. */
+  awaitingExplicitSend?: true
   browserRecipient?: AgentSessionControl
   browserInput?: BrowserCapturedInput
   goalDispatch?: import('../../shared/goal-dispatch').GoalDispatchReference
@@ -4213,6 +4215,20 @@ export async function retainRecoveryMessageIntent(binding: SpatialRequestBinding
   useAppStore.setState(state => ({ spatialRequests: { ...state.spatialRequests, [binding.requestId]: binding } }))
   return await saveWorkbenchSelection(false)
 }
+/** Advance the same Browser creation admission before handoff or first input. */
+export async function retainBrowserAgentIntent(requestId: string, expected: NonNullable<SpatialRequestBinding['browserAgent']>,
+  next: NonNullable<SpatialRequestBinding['browserAgent']>): Promise<void> {
+  let changed = false
+  useAppStore.setState(state => {
+    const binding = state.spatialRequests[requestId]
+    if (binding?.purpose !== 'browser-agent' || binding.browserAgent !== expected) return state
+    changed = true
+    return { spatialRequests: { ...state.spatialRequests, [requestId]: { ...binding, browserAgent: next } } }
+  })
+  if (!changed) throw new Error('The original Browser Agent intent changed. Inspect that same request; its Agent and page are kept.')
+  const saved = await saveWorkbenchSelection(false)
+  if (!saved.localStorageWritten) throw new Error('The Browser Agent intent could not be saved. No further handoff or input was dispatched.')
+}
 /** Retain one unresolved exact reading-point input in the existing workbench draft writer. */
 export async function retainConversationLandmarkIntent(input: ConversationLandmarkWrite): Promise<AgentMuxSpatialSave> {
   const parsed = parseConversationLandmarkWrite(input), key = conversationLandmarkIntentKey(parsed)
@@ -4503,6 +4519,7 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
     ...(options?.reaction ? { reaction: structuredClone(options.reaction) } : {}),
     ...(options?.sourceChannel ? { sourceChannel: options.sourceChannel } : {}),
     status: 'queued',
+    ...(options?.awaitingExplicitSend ? { awaitingExplicitSend: true as const } : {}),
     ...(origin === 'manual' ? { origin: 'manual' } : {}),
     ...(origin === 'manual' && !options?.goalContinuation && !options?.goalPmo && !options?.goalDispatch ? { freshComposerIntent: true as const } : {})
   }
@@ -6641,7 +6658,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // 通用图标——而"是哪个 Agent 在动我的浏览器"正是这条轨迹要回答的唯一问题。
       const report = await api.browser.runScript(request.browserId, request.code, request.caller
         ? browserOperatorForSession(request.caller.agentSessionId, get().sessions)
-        : undefined, request.operationId)
+        : undefined, request.operationId, request.caller ? { agentSessionId: request.caller.agentSessionId } : undefined)
       requireActive()
       return {
         operation: request.operation,
@@ -6726,7 +6743,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       const report = await api.browser.runReplay(request.browserId, runPlan, request.caller
         ? browserOperatorForSession(request.caller.agentSessionId, get().sessions)
-        : undefined)
+        : undefined, request.caller ? { agentSessionId: request.caller.agentSessionId } : undefined)
       requireActive()
       return {
         operation: request.operation,

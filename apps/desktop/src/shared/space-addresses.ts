@@ -76,13 +76,23 @@ export type SpaceZoneBinding = {
   relations?: Record<string, boolean>
 }
 export type SpaceZoneBindings = Record<string, SpaceZoneBinding>
-/** Correlation references, never a second layout, Session state or prompt body. */
+/** Original spatial admissions and bounded follow-up input; layout, Session and delivery facts keep their existing owners. */
 export type SpatialRequestBinding = {
   requestId: string
   inputDigest: string
   operation: 'agent.open' | 'space.mv' | 'agent.message'
   /** Original business intent on this same creation record, never a second operation ledger. */
-  purpose?: 'goal-global-patrol'
+  purpose?: 'goal-global-patrol' | 'browser-agent'
+  /** Original Browser click and authored first input, on the existing creation admission. */
+  browserAgent?: {
+    browserId: string; navigationId: string; controlRevision: number
+    source: { displayWorkspaceId: string; groupId: string; tabId: string; regionId: string }
+    workspaceId: string; hostId: string; executionPath: string
+    messageOperationId: string; prompt: string; note: string
+    recipient?: import('./contracts').AgentSessionControl
+    /** Original queue admitted; further clicks inspect its input rather than recreating it. */
+    inputStarted?: true
+  }
   tabId: string
   regionId: string
   agentSessionId: string

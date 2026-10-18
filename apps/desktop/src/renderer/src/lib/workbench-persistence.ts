@@ -42,6 +42,8 @@ export type PersistedBrowserSurface = {
   title: string
   viewport?: BrowserWorkbenchSurface['viewport']
   bookmarkOrigin?: BrowserWorkbenchSurface['bookmarkOrigin']
+  agent?: BrowserWorkbenchSurface['agent']
+  agentCreationRequestId?: string
 }
 
 /** 存盘形态的 Region：只有 browser 与活体不同（缩成 {@link PersistedBrowserSurface}），其余原样。 */
@@ -72,11 +74,16 @@ export type RestoredWorkbench = {
 /** 把一个存盘 browser 复活成活体 surface：url/title/browserId 保留，其余瞬时位填默认，等待真快照覆盖。 */
 function hydratePersistedBrowserSurface(surface: PersistedBrowserSurface): BrowserWorkbenchSurface {
   const privateMode = surface.mode === 'private'
+  // The write projection also passes live surfaces through this function before reduction.
+  const control = (surface as BrowserWorkbenchSurface).control
+  const agent = control ? control.agent : surface.agent
   return {
     regionId: surface.regionId,
     kind: 'browser',
     workspaceId: surface.workspaceId,
     browserId: surface.browserId,
+    ...(agent === undefined ? {} : { agent }),
+    ...(surface.agentCreationRequestId ? { agentCreationRequestId: surface.agentCreationRequestId } : {}),
     id: surface.browserId,
     mode: privateMode ? 'private' : 'normal',
     url: privateMode ? 'about:blank' : surface.url,
@@ -99,9 +106,12 @@ function hydratePersistedBrowserSurface(surface: PersistedBrowserSurface): Brows
 
 /** 存盘时把一个 browser 活体 surface 缩成最小可再实例化子集，剥掉全部瞬时/敏感运行时位。 */
 function reduceBrowserSurfaceForPersistence(surface: BrowserWorkbenchSurface): PersistedBrowserSurface {
+  const agent = surface.control ? surface.control.agent : surface.agent
+  const association = { ...(agent === undefined ? {} : { agent }),
+    ...(surface.agentCreationRequestId ? { agentCreationRequestId: surface.agentCreationRequestId } : {}) }
   if (surface.mode === 'private') return {
     regionId: surface.regionId, kind: 'browser', workspaceId: surface.workspaceId,
-    browserId: surface.browserId, mode: 'private', url: 'about:blank', title: 'Private page',
+    browserId: surface.browserId, mode: 'private', url: 'about:blank', title: 'Private page', ...association,
     ...(!surface.restoredViewportUnknown ? { viewport: cloneBrowserViewport(surface.viewport) } : {})
   }
   return {
@@ -109,6 +119,7 @@ function reduceBrowserSurfaceForPersistence(surface: BrowserWorkbenchSurface): P
     kind: 'browser',
     workspaceId: surface.workspaceId,
     browserId: surface.browserId,
+    ...association,
     ...(surface.profileId ? { profileId: surface.profileId } : {}),
     url: surface.url,
     title: surface.title,

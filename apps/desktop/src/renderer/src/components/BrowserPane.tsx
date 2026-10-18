@@ -73,6 +73,7 @@ import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { BrowserToolsPanel } from './BrowserToolsPanel'
 import type { SurveyBrowserPreparation } from '../lib/survey-browser-creation'
 import { BrowserWorkfaceBoundary, type BrowserWorkfaceAddressDraft } from './BrowserWorkfaceBoundary'
+import { createBrowserAgent } from '../lib/browser-agent-creation'
 
 const ThemeActionAddAnnotationIcon = semanticIconComponent('action.add-annotation')
 const ThemeStatusSavedIcon = semanticIconComponent('status.saved')
@@ -312,6 +313,18 @@ function BrowserPaneContent({
   const bookmarkRequest = useRef<BookmarkSource | null>(null)
   const inSurvey = controlPanelOpen !== undefined
   const [busy, setBusy] = useState(false)
+  const [creatingAgent, setCreatingAgent] = useState(false)
+  const [agentCreationNotice, setAgentCreationNotice] = useState<string | null>(null)
+  const browserAgentIntent = useAppStore(state => tab.agentCreationRequestId ? state.spatialRequests[tab.agentCreationRequestId]?.browserAgent : undefined)
+  async function startBrowserAgent(target: { reference?: WorkbenchProjectionSelection | undefined } = primaryPresentation): Promise<void> {
+    const reference = target.reference && { ...target.reference, regionId: tab.regionId }
+    if (!reference) { setAgentCreationNotice('The original Browser presentation is unconfirmed. The page is kept; select this Browser occurrence and try again.'); return }
+    setCreatingAgent(true)
+    setAgentCreationNotice(null)
+    try { setAgentCreationNotice(await createBrowserAgent(tab.browserId, reference) || null) }
+    catch (error) { setAgentCreationNotice(presentError(error)) }
+    finally { setCreatingAgent(false) }
+  }
   const [menuOpen, setMenuOpen] = useState(false)
   const [customViewport, setCustomViewport] = useState<string | null>(null)
   const [managementOpen, setManagementOpen] = useState(false)
@@ -1172,6 +1185,8 @@ function BrowserPaneContent({
           onTakeControl={() => void takeBrowserControl()}
           onStop={() => void stopBrowserOperation()}
           onReturnControl={() => void run(() => api.browser.returnControl(tab.browserId))}
+          onCreateAgent={() => void startBrowserAgent(presentation?.target ?? primaryPresentation)}
+          creatingAgent={creatingAgent}
           onOpenTimeline={() => openOperationTimeline(key)}
           onOpenChange={setMenuOpen}
         />
@@ -1342,6 +1357,14 @@ function BrowserPaneContent({
       {addressError ? <p className="browser-address-error" role="alert">{addressError}{research.current ? <button type="button" className="small-button" disabled={busy} onClick={() => void startResearch()}>Retry same research</button> : null}{privateCreation.current ? <button type="button" className="small-button" disabled={busy} onClick={() => void startPrivatePage()}>Retry same private page</button> : null}</p> : null}
       {inputHistoryNotice ? <p className="browser-address-error" role="status">{inputHistoryNotice}</p> : null}
       <BrowserOperationWarning activity={browserActivity} />
+      {(agentCreationNotice || browserAgentIntent && !browserAgentIntent.inputStarted && !creatingAgent) ? <ServiceWindowNotice notice={{
+        kind: 'indeterminate', notice: {
+          step: 'Browser Agent setup needs attention',
+          mode: agentCreationNotice ?? 'The original Agent creation request is retained. Its first task has not been confirmed.',
+          restore: 'Check the same request to continue. The existing Agent and original page are kept.'
+        }
+      }} actions={<button type="button" className="small-button" disabled={creatingAgent}
+        onClick={() => void startBrowserAgent(presentation?.target ?? primaryPresentation)}>Check Agent setup</button>} /> : null}
       {!connectionUnavailable && !tab.nativeOwnerReleased && tab.retention?.status === 'unknown' && tab.retention.reasons.includes('close-unconfirmed') ? <ServiceWindowNotice notice={{
         kind: 'indeterminate', notice: {
           step: 'Browser close unconfirmed',
@@ -1441,7 +1464,6 @@ function BrowserPaneContent({
             })}
             busy={taskBusy || tab.driving || demonstrationBusy}
             onRun={(input, event) => taskAction(event, async () => {
-              applyBrowserEvent({ type: 'updated', browser: await api.browser.returnControl(tab.browserId) })
               setSelectedOperationId(null)
               setSelectedStep(null)
               await api.browser.checkOutcomeFields(tab.browserId, input)

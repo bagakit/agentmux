@@ -50,7 +50,7 @@ export type SpatialControlPorts = {
   recordRemovedTab?(tabId: string): void
 }
 /** Local UI context, separate from the public spatial request and user prompt. */
-export type SpatialControlOptions = { agentMuxNote?: string; purpose?: SpatialRequestBinding['purpose']; recovery?: SpatialRequestBinding['recovery']; authorize?: () => boolean; fileOpenIntent?: 'default' | 'source'; fileInputPolicy?: 'preserve' | 'target' }
+export type SpatialControlOptions = { agentMuxNote?: string; purpose?: SpatialRequestBinding['purpose']; recovery?: SpatialRequestBinding['recovery']; browserAgent?: SpatialRequestBinding['browserAgent']; authorize?: () => boolean; fileOpenIntent?: 'default' | 'source'; fileInputPolicy?: 'preserve' | 'target' }
 
 class SpatialFailure extends Error {
   constructor(readonly issue: AgentMuxSpatialIssue) { super(issue.message) }
@@ -531,7 +531,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
   }
   try {
     const inputDigest = await digest({ operation, destination: request.destination, focus: request.focus,
-      ...(operation === 'agent.open' ? { content: request.content, caller: request.caller, agentMuxNote: options?.agentMuxNote, purpose: options?.purpose, recovery: options?.recovery } : { fromRegionId: request.fromRegionId, expectedAgentSessionId: request.expectedAgentSessionId, fromLocation: request.fromLocation }) })
+      ...(operation === 'agent.open' ? { content: request.content, caller: request.caller, agentMuxNote: options?.agentMuxNote, purpose: options?.purpose, recovery: options?.recovery, browserAgent: options?.browserAgent } : { fromRegionId: request.fromRegionId, expectedAgentSessionId: request.expectedAgentSessionId, fromLocation: request.fromLocation }) })
     const existing = ports.get().spatialRequests[request.requestId]
     if (existing) {
       if (existing.inputDigest !== inputDigest) failure('SPACE_REQUEST_CONFLICT', 'This request ID is already bound to different input.')
@@ -651,12 +651,20 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
       agentSessionId: sessionId, createAgent: operation === 'agent.open' && request.content.kind !== 'agent-session',
       ...(executionHostId ? { executionHostId } : {}),
       ...(options?.recovery ? { recovery: options.recovery } : {}),
+      ...(options?.browserAgent ? { browserAgent: structuredClone(options.browserAgent) } : {}),
       ...(operation === 'agent.open' && request.content.kind === 'fork-agent' ? { forkSource: structuredClone(request.content.source) } : {}),
       ...(from ? { from } : {}), target: destination ? { ...(destination.address.spaceId ? { spaceId: destination.address.spaceId } : {}), ...(destination.address.zoneId ? { zoneId: destination.address.zoneId } : {}), tabId: destination.address.tabId, regionId: destination.anchor ?? destination.address.regionId, displayWorkspaceId: destination.address.displayWorkspaceId, groupId: destination.address.groupId } : { spaceId: request.destination.spaceId!,
         ...(request.destination.displayWorkspaceId ? { displayWorkspaceId: request.destination.displayWorkspaceId } : {}),
         ...(request.destination.groupId ? { groupId: request.destination.groupId } : {}) },
       ...(resourceReference ? { resource: resourceReference } : {}) }
-    ports.patch({ spatialRequests: { ...ports.get().spatialRequests, [request.requestId]: binding } })
+    const browserSource = options?.browserAgent?.source
+    const sourceTab = browserSource && ports.get().tabs[browserSource.tabId]
+    const source = browserSource && sourceTab?.regions[browserSource.regionId]
+    ports.patch({ spatialRequests: { ...ports.get().spatialRequests, [request.requestId]: binding },
+      ...(sourceTab && source?.kind === 'browser' && source.browserId === options?.browserAgent?.browserId ? {
+        tabs: { ...ports.get().tabs, [sourceTab.id]: { ...sourceTab, regions: { ...sourceTab.regions,
+          [source.regionId]: { ...source, agentCreationRequestId: request.requestId } } } }
+      } : {}) })
     const admitted = await ports.save(false)
     if (!admitted.localStorageWritten) { report.save = admitted; failure('SPACE_INTENT_SAVE_FAILED', 'The request association could not be written; creation has not been dispatched.') }
     if (selfMove) {
