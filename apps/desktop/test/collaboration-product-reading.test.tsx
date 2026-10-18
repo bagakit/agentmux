@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
-import type { AgentMuxMessageEvent, AgentMuxRpcResult, DurableAgentMuxMessage } from '@agentmux/core'
+import type { AgentMuxMessageEvent, AgentMuxRpcResult, AgentSessionHistoryDescriptor, DurableAgentMuxMessage } from '@agentmux/core'
 import { projectRunProcessStatus } from '@agentmux/core/run-status'
 import type { RuntimeEvent, SessionHistoryReference } from '../src/shared/contracts'
 import { fixtureEpoch } from '../../../test/fixture-values.mjs'
@@ -17,6 +17,8 @@ import type { CollaborationMapTarget } from '../src/renderer/src/lib/collaborati
 import { useCollaborationReading } from '../src/renderer/src/lib/use-collaboration-reading'
 import * as collaborationReading from '../src/renderer/src/lib/use-collaboration-reading'
 import { COLLABORATION_ACTIVITY_MS, collaborationAgentPresentation } from '../src/renderer/src/lib/collaboration-map-presentation'
+import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects'
+import { collaborationAgentNode } from '../src/renderer/src/lib/collaboration-presentation'
 
 const dom = composerDOM({ agentInformation: true }), workspace = composerConfig.workspaces[0]!
 const sessions = ['agent-a', 'agent-b', 'agent-c', 'agent-d'].map(id => ({ ...composerSession(id),
@@ -436,4 +438,67 @@ it('shows live activity between original referenced Agents outside the catalogue
   expect(api.sessions.messageEvents).toHaveBeenCalledTimes(reads)
   expect(vi.mocked(api.sessions.messageEvents).mock.calls.every(([reference]) => reference.agentSessionId === 'agent-a')).toBe(true)
   expect(api.sessions.readMessage).not.toHaveBeenCalled(); expect(api.sessions.dispatch).not.toHaveBeenCalled()
+})
+
+it('shows retained project association in the real Map while unknown area and identity stay separate', async () => {
+  const retained: AgentSessionHistoryDescriptor = { hostId: 'local', agentSessionId: 'retained-project-peer', state: 'retired',
+    history: { providerId: 'codex', executorId: 'codex', workspacePath: workspace.path, createdAt: fixtureEpoch(1) } }
+  const unknown: AgentSessionHistoryDescriptor = { ...retained, agentSessionId: 'unknown-area-peer', history: { ...retained.history!, workspacePath: workspace.path + '/unregistered-child' } }
+  vi.mocked(api.sessions.historySources).mockResolvedValue({ sources: [retained, unknown], warnings: [] })
+  vi.spyOn(api.sessions, 'historySource').mockImplementation(async reference => ({ reference, source: null, issue: null }))
+  vi.mocked(api.sessions.spawns).mockImplementation(async (reference, options) => ({ hostId: reference.hostId, participantSessionId: reference.agentSessionId,
+    direction: options.direction, creatorRuntimeId: null, records: options.direction === 'creator' ? [{ agentSessionId: 'agent-a', phase: 'active', currentRun: null, createdAt: fixtureEpoch(1),
+      creation: { createOperationId: 'original-create', initialPrompt: 'not-requested', createdBy: { agentSessionId: 'foreign-creator', run: { runId: 'original-parent' }, owner: { kind: 'runtime', runtimeId: 'foreign-runtime' } } } }] : [],
+    nextCursor: null, coverage: { scope: 'selected-owner', history: 'recorded-creations' } }))
+  await render({ kind: 'focus', subject: subject(retained.agentSessionId), name: 'Retained project peer' })
+  const area = graph().querySelector('[aria-label="Area affiliation"]')!
+  expect(area.textContent).toContain('Workspace association'); expect(area.textContent).toContain(workspace.name); expect(area.textContent).toContain(workspace.path)
+  expect(area.textContent).not.toContain('Display binding'); expect(area.textContent).not.toContain('unconfirmed')
+  const point = [...graph().querySelectorAll<HTMLElement>('[data-collaboration-agent]')].find(node => node.dataset.collaborationAgent === JSON.stringify(['local', retained.agentSessionId]))!
+  expect(point.closest('.react-flow__node')?.getAttribute('data-id')).toBe(collaborationAgentNode(workspaceProjectId(workspace), JSON.stringify(['local', retained.agentSessionId])))
+  expect(graph().querySelector('.collaboration-inspector')?.textContent).toContain('Original workface is not confirmed')
+  expect([...graph().querySelectorAll('button')].some(button => button.textContent?.includes('Open workface'))).toBe(false)
+  await dom.render(<AgentCollaborationMap request={{ kind: 'focus', subject: subject(unknown.agentSessionId), name: 'Unknown area peer' }} onOpen={() => { throw Error('No new control') }} onViewInFocus={() => { throw Error('No inferred navigation') }} />)
+  expect(graph().querySelector('[aria-label="Area affiliation"]')?.textContent).toContain('Area unconfirmed. No original binding or matching work resource is confirmed.')
+  expect(graph().querySelector('[aria-label="Area affiliation"]')?.textContent).not.toContain('identity is unresolved')
+  await dom.render(<AgentCollaborationMap request={original} onOpen={() => { throw Error('No new control') }} onViewInFocus={() => { throw Error('No inferred navigation') }} />)
+  await selectRelation('foreign-creator', 'Task A', 'creation')
+  await act(async () => graph().querySelector<HTMLButtonElement>('.collaboration-endpoints button')!.click())
+  const foreign = JSON.stringify(['runtime-reference', 'foreign-runtime', 'foreign-creator'])
+  await settleCollaborationCanvas(() => expect([...graph().querySelectorAll<HTMLElement>('[data-collaboration-agent]')].some(node => node.dataset.collaborationAgent === foreign)).toBe(true))
+  const foreignPoint = [...graph().querySelectorAll<HTMLElement>('[data-collaboration-agent]')].find(node => node.dataset.collaborationAgent === foreign)!
+  await act(async () => foreignPoint.querySelector<HTMLButtonElement>('button')!.click())
+  expect(graph().querySelector('[aria-label="Area affiliation"]')?.textContent).toContain('Original identity is unresolved')
+  expect(api.sessions.readMessage).not.toHaveBeenCalled(); expect(api.sessions.dispatch).not.toHaveBeenCalled()
+  expect(useAppStore.getState().sessions).toBe(sessions); expect(useAppStore.getState().tabs).toEqual({})
+})
+
+it('the real map associates a late original metadata endpoint with its project without inventing a workface or reading its body', async () => {
+  records = [event(7, 'message-a'), event(9, 'late-original-message', 'agent-a', 'late-resource-peer')]
+  const pending = deferred<Awaited<ReturnType<typeof api.sessions.historySource>>>()
+  const lookup = vi.spyOn(api.sessions, 'historySource').mockReturnValue(pending.promise)
+  await render(); await selectRelation(); await clickText('Read original message')
+  const body = bodyNode()!, viewport = graph().querySelector('.react-flow__viewport')!, camera = viewport.getAttribute('style')
+  expect(body).not.toBeNull()
+  const originalNodes = [...graph().querySelectorAll<HTMLElement>('[data-collaboration-agent]')].filter(node => ['agent-a', 'agent-b'].some(id => node.dataset.collaborationAgent === JSON.stringify(['local', id])))
+  expect(originalNodes).toHaveLength(2)
+  const geometry = originalNodes.map(node => [node, node.closest('.react-flow__node')?.getAttribute('style')] as const)
+  const subjectKey = JSON.stringify(['local', 'late-resource-peer'])
+  const locateLate = () => [...graph().querySelectorAll<HTMLElement>('[data-collaboration-agent]')].find(node => node.dataset.collaborationAgent === subjectKey)
+  await settleCollaborationCanvas(() => expect(locateLate()?.closest('.react-flow__node')?.getAttribute('data-id')).toBe(collaborationAgentNode('retained-unplaced', subjectKey)))
+  const source: AgentSessionHistoryDescriptor = { hostId: 'local', agentSessionId: 'late-resource-peer', state: 'retired', history: {
+    providerId: 'claude', executorId: 'claude', workspacePath: workspace.path, createdAt: fixtureEpoch(1) } }
+  await act(async () => pending.resolve({ reference: subject(source.agentSessionId), source, issue: null }))
+  await settleCollaborationCanvas(() => expect(locateLate()?.closest('.react-flow__node')?.getAttribute('data-id')).toBe(collaborationAgentNode(workspaceProjectId(workspace), subjectKey)))
+  expect(bodyNode()).toBe(body); expect(viewport.getAttribute('style')).toBe(camera)
+  for (const [node, style] of geometry) { expect(node.isConnected).toBe(true); expect(node.closest('.react-flow__node')?.getAttribute('style')).toBe(style) }
+  expect(lookup).toHaveBeenCalledExactlyOnceWith(subject('late-resource-peer'))
+  expect(vi.mocked(api.sessions.messageEvents).mock.calls.length).toBeGreaterThan(0)
+  expect(vi.mocked(api.sessions.messageEvents).mock.calls.every(([reference]) => reference.agentSessionId !== source.agentSessionId)).toBe(true)
+  expect(api.sessions.readMessage).toHaveBeenCalledExactlyOnceWith(subject('agent-a'), 'message-a')
+  await act(async () => locateLate()!.querySelector<HTMLButtonElement>('button')!.click())
+  expect(graph().querySelector('[aria-label="Area affiliation"]')?.textContent).toContain('Workspace association')
+  expect(graph().querySelector('[aria-label="Area affiliation"]')?.textContent).toContain(workspace.name)
+  expect([...graph().querySelectorAll('button')].some(button => button.textContent?.includes('Open workface'))).toBe(false)
+  expect(useAppStore.getState().sessions).toBe(sessions); expect(useAppStore.getState().tabs).toEqual({}); expect(useAppStore.getState().agentComposerDrafts['agent-a']).toBe('Original A draft')
 })

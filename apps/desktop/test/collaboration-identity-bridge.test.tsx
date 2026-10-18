@@ -88,7 +88,10 @@ it('the real map resolves an original journal endpoint through preload IPC and o
     expect(container.textContent).not.toContain('Unopened original content')
     const point = container.querySelector<HTMLButtonElement>('[data-session-id="late-peer"]')!
     await act(async () => point.click())
-    expect(container.textContent).toContain('Related task'); expect(container.textContent).toContain('Area membership is unconfirmed')
+    expect(container.textContent).toContain('Related task')
+    const affiliation = container.querySelector('[aria-label="Area affiliation"]')!
+    expect(affiliation.textContent).toContain('Workspace association'); expect(affiliation.textContent).toContain(config.workspaces[0]!.name)
+    expect(affiliation.textContent).toContain(related.workspacePath); expect(affiliation.textContent).not.toContain('Display binding')
     await act(async () => [...container!.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('View in Focus'))!.click())
     expect(focused).toHaveBeenLastCalledWith({ hostId: 'local', agentSessionId: related.id }, related.id)
     expect(opened).not.toHaveBeenCalled(); expect(connect).not.toHaveBeenCalled(); for (const control of controls) expect(control).not.toHaveBeenCalled()
