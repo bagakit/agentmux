@@ -194,13 +194,13 @@ export function AppearanceSettingsPane({ appearance, onSave, active = true }: {
                     <i style={{ background: theme.green }} />
                   </span>
                   <span className="terminal-theme-preview__line"><b style={{ color: theme.green }}>›</b> project/</span>
-                  <span className="terminal-theme-preview__composer" style={{ background: theme.black }}><b style={{ color: theme.blue }}>›</b> Ask agent…</span>
+                  <span className="terminal-theme-preview__composer" style={{ background: theme.selectionBackground, color: theme.selectionForeground ?? theme.foreground }}><b>›</b> Ask agent…</span>
                 </span>
                 <span className="terminal-theme-choice__copy">
                   <strong>{definition.label}</strong>
                   <small id={`${choiceId}-${definition.id}-description`}>{definition.description}</small>
                 </span>
-                <SemanticIcon name={selected ? 'appearance.theme' : 'object.terminal'} size={14} />
+                <SemanticIcon name={selected ? 'status.selected' : 'object.terminal'} size={14} />
               </label>
             )
           })}
