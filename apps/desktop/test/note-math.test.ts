@@ -86,7 +86,7 @@ it('saves cleared inline math as a blank inline expression, never as a new block
 
 it('keeps unsupported math fence metadata in the original source instead of dropping it', () => {
   const raw = header + '$$ metadata\nx\n$$\n'
-  expect(readNoteDocument(raw)).toMatchObject({ status: 'invalid', raw, message: expect.stringContaining('Math fence metadata') })
+  expect(readNoteDocument(raw)).toMatchObject({ status: 'valid', note: { content: { content: [{ type: 'noteRawBlock', attrs: { source: '$$ metadata\nx\n$$', format: 'markdown' } }] } } })
 })
 
 it('indexes mathematical source text but creates no wiki references or binding requests inside formulas', () => {
