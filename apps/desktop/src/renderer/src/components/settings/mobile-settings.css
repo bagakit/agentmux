@@ -5,6 +5,8 @@
 .device-management__phone { display: grid; place-items: center; flex: none; width: 52px; height: 60px; border: 1px solid var(--line-soft); border-radius: var(--radius-lg); background: var(--surface-0); color: var(--text-2); }
 .device-management[data-device-view='settings'] h3 { margin: 0; color: var(--text); font-size: var(--fs-title); font-weight: 550; line-height: 1.4; }
 .device-management__intro .settings-group-note { max-width: 64ch; margin: var(--sp-2) 0 0; line-height: 1.65; }
+.device-management[data-device-view='settings'] .device-management__actions { justify-content: flex-start; flex-wrap: wrap; gap: var(--sp-3); }
+.device-management[data-device-view='settings'] .device-management__actions > button { flex: none; margin-right: 0; min-height: 32px; padding-block: var(--sp-2); }
 .device-management[data-device-view='settings'] .device-management__devices { margin-top: var(--sp-7); padding-top: 0; border: 0; }
 .device-management__devices > .settings-pane-toolbar { align-items: flex-start; }
 .device-management__devices > .settings-pane-toolbar > div { flex: 1; min-width: 0; }
@@ -23,6 +25,11 @@
 .device-management[data-device-view='settings'] summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; border-radius: var(--radius-sm); }
 .device-management[data-device-view='settings'] .device-management__record > summary { flex-wrap: wrap; row-gap: var(--sp-2); padding-block: var(--sp-4); }
 .device-management[data-device-view='settings'] .device-management__record > summary strong { overflow-wrap: anywhere; }
+@container mobile-settings (min-width: 640px) {
+  .device-management[data-device-view='settings'] .device-management__connection:has(.connection-link-code) { grid-template-columns: minmax(0, 1fr) 232px; column-gap: var(--sp-6); align-items: start; }
+  .device-management__connection:has(.connection-link-code) > :not(.connection-link-code) { grid-column: 1; }
+  .device-management__connection > .connection-link-code { grid-column: 2; grid-row: 1 / span 4; align-self: center; margin: 0; }
+}
 @container mobile-settings (width < 420px) {
   .device-management[data-device-view='settings'] .device-management__connection { padding: var(--sp-4); }
   .device-management__intro { gap: var(--sp-3); }
