@@ -53,8 +53,9 @@
 .agent-native-source__review { display: grid; gap: var(--sp-1); padding-top: var(--sp-2); color: var(--text-2); }
 .agent-native-source strong { font-size: var(--fs-meta); font-weight: 500; }
 
-.agent-region-header__connector { display: inline-flex; align-items: center; flex: none; gap: var(--sp-1); height: 22px; padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font-size: var(--fs-micro); line-height: 14px; white-space: nowrap; pointer-events: auto; }
+.agent-region-header__connector { display: inline-flex; align-items: center; flex: 0 1 auto; min-width: 0; max-width: 28ch; gap: var(--sp-1); height: 22px; padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font-size: var(--fs-micro); line-height: 14px; white-space: nowrap; pointer-events: auto; }
 .agent-region-header__connector > :is(img, svg) { flex: none; }
+.agent-region-header__connector > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .agent-region-header__connector:is(:hover, :focus-visible, [data-state='open']) { color: var(--text); background: var(--surface-3); }
 .agent-region-header__connector[data-sharing-state='unknown'] { color: var(--amber-text); }
 .agent-region-header-home .agent-region-header__connector { align-items: flex-start; }

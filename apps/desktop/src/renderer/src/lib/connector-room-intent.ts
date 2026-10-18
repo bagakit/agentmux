@@ -7,6 +7,17 @@ export type ConnectorRoomIntent = { [M in Effect]: {
 } & (M extends 'connection.room.link.create' ? { replacesOperationId?: string } : {}) }[Effect]
 const effects: readonly string[] = ['connection.room.create', 'connection.room.link.create', 'connection.bind', 'connection.binding.relink', 'connection.binding.pause', 'connection.grant']
 export const sameConnectorTarget = (a: Pick<RoomBindingTarget, 'executionHostId' | 'agentSessionId'>, b: Pick<RoomBindingTarget, 'executionHostId' | 'agentSessionId'>) => a.executionHostId === b.executionHostId && a.agentSessionId === b.agentSessionId
+const intentTargets = new WeakMap<Readonly<Record<string, ConnectorRoomIntent>>, ReadonlySet<string>>()
+const targetKey = (target: Pick<RoomBindingTarget, 'executionHostId' | 'agentSessionId'>) => JSON.stringify([target.executionHostId, target.agentSessionId])
+/** One derived index per immutable intent projection, shared by visible original Session consumers. */
+export function hasConnectorRoomIntent(intents: Readonly<Record<string, ConnectorRoomIntent>>, target: Pick<RoomBindingTarget, 'executionHostId' | 'agentSessionId'>): boolean {
+  let indexed = intentTargets.get(intents)
+  if (!indexed) {
+    indexed = new Set(Object.values(intents).map(intent => targetKey(intent.target)))
+    intentTargets.set(intents, indexed)
+  }
+  return indexed.has(targetKey(target))
+}
 export function restoredConnectorRoomIntents(value: unknown): Record<string, ConnectorRoomIntent> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
   const result: Record<string, ConnectorRoomIntent> = {}

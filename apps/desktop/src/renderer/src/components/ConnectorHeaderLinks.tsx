@@ -15,14 +15,15 @@ function PlatformIcon({ binding }: { binding: RoomBinding }) {
 }
 
 /** A projection of this Session's original bindings; it owns no discovery or group effects. */
-export function ConnectorHeaderLinks({ bindings, unconfirmed, onOpen }: {
-  bindings: RoomBinding[]; unconfirmed: boolean; onOpen(binding: RoomBinding, trigger: HTMLElement): void
+export function ConnectorHeaderLinks({ bindings, unconfirmed, syncEnabled, onOpen }: {
+  bindings: RoomBinding[]; unconfirmed: boolean; syncEnabled: boolean | null; onOpen(binding: RoomBinding, trigger: HTMLElement): void
 }) {
   const trigger = useRef<HTMLButtonElement>(null), selected = useRef<RoomBinding | null>(null), handingOff = useRef(false)
-  const state = (binding: RoomBinding) => unconfirmed ? 'Status unknown' : binding.state === 'active' ? 'Sharing on' : 'Sharing paused'
+  const state = (binding: RoomBinding) => unconfirmed ? 'Status unknown' : binding.state === 'paused' ? 'Sharing paused' : syncEnabled === false ? 'Sync off' : 'Group connected'
   if (!bindings.length) return null
   const only = bindings.length === 1 ? bindings[0]! : null
-  const description = (binding: RoomBinding) => `${platform(binding)} · ${state(binding)} · ${binding.externalConversationId} · ${binding.application.appId}`
+  const sync = syncEnabled === null ? 'Automatic chat sync is not confirmed.' : syncEnabled ? 'Automatic chat sync is enabled.' : 'Automatic chat sync is off.'
+  const description = (binding: RoomBinding) => `${platform(binding)} · ${state(binding)} · ${binding.externalConversationId} · ${binding.application.appId}. ${unconfirmed ? 'Current local binding is unconfirmed; the last known group is kept.' : binding.state === 'active' ? 'Group binding is saved locally.' : 'Local sharing is paused.'} ${sync}`
   if (only) return <button type="button" className="agent-region-header__connector" data-sharing-state={unconfirmed ? 'unknown' : only.state}
     aria-label={`Open ${platform(only)} group and joining details; ${description(only)}`} title={description(only)}
     onPointerDown={event => event.stopPropagation()} onClick={event => onOpen(only, event.currentTarget)}>
