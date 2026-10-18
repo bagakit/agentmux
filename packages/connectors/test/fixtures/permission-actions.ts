@@ -94,12 +94,15 @@ export async function permissionActionsFixture(initialCoreAvailable = true) {
       expectedConnectionRevision: 1, executionHostId: 'local', agentSessionId: 'original-agent', regionAnchor: { regionId: 'original-region' }, externalConversationId: 'original-room',
       expectedSource: { providerId: 'codex', nativeSessionId: 'original-native' }, scope: { input: 'all-messages', publication: 'future-native-user-facing' } })
     expect(bound.state).toBe('applied')
+    services.publication!.refresh()
+    await vi.waitFor(() => expect(services.publication!.store.list(bound.binding).some(value => value.payload.kind === 'binding-lifecycle' && value.state === 'confirmed')).toBe(true))
+    effects.splice(0); lastCard = undefined
     const actor = { application: feishuConfig.application, idType: 'open_id' as const, userId: 'original-external-user' }
     const grant = async (capabilities: Array<'input' | 'answer' | 'permission'> = ['permission'], revision: number | null = null) => await cli(['connection', 'grant', '--input', '-'], {
       operationId: 'permission-grant-' + String(revision), grantId: 'original-member', bindingId: bound.binding.bindingId, expectedBindingRevision: 1, expectedRevision: revision, actor, capabilities, state: capabilities.length ? 'active' : 'revoked' })
     await vi.waitFor(() => expect(sdk.sockets).toHaveLength(1))
     let request: ClientRequest | undefined
-    const open = async (requestId = 'original-request', command = 'original command') => {
+    const open = async (requestId = 'original-request', command = 'original command', kind: 'permission' | 'question' = 'permission') => {
       const server = Reflect.get(original.client, 'hookServer') as { start(): Promise<void>; createBinding(sid: string, provider: string): { bindRun(run: string): Promise<void>; endpoint: { url: string; token: string } } }
       await server.start()
       const hook = server.createBinding('original-agent', 'codex'); await hook.bindRun('run-original-agent')
@@ -108,7 +111,11 @@ export async function permissionActionsFixture(initialCoreAvailable = true) {
           let body = ''; response.setEncoding('utf8'); response.on('data', value => { body += value })
           response.once('error', reject); response.once('end', () => { try { expect(response.statusCode).toBe(200); resolveBody(JSON.parse(body)) } catch (error) { reject(error) } })
         }); request.once('error', reject)
-        request.end(JSON.stringify({ receiptId: requestId, eventName: 'PermissionRequest', decision: true, payload: { hook_event_name: 'PermissionRequest', session_id: 'original-native', turn_id: 'original-turn', tool_name: 'Bash', tool_input: { command } } }))
+        const eventName = kind === 'question' ? 'PreToolUse' : 'PermissionRequest'
+        request.end(JSON.stringify({ receiptId: requestId, eventName, ...(kind === 'permission' ? { decision: true } : {}), payload: {
+          hook_event_name: eventName, session_id: 'original-native', turn_id: 'original-turn',
+          tool_name: kind === 'question' ? 'request_user_input' : 'Bash',
+          tool_input: kind === 'question' ? { question: command, options: ['Keep the original work', 'Review first'] } : { command } } }))
       })
       void callback.catch(() => {})
       cleanup.push(async () => { request?.destroy(); await Promise.allSettled([callback]) })
@@ -116,8 +123,8 @@ export async function permissionActionsFixture(initialCoreAvailable = true) {
       return { request: original.client.agentSession('original-agent').pendingInteraction!.request, callback }
     }
     const action = (actionRef: string, eventId = 'original-action-event', overrides: Record<string, unknown> = {}) => ({ schema: '2.0', header: { app_id: feishuConfig.application.appId, event_id: eventId, event_type: 'card.action.trigger' },
-      event: { operator: { open_id: actor.userId }, context: { open_chat_id: 'original-room', open_message_id: 'original-card' }, action: { tag: 'button', value: { actionRef }, form_value: { arbitrary: 'never becomes a response' } }, ...overrides } })
-    const buttons = () => (lastCard?.elements as Array<{ actions?: Array<{ text: { content: string }; value: { actionRef: string } }> }> | undefined)?.flatMap(element => element.actions ?? []) ?? []
+      event: { operator: { open_id: actor.userId }, context: { open_chat_id: 'original-room', open_message_id: services.publication!.store.list(bound.binding).find(value => value.state === 'confirmed' && value.payload.kind === 'permission' && value.payload.options.some(option => option.actionRef === actionRef))?.mapping?.messageId ?? 'original-card' }, action: { tag: 'button', value: { actionRef }, form_value: { arbitrary: 'never becomes a response' } }, ...overrides } })
+    const buttons = () => (lastCard?.elements as Array<{ actions?: Array<{ text: { content: string }; value: { actionRef: string } }> }> | undefined)?.flatMap(element => element.actions ?? []).filter(button => button.value?.actionRef) ?? []
     const tracedClose = async () => {
       const directory = resolve('.bagakit/feature-tracker/features/f-2wr8fmvnv/artifacts/permission-actions/consumer-traces')
       await mkdir(directory, { recursive: true })

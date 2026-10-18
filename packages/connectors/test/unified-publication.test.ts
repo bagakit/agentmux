@@ -115,7 +115,7 @@ it('a late exact same-event contribution preserves already represented native co
   }) })
   f.host.refresh()
   await vi.waitFor(() => expect(f.host.store.list(f.binding).at(-1)).toMatchObject({ state: 'confirmed', mapping: first.mapping }), { timeout: 10_000 })
-  await vi.waitFor(() => expect(f.remote.messageCalls().some(call => call.method === 'PUT')).toBe(true), { timeout: 10_000 })
+  await vi.waitFor(() => expect(f.remote.messageCalls().some(call => call.method === 'PATCH')).toBe(true), { timeout: 10_000 })
   expect(f.posts()).toHaveLength(1)
   const current = f.remote.records.get(first.mapping!.messageId)!
   const represented = JSON.stringify(JSON.parse((current.body as { content: string }).content))
@@ -144,7 +144,7 @@ it('an unread canonical target never hides its captured body; the later native c
   expect(f.texts().join('\n')).toContain('Original captured body before canonical arrival')
   await appendFile(f.transcript, row('native-after', _historyFixtureEpoch(0, 0, 100), [{ type: 'text', text: 'Original canonical body arrives later' }]))
   f.host.refresh()
-  await vi.waitFor(() => expect(f.remote.messageCalls().some(call => call.method === 'PUT')).toBe(true), { timeout: 10_000 })
+  await vi.waitFor(() => expect(f.remote.messageCalls().some(call => call.method === 'PATCH')).toBe(true), { timeout: 10_000 })
   await vi.waitFor(() => expect(f.host.store.list(f.binding).at(-1)?.state).toBe('confirmed'), { timeout: 10_000 })
   expect(f.posts()).toHaveLength(1)
   expect(f.host.store.list(f.binding).at(-1)?.mapping).toEqual(first.mapping)
@@ -478,7 +478,7 @@ it('an unavailable complete text resource keeps its exact gap while adjacent con
   const versions = allOperations(f.host.store, f.binding).filter(operation => operation.projectionId === projection), latest = new Map(versions.map(operation => [operation.fragment.ordinal, operation]))
   const platform = [...latest.values()].sort((a, b) => a.fragment.ordinal - b.fragment.ordinal).map(operation => {
     const content = f.remote.records.get(operation.mapping!.messageId)!.body as { content: string }
-    return JSON.parse(content.content).content[0][0].text as string
+    return JSON.parse(content.content).elements[0].text.content as string
   }).join('')
   expect(platform).toBe(prefix + '\n\n' + text)
   expect(latest.get(0)!.mapping).toEqual(before.find(operation => operation.projectionId === projection)!.mapping)
@@ -522,9 +522,9 @@ it('the actual canonical saved question publishes complete original options; its
     const receipt = await adapter.publication!.dispatch(operation.prepared!, operation.target, 'isolated-credential', signal, operation.mapping)
     store.settle(operation.operationId, operation.attempt!, receipt)
   }
-  const outgoing = remote.messageCalls().filter(call => call.method === 'POST').map(call => JSON.parse(JSON.parse(call.body).content).zh_cn.content[0][0].text).join('')
+  const outgoing = remote.messageCalls().filter(call => call.method === 'POST').map(call => JSON.parse(JSON.parse(call.body).content).elements[0].text.content).join('')
   expect(outgoing).toContain(savedQuestionPrompt)
-  expect(outgoing).toContain('- Keep the original work'); expect(outgoing).toContain('- Review the direction'); expect(outgoing).toContain('Recorded question · read-only')
+  expect(outgoing).toContain('- Keep the original work'); expect(outgoing).toContain('- Review the direction'); expect(outgoing).toContain('Original recorded question.')
   const answer = accepted.flatMap(unit => unit.records).find(record => record.original.kind === 'native' && record.original.item.questionAnswers?.length)!
   expect(answer.original.kind === 'native' && answer.original.item.questionAnswers).toEqual([expect.objectContaining({ questionId: savedQuestionId, answer: savedQuestionAnswer })])
   expect(store.coverage(boundary).gaps).toContainEqual(expect.objectContaining({ reason: 'public-content-unconfirmed', part: expect.objectContaining({ record: answer.reference }) }))
