@@ -156,6 +156,9 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       return { ingress, duplicate: originalMessage ? 'message' as const : null }
     })
     await acknowledge()
+    // Let the transport finish its native ACK before optional profile I/O. A
+    // failed/missing profile is never part of the original input admission.
+    if (event.actor) setImmediate(() => { void this.options.connections.observeChannelActor(connection.config, event.actor!).catch(() => {}) })
     return saved
   }
   private freezeGroup(application: ConnectionConfig['application'], externalConversationId: string): NonNullable<ConnectionIngressMessage['group']>['target'] {
@@ -323,14 +326,15 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       const current = this.read(ingressId)!
       if (current.kind === 'action') fail('INGRESS_EVENT_CONFLICT')
       if (current.state !== 'received') return { record: current, own: false as const }
-      const frozen = { hostId: original.binding.executionHostId, agentSessionId: original.binding.agentSessionId, expectedRun: expectedRun!, operationId: mintObjectId(), messageId: mintObjectId(), author: original.author, admissionIntent: { ...(original.binding.inputTarget ?? { kind: 'manual-actor' as const }), expectedRun } }
+      const channelProfile = this.options.connections.readChannelActor(current.connectionId, current.actor)
+      const frozen = { hostId: original.binding.executionHostId, agentSessionId: original.binding.agentSessionId, expectedRun: expectedRun!, operationId: mintObjectId(), messageId: mintObjectId(), author: original.author, channelProfile, admissionIntent: { ...(original.binding.inputTarget ?? { kind: 'manual-actor' as const }), expectedRun } }
       this.authorize(current, frozen)
       return { record: this.write({ ...current, state: 'claimed', input: frozen }), own: true as const }
     })
     if (!claimed.own) return await this.inspect({ ingressId })
     const ref = claimed.record.input!
     const envelope: AgentMuxMessageEnvelope = { schema: 'agentmux.a2a.v1', messageId: ref.messageId, operationId: ref.operationId, createdAt: Date.now(),
-      sender: ref.author, recipient: { kind: 'agent-session', agentSessionId: ref.agentSessionId }, threadId: JSON.stringify(['external', record.application.domain, record.application.appId, record.externalConversationId]), correlationId: JSON.stringify(['external', record.application.domain, record.application.appId, record.externalMessageId]), replyTo: null, workspaceId: null, senderSessionId: null, senderRunId: null, recipientSessionId: ref.agentSessionId, recipientRunId: ref.expectedRun.runId, body: record.body }
+      sender: ref.author, ...(ref.channelProfile ? { channelProfile: ref.channelProfile } : {}), recipient: { kind: 'agent-session', agentSessionId: ref.agentSessionId }, threadId: JSON.stringify(['external', record.application.domain, record.application.appId, record.externalConversationId]), correlationId: JSON.stringify(['external', record.application.domain, record.application.appId, record.externalMessageId]), replyTo: null, workspaceId: null, senderSessionId: null, senderRunId: null, recipientSessionId: ref.agentSessionId, recipientRunId: ref.expectedRun.runId, body: record.body }
     try {
       await client.submitAgentMessage({ agentSessionId: ref.agentSessionId, envelope, admissionIntent: ref.admissionIntent!, execution: 'immediate', sourceChannel: 'agent-message' }, this.context(claimed.record))
     } catch { /* A Core call may have saved or dispatched input. Only inspect this original operation. */ }

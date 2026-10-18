@@ -6,6 +6,9 @@ import { DatabaseSync } from 'node:sqlite'
 import { ConnectionProfileHost } from './connection-profile.js'
 import { ConnectionEnrollmentHost } from './connection-enrollment.js'
 import { createRoomDiscovery } from './room-discovery.js'
+import { ChannelStorage, type ChannelStoragePort, type ChannelStorageScope } from './channel-storage.js'
+import type { ChannelProfileAdapter } from './channel-profile-adapter.js'
+import type { ChannelActorProfileObservation, ChannelProfileReason, ConnectionActor } from '@agentmux/core/connections'
 import { AgentMuxError } from '@agentmux/core'
 import { parseConnectionConfig, parseConnectionObservation, parseConnectionParams, parseConnectionRecord, parseConnectionResult, parseConnectionServiceParams, parseConnectionServiceResult, parseConnectionServiceState, type ConnectionConfig, type ConnectionConfigureInput, type ConnectionInspectInput, type ConnectionInspectResult, type ConnectionObservation, type ConnectionOperation, type ConnectionPort, type ConnectionRecord, type ConnectionServiceState, type ConnectionServicePort, type ConnectionServiceConfigure, type ConnectionServiceOperation } from '@agentmux/core/connections'
 
@@ -19,6 +22,7 @@ export interface WritableSecretPort extends SecretPort {
 }
 export interface ConnectionAdapter {
   readonly adapterId: string
+  readonly channelProfiles?: ChannelProfileAdapter
   readonly profile?: import('./connection-profile-adapter.js').ConnectionProfileAdapter
   readonly setup?: import('./connection-setup-adapter.js').ConnectionSetupAdapter
   readonly enrollment?: import('./connection-enrollment-adapter.js').ConnectionEnrollmentAdapter
@@ -55,6 +59,9 @@ export class ConnectionHost implements ConnectionPort {
   private profileHost: ConnectionProfileHost | undefined
   private setupHost: ConnectionSetupHost | undefined
   private enrollmentHost: ConnectionEnrollmentHost | undefined
+  private channelStorageOwner: ChannelStorage | undefined
+  private readonly channelProfileAbort = new AbortController()
+  private readonly channelProfileReads = new Map<string, Promise<ChannelActorProfileObservation>>()
   private closed = false
   constructor(private readonly options: ConnectionHostOptions) {
     let ownedDatabase: DatabaseSync | undefined
@@ -283,6 +290,46 @@ export class ConnectionHost implements ConnectionPort {
     const config = this.readConfiguration(connectionId)?.config
     return config?.enabled ? this.adapters.get(config.adapterId)?.publication ?? null : null
   }
+  /** Private adapter storage; names, local aliases and UI routes never select its namespace. */
+  channelStorage(scope: ChannelStorageScope): ChannelStoragePort {
+    if (this.closed) throw new AgentMuxError('The original Channel storage owner is closed.', 'CHANNEL_STORAGE_UNAVAILABLE')
+    this.channelStorageOwner ??= new ChannelStorage(this.database)
+    return this.channelStorageOwner.namespace(scope)
+  }
+  /** A local display snapshot only. It does not check or grant input/publication permission. */
+  readChannelActor(connectionId: string, actor: ConnectionActor): ChannelActorProfileObservation {
+    const missing = (reason: ChannelProfileReason): ChannelActorProfileObservation => ({ actor, state: 'unknown', profile: null, checkedAt: Date.now(), freshness: 'unknown', reason })
+    try {
+      const config = this.readConfiguration(connectionId)?.config
+      if (!config || config.application.domain !== actor.application.domain || config.application.appId !== actor.application.appId) return missing('source-unconfirmed')
+      const adapter = this.adapters.get(config.adapterId)?.channelProfiles
+      return adapter ? adapter.readActor({ actor, storage: this.channelStorage(config) }) : missing('adapter-unavailable')
+    } catch { return missing('storage-unconfirmed') }
+  }
+  /** Called after durable ACK, independently of the original input and platform response. */
+  observeChannelActor(config: ConnectionConfig, actor: ConnectionActor): Promise<ChannelActorProfileObservation> {
+    const identity = JSON.stringify([config.adapterId, config.application.domain, config.application.appId, actor.idType, actor.userId])
+    const pending = this.channelProfileReads.get(identity)
+    if (pending) return pending
+    const read = async (): Promise<ChannelActorProfileObservation> => {
+      const cached = this.readChannelActor(config.connectionId, actor)
+      if (this.closed || cached.state === 'observed' && cached.freshness === 'current') return cached
+      const unavailable = (reason: ChannelProfileReason): ChannelActorProfileObservation => ({ ...cached, state: 'unavailable', freshness: cached.profile ? 'stale' : 'unknown', checkedAt: Date.now(), reason })
+      try {
+        const current = this.readConfiguration(config.connectionId)?.config
+        if (!current?.enabled || current.adapterId !== config.adapterId || current.application.domain !== actor.application.domain || current.application.appId !== actor.application.appId) return cached
+        const adapter = this.adapters.get(current.adapterId)?.channelProfiles
+        if (!adapter) return cached
+        let credential: string | null
+        try { credential = await this.options.secrets.resolve(current.credentialRef) } catch { return unavailable('credential-unavailable') }
+        if (!credential || this.channelProfileAbort.signal.aborted) return unavailable('credential-unavailable')
+        return await adapter.refreshActor({ actor, config: current, storage: this.channelStorage(current) }, credential, this.channelProfileAbort.signal)
+      } catch (error) { return unavailable(error instanceof AgentMuxError && error.code === 'CHANNEL_STORAGE_UNAVAILABLE' ? 'storage-unconfirmed' : 'source-unconfirmed') }
+    }
+    const work = read().finally(() => { this.channelProfileReads.delete(identity) })
+    this.channelProfileReads.set(identity, work)
+    return work
+  }
   enrollmentAdapters(): ConnectionAdapter[] { return [...this.adapters.values()].filter(a => a.enrollment) }
   registeredAdapter(adapterId: string): ConnectionAdapter | undefined { return this.adapters.get(adapterId) }
   ingressAuthenticators(): import('./durable-ingress.js').IngressAuthenticator[] {
@@ -302,5 +349,5 @@ export class ConnectionHost implements ConnectionPort {
     this.profileHost ??= new ConnectionProfileHost(this, this.options.secrets)
     return this.profileHost.unresolvedApplicationWrite(application, actor)
   }
-  close(): void { this.closed = true; this.profileHost?.close(); this.setupHost?.close(); this.enrollmentHost?.close(); this.closeRoomDiscovery(); if (!this.options.database) this.database.close() }
+  close(): void { this.closed = true; this.channelProfileAbort.abort(); this.profileHost?.close(); this.setupHost?.close(); this.enrollmentHost?.close(); this.closeRoomDiscovery(); if (!this.options.database) this.database.close() }
 }
