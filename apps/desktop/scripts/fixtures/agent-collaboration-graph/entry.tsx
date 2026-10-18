@@ -13,11 +13,11 @@ import { useAppStore } from '../../../src/renderer/src/store'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { desktopSpatialGraph } from '../../../src/renderer/src/lib/desktop-spatial-state'
 import { fixturePath } from '../../lib/fixture-values.mjs'
-import type { CollaborationLayoutRequest, CollaborationLayoutResponse } from '../../../src/renderer/src/lib/collaboration-layout-engine'
+import type { CollaborationLayoutBox, CollaborationLayoutRequest, CollaborationLayoutResponse } from '../../../src/renderer/src/lib/collaboration-layout-engine'
 import '../../../src/renderer/src/styles/index.css'
 
 // Transparent instrumentation: actual browser Workers and original context code execute.
-const nativeWorkers: Array<{ input?: { nodes: number; connections: number; ids: string[]; sizes: Record<string, number>; areas: Array<{ id: string; members: number }>; edges: Array<{ id: string; source: string; target: string; kind: string }> }; boxes?: { agents: number; ids: string[]; areas: Array<{ id: string; width: number; height: number }> }; complete?: boolean; terminated?: boolean; observerMS: number }> = []
+const nativeWorkers: Array<{ input?: { nodes: number; connections: number; ids: string[]; sizes: Record<string, number>; areas: Array<{ id: string; members: number }>; edges: Array<{ id: string; source: string; target: string; kind: string }> }; boxes?: { agents: number; ids: string[]; areas: Array<{ id: string; width: number; height: number }> }; geometry?: readonly CollaborationLayoutBox[]; complete?: boolean; terminated?: boolean; observerMS: number }> = []
 const OriginalWorker = window.Worker
 class ObservedWorker extends OriginalWorker {
   private readonly sample: typeof nativeWorkers[number] = { observerMS: 0 }
@@ -26,6 +26,7 @@ class ObservedWorker extends OriginalWorker {
     this.addEventListener('message', (event: MessageEvent<CollaborationLayoutResponse>) => {
       const start = performance.now()
       if (event.data?.type === 'boxes' && Array.isArray(event.data.boxes)) this.sample.boxes = { agents: event.data.boxes.filter(box => box.kind === 'agent').length, ids: event.data.boxes.filter(box => box.kind === 'agent').map(box => box.id), areas: event.data.boxes.filter(box => box.kind === 'area').map(({ id, width, height }) => ({ id, width, height })) }
+      if (event.data?.type === 'boxes' && Array.isArray(event.data.boxes)) this.sample.geometry = event.data.boxes
       if (event.data?.type === 'complete') this.sample.complete = true
       this.sample.observerMS += performance.now() - start
     })
@@ -184,7 +185,7 @@ for (const name of ['launchAgent', 'stop', 'resume', 'write', 'interrupt', 'subm
 function originalTimeline(id: string): AgentTimelineSnapshot {
   const value = timelines[id]
   if (value) return value
-  if (!sessions.some(session => session.id === id)) throw Error('Unknown private conversation participant')
+  if (!sessions.some(session => session.id === id) && !retired.some(source => source.agentSessionId === id)) throw Error('Unknown private conversation participant')
   return { agentSessionId: id, sourceHostId: hostId, revision: 0, items: [], stream: { epoch: 'fixture-empty-' + id, revision: 0, sequence: 0, origin: 'beginning', gaps: [], positions: [] } }
 }
 function conversation(input: ConversationTimelineReadInput) {
@@ -350,7 +351,7 @@ Object.assign(window, { graphCapture: {
     sameMap: originalMap === document.querySelector('.collaboration-map'), census: census(),
     activeWorkspaceId: state.activeWorkspaceId, choice: structuredClone(state.workbenchSpaceSelection),
     documentHidden: document.hidden, visibilityState: document.visibilityState,
-    publicAdmissionReady: Boolean(admittedControl), publicRequests: [...publicRequests], mainSurface: state.mainSurface, focusView: state.focusView, mapTarget: state.collaborationMapTarget, graph: Boolean(document.querySelector('.collaboration-map[data-desktop-focus-view="map"]:not([hidden])')),
+    focusAgentReveal: state.focusAgentReveal, publicAdmissionReady: Boolean(admittedControl), publicRequests: [...publicRequests], mainSurface: state.mainSurface, focusView: state.focusView, mapTarget: state.collaborationMapTarget, graph: Boolean(document.querySelector('.collaboration-map[data-desktop-focus-view="map"]:not([hidden])')),
     chrome: { viewportWidth: innerWidth, map: visibleSurfaces('[data-desktop-focus-view="map"]'), list: visibleSurfaces('[data-desktop-focus-view="list"]'), rail: visibleSurfaces('.project-rail-shell'), dock: visibleSurfaces('[data-surface-tool-dock]'), preferences: { toolsOpen: state.toolsOpen, projectRailOpen: state.projectRailOpen } },
     instrumentation: structuredClone(instrumentation()), readers: document.querySelectorAll('[data-agent-reading-host]').length } }
 } })

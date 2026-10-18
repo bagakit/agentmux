@@ -20,7 +20,7 @@ assert.ok(privateRoot.startsWith(join(tmpdir(), 'amux-collaboration-capture-')) 
 const require = createRequire(join(desktop, 'package.json')), hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const sources = {}, isolated = [], instrumented = [], logs = []
 const receipt = { schema: 'agentmux.collaboration-graph-capture.v1', scenario: 'focus-map-readability', capturedPass: false, captureOnly: true, aestheticReview: 'not-performed',
-  boundary: 'Current source App, actual initialization/Store, Focus List/Map and original Space workfaces, original area owners, Graph, shared Focus cards and sole AgentInformationPreviewHost/Reader. The distribution includes permanent empty areas, uneven populated groups, isolated members and observed dense cross-area relations. Only platform API facts and unrelated PTY/Monaco painting are controlled. Private synthetic identities, events and content; no Core/Provider/Runtime, real messages, restart or installed-product claim.' }
+  boundary: 'Current source App, actual initialization/Store, Focus List/Map and original Space workfaces, original area owners, Graph, shared Focus cards and sole AgentInformationPreviewHost/Reader. The distribution includes permanent empty areas, uneven populated groups, isolated members and observed dense cross-area relations. Only platform API facts and unrelated PTY/Monaco painting are controlled. Private synthetic identities, events and content; no live Core lifecycle, Provider, Runtime, real messages, restart or installed-product claim.' }
 let compilationWrites = Promise.resolve()
 function publishCompilation(value) {
   return compilationWrites = compilationWrites.then(async () => {
@@ -103,7 +103,7 @@ try {
   assert.equal(receipt.compilation?.phase, 'complete')
   Object.assign(sources, receipt.compilation.inputs); isolated.push(...receipt.compilation.isolated); instrumented.push(...receipt.compilation.instrumented)
   receipt.inputs = sources; receipt.isolated = isolated; receipt.instrumented = instrumented
-  for (const owner of ['App.tsx', 'GlobalFocusSurface.tsx', 'FocusToolbar.tsx', 'FocusViewSwitch.tsx', 'SurfaceToolDock.tsx', 'WorkspaceCollaboration.tsx', 'CollaborationMapToolbar.tsx', 'collaboration-areas.ts', 'collaboration-presentation.ts', 'workspace-agent-scope.ts', 'AgentCollaborationMap.tsx', 'AgentCollaborationGraph.tsx', 'collaboration-layout.worker.ts', 'collaboration-layout-engine.ts', 'use-collaboration-layout.ts', 'FocusContextCardBody.tsx', 'FocusContextRow.tsx', 'AgentInformationPreview.tsx', 'AgentInformationReader.tsx', 'store.ts', 'collaboration.css']) {
+  for (const owner of ['App.tsx', 'GlobalFocusSurface.tsx', 'FocusToolbar.tsx', 'FocusViewSwitch.tsx', 'SurfaceToolDock.tsx', 'WorkspaceCollaboration.tsx', 'CollaborationMapToolbar.tsx', 'collaboration-areas.ts', 'collaboration-presentation.ts', 'workspace-agent-scope.ts', 'AgentCollaborationMap.tsx', 'AgentCollaborationGraph.tsx', 'collaboration-layout.worker.ts', 'collaboration-layout-engine.ts', 'collaboration-map-geometry.ts', 'desktop-presentation.ts', 'FocusContextCards.tsx', 'use-collaboration-layout.ts', 'FocusContextCardBody.tsx', 'FocusContextRow.tsx', 'AgentInformationPreview.tsx', 'AgentInformationReader.tsx', 'store.ts', 'collaboration.css']) {
     assert.ok(Object.keys(sources).some(file => file.endsWith('/' + owner)), 'Actual owning module must compile: ' + owner)
   }
   receipt.outputs = {}
@@ -125,7 +125,7 @@ try {
   await new Promise(done => server.listen(0, '127.0.0.1', done))
   receipt.phase = 'capturing'; await writeFile(join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
   receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), `http://127.0.0.1:${server.address().port}/`, privateRoot, evidence],
-    { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 100000, onLine: line => logs.push(line) })
+    { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 150000, onLine: line => logs.push(line) })
   const actualText = await readFile(join(evidence, 'actual.json'), 'utf8').catch(error => error.code === 'ENOENT' ? '' : Promise.reject(error))
   if (actualText.trim()) receipt.actual = JSON.parse(actualText)
   assert.equal(receipt.process.timedOut, false, 'The original source capture timed out; retain its partial scene evidence')
