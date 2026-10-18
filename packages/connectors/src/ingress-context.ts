@@ -114,7 +114,18 @@ export class IngressContextPositions {
         covered = quote.range.origin === 'first-observed' && quote.range.from?.inclusive === true &&
           first?.kind !== 'action' && first?.externalMessageId === quote.range.from.messageId
       }
-      if (!covered) { this.database.exec('COMMIT'); return false }
+      if (!covered) {
+        // A later accepted interval can already include this late original input.
+        // Retire only that receipt lookup; opaque intake sequence is not native order.
+        const current = previous ? this.original(previous.ingressId) : null, currentQuote = current?.input?.channelQuote
+        const alreadyIncluded = current && isDeepStrictEqual(this.recipient(current), recipient) &&
+          current.externalMessageId === previous?.messageId && currentQuote?.coverage === 'complete' && !currentQuote.gaps.length &&
+          currentQuote.range.throughMessageId === previous.messageId && current.externalConversationId === record.externalConversationId &&
+          isDeepStrictEqual(current.application, record.application) &&
+          (currentQuote.range.from?.messageId === record.externalMessageId || currentQuote.records.some(item => item.messageId === record.externalMessageId))
+        if (alreadyIncluded) this.database.prepare('DELETE FROM connection_ingress_context_pending WHERE ingress_id=?').run(record.ingressId)
+        this.database.exec('COMMIT'); return false
+      }
       if (previous?.messageId !== record.externalMessageId) this.database.prepare(`INSERT INTO connection_ingress_context_position VALUES (?,?,?)
         ON CONFLICT(scope) DO UPDATE SET ingress_id=excluded.ingress_id,message_id=excluded.message_id`).run(scope, record.ingressId, record.externalMessageId)
       this.database.prepare('DELETE FROM connection_ingress_context_pending WHERE ingress_id=?').run(record.ingressId)
