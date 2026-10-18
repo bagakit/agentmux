@@ -1,5 +1,4 @@
-import { ConversationSourceLabels } from '@agentmux/client-ui/components/ConversationSourceLabels'
-import type { ConversationSources } from '@agentmux/client-ui/conversation-sources'
+import { CapturedProcessRecord } from '@agentmux/client-ui/components/CapturedProcessRecord'
 import { conversationItemRef } from '@agentmux/core/conversation'
 import { ConversationCoverage } from '@agentmux/client-ui/components/ConversationCoverage'
 import type { ConversationPresentationController } from '@agentmux/client-ui/use-conversation-record-layout'
@@ -7,12 +6,11 @@ import { type AgentConversationRecord, type ConversationItemRef } from '@agentmu
 import { projectConversationWindow, type ConversationRecord } from '@agentmux/client-ui/conversation-records'
 import { consumeProgrammaticReadingScroll, markProgrammaticReadingScroll } from '@agentmux/client-ui/reading-scroll'
 import { CapturedConversationMessage, type SubmissionDisclosure } from '@agentmux/client-ui/components/CapturedConversationMessage'
-import { ConversationToolPayload } from '@agentmux/client-ui/components/ConversationToolPayload'
 import { ReadingFind } from '@agentmux/client-ui/components/ReadingFind'
 import { useConversationTraceDisclosure } from '@agentmux/client-ui/conversation-trace-disclosure'
 import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode, type ComponentProps, type KeyboardEvent, type WheelEvent } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode, type ComponentProps, type KeyboardEvent, type WheelEvent } from 'react'
 import type { AgentDisplayState, AgentSessionHistoryPage, AgentSessionUserMessage } from '@agentmux/core'
 import type { AgentObservation } from '@agentmux/core/agent-status'
 import type { AgentTimelineItem } from '../../../shared/contracts'
@@ -25,15 +23,8 @@ import {
   isNearBottom,
   type ScrollGeometry
 } from '../lib/activity-autoscroll'
-import {
-  MAX_DIFF_LINES,
-  parseUnifiedDiff,
-  toolCallToDiff,
-  type ToolDiff
-} from '../lib/activity-diff'
 import { createRulerScale, describeReadout, describeRulerAxis, describeSpan, describeActivityRecordTime, rulerBand, stepRulerSelection, type RulerReadoutText, type RulerScale } from '../lib/activity-ruler'
 import { formatClock } from '@agentmux/client-ui/conversation-time'
-import { stepTitle } from '@agentmux/client-ui/activity-step-summary'
 import { showEmptyState, showWorkingIndicator } from '../lib/activity-working-state'
 import { speaksAsAgent, type ConversationAxisItem, type ConversationAxisMark } from '../lib/conversation-axis'
 import { buildContinuationPrompt } from '../lib/session-continuation'
@@ -56,7 +47,6 @@ import type { ConversationProcessProps } from '@agentmux/client-ui/components/Co
 import { renderConversationQuestionNotice } from './ConversationQuestionNotice'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { SemanticIcon } from './semantic-icons'
-import { RecordedToolRow as WorkflowToolRow } from '@agentmux/client-ui/components/WorkflowObservation'
 import { NativeProcessObservation } from '@agentmux/client-ui/components/NativeProcessObservation'
 import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
 import { conversationReadingAnchor, restoreConversationAnchor, useSessionConversationWindow, type ConversationReading } from '../lib/session-conversation-window'
@@ -68,34 +58,11 @@ import { useConversationReadAhead } from '../lib/use-conversation-read-ahead'
 import type { ConversationConsumerQuery } from '@agentmux/core/control'
 import type { ConversationConsumerSample } from '../../../shared/conversation-consumer-observation'
 
-const ThemeFileTextIcon = semanticIconComponent('file.text')
-const ThemeActionEditIcon = semanticIconComponent('action.edit')
-const ThemeActionSearchIcon = semanticIconComponent('action.search')
 const ThemeNavigationUpIcon = semanticIconComponent('navigation.up')
 const ThemeActionCurrentIcon = semanticIconComponent('action.current')
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
 const ThemeLayoutCollapseAllIcon = semanticIconComponent('layout.collapse-all')
 
-
-/**
- * 机器上报那一路的图标：按 `kind` 画，而这是对的——`tool_call` 是一把锤子、`permission` 是一枚盾，
- * 回答的是「这是一条什么事件」。**对话回合不走这里**：那一路的形状由身份驱动（见共同消息组件），
- * 因为「谁说的」不是一种事件类型。两个寄存器各有各的判据，不是同一个判据的两次调用。
- */
-function Glyph({ kind, toolName, size = 12 }: { kind: AgentTimelineItem['kind']; toolName?: string; size?: number }) {
-  if (kind === 'user_message') return <SemanticIcon name="conversation.user-message" size={size} />
-  if (kind === 'assistant_message') return <SemanticIcon name="conversation.assistant-message" size={size} />
-  if (kind === 'tool_call') {
-    const name = toolName?.toLowerCase()
-    if (name === 'bash' || name === 'shell' || name === 'exec_command' || name === 'run_command') return <SemanticIcon name="object.terminal" size={size} />
-    if (name === 'read' || name === 'read_file') return <ThemeFileTextIcon size={size} />
-    if (name === 'edit' || name === 'write' || name === 'write_file' || name === 'apply_patch') return <ThemeActionEditIcon size={size} />
-    if (name === 'grep' || name === 'glob' || name === 'search') return <ThemeActionSearchIcon size={size} />
-    return <SemanticIcon name="conversation.tool-call" size={size} />
-  }
-  if (kind === 'permission') return <SemanticIcon name="status.permission" size={size} />
-  return <SemanticIcon name="status.neutral" size={size} />
-}
 
 /**
  * A run of consecutive machine-reported steps between two turns the user can read. Collapsing the run
@@ -113,104 +80,6 @@ function buildActivityEntries(projection: ReturnType<typeof projectConversationW
     ? [{ kind: 'item' as const, item: record.original.item, record }] : [])
   return { records, nativeTailBeforeRecordId: afterNativeTail?.presentationKey ?? afterNativeTail?.id, originalRecords: projection?.originalRecords ?? [], coverage: projection?.timeline.coverage ?? [],
     unifiedItems: segments.map(entry => entry.item), segments }
-}
-
-function Row({
-  item,
-  sources,
-  origin,
-  showSource,
-  workspaceRoot,
-  expanded,
-  onExpandedChange
-}: {
-  item: AgentTimelineItem
-  sources?: ConversationSources | undefined
-  origin: number
-  showSource: boolean
-  /** 用来把仓内绝对路径缩成相对路径，见 activity-step-summary 的 shortenPath。缺席则原样显示。 */
-  workspaceRoot: string
-  expanded?: boolean
-  onExpandedChange?: (expanded: boolean) => void
-}) {
-  const [localOpen, setOpen] = useState(false)
-  const open = expanded ?? localOpen
-  const sourceIdentity = useMemo(() => ({}), [item])
-  const payloadIdentity = useMemo(() => ({}), [sourceIdentity, item.toolInput, item.content])
-  const outputIdentity = useMemo(() => ({}), [sourceIdentity, item.toolOutput])
-  // What the agent said is the content of the trace; what a tool was invoked with is its payload.
-  // Prose stays on the page, machine arguments fold away — that is the noise the run view is hiding.
-  const prose = item.kind === 'tool_call' ? undefined : item.content
-  const payload = item.toolInput ?? (item.kind === 'tool_call' ? item.content : undefined)
-  // 结果和入参一样值得展开——而且比入参更值得：一步跑失败了，用户第一件想看的是它说了什么。
-  // 只有入参能展开的话，失败行点开只有参数，等于把唯一有用的信息挡在外面。
-  const output = item.toolOutput
-  const expandable = Boolean(payload) || Boolean(output)
-  // 一次编辑的实质是"哪几行没了、哪几行来了"，而不是一段转义 JSON——把 old/new 摊成加删行，
-  // 用户就不必在脑子里反转义再做行对比。算不出 diff 时（工具不是编辑类、JSON 坏了）如实退回
-  // 原始 payload，不猜、不半渲染。
-  const diff = useMemo(() => {
-    if (!open || !payload) return null
-    const fromTool = item.toolInput ? toolCallToDiff(item.title, item.toolInput) : null
-    return fromTool ?? parseUnifiedDiff(payload)
-  }, [open, payload, item.toolInput, item.title])
-  // 折叠起来的一行只有裸工具名时，三行 `Bash` 分不出跑的是哪条命令——而不展开就认得出，
-  // 正是折叠的前提。带上那个最具识别性的参数。
-  const heading = stepTitle(item.title, item.toolName, item.toolInput, workspaceRoot)
-  const recordedTime = describeActivityRecordTime(item.createdAt, item.createdAt, origin)
-
-  return (
-    <Fragment>
-      <WorkflowToolRow observation={{
-        id: item.id,
-        title: heading,
-        status: item.status,
-        recordedTime,
-        source: sources ? <ConversationSourceLabels sources={sources.fields[item.toolInput !== undefined ? 'toolInput' : 'content'] ?? sources.main} /> : item.source,
-        persistentSource: showSource
-      }} className={`log-row log-row--${item.kind}`} icon={<Glyph kind={item.kind} {...(item.toolName ? { toolName: item.toolName } : {})} />}
-        {...(expandable ? { expanded: open, onToggle: () => { setOpen(!open); onExpandedChange?.(!open) } } : {})} />
-      {prose ? <p className="log-row__prose">{prose}</p> : null}
-      {open ? <div className="wf-native-process__body">
-        {diff ? <DiffBlock diff={diff} /> : null}
-        {payload ? diff ? <details><summary>Original tool input</summary><div className="conversation-tool-trace__payload">
-          <ConversationSourceLabels sources={sources?.fields[item.toolInput !== undefined ? 'toolInput' : 'content']} /><ConversationToolPayload text={payload} identity={payloadIdentity} sourceIdentity={sourceIdentity} copyLabel="Copy tool input" />
-        </div></details> : <div className="conversation-tool-trace__payload">
-          <ConversationSourceLabels sources={sources?.fields[item.toolInput !== undefined ? 'toolInput' : 'content']} /><ConversationToolPayload text={payload} identity={payloadIdentity} sourceIdentity={sourceIdentity} copyLabel="Copy tool input" />
-        </div> : null}
-        {output ? <div className="conversation-tool-trace__payload" data-status={item.status}>
-          <ConversationSourceLabels sources={sources?.fields.toolOutput} /><ConversationToolPayload text={output} identity={outputIdentity} sourceIdentity={sourceIdentity} copyLabel="Copy tool output" />
-        </div> : null}
-      </div> : null}
-    </Fragment>
-  )
-}
-
-/**
- * 一次编辑摊成加删行。
- *
- * 颜色不是唯一的载体：每行前面留一个 `+`/`-`/空槽，色觉差异或高对比模式下仍读得出增删。
- * 长 diff 由 lib 截断并给出 `truncated`，这里如实说明被截了——静默截断会让用户以为自己看到了全部。
- */
-export function DiffBlock({ diff }: { diff: ToolDiff }): JSX.Element {
-  return (
-    <div className="log-diff">
-      {diff.filePath ? <div className="log-diff__path">{diff.filePath}</div> : null}
-      <pre className="log-diff__body">
-        {diff.lines.map((line, index) => (
-          <span key={index} className={`log-diff__line log-diff__line--${line.kind}`}>
-            <span className="log-diff__marker" aria-hidden="true">
-              {line.kind === 'added' ? '+' : line.kind === 'removed' ? '-' : ' '}
-            </span>
-            {line.text}
-          </span>
-        ))}
-      </pre>
-      {diff.truncated ? (
-        <div className="log-diff__truncated">Diff truncated at {MAX_DIFF_LINES} lines.</div>
-      ) : null}
-    </div>
-  )
 }
 
 /** A segment paired with the half-open range of event indices it covers, so a position on the ruler
@@ -1071,8 +940,9 @@ export function ActivityView({
           {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
         />
       ) : (
-        <Row sources={entry.record?.sources} item={entry.item} origin={origin} showSource workspaceRoot={workspaceRoot}
-          {...(disclosure ? { ...(disclosure.steps.has(entry.item.id) ? { expanded: disclosure.steps.get(entry.item.id)! } : {}), onExpandedChange: expanded => disclosure.onStepExpandedChange(entry.item.id, expanded) } : {})} />
+        <CapturedProcessRecord record={entry.record} origin={origin} workspaceRoot={workspaceRoot}
+          located={locatedMessageKey === conversationMessageSourceKey(sessionId, entry.record.source)}
+          {...(disclosure ? { disclosure } : {})} />
       )}
     </div>
   )
