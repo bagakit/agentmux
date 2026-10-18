@@ -21,6 +21,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
 import { AgentLifecycleFeedback } from '../src/renderer/src/components/AgentLifecycleFeedback'
+import { useSessionRestart } from '../src/renderer/src/components/SessionRestart'
 import { TerminalView } from '../src/renderer/src/components/TerminalView'
 import { readTerminalViewObservation, registerTerminalViewObservation } from '../src/renderer/src/lib/terminal-view-observation'
 import { TERMINAL_REVEAL_DEADLINE_MS } from '../src/renderer/src/lib/terminal-reveal'
@@ -103,9 +104,9 @@ function replay(data: string): SessionAttachResult {
     terminal: { type: 'unknown', reason: 'origin_unknown' }, resizeRevision: 0,
     replay: [{ type: 'data', runId: session.control.run.runId, startByte: 0, endByte: data.length, data, dataBytes: new TextEncoder().encode(data) }] }
 }
-async function render(current: SessionSnapshot = session, props: { visible?: boolean; readOnly?: boolean; regionId?: string } = {}) {
+async function render(current: SessionSnapshot = session, props: { autoFocus?: boolean; visible?: boolean; readOnly?: boolean; regionId?: string } = {}) {
   await act(async () => root.render(createElement(TerminalView, { session: current, themeId: 'graphite',
-    interactiveResize: false, visible: props.visible ?? true, readOnly: props.readOnly ?? false, autoFocus: false,
+    interactiveResize: false, visible: props.visible ?? true, readOnly: props.readOnly ?? false, autoFocus: props.autoFocus ?? false,
     linkOrigin: { ...origin, regionId: props.regionId ?? origin.regionId }, onObservationRefresh: refresh => { fixture.refresh = refresh } })))
 }
 async function ready(data: string) {
@@ -428,4 +429,145 @@ it('retains typed connection observations without upgrading unknown continuation
     metadata: { continuationType: 'basic-vt', liveReady: true } })
   expect(sent.mock.calls[4]![1].attemptId).not.toBe(sent.mock.calls[3]![1].attemptId)
   expect(attach).toHaveBeenCalledTimes(1); expect(write).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled()
+})
+
+function pausedFrames(owner: Window) {
+  const callbacks = new Map<number, FrameRequestCallback>()
+  let sequence = 0
+  vi.spyOn(owner, 'requestAnimationFrame').mockImplementation(callback => {
+    callbacks.set(++sequence, callback)
+    return sequence
+  })
+  vi.spyOn(owner, 'cancelAnimationFrame').mockImplementation(id => { callbacks.delete(id) })
+  return callbacks
+}
+
+function RestartTerminalConsumer() {
+  const current = useAppStore(state => state.sessions.find(value => value.id === session.id) as typeof session)
+  const restart = useSessionRestart()
+  return <><button data-restart-trigger onClick={event => restart.requestRestart(current, 'Original work', event.currentTarget)}>Restart Session</button>
+    <TerminalView session={current} themeId="graphite" interactiveResize={false} autoFocus={false} linkOrigin={origin} />{restart.dialog}</>
+}
+async function openRestart() {
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-restart-trigger]')!.click())
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Original work')
+}
+async function confirmRestart() {
+  await act(async () => document.querySelector<HTMLButtonElement>('[role="dialog"] [data-confirm-label]')!.click())
+}
+async function readyRun(runId: string) {
+  await act(async () => await vi.waitFor(() => expect(readTerminalViewObservation({
+    regionId: origin.regionId, sessionId: session.id, runId
+  })?.liveReady).toBe(true)))
+}
+
+it('retires suspended terminal frames and obsolete buffers through repeated original Session restart confirmations', async () => {
+  const { setFlagsFromString } = await import('node:v8')
+  const { runInNewContext } = await import('node:vm')
+  const { setImmediate: nextJob } = await import('node:timers/promises')
+  setFlagsFromString('--expose_gc')
+  const collect: () => void = runInNewContext('gc')
+  const frames = pausedFrames(window)
+  const retired: WeakRef<BrowserTerminal>[] = []
+  const counts: number[] = []
+  const neighbor = { ...session, id: 'neighbor-agent', control: { ...session.control, agentSessionId: 'neighbor-agent', run: { runId: 'neighbor-run' } } }
+  useAppStore.setState({ sessions: [session, neighbor], agentComposerDrafts: { [session.id]: 'Unsent original draft' } })
+  const original = useAppStore.getState()
+  let generation = 0
+  const restart = vi.spyOn(api.sessions, 'restart').mockImplementation(async (control, operationId) => {
+    const newRun = { runId: `replacement-run-${++generation}` }
+    return { agentSessionId: session.id, expectedRun: control.run, operationId, previousRun: control.run,
+      phase: 'restarted', canRetry: false, observedAt: generation, newRun,
+      session: { ...session, control: { ...session.control, run: newRun } } }
+  })
+  attach.mockImplementation(async control => {
+    const data = `ORIGINAL OUTPUT ${control.run.runId}`
+    const result = replay(data)
+    return { ...result, attachmentId: `lease-${control.run.runId}`,
+      replay: result.replay.map(item => ({ ...item, runId: control.run.runId })),
+      session: { ...session, control: control as typeof session.control, latestOutputBytes: data.length } }
+  })
+  await act(async () => root.render(<RestartTerminalConsumer />))
+  for (let index = 0; index < 6; index++) {
+    if (index) { await openRestart(); await confirmRestart() }
+    const runId = index ? `replacement-run-${index}` : session.control.run.runId
+    await readyRun(runId)
+    expect(fixture.terminals.at(-1)!.buffer.active.getLine(0)?.translateToString(true)).toContain(`ORIGINAL OUTPUT ${runId}`)
+    retired.push(new WeakRef(fixture.terminals.at(-1)!))
+    counts.push(frames.size)
+    const current = useAppStore.getState()
+    expect(current.sessions.find(value => value.id === neighbor.id)).toBe(neighbor)
+    for (const key of ['tabs', 'layouts', 'agentComposerDrafts', 'activeWorkspaceId'] as const) expect(current[key]).toBe(original[key])
+  }
+  expect(restart).toHaveBeenCalledTimes(5)
+  expect(new Set(restart.mock.calls.map(call => call[1])).size).toBe(5)
+  expect(restart.mock.calls.every(call => call[2] === false)).toBe(true)
+  expect(api.sessions.detach).toHaveBeenCalledTimes(5)
+  expect(vi.mocked(api.sessions.detach).mock.calls.map(call => call[0])).toEqual([
+    `lease-${session.control.run.runId}`, ...[1, 2, 3, 4].map(index => `lease-replacement-run-${index}`)
+  ])
+  await act(async () => root.render(null))
+  expect(api.sessions.detach).toHaveBeenCalledTimes(6)
+  fixture.terminals.length = 0
+  // Spy histories are test-owned roots (callback arguments and DOM receivers), not product retention.
+  vi.clearAllMocks()
+  for (let index = 0; index < 4; index++) { await nextJob(); collect(); await nextJob() }
+  const obsoleteAlive = retired.slice(0, -1).map(reference => reference.deref() !== undefined)
+  if (process.env.AGENTMUX_TERMINAL_FRAME_SAMPLE) {
+    const { appendFileSync } = await import('node:fs')
+    appendFileSync(process.env.AGENTMUX_TERMINAL_FRAME_SAMPLE, JSON.stringify({ counts, pendingAfterUnmount: frames.size, obsoleteAlive }) + '\n')
+  }
+  // The latest generation can remain in the test/React unmount job; only the five replaced Runs are the reachability oracle.
+  expect(obsoleteAlive).toEqual([false, false, false, false, false])
+  expect(counts).toEqual(Array(6).fill(counts[0]))
+  expect(frames.size).toBe(0)
+})
+
+it('keeps the original terminal and draft when restart is cancelled or its original receipt is unknown', async () => {
+  const frames = pausedFrames(window)
+  const restart = vi.spyOn(api.sessions, 'restart').mockRejectedValue(new Error('Original restart reply unknown'))
+  useAppStore.setState({ agentComposerDrafts: { [session.id]: 'Unsent original draft' } })
+  const original = useAppStore.getState()
+  await act(async () => root.render(<RestartTerminalConsumer />))
+  await readyRun(session.control.run.runId)
+  const terminal = fixture.terminals[0]!, pending = frames.size
+  await openRestart()
+  await act(async () => document.querySelector<HTMLButtonElement>('.confirmation-dialog__cancel')!.click())
+  expect(restart).not.toHaveBeenCalled()
+  await openRestart(); await confirmRestart()
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Original restart reply unknown')
+  const operationId = restart.mock.calls[0]![1]
+  await confirmRestart()
+  expect(restart).toHaveBeenNthCalledWith(2, session.control, operationId, true)
+  expect(fixture.terminals).toEqual([terminal])
+  expect(frames.size).toBe(pending)
+  expect(api.sessions.detach).not.toHaveBeenCalled()
+  for (const key of ['sessions', 'tabs', 'layouts', 'agentComposerDrafts'] as const) expect(useAppStore.getState()[key]).toBe(original[key])
+})
+
+it('still focuses the live eligible terminal when its initialization frame executes', async () => {
+  const frames = pausedFrames(window)
+  await render(session, { autoFocus: true })
+  await readyRun(session.control.run.runId)
+  const focus = vi.spyOn(fixture.terminals[0]!, 'focus')
+  const callbacks = [...frames.values()]
+  frames.clear()
+  await act(async () => callbacks.forEach(callback => callback(0)))
+  expect(focus).toHaveBeenCalledTimes(1)
+})
+
+it('retires the initialization frame on its scheduling Window after the terminal DOM moves', async () => {
+  const originalFrames = pausedFrames(window)
+  await ready('ORIGINAL OUTPUT')
+  const next = document.createElement('iframe'); document.body.append(next)
+  const nextWindow = next.contentWindow!
+  const nextFrames = pausedFrames(nextWindow)
+  nextWindow.requestAnimationFrame(() => {})
+  next.contentDocument!.body.append(container)
+  await act(async () => root.render(null))
+  expect(originalFrames.size).toBe(0)
+  expect(nextFrames.size).toBe(1)
+  expect(api.sessions.detach).toHaveBeenCalledTimes(1)
+  nextFrames.clear()
+  document.body.append(container); next.remove()
 })
