@@ -24,3 +24,6 @@ docs/status/
 docs/prototypes/
 docs/ideas/
 docs/research/
+
+# Derived from the shared identity runtime for the unpacked extension.
+apps/desktop/browser-extension/identity-runtime.js

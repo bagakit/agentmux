@@ -1,3 +1,4 @@
+import { mintObjectId } from './identity-runtime.js'
 import { EXTERNAL_BROWSER_PROTOCOL, MAX_BRIDGE_BYTES, isShareUrl, isTabScopedCommand, BROWSER_OPERATION_FEEDBACK_WORLD_NAME, buildOwnedFeedbackClearScript } from './protocol.js'
 
 /** Authority stays with the extension popup's explicit share, never a CDP caller's tab argument. */
@@ -12,7 +13,7 @@ export class SharedTabWorker {
   }
   async load() {
     const state = await this.api.storage.session.get(['instanceId', 'grants'])
-    this.instanceId = state.instanceId || crypto.randomUUID()
+    this.instanceId = state.instanceId || mintObjectId()
     for (const grant of state.grants || []) {
       if (!Number.isInteger(grant.tabId) || typeof grant.grantId !== 'string') continue
       try {
@@ -61,7 +62,7 @@ export class SharedTabWorker {
     if (!isShareUrl(tab.url)) throw new Error('Share a normal HTTPS or local HTTP page. Browser-restricted pages remain unavailable.')
     const current = this.grants.get(tab.id)
     if (current) return { bindingId: current.bindingId }
-    const grant = { tabId: tab.id, grantId: crypto.randomUUID(), navigationId: crypto.randomUUID(),
+    const grant = { tabId: tab.id, grantId: mintObjectId(), navigationId: mintObjectId(),
       url: tab.url, title: tab.title || '', attached: false, frames: new Map() }
     this.grants.set(tab.id, grant)
     await this.persist()
@@ -216,7 +217,7 @@ export class SharedTabWorker {
     const mainDocumentNavigation = (method === 'Page.frameNavigated' && !source.sessionId && !params.frame?.parentId) ||
       (method === 'Page.navigatedWithinDocument' && !source.sessionId && params.frameId === grant.rootFrameId)
     if (mainDocumentNavigation) {
-      if (method === 'Page.frameNavigated') grant.navigationId = params.frame?.loaderId || crypto.randomUUID()
+      if (method === 'Page.frameNavigated') grant.navigationId = params.frame?.loaderId || mintObjectId()
       grant.url = params.frame?.url || params.url || grant.url
       if (!isShareUrl(grant.url)) { void this.revoke(grant.tabId, 'unavailable'); return }
       if (method === 'Page.frameNavigated') grant.frames.clear()
