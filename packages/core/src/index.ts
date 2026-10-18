@@ -164,3 +164,6 @@ export * from './mote-chat.js'
 export { agentDiscoveryActivity } from './agent-discovery.js'
 
 export * from './external-conversation.js'
+
+export type * from './channel-metadata-contract.js'
+export * from './channel-metadata-codec.js'

@@ -36,3 +36,6 @@ export { groupTarget, groupWindowLimit, deliveryFacts, deliveryMatches, formatGr
 export * from './connection-deletion-contract.js'
 export * from './connection-deletion-codec.js'
 export * from './channel-profile.js'
+
+export type * from './channel-metadata-contract.js'
+export * from './channel-metadata-codec.js'
