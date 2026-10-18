@@ -15,6 +15,7 @@ import { dispatchWorkbenchCommand, focusedSessionId } from '../src/renderer/src/
 import { layoutForLogicalRegionFocus } from '../src/renderer/src/lib/region-focus'
 import { agentCreationFixture } from './helpers/agent-creation-fixture'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { createBrowserAgent } from '../src/renderer/src/lib/browser-agent-creation'
 
 const initial = useAppStore.getState()
 const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private' }],
@@ -61,7 +62,144 @@ beforeEach(async () => {
 })
 afterEach(() => { dispose?.(); dispose = undefined; vi.restoreAllMocks(); useAppStore.setState(initial, true); vi.unstubAllGlobals() })
 
+function browserAgentSource() {
+  const source = { displayWorkspaceId: 'repo', groupId: 'browser-group', tabId: 'browser-tab', regionId: 'browser-region' }
+  const browser = { regionId: source.regionId, kind: 'browser' as const, workspaceId: 'repo', browserId: 'original-browser', id: 'original-browser',
+    navigationId: 'original-navigation', mode: 'normal' as const, profileId: 'original-profile', url: 'https://example.test/original', title: 'Original page',
+    loading: false, canGoBack: false, canGoForward: false, viewport: 'responsive' as const, error: null, driving: false, appLinkPrompt: null,
+    control: { owner: 'human' as const, agent: null, activeOperationId: null, revision: 3, inputIsolation: 'inactive' as const } }
+  const tab = createWorkbenchTab(source.tabId, browser)
+  useAppStore.setState({ tabs: { [tab.id]: tab }, layouts: { repo: createWorkspaceLayout(source.groupId, [tab.id]) }, activeWorkspaceId: 'repo', mainSurface: 'workbench', agentSteerQueues: {} })
+  return { source, browser }
+}
+
 describe('public Desktop spatial Control owner', () => {
+  it('holds the admitted first task against background drains while its save waits and a newer Take arrives', async () => {
+    const { source, browser } = browserAgentSource()
+    let handed = false, recipient = ''
+    vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => launch(agent(input.agentSessionId!), input.createOperationId!))
+    vi.spyOn(api.browser, 'returnControl').mockImplementation(async (_id, input) => {
+      handed = true; recipient = input!.agent.agentSessionId
+      return { ...browser, control: { ...browser.control, owner: 'agent', revision: 4, agent: { hostId: 'local', agentSessionId: recipient } } }
+    })
+    const submit = vi.spyOn(api.sessions, 'submitPrompt')
+    vi.spyOn(api.ui, 'requestStorageFlush').mockImplementation(async () => {
+      if (!handed) return
+      const state = useAppStore.getState(), entry = state.agentSteerQueues[recipient]?.[0]
+      expect(entry).toMatchObject({ awaitingExplicitSend: true, promptCondition: null, status: 'queued' })
+      state.applyBrowserEvent({ type: 'updated', browser: { ...browser, control: { ...browser.control, revision: 5 } } })
+      await useAppStore.getState().flushAgentSteerQueue(recipient)
+      expect(useAppStore.getState().agentSteerQueues[recipient]?.[0]).toMatchObject({ awaitingExplicitSend: true, promptCondition: null, status: 'queued' })
+      expect(submit).not.toHaveBeenCalled()
+    })
+    await expect(createBrowserAgent(browser.id, source)).rejects.toThrow('control changed before initial input')
+    expect(submit).not.toHaveBeenCalled()
+  })
+
+  it('does not create against a changed execution directory after the original click', async () => {
+    const { source, browser } = browserAgentSource()
+    const created = vi.spyOn(api.sessions, 'launchAgent')
+    const originalDigest = crypto.subtle.digest.bind(crypto.subtle)
+    vi.spyOn(crypto.subtle, 'digest').mockImplementation(async (...args) => {
+      useAppStore.setState(state => ({ config: { ...state.config!, workspaces: state.config!.workspaces.map(item => item.id === 'repo' ? { ...item, path: _hygiene_fixturePath('changed') } : item) } }))
+      return originalDigest(...args)
+    })
+    await expect(createBrowserAgent(browser.id, source)).rejects.toThrow('original recovery selection changed')
+    expect(created).not.toHaveBeenCalled()
+    expect(useAppStore.getState().tabs[source.tabId]!.regions[source.regionId]).toMatchObject({ browserId: browser.id, url: browser.url })
+  })
+
+  it('keeps a newer Take event when the older handoff acknowledgement arrives last', async () => {
+    const { source, browser } = browserAgentSource()
+    vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => launch(agent(input.agentSessionId!), input.createOperationId!))
+    const enqueue = vi.spyOn(useAppStore.getState(), 'enqueueAgentSteer')
+    vi.spyOn(api.browser, 'returnControl').mockImplementation(async (_id, input) => {
+      useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: { ...browser, control: { ...browser.control, revision: 5 } } })
+      return { ...browser, control: { ...browser.control, owner: 'agent', revision: 4, agent: { hostId: input!.agent.hostId, agentSessionId: input!.agent.agentSessionId } } }
+    })
+    await expect(createBrowserAgent(browser.id, source)).rejects.toThrow('newer Browser page or control decision')
+    expect(enqueue).not.toHaveBeenCalled()
+    expect(useAppStore.getState().tabs[source.tabId]!.regions[source.regionId]).toMatchObject({ control: { owner: 'human', revision: 5 } })
+    expect(Object.values(useAppStore.getState().spatialRequests).find(item => item.purpose === 'browser-agent')?.browserAgent?.recipient).toBeDefined()
+  })
+
+  it('retries a refused queue admission with the original Agent and message, without another creation or handoff', async () => {
+    const { source, browser } = browserAgentSource()
+    const created = vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => launch(agent(input.agentSessionId!), input.createOperationId!))
+    const handoff = vi.spyOn(api.browser, 'returnControl').mockImplementation(async (_id, input) => ({ ...browser,
+      control: { ...browser.control, owner: 'agent', revision: 4, agent: { hostId: input!.agent.hostId, agentSessionId: input!.agent.agentSessionId } } }))
+    const enqueue = vi.spyOn(useAppStore.getState(), 'enqueueAgentSteer').mockReturnValueOnce(false)
+    await expect(createBrowserAgent(browser.id, source)).rejects.toThrow('not queued')
+    const record = Object.values(useAppStore.getState().spatialRequests).find(item => item.purpose === 'browser-agent')!
+    expect(record.browserAgent?.inputStarted).toBeUndefined()
+    vi.spyOn(api.sessions, 'creation').mockResolvedValue({ ...agentCreationFixture(agent(record.agentSessionId)), creation: { createOperationId: record.requestId, initialPrompt: 'not-requested' } })
+    vi.spyOn(useAppStore.getState(), 'sendQueuedAgentSteer').mockResolvedValue('submitted')
+    expect(await createBrowserAgent(browser.id, source)).toBe('')
+    expect(enqueue).toHaveBeenCalledTimes(2)
+    expect(enqueue.mock.calls[0]![3]).toBe(enqueue.mock.calls[1]![3])
+    expect(created).toHaveBeenCalledTimes(1); expect(handoff).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a created Agent when the original Browser navigates during creation', async () => {
+    const { source, browser } = browserAgentSource()
+    const created = vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => {
+      useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: { ...browser, navigationId: 'newer-navigation', url: 'https://example.test/newer' } })
+      return launch(agent(input.agentSessionId!), input.createOperationId!)
+    })
+    const handoff = vi.spyOn(api.browser, 'returnControl'), enqueue = vi.spyOn(useAppStore.getState(), 'enqueueAgentSteer')
+    await expect(createBrowserAgent(browser.id, source)).rejects.toThrow('Browser changed')
+    expect(created).toHaveBeenCalledTimes(1); expect(handoff).not.toHaveBeenCalled(); expect(enqueue).not.toHaveBeenCalled()
+    expect(Object.values(useAppStore.getState().tabs[source.tabId]!.regions).filter(item => item.kind === 'agent')).toHaveLength(1)
+    expect(useAppStore.getState().tabs[source.tabId]!.regions[source.regionId]).toMatchObject({ navigationId: 'newer-navigation', control: { owner: 'human' } })
+  })
+  it.each(['normal', 'private'] as const)('creates one right Agent without a prompt, then hands off the original %s Browser before its frozen first queue input', async mode => {
+    const source = { displayWorkspaceId: 'repo', groupId: 'browser-group', tabId: 'browser-tab', regionId: 'browser-region' }
+    const browser = { regionId: source.regionId, kind: 'browser' as const, workspaceId: 'repo', browserId: 'original-browser', id: 'original-browser',
+      navigationId: 'original-navigation', mode, profileId: 'original-profile', url: 'https://example.test/original', title: 'Original page',
+      loading: false, canGoBack: false, canGoForward: false, viewport: 'responsive' as const, error: null, driving: false, appLinkPrompt: null,
+      control: { owner: 'human' as const, agent: null, activeOperationId: null, revision: 3, inputIsolation: 'inactive' as const } }
+    const tab = createWorkbenchTab(source.tabId, browser)
+    useAppStore.setState({ tabs: { [tab.id]: tab }, layouts: { repo: createWorkspaceLayout(source.groupId, [tab.id]) }, activeWorkspaceId: 'repo', mainSurface: 'workbench', agentSteerQueues: {} })
+    const stages: string[] = []
+    const created = vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => {
+      stages.push('create')
+      expect(input.prompt).toBeUndefined(); expect(input.agentMuxNote).toBeUndefined()
+      expect(input.workspacePath).toBe(config.workspaces[0]!.path)
+      const disk = JSON.parse(localStorage.getItem('agentmux-workbench-v1')!).state
+      expect(disk.spatialRequests[input.createOperationId!].browserAgent).toMatchObject({ browserId: browser.id, navigationId: browser.navigationId, prompt: expect.stringContaining('browser --skill') })
+      return launch(agent(input.agentSessionId!, input.workspacePath), input.createOperationId!)
+    })
+    const handoff = vi.spyOn(api.browser, 'returnControl').mockImplementation(async (id, input) => {
+      stages.push('handoff'); expect(id).toBe(browser.id)
+      expect(input).toMatchObject({ navigationId: browser.navigationId, expectedRevision: 3, agent: { hostId: 'local', run: { runId: expect.any(String) } } })
+      return { ...browser, control: { ...browser.control, owner: 'agent', revision: 4, agent: { hostId: input!.agent.hostId, agentSessionId: input!.agent.agentSessionId } } }
+    })
+    const send = vi.spyOn(useAppStore.getState(), 'sendQueuedAgentSteer').mockImplementation(async (id, messageId) => {
+      stages.push('input')
+      expect(stages).toEqual(['create', 'handoff', 'input'])
+      const entry = useAppStore.getState().agentSteerQueues[id]!.find(item => item.operationId === messageId)!
+      expect(entry.browserRecipient).toEqual(agent(id).control)
+      expect(entry.agentMuxNote).toContain(browser.navigationId)
+      if (mode === 'private') { expect(entry.agentMuxNote).not.toContain(browser.url); expect(entry.agentMuxNote).not.toContain(browser.title) }
+      expect(entry.text).toContain('space --skill')
+      const binding = Object.values(useAppStore.getState().spatialRequests).find(item => item.browserAgent?.messageOperationId === messageId)!
+      expect(binding.browserAgent?.inputStarted).toBe(true)
+      return 'submitted'
+    })
+    const first = createBrowserAgent(browser.id, source), duplicate = createBrowserAgent(browser.id, source)
+    expect(duplicate).toBe(first)
+    expect(await first).toBe('')
+    expect(stages).toEqual(['create', 'handoff', 'input']); expect(created).toHaveBeenCalledTimes(1); expect(handoff).toHaveBeenCalledTimes(1); expect(send).toHaveBeenCalledTimes(1)
+    const record = Object.values(useAppStore.getState().spatialRequests).find(item => item.purpose === 'browser-agent')!
+    expect(record.target).toMatchObject(source)
+    const placed = useAppStore.getState().tabs[source.tabId]!
+    expect(placed.layout.root).toMatchObject({ type: 'split', direction: 'horizontal', first: { type: 'leaf', regionId: source.regionId }, second: { type: 'leaf', regionId: record.regionId } })
+    expect(placed.regions[source.regionId]).toMatchObject({ browserId: browser.id, url: browser.url, agentCreationRequestId: record.requestId })
+    vi.spyOn(api.sessions, 'creation').mockResolvedValue({ ...agentCreationFixture(agent(record.agentSessionId)), creation: { createOperationId: record.requestId, initialPrompt: 'not-requested' } })
+    vi.spyOn(api.sessions, 'inspectInput').mockResolvedValue(null)
+    expect(await createBrowserAgent(browser.id, source)).toContain('No input was resent')
+    expect(created).toHaveBeenCalledTimes(1); expect(send).toHaveBeenCalledTimes(1)
+  })
   it('generates a fixed-width Base58 identity at the real Desktop launch boundary', async () => {
     useAppStore.setState({ config: structuredClone(config), activeWorkspaceId: 'repo', mainSurface: 'workbench' })
     const created = vi.spyOn(api.sessions, 'launchAgent').mockRejectedValue(new Error('Creation receipt unavailable'))
