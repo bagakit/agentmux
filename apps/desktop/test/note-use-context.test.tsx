@@ -32,7 +32,7 @@ beforeEach(() => {
 })
 afterEach(async () => { await dom.render(null); for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); vi.unstubAllGlobals() })
 
-async function fixture() {
+async function fixture(sharedHost = false) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'amx-note-use-context-')))
   cleanups.push(() => rm(root, { recursive: true, force: true }))
   const workspace = { id: 'notes', hostId: 'local', name: 'Notes', path: root, kind: 'folder' as const }
@@ -43,13 +43,20 @@ async function fixture() {
   const shared = newNoteDocument('The shared body is not a location excerpt.', 'shared', 'shared-body'); shared.kind = 'shared-block'; shared.title = 'Shared evidence'
   await writeFile(join(root, resource('shared').path), serializeNoteDocument(shared))
   const host = newNoteDocument('', 'reader', 'empty')
+  if (sharedHost) { host.kind = 'shared-block'; host.title = 'Nested shared host' }
   host.content.content = ['First', 'Second'].flatMap((section, index) => [
     { type: 'heading', attrs: { blockId: `section-${index}`, level: 2 }, content: [{ type: 'text', text: `${section} section` }] },
     { type: 'paragraph', attrs: { blockId: `context-${index}` }, content: [{ type: 'text', text: `Local ${section.toLowerCase()} evidence belongs here.` }] },
     { type: 'noteInclude', attrs: { blockId: `use-${index}`, referenceId: `reader-${index}`, noteId: shared.noteId, path: resource('shared').path, workspaceId: workspace.id } }
   ])
   await writeFile(join(root, resource('reader').path), serializeNoteDocument(host))
-  await metadata.apply({ expectedRevision: (await metadata.read()).revision, operationId: 'register-reader', change: { kind: 'register', noteId: host.noteId, title: 'Same host page', resource: resource('reader') } }, { kind: 'user', id: 'reader' })
+  if (sharedHost) {
+    const outer = newNoteDocument('', 'outer', 'outer-empty')
+    outer.content.content = [{ type: 'noteInclude', attrs: { blockId: 'outer-use', referenceId: 'outer-reader', noteId: host.noteId, path: resource('reader').path, workspaceId: workspace.id } }]
+    await writeFile(join(root, resource('outer').path), serializeNoteDocument(outer))
+  }
+  const registered = sharedHost ? 'outer' : 'reader'
+  await metadata.apply({ expectedRevision: (await metadata.read()).revision, operationId: 'register-host', change: { kind: 'register', noteId: registered, title: 'Same host page', resource: resource(registered) } }, { kind: 'user', id: 'reader' })
   const catalog = await metadata.read(), snapshot = { catalog, graph: await owner.graph(catalog, {}) }
   vi.spyOn(api.notebooks, 'graph').mockImplementation(async () => snapshot)
   vi.spyOn(api.notebooks, 'content').mockImplementation(async (id, options) => owner.content(await metadata.read(), id, options))
@@ -151,4 +158,17 @@ it('keeps failed context navigation usable and does not guess another position o
   const reference = noteSharedRelations(f.snapshot, 'shared', undefined, { target: { ...f.resource('reader'), noteId: 'reader' }, referenceId: 'reader-0' }).uses[0]!.reference
   expect(noteUseContext(source, { ...reference, source: { ...reference.source, blockId: 'unconfirmed-block' } }).status).toBe('unknown')
   expect(noteUseContext(source, { ...reference, occurrence: { kind: 'stored', referenceId: 'different-occurrence' } }).status).toBe('unknown')
+})
+
+it('reads exact use contexts from an uncatalogued shared host found through a real outer include', async () => {
+  const f = await fixture(true)
+  expect(f.snapshot.catalog.pages.reader).toBeUndefined()
+  expect(f.snapshot.graph.observations.find(item => item.noteId === 'reader')).toMatchObject({ kind: 'shared-block', fileIdentity: 'confirmed' })
+  await f.mount(); await open()
+  await vi.waitFor(() => expect(row('use-1', panel()).textContent).toContain('Second section'))
+  expect(row('use-0', panel()).textContent).toContain('Nested shared host')
+  expect(row('use-0', panel()).textContent).toContain('Local first evidence belongs here.')
+  expect(api.notebooks.content).toHaveBeenCalledTimes(1)
+  await act(async () => row('use-1', panel()).querySelector<HTMLButtonElement>('button')!.click())
+  expect(f.onOpen).toHaveBeenCalledExactlyOnceWith({ ...f.resource('reader'), noteId: 'reader' }, 'use-1', expect.any(AbortSignal))
 })
