@@ -86,6 +86,8 @@
 
 .note-block-content { position: relative; }
 .note-editor[data-note-empty="true"] .note-block-content::before { content: 'Start writing…'; position: absolute; inset: 0 auto auto 0; color: var(--text-3); font-size: var(--fs-title); pointer-events: none; }
+.note-editor[data-note-empty="true"] .note-block-content > p { position: relative; padding-bottom: 22px; }
+.note-editor[data-note-empty="true"] .note-block-content > p > .note-block-author { position: absolute; inset-block-start: calc(var(--note-font-size, var(--fs-prose)) * 1.85 + 4px); inset-inline-start: 0; margin-inline-start: 0; }
 
 .notebook-page-heading { max-width: var(--note-content-width, 760px); margin: 0 auto; padding: var(--sp-8) var(--sp-8) 0; }
 .notebook-page-topline { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
