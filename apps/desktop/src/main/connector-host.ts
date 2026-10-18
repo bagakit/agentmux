@@ -3,12 +3,13 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError } from '@agentmux/core'
 import { ConnectionHost, RoomBindingHost, RoomProvisioningHost, PublicationHost, PublicationStore, DurableIngressHost, ConnectionReceivers, MoteChatHost, composeMoteChatBindings, createBuiltinConnectionAdapters, type DurableIngressOptions, type PublicationConversationPort, type RoomBindingHostOptions, type ConnectionAdapter, type MoteChatAgentPort } from '@agentmux/connectors'
-import type { ConnectionPort } from '@agentmux/core/connections'
+import type { ChannelMetadataChange, ConnectionPort } from '@agentmux/core/connections'
 import type { MoteChatPort, MoteChatTarget } from '@agentmux/core/mote-chat'
 import { DesktopConnectorSecrets, type CredentialEncryption } from './connector-secrets.js'
 
 export type DesktopConnectionServices = {
   connections: ConnectionPort
+  onChannelMetadataChanged(listener: (change: ChannelMetadataChange) => void): () => void
   moteChat?: MoteChatPort
   secrets: Pick<DesktopConnectorSecrets, 'store' | 'inspect'>
   openDatabase(): Promise<DatabaseSync>
@@ -24,6 +25,8 @@ type LiveServices = { database: DatabaseSync; connections: ConnectionHost; secre
 export async function createDesktopConnections(options: { directory: string; encryption: CredentialEncryption; adapters?: readonly ConnectionAdapter[]; bindings?: Omit<RoomBindingHostOptions, 'connections'>; publication?: PublicationConversationPort; ingress?: Pick<DurableIngressOptions, 'core'>; moteChat?: { agents: MoteChatAgentPort; assertTarget(target: MoteChatTarget): Promise<void>; assertReady?(target: MoteChatTarget): Promise<void> } }): Promise<DesktopConnectionServices> {
   const adapters = options.adapters ?? createBuiltinConnectionAdapters()
   let live: LiveServices | undefined, opening: Promise<LiveServices> | undefined, closed = false
+  const metadataListeners = new Set<(change: ChannelMetadataChange) => void>()
+  const relayMetadata = (change: ChannelMetadataChange) => { for (const listener of metadataListeners) try { listener(change) } catch { /* Display notification does not own native intake. */ } }
   const ensure = async (): Promise<LiveServices> => {
     if (closed) throw new AgentMuxError('The original connection owner is closed.', 'CONNECTION_STORAGE_UNAVAILABLE')
     if (live) return live
@@ -35,6 +38,7 @@ export async function createDesktopConnections(options: { directory: string; enc
         database = new DatabaseSync(path); await chmod(path, 0o600)
         const secrets = new DesktopConnectorSecrets(database, options.encryption)
         const connections = new ConnectionHost({ database, secrets, adapters })
+        connections.onChannelMetadataChanged(relayMetadata)
         const publicationStore = options.publication ? new PublicationStore(database) : undefined
         const bindings = options.bindings ? new RoomBindingHost({ ...options.bindings, connections, ...(publicationStore ? { lifecycle: publicationStore } : {}) }) : undefined
         const moteChat = options.moteChat ? new MoteChatHost({ connections, agents: options.moteChat.agents, assertTarget: options.moteChat.assertTarget }) : undefined
@@ -83,6 +87,7 @@ export async function createDesktopConnections(options: { directory: string; enc
   // Warm the optional owner without making its availability a Host startup prerequisite.
   await ensure().catch(() => {})
   return {
+    onChannelMetadataChanged: listener => { metadataListeners.add(listener); return () => { metadataListeners.delete(listener) } },
     get bindings() { return live?.bindings ?? null },
     get rooms() { return live?.rooms ?? null },
     get publication() { return live?.publication ?? null },
@@ -106,6 +111,12 @@ export async function createDesktopConnections(options: { directory: string; enc
         get: async () => (await ensure()).connections.service.get(),
         configure: async input => { const owner = await ensure(); const result = await owner.connections.service.configure(input); owner.receivers?.refresh(); owner.publication?.refresh(); return result },
         inspect: async input => (await ensure()).connections.service.inspect(input)
+      },
+      metadata: {
+        get: async (input, context) => (await ensure()).connections.metadata.get(input, context),
+        list: async (input, context) => (await ensure()).connections.metadata.list(input, context),
+        refresh: async (input, context) => (await ensure()).connections.metadata.refresh(input, context),
+        clear: async (input, context) => (await ensure()).connections.metadata.clear(input, context)
       },
       profile: {
         get: async (input, context) => (await ensure()).connections.profile!.get(input, context),
@@ -166,6 +177,6 @@ export async function createDesktopConnections(options: { directory: string; enc
       test: async input => (await ensure()).connections.test(input)
     },
     secrets: { store: async input => (await ensure()).secrets.store(input), inspect: async operationId => (await ensure()).secrets.inspect(operationId) },
-    close: () => { closed = true; live?.receivers?.close(); live?.publication?.close(); live?.connections.close(); live?.database.close(); live = undefined }
+    close: () => { closed = true; metadataListeners.clear(); live?.receivers?.close(); live?.publication?.close(); live?.connections.close(); live?.database.close(); live = undefined }
   }
 }

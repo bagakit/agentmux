@@ -9,6 +9,8 @@ import { createRoomDiscovery } from './room-discovery.js'
 import { ChannelStorage, type ChannelStoragePort, type ChannelStorageScope } from './channel-storage.js'
 import type { ChannelProfileAdapter } from './channel-profile-adapter.js'
 import type { ChannelActorProfileObservation, ChannelProfileReason, ConnectionActor } from '@agentmux/core/connections'
+import type { ChannelMetadataChange, ChannelMetadataPort } from '@agentmux/core/connections'
+import { createChannelMetadata } from './channel-metadata.js'
 import { AgentMuxError } from '@agentmux/core'
 import { parseConnectionConfig, parseConnectionObservation, parseConnectionParams, parseConnectionRecord, parseConnectionResult, parseConnectionServiceParams, parseConnectionServiceResult, parseConnectionServiceState, type ConnectionConfig, type ConnectionConfigureInput, type ConnectionInspectInput, type ConnectionInspectResult, type ConnectionObservation, type ConnectionOperation, type ConnectionPort, type ConnectionRecord, type ConnectionServiceState, type ConnectionServicePort, type ConnectionServiceConfigure, type ConnectionServiceOperation } from '@agentmux/core/connections'
 
@@ -43,6 +45,7 @@ function unavailable(reason: 'credential-missing' | 'adapter-unavailable' | 'che
 /** Optional original Host owner. Configuration and its operation receipt commit in one SQLite transaction. */
 export class ConnectionHost implements ConnectionPort {
   readonly service: ConnectionServicePort
+  readonly metadata: ChannelMetadataPort
   private serviceSchemaReady = false
   profile?: import('@agentmux/core/connections').ConnectionProfilePort
   setup?: import('@agentmux/core/connections').ConnectionSetupPort
@@ -62,6 +65,8 @@ export class ConnectionHost implements ConnectionPort {
   private channelStorageOwner: ChannelStorage | undefined
   private readonly channelProfileAbort = new AbortController()
   private readonly channelProfileReads = new Map<string, Promise<ChannelActorProfileObservation>>()
+  private readonly metadataListeners = new Set<(change: ChannelMetadataChange) => void>()
+  private readonly conversationProfileReads = new Set<string>()
   private closed = false
   constructor(private readonly options: ConnectionHostOptions) {
     let ownedDatabase: DatabaseSync | undefined
@@ -80,6 +85,7 @@ export class ConnectionHost implements ConnectionPort {
     } }
     this.adapters = new Map((options.adapters ?? []).map(adapter => [adapter.adapterId, adapter]))
     if (this.adapters.size !== (options.adapters?.length ?? 0)) { if (!options.database) this.database.close(); throw new AgentMuxError('Connection adapter IDs must be unique.', 'INVALID_CONNECTION_DATA') }
+    this.metadata = createChannelMetadata(this, options.secrets, this.channelProfileAbort.signal, change => this.publishMetadata(change))
     const discovery = createRoomDiscovery(this, options.secrets)
     this.rooms = discovery.port; this.closeRoomDiscovery = discovery.close
     const profile = (): ConnectionProfileHost => {
@@ -291,6 +297,21 @@ export class ConnectionHost implements ConnectionPort {
     return config?.enabled ? this.adapters.get(config.adapterId)?.publication ?? null : null
   }
   /** Private adapter storage; names, local aliases and UI routes never select its namespace. */
+  onChannelMetadataChanged(listener: (change: ChannelMetadataChange) => void): () => void { this.metadataListeners.add(listener); return () => { this.metadataListeners.delete(listener) } }
+  private publishMetadata(change: ChannelMetadataChange): void { for (const listener of this.metadataListeners) try { listener(change) } catch { /* A display subscriber cannot gate native intake or metadata recovery. */ } }
+  async observeChannelConversation(config: ConnectionConfig, externalConversationId: string): Promise<void> {
+    const identity = JSON.stringify([config.adapterId, config.application.domain, config.application.appId, externalConversationId])
+    if (this.closed || this.conversationProfileReads.has(identity)) return
+    this.conversationProfileReads.add(identity)
+    try {
+      const current = this.readConfiguration(config.connectionId)
+      if (!current?.config.enabled) return
+      const subject = { kind: 'conversation' as const, externalConversationId }, input = { connectionId: config.connectionId, subject }
+      const cached = await this.metadata.get(input)
+      if (cached.entry.observation.state === 'observed' && cached.entry.observation.freshness === 'current') return
+      await this.metadata.refresh({ ...input, expectedConnectionRevision: current.revision })
+    } finally { this.conversationProfileReads.delete(identity) }
+  }
   channelStorage(scope: ChannelStorageScope): ChannelStoragePort {
     if (this.closed) throw new AgentMuxError('The original Channel storage owner is closed.', 'CHANNEL_STORAGE_UNAVAILABLE')
     this.channelStorageOwner ??= new ChannelStorage(this.database)
@@ -323,7 +344,9 @@ export class ConnectionHost implements ConnectionPort {
         let credential: string | null
         try { credential = await this.options.secrets.resolve(current.credentialRef) } catch { return unavailable('credential-unavailable') }
         if (!credential || this.channelProfileAbort.signal.aborted) return unavailable('credential-unavailable')
-        return await adapter.refreshActor({ actor, config: current, storage: this.channelStorage(current) }, credential, this.channelProfileAbort.signal)
+        const observation = await adapter.refreshActor({ actor, config: current, storage: this.channelStorage(current) }, credential, this.channelProfileAbort.signal)
+        this.publishMetadata({ connectionId: config.connectionId, application: current.application, subject: { kind: 'actor', actor } })
+        return observation
       } catch (error) { return unavailable(error instanceof AgentMuxError && error.code === 'CHANNEL_STORAGE_UNAVAILABLE' ? 'storage-unconfirmed' : 'source-unconfirmed') }
     }
     const work = read().finally(() => { this.channelProfileReads.delete(identity) })
@@ -349,5 +372,5 @@ export class ConnectionHost implements ConnectionPort {
     this.profileHost ??= new ConnectionProfileHost(this, this.options.secrets)
     return this.profileHost.unresolvedApplicationWrite(application, actor)
   }
-  close(): void { this.closed = true; this.channelProfileAbort.abort(); this.profileHost?.close(); this.setupHost?.close(); this.enrollmentHost?.close(); this.closeRoomDiscovery(); if (!this.options.database) this.database.close() }
+  close(): void { this.closed = true; this.channelProfileAbort.abort(); this.metadataListeners.clear(); this.profileHost?.close(); this.setupHost?.close(); this.enrollmentHost?.close(); this.closeRoomDiscovery(); if (!this.options.database) this.database.close() }
 }

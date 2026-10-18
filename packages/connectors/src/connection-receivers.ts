@@ -99,6 +99,14 @@ export class ConnectionReceivers {
       const receiver = await transport.start({ config: structuredClone(lane.record.config), credential,
         signal: lane.abort.signal,
         storage: () => this.connections.channelStorage(lane.record.config),
+        metadataChanged: subject => {
+          setImmediate(() => {
+            try {
+              if (!this.current(lane)) return
+              void this.connections.metadata.refresh({ connectionId: lane.record.config.connectionId, expectedConnectionRevision: lane.record.revision, subject }).catch(() => {})
+            } catch { /* Metadata observations do not change authenticated intake or healthy Agents. */ }
+          })
+        },
         receive: async (input, acknowledge) => {
           this.connections.assertServiceEnabled()
           if (!this.current(lane)) throw new AgentMuxError('This original connection receiver is no longer current. Existing Agents are retained.', 'INGRESS_CONNECTION_REVISED')
