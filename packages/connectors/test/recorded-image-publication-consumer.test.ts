@@ -3,6 +3,7 @@ import { createServer } from 'node:http'
 import { appendFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
+import type { PublicationStore } from '../dist/publication-store.js'
 import { defaultHttpInstance, type HttpInstance } from '@larksuiteoapi/node-sdk'
 import * as core from '../../core/dist/index.js'
 import { parseConnectionDelivery } from '../../core/dist/connections.js'
@@ -17,6 +18,8 @@ import { recordedRaster } from '../../core/test/helpers/recorded-raster.js'
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0K8AAAAASUVORK5CYII=', 'base64')
 const reference = 'data:image/png;base64,' + png.toString('base64')
 const closes: Array<() => unknown | Promise<unknown>> = []
+const contentOperations = (store: PublicationStore, ...args: Parameters<PublicationStore['list']>) =>
+  store.list(...args).filter(operation => operation.payload.kind !== 'binding-lifecycle')
 afterEach(async () => {
   const errors: unknown[] = []
   for (const close of closes.splice(0).reverse()) try { await close() } catch (error) { errors.push(error) }
@@ -48,7 +51,7 @@ async function platform() {
         else {
           const messageId = request.method === 'POST' ? 'original-message-' + (messages.size + 1) : id
           const message = { message_id: messageId, chat_id: body.receive_id ?? original?.chat_id, msg_type: body.msg_type ?? original?.msg_type,
-            sender: { sender_type: 'app', id_type: 'app_id', id: feishuConfig.application.appId }, deleted: false, body: { content: JSON.stringify(JSON.parse(body.content).zh_cn) } }
+            sender: { sender_type: 'app', id_type: 'app_id', id: feishuConfig.application.appId }, deleted: false, body: { content: JSON.stringify(body.msg_type === 'interactive' || original?.msg_type === 'interactive' ? JSON.parse(body.content) : JSON.parse(body.content).zh_cn) } }
           if (!controls.rejectImageMessage || !body.content.includes('image_key')) messages.set(messageId, message)
           result = body.content.includes('image_key') && controls.rejectImageMessage ? { code: 230025 } : controls.unknownImageMessage && body.content.includes('image_key') ? { code: 230049 } : { code: 0, data: message }
         }
@@ -106,10 +109,10 @@ it('the original public raster reaches the default Host, durable Outbox, officia
   await vi.waitFor(() => expect(f.remote.uploads).toHaveLength(1), { timeout: 10_000 })
   expect(f.remote.uploads[0]).toEqual(png)
   expect(resource).toHaveBeenCalledWith({ hostId: 'local', agentSessionId: 'original-agent' }, expect.objectContaining({ source: { providerId: 'claude', nativeSessionId: 'ingress-native' }, recordId: 'original-raster', partIndex: 1, expectedReference: reference, maxBytes: 10 * 1024 * 1024 }), expect.any(AbortSignal))
-  await vi.waitFor(() => expect(f.services.publication!.store.list(f.binding).every(operation => operation.state === 'confirmed')).toBe(true), { timeout: 10_000 })
-  const deliveries = f.services.publication!.store.list(f.binding)
+  await vi.waitFor(() => expect(contentOperations(f.services.publication!.store, f.binding).every(operation => operation.state === 'confirmed')).toBe(true), { timeout: 10_000 })
+  const deliveries = contentOperations(f.services.publication!.store, f.binding)
   expect(deliveries).toHaveLength(3)
-  expect(f.remote.calls.filter(call => call.method === 'POST').map(call => JSON.parse((call.body as { content: string }).content).zh_cn.content[0][0])).toEqual([
+  expect(posts(f).map(call => JSON.parse((call.body as { content: string }).content).zh_cn.content[0][0])).toEqual([
     { tag: 'text', text: before, un_escape: false }, { tag: 'img', image_key: 'original-image-key-1' }, { tag: 'text', text: after, un_escape: false }
   ])
   expect(JSON.stringify(f.remote.calls)).toContain(before); expect(JSON.stringify(f.remote.calls)).toContain(after)
@@ -132,9 +135,35 @@ it('the original public raster reaches the default Host, durable Outbox, officia
 const imageBlock = () => ({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: png.toString('base64') } })
 const native = (uuid: string, content: unknown[], extra: Record<string, unknown> = {}) => ({ sessionId: 'ingress-native', uuid, type: 'assistant', message: { role: 'assistant', content }, ...extra })
 const append = (f: Awaited<ReturnType<typeof fixture>>, record: unknown) => appendFile(f.transcript, JSON.stringify(record) + '\n')
-const posts = (f: Awaited<ReturnType<typeof fixture>>) => f.remote.calls.filter(call => call.method === 'POST')
+const posts = (f: Awaited<ReturnType<typeof fixture>>) => f.remote.calls.filter(call => call.method === 'POST' && (call.body as { msg_type: string }).msg_type === 'post')
 const imagePosts = (f: Awaited<ReturnType<typeof fixture>>) => posts(f).filter(call => JSON.stringify(call.body).includes('image_key'))
-const imageOperation = (f: Awaited<ReturnType<typeof fixture>>) => f.services.publication!.store.list(f.binding).find(operation => operation.payload.kind === 'image')
+const imageOperation = (f: Awaited<ReturnType<typeof fixture>>) => contentOperations(f.services.publication!.store, f.binding).find(operation => operation.payload.kind === 'image')
+
+it('public tool activities stay local while pure image replies and adjacent speech reach the actual resource owner and SDK', async () => {
+  const f = await fixture(), read = vi.spyOn(f.port, 'resource'), hidden = 'Tool-only argument stays local'
+  await append(f, native('public-tool-activity', [{ type: 'tool_use', id: 'original-image-tool', name: 'image_tool', input: hidden }]))
+  await append(f, native('ordinary-resource', [imageBlock()]))
+  await append(f, native('ordinary-resource-sibling', [{ type: 'text', text: 'Ordinary reply beside the original resources' }]))
+  const local = core.consumeConversationWindowPage(await f.client.readAgentConversation({ hostId: 'local', agentSessionId: 'original-agent' }))
+  expect(local.kind).toBe('complete'); if (local.kind !== 'complete') throw new Error('Original resource conversation incomplete')
+  const originals = local.snapshot.units.flatMap(unit => unit.records).flatMap(record => record.original.kind === 'native' ? [record.original.item] : [])
+  expect(originals.find(item => item.id === 'public-tool-activity')).toMatchObject({ kind: 'activity', contentParts: [
+    { kind: 'tool-call', contentEligibility: 'public', input: hidden }
+  ] })
+  expect(originals.find(item => item.id === 'ordinary-resource')).toMatchObject({ kind: 'assistant-message', contentParts: [{ kind: 'resource', contentEligibility: 'public' }] })
+  f.services.publication!.refresh()
+  await vi.waitFor(() => {
+    expect(imagePosts(f)).toHaveLength(1)
+    expect(JSON.stringify(posts(f))).toContain('Ordinary reply beside the original resources')
+    expect(contentOperations(f.services.publication!.store, f.binding).every(operation => operation.state === 'confirmed')).toBe(true)
+  }, { timeout: 10_000 })
+  expect(read).toHaveBeenCalled()
+  expect(new Set(read.mock.calls.map(([, request]) => request.recordId))).toEqual(new Set(['ordinary-resource']))
+  expect(f.remote.uploads).toEqual([png]); expect(JSON.stringify(posts(f))).not.toContain(hidden)
+  expect(f.services.publication!.store.coverage(f.binding)).toMatchObject({ state: 'complete', gaps: [] })
+  expect(f.client.agentSession('original-agent').run).toEqual({ runId: 'run-original-agent' })
+  expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+}, 20_000)
 
 it('an upload saved before message claim survives reopening the original Host without uploading the bytes again', async () => {
   const f = await fixture(), store = f.services.publication!.store, claim = store.claimNext.bind(store)
@@ -185,7 +214,7 @@ it('a possibly applied message keeps the exact uploaded key and prepared wire ac
   await vi.waitFor(() => expect(imageOperation(f)?.state).toBe('unknown'))
   const original = imageOperation(f)!
   expect(original.uploads).toEqual([{ state: 'confirmed', imageKey: 'original-image-key-1' }]); expect(original.attempt).toBe(1)
-  expect(imagePosts(f)).toHaveLength(1); expect(f.remote.messages.size).toBe(1)
+  expect(imagePosts(f)).toHaveLength(1); expect([...f.remote.messages.values()].filter(message => message.msg_type === 'post')).toHaveLength(1)
   await expect(f.services.connections.delivery!.retry({ operationId: original.operationId }, context)).rejects.toMatchObject({ code: 'PUBLICATION_RETRY_UNCONFIRMED' })
   await f.restart(); f.services.publication!.refresh()
   await vi.waitFor(() => expect(f.services.publication!.observation(f.binding.bindingId, f.binding.revision).state).toBe('unknown'))
@@ -242,8 +271,8 @@ it('a foreign original resource response stays an exact recoverable image gap wh
 it('different original image parts retain distinct original operations, mapping updates and ordered withdrawals', async () => {
   const f = await fixture()
   await append(f, native('two-original-parts', [imageBlock(), imageBlock()])); f.services.publication!.refresh()
-  await vi.waitFor(() => expect(f.services.publication!.store.list(f.binding).filter(operation => operation.state === 'confirmed')).toHaveLength(2))
-  const originals = f.services.publication!.store.list(f.binding)
+  await vi.waitFor(() => expect(contentOperations(f.services.publication!.store, f.binding).filter(operation => operation.state === 'confirmed')).toHaveLength(2))
+  const originals = contentOperations(f.services.publication!.store, f.binding)
   expect(new Set(originals.map(operation => operation.operationId)).size).toBe(2)
   expect(f.remote.uploads).toEqual([png, png]); expect(imagePosts(f)).toHaveLength(2)
   expect(originals.map(operation => operation.payload.kind === 'image' && operation.payload.part.selector)).toEqual([{ kind: 'native-part', partIndex: 0 }, { kind: 'native-part', partIndex: 1 }])
@@ -321,9 +350,9 @@ it('a recorded remote image reference stays locally readable and an exact resour
 it('more than one bounded drain of original image parts completes with independent operations and exact bytes', async () => {
   const f = await fixture()
   await append(f, native('bounded-original-parts', Array.from({ length: 17 }, imageBlock))); f.services.publication!.refresh()
-  await vi.waitFor(() => expect(f.services.publication!.store.list(f.binding).filter(operation => operation.state === 'confirmed')).toHaveLength(17), { timeout: 10_000 })
+  await vi.waitFor(() => expect(contentOperations(f.services.publication!.store, f.binding).filter(operation => operation.state === 'confirmed')).toHaveLength(17), { timeout: 10_000 })
   expect(f.remote.uploads).toEqual(Array.from({ length: 17 }, () => png)); expect(imagePosts(f)).toHaveLength(17)
-  expect(new Set(f.services.publication!.store.list(f.binding).map(operation => operation.operationId)).size).toBe(17)
+  expect(new Set(contentOperations(f.services.publication!.store, f.binding).map(operation => operation.operationId)).size).toBe(17)
 }, 20_000)
 
 it.each([{ captured: false, text: true }, { captured: true, text: true }, { captured: true, text: false }])('recovering an original image gap retains Core record and part order: %j', async variant => {
@@ -347,9 +376,9 @@ it.each([{ captured: false, text: true }, { captured: true, text: true }, { capt
   expect(f.services.publication!.store.coverage(f.binding)).toMatchObject({ state: 'incomplete', gaps: [expect.objectContaining({ reason: 'resource-unavailable', part: expect.objectContaining({ selector: { kind: 'native-part', partIndex: variant.text ? 1 : 0 } }) })] })
   unavailable = false; f.services.publication!.refresh()
   await vi.waitFor(() => expect(f.services.publication!.store.coverage(f.binding)).toMatchObject({ state: 'complete', gaps: [] }))
-  await vi.waitFor(() => expect(f.services.publication!.store.list(f.binding).every(operation => operation.state === 'confirmed')).toBe(true))
+  await vi.waitFor(() => expect(contentOperations(f.services.publication!.store, f.binding).every(operation => operation.state === 'confirmed')).toBe(true))
   expect(f.remote.uploads).toEqual([png])
-  const nodes = [...f.remote.messages.values()].filter(message => !message.deleted).map(message => JSON.parse((message.body as { content: string }).content).content[0][0])
+  const nodes = [...f.remote.messages.values()].filter(message => !message.deleted && message.msg_type === 'post').map(message => JSON.parse((message.body as { content: string }).content).content[0][0])
   expect(nodes.map(node => node.tag)).toEqual(variant.text ? ['text', 'img', 'text'] : ['img', 'text'])
   if (variant.text) expect(nodes[0]).toEqual({ tag: 'text', text: 'Original text A', un_escape: false })
   expect(nodes[variant.text ? 1 : 0]).toEqual({ tag: 'img', image_key: 'original-image-key-1' })
