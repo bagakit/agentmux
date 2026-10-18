@@ -1,6 +1,7 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { parseDesktopClientObservationForInstall as parseDesktopClientObservation } from '../src/shared/client-observation.ts'
 import { execFile, spawn } from 'node:child_process'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { chmod, lstat, mkdir, mkdtemp, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
@@ -693,7 +694,7 @@ export async function prepareRuntimeUpgrade(currentApp, candidateApp, { coldOnly
 }
 
 async function writeUpgradedReceipt(plan, owner, runtime) {
-  const temporary = join(dirname(plan.receiptPath), `.owner-install-${randomUUID()}.json`)
+  const temporary = join(dirname(plan.receiptPath), `.owner-install-${mintObjectId()}.json`)
   const receipt = { schema: 'agentmux.ctxmux-owner.v1', sourceCommit: plan.candidate.manifest.source.commit,
     sourceTree: plan.candidate.manifest.source.tree, manifestSha256: plan.candidate.manifestSha256,
     daemonSha256: plan.candidate.daemonSha256, daemonPath: owner.executable, socketPath: plan.old.socketPath,
