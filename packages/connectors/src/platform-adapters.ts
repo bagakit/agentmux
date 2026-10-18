@@ -2,6 +2,7 @@ import { AgentMuxError } from '@agentmux/core'
 import type { ConnectionAdapter } from './connection-host.js'
 import { FeishuPublicationAdapter } from './adapters/feishu/publication.js'
 import { FEISHU_ENROLLMENT_PROTOCOL } from './adapters/feishu/enrollment-protocol.js'
+import { createFeishuChannelProfiles } from './adapters/feishu/channel-profile.js'
 
 /** Built-in leaves stay unloaded until an explicit adapter operation or receiver consumes them. */
 export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] {
@@ -12,6 +13,7 @@ export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] 
   })
   const adapter: ConnectionAdapter = {
     adapterId: 'feishu',
+    channelProfiles: createFeishuChannelProfiles(async (config, credential, call, signal) => (await feishu()).withClient(config, credential, call, signal)),
     profile: {
       get: async (config, revision, credential, signal) => (await feishu()).profile.get(config, revision, credential, signal)
     },
