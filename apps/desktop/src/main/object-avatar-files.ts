@@ -1,5 +1,6 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { constants, link, lstat, mkdir, open, realpath, unlink } from 'node:fs/promises'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { AVATAR_OUTPUT_MAX_BYTES, isObjectAvatarRef, type ObjectAvatarRef } from '../shared/object-avatars.js'
 
@@ -52,7 +53,7 @@ export async function saveObjectAvatarFile(original: string, png: Buffer): Promi
   if (!png.length || png.length > AVATAR_OUTPUT_MAX_BYTES) throw new Error('Save a bounded avatar crop.')
   const ref: ObjectAvatarRef = { kind: 'image', fileName: createHash('sha256').update(png).digest('hex') + '.png' }
   const directory = await avatarDirectory(original, true), path = join(directory, ref.fileName)
-  const temporaryPath = join(directory, ref.fileName + '.' + randomUUID() + '.tmp')
+  const temporaryPath = join(directory, ref.fileName + '.' + mintObjectId() + '.tmp')
   const handle = await open(temporaryPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
   try {
     try { await handle.writeFile(png); await handle.sync() }

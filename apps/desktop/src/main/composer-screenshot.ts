@@ -1,6 +1,7 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { mkdir, stat, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { randomUUID } from 'node:crypto'
+
 import { spawn, type ChildProcess } from 'node:child_process'
 import { systemPreferences } from 'electron'
 import { pastedDirectory } from './pasted-directory.js'
@@ -21,7 +22,7 @@ export async function captureComposerScreenshot(home: string): Promise<string | 
   const owner: { child?: ChildProcess } = {}
   captureOwner = owner
   const directory = pastedDirectory(home)
-  const path = join(directory, `screen-${randomUUID()}.png`)
+  const path = join(directory, `screen-${mintObjectId()}.png`)
   try { await mkdir(directory, { recursive: true, mode: 0o700 }) } catch (error) {
     captureOwner = null
     throw new Error(`Could not create the screenshot save directory: ${describe(error)}. Your draft is kept; check the directory and try again.`)

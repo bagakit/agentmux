@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { AgentMuxNotesStorage, type NotesStorageChange, type NotesStorageSnapshot } from '@agentmux/core/notebook-store'
 import type { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import type { WorkspaceRecord, WorkspaceFileWriteInput } from '../shared/contracts.js'
@@ -6,7 +7,7 @@ import { NOTES_WORKSPACE_ID, NOTES_WORKSPACE_NAME } from '../shared/notes-librar
 import { SCRATCH_WORKSPACE_ID } from '../shared/scratch-topics.js'
 import { workspaceLocationKey } from './workspace-location.js'
 import { dirname, join } from 'node:path'
-import { randomUUID } from 'node:crypto'
+
 import { reconcileNotesSpatialResources } from '../shared/notes-storage-reconciliation.js'
 import { prepareLegacyNotesConversion, prepareLegacyPendingConversion } from './note-legacy-conversion.js'
 /** Host adapter; the Core locator remains the only directory setting authority. */
@@ -22,7 +23,7 @@ export class NotesStorageOwner {
       operation => prepareLegacyPendingConversion(operation, stagingDirectory))
     else await this.storage.resume()
     const current = await this.inspect()
-    await this.storage.convert({ operationId: 'convert-original-note-markdown:' + randomUUID(), expectedDirectory: current.directory },
+    await this.storage.convert({ operationId: 'convert-original-note-markdown:' + mintObjectId(), expectedDirectory: current.directory },
       snapshot => prepareLegacyNotesConversion(snapshot, { directory: current.directory,
         stagingDirectory, workspaces: this.config.current.workspaces }))
     const scratch = this.config.current.workspaces.find(w => w.id === SCRATCH_WORKSPACE_ID)

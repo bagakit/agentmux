@@ -1,5 +1,6 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { open, rename, unlink } from 'node:fs/promises'
-import { randomUUID } from 'node:crypto'
+
 import { serializeThemeFile, themeDocumentSchema } from '@agentmux/client-ui/theme'
 import type { ThemeFileExportResult } from '../shared/contracts.js'
 
@@ -18,7 +19,7 @@ export async function exportThemeFile(document: unknown, ports: {
 
 /** A failed export leaves the destination intact; only a complete synced file replaces it. */
 export async function writeThemeFile(path: string, text: string): Promise<void> {
-  const temporary = `${path}.${randomUUID()}.tmp`
+  const temporary = `${path}.${mintObjectId()}.tmp`
   let created = false
   try {
     const file = await open(temporary, 'wx', 0o600)

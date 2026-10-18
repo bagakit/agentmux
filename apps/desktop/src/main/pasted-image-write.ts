@@ -1,5 +1,6 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { constants } from 'node:fs'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { link, lstat, mkdir, open, unlink } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { PASTED_IMAGE_EXTENSIONS, PASTED_IMAGE_MAX_BYTES } from '@agentmux/client-ui/pasted-images'
@@ -47,7 +48,7 @@ export async function savePastedImage(home: string, input: { bytes: Uint8Array; 
   const extension = extensions.has(input.extension) ? input.extension : 'png'
   const sha256 = createHash('sha256').update(bytes).digest('hex')
   const directory = pastedDirectory(home), path = join(directory, `${sha256}.${extension}`)
-  const temporary = join(directory, `.${sha256}.${randomUUID()}.partial`)
+  const temporary = join(directory, `.${sha256}.${mintObjectId()}.partial`)
   try {
     await mkdir(directory, { recursive: true, mode: 0o700 })
     const file = await open(temporary, 'wx', 0o600)

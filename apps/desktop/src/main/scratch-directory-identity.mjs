@@ -1,5 +1,6 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { isScratchTopicId, scratchTopicDirectoryName, scratchTopicIdFromDirectoryName } from '../shared/scratch-topic-identity.mjs'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { constants, lstat, mkdir, open, readdir, unlink } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -184,7 +185,7 @@ export async function normalizeDirectoryIdentity(directory, original, options = 
   }
   const root = await lstat(directory, { bigint: true }), metadata = join(directory, '.agentmux')
   if (!root.isDirectory() || root.isSymbolicLink()) throw invalid('The identity object is not a confirmed regular directory.')
-  const temporary = join(metadata, `directory-identity.${process.pid}.${randomUUID()}.tmp`)
+  const temporary = join(metadata, `directory-identity.${process.pid}.${mintObjectId()}.tmp`)
   let nativeStarted = false
   const needsPublication = before.current?.needsUpgrade !== false
   try {
@@ -208,7 +209,7 @@ export async function normalizeDirectoryIdentity(directory, original, options = 
     if (!published?.pending || published.current?.needsUpgrade !== false ||
         !sameRecord(published.pending, before.pending ?? before.current) || published.current.bytes !== expectedCurrent)
       throw invalid('The same original publication witness changed or is unconfirmed. Its later bytes are kept; inspect the same object before retrying.')
-    const retired = join(metadata, `directory-identity.${process.pid}.${randomUUID()}.retired.tmp`)
+    const retired = join(metadata, `directory-identity.${process.pid}.${mintObjectId()}.retired.tmp`)
     await runFilePublication('--file-confirm', directory, root, published, retired, options)
     const confirmed = await inspectDirectoryIdentity(directory, original)
     if (!confirmed || confirmed.needsUpgrade) throw invalid('The identity upgrade could not be confirmed.')

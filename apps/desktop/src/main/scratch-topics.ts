@@ -1,8 +1,9 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { topicPublicCopy } from '../shared/scratch-topics.js'
 import { MOTE_QUICK_MODE_PATH, parseMoteQuickMode, type MoteQuickMode } from '../shared/mote-quick-mode.js'
 import { directoryIdentity } from '../shared/space-addresses.js'
 import { constants, lstat, mkdir, open, readdir, realpath, stat, unlink } from 'node:fs/promises'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { basename, dirname, join, sep } from 'node:path'
 import { ensureScratchStorageRoot, resolveScratchTopicDirectory, scratchDirectoryAddress, scratchDirectoryIdentity, scratchStorageTopicIds, scratchIdentityContext, scratchConfirmedDirectoryPaths } from './scratch-topic-directories.js'
 import { DirectoryIdentityUpgradeRequiredError, normalizeDirectoryIdentity, retainDirectoryIdentity, inspectDirectoryIdentity, moteDirectoryName, type DirectoryIdentityWriteOptions } from './scratch-directory-identity.mjs'
@@ -384,7 +385,7 @@ export class ScratchTopics {
       if (current.state === 'unknown') throw new Error('Mote archive state is unconfirmed: ' + current.issue)
       if (current.version !== expectedVersion) throw new Error('Mote archive state changed. Refresh this Mote before retrying.')
       await ensureDirectory(join(directory, '.agentmux'))
-      const version = randomUUID()
+      const version = mintObjectId()
       await durableWriteFile(join(directory, MOTE_STATE_PATH), JSON.stringify({ archived, version }) + '\n', { mode: 0o600 })
       const confirmed = await this.readMoteArchive(directory, topicId)
       if (confirmed.state === 'unknown' || confirmed.version !== version || confirmed.state !== (archived ? 'archived' : 'active'))
